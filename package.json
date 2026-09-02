@@ -20,7 +20,8 @@
   },
   "files": [
     "bin/cli.js",
-    "LICENSE"
+    "LICENSE",
+    "README.md"
   ],
   "publishConfig": {
     "access": "public"
