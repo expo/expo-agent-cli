@@ -30,8 +30,11 @@ function readAliasVersion(from = import.meta.url) {
 
 // src/resolveRunner.ts
 var BIN = "expo-agent-cli";
+function canonicalSpec(cliVersion) {
+  return `@expo/agent-cli@<=${cliVersion}`;
+}
 function resolveRunner(hints, cliVersion, argv) {
-  const spec = `@expo/agent-cli@${cliVersion}`;
+  const spec = canonicalSpec(cliVersion);
   switch (detectManager(hints)) {
     case "bun":
       return { command: "bunx", args: ["--package", spec, BIN, ...argv] };
@@ -46,7 +49,7 @@ function resolveRunner(hints, cliVersion, argv) {
 function resolveNpxRunner(cliVersion, argv) {
   return {
     command: "npx",
-    args: ["--yes", `--package=@expo/agent-cli@${cliVersion}`, "--", BIN, ...argv]
+    args: ["--yes", `--package=${canonicalSpec(cliVersion)}`, "--", BIN, ...argv]
   };
 }
 function detectManager(hints) {

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { readAliasVersion } from './readAliasVersion';
-import { resolveNpxRunner, resolveRunner } from './resolveRunner';
+import { canonicalSpec, resolveNpxRunner, resolveRunner } from './resolveRunner';
 import { run } from './run';
 import { resolveSpawnTarget } from './windowsShim';
 
@@ -15,11 +15,17 @@ const version = (
   }
 ).version;
 
+describe('canonicalSpec', () => {
+  it('should request the target at or below the alias version', () => {
+    expect(canonicalSpec('1.0.2')).toBe('@expo/agent-cli@<=1.0.2');
+  });
+});
+
 describe('resolveRunner', () => {
   it('should run bunx with an explicit package and bin under bun', () => {
     expect(resolveRunner({ userAgent: 'bun/1.2.0 npm/? bunx/1.2.0' }, '2.0.0', ['status'])).toEqual({
       command: 'bunx',
-      args: ['--package', '@expo/agent-cli@2.0.0', 'expo-agent-cli', 'status'],
+      args: ['--package', '@expo/agent-cli@<=2.0.0', 'expo-agent-cli', 'status'],
     });
   });
 
@@ -28,28 +34,28 @@ describe('resolveRunner', () => {
       resolveRunner({ userAgent: 'pnpm/10.0.0 npm/? node/v22.0.0' }, '2.0.0', ['dev', '--json'])
     ).toEqual({
       command: 'pnpm',
-      args: ['--package', '@expo/agent-cli@2.0.0', 'dlx', 'expo-agent-cli', 'dev', '--json'],
+      args: ['--package', '@expo/agent-cli@<=2.0.0', 'dlx', 'expo-agent-cli', 'dev', '--json'],
     });
   });
 
   it('should run yarn dlx with an explicit package and bin under yarn berry', () => {
     expect(resolveRunner({ userAgent: 'yarn/4.0.0 npm/? node/v22.0.0' }, '2.0.0', [])).toEqual({
       command: 'yarn',
-      args: ['dlx', '--package', '@expo/agent-cli@2.0.0', 'expo-agent-cli'],
+      args: ['dlx', '--package', '@expo/agent-cli@<=2.0.0', 'expo-agent-cli'],
     });
   });
 
   it('should run npx with an explicit package and bin under npm', () => {
     expect(resolveRunner({ userAgent: 'npm/10.0.0 node/v22.0.0' }, '2.0.0', ['--help'])).toEqual({
       command: 'npx',
-      args: ['--yes', '--package=@expo/agent-cli@2.0.0', '--', 'expo-agent-cli', '--help'],
+      args: ['--yes', '--package=@expo/agent-cli@<=2.0.0', '--', 'expo-agent-cli', '--help'],
     });
   });
 
   it('should default to npx when the user agent is missing', () => {
     expect(resolveRunner({}, '1.0.0', ['status'])).toEqual({
       command: 'npx',
-      args: ['--yes', '--package=@expo/agent-cli@1.0.0', '--', 'expo-agent-cli', 'status'],
+      args: ['--yes', '--package=@expo/agent-cli@<=1.0.0', '--', 'expo-agent-cli', 'status'],
     });
   });
 
@@ -62,7 +68,7 @@ describe('resolveRunner', () => {
   it('should run bunx when the process is bun even without a user agent', () => {
     expect(resolveRunner({ bunRuntime: true }, '2.0.0', [])).toEqual({
       command: 'bunx',
-      args: ['--package', '@expo/agent-cli@2.0.0', 'expo-agent-cli'],
+      args: ['--package', '@expo/agent-cli@<=2.0.0', 'expo-agent-cli'],
     });
   });
 
@@ -71,14 +77,14 @@ describe('resolveRunner', () => {
       resolveRunner({ execPath: '/opt/homebrew/Cellar/bun/1.3.14/bin/bun' }, '2.0.0', [])
     ).toEqual({
       command: 'bunx',
-      args: ['--package', '@expo/agent-cli@2.0.0', 'expo-agent-cli'],
+      args: ['--package', '@expo/agent-cli@<=2.0.0', 'expo-agent-cli'],
     });
   });
 
   it('should run bunx when npm_execpath is bun.exe', () => {
     expect(resolveRunner({ execPath: 'C:\\Users\\me\\.bun\\bin\\bun.exe' }, '2.0.0', [])).toEqual({
       command: 'bunx',
-      args: ['--package', '@expo/agent-cli@2.0.0', 'expo-agent-cli'],
+      args: ['--package', '@expo/agent-cli@<=2.0.0', 'expo-agent-cli'],
     });
   });
 
@@ -87,7 +93,7 @@ describe('resolveRunner', () => {
       resolveRunner({ execPath: '/usr/local/lib/node_modules/pnpm/bin/pnpm.cjs' }, '2.0.0', [])
     ).toEqual({
       command: 'pnpm',
-      args: ['--package', '@expo/agent-cli@2.0.0', 'dlx', 'expo-agent-cli'],
+      args: ['--package', '@expo/agent-cli@<=2.0.0', 'dlx', 'expo-agent-cli'],
     });
   });
 
@@ -178,6 +184,12 @@ describe('resolveSpawnTarget', () => {
     ]);
   });
 
+  it('should caret-escape the version range on windows', () => {
+    expect(
+      resolveSpawnTarget('C:\\bin\\npx.cmd', [`--package=${canonicalSpec('1.0.2')}`], 'win32').args
+    ).toEqual(['^"--package=@expo/agent-cli@^<=1.0.2^"']);
+  });
+
   it('should spawn a real executable without a shell on windows', () => {
     expect(resolveSpawnTarget('C:\\Program Files\\nodejs\\node.exe', ['-v'], 'win32')).toEqual({
       command: 'C:\\Program Files\\nodejs\\node.exe',
@@ -205,7 +217,7 @@ describe('run', () => {
     expect(exit).toHaveBeenCalledWith(0);
     expect(spawnFn).toHaveBeenCalledWith(
       'npx',
-      ['--yes', `--package=@expo/agent-cli@${version}`, '--', 'expo-agent-cli', 'status'],
+      ['--yes', `--package=${canonicalSpec(version)}`, '--', 'expo-agent-cli', 'status'],
       { stdio: 'inherit', shell: false }
     );
   });
@@ -265,7 +277,7 @@ describe('run', () => {
     expect(spawnFn).toHaveBeenNthCalledWith(
       2,
       'npx',
-      ['--yes', `--package=@expo/agent-cli@${version}`, '--', 'expo-agent-cli', 'status'],
+      ['--yes', `--package=${canonicalSpec(version)}`, '--', 'expo-agent-cli', 'status'],
       { stdio: 'inherit', shell: false }
     );
     expect(exit).toHaveBeenCalledWith(0);

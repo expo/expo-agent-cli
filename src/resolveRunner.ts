@@ -12,14 +12,19 @@ export type RunnerHints = {
 const BIN = 'expo-agent-cli';
 
 /**
- * Turn the alias invocation into a same-version run of `@expo/agent-cli`.
+ * Pin `@expo/agent-cli` at or below this package's version.
  *
- * The version comes from this package's own manifest, not from argv. bunx/npx
- * consume `expo-agent-cli@2.0.0` before the bin starts, so the only pin that
- * survives is the version of the tarball they installed.
+ * bunx/npx consume `expo-agent-cli@2.0.0` before the bin starts, so the only
+ * pin that survives is this tarball's version. `<=` keeps that pin when the
+ * versions match, and still resolves when this alias shipped a patch that
+ * `@expo/agent-cli` does not have yet (1.0.2 here, 1.0.0 there).
  */
+export function canonicalSpec(cliVersion: string): string {
+  return `@expo/agent-cli@<=${cliVersion}`;
+}
+
 export function resolveRunner(hints: RunnerHints, cliVersion: string, argv: string[]): Runner {
-  const spec = `@expo/agent-cli@${cliVersion}`;
+  const spec = canonicalSpec(cliVersion);
 
   switch (detectManager(hints)) {
     case 'bun':
@@ -36,7 +41,7 @@ export function resolveRunner(hints: RunnerHints, cliVersion: string, argv: stri
 export function resolveNpxRunner(cliVersion: string, argv: string[]): Runner {
   return {
     command: 'npx',
-    args: ['--yes', `--package=@expo/agent-cli@${cliVersion}`, '--', BIN, ...argv],
+    args: ['--yes', `--package=${canonicalSpec(cliVersion)}`, '--', BIN, ...argv],
   };
 }
 
