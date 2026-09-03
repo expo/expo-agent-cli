@@ -13,7 +13,7 @@ import {
 
 const cwd = '/repo';
 const aliasPackageJsonPath = path.join(cwd, 'packages/expo-agent-cli/package.json');
-const agentCliPackageJsonPath = path.join(cwd, 'packages/agent-cli/package.json');
+const agentCliPackageJsonPath = path.join(cwd, 'packages/@expo/agent-cli/package.json');
 
 function packageJsonAt(version: string, name = DEFAULT_PACKAGE): string {
   return `${JSON.stringify({ name, version }, null, 2)}\n`;
@@ -223,19 +223,19 @@ describe('publish', () => {
     ]);
     expect(io.logs).toEqual([
       'Publishing @expo/agent-cli@2.0.0 with tag latest',
-      'Would update packages/agent-cli/package.json to 2.0.0',
+      'Would update packages/@expo/agent-cli/package.json to 2.0.0',
       'Would commit and push to origin/main',
       'Would dispatch publish.yml on main (package @expo/agent-cli, tag latest)',
     ]);
     expect(io.exit).toHaveBeenCalledWith(0);
   });
 
-  it('should publish @expo/agent-cli from packages/agent-cli by default', () => {
+  it('should publish @expo/agent-cli from packages/@expo/agent-cli by default', () => {
     const io = createIo(['2.0.0', '--tag', 'next'], {
       'npm view @expo/agent-cli@2.0.0 version': fail('404 Not Found'),
       'git rev-parse --abbrev-ref HEAD': ok('main\n'),
       'git status --porcelain': ok(''),
-      'git add packages/agent-cli/package.json': ok(),
+      'git add packages/@expo/agent-cli/package.json': ok(),
       'git commit -m Publish @expo/agent-cli@2.0.0': ok(),
       'git push': ok(),
       [ghDispatch('next', '@expo/agent-cli')]: ok(),
@@ -248,7 +248,7 @@ describe('publish', () => {
       'npm view @expo/agent-cli@2.0.0 version',
       'git rev-parse --abbrev-ref HEAD',
       'git status --porcelain',
-      'git add packages/agent-cli/package.json',
+      'git add packages/@expo/agent-cli/package.json',
       'git commit -m Publish @expo/agent-cli@2.0.0',
       'git push',
       ghDispatch('next', '@expo/agent-cli'),
@@ -342,7 +342,7 @@ describe('publish', () => {
       'npm view @expo/agent-cli@2.0.0 version': fail('404 Not Found'),
       'git rev-parse --abbrev-ref HEAD': ok('main\n'),
       'git status --porcelain': ok(''),
-      'git add packages/agent-cli/package.json': ok(),
+      'git add packages/@expo/agent-cli/package.json': ok(),
       'git commit -m Publish @expo/agent-cli@2.0.0': ok(),
       'git push': ok(),
       [ghDispatch('latest', '@expo/agent-cli')]: fail('cannot find gh'),

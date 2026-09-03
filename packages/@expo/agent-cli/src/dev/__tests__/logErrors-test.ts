@@ -42,6 +42,21 @@ describe(parseDevServerLogEntries, () => {
     expect(entries[0]).toMatchObject({ platform: 'Android', message: '[Error: boom]' });
   });
 
+  it('reads logs checked out with Windows CRLF line endings', () => {
+    const entries = parseDevServerLogEntries([
+      ' ERROR  [Error: boom]\r',
+      'Call Stack\r',
+      '  HomeScreen (src/app/index.tsx:33:18)\r',
+    ]);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      level: 'ERROR',
+      message: '[Error: boom]',
+      details: 'Call Stack\n  HomeScreen (src/app/index.tsx:33:18)',
+    });
+  });
+
   it('ignores the levels that are not errors', () => {
     const entries = parseDevServerLogEntries([
       ' LOG  hello',

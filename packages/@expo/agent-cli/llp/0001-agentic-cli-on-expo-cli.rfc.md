@@ -2,10 +2,10 @@
 
 **Type:** RFC
 **Status:** Active
-**Systems:** `packages/@expo/agent-cli`; `packages/@expo/cli`; `packages-detached/expo-agent-cli`
+**Systems:** `packages/@expo/agent-cli`; upstream `expo/expo:packages/@expo/cli`; `packages/expo-agent-cli`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-18
-**Revised:** 2026-09-02
+**Revised:** 2026-09-03
 **Related:** [[0000-expo-monorepo]]
 
 ## Summary
@@ -38,11 +38,11 @@ See [[0000-expo-monorepo]] §Status convention. This corpus uses Draft, Active, 
 
 ## Naming
 
-The package is `@expo/agent-cli`, in `packages/@expo/agent-cli/`. Every command this repository prints or teaches is `npx @expo/agent-cli <command>`. [confirmed, Kudo, 2026-08-28] The scoped name matches the monorepo's other tools (`@expo/cli`, `@expo/fingerprint`) and shows the package comes from the Expo org.
+The package is `@expo/agent-cli`, in `packages/@expo/agent-cli/`. Every command this repository prints or teaches is `npx @expo/agent-cli <command>`. [confirmed, Kudo, 2026-08-28] The scoped name matches Expo's other tools (`@expo/cli`, `@expo/fingerprint`) and shows the package comes from the Expo org.
 
 The package declares one bin, `expo-agent-cli` → `bin/cli.js`. Help, `Try:` lines, the README, and the `AGENTS.md` managed block all print `npx @expo/agent-cli`. The bin name exists because `npx <package>` requires a declared bin.
 
-`packages-detached/expo-agent-cli` is the npm package named `expo-agent-cli`, so `bunx expo-agent-cli` and `npx expo-agent-cli` resolve. It is outside `packages/`, so the SDK publish pipeline does not select it on its own. It has no dependency on `@expo/agent-cli`. Its bin reads its own `package.json` version and runs `@expo/agent-cli` at that same version, so `bunx expo-agent-cli@2.0.0` is `bunx @expo/agent-cli@2.0.0`. Publishing `@expo/agent-cli` also publishes this alias at the same version and dist-tag. The taught name stays `@expo/agent-cli`.
+`packages/expo-agent-cli` is the npm package named `expo-agent-cli`, so `bunx expo-agent-cli` and `npx expo-agent-cli` resolve. It has no dependency on `@expo/agent-cli`. Its bin reads its own `package.json` version and runs `@expo/agent-cli` at that same version, so `bunx expo-agent-cli@2.0.0` is `bunx @expo/agent-cli@2.0.0`. Publishing `@expo/agent-cli` also publishes this alias at the same version and dist-tag. The taught name stays `@expo/agent-cli`.
 
 ## Package layout
 

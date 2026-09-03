@@ -90,7 +90,11 @@ export function parseDevServerLogEntries(lines: readonly string[]): DevServerLog
   };
 
   for (let index = 0; index < lines.length; index++) {
-    const match = LOG_LINE.exec(lines[index]!);
+    // Git may check committed log fixtures out with CRLF on Windows. Callers usually split on
+    // `\n`, leaving the carriage return attached to each line; normalize that transport detail
+    // before parsing or preserving entry details.
+    const line = lines[index]!.replace(/\r$/, '');
+    const match = LOG_LINE.exec(line);
     if (match) {
       close();
       const [, platform, level, message] = match;
@@ -106,7 +110,7 @@ export function parseDevServerLogEntries(lines: readonly string[]): DevServerLog
       continue;
     }
     if (open) {
-      details.push(lines[index]!);
+      details.push(line);
     }
   }
   close();

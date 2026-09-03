@@ -1,4 +1,4 @@
-# 0000: The Expo monorepo
+# 0000: The expo-agent-cli repository
 
 **Type:** Explainer
 **Status:** Active
@@ -6,22 +6,20 @@
 **Systems:** repo-wide
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-18
-**Revised:** 2026-08-30
+**Revised:** 2026-09-03
 
 ## What this is
 
-The root LLP for this corpus, scoped to `packages/@expo/agent-cli` since 2026-08-21. Read it to get oriented, then use the index to find the document that governs what you are about to change.
+The root LLP for this corpus, scoped to `packages/@expo/agent-cli`. Read it to get oriented, then use the index to find the document that governs what you are about to change.
 
 ## The repository
 
-- `packages/` holds the Expo SDK modules (`expo-camera`, `expo-image`, ...), the `expo` package, and tooling under `packages/@expo/` (including `@expo/cli`).
-- `packages-detached/` holds npm packages that are not SDK modules. `expo-agent-cli` lives here: a bunx/npx alias for `@expo/agent-cli`, published at the same version when that package is published.
-- `apps/` holds development and test apps.
-- `docs/` holds the expo.dev documentation site.
-- `templates/`, `tools/`, `scripts/` support the above.
+- `packages/@expo/agent-cli/` is the `@expo/agent-cli` package and owns this LLP corpus.
+- `packages/expo-agent-cli/` is the bunx/npx alias for `@expo/agent-cli`, published at the same version when that package is published.
+- `scripts/` and `.github/workflows/publish.yml` manage releases for both packages.
 - Package manager: bun.
 
-`packages/@expo/cli` is the Expo CLI (`npx expo <command>`). Its command registry lives in `packages/@expo/cli/bin/cli.ts`. Each command lazy-imports its implementation from `src/<command>/`. The CLI has its own `CLAUDE.md` describing structure and conventions.
+The upstream Expo CLI (`npx expo <command>`) lives in the `expo/expo` repository at `packages/@expo/cli`. Paths into `packages/@expo/cli` elsewhere in this corpus refer to that upstream repository, not to this workspace.
 
 ## LLP conventions here
 
