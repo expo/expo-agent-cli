@@ -37,7 +37,7 @@ Opt-in reports of an agent getting stuck on an Expo task become eval-scenario ca
 
 ## Decisions that still bind
 
-- Harness home: `expo/expo`, under `packages/@expo/agent-cli/evals/`.
+- Harness home: `expo/expo-agent-cli`, under `packages/@expo/agent-cli/evals/`.
 - CI split: `tier0-linux` on every PR (subprocess, JSONL and schema tests, no simulator). Simulator scenarios on macOS runners. `tier0-windows` on every PR: full unit and e2e on windows-2022. Node (post CVE-2024-27980) throws `spawn EINVAL` on `.cmd` shims without `shell: true`. Fixed via `resolveSpawnTarget`.
 - First fixture matrix: latest stable SDK only. Three fixtures (an Expo Go app, a dev-client app, a broken variant). iOS-first for simulator scenarios, Android after the harness works.
 - Sequencing: feature-set review happens before implementation starts. [confirmed, Kudo, 2026-08-20]

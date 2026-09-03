@@ -26,7 +26,7 @@ An Expo-built tool layer lets any driving agent read structured CLI state, encod
 
 [confirmed, Kudo, 2026-08-18]
 
-1. The code lives in the `expo/expo` repository.
+1. The code lives in the `expo/expo-agent-cli` repository.
 2. The command can be an entirely new bin, not necessarily an `expo` subcommand.
 3. Testing must be heavy. An eval suite must gate shipping. Testing infrastructure is built first [confirmed, Kudo, 2026-08-20].
 4. **Process boundary** [confirmed, Kudo, 2026-08-20]: implementation invokes the `expo` CLI as a subprocess as much as possible. It does not import `@expo/cli` code. The same boundary generalizes across the Expo CLI family: `expo`, `eas-cli`, `expo-doctor` (bin `expo-doctor`), `@expo/fingerprint` (bin `fingerprint`), `create-expo`, and more. Details: [[0006-agent-native-cli-surface]].
