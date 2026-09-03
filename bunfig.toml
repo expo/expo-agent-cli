@@ -1,0 +1,4 @@
+[install]
+minimumReleaseAge = 172800
+minimumReleaseAgeExcludes = []
+linker = "isolated"
