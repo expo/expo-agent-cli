@@ -327,6 +327,20 @@ export function spawnAgentCli(
   // as it blocks recently published packages without the matching exclusion list.
   const { npm_config_minimum_release_age, ...processEnv } = process.env;
 
+  // Windows environment keys are case-insensitive, but the object handed to `spawn` is not.
+  // Remove inherited aliases before applying a test's overrides: otherwise an inherited
+  // `NPM_CONFIG_USER_AGENT` can win over the test's `npm_config_user_agent`, and a simulated bunx
+  // invocation is observed as npx in the child. This surfaced when the standalone repo began
+  // launching Vitest through Bun on Windows.
+  if (process.platform === 'win32' && env) {
+    const overridden = new Set(Object.keys(env).map((key) => key.toLowerCase()));
+    for (const key of Object.keys(processEnv)) {
+      if (overridden.has(key.toLowerCase())) {
+        delete processEnv[key];
+      }
+    }
+  }
+
   return spawn(process.execPath, [bin, ...args], {
     cwd,
     // Own process group, so `killAsync` can stop the `expo` subprocess the wrapper spawned too.
