@@ -103,6 +103,7 @@ describe(printTypeCheckAsync, () => {
         'errorCount',
         'errors',
         'followups',
+        'generatedTypes',
         'projectRoot',
         'reason',
       ]);
