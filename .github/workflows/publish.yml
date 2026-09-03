@@ -1,5 +1,5 @@
 # npm trusted publishing (OIDC). No NPM_TOKEN.
-# One-time setup: npmjs.com → expo-agent-cli → Settings → Trusted Publisher
+# One-time setup per package on npmjs.com → Settings → Trusted Publisher
 #   Organization or user: expo
 #   Repository: expo-agent-cli
 #   Workflow filename: publish.yml
@@ -10,6 +10,14 @@ name: Publish
 on:
   workflow_dispatch:
     inputs:
+      package:
+        description: Package to publish
+        required: true
+        type: choice
+        default: '@expo/agent-cli'
+        options:
+          - '@expo/agent-cli'
+          - expo-agent-cli
       tag:
         description: npm dist-tag
         required: false
@@ -41,9 +49,33 @@ jobs:
 
       - run: bun install
       - run: bun test
-      - run: bun run bundle
+
+      - name: Resolve package
+        id: pkg
+        env:
+          NPM_PACKAGE: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          case "$NPM_PACKAGE" in
+            expo-agent-cli)
+              echo "dir=packages/expo-agent-cli" >> "$GITHUB_OUTPUT"
+              ;;
+            '@expo/agent-cli')
+              echo "dir=packages/agent-cli" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unknown package: $NPM_PACKAGE"
+              exit 1
+              ;;
+          esac
+
+      - name: Prepare package
+        env:
+          NPM_PACKAGE: ${{ inputs.package }}
+        run: bun run --filter "$NPM_PACKAGE" prepublishOnly
 
       - name: Publish to npm
+        working-directory: ${{ steps.pkg.outputs.dir }}
         env:
           NPM_TAG: ${{ inputs.tag }}
         run: |

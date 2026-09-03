@@ -3,21 +3,34 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const TARGET_PACKAGE = '@expo/agent-cli';
-const ALIAS_PACKAGE = 'expo-agent-cli';
 const WORKFLOW_FILE = 'publish.yml';
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?(?:\+[0-9A-Za-z.]+)?$/;
 const TAG_PATTERN = /^[A-Za-z0-9._-]+$/;
 
-export const USAGE = `Usage: bun scripts/publish.ts [version] [--tag <dist-tag>] [--dry-run]
+export const DEFAULT_PACKAGE = '@expo/agent-cli';
 
-Bump ${ALIAS_PACKAGE} to [version] and dispatch ${WORKFLOW_FILE}.
-When version is omitted, use ${TARGET_PACKAGE} on the given dist-tag.
+export const PUBLISHABLE_PACKAGES: Record<string, { dir: string }> = {
+  'expo-agent-cli': {
+    dir: 'packages/expo-agent-cli',
+  },
+  '@expo/agent-cli': {
+    dir: 'packages/agent-cli',
+  },
+};
+
+const PACKAGE_NAMES = Object.keys(PUBLISHABLE_PACKAGES).join(', ');
+
+export const USAGE = `Usage: bun scripts/publish.ts [version] [--package <name>] [--tag <dist-tag>] [--dry-run]
+
+Bump a package to [version] and dispatch ${WORKFLOW_FILE}.
+Packages: ${PACKAGE_NAMES} (default: ${DEFAULT_PACKAGE}).
+When version is omitted, use the local package.json version.
 
 Options:
-  --tag <name>  npm dist-tag (default: latest)
-  --dry-run     print actions without writing, pushing, or dispatching
-  -h, --help    show this help`;
+  --package <name>  package to publish (default: ${DEFAULT_PACKAGE})
+  --tag <name>      npm dist-tag (default: latest)
+  --dry-run         print actions without writing, pushing, or dispatching
+  -h, --help        show this help`;
 
 export type CommandResult = {
   status: number;
@@ -38,6 +51,7 @@ export type PublishIo = {
 
 export type PublishArgs = {
   version?: string;
+  packageName: string;
   tag: string;
   dryRun: boolean;
   help: boolean;
@@ -45,6 +59,7 @@ export type PublishArgs = {
 
 export function parseArgs(argv: string[]): PublishArgs {
   let version: string | undefined;
+  let packageName = DEFAULT_PACKAGE;
   let tag = 'latest';
   let dryRun = false;
   let help = false;
@@ -75,6 +90,22 @@ export function parseArgs(argv: string[]): PublishArgs {
       }
       continue;
     }
+    if (arg === '--package') {
+      const value = argv[i + 1];
+      if (!value || value.startsWith('-')) {
+        throw new Error('publish: --package needs a value');
+      }
+      packageName = value;
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--package=')) {
+      packageName = arg.slice('--package='.length);
+      if (!packageName) {
+        throw new Error('publish: --package needs a value');
+      }
+      continue;
+    }
     if (arg.startsWith('-')) {
       throw new Error(`publish: unknown option ${arg}`);
     }
@@ -84,7 +115,7 @@ export function parseArgs(argv: string[]): PublishArgs {
     version = arg;
   }
 
-  return { version, tag, dryRun, help };
+  return { version, packageName, tag, dryRun, help };
 }
 
 export function applyVersion(packageJson: string, version: string): string {
@@ -142,6 +173,22 @@ function commandOutput(
   return result.stdout.trim();
 }
 
+function resolvePublishablePackage(packageName: string): {
+  name: string;
+  dir: string;
+  relPackageJson: string;
+} {
+  const spec = PUBLISHABLE_PACKAGES[packageName];
+  if (!spec) {
+    throw new Error(`publish: unknown package ${packageName} (expected ${PACKAGE_NAMES})`);
+  }
+  return {
+    name: packageName,
+    dir: spec.dir,
+    relPackageJson: `${spec.dir}/package.json`,
+  };
+}
+
 function readCurrentVersion(packageJson: string): string {
   let parsed: { version?: unknown };
   try {
@@ -155,22 +202,10 @@ function readCurrentVersion(packageJson: string): string {
   return parsed.version;
 }
 
-function resolveVersion(io: PublishIo, args: PublishArgs): string {
-  if (args.version) {
-    return args.version;
-  }
-  return commandOutput(
-    io,
-    'npm',
-    ['view', `${TARGET_PACKAGE}@${args.tag}`, 'version'],
-    `publish: cannot read ${TARGET_PACKAGE}@${args.tag} version`
-  );
-}
-
-function assertNotPublished(io: PublishIo, version: string): void {
-  const result = io.run('npm', ['view', `${ALIAS_PACKAGE}@${version}`, 'version']);
+function assertNotPublished(io: PublishIo, packageName: string, version: string): void {
+  const result = io.run('npm', ['view', `${packageName}@${version}`, 'version']);
   if (result.status === 0 && result.stdout.trim() === version) {
-    throw new Error(`publish: ${ALIAS_PACKAGE}@${version} is already on npm`);
+    throw new Error(`publish: ${packageName}@${version} is already on npm`);
   }
 }
 
@@ -201,43 +236,61 @@ function assertGitReady(io: PublishIo): string {
 function bumpAndPush(
   io: PublishIo,
   packageJsonPath: string,
+  relPackageJson: string,
   packageJson: string,
+  packageName: string,
   version: string,
   branch: string,
   dryRun: boolean
 ): void {
   const nextPackageJson = applyVersion(packageJson, version);
   if (dryRun) {
-    io.log(`Would update package.json to ${version}`);
+    io.log(`Would update ${relPackageJson} to ${version}`);
     io.log(`Would commit and push to origin/${branch}`);
     return;
   }
 
   io.writeFile(packageJsonPath, nextPackageJson);
-  commandOutput(io, 'git', ['add', 'package.json'], 'publish: git add failed');
+  commandOutput(io, 'git', ['add', relPackageJson], 'publish: git add failed');
   commandOutput(
     io,
     'git',
-    ['commit', '-m', `Publish ${ALIAS_PACKAGE}@${version}`],
+    ['commit', '-m', `Publish ${packageName}@${version}`],
     'publish: git commit failed'
   );
   commandOutput(io, 'git', ['push'], 'publish: git push failed');
-  io.log(`Pushed ${ALIAS_PACKAGE}@${version} to origin/${branch}`);
+  io.log(`Pushed ${packageName}@${version} to origin/${branch}`);
 }
 
-function dispatchWorkflow(io: PublishIo, branch: string, tag: string, dryRun: boolean): void {
+function dispatchWorkflow(
+  io: PublishIo,
+  branch: string,
+  packageName: string,
+  tag: string,
+  dryRun: boolean
+): void {
   if (dryRun) {
-    io.log(`Would dispatch ${WORKFLOW_FILE} on ${branch} (tag ${tag})`);
+    io.log(`Would dispatch ${WORKFLOW_FILE} on ${branch} (package ${packageName}, tag ${tag})`);
     return;
   }
 
   commandOutput(
     io,
     'gh',
-    ['workflow', 'run', WORKFLOW_FILE, '--ref', branch, '--field', `tag=${tag}`],
+    [
+      'workflow',
+      'run',
+      WORKFLOW_FILE,
+      '--ref',
+      branch,
+      '--field',
+      `package=${packageName}`,
+      '--field',
+      `tag=${tag}`,
+    ],
     'publish: failed to dispatch workflow'
   );
-  io.log(`Dispatched ${WORKFLOW_FILE} on ${branch} (tag ${tag})`);
+  io.log(`Dispatched ${WORKFLOW_FILE} on ${branch} (package ${packageName}, tag ${tag})`);
 }
 
 export function publish(io: Partial<PublishIo> = {}): void {
@@ -254,7 +307,8 @@ export function publish(io: Partial<PublishIo> = {}): void {
       throw new Error(`publish: invalid dist-tag ${args.tag}`);
     }
 
-    const packageJsonPath = path.join(resolved.cwd, 'package.json');
+    const pkg = resolvePublishablePackage(args.packageName);
+    const packageJsonPath = path.join(resolved.cwd, pkg.relPackageJson);
     let packageJson: string;
     try {
       packageJson = resolved.readFile(packageJsonPath);
@@ -264,21 +318,30 @@ export function publish(io: Partial<PublishIo> = {}): void {
     }
 
     const currentVersion = readCurrentVersion(packageJson);
-    const version = resolveVersion(resolved, args);
+    const version = args.version ?? currentVersion;
     if (!VERSION_PATTERN.test(version)) {
       throw new Error(`publish: invalid version ${version}`);
     }
 
-    assertNotPublished(resolved, version);
+    assertNotPublished(resolved, pkg.name, version);
     const branch = assertGitReady(resolved);
 
-    resolved.log(`Publishing ${ALIAS_PACKAGE}@${version} with tag ${args.tag}`);
+    resolved.log(`Publishing ${pkg.name}@${version} with tag ${args.tag}`);
     if (currentVersion === version) {
       resolved.log(`package.json is already ${version}`);
     } else {
-      bumpAndPush(resolved, packageJsonPath, packageJson, version, branch, args.dryRun);
+      bumpAndPush(
+        resolved,
+        packageJsonPath,
+        pkg.relPackageJson,
+        packageJson,
+        pkg.name,
+        version,
+        branch,
+        args.dryRun
+      );
     }
-    dispatchWorkflow(resolved, branch, args.tag, args.dryRun);
+    dispatchWorkflow(resolved, branch, pkg.name, args.tag, args.dryRun);
     resolved.exit(0);
   } catch (error) {
     resolved.error(error instanceof Error ? error.message : String(error));
