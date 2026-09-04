@@ -448,11 +448,14 @@ describe('a package.json that is not an Expo app', () => {
     const binDir = path.join(directory, 'escape-hatch-bin');
     const stubScript = path.join(directory, 'escape-hatch-stub.js');
     await fs.promises.writeFile(stubScript, 'process.exit(0);\n');
-    await installStubBinAsync(binDir, 'expo', stubScript);
+    await installStubBinAsync(binDir, 'npx', stubScript);
+    await installStubBinAsync(binDir, 'bunx', stubScript);
     await installStubBinAsync(binDir, 'create-expo', stubScript);
-    const env = pathEnvVars(
-      [binDir, process.env.PATH ?? process.env.Path ?? ''].join(path.delimiter)
-    );
+    const env = {
+      npm_config_user_agent: '',
+      npm_execpath: '',
+      ...pathEnvVars([binDir, process.env.PATH ?? process.env.Path ?? ''].join(path.delimiter)),
+    };
 
     for (const argv of [
       ['install', 'expo', '--check'],
