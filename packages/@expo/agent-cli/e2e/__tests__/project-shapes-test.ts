@@ -445,12 +445,20 @@ describe('a package.json that is not an Expo app', () => {
   // an Expo app, and a guard that refused it would leave no way out of the state it reports.
   it('does not refuse the commands that would make this an Expo app', async () => {
     const directory = await plainPackageAsync();
+    const binDir = path.join(directory, 'escape-hatch-bin');
+    const stubScript = path.join(directory, 'escape-hatch-stub.js');
+    await fs.promises.writeFile(stubScript, 'process.exit(0);\n');
+    await installStubBinAsync(binDir, 'expo', stubScript);
+    await installStubBinAsync(binDir, 'create-expo', stubScript);
+    const env = pathEnvVars(
+      [binDir, process.env.PATH ?? process.env.Path ?? ''].join(path.delimiter)
+    );
 
     for (const argv of [
       ['install', 'expo', '--check'],
       ['new', '--help'],
     ]) {
-      const result = await executeAgentCliAsync(directory, argv, { reject: false });
+      const result = await executeAgentCliAsync(directory, argv, { env, reject: false });
       expect({ argv, all: result.all.includes('NOT_EXPO_APP') }).toEqual({ argv, all: false });
     }
   });
