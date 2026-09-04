@@ -1317,8 +1317,11 @@ describe('@expo/agent-cli smoke', () => {
         expect(result.exitCode).toBe(1);
         const { error } = JSON.parse(result.stdout);
         expect(error.code).toBe('ROUTE_NOT_FOUND');
-        // And the suggestion keeps the command the caller was running (friction run 5).
-        expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --route /notes');
+        // And the suggestion keeps the command the caller was running (friction run 5) —
+        // **including the platform**, since the gate requires one and a `Try:` line an agent runs
+        // verbatim must not be refused for a second reason
+        // (@ref src/navigate/routeCheck §ROUTE_COMMANDS).
+        expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --ios --route /notes');
         expect(readXcrun().filter((argv) => argv.includes('openurl'))).toEqual([]);
       } finally {
         release();

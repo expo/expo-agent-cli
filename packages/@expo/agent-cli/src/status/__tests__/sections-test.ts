@@ -563,8 +563,50 @@ describe(buildNextActionStatus, () => {
         devServerStatus({ appsConnected: 1 })
       );
 
-      expect(next.command).toBe('npx @expo/agent-cli smoke');
+      expect(next.command).toBe('npx @expo/agent-cli smoke --ios');
       expect(next.why).toContain('app connected');
+    });
+
+    // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+    //
+    // The gate requires a platform now, so a bare `smoke` here would be a `next` line that exits 1
+    // — and `next` is read as "run this" [found by the tier-0 evals, 2026-09-04]. The platform is
+    // taken from the device this machine actually has booted, which is the same fact the gate would
+    // otherwise have to go looking for: an Android emulator gets `--android` on a Mac.
+    it(`names the platform of the device this machine has, not the host's`, () => {
+      const next = buildNextActionStatus(
+        mockState(),
+        {},
+        'ios',
+        devServerStatus({ appsConnected: 1 }),
+        {
+          state: 'present',
+          platform: 'android',
+          deviceId: 'emulator-5554',
+          name: 'tuft-pixel',
+          devices: [],
+          reason: null,
+        }
+      );
+
+      expect(next.command).toBe('npx @expo/agent-cli smoke --android');
+    });
+
+    // And with no device booted it falls back to the project's own answer, which is the same one
+    // this report's `dev` plan prints — so two lines of one report cannot name two platforms
+    // (@ref ../sections §resolveDefaultPlatform).
+    it(`falls back to the platform the rest of the report already names`, () => {
+      const next = buildNextActionStatus(
+        mockState(),
+        {},
+        'ios',
+        devServerStatus({ appsConnected: 1 }),
+        { state: 'absent', platform: null, deviceId: null, name: null, devices: [], reason: 'none' }
+      );
+
+      expect(next.command).toBe(
+        `npx @expo/agent-cli smoke --${process.platform === 'darwin' ? 'ios' : 'android'}`
+      );
     });
 
     // Undecidable is not a mismatch: a dev server that named no project root is still the only one
@@ -578,7 +620,7 @@ describe(buildNextActionStatus, () => {
         devServerStatus({ projectRootMatched: null, appsConnected: 1 })
       );
 
-      expect(next.command).toBe('npx @expo/agent-cli smoke');
+      expect(next.command).toBe('npx @expo/agent-cli smoke --ios');
     });
 
     it(`should keep the plan for another project's dev server`, () => {
@@ -894,7 +936,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       true
     );
 
-    expect(next.command).toBe('npx @expo/agent-cli smoke --cloud');
+    expect(next.command).toBe('npx @expo/agent-cli smoke --ios --cloud');
     expect(next.why).toContain('EAS Simulator session');
   });
 
@@ -918,7 +960,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       true
     );
 
-    expect(next.command).toBe('npx @expo/agent-cli smoke');
+    expect(next.command).toBe('npx @expo/agent-cli smoke --ios');
   });
 
   // A probe that could not run is not evidence of a local device, and the caller has *told* this

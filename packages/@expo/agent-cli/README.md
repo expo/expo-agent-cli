@@ -14,7 +14,7 @@ Design documents: `llp/0001-agentic-cli-on-expo-cli.rfc.md` and its child LLPs i
 | 3. Edit and reload           | `npx @expo/agent-cli runtime:reload`      | after your edit, the app runs the code on disk |
 |                              | `npx @expo/agent-cli runtime:errors`      | what it threw, over a time window              |
 |                              | `npx @expo/agent-cli runtime:tree`        | what is on screen, and its testIDs             |
-| 4. Verify before you're done | `npx @expo/agent-cli smoke`               | the app on the code on disk, and one exit code |
+| 4. Verify before you're done | `npx @expo/agent-cli smoke --ios`         | the app on the code on disk, and one exit code |
 |                              | `npx @expo/agent-cli typecheck`           | the type errors neither of those can see       |
 | 5. Release                   | `npx @expo/agent-cli deploy`              | the web app to EAS Hosting                     |
 | One-time setup               | `npx @expo/agent-cli new my-app`          | create a project                               |

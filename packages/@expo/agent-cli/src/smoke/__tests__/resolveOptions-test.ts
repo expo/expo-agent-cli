@@ -186,7 +186,22 @@ describe(resolveSmokeOptions, () => {
   // @ref llp/0010-agent-conventions.rfc.md §Registry rules. A bare word is a caller
   // who meant `--route`, and dropping it would run the gate without opening anything.
   it(`refuses a bare route and says how to pass one`, () => {
-    expect(() => resolveSmokeOptions(['--ios', '/notes'])).toThrow(/--route \/notes/);
+    expect(() => resolveSmokeOptions(['--ios', '/notes'])).toThrow(/smoke --ios --route \/notes/);
+  });
+
+  // The hint has to quote a command line that **runs**. Since the platform became required, a hint
+  // of `smoke --route /notes` was a correct instruction and a second refusal, which is the dead end
+  // this whole CLI is written against.
+  it(`carries the platform into the hint, so following it does not fail again`, () => {
+    expect(() => resolveSmokeOptions(['--android', '/notes'])).toThrow(
+      /smoke --android --route \/notes/
+    );
+  });
+
+  // And a caller with two things wrong is told the more specific one first: the stray word is what
+  // they typed, and the hint still teaches the flag they are missing.
+  it(`names the stray word before the missing platform, and teaches both`, () => {
+    expect(() => resolveSmokeOptions(['/notes'])).toThrow(/smoke --ios\|--android --route \/notes/);
   });
 
   it(`refuses an option this command does not have`, () => {

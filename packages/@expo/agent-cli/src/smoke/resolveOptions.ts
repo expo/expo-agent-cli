@@ -137,9 +137,17 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
 
   // @ref llp/0010-agent-conventions.rfc.md §Registry rules. The route is a flag, not a
   // positional: this command's subject is the app, and a bare word is a caller who meant --route.
+  //
+  // The hint carries the platform too, and that is a fix rather than decoration
+  // [found by sweeping what this change teaches, 2026-09-04]: it used to print
+  // `smoke --route /notes`, which since the platform became required is a correct instruction and a
+  // second error — a caller who followed it would be refused again. The platform is read
+  // **leniently** here, without the refusal, because this error is about the stray word and a
+  // caller with two things wrong should be told the more specific one first.
   if (args._.length > 0) {
+    const named = namedPlatform(args) ?? 'ios|--android';
     throw strayArgumentError('smoke', args._, {
-      hint: `to open a route before the error window, pass it as a flag: ${PROGRAM_PREFIX} smoke --route ${args._[0]}`,
+      hint: `to open a route before the error window, pass it as a flag: ${PROGRAM_PREFIX} smoke --${named} --route ${args._[0]}`,
     });
   }
 
@@ -205,6 +213,23 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
     json: !!args['--json'],
     followups: !args['--no-followups'],
   };
+}
+
+/**
+ * The platform this command line names, or null when it names none. Never throws.
+ *
+ * For the messages that want to *quote* a usable command line rather than decide the run's
+ * platform — see the stray-argument hint above. {@link resolveSmokePlatform} is the deciding one.
+ */
+function namedPlatform(args: { [flag: string]: unknown }): string | null {
+  if (args['--ios']) {
+    return 'ios';
+  }
+  if (args['--android']) {
+    return 'android';
+  }
+  const named = args['--platform'] == null ? null : String(args['--platform']);
+  return named === 'ios' || named === 'android' ? named : null;
 }
 
 /**

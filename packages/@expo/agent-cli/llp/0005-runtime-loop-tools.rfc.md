@@ -320,7 +320,22 @@ The refusal is `BAD_ARGS`, exit 1, with `suggestedCommand: smoke --ios` — the 
 
 **One line**, in the shape §navigate already uses for a missing route: `Missing platform. Usage: … smoke --ios|--android, for example: … smoke --ios`. The first cut put the paragraph above into the error itself and it was rightly called noisy [Kudo, 2026-09-04]. The three-part What/Why/How form of [[0006-agent-native-cli-surface]] §Errors are prompts earns its length when the cause is not visible on the command line; a required flag that was not passed is visible, and the reasoning belongs in this document and in the source rather than in front of somebody who needs to add five characters.
 
-Two consequences worth naming. The follow-ups already carried the platform into every command they suggest (F58), so nothing downstream had to change. And the test tiers stopped depending on the host: every `smoke` invocation in them now names a platform, so a case that asserts platform-specific text says so out loud rather than passing on macOS and failing on the Linux runner — which is a failure this repo's CI had already produced once.
+The test tiers stopped depending on the host: every `smoke` invocation in them now names a platform, so a case that asserts platform-specific text says so out loud rather than passing on macOS and failing on the Linux runner — a failure this repo's CI had already produced once.
+
+**Making a flag required breaks every surface that teaches the command**, and the first sweep missed most of them [found by the tier-0 evals, 2026-09-04]. The follow-ups were already fine (F58 made them carry the platform), which is what made the rest look done. What was not:
+
+| surface                                              | was                       | now                                            |
+| ---------------------------------------------------- | ------------------------- | ---------------------------------------------- |
+| `evals/scenarios/smoke-no-dev-server.json`           | `smoke --dev-server-url …`| the golden argv names `--ios`                  |
+| §The smoke gate's `status.next` (`verifyCommand`)     | `smoke`                   | the booted device's platform, else the project's |
+| `routeNotFoundError`'s `Try:` for `smoke`             | `smoke --route /notes`    | the caller's platform, kept                    |
+| `notReadyError`'s `suggestedCommand`                  | `smoke`                   | `dev:logs`                                     |
+| the stray-argument hint                               | `smoke --route <word>`    | the named platform, or `--ios|--android`       |
+| the workflow ladder and the README                    | `smoke`                   | `smoke --ios|--android`                        |
+
+Two of those are worth more than a table row. `suggestedCommand` is the field a driving agent runs **verbatim**, so a value that is refused for a second reason is worse than none — and `notReadyError` cannot name a platform at all, because it is a failure about a dev server and a dev server has not got one. It names `dev:logs`, which answers the same question and is runnable as written; `smoke` stays in its prose with the flags shown.
+
+And `status.next` is read as "run this", so it states a platform rather than leaving one to be defaulted. It is chosen from the strongest evidence at hand — a device this machine has **booted**, which is the fact the gate would otherwise go looking for, so a Mac with an Android emulator running gets `--android` — and otherwise from `resolveDefaultPlatform`, which reads the project's own checked-in native directories before it falls back to the host. That is the same answer the report's `dev` plan prints, so two lines of one report cannot name two platforms. A stated platform in a suggestion is not the guess this section removed: it is text the caller reads and can change, where the default inside `smoke` was invisible.
 
 ### The gate says what it is doing while it does it
 

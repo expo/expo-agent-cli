@@ -333,10 +333,23 @@ describe(notReadyError, () => {
     expect(message).not.toContain('this is about the wait, not about the server');
   });
 
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  //
+  // `dev:logs` rather than `smoke`, and the reason is mechanical: `smoke` requires a platform now,
+  // this failure is about a dev server, and a dev server has no platform — so `smoke` is not a
+  // command this error could write out in full. `suggestedCommand` is the field an agent runs
+  // verbatim, so it has to be runnable [found by sweeping what this change teaches, 2026-09-04].
   it(`recovers into the command that reports what the bundler is doing`, () => {
     expect(notReadyError(lock, '/project/.expo/dev.log', readyResult()).suggestedCommand).toBe(
-      'npx @expo/agent-cli smoke'
+      'npx @expo/agent-cli dev:logs'
     );
+  });
+
+  // And the gate is still named, with its flags shown, for a reader who knows which device to use.
+  it(`still names the gate in the prose, with the platform it now requires`, () => {
+    const message = notReadyError(lock, '/project/.expo/dev.log', readyResult()).message;
+
+    expect(message).toContain('smoke --ios');
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization

@@ -995,7 +995,7 @@ describe(printStatusAsync, () => {
       // The dev server of this fixture is running with an app attached, so `next` is the readiness
       // gate rather than `@expo/agent-cli dev` — and deliberately not `runtime:errors`, which the
       // `runtime-errors` follow-up above already names.
-      expect(report.next.command).toBe('npx @expo/agent-cli smoke');
+      expect(report.next.command).toBe('npx @expo/agent-cli smoke --ios');
       expect(
         report.followups.map((followup: { command: string }) => followup.command)
       ).not.toContain(report.next.command);

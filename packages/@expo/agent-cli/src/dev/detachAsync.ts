@@ -897,10 +897,16 @@ export function notReadyError(
       // the one they will not think of: a port number is not a listener, and this CLI only ever
       // looks at one of the two a machine can have.
       `Note: this CLI reaches the dev server at ${lock.url}, over IPv4. A port number is not one listener — 127.0.0.1:${lock.port} and [::1]:${lock.port} are different sockets, so another process can be answering this port on the other stack while this project's dev server is fine, and neither will have reported a collision. "lsof -nP -iTCP:${lock.port} -sTCP:LISTEN" lists both.`,
-      `How: run "${PROGRAM_PREFIX} smoke", which reports what the bundler is doing and whether this project compiles and runs, or read ${logFile} with "${PROGRAM_PREFIX} dev:logs". Stop it with "${PROGRAM_PREFIX} dev:stop".`,
+      // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+      // `smoke` needs `--ios` or `--android` now and nothing here knows which — this failure is
+      // about a dev server, and a dev server has no platform. So the *machine-readable* next action
+      // is `dev:logs`, which answers the same question ("what is the bundler doing") and is
+      // runnable as written. `smoke` stays in the prose with its flags shown, because it is the
+      // better answer for a reader who knows which device they have.
+      `How: read ${logFile} with "${PROGRAM_PREFIX} dev:logs", which says what the bundler is doing. "${PROGRAM_PREFIX} smoke --ios" or "--android" then reports whether this project compiles and runs on that device. Stop it with "${PROGRAM_PREFIX} dev:stop".`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} smoke`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
   return error;
 }
 
