@@ -169,6 +169,8 @@ describe('bumpPatch', () => {
 
   it('should throw for an invalid version', () => {
     expect(() => bumpPatch('1.2')).toThrow('publish: invalid version 1.2');
+    expect(() => bumpPatch('v1.2.3')).toThrow('publish: invalid version v1.2.3');
+    expect(() => bumpPatch('foo')).toThrow('publish: invalid version foo');
   });
 });
 

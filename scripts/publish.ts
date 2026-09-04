@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { semver } from 'bun';
 
 const WORKFLOW_FILE = 'publish.yml';
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?(?:\+[0-9A-Za-z.]+)?$/;
@@ -125,12 +126,19 @@ export function applyVersion(packageJson: string, version: string): string {
 }
 
 export function bumpPatch(version: string): string {
-  if (!VERSION_PATTERN.test(version)) {
+  if (!semver.satisfies(version, version)) {
     throw new Error(`publish: invalid version ${version}`);
   }
   const [core] = version.split(/[-+]/);
   const [major, minor, patch] = core.split('.').map(Number);
-  return `${major}.${minor}.${patch + 1}`;
+  if (![major, minor, patch].every((part) => Number.isInteger(part) && part >= 0)) {
+    throw new Error(`publish: invalid version ${version}`);
+  }
+  const next = `${major}.${minor}.${patch + 1}`;
+  if (semver.order(next, version) !== 1) {
+    throw new Error(`publish: invalid version ${version}`);
+  }
+  return next;
 }
 
 function defaultIo(): PublishIo {
@@ -328,7 +336,7 @@ export function publish(io: Partial<PublishIo> = {}): void {
 
     const currentVersion = readCurrentVersion(packageJson);
     const version = args.version ?? bumpPatch(currentVersion);
-    if (!VERSION_PATTERN.test(version)) {
+    if (!semver.satisfies(version, version) || !VERSION_PATTERN.test(version)) {
       throw new Error(`publish: invalid version ${version}`);
     }
 
