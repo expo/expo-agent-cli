@@ -47,6 +47,33 @@ export interface SmokeFollowUpInput {
    */
   platform: 'ios' | 'android';
   /**
+   * This run's start phase ran a plan that **compiled**.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+   * It changes what the cheapest next step is. "Start one in the foreground and watch it fail" is
+   * good advice for a start that took seconds and expensive advice for one that took minutes — the
+   * build already wrote down why it failed, and reading that costs nothing.
+   */
+  buildAttempted: boolean;
+  /**
+   * Why the app that answered cannot run this project, or null when it can.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+   * The one inconclusive state a re-run can never change, so the one that has to lead with a
+   * different command entirely: no amount of looking again turns Expo Go into a runtime that holds
+   * this project's native code.
+   */
+  appMismatch: string | null;
+  /**
+   * What the `reload` phase did about the app the window was read from.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+   * It decides whether `runtime:reload` is still the first thing to do about a non-empty window.
+   * The advice exists because the window belongs to a session that outlives the fix — and a run
+   * that reloaded, or that opened the app itself, has already left that state.
+   */
+  reloadDisposition: 'not-needed' | 'reloaded' | 'unproved' | 'declined';
+  /**
    * Whether this run was told to use the project's EAS Simulator session.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
@@ -69,10 +96,51 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   const same = ` --${input.platform}${sameRoute}${onCloud}`;
   const otherPlatform = input.platform === 'android' ? 'ios' : 'android';
 
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+  //
+  // Above the dev-server rows, because it is the one state here that no command in this file's
+  // ordinary ladder addresses: the dev server is fine, the bundle is fine, an app answered — and it
+  // is the wrong app for this project. Offering a re-run of the gate would be the exact mistake
+  // llp/0009 was written against, since the same Expo Go will answer the same way for ever.
+  if (input.appMismatch) {
+    return capFollowUps([
+      {
+        id: 'dev-build',
+        command: `${PROGRAM_PREFIX} dev --${input.platform} --yes`,
+        why: 'This project needs a development build to run at all, and that is the command that makes one and starts the dev server for it. Expo Go cannot load its native code, so no reading taken through Expo Go is about this project.',
+      },
+      {
+        id: 'status',
+        command: `${PROGRAM_PREFIX} status`,
+        why: 'Names every reason this project cannot run in Expo Go, which is what decides whether the build above is the whole of what is needed.',
+      },
+      ...(input.screenshotPath
+        ? [
+            {
+              id: 'screenshot',
+              command: `open ${input.screenshotPath}`,
+              why: 'What Expo Go had on screen while it was read, which is evidence about Expo Go rather than about this project.',
+            },
+          ]
+        : []),
+    ]);
+  }
+
   // No dev server. A run that tried to start one and could not needs to see the start fail where
   // its output is visible; a `--no-start` run needs the start it declined to do.
   if (!input.devServerFound) {
     return capFollowUps([
+      // @ref llp/0005 §It builds what the app needs, and says so first. The log first when a build
+      // ran, because the alternative below is that build again.
+      ...(input.buildAttempted
+        ? [
+            {
+              id: 'dev-logs',
+              command: `${PROGRAM_PREFIX} dev:logs`,
+              why: 'The build this run started wrote why it stopped to the detached log, and reading it costs nothing — where starting another one costs the whole build again.',
+            },
+          ]
+        : []),
       {
         id: 'dev-detach',
         command: `${PROGRAM_PREFIX} dev --detach --yes --wait-ready`,
@@ -169,12 +237,23 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   }
 
   if (input.failing > 0) {
+    // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk. The reload
+    // leads this list only when the window might still be of the session before the fix. A run
+    // that reloaded the app, or that opened it and so loaded the served bundle on the way in, has
+    // already answered that — and repeating it as the first step is advice about a state this run
+    // has left, which is the class of stale follow-up llp/0009 exists to keep out.
+    const windowMightPredateTheFix =
+      input.reloadDisposition === 'declined' || input.reloadDisposition === 'unproved';
     return capFollowUps([
-      {
-        id: 'runtime-reload',
-        command: `${PROGRAM_PREFIX} runtime:reload --${input.platform}${onCloud}`,
-        why: 'An error window is a property of the app’s session and the session outlives a fix, so reload before believing a second reading.',
-      },
+      ...(windowMightPredateTheFix
+        ? [
+            {
+              id: 'runtime-reload',
+              command: `${PROGRAM_PREFIX} runtime:reload --${input.platform}${onCloud}`,
+              why: 'An error window is a property of the app’s session and the session outlives a fix, so reload before believing a second reading.',
+            },
+          ]
+        : []),
       {
         id: 'runtime-errors',
         command: `${PROGRAM_PREFIX} runtime:errors --${input.platform} --duration 5s --json`,

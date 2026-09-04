@@ -220,9 +220,16 @@ async function installStubPlutilAsync(projectRoot: string): Promise<void> {
     scriptPath,
     [
       `const fs = require('fs');`,
+      // The key that was asked for, not always CFBundleIdentifier. Two callers read these plists
+      // now — the device choice wants the bundle id and the Expo Go version check wants
+      // CFBundleShortVersionString — and a stub that answered the same key whichever was asked
+      // would hand a bundle id back as a version string.
+      `const key = process.argv[process.argv.indexOf('-extract') + 1];`,
       `const plist = process.argv[process.argv.length - 1];`,
       `const xml = fs.readFileSync(plist, 'utf8');`,
-      `const match = xml.match(/<key>CFBundleIdentifier<\\/key>\\s*<string>([^<]*)<\\/string>/);`,
+      `const match = xml.match(new RegExp('<key>' + key + '<\\\\/key>\\\\s*<string>([^<]*)<\\\\/string>'));`,
+      // Real `plutil` exits non-zero for a key the plist has not got, which is the case the
+      // version check reads as "nothing installed to compare".
       `if (!match) process.exit(1);`,
       `process.stdout.write(match[1] + '\\n');`,
     ].join('\n')
@@ -237,6 +244,52 @@ async function writeRoutesAsync(projectRoot: string, files: string[]): Promise<v
     await fs.promises.mkdir(path.dirname(target), { recursive: true });
     await fs.promises.writeFile(target, 'export default function Route() { return null; }\n');
   }
+}
+
+/**
+ * A stub `npx`, so no test in this tier downloads Expo Go.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+ * The install phase shells `npx --yes expo-go download`, which is a 423 MB transfer over the
+ * network. Left unstubbed it doubled this suite's wall clock and made it depend on a CDN
+ * [observed, 2026-09-03]. It answers the `{"path":…}` shape the real CLI does, and records what it
+ * was asked so a test can assert the install happened without one byte moving.
+ */
+async function installStubNpxAsync(projectRoot: string): Promise<() => string[][]> {
+  const recordPath = path.join(projectRoot, '.npx-calls.jsonl');
+  const scriptPath = path.join(projectRoot, '.stub-bin', 'npx-stub.js');
+  await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
+  await fs.promises.writeFile(
+    scriptPath,
+    [
+      `const fs = require('fs');`,
+      `const path = require('path');`,
+      `const args = process.argv.slice(2);`,
+      `fs.appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify(args) + '\\n');`,
+      // The one verb this tier exercises. A downloaded bundle is a directory, so the stub makes an
+      // empty one at the path it answers — which is what `simctl install` would be handed.
+      `if (args.includes('download')) {`,
+      `  const target = path.join(process.cwd(), 'Expo-Go-57.0.9.tar.app');`,
+      `  fs.mkdirSync(target, { recursive: true });`,
+      `  process.stdout.write(JSON.stringify({ path: target }));`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args.includes('url')) {`,
+      `  process.stdout.write(JSON.stringify({ url: 'https://example.com/Expo-Go-57.0.9/Expo-Go-57.0.9.tar.gz' }));`,
+      `  process.exit(0);`,
+      `}`,
+      `process.exit(0);`,
+    ].join('\n')
+  );
+  await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'npx', scriptPath);
+  return () =>
+    fs.existsSync(recordPath)
+      ? fs
+          .readFileSync(recordPath, 'utf8')
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+      : [];
 }
 
 /**
@@ -257,6 +310,13 @@ async function writeSimulatorHomeAsync(
   await installStubPlutilAsync(projectRoot);
   const home = path.join(projectRoot, '.sim-home');
   for (const [udid, appIds] of Object.entries(installed)) {
+    // The device's own directory, whether or not it has apps in it. A real simulator that exists
+    // has one, and a caller that acts on "no Expo Go here" needs to tell an empty device from a
+    // machine that has no simulators at all (@ref src/device/installedApps §simulatorDiskExistsAsync).
+    await fs.promises.mkdir(
+      path.join(home, 'Library/Developer/CoreSimulator/Devices', udid, 'data'),
+      { recursive: true }
+    );
     for (const [index, appId] of appIds.entries()) {
       const bundle = path.join(
         home,
@@ -327,14 +387,16 @@ describe('@expo/agent-cli smoke', () => {
     // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment. A command that
     // starts a dev server and boots a simulator changes the machine, so the help says so before
     // anybody runs it — and says what to do to keep the dev server afterwards.
-    it(`says it starts what is missing, puts it back, and does not build`, async () => {
+    it(`says it starts what is missing, puts it back, and builds what is missing`, async () => {
       const projectRoot = await setupFixtureAsync('go-app');
 
       const result = await executeAgentCliAsync(projectRoot, ['smoke', '--help']);
 
       expect(result.all).toContain('brings its own environment');
       expect(result.all).toContain('stops exactly what it started');
-      expect(result.all).toContain('It does not build');
+      // @ref llp/0005 §It builds what the app needs, and says so first. This said "It does not
+      // build" until 2026-09-03, which was the boundary and is now the opposite promise.
+      expect(result.all).toContain('It builds the development build');
     });
 
     // The two limits a reader would otherwise assume away, both of them llp/0005 findings.
@@ -415,6 +477,57 @@ describe('@expo/agent-cli smoke', () => {
   // project's lock, and it is gone by the time this command's own process exits. The dev server is
   // the stub `expo` bin, which takes the lock exactly as the real one does, because the wrapper
   // that takes it is real here.
+  // @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+  //
+  // This command used to refuse a project whose development build is missing, and name `dev`. That
+  // is a correct instruction and a dead end for a loop that cannot leave itself to take it, so it
+  // now runs the plan — and the one thing a caller needs from a command that will block for
+  // minutes is the sentence saying so, before the wait rather than after it.
+  describe('a project that has to be built first', () => {
+    it('says it is building, on stderr, before it waits', async () => {
+      // No recorded build for its fingerprint, so the plan compiles.
+      const projectRoot = await setupFixtureAsync('dev-client-app');
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        // `--ios` named, not left to the host. The platform default is iOS on a Mac and Android
+        // everywhere else, so a test that asserted the sentence without naming one passed here and
+        // failed on both CI runners with `Building the android development build`
+        // [observed — tier0-linux and tier0-windows, 2026-09-03]. F58's rule for the follow-ups is
+        // the same rule for an assertion: a run that drops the platform is a different run.
+        ['smoke', '--ios', '--json', '--no-screenshot', '--port', '9377', '--timeout', '4s'],
+        {
+          env: {
+            ...devServerOnlyEnv(projectRoot),
+            // The stub `expo` exits without ever listening, so the start fails fast — this case is
+            // about what was *said* before the wait, not about a build succeeding.
+            STUB_EXPO_EXIT_CODE: '1',
+          },
+          reject: false,
+        }
+      );
+
+      // On stderr, never stdout: a `--json` run puts one object there and nothing else.
+      expect(result.stderr).toContain('Building the ios development build');
+      expect(result.stderr).toContain('nothing is stuck');
+      expect(() => JSON.parse(result.stdout)).not.toThrow();
+    });
+
+    // The other half: a project that needs no build says nothing, because a line printed on every
+    // healthy run is a line nobody reads.
+    it('says nothing about building for a project that needs none', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['smoke', '--ios', '--json', '--no-screenshot', '--port', '9378', '--timeout', '4s'],
+        { env: { ...devServerOnlyEnv(projectRoot), STUB_EXPO_EXIT_CODE: '1' }, reject: false }
+      );
+
+      expect(result.stderr).not.toContain('Building the');
+    });
+  });
+
   describe('with no dev server, by default', () => {
     /** Whether this project's dev-server lock still answers. */
     async function lockHeldAsync(projectRoot: string): Promise<boolean> {
@@ -767,9 +880,7 @@ describe('@expo/agent-cli smoke', () => {
         { udid: FRESH, name: 'iPhone 17 Pro', lastBootedAt: '2026-08-30T09:00:00Z' },
       ]);
       // A simulator with Expo Go on it and *not* this project's development build.
-      const home = await writeSimulatorHomeAsync(projectRoot, {
-        [FRESH]: ['host.exp.Exponent'],
-      });
+      const home = await writeSimulatorHomeAsync(projectRoot, { [FRESH]: ['host.exp.Exponent'] });
       const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
 
       try {
@@ -788,16 +899,69 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
-    // An Expo Go project is **not** exempt, and that is a correction to what this was expected to
-    // do: `simctl openurl exp://…` on a simulator without Expo Go answers `115` exactly like a
-    // dev-client scheme does [observed — live, 2026-08-30, a freshly created simulator]. The open
-    // path installs nothing, so the same rule has to hold for both.
-    it('refuses for an Expo Go project on a machine with no Expo Go either', async () => {
+    // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+    //
+    // An Expo Go project on a machine with no Expo Go used to be a refusal here, on the same
+    // footing as a missing development build: `simctl openurl exp://…` answers `115` for both, and
+    // the open path installs nothing [observed — live, 2026-08-30]. It is no longer, and the
+    // difference is what can be *done* about it — Expo Go is a published binary to download, so the
+    // boot goes ahead and the app is installed onto it.
+    it('boots and installs for an Expo Go project on a machine with no Expo Go', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
+      // The marker is what keeps this test off the cold attach budget: the stub `xcrun` writes it
+      // when it opens the URL, and the stub dev server starts listing a target once it exists. A
+      // run without it waits out the whole two minutes to prove something about the install.
+      const opened = path.join(projectRoot, '.app-opened');
+      const readXcrun = await installStubXcrunForBootAsync(
+        projectRoot,
+        [{ udid: FRESH, name: 'iPhone 17 Pro', lastBootedAt: '2026-08-30T09:00:00Z' }],
+        opened
+      );
+      const readNpx = await installStubNpxAsync(projectRoot);
+      const home = await writeSimulatorHomeAsync(projectRoot, { [FRESH]: [] });
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [EXPO_GO_TARGET],
+        targetsAppearWithFile: opened,
+      });
+
+      try {
+        const report = await runAsync(projectRoot, home, stub);
+
+        // It booted, rather than declining because no device had the app.
+        expect(readXcrun().filter((argv) => argv[1] === 'boot')).toEqual([
+          ['simctl', 'boot', FRESH],
+        ]);
+        const boot = report.phases.find((phase: any) => phase.id === 'boot-device');
+        expect(boot).toMatchObject({ status: 'ok' });
+        expect(boot.reason).toContain('to install it onto');
+
+        // And it installed: the release was asked for, and `simctl install` was handed a path.
+        expect(readNpx().some((argv) => argv.includes('download'))).toBe(true);
+        expect(readXcrun().some((argv) => argv[1] === 'install')).toBe(true);
+        const install = report.phases.find((phase: any) => phase.id === 'install-app');
+        expect(install).toMatchObject({ status: 'ok' });
+
+        // Then the link works without a tap, which is the half an install alone does not buy.
+        const approvals = readXcrun().filter((argv) =>
+          argv.some((arg) => arg.includes('schemeapproval'))
+        );
+        expect(approvals.length).toBeGreaterThan(0);
+      } finally {
+        await stub.close();
+      }
+    });
+
+    // The other half of the same boundary. A development build is this project's own artefact, and
+    // making one is a compile — so a machine without it is still refused, and still told which
+    // command builds it.
+    it('still refuses for a development build no device has', async () => {
+      const projectRoot = await devClientFixtureAsync();
       const readXcrun = await installStubXcrunForBootAsync(projectRoot, [
         { udid: FRESH, name: 'iPhone 17 Pro', lastBootedAt: '2026-08-30T09:00:00Z' },
       ]);
-      const home = await writeSimulatorHomeAsync(projectRoot, { [FRESH]: [] });
+      await installStubNpxAsync(projectRoot);
+      const home = await writeSimulatorHomeAsync(projectRoot, { [FRESH]: ['host.exp.Exponent'] });
       const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
 
       try {
@@ -805,9 +969,9 @@ describe('@expo/agent-cli smoke', () => {
 
         expect(readXcrun().filter((argv) => argv[1] === 'boot')).toEqual([]);
         const boot = report.phases.find((phase: any) => phase.id === 'boot-device');
-        expect(boot.reason).toContain('Expo Go');
-        // And it names the command that puts Expo Go on a simulator.
-        expect(boot.reason).toContain('expo start --ios');
+        expect(boot).toMatchObject({ status: 'failed' });
+        expect(boot.reason).toContain(DEV_CLIENT_ID);
+        expect(report.phases.some((phase: any) => phase.id === 'install-app')).toBe(false);
       } finally {
         await stub.close();
       }
@@ -1053,6 +1217,113 @@ describe('@expo/agent-cli smoke', () => {
 
   // @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract — the property the flag exists
   // for, checked as the property rather than as a substring.
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+  //
+  // The gate's four reading phases are about the *running* app, and an app that was already
+  // attached is running whatever it last loaded. Live, that made `smoke` exit 0 over a `throw` at
+  // the top of the entry component, with the previous screen in its own screenshot [observed —
+  // iOS 26.5 simulator, Expo Go SDK 57, 2026-09-03]. The stub dev server speaks the real
+  // `/message` protocol, so the rung and both of its proofs are exercised here rather than mocked.
+  describe('putting the app on the code on disk', () => {
+    it('reloads an app that was already attached, and says what proved it', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [EXPO_GO_TARGET],
+        messageSocket: 'v2',
+        reloadTargets: 'reconnect',
+      });
+      const release = await holdLockForAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '20s'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
+
+        const report = JSON.parse(result.stdout);
+        expect(report.phases.find((phase: any) => phase.id === 'reload')).toMatchObject({
+          status: 'ok',
+        });
+        expect(report.reload.disposition).toBe('reloaded');
+        // The label, and the evidence it rests on in the same payload (llp/0021 §The rules band).
+        expect(report.reload.verifiedBy).not.toBeNull();
+        expect(
+          report.reload.commandSocketReconnected === true ||
+            report.reload.freshTargets > 0 ||
+            report.reload.bundleServed === true
+        ).toBe(true);
+      } finally {
+        release();
+        await stub.close();
+      }
+    });
+
+    // A dev server that answers `getpeers` and whose broadcast changes nothing: the app did not
+    // act. Nothing is wrong with the app, and the run cannot say which session it read — so 22,
+    // and never a pass.
+    it('will not pass when nothing came of the reload', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [EXPO_GO_TARGET],
+        messageSocket: 'no-churn',
+        reloadTargets: 'stale',
+      });
+      const release = await holdLockForAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '20s'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
+
+        const report = JSON.parse(result.stdout);
+        expect(report.phases.find((phase: any) => phase.id === 'reload')).toMatchObject({
+          status: 'inconclusive',
+        });
+        expect(report.reload.disposition).toBe('unproved');
+        expect(report.reload.verifiedBy).toBeNull();
+        expect(report.outcome).toBe('inconclusive');
+        expect(result.exitCode).toBe(22);
+      } finally {
+        release();
+        await stub.close();
+      }
+    });
+
+    // The opt-out, and the row that has to say which of the two questions the run answered.
+    it('reads the app where it is under --no-reload, and says so', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [EXPO_GO_TARGET],
+        // Deaf on purpose: a run that declines the reload must not touch this socket at all.
+        messageSocket: 'deaf',
+      });
+      const release = await holdLockForAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-screenshot', '--no-reload', '--timeout', '20s'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
+
+        const report = JSON.parse(result.stdout);
+        const reload = report.phases.find((phase: any) => phase.id === 'reload');
+        expect(reload).toMatchObject({ status: 'skipped' });
+        expect(reload.reason).toContain('--no-reload');
+        expect(report.reload.disposition).toBe('declined');
+      } finally {
+        release();
+        await stub.close();
+      }
+    });
+  });
+
   describe('--json', () => {
     it('prints exactly one parseable object, whatever the outcome', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
@@ -1065,6 +1336,7 @@ describe('@expo/agent-cli smoke', () => {
 
       expect(() => JSON.parse(result.stdout)).not.toThrow();
       expect(Object.keys(JSON.parse(result.stdout)).sort()).toEqual([
+        'appMismatch',
         'appsConnected',
         'bundle',
         'devServerUrl',
@@ -1079,6 +1351,7 @@ describe('@expo/agent-cli smoke', () => {
         'phases',
         'platform',
         'projectRootMatched',
+        'reload',
         'route',
         'routeCheck',
         'runtimeSupported',
@@ -1135,6 +1408,6 @@ describe('@expo/agent-cli smoke', () => {
       .map((line) => JSON.parse(line));
     const smoke = events.find((entry) => entry._e === 'cli:smoke');
     expect(smoke).toMatchObject({ outcome: 'failed', started: false });
-    expect(smoke.phases).toHaveLength(8);
+    expect(smoke.phases).toHaveLength(9);
   });
 });
