@@ -465,10 +465,25 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
     // The second is the same disk read the device choice makes (`installedApps.ts`).
     installNeededOnDevice: async (deviceId, backend) => {
       const target = await targetAsync();
-      // No app id is a plan this could not read, and there is nothing to look for
-      // (@ref ./smokeAsync §resolveSmokeTargetAsync).
+
+      // @ref llp/0005-runtime-loop-tools.rfc.md §An app that cannot be named still has to be installed
+      //
+      // **No app id is not "no app".** For a native build it is the ordinary state of a project
+      // that has never been prebuilt for this platform: `android.package` is undeclared and there
+      // is no `android/app/build.gradle` yet, because `expo prebuild` is the thing that writes
+      // both. Skipping the install there is the bug that outlived two attempts at fixing it — the
+      // emulator booted, nothing was installed, and the deep link was refused, three runs in a row
+      // [observed — Kudo, 2026-09-04].
+      //
+      // The id is only needed to ask "is it already there". `expo run:<platform>` needs none: it
+      // resolves the package itself, from the config it is about to write. So a run that cannot see
+      // whether the app is installed installs it — and after that first build the package *is*
+      // declared, so every later run resolves it and checks properly. One build, then normal.
+      //
+      // Expo Go is excluded because its ids are constants: an Expo Go run that cannot name its app
+      // has a plan this could not read, and downloading 423 MB on that basis would be a guess.
       if (target.appId == null) {
-        return false;
+        return target.installWithKind === 'native-build';
       }
       // @ref ./smokeAsync §hasAppOnDeviceAsync. Local devices only — a cloud session's device is
       // not this machine's, and there is nothing this CLI can install on somebody else's session
@@ -518,6 +533,9 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
           await readSdkVersionAsync(projectRoot)
         );
       }
+      // @ref llp/0005 §An app that cannot be named still has to be installed — the build resolves
+      // the package itself, so this works with `target.appId` null, which is exactly the run that
+      // most needs it.
       const built = await installDevBuildAsync(projectRoot, options.platform, deviceId, {
         // @ref src/device/installDevBuild §verifyInstalledAsync — the device decides, because
         // `expo run:ios` activates the Simulator window through AppleScript *after* it installs and

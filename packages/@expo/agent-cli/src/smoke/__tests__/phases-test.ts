@@ -2856,3 +2856,35 @@ describe(`${runSmokePhasesAsync.name} and a start that changed the project`, () 
     expect(order).toEqual(['start', 'install-needed']);
   });
 });
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §An app that cannot be named still has to be installed
+//
+// The install decision is the wiring's, not the walk's, so what this pins is the one thing the walk
+// owns: that it *asks*, and that it installs whatever the answer says — including for a run whose
+// app the wiring could not name. Three runs in a row booted an emulator, installed nothing and had
+// the deep link refused because the answer was "no" for the wrong reason [observed — Kudo,
+// 2026-09-04].
+describe(`${runSmokePhasesAsync.name} and an install it was told is needed`, () => {
+  it(`installs whenever the decision says so, whatever the run knows about the app`, async () => {
+    const run = await runSmokePhasesAsync(
+      deps({
+        installNeededOnDevice: async () => true,
+        installApp: async () => ({
+          ok: true,
+          // A native build knows neither, and that is the shape this case is about: nothing about
+          // the install phase may depend on the app being nameable.
+          version: null,
+          replaced: null,
+          reason: null,
+        }),
+        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+      }),
+      options({ bootstrap: true })
+    );
+
+    const install = run.phases.find((phase) => phase.id === 'install-app');
+    expect(install).toMatchObject({ status: 'ok' });
+    // The row reads without a version, rather than printing `null` or omitting the act.
+    expect(install!.reason).toContain('installed the app');
+  });
+});
