@@ -1,6 +1,14 @@
 import { vol } from 'memfs';
 
+import { requireAutolinking } from '../../utils/autolinking';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../expoGo';
+import { EXPO_GO_MODULES_DUMP } from '../expoGoModules';
+
+vi.mock('../../utils/autolinking', () => ({
+  requireAutolinking: vi.fn(() => {
+    throw new Error('no autolinking in unit tests');
+  }),
+}));
 
 const projectRoot = '/project';
 
@@ -162,6 +170,53 @@ describe(checkExpoGoCompatibilityAsync, () => {
     });
   });
 
+  it(`should never report react-native as unbundled, even though it ships a podspec`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'react-native': '0.81.0' }),
+      ...expoPackage(null, sdk),
+      [`${projectRoot}/node_modules/react-native/package.json`]: '{"name":"react-native"}',
+      [`${projectRoot}/node_modules/react-native/React.podspec`]: '',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
+  it(`should never report expo-modules-autolinking as unbundled, even though it ships android/`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'expo-modules-autolinking': '3.0.0' }),
+      ...expoPackage(null, sdk),
+      [`${projectRoot}/node_modules/expo-modules-autolinking/package.json`]:
+        '{"name":"expo-modules-autolinking"}',
+      [`${projectRoot}/node_modules/expo-modules-autolinking/android/build.gradle`]: '',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
+  it(`should accept expo-status-bar even though Go does not autolink it`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'expo-status-bar': '~57.0.0' }),
+      ...expoPackage(null, sdk),
+      [`${projectRoot}/node_modules/expo-status-bar/package.json`]: '{"name":"expo-status-bar"}',
+      [`${projectRoot}/node_modules/expo-status-bar/android/build.gradle`]: '',
+      [`${projectRoot}/node_modules/expo-status-bar/expo-module.config.json`]: '{}',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
   it(`should report a config plugin of an unbundled package`, async () => {
     vol.fromJSON({
       ...projectPackage({ expo: '54.0.0' }),
@@ -258,6 +313,36 @@ describe(checkExpoGoCompatibilityAsync, () => {
     expect(result.reasons).toEqual([expect.objectContaining({ kind: 'custom-native-code' })]);
   });
 
+  it(`should not report custom native code for gitignored prebuild output`, async () => {
+    vol.fromJSON({
+      ...projectPackage({ expo: '54.0.0' }),
+      ...expoPackage({}),
+      [`${projectRoot}/.gitignore`]: '/ios\n/android\n',
+      [`${projectRoot}/ios/Podfile`]: '',
+      [`${projectRoot}/android/build.gradle`]: '',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
+  it(`should report a local module under modules/ as unbundled`, async () => {
+    vol.fromJSON({
+      ...projectPackage({ expo: '54.0.0' }),
+      ...expoPackage({}),
+      [`${projectRoot}/modules/local-native/package.json`]: '{"name":"local-native"}',
+      [`${projectRoot}/modules/local-native/ios/Module.swift`]: '',
+    });
+
+    const result = await checkExpoGoCompatibilityAsync(projectRoot);
+
+    expect(result.reasons).toEqual([
+      expect.objectContaining({ kind: 'unbundled-native-module', packageName: 'local-native' }),
+    ]);
+  });
+
   it(`should report an unknown SDK when expo is not installed`, async () => {
     vol.fromJSON(projectPackage({ expo: '54.0.0' }));
 
@@ -267,7 +352,7 @@ describe(checkExpoGoCompatibilityAsync, () => {
     expect(result.reasons).toEqual([expect.objectContaining({ kind: 'unknown-sdk' })]);
   });
 
-  it(`should report an unknown SDK when bundledNativeModules.json is missing`, async () => {
+  it(`should report an unknown SDK when the dump misses this SDK and bundledNativeModules.json is missing`, async () => {
     vol.fromJSON({
       ...projectPackage({ expo: '54.0.0' }),
       ...expoPackage(null),
@@ -276,6 +361,94 @@ describe(checkExpoGoCompatibilityAsync, () => {
     const result = await checkExpoGoCompatibilityAsync(projectRoot);
 
     expect(result.reasons).toEqual([expect.objectContaining({ kind: 'unknown-sdk' })]);
+  });
+
+  it(`should not need bundledNativeModules.json when the dump covers this SDK`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'expo-camera': '~57.0.0' }),
+      ...expoPackage(null, sdk),
+      [`${projectRoot}/node_modules/expo-camera/package.json`]: '{"name":"expo-camera"}',
+      [`${projectRoot}/node_modules/expo-camera/ios/Camera.swift`]: '',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
+  it(`should use the dump rather than the catalog when this CLI captured that SDK`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'expo-dev-client': '~57.0.0' }),
+      ...expoPackage({ 'expo-dev-client': '~57.0.0' }, sdk),
+      [`${projectRoot}/node_modules/expo-dev-client/package.json`]: '{"name":"expo-dev-client"}',
+      [`${projectRoot}/node_modules/expo-dev-client/ios/DevClient.swift`]: '',
+    });
+
+    const result = await checkExpoGoCompatibilityAsync(projectRoot);
+
+    expect(result.reasons).toEqual([
+      expect.objectContaining({ kind: 'unbundled-native-module', packageName: 'expo-dev-client' }),
+    ]);
+  });
+
+  it(`should accept expo-splash-screen even though Go does not autolink it`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'expo-splash-screen': '~57.0.0' }),
+      ...expoPackage(null, sdk),
+      [`${projectRoot}/node_modules/expo-splash-screen/package.json`]:
+        '{"name":"expo-splash-screen"}',
+      [`${projectRoot}/node_modules/expo-splash-screen/ios/Splash.swift`]: '',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
+  it(`should inspect a transitive native module from the autolinking graph`, async () => {
+    vol.fromJSON({
+      ...projectPackage({ expo: '54.0.0', 'js-sdk': '1.0.0' }),
+      ...expoPackage({}),
+      [`${projectRoot}/node_modules/js-sdk/package.json`]: '{"name":"js-sdk"}',
+      [`${projectRoot}/node_modules/js-sdk/index.js`]: '',
+      [`${projectRoot}/node_modules/react-native-mmkv/package.json`]: '{"name":"react-native-mmkv"}',
+      [`${projectRoot}/node_modules/react-native-mmkv/android/build.gradle`]: '',
+    });
+    vi.mocked(requireAutolinking).mockReturnValueOnce({
+      makeCachedDependenciesLinker: () => ({
+        scanDependenciesRecursively: async () => ({
+          expo: {
+            name: 'expo',
+            version: '54.0.0',
+            path: `${projectRoot}/node_modules/expo`,
+          },
+          'js-sdk': {
+            name: 'js-sdk',
+            version: '1.0.0',
+            path: `${projectRoot}/node_modules/js-sdk`,
+          },
+          'react-native-mmkv': {
+            name: 'react-native-mmkv',
+            version: '1.0.0',
+            path: `${projectRoot}/node_modules/react-native-mmkv`,
+          },
+        }),
+      }),
+    });
+
+    const result = await checkExpoGoCompatibilityAsync(projectRoot);
+
+    expect(result.reasons).toEqual([
+      expect.objectContaining({
+        kind: 'unbundled-native-module',
+        packageName: 'react-native-mmkv',
+      }),
+    ]);
   });
 
   it(`should report every reason it finds`, async () => {

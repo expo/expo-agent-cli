@@ -123,6 +123,9 @@ describe('the flags this CLI writes onto a command line', () => {
     // Expo-Go-54.0.8.apk` printed `Performing Streamed Install` then `Success` and exited 0 — over
     // an Expo Go 57.0.9, so a **downgrade**, which is the case `-d` exists for: without it the same
     // command fails with `INSTALL_FAILED_VERSION_DOWNGRADE`].
+    //
+    // `-q  src/project/nativeCode.ts` is `git check-ignore -q`, which tells a gitignored prebuild
+    // directory from one that was `git add -f`'d. Git, not an Expo CLI.
     expect(sweep.foreignFlags.map(({ flag, file }) => `${flag}  ${file}`).sort())
       .toMatchInlineSnapshot(`
         [
@@ -173,6 +176,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "-p  src/device/screenshot.ts",
           "-p  src/toolchain/detect.ts",
           "-ports  src/device/bootDevice.ts",
+          "-q  src/project/nativeCode.ts",
           "-r  src/device/installExpoGo.ts",
           "-s  src/device/installExpoGo.ts",
           "-s  src/device/screenshot.ts",

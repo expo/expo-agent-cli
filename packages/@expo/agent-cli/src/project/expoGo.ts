@@ -2,14 +2,18 @@
 // "Can this project run in Expo Go?" — answered from files only, with a reason per finding.
 //
 // Expo Go ships a fixed native runtime. A project can use it only when every native module it
-// needs is already inside that runtime (`expo/bundledNativeModules.json`), no config plugin
+// needs is already inside that runtime (the vendored autolink dump, falling back to
+// `expo/bundledNativeModules.json` for an SDK this CLI has not recaptured), no config plugin
 // changes the native projects, and no native project is checked in.
+import { requireAutolinking } from '../utils/autolinking';
 import { readStaticAppConfigAsync } from './appConfig';
 import { debugEvent } from './events';
+import { dumpCoversSdk, isExpoGoNativeModule } from './expoGoModules';
 import {
   describeNativeCode,
   hasNativeCode,
   inspectPackageAsync,
+  listLocalModulePackagesAsync,
   readProjectNativeDirsAsync,
 } from './nativeCode';
 import {
@@ -18,14 +22,15 @@ import {
   readProjectPackageJsonAsync,
   readSdkVersionAsync,
   resolvePackageRootAsync,
+  type ProjectPackageJson,
 } from './nodeModules';
 import type { ExpoGoCompatibility, ExpoGoIncompatibility } from './types';
 
-/**
- * Packages that are part of the Expo Go runtime itself, so their native code is always present.
- * They carry native code but are not listed in `bundledNativeModules.json`.
- */
-const RUNTIME_PACKAGES = new Set(['expo']);
+/** One installed package the native-module scan will inspect. */
+interface InstalledPackage {
+  name: string;
+  root: string;
+}
 
 /**
  * Check whether a project can run in Expo Go, and why not.
@@ -46,13 +51,13 @@ export async function checkExpoGoCompatibilityAsync(
 
   const reasons: ExpoGoIncompatibility[] = [];
 
-  if (sdkVersion == null || bundledNativeModules == null) {
+  if (sdkVersion == null || (!dumpCoversSdk(sdkVersion) && bundledNativeModules == null)) {
     reasons.push({
       kind: 'unknown-sdk',
       detail:
         sdkVersion == null
           ? `The project has no installed "expo" package, so the SDK version and its Expo Go runtime are unknown. Install the project dependencies and check again.`
-          : `The installed expo@${sdkVersion} package ships no bundledNativeModules.json, so the modules of its Expo Go runtime are unknown.`,
+          : `This CLI has no Expo Go module dump for SDK ${sdkVersion}, and the installed expo package ships no bundledNativeModules.json, so the modules of its Expo Go runtime are unknown.`,
     });
   }
 
@@ -64,23 +69,19 @@ export async function checkExpoGoCompatibilityAsync(
     });
   }
 
-  for (const packageName of listDependencyNames(packageJson)) {
-    if (RUNTIME_PACKAGES.has(packageName) || bundledNativeModules?.[packageName]) {
+  const allowlist = { sdkVersion, bundledNativeModules };
+  for (const installed of await listInstalledPackagesAsync(projectRoot, packageJson)) {
+    if (isExpoGoNativeModule(installed.name, allowlist)) {
       continue;
     }
-    const packageRoot = await resolvePackageRootAsync(projectRoot, packageName);
-    if (!packageRoot) {
-      // A declared but uninstalled package says nothing about how the app runs today.
-      continue;
-    }
-    const signals = await inspectPackageAsync(packageRoot);
+    const signals = await inspectPackageAsync(installed.root);
     if (!hasNativeCode(signals)) {
       continue;
     }
     reasons.push({
       kind: 'unbundled-native-module',
-      packageName,
-      detail: `${packageName} contains native code (${describeNativeCode(signals).join(', ')}) and is not bundled in the Expo Go runtime${sdkVersion ? ` of SDK ${sdkVersion}` : ''}.`,
+      packageName: installed.name,
+      detail: `${installed.name} contains native code (${describeNativeCode(signals).join(', ')}) and is not bundled in the Expo Go runtime${sdkVersion ? ` of SDK ${sdkVersion}` : ''}.`,
     });
   }
 
@@ -108,6 +109,70 @@ export async function checkExpoGoCompatibilityAsync(
 }
 
 /**
+ * Installed packages to inspect for native code.
+ *
+ * Prefer the autolinking graph (transitive). Fall back to declared dependencies when the
+ * linker cannot load — the ordinary state of a unit test against a virtual filesystem, and of
+ * a project whose `expo` package ships no autolinking exports.
+ *
+ * Always include `./modules`, which autolinking links first and which the npm graph does not
+ * contain unless the package is also a `file:` dependency.
+ */
+async function listInstalledPackagesAsync(
+  projectRoot: string,
+  packageJson: ProjectPackageJson | null
+): Promise<InstalledPackage[]> {
+  const fromGraph = await scanAutolinkingGraphAsync(projectRoot);
+  const installed = fromGraph.length
+    ? fromGraph
+    : await listDeclaredPackagesAsync(projectRoot, packageJson);
+  const local = await listLocalModulePackagesAsync(projectRoot);
+  if (!local.length) {
+    return installed;
+  }
+
+  const seen = new Set(installed.map((pkg) => pkg.name));
+  for (const pkg of local) {
+    if (!seen.has(pkg.name)) {
+      installed.push(pkg);
+      seen.add(pkg.name);
+    }
+  }
+  return installed;
+}
+
+async function listDeclaredPackagesAsync(
+  projectRoot: string,
+  packageJson: ProjectPackageJson | null
+): Promise<InstalledPackage[]> {
+  const installed: InstalledPackage[] = [];
+  for (const name of listDependencyNames(packageJson)) {
+    const root = await resolvePackageRootAsync(projectRoot, name);
+    if (root) {
+      installed.push({ name, root });
+    }
+  }
+  return installed;
+}
+
+async function scanAutolinkingGraphAsync(projectRoot: string): Promise<InstalledPackage[]> {
+  try {
+    const autolinking = requireAutolinking(projectRoot);
+    const linker = autolinking.makeCachedDependenciesLinker({ projectRoot });
+    const resolutions = await linker.scanDependenciesRecursively();
+    const installed: InstalledPackage[] = [];
+    for (const resolution of Object.values(resolutions)) {
+      if (resolution?.name && resolution.path) {
+        installed.push({ name: resolution.name, root: resolution.path });
+      }
+    }
+    return installed;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * The reason kinds that **rule Expo Go out**, as opposed to merely counting against it.
  *
  * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
@@ -121,11 +186,11 @@ export async function checkExpoGoCompatibilityAsync(
  *
  * The two that are left out are not weaker versions of the same thing; they are different
  * statements. `unknown-sdk` is this check saying it could not read the project — the ordinary state
- * of a fresh clone with no `node_modules`. And `custom-native-code` is a checked-in native
- * directory, which its own `detail` calls out as something that *can* contain native code the
- * runtime lacks: a bare project with no unbundled module still runs in Expo Go, which is exactly
- * the uncertainty {@link import('../navigate/target').ExpoGoDecision.certain} exists to carry.
- * Treating either as decisive would refuse working projects.
+ * of a fresh clone with no `node_modules`. And `custom-native-code` is a checked-in native directory,
+ * which its own `detail` calls out as something that *can* contain native code the runtime lacks: a
+ * bare project with no unbundled module still runs in Expo Go, which is exactly the uncertainty
+ * {@link import('../navigate/target').ExpoGoDecision.certain} exists to carry. Treating either as
+ * decisive would refuse working projects.
  */
 const RULES_OUT_EXPO_GO = new Set<ExpoGoIncompatibility['kind']>([
   'unbundled-native-module',

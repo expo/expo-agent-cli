@@ -3,6 +3,7 @@
 // `@expo/agent-cli status` is the read-only overview: it prints where the project is and what would
 // happen next, and always exits 0. These tests run it through the CLI it is published as, against
 // the fixture matrix in `e2e/fixtures/README.md`.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -239,6 +240,79 @@ async function reportInAsync(
 /** Run `status --json` in a fixture and parse the report. */
 async function reportAsync(fixtureName: string): Promise<StatusReport> {
   return reportInAsync(await setupAsync(fixtureName));
+}
+
+/**
+ * Point the copied `go-app` at the SDK major this CLI captured an Expo Go dump for.
+ *
+ * Fixtures ship `expo@54.0.0`, and a miss falls back to the short `bundledNativeModules.json`.
+ * These tests are about the dump, so the installed `expo` version has to match it.
+ */
+const DUMP_SDK_VERSION = '57.0.0';
+
+async function useCapturedGoDumpAsync(projectRoot: string): Promise<void> {
+  const expoPkgPath = path.join(projectRoot, 'node_modules', 'expo', 'package.json');
+  const expoPkg = JSON.parse(await fs.promises.readFile(expoPkgPath, 'utf8'));
+  expoPkg.version = DUMP_SDK_VERSION;
+  await fs.promises.writeFile(expoPkgPath, JSON.stringify(expoPkg, null, 2) + '\n');
+
+  const manifestPath = path.join(projectRoot, 'package.json');
+  const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+  manifest.dependencies.expo = DUMP_SDK_VERSION;
+  await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+}
+
+/** Declare and plant a stub native module the Expo Go check will inspect. */
+async function addNativeModuleAsync(projectRoot: string, packageName: string): Promise<void> {
+  const manifestPath = path.join(projectRoot, 'package.json');
+  const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+  manifest.dependencies[packageName] = '1.0.0';
+  await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+
+  const packageRoot = path.join(projectRoot, 'node_modules', ...packageName.split('/'));
+  await fs.promises.mkdir(path.join(packageRoot, 'ios'), { recursive: true });
+  await fs.promises.writeFile(
+    path.join(packageRoot, 'package.json'),
+    JSON.stringify({ name: packageName, version: '1.0.0' })
+  );
+  await fs.promises.writeFile(path.join(packageRoot, 'expo-module.config.json'), '{}');
+  await fs.promises.writeFile(path.join(packageRoot, 'index.js'), '');
+  await fs.promises.writeFile(path.join(packageRoot, 'ios', 'Module.swift'), '');
+}
+
+async function goAppOnDumpSdkAsync(): Promise<string> {
+  const projectRoot = await setupAsync('go-app');
+  await useCapturedGoDumpAsync(projectRoot);
+  return projectRoot;
+}
+
+/** Write the native projects `expo prebuild` generates, plus the template gitignore that covers them. */
+async function writePrebuildOutputAsync(projectRoot: string): Promise<void> {
+  await fs.promises.writeFile(path.join(projectRoot, '.gitignore'), '/ios\n/android\n');
+  await fs.promises.mkdir(path.join(projectRoot, 'ios'), { recursive: true });
+  await fs.promises.mkdir(path.join(projectRoot, 'android'), { recursive: true });
+  await fs.promises.writeFile(path.join(projectRoot, 'ios', 'Podfile'), '');
+  await fs.promises.writeFile(path.join(projectRoot, 'android', 'build.gradle'), '');
+}
+
+function git(projectRoot: string, args: string[]): void {
+  const result = spawnSync('git', args, {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    timeout: 15_000,
+    windowsHide: true,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' },
+  });
+  if (result.error) {
+    throw new Error(`git ${args.join(' ')} failed: ${result.error.message}`);
+  }
+  if (result.status !== 0) {
+    throw new Error(`git ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
+  }
+}
+
+async function initGitRepoAsync(projectRoot: string): Promise<void> {
+  git(projectRoot, ['init', '-q']);
 }
 
 /**
@@ -510,6 +584,125 @@ describe('@expo/agent-cli status', () => {
 
       expect(documentedJsonKeys(help.stdout).sort()).toEqual(
         Object.keys(JSON.parse(report.stdout)).sort()
+      );
+    });
+  });
+
+  describe('Expo Go compatibility of a new project', () => {
+    it('should report a new go-app as compatible', async () => {
+      const report = await reportInAsync(await goAppOnDumpSdkAsync());
+
+      expect(report.expoGo).toEqual({ compatible: true, reasonCount: 0 });
+      expect(report.probe?.expoGo.reasons).toEqual([]);
+    });
+
+    it('should stay compatible after adding expo-sqlite', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await addNativeModuleAsync(projectRoot, 'expo-sqlite');
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.expoGo).toEqual({ compatible: true, reasonCount: 0 });
+      expect(report.probe?.expoGo.reasons).toEqual([]);
+    });
+
+    it('should stay compatible after adding @shopify/react-native-skia', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await addNativeModuleAsync(projectRoot, 'expo-sqlite');
+      await addNativeModuleAsync(projectRoot, '@shopify/react-native-skia');
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.expoGo).toEqual({ compatible: true, reasonCount: 0 });
+      expect(report.probe?.expoGo.reasons).toEqual([]);
+    });
+
+    it('should become incompatible after adding expo-observe', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await addNativeModuleAsync(projectRoot, 'expo-sqlite');
+      await addNativeModuleAsync(projectRoot, '@shopify/react-native-skia');
+      await addNativeModuleAsync(projectRoot, 'expo-observe');
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.expoGo?.compatible).toBe(false);
+      expect(report.expoGo!.reasonCount).toBeGreaterThan(0);
+      expect(report.probe?.expoGo.reasons).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'unbundled-native-module',
+            packageName: 'expo-observe',
+          }),
+        ])
+      );
+      const packages = (report.probe?.expoGo.reasons ?? []).map((reason) => reason.packageName);
+      expect(packages).not.toContain('expo-sqlite');
+      expect(packages).not.toContain('@shopify/react-native-skia');
+    });
+  });
+
+  describe('Expo Go compatibility after prebuild', () => {
+    it('should stay CNG and compatible when ios/ and android/ are gitignored', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await writePrebuildOutputAsync(projectRoot);
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.project?.native).toBe('cng');
+      expect(report.project?.nativeDirs).toEqual({ ios: false, android: false });
+      expect(report.expoGo).toEqual({ compatible: true, reasonCount: 0 });
+      expect(report.probe?.expoGo.reasons).toEqual([]);
+    });
+
+    it('should stay CNG when git check-ignore covers the prebuild output', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await writePrebuildOutputAsync(projectRoot);
+      await initGitRepoAsync(projectRoot);
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.project?.native).toBe('cng');
+      expect(report.project?.nativeDirs).toEqual({ ios: false, android: false });
+      expect(report.expoGo).toEqual({ compatible: true, reasonCount: 0 });
+    });
+
+    it('should report custom-native-code when prebuild output is tracked', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await writePrebuildOutputAsync(projectRoot);
+      await initGitRepoAsync(projectRoot);
+      git(projectRoot, ['add', '-f', '--', 'ios', 'android']);
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.project?.native).toBe('bare');
+      expect(report.project?.nativeDirs).toEqual({ ios: true, android: true });
+      expect(report.expoGo?.compatible).toBe(false);
+      expect(report.probe?.expoGo.reasons).toEqual(
+        expect.arrayContaining([expect.objectContaining({ kind: 'custom-native-code' })])
+      );
+    });
+
+    it('should report a local module under modules/ as unbundled', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      const moduleRoot = path.join(projectRoot, 'modules', 'local-native');
+      await fs.promises.mkdir(path.join(moduleRoot, 'ios'), { recursive: true });
+      await fs.promises.writeFile(
+        path.join(moduleRoot, 'package.json'),
+        JSON.stringify({ name: 'local-native', version: '1.0.0' })
+      );
+      await fs.promises.writeFile(path.join(moduleRoot, 'expo-module.config.json'), '{}');
+      await fs.promises.writeFile(path.join(moduleRoot, 'ios', 'Module.swift'), '');
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.expoGo?.compatible).toBe(false);
+      expect(report.probe?.expoGo.reasons).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'unbundled-native-module',
+            packageName: 'local-native',
+          }),
+        ])
       );
     });
   });

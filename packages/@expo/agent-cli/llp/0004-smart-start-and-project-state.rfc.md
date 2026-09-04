@@ -5,7 +5,7 @@
 **Systems:** project-state probe (`src/project/`); plan engine (`src/plan/`); smart `dev` (`src/dev/`); `@expo/agent-cli status` (`src/status/`); dev-server lock (`src/devLock/`); `@expo/fingerprint`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20 · finalized 2026-08-28
-**Revised:** 2026-08-30
+**Revised:** 2026-09-05
 **Related:** [[0001-agentic-cli-on-expo-cli]], [[0002-testing-and-evals]], [[0008-guardrails]], [[0011-impact-and-freshness]], [[0015-backend-selection-and-config]], [[0021-honest-reports]]
 
 ## Summary
@@ -149,9 +149,17 @@ change the answer.
 
 ## Sub-features
 
-Expo Go compatibility check. Answer "can this run in Expo Go?" with reasons. Compare
-dependencies against `packages/expo/bundledNativeModules.json`, detect config plugins
-and custom native code, and check SDK support.
+Expo Go compatibility check. Answer "can this run in Expo Go?" with reasons. Native
+modules are compared against a vendored autolink dump of `apps/expo-go`
+(`src/project/expoGoNativeModules.json`), captured per SDK major. Lookups are a Set. An SDK
+this CLI has not recaptured falls back to that project's
+`expo/bundledNativeModules.json`, so a new Expo release does not wait on an agent-cli
+update. Config plugins still use the catalog (optimistic for `expo-build-properties`).
+`custom-native-code` is a native directory that git does not ignore (bare), not
+merely one that exists: `expo prebuild` writes `ios/` and `android/` that the
+template gitignore covers, and those are still CNG. Local packages under
+`./modules` count as `unbundled-native-module`. Recapture with
+`scripts/capture-expo-go-modules.mjs --expo <expo/expo>`.
 
 Post-install impact. After `npx expo install {pkg}`, JS-only means keep the dev server
 and maybe reload. A new config plugin or native module under CNG means prebuild plus a

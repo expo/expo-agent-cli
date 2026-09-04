@@ -46,7 +46,12 @@ export interface ProjectState {
   isExpoApp: boolean;
   /** From the installed `expo` package, e.g. "54.0.0". Null when unresolvable. */
   sdkVersion: string | null;
-  /** Bare native project directories checked into the repo (vs CNG). */
+  /**
+   * Bare native project directories **checked into the repo** (vs CNG).
+   *
+   * Presence on disk is not enough: `expo prebuild` writes `ios/` and `android/` that
+   * `.gitignore` ignores. Those do not count. See `readProjectNativeDirsAsync`.
+   */
   nativeDirs: { ios: boolean; android: boolean };
   /** `expo-dev-client` is a dependency. */
   usesDevClient: boolean;
