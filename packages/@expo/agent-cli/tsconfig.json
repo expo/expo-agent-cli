@@ -4,6 +4,7 @@
   "exclude": ["./src/deferred", "./src/**/__tests__", "./src/__fixtures__"],
   "compilerOptions": {
     "noEmit": true,
+    "declaration": false,
     "customConditions": [],
     "module": "preserve",
     "moduleResolution": "bundler",
