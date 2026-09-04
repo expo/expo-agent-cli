@@ -1,6 +1,14 @@
 import { vol } from 'memfs';
 
+import { requireAutolinking } from '../../utils/autolinking';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../expoGo';
+import { EXPO_GO_MODULES_DUMP } from '../expoGoModules';
+
+vi.mock('../../utils/autolinking', () => ({
+  requireAutolinking: vi.fn(() => {
+    throw new Error('no autolinking in unit tests');
+  }),
+}));
 
 const projectRoot = '/project';
 
@@ -267,7 +275,7 @@ describe(checkExpoGoCompatibilityAsync, () => {
     expect(result.reasons).toEqual([expect.objectContaining({ kind: 'unknown-sdk' })]);
   });
 
-  it(`should report an unknown SDK when bundledNativeModules.json is missing`, async () => {
+  it(`should report an unknown SDK when the dump misses this SDK and bundledNativeModules.json is missing`, async () => {
     vol.fromJSON({
       ...projectPackage({ expo: '54.0.0' }),
       ...expoPackage(null),
@@ -276,6 +284,94 @@ describe(checkExpoGoCompatibilityAsync, () => {
     const result = await checkExpoGoCompatibilityAsync(projectRoot);
 
     expect(result.reasons).toEqual([expect.objectContaining({ kind: 'unknown-sdk' })]);
+  });
+
+  it(`should not need bundledNativeModules.json when the dump covers this SDK`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'expo-camera': '~57.0.0' }),
+      ...expoPackage(null, sdk),
+      [`${projectRoot}/node_modules/expo-camera/package.json`]: '{"name":"expo-camera"}',
+      [`${projectRoot}/node_modules/expo-camera/ios/Camera.swift`]: '',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
+  it(`should use the dump rather than the catalog when this CLI captured that SDK`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'expo-dev-client': '~57.0.0' }),
+      ...expoPackage({ 'expo-dev-client': '~57.0.0' }, sdk),
+      [`${projectRoot}/node_modules/expo-dev-client/package.json`]: '{"name":"expo-dev-client"}',
+      [`${projectRoot}/node_modules/expo-dev-client/ios/DevClient.swift`]: '',
+    });
+
+    const result = await checkExpoGoCompatibilityAsync(projectRoot);
+
+    expect(result.reasons).toEqual([
+      expect.objectContaining({ kind: 'unbundled-native-module', packageName: 'expo-dev-client' }),
+    ]);
+  });
+
+  it(`should accept expo-splash-screen even though Go does not autolink it`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'expo-splash-screen': '~57.0.0' }),
+      ...expoPackage(null, sdk),
+      [`${projectRoot}/node_modules/expo-splash-screen/package.json`]:
+        '{"name":"expo-splash-screen"}',
+      [`${projectRoot}/node_modules/expo-splash-screen/ios/Splash.swift`]: '',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
+  it(`should inspect a transitive native module from the autolinking graph`, async () => {
+    vol.fromJSON({
+      ...projectPackage({ expo: '54.0.0', 'js-sdk': '1.0.0' }),
+      ...expoPackage({}),
+      [`${projectRoot}/node_modules/js-sdk/package.json`]: '{"name":"js-sdk"}',
+      [`${projectRoot}/node_modules/js-sdk/index.js`]: '',
+      [`${projectRoot}/node_modules/react-native-mmkv/package.json`]: '{"name":"react-native-mmkv"}',
+      [`${projectRoot}/node_modules/react-native-mmkv/android/build.gradle`]: '',
+    });
+    vi.mocked(requireAutolinking).mockReturnValueOnce({
+      makeCachedDependenciesLinker: () => ({
+        scanDependenciesRecursively: async () => ({
+          expo: {
+            name: 'expo',
+            version: '54.0.0',
+            path: `${projectRoot}/node_modules/expo`,
+          },
+          'js-sdk': {
+            name: 'js-sdk',
+            version: '1.0.0',
+            path: `${projectRoot}/node_modules/js-sdk`,
+          },
+          'react-native-mmkv': {
+            name: 'react-native-mmkv',
+            version: '1.0.0',
+            path: `${projectRoot}/node_modules/react-native-mmkv`,
+          },
+        }),
+      }),
+    });
+
+    const result = await checkExpoGoCompatibilityAsync(projectRoot);
+
+    expect(result.reasons).toEqual([
+      expect.objectContaining({
+        kind: 'unbundled-native-module',
+        packageName: 'react-native-mmkv',
+      }),
+    ]);
   });
 
   it(`should report every reason it finds`, async () => {

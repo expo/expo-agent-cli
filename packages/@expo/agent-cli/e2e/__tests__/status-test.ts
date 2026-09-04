@@ -242,6 +242,50 @@ async function reportAsync(fixtureName: string): Promise<StatusReport> {
 }
 
 /**
+ * Point the copied `go-app` at the SDK major this CLI captured an Expo Go dump for.
+ *
+ * Fixtures ship `expo@54.0.0`, and a miss falls back to the short `bundledNativeModules.json`.
+ * These tests are about the dump, so the installed `expo` version has to match it.
+ */
+const DUMP_SDK_VERSION = '57.0.0';
+
+async function useCapturedGoDumpAsync(projectRoot: string): Promise<void> {
+  const expoPkgPath = path.join(projectRoot, 'node_modules', 'expo', 'package.json');
+  const expoPkg = JSON.parse(await fs.promises.readFile(expoPkgPath, 'utf8'));
+  expoPkg.version = DUMP_SDK_VERSION;
+  await fs.promises.writeFile(expoPkgPath, JSON.stringify(expoPkg, null, 2) + '\n');
+
+  const manifestPath = path.join(projectRoot, 'package.json');
+  const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+  manifest.dependencies.expo = DUMP_SDK_VERSION;
+  await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+}
+
+/** Declare and plant a stub native module the Expo Go check will inspect. */
+async function addNativeModuleAsync(projectRoot: string, packageName: string): Promise<void> {
+  const manifestPath = path.join(projectRoot, 'package.json');
+  const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+  manifest.dependencies[packageName] = '1.0.0';
+  await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+
+  const packageRoot = path.join(projectRoot, 'node_modules', ...packageName.split('/'));
+  await fs.promises.mkdir(path.join(packageRoot, 'ios'), { recursive: true });
+  await fs.promises.writeFile(
+    path.join(packageRoot, 'package.json'),
+    JSON.stringify({ name: packageName, version: '1.0.0' })
+  );
+  await fs.promises.writeFile(path.join(packageRoot, 'expo-module.config.json'), '{}');
+  await fs.promises.writeFile(path.join(packageRoot, 'index.js'), '');
+  await fs.promises.writeFile(path.join(packageRoot, 'ios', 'Module.swift'), '');
+}
+
+async function goAppOnDumpSdkAsync(): Promise<string> {
+  const projectRoot = await setupAsync('go-app');
+  await useCapturedGoDumpAsync(projectRoot);
+  return projectRoot;
+}
+
+/**
  * Declare `eas-cli` in the project, which is what makes the EAS CLI answer at all.
  *
  * @ref llp/0015-backend-selection-and-config.rfc.md §Resolving the EAS CLI
@@ -511,6 +555,59 @@ describe('@expo/agent-cli status', () => {
       expect(documentedJsonKeys(help.stdout).sort()).toEqual(
         Object.keys(JSON.parse(report.stdout)).sort()
       );
+    });
+  });
+
+  describe('Expo Go compatibility of a new project', () => {
+    it('should report a new go-app as compatible', async () => {
+      const report = await reportInAsync(await goAppOnDumpSdkAsync());
+
+      expect(report.expoGo).toEqual({ compatible: true, reasonCount: 0 });
+      expect(report.probe?.expoGo.reasons).toEqual([]);
+    });
+
+    it('should stay compatible after adding expo-sqlite', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await addNativeModuleAsync(projectRoot, 'expo-sqlite');
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.expoGo).toEqual({ compatible: true, reasonCount: 0 });
+      expect(report.probe?.expoGo.reasons).toEqual([]);
+    });
+
+    it('should stay compatible after adding @shopify/react-native-skia', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await addNativeModuleAsync(projectRoot, 'expo-sqlite');
+      await addNativeModuleAsync(projectRoot, '@shopify/react-native-skia');
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.expoGo).toEqual({ compatible: true, reasonCount: 0 });
+      expect(report.probe?.expoGo.reasons).toEqual([]);
+    });
+
+    it('should become incompatible after adding expo-observe', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await addNativeModuleAsync(projectRoot, 'expo-sqlite');
+      await addNativeModuleAsync(projectRoot, '@shopify/react-native-skia');
+      await addNativeModuleAsync(projectRoot, 'expo-observe');
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.expoGo?.compatible).toBe(false);
+      expect(report.expoGo!.reasonCount).toBeGreaterThan(0);
+      expect(report.probe?.expoGo.reasons).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            kind: 'unbundled-native-module',
+            packageName: 'expo-observe',
+          }),
+        ])
+      );
+      const packages = (report.probe?.expoGo.reasons ?? []).map((reason) => reason.packageName);
+      expect(packages).not.toContain('expo-sqlite');
+      expect(packages).not.toContain('@shopify/react-native-skia');
     });
   });
 
