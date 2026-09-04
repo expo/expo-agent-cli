@@ -29,7 +29,7 @@ function fail(stderr: string, stdout = ''): CommandResult {
 }
 
 function ghDispatch(tag: string, packageName: string, branch = 'main'): string {
-  return `gh workflow run publish.yml --ref ${branch} --field package=${packageName} --field tag=${tag}`;
+  return `gh workflow run publish.yml --ref ${branch} --raw-field package=${packageName} --raw-field tag=${tag}`;
 }
 
 function createIo(

@@ -291,6 +291,8 @@ function dispatchWorkflow(
     return;
   }
 
+  // --raw-field, not --field: gh treats @value as a filename, so
+  // --field package=@expo/agent-cli fails with "open expo/agent-cli: no such file or directory".
   commandOutput(
     io,
     'gh',
@@ -300,9 +302,9 @@ function dispatchWorkflow(
       WORKFLOW_FILE,
       '--ref',
       branch,
-      '--field',
+      '--raw-field',
       `package=${packageName}`,
-      '--field',
+      '--raw-field',
       `tag=${tag}`,
     ],
     'publish: failed to dispatch workflow'
