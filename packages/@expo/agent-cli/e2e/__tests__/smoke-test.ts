@@ -946,26 +946,49 @@ describe('@expo/agent-cli smoke', () => {
     // The refusal, and the assertion that matters most: **no boot was issued at all**. The minute
     // is the thing being saved, so a run that decided correctly and booted anyway would still be
     // the bug.
-    it('refuses before booting when no device has the app', async () => {
+    // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+    //
+    // **This case used to assert the opposite**, and the assertion was the policy: a device without
+    // this project's development build was refused before the boot, and the reason named
+    // `dev --ios --yes`. That is a correct instruction and a dead end for an agent, which cannot
+    // take it without leaving the loop this command exists to serve
+    // [Kudo, 2026-09-04: "smoke should be self-served without running dev first"]. So the boot goes
+    // ahead for either kind of app, and the install phase puts the app there.
+    it('boots and installs when no device has the development build', async () => {
       const projectRoot = await devClientFixtureAsync();
-      const readXcrun = await installStubXcrunForBootAsync(projectRoot, [
-        { udid: FRESH, name: 'iPhone 17 Pro', lastBootedAt: '2026-08-30T09:00:00Z' },
-      ]);
+      const opened = path.join(projectRoot, '.app-opened');
+      const readXcrun = await installStubXcrunForBootAsync(
+        projectRoot,
+        [{ udid: FRESH, name: 'iPhone 17 Pro', lastBootedAt: '2026-08-30T09:00:00Z' }],
+        opened
+      );
       // A simulator with Expo Go on it and *not* this project's development build.
       const home = await writeSimulatorHomeAsync(projectRoot, { [FRESH]: ['host.exp.Exponent'] });
-      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+      const readNpx = await installStubNpxAsync(projectRoot);
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [],
+        targetsAppearWithFile: opened,
+      });
 
       try {
         const report = await runAsync(projectRoot, home, stub);
 
-        expect(readXcrun().filter((argv) => argv[1] === 'boot')).toEqual([]);
+        // It booted rather than declining, and the reason says what the boot was for.
+        expect(readXcrun().filter((argv) => argv[1] === 'boot')).toEqual([
+          ['simctl', 'boot', FRESH],
+        ]);
         const boot = report.phases.find((phase: any) => phase.id === 'boot-device');
-        expect(boot).toMatchObject({ status: 'failed' });
-        expect(boot.reason).toContain(DEV_CLIENT_ID);
-        expect(boot.reason).toContain('would open nothing');
-        // Nothing was booted, so the machine is as it was found.
-        expect(report.environment.device).toBe('absent');
-        expect(report.environment.cleanup).toEqual([]);
+        expect(boot).toMatchObject({ status: 'ok' });
+
+        // And the install is a **native build** rather than a download, because a development build
+        // is this project's own artefact (@ref src/device/installDevBuild.ts).
+        const install = report.phases.find((phase: any) => phase.id === 'install-app');
+        expect(install).toMatchObject({ status: 'ok' });
+        const run = readNpx().find((argv) => argv.includes('run:ios'));
+        expect(run).toEqual(['expo', 'run:ios', '--no-bundler', '--device', FRESH]);
+        // Never a second dev server: this run already has one.
+        expect(readNpx().some((argv) => argv.includes('start'))).toBe(false);
       } finally {
         await stub.close();
       }
@@ -1024,27 +1047,40 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
-    // The other half of the same boundary. A development build is this project's own artefact, and
-    // making one is a compile — so a machine without it is still refused, and still told which
-    // command builds it.
-    it('still refuses for a development build no device has', async () => {
+    // The boundary that remains: `--no-start` says change nothing, so a device without the app is
+    // reported rather than fixed — and the report names the run that would fix it.
+    it('reports the missing app rather than installing under --no-start', async () => {
       const projectRoot = await devClientFixtureAsync();
       const readXcrun = await installStubXcrunForBootAsync(projectRoot, [
         { udid: FRESH, name: 'iPhone 17 Pro', lastBootedAt: '2026-08-30T09:00:00Z' },
       ]);
-      await installStubNpxAsync(projectRoot);
+      const readNpx = await installStubNpxAsync(projectRoot);
       const home = await writeSimulatorHomeAsync(projectRoot, { [FRESH]: ['host.exp.Exponent'] });
       const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+      const release = await holdLockForAsync(projectRoot, stub);
 
       try {
-        const report = await runAsync(projectRoot, home, stub);
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-screenshot', '--no-start', '--timeout', '4s'],
+          {
+            env: {
+              ...stubExpoEnv(projectRoot),
+              HOME: home,
+              ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
+              PATH: `${path.join(projectRoot, '.stub-bin')}${path.delimiter}${process.env.PATH}`,
+            },
+            reject: false,
+          }
+        );
+        const report = JSON.parse(result.stdout);
 
+        // Nothing was booted and nothing was built: the flag forbade both.
         expect(readXcrun().filter((argv) => argv[1] === 'boot')).toEqual([]);
-        const boot = report.phases.find((phase: any) => phase.id === 'boot-device');
-        expect(boot).toMatchObject({ status: 'failed' });
-        expect(boot.reason).toContain(DEV_CLIENT_ID);
+        expect(readNpx().some((argv) => argv.includes('run:ios'))).toBe(false);
         expect(report.phases.some((phase: any) => phase.id === 'install-app')).toBe(false);
       } finally {
+        await release();
         await stub.close();
       }
     });

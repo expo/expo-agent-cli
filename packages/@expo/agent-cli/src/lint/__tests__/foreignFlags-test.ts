@@ -96,6 +96,14 @@ describe('the flags this CLI writes onto a command line', () => {
     // pinned here for the first time. All seven run in the live tier, on every emulator boot and
     // every Expo Go install.
     //
+    // The two `src/device/installDevBuild.ts` rows are `expo run:<platform>`'s, and they are what
+    // makes `smoke` install a development build instead of naming `dev` and stopping
+    // (llp/0005 §The gate installs the app, whichever app it is). Run as the rule requires
+    // [observed — live, 2026-09-04: `npx expo run:ios --no-bundler --device <udid>` in a project
+    // outside this repository compiled, installed `com.tuft.pdfbuild` on the simulator, and then
+    // exited non-zero on the AppleScript window activation — which is why the caller judges that
+    // command by the device rather than by its exit code].
+    //
     // `-bool  src/device/approveScheme.ts` is the dev-menu onboarding flag, written beside the
     // approval and measured the same way [observed — live, 2026-09-04, iOS 26.5: without it a
     // development build launched and then sat behind `This is the developer menu … Continue` for
@@ -119,6 +127,7 @@ describe('the flags this CLI writes onto a command line', () => {
       .toMatchInlineSnapshot(`
         [
           "--detach  src/smoke/smokeAsync.ts",
+          "--device  src/device/installDevBuild.ts",
           "--help  src/cli.ts",
           "--is-inside-work-tree  src/new/git.ts",
           "--json  src/config/introspectAsync.ts",
@@ -127,6 +136,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--json  src/device/installExpoGo.ts",
           "--json  src/impact/runtimeVersion.ts",
           "--json  src/install/resolveOptions.ts",
+          "--no-bundler  src/device/installDevBuild.ts",
           "--no-install  src/new/createExpo.ts",
           "--noEmit  src/typecheck/checkAsync.ts",
           "--non-interactive  src/deploy/deployAsync.ts",

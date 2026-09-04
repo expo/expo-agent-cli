@@ -130,13 +130,15 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     if (input.appMismatchKind === 'app-not-installed') {
       return capFollowUps([
         {
-          id: input.bootstrap ? 'dev-build' : 'smoke-install-expo-go',
-          command: input.bootstrap
-            ? `${PROGRAM_PREFIX} dev --${input.platform} --yes`
-            : `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}`,
-          why: input.bootstrap
-            ? 'The device has not got the app this project runs, and making one is a native build — which is what that command plans and runs, then starts the dev server for it.'
-            : '--no-start told this run to change nothing, so it could not put the app on the device. A run without it installs what is missing first.',
+          // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+          //
+          // One answer for both kinds of app now, and it is this command: a run allowed to bring
+          // its own environment installs what is missing — a download for Expo Go, an
+          // `expo run:<platform>` for a development build. So a run that reached this was told to
+          // change nothing, and the fix is the run without that flag rather than a separate `dev`.
+          id: 'smoke-installs-it',
+          command: `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}`,
+          why: '--no-start told this run to change nothing, so it could not put the app on the device. A run without it installs what is missing — Expo Go by download, a development build by building it — and then reads the app.',
         },
         {
           id: 'status',

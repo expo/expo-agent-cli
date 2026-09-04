@@ -1212,6 +1212,13 @@ async function runPhasesAsync(
       device.deviceId != null &&
       (await deps.installNeededOnDevice(device.deviceId, device.backend))
     ) {
+      // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+      //
+      // The build budget rather than an install budget, because this phase now covers both and the
+      // larger of the two is a native compile — the same `BUILD_DEV_SERVER_TIMEOUT_MS` the start
+      // phase gives a plan that compiles. A download that finishes in twenty seconds is not made
+      // slower by a bound it never reaches; a compile stopped at two minutes is a build reported as
+      // failed for no reason (§It builds what the app needs, and says so first).
       const installed = await recordBootstrap('install-app', async () => {
         const result = await deps.installApp(device.deviceId!);
         return result.ok
@@ -1229,7 +1236,7 @@ async function runPhasesAsync(
               reason: result.reason ?? 'the install failed, and nothing said why',
               value: result,
             };
-      });
+      }, BUILD_DEV_SERVER_TIMEOUT_MS);
       if (installed.ok) {
         // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got
         // it. **The install invalidates every read of the app that came before it.** `simctl

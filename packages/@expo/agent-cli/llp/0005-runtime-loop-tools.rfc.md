@@ -483,6 +483,27 @@ The local read gates the network one. Reading the device's plist is a file read;
 
 End to end: a simulator carrying Expo Go 56.0.4 against an SDK 57 project got `install-app 2.3s · installed 57.0.9 …, replacing 56.0.4`, and the run passed [observed, 2026-09-03]. Before it, the same simulator produced a 120 s wait and exit 22.
 
+### The gate installs the app, whichever app it is
+
+`smoke` installs the app under test, and there is no longer a kind of app it will not install [confirmed, Kudo, 2026-09-04: _"smoke should be self-served without running dev first"_, _"if the app isn't installed, smoke should install it?"_].
+
+§Putting Expo Go on a simulator that has not got it did half of this and drew a boundary at the other half: Expo Go is a published binary to *download onto a device*, and a development build is this project's own artefact to *compile*, so the compile belonged to `dev`. The distinction is real. It is also not the caller's problem — an agent told `npx @expo/agent-cli dev --ios --yes` cannot take that instruction without leaving the loop this command exists to serve, which is exactly the dead end that section was written against. The boundary was ours to keep, so we kept it in the wrong place.
+
+Both are installs now, and the plan says which kind (`SmokeTarget.installWithKind`):
+
+| kind           | what runs                                              | budget           |
+| -------------- | ------------------------------------------------------ | ---------------- |
+| `expo-go`      | `expo-go download`, then `simctl install`/`adb install` | 30 min           |
+| `native-build` | `expo run:<platform> --no-bundler --device <id>`        | 30 min           |
+
+`--no-bundler` because this run already has a dev server, and a second Metro would be a second answer to "which bundle is the app under test running". `--device` so the app lands on the device the rest of the run is looking at. Both flags were read off the published binary and then run against it, per llp/0002. It is **not** `@expo/agent-cli dev`, which plans *and starts a dev server* — the thing this run has already done.
+
+The phase keeps the build-sized budget for both, because the larger of the two is a native compile and a download that finishes in twenty seconds is not made slower by a bound it never reaches. `install-app` stays a **conditional** phase and still registers no cleanup: an installed app is given, not held (§Putting Expo Go on a simulator that has not got it).
+
+**The exit code is not the judge of a native build.** `expo run:ios` finishes by activating the Simulator window through AppleScript, and on a Mac that has granted no Automation permission it throws — *after* the build has compiled and the app has been installed. Measured: non-zero exit with an `osascript` stack, and the app on the simulator [observed — live, 2026-09-04]. The window is nothing this run needs, because `smoke` opens the app itself with `simctl openurl`, which needs no grant — the same fact that keeps `--start` from carrying a platform flag (§The smoke gate). So the question is "is the app there", the device answers it, and the command's complaint is reported beside the success rather than instead of it.
+
+What is left of the refusal is the run that was told to change nothing. Under `--no-start` a device without the app is reported, and the report names the run that would install it — not `dev`.
+
 ### A link nobody can approve is a link that never opens
 
 Two obstacles sit between an unattended `simctl openurl` and a readable app, and **both were fixed for Expo Go and left in place for every development build** [observed — Kudo, local run, 2026-09-04].

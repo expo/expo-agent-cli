@@ -56,7 +56,12 @@ export const silentProgress: SmokeProgress = () => {};
  * that is the longest thing this command ever does (@ref src/smoke/phases, the `app` phase). The
  * budget is what tells them apart: the walk knows the bound for the second and not for the first.
  */
-function phaseSentence(phase: SmokePhaseId, options: SmokeOptions, bounded: boolean): string {
+function phaseSentence(
+  phase: SmokePhaseId,
+  options: SmokeOptions,
+  bounded: boolean,
+  context: SmokeProgressContext
+): string {
   switch (phase) {
     case 'app':
       return bounded
@@ -73,7 +78,13 @@ function phaseSentence(phase: SmokePhaseId, options: SmokeOptions, bounded: bool
     case 'boot-device':
       return `Booting an ${options.platform} device — a cold one takes a minute or two`;
     case 'install-app':
-      return `Installing Expo Go on it — a few hundred megabytes to download first`;
+      // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+      // Two very different waits behind one phase, and the line has to say which: a download is
+      // minutes of network, a native build is minutes of compiler. The walk knows because the plan
+      // does, so it is told rather than guessed.
+      return context.installKind() === 'native-build'
+        ? `Building and installing this project's development build — a native build takes some minutes`
+        : `Installing Expo Go on the device — a few hundred megabytes to download first`;
     case 'reload':
       return 'Putting the app back on the code on disk';
     case 'route':
@@ -94,14 +105,32 @@ function phaseSentence(phase: SmokePhaseId, options: SmokeOptions, bounded: bool
  * useful with it — "Opening /notes" says what "Opening the route" does not, and a run's platform is
  * the first thing a reader of a mixed log has to establish.
  */
-export function buildSmokeProgress(options: SmokeOptions): SmokeProgress {
+/**
+ * What the sentences need that the options do not carry.
+ *
+ * One reader so far, and it is a *function* rather than a value because the answer is not known
+ * when this is built: which kind of install the run would perform comes from the project's plan,
+ * which is resolved lazily so that a run failing at the dev-server phase never reads it
+ * (@ref src/smoke/smokeAsync §resolveSmokeTargetAsync). By the time the `install-app` line is said,
+ * the phase that decided there was an install to do has already asked.
+ */
+export interface SmokeProgressContext {
+  installKind: () => 'expo-go' | 'native-build' | null;
+}
+
+export function buildSmokeProgress(
+  options: SmokeOptions,
+  context: SmokeProgressContext = { installKind: () => null }
+): SmokeProgress {
   return (phase, budgetMs) => {
     event('smoke_phase', { phase, platform: options.platform, budgetMs });
     // The bound only when there is one, and only when it is long enough to be worth planning
     // around: "up to 800ms" on a discovery probe is noise dressed as information.
     const bounded = budgetMs != null && budgetMs >= BUDGET_WORTH_SAYING_MS;
     const bound = bounded ? ` (up to ${formatBudget(budgetMs!)})` : '';
-    Log.progress(chalk.dim(`… ${phaseSentence(phase, options, budgetMs != null)}${bound}`));
+    Log.progress(
+      chalk.dim(`… ${phaseSentence(phase, options, budgetMs != null, context)}${bound}`)
+    );
   };
 }
 

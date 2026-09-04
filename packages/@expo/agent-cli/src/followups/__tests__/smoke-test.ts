@@ -357,18 +357,24 @@ describe(`${buildSmokeFollowUps.name} for a device without the app`, () => {
     appMismatchKind: 'app-not-installed' as const,
   };
 
-  // A development build is this project's own artefact, so putting one on a device is a compile.
-  it(`leads with the build that puts the app on the device`, () => {
-    expect(commands(missing)[0]).toBe('npx @expo/agent-cli dev --ios --yes');
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+  //
+  // **The gate installs it**, so the answer is the gate — not `dev`, which is what this said until
+  // the boundary came down [Kudo, 2026-09-04: "smoke should be self-served without running dev
+  // first"]. A run only reaches this state by having been told to change nothing, and the flag
+  // that told it is the whole of the fix.
+  it(`leads with the run that installs it, not with a separate dev`, () => {
+    expect(commands(missing)[0]).toBe('npx @expo/agent-cli smoke --ios');
+    expect(commands(missing).join(' ')).not.toContain('dev --ios --yes');
   });
 
   it(`never suggests opening a link the device has already refused`, () => {
     expect(commands(missing).join(' ')).not.toContain('navigate');
   });
 
-  // Under `--no-start` the gate could not install what was missing, and that flag is the reason —
-  // so the answer is the run without it, not a native build the project may not need.
-  it(`names the run that installs what is missing, when --no-start forbade it`, () => {
+  // And the same answer whichever way the run got here, because the install is the gate's either
+  // way — a download for Expo Go, a native build for a development build.
+  it(`names the same run when --no-start forbade the install`, () => {
     expect(commands({ ...missing, bootstrap: false })[0]).toBe('npx @expo/agent-cli smoke --ios');
   });
 });
