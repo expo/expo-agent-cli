@@ -61,13 +61,26 @@ export interface BundlerReadyResult {
 }
 
 /**
- * How long to wait before asking again, when nothing is listening on the port yet.
+ * The first gap between two attempts, when nothing is listening on the port yet.
  *
  * @ref ./waitReady §waitForBundlerReadyAsync — the retry, and why there is one.
- * A second, because what this is waiting out is a native build: a poll rate that matters on that
- * scale would be a poll rate that hammered the port for twenty minutes.
+ *
+ * **Small, and then it grows** ({@link NOT_LISTENING_RETRY_CEILING_MS}). A flat one-second poll was
+ * the first cut, chosen because the long case is waiting out a native build and a faster rate would
+ * hammer the port for twenty minutes. It was wrong for the *short* case, which this same function
+ * also serves: a dev server that binds its port a few tens of milliseconds after the first probe
+ * gets a whole second added to every run that races it, and one e2e case — a stub that answers
+ * `/status` and then dies 400 ms later — stopped reproducing the ordering it exists to pin
+ * [observed — tier0-linux, 2026-09-04; it passed on a faster macOS runner, which is what made the
+ * first probe land after the bind there and before it on CI].
+ *
+ * So the gap starts at a tenth of a second, where a port that is nearly up is caught almost at
+ * once, and doubles to the ceiling, where a native build is waited out at one request a second.
  */
-const NOT_LISTENING_RETRY_MS = 1_000;
+const NOT_LISTENING_FIRST_RETRY_MS = 100;
+
+/** The gap the retry grows to, and stays at. @see NOT_LISTENING_FIRST_RETRY_MS */
+const NOT_LISTENING_RETRY_CEILING_MS = 1_000;
 
 /**
  * Whether this failure is "nothing is listening there", rather than an answer.
@@ -153,6 +166,8 @@ export async function waitForBundlerReadyAsync(
   let projectRootMatched: boolean | null = null;
   /** The last connection failure, for the report when the budget runs out without one answer. */
   let lastRefusal: string | null = null;
+  /** The current gap between attempts, which grows (@ref ./waitReady §NOT_LISTENING_FIRST_RETRY_MS). */
+  let retryMs = NOT_LISTENING_FIRST_RETRY_MS;
 
   try {
     for (;;) {
@@ -225,7 +240,8 @@ export async function waitForBundlerReadyAsync(
           };
         }
         lastRefusal = error instanceof Error ? error.message : String(error);
-        await new Promise((resolve) => setTimeout(resolve, NOT_LISTENING_RETRY_MS));
+        await new Promise((resolve) => setTimeout(resolve, retryMs));
+        retryMs = Math.min(retryMs * 2, NOT_LISTENING_RETRY_CEILING_MS);
       }
     }
   } finally {

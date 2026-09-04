@@ -231,6 +231,35 @@ describe(waitForBundlerReadyAsync, () => {
       return port;
     }
 
+    // @ref ../waitReady §NOT_LISTENING_FIRST_RETRY_MS
+    //
+    // The gap starts small, and this is what that buys. A dev server binds its port tens of
+    // milliseconds after the first probe on a loaded machine, and a flat one-second poll added a
+    // whole second to every run that raced it — enough to walk past a window an e2e case depends on
+    // [observed — tier0-linux, 2026-09-04]. So a port that opens almost immediately is caught
+    // almost immediately.
+    it(`catches a port that opens a moment later, without waiting out a whole second`, async () => {
+      const port = await freePortAsync();
+      const opening = setTimeout(() => {
+        const server = createServer((_request, response) => {
+          response.writeHead(200, { 'Content-Type': 'text/plain' });
+          response.end(PACKAGER_STATUS_READY);
+        });
+        server.unref();
+        server.listen(port, '127.0.0.1');
+        servers.push(server);
+      }, 150);
+      opening.unref?.();
+
+      const result = await waitForBundlerReadyAsync(`http://127.0.0.1:${port}`, {
+        timeoutMs: 15_000,
+      });
+
+      expect(result.ready).toBe(true);
+      // Well under the ceiling the gap grows to: it waited for the port, not for the poll.
+      expect(result.waitedMs).toBeLessThan(900);
+    }, 20_000);
+
     it(`keeps asking until the dev server opens the port, then reads it`, async () => {
       const port = await freePortAsync();
       // Nothing is listening for the first while, which is the state a native build leaves the

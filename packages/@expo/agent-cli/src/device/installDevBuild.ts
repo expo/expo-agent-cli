@@ -25,6 +25,60 @@
 // run has already done; asking for it again from inside the install phase would start a second one.
 
 import { spawnCaptureAsync } from '../utils/spawnCapture';
+import { runAdbAsync } from './adb';
+
+/** How long `adb` gets to name one device. It reads local state and answers. */
+const NAME_TIMEOUT_MS = 15_000;
+
+/**
+ * What `expo run:android --device` calls this device, or null when it cannot be named.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+ *
+ * **`--device` does not mean the same thing on the two platforms**, and the difference is not in
+ * the help text in a way anybody would notice: iOS takes a *"Device name, UDID, or generic"*, and
+ * Android takes a *"Device name"* and nothing else. Passing an `adb` serial to Android answers
+ * `CommandError: Could not find device with name: emulator-5554` [observed — live, 2026-09-04],
+ * which is what this function exists to avoid.
+ *
+ * The names it accepts are the ones its own device list builds
+ * [reference — `@expo/cli` `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync]: an
+ * emulator is its **AVD name**, from `adb -s <serial> emu avd name`, and a physical device is the
+ * `model:` field of `adb devices -l`. So this asks the same two questions in the same order.
+ */
+export async function androidDeviceNameAsync(
+  serial: string,
+  { run = runAdbAsync }: { run?: typeof runAdbAsync } = {}
+): Promise<string | null> {
+  if (serial.startsWith('emulator-')) {
+    const named = await run(['-s', serial, 'emu', 'avd', 'name'], { timeoutMs: NAME_TIMEOUT_MS });
+    if (!named.notRunnable && named.exitCode === 0) {
+      // Two lines: the name, then `OK`. The console protocol's acknowledgement is not the answer.
+      const name = named.stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line.length > 0 && line !== 'OK');
+      if (name) {
+        return name;
+      }
+    }
+    return null;
+  }
+
+  const listed = await run(['devices', '-l'], { timeoutMs: NAME_TIMEOUT_MS });
+  if (listed.notRunnable || listed.exitCode !== 0) {
+    return null;
+  }
+  const row = listed.stdout
+    .split('\n')
+    .find((line) => line.startsWith(`${serial}\t`) || line.startsWith(`${serial} `));
+  return (
+    row
+      ?.split(/\s+/)
+      .find((field) => field.startsWith('model:'))
+      ?.replace('model:', '') ?? null
+  );
+}
 
 /**
  * How long the build gets.
@@ -65,6 +119,8 @@ export interface InstallDevBuildOptions {
    * asked, and then the exit code decides after all — it is the only evidence left.
    */
   verifyInstalledAsync?: () => Promise<boolean | null>;
+  /** Injected for the tests, so the Android name lookup is provable without an emulator. */
+  run?: typeof runAdbAsync;
 }
 
 /** The first line of a message, for a reason that has to fit on one. */
@@ -87,9 +143,23 @@ export async function installDevBuildAsync(
     spawn = spawnCaptureAsync,
     timeoutMs = BUILD_TIMEOUT_MS,
     verifyInstalledAsync,
+    run,
   }: InstallDevBuildOptions = {}
 ): Promise<InstallDevBuildResult> {
-  const args = [`run:${platform}`, '--no-bundler', '--device', deviceId];
+  // @ref ./installDevBuild §androidDeviceNameAsync — iOS takes the udid, Android takes a name.
+  // A device Android cannot name gets no `--device` at all rather than a wrong one: the command
+  // then picks the attached device itself, which on the one-device machine this is usually run on
+  // is the same device, and a wrong `--device` is a refusal.
+  const target =
+    platform === 'android' ? await androidDeviceNameAsync(deviceId, run ? { run } : {}) : deviceId;
+  // Pushed rather than spread, so `--device` stays a literal the foreign-flag sweep can see: a
+  // conditional spread hid it, and a flag this CLI writes onto another CLI's command line without
+  // the guard noticing is exactly what that guard exists to stop (llp/0002 §A flag is not shipped
+  // until it has run against the published binary).
+  const args = [`run:${platform}`, '--no-bundler'];
+  if (target != null) {
+    args.push('--device', target);
+  }
   const command = `npx expo ${args.join(' ')}`;
 
   const built = await spawn('npx', ['expo', ...args], { cwd: projectRoot, timeoutMs });

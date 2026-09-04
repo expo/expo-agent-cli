@@ -504,6 +504,16 @@ The phase keeps the build-sized budget for both, because the larger of the two i
 
 What is left of the refusal is the run that was told to change nothing. Under `--no-start` a device without the app is reported, and the report names the run that would install it — not `dev`.
 
+#### Android needs an application id the app config does not have
+
+The install fires only for an app this CLI can *name*, and on Android it usually could not [observed — Kudo, local run, 2026-09-04]. `readConfiguredAppId` read the static app config, where iOS finds `ios.bundleIdentifier` and Android finds `android.package` — which a great many projects never declare. So the same project answered an id for iOS and `null` for Android, and with no id there was nothing to check for, nothing to install, and nothing to explain: `smoke --ios` installed the development build and passed, while `smoke --android` booted an emulator, installed nothing, and reported only that the device had refused the deep link.
+
+`expo prebuild` writes the id into `android/app/build.gradle` whether or not it was declared, so that file is the second source, consulted when the config names none (`readPrebuiltAndroidApplicationId`). The declaration still wins, because a project that declares `android.package` has said what it wants. Still a static file read: no `app.config.js` is evaluated and no Gradle is run.
+
+#### `--device` does not mean the same thing on the two platforms
+
+iOS takes a *"Device name, UDID, or generic"*; Android takes a *"Device name"* and nothing else. An `adb` serial handed to Android is answered `CommandError: Could not find device with name: emulator-5554` [observed — live, 2026-09-04], which cost a whole run to find. The names Android accepts are the ones its own device list builds [reference — `@expo/cli` `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync]: an emulator is its **AVD name**, from `adb -s <serial> emu avd name`, and a physical device is the `model:` field of `adb devices -l`. `androidDeviceNameAsync` asks those two questions in that order, and a device it cannot name gets no `--device` at all rather than a wrong one — the command then picks the attached device itself, and a wrong `--device` is a refusal.
+
 ### A link nobody can approve is a link that never opens
 
 Two obstacles sit between an unattended `simctl openurl` and a readable app, and **both were fixed for Expo Go and left in place for every development build** [observed — Kudo, local run, 2026-09-04].
