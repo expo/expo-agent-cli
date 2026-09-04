@@ -510,6 +510,16 @@ The install fires only for an app this CLI can *name*, and on Android it usually
 
 `expo prebuild` writes the id into `android/app/build.gradle` whether or not it was declared, so that file is the second source, consulted when the config names none (`readPrebuiltAndroidApplicationId`). The declaration still wins, because a project that declares `android.package` has said what it wants. Still a static file read: no `app.config.js` is evaluated and no Gradle is run.
 
+#### A build changes the project it was read from
+
+The start phase can compile, and a compile rewrites the app config: `expo prebuild` writes `android.package` and `ios.bundleIdentifier` into it when they were not declared. So "which app is this run about" has two answers on a run that builds, and the gate was reading the first one.
+
+The target is resolved once and memoized, deliberately — a run that fails at the dev-server phase must not spawn a plan read (§It builds what the app needs, and says so first). Its **first** reader, though, is the start phase itself, which asks for `buildLocation` before it runs the plan. Everything after it then saw the project as it was before the build. On an Android project whose package the prebuild was about to write, that reading was `null`: no app id, so nothing to check for, nothing to install, and nothing to explain — the emulator booted, the install phase never fired, and the deep link was refused [observed — Kudo, local run, 2026-09-04].
+
+So a start that built forgets the target, and the next reader re-reads the project the build left behind. The memo still holds for every run that compiles nothing, which is almost all of them.
+
+The general shape is the one this document keeps meeting: **a fact captured before the thing it describes existed.** The pre-install app probe (§Putting Expo Go on a simulator that has not got it), the device-name index, and this. Each was a value read at the cheapest moment rather than at the moment it was needed.
+
 #### `--device` does not mean the same thing on the two platforms
 
 iOS takes a *"Device name, UDID, or generic"*; Android takes a *"Device name"* and nothing else. An `adb` serial handed to Android is answered `CommandError: Could not find device with name: emulator-5554` [observed — live, 2026-09-04], which cost a whole run to find. The names Android accepts are the ones its own device list builds [reference — `@expo/cli` `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync]: an emulator is its **AVD name**, from `adb -s <serial> emu avd name`, and a physical device is the `model:` field of `adb devices -l`. `androidDeviceNameAsync` asks those two questions in that order, and a device it cannot name gets no `--device` at all rather than a wrong one — the command then picks the attached device itself, and a wrong `--device` is a refusal.

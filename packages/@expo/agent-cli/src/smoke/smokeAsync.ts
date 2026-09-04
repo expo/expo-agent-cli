@@ -297,6 +297,19 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       installKind = resolved.installWithKind;
       return resolved;
     }));
+  /**
+   * Forget it, so the next reader sees the project as it is now.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §A build changes the project it was read from
+   * Called after a start phase that **compiled**, and for one reason: `expo prebuild` writes
+   * `android.package` and `ios.bundleIdentifier` into the app config when they were not declared,
+   * so a build is one of the few things that changes the answer to "which app is this run about"
+   * [observed — Kudo, local run, 2026-09-04: an Android project whose package the prebuild was
+   * about to write read `null`, so the install phase never fired and the deep link was refused].
+   */
+  const forgetTarget = () => {
+    target = null;
+  };
 
   let deviceIndex: Promise<DeviceNameIndex> | null = null;
   const indexAsync = (devServerUrl: string) =>
@@ -343,6 +356,11 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
         );
       }
       const built = target.buildLocation != null;
+      if (built) {
+        // @ref ./smokeAsync §forgetTarget — the build below rewrites the app config, so the answer
+        // read above is about the project as it was before it.
+        forgetTarget();
+      }
       const argv = [...START_DEV_SERVER_ARGV, ...startPortArgs(options.devServerUrl)];
       try {
         // `print: false`: the detached start is one phase of this run, and this run prints one

@@ -2818,3 +2818,41 @@ describe(`${runSmokePhasesAsync.name} and a device that refused the link`, () =>
     expect(asked).toEqual(['SIM-1']);
   });
 });
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §A build changes the project it was read from
+//
+// The start phase can **compile**, and a compile is one of the few things that changes the answer
+// to "which app is this run about": `expo prebuild` writes `android.package` and
+// `ios.bundleIdentifier` into the app config when they were not declared. A run that read the
+// project once, before the build, then decided about the install from that reading — and on an
+// Android project whose package the prebuild was about to write, the reading was `null`, so no
+// install ever fired and the deep link was refused [observed — Kudo, local run, 2026-09-04].
+//
+// The walk cannot see any of that: the target is the wiring's (`smokeAsync.ts`). What it *can*
+// pin is the order the phases run in, which is what makes a re-read possible at all — the install
+// decision has to come after the start, not beside it.
+describe(`${runSmokePhasesAsync.name} and a start that changed the project`, () => {
+  it(`asks whether an install is needed only after the start phase has finished`, async () => {
+    const order: string[] = [];
+    let looks = 0;
+
+    await runSmokePhasesAsync(
+      deps({
+        // Nothing there to begin with, so the run performs the start.
+        discoverDevServer: async () => discovery({ reachable: looks++ > 0 }),
+        startDevServer: async () => {
+          order.push('start');
+          return { ok: true, devServerUrl: 'http://127.0.0.1:8081', reason: null };
+        },
+        installNeededOnDevice: async () => {
+          order.push('install-needed');
+          return false;
+        },
+        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+      }),
+      options({ bootstrap: true })
+    );
+
+    expect(order).toEqual(['start', 'install-needed']);
+  });
+});
