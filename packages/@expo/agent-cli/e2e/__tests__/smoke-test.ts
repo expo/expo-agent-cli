@@ -1613,7 +1613,7 @@ describe('@expo/agent-cli smoke', () => {
       expect(result.exitCode).toBe(1);
       const { error } = JSON.parse(result.stdout);
       expect(error.code).toBe('BAD_ARGS');
-      expect(error.message).toContain('needs to be told which platform');
+      expect(error.message).toContain('Missing platform');
       expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --ios');
     });
 

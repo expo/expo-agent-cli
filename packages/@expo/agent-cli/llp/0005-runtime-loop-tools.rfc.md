@@ -318,6 +318,8 @@ It used to default from the host: iOS on a Mac, Android everywhere else. That is
 
 The refusal is `BAD_ARGS`, exit 1, with `suggestedCommand: smoke --ios` — the same band as `--platform web`, because a caller who named no device has not asked a question this command can answer, and no amount of looking again supplies one.
 
+**One line**, in the shape §navigate already uses for a missing route: `Missing platform. Usage: … smoke --ios|--android, for example: … smoke --ios`. The first cut put the paragraph above into the error itself and it was rightly called noisy [Kudo, 2026-09-04]. The three-part What/Why/How form of [[0006-agent-native-cli-surface]] §Errors are prompts earns its length when the cause is not visible on the command line; a required flag that was not passed is visible, and the reasoning belongs in this document and in the source rather than in front of somebody who needs to add five characters.
+
 Two consequences worth naming. The follow-ups already carried the platform into every command they suggest (F58), so nothing downstream had to change. And the test tiers stopped depending on the host: every `smoke` invocation in them now names a platform, so a case that asserts platform-specific text says so out loud rather than passing on macOS and failing on the Linux runner — which is a failure this repo's CI had already produced once.
 
 ### The gate says what it is doing while it does it

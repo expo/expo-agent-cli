@@ -269,13 +269,13 @@ function resolveSmokePlatform(args: { [flag: string]: unknown }): SmokePlatform 
   // apart on the ordinary Mac with an Android emulator running and nothing else, where the guess
   // produced a real verdict about a platform the caller had not asked about.
   if (named == null && flagged == null) {
+    // One line, in the shape `navigate` already uses for a missing route. The three-part
+    // What/Why/How form belongs to a failure whose cause is not obvious from the command line;
+    // a required flag that was not passed is obvious, and the reasoning above is for a reader of
+    // this file rather than for somebody who just needs to add `--ios` [confirmed, Kudo, 2026-09-04].
     const error = new CommandError(
       'BAD_ARGS',
-      [
-        `smoke needs to be told which platform to drive, so nothing ran.`,
-        `Why: every phase of this command is about one device — the bundle is built for that platform, the debugger targets are filtered to it, and the picture is taken through that platform's own tool. There is no answer this command can give about "the app" without being told which one, and picking from the host operating system would report a verdict about a device you may not have running.`,
-        `How: pass --ios or --android, or --platform ios|android. To cover both, run it twice.`,
-      ].join('\n')
+      `Missing platform. Usage: ${PROGRAM_PREFIX} smoke --ios|--android, for example: ${PROGRAM_PREFIX} smoke --ios`
     );
     error.suggestedCommand = `${PROGRAM_PREFIX} smoke --ios`;
     throw error;

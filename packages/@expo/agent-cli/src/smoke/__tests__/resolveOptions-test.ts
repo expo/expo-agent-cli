@@ -93,6 +93,10 @@ describe(resolveSmokeOptions, () => {
   // guess is gone, because it is a fact about the machine the CLI is running on and every question
   // this command answers is about a device — and the two come apart on the ordinary Mac with an
   // Android emulator running, which got a real verdict about a platform nobody asked about.
+  // One line, the shape `navigate` uses for a missing route. Asserted in full rather than by a
+  // fragment, because the property under test is that it stays *short*: the first version of this
+  // was a three-paragraph What/Why/How, which is the form for a failure whose cause is not obvious
+  // from the command line [Kudo, 2026-09-04: "that's noisy. keep it short."].
   it(`refuses to guess the platform, and names the two flags that say it`, () => {
     const error = (() => {
       try {
@@ -104,7 +108,9 @@ describe(resolveSmokeOptions, () => {
     })();
 
     expect(error.code).toBe('BAD_ARGS');
-    expect(error.message).toContain('needs to be told which platform');
+    expect(error.message).toBe(
+      'Missing platform. Usage: npx @expo/agent-cli smoke --ios|--android, for example: npx @expo/agent-cli smoke --ios'
+    );
     expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --ios');
   });
 
@@ -112,7 +118,7 @@ describe(resolveSmokeOptions, () => {
   // message on a Mac and on Linux.
   it.each(['darwin', 'linux', 'win32'])(`refuses it on %s too`, (host) => {
     onPlatform(host);
-    expect(() => resolveSmokeOptions([])).toThrow(/needs to be told which platform/);
+    expect(() => resolveSmokeOptions([])).toThrow(/Missing platform/);
   });
 
   it(`refuses two devices at once, whichever way they are spelled`, () => {
