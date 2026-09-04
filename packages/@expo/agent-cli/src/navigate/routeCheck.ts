@@ -112,7 +112,15 @@ export function checkRoute({
 const ROUTE_COMMANDS = {
   navigate: (route: string) => `${PROGRAM_PREFIX} navigate ${route}`,
   'runtime:reload': (route: string) => `${PROGRAM_PREFIX} runtime:reload --route ${route}`,
-  smoke: (route: string) => `${PROGRAM_PREFIX} smoke --route ${route}`,
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  //
+  // The platform is carried because `smoke` requires it, and this string is the `Try:` line a
+  // driving agent runs verbatim — so `smoke --route /notes` would correct the route and then be
+  // refused for the flag, which is two errors for one mistake
+  // [found by sweeping what this change teaches, 2026-09-04]. The caller's own platform is used
+  // rather than a default: this is their command line with the route fixed, and nothing else.
+  smoke: (route: string, platform?: string) =>
+    `${PROGRAM_PREFIX} smoke${platform ? ` --${platform}` : ''} --route ${route}`,
 } as const;
 
 /** A command that resolves a route against the project's routes before it acts on one. */
@@ -146,7 +154,7 @@ export function routeNotFoundError(
       `How: ${nearest != null ? `did you mean "${nearest}"? ` : ''}The routes this project has are: ${listing}. A route you have just added has to exist as a file before it can be opened. Pass --no-route-check to open the link without this check.`,
     ].join('\n')
   );
-  error.suggestedCommand = ROUTE_COMMANDS[command](nearest ?? '/');
+  error.suggestedCommand = ROUTE_COMMANDS[command](nearest ?? '/', platform);
   return error;
 }
 

@@ -40,6 +40,7 @@ import { checkRoute, routeNotFoundError, type RouteCheckJson } from '../../navig
 import { decideExpoGoTarget } from '../../navigate/target';
 import type { NativePlatform } from '../../plan/types';
 import { PROGRAM_PREFIX } from '../../programName';
+import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../../project/expoGo';
 import { readProjectNativeDirsAsync } from '../../project/nativeCode';
 import {
   isInstalledDependencyAsync,
@@ -957,7 +958,7 @@ export async function reloadOverDevServerAsync(
 }
 
 /** What the wait for a cloud reload found: the target list, and the dev server's own output. */
-interface ReloadEvidence {
+export interface ReloadEvidence {
   appsConnected: number;
   freshTargets: number;
   timedOut: boolean;
@@ -973,7 +974,7 @@ interface ReloadEvidence {
  * there is (S11). Every rung uses it (wave 21); until then the log was read on the cloud path alone,
  * which made one question have two answers.
  */
-async function waitForReloadEvidenceAsync(
+export async function waitForReloadEvidenceAsync(
   devServerUrl: string,
   projectRoot: string,
   {
@@ -1376,6 +1377,11 @@ async function openRouteAsync(
     targetAppIds: [],
     hasNativeDirs: nativeDirs.ios || nativeDirs.android,
     usesDevClient,
+    // @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+    // This rung starts an app that is not running, so it builds the same deep link `navigate` does
+    // and owes the same answer: starting Expo Go for a project that cannot run there would put the
+    // wrong app on the screen and call it a reload.
+    expoGoCompatible: decidesAgainstExpoGo(await checkExpoGoCompatibilityAsync(projectRoot)),
   });
 
   const resolved = resolveDeepLinkUrl({

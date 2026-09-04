@@ -55,6 +55,9 @@ export function smokeResultToJson(
     deviceId: run.deviceId,
     deviceBackend: run.deviceBackend,
     runtimeSupported: run.runtimeSupported,
+    reload: run.reload,
+    appMismatch: run.appMismatch,
+    appMismatchKind: run.appMismatchKind,
     errors: {
       windowMs: run.windowMs,
       // Null rather than 0 for a window that never opened: zero errors and no window are opposite

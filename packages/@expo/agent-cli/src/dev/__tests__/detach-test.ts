@@ -158,10 +158,21 @@ describe(needsOpenPlatformGrace, () => {
     expect(needsOpenPlatformGrace({ ready: true, phase: serving })).toBe(false);
   });
 
-  // Nothing was claimed, so there is no claim to defend — and a caller who did not ask for
-  // readiness must not be made to wait for one.
-  it(`does not re-check a run that claimed no readiness`, () => {
-    expect(needsOpenPlatformGrace({ ready: null, phase: openingIos })).toBe(false);
+  // @ref llp/0021-honest-reports.rfc.md §The rules — the correction of 2026-09-03.
+  //
+  // This used to be `false`, on the reasoning that "a run that asked for no readiness claims
+  // nothing". It claims plenty: `dev --detach --ios` prints `Dev server <url> · detached` and a
+  // pid, and exits 0. Live, that pid was gone and nothing was listening on that URL within the
+  // second — `expo start --go --ios` had been refused Automation permission by macOS and taken the
+  // dev server with it [observed — macOS 25.5, no Automation grant, 2026-09-03: exit 0 beside a
+  // `curl` of the printed URL answering 000]. Adding `--wait-ready` caught it, which is what
+  // located the hole: the grace this decides was the fix for exactly that failure, and the one
+  // flag it was gated on was the flag that was missing.
+  //
+  // What the grace checks for such a run is narrowed rather than the same — see
+  // {@link resolveDetachFailure} and the `statusAnswering: null` it is given.
+  it(`re-checks a run that claimed no readiness but printed a dev server`, () => {
+    expect(needsOpenPlatformGrace({ ready: null, phase: openingIos })).toBe(true);
   });
 
   // The failure has already been raised by then; a grace period on top of it would only delay it.
@@ -220,9 +231,7 @@ describe(readDetachedLogSync, () => {
 
   // Metro colours its output and draws progress bars with cursor moves. Neither is text.
   it(`strips the escape codes a bundler writes`, () => {
-    vol.fromJSON({
-      [detachedLogPath(projectRoot)]: '[32mBundled 1200ms[0m\n',
-    });
+    vol.fromJSON({ [detachedLogPath(projectRoot)]: '[32mBundled 1200ms[0m\n' });
 
     expect(readDetachedLogSync(projectRoot, 10)!.lines).toEqual(['Bundled 1200ms']);
   });
@@ -324,10 +333,23 @@ describe(notReadyError, () => {
     expect(message).not.toContain('this is about the wait, not about the server');
   });
 
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  //
+  // `dev:logs` rather than `smoke`, and the reason is mechanical: `smoke` requires a platform now,
+  // this failure is about a dev server, and a dev server has no platform — so `smoke` is not a
+  // command this error could write out in full. `suggestedCommand` is the field an agent runs
+  // verbatim, so it has to be runnable [found by sweeping what this change teaches, 2026-09-04].
   it(`recovers into the command that reports what the bundler is doing`, () => {
     expect(notReadyError(lock, '/project/.expo/dev.log', readyResult()).suggestedCommand).toBe(
-      'npx @expo/agent-cli smoke'
+      'npx @expo/agent-cli dev:logs'
     );
+  });
+
+  // And the gate is still named, with its flags shown, for a reader who knows which device to use.
+  it(`still names the gate in the prose, with the platform it now requires`, () => {
+    const message = notReadyError(lock, '/project/.expo/dev.log', readyResult()).message;
+
+    expect(message).toContain('smoke --ios');
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
@@ -337,11 +359,7 @@ describe(notReadyError, () => {
   // was on 8081, and "the dev server is still running" described a compiler
   // [observed — wave 29, `evidence/10-dev-detach-android.json`].
   describe('a plan that is still building', () => {
-    const building = {
-      phase: 'building',
-      step: 'expo run:android',
-      opensPlatform: true,
-    } as const;
+    const building = { phase: 'building', step: 'expo run:android', opensPlatform: true } as const;
 
     it(`does not say a dev server started`, () => {
       const message = notReadyError(

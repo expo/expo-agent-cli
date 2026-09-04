@@ -114,11 +114,48 @@ export function resolveAppId({
 }
 
 /**
+ * The `applicationId` of a **prebuilt** Android project, from `android/app/build.gradle`.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+ *
+ * The one place an Android application id lives that the app config does not. `expo prebuild`
+ * writes it into the Gradle file whether or not `android.package` was ever declared, and a great
+ * many projects never declare it — so on those, every question this CLI asks about "the app" got
+ * `null` for Android and `ios.bundleIdentifier` for iOS. The effect was visible and one-sided
+ * [observed — Kudo, local run, 2026-09-04]: `smoke --ios` installed the development build and
+ * passed, and `smoke --android` on the same project booted an emulator, installed nothing, and
+ * reported only that the device had refused the deep link — because with no app id there was
+ * nothing to check for, nothing to install, and nothing to explain.
+ *
+ * A static file read, which keeps the llp/0001 constraint 5 line the app-config reader draws: no
+ * `app.config.js` is evaluated and no Gradle is run. Both quote styles and the Kotlin DSL's `=` are
+ * accepted; the shape was read off a real `expo prebuild` rather than guessed
+ * [observed, 2026-09-04: `    applicationId 'com.tuft.pdfbuild'`].
+ */
+export function readPrebuiltAndroidApplicationId(projectRoot: string): string | null {
+  let source: string;
+  try {
+    source = fs.readFileSync(path.join(projectRoot, 'android', 'app', 'build.gradle'), 'utf8');
+  } catch {
+    // No `android/` directory is a project that has not been prebuilt, and its application id is
+    // not decided yet — `expo prebuild` is what decides it.
+    return null;
+  }
+  const found = /^\s*applicationId\s*=?\s*["']([^"']+)["']/m.exec(source)?.[1]?.trim();
+  return found != null && isValidAppId(found) ? found : null;
+}
+
+/**
  * `ios.bundleIdentifier` or `android.package` from the project's static app config.
  *
  * A dynamic `app.config.js` is never evaluated, per the process boundary of llp/0001
  * constraint 5; such a project answers null and falls through to the Expo Go default, which
  * `--app-id` overrides.
+ *
+ * **Android has a second source**, and it is consulted when the config names none: the
+ * `applicationId` a prebuild wrote into Gradle (@ref ./appId §readPrebuiltAndroidApplicationId).
+ * The config comes first, because a project that declares `android.package` has said what it wants
+ * and a prebuild older than that declaration would otherwise outrank it.
  */
 export function readConfiguredAppId(
   projectRoot: string,
@@ -140,7 +177,7 @@ export function readConfiguredAppId(
       return isValidAppId(value.trim()) ? value.trim() : null;
     }
   }
-  return null;
+  return platform === 'android' ? readPrebuiltAndroidApplicationId(projectRoot) : null;
 }
 
 function readJsonFile(filePath: string): Record<string, unknown> | null {

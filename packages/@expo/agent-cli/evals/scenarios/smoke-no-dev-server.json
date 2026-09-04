@@ -5,7 +5,7 @@
   "drivingAgent": "deterministic",
   "tiers": [0],
   "command": {
-    "argv": ["smoke", "--dev-server-url", "http://127.0.0.1:1", "--timeout", "1000"],
+    "argv": ["smoke", "--ios", "--dev-server-url", "http://127.0.0.1:1", "--timeout", "1000"],
     "env": {
       "LOG_EVENTS": "events.jsonl"
     },

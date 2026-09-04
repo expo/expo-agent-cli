@@ -604,6 +604,40 @@ declare module '2g' {
      *
      * @see llp/0005-runtime-loop-tools.rfc.md §The smoke gate
      */
+    /**
+     * The start phase is about to run a plan that **compiles**, before it waits on it.
+     *
+     * @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+     * Emitted before the build rather than after, because its whole purpose is to tell a reader
+     * that a long wait is starting and is not a hang. The human sentence goes to stderr; this is
+     * the same fact for a reader of the stream.
+     */
+    'cli:smoke_building': {
+      platform: 'ios' | 'android';
+      /** Where the plan builds: `local` for this machine, `eas` for a cloud build. */
+      where: string;
+    };
+    /**
+     * One phase of the gate is starting, said before it starts.
+     *
+     * @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+     * The stream half of the progress line. `smoke` can spend three minutes between its first
+     * output and its report, and a reader that only has the report cannot tell a long run from a
+     * hung one — so the walk is narrated, here for a consumer of events and on stderr for a person.
+     *
+     * Not the same as the `phases` array in `cli:smoke`: that says what every phase *came to*, once
+     * the run is over. This says which one is being spent, while it is being spent.
+     */
+    'cli:smoke_phase': {
+      /** The phase id, the same spelling the report's `phases` array uses. */
+      phase: string;
+      platform: 'ios' | 'android';
+      /**
+       * How long it may spend, or null when the bound is not the walk's to state
+       * (@ref src/smoke/progress §SmokeProgress).
+       */
+      budgetMs: number | null;
+    };
     'cli:smoke': {
       /** `passed`, `failed` or `inconclusive`. */
       outcome: string;

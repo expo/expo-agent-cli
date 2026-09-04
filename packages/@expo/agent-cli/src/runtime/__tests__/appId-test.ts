@@ -223,3 +223,78 @@ describe('Application ids from an untrusted source', () => {
     ).toMatchObject({ appId: EXPO_GO_APP_ID.android, source: 'expo-go-default' });
   });
 });
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+// @ref ../appId §readPrebuiltAndroidApplicationId
+//
+// The one place an Android application id lives that the app config does not. A great many projects
+// never declare `android.package`, and on those every question this CLI asked about "the app" got
+// `null` for Android and an answer for iOS — so `smoke --ios` installed the development build and
+// passed while `smoke --android` on the same project booted an emulator, installed nothing, and
+// reported only that the device had refused the deep link [observed — Kudo, 2026-09-04].
+describe('the application id of a prebuilt Android project', () => {
+  /** `android/app/build.gradle`, in the shape `expo prebuild` writes [observed, 2026-09-04]. */
+  function gradle(body: string): void {
+    vol.fromJSON({
+      '/project/package.json': JSON.stringify({ name: 'demo' }),
+      '/project/android/app/build.gradle': body,
+    });
+  }
+
+  it(`reads the applicationId a prebuild wrote`, () => {
+    gradle(
+      [
+        'android {',
+        "    namespace 'com.tuft.pdfbuild'",
+        '    defaultConfig {',
+        "        applicationId 'com.tuft.pdfbuild'",
+        '        minSdkVersion rootProject.ext.minSdkVersion',
+        '    }',
+        '}',
+      ].join('\n')
+    );
+
+    expect(readConfiguredAppId('/project', 'android')).toBe('com.tuft.pdfbuild');
+  });
+
+  // The Kotlin DSL writes an `=`, and either quote style occurs in the wild.
+  it.each([
+    ['applicationId = "com.example.kts"', 'com.example.kts'],
+    ["applicationId='com.example.tight'", 'com.example.tight'],
+  ])(`accepts %s`, (line, expected) => {
+    gradle(`android {\n    defaultConfig {\n        ${line}\n    }\n}`);
+
+    expect(readConfiguredAppId('/project', 'android')).toBe(expected);
+  });
+
+  // `namespace` is not the application id — they are usually equal and are allowed to differ, and
+  // the one that decides which app a link reaches is `applicationId`.
+  it(`never mistakes the namespace for the application id`, () => {
+    gradle("android {\n    namespace 'com.example.namespace'\n}");
+
+    expect(readConfiguredAppId('/project', 'android')).toBeNull();
+  });
+
+  // The declaration wins: a project that says `android.package` has said what it wants, and a
+  // prebuild older than that declaration must not outrank it.
+  it(`prefers the app config over an older prebuild`, () => {
+    vol.fromJSON({
+      '/project/package.json': JSON.stringify({ name: 'demo' }),
+      '/project/app.json': JSON.stringify({ expo: { android: { package: 'com.declared.one' } } }),
+      '/project/android/app/build.gradle': "defaultConfig {\n applicationId 'com.stale.one'\n}",
+    });
+
+    expect(readConfiguredAppId('/project', 'android')).toBe('com.declared.one');
+  });
+
+  // A project that has never been prebuilt has no application id yet — `expo prebuild` is what
+  // decides it — and iOS never consults Gradle at all.
+  it(`answers null with no android directory, and never reads it for ios`, () => {
+    gradle("defaultConfig {\n applicationId 'com.tuft.pdfbuild'\n}");
+
+    expect(readConfiguredAppId('/project', 'ios')).toBeNull();
+    vol.reset();
+    vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'demo' }) });
+    expect(readConfiguredAppId('/project', 'android')).toBeNull();
+  });
+});

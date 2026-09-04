@@ -1820,7 +1820,7 @@ process.exit(1);
         ]);
 
         const report: StatusReport = JSON.parse(result.stdout);
-        expect(report.next?.command).toBe('npx @expo/agent-cli smoke');
+        expect(report.next?.command).toMatch(/^npx @expo\/agent-cli smoke --(ios|android)$/);
         expect(report.next?.why).toContain('instead of starting a second server');
         // The project's own shape is still reported: a running server does not change it.
         expect(report.next?.rule).toBe('expo-go');

@@ -7,11 +7,18 @@
 // tested against fakes. What is here is the real versions of those functions — every one of them
 // the same function the command that owns the question already calls.
 
+import chalk from 'chalk';
+
 import { devDetachAsync } from '../dev/detachAsync';
 import { resolveDevOptions } from '../dev/resolveOptions';
 import { resolveDevStopOptions } from '../dev/resolveStopOptions';
 import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
+import { androidHasAppAsync } from '../device/androidApps';
 import { bootDeviceAsync, shutdownDeviceAsync } from '../device/bootDevice';
+import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
+import { installDevBuildAsync } from '../device/installDevBuild';
+import { installExpoGoAsync } from '../device/installExpoGo';
+import { simulatorDiskExistsAsync, simulatorHasAppAsync } from '../device/installedApps';
 import { captureScreenshotAsync, defaultScreenshotPath } from '../device/screenshot';
 import { event } from '../events';
 import { EXIT_OK } from '../exitCodes';
@@ -19,12 +26,26 @@ import { buildSmokeFollowUps, followUpsEnabled, reportFollowUps } from '../follo
 import * as Log from '../log';
 import { resolveDeviceAsync, type DeviceBackend } from '../navigate/device';
 import { openRouteAsync } from '../navigate/openRoute';
+import { EXPO_GO_APP_IDS } from '../navigate/target';
 import { PROGRAM_PREFIX } from '../programName';
+import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../project/expoGo';
+import { readSdkVersionAsync } from '../project/nodeModules';
+import type { StartPlan } from '../project/types';
 import { checkEntryBundleAsync } from '../runtime/bundleCheck';
 import { CdpClient, isMethodNotFoundError } from '../runtime/cdpClient';
 import { discoverDevServerAsync, probeDevServerAsync } from '../runtime/devServer';
+import { markBundleSignalSync } from '../runtime/reload/bundleSignal';
+import {
+  reloadOverDevServerAsync,
+  waitForReloadEvidenceAsync,
+  type CommandSocketChurn,
+} from '../runtime/reload/reloadAsync';
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
-import { buildDeviceNameIndexIfNeededAsync, type DeviceNameIndex } from '../runtime/targetPlatform';
+import {
+  buildDeviceNameIndexIfNeededAsync,
+  scopeTargets,
+  type DeviceNameIndex,
+} from '../runtime/targetPlatform';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { formatSmokeResult, smokeResultToJson } from './format';
 import {
@@ -32,10 +53,12 @@ import {
   isFailingRecord,
   runSmokePhasesAsync,
   smokeExitCode,
+  BUILD_DEV_SERVER_TIMEOUT_MS,
   START_DEV_SERVER_TIMEOUT_MS,
   type SmokeDeps,
   type SmokeRun,
 } from './phases';
+import { buildSmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
 
 /** How long discovery may spend on each candidate port. Short: a dev server that is up answers. */
@@ -159,6 +182,12 @@ function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
     screenshotPath: run.screenshot.ok ? run.screenshot.path : null,
     route: options.route,
     platform: options.platform,
+    reloadDisposition: run.reload.disposition,
+    appMismatch: run.appMismatch,
+    appMismatchKind: run.appMismatchKind,
+    // The `start-dev-server` phase is only in the list for a run that performed one, and it is
+    // charged as a build when the plan compiled (@ref ./phases §BUILD_DEV_SERVER_TIMEOUT_MS).
+    buildAttempted: run.buildAttempted,
     // `required` is `--cloud`; `fallback` is a run that would only reach a session if this machine
     // had no device, and a ladder must not put a billed session on a line the caller never asked
     // for (llp/0005 §Cloud simulator).
@@ -186,11 +215,59 @@ function explainOutcome(run: SmokeRun): string {
     run.outcome === 'failed'
       ? `Read the phase list above: every phase before the one that failed did answer, so the failure is about what that phase asked and nothing later. The "Suggested next:" line is the command that acts on it.`
       : `Nothing was shown to be wrong and nothing was proved right, so this is not a failure to act on. ${
-          run.runtimeSupported === false
-            ? 'This runtime carries no debugger, so no window read from it will ever say anything — a development build, or iOS, is what answers.'
-            : 'Looking again is the honest next step, with a longer --timeout when a first build was still running.'
+          run.appMismatchKind === 'expo-go-version'
+            ? // @ref llp/0005 §The Expo Go on the device is not the Expo Go the SDK wants. Looking
+              // again changes nothing *while the device holds that copy* — but unlike the case
+              // below, the thing that has to change is cheap and this command does it itself.
+              'The Expo Go on the device is built from another SDK, so looking again reads the same wrong runtime — a run without --no-start installs the release this SDK ships and reads that.'
+            : run.appMismatch != null
+              ? // @ref llp/0009 §the no-useless-re-run rule. The one inconclusive state looking
+                // again cannot change: the same Expo Go will answer the same way for ever, so "look
+                // again" here would send a caller round a loop with no exit.
+                'The app that answered cannot run this project at all, so looking again reads the same wrong runtime — the development build is what has to exist first.'
+              : run.runtimeSupported === false
+                ? 'This runtime carries no debugger, so no window read from it will ever say anything — a development build, or iOS, is what answers.'
+                : 'Looking again is the honest next step, with a longer --timeout when a first build was still running.'
         }`;
   return [what, `Why: ${why}`, `How: ${how}`].join('\n');
+}
+
+/**
+ * Whether one local device has one app, with each platform's own reader.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Android
+ *
+ * **Three answers, not two.** `null` is "this could not be looked up", and it is separate from
+ * `false` because the callers *act* on `false`: one downloads a few hundred megabytes and another
+ * runs a native build. A machine with no CoreSimulator tree — the e2e tier's Linux runner, a udid
+ * nothing here has — read as "not installed" and reached for a real download until this
+ * distinction existed [observed — tier0-linux, 2026-09-03].
+ *
+ * One function because there are now **three** callers: the install decision, the explanation for a
+ * device that answered nothing, and the check that judges a native build by its result rather than
+ * its exit code. Three copies of a platform switch is three places for it to drift, and it had
+ * already drifted once — the install decision asked Android for *Expo Go's* application id whatever
+ * the project's app was, which was right while only Expo Go was ever installed and wrong the moment
+ * a development build could be.
+ */
+async function hasAppOnDeviceAsync(
+  deviceId: string,
+  backend: DeviceBackend | null,
+  appId: string
+): Promise<boolean | null> {
+  if (backend === 'local-android') {
+    return await androidHasAppAsync(deviceId, appId);
+  }
+  if (backend !== 'local-ios') {
+    // A cloud session's device is not this machine's, so nothing here can read it
+    // (llp/0005 §Cloud simulator).
+    return null;
+  }
+  // @ref src/device/installedApps §simulatorDiskExistsAsync — asked **before** the app is looked
+  // for, because "no apps" and "could not look" are the same answer from that read.
+  return (await simulatorDiskExistsAsync(deviceId))
+    ? await simulatorHasAppAsync(deviceId, appId)
+    : null;
 }
 
 /**
@@ -207,7 +284,32 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
   // Read once and shared by the start phase and the boot phase, which ask two halves of one
   // question: what is this run about to open, and does it exist yet.
   let target: Promise<SmokeTarget> | null = null;
-  const targetAsync = () => (target ??= resolveSmokeTargetAsync(projectRoot, options));
+  /**
+   * The plan's install kind, once anything has asked for the target.
+   *
+   * Kept beside the promise so the progress line can read it **synchronously**
+   * (@ref ./progress §SmokeProgressContext): by the time the `install-app` line is said, the phase
+   * that decided there was an install to do has already resolved the target.
+   */
+  let installKind: SmokeTarget['installWithKind'] | null = null;
+  const targetAsync = () =>
+    (target ??= resolveSmokeTargetAsync(projectRoot, options).then((resolved) => {
+      installKind = resolved.installWithKind;
+      return resolved;
+    }));
+  /**
+   * Forget it, so the next reader sees the project as it is now.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §A build changes the project it was read from
+   * Called after a start phase that **compiled**, and for one reason: `expo prebuild` writes
+   * `android.package` and `ios.bundleIdentifier` into the app config when they were not declared,
+   * so a build is one of the few things that changes the answer to "which app is this run about"
+   * [observed — Kudo, local run, 2026-09-04: an Android project whose package the prebuild was
+   * about to write read `null`, so the install phase never fired and the deep link was refused].
+   */
+  const forgetTarget = () => {
+    target = null;
+  };
 
   let deviceIndex: Promise<DeviceNameIndex> | null = null;
   const indexAsync = (devServerUrl: string) =>
@@ -226,14 +328,38 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
     // return, and this run has seven more phases to perform (llp/0004 §Daemonization).
     // The argv is `START_DEV_SERVER_ARGV`, whose documentation says why it carries no platform.
     startDevServer: async () => {
-      // @ref llp/0005-runtime-loop-tools.rfc.md §This command does not build — the boundary the
-      // bootstrap must not blur. Asked *before* anything is spawned: `--yes` on the detached child
-      // consents to whatever plan it makes, and for a project whose target needs a development
-      // build that is not installed, that plan is a compiler. `smoke` verifies a running app; the
-      // command that builds one is `dev`, and this says so instead of spending ten minutes.
-      const { buildRefusal } = await targetAsync();
-      if (buildRefusal) {
-        return { ok: false, devServerUrl: null, reason: buildRefusal };
+      // @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+      //
+      // This used to refuse. `--yes` on the detached child consents to whatever plan it makes, and
+      // for a project whose development build is missing or stale that plan is a compiler — so the
+      // gate named `dev` and stopped, which is a correct instruction and a dead end for a loop that
+      // cannot leave itself to take it.
+      //
+      // It now runs the plan, and **says so before it starts**. A command that silently blocks for
+      // twenty minutes is indistinguishable from one that has hung, so the one thing the caller
+      // needs is the sentence that tells them which it is. On stderr, because stdout carries one
+      // JSON object and nothing else (llp/0006 §Output contract), and as an event too so a reader
+      // of the stream sees it without parsing English.
+      const target = await targetAsync();
+      if (target.buildLocation != null) {
+        // `runsOn` is where it compiles: this machine, or EAS. Worth saying, because the two have
+        // very different costs and the caller may not have chosen either on purpose.
+        const where = target.buildLocation.runsOn;
+        event('smoke_building', { platform: options.platform, where });
+        Log.progress(
+          chalk.dim(
+            [
+              `Building the ${options.platform} development build first, ${where === 'eas' ? 'on EAS' : 'on this machine'}.`,
+              `This project has none for its current fingerprint, and a native build takes some minutes — nothing is stuck.`,
+            ].join(' ')
+          )
+        );
+      }
+      const built = target.buildLocation != null;
+      if (built) {
+        // @ref ./smokeAsync §forgetTarget — the build below rewrites the app config, so the answer
+        // read above is about the project as it was before it.
+        forgetTarget();
       }
       const argv = [...START_DEV_SERVER_ARGV, ...startPortArgs(options.devServerUrl)];
       try {
@@ -244,13 +370,22 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
         // `--timeout`, which bounds the phases that read the app and is not charged for the start.
         await devDetachAsync(
           projectRoot,
-          { ...resolveDevOptions(argv), detachTimeoutMs: START_DEV_SERVER_TIMEOUT_MS },
+          {
+            ...resolveDevOptions(argv),
+            // A plan that compiles needs a budget the shape of a compile
+            // (@ref ./phases §BUILD_DEV_SERVER_TIMEOUT_MS).
+            detachTimeoutMs:
+              target.buildLocation != null
+                ? BUILD_DEV_SERVER_TIMEOUT_MS
+                : START_DEV_SERVER_TIMEOUT_MS,
+          },
           { print: false }
         );
       } catch (error: unknown) {
         return {
           ok: false,
           devServerUrl: null,
+          built,
           reason: `a dev server could not be started (${error instanceof Error ? firstLine(error.message) : String(error)})`,
         };
       }
@@ -263,6 +398,7 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       return {
         ok: found.reachable,
         devServerUrl: found.devServerUrl,
+        built,
         reason: found.reachable
           ? null
           : `a dev server was started and nothing answered at ${found.devServerUrl} afterwards (${found.reason ?? 'no answer'})`,
@@ -303,6 +439,12 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
         appId: target.appId,
         appLabel: target.appLabel,
         installWith: target.installWith,
+        // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+        // Always, now. This used to be the plan's `expo-go` rule alone, on the reasoning that a
+        // development build is a compile and compiles belong to `dev`; the boundary is real and it
+        // was the caller's problem, so the boot may pick a bare device for either kind of app and
+        // the install phase puts the app there.
+        mayInstall: true,
       });
       return {
         ok: result.ok,
@@ -310,7 +452,111 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
         backend: result.backend,
         refused: result.refused,
         choice: result.choice,
+        installNeeded: result.installNeeded,
         reason: result.ok ? null : `${result.reason}${result.name ? ` (${result.name})` : ''}`,
+      };
+    },
+
+    // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
+    //
+    // Both halves of the question, so the phase runner carries no policy: is this an app this run
+    // may install, and has the device not got it. The first is the plan's `expo-go` rule, which
+    // already means "the project fits in Expo Go and nothing overrode it to a development build".
+    // The second is the same disk read the device choice makes (`installedApps.ts`).
+    installNeededOnDevice: async (deviceId, backend) => {
+      const target = await targetAsync();
+
+      // @ref llp/0005-runtime-loop-tools.rfc.md §An app that cannot be named still has to be installed
+      //
+      // **No app id is not "no app".** For a native build it is the ordinary state of a project
+      // that has never been prebuilt for this platform: `android.package` is undeclared and there
+      // is no `android/app/build.gradle` yet, because `expo prebuild` is the thing that writes
+      // both. Skipping the install there is the bug that outlived two attempts at fixing it — the
+      // emulator booted, nothing was installed, and the deep link was refused, three runs in a row
+      // [observed — Kudo, 2026-09-04].
+      //
+      // The id is only needed to ask "is it already there". `expo run:<platform>` needs none: it
+      // resolves the package itself, from the config it is about to write. So a run that cannot see
+      // whether the app is installed installs it — and after that first build the package *is*
+      // declared, so every later run resolves it and checks properly. One build, then normal.
+      //
+      // Expo Go is excluded because its ids are constants: an Expo Go run that cannot name its app
+      // has a plan this could not read, and downloading 423 MB on that basis would be a guess.
+      if (target.appId == null) {
+        return target.installWithKind === 'native-build';
+      }
+      // @ref ./smokeAsync §hasAppOnDeviceAsync. Local devices only — a cloud session's device is
+      // not this machine's, and there is nothing this CLI can install on somebody else's session
+      // (llp/0005 §Cloud simulator) — and `null` for a lookup that did not happen, which is never
+      // a licence to install.
+      const has = await hasAppOnDeviceAsync(deviceId, backend, target.appId);
+      if (has == null) {
+        return false;
+      }
+      if (!has) {
+        return true;
+      }
+      // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+      //
+      // Installed is not the same as right, and this is the half `@expo/cli` gets right and a first
+      // cut here did not: `ExpoGoInstaller` compares with `semver.eq` and, when it cannot prompt,
+      // installs the recommended release rather than reporting the difference — "better to have the
+      // correct version than not have Expo Go work at all". An agent loop is exactly the caller
+      // that cannot be prompted.
+      //
+      // `unknown` installs nothing: a machine that is offline, or one whose version would not
+      // read, has shown no reason to spend a few hundred megabytes.
+      const version = await checkExpoGoVersionAsync(
+        deviceId,
+        options.platform,
+        await readSdkVersionAsync(projectRoot)
+      );
+      return version.verdict === 'mismatch';
+    },
+
+    // `expo-go download` for the binary and `simctl install` for the device, both as subprocesses.
+    // Only reached for a boot that came up without the app, and only when the plan's rule is Expo
+    // Go — so the SDK version is the one the project reports, and the release is the one that SDK
+    // ships rather than whatever is newest.
+    // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+    //
+    // Two installs, because they put two different apps on the device: a published binary to
+    // download, or this project's own artefact to compile. The plan decides which
+    // (@ref ./smokeAsync §SmokeTarget.installWithKind), so this reads the answer rather than
+    // forming a third opinion about which app the run is even about.
+    installApp: async (deviceId) => {
+      const target = await targetAsync();
+      if (target.installWithKind === 'expo-go') {
+        return await installExpoGoAsync(
+          deviceId,
+          options.platform,
+          await readSdkVersionAsync(projectRoot)
+        );
+      }
+      // @ref llp/0005 §An app that cannot be named still has to be installed — the build resolves
+      // the package itself, so this works with `target.appId` null, which is exactly the run that
+      // most needs it.
+      const built = await installDevBuildAsync(projectRoot, options.platform, deviceId, {
+        // @ref src/device/installDevBuild §verifyInstalledAsync — the device decides, because
+        // `expo run:ios` activates the Simulator window through AppleScript *after* it installs and
+        // throws there on a Mac with no Automation grant. The same read the install decision made.
+        verifyInstalledAsync: async () =>
+          target.appId == null
+            ? null
+            : await hasAppOnDeviceAsync(
+                deviceId,
+                options.platform === 'android' ? 'local-android' : 'local-ios',
+                target.appId
+              ),
+      });
+      // The shapes differ in what they can report: a download knows which release it fetched and
+      // what it replaced, and a compile knows neither — the version of a development build is the
+      // project's own business, and `expo run:*` does not say what it overwrote.
+      return {
+        ok: built.ok,
+        version: null,
+        replaced: null,
+        reason: built.reason,
       };
     },
 
@@ -323,11 +569,7 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       waitForBundlerReadyAsync(devServerUrl, { timeoutMs, projectRoot }),
 
     checkEntryBundle: (devServerUrl, timeoutMs) =>
-      checkEntryBundleAsync(devServerUrl, {
-        platform: options.platform,
-        timeoutMs,
-        projectRoot,
-      }),
+      checkEntryBundleAsync(devServerUrl, { platform: options.platform, timeoutMs, projectRoot }),
 
     // Scoped to this run's platform: a `smoke --android` that counted the iOS simulator already
     // attached to this dev server would go on to read that simulator's runtime, and report the
@@ -389,6 +631,244 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
         // a second URL of its own (F96).
         confirmAttachMs: attachBudgetMs,
       }),
+
+    // @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+    //
+    // The gate's own version of the question `decideExpoGoTarget` answers for the *link*. That
+    // decision stops this command opening Expo Go for a project that cannot run there; it says
+    // nothing about an Expo Go that was already attached when the run arrived, which is what
+    // `expo start --ios` leaves behind and the state an agent is most likely to inherit.
+    //
+    // Scoped to this run's platform for the same reason every other read is (F51): an iOS Expo Go
+    // attached to the same dev server must not decide an `--android` run's answer.
+    checkAppFitsProject: async (devServerUrl) => {
+      const nothing = { mismatch: null, kind: null, note: null };
+      const probe = await probeDevServerAsync(devServerUrl);
+      // `matched` only, never `undetermined`: a target whose platform nothing decided must not earn
+      // this run's verdict either way (@ref src/runtime/targetPlatform §scopeTargets). Erring that
+      // way keeps the check from turning an unreadable target into a refusal.
+      const scoped = scopeTargets(probe.targets, options.platform, await indexAsync(devServerUrl));
+      const expoGo = scoped.matched
+        .map((target) => target.appId)
+        .find((appId): appId is string => appId != null && EXPO_GO_APP_IDS.includes(appId));
+      // Everything below is about Expo Go. A development build is this project's own app and its
+      // version is the project's own business, so there is nothing here to ask about it.
+      if (expoGo == null) {
+        return nothing;
+      }
+
+      // @ref llp/0005 §Expo Go is only a target for a project that fits in it. Only a project that
+      // is **ruled out** is a mismatch. Unknown is not: a project this could not read is the
+      // ordinary state of a fresh clone (@ref src/project/expoGo §RULES_OUT_EXPO_GO).
+      if (decidesAgainstExpoGo(await checkExpoGoCompatibilityAsync(projectRoot)) === false) {
+        return {
+          mismatch: `the app that answered is Expo Go (${expoGo}), and this project cannot run in Expo Go — its native code is not in that runtime, so this window is about Expo Go rather than about this project. "${PROGRAM_PREFIX} dev --${options.platform} --yes" makes the development build that can run it`,
+          kind: 'expo-go-incompatible' as const,
+          note: null,
+        };
+      }
+
+      // @ref llp/0005 §The Expo Go on the device is not the Expo Go the SDK wants
+      //
+      // The project fits in Expo Go — but the Expo Go on the device is a build of *some* SDK, and
+      // only the one from this project's release line is the app under test. Asked only of a local
+      // simulator: the check reads that simulator's own bundle, and a cloud session's disk is not
+      // this machine's (llp/0005 §Cloud simulator).
+      // The same resolution `probeDevice` performs, and for the same reason: the device this run is
+      // about. Any failure to find one is nothing to check rather than something to report — the
+      // app answered, so whatever it is running on is beyond this check's reach.
+      let localDeviceId: string | null = null;
+      try {
+        const device = await resolveDeviceAsync(options.platform, {
+          cloud: options.cloud,
+          projectRoot,
+        });
+        // @ref llp/0005-runtime-loop-tools.rfc.md §Android — both local backends now, because both
+        // have a reader for the version on the device (@ref src/device/expoGoVersion). A cloud
+        // session is still excluded: the check reads the device, and that device is not this
+        // machine's (llp/0005 §Cloud simulator).
+        localDeviceId =
+          device.backend === 'local-ios' || device.backend === 'local-android'
+            ? device.deviceId
+            : null;
+      } catch {
+        localDeviceId = null;
+      }
+      if (localDeviceId == null) {
+        return nothing;
+      }
+      const version = await checkExpoGoVersionAsync(
+        localDeviceId,
+        options.platform,
+        await readSdkVersionAsync(projectRoot)
+      );
+      // `unknown` says nothing at all, and that is a decision rather than an oversight: a machine
+      // with no route out would otherwise carry "the version could not be checked" on the `app` row
+      // of every run it ever makes, which is chatter rather than a finding.
+      if (version.verdict !== 'mismatch') {
+        return nothing;
+      }
+      // A run that could install has already fixed this in the `install-app` phase, so what reaches
+      // here is a run that could not — `--no-start`, which says change nothing. It blocks the pass
+      // rather than noting it: the runtime that answered is not the release this SDK ships, so the
+      // window is not about the app the caller would ship.
+      return {
+        mismatch: [
+          version.reason,
+          `— so this window is about an Expo Go this SDK does not ship.`,
+          options.bootstrap
+            ? `This run was allowed to install the right one and did not manage to.`
+            : `--no-start told this run to change nothing; a run without it installs the right one.`,
+        ].join(' '),
+        kind: 'expo-go-version' as const,
+        note: null,
+      };
+    },
+
+    // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+    // @ref ./phases §SmokeDeps.explainSilentApp
+    //
+    // The same version question as above, asked of the **device** instead of the dev server's
+    // target list — because on this path that list is empty, and its emptiness is the thing being
+    // explained. An Expo Go from another SDK takes the deep link, fails to load a bundle its
+    // runtime cannot run, and registers no debugger target at all; the run then waits out its
+    // budget and reports the symptom [observed — 119 s, 2026-09-04].
+    //
+    // Only for a local device this CLI has a version reader for, and only when the app this run is
+    // about is Expo Go: a development build that did not attach is this project's own artefact, and
+    // there is no release of it for this to have an opinion about.
+    explainSilentApp: async (deviceId, backend) => {
+      if (deviceId == null || (backend !== 'local-ios' && backend !== 'local-android')) {
+        return null;
+      }
+      const target = await targetAsync();
+
+      // @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+      //
+      // Asked first, and of **every** app rather than only of Expo Go: the commonest reason a
+      // device answers nothing is that it has not got the app, and the commonest way that happens
+      // is a development build on a simulator it was not built for. The link is then refused with
+      // `115` and the report used to say only that the device refused it, which reads as a fault in
+      // the device [observed — Kudo, local run, 2026-09-04].
+      if (target.appId != null) {
+        // `null` is "could not look", which explains nothing (@ref ./smokeAsync §hasAppOnDeviceAsync).
+        const has = await hasAppOnDeviceAsync(deviceId, backend, target.appId);
+        if (has === false) {
+          return {
+            mismatch: [
+              `the app this project runs (${target.appLabel ?? target.appId}) is not installed on ${deviceId}, so nothing there handles its link`,
+              // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app
+              // it is. One sentence for both kinds now, because a run allowed to bring its own
+              // environment installs both — a download for Expo Go, `expo run:<platform>` for a
+              // development build. Anything that reaches here was told to change nothing, and the
+              // flag that told it is the whole of the answer.
+              `a run without --no-start installs it.`,
+            ].join(' — '),
+            kind: 'app-not-installed' as const,
+            note: null,
+          };
+        }
+      }
+
+      // Everything below is about Expo Go's *version*, so a development build stops here: it is
+      // this project's own app, and there is no release of it for this to have an opinion about.
+      if (target.installWithKind !== 'expo-go') {
+        return null;
+      }
+      const version = await checkExpoGoVersionAsync(
+        deviceId,
+        options.platform,
+        await readSdkVersionAsync(projectRoot)
+      );
+      // `unknown` explains nothing, and saying "the version could not be checked" beside a wait
+      // that expired would add a sentence without adding a fact.
+      if (version.verdict !== 'mismatch') {
+        return null;
+      }
+      return {
+        mismatch: [
+          version.reason,
+          `— and an Expo Go built from another SDK takes the link, fails to load a bundle it cannot run, and registers no debugger target, which is what this wait was waiting for.`,
+          options.bootstrap
+            ? `This run was allowed to install the right one and did not manage to.`
+            : `--no-start told this run to change nothing; a run without it installs the right one.`,
+        ].join(' '),
+        kind: 'expo-go-version' as const,
+        note: null,
+      };
+    },
+
+    // @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+    //
+    // `runtime:reload`'s rung 1, and its proofs, through the same functions — the whole point of
+    // this command being one process (llp/0005 §The smoke gate). Deliberately **only** rung 1: the
+    // rungs above it stop the app and start it again, and a gate is not allowed to take the
+    // caller's app away in order to answer a question about it. An app the broadcast cannot reach
+    // is a fact this phase reports, not a licence to relaunch.
+    //
+    // The bundle mark is taken *before* the broadcast because that is what makes the log a proof:
+    // `dev-server-bundle` says a bundle was served after this run acted, which is only readable
+    // against a count from before it.
+    reloadApp: async (devServerUrl, timeoutMs) => {
+      const before = await probeDevServerAsync(devServerUrl);
+      const knownTargetIds = before.targets.map((target) => target.id);
+      const bundleMark = markBundleSignalSync(projectRoot);
+
+      let churn: CommandSocketChurn | null = null;
+      const attempt = await reloadOverDevServerAsync(devServerUrl, {
+        connectedApps: before.targets.length,
+        onChurn: (observed) => {
+          churn = observed;
+        },
+      });
+      // The churn out-parameter is written on every path through the rung, including the ones that
+      // fail before the broadcast, so it is read whatever `attempt.ok` says.
+      const reconnected = ((churn as CommandSocketChurn | null)?.reconnected ?? 0) > 0;
+
+      if (!attempt.ok) {
+        return {
+          ok: false,
+          verifiedBy: null,
+          knownTargetIds,
+          freshTargets: 0,
+          commandSocketReconnected: reconnected,
+          bundleServed: false,
+          reason: attempt.reason,
+        };
+      }
+
+      const evidence = await waitForReloadEvidenceAsync(devServerUrl, projectRoot, {
+        timeoutMs,
+        knownTargetIds,
+        bundleMark,
+        platform: options.platform,
+      });
+
+      // The same order of preference `runtime:reload` uses, for the same reason: the mechanism's
+      // own observation is the strongest fact, a target the dev server had never listed is the
+      // next, and a bundle line says something fetched a bundle without saying which client did.
+      // Each label is named only where its own evidence in this result is non-empty (llp/0021).
+      const verifiedBy = reconnected
+        ? ('message-socket-peers' as const)
+        : evidence.freshTargets > 0
+          ? ('fresh-debugger-target' as const)
+          : evidence.bundle.observed
+            ? ('dev-server-bundle' as const)
+            : null;
+
+      return {
+        ok: verifiedBy != null,
+        verifiedBy,
+        knownTargetIds,
+        freshTargets: evidence.freshTargets,
+        commandSocketReconnected: reconnected,
+        bundleServed: evidence.bundle.observed,
+        reason:
+          verifiedBy != null
+            ? null
+            : 'the reload was delivered to the dev server and nothing was seen to come of it: no client reconnected, no debugger target appeared under a new id, and the dev server served no bundle',
+      };
+    },
 
     evaluate: async (devServerUrl) => {
       try {
@@ -471,6 +951,9 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
         filePath: options.screenshotPath ?? defaultScreenshotPath(projectRoot),
       }),
 
+    // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+    progress: buildSmokeProgress(options, { installKind: () => installKind }),
+
     now: () => Date.now(),
   };
 }
@@ -483,18 +966,15 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
  */
 interface SmokeTarget {
   /**
-   * Why this run will not start a dev server, or null when there is nothing to refuse.
+   * Where this project's plan would build, or null when it builds nothing.
    *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §This command does not build
-   * The boundary between `smoke` and `dev`, and the one the bootstrap could most easily have
-   * blurred. Starting a dev server is seconds; starting one for a project whose development build
-   * is missing or stale is `expo run:ios`, which is a compiler, minutes of it, and a native
-   * toolchain that may not be on this machine at all. The question is `StartPlan.buildLocation`,
-   * the plan engine's own answer to "does this plan build anything": Expo Go targets and a
-   * development build already installed for this fingerprint both answer null, and both bootstrap
-   * in full.
+   * @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+   * `StartPlan.buildLocation`, the plan engine's own answer to "does this plan compile anything":
+   * an Expo Go target and a development build already installed for this fingerprint both answer
+   * null. It used to be the boundary this command refused at; it is now the fact that decides the
+   * start phase's budget and the sentence printed before the wait.
    */
-  buildRefusal: string | null;
+  buildLocation: StartPlan['buildLocation'];
   /**
    * The application id this run's deep link would open, or null when it could not be read.
    *
@@ -508,6 +988,28 @@ interface SmokeTarget {
   appLabel: string | null;
   /** The command that puts that app on a simulator, for a machine where no device has it. */
   installWith: string | null;
+  /**
+   * How this run puts the app on a device that has not got it.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+   *
+   * **This was a boolean, and the boolean was the last refusal in the command**
+   * [confirmed, Kudo, 2026-09-04: "smoke should be self-served without running dev first"]. It was
+   * true for exactly one plan rule, `expo-go`, on the reasoning that Expo Go is a published binary
+   * to download and a development build is this project's own artefact to compile — so the compile
+   * belonged to `dev`. The distinction is real and it is not the caller's problem: an agent told
+   * "run `dev --ios --yes` first" cannot take that instruction without leaving the loop this
+   * command exists to serve, which is the same dead end §Putting Expo Go on a simulator that has
+   * not got it was written against.
+   *
+   * So both are installs, and this says which kind:
+   *
+   * - `expo-go` — download the release this SDK ships and `simctl install` it.
+   * - `native-build` — `expo run:<platform> --no-bundler --device <id>`, which builds what is
+   *   missing and installs it onto the device this run chose. `--no-bundler` because this run
+   *   already has a dev server and a second one would be a second answer to "which bundle".
+   */
+  installWithKind: 'expo-go' | 'native-build';
 }
 
 /** Read the plan once, and answer both questions from it. Never throws. */
@@ -525,10 +1027,14 @@ async function resolveSmokeTargetAsync(
     require('../runtime/appId') as typeof import('../runtime/appId');
 
   const unknown: SmokeTarget = {
-    buildRefusal: null,
+    buildLocation: null,
     appId: null,
     appLabel: null,
     installWith: null,
+    // A plan this could not read still gets the native path rather than none, and that is safe:
+    // every caller of this checks `appId` first, and an unread plan has none — so nothing is
+    // installed for a project whose rule is unknown, because there is no app to look for.
+    installWithKind: 'native-build',
   };
 
   let plan;
@@ -553,13 +1059,7 @@ async function resolveSmokeTargetAsync(
   const appId = expoGo ? EXPO_GO_APP_ID[options.platform] : configured;
 
   return {
-    buildRefusal:
-      plan.buildLocation == null
-        ? null
-        : [
-            `this project needs a ${options.platform} development build before a dev server is any use, and this command does not build`,
-            `— "${PROGRAM_PREFIX} dev --${options.platform} --yes" runs that build and starts the dev server, and this gate answers once the app is installed`,
-          ].join(' '),
+    buildLocation: plan.buildLocation,
     appId,
     appLabel: expoGo ? 'Expo Go' : appId,
     // Two different commands, because they put two different apps on the device. `expo start
@@ -569,6 +1069,7 @@ async function resolveSmokeTargetAsync(
     installWith: expoGo
       ? `npx expo start --${options.platform}`
       : `${PROGRAM_PREFIX} dev --${options.platform} --yes`,
+    installWithKind: expoGo ? 'expo-go' : 'native-build',
   };
 }
 

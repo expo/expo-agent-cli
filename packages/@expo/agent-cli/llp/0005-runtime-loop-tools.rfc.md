@@ -275,7 +275,7 @@ Two consequences the code cites here:
 
 `@expo/agent-cli smoke` answers "does this app still boot" by asking the questions of existing commands in this process, plus a picture of the screen [confirmed, Kudo, 2026-08-24]. Graduated 2026-08-28 ([[0016-v1-scope]]). One process. Every dependency is injected (`src/smoke/phases.ts`). A `smoke` built out of subprocesses would do dev-server discovery eight times, and eight discoveries on a machine running two projects can answer eight different things.
 
-Eight phases:
+Nine phases:
 
 | phase           | the function                                       |
 | --------------- | -------------------------------------------------- |
@@ -283,6 +283,7 @@ Eight phases:
 | `bundler-ready` | `waitForBundlerReadyAsync`                         |
 | `bundle`        | `checkEntryBundleAsync`                            |
 | `app`           | `waitForAppConnectionAsync`, then `openRouteAsync` |
+| `reload`        | `reloadOverDevServerAsync`, then its proofs        |
 | `route`         | `openRouteAsync` (route-checked)                   |
 | `runtime`       | `CdpClient.evaluateAsync('1')`                     |
 | `errors`        | `CdpRuntimeErrorCollector`                         |
@@ -309,6 +310,247 @@ The gate fails on `isError || source === 'exception'`. React Native reports an E
 
 The screenshot primitive writes a PNG (`src/device/screenshot.ts`). `simctl` is given the path and writes the file. `adb exec-out screencap -p` writes the PNG to stdout. Never through `adb shell`, which rewrites `\n` as `\r\n` and corrupts every image. Never through a JavaScript string. Success is the first eight bytes matching the PNG signature. `adb exec-out` answers a device that is not ready by writing a sentence to stdout and exiting 0. A missing screenshot degrades. It never decides the run. When no app of this project was connected, `screenshot.ok` says the picture is of the device's screen.
 
+### Which platform is the caller's to say
+
+`--ios` or `--android` is **required**, and it is the one flag of this command with no default [confirmed, Kudo, 2026-09-03].
+
+It used to default from the host: iOS on a Mac, Android everywhere else. That is a fact about the machine the CLI is running on, and every question this command answers is about a _device_ — which bundle is built, which debugger targets are counted (§The smoke gate scopes them by platform), which tool takes the picture. The two come apart on an ordinary machine: a Mac with only an Android emulator running got an iOS run, produced a real verdict about a platform nobody had asked about, and the guess was invisible in the report.
+
+The refusal is `BAD_ARGS`, exit 1, with `suggestedCommand: smoke --ios` — the same band as `--platform web`, because a caller who named no device has not asked a question this command can answer, and no amount of looking again supplies one.
+
+**One line**, in the shape §navigate already uses for a missing route: `Missing platform. Usage: … smoke --ios|--android, for example: … smoke --ios`. The first cut put the paragraph above into the error itself and it was rightly called noisy [Kudo, 2026-09-04]. The three-part What/Why/How form of [[0006-agent-native-cli-surface]] §Errors are prompts earns its length when the cause is not visible on the command line; a required flag that was not passed is visible, and the reasoning belongs in this document and in the source rather than in front of somebody who needs to add five characters.
+
+The test tiers stopped depending on the host: every `smoke` invocation in them now names a platform, so a case that asserts platform-specific text says so out loud rather than passing on macOS and failing on the Linux runner — a failure this repo's CI had already produced once.
+
+**Making a flag required breaks every surface that teaches the command**, and the first sweep missed most of them [found by the tier-0 evals, 2026-09-04]. The follow-ups were already fine (F58 made them carry the platform), which is what made the rest look done. What was not:
+
+| surface                                              | was                       | now                                            |
+| ---------------------------------------------------- | ------------------------- | ---------------------------------------------- |
+| `evals/scenarios/smoke-no-dev-server.json`           | `smoke --dev-server-url …`| the golden argv names `--ios`                  |
+| §The smoke gate's `status.next` (`verifyCommand`)     | `smoke`                   | the booted device's platform, else the project's |
+| `routeNotFoundError`'s `Try:` for `smoke`             | `smoke --route /notes`    | the caller's platform, kept                    |
+| `notReadyError`'s `suggestedCommand`                  | `smoke`                   | `dev:logs`                                     |
+| the stray-argument hint                               | `smoke --route <word>`    | the named platform, or `--ios|--android`       |
+| the workflow ladder and the README                    | `smoke`                   | `smoke --ios|--android`                        |
+
+Two of those are worth more than a table row. `suggestedCommand` is the field a driving agent runs **verbatim**, so a value that is refused for a second reason is worse than none — and `notReadyError` cannot name a platform at all, because it is a failure about a dev server and a dev server has not got one. It names `dev:logs`, which answers the same question and is runnable as written; `smoke` stays in its prose with the flags shown.
+
+And `status.next` is read as "run this", so it states a platform rather than leaving one to be defaulted. It is chosen from the strongest evidence at hand — a device this machine has **booted**, which is the fact the gate would otherwise go looking for, so a Mac with an Android emulator running gets `--android` — and otherwise from `resolveDefaultPlatform`, which reads the project's own checked-in native directories before it falls back to the host. That is the same answer the report's `dev` plan prints, so two lines of one report cannot name two platforms. A stated platform in a suggestion is not the guess this section removed: it is text the caller reads and can change, where the default inside `smoke` was invisible.
+
+### The gate says what it is doing while it does it
+
+The gate is the slowest command in this CLI by a wide margin, and until now it said **nothing at all** until the last of its phases was over [confirmed, Kudo, 2026-09-03]. One run can start a dev server, wait out a cold first bundle, boot a simulator, download a few hundred megabytes and then wait two minutes for the app to attach. A caller watching three minutes of silence cannot tell a run that is working from one that has hung, and the only thing that resolves that is a line naming the phase being spent.
+
+One line per phase, said **before** the phase runs (`src/smoke/progress.ts`). On `stderr`, because `stdout` carries one JSON object and nothing else ([[0006-agent-native-cli-surface]] §Output contract) — a progress line there would break `JSON.parse(stdout)` for every `--json` caller. And on the event stream as `cli:smoke_phase`, because the reader this CLI is for is an agent, and an agent watching events sees the same walk without matching English.
+
+Said before rather than after, because a line's only job is to name the wait the caller is in: one printed on the way out would arrive at the moment it stopped being needed, and the final report already says what every phase came to, with its duration.
+
+Three details the wording carries:
+
+- **The question, not the code.** `bundle` is not "check the entry bundle", it is "does this project's own code compile for ios" — the thing the wait is buying an answer to.
+- **A budget only where there is one.** `(up to 2m)` is printed when the walk knows the bound, and nothing is printed when it does not. `start-dev-server` passes none, because a plan that compiles gets the build budget and one that does not gets the start budget, and that is decided inside the phase; a stated bound the run then sails past would be worse than no bound (see [[0021-honest-reports]] §The rules). Under five seconds nothing is printed either: a bound nobody would plan around is noise dressed as information.
+- **Two lines for `app`, one for everything else.** That phase is two things of very different sizes — a two-second look for an app that is already attached, and, only when there is none, an open plus the longest wait this command ever performs. One line would either overstate the look or say nothing about the wait.
+
+The phases that are pushed onto the report rather than performed — a `route` the `app` phase already opened, a `reload` the caller declined — say nothing. They are rows about work that did not happen, and a progress line for one would report a wait the caller is not in. The same holds for the three conditional acts: a machine that already had a dev server, a device and the app narrates none of them.
+
+### The app under test is the code on disk
+
+The phase that makes the four below it mean something [confirmed, 2026-09-03]. `runtime`, `errors` and `screenshot` all read _the running app_, and an app that was already attached when the run arrived is running whatever it last loaded. At the moment this command is for — after an edit, before saying "done" — that is the bundle from before the edit.
+
+Without it the gate passed a broken app. On a plain Expo Go project with a bare `throw new Error(...)` at the top of the entry component, `smoke --platform ios --no-start` reported `smoke passed` with `errors` `ok` at 3.1 s and exited 0, and its own screenshot showed the _previous_ screen [observed — iOS 26.5 simulator, Expo Go SDK 57, 2026-09-03]. Killing the app first made the identical run fail with the throw in the error window, which is what proved it was staleness rather than the error reader. §Reloading the app had already written the rule — "an error window is a property of the app's session, and the session outlives the fix" — and named `runtime:errors` as the command that must not be believed without a reload. `smoke` reads that window and was not applying it.
+
+The phase is `runtime:reload`'s **rung 1 only**, asked through the same functions in the same process. The rungs above it stop the app and start it again, and a gate is not allowed to take the caller's app away in order to answer a question about it. An app the broadcast cannot reach is a fact this phase reports.
+
+Four dispositions, and the report carries the evidence rather than a summary of it:
+
+| disposition  | when                                                                   | the verdict                     |
+| ------------ | ---------------------------------------------------------------------- | ------------------------------- |
+| `not-needed` | this run opened the app, so it fetched the served bundle on its way up | unaffected                      |
+| `reloaded`   | it was already attached, and the reload was observed                   | unaffected                      |
+| `unproved`   | the reload was attempted and nothing came of it                        | never `passed`                  |
+| `declined`   | `--no-reload`                                                          | unaffected, and the row says so |
+
+`unproved` is `inconclusive` rather than `failed`: nothing has been shown to be wrong with the app, and what is unknown is _which session_ the phases below are about. `passed` is a claim about the app the caller has on disk, so a run that cannot say which session it read must not make it (llp/0021 §The rules band). A real error still wins over all of it — an app that reported one has been shown to be broken, and which session it was is no longer the open question.
+
+`verifiedBy` reuses §What proves a reload's four labels and its one rule: a label may be named only where its own evidence is in the payload and non-empty. `--json` carries `knownTargetIds`, `freshTargets`, `commandSocketReconnected` and `bundleServed` beside it.
+
+Before `route`, not after. A reload sends the app back to its initial route, so a run that opened the route first would reload out of the screen it had just asked for. A proved reload also leaves the app re-registering exactly the way a cold launch does, so it owes the same settle and the same runtime-ready poll (§APP*SETTLE_MS, §RUNTIME_READY_TIMEOUT_MS) — and one that was \_not* proved owes neither, because an app that never acted is not coming up.
+
+`--no-reload` is the opt-out, and it exists for the one question a reload destroys: "is the app throwing right now, where I navigated it to by hand". That is a real question and the caller has to be able to ask it, so the verdict is left alone and the `reload` row says out loud which of the two questions the run answered. The narrow claim this phase makes is that the app fetched the bundle the dev server is serving _after_ this run arrived. It says nothing about the dev server's own freshness, which is the `bundle` phase's question.
+
+Cost: one broadcast on a socket that is already open, plus the reconnect. Measured at ~260 ms across six consecutive break-detect-fix-verify runs, all six correct [observed — iOS 26.5 simulator, Expo Go SDK 57, 2026-09-03].
+
+### Expo Go is only a target for a project that fits in it
+
+`decideExpoGoTarget` decided from four facts — `--app-id`, the app ids on the dev server, `expo-dev-client`, and checked-in native directories — and none of them was "can this project run in Expo Go" [confirmed, 2026-09-03]. Its last branch therefore answered `isExpoGo: true` with `certain: true` for a project `status` and the plan engine already called `needs-dev-client`. One question, two answers, and the wrong one won where it mattered: on a CNG project with a podspec-shipping dependency `smoke` opened `exp://…`, Expo Go answered the debugger, and the gate reported `passed` at exit 0 — a run that proved Expo Go can boot the bundle and called it the app working [observed — iOS 26.5 simulator, 2026-09-03].
+
+Compatibility is now a fifth input, below the two observations and above the native-directory guess. `--app-id` and an app already on the dev server still win: those are facts about _what will open the link_, and answering `<scheme>://` for a session that is demonstrably Expo Go would send the link to an app that is not there.
+
+`ExpoGoCompatibility.compatible` could not be used directly, and that is the part worth writing down. It is `false` for all four reason kinds and only two of them rule Expo Go out. `unbundled-native-module` and `config-plugin` do. `unknown-sdk` does not — it is the check saying it could not read the project, which is the ordinary state of a fresh clone with no `node_modules`. Nor does `custom-native-code`, whose own `detail` says a checked-in native directory _can_ contain code the runtime lacks: a bare project with no unbundled module still runs in Expo Go, which is exactly the uncertainty `ExpoGoDecision.certain` carries. `decidesAgainstExpoGo` is the three-valued answer, and the suites that run against a virtual filesystem caught both mistakes before they shipped.
+
+Choosing the right app is half of it. Expo Go can already be attached because somebody ran `expo start --ios`, so the `app` phase also asks whether the app that answered is one this project can run. A mismatch is `inconclusive` with the build command named, never `failed` — nothing is wrong with the code — and never `passed`. The window is still opened and the screen still photographed, the same rule §Android sets for a runtime with no debugger. An error outranks all of it: Expo Go throwing on this project's bundle is a fact about the code, whichever app was holding it. `appMismatch` is on `--json` so nothing has to match English, and the follow-ups lead with `dev --<platform> --yes` rather than a re-run of a gate that will answer the same way for ever.
+
+### Putting Expo Go on a simulator that has not got it
+
+§The device that can open the app refused a machine with no Expo Go and named `npx expo start --ios`. That is a correct instruction and a dead end for the caller this CLI is for: an agent cannot take it without leaving its loop, and the loop is the thing being served. So the app is installed [confirmed, Kudo, 2026-09-03].
+
+**Only Expo Go, and only on the plan's `expo-go` rule.** That rule already is the pair of conditions this turns on — the project fits in Expo Go, and nothing in `agentCli` config overrode it to a development build (`src/plan/decide.ts`) — so the target reads the plan's answer rather than forming a third opinion. Everything else is a development build: a published binary is something to download, and a development build is this project's own artefact to compile.
+
+`install-app` is a **conditional** phase, like the start and the boot, because installing is an act: a machine that already had the app never had an install to do, and a `skipped` row there would read as work that was owed. It is bootstrap, not charged to `--timeout`, for the same reason the boot is — a 423 MB download is cold this run caused. It registers **no cleanup**, and that is the one deliberate exception to "stop only what you started": that rule is about resources this run is _holding_, and an installed app is not held but given. Uninstalling it on the way out would take away what the next run needs and make it download the whole thing again.
+
+It is driven off the **device**, not off the boot. Hanging it on the boot was the first cut and it missed the ordinary case — a simulator somebody left running without Expo Go, where this run boots nothing and the deep link comes back `115` [observed, 2026-09-03]. `installNeededOnDevice` asks of whichever device the run settled on.
+
+Two subprocesses, and neither is `@expo/cli`'s: `expo-go download <platform> <sdk> --json` for the binary, and the platform's own installer for the device. The download goes to a temporary directory rather than the project, because `expo-go download` writes into the working directory. **The device has to be running first**: `simctl install` on a shut simulator answers `Unable to lookup in current state: Shutdown` (code 405), and `adb install` needs a device `adb` lists at all.
+
+The download is the _same_ subprocess on both platforms, with the same contract — an `.app` on iOS, a 186 MB `.apk` on Android, `{"path":…}` either way [observed, 2026-09-03]. Only the installer differs:
+
+| platform | installer                            | why those flags                                                                                                                                                                    |
+| -------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ios      | `xcrun simctl install <udid> <path>` | on a simulator that is already booted                                                                                                                                              |
+| android  | `adb -s <serial> install -r -d <apk>`| `-r` reinstalls and keeps the app's data, which is what makes a replacement an install rather than an uninstall; **`-d` is not optional** — without it a downgrade fails with `INSTALL_FAILED_VERSION_DOWNGRADE` |
+
+A downgrade is an ordinary case here rather than an odd one: a project on an older SDK than the emulator's Expo Go wants the _older_ release, because the release this SDK ships is the one under test (§The Expo Go on the device is not the Expo Go the SDK wants).
+
+`adb install` is also the one of the two that can **exit 0 and fail**: it prints `Failure [INSTALL_FAILED_…]` and returns 0 for a device that refused the package [observed, 2026-09-03]. So on Android the output decides and on iOS the exit code does. A caller reading only the exit code would report that install as a success, which is the class of false green this whole gate exists to remove.
+
+#### An install is not finished until the link works
+
+Two obstacles sit between a fresh install and an unattended run, and both were found by running it [observed — a fresh iOS 26.5 simulator, 2026-09-03].
+
+A freshly installed app has no approved URL schemes, so `simctl openurl exp://…` raises `Open in "Expo Go"?` and waits. Nobody presses Open, and the run reports — correctly and uselessly — that no app attached inside its budget. `@expo/cli` pre-writes the scheme-approval plist with a bplist library (`updateSimulatorLinkingPermissionsAsync`). The same key written **through the simulator's own `defaults`** needs no library and no plist parsing, and it is the version that works on a device that is already booted: the file written from outside is ignored, because the running preferences daemon has already read it.
+
+Then a first-ever Expo Go launch puts its developer-menu onboarding sheet over the app. The link works, the runtime attaches, the window reads — and the screenshot is a picture of the sheet, which §The smoke gate calls evidence and which is evidence of nothing, exactly as a splash screen is. The key is `expo-dev-menu`'s own, read out of this monorepo rather than guessed (`packages/expo-dev-menu/ios/Modules/DevMenuPreferences.swift` §isOnboardingFinishedKey), and it is written only for an Expo Go **this run just installed** — never for one the caller already had, whose preferences are theirs.
+
+Neither write can fail the install. Expo Go is on the device either way, and the worst case is the dialog or the sheet they exist to remove.
+
+**Both are iOS's**, and Android needs neither: Expo Go's `exp://` intent filter is in its manifest, so the link works the moment the package is there and there is no dialog to approve away [observed — emulator-5554, Android 36, 2026-09-03]. Nothing that only iOS needs is written to somebody's emulator.
+
+End to end on a simulator created for the purpose: `install-app 15.2s`, `app 7.2s`, and a screenshot of the app itself [observed, 2026-09-03].
+
+### The Expo Go on the device is not the Expo Go the SDK wants
+
+Expo Go being _installed_ is not Expo Go being the _right_ Expo Go [confirmed, Kudo, 2026-09-03]. Its native runtime is versioned with the SDK, and §The device that can open the app chose a simulator by asking which one _has_ `host.exp.Exponent` and then trusted whatever was there. A simulator nobody has opened for a while holds a build of something else, and it cannot load this project's bundle: live, the deep link opened and no app attached for the whole 120 s budget.
+
+Two questions, two sources, and neither is `@expo/cli`'s. What is installed comes from the device, with each platform's own reader. What the SDK wants comes from the `expo-go` CLI as a subprocess: `npx expo-go url <platform> <sdk> --json` answers `{"url":…}` at exit 0 and `{"error":…}` at exit 1, and the release URL carries the version. `@expo/cli` answers this in `ExpoGoInstaller`, which is precisely the internal llp/0001 constraint 5 forbids importing. It resolves per release line: 54 → 54.0.7, 55 → 55.0.34, 56 → 56.0.4, 57 → 57.0.9 [observed, 2026-09-03]. Android URLs carry the version in the same shape, so one parser answers for both.
+
+**Both platforms, and Android was missing** [confirmed, Kudo, 2026-09-03]. The first cut of this check only ever read a simulator's disk, which made `smoke --android` the exact false green the section was written against: an emulator holding an Expo Go from another SDK found no version to compare, reported `unknown`, and `unknown` says nothing and blocks nothing.
+
+| platform | is it installed                   | which version                              |
+| -------- | --------------------------------- | ------------------------------------------ |
+| ios      | the app bundle's `CFBundleIdentifier` on the simulator's disk (`installedApps.ts`) | `plutil -extract CFBundleShortVersionString` from that bundle's `Info.plist` |
+| android  | `adb shell pm path <id>`          | `adb shell dumpsys package <id>` → `versionName=` |
+
+The iOS pair is a filesystem read because both `simctl` tools that would answer refuse on a device that is not booted, and every device the _boot choice_ asks about is shut. Android is the opposite: a device `adb` lists is a device that is up, so the question goes to the package manager, which is the thing that actually knows.
+
+Each Android command was chosen by measuring it, not by preference [both observed — emulator-5554, Android 36, 2026-09-03]. `pm path` exits **1** for a package the device has not got, which is the only exit code in this area that means anything; `pm list packages <id>` was the obvious alternative and is worse twice over — it exits 0 either way, so the answer has to be parsed out of an empty string, and its argument is a _substring_ filter, so `host.exp.exponent` also matches `host.exp.exponent.debug`. `dumpsys package` exits **0 even for a package that is not installed**, printing `Unable to find package`, so there the exit code decides nothing and the absence of a `versionName` line is the whole answer.
+
+**Exact equality, and the wrong version is installed rather than graded.** This is the part a first cut got wrong. It split a different release line from an older patch of the same one so it could fail the run for the first and merely mention the second — and that distinction is the wrong tool, because the answer to a wrong version is not a better sentence about it. `@expo/cli` compares with `semver.eq` and, when it cannot prompt, installs the recommended release: _"better to have the correct version than not have Expo Go work at all"_. An agent loop is exactly the caller that cannot be prompted, so this check feeds §Putting Expo Go on a simulator that has not got it rather than the verdict. Newer than expected is a mismatch too, for the same reason it is there: the release this SDK ships is the one under test.
+
+Three verdicts:
+
+| verdict    | what it means                                          | what the run does         |
+| ---------- | ------------------------------------------------------ | ------------------------- |
+| `match`    | exactly the release this SDK ships                     | nothing                   |
+| `mismatch` | any other version — older, newer, any release line     | installs the right one    |
+| `unknown`  | offline, no `expo-go`, or a version nothing could read | nothing, and says nothing |
+
+`unknown` installing nothing is the same rule as `unknown` saying nothing: a machine with no route out has shown no reason to spend 423 MB, and a check that could not run must not become an action or a refusal. The install report names what it replaced — an addition and a replacement are different things to do to somebody's machine.
+
+What is left for the verdict is the run that was told to change nothing. Under `--no-start` nothing is installed, so a mismatched Expo Go is reported and blocks the pass: the runtime that answered is not the release this SDK ships, so the window is not about the app the caller would ship. Asked of the app that actually answered, on a local device — a development build is this project's own app and its version is the project's own business, and a cloud session's device is not this machine's.
+
+#### Nothing attached is a symptom, and the device holds the cause
+
+The above asks about an Expo Go among the dev server's debugger targets, which leaves the worst case of the whole section unanswered: **a stale Expo Go registers no target at all.** It takes the deep link, fails to load a bundle its runtime cannot run, and never appears in the list — so the check that looks in the list finds nothing to have an opinion about, and the run waits out its budget and reports the symptom.
+
+Measured at full price: an emulator on Expo Go 54.0.8 against an SDK 57 project, `--no-start`, **119 seconds** to report `exp://…/--/? was opened on the device and no app had attached when the budget ran out` — while the reason sat on the device the entire time. The follow-ups then suggested `navigate / --android`, which fails identically for ever, and a re-run of the gate. That is the exact mistake [[0009-smart-followups]] was written against, and it happened because the run did not know why [observed — emulator-5554, 2026-09-04].
+
+So on that path the same version question is asked of the **device** instead of the dev server (`SmokeDeps.explainSilentApp`). It costs nothing on the healthy path: the branch is only reached by a run that already has nothing to read. `unknown` explains nothing, and a sentence saying "the version could not be checked" beside a wait that expired would add words without adding a fact. The `app` row then carries both — the open succeeded and nothing came of it, _and_ why — because the second without the first would not say that the link was accepted.
+
+#### Two mismatches, two next actions
+
+The finding is carried as a value, not only as a sentence: `appMismatchKind` in the report and in `--json`. There are two kinds and their answers are opposite, and before the discriminator existed both got the advice for the first one:
+
+| kind                    | what it means                                                        | what fixes it                                                   |
+| ----------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `expo-go-incompatible`  | this project's native code is not in Expo Go's runtime, ever         | a development build — `dev --<platform> --yes`                  |
+| `expo-go-version`       | the project fits in Expo Go; the copy on the device is another SDK's  | the right copy, which the gate installs itself — `smoke --<platform>`, without `--no-start` |
+
+Sending the second caller to a native build would cost them twenty minutes to fix something a re-run fixes in seconds. The suggestion deliberately drops `--no-start` whether or not the caller passed it, because that flag is precisely what forbids the fix. And a consumer picks between the two actions from the kind rather than by matching English, which is [[0021-honest-reports]] §The rules: a follow-up that read the sentence would be one wording edit away from wrong advice.
+
+End to end, after the fix: the same emulator and project reported `the Expo Go on the device is 54.0.8, and this project's SDK ships 57.0.9 … registers no debugger target, which is what this wait was waiting for`, led with `smoke --android`, and that command installed 57.0.9 and had the app attached in 3.6 s [observed, 2026-09-04].
+
+The local read gates the network one. Reading the device's plist is a file read; resolving the release is a subprocess and a request. With nothing installed to compare there is nothing the second answer could be compared _to_, so it is not spent — which is also what keeps the e2e tier off the network, since its fixture plists carry no version key. `EXPO_OFFLINE` skips the lookup outright, the same courtesy `@expo/cli` extends. Measured at ~290 ms warm.
+
+End to end: a simulator carrying Expo Go 56.0.4 against an SDK 57 project got `install-app 2.3s · installed 57.0.9 …, replacing 56.0.4`, and the run passed [observed, 2026-09-03]. Before it, the same simulator produced a 120 s wait and exit 22.
+
+### The gate installs the app, whichever app it is
+
+`smoke` installs the app under test, and there is no longer a kind of app it will not install [confirmed, Kudo, 2026-09-04: _"smoke should be self-served without running dev first"_, _"if the app isn't installed, smoke should install it?"_].
+
+§Putting Expo Go on a simulator that has not got it did half of this and drew a boundary at the other half: Expo Go is a published binary to *download onto a device*, and a development build is this project's own artefact to *compile*, so the compile belonged to `dev`. The distinction is real. It is also not the caller's problem — an agent told `npx @expo/agent-cli dev --ios --yes` cannot take that instruction without leaving the loop this command exists to serve, which is exactly the dead end that section was written against. The boundary was ours to keep, so we kept it in the wrong place.
+
+Both are installs now, and the plan says which kind (`SmokeTarget.installWithKind`):
+
+| kind           | what runs                                              | budget           |
+| -------------- | ------------------------------------------------------ | ---------------- |
+| `expo-go`      | `expo-go download`, then `simctl install`/`adb install` | 30 min           |
+| `native-build` | `expo run:<platform> --no-bundler --device <id>`        | 30 min           |
+
+`--no-bundler` because this run already has a dev server, and a second Metro would be a second answer to "which bundle is the app under test running". `--device` so the app lands on the device the rest of the run is looking at. Both flags were read off the published binary and then run against it, per llp/0002. It is **not** `@expo/agent-cli dev`, which plans *and starts a dev server* — the thing this run has already done.
+
+The phase keeps the build-sized budget for both, because the larger of the two is a native compile and a download that finishes in twenty seconds is not made slower by a bound it never reaches. `install-app` stays a **conditional** phase and still registers no cleanup: an installed app is given, not held (§Putting Expo Go on a simulator that has not got it).
+
+**The exit code is not the judge of a native build.** `expo run:ios` finishes by activating the Simulator window through AppleScript, and on a Mac that has granted no Automation permission it throws — *after* the build has compiled and the app has been installed. Measured: non-zero exit with an `osascript` stack, and the app on the simulator [observed — live, 2026-09-04]. The window is nothing this run needs, because `smoke` opens the app itself with `simctl openurl`, which needs no grant — the same fact that keeps `--start` from carrying a platform flag (§The smoke gate). So the question is "is the app there", the device answers it, and the command's complaint is reported beside the success rather than instead of it.
+
+What is left of the refusal is the run that was told to change nothing. Under `--no-start` a device without the app is reported, and the report names the run that would install it — not `dev`.
+
+#### Android needs an application id the app config does not have
+
+The install fires only for an app this CLI can *name*, and on Android it usually could not [observed — Kudo, local run, 2026-09-04]. `readConfiguredAppId` read the static app config, where iOS finds `ios.bundleIdentifier` and Android finds `android.package` — which a great many projects never declare. So the same project answered an id for iOS and `null` for Android, and with no id there was nothing to check for, nothing to install, and nothing to explain: `smoke --ios` installed the development build and passed, while `smoke --android` booted an emulator, installed nothing, and reported only that the device had refused the deep link.
+
+`expo prebuild` writes the id into `android/app/build.gradle` whether or not it was declared, so that file is the second source, consulted when the config names none (`readPrebuiltAndroidApplicationId`). The declaration still wins, because a project that declares `android.package` has said what it wants. Still a static file read: no `app.config.js` is evaluated and no Gradle is run.
+
+#### An app that cannot be named still has to be installed
+
+**No app id is not "no app".** The install decision needs an application id to ask "is it already there", and for a native build the absence of one is the ordinary state of a project that has never been prebuilt for that platform: `android.package` is undeclared and there is no `android/app/build.gradle`, because `expo prebuild` is the thing that writes both. Treating that as "nothing to install" is the bug that outlived two attempts at fixing it — an emulator booted, nothing installed, the deep link refused, three runs in a row [observed — Kudo, 2026-09-04].
+
+The id is only needed for the *check*. `expo run:<platform>` needs none: it resolves the package itself, from the config it is about to write. So a run that cannot see whether the app is installed installs it — and after that first build the package **is** declared, so every later run resolves it and checks properly. One build, then normal.
+
+Expo Go is excluded, and the asymmetry is the point: its application ids are constants, so an Expo Go run that cannot name its app has a plan this could not read at all, and spending 423 MB of somebody's bandwidth on that basis would be a guess rather than an inference.
+
+#### A build changes the project it was read from
+
+The start phase can compile, and a compile rewrites the app config: `expo prebuild` writes `android.package` and `ios.bundleIdentifier` into it when they were not declared. So "which app is this run about" has two answers on a run that builds, and the gate was reading the first one.
+
+The target is resolved once and memoized, deliberately — a run that fails at the dev-server phase must not spawn a plan read (§It builds what the app needs, and says so first). Its **first** reader, though, is the start phase itself, which asks for `buildLocation` before it runs the plan. Everything after it then saw the project as it was before the build. On an Android project whose package the prebuild was about to write, that reading was `null`: no app id, so nothing to check for, nothing to install, and nothing to explain — the emulator booted, the install phase never fired, and the deep link was refused [observed — Kudo, local run, 2026-09-04].
+
+So a start that built forgets the target, and the next reader re-reads the project the build left behind. The memo still holds for every run that compiles nothing, which is almost all of them.
+
+The general shape is the one this document keeps meeting: **a fact captured before the thing it describes existed.** The pre-install app probe (§Putting Expo Go on a simulator that has not got it), the device-name index, and this. Each was a value read at the cheapest moment rather than at the moment it was needed.
+
+#### `--device` does not mean the same thing on the two platforms
+
+iOS takes a *"Device name, UDID, or generic"*; Android takes a *"Device name"* and nothing else. An `adb` serial handed to Android is answered `CommandError: Could not find device with name: emulator-5554` [observed — live, 2026-09-04], which cost a whole run to find. The names Android accepts are the ones its own device list builds [reference — `@expo/cli` `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync]: an emulator is its **AVD name**, from `adb -s <serial> emu avd name`, and a physical device is the `model:` field of `adb devices -l`. `androidDeviceNameAsync` asks those two questions in that order, and a device it cannot name gets no `--device` at all rather than a wrong one — the command then picks the attached device itself, and a wrong `--device` is a refusal.
+
+### A link nobody can approve is a link that never opens
+
+Two obstacles sit between an unattended `simctl openurl` and a readable app, and **both were fixed for Expo Go and left in place for every development build** [observed — Kudo, local run, 2026-09-04].
+
+**The dialog.** A scheme iOS has not seen approved raises `Open in "<app>"?` with Cancel and Open — and `simctl openurl` **exits 0** while that alert is up. The link was delivered; the alert is the app's front door; there is nobody in this loop to press Open. The run then waits out its whole attach budget and reports, correctly and uselessly, that no app attached. Worse, the alert is **sticky**: it survives `simctl terminate`, `uninstall` and `install`, because it belongs to SpringBoard rather than to the app, so one unanswered dialog poisons every later run on that simulator until something restarts SpringBoard.
+
+**The sheet.** A first-ever launch of any app that ships `expo-dev-menu` then puts its onboarding sheet over the screen — "This is the developer menu… Continue" — and there is nobody to press Continue either. §The smoke gate calls the picture evidence, and a picture of an onboarding sheet is evidence of nothing.
+
+§Putting Expo Go on a simulator that has not got it solved both, and scoped the fix to an app **this run had just installed** — on the reasoning that a preference belonging to an app the caller already had is theirs and not ours. That reasoning was wrong twice over:
+
+- `@expo/cli` settles the first half. `openUrlAsync` calls `updateSimulatorLinkingPermissionsAsync` before **every** `simctl openurl` for any `appId`, Expo Go or not [reference — `src/start/platforms/ios/simctl.ts`]. So writing it is parity, not a policy of ours.
+- The live run settles the second. With the approval fixed, a development build the caller had built themselves launched and sat behind the onboarding sheet for the whole 120-second budget. A first-run onboarding nobody has seen is not a preference anybody chose, and without it the loop cannot get past it.
+
+So both writes now happen for **every local iOS open**, for whichever app the link belongs to (`src/device/approveScheme.ts`), memoized per device and app so one `navigate` — which opens the launcher URL and then the route link — writes each once.
+
+The app id is what makes this work, and its absence is what made the first cut a silent no-op. An `appId` reached an open in this CLI from `--app-id` and from nothing else, because until now only Android needed one — there it scopes the intent. So the write was skipped on every ordinary run. It is resolved now: `--app-id`, then Expo Go for Expo Go's own two schemes, then `ios.bundleIdentifier` from the static app config. **And `projectRoot` had to be threaded to the local branch of the open**, which had only ever passed it on the cloud path — three layers of the same shape in one fix, each one a seam that existed with nothing feeding it.
+
+Measured end to end on iOS 26.5 against a development build with `react-native-pdf`: before, `Open in "pdfbuild"?` and exit 22 after 120 s; after, no dialog, no sheet, and the app's own screen in the screenshot [observed, 2026-09-04].
+
 ### The run brings its own environment
 
 Start what is missing, stop only what you started, leave what you found [confirmed, Kudo, 2026-08-29]. `--start` is the default. `--no-start` is the opt-out. A dev server that was already up is used and still running afterwards. One this run started is stopped in a cleanup. The same for the device. The run tracks "I started this" explicitly. It never infers it at cleanup time.
@@ -317,9 +559,33 @@ Start what is missing, stop only what you started, leave what you found [confirm
 
 Cleanup is registered before the resource is started, newest-first. A start that got halfway is still a resource this run is holding. Newest-first because the dev server is started before the device is booted, and leaving an app talking to a bundler that has gone is a worse state than the reverse. A cleanup that fails is reported and never folded into the outcome. It lands in `environment.cleanup`, as a `left behind` line, and on `cli:smoke` as `leftBehind`.
 
-### This command does not build
+### It builds what the app needs, and says so first
 
-The start phase asks `StartPlan.buildLocation` first and refuses with `npx @expo/agent-cli dev` when the plan would compile. Expo Go targets and a development build already installed for this fingerprint both answer null there, and both bootstrap in full.
+This section used to be called "This command does not build", and it was the boundary: the start phase asked `StartPlan.buildLocation` first and refused with `npx @expo/agent-cli dev` when the plan would compile. That refusal is a correct instruction and a dead end for the caller this CLI is for [confirmed, Kudo, 2026-09-03] — an agent cannot take it without leaving its loop, and the loop is the thing being served. So the plan runs, whatever it contains.
+
+**And the run says so before it waits.** A command that blocks silently for twenty minutes is indistinguishable from one that has hung, so the single thing the caller needs is the sentence that tells them which it is. It goes to stderr, because stdout carries one JSON object and nothing else (llp/0006 §Output contract) — `Log.progress` exists for exactly this and is neither `log`, which would break that contract, nor `warn`, which colours yellow for something that is not going wrong. `cli:smoke_building` carries the same fact for a reader of the event stream, emitted before the build rather than after it.
+
+A plan that compiles gets a budget the shape of a compile: `BUILD_DEV_SERVER_TIMEOUT_MS`, thirty minutes, against the two the ordinary start gets. The number is the shape of the work rather than a measurement — a cold `expo run:ios` is a pod install and a full native compile — and the cost of a bound that is too short is the worst failure this command has, twenty minutes spent and then a timeout reported for a build that was going fine.
+
+The follow-ups change with it. "Start one in the foreground and watch it fail" is good advice for a start that took seconds and expensive advice for one that took minutes, so a run that built leads with `dev:logs`: the build already wrote down why it stopped, and reading that costs nothing where another build costs the whole build. This is llp/0009's no-useless-re-run rule met from the other side — a re-run that _can_ change the state, at a price the reader should not have to pay to find out why.
+
+`buildAttempted` is on the run for that decision, and set whether the start succeeded or failed: a build that failed is exactly the case where the cheapest next step differs from the ordinary one.
+
+#### A refused connection is not an answer
+
+**A thirty-minute budget is worth nothing if the wait it bounds returns in ten milliseconds**, and for the first version of this section that is what happened [observed — Kudo, local run, 2026-09-04].
+
+`waitForBundlerReadyAsync` made **one** request and no loop. The reasoning was sound as far as it went: `//status` answers only once the bundler has finished, so the request *is* the wait, and a poll would be a second mechanism for a thing HTTP already does. That holds exactly while something is listening on the port.
+
+The case it fails in is the expensive one this section is about. `expo run:ios` publishes the dev-server lock at the **start** of its dev-server step — the same F125 fact §Daemonization records for the phase reporting — and the port does not open until Xcode has finished, minutes later. The fetch was refused in about ten milliseconds, `waitForBundlerReadyAsync` returned `ready: false, timedOut: false`, and the run reported `a dev server could not be started (… --wait-ready gave up after 10ms)`. `smoke --ios` on a project that had just gained a native module failed in 23 seconds having compiled nothing, while the build it had announced carried on in the background.
+
+So a **connection-level** failure is retried, once a second, until the budget runs out. Three things are deliberate about the shape:
+
+- **Only a refusal retries.** A server that answered has answered, whatever it said — a 500, a body that is not `packager-status:running`, a TLS failure — and asking again would spend the budget on a settled question. `ENOTFOUND` is specifically not retried: a hostname that does not resolve will not start resolving, and waiting thirty minutes for it would turn a typo into a hang.
+- **The codes were measured, not assumed.** `undici` reports every network failure as `TypeError: fetch failed`, so the message says nothing; the syscall code is on `.cause.code`, and `localhost` — which resolves to two addresses — gives an `AggregateError` whose own `errors` carry one code each [observed, 2026-09-04].
+- **The timeout says which thing happened.** "The bundler was still working" is false when nothing ever listened: there was no bundler. A budget that expires with no answer at all reports `nothing was listening on … for Nms`, which is a dev server that never finished starting (see [[0021-honest-reports]] §The rules).
+
+The test that should have caught this existed and did not, which is worth more than the fix. `reports an unreachable dev server instead of throwing` pointed at **port 1** — and `undici` rejects port 1 as `bad port` before it opens a socket, so the case never exercised a refused connection at all. It is now four cases against a real server that starts listening a second and a half late: the retry that finds it, the budget that expires without it, the caller's `signal` that ends the loop early, and the hostname that must not be waited out.
 
 The bootstrap is not charged to `--timeout`. A cold simulator takes about a minute. A cold first bundle takes longer. Each act has a budget of its own: 120 s for the dev server, 120 s for an iOS boot, 240 s for an Android one. This run pays for the cold it caused. First compile (`FIRST_BUNDLE_TIMEOUT_MS`, 3 min) when it started that dev server. First launch and attach (`APP_ATTACH_TIMEOUT_MS`, 2 min) when it started the dev server or booted the device. That attach budget is taken once and shared by the open and the `app` phase wait, so a cold run that never attaches answers after two minutes rather than four. First readable runtime (`RUNTIME_READY_TIMEOUT_MS`, 30 s) when it opened the app. `--timeout` bounds the reads.
 
@@ -341,6 +607,8 @@ Live evidence for the eight-phase table, Expo Go Android at 22, and a developmen
 
 Every refusal below was measured against Expo Go for Android. On a development build of the same project, on the same emulator, `runtime:eval` returns values, `runtime:tree` reads the screen, `runtime:tap` and `runtime:type` drive it, `runtime:errors` reports `runtimeReadable: true`, and `smoke --android` exits 0. The sentences are about an app, not about a platform.
 
+Expo Go for Android now reaches the gate on the same footing as iOS in everything except the debugger: §Which platform is the caller's to say makes `--android` a thing the caller states rather than a thing the host guesses, and the two Expo Go sections above install and version-check through `adb` rather than refusing by name.
+
 Expo Go for Android ships a Hermes without any CDP debugger [observed, `HermesRuntime[RNBridgeless] does not support debugging over the Chrome DevTools Protocol`]. `Runtime.enable`, `Log.enable`, `Network.enable`, and `Debugger.enable` acknowledge. `Runtime.evaluate` answers `-32601`. The ack is what makes an empty window look like a healthy app. Collectors probe the runtime as they open their window, with `Log.enable` for the announcement and one `Runtime.evaluate` of `1` for the code. The verdict is `RuntimeDebuggerCapability`. `RUNTIME_EVALUATE_UNSUPPORTED` is reached by asking, not by knowing the platform.
 
 The target selector skips only on transport failure, and ranks `-32601` targets behind answering ones. It no longer drops such targets. `CdpRuntimeErrorCollector` forwards every `CdpClientOptions` key, including `platform` and `deviceIndex`.
@@ -352,6 +620,8 @@ Scoping reaches `requireConnectedAppAsync`, `waitForAppConnectionAsync`, `CdpCli
 The bundle-check platform is derived from the apps that are actually connected (`resolveBundleCheckPlatformsAsync`). A named `--platform` wins. One connected platform is that platform. Two are both. Nothing connected leaves the fixed default, and the report says so. A broken bundle decides the run whichever platform it was found on.
 
 `adb` is resolved from `ANDROID_HOME`, then `ANDROID_SDK_ROOT`, then `PATH`, then this platform's default install location (`src/device/adb.ts`). A tool failure is `ADB_NOT_RUNNABLE`. It names every place that was looked. "No device" is reachable only once `adb` has run and answered.
+
+Which apps a device has, and which version of one, is `src/device/androidApps.ts` — the Android counterpart of the simulator-disk reader, and the source §The Expo Go on the device is not the Expo Go the SDK wants and §Putting Expo Go on a simulator that has not got it now use on this platform. Both of its answers distinguish "has not got it" from "could not look", because the caller that acts on the first downloads a few hundred megabytes.
 
 On Android, `am force-stop` exits 0 whether or not the app was running. `stopAppOnDeviceAsync` asks `adb shell pidof <appId>` before the stop. A pid makes `wasRunning` an observation. Exit 1 with nothing said makes it `false`. A `pidof` that could not run makes `verified` false and `wasRunning` null. The `adb shell` returns as soon as ActivityManager has taken the request, so `stopped: true` means the stop ran. A caller that needs the process gone has to look.
 

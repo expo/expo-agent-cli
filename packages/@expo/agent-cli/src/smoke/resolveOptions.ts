@@ -77,6 +77,23 @@ export interface SmokeOptions {
   devServerUrl: string | null;
   /** Check `--route` against the project's routes first, cleared by `--no-route-check`. */
   routeCheck: boolean;
+  /**
+   * Put an app that was already attached back on the code on disk before reading it. Cleared by
+   * `--no-reload`.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+   * On by default because the moment this command is for is the moment after an edit, and at that
+   * moment the app is already running the bundle from *before* it. A run that read that session
+   * answered about code the caller had already replaced — exit 0 over a `throw` at the top of the
+   * component, with the previous screen in the screenshot [observed — iOS 26.5 simulator, Expo Go
+   * SDK 57, 2026-09-03].
+   *
+   * The opt-out is for the one question a reload destroys: "is the app throwing *right now*, where
+   * I navigated it to by hand". A reload sends it back to the initial route, so that caller has to
+   * be able to say no — and the `reload` phase row then says out loud which of the two questions
+   * the run answered.
+   */
+  reload: boolean;
   /** Print the result as one JSON object instead of the human summary (`--json`). */
   json: boolean;
   /** Attach the state-aware next actions to the output, cleared by `--no-followups`. */
@@ -101,6 +118,10 @@ const SMOKE_ARGS = {
   // Sugar for the URL above (llp/0005 §One preflight for the runtime family).
   '--port': String,
   '--no-route-check': Boolean,
+  // Accepted as well as its negation, for the same reason `--start` is: it names what the command
+  // already does, and it is on command lines people write to be explicit.
+  '--reload': Boolean,
+  '--no-reload': Boolean,
   '--json': Boolean,
   '--no-followups': Boolean,
 };
@@ -116,9 +137,17 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
 
   // @ref llp/0010-agent-conventions.rfc.md §Registry rules. The route is a flag, not a
   // positional: this command's subject is the app, and a bare word is a caller who meant --route.
+  //
+  // The hint carries the platform too, and that is a fix rather than decoration
+  // [found by sweeping what this change teaches, 2026-09-04]: it used to print
+  // `smoke --route /notes`, which since the platform became required is a correct instruction and a
+  // second error — a caller who followed it would be refused again. The platform is read
+  // **leniently** here, without the refusal, because this error is about the stray word and a
+  // caller with two things wrong should be told the more specific one first.
   if (args._.length > 0) {
+    const named = namedPlatform(args) ?? 'ios|--android';
     throw strayArgumentError('smoke', args._, {
-      hint: `to open a route before the error window, pass it as a flag: ${PROGRAM_PREFIX} smoke --route ${args._[0]}`,
+      hint: `to open a route before the error window, pass it as a flag: ${PROGRAM_PREFIX} smoke --${named} --route ${args._[0]}`,
     });
   }
 
@@ -131,6 +160,17 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
         `--screenshot and --no-screenshot ask for opposite things, so this run has no rule for what to do.`,
         `Why: --screenshot names where to write the picture and --no-screenshot says not to take one; there is no reading of the pair that does both.`,
         `How: pass one. Use --screenshot ${args['--screenshot']} to choose the path, or --no-screenshot to skip the capture and everything it needs a device for.`,
+      ].join('\n')
+    );
+  }
+
+  if (args['--reload'] && args['--no-reload']) {
+    throw new CommandError(
+      'BAD_ARGS',
+      [
+        `--reload and --no-reload ask for opposite things, so this run has no rule for what to do.`,
+        `Why: --reload says to put an app that is already running back on the code on disk before reading it, and --no-reload says to read it on the bundle it already has; there is no reading of the pair that does both.`,
+        `How: pass one, or neither. Reloading an app this run found already attached is what this command does by default, so --reload is only the same thing spelled out loud.`,
       ].join('\n')
     );
   }
@@ -169,13 +209,34 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
     screenshot: !args['--no-screenshot'],
     devServerUrl: resolveDevServerTarget(args['--dev-server-url'], args['--port'], 'smoke'),
     routeCheck: !args['--no-route-check'],
+    reload: !args['--no-reload'],
     json: !!args['--json'],
     followups: !args['--no-followups'],
   };
 }
 
 /**
+ * The platform this command line names, or null when it names none. Never throws.
+ *
+ * For the messages that want to *quote* a usable command line rather than decide the run's
+ * platform — see the stray-argument hint above. {@link resolveSmokePlatform} is the deciding one.
+ */
+function namedPlatform(args: { [flag: string]: unknown }): string | null {
+  if (args['--ios']) {
+    return 'ios';
+  }
+  if (args['--android']) {
+    return 'android';
+  }
+  const named = args['--platform'] == null ? null : String(args['--platform']);
+  return named === 'ios' || named === 'android' ? named : null;
+}
+
+/**
  * Read the platform flags: `--ios`/`--android`, or `--platform <name>`.
+ *
+ * **One of them is required** [confirmed, Kudo, 2026-09-03], which is the one flag in this command
+ * that has no default. @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
  *
  * **`--platform web` is refused**, and this is the one place the command's flag set is narrower
  * than a bundler wait's. The reason is llp/0010 §An empty target list is inconclusive: `/json/list` is
@@ -185,7 +246,8 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
  * That section settled the same shape for `--require-app --platform web`, and for the same reason
  * it is exit `1` rather than `22`: no amount of looking again makes a browser answer a debugger.
  *
- * @throws {CommandError} `BAD_ARGS` for two platforms at once, or for one with no runtime.
+ * @throws {CommandError} `BAD_ARGS` for no platform at all, two platforms at once, or one with no
+ * runtime.
  */
 function resolveSmokePlatform(args: { [flag: string]: unknown }): SmokePlatform {
   const named = args['--platform'] == null ? null : String(args['--platform']);
@@ -225,7 +287,24 @@ function resolveSmokePlatform(args: { [flag: string]: unknown }): SmokePlatform 
     );
   }
 
-  // No flag at all: iOS on a Mac, where an Expo project usually has a simulator open, and Android
-  // everywhere else — the same default `resolveDeviceAsync` applies when it looks for a device.
-  return (named ?? flagged ?? (process.platform === 'darwin' ? 'ios' : 'android')) as SmokePlatform;
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  //
+  // No flag at all used to mean iOS on a Mac and Android everywhere else. That is a guess about
+  // the *host*, and every question this command answers is about a *device* — so the two came
+  // apart on the ordinary Mac with an Android emulator running and nothing else, where the guess
+  // produced a real verdict about a platform the caller had not asked about.
+  if (named == null && flagged == null) {
+    // One line, in the shape `navigate` already uses for a missing route. The three-part
+    // What/Why/How form belongs to a failure whose cause is not obvious from the command line;
+    // a required flag that was not passed is obvious, and the reasoning above is for a reader of
+    // this file rather than for somebody who just needs to add `--ios` [confirmed, Kudo, 2026-09-04].
+    const error = new CommandError(
+      'BAD_ARGS',
+      `Missing platform. Usage: ${PROGRAM_PREFIX} smoke --ios|--android, for example: ${PROGRAM_PREFIX} smoke --ios`
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} smoke --ios`;
+    throw error;
+  }
+
+  return (named ?? flagged) as SmokePlatform;
 }

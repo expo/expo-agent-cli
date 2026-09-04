@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 
+import { resetApprovedSchemes } from '../../device/approveScheme';
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
 import { navigateAsync } from '../navigateAsync';
 import type { NavigateOptions } from '../resolveOptions';
@@ -24,9 +25,26 @@ interface SpawnAnswer {
 }
 
 /** Answer each `spawn` call in order, and record the argv it was called with. */
+/**
+ * Answer the device commands in order, and answer a simulator preference write with success.
+ *
+ * @ref src/device/approveScheme.ts — the reason the queue skips them. A local iOS open writes the
+ * scheme approval and the dev-menu onboarding flag first, so a positional queue written for
+ * `[probe, open]` had its `open` answer land on a `defaults write` and the open then got the
+ * default success. Every existing queue in this file is about the device commands, so those are
+ * what it feeds; the writes always succeed, which is also what they do in practice.
+ */
 function mockSpawnQueue(answers: SpawnAnswer[]) {
   let call = 0;
-  vi.mocked(spawn).mockImplementation((() => {
+  vi.mocked(spawn).mockImplementation(((_bin: string, args: string[]) => {
+    if (Array.isArray(args) && args.includes('defaults')) {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => child.emit('close', 0, null));
+      return child as never;
+    }
     const answer = answers[call++] ?? {};
     const child = Object.assign(new EventEmitter(), {
       stdout: new EventEmitter(),
@@ -45,6 +63,23 @@ function mockSpawnQueue(answers: SpawnAnswer[]) {
 function spawnedArgv(index: number): string[] {
   const [bin, args] = vi.mocked(spawn).mock.calls[index] as unknown as [string, string[]];
   return [bin, ...args];
+}
+
+/**
+ * The argv of the **link open**, found by what it is rather than by where it is.
+ *
+ * @ref src/device/approveScheme.ts — the reason this exists. A local iOS open now writes two
+ * simulator preferences first (the scheme approval and the dev-menu onboarding flag), so the open
+ * is no longer at a fixed index and a positional assertion silently moved onto a `defaults write`.
+ * Every case whose subject is "which URL reached the device" asks for it this way, and only the
+ * cases whose subject is the *order of the preparation* still count positions.
+ */
+function openedArgv(): string[] {
+  const found = vi
+    .mocked(spawn)
+    .mock.calls.map(([bin, args]) => [bin as string, ...((args as string[]) ?? [])])
+    .find((argv) => argv.includes('openurl') || argv.includes('am'));
+  return found ?? [];
 }
 
 const BOOTED_SIMULATOR = JSON.stringify({
@@ -114,6 +149,10 @@ function printed(): string {
 let originalFetch: typeof fetch | undefined;
 
 beforeEach(() => {
+  // @ref src/device/approveScheme §written — the two preference writes are memoized per process,
+  // so a case that counts spawns has to start from an empty memo (`clearMocks` does not touch
+  // module state).
+  resetApprovedSchemes();
   originalFetch = globalThis.fetch;
   // `clearMocks` empties these between tests, and "no lock, no logged port" is the default state.
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
@@ -138,11 +177,40 @@ describe(navigateAsync, () => {
       [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
     });
     mockDevServer([EXPO_GO_TARGET]);
+    // Four spawns now, not two: the device probe, the **scheme approval**, the **dev-menu
+    // onboarding flag**, then the open (@ref src/device/approveScheme.ts). Both preferences are
+    // written for the same reason and for any app, Expo Go or a development build: an unapproved
+    // scheme raises `Open in "<app>"?` while `simctl openurl` exits 0, and an unseen onboarding
+    // sheet then covers the app that did launch.
     mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: 'success' }]);
 
     await expect(navigateAsync(projectRoot, options())).resolves.toBe(0);
 
     expect(spawnedArgv(1)).toEqual([
+      'xcrun',
+      'simctl',
+      'spawn',
+      'IOS-1',
+      'defaults',
+      'write',
+      'com.apple.launchservices.schemeapproval',
+      'com.apple.CoreSimulator.CoreSimulatorBridge-->exp',
+      '-string',
+      'host.exp.Exponent',
+    ]);
+    expect(spawnedArgv(2)).toEqual([
+      'xcrun',
+      'simctl',
+      'spawn',
+      'IOS-1',
+      'defaults',
+      'write',
+      'host.exp.Exponent',
+      'EXDevMenuIsOnboardingFinished',
+      '-bool',
+      'true',
+    ]);
+    expect(spawnedArgv(3)).toEqual([
       'xcrun',
       'simctl',
       'openurl',
@@ -186,7 +254,7 @@ describe(navigateAsync, () => {
       expect(report.url).toBe('exp://127.0.0.1:8099/--/profile/42');
       expect(report.devServerUrl).toBe('http://127.0.0.1:8099');
       expect(report.devServerSource).toBe('lock');
-      expect(spawnedArgv(1).at(-1)).toBe('exp://127.0.0.1:8099/--/profile/42');
+      expect(openedArgv().at(-1)).toBe('exp://127.0.0.1:8099/--/profile/42');
     });
 
     it(`should still let --dev-server-url name the dev server exactly`, async () => {
@@ -294,7 +362,7 @@ describe(navigateAsync, () => {
       )
     ).resolves.toBe(0);
 
-    const argv = spawnedArgv(1);
+    const argv = openedArgv();
     expect(argv[0]).toBe('adb');
     expect(argv).toContain(`'demoapp://profile/42'`);
     expect(argv.at(-1)).toBe('com.example.demo');
@@ -310,7 +378,7 @@ describe(navigateAsync, () => {
 
     await expect(navigateAsync(projectRoot, options({ scheme: 'override' }))).resolves.toBe(0);
 
-    expect(spawnedArgv(1).at(-1)).toBe('override://profile/42');
+    expect(openedArgv().at(-1)).toBe('override://profile/42');
   });
 
   it(`should report a device that refused the deep link`, async () => {
@@ -322,9 +390,7 @@ describe(navigateAsync, () => {
     mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '', exitCode: 1 }]);
 
     await expect(navigateAsync(projectRoot, options())).resolves.toBe(1);
-    expect(vi.mocked(console.error).mock.calls.join('\n')).toContain(
-      'did not open the deep link'
-    );
+    expect(vi.mocked(console.error).mock.calls.join('\n')).toContain('did not open the deep link');
   });
 
   it(`should print one JSON object and nothing else with --json`, async () => {
@@ -500,9 +566,7 @@ describe(navigateAsync, () => {
     expect(console.log).toHaveBeenCalledTimes(1);
     expect(JSON.parse(printed()).exitCode).toBe(1);
     // The what/why/how of a failure stays human text, on stderr.
-    expect(vi.mocked(console.error).mock.calls.join('\n')).toContain(
-      'did not open the deep link'
-    );
+    expect(vi.mocked(console.error).mock.calls.join('\n')).toContain('did not open the deep link');
   });
 
   it(`should explain an unresolvable scheme instead of opening anything`, async () => {
@@ -1082,7 +1146,8 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
    * about *which links were opened* must not be a test of how many probes ran.
    */
   function openedUrls(): string[] {
-    return vi.mocked(spawn)
+    return vi
+      .mocked(spawn)
       .mock.calls.map(([, args]) => (args as string[]).join(' '))
       .filter((line) => line.includes('://'))
       .map((line) => line.match(/'([^']*:\/\/[^']*)'/)?.[1] ?? line);
@@ -1150,7 +1215,8 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
       navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 5_000 }))
     ).resolves.toBe(0);
 
-    const launcher = vi.mocked(spawn)
+    const launcher = vi
+      .mocked(spawn)
       .mock.calls.map(([, args]) => (args as string[]).join(' '))
       .find((line) => line.includes('expo-development-client'));
     expect(launcher).toContain(`-n 'com.example.demo/.MainActivity'`);

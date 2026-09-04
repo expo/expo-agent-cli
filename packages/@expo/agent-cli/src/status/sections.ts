@@ -14,6 +14,7 @@ import { decideStartPlan } from '../plan/decide';
 import type { LastBuildRecord } from '../plan/lastBuild';
 import type { LastBuildFingerprints, NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
+import { decidesAgainstExpoGo } from '../project/expoGo';
 import type { FingerprintResult } from '../project/fingerprint';
 import type { ProjectState, StartPlan } from '../project/types';
 import type { DevServerProbe, DevServerSource } from '../runtime/devServer';
@@ -68,6 +69,33 @@ const NOT_AN_APP_COMMAND = `${PROGRAM_PREFIX} new my-app`;
  * that `status` keeps its follow-ups silent to avoid.
  */
 const VERIFY_COMMAND = `${PROGRAM_PREFIX} smoke`;
+
+/**
+ * The gate, with the platform it should be run for.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+ *
+ * `smoke` requires `--ios` or `--android` now, so a bare {@link VERIFY_COMMAND} is a suggestion
+ * that exits 1 — which is the worst kind of thing for `status.next` to print, because `next` is
+ * read as "run this" [found by the tier-0 evals, 2026-09-04].
+ *
+ * The platform is **stated rather than defaulted**, and that is the whole point: this is text the
+ * caller reads and can change, where the old default inside `smoke` was invisible. It is chosen
+ * from the strongest evidence available, in this order:
+ *
+ *  1. A device this machine actually has booted, which is the fact `smoke` itself would have to go
+ *     looking for. A machine with an Android emulator running gets `--android`.
+ *  2. Otherwise {@link resolveDefaultPlatform}, which reads the project's own checked-in native
+ *     directories before it falls back to the host — the same answer `status` already prints for
+ *     the `dev` plan, so the two lines of one report cannot name two platforms.
+ */
+function verifyCommand(device: LocalDeviceStatus | null, state: ProjectState): string {
+  const booted =
+    device?.state === 'present' && (device.platform === 'ios' || device.platform === 'android')
+      ? device.platform
+      : null;
+  return `${VERIFY_COMMAND} --${booted ?? resolveDefaultPlatform(state)}`;
+}
 
 /**
  * The command to name when a dev server is up and nothing is attached to it.
@@ -410,6 +438,10 @@ function resolveConnectUrls(
     targetAppIds,
     hasNativeDirs: state.nativeDirs.ios || state.nativeDirs.android,
     usesDevClient: state.usesDevClient,
+    // Free here: the probe already answered it, and this is the same fact the `expo go` row of this
+    // very report prints. A connect URL for Expo Go printed under "expo go not compatible" is this
+    // report arguing with itself (llp/0021 §The rules).
+    expoGoCompatible: decidesAgainstExpoGo(state.expoGo),
   });
   const tunnelHost = devServer.tunnelUrl ? hostOf(devServer.tunnelUrl) : null;
   return buildConnectUrls({
@@ -561,11 +593,13 @@ function verifyAction(
   if (devServer.appsConnected > 0) {
     return cloudLoop
       ? {
-          command: `${VERIFY_COMMAND} --cloud`,
+          // An EAS Simulator session is iOS (`resolveDeviceAsync`'s cloud fallback asks for iOS and
+          // nothing else), so the platform here is a fact about the session rather than a choice.
+          command: `${VERIFY_COMMAND} --ios --cloud`,
           why: 'a dev server is running with an app connected and this project has an EAS Simulator session, so the gate runs against that session — a plain "smoke" would look for a simulator on this machine',
         }
       : {
-          command: VERIFY_COMMAND,
+          command: verifyCommand(device, state),
           why: 'a dev server is running with an app connected, so check that its bundle builds instead of starting a second server',
         };
   }

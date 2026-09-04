@@ -9,6 +9,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { adbNotRunnableError, resolveAdb, type AdbResolution } from '../device/adb';
+import { approveSchemeForUrlAsync } from '../device/approveScheme';
 import {
   buildCloudOpenUrlArgs,
   easCliMissingError,
@@ -448,6 +449,26 @@ export async function openUrlOnDeviceAsync(
       stderr: result.stderr,
       exitCode: result.exitCode,
     };
+  }
+
+  // @ref src/device/approveScheme.ts
+  //
+  // Before the open, and for every local iOS open rather than only for an app this CLI installed.
+  // A scheme iOS has not seen approved raises `Open in "<app>"?` and `simctl openurl` **exits 0**
+  // while that alert is up — so the link reads as delivered, nothing attaches, and the run waits
+  // out its budget against a dialog nobody is there to answer [observed — a development build,
+  // 2026-09-04]. This is what `@expo/cli` does before every one of its own opens.
+  // The cloud branch returned above, so anything still here is a local device.
+  if (params.platform === 'ios') {
+    // This module's own `spawnCaptureAsync`, handed over rather than left to the approval's
+    // default: there is one spawn seam per call path, so a caller that has stubbed the tool for
+    // this file has stubbed it for the write too.
+    await approveSchemeForUrlAsync(params.deviceId, params.url, params.appId, {
+      spawn: spawnCaptureAsync,
+      // The project, because `--app-id` is almost never passed and the app config is what actually
+      // names the bundle identifier (@ref src/device/approveScheme §appIdForScheme).
+      projectRoot: params.projectRoot ?? undefined,
+    });
   }
 
   const { stdout, stderr, exitCode, spawnError } = await spawnCaptureAsync(bin, args);

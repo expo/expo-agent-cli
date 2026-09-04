@@ -25,6 +25,12 @@ function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput 
     // Named, always: a re-run that drops the platform is a different run (F58).
     platform: 'ios',
     cloud: false,
+    // The default is the common case after the `reload` phase: the app was put on the code on disk
+    // before it was read, so the window these follow-ups are about is already trustworthy.
+    reloadDisposition: 'reloaded',
+    appMismatch: null,
+    appMismatchKind: null,
+    buildAttempted: false,
     ...overrides,
   };
 }
@@ -135,8 +141,13 @@ describe(buildSmokeFollowUps, () => {
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload — an error window is a property of the
   // app's session and the session outlives a fix, so a reload leads.
+  //
+  // **For a run that has not already performed one.** The gate grew a `reload` phase of its own
+  // (§The app under test is the code on disk), so the state this advice is for is now the state of
+  // a run that declined it or could not prove it. The cases either side of that are next to this
+  // file's `after the reload phase` block.
   it(`leads a non-empty window with the reload`, () => {
-    expect(commands({ failing: 1, outcome: 'failed' })[0]).toBe(
+    expect(commands({ failing: 1, outcome: 'failed', reloadDisposition: 'declined' })[0]).toBe(
       'npx @expo/agent-cli runtime:reload --ios'
     );
   });
@@ -215,5 +226,183 @@ describe('a run that asked for the cloud', () => {
         expect(command).not.toContain('--cloud');
       }
     }
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §The app under test is the code on disk
+//
+// The `reload` phase makes one of these follow-ups stale. `runtime:reload` led the list of a
+// non-empty error window because the window belonged to a session that outlived the fix — and the
+// gate now performs that reload itself, so telling the caller to do it first is advice about a
+// state this run has already left. It is still the right first step for the one run that declined.
+describe(`${buildSmokeFollowUps.name} after the reload phase`, () => {
+  const failed = { failing: 1, outcome: 'failed' as const };
+
+  it(`does not suggest a reload the run already performed`, () => {
+    expect(commands({ ...failed, reloadDisposition: 'reloaded' })).not.toContain(
+      'npx @expo/agent-cli runtime:reload --ios'
+    );
+  });
+
+  // An app this run opened fetched the served bundle on its way up, so the window is of the code on
+  // disk for that run too.
+  it(`does not suggest a reload for an app this run opened`, () => {
+    expect(commands({ ...failed, reloadDisposition: 'not-needed' })).not.toContain(
+      'npx @expo/agent-cli runtime:reload --ios'
+    );
+  });
+
+  // `--no-reload`. The window really is of a session that may predate the fix, which is the state
+  // the advice was written for, so it leads the list exactly as before.
+  it(`still leads with a reload for a run that declined one`, () => {
+    expect(commands({ ...failed, reloadDisposition: 'declined' })[0]).toBe(
+      'npx @expo/agent-cli runtime:reload --ios'
+    );
+  });
+
+  // An unproved reload leaves the same doubt as a declined one: nothing established which session
+  // was read, so the reload is still the first thing to do about it.
+  it(`still leads with a reload for a run whose reload was not proved`, () => {
+    expect(commands({ ...failed, reloadDisposition: 'unproved' })[0]).toBe(
+      'npx @expo/agent-cli runtime:reload --ios'
+    );
+  });
+
+  // And what a run that already reloaded gets instead: the stacks, which is the thing the summary
+  // does not have.
+  it(`leads with the whole stacks when the window is already trustworthy`, () => {
+    expect(commands({ ...failed, reloadDisposition: 'reloaded' })[0]).toBe(
+      'npx @expo/agent-cli runtime:errors --ios --duration 5s --json'
+    );
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+//
+// The one inconclusive state a re-run can never change, which is the rule this file exists for
+// (llp/0009, F41/F48-8). Expo Go answered for a project whose native code it does not contain: no
+// amount of looking again makes that runtime the right one, and the only thing that helps is making
+// the build that can run the project.
+describe(`${buildSmokeFollowUps.name} for an app that cannot run the project`, () => {
+  const mismatched = {
+    outcome: 'inconclusive' as const,
+    appMismatch: 'the app that answered is Expo Go, and this project cannot run in Expo Go',
+    appMismatchKind: 'expo-go-incompatible' as const,
+  };
+
+  it(`leads with the build that can run the project`, () => {
+    expect(commands(mismatched)[0]).toBe('npx @expo/agent-cli dev --ios --yes');
+  });
+
+  // The rule itself: never offer a re-run of this gate for a state a re-run cannot change.
+  it(`never offers to run the gate again`, () => {
+    expect(commands(mismatched).join(' ')).not.toContain('agent-cli smoke');
+  });
+
+  // And it keeps the platform, like every other follow-up here (F58).
+  it(`names the platform the run was about`, () => {
+    expect(commands({ ...mismatched, platform: 'android' })[0]).toBe(
+      'npx @expo/agent-cli dev --android --yes'
+    );
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+//
+// The **other** mismatch, and the reason `appMismatchKind` exists
+// (@ref src/smoke/phases §SmokeAppMismatchKind). Before it did, both kinds got the advice above —
+// which is right for a project Expo Go cannot run and wrong for a project it can: the answer to the
+// wrong *version* of Expo Go is the right version, which this gate installs for itself. Sending
+// that caller to a native build would cost twenty minutes to fix what a re-run fixes in seconds.
+describe(`${buildSmokeFollowUps.name} for the wrong version of Expo Go`, () => {
+  const stale = {
+    outcome: 'inconclusive' as const,
+    appMismatch: 'the Expo Go on the device is 54.0.8, and 57.0.9 is the release this SDK ships',
+    appMismatchKind: 'expo-go-version' as const,
+  };
+
+  it(`leads with the run that installs the release this SDK ships`, () => {
+    expect(commands(stale)[0]).toBe('npx @expo/agent-cli smoke --ios');
+  });
+
+  // The one case in this file where re-running the gate *is* the answer, because the re-run is not
+  // a second look — it is the install. And the flag that forbids the install is deliberately left
+  // off, whether or not the caller passed it.
+  it(`drops --no-start from the suggestion, because that flag is what forbids the fix`, () => {
+    expect(commands({ ...stale, bootstrap: false }).join(' ')).not.toContain('--no-start');
+  });
+
+  it(`never suggests a native build for a project that fits in Expo Go`, () => {
+    expect(commands(stale).join(' ')).not.toContain('dev --ios --yes');
+  });
+
+  // And it keeps the platform and the route, like every other follow-up here (F58).
+  it(`keeps the platform and the route the run was about`, () => {
+    expect(commands({ ...stale, platform: 'android', route: '/notes' })[0]).toBe(
+      'npx @expo/agent-cli smoke --android --route /notes'
+    );
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+//
+// The third kind of mismatch, and the one a live run met: the device has not got the app, so the
+// deep link was refused and nothing could attach. This used to lead with `navigate / --ios`, which
+// is refused in exactly the same way every time — the llp/0009 mistake, reached because the run did
+// not know why the link failed [observed — Kudo, local run, 2026-09-04].
+describe(`${buildSmokeFollowUps.name} for a device without the app`, () => {
+  const missing = {
+    outcome: 'failed' as const,
+    appMismatch: 'the app this project runs (com.example.app) is not installed on SIM-1',
+    appMismatchKind: 'app-not-installed' as const,
+  };
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
+  //
+  // **The gate installs it**, so the answer is the gate — not `dev`, which is what this said until
+  // the boundary came down [Kudo, 2026-09-04: "smoke should be self-served without running dev
+  // first"]. A run only reaches this state by having been told to change nothing, and the flag
+  // that told it is the whole of the fix.
+  it(`leads with the run that installs it, not with a separate dev`, () => {
+    expect(commands(missing)[0]).toBe('npx @expo/agent-cli smoke --ios');
+    expect(commands(missing).join(' ')).not.toContain('dev --ios --yes');
+  });
+
+  it(`never suggests opening a link the device has already refused`, () => {
+    expect(commands(missing).join(' ')).not.toContain('navigate');
+  });
+
+  // And the same answer whichever way the run got here, because the install is the gate's either
+  // way — a download for Expo Go, a native build for a development build.
+  it(`names the same run when --no-start forbade the install`, () => {
+    expect(commands({ ...missing, bootstrap: false })[0]).toBe('npx @expo/agent-cli smoke --ios');
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
+//
+// The gate builds now, so "start one on its own and watch it fail" is no longer cheap advice: it is
+// another native build, minutes of it, to see something the first one already wrote down. The log
+// leads instead — llp/0009's rule is about re-runs that cannot change the state, and this is its
+// neighbour: a re-run that can, at a price the reader does not have to pay to find out why.
+describe(`${buildSmokeFollowUps.name} after a build that failed`, () => {
+  const failedBuild = { devServerFound: false, buildAttempted: true, outcome: 'failed' as const };
+
+  it(`leads with the log the build already wrote`, () => {
+    expect(commands(failedBuild)[0]).toBe('npx @expo/agent-cli dev:logs');
+  });
+
+  // And it still offers the foreground run, second: watching it fail is the right next step when
+  // the log does not say enough.
+  it(`still offers to watch the build in the foreground`, () => {
+    expect(commands(failedBuild)).toContain('npx @expo/agent-cli dev --detach --yes --wait-ready');
+  });
+
+  // A start that failed without building keeps what it had: there is no long build to avoid, so
+  // starting one in the foreground is the cheapest way to see the failure.
+  it(`leads with the foreground start when nothing was built`, () => {
+    expect(commands({ ...failedBuild, buildAttempted: false })[0]).toBe(
+      'npx @expo/agent-cli dev --detach --yes --wait-ready'
+    );
   });
 });
