@@ -14,6 +14,7 @@ yarn-error.log
 
 # Logs and coverage
 *.log
+!**/__tests__/fixtures/**/*.log
 coverage
 .nyc_output
 
@@ -27,3 +28,9 @@ coverage
 .idea
 .vscode
 .history/
+
+# TypeScript state
+*.tsbuildinfo
+
+# build outputs
+/packages/**/build/

@@ -14,7 +14,7 @@ export const PUBLISHABLE_PACKAGES: Record<string, { dir: string }> = {
     dir: 'packages/expo-agent-cli',
   },
   '@expo/agent-cli': {
-    dir: 'packages/agent-cli',
+    dir: 'packages/@expo/agent-cli',
   },
 };
 

@@ -1,0 +1,13 @@
+{
+  "extends": "expo-module-scripts/tsconfig.node",
+  "include": ["./src"],
+  "exclude": ["./src/deferred", "./src/**/__tests__", "./src/__fixtures__"],
+  "compilerOptions": {
+    "noEmit": true,
+    "customConditions": [],
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "rootDir": "./src",
+    "types": ["node"]
+  }
+}

@@ -48,7 +48,7 @@ jobs:
           package-manager-cache: false
 
       - run: bun install
-      - run: bun test
+      - run: bun run test
 
       - name: Resolve package
         id: pkg
@@ -61,7 +61,7 @@ jobs:
               echo "dir=packages/expo-agent-cli" >> "$GITHUB_OUTPUT"
               ;;
             '@expo/agent-cli')
-              echo "dir=packages/agent-cli" >> "$GITHUB_OUTPUT"
+              echo "dir=packages/@expo/agent-cli" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "Unknown package: $NPM_PACKAGE"

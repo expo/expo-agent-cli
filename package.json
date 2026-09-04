@@ -2,10 +2,15 @@
   "name": "expo-agent-cli-monorepo",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "packages/@expo/*"
   ],
   "scripts": {
     "bundle": "bun run --filter expo-agent-cli bundle",
-    "test": "bun test"
+    "test": "bun test && bun run --filter @expo/agent-cli test"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.66.0",
+    "oxlint": "^1.81.0"
   }
 }
