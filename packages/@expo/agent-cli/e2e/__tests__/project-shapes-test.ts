@@ -15,6 +15,8 @@ import path from 'node:path';
 import {
   executeAgentCliAsync,
   installStubBinAsync,
+  installStubEasRunnerAsync,
+  pathEnvVars,
   readDevLockAsync,
   setupFixtureAsync,
   waitForDevLockAsync,
@@ -313,8 +315,15 @@ describe('a directory with no project in it', () => {
     const empty = await fs.promises.realpath(
       await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-cli-empty-'))
     );
+    const binDir = path.join(empty, 'runner-bin');
+    const easScript = path.join(empty, 'eas-stub.js');
+    await fs.promises.writeFile(easScript, 'process.exit(0);\n');
+    await installStubEasRunnerAsync(binDir, easScript);
 
-    const result = await executeAgentCliAsync(empty, ['whoami', '--help'], { reject: false });
+    const result = await executeAgentCliAsync(empty, ['whoami', '--help'], {
+      env: pathEnvVars([binDir, process.env.PATH ?? process.env.Path ?? ''].join(path.delimiter)),
+      reject: false,
+    });
 
     // Whatever it answers, it is not "there is no project here".
     expect(result.all).not.toContain('NO_PROJECT');
