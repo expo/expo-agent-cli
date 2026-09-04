@@ -1,6 +1,6 @@
 {
   "defaultSdk": "57",
-  "alsoCompatible": ["expo-splash-screen"],
+  "alsoCompatible": ["expo-splash-screen", "expo-status-bar"],
   "bySdk": {
     "57": {
       "captured": "2026-09-04",

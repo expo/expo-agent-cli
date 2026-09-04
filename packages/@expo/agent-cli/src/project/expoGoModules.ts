@@ -21,11 +21,20 @@ export interface ExpoGoModulesDump {
 
 const DUMP = dump as ExpoGoModulesDump;
 
-/** Packages Go implements without autolinking them. Every template depends on splash-screen. */
+/** Packages Go implements without autolinking them. Templates depend on these. */
 const ALSO_COMPATIBLE = new Set(DUMP.alsoCompatible);
 
-/** The Expo Go runtime itself. It ships native code and is not always in the catalog fallback. */
-const RUNTIME_PACKAGES = new Set(['expo']);
+/**
+ * The Expo Go runtime itself. It ships native files (podspecs, ios/, android/) and is not an
+ * autolinked third-party module, so it never appears in the dump.
+ */
+const RUNTIME_PACKAGES = new Set(['expo', 'react-native']);
+
+/**
+ * Packages whose native-looking files are build tooling, not something the app links.
+ * `expo-modules-autolinking` ships `android/` for its Gradle plugin.
+ */
+const TOOLING_PACKAGES = new Set(['expo-modules-autolinking', '@react-native/gradle-plugin']);
 
 /** One Set per SDK major, built once. `modules` ∪ `alsoCompatible`. */
 const MODULES_BY_SDK = new Map<string, Set<string>>();
@@ -57,7 +66,8 @@ export function dumpCoversSdk(sdkVersion: string | null | undefined): boolean {
  * the SDK ships.
  *
  * `alsoCompatible` applies on both paths: those packages are missing from Go's autolink
- * output on purpose and still run there.
+ * output on purpose and still run there. Runtime and tooling packages are never a reason:
+ * `react-native` is the engine, and `expo-modules-autolinking` is a Gradle plugin.
  */
 export function isExpoGoNativeModule(
   packageName: string,
@@ -66,7 +76,11 @@ export function isExpoGoNativeModule(
     bundledNativeModules: Record<string, string> | null;
   }
 ): boolean {
-  if (RUNTIME_PACKAGES.has(packageName) || ALSO_COMPATIBLE.has(packageName)) {
+  if (
+    RUNTIME_PACKAGES.has(packageName) ||
+    ALSO_COMPATIBLE.has(packageName) ||
+    TOOLING_PACKAGES.has(packageName)
+  ) {
     return true;
   }
   const dumped = sdkMajor(options.sdkVersion);

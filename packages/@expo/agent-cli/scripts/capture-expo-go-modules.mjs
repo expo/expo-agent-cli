@@ -193,7 +193,7 @@ existing.bySdk[sdk] = {
     'apps/expo-go prebuild autolinking (expo-modules resolve + rncore autolinking, ios ∪ android)',
   modules,
 };
-existing.alsoCompatible = existing.alsoCompatible ?? ['expo-splash-screen'];
+existing.alsoCompatible = existing.alsoCompatible ?? ['expo-splash-screen', 'expo-status-bar'];
 
 fs.writeFileSync(dumpPath, `${JSON.stringify(existing, null, 2)}\n`);
 console.log(`wrote ${path.relative(process.cwd(), dumpPath)}`);

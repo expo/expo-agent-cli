@@ -170,6 +170,53 @@ describe(checkExpoGoCompatibilityAsync, () => {
     });
   });
 
+  it(`should never report react-native as unbundled, even though it ships a podspec`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'react-native': '0.81.0' }),
+      ...expoPackage(null, sdk),
+      [`${projectRoot}/node_modules/react-native/package.json`]: '{"name":"react-native"}',
+      [`${projectRoot}/node_modules/react-native/React.podspec`]: '',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
+  it(`should never report expo-modules-autolinking as unbundled, even though it ships android/`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'expo-modules-autolinking': '3.0.0' }),
+      ...expoPackage(null, sdk),
+      [`${projectRoot}/node_modules/expo-modules-autolinking/package.json`]:
+        '{"name":"expo-modules-autolinking"}',
+      [`${projectRoot}/node_modules/expo-modules-autolinking/android/build.gradle`]: '',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
+  it(`should accept expo-status-bar even though Go does not autolink it`, async () => {
+    const sdk = `${EXPO_GO_MODULES_DUMP.defaultSdk}.0.0`;
+    vol.fromJSON({
+      ...projectPackage({ expo: sdk, 'expo-status-bar': '~57.0.0' }),
+      ...expoPackage(null, sdk),
+      [`${projectRoot}/node_modules/expo-status-bar/package.json`]: '{"name":"expo-status-bar"}',
+      [`${projectRoot}/node_modules/expo-status-bar/android/build.gradle`]: '',
+      [`${projectRoot}/node_modules/expo-status-bar/expo-module.config.json`]: '{}',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
   it(`should report a config plugin of an unbundled package`, async () => {
     vol.fromJSON({
       ...projectPackage({ expo: '54.0.0' }),

@@ -25,8 +25,10 @@ describe('the vendored Expo Go module dump', () => {
     expect(modules.has('react-native-mmkv')).toBe(false);
   });
 
-  it(`should list expo-splash-screen as also compatible`, () => {
-    expect(EXPO_GO_MODULES_DUMP.alsoCompatible).toContain('expo-splash-screen');
+  it(`should list template packages Go hosts without autolinking them`, () => {
+    expect(EXPO_GO_MODULES_DUMP.alsoCompatible).toEqual(
+      expect.arrayContaining(['expo-splash-screen', 'expo-status-bar'])
+    );
   });
 });
 
@@ -100,9 +102,30 @@ describe(isExpoGoNativeModule, () => {
     ).toBe(true);
   });
 
+  it(`should treat expo-status-bar as compatible on both paths`, () => {
+    expect(
+      isExpoGoNativeModule('expo-status-bar', { sdkVersion: dumpSdk, bundledNativeModules: null })
+    ).toBe(true);
+  });
+
   it(`should treat the expo package as the runtime itself`, () => {
     expect(isExpoGoNativeModule('expo', { sdkVersion: '99.0.0', bundledNativeModules: {} })).toBe(
       true
     );
+  });
+
+  it(`should treat react-native as the runtime itself`, () => {
+    expect(
+      isExpoGoNativeModule('react-native', { sdkVersion: dumpSdk, bundledNativeModules: null })
+    ).toBe(true);
+  });
+
+  it(`should ignore expo-modules-autolinking, whose android/ is a Gradle plugin`, () => {
+    expect(
+      isExpoGoNativeModule('expo-modules-autolinking', {
+        sdkVersion: dumpSdk,
+        bundledNativeModules: null,
+      })
+    ).toBe(true);
   });
 });
