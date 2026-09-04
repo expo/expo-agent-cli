@@ -313,6 +313,36 @@ describe(checkExpoGoCompatibilityAsync, () => {
     expect(result.reasons).toEqual([expect.objectContaining({ kind: 'custom-native-code' })]);
   });
 
+  it(`should not report custom native code for gitignored prebuild output`, async () => {
+    vol.fromJSON({
+      ...projectPackage({ expo: '54.0.0' }),
+      ...expoPackage({}),
+      [`${projectRoot}/.gitignore`]: '/ios\n/android\n',
+      [`${projectRoot}/ios/Podfile`]: '',
+      [`${projectRoot}/android/build.gradle`]: '',
+    });
+
+    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+      compatible: true,
+      reasons: [],
+    });
+  });
+
+  it(`should report a local module under modules/ as unbundled`, async () => {
+    vol.fromJSON({
+      ...projectPackage({ expo: '54.0.0' }),
+      ...expoPackage({}),
+      [`${projectRoot}/modules/local-native/package.json`]: '{"name":"local-native"}',
+      [`${projectRoot}/modules/local-native/ios/Module.swift`]: '',
+    });
+
+    const result = await checkExpoGoCompatibilityAsync(projectRoot);
+
+    expect(result.reasons).toEqual([
+      expect.objectContaining({ kind: 'unbundled-native-module', packageName: 'local-native' }),
+    ]);
+  });
+
   it(`should report an unknown SDK when expo is not installed`, async () => {
     vol.fromJSON(projectPackage({ expo: '54.0.0' }));
 

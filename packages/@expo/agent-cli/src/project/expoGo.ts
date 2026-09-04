@@ -13,6 +13,7 @@ import {
   describeNativeCode,
   hasNativeCode,
   inspectPackageAsync,
+  listLocalModulePackagesAsync,
   readProjectNativeDirsAsync,
 } from './nativeCode';
 import {
@@ -113,16 +114,37 @@ export async function checkExpoGoCompatibilityAsync(
  * Prefer the autolinking graph (transitive). Fall back to declared dependencies when the
  * linker cannot load — the ordinary state of a unit test against a virtual filesystem, and of
  * a project whose `expo` package ships no autolinking exports.
+ *
+ * Always include `./modules`, which autolinking links first and which the npm graph does not
+ * contain unless the package is also a `file:` dependency.
  */
 async function listInstalledPackagesAsync(
   projectRoot: string,
   packageJson: ProjectPackageJson | null
 ): Promise<InstalledPackage[]> {
   const fromGraph = await scanAutolinkingGraphAsync(projectRoot);
-  if (fromGraph.length) {
-    return fromGraph;
+  const installed = fromGraph.length
+    ? fromGraph
+    : await listDeclaredPackagesAsync(projectRoot, packageJson);
+  const local = await listLocalModulePackagesAsync(projectRoot);
+  if (!local.length) {
+    return installed;
   }
 
+  const seen = new Set(installed.map((pkg) => pkg.name));
+  for (const pkg of local) {
+    if (!seen.has(pkg.name)) {
+      installed.push(pkg);
+      seen.add(pkg.name);
+    }
+  }
+  return installed;
+}
+
+async function listDeclaredPackagesAsync(
+  projectRoot: string,
+  packageJson: ProjectPackageJson | null
+): Promise<InstalledPackage[]> {
   const installed: InstalledPackage[] = [];
   for (const name of listDependencyNames(packageJson)) {
     const root = await resolvePackageRootAsync(projectRoot, name);

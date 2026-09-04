@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { directoryExistsAsync } from '../utils/dir';
+import { spawnCaptureAsync } from '../utils/spawnCapture';
 
 /** What a package's own files say about the native surface it adds. */
 export interface PackageNativeSignals {
@@ -67,13 +68,142 @@ export function describeNativeCode(signals: PackageNativeSignals): string[] {
   return reasons;
 }
 
-/** Native projects checked into the repository, i.e. the project is bare instead of CNG. */
+/** Autolinking's default local-modules directory (`expo.autolinking.nativeModulesDir`). */
+export const LOCAL_MODULES_DIR = 'modules';
+
+/**
+ * Native projects **checked into the repository**, i.e. bare rather than CNG.
+ *
+ * Directory existence is not enough: `expo prebuild` writes `ios/` and `android/` that the
+ * template `.gitignore` ignores. Those dirs are regenerable and do not mean the app has native
+ * code Expo Go lacks. Fingerprint's project workflow uses the same rule — present and not
+ * gitignored is `generic`, gitignored or missing is `managed` — without importing it
+ * (llp/0001 process boundary).
+ *
+ * `git check-ignore` is the source of truth when this is a work tree: a tracked file is not
+ * ignored even if `.gitignore` names it, which is the committed-prebuild case. When git cannot
+ * answer, the project's `.gitignore` is read for the template patterns (`/ios`, `/android`).
+ */
 export async function readProjectNativeDirsAsync(
   projectRoot: string
 ): Promise<{ ios: boolean; android: boolean }> {
   const [ios, android] = await Promise.all([
-    directoryExistsAsync(path.join(projectRoot, 'ios')),
-    directoryExistsAsync(path.join(projectRoot, 'android')),
+    isCheckedInNativeDirAsync(projectRoot, 'ios'),
+    isCheckedInNativeDirAsync(projectRoot, 'android'),
   ]);
   return { ios, android };
+}
+
+/** Packages under `./modules`, which autolinking links ahead of `node_modules`. */
+export async function listLocalModulePackagesAsync(
+  projectRoot: string
+): Promise<{ name: string; root: string }[]> {
+  const modulesRoot = path.join(projectRoot, LOCAL_MODULES_DIR);
+  let entries: fs.Dirent[];
+  try {
+    entries = await fs.promises.readdir(modulesRoot, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const packages: { name: string; root: string }[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const root = path.join(modulesRoot, entry.name);
+    const packageJson = await readJsonName(path.join(root, 'package.json'));
+    if (packageJson == null) {
+      continue;
+    }
+    packages.push({ name: packageJson, root });
+  }
+  return packages;
+}
+
+/**
+ * Whether a `.gitignore` body ignores a native directory at the project root.
+ *
+ * Only the patterns Expo's template writes (`/ios`, `/android`, and the unanchored forms).
+ * Nested or negated rules belong to `git check-ignore`.
+ */
+export function gitignoreIgnoresNativeDir(contents: string, dirName: 'ios' | 'android'): boolean {
+  const matches = new Set([dirName, `${dirName}/`, `/${dirName}`, `/${dirName}/`]);
+  for (const raw of contents.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#') || line.startsWith('!')) {
+      continue;
+    }
+    if (matches.has(line)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function isCheckedInNativeDirAsync(
+  projectRoot: string,
+  dirName: 'ios' | 'android'
+): Promise<boolean> {
+  if (!(await directoryExistsAsync(path.join(projectRoot, dirName)))) {
+    return false;
+  }
+
+  const git = await gitCheckIgnoreAsync(projectRoot, dirName);
+  if (git === 'ignored') {
+    return false;
+  }
+  if (git === 'tracked') {
+    return true;
+  }
+
+  try {
+    const gitignore = await fs.promises.readFile(path.join(projectRoot, '.gitignore'), 'utf8');
+    if (gitignoreIgnoresNativeDir(gitignore, dirName)) {
+      return false;
+    }
+  } catch {
+    // No .gitignore, or unreadable: a present directory counts as checked in.
+  }
+  return true;
+}
+
+/**
+ * `git check-ignore -q <dir>` from the project root.
+ *
+ * Exit 0 is ignored (CNG prebuild output). Exit 1 is not ignored, including a file that is
+ * tracked despite matching `.gitignore`. Anything else — no git, not a repo, a hang — is
+ * unknown, and the `.gitignore` fallback answers.
+ */
+async function gitCheckIgnoreAsync(
+  projectRoot: string,
+  dirName: 'ios' | 'android'
+): Promise<'ignored' | 'tracked' | 'unknown'> {
+  try {
+    const result = await spawnCaptureAsync('git', ['check-ignore', '-q', dirName], {
+      cwd: projectRoot,
+      timeoutMs: 3_000,
+    });
+    if (result.spawnError || result.exitCode == null) {
+      return 'unknown';
+    }
+    if (result.exitCode === 0) {
+      return 'ignored';
+    }
+    if (result.exitCode === 1) {
+      return 'tracked';
+    }
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+async function readJsonName(filePath: string): Promise<string | null> {
+  try {
+    const parsed = JSON.parse(await fs.promises.readFile(filePath, 'utf8')) as { name?: string };
+    return typeof parsed.name === 'string' && parsed.name ? parsed.name : null;
+  } catch {
+    return null;
+  }
 }
