@@ -596,7 +596,7 @@ describe('@expo/agent-cli smoke --cloud', () => {
     try {
       await executeAgentCliAsync(
         projectRoot,
-        ['smoke', '--cloud', '--dev-server-url', stub.url, '--json', '--timeout', '2s'],
+        ['smoke', '--ios', '--cloud', '--dev-server-url', stub.url, '--json', '--timeout', '2s'],
         { reject: false }
       );
 
@@ -663,7 +663,7 @@ describe('@expo/agent-cli smoke --cloud', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['smoke', '--cloud', '--dev-server-url', stub.url, '--json', '--timeout', '2s'],
+        ['smoke', '--ios', '--cloud', '--dev-server-url', stub.url, '--json', '--timeout', '2s'],
         { reject: false, env: { STUB_SIM_SESSIONS: '0' } }
       );
 

@@ -86,53 +86,78 @@ describe('the flags this CLI writes onto a command line', () => {
     // — and it was [observed — live, 2026-08-30: `plutil -extract CFBundleIdentifier raw -o -
     // <sim>/…/ExpoGo.app/Info.plist` printed `host.exp.Exponent` and exited 0, and the same call
     // against a development build's bundle printed `com.example.app`].
+    //
+    // **Ten rows arrived at once and only three of them are new flags** [2026-09-04]. The other
+    // seven were already on command lines this CLI writes, and the extractor could not see them:
+    // two modules do not call `spawnCaptureAsync` by that name, because `installExpoGo.ts` takes it
+    // as a parameter so its tests can record the argv and `bootDevice.ts` uses Node's own `spawn`
+    // for the detached emulator (@ref ../foreignFlags §SPAWN_HELPERS). So the emulator's `-avd`,
+    // `-ports` and `-no-snapshot-save`, and `npx expo-go`'s `--yes`/`--json` in two files, are
+    // pinned here for the first time. All seven run in the live tier, on every emulator boot and
+    // every Expo Go install.
+    //
+    // The three that are genuinely new are `adb install`'s, and they were run as the rule requires
+    // [observed — live, 2026-09-04, emulator-5554: `adb -s emulator-5554 install -r -d
+    // Expo-Go-54.0.8.apk` printed `Performing Streamed Install` then `Success` and exited 0 — over
+    // an Expo Go 57.0.9, so a **downgrade**, which is the case `-d` exists for: without it the same
+    // command fails with `INSTALL_FAILED_VERSION_DOWNGRADE`].
     expect(sweep.foreignFlags.map(({ flag, file }) => `${flag}  ${file}`).sort())
       .toMatchInlineSnapshot(`
-      [
-        "--detach  src/smoke/smokeAsync.ts",
-        "--help  src/cli.ts",
-        "--is-inside-work-tree  src/new/git.ts",
-        "--json  src/config/introspectAsync.ts",
-        "--json  src/deploy/launchCli.ts",
-        "--json  src/impact/runtimeVersion.ts",
-        "--json  src/install/resolveOptions.ts",
-        "--no-install  src/new/createExpo.ts",
-        "--noEmit  src/typecheck/checkAsync.ts",
-        "--non-interactive  src/deploy/deployAsync.ts",
-        "--platform  src/deploy/deployAsync.ts",
-        "--platform  src/project/fingerprint.ts",
-        "--port  src/dev/devAsync.ts",
-        "--preset  src/project/fingerprint.ts",
-        "--pretty  src/typecheck/checkAsync.ts",
-        "--project  src/deploy/launchCli.ts",
-        "--type  src/config/introspectAsync.ts",
-        "--type  src/impact/runtimeVersion.ts",
-        "--verbose  src/doctor/checkAsync.ts",
-        "--wait-ready  src/smoke/smokeAsync.ts",
-        "--yes  src/new/createExpo.ts",
-        "--yes  src/smoke/smokeAsync.ts",
-        "--yes  src/utils/easCli.ts",
-        "-Fpc  src/dev/portListener.ts",
-        "-ano  src/dev/portListener.ts",
-        "-extract  src/device/expoGoVersion.ts",
-        "-extract  src/device/installedApps.ts",
-        "-j  src/device/bootDevice.ts",
-        "-j  src/navigate/device.ts",
-        "-j  src/runtime/targetPlatform.ts",
-        "-list-avds  src/device/bootDevice.ts",
-        "-nP  src/dev/portListener.ts",
-        "-o  src/device/expoGoVersion.ts",
-        "-o  src/device/installedApps.ts",
-        "-p  src/device/screenshot.ts",
-        "-p  src/toolchain/detect.ts",
-        "-s  src/device/screenshot.ts",
-        "-s  src/navigate/adbReverse.ts",
-        "-s  src/runtime/appProcess.ts",
-        "-sTCP:LISTEN  src/dev/portListener.ts",
-        "-version  src/toolchain/detect.ts",
-        "-version  src/toolchain/detect.ts",
-      ]
-    `);
+        [
+          "--detach  src/smoke/smokeAsync.ts",
+          "--help  src/cli.ts",
+          "--is-inside-work-tree  src/new/git.ts",
+          "--json  src/config/introspectAsync.ts",
+          "--json  src/deploy/launchCli.ts",
+          "--json  src/device/expoGoVersion.ts",
+          "--json  src/device/installExpoGo.ts",
+          "--json  src/impact/runtimeVersion.ts",
+          "--json  src/install/resolveOptions.ts",
+          "--no-install  src/new/createExpo.ts",
+          "--noEmit  src/typecheck/checkAsync.ts",
+          "--non-interactive  src/deploy/deployAsync.ts",
+          "--platform  src/deploy/deployAsync.ts",
+          "--platform  src/project/fingerprint.ts",
+          "--port  src/dev/devAsync.ts",
+          "--preset  src/project/fingerprint.ts",
+          "--pretty  src/typecheck/checkAsync.ts",
+          "--project  src/deploy/launchCli.ts",
+          "--type  src/config/introspectAsync.ts",
+          "--type  src/impact/runtimeVersion.ts",
+          "--verbose  src/doctor/checkAsync.ts",
+          "--wait-ready  src/smoke/smokeAsync.ts",
+          "--yes  src/device/expoGoVersion.ts",
+          "--yes  src/device/installExpoGo.ts",
+          "--yes  src/new/createExpo.ts",
+          "--yes  src/smoke/smokeAsync.ts",
+          "--yes  src/utils/easCli.ts",
+          "-Fpc  src/dev/portListener.ts",
+          "-ano  src/dev/portListener.ts",
+          "-avd  src/device/bootDevice.ts",
+          "-d  src/device/installExpoGo.ts",
+          "-extract  src/device/expoGoVersion.ts",
+          "-extract  src/device/installedApps.ts",
+          "-j  src/device/bootDevice.ts",
+          "-j  src/navigate/device.ts",
+          "-j  src/runtime/targetPlatform.ts",
+          "-list-avds  src/device/bootDevice.ts",
+          "-nP  src/dev/portListener.ts",
+          "-no-snapshot-save  src/device/bootDevice.ts",
+          "-o  src/device/expoGoVersion.ts",
+          "-o  src/device/installedApps.ts",
+          "-p  src/device/screenshot.ts",
+          "-p  src/toolchain/detect.ts",
+          "-ports  src/device/bootDevice.ts",
+          "-r  src/device/installExpoGo.ts",
+          "-s  src/device/installExpoGo.ts",
+          "-s  src/device/screenshot.ts",
+          "-s  src/navigate/adbReverse.ts",
+          "-s  src/runtime/appProcess.ts",
+          "-sTCP:LISTEN  src/dev/portListener.ts",
+          "-version  src/toolchain/detect.ts",
+          "-version  src/toolchain/detect.ts",
+        ]
+      `);
   });
 
   it(`never puts a fingerprint option on the command line unasked`, () => {

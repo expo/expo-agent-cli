@@ -301,7 +301,7 @@ describe('a directory with no project in it', () => {
       ['status', '--json'],
       ['dev', '--plan', '--json'],
       ['typecheck', '--json'],
-      ['smoke', '--json'],
+      ['smoke', '--ios', '--json'],
     ]) {
       const result = await executeAgentCliAsync(empty, argv, { reject: false });
       expect(result.exitCode).toBe(1);
@@ -398,7 +398,7 @@ describe('a package.json that is not an Expo app', () => {
     for (const argv of [
       ['dev', '--plan', '--json'],
       ['start', '--json'],
-      ['smoke', '--json'],
+      ['smoke', '--ios', '--json'],
       ['navigate', '/', '--json'],
       ['deploy', '--web', '--json'],
       ['doctor', '--json'],

@@ -258,6 +258,62 @@ describe(checkExpoGoVersionAsync, () => {
     expect(check.expected).toBeNull();
   });
 
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Android
+  //
+  // The dispatch, which was the whole of the gap: this function only ever read a simulator's disk,
+  // so `smoke --android` against an emulator holding an Expo Go from another SDK compared nothing
+  // and reported `unknown` — a verdict that says nothing and blocks nothing. An Android device is
+  // asked through `adb` instead (@ref ../androidApps), and the comparison is the same table.
+  it(`reads an Android device through adb, and compares the same way`, async () => {
+    const asked: [string, string][] = [];
+    const check = await checkExpoGoVersionAsync('emulator-5554', 'android', '54.0.0', {
+      readAndroidVersionAsync: async (serial, appId) => {
+        asked.push([serial, appId]);
+        return '57.0.9';
+      },
+      resolveExpectedAsync: async () => ({ version: '54.0.8', reason: null }),
+    });
+
+    // Newer than expected is a mismatch too, and for the reason the verdict exists: the release
+    // this project's SDK ships is the one under test
+    // (@ref ../expoGoVersion §ExpoGoVersionCheck).
+    expect(check).toMatchObject({ verdict: 'mismatch', installed: '57.0.9', expected: '54.0.8' });
+    // The Android application id, whose `e` is lower case where the iOS bundle id's is a capital.
+    expect(asked).toEqual([['emulator-5554', 'host.exp.exponent']]);
+  });
+
+  // And the two readers do not cross: an Android run never touches the CoreSimulator tree, which on
+  // a Linux or Windows machine is not there to touch.
+  it(`never reads a simulator's disk for an Android device`, async () => {
+    let readBundles = false;
+    await checkExpoGoVersionAsync('emulator-5554', 'android', '54.0.0', {
+      bundleDirs: () => {
+        readBundles = true;
+        return [];
+      },
+      readAndroidVersionAsync: async () => '54.0.8',
+      resolveExpectedAsync: async () => ({ version: '54.0.8', reason: null }),
+    });
+
+    expect(readBundles).toBe(false);
+  });
+
+  // The same courtesy the iOS branch gets: an emulator with no Expo Go at all spends no subprocess
+  // finding out what it would have been compared to.
+  it(`resolves no release when an Android device has no Expo Go`, async () => {
+    let resolved = false;
+    const check = await checkExpoGoVersionAsync('emulator-5554', 'android', '54.0.0', {
+      readAndroidVersionAsync: async () => null,
+      resolveExpectedAsync: async () => {
+        resolved = true;
+        return { version: '54.0.8', reason: null };
+      },
+    });
+
+    expect(check.verdict).toBe('unknown');
+    expect(resolved).toBe(false);
+  });
+
   it(`compares the two when both are known`, async () => {
     const check = await checkExpoGoVersionAsync('UDID', 'ios', '57.0.0', {
       bundleDirs: bundles,

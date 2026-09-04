@@ -18,8 +18,7 @@ function onPlatform(platform: string) {
 
 describe(resolveSmokeOptions, () => {
   it(`defaults to bootstrapping, watching for three seconds, and taking a picture`, () => {
-    onPlatform('darwin');
-    expect(resolveSmokeOptions([])).toEqual({
+    expect(resolveSmokeOptions(['--ios'])).toEqual({
       route: null,
       platform: 'ios',
       cloud: 'fallback',
@@ -41,36 +40,40 @@ describe(resolveSmokeOptions, () => {
   // does, `--reload` is that spelled out loud, and `--no-reload` is the opt-out for a caller who is
   // asking about the session that is running rather than about the code on disk.
   it(`treats --reload as the default and --no-reload as the opt-out`, () => {
-    expect(resolveSmokeOptions([]).reload).toBe(true);
-    expect(resolveSmokeOptions(['--reload']).reload).toBe(true);
-    expect(resolveSmokeOptions(['--no-reload']).reload).toBe(false);
+    expect(resolveSmokeOptions(['--ios']).reload).toBe(true);
+    expect(resolveSmokeOptions(['--ios', '--reload']).reload).toBe(true);
+    expect(resolveSmokeOptions(['--ios', '--no-reload']).reload).toBe(false);
   });
 
   // The same refusal the other opposite-flag pairs get: a run with no rule for what to do must not
   // pick one.
   it(`refuses --reload and --no-reload together`, () => {
-    expect(() => resolveSmokeOptions(['--reload', '--no-reload'])).toThrow(/opposite things/);
+    expect(() => resolveSmokeOptions(['--ios', '--reload', '--no-reload'])).toThrow(
+      /opposite things/
+    );
   });
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
   // of 2026-08-29. Starting what is missing is what the command does now, so `--start` is the
   // default spelled out loud and `--no-start` is the attach-only run it used to be.
   it(`treats --start as the default and --no-start as the attach-only run`, () => {
-    expect(resolveSmokeOptions([]).bootstrap).toBe(true);
-    expect(resolveSmokeOptions(['--start']).bootstrap).toBe(true);
-    expect(resolveSmokeOptions(['--no-start']).bootstrap).toBe(false);
+    expect(resolveSmokeOptions(['--ios']).bootstrap).toBe(true);
+    expect(resolveSmokeOptions(['--ios', '--start']).bootstrap).toBe(true);
+    expect(resolveSmokeOptions(['--ios', '--no-start']).bootstrap).toBe(false);
   });
 
   it(`refuses --start and --no-start together`, () => {
-    expect(() => resolveSmokeOptions(['--start', '--no-start'])).toThrow(/opposite things/);
+    expect(() => resolveSmokeOptions(['--ios', '--start', '--no-start'])).toThrow(
+      /opposite things/
+    );
   });
 
   // The budget of a run that may start a dev server contains a cold first bundle, which is the
   // same reason a readiness wait defaults to two minutes rather than to seconds.
   it(`gives a bootstrapping run a larger budget, and lets --timeout override it`, () => {
-    expect(resolveSmokeOptions([]).timeoutMs).toBe(DEFAULT_SMOKE_START_TIMEOUT_MS);
-    expect(resolveSmokeOptions(['--timeout', '30s']).timeoutMs).toBe(30_000);
-    expect(resolveSmokeOptions(['--no-start']).timeoutMs).toBe(DEFAULT_SMOKE_TIMEOUT_MS);
+    expect(resolveSmokeOptions(['--ios']).timeoutMs).toBe(DEFAULT_SMOKE_START_TIMEOUT_MS);
+    expect(resolveSmokeOptions(['--ios', '--timeout', '30s']).timeoutMs).toBe(30_000);
+    expect(resolveSmokeOptions(['--ios', '--no-start']).timeoutMs).toBe(DEFAULT_SMOKE_TIMEOUT_MS);
   });
 
   it.each([
@@ -84,11 +87,32 @@ describe(resolveSmokeOptions, () => {
     expect(resolveSmokeOptions(argv).platform).toBe(platform);
   });
 
-  it(`prefers a booted iOS simulator on a Mac and Android everywhere else`, () => {
-    onPlatform('darwin');
-    expect(resolveSmokeOptions([]).platform).toBe('ios');
-    onPlatform('linux');
-    expect(resolveSmokeOptions([]).platform).toBe('android');
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  //
+  // This used to be a test that the host decides: iOS on a Mac and Android everywhere else. The
+  // guess is gone, because it is a fact about the machine the CLI is running on and every question
+  // this command answers is about a device — and the two come apart on the ordinary Mac with an
+  // Android emulator running, which got a real verdict about a platform nobody asked about.
+  it(`refuses to guess the platform, and names the two flags that say it`, () => {
+    const error = (() => {
+      try {
+        resolveSmokeOptions([]);
+      } catch (thrown: any) {
+        return thrown;
+      }
+      return null;
+    })();
+
+    expect(error.code).toBe('BAD_ARGS');
+    expect(error.message).toContain('needs to be told which platform');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --ios');
+  });
+
+  // And the host is not consulted on the way to that refusal, whichever host it is: the same
+  // message on a Mac and on Linux.
+  it.each(['darwin', 'linux', 'win32'])(`refuses it on %s too`, (host) => {
+    onPlatform(host);
+    expect(() => resolveSmokeOptions([])).toThrow(/needs to be told which platform/);
   });
 
   it(`refuses two devices at once, whichever way they are spelled`, () => {
@@ -121,44 +145,46 @@ describe(resolveSmokeOptions, () => {
   });
 
   it(`reads --screenshot and --no-screenshot, and refuses both`, () => {
-    expect(resolveSmokeOptions(['--screenshot', '/tmp/a.png'])).toMatchObject({
+    expect(resolveSmokeOptions(['--ios', '--screenshot', '/tmp/a.png'])).toMatchObject({
       screenshot: true,
       screenshotPath: '/tmp/a.png',
     });
-    expect(resolveSmokeOptions(['--no-screenshot'])).toMatchObject({
+    expect(resolveSmokeOptions(['--ios', '--no-screenshot'])).toMatchObject({
       screenshot: false,
       screenshotPath: null,
     });
-    expect(() => resolveSmokeOptions(['--screenshot', '/tmp/a.png', '--no-screenshot'])).toThrow(
-      /opposite things/
-    );
+    expect(() =>
+      resolveSmokeOptions(['--ios', '--screenshot', '/tmp/a.png', '--no-screenshot'])
+    ).toThrow(/opposite things/);
   });
 
   // A window of zero catches nothing and would report the empty result as evidence, which is the
   // reading the whole command exists to stop.
   it(`refuses a window of zero`, () => {
-    expect(() => resolveSmokeOptions(['--window', '0'])).toThrow();
-    expect(resolveSmokeOptions(['--window', '5s']).windowMs).toBe(5_000);
+    expect(() => resolveSmokeOptions(['--ios', '--window', '0'])).toThrow();
+    expect(resolveSmokeOptions(['--ios', '--window', '5s']).windowMs).toBe(5_000);
   });
 
   it(`takes --port as shorthand for --dev-server-url, and refuses both`, () => {
-    expect(resolveSmokeOptions(['--port', '8210']).devServerUrl).toBe('http://127.0.0.1:8210');
-    expect(resolveSmokeOptions(['--dev-server-url', 'http://host:9000']).devServerUrl).toBe(
-      'http://host:9000'
+    expect(resolveSmokeOptions(['--ios', '--port', '8210']).devServerUrl).toBe(
+      'http://127.0.0.1:8210'
     );
+    expect(
+      resolveSmokeOptions(['--ios', '--dev-server-url', 'http://host:9000']).devServerUrl
+    ).toBe('http://host:9000');
     expect(() =>
-      resolveSmokeOptions(['--port', '8210', '--dev-server-url', 'http://host:9000'])
+      resolveSmokeOptions(['--ios', '--port', '8210', '--dev-server-url', 'http://host:9000'])
     ).toThrow(/both name a dev server/);
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Registry rules. A bare word is a caller
   // who meant `--route`, and dropping it would run the gate without opening anything.
   it(`refuses a bare route and says how to pass one`, () => {
-    expect(() => resolveSmokeOptions(['/notes'])).toThrow(/--route \/notes/);
+    expect(() => resolveSmokeOptions(['--ios', '/notes'])).toThrow(/--route \/notes/);
   });
 
   it(`refuses an option this command does not have`, () => {
-    expect(() => resolveSmokeOptions(['--bogus'])).toThrow(/--bogus/);
+    expect(() => resolveSmokeOptions(['--ios', '--bogus'])).toThrow(/--bogus/);
   });
 });
 

@@ -21,7 +21,17 @@ import path from 'path';
 
 import { EXPO_GO_APP_IDS } from '../navigate/target';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
+import { readInstalledExpoGoVersionAndroidAsync } from './androidApps';
 import { appBundleDirs, readBundleIdAsync, simulatorDeviceDir } from './installedApps';
+
+/**
+ * Expo Go's Android application id.
+ *
+ * A lower-case `e`, where the iOS bundle id has an upper-case one — the same two spellings
+ * `EXPO_GO_APP_IDS` carries. Named here rather than picked out of that array by index, because a
+ * platform's app id is a fact about the platform and an index is a fact about the array.
+ */
+const ANDROID_EXPO_GO_APP_ID = 'host.exp.exponent';
 
 /** How long `plutil` gets to read one `Info.plist`. Generous: it reads a file and exits. */
 const PLUTIL_TIMEOUT_MS = 5_000;
@@ -264,27 +274,68 @@ export async function resolveExpectedExpoGoVersionAsync(
 }
 
 /**
- * The whole check, for one simulator and one SDK.
+ * The version of the Expo Go on one device, whichever kind of device it is.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Android
+ *
+ * Two device tools and one question. The iOS answer is a `plutil` read of a simulator's own app
+ * bundle; the Android answer is `adb shell dumpsys package`, which asks the package manager on the
+ * device (@ref ./androidApps). They are apart here rather than inside the comparison, so
+ * {@link compareExpoGoVersion} stays a pure table over two strings.
+ *
+ * `android` used to be missing entirely, and the effect was a false green pointed at exactly the
+ * case the check exists for: `smoke --android` against an emulator holding an Expo Go from another
+ * SDK read that runtime, found no version to compare, and reported `unknown` — which says nothing
+ * and blocks nothing [confirmed, Kudo, 2026-09-03].
+ */
+async function readInstalledVersionAsync(
+  deviceId: string,
+  platform: 'ios' | 'android',
+  {
+    readAndroidVersionAsync = (serial, appId) =>
+      readInstalledExpoGoVersionAndroidAsync(serial, appId),
+    ...options
+  }: CheckExpoGoVersionOptions
+): Promise<string | null> {
+  if (platform === 'android') {
+    return await readAndroidVersionAsync(deviceId, ANDROID_EXPO_GO_APP_ID);
+  }
+  return await readInstalledExpoGoVersionAsync(deviceId, options);
+}
+
+/** What {@link checkExpoGoVersionAsync} takes, which is one seam per source it reads. */
+export type CheckExpoGoVersionOptions = ReadInstalledExpoGoVersionOptions & {
+  /** Injected for the tests, so the table above is provable without a subprocess. */
+  resolveExpectedAsync?: typeof resolveExpectedExpoGoVersionAsync;
+  /**
+   * Injected for the tests, so the Android branch is provable without an emulator.
+   *
+   * Its own seam rather than the `runAdbAsync` underneath it, because what this file is about is
+   * "which version is on the device" and the `adb` argv that answers that is `./androidApps`'s
+   * business (and is pinned there).
+   */
+  readAndroidVersionAsync?: (serial: string, appId: string) => Promise<string | null>;
+};
+
+/**
+ * The whole check, for one device and one SDK.
  *
  * **The local read gates the network one**, rather than the two running together. Reading the
- * device's own `Info.plist` is a file read; resolving the release is a subprocess and a request. If
- * there is no installed version to compare, there is nothing the second answer could be compared
- * *to* — so spending it would buy a more detailed way of saying "unknown". This is also what keeps
- * the e2e tier hermetic: a fixture with no Expo Go bundle on its simulator makes no network call.
+ * device's own version is a file read or one `adb` call; resolving the release is a subprocess and a
+ * request. If there is no installed version to compare, there is nothing the second answer could be
+ * compared *to* — so spending it would buy a more detailed way of saying "unknown". This is also
+ * what keeps the e2e tier hermetic: a fixture with no Expo Go on its device makes no network call.
  */
 export async function checkExpoGoVersionAsync(
-  udid: string,
+  deviceId: string,
   platform: 'ios' | 'android',
   sdkVersion: string | null,
   {
     resolveExpectedAsync = resolveExpectedExpoGoVersionAsync,
     ...options
-  }: ReadInstalledExpoGoVersionOptions & {
-    /** Injected for the tests, so the table above is provable without a subprocess. */
-    resolveExpectedAsync?: typeof resolveExpectedExpoGoVersionAsync;
-  } = {}
+  }: CheckExpoGoVersionOptions = {}
 ): Promise<ExpoGoVersionCheck> {
-  const installed = await readInstalledExpoGoVersionAsync(udid, options);
+  const installed = await readInstalledVersionAsync(deviceId, platform, options);
   if (installed == null) {
     return compareExpoGoVersion(null, null);
   }

@@ -7,20 +7,28 @@
 // installed [confirmed, Kudo, 2026-09-03].
 //
 // Two subprocesses, and neither is `@expo/cli`'s. `expo-go download <platform> <sdk> --json`
-// fetches the release and extracts it, answering `{"path":…}`. `xcrun simctl install <udid>
-// <path>` puts it on the device. `@expo/cli` does this in `ExpoGoInstaller` via
+// fetches the release and extracts it, answering `{"path":…}` — for both platforms, with the same
+// contract [observed, 2026-09-03: an `.app` on iOS and a 186 MB `.apk` on Android]. The second is
+// the platform's own installer, and it is the only thing that differs
+// (@ref ./installExpoGo §putOnDeviceAsync). `@expo/cli` does this in `ExpoGoInstaller` via
 // `downloadExpoGoAsync`, which is the internal llp/0001 constraint 5 forbids importing.
 //
-// **The device has to be booted first.** `simctl install` on a shut device answers
+// **The device has to be running first**, on both. `simctl install` on a shut simulator answers
 // `Unable to lookup in current state: Shutdown` (domain `com.apple.CoreSimulator.SimError`, code
-// 405) [observed, 2026-09-03], so the boot comes before this and not after it.
+// 405) [observed, 2026-09-03], and `adb install` needs a device `adb` lists at all — so the boot
+// comes before this and not after it.
 
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
 import { spawnCaptureAsync } from '../utils/spawnCapture';
+import { resolveAdb, type AdbResolution } from './adb';
+import { readInstalledExpoGoVersionAndroidAsync } from './androidApps';
 import { expoGoVersionFromUrl, readInstalledExpoGoVersionAsync } from './expoGoVersion';
+
+/** Expo Go's Android application id — a lower-case `e`, where the iOS bundle id has a capital. */
+const ANDROID_EXPO_GO_APP_ID = 'host.exp.exponent';
 
 /**
  * How long the download gets.
@@ -54,6 +62,13 @@ export interface InstallExpoGoResult {
 
 export interface InstallExpoGoOptions {
   spawn?: typeof spawnCaptureAsync;
+  /**
+   * Which `adb` to install through, for an Android device.
+   *
+   * Injected so the argv a test asserts on is `adb …` rather than this machine's absolute SDK path,
+   * and resolved the same way every other Android call in this CLI resolves it (@ref ./adb).
+   */
+  adb?: AdbResolution;
   /** Where to download to. Injected for the tests, and a temporary directory otherwise. */
   tempDirAsync?: () => Promise<string>;
   /** How the download is removed afterwards. Injected for the tests. */
@@ -149,6 +164,92 @@ function firstLine(text: string): string {
 }
 
 /**
+ * The version of the Expo Go already on this device, for the report's sake.
+ *
+ * @ref ./expoGoVersion §readInstalledVersionAsync — the same pair of device tools, asked here for a
+ * different purpose: not "is it the right one" but "was there one at all", so an addition and a
+ * replacement are told apart in the report (llp/0021 §The rules).
+ */
+async function readInstalledVersionAsync(
+  deviceId: string,
+  platform: 'ios' | 'android'
+): Promise<string | null> {
+  return platform === 'android'
+    ? await readInstalledExpoGoVersionAndroidAsync(deviceId, ANDROID_EXPO_GO_APP_ID)
+    : await readInstalledExpoGoVersionAsync(deviceId);
+}
+
+/**
+ * Put a downloaded Expo Go onto a **running** device, with that platform's own tool.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Android
+ *
+ * Two tools, and one thing worth saying about each argv:
+ *
+ * - iOS: `xcrun simctl install <udid> <path>`, on a simulator that is already booted.
+ * - Android: `adb -s <serial> install -r -d <apk>`. `-r` is the reinstall that keeps the app's data,
+ *   which is what makes replacing a version an install rather than an uninstall and an install.
+ *   **`-d` is not optional**: without it a *downgrade* fails with `INSTALL_FAILED_VERSION_DOWNGRADE`
+ *   [observed — emulator-5554, Expo Go 57.0.9 → 54.0.8, 2026-09-03], and a downgrade is an ordinary
+ *   case here rather than an odd one — a project on an older SDK than the emulator's Expo Go wants
+ *   the older release, because the release this SDK ships is the one under test
+ *   (@ref ./expoGoVersion §ExpoGoVersionCheck).
+ *
+ * Never throws: every failure is a `reason`.
+ */
+async function putOnDeviceAsync(
+  deviceId: string,
+  platform: 'ios' | 'android',
+  bundlePath: string,
+  { spawn, adb }: { spawn: typeof spawnCaptureAsync; adb: AdbResolution }
+): Promise<{ ok: true; reason: null } | { ok: false; reason: string }> {
+  // Each branch spawns an array literal of its own rather than one built above the call, and that
+  // is deliberate: `src/lint/foreignFlags.ts` reads the options this CLI puts on another CLI's
+  // command line out of the source, and it reads them off literals. `-d` in particular is the
+  // difference between a working downgrade and `INSTALL_FAILED_VERSION_DOWNGRADE`, so it is exactly
+  // the kind of flag that has to be countable rather than hidden in a ternary
+  // (llp/0002 §A flag is not shipped until it has run against the published binary).
+  const command = platform === 'android' ? adb.bin : 'xcrun';
+  const installed =
+    platform === 'android'
+      ? await spawn(adb.bin, ['-s', deviceId, 'install', '-r', '-d', bundlePath], {
+          timeoutMs: INSTALL_TIMEOUT_MS,
+        })
+      : await spawn('xcrun', ['simctl', 'install', deviceId, bundlePath], {
+          timeoutMs: INSTALL_TIMEOUT_MS,
+        });
+  if (installed.spawnError) {
+    return {
+      ok: false,
+      reason: `"${command}" could not be run (${installed.spawnError.code ?? installed.spawnError.message})`,
+    };
+  }
+  const output = installed.stderr + installed.stdout;
+  // `adb install` is the one of the two that can **exit 0 and fail**: it prints `Failure
+  // [INSTALL_FAILED_…]` and returns 0 for a device that refused the package [observed, 2026-09-03],
+  // so the output decides on Android and the exit code decides on iOS.
+  const refused = platform === 'android' && /^Failure|\[INSTALL_FAILED/m.test(output);
+  if (installed.exitCode !== 0 || refused) {
+    const said = firstLine(installed.stderr || installed.stdout) || 'it printed nothing';
+    // The one failure worth naming rather than passing through: `simctl install` needs a booted
+    // device, and the CoreSimulator sentence for it says "current state" rather than "boot".
+    const notBooted = /current state: (Shutdown|Shutting Down|Creating)/.test(output);
+    if (notBooted) {
+      return {
+        ok: false,
+        reason: `the simulator ${deviceId} is not booted, and "simctl install" only works on one that is — so the boot has to come first (${said})`,
+      };
+    }
+    const failure = refused ? firstLine(output) : said;
+    return {
+      ok: false,
+      reason: `"${command} install" ${refused && installed.exitCode === 0 ? 'reported a failure' : `exited ${installed.exitCode ?? 'on a signal'}`}: ${failure}`,
+    };
+  }
+  return { ok: true, reason: null };
+}
+
+/**
  * Download the Expo Go this SDK wants and install it on a **booted** simulator.
  *
  * The download goes to a temporary directory rather than the project, because `expo-go download`
@@ -163,23 +264,14 @@ export async function installExpoGoAsync(
     spawn = spawnCaptureAsync,
     tempDirAsync = makeTempDirAsync,
     cleanupAsync = removeDirAsync,
+    // Resolved lazily rather than eagerly would be tidier, and is not worth it: this is a
+    // filesystem search that spawns nothing (@ref ./adb §resolveAdb).
+    adb = resolveAdb(),
   }: InstallExpoGoOptions = {}
 ): Promise<InstallExpoGoResult> {
-  // @ref llp/0005 §Android. This installs through `simctl`, which is the iOS simulator's tool and
-  // nothing else's. Refused by name rather than attempted, so a machine with no simulators reads
-  // the gap rather than an `xcrun` failure.
-  if (platform !== 'ios') {
-    return {
-      ok: false,
-      version: null,
-      replaced: null,
-      reason: `this command installs Expo Go through "xcrun simctl", so it cannot put it on an android device — "npx expo start --android" is what installs it there`,
-    };
-  }
-
   // Read before anything is downloaded, so the report can tell a replacement from an addition. A
   // failure to read is not a failure to install: it only means the report says less.
-  const replaced = await readInstalledExpoGoVersionAsync(deviceId).catch(() => null);
+  const replaced = await readInstalledVersionAsync(deviceId, platform).catch(() => null);
 
   const dir = await tempDirAsync();
   try {
@@ -221,37 +313,19 @@ export async function installExpoGoAsync(
       };
     }
 
-    const installed = await spawn('xcrun', ['simctl', 'install', deviceId, payload.path], {
-      timeoutMs: INSTALL_TIMEOUT_MS,
-    });
-    if (installed.spawnError) {
-      return {
-        ok: false,
-        version: null,
-        replaced,
-        reason: `xcrun could not be run (${installed.spawnError.code ?? installed.spawnError.message})`,
-      };
-    }
-    if (installed.exitCode !== 0) {
-      const said = firstLine(installed.stderr || installed.stdout) || 'it printed nothing';
-      // The one failure worth naming rather than passing through: `simctl install` needs a booted
-      // device, and the CoreSimulator sentence for it says "current state" rather than "boot".
-      const notBooted = /current state: (Shutdown|Shutting Down|Creating)/.test(
-        installed.stderr + installed.stdout
-      );
-      return {
-        ok: false,
-        version: null,
-        replaced,
-        reason: notBooted
-          ? `the simulator ${deviceId} is not booted, and "simctl install" only works on one that is — so the boot has to come first (${said})`
-          : `"xcrun simctl install" exited ${installed.exitCode ?? 'on a signal'}: ${said}`,
-      };
+    const put = await putOnDeviceAsync(deviceId, platform, payload.path, { spawn, adb });
+    if (!put.ok) {
+      return { ok: false, version: null, replaced, reason: put.reason };
     }
 
-    // An install is not finished until the link works, and on a freshly installed app it does not:
-    // iOS asks first, and nobody answers (@ref ./installExpoGo §approveSchemesAsync).
-    await approveSchemesAsync(deviceId, spawn);
+    if (platform === 'ios') {
+      // An install is not finished until the link works, and on a freshly installed app on iOS it
+      // does not: iOS asks first, and nobody answers (@ref ./installExpoGo §approveSchemesAsync).
+      // Android needs none of it — Expo Go's `exp://` intent filter is in its manifest, so the
+      // link works the moment the package is there, and there is no dialog to approve away
+      // [observed — emulator-5554, Android 36, 2026-09-03].
+      await approveSchemesAsync(deviceId, spawn);
+    }
 
     // The version is in the path the CLI answered, which is the release it chose — so this reports
     // what was installed rather than what was asked for.

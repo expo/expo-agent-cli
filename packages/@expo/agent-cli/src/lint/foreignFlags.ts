@@ -45,6 +45,14 @@ const SPAWN_HELPERS = new Set([
   'spawnSubprocessAsync',
   'spawnCaptureAsync',
   'spawnFingerprintAsync',
+  // The injected seam, and the reason this list grew [found while adding the Android install,
+  // 2026-09-04]. Two modules do not call `spawnCaptureAsync` by that name: `installExpoGo.ts` takes
+  // it as a parameter so the tests can record the argv, and `bootDevice.ts` uses Node's own `spawn`
+  // for the emulator, which is detached. Every option those two put on `xcrun`, `adb` and
+  // `emulator` was therefore invisible here — including `adb install -d`, which is the difference
+  // between a working downgrade and `INSTALL_FAILED_VERSION_DOWNGRADE`. An injected spawn is still
+  // a spawn.
+  'spawn',
 ]);
 
 /**

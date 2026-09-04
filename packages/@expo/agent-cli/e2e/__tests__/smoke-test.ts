@@ -130,6 +130,78 @@ async function installStubAdbAsync(projectRoot: string): Promise<Record<string, 
 }
 
 /**
+ * A stub `adb` for the Expo Go questions, and every call recorded.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+ *
+ * Separate from {@link installStubAdbAsync}, which answers the screenshot path. What this one is
+ * for is the three commands the version check and the install go through, and each of its answers
+ * is copied from a run against a real emulator rather than invented
+ * [emulator-5554, Android 36, 2026-09-03]:
+ *
+ * - `shell pm path <id>` — exit **1** for a package the device has not got, and a `package:` line
+ *   with exit 0 for one it has.
+ * - `shell dumpsys package <id>` — `versionName=…`, and **exit 0 even when the package is absent**,
+ *   printing `Unable to find package`.
+ * - `install -r -d <apk>` — `Success`.
+ *
+ * @param installedVersion the Expo Go on the fixture's device, or null for a device without one.
+ */
+async function installStubAdbForExpoGoAsync(
+  projectRoot: string,
+  installedVersion: string | null
+): Promise<{ env: Record<string, string>; read: () => string[][] }> {
+  const recordPath = path.join(projectRoot, '.adb-calls.jsonl');
+  const scriptPath = path.join(projectRoot, '.stub-bin', 'adb-expo-go-stub.js');
+  await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
+  await fs.promises.writeFile(
+    scriptPath,
+    [
+      `const fs = require('fs');`,
+      `const args = process.argv.slice(2);`,
+      `fs.appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify(args) + '\\n');`,
+      `const installed = ${JSON.stringify(installedVersion)};`,
+      `if (args[0] === 'devices') {`,
+      `  process.stdout.write('List of devices attached\\nemulator-5554\\tdevice\\n');`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args.includes('pm') && args.includes('path')) {`,
+      `  if (installed == null) { process.exit(1); }`,
+      `  process.stdout.write('package:/data/app/~~abc==/host.exp.exponent-def==/base.apk\\n');`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args.includes('dumpsys')) {`,
+      // Exit 0 either way, which is the quirk the reader has to survive.
+      `  if (installed == null) { process.stdout.write('Unable to find package: host.exp.exponent\\n'); process.exit(0); }`,
+      `  process.stdout.write('  Package [host.exp.exponent] (abc):\\n    versionCode=444 minSdk=24\\n    versionName=' + installed + '\\n');`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args.includes('install')) {`,
+      `  process.stdout.write('Performing Streamed Install\\nSuccess\\n');`,
+      `  process.exit(0);`,
+      `}`,
+      `process.exit(0);`,
+    ].join('\n')
+  );
+  await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'adb', scriptPath);
+  // ANDROID_HOME beats PATH, and a runner that already has an SDK would otherwise reach a real
+  // emulator instead of this stub (@ref src/device/adb §resolveAdb).
+  const sdk = path.join(projectRoot, '.stub-android-sdk');
+  await installStubBinAsync(path.join(sdk, 'platform-tools'), 'adb', scriptPath);
+  return {
+    env: { ANDROID_HOME: sdk },
+    read: () =>
+      fs.existsSync(recordPath)
+        ? fs
+            .readFileSync(recordPath, 'utf8')
+            .split('\n')
+            .filter(Boolean)
+            .map((line) => JSON.parse(line))
+        : [],
+  };
+}
+
+/**
  * A stub `xcrun` for the boot path: several simulators, all shut, and every call recorded.
  *
  * The list is what `pickSimulator` chooses from, so the fixture is the machine the run met — a
@@ -430,7 +502,7 @@ describe('@expo/agent-cli smoke', () => {
       const result = await executeAgentCliAsync(
         projectRoot,
         // A port nothing is on, named explicitly so no scan can find another project's server.
-        ['smoke', '--json', '--no-start', '--port', '59117'],
+        ['smoke', '--ios', '--json', '--no-start', '--port', '59117'],
         { env: stubExpoEnv(projectRoot), reject: false }
       );
 
@@ -460,7 +532,7 @@ describe('@expo/agent-cli smoke', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['smoke', '--no-start', '--port', '59118'],
+        ['smoke', '--ios', '--no-start', '--port', '59118'],
         { env: stubExpoEnv(projectRoot), reject: false }
       );
 
@@ -542,7 +614,7 @@ describe('@expo/agent-cli smoke', () => {
           projectRoot,
           // No screenshot and no device: this case is about the dev server, and a stub `xcrun` is
           // what the screenshot tests own.
-          ['smoke', '--json', '--no-screenshot', '--port', '9351', '--timeout', '10s'],
+          ['smoke', '--ios', '--json', '--no-screenshot', '--port', '9351', '--timeout', '10s'],
           {
             env: {
               ...devServerOnlyEnv(projectRoot),
@@ -589,7 +661,7 @@ describe('@expo/agent-cli smoke', () => {
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['smoke', '--json', '--no-screenshot', '--port', '9352', '--timeout', '2s'],
+          ['smoke', '--ios', '--json', '--no-screenshot', '--port', '9352', '--timeout', '2s'],
           {
             env: {
               ...devServerOnlyEnv(projectRoot),
@@ -627,7 +699,7 @@ describe('@expo/agent-cli smoke', () => {
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['smoke', '--json', '--no-screenshot', '--timeout', '4s'],
+          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '4s'],
           { env: pathEnvVars(path.join(projectRoot, '.no-bin')), reject: false }
         );
 
@@ -665,7 +737,7 @@ describe('@expo/agent-cli smoke', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['smoke', '--json', '--no-start', '--timeout', '4s'],
+        ['smoke', '--ios', '--json', '--no-start', '--timeout', '4s'],
         {
           // An empty `PATH`, so neither a stub nor this machine's own `xcrun` and `adb` can be
           // found. Inheriting the real one made this pass against a simulator that happened to be
@@ -978,6 +1050,131 @@ describe('@expo/agent-cli smoke', () => {
     });
   });
 
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Android
+  //
+  // The Android half of the version check, which did not exist. `checkExpoGoVersionAsync` only ever
+  // read a *simulator's* `Info.plist` through `plutil`, so `smoke --android` against an emulator
+  // holding an Expo Go from another SDK compared nothing and reported `unknown` — a verdict that
+  // says nothing and blocks nothing [confirmed, Kudo, 2026-09-03].
+  //
+  // This tier owns the argv, which is the whole question here: which `adb` commands the run reached
+  // for, and what it did with what they said.
+  describe('the Expo Go on an Android device', () => {
+    /** A bootstrapping run against a stub dev server nothing is attached to. */
+    async function runAndroidAsync(
+      projectRoot: string,
+      env: Record<string, string>,
+      stub: StubDevServer
+    ): Promise<Record<string, any>> {
+      const release = await holdLockForAsync(projectRoot, stub);
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--android', '--json', '--no-screenshot', '--timeout', '4s'],
+          { env: { ...stubExpoEnv(projectRoot), ...env }, reject: false }
+        );
+        return JSON.parse(result.stdout);
+      } finally {
+        await release();
+      }
+    }
+
+    it('replaces an Expo Go built from another SDK, and says what it replaced', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      // The fixture is on SDK 57, so 54.0.8 on the device is another release line.
+      const adb = await installStubAdbForExpoGoAsync(projectRoot, '54.0.8');
+      const readNpx = await installStubNpxAsync(projectRoot);
+      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+
+      try {
+        const report = await runAndroidAsync(projectRoot, adb.env, stub);
+
+        // It asked the device's package manager, rather than reading a CoreSimulator tree that on
+        // this platform is not there to read (@ref src/device/androidApps).
+        expect(adb.read().some((argv) => argv.includes('dumpsys'))).toBe(true);
+        // Then it downloaded the release *this project's SDK* ships, and installed it with the two
+        // flags that make a replacement work: `-r` to keep the data, `-d` to allow a downgrade.
+        expect(
+          readNpx().some((argv) => argv.includes('download') && argv.includes('android'))
+        ).toBe(true);
+        const install = adb.read().find((argv) => argv.includes('install'))!;
+        expect(install).toContain('-r');
+        expect(install).toContain('-d');
+
+        const phase = report.phases.find((entry: any) => entry.id === 'install-app');
+        expect(phase).toMatchObject({ status: 'ok' });
+        // An addition and a replacement are different things to do to somebody's machine, so the
+        // row says which (llp/0021 §The rules).
+        expect(phase.reason).toContain('replacing 54.0.8');
+      } finally {
+        await stub.close();
+      }
+    });
+
+    // The other half of the same check, and the one that keeps it from being a tax: an emulator
+    // already holding the right release pays for one `adb` call and no download at all.
+    it('installs nothing when the Expo Go on the device is the one this SDK ships', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const adb = await installStubAdbForExpoGoAsync(projectRoot, '57.0.9');
+      const readNpx = await installStubNpxAsync(projectRoot);
+      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+
+      try {
+        const report = await runAndroidAsync(projectRoot, adb.env, stub);
+
+        expect(readNpx().some((argv) => argv.includes('download'))).toBe(false);
+        expect(adb.read().some((argv) => argv.includes('install'))).toBe(false);
+        // Not `skipped`: a machine that already had the app never had an install to do, and a
+        // skipped row reads as work that was owed (@ref src/smoke/phases §CONDITIONAL_PHASES).
+        expect(report.phases.some((entry: any) => entry.id === 'install-app')).toBe(false);
+      } finally {
+        await stub.close();
+      }
+    });
+
+    // @ref src/smoke/phases §SmokeDeps.explainSilentApp
+    //
+    // Found live and at full price: an emulator on Expo Go 54.0.8, a project on SDK 57, and 119
+    // seconds spent to report `no app had attached when the budget ran out` — while the reason was
+    // on the device the whole time [observed — emulator-5554, 2026-09-04]. A stale Expo Go takes
+    // the link, fails to load a bundle it cannot run, and registers no debugger target, which is
+    // exactly what the wait is waiting for.
+    //
+    // `--no-start` is the run that reaches it: a run allowed to install has already fixed it.
+    it('names the stale Expo Go when nothing attaches, rather than only the wait', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const adb = await installStubAdbForExpoGoAsync(projectRoot, '54.0.8');
+      await installStubNpxAsync(projectRoot);
+      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+      const release = await holdLockForAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--android', '--json', '--no-start', '--no-screenshot', '--timeout', '4s'],
+          { env: { ...stubExpoEnv(projectRoot), ...adb.env }, reject: false }
+        );
+        const report = JSON.parse(result.stdout);
+
+        const app = report.phases.find((entry: any) => entry.id === 'app');
+        // Both facts: the open succeeded and nothing came of it, and the device says why.
+        expect(app.reason).toContain('no app had attached');
+        expect(app.reason).toContain('54.0.8');
+        // And as a value, so the follow-up below is picked rather than matched out of English.
+        expect(report.appMismatchKind).toBe('expo-go-version');
+        // The follow-up is the run that installs the right release — not `navigate`, which would
+        // fail identically for ever, and not a native build, which this project does not need.
+        const commands = report.followups.map((followup: any) => followup.command);
+        expect(commands[0]).toBe('npx @expo/agent-cli smoke --android');
+        expect(commands.join(' ')).not.toContain('dev --android --yes');
+      } finally {
+        await release();
+        await stub.close();
+      }
+    });
+  });
+
   // @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it.
   //
   // `<scheme>://<route>` navigates an app that is **already** running against a dev server;
@@ -1083,7 +1280,7 @@ describe('@expo/agent-cli smoke', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['smoke', '--json', '--dev-server-url', stub.url],
+        ['smoke', '--ios', '--json', '--dev-server-url', stub.url],
         { env: stubExpoEnv(projectRoot), reject: false }
       );
 
@@ -1330,13 +1527,14 @@ describe('@expo/agent-cli smoke', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['smoke', '--json', '--no-start', '--port', '59119'],
+        ['smoke', '--ios', '--json', '--no-start', '--port', '59119'],
         { env: stubExpoEnv(projectRoot), reject: false }
       );
 
       expect(() => JSON.parse(result.stdout)).not.toThrow();
       expect(Object.keys(JSON.parse(result.stdout)).sort()).toEqual([
         'appMismatch',
+        'appMismatchKind',
         'appsConnected',
         'bundle',
         'devServerUrl',
@@ -1362,17 +1560,61 @@ describe('@expo/agent-cli smoke', () => {
       ]);
     });
 
+    // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+    // @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract
+    //
+    // The gate narrates itself now, and this tier owns the one property that matters about where
+    // those lines go: `stdout` still carries one object and nothing else. A progress line printed
+    // there would break `JSON.parse(stdout)` for every `--json` caller — which is why the narration
+    // goes through `Log.progress` and not `Log.log` (@ref src/log §progress).
+    it('narrates the walk on stderr, and leaves stdout one object', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['smoke', '--ios', '--json', '--no-start', '--port', '59121'],
+        { env: stubExpoEnv(projectRoot), reject: false }
+      );
+
+      expect(result.stderr).toContain('Looking for a dev server');
+      expect(() => JSON.parse(result.stdout)).not.toThrow();
+      // And the narration is on the other stream, not both.
+      expect(result.stdout).not.toContain('Looking for a dev server');
+    });
+
     it('prints the error envelope for a command that was wrong', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['smoke', '--json', '--bogus'], {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['smoke', '--ios', '--json', '--bogus'],
+        { reject: false }
+      );
+
+      expect(result.exitCode).toBe(1);
+      const { error } = JSON.parse(result.stdout);
+      expect(error.code).toBe('BAD_ARGS');
+      expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --help');
+    });
+
+    // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+    //
+    // The one flag with no default. It used to default from the host — iOS on a Mac, Android
+    // everywhere else — which is a fact about the machine the CLI runs on and not about the device
+    // the caller has, so on a Mac with only an Android emulator running the gate produced a real
+    // verdict about a platform nobody had asked about.
+    it('refuses to guess the platform, and names the flags that say it', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+
+      const result = await executeAgentCliAsync(projectRoot, ['smoke', '--json'], {
         reject: false,
       });
 
       expect(result.exitCode).toBe(1);
       const { error } = JSON.parse(result.stdout);
       expect(error.code).toBe('BAD_ARGS');
-      expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --help');
+      expect(error.message).toContain('needs to be told which platform');
+      expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --ios');
     });
 
     // @ref llp/0010-agent-conventions.rfc.md §Exit codes.
@@ -1396,10 +1638,11 @@ describe('@expo/agent-cli smoke', () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const eventsPath = path.join(projectRoot, 'events.jsonl');
 
-    await executeAgentCliAsync(projectRoot, ['smoke', '--json', '--no-start', '--port', '59120'], {
-      env: { ...stubExpoEnv(projectRoot), LOG_EVENTS: eventsPath },
-      reject: false,
-    });
+    await executeAgentCliAsync(
+      projectRoot,
+      ['smoke', '--ios', '--json', '--no-start', '--port', '59120'],
+      { env: { ...stubExpoEnv(projectRoot), LOG_EVENTS: eventsPath }, reject: false }
+    );
 
     const events = fs
       .readFileSync(eventsPath, 'utf8')

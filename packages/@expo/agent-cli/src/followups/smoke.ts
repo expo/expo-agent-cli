@@ -7,6 +7,7 @@
 // commands this replaces made that mistake often enough to be worth stating (F41, F48-8).
 
 import { PROGRAM_PREFIX } from '../programName';
+import type { SmokeAppMismatchKind } from '../smoke/phases';
 import { capFollowUps, type FollowUp } from './types';
 
 export interface SmokeFollowUpInput {
@@ -56,14 +57,23 @@ export interface SmokeFollowUpInput {
    */
   buildAttempted: boolean;
   /**
-   * Why the app that answered cannot run this project, or null when it can.
+   * Why the app under test cannot run this project, or null when it can.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
-   * The one inconclusive state a re-run can never change, so the one that has to lead with a
-   * different command entirely: no amount of looking again turns Expo Go into a runtime that holds
-   * this project's native code.
+   * A state a bare re-run can never change, so one that has to lead with a different command
+   * entirely: no amount of looking again turns Expo Go into a runtime that holds this project's
+   * native code, and none of it turns the wrong release of Expo Go into the right one.
    */
   appMismatch: string | null;
+  /**
+   * Which kind of mismatch it is, which decides which command leads.
+   *
+   * @see SmokeAppMismatchKind — a project Expo Go cannot run needs a development build; a project it
+   * can run needs the right *version* of Expo Go, which the gate installs for itself. Read from
+   * here rather than from {@link appMismatch}, because a follow-up that picked its command by
+   * matching English would be one sentence edit away from wrong advice.
+   */
+  appMismatchKind: SmokeAppMismatchKind | null;
   /**
    * What the `reload` phase did about the app the window was read from.
    *
@@ -103,6 +113,30 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   // is the wrong app for this project. Offering a re-run of the gate would be the exact mistake
   // llp/0009 was written against, since the same Expo Go will answer the same way for ever.
   if (input.appMismatch) {
+    // @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+    //
+    // **Two mismatches, two next actions** (@ref src/smoke/phases §SmokeAppMismatchKind). Before
+    // this branch existed both got the development-build advice, which is right for a project Expo
+    // Go cannot run and wrong for a project it can: the answer to the wrong *version* of Expo Go is
+    // the right version, which this gate installs for itself on any run that was not told to change
+    // nothing. Sending that caller to a native build would cost them twenty minutes to fix
+    // something a re-run fixes in seconds.
+    if (input.appMismatchKind === 'expo-go-version') {
+      return capFollowUps([
+        {
+          id: 'smoke-install-expo-go',
+          // Deliberately without `--no-start`, whether or not the caller passed it: the point of
+          // the suggestion is the install, and `--no-start` is what forbids it.
+          command: `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}`,
+          why: 'The Expo Go on the device is built from another SDK, so it is not the app this project runs. A run allowed to bring its own environment installs the release this SDK ships and reads that instead.',
+        },
+        {
+          id: 'status',
+          command: `${PROGRAM_PREFIX} status`,
+          why: "Says which SDK this project is on, which is what decides which Expo Go belongs on the device.",
+        },
+      ]);
+    }
     return capFollowUps([
       {
         id: 'dev-build',

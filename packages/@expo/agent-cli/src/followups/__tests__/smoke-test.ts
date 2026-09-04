@@ -29,6 +29,7 @@ function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput 
     // before it was read, so the window these follow-ups are about is already trustworthy.
     reloadDisposition: 'reloaded',
     appMismatch: null,
+    appMismatchKind: null,
     buildAttempted: false,
     ...overrides,
   };
@@ -286,6 +287,7 @@ describe(`${buildSmokeFollowUps.name} for an app that cannot run the project`, (
   const mismatched = {
     outcome: 'inconclusive' as const,
     appMismatch: 'the app that answered is Expo Go, and this project cannot run in Expo Go',
+    appMismatchKind: 'expo-go-incompatible' as const,
   };
 
   it(`leads with the build that can run the project`, () => {
@@ -301,6 +303,43 @@ describe(`${buildSmokeFollowUps.name} for an app that cannot run the project`, (
   it(`names the platform the run was about`, () => {
     expect(commands({ ...mismatched, platform: 'android' })[0]).toBe(
       'npx @expo/agent-cli dev --android --yes'
+    );
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+//
+// The **other** mismatch, and the reason `appMismatchKind` exists
+// (@ref src/smoke/phases §SmokeAppMismatchKind). Before it did, both kinds got the advice above —
+// which is right for a project Expo Go cannot run and wrong for a project it can: the answer to the
+// wrong *version* of Expo Go is the right version, which this gate installs for itself. Sending
+// that caller to a native build would cost twenty minutes to fix what a re-run fixes in seconds.
+describe(`${buildSmokeFollowUps.name} for the wrong version of Expo Go`, () => {
+  const stale = {
+    outcome: 'inconclusive' as const,
+    appMismatch: 'the Expo Go on the device is 54.0.8, and 57.0.9 is the release this SDK ships',
+    appMismatchKind: 'expo-go-version' as const,
+  };
+
+  it(`leads with the run that installs the release this SDK ships`, () => {
+    expect(commands(stale)[0]).toBe('npx @expo/agent-cli smoke --ios');
+  });
+
+  // The one case in this file where re-running the gate *is* the answer, because the re-run is not
+  // a second look — it is the install. And the flag that forbids the install is deliberately left
+  // off, whether or not the caller passed it.
+  it(`drops --no-start from the suggestion, because that flag is what forbids the fix`, () => {
+    expect(commands({ ...stale, bootstrap: false }).join(' ')).not.toContain('--no-start');
+  });
+
+  it(`never suggests a native build for a project that fits in Expo Go`, () => {
+    expect(commands(stale).join(' ')).not.toContain('dev --ios --yes');
+  });
+
+  // And it keeps the platform and the route, like every other follow-up here (F58).
+  it(`keeps the platform and the route the run was about`, () => {
+    expect(commands({ ...stale, platform: 'android', route: '/notes' })[0]).toBe(
+      'npx @expo/agent-cli smoke --android --route /notes'
     );
   });
 });

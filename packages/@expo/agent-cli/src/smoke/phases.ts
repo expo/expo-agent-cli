@@ -48,6 +48,7 @@ import type { BundleCheckResult } from '../runtime/bundleCheck';
 import type { DevServerDiscovery } from '../runtime/devServer';
 import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
 import type { AppConnectionResult, BundlerReadyResult } from '../runtime/waitReady';
+import type { SmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
 import type {
   SmokeCleanupJson,
@@ -185,6 +186,37 @@ export interface SmokeReloadResult {
 }
 
 /** What the error window amounted to. Never a throw: an unreadable app is a result. */
+/**
+ * Which of the two reasons an app cannot run this project.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
+ * @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+ *
+ * Carried as a value rather than left to be read out of the sentence, because the **next action is
+ * different for each** and the follow-ups have to pick one (llp/0021 §The rules — nothing
+ * downstream should have to match English to act):
+ *
+ * - `expo-go-incompatible`: this project's native code is not in Expo Go's runtime, and no version
+ *   of Expo Go will ever run it. The answer is a development build.
+ * - `expo-go-version`: the project fits in Expo Go, and the copy on the device is built from a
+ *   different SDK. The answer is the right copy, which this gate installs for itself on any run
+ *   that was not told to change nothing.
+ *
+ * Suggesting a development build for the second would send a caller to a twenty-minute compile to
+ * fix something a re-run without `--no-start` fixes in seconds.
+ */
+export type SmokeAppMismatchKind = 'expo-go-incompatible' | 'expo-go-version';
+
+/** What asking "can the app under test run this project" came to. @see SmokeDeps.checkAppFitsProject */
+export interface SmokeAppFit {
+  /** Why it cannot, or null when it can — or when nothing could be decided. */
+  mismatch: string | null;
+  /** Which kind of "cannot". Null exactly when {@link mismatch} is. */
+  kind: SmokeAppMismatchKind | null;
+  /** A finding worth printing that decides nothing. */
+  note: string | null;
+}
+
 export interface SmokeErrorsResult {
   ok: boolean;
   records: RuntimeErrorRecord[];
@@ -277,18 +309,40 @@ export interface SmokeDeps {
    * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
    * @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
    *
-   * Two answers, because the findings are not the same weight. A `mismatch` is an app that cannot
-   * run this project — Expo Go holding a project whose native code its fixed runtime does not
-   * contain, or an Expo Go from another SDK release line — and the gate must not report a pass on
-   * a reading taken through it. A `note` is a finding worth printing that decides nothing, such as
-   * an Expo Go an update behind on the same release line, which will usually run the app.
+   * Three fields, because the findings are not the same weight and the two heavy ones do not have
+   * the same answer. A `mismatch` is an app that cannot run this project, and the gate must not
+   * report a pass on a reading taken through it. `kind` says which of the two it is — see
+   * {@link SmokeAppMismatchKind}, and the reason it is carried rather than derived from the
+   * sentence. A `note` is a finding worth printing that decides nothing, such as an Expo Go an
+   * update behind on the same release line, which will usually run the app.
    *
-   * Both null is the ordinary answer, and so is both null when nothing could be decided: a check
+   * All null is the ordinary answer, and so is all null when nothing could be decided: a check
    * that could not run must not become a refusal.
    */
-  checkAppFitsProject(
-    devServerUrl: string
-  ): Promise<{ mismatch: string | null; note: string | null }>;
+  checkAppFitsProject(devServerUrl: string): Promise<SmokeAppFit>;
+  /**
+   * Why an app this run opened may never have attached, read off the **device** rather than the
+   * dev server.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+   *
+   * The one question {@link checkAppFitsProject} cannot answer, and the reason is in its argument:
+   * it looks for an Expo Go among the dev server's debugger targets, and on this path there are
+   * none — nothing attached, which is the whole problem. So the same question is asked of the
+   * device.
+   *
+   * Found live, and it is the worst form of the gap the version check was written to close: an
+   * emulator holding Expo Go 54.0.8, a project on SDK 57, and 119 seconds spent to report `no app
+   * had attached when the budget ran out` — while the reason was on the device the entire time, and
+   * the follow-ups went on to suggest opening it again [observed — emulator-5554, 2026-09-04].
+   *
+   * Null when nothing on the device explains it, which is the ordinary answer: a slow app, a first
+   * bundle still building, a device that is busy. Never a guess.
+   */
+  explainSilentApp(
+    deviceId: string | null,
+    backend: DeviceBackend | null
+  ): Promise<SmokeAppFit | null>;
   /**
    * Put an app that was already attached back on the bundle the dev server is serving.
    *
@@ -311,6 +365,15 @@ export interface SmokeDeps {
    * re-registering, which is what a still-loading relaunch does.
    */
   waitForStableTargets(devServerUrl: string, timeoutMs: number): Promise<{ stable: boolean }>;
+  /**
+   * Say which phase is starting, before it starts.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+   * A dependency rather than a `Log` call, for the same reason every other side effect in this
+   * file is one: the outcome table is tested against fakes, and a walk that printed for itself
+   * would make those tests about prose. `silentProgress` is what they pass.
+   */
+  progress: SmokeProgress;
   /** The clock, so a test can pin the durations it reports. */
   now(): number;
 }
@@ -368,6 +431,13 @@ export interface SmokeRun {
    * (llp/0005 §One preflight for the runtime family, on `error.data`).
    */
   appMismatch: string | null;
+  /**
+   * Which kind of mismatch it is. Null exactly when {@link appMismatch} is.
+   *
+   * @see SmokeAppMismatchKind — the next action differs per kind, and the follow-ups pick it from
+   * here rather than from the sentence.
+   */
+  appMismatchKind: SmokeAppMismatchKind | null;
   /**
    * The start phase ran a plan that **compiled**.
    *
@@ -725,11 +795,25 @@ async function runPhasesAsync(
   let bootstrapMs = 0;
   const remaining = () => Math.max(0, options.timeoutMs - (deps.now() - startedAt - bootstrapMs));
 
-  /** Record one phase and hand back what it produced. */
+  /**
+   * Record one phase and hand back what it produced.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+   * The progress line is said here rather than at each call site, because "a phase is starting" and
+   * "a phase is being recorded" are the same event and a second place to say it would be a second
+   * place to forget one. The phases that are pushed straight onto the list instead of going through
+   * this — a `route` that was already opened, a `reload` the run declined — say nothing, and that is
+   * right: they are rows about work that did not happen, and a progress line for one would report a
+   * wait the caller is not in.
+   *
+   * @param budgetMs how long this phase may spend, when the walk knows (@ref ./progress §SmokeProgress).
+   */
   const record = async <T>(
     id: SmokePhaseId,
-    run: () => Promise<{ status: SmokePhaseStatus; reason?: string | null; value: T }>
+    run: () => Promise<{ status: SmokePhaseStatus; reason?: string | null; value: T }>,
+    budgetMs?: number | null
   ): Promise<T> => {
+    deps.progress(id, budgetMs ?? null);
     const at = deps.now();
     const { status, reason, value } = await run();
     phases.push({ id, status, ms: deps.now() - at, reason: reason ?? null });
@@ -742,8 +826,8 @@ async function runPhasesAsync(
   };
 
   /** The same, for a phase that is always bootstrap. */
-  const recordBootstrap: typeof record = async (id, run) => {
-    const value = await record(id, run);
+  const recordBootstrap: typeof record = async (id, run, budgetMs) => {
+    const value = await record(id, run, budgetMs);
     chargeToBootstrap();
     return value;
   };
@@ -783,6 +867,7 @@ async function runPhasesAsync(
     runtimeSupported: null,
     reload: noReload(),
     appMismatch: null,
+    appMismatchKind: null,
     buildAttempted: false,
     windowMs: null,
     errors: [],
@@ -806,6 +891,13 @@ async function runPhasesAsync(
    */
   let buildAttempted = false;
   let devServerMs = 0;
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+  //
+  // Said here rather than left to `record`, because this phase is the one that does not go through
+  // it: its row is pushed by hand further down, since its milliseconds are the *sum* of the look
+  // and the second look after a start. The caller is nonetheless waiting on this from the first
+  // moment of the run, so it is the first thing the run says.
+  deps.progress('dev-server', null);
   const lookAt = deps.now();
   let discovery = await deps.discoverDevServer(options.devServerUrl);
   devServerMs += deps.now() - lookAt;
@@ -880,26 +972,30 @@ async function runPhasesAsync(
   const warming = environment.devServer === 'started';
   const warmingBudget = () => (warming ? FIRST_BUNDLE_TIMEOUT_MS : remaining());
 
-  const readiness = await record('bundler-ready', async () => {
-    const result = await deps.waitForBundlerReady(devServerUrl, warmingBudget());
-    // Checked before the timeout, because it is decided rather than pending: no amount of looking
-    // again turns another project's dev server into this one's (llp/0010 §Other gates, in brief).
-    if (result.projectRootMatched === false) {
+  const readiness = await record(
+    'bundler-ready',
+    async () => {
+      const result = await deps.waitForBundlerReady(devServerUrl, warmingBudget());
+      // Checked before the timeout, because it is decided rather than pending: no amount of looking
+      // again turns another project's dev server into this one's (llp/0010 §Other gates, in brief).
+      if (result.projectRootMatched === false) {
+        return {
+          status: 'failed' as const,
+          reason: `it serves ${result.reportedProjectRoot ?? 'another project'}, not this one`,
+          value: result,
+        };
+      }
+      if (result.ready) {
+        return { status: 'ok' as const, value: result };
+      }
       return {
-        status: 'failed' as const,
-        reason: `it serves ${result.reportedProjectRoot ?? 'another project'}, not this one`,
+        status: result.timedOut ? ('inconclusive' as const) : ('failed' as const),
+        reason: result.reason ?? 'the bundler did not answer',
         value: result,
       };
-    }
-    if (result.ready) {
-      return { status: 'ok' as const, value: result };
-    }
-    return {
-      status: result.timedOut ? ('inconclusive' as const) : ('failed' as const),
-      reason: result.reason ?? 'the bundler did not answer',
-      value: result,
-    };
-  });
+    },
+    warmingBudget()
+  );
   if (warming) {
     chargeToBootstrap();
   }
@@ -936,29 +1032,33 @@ async function runPhasesAsync(
 
   // ---- Phase 3: does this project's own code compile? ---------------------------------------
 
-  const bundle = await record('bundle', async () => {
-    const result = await deps.checkEntryBundle(devServerUrl, warmingBudget());
-    switch (result.outcome) {
-      case 'ok':
-        return { status: 'ok' as const, value: result };
-      case 'broken':
-        return { status: 'failed' as const, reason: bundleErrorSentence(result), value: result };
-      case 'timeout':
-        return {
-          status: 'inconclusive' as const,
-          reason: 'the bundler was still building it when the budget ran out',
-          value: result,
-        };
-      default:
-        // Fail-open, unchanged from `dev:wait`: a dev server that answered nothing this CLI
-        // understands has not shown the project to be broken (llp/0010 §An empty target list is inconclusive).
-        return {
-          status: 'inconclusive' as const,
-          reason: result.reason ?? 'the bundler gave no answer about the entry bundle',
-          value: result,
-        };
-    }
-  });
+  const bundle = await record(
+    'bundle',
+    async () => {
+      const result = await deps.checkEntryBundle(devServerUrl, warmingBudget());
+      switch (result.outcome) {
+        case 'ok':
+          return { status: 'ok' as const, value: result };
+        case 'broken':
+          return { status: 'failed' as const, reason: bundleErrorSentence(result), value: result };
+        case 'timeout':
+          return {
+            status: 'inconclusive' as const,
+            reason: 'the bundler was still building it when the budget ran out',
+            value: result,
+          };
+        default:
+          // Fail-open, unchanged from `dev:wait`: a dev server that answered nothing this CLI
+          // understands has not shown the project to be broken (llp/0010 §An empty target list is inconclusive).
+          return {
+            status: 'inconclusive' as const,
+            reason: result.reason ?? 'the bundler gave no answer about the entry bundle',
+            value: result,
+          };
+      }
+    },
+    warmingBudget()
+  );
   if (warming) {
     chargeToBootstrap();
   }
@@ -1248,7 +1348,15 @@ async function runPhasesAsync(
     // it loads (F123's ladder is gated on that), and the wait below asks the same question — so a
     // budget handed to each would be two of them: a cold run whose app never arrives would spend
     // four minutes to report what it knew after two.
+    // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+    //
+    // The second line this phase says, and the only phase that says two. The reason is that the
+    // phase does two things of very different sizes: a two-second look for an app that is already
+    // there, and — when there is none — an open followed by a wait that on a cold environment is
+    // two minutes. One line covering both would either overstate the look or say nothing about the
+    // wait, and the wait is the longest single thing this command ever does.
     const attachDeadline = deps.now() + attachBudget();
+    deps.progress('app', Math.max(0, attachDeadline - deps.now()));
     const opened = await deps.openRoute(
       options.route ?? ROOT_ROUTE,
       devServerUrl,
@@ -1298,6 +1406,27 @@ async function runPhasesAsync(
 
   if (appsConnected === 0) {
     const appPhase = phases[phases.length - 1]!;
+
+    // @ref ./phases §SmokeDeps.explainSilentApp
+    //
+    // Nothing attached is a *symptom*, and the device often holds the cause. The commonest one is
+    // an Expo Go built from another SDK: it takes the deep link, fails to load a bundle it cannot
+    // run, and registers no debugger target — so the wait expires and the run reports the symptom
+    // [observed — emulator-5554 on Expo Go 54.0.8 against an SDK 57 project, 119 s, 2026-09-04].
+    //
+    // Asked here rather than in the `app` phase itself so it costs nothing on the healthy path:
+    // this branch is only reached by a run that already has nothing to read.
+    const silent = await deps.explainSilentApp(deviceId, deviceBackend);
+    if (silent?.mismatch != null) {
+      // Appended rather than substituted: "the link was opened and nothing attached" is what the
+      // phase measured, and the device fact is why. A reader needs both — the second without the
+      // first would not say that the open itself succeeded.
+      appPhase.reason =
+        appPhase.reason == null
+          ? silent.mismatch
+          : `${appPhase.reason} · ${silent.mismatch}`;
+    }
+
     // No app, so no runtime and no window — but there may still be a device, and a picture of
     // whatever is on it is the most useful thing left to hand back.
     // From `reload` rather than from `route`: the reload phase sits between this one and the route
@@ -1315,6 +1444,11 @@ async function runPhasesAsync(
       deviceId: captured.deviceId,
       deviceBackend: captured.deviceBackend,
       routeCheck,
+      // Reported as a fact and not only as the phase's sentence, so the follow-ups can lead with
+      // the command that fixes it rather than with "open the app again" — which is what they did,
+      // for ever, against a device that will answer the same way every time (llp/0009).
+      appMismatch: silent?.mismatch ?? null,
+      appMismatchKind: silent?.kind ?? null,
       screenshot: captured.screenshot,
       durationMs: deps.now() - startedAt,
     });
@@ -1339,6 +1473,7 @@ async function runPhasesAsync(
   // changes is that the verdict can no longer be `passed`.
   const appFit = await deps.checkAppFitsProject(devServerUrl);
   const appMismatch = appFit.mismatch;
+  const appMismatchKind = appFit.kind;
   const appPhase = phases.find((phase) => phase.id === 'app');
   if (appPhase != null) {
     if (appMismatch != null) {
@@ -1395,32 +1530,36 @@ async function runPhasesAsync(
         '--no-reload was given, so the app was read on the bundle it already had, which may predate the code on disk',
     });
   } else {
-    const reloaded = await record('reload', async () => {
-      const result = await deps.reloadApp(devServerUrl, Math.min(RELOAD_TIMEOUT_MS, remaining()));
-      reloadJson.knownTargetIds = result.knownTargetIds;
-      reloadJson.freshTargets = result.freshTargets;
-      reloadJson.commandSocketReconnected = result.commandSocketReconnected;
-      reloadJson.bundleServed = result.bundleServed;
-      if (result.ok) {
-        reloadJson.disposition = 'reloaded';
-        reloadJson.verifiedBy = result.verifiedBy;
+    const reloaded = await record(
+      'reload',
+      async () => {
+        const result = await deps.reloadApp(devServerUrl, Math.min(RELOAD_TIMEOUT_MS, remaining()));
+        reloadJson.knownTargetIds = result.knownTargetIds;
+        reloadJson.freshTargets = result.freshTargets;
+        reloadJson.commandSocketReconnected = result.commandSocketReconnected;
+        reloadJson.bundleServed = result.bundleServed;
+        if (result.ok) {
+          reloadJson.disposition = 'reloaded';
+          reloadJson.verifiedBy = result.verifiedBy;
+          return {
+            status: 'ok' as const,
+            reason: `the app fetched the served bundle again (${result.verifiedBy})`,
+            value: result,
+          };
+        }
+        // @ref llp/0021-honest-reports.rfc.md §The rules band. Not `failed`: nothing has been shown
+        // to be wrong with the app, and the next action is to look again rather than to fix
+        // something. What is unknown is *which session* the phases below are about, and that is
+        // exactly the band `inconclusive` exists for (llp/0010 §Exit codes).
+        reloadJson.disposition = 'unproved';
         return {
-          status: 'ok' as const,
-          reason: `the app fetched the served bundle again (${result.verifiedBy})`,
+          status: 'inconclusive' as const,
+          reason: `${result.reason ?? 'nothing was observed to come of the reload'}, so what the phases below read may be the session from before the code on disk`,
           value: result,
         };
-      }
-      // @ref llp/0021-honest-reports.rfc.md §The rules band. Not `failed`: nothing has been shown
-      // to be wrong with the app, and the next action is to look again rather than to fix
-      // something. What is unknown is *which session* the phases below are about, and that is
-      // exactly the band `inconclusive` exists for (llp/0010 §Exit codes).
-      reloadJson.disposition = 'unproved';
-      return {
-        status: 'inconclusive' as const,
-        reason: `${result.reason ?? 'nothing was observed to come of the reload'}, so what the phases below read may be the session from before the code on disk`,
-        value: result,
-      };
-    });
+      },
+      Math.min(RELOAD_TIMEOUT_MS, remaining())
+    );
     if (reloaded.ok) {
       // The app is coming back, so it owes the same waits a freshly opened one does: the settle
       // before the reads, and the runtime-ready poll rather than a single look
@@ -1542,39 +1681,43 @@ async function runPhasesAsync(
   // the report is more useful with it — but the *verdict* never rests on it. That is the rule
   // llp/0005-runtime-loop-tools.rfc.md §Android forces: Expo Go on Android acknowledges `Runtime.enable` and reports
   // nothing, so an empty window there is silence and not health.
-  const collected = await record('errors', async () => {
-    const result = await deps.collectErrors(devServerUrl, options.windowMs);
-    if (!result.ok) {
+  const collected = await record(
+    'errors',
+    async () => {
+      const result = await deps.collectErrors(devServerUrl, options.windowMs);
+      if (!result.ok) {
+        return {
+          status: 'inconclusive' as const,
+          reason: result.reason ?? 'the error window could not be opened',
+          value: result,
+        };
+      }
+      const failing = result.records.filter(isFailingRecord);
+      if (failing.length > 0) {
+        return {
+          status: 'failed' as const,
+          reason: `${failing.length} ${failing.length === 1 ? 'error' : 'errors'} reported by the app: ${failing[0]!.message}`,
+          value: result,
+        };
+      }
+      if (!runtime.ok) {
+        return {
+          status: 'inconclusive' as const,
+          reason: 'the window was empty, and this runtime reports nothing whatever the app does',
+          value: result,
+        };
+      }
       return {
-        status: 'inconclusive' as const,
-        reason: result.reason ?? 'the error window could not be opened',
+        status: 'ok' as const,
+        reason:
+          result.records.length > 0
+            ? `${result.records.length} console.error ${result.records.length === 1 ? 'line' : 'lines'}, none of them an error the app reported`
+            : null,
         value: result,
       };
-    }
-    const failing = result.records.filter(isFailingRecord);
-    if (failing.length > 0) {
-      return {
-        status: 'failed' as const,
-        reason: `${failing.length} ${failing.length === 1 ? 'error' : 'errors'} reported by the app: ${failing[0]!.message}`,
-        value: result,
-      };
-    }
-    if (!runtime.ok) {
-      return {
-        status: 'inconclusive' as const,
-        reason: 'the window was empty, and this runtime reports nothing whatever the app does',
-        value: result,
-      };
-    }
-    return {
-      status: 'ok' as const,
-      reason:
-        result.records.length > 0
-          ? `${result.records.length} console.error ${result.records.length === 1 ? 'line' : 'lines'}, none of them an error the app reported`
-          : null,
-      value: result,
-    };
-  });
+    },
+    options.windowMs
+  );
 
   // ---- Phase 10: the picture ----------------------------------------------------------------
 
@@ -1616,6 +1759,7 @@ async function runPhasesAsync(
       runtimeSupported: runtime.unsupported ? false : runtime.ok ? true : null,
       reload: reloadJson,
       appMismatch,
+      appMismatchKind,
       windowMs: options.windowMs,
       errors: collected.records,
       screenshot: captured.screenshot,
@@ -1700,6 +1844,14 @@ async function captureIfPossible(
     }
     device = probe.deviceId;
   }
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+  //
+  // Here rather than at the top of this function, because everything above it is a decision and
+  // this is where the work starts: a run with `--no-screenshot`, or one with no device to
+  // photograph, has no wait to announce. The settle below is the wait, which is why the line comes
+  // before it and not before the capture.
+  deps.progress('screenshot', null);
 
   // @ref ./phases §APP_SETTLE_MS — friction run 6, F57. Usually already done: the runtime read
   // needs the same settle and asks for it first, on every path that reaches it.

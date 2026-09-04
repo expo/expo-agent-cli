@@ -11,6 +11,7 @@ import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckJson } from '../runtime/bundleCheck';
 import type { DevServerSource } from '../runtime/devServer';
 import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
+import type { SmokeAppMismatchKind } from './phases';
 
 /**
  * The phases of a smoke run, in the order they happen.
@@ -308,6 +309,16 @@ export interface SmokeResultJson {
    * list's prose.
    */
   appMismatch: string | null;
+  /**
+   * Which kind of mismatch it is. Null exactly when {@link appMismatch} is.
+   *
+   * @see SmokeAppMismatchKind — `expo-go-incompatible` needs a development build and
+   * `expo-go-version` needs the right release of Expo Go, which this gate installs for itself. Here
+   * as well as in the sentence, because an agent that had to pick between those two actions by
+   * matching English would be one wording edit away from sending its caller to a native build it
+   * does not need (llp/0021 §The rules).
+   */
+  appMismatchKind: SmokeAppMismatchKind | null;
   errors: SmokeErrorsJson;
   screenshot: ScreenshotResult;
   /** How long the whole run took, in milliseconds. */

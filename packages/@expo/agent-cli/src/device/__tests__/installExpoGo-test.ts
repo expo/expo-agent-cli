@@ -193,21 +193,108 @@ describe(installExpoGoAsync, () => {
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('ENOENT');
   });
+});
 
-  // Android is a different device tool, and this one only speaks `simctl`. Refused rather than
-  // attempted, so the reason names the gap instead of an `xcrun` failure on a machine with no
-  // simulators (llp/0005 §Android).
-  it(`refuses a platform it cannot install on`, async () => {
-    const spawn = vi.fn(async () => captured());
-    const result = await installExpoGoAsync('EMULATOR-1', 'android', '57.0.0', {
-      spawn,
+// @ref llp/0005-runtime-loop-tools.rfc.md §Android
+//
+// This used to refuse android by name, because the install went through `simctl` and `simctl` is
+// the iOS simulator's tool and nothing else's — which left `smoke --android` with the dead end the
+// whole section was written against: an emulator with no Expo Go, or with the wrong one, and an
+// instruction the agent loop cannot take without leaving the loop.
+//
+// The download is the *same* subprocess with a different platform argument [observed, 2026-09-03:
+// `expo-go download android 54.0.0 --json` answers `{"path":"…/Expo-Go-54.0.8.apk"}`, the same
+// contract iOS gets]. Only the installer differs, and that is what these cases pin.
+describe(`${installExpoGoAsync.name} on Android`, () => {
+  /** An `adb` resolution whose bin is the bare name, so the argv a case asserts on is readable. */
+  const adb = { bin: 'adb', source: 'PATH' as const, searched: [], fromPathOnly: false };
+  const DOWNLOADED_APK = '{"path":"/tmp/dl/Expo-Go-54.0.8.apk"}';
+
+  it(`downloads the apk and installs it with adb`, async () => {
+    const calls: string[][] = [];
+    const result = await installExpoGoAsync('emulator-5554', 'android', '54.0.0', {
+      adb,
+      spawn: async (command, args) => {
+        calls.push([command, ...args]);
+        return captured({ stdout: command === 'npx' ? DOWNLOADED_APK : 'Success' });
+      },
       tempDirAsync: async () => '/tmp/dl',
       cleanupAsync: async () => {},
     });
 
-    expect(spawn).not.toHaveBeenCalled();
+    expect(result).toMatchObject({ ok: true, version: '54.0.8' });
+    // @ref ../installExpoGo §putOnDeviceAsync — `-r` keeps the app's data across a replacement, and
+    // `-d` is what lets the replacement be a *downgrade*: a project on an older SDK than the
+    // emulator's Expo Go wants the older release, and without `-d` that fails with
+    // `INSTALL_FAILED_VERSION_DOWNGRADE`.
+    expect(calls).toEqual([
+      ['npx', '--yes', 'expo-go', 'download', 'android', '54.0.0', '--json'],
+      ['adb', '-s', 'emulator-5554', 'install', '-r', '-d', '/tmp/dl/Expo-Go-54.0.8.apk'],
+    ]);
+  });
+
+  // @ref ../installExpoGo §approveSchemesAsync. iOS needs the scheme approval and the onboarding
+  // flag written before a deep link works on a freshly installed app; Android needs neither —
+  // Expo Go's `exp://` intent filter is in its manifest [observed, 2026-09-03]. So nothing is
+  // written, and in particular nothing that only iOS needs is written to somebody's emulator.
+  it(`writes no preferences, because Android has no dialog to approve away`, async () => {
+    const calls: string[][] = [];
+    await installExpoGoAsync('emulator-5554', 'android', '54.0.0', {
+      adb,
+      spawn: async (command, args) => {
+        calls.push([command, ...args]);
+        return captured({ stdout: command === 'npx' ? DOWNLOADED_APK : 'Success' });
+      },
+      tempDirAsync: async () => '/tmp/dl',
+      cleanupAsync: async () => {},
+    });
+
+    expect(calls.some((argv) => argv.includes('defaults'))).toBe(false);
+    expect(calls.some((argv) => argv.includes('xcrun'))).toBe(false);
+  });
+
+  // @ref ../installExpoGo §putOnDeviceAsync — the one way `adb install` differs from `simctl
+  // install` in its *reporting*: it prints `Failure [INSTALL_FAILED_…]` and **exits 0**
+  // [observed, 2026-09-03]. A caller reading only the exit code would report that install as a
+  // success, which is a false green of exactly the kind this gate exists to remove.
+  it(`reports a refused install that exited zero`, async () => {
+    const result = await installExpoGoAsync('emulator-5554', 'android', '54.0.0', {
+      adb,
+      spawn: async (command) =>
+        captured({
+          stdout: command === 'npx' ? DOWNLOADED_APK : '',
+          stderr:
+            command === 'npx'
+              ? ''
+              : 'adb: failed to install /tmp/dl/Expo-Go-54.0.8.apk: Failure [INSTALL_FAILED_INSUFFICIENT_STORAGE]',
+          exitCode: 0,
+        }),
+      tempDirAsync: async () => '/tmp/dl',
+      cleanupAsync: async () => {},
+    });
+
     expect(result.ok).toBe(false);
-    expect(result.reason).toContain('android');
+    expect(result.reason).toContain('INSTALL_FAILED_INSUFFICIENT_STORAGE');
+  });
+
+  // The `adb` this CLI resolved, not the bare name: two Android SDKs on one machine is common, and
+  // an install through the wrong one puts the app on a device the rest of the run cannot see
+  // (@ref ../adb).
+  it(`installs through the adb this machine resolved`, async () => {
+    let installer: string | null = null;
+    await installExpoGoAsync('emulator-5554', 'android', '54.0.0', {
+      adb: { ...adb, bin: '/opt/android/platform-tools/adb', source: 'ANDROID_HOME' },
+      spawn: async (command, args) => {
+        if (args.includes('install')) {
+          installer = command;
+        }
+        return captured({ stdout: command === 'npx' ? DOWNLOADED_APK : 'Success' });
+      },
+      tempDirAsync: async () => '/tmp/dl',
+      cleanupAsync: async () => {},
+    });
+
+    expect(installer).toBe('/opt/android/platform-tools/adb');
   });
 });
 

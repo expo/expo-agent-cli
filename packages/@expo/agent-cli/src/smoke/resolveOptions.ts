@@ -210,6 +210,9 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
 /**
  * Read the platform flags: `--ios`/`--android`, or `--platform <name>`.
  *
+ * **One of them is required** [confirmed, Kudo, 2026-09-03], which is the one flag in this command
+ * that has no default. @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+ *
  * **`--platform web` is refused**, and this is the one place the command's flag set is narrower
  * than a bundler wait's. The reason is llp/0010 §An empty target list is inconclusive: `/json/list` is
  * the inspector proxy's list of React Native runtimes, a browser registers nothing in it, and this
@@ -218,7 +221,8 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
  * That section settled the same shape for `--require-app --platform web`, and for the same reason
  * it is exit `1` rather than `22`: no amount of looking again makes a browser answer a debugger.
  *
- * @throws {CommandError} `BAD_ARGS` for two platforms at once, or for one with no runtime.
+ * @throws {CommandError} `BAD_ARGS` for no platform at all, two platforms at once, or one with no
+ * runtime.
  */
 function resolveSmokePlatform(args: { [flag: string]: unknown }): SmokePlatform {
   const named = args['--platform'] == null ? null : String(args['--platform']);
@@ -258,7 +262,24 @@ function resolveSmokePlatform(args: { [flag: string]: unknown }): SmokePlatform 
     );
   }
 
-  // No flag at all: iOS on a Mac, where an Expo project usually has a simulator open, and Android
-  // everywhere else — the same default `resolveDeviceAsync` applies when it looks for a device.
-  return (named ?? flagged ?? (process.platform === 'darwin' ? 'ios' : 'android')) as SmokePlatform;
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  //
+  // No flag at all used to mean iOS on a Mac and Android everywhere else. That is a guess about
+  // the *host*, and every question this command answers is about a *device* — so the two came
+  // apart on the ordinary Mac with an Android emulator running and nothing else, where the guess
+  // produced a real verdict about a platform the caller had not asked about.
+  if (named == null && flagged == null) {
+    const error = new CommandError(
+      'BAD_ARGS',
+      [
+        `smoke needs to be told which platform to drive, so nothing ran.`,
+        `Why: every phase of this command is about one device — the bundle is built for that platform, the debugger targets are filtered to it, and the picture is taken through that platform's own tool. There is no answer this command can give about "the app" without being told which one, and picking from the host operating system would report a verdict about a device you may not have running.`,
+        `How: pass --ios or --android, or --platform ios|android. To cover both, run it twice.`,
+      ].join('\n')
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} smoke --ios`;
+    throw error;
+  }
+
+  return (named ?? flagged) as SmokePlatform;
 }

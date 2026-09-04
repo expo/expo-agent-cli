@@ -588,7 +588,10 @@ export const workflow: WorkflowStep[] = [
   {
     title: "Verify before you're done",
     rungs: [
-      { run: 'smoke', gets: 'bundle, boot and error window, one exit code' },
+      // The platform is in the rung rather than left to a default, because there is no default:
+      // every question this command answers is about one device, so it has to be told which
+      // (@ref src/smoke/resolveOptions §resolveSmokePlatform).
+      { run: 'smoke --ios|--android', gets: 'bundle, boot and error window, one exit code' },
       { run: 'typecheck', gets: 'the type errors neither of those can see' },
       { run: 'doctor', gets: 'what expo-doctor finds wrong with the setup' },
     ],

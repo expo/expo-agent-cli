@@ -23,6 +23,7 @@ import {
   type SmokeDeps,
   type SmokeRun,
 } from '../phases';
+import { silentProgress } from '../progress';
 import type { SmokeOptions } from '../resolveOptions';
 import type { SmokePhaseId, SmokePhaseStatus } from '../types';
 
@@ -175,7 +176,10 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
     probeDevice: async () => ({ deviceId: 'SIM-1', backend: 'local-ios' as const, reason: null }),
     openRoute: async (route) => opened({ route }),
     // The ordinary case: the app that answered is one this project can run, with nothing to note.
-    checkAppFitsProject: async () => ({ mismatch: null, note: null }),
+    checkAppFitsProject: async () => ({ mismatch: null, kind: null, note: null }),
+    // @ref ../phases §SmokeDeps.explainSilentApp — nothing on the device explains a wait that
+    // expired, which is the ordinary answer: a slow app is not a wrong app.
+    explainSilentApp: async () => null,
     // A reload the dev server's own command socket proved, which is the healthy local case.
     reloadApp: async () => ({
       ok: true,
@@ -189,6 +193,10 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
     evaluate: async () => ({ ok: true, unsupported: false, reason: null }),
     collectErrors: async () => ({ ok: true, records: [], reason: null }),
     captureScreenshot: async () => screenshot(),
+    // @ref ./progress §silentProgress — the walk narrates itself on stderr, and these cases are
+    // about the outcome table rather than about the prose. The cases that *are* about the narration
+    // pass a recorder of their own.
+    progress: silentProgress,
     // Monotonic and coarse, so every phase reports a duration a test can assert on.
     now: () => (clock += 10),
     ...overrides,
@@ -2058,7 +2066,7 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
 
   it(`will not pass a run whose runtime is an app the project cannot run`, async () => {
     const run = await runSmokePhasesAsync(
-      deps({ checkAppFitsProject: async () => ({ mismatch: MISMATCH, note: null }) }),
+      deps({ checkAppFitsProject: async () => ({ mismatch: MISMATCH, kind: 'expo-go-incompatible' as const, note: null }) }),
       options()
     );
 
@@ -2073,7 +2081,7 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
   // decide the verdict.
   it(`still reads the app it found, and still photographs it`, async () => {
     const run = await runSmokePhasesAsync(
-      deps({ checkAppFitsProject: async () => ({ mismatch: MISMATCH, note: null }) }),
+      deps({ checkAppFitsProject: async () => ({ mismatch: MISMATCH, kind: 'expo-go-incompatible' as const, note: null }) }),
       options()
     );
 
@@ -2087,7 +2095,7 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
   it(`still fails on an error the wrong app reported`, async () => {
     const run = await runSmokePhasesAsync(
       deps({
-        checkAppFitsProject: async () => ({ mismatch: MISMATCH, note: null }),
+        checkAppFitsProject: async () => ({ mismatch: MISMATCH, kind: 'expo-go-incompatible' as const, note: null }),
         collectErrors: async () => ({ ok: true, records: [record()], reason: null }),
       }),
       options()
@@ -2100,7 +2108,7 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
   // An app this run opened itself is asked the same question: the open picks the target from the
   // same decision, so a mismatch there would mean this gate had opened the wrong app.
   it(`asks the question for an app it opened as well as one it found`, async () => {
-    const checkAppFitsProject = vi.fn(async () => ({ mismatch: null, note: null }));
+    const checkAppFitsProject = vi.fn(async () => ({ mismatch: null, kind: null, note: null }));
     await runSmokePhasesAsync(
       deps({
         checkAppFitsProject,
@@ -2116,7 +2124,7 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
 
   // And a run with no app at all never asks: there is no runtime to be about.
   it(`does not ask when nothing is connected`, async () => {
-    const checkAppFitsProject = vi.fn(async () => ({ mismatch: null, note: null }));
+    const checkAppFitsProject = vi.fn(async () => ({ mismatch: null, kind: null, note: null }));
     await runSmokePhasesAsync(
       deps({
         checkAppFitsProject,
@@ -2142,7 +2150,7 @@ describe(`${runSmokePhasesAsync.name} and a note about the app it read`, () => {
 
   it(`keeps the phase ok and still passes the run`, async () => {
     const run = await runSmokePhasesAsync(
-      deps({ checkAppFitsProject: async () => ({ mismatch: null, note: NOTE }) }),
+      deps({ checkAppFitsProject: async () => ({ mismatch: null, kind: null, note: NOTE }) }),
       options()
     );
 
@@ -2153,7 +2161,7 @@ describe(`${runSmokePhasesAsync.name} and a note about the app it read`, () => {
   // Said out loud on the row it is about, because a fact nobody prints is a fact nobody has.
   it(`says it on the app phase`, async () => {
     const run = await runSmokePhasesAsync(
-      deps({ checkAppFitsProject: async () => ({ mismatch: null, note: NOTE }) }),
+      deps({ checkAppFitsProject: async () => ({ mismatch: null, kind: null, note: NOTE }) }),
       options()
     );
 
@@ -2165,7 +2173,7 @@ describe(`${runSmokePhasesAsync.name} and a note about the app it read`, () => {
   it(`prefers the mismatch when there is one`, async () => {
     const run = await runSmokePhasesAsync(
       deps({
-        checkAppFitsProject: async () => ({ mismatch: 'cannot run this project', note: NOTE }),
+        checkAppFitsProject: async () => ({ mismatch: 'cannot run this project', kind: 'expo-go-incompatible' as const, note: NOTE }),
       }),
       options()
     );
@@ -2180,8 +2188,9 @@ describe(`${runSmokePhasesAsync.name} and a note about the app it read`, () => {
   it(`does not lose the phase's own reason`, async () => {
     const run = await runSmokePhasesAsync(
       deps({
-        checkAppFitsProject: async () => ({ mismatch: null, note: NOTE }),
-        waitForAppConnection: vi.fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
+        checkAppFitsProject: async () => ({ mismatch: null, kind: null, note: NOTE }),
+        waitForAppConnection: vi
+          .fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
           .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
           .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2 }),
       }),
@@ -2432,5 +2441,224 @@ describe(`${runSmokePhasesAsync.name} and the app the install replaced`, () => {
 
     expect(statusOf(run, 'install-app')).toBe('failed');
     expect(statusOf(run, 'app')).toBe('skipped');
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §The gate says what it is doing while it does it
+//
+// The gate can spend three minutes between its first output and its report, and until it narrated
+// itself a caller had no way to tell a long run from a hung one. What is worth pinning here is not
+// the prose — that is `./progress-test.ts` — but that the walk says a phase is starting **before**
+// it starts it, and that it says nothing about a phase it did not perform.
+describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
+  /** Every phase the walk narrated, in the order it narrated them. */
+  function narrated(overrides: Partial<SmokeDeps> = {}, over: Partial<SmokeOptions> = {}) {
+    const said: SmokePhaseId[] = [];
+    return {
+      said,
+      runAsync: () =>
+        runSmokePhasesAsync(
+          deps({ progress: (phase) => said.push(phase), ...overrides }),
+          options(over)
+        ),
+    };
+  }
+
+  it(`names every phase it performs, in the order it performs them`, async () => {
+    const { said, runAsync } = narrated({}, { route: '/notes' });
+    await runAsync();
+
+    // No `start-dev-server` and no `boot-device`: the default machine has both already, which is
+    // the same reason those rows are absent from the report (@ref ../phases §CONDITIONAL_PHASES).
+    expect(said).toEqual([
+      'dev-server',
+      'bundler-ready',
+      'bundle',
+      'app',
+      'reload',
+      'route',
+      'runtime',
+      'errors',
+      'screenshot',
+    ]);
+  });
+
+  // Said before the work rather than after it: a line's only job is to name the wait the caller is
+  // in, and one printed on the way out would arrive at the moment it stopped being needed.
+  it(`says a phase is starting before that phase runs`, async () => {
+    const order: string[] = [];
+    await runSmokePhasesAsync(
+      deps({
+        progress: (phase) => order.push(`say:${phase}`),
+        checkEntryBundle: async () => {
+          order.push('do:bundle');
+          return bundle();
+        },
+      }),
+      options()
+    );
+
+    expect(order.indexOf('say:bundle')).toBeLessThan(order.indexOf('do:bundle'));
+  });
+
+  // The acts, which only a run that performs them reports — and only such a run narrates.
+  it(`names the start, the boot and the install only when it does them`, async () => {
+    // Nothing there to begin with and a dev server there afterwards, which is what makes the run
+    // perform the start rather than report that nothing answered.
+    let looks = 0;
+    const { said, runAsync } = narrated(
+      {
+        discoverDevServer: async () => discovery({ reachable: looks++ > 0 }),
+        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        probeDevice: async () => ({ deviceId: null, backend: null, reason: 'no simulator' }),
+        installNeededOnDevice: async () => true,
+      },
+      // The three acts are only performed by a run allowed to bring its own environment, and this
+      // table defaults that off (@ref ./phases-test §options).
+      { bootstrap: true }
+    );
+    await runAsync();
+
+    expect(said.slice(0, 2)).toEqual(['dev-server', 'start-dev-server']);
+    expect(said).toContain('boot-device');
+    expect(said).toContain('install-app');
+  });
+
+  // And a machine that has both says neither, for the same reason the report has no row for them:
+  // there was nothing to do, which is not the same as something skipped
+  // (@ref ../phases §CONDITIONAL_PHASES).
+  it(`says nothing about an act it had no need to perform`, async () => {
+    const { said, runAsync } = narrated({}, { bootstrap: true });
+    await runAsync();
+
+    expect(said).not.toContain('start-dev-server');
+    expect(said).not.toContain('boot-device');
+    expect(said).not.toContain('install-app');
+  });
+
+  // @ref ../progress §phaseSentence. The `app` phase is two things — a two-second look, then an
+  // open and a wait that on a cold environment is two minutes — so it says two lines, and the
+  // budget on the second is what makes them read differently.
+  it(`says the app phase twice when it has to open the app, with the wait's budget`, async () => {
+    const budgets: (number | null)[] = [];
+    await runSmokePhasesAsync(
+      deps({
+        progress: (phase, budgetMs) => {
+          if (phase === 'app') {
+            budgets.push(budgetMs);
+          }
+        },
+        // Nothing attached, so the phase opens one and waits.
+        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+      }),
+      options()
+    );
+
+    expect(budgets).toHaveLength(2);
+    expect(budgets[0]).toBeNull();
+    expect(budgets[1]).toBeGreaterThan(0);
+  });
+
+  // And once when it does not: an app that is already attached is the phase's cheap half only.
+  it(`says the app phase once when an app is already attached`, async () => {
+    const { said, runAsync } = narrated();
+    await runAsync();
+
+    expect(said.filter((phase) => phase === 'app')).toEqual(['app']);
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §The Expo Go on the device is not the Expo Go the SDK wants
+// @ref ./phases §SmokeDeps.explainSilentApp
+//
+// Nothing attached is a symptom, and the device often holds the cause. Found live and at full
+// price: an emulator holding Expo Go 54.0.8, a project on SDK 57, and **119 seconds** spent to
+// report `no app had attached when the budget ran out` — while the reason sat on the device the
+// whole time, and the follow-ups went on to suggest opening the app again, which would fail the
+// same way for ever [observed — emulator-5554, 2026-09-04].
+describe(`${runSmokePhasesAsync.name} and an app that never attached`, () => {
+  const SILENT = {
+    mismatch: 'the Expo Go on the device is 54.0.8, and 57.0.9 is the release this SDK ships',
+    kind: 'expo-go-version' as const,
+    note: null,
+  };
+
+  /** A run whose app never turns up, which is the only path this question is asked on. */
+  function nothingAttaches(overrides: Partial<SmokeDeps> = {}) {
+    return deps({
+      waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+      ...overrides,
+    });
+  }
+
+  it(`names the device-side reason beside the wait that expired`, async () => {
+    const run = await runSmokePhasesAsync(
+      nothingAttaches({ explainSilentApp: async () => SILENT }),
+      options()
+    );
+
+    const app = run.phases.find((phase) => phase.id === 'app')!;
+    // Both: the phase measured that the link was opened and nothing came of it, and the device
+    // says why. The second without the first would not say that the open itself succeeded.
+    expect(app.reason).toContain('no app had attached');
+    expect(app.reason).toContain('54.0.8');
+  });
+
+  // Reported as a fact and not only as a sentence, so the follow-ups can lead with the command that
+  // fixes it rather than with "open the app again" (llp/0021 §The rules).
+  it(`carries the finding as a value the follow-ups can branch on`, async () => {
+    const run = await runSmokePhasesAsync(
+      nothingAttaches({ explainSilentApp: async () => SILENT }),
+      options()
+    );
+
+    expect(run.appMismatch).toContain('54.0.8');
+    expect(run.appMismatchKind).toBe('expo-go-version');
+  });
+
+  // The ordinary answer, and the one that must not be dressed up: a slow app is not a wrong app.
+  it(`says nothing extra when the device explains nothing`, async () => {
+    const run = await runSmokePhasesAsync(
+      nothingAttaches({ explainSilentApp: async () => null }),
+      options()
+    );
+
+    expect(run.appMismatch).toBeNull();
+    expect(run.appMismatchKind).toBeNull();
+    expect(run.phases.find((phase) => phase.id === 'app')?.reason).toContain('no app had attached');
+  });
+
+  // Never on the healthy path. The question costs an `adb` call or a `plutil` read, and a run whose
+  // app answered has nothing for it to explain.
+  it(`never asks the device when an app did attach`, async () => {
+    let asked = false;
+    await runSmokePhasesAsync(
+      deps({
+        explainSilentApp: async () => {
+          asked = true;
+          return null;
+        },
+      }),
+      options()
+    );
+
+    expect(asked).toBe(false);
+  });
+
+  // The device this run settled on, handed over rather than resolved again: a second resolution
+  // would be a second chance for the run to be about two devices (F98).
+  it(`asks about the device the run is about`, async () => {
+    const asked: (string | null)[] = [];
+    await runSmokePhasesAsync(
+      nothingAttaches({
+        explainSilentApp: async (deviceId) => {
+          asked.push(deviceId);
+          return null;
+        },
+      }),
+      options()
+    );
+
+    expect(asked).toEqual(['SIM-1']);
   });
 });

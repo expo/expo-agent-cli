@@ -6,10 +6,10 @@ import { assertWithOptionsArgs, DURATION_HELP_NOTE, DURATION_METAVAR } from '../
 
 export const smokeHelp: CommandHelp = {
   command: 'smoke',
-  usage: `${PROGRAM_PREFIX} smoke`,
+  usage: `${PROGRAM_PREFIX} smoke --ios|--android`,
   options: [
     `--route <route>            Open this route before the error window`,
-    `--ios, --android           Platform to drive; the host decides when none is named`,
+    `--ios, --android           Platform to drive. Required: nothing here is guessed from the host`,
     `--platform <ios|android>   The same, spelled the way --json reports it`,
     `--cloud                    Drive this project's EAS Simulator session, not a local device`,
     `--start                    Start what is missing. The default; this only says it out loud`,
@@ -28,15 +28,15 @@ export const smokeHelp: CommandHelp = {
   ],
   examples: [
     {
-      run: `${PROGRAM_PREFIX} smoke`,
+      run: `${PROGRAM_PREFIX} smoke --ios`,
       gets: 'the whole gate: it starts the dev server, boots a device, answers, and puts both back',
     },
     {
-      run: `${PROGRAM_PREFIX} smoke --route /notes --json`,
+      run: `${PROGRAM_PREFIX} smoke --android --route /notes --json`,
       gets: 'the same on that route, as one object with a phase-by-phase record',
     },
     {
-      run: `${PROGRAM_PREFIX} smoke --no-start --window 5s`,
+      run: `${PROGRAM_PREFIX} smoke --ios --no-start --window 5s`,
       gets: 'the same against the dev server you already have, watching five seconds for errors',
     },
   ],
