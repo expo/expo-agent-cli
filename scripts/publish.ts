@@ -24,7 +24,7 @@ export const USAGE = `Usage: bun scripts/publish.ts [version] [--package <name>]
 
 Bump a package to [version] and dispatch ${WORKFLOW_FILE}.
 Packages: ${PACKAGE_NAMES} (default: ${DEFAULT_PACKAGE}).
-When version is omitted, use the local package.json version.
+When version is omitted, bump the patch version from package.json.
 
 Options:
   --package <name>  package to publish (default: ${DEFAULT_PACKAGE})
@@ -122,6 +122,15 @@ export function applyVersion(packageJson: string, version: string): string {
   const parsed = JSON.parse(packageJson) as { version?: string };
   parsed.version = version;
   return `${JSON.stringify(parsed, null, 2)}\n`;
+}
+
+export function bumpPatch(version: string): string {
+  if (!VERSION_PATTERN.test(version)) {
+    throw new Error(`publish: invalid version ${version}`);
+  }
+  const [core] = version.split(/[-+]/);
+  const [major, minor, patch] = core.split('.').map(Number);
+  return `${major}.${minor}.${patch + 1}`;
 }
 
 function defaultIo(): PublishIo {
@@ -318,7 +327,7 @@ export function publish(io: Partial<PublishIo> = {}): void {
     }
 
     const currentVersion = readCurrentVersion(packageJson);
-    const version = args.version ?? currentVersion;
+    const version = args.version ?? bumpPatch(currentVersion);
     if (!VERSION_PATTERN.test(version)) {
       throw new Error(`publish: invalid version ${version}`);
     }

@@ -3,6 +3,7 @@ import path from 'node:path';
 
 import {
   applyVersion,
+  bumpPatch,
   DEFAULT_PACKAGE,
   parseArgs,
   publish,
@@ -152,6 +153,25 @@ describe('applyVersion', () => {
   });
 });
 
+describe('bumpPatch', () => {
+  it('should increment the patch number', () => {
+    expect(bumpPatch('1.2.3')).toBe('1.2.4');
+  });
+
+  it('should increment patch from 9 to 10', () => {
+    expect(bumpPatch('1.2.9')).toBe('1.2.10');
+  });
+
+  it('should drop prerelease and build metadata', () => {
+    expect(bumpPatch('1.2.3-beta.1')).toBe('1.2.4');
+    expect(bumpPatch('1.2.3+build.5')).toBe('1.2.4');
+  });
+
+  it('should throw for an invalid version', () => {
+    expect(() => bumpPatch('1.2')).toThrow('publish: invalid version 1.2');
+  });
+});
+
 describe('publish', () => {
   it('should print usage and exit 0 for --help', () => {
     const io = createIo(['--help'], {});
@@ -161,26 +181,32 @@ describe('publish', () => {
     expect(io.runs).toEqual([]);
   });
 
-  it('should use the local version when version is omitted for expo-agent-cli', () => {
+  it('should bump the patch version when version is omitted for expo-agent-cli', () => {
     const io = createIo(['--package', 'expo-agent-cli'], {
-      'npm view expo-agent-cli@1.0.0 version': fail('404 Not Found'),
+      'npm view expo-agent-cli@1.0.1 version': fail('404 Not Found'),
       'git rev-parse --abbrev-ref HEAD': ok('main\n'),
       'git status --porcelain': ok(''),
+      'git add packages/expo-agent-cli/package.json': ok(),
+      'git commit -m Publish expo-agent-cli@1.0.1': ok(),
+      'git push': ok(),
       [ghDispatch('latest', 'expo-agent-cli')]: ok(),
     }, { [aliasPackageJsonPath]: packageJsonAt('1.0.0', 'expo-agent-cli') });
 
     publish(io);
 
-    expect(io.writes).toEqual({});
+    expect(io.writes[aliasPackageJsonPath]).toBe(packageJsonAt('1.0.1', 'expo-agent-cli'));
     expect(io.runs).toEqual([
-      'npm view expo-agent-cli@1.0.0 version',
+      'npm view expo-agent-cli@1.0.1 version',
       'git rev-parse --abbrev-ref HEAD',
       'git status --porcelain',
+      'git add packages/expo-agent-cli/package.json',
+      'git commit -m Publish expo-agent-cli@1.0.1',
+      'git push',
       ghDispatch('latest', 'expo-agent-cli'),
     ]);
     expect(io.logs).toEqual([
-      'Publishing expo-agent-cli@1.0.0 with tag latest',
-      'package.json is already 1.0.0',
+      'Publishing expo-agent-cli@1.0.1 with tag latest',
+      'Pushed expo-agent-cli@1.0.1 to origin/main',
       'Dispatched publish.yml on main (package expo-agent-cli, tag latest)',
     ]);
     expect(io.exit).toHaveBeenCalledWith(0);
@@ -261,26 +287,32 @@ describe('publish', () => {
     expect(io.exit).toHaveBeenCalledWith(0);
   });
 
-  it('should use the local version when version is omitted', () => {
+  it('should bump the patch version when version is omitted', () => {
     const io = createIo([], {
-      'npm view @expo/agent-cli@1.0.0 version': fail('404 Not Found'),
+      'npm view @expo/agent-cli@1.0.1 version': fail('404 Not Found'),
       'git rev-parse --abbrev-ref HEAD': ok('main\n'),
       'git status --porcelain': ok(''),
+      'git add packages/@expo/agent-cli/package.json': ok(),
+      'git commit -m Publish @expo/agent-cli@1.0.1': ok(),
+      'git push': ok(),
       [ghDispatch('latest', '@expo/agent-cli')]: ok(),
     });
 
     publish(io);
 
-    expect(io.writes).toEqual({});
+    expect(io.writes[agentCliPackageJsonPath]).toBe(packageJsonAt('1.0.1'));
     expect(io.runs).toEqual([
-      'npm view @expo/agent-cli@1.0.0 version',
+      'npm view @expo/agent-cli@1.0.1 version',
       'git rev-parse --abbrev-ref HEAD',
       'git status --porcelain',
+      'git add packages/@expo/agent-cli/package.json',
+      'git commit -m Publish @expo/agent-cli@1.0.1',
+      'git push',
       ghDispatch('latest', '@expo/agent-cli'),
     ]);
     expect(io.logs).toEqual([
-      'Publishing @expo/agent-cli@1.0.0 with tag latest',
-      'package.json is already 1.0.0',
+      'Publishing @expo/agent-cli@1.0.1 with tag latest',
+      'Pushed @expo/agent-cli@1.0.1 to origin/main',
       'Dispatched publish.yml on main (package @expo/agent-cli, tag latest)',
     ]);
     expect(io.exit).toHaveBeenCalledWith(0);

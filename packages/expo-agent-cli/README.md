@@ -30,6 +30,6 @@ bun scripts/publish.ts 2.1.0 --package @expo/agent-cli --tag beta
 bun scripts/publish.ts --dry-run
 ```
 
-`--package` defaults to `@expo/agent-cli`. Omit the version to use the selected package's local `package.json` version. The script will not overwrite a version that is already on npm.
+`--package` defaults to `@expo/agent-cli`. Omit the version to bump the selected package's patch version from `package.json`. The script will not overwrite a version that is already on npm.
 
 After the first trusted publish works, set Publishing access to "Require two-factor authentication and disallow tokens".
