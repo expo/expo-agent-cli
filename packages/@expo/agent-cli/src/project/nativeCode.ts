@@ -162,9 +162,26 @@ async function isCheckedInNativeDirAsync(
   }
 
   // The template gitignore would hide this. Ask git whether the dir is tracked anyway
-  // (`git add -f`). Spawn only in that case, so tests that mock `spawn` for simctl/adb
-  // and have a bare `ios/` without a gitignore still see a checked-in native project.
+  // (`git add -f`), but only when this project is inside a work tree. Spawning git from
+  // a temp directory with no `.git` is a hang on some Windows runners.
+  if (!(await hasGitDirAsync(projectRoot))) {
+    return false;
+  }
   return (await gitCheckIgnoreAsync(projectRoot, dirName)) === 'tracked';
+}
+
+async function hasGitDirAsync(start: string): Promise<boolean> {
+  for (let dir = start; ; dir = path.dirname(dir)) {
+    try {
+      await fs.promises.access(path.join(dir, '.git'));
+      return true;
+    } catch {
+      // Keep walking.
+    }
+    if (path.dirname(dir) === dir) {
+      return false;
+    }
+  }
 }
 
 /**

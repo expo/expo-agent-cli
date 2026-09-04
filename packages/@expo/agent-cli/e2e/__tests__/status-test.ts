@@ -296,17 +296,23 @@ async function writePrebuildOutputAsync(projectRoot: string): Promise<void> {
 }
 
 function git(projectRoot: string, args: string[]): void {
-  const result = spawnSync('git', args, { cwd: projectRoot, encoding: 'utf8' });
+  const result = spawnSync('git', args, {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    timeout: 15_000,
+    windowsHide: true,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' },
+  });
+  if (result.error) {
+    throw new Error(`git ${args.join(' ')} failed: ${result.error.message}`);
+  }
   if (result.status !== 0) {
     throw new Error(`git ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
   }
 }
 
 async function initGitRepoAsync(projectRoot: string): Promise<void> {
-  git(projectRoot, ['init']);
-  git(projectRoot, ['config', 'user.email', 'agent-cli@expo.dev']);
-  git(projectRoot, ['config', 'user.name', 'expo-agent-cli']);
-  git(projectRoot, ['config', 'commit.gpgsign', 'false']);
+  git(projectRoot, ['init', '-q']);
 }
 
 /**
@@ -652,8 +658,6 @@ describe('@expo/agent-cli status', () => {
       const projectRoot = await goAppOnDumpSdkAsync();
       await writePrebuildOutputAsync(projectRoot);
       await initGitRepoAsync(projectRoot);
-      git(projectRoot, ['add', '.']);
-      git(projectRoot, ['commit', '-m', 'prebuild ignored']);
 
       const report = await reportInAsync(projectRoot);
 
@@ -666,8 +670,7 @@ describe('@expo/agent-cli status', () => {
       const projectRoot = await goAppOnDumpSdkAsync();
       await writePrebuildOutputAsync(projectRoot);
       await initGitRepoAsync(projectRoot);
-      git(projectRoot, ['add', '-f', 'ios', 'android']);
-      git(projectRoot, ['commit', '-m', 'commit native projects']);
+      git(projectRoot, ['add', '-f', '--', 'ios', 'android']);
 
       const report = await reportInAsync(projectRoot);
 
