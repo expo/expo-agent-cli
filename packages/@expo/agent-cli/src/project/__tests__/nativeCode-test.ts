@@ -1,3 +1,4 @@
+import path from 'node:path';
 import { vol } from 'memfs';
 
 import {
@@ -69,7 +70,7 @@ describe(listLocalModulePackagesAsync, () => {
     });
 
     await expect(listLocalModulePackagesAsync(projectRoot)).resolves.toEqual([
-      { name: 'local-native', root: `${projectRoot}/modules/local-native` },
+      { name: 'local-native', root: path.join(projectRoot, 'modules', 'local-native') },
     ]);
   });
 

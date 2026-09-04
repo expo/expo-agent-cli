@@ -80,9 +80,9 @@ export const LOCAL_MODULES_DIR = 'modules';
  * gitignored is `generic`, gitignored or missing is `managed` — without importing it
  * (llp/0001 process boundary).
  *
- * `git check-ignore` is the source of truth when this is a work tree: a tracked file is not
- * ignored even if `.gitignore` names it, which is the committed-prebuild case. When git cannot
- * answer, the project's `.gitignore` is read for the template patterns (`/ios`, `/android`).
+ * `.gitignore` is read first for the template patterns (`/ios`, `/android`). When those
+ * match, `git check-ignore` decides whether the dir is tracked anyway (`git add -f`).
+ * A tracked file is not ignored even if `.gitignore` names it.
  */
 export async function readProjectNativeDirsAsync(
   projectRoot: string
@@ -149,31 +149,30 @@ async function isCheckedInNativeDirAsync(
     return false;
   }
 
-  const git = await gitCheckIgnoreAsync(projectRoot, dirName);
-  if (git === 'ignored') {
-    return false;
+  let gitignored = false;
+  try {
+    const gitignore = await fs.promises.readFile(path.join(projectRoot, '.gitignore'), 'utf8');
+    gitignored = gitignoreIgnoresNativeDir(gitignore, dirName);
+  } catch {
+    // No .gitignore, or unreadable.
   }
-  if (git === 'tracked') {
+
+  if (!gitignored) {
     return true;
   }
 
-  try {
-    const gitignore = await fs.promises.readFile(path.join(projectRoot, '.gitignore'), 'utf8');
-    if (gitignoreIgnoresNativeDir(gitignore, dirName)) {
-      return false;
-    }
-  } catch {
-    // No .gitignore, or unreadable: a present directory counts as checked in.
-  }
-  return true;
+  // The template gitignore would hide this. Ask git whether the dir is tracked anyway
+  // (`git add -f`). Spawn only in that case, so tests that mock `spawn` for simctl/adb
+  // and have a bare `ios/` without a gitignore still see a checked-in native project.
+  return (await gitCheckIgnoreAsync(projectRoot, dirName)) === 'tracked';
 }
 
 /**
  * `git check-ignore -q <dir>` from the project root.
  *
- * Exit 0 is ignored (CNG prebuild output). Exit 1 is not ignored, including a file that is
- * tracked despite matching `.gitignore`. Anything else — no git, not a repo, a hang — is
- * unknown, and the `.gitignore` fallback answers.
+ * Exit 0 is ignored (untracked prebuild output). Exit 1 is not ignored, including a file
+ * that is tracked despite matching `.gitignore`. Anything else — no git, not a repo — is
+ * unknown, and a gitignored directory is treated as CNG.
  */
 async function gitCheckIgnoreAsync(
   projectRoot: string,
