@@ -8,7 +8,12 @@
 // Both are stubbed here. What is worth testing is the argv, the order, and every way the pair can
 // fail: a download that answers no path, a `simctl` that refuses, a device that is not booted.
 
+import { resetApprovedSchemes } from '../approveScheme';
 import { installExpoGoAsync } from '../installExpoGo';
+
+// @ref ../approveScheme §written — the approvals are memoized per process, so a case that asserts
+// an exact argv list has to start from an empty memo or inherit whatever ran before it.
+beforeEach(() => resetApprovedSchemes());
 
 /** A capture result, with the fields a caller reads. */
 function captured(over: Partial<{ stdout: string; stderr: string; exitCode: number | null }> = {}) {
@@ -33,9 +38,9 @@ describe(installExpoGoAsync, () => {
     expect(calls).toEqual([
       ['npx', '--yes', 'expo-go', 'download', 'ios', '57.0.19', '--json'],
       ['xcrun', 'simctl', 'install', 'SIM-1', '/tmp/dl/Expo-Go-57.0.9.tar.app'],
-      // @ref ./installExpoGo §approveSchemesAsync — the install is not finished until the link
-      // works, and on a freshly installed app iOS asks `Open in "Expo Go"?` first.
-      ...['exp', 'exps'].map((scheme) => [
+      // @ref src/device/approveScheme.ts — the install is not finished until the link works, and on
+      // a freshly installed app iOS asks `Open in "Expo Go"?` first.
+      [
         'xcrun',
         'simctl',
         'spawn',
@@ -43,12 +48,13 @@ describe(installExpoGoAsync, () => {
         'defaults',
         'write',
         'com.apple.launchservices.schemeapproval',
-        `com.apple.CoreSimulator.CoreSimulatorBridge-->${scheme}`,
+        'com.apple.CoreSimulator.CoreSimulatorBridge-->exp',
         '-string',
         'host.exp.Exponent',
-      ]),
-      // And the second obstacle: a first-ever launch puts the developer-menu onboarding sheet over
-      // the app, which would make the screenshot a picture of the sheet.
+      ],
+      // The second obstacle, written with the first rather than after both schemes: a first-ever
+      // launch puts the developer-menu onboarding sheet over the app, which would make the
+      // screenshot a picture of the sheet. Once per app, hence not repeated below.
       [
         'xcrun',
         'simctl',
@@ -60,6 +66,18 @@ describe(installExpoGoAsync, () => {
         'EXDevMenuIsOnboardingFinished',
         '-bool',
         'true',
+      ],
+      [
+        'xcrun',
+        'simctl',
+        'spawn',
+        'SIM-1',
+        'defaults',
+        'write',
+        'com.apple.launchservices.schemeapproval',
+        'com.apple.CoreSimulator.CoreSimulatorBridge-->exps',
+        '-string',
+        'host.exp.Exponent',
       ],
     ]);
   });

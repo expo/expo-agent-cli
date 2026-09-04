@@ -539,6 +539,25 @@ describe(buildNextActionStatus, () => {
       };
     }
 
+    /**
+     * A booted iOS simulator.
+     *
+     * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+     * Named by the cases that assert the gate's command line, because the platform in it comes
+     * from the device this machine has — so a case that passed no device was asserting the *host's*
+     * answer and failed on the Linux runner while passing on a Mac [observed — tier0-linux,
+     * 2026-09-04]. That is the F58 mistake, made while fixing F58-class bugs: a fixture has to say
+     * what it means.
+     */
+    const bootedIos = {
+      state: 'present' as const,
+      platform: 'ios',
+      deviceId: 'SIM-1',
+      name: 'iPhone 17 Pro',
+      devices: [],
+      reason: null,
+    };
+
     // @ref llp/0009-smart-followups.rfc.md §Examples per command — friction run 5, F48-8. A wait
     // for an app to attach cannot succeed while nothing is opening one: `--require-app` polls the
     // debugger target list, and no command in this CLI puts an app in it except this one. The
@@ -560,7 +579,8 @@ describe(buildNextActionStatus, () => {
         mockState(),
         {},
         'ios',
-        devServerStatus({ appsConnected: 1 })
+        devServerStatus({ appsConnected: 1 }),
+        bootedIos
       );
 
       expect(next.command).toBe('npx @expo/agent-cli smoke --ios');
@@ -617,7 +637,8 @@ describe(buildNextActionStatus, () => {
         {},
         'ios',
         // With an app attached, so this isolates the match decision from the app-count branch.
-        devServerStatus({ projectRootMatched: null, appsConnected: 1 })
+        devServerStatus({ projectRootMatched: null, appsConnected: 1 }),
+        bootedIos
       );
 
       expect(next.command).toBe('npx @expo/agent-cli smoke --ios');

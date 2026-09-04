@@ -205,7 +205,18 @@ export interface SmokeReloadResult {
  * Suggesting a development build for the second would send a caller to a twenty-minute compile to
  * fix something a re-run without `--no-start` fixes in seconds.
  */
-export type SmokeAppMismatchKind = 'expo-go-incompatible' | 'expo-go-version';
+export type SmokeAppMismatchKind =
+  | 'expo-go-incompatible'
+  | 'expo-go-version'
+  /**
+   * The device has not got the app at all, so nothing there handles this project's link.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+   * The development-build case, and the reason it is a *third* kind: `smoke` installs Expo Go for
+   * itself, and a development build is this project's own artefact to compile — so the answer is
+   * `dev --<platform> --yes` and not a re-run of anything.
+   */
+  | 'app-not-installed';
 
 /** What asking "can the app under test run this project" came to. @see SmokeDeps.checkAppFitsProject */
 export interface SmokeAppFit {
@@ -1274,8 +1285,32 @@ async function runPhasesAsync(
    * @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it. What a
    * development build shows in that state is the launcher's own screen, and a picture of it has to
    * say so — `openRouteAsync` reports the open it performed, so this is read rather than guessed.
+   *
+   * **`exitCode === 0` is part of the question**, and leaving it out made the picture lie
+   * [observed — Kudo, local run, 2026-09-04]. A launcher open the device *refused* also comes back
+   * `attached: false`, so a run whose deep link was rejected with `115` — no app on that device
+   * handles the scheme — captioned its screenshot "the loading link was opened and this project's
+   * bundle never ran". The link was not opened. Nothing was. The screenshot is the one piece of
+   * evidence a reader believes without checking it (llp/0021 §The rules), so a caption that
+   * describes an act that never happened is the worst thing in this file to get wrong.
    */
   let devLauncherLeftOnScreen = false;
+  /**
+   * Why the device refused this run's deep link, when it did and the device could say.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+   * Reported as a value and not only in the phase's sentence, for the same reason every other
+   * finding here is: the follow-ups branch on it, and a re-run is never the answer to it.
+   */
+  let refusedOpen: SmokeAppFit | null = null;
+  /**
+   * Whether the refused-open path already asked the device.
+   *
+   * Its own flag rather than `refusedOpen != null`, because "asked, and the device explained
+   * nothing" is a real answer and `??` cannot tell it from "not asked" — which made the run spend
+   * two device reads on one question.
+   */
+  let refusedOpenAsked = false;
 
   /**
    * Whether this run is the reason the thing it is now waiting for is cold.
@@ -1364,7 +1399,8 @@ async function runPhasesAsync(
     );
     appOpenedByThisRun = true;
     appMovedByThisRun = true;
-    devLauncherLeftOnScreen = opened.launch != null && !opened.launch.attached;
+    devLauncherLeftOnScreen =
+      opened.launch != null && opened.launch.exitCode === 0 && !opened.launch.attached;
     deviceId = opened.deviceId;
     deviceBackend = opened.deviceBackend;
     if (options.route != null) {
@@ -1372,9 +1408,24 @@ async function runPhasesAsync(
       routeOpenedWhileConnecting = true;
     }
     if (opened.exitCode !== 0) {
+      // @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+      //
+      // "The device refused the deep link" is what happened and not why, and it reads as a fault in
+      // the device. The why is almost always one thing: nothing on that device handles this
+      // project's scheme, because the app is not there. `simctl openurl` says so with `115` and
+      // says nothing else [observed — Kudo, local run, 2026-09-04, a development build and a
+      // simulator that had not got it], and a report that stopped at the refusal sent its reader to
+      // `navigate`, which is refused in exactly the same way for ever (llp/0009).
+      refusedOpenAsked = true;
+      refusedOpen = await deps.explainSilentApp(opened.deviceId, opened.deviceBackend);
       return {
         status: 'failed' as const,
-        reason: `no app was connected, and the device refused the deep link that would have opened one ("${opened.command}" exited ${opened.exitCode ?? 'on a signal'})`,
+        reason: [
+          `no app was connected, and the device refused the deep link that would have opened one ("${opened.command}" exited ${opened.exitCode ?? 'on a signal'})`,
+          refusedOpen?.mismatch,
+        ]
+          .filter(Boolean)
+          .join(' · '),
         value: first,
       };
     }
@@ -1416,15 +1467,18 @@ async function runPhasesAsync(
     //
     // Asked here rather than in the `app` phase itself so it costs nothing on the healthy path:
     // this branch is only reached by a run that already has nothing to read.
-    const silent = await deps.explainSilentApp(deviceId, deviceBackend);
-    if (silent?.mismatch != null) {
+    // The refused-open path already asked, and already put the answer in the phase's sentence, so
+    // this reads its result rather than spending a second device read — and appends nothing, which
+    // is what keeps the same finding from being printed twice on one row.
+    const silent = refusedOpenAsked
+      ? refusedOpen
+      : await deps.explainSilentApp(deviceId, deviceBackend);
+    if (!refusedOpenAsked && silent?.mismatch != null) {
       // Appended rather than substituted: "the link was opened and nothing attached" is what the
       // phase measured, and the device fact is why. A reader needs both — the second without the
       // first would not say that the open itself succeeded.
       appPhase.reason =
-        appPhase.reason == null
-          ? silent.mismatch
-          : `${appPhase.reason} · ${silent.mismatch}`;
+        appPhase.reason == null ? silent.mismatch : `${appPhase.reason} · ${silent.mismatch}`;
     }
 
     // No app, so no runtime and no window — but there may still be a device, and a picture of
@@ -1591,7 +1645,8 @@ async function runPhasesAsync(
       const result = await deps.openRoute(options.route!, devServerUrl, attachBudget());
       appOpenedByThisRun = true;
       appMovedByThisRun = true;
-      devLauncherLeftOnScreen = result.launch != null && !result.launch.attached;
+      devLauncherLeftOnScreen =
+        result.launch != null && result.launch.exitCode === 0 && !result.launch.attached;
       deviceId = result.deviceId;
       deviceBackend = result.deviceBackend;
       routeCheck = result.routeCheck;

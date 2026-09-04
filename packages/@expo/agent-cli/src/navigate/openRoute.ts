@@ -594,6 +594,12 @@ async function openUrlOnBackendAsync(
       deviceId: device.deviceId,
       url,
       appId,
+      // @ref src/device/approveScheme §appIdForScheme. Passed on the **local** branch too, which
+      // it was not: this parameter existed for the cloud path, which needs it to find the session,
+      // so the local open never received it — and the scheme approval that resolves this project's
+      // bundle identifier out of its app config therefore resolved nothing at all
+      // [observed, 2026-09-04, after two other layers of the same shape].
+      projectRoot,
       // @see BuildOpenUrlCommandParams.launchActivity — set only for the dev launcher's own URL on
       // Android, where a BROWSABLE intent reaches a code path that dies on a cold app (F123).
       launchActivity,

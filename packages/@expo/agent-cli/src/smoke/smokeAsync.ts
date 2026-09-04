@@ -639,6 +639,43 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
         return null;
       }
       const target = await targetAsync();
+
+      // @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+      //
+      // Asked first, and of **every** app rather than only of Expo Go: the commonest reason a
+      // device answers nothing is that it has not got the app, and the commonest way that happens
+      // is a development build on a simulator it was not built for. The link is then refused with
+      // `115` and the report used to say only that the device refused it, which reads as a fault in
+      // the device [observed — Kudo, local run, 2026-09-04].
+      if (target.appId != null) {
+        const has =
+          backend === 'local-android'
+            ? await androidHasAppAsync(deviceId, target.appId)
+            : (await simulatorDiskExistsAsync(deviceId))
+              ? await simulatorHasAppAsync(deviceId, target.appId)
+              : null;
+        // `null` is "could not look", which explains nothing (@ref src/device/androidApps).
+        if (has === false) {
+          return {
+            mismatch: [
+              `the app this project runs (${target.appLabel ?? target.appId}) is not installed on ${deviceId}, so nothing there handles its link`,
+              target.installable
+                ? // Expo Go, on a run that was told to change nothing: the install phase is what
+                  // fixes this, and `--no-start` is what forbade it.
+                  `a run without --no-start installs it.`
+                : // A development build is this project's own artefact, and putting one on a device
+                  // is a compile — which is `dev`'s to do, not this command's (llp/0005 §It builds
+                  // what the app needs, and says so first).
+                  `"${PROGRAM_PREFIX} dev --${options.platform} --yes" builds and installs it.`,
+            ].join(' — '),
+            kind: 'app-not-installed' as const,
+            note: null,
+          };
+        }
+      }
+
+      // Everything below is about Expo Go's *version*, so a development build stops here: it is
+      // this project's own app, and there is no release of it for this to have an opinion about.
       if (!target.installable) {
         return null;
       }

@@ -483,6 +483,25 @@ The local read gates the network one. Reading the device's plist is a file read;
 
 End to end: a simulator carrying Expo Go 56.0.4 against an SDK 57 project got `install-app 2.3s · installed 57.0.9 …, replacing 56.0.4`, and the run passed [observed, 2026-09-03]. Before it, the same simulator produced a 120 s wait and exit 22.
 
+### A link nobody can approve is a link that never opens
+
+Two obstacles sit between an unattended `simctl openurl` and a readable app, and **both were fixed for Expo Go and left in place for every development build** [observed — Kudo, local run, 2026-09-04].
+
+**The dialog.** A scheme iOS has not seen approved raises `Open in "<app>"?` with Cancel and Open — and `simctl openurl` **exits 0** while that alert is up. The link was delivered; the alert is the app's front door; there is nobody in this loop to press Open. The run then waits out its whole attach budget and reports, correctly and uselessly, that no app attached. Worse, the alert is **sticky**: it survives `simctl terminate`, `uninstall` and `install`, because it belongs to SpringBoard rather than to the app, so one unanswered dialog poisons every later run on that simulator until something restarts SpringBoard.
+
+**The sheet.** A first-ever launch of any app that ships `expo-dev-menu` then puts its onboarding sheet over the screen — "This is the developer menu… Continue" — and there is nobody to press Continue either. §The smoke gate calls the picture evidence, and a picture of an onboarding sheet is evidence of nothing.
+
+§Putting Expo Go on a simulator that has not got it solved both, and scoped the fix to an app **this run had just installed** — on the reasoning that a preference belonging to an app the caller already had is theirs and not ours. That reasoning was wrong twice over:
+
+- `@expo/cli` settles the first half. `openUrlAsync` calls `updateSimulatorLinkingPermissionsAsync` before **every** `simctl openurl` for any `appId`, Expo Go or not [reference — `src/start/platforms/ios/simctl.ts`]. So writing it is parity, not a policy of ours.
+- The live run settles the second. With the approval fixed, a development build the caller had built themselves launched and sat behind the onboarding sheet for the whole 120-second budget. A first-run onboarding nobody has seen is not a preference anybody chose, and without it the loop cannot get past it.
+
+So both writes now happen for **every local iOS open**, for whichever app the link belongs to (`src/device/approveScheme.ts`), memoized per device and app so one `navigate` — which opens the launcher URL and then the route link — writes each once.
+
+The app id is what makes this work, and its absence is what made the first cut a silent no-op. An `appId` reached an open in this CLI from `--app-id` and from nothing else, because until now only Android needed one — there it scopes the intent. So the write was skipped on every ordinary run. It is resolved now: `--app-id`, then Expo Go for Expo Go's own two schemes, then `ios.bundleIdentifier` from the static app config. **And `projectRoot` had to be threaded to the local branch of the open**, which had only ever passed it on the cloud path — three layers of the same shape in one fix, each one a seam that existed with nothing feeding it.
+
+Measured end to end on iOS 26.5 against a development build with `react-native-pdf`: before, `Open in "pdfbuild"?` and exit 22 after 120 s; after, no dialog, no sheet, and the app's own screen in the screenshot [observed, 2026-09-04].
+
 ### The run brings its own environment
 
 Start what is missing, stop only what you started, leave what you found [confirmed, Kudo, 2026-08-29]. `--start` is the default. `--no-start` is the opt-out. A dev server that was already up is used and still running afterwards. One this run started is stopped in a cleanup. The same for the device. The run tracks "I started this" explicitly. It never infers it at cleanup time.
@@ -502,6 +521,22 @@ A plan that compiles gets a budget the shape of a compile: `BUILD_DEV_SERVER_TIM
 The follow-ups change with it. "Start one in the foreground and watch it fail" is good advice for a start that took seconds and expensive advice for one that took minutes, so a run that built leads with `dev:logs`: the build already wrote down why it stopped, and reading that costs nothing where another build costs the whole build. This is llp/0009's no-useless-re-run rule met from the other side — a re-run that _can_ change the state, at a price the reader should not have to pay to find out why.
 
 `buildAttempted` is on the run for that decision, and set whether the start succeeded or failed: a build that failed is exactly the case where the cheapest next step differs from the ordinary one.
+
+#### A refused connection is not an answer
+
+**A thirty-minute budget is worth nothing if the wait it bounds returns in ten milliseconds**, and for the first version of this section that is what happened [observed — Kudo, local run, 2026-09-04].
+
+`waitForBundlerReadyAsync` made **one** request and no loop. The reasoning was sound as far as it went: `//status` answers only once the bundler has finished, so the request *is* the wait, and a poll would be a second mechanism for a thing HTTP already does. That holds exactly while something is listening on the port.
+
+The case it fails in is the expensive one this section is about. `expo run:ios` publishes the dev-server lock at the **start** of its dev-server step — the same F125 fact §Daemonization records for the phase reporting — and the port does not open until Xcode has finished, minutes later. The fetch was refused in about ten milliseconds, `waitForBundlerReadyAsync` returned `ready: false, timedOut: false`, and the run reported `a dev server could not be started (… --wait-ready gave up after 10ms)`. `smoke --ios` on a project that had just gained a native module failed in 23 seconds having compiled nothing, while the build it had announced carried on in the background.
+
+So a **connection-level** failure is retried, once a second, until the budget runs out. Three things are deliberate about the shape:
+
+- **Only a refusal retries.** A server that answered has answered, whatever it said — a 500, a body that is not `packager-status:running`, a TLS failure — and asking again would spend the budget on a settled question. `ENOTFOUND` is specifically not retried: a hostname that does not resolve will not start resolving, and waiting thirty minutes for it would turn a typo into a hang.
+- **The codes were measured, not assumed.** `undici` reports every network failure as `TypeError: fetch failed`, so the message says nothing; the syscall code is on `.cause.code`, and `localhost` — which resolves to two addresses — gives an `AggregateError` whose own `errors` carry one code each [observed, 2026-09-04].
+- **The timeout says which thing happened.** "The bundler was still working" is false when nothing ever listened: there was no bundler. A budget that expires with no answer at all reports `nothing was listening on … for Nms`, which is a dev server that never finished starting (see [[0021-honest-reports]] §The rules).
+
+The test that should have caught this existed and did not, which is worth more than the fix. `reports an unreachable dev server instead of throwing` pointed at **port 1** — and `undici` rejects port 1 as `bad port` before it opens a socket, so the case never exercised a refused connection at all. It is now four cases against a real server that starts listening a second and a half late: the retry that finds it, the budget that expires without it, the caller's `signal` that ends the loop early, and the hostname that must not be waited out.
 
 The bootstrap is not charged to `--timeout`. A cold simulator takes about a minute. A cold first bundle takes longer. Each act has a budget of its own: 120 s for the dev server, 120 s for an iOS boot, 240 s for an Android one. This run pays for the cold it caused. First compile (`FIRST_BUNDLE_TIMEOUT_MS`, 3 min) when it started that dev server. First launch and attach (`APP_ATTACH_TIMEOUT_MS`, 2 min) when it started the dev server or booted the device. That attach budget is taken once and shared by the open and the `app` phase wait, so a cold run that never attaches answers after two minutes rather than four. First readable runtime (`RUNTIME_READY_TIMEOUT_MS`, 30 s) when it opened the app. `--timeout` bounds the reads.
 

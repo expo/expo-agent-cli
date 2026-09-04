@@ -61,10 +61,72 @@ export interface BundlerReadyResult {
 }
 
 /**
+ * How long to wait before asking again, when nothing is listening on the port yet.
+ *
+ * @ref ./waitReady §waitForBundlerReadyAsync — the retry, and why there is one.
+ * A second, because what this is waiting out is a native build: a poll rate that matters on that
+ * scale would be a poll rate that hammered the port for twenty minutes.
+ */
+const NOT_LISTENING_RETRY_MS = 1_000;
+
+/**
+ * Whether this failure is "nothing is listening there", rather than an answer.
+ *
+ * @ref ./waitReady §waitForBundlerReadyAsync
+ *
+ * `undici` reports a refused connection as a `TypeError: fetch failed` whose **`cause`** carries the
+ * syscall code, so the code is what is read rather than the message — `fetch failed` is the same
+ * sentence for every network failure there is. Measured rather than assumed
+ * [observed, 2026-09-04: `127.0.0.1:<unbound>` gives `cause.code === 'ECONNREFUSED'`, and
+ * `localhost:<unbound>` gives an `AggregateError` cause whose own `errors` are two of them, one per
+ * address the name resolves to].
+ *
+ * `ENOTFOUND` is deliberately **not** in the list. A hostname that does not resolve is a settled
+ * answer, and waiting twenty minutes for DNS to change its mind would turn a typo into a hang.
+ */
+function isNotListening(error: unknown): boolean {
+  if (error == null || typeof error !== 'object') {
+    return false;
+  }
+  const cause = (error as { cause?: unknown }).cause;
+  const codes = [
+    (error as { code?: unknown }).code,
+    (cause as { code?: unknown } | undefined)?.code,
+    // The `localhost` shape: one error per address, and any of them being a refusal means there
+    // was nothing to talk to on that address.
+    ...(((cause as { errors?: unknown[] } | undefined)?.errors ?? []) as { code?: unknown }[]).map(
+      (entry) => entry?.code
+    ),
+  ];
+  return codes.some(
+    (value) =>
+      typeof value === 'string' &&
+      ['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH', 'UND_ERR_SOCKET'].includes(
+        value
+      )
+  );
+}
+
+/**
  * Wait for the dev server to finish bundling, and check whether it is this project's.
  *
  * Never throws: an unreachable dev server, a wrong answer and an expired budget are all results a
  * command has to report differently, and an exception would flatten them into one.
+ *
+ * **A refused connection is not an answer, so it is asked again.**
+ * @ref llp/0005-runtime-loop-tools.rfc.md §A refused connection is not an answer
+ *
+ * The original design was one request and no loop, on the reasoning that `/status` answers only
+ * once the bundler has finished — so the request *is* the wait. That holds exactly while something
+ * is listening on the port, and the case it fails in is the expensive one: `expo run:ios` publishes
+ * the dev-server lock at the **start** of its step, and the port does not open until Xcode has
+ * finished, which is minutes later (llp/0004 §Daemonization, F125). The fetch was refused in about
+ * ten milliseconds, the wait reported itself as over, and `smoke --ios` on a project that needs a
+ * development build failed in 23 seconds having built nothing
+ * [observed — Kudo, local run, 2026-09-04: `--wait-ready gave up after 10ms`].
+ *
+ * So a connection-level failure retries until the budget runs out, and everything else is returned
+ * as it always was: a server that answered has answered, whatever it said.
  */
 export async function waitForBundlerReadyAsync(
   devServerUrl: string,
@@ -89,57 +151,83 @@ export async function waitForBundlerReadyAsync(
   // abort. It is the whole reason a request that times out is still worth reporting.
   let reported: string | null = null;
   let projectRootMatched: boolean | null = null;
+  /** The last connection failure, for the report when the budget runs out without one answer. */
+  let lastRefusal: string | null = null;
 
   try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: { connection: 'close' },
-    });
-    reported = decodeProjectRoot(response.headers.get(PROJECT_ROOT_HEADER));
-    projectRootMatched = matchProjectRoot(reported, projectRoot);
-    const body = (await response.text()).trim();
+    for (;;) {
+      try {
+        const response = await fetch(url, {
+          signal: controller.signal,
+          headers: { connection: 'close' },
+        });
+        reported = decodeProjectRoot(response.headers.get(PROJECT_ROOT_HEADER));
+        projectRootMatched = matchProjectRoot(reported, projectRoot);
+        const body = (await response.text()).trim();
 
-    if (!response.ok) {
-      return {
-        ready: false,
-        projectRootMatched,
-        reportedProjectRoot: reported,
-        timedOut: false,
-        waitedMs: Date.now() - startedAt,
-        reason: `${url} answered ${response.status} ${response.statusText}`,
-      };
-    }
-    if (body !== PACKAGER_STATUS_READY) {
-      return {
-        ready: false,
-        projectRootMatched,
-        reportedProjectRoot: reported,
-        timedOut: false,
-        waitedMs: Date.now() - startedAt,
-        reason: `${url} answered "${excerpt(body)}" instead of "${PACKAGER_STATUS_READY}", so it is not an Expo dev server`,
-      };
-    }
+        if (!response.ok) {
+          return {
+            ready: false,
+            projectRootMatched,
+            reportedProjectRoot: reported,
+            timedOut: false,
+            waitedMs: Date.now() - startedAt,
+            reason: `${url} answered ${response.status} ${response.statusText}`,
+          };
+        }
+        if (body !== PACKAGER_STATUS_READY) {
+          return {
+            ready: false,
+            projectRootMatched,
+            reportedProjectRoot: reported,
+            timedOut: false,
+            waitedMs: Date.now() - startedAt,
+            reason: `${url} answered "${excerpt(body)}" instead of "${PACKAGER_STATUS_READY}", so it is not an Expo dev server`,
+          };
+        }
 
-    return {
-      ready: true,
-      projectRootMatched,
-      reportedProjectRoot: reported,
-      timedOut: false,
-      waitedMs: Date.now() - startedAt,
-    };
-  } catch (error: unknown) {
-    return {
-      ready: false,
-      projectRootMatched,
-      reportedProjectRoot: reported,
-      timedOut,
-      waitedMs: Date.now() - startedAt,
-      reason: timedOut
-        ? `${url} did not answer "${PACKAGER_STATUS_READY}" within ${timeoutMs}ms, so the bundler was still working`
-        : error instanceof Error
-          ? error.message
-          : String(error),
-    };
+        return {
+          ready: true,
+          projectRootMatched,
+          reportedProjectRoot: reported,
+          timedOut: false,
+          waitedMs: Date.now() - startedAt,
+        };
+      } catch (error: unknown) {
+        // The budget, or the caller, ended the wait. Either way there is nothing left to ask with.
+        if (timedOut || controller.signal.aborted) {
+          return {
+            ready: false,
+            projectRootMatched,
+            reportedProjectRoot: reported,
+            timedOut,
+            waitedMs: Date.now() - startedAt,
+            reason: timedOut
+              ? lastRefusal == null
+                ? `${url} did not answer "${PACKAGER_STATUS_READY}" within ${timeoutMs}ms, so the bundler was still working`
+                : // A different sentence for a different fact: nothing ever listened on that port,
+                  // which is a dev server that has not started rather than a bundler still working.
+                  `nothing was listening on ${url} for ${timeoutMs}ms (${lastRefusal}), so no dev server had finished starting`
+              : (lastRefusal ?? (error instanceof Error ? error.message : String(error))),
+          };
+        }
+        // @ref ./waitReady §isNotListening. Anything else is an answer of a kind — a TLS failure, a
+        // hostname that does not resolve — and retrying it would spend the whole budget on a
+        // question already settled.
+        if (!isNotListening(error)) {
+          return {
+            ready: false,
+            projectRootMatched,
+            reportedProjectRoot: reported,
+            timedOut: false,
+            waitedMs: Date.now() - startedAt,
+            reason: error instanceof Error ? error.message : String(error),
+          };
+        }
+        lastRefusal = error instanceof Error ? error.message : String(error);
+        await new Promise((resolve) => setTimeout(resolve, NOT_LISTENING_RETRY_MS));
+      }
+    }
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', abortFromCaller);
@@ -205,9 +293,7 @@ export async function waitForAppConnectionAsync(
       ? null
       : (deviceIndex ??
         (await buildDeviceNameIndexIfNeededAsync(
-          (
-            await probeDevServerAsync(devServerUrl)
-          ).targets
+          (await probeDevServerAsync(devServerUrl)).targets
         )));
 
   for (;;) {

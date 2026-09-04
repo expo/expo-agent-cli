@@ -344,6 +344,35 @@ describe(`${buildSmokeFollowUps.name} for the wrong version of Expo Go`, () => {
   });
 });
 
+// @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+//
+// The third kind of mismatch, and the one a live run met: the device has not got the app, so the
+// deep link was refused and nothing could attach. This used to lead with `navigate / --ios`, which
+// is refused in exactly the same way every time — the llp/0009 mistake, reached because the run did
+// not know why the link failed [observed — Kudo, local run, 2026-09-04].
+describe(`${buildSmokeFollowUps.name} for a device without the app`, () => {
+  const missing = {
+    outcome: 'failed' as const,
+    appMismatch: 'the app this project runs (com.example.app) is not installed on SIM-1',
+    appMismatchKind: 'app-not-installed' as const,
+  };
+
+  // A development build is this project's own artefact, so putting one on a device is a compile.
+  it(`leads with the build that puts the app on the device`, () => {
+    expect(commands(missing)[0]).toBe('npx @expo/agent-cli dev --ios --yes');
+  });
+
+  it(`never suggests opening a link the device has already refused`, () => {
+    expect(commands(missing).join(' ')).not.toContain('navigate');
+  });
+
+  // Under `--no-start` the gate could not install what was missing, and that flag is the reason —
+  // so the answer is the run without it, not a native build the project may not need.
+  it(`names the run that installs what is missing, when --no-start forbade it`, () => {
+    expect(commands({ ...missing, bootstrap: false })[0]).toBe('npx @expo/agent-cli smoke --ios');
+  });
+});
+
 // @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
 //
 // The gate builds now, so "start one on its own and watch it fail" is no longer cheap advice: it is

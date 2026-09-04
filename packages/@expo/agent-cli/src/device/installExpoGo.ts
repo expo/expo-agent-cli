@@ -24,6 +24,7 @@ import path from 'path';
 
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { resolveAdb, type AdbResolution } from './adb';
+import { approveSchemeForUrlAsync } from './approveScheme';
 import { readInstalledExpoGoVersionAndroidAsync } from './androidApps';
 import { expoGoVersionFromUrl, readInstalledExpoGoVersionAsync } from './expoGoVersion';
 
@@ -125,38 +126,15 @@ async function approveSchemesAsync(
   deviceId: string,
   spawn: typeof spawnCaptureAsync
 ): Promise<void> {
-  /** One preference, written inside the simulator so a booted one picks it up. */
-  const writeAsync = (domain: string, key: string, value: string[]) =>
-    spawn('xcrun', ['simctl', 'spawn', deviceId, 'defaults', 'write', domain, key, ...value], {
-      timeoutMs: APPROVE_TIMEOUT_MS,
-    });
-
+  // @ref src/device/approveScheme.ts — both writes live there now, because neither is about
+  // installs: every local iOS open makes them, for whatever app the link belongs to, which is what
+  // `@expo/cli` does for the approval and what the live run of 2026-09-04 showed is needed for the
+  // onboarding flag too. This still writes Expo Go's two schemes up front rather than leaving them
+  // to the first open, because an install is exactly the moment the answer is known.
   for (const scheme of EXPO_GO_SCHEMES) {
-    await writeAsync(
-      'com.apple.launchservices.schemeapproval',
-      // The key CoreSimulator reads. Its `-->` is part of the key rather than a path separator,
-      // which is why this goes through `defaults` and not `plutil -replace`: a plutil keypath is
-      // dot-separated and this key is full of dots.
-      `com.apple.CoreSimulator.CoreSimulatorBridge-->${scheme}`,
-      ['-string', EXPO_GO_APP_ID]
-    );
+    await approveSchemeForUrlAsync(deviceId, `${scheme}://`, EXPO_GO_APP_ID, { spawn });
   }
-
-  // The second obstacle, and the same shape as the first. A first-ever Expo Go launch puts its
-  // developer-menu onboarding sheet over the app, so the link works, the runtime attaches, the
-  // window reads — and the screenshot is a picture of the sheet [observed, 2026-09-03]. llp/0005
-  // §The smoke gate calls the picture evidence, and a picture of an onboarding sheet is evidence of
-  // nothing, exactly as a splash screen is.
-  //
-  // The key is `expo-dev-menu`'s own, read from this monorepo rather than guessed
-  // (`packages/expo-dev-menu/ios/Modules/DevMenuPreferences.swift` §isOnboardingFinishedKey), and
-  // it is written only for an Expo Go **this run just installed** — never for one the caller
-  // already had, whose preferences are theirs.
-  await writeAsync(EXPO_GO_APP_ID, 'EXDevMenuIsOnboardingFinished', ['-bool', 'true']);
 }
-
-/** How long one preference write gets. It writes one key inside a booted simulator. */
-const APPROVE_TIMEOUT_MS = 15_000;
 
 /** The first line of a message, for a reason that has to fit on one. */
 function firstLine(text: string): string {

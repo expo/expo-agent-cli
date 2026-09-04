@@ -199,13 +199,108 @@ describe(waitForBundlerReadyAsync, () => {
     expect(result.timedOut).toBe(false);
   });
 
-  it(`reports an unreachable dev server instead of throwing`, async () => {
-    // Port 1 is privileged and unbound, so the connection is refused immediately.
+  it(`reports a URL nothing could even be asked at, instead of throwing`, async () => {
+    // Port 1 is not a refused connection — `undici` rejects it as `bad port` before it opens a
+    // socket [observed, 2026-09-04]. That is a settled answer rather than something to wait for,
+    // which is why this returns at once and does not retry.
     const result = await waitForBundlerReadyAsync('http://127.0.0.1:1', { timeoutMs: 2000 });
 
     expect(result.ready).toBe(false);
     expect(result.timedOut).toBe(false);
     expect(result.reason).toBeTruthy();
+  });
+
+  // @ref ../waitReady §waitForBundlerReadyAsync — "a refused connection is not an answer".
+  //
+  // The bug these cases exist for, and it cost a real run: `expo run:ios` publishes the dev-server
+  // lock at the **start** of its step, so `--wait-ready` asked a port that Xcode had not opened
+  // yet, was refused in about ten milliseconds, and reported the wait as over. `smoke --ios` on a
+  // project needing a development build failed in 23 seconds having built nothing
+  // [observed — Kudo, local run, 2026-09-04].
+  //
+  // The old design was one request and no loop, because `/status` answers only once the bundler has
+  // finished — so the request *is* the wait. True while something is listening; false in exactly
+  // the expensive case.
+  describe('a port nothing is listening on yet', () => {
+    /** A port that is free now, so the first requests to it are refused. */
+    async function freePortAsync(): Promise<number> {
+      const probe = createServer();
+      await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', () => resolve()));
+      const { port } = probe.address() as AddressInfo;
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+      return port;
+    }
+
+    it(`keeps asking until the dev server opens the port, then reads it`, async () => {
+      const port = await freePortAsync();
+      // Nothing is listening for the first while, which is the state a native build leaves the
+      // port in. The wait has to survive it rather than call it an answer.
+      const opening = setTimeout(() => {
+        const server = createServer((_request, response) => {
+          response.writeHead(200, { 'Content-Type': 'text/plain' });
+          response.end(PACKAGER_STATUS_READY);
+        });
+        server.unref();
+        server.listen(port, '127.0.0.1');
+        servers.push(server);
+      }, 1500);
+      opening.unref?.();
+
+      const result = await waitForBundlerReadyAsync(`http://127.0.0.1:${port}`, {
+        timeoutMs: 15_000,
+      });
+
+      expect(result.ready).toBe(true);
+      // The proof that it waited rather than answered: a refused connection comes back in
+      // milliseconds, and the server did not exist for the first second and a half.
+      expect(result.waitedMs).toBeGreaterThan(1_000);
+    }, 20_000);
+
+    // And when nothing ever listens, the budget decides — with a sentence that says which of the
+    // two things happened, because "the bundler was still working" would be false: there was no
+    // bundler (llp/0021 §The rules).
+    it(`times out saying nothing was listening, rather than that the bundler was busy`, async () => {
+      const port = await freePortAsync();
+
+      const result = await waitForBundlerReadyAsync(`http://127.0.0.1:${port}`, {
+        timeoutMs: 2_500,
+      });
+
+      expect(result.ready).toBe(false);
+      expect(result.timedOut).toBe(true);
+      expect(result.reason).toContain('nothing was listening');
+      expect(result.waitedMs).toBeGreaterThan(2_000);
+    }, 10_000);
+
+    // A caller's own signal still ends it at once. A retry loop that outlived the caller's abort
+    // would be a wait nobody could stop.
+    it(`stops at once when the caller aborts, mid-retry`, async () => {
+      const port = await freePortAsync();
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 300).unref?.();
+
+      const result = await waitForBundlerReadyAsync(`http://127.0.0.1:${port}`, {
+        timeoutMs: 30_000,
+        signal: controller.signal,
+      });
+
+      expect(result.ready).toBe(false);
+      // A caller that gave up is not a budget that expired, and the two need different exit codes.
+      expect(result.timedOut).toBe(false);
+      expect(result.waitedMs).toBeLessThan(5_000);
+    }, 10_000);
+
+    // A name that does not resolve is settled, not pending: retrying it would turn a typo into a
+    // twenty-minute hang (@ref ../waitReady §isNotListening).
+    it(`does not wait out a hostname that does not resolve`, async () => {
+      const result = await waitForBundlerReadyAsync('http://nope.invalid.example:8081', {
+        timeoutMs: 30_000,
+      });
+
+      expect(result.ready).toBe(false);
+      expect(result.timedOut).toBe(false);
+      expect(result.waitedMs).toBeLessThan(5_000);
+    }, 10_000);
   });
 });
 

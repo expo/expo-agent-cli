@@ -121,6 +121,31 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     // the right version, which this gate installs for itself on any run that was not told to change
     // nothing. Sending that caller to a native build would cost them twenty minutes to fix
     // something a re-run fixes in seconds.
+    // @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+    //
+    // The device has not got the app. For a development build that is a compile, which `dev` owns;
+    // for an Expo Go run it means `--no-start` forbade the install this gate would have done. Both
+    // lead with the command that puts the app there, and neither leads with `navigate` — which is
+    // what this used to suggest, and which is refused in exactly the same way every time (llp/0009).
+    if (input.appMismatchKind === 'app-not-installed') {
+      return capFollowUps([
+        {
+          id: input.bootstrap ? 'dev-build' : 'smoke-install-expo-go',
+          command: input.bootstrap
+            ? `${PROGRAM_PREFIX} dev --${input.platform} --yes`
+            : `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}`,
+          why: input.bootstrap
+            ? 'The device has not got the app this project runs, and making one is a native build — which is what that command plans and runs, then starts the dev server for it.'
+            : '--no-start told this run to change nothing, so it could not put the app on the device. A run without it installs what is missing first.',
+        },
+        {
+          id: 'status',
+          command: `${PROGRAM_PREFIX} status`,
+          why: 'Names which app this project runs and which devices this machine has, which is what decides whether the build above is needed or a different device already has it.',
+        },
+      ]);
+    }
+
     if (input.appMismatchKind === 'expo-go-version') {
       return capFollowUps([
         {
@@ -133,7 +158,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
         {
           id: 'status',
           command: `${PROGRAM_PREFIX} status`,
-          why: "Says which SDK this project is on, which is what decides which Expo Go belongs on the device.",
+          why: 'Says which SDK this project is on, which is what decides which Expo Go belongs on the device.',
         },
       ]);
     }

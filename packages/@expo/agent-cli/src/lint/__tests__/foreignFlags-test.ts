@@ -96,6 +96,20 @@ describe('the flags this CLI writes onto a command line', () => {
     // pinned here for the first time. All seven run in the live tier, on every emulator boot and
     // every Expo Go install.
     //
+    // `-bool  src/device/approveScheme.ts` is the dev-menu onboarding flag, written beside the
+    // approval and measured the same way [observed — live, 2026-09-04, iOS 26.5: without it a
+    // development build launched and then sat behind `This is the developer menu … Continue` for
+    // the whole 120-second attach budget; with it the sheet is gone].
+    //
+    // `-string  src/device/approveScheme.ts` is `defaults write` inside a booted simulator, and it
+    // was run as the rule requires [observed — live, 2026-09-04, iOS 26.5: `xcrun simctl spawn
+    // <udid> defaults write com.apple.launchservices.schemeapproval
+    // 'com.apple.CoreSimulator.CoreSimulatorBridge-->exp+pdfbuild' -string com.tuft.pdfbuild`
+    // exited 0, and `defaults read` of that domain afterwards listed the key — where before it, the
+    // same simulator sat on `Open in "pdfbuild"?` and no `openurl` could get past it]. It moved out
+    // of `installExpoGo.ts` in the same change, which is why that file no longer has a row for it:
+    // the approval is not about installs, it is about every local iOS open.
+    //
     // The three that are genuinely new are `adb install`'s, and they were run as the rule requires
     // [observed — live, 2026-09-04, emulator-5554: `adb -s emulator-5554 install -r -d
     // Expo-Go-54.0.8.apk` printed `Performing Streamed Install` then `Success` and exited 0 — over
@@ -134,6 +148,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "-Fpc  src/dev/portListener.ts",
           "-ano  src/dev/portListener.ts",
           "-avd  src/device/bootDevice.ts",
+          "-bool  src/device/approveScheme.ts",
           "-d  src/device/installExpoGo.ts",
           "-extract  src/device/expoGoVersion.ts",
           "-extract  src/device/installedApps.ts",
@@ -154,6 +169,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "-s  src/navigate/adbReverse.ts",
           "-s  src/runtime/appProcess.ts",
           "-sTCP:LISTEN  src/dev/portListener.ts",
+          "-string  src/device/approveScheme.ts",
           "-version  src/toolchain/detect.ts",
           "-version  src/toolchain/detect.ts",
         ]

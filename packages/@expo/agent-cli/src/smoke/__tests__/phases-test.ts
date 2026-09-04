@@ -966,7 +966,8 @@ describe(runSmokePhasesAsync, () => {
             backend: 'local-ios' as const,
             reason: null,
           }),
-          waitForAppConnection: vi.fn()
+          waitForAppConnection: vi
+            .fn()
             .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
             .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
           evaluate: async () => {
@@ -1020,7 +1021,8 @@ describe(runSmokePhasesAsync, () => {
             backend: 'local-ios' as const,
             reason: null,
           }),
-          waitForAppConnection: vi.fn()
+          waitForAppConnection: vi
+            .fn()
             .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
             .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
           evaluate: async () => {
@@ -1112,7 +1114,8 @@ describe(runSmokePhasesAsync, () => {
 
       await runSmokePhasesAsync(
         deps({
-          waitForAppConnection: vi.fn()
+          waitForAppConnection: vi
+            .fn()
             .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
             .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
           openRoute: async (route, _url, attachBudgetMs) => {
@@ -1755,7 +1758,8 @@ describe(`${runSmokePhasesAsync.name} and the app it opened`, () => {
     await runSmokePhasesAsync(
       deps({
         // Nothing attached at first, so the run opens the app itself.
-        waitForAppConnection: vi.fn()
+        waitForAppConnection: vi
+          .fn()
           .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
           .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
         waitForStableTargets: async (_url, timeoutMs) => {
@@ -1779,7 +1783,8 @@ describe(`${runSmokePhasesAsync.name} and the app it opened`, () => {
     const order: string[] = [];
     await runSmokePhasesAsync(
       deps({
-        waitForAppConnection: vi.fn()
+        waitForAppConnection: vi
+          .fn()
           .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
           .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
         waitForStableTargets: async () => {
@@ -1915,7 +1920,8 @@ describe(`${runSmokePhasesAsync.name} and the code on disk`, () => {
     const reloadApp = vi.fn();
     const run = await runSmokePhasesAsync(
       deps({
-        waitForAppConnection: vi.fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
+        waitForAppConnection: vi
+          .fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
           .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
           .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2 }),
         reloadApp,
@@ -2066,7 +2072,13 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
 
   it(`will not pass a run whose runtime is an app the project cannot run`, async () => {
     const run = await runSmokePhasesAsync(
-      deps({ checkAppFitsProject: async () => ({ mismatch: MISMATCH, kind: 'expo-go-incompatible' as const, note: null }) }),
+      deps({
+        checkAppFitsProject: async () => ({
+          mismatch: MISMATCH,
+          kind: 'expo-go-incompatible' as const,
+          note: null,
+        }),
+      }),
       options()
     );
 
@@ -2081,7 +2093,13 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
   // decide the verdict.
   it(`still reads the app it found, and still photographs it`, async () => {
     const run = await runSmokePhasesAsync(
-      deps({ checkAppFitsProject: async () => ({ mismatch: MISMATCH, kind: 'expo-go-incompatible' as const, note: null }) }),
+      deps({
+        checkAppFitsProject: async () => ({
+          mismatch: MISMATCH,
+          kind: 'expo-go-incompatible' as const,
+          note: null,
+        }),
+      }),
       options()
     );
 
@@ -2095,7 +2113,11 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
   it(`still fails on an error the wrong app reported`, async () => {
     const run = await runSmokePhasesAsync(
       deps({
-        checkAppFitsProject: async () => ({ mismatch: MISMATCH, kind: 'expo-go-incompatible' as const, note: null }),
+        checkAppFitsProject: async () => ({
+          mismatch: MISMATCH,
+          kind: 'expo-go-incompatible' as const,
+          note: null,
+        }),
         collectErrors: async () => ({ ok: true, records: [record()], reason: null }),
       }),
       options()
@@ -2112,7 +2134,8 @@ describe(`${runSmokePhasesAsync.name} and whether the app fits the project`, () 
     await runSmokePhasesAsync(
       deps({
         checkAppFitsProject,
-        waitForAppConnection: vi.fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
+        waitForAppConnection: vi
+          .fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
           .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
           .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2 }),
       }),
@@ -2173,7 +2196,11 @@ describe(`${runSmokePhasesAsync.name} and a note about the app it read`, () => {
   it(`prefers the mismatch when there is one`, async () => {
     const run = await runSmokePhasesAsync(
       deps({
-        checkAppFitsProject: async () => ({ mismatch: 'cannot run this project', kind: 'expo-go-incompatible' as const, note: NOTE }),
+        checkAppFitsProject: async () => ({
+          mismatch: 'cannot run this project',
+          kind: 'expo-go-incompatible' as const,
+          note: NOTE,
+        }),
       }),
       options()
     );
@@ -2224,7 +2251,8 @@ describe(`${runSmokePhasesAsync.name} and installing the app`, () => {
   const needsBoot = () => ({
     bootstrap: true,
     probeDevice: async () => ({ deviceId: null, backend: null, reason: 'nothing booted' }),
-    waitForAppConnection: vi.fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
+    waitForAppConnection: vi
+      .fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
       .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
       .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 2 }),
   });
@@ -2651,6 +2679,134 @@ describe(`${runSmokePhasesAsync.name} and an app that never attached`, () => {
     const asked: (string | null)[] = [];
     await runSmokePhasesAsync(
       nothingAttaches({
+        explainSilentApp: async (deviceId) => {
+          asked.push(deviceId);
+          return null;
+        },
+      }),
+      options()
+    );
+
+    expect(asked).toEqual(['SIM-1']);
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
+//
+// The device refused this run's deep link. Two things went wrong in that report and both were found
+// in one live run [observed — Kudo, 2026-09-04, a development build and a simulator that had not got
+// it]: the screenshot was captioned as the dev launcher's screen when nothing had been opened at
+// all, and the reason said only that the device refused the link — which reads as a fault in the
+// device, and sent the reader to `navigate`, refused identically for ever.
+describe(`${runSmokePhasesAsync.name} and a device that refused the link`, () => {
+  const NOT_INSTALLED = {
+    mismatch: 'the app this project runs (com.example.app) is not installed on SIM-1',
+    kind: 'app-not-installed' as const,
+    note: null,
+  };
+
+  /** A run whose deep link is refused, the way `simctl openurl` refuses one with `115`. */
+  function refused(overrides: Partial<SmokeDeps> = {}) {
+    return deps({
+      waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+      openRoute: async (route) =>
+        opened({
+          route,
+          exitCode: 115,
+          // The launcher link was refused too — same scheme, same missing app. This is the shape
+          // that made the caption lie: a refused launcher open also reports `attached: false`.
+          launch: {
+            url: 'com.example.app://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
+            command: 'xcrun simctl openurl SIM-1 …',
+            exitCode: 115,
+            attached: false,
+            waitedMs: 0,
+          },
+        }),
+      ...overrides,
+    });
+  }
+
+  // The bug that matters most, because a picture is the one piece of evidence a reader believes
+  // without checking it (llp/0021 §The rules).
+  it(`never says the dev launcher is on screen when the launch was refused`, async () => {
+    const run = await runSmokePhasesAsync(
+      refused({ explainSilentApp: async () => NOT_INSTALLED }),
+      options()
+    );
+
+    const shot = run.phases.find((phase) => phase.id === 'screenshot')!;
+    expect(shot.reason).not.toContain('dev launcher');
+    expect(shot.reason).not.toContain('the loading link was opened');
+    // What it is a picture of instead: the device, with nothing of this project on it.
+    expect(shot.reason).toContain("the device's screen");
+  });
+
+  // And the caption is still right for the state it was written for: a launcher open that
+  // **succeeded** and left the launcher's own screen up because the bundle never arrived.
+  it(`still says so for a launch that was opened and never loaded`, async () => {
+    const run = await runSmokePhasesAsync(
+      deps({
+        waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
+        openRoute: async (route) =>
+          opened({
+            route,
+            launch: {
+              url: 'com.example.app://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
+              command: 'xcrun simctl openurl SIM-1 …',
+              exitCode: 0,
+              attached: false,
+              waitedMs: 1_000,
+            },
+          }),
+      }),
+      options()
+    );
+
+    expect(run.phases.find((phase) => phase.id === 'screenshot')?.reason).toContain('dev launcher');
+  });
+
+  it(`names why the device refused it, beside the refusal itself`, async () => {
+    const run = await runSmokePhasesAsync(
+      refused({ explainSilentApp: async () => NOT_INSTALLED }),
+      options()
+    );
+
+    const app = run.phases.find((phase) => phase.id === 'app')!;
+    // Both: what the device did, and why it did it.
+    expect(app.reason).toContain('refused the deep link');
+    expect(app.reason).toContain('is not installed on SIM-1');
+    // Once, not twice — the no-attach branch below must not append the same finding again.
+    expect(app.reason!.match(/is not installed/g)).toHaveLength(1);
+  });
+
+  it(`carries the finding as a value the follow-ups can branch on`, async () => {
+    const run = await runSmokePhasesAsync(
+      refused({ explainSilentApp: async () => NOT_INSTALLED }),
+      options()
+    );
+
+    expect(run.appMismatchKind).toBe('app-not-installed');
+  });
+
+  // A device read that answered nothing adds nothing: the refusal is still reported, on its own.
+  it(`reports the refusal alone when the device explains nothing`, async () => {
+    const run = await runSmokePhasesAsync(
+      refused({ explainSilentApp: async () => null }),
+      options()
+    );
+
+    const app = run.phases.find((phase) => phase.id === 'app')!;
+    expect(app.reason).toContain('refused the deep link');
+    expect(app.status).toBe('failed');
+    expect(run.appMismatchKind).toBeNull();
+  });
+
+  // The device the open actually used, handed over rather than resolved again (F98).
+  it(`asks about the device the open was performed on`, async () => {
+    const asked: (string | null)[] = [];
+    await runSmokePhasesAsync(
+      refused({
         explainSilentApp: async (deviceId) => {
           asked.push(deviceId);
           return null;
