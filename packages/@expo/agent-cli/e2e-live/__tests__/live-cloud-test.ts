@@ -65,6 +65,7 @@ import {
   builtBinGate,
   cloudOptInGate,
   describeLive,
+  EAS_EXAMPLE_APP,
   networkGate,
   packageRunnerGate,
   publicOriginGate,
@@ -116,6 +117,19 @@ const LAB_ROUTE = '/lab';
 const CLOUD_PLATFORM = process.env.AGENT_CLI_LIVE_CLOUD_PLATFORM === 'android' ? 'android' : 'ios';
 const OTHER_PLATFORM = CLOUD_PLATFORM === 'ios' ? 'android' : 'ios';
 
+/**
+ * What the cloud session runs. `expo-go` (the default) scaffolds a fresh app and starts the session
+ * with `--expo-go`. `dev-build` reads the committed `apps/eas-example` in place — already linked to the
+ * CI project, with an installed dev client — and starts the session on a real build via `--build-id`.
+ * The build id is `AGENT_CLI_LIVE_CLOUD_BUILD_ID`, or the newest finished development build for the
+ * platform. `eas-example` is minimal (root route, no `/lab`), so the route-reload test is expo-go only.
+ */
+const CLOUD_MODE = process.env.AGENT_CLI_LIVE_CLOUD_MODE === 'dev-build' ? 'dev-build' : 'expo-go';
+const CLOUD_BUILD_ID = process.env.AGENT_CLI_LIVE_CLOUD_BUILD_ID ?? '';
+/** The dev-build app's URL scheme, declared in `apps/eas-example/app.json`. */
+const EAS_EXAMPLE_SCHEME = 'easexample';
+const onExpoGo = CLOUD_MODE === 'expo-go' ? it : it.skip;
+
 /** The `id` of an `eas simulator --json` payload, or null when the output is not that object. */
 function jsonSessionId(stdout: string): string | null {
   try {
@@ -159,53 +173,68 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     run.prepare();
     port = await findFreePortAsync();
 
-    const created = await runLiveEasAsync(
-      run,
-      run.tempDir,
-      ['new', 'cloudapp', '--name', 'Cloud App', '--json'],
-      { label: 'new' }
-    );
-    run.spend.scaffolds += 1;
-    expectExit(created, 0);
-    projectRoot = parseJson(created).projectRoot;
+    if (CLOUD_MODE === 'dev-build') {
+      // The committed dev-build app, read in place. Its installed dev client is what the session runs,
+      // and its app.json is already linked to the CI project — so nothing is scaffolded or linked, and
+      // there is no lab route to add (it has none; the route-reload test is skipped in this mode).
+      projectRoot = EAS_EXAMPLE_APP;
+    } else {
+      const created = await runLiveEasAsync(
+        run,
+        run.tempDir,
+        ['new', 'cloudapp', '--name', 'Cloud App', '--json'],
+        { label: 'new' }
+      );
+      run.spend.scaffolds += 1;
+      expectExit(created, 0);
+      projectRoot = parseJson(created).projectRoot;
 
-    // `eas simulator` refuses a project EAS has never heard of, and a scratch scaffold is exactly
-    // that. Link it to the suite's standing CI project (the same one `live-eas` deploys to)
-    // instead of creating one per run: `eas init --id` is what the refusal itself suggests, but it
-    // stops on the slug mismatch in non-interactive mode, so the link is written the way `eas init`
-    // would have written it. Identity comes from the livecheck fixture, or from
-    // AGENT_CLI_LIVE_EAS_OWNER / AGENT_CLI_LIVE_EAS_PROJECT_ID.
-    writeLivecheckLink(projectRoot);
+      // `eas simulator` refuses a project EAS has never heard of, and a scratch scaffold is exactly
+      // that. Link it to the suite's standing CI project (the same one `live-eas` deploys to)
+      // instead of creating one per run: `eas init --id` is what the refusal itself suggests, but it
+      // stops on the slug mismatch in non-interactive mode, so the link is written the way `eas init`
+      // would have written it. Identity comes from the livecheck fixture, or from
+      // AGENT_CLI_LIVE_EAS_OWNER / AGENT_CLI_LIVE_EAS_PROJECT_ID.
+      writeLivecheckLink(projectRoot);
 
-    // The lab screen, so the `--route` reload has somewhere to go that is not the root. Same fixture
-    // and same tab-trigger insertion as `live-local`; see that file for why it is an insertion.
-    fs.writeFileSync(
-      path.join(projectRoot, 'src', 'app', 'lab.tsx'),
-      fs.readFileSync(path.join(fixturesDir, 'lab', 'lab.tsx'), 'utf8')
-    );
-    const tabsFile = path.join(projectRoot, 'src', 'components', 'app-tabs.tsx');
-    const tabs = fs.readFileSync(tabsFile, 'utf8');
-    const anchor = '</NativeTabs>';
-    if (!tabs.includes(anchor)) {
-      throw new Error(
-        `the scaffold's ${tabsFile} has no ${anchor} to insert the lab tab trigger before — the template ` +
-          `changed shape, so this harness needs updating (not a finding about the CLI)`
+      // The lab screen, so the `--route` reload has somewhere to go that is not the root. Same fixture
+      // and same tab-trigger insertion as `live-local`; see that file for why it is an insertion.
+      fs.writeFileSync(
+        path.join(projectRoot, 'src', 'app', 'lab.tsx'),
+        fs.readFileSync(path.join(fixturesDir, 'lab', 'lab.tsx'), 'utf8')
+      );
+      const tabsFile = path.join(projectRoot, 'src', 'components', 'app-tabs.tsx');
+      const tabs = fs.readFileSync(tabsFile, 'utf8');
+      const anchor = '</NativeTabs>';
+      if (!tabs.includes(anchor)) {
+        throw new Error(
+          `the scaffold's ${tabsFile} has no ${anchor} to insert the lab tab trigger before — the template ` +
+            `changed shape, so this harness needs updating (not a finding about the CLI)`
+        );
+      }
+      fs.writeFileSync(
+        tabsFile,
+        tabs.replace(
+          anchor,
+          `  <NativeTabs.Trigger name="lab">\n` +
+            `        <NativeTabs.Trigger.Label>Lab</NativeTabs.Trigger.Label>\n` +
+            `      </NativeTabs.Trigger>\n    ${anchor}`
+        )
       );
     }
-    fs.writeFileSync(
-      tabsFile,
-      tabs.replace(
-        anchor,
-        `  <NativeTabs.Trigger name="lab">\n` +
-          `        <NativeTabs.Trigger.Label>Lab</NativeTabs.Trigger.Label>\n` +
-          `      </NativeTabs.Trigger>\n    ${anchor}`
-      )
-    );
 
     // Cleanups run newest-first, so these are registered cheapest-first: the session that bills is
     // registered last and therefore ends first, and the directory the others run in is deleted last.
     run.onCleanup('scratch project', () => {
-      if (!process.env.AGENT_CLI_LIVE_KEEP) {
+      if (process.env.AGENT_CLI_LIVE_KEEP) {
+        return;
+      }
+      if (CLOUD_MODE === 'dev-build') {
+        // Read in place: remove only what this run wrote into the committed app, never the app itself.
+        for (const artifact of ['.expo', '.env.eas-simulator', 'dist']) {
+          fs.rmSync(path.join(projectRoot, artifact), { recursive: true, force: true });
+        }
+      } else {
         fs.rmSync(run.tempDir, { recursive: true, force: true });
       }
     });
@@ -256,35 +285,84 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     }
     publicHost = new URL(origin).host;
 
+    // In dev-build mode the dev client is installed on the remote cloud sim, not this machine — but
+    // `dev` decides serve-vs-build from the *local* last-build record and would try to build one here.
+    // Record the project's current fingerprint (what `status` computes) as the last build, so
+    // `dev --dev-client --no-open` serves the metro the remote client loads rather than rebuilding.
+    // The hash is read at runtime, so it matches whatever machine runs the suite.
+    if (CLOUD_MODE === 'dev-build') {
+      const status = await runLiveEasAsync(run, projectRoot, ['status', '--json'], {
+        label: 'status-fingerprint',
+      });
+      const hash = parseJson(status)?.freshness?.hash;
+      if (!hash) {
+        throw new Error(
+          `could not read the project fingerprint from "status --json" (harness, not a finding): ${status.artifact}`
+        );
+      }
+      fs.mkdirSync(path.join(projectRoot, '.expo'), { recursive: true });
+      fs.writeFileSync(
+        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        JSON.stringify({ [CLOUD_PLATFORM]: { hash, sources: null } }) + '\n'
+      );
+    }
+
     // The dev server, told to advertise that origin. **Not** `--tunnel`: see the header, fact 1.
-    const dev = await runLiveEasAsync(
-      run,
-      projectRoot,
-      ['dev', '--ios', '--no-open', '--detach', '--wait-ready', '--port', String(port), '--json'],
-      { label: 'dev-proxy', env: proxyEnv() }
-    );
+    // `--no-open` serves without opening a local device — the device is the cloud sim — and in
+    // dev-build mode `--dev-client` serves the installed dev client instead of Expo Go.
+    const devArgs = [
+      'dev',
+      `--${CLOUD_PLATFORM}`,
+      ...(CLOUD_MODE === 'dev-build' ? ['--dev-client'] : []),
+      '--no-open',
+      '--detach',
+      '--wait-ready',
+      '--port',
+      String(port),
+      '--json',
+    ];
+    const dev = await runLiveEasAsync(run, projectRoot, devArgs, {
+      label: 'dev-proxy',
+      env: proxyEnv(),
+    });
     expectExit(dev, 0);
     expect(parseJson(dev).port).toBe(port);
 
     // That the origin actually reached the world, checked before a session is billed to find out.
-    // `--print-url` needs no device and is the cheapest question with this answer.
-    const printed = await runLiveEasAsync(
-      run,
-      projectRoot,
-      ['navigate', '/', '--print-url', '--json'],
-      {
+    if (CLOUD_MODE === 'dev-build') {
+      // A dev build's route link is `easexample://` with no host, so the Expo Go `--print-url` check
+      // does not apply. Ask the running dev server's `/status` through the public origin instead: a
+      // `packager-status:running` answer proves the tunnel forwards to the server the cloud sim will
+      // load the bundle from.
+      const reached = await execAsync('curl', ['-sS', '-m', '20', `${origin}/status`], {
+        timeoutMs: 40_000,
+      });
+      run.writeArtifact(
+        'devbuild-origin-status.txt',
+        `GET ${origin}/status\n\n${reached.stdout}\n${reached.stderr}`
+      );
+      if (!reached.stdout.includes('packager-status:running')) {
+        throw new Error(
+          `the dev server is not reachable over the public origin ${origin}: "GET ${origin}/status" ` +
+            `answered "${reached.stdout.slice(0, 200)}". A cloud simulator cannot reach it, so no ` +
+            `session is worth starting.`
+        );
+      }
+    } else {
+      // `--print-url` needs no device and is the cheapest question with this answer.
+      const printed = await runLiveEasAsync(run, projectRoot, ['navigate', '/', '--print-url', '--json'], {
         label: 'print-url',
         env: proxyEnv(),
+      });
+      expectExit(printed, 0);
+      const printedReport = parseJson(printed);
+      if (printedReport.hostType !== 'tunnel' || !String(printedReport.url).includes(publicHost)) {
+        throw new Error(
+          `the dev server is not advertising the public origin ${origin}: navigate --print-url reported ` +
+            `hostType ${printedReport.hostType} and url ${printedReport.url}. A cloud simulator cannot ` +
+            `reach it, so no session is worth starting. Evidence: ${printed.artifact}`
+        );
       }
-    );
-    expectExit(printed, 0);
-    const printedReport = parseJson(printed);
-    if (printedReport.hostType !== 'tunnel' || !String(printedReport.url).includes(publicHost)) {
-      throw new Error(
-        `the dev server is not advertising the public origin ${origin}: navigate --print-url reported ` +
-          `hostType ${printedReport.hostType} and url ${printedReport.url}. A cloud simulator cannot ` +
-          `reach it, so no session is worth starting. Evidence: ${printed.artifact}`
-      );
     }
 
     // The session, with `--expo-go` **and `--open-url`**. `eas simulator`, not
@@ -314,6 +392,42 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     const findSessionId = (stdout: string, stderr: string): string | null =>
       jsonSessionId(stdout) ?? `${stdout}\n${stderr}`.match(/id: ([0-9a-f-]{36})/i)?.[1] ?? null;
 
+    // In dev-build mode the session installs and runs a real dev client, named by its build id — the
+    // AGENT_CLI_LIVE_CLOUD_BUILD_ID override, or the newest finished development build for this platform.
+    // Its launch URL is the dev-launcher form (`<scheme>://expo-development-client/?url=<origin>`), which
+    // `--open-url` accepts, rather than Expo Go's `exp://<host>`.
+    let appFlags: string[];
+    if (CLOUD_MODE === 'dev-build') {
+      let buildId = CLOUD_BUILD_ID;
+      if (!buildId) {
+        const listed = await easAsync('build-list', [
+          'build:list',
+          '--platform',
+          CLOUD_PLATFORM,
+          '--build-profile',
+          'development',
+          '--status',
+          'finished',
+          '--limit',
+          '1',
+          '--json',
+          '--non-interactive',
+        ]);
+        buildId = JSON.parse(listed.stdout)?.[0]?.id ?? '';
+      }
+      if (!buildId) {
+        throw new Error(
+          `no finished development build for ${CLOUD_PLATFORM}: build one with ` +
+            `"eas build --profile development --platform ${CLOUD_PLATFORM}" in apps/eas-example, or set ` +
+            `AGENT_CLI_LIVE_CLOUD_BUILD_ID (harness, not a finding)`
+        );
+      }
+      const launchUrl = `${EAS_EXAMPLE_SCHEME}://expo-development-client/?url=${encodeURIComponent(origin)}`;
+      appFlags = ['--build-id', buildId, '--open-url', launchUrl];
+    } else {
+      appFlags = ['--expo-go', '--open-url', `exp://${publicHost}`];
+    }
+
     let started: Awaited<ReturnType<typeof easAsync>>;
     try {
       started = await easAsync('simulator-start', [
@@ -322,9 +436,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
         CLOUD_PLATFORM,
         '--type',
         'agent-device',
-        '--expo-go',
-        '--open-url',
-        `exp://${publicHost}`,
+        ...appFlags,
         '--non-interactive',
         '--name',
         'agent-cli-live',
@@ -380,10 +492,16 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // `DeviceBackend` is `'cloud'` — one value for both platforms, with `platform` carrying the rest.
     expect(report.deviceBackend).toBe('cloud');
     expect(report.platform).toBe(CLOUD_PLATFORM);
-    // The URL has to name the public origin, not this machine. A localhost URL here is the S3 failure,
-    // and it would be opened onto an error screen rather than refused.
-    expect(report.url).toContain(publicHost);
-    expect(report.hostType).toBe('tunnel');
+    // The URL has to name where the app really is. In Expo Go that is the public origin (a localhost URL
+    // here is the S3 failure, opened onto an error screen rather than refused); in a dev build it is the
+    // app's own scheme — `easexample://<route>` — which the dev client resolves against the origin the
+    // launcher already handed it.
+    if (CLOUD_MODE === 'dev-build') {
+      expect(report.url.startsWith(`${EAS_EXAMPLE_SCHEME}://`)).toBe(true);
+    } else {
+      expect(report.url).toContain(publicHost);
+      expect(report.hostType).toBe('tunnel');
+    }
     // The `open` itself succeeded: this is the half `--expo-go` fixed, and the half that answered
     // `LSApplicationWorkspaceErrorDomain error 115` without it.
     expect(report.exitCode).toBe(0);
@@ -487,7 +605,9 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     }
   });
 
-  it('runtime:reload --cloud --route puts the app on the route it names', async () => {
+  // Expo Go only: the route reload needs the `/lab` screen, which the scaffold has and the minimal
+  // dev-build app (`apps/eas-example`, root route only) does not.
+  onExpoGo('runtime:reload --cloud --route puts the app on the route it names', async () => {
     const result = await runLiveEasAsync(
       run,
       projectRoot,

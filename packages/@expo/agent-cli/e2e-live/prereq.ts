@@ -667,7 +667,7 @@ export function assertEasEnabled(what: string): void {
 }
 
 /** The committed example app the EAS suites read builds from. Relative to the repo root. */
-const EAS_EXAMPLE_APP = path.resolve(__dirname, '..', '..', '..', '..', 'apps', 'eas-example');
+export const EAS_EXAMPLE_APP = path.resolve(__dirname, '..', '..', '..', '..', 'apps', 'eas-example');
 
 /**
  * An EAS-linked app to read builds from, owned by the CI account.
