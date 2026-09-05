@@ -20,7 +20,7 @@ import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import zlib from 'node:zlib';
 
-import { assertStaging, bin } from './prereq';
+import { assertEasEnabled, bin } from './prereq';
 
 export { bin } from './prereq';
 
@@ -212,7 +212,7 @@ export type LiveResult = {
 };
 
 export type LiveOptions = {
-  /** Extra environment for the child. `EXPO_STAGING` is added by {@link runLiveEasAsync}. */
+  /** Extra environment for the child, merged over the ambient session. */
   env?: Record<string, string | undefined>;
   /** Label for the evidence file, so a failure is findable by what it was doing. */
   label?: string;
@@ -305,10 +305,10 @@ export async function runLiveAsync(
 }
 
 /**
- * The same, with `EXPO_STAGING=1` forced on and asserted.
+ * The same, but asserts the live-EAS opt-in first.
  *
- * Every EAS-touching invocation in this tier goes through here rather than passing the variable at
- * the call site, because "one call site forgot" is exactly the failure the guard exists for.
+ * Every EAS-touching invocation in this tier goes through here rather than checking at the call
+ * site, because "one call site forgot" is exactly the failure the guard exists for.
  */
 export async function runLiveEasAsync(
   run: LiveRun,
@@ -316,11 +316,10 @@ export async function runLiveEasAsync(
   argv: string[],
   options: LiveOptions = {}
 ): Promise<LiveResult> {
-  assertStaging(`@expo/agent-cli ${argv.join(' ')}`);
-  return runLiveAsync(run, cwd, argv, {
-    ...options,
-    env: { ...options.env, EXPO_STAGING: '1' },
-  });
+  assertEasEnabled(`@expo/agent-cli ${argv.join(' ')}`);
+  // No forced environment: the account is pinned in the target app's committed owner, and auth is
+  // the ambient session or an EXPO_TOKEN the run already carries.
+  return runLiveAsync(run, cwd, argv, options);
 }
 
 /**

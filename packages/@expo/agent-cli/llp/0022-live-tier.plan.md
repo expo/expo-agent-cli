@@ -70,10 +70,18 @@ A missing prerequisite skips, and prints a sentence saying what to install or bo
 laptop with no simulator reporting a red suite would train everyone to ignore the whole
 tier.
 
-A prerequisite that is present and wrong throws. The case is `EXPO_STAGING` being unset
-while an EAS suite is about to write. `assertStaging` is called at every EAS call site
+A prerequisite that is present and wrong throws. The case is the EAS opt-in being unset
+while an EAS suite is about to write. `assertEasEnabled` is called at every EAS call site
 rather than once in a `beforeAll`, because "one call site forgot" is the failure mode it
 exists for.
+
+The EAS suites used to run against **staging** — a sandbox nobody's real work lived in —
+guarded by `EXPO_STAGING=1`. The real rule was always "never a human's account", and a
+dedicated CI account (`expo-ci`) states that directly, so the model moved: the opt-in is
+`AGENT_CLI_LIVE_EAS=1`, auth is the ambient session or an `EXPO_TOKEN`, and the safety is
+that the target app's `owner` is committed as the CI account and `easProjectGate` refuses
+anything else. The account is pinned in `apps/eas-example`, so a run cannot wander onto a
+personal one. `live-cloud` shares the guard; `live-eas` reads that committed app in place.
 
 Every gate is synchronous. Vitest decides which suites exist while the module body runs,
 so `describe.skip` needs its answer before any `beforeAll` could have awaited one. Each
@@ -126,7 +134,7 @@ The commands whose backend is the project: `install`, `agents:setup`, `skills:sy
 `expo` set. One project scaffolded by `@expo/agent-cli new`. No device.
 
 Its gate is whether `registry.npmjs.org` answers. Deliberately not `networkGate()`,
-which asks whether `staging.expo.dev` answers: that is a fact about an EAS account, and
+which asks whether `api.expo.dev` answers: that is a fact about an EAS account, and
 this suite makes no EAS call. Folding these rows into `live-local` would gate them on a
 booted iOS simulator they do not use. This is the first suite whose gate a Linux box can
 pass.
@@ -216,12 +224,12 @@ without a rebuild. It is the suite that turns the iOS runtime column from `by ha
 
 ### live-eas
 
-Against staging and nothing else. About 50 s.
+Against the `expo-ci` CI account, reading the committed `apps/eas-example` in place. About 50 s.
 
-Reads, repeated freely: `whoami` (and that its `sessionFile` is the staging one),
+Reads, repeated freely: `whoami` (logged in as the account the run authenticates with),
 `status` agreeing with `whoami` about who is signed in, `status --explain` against the
-real builds of a real project, `status --explain --build` echoing the id it was given,
-and `inspect:build-log` on a log EAS actually served.
+real seeded builds of the example, `status --explain --build` echoing the id it was given,
+and `inspect:build-log` on a log EAS actually served. Plus `deploy --web` of the example.
 
 One write, idempotent: `deploy --web` of a five-dependency fixture. EAS Hosting gives
 each deploy its own preview URL, so a re-run adds a deployment and changes nothing that
@@ -249,9 +257,12 @@ ngrok). What works is a proxy origin: a public name for the port and
 took (`navigate / --print-url` must report `hostType: "tunnel"`) before it starts
 anything that bills.
 
-A cloud reload is a relaunch, proved on the dev server. The suite asserts the ladder
-rather than the state of one session: rung 1 is always taken and always reports what the
-socket held, and the relaunch is what reloads a cloud session from either state.
+A cloud reload takes whichever rung works, and which one that is turns out to be the
+platform's to decide [observed — 2026-09-05, both platforms live in one workflow run].
+Rung 1 is always taken and always reports what the socket held. On an iOS cloud Expo Go the
+command-socket broadcast does not take, so the ladder climbs to the relaunch; on Android it
+does, so the dev-server rung reloads and the ladder never climbs. The suite asserts whichever
+rung won, not a platform it guessed.
 
 What the suite still may not assert: `attached` as a requirement. `navigate --cloud`
 asserts the link was opened. There is no `runtime:eval --cloud` test, because the flag
@@ -280,7 +291,7 @@ This table is abbreviated. The source of truth is the tests under `e2e-live/`.
 | ------------------------------- | ----------------------------------------- | ---------------------------------------- | ----------------------------------------- | ----------------------------------------- | ------------------------------------ | --------------------------------- |
 | `login` / `logout` / `register` | unreachable (mutates the machine session) | unreachable                              | unreachable                               | unreachable                               | n/a                                  | unreachable                       |
 | `inspect:build-log <build-id>`  | n/a                                       | n/a                                      | n/a                                       | unreachable (eas-cli has no `build:logs`) | n/a                                  | n/a                               |
-| native EAS build creation       | n/a                                       | n/a                                      | n/a                                       | unreachable in v1                         | n/a                                  | n/a                               |
+| native EAS build creation       | n/a                                       | n/a                                      | n/a                                       | covered by the `agent-cli-cloud-e2e` dev-build jobs (build + run `apps/eas-example`), not this tier | n/a    | n/a                               |
 | `deploy --native`               | n/a                                       | n/a                                      | n/a                                       | unreachable (create-launch has no staging; a run uploads to production) | n/a                    | n/a                               |
 | `dev --tunnel`                  | n/a                                       | unreachable (`@expo/ngrok` exits 1 here) | n/a (emulator uses `adb reverse`)         | n/a                                       | n/a (uses a proxy origin)            | n/a                               |
 | `runtime:eval`                  | n/a                                       | filled (returns `2`)                     | filled (exit 1, no debugger)              | n/a                                       | unreachable (no `--cloud` on `eval`) | filled (exit 0, `value: 2`)       |

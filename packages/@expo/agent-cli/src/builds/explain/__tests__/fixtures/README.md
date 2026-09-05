@@ -29,6 +29,7 @@ were deleted afterwards; the source app was never modified.
 | `metro-unresolved-module.log` | captured | An import of a module that does not exist, then `npx expo export --platform ios`. Contains real ANSI colour. |
 | `metro-syntax-error.log` | captured | A stray `;` inside an object literal, then `npx expo export --platform ios`. Contains real ANSI colour. |
 | `npm-package-not-found.log` | captured | `npm install nonexistent-package-xyz-123` |
+| `bun-package-not-found.log` | captured | `bun install` of a package that 404s, from expo-ci build `b0b2c9ad` |
 | `npm-no-matching-version.log` | captured | `npm install react@99.99.99` |
 | `npm-peer-conflict.log` | captured | `npm install react-dom@18.3.1` in a project pinned to `react@17.0.2` |
 | `prebuild-plugin-not-found.log` | captured | A plugin name no package provides, added to `app.json`, then `npx expo prebuild --platform ios --no-install` |
