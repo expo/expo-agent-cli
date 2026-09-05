@@ -293,11 +293,18 @@ describe('@expo/agent-cli dev', () => {
       return projectRoot;
     }
 
-    /** The steps `dev --plan` would run, as argv lists. */
+    /**
+     * The steps `dev --plan` would run, as argv lists.
+     *
+     * `--local` pins the backend: on a CI box with no Xcode the selector would route the rebuild
+     * to EAS, and these tests are about *when* a build is planned, not where it runs.
+     */
     async function planStepsAsync(projectRoot: string): Promise<string[][]> {
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--ios', '--json'], {
-        env: HASH_FROM_PROJECT,
-      });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--plan', '--ios', '--local', '--json'],
+        { env: HASH_FROM_PROJECT }
+      );
       expect(result.exitCode).toBe(0);
       return JSON.parse(result.stdout).steps.map((step: { argv: string[] }) => step.argv);
     }
