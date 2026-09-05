@@ -8,7 +8,8 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "android": { "buildType": "apk" }
+      "android": { "buildType": "apk" },
+      "ios": { "simulator": true }
     },
     "production": { "autoIncrement": true }
   }
