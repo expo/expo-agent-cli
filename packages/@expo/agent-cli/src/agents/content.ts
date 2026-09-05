@@ -4,6 +4,7 @@
 // the same project always produces the same block and a rerun rewrites nothing.
 import { PROGRAM_PREFIX } from '../programName';
 import type { ProjectState } from '../project/types';
+import { defaultSmokePlatform, smokeCommand } from '../smoke/suggest';
 
 export interface AgentsMdContext {
   /** The probed project state, from `probeProjectStateAsync`. */
@@ -62,7 +63,7 @@ export function generateAgentsMdBlock({ state, projectName, skillsDirs }: Agents
     `- \`${PROGRAM_PREFIX} runtime:type <text> --testID <id>\` — type into an input`,
     `- \`${PROGRAM_PREFIX} skills:list\` — the agent skills the installed packages ship`,
     `- \`${PROGRAM_PREFIX} new <dir>\` / \`${PROGRAM_PREFIX} deploy\` — create a project headlessly / deploy web and native`,
-    `- \`${PROGRAM_PREFIX} smoke\` — the whole gate in one command: the dev server bundles, the app is up, and nothing threw`,
+    `- \`${smokeCommand(defaultSmokePlatform(state.nativeDirs))}\` — the whole gate in one command: the dev server bundles, the app is up, and nothing threw`,
     '',
     skillsLine(skillsDirs),
   ].join('\n');

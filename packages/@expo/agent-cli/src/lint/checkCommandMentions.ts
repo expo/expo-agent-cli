@@ -46,6 +46,18 @@ const LAUNCHER_OPTIONS = new Set(['--help', '-h', '--version', '-v']);
 const PLACEHOLDER = /<[^<>\s][^<>]*>/;
 
 /**
+ * Options a command cannot run without, as groups where one of each group must be present.
+ *
+ * The gap this fills: `smoke` grew a required platform, and six printed `smoke` lines kept shipping
+ * without one — F151. `checkOptions` only catches an option the command does *not* have; nothing
+ * caught an option the command *must* have. A row here pins that, and the next command that grows a
+ * required flag is one line of maintenance rather than a wave of exit-1 suggestions.
+ */
+export const REQUIRED_OPTION_GROUPS: ReadonlyMap<string, readonly (readonly string[])[]> = new Map([
+  ['smoke', [['--ios', '--android', '--platform']]],
+]);
+
+/**
  * The suggested commands that may carry a placeholder, and why each one has to.
  *
  * The bar is not "this reads well as documentation" — every usage line reads well as documentation.
@@ -77,7 +89,7 @@ export interface ProblemSubject {
 export interface MentionProblem {
   subject: ProblemSubject;
   /** Which rule, as a stable id an assertion can name. */
-  rule: 'unknown-command' | 'unknown-option' | 'stray-argument' | 'placeholder';
+  rule: 'unknown-command' | 'unknown-option' | 'missing-required-option' | 'stray-argument' | 'placeholder';
   /** What is wrong, in one sentence. */
   why: string;
   /** What to do about it, in one sentence. */
@@ -176,6 +188,7 @@ export function checkCommandMentions(
           problems.push(stray);
         }
       }
+      problems.push(...checkRequiredOptions(subject, resolution.name, resolution.argv));
     }
   }
 
@@ -220,6 +233,46 @@ function checkResolution(
 }
 
 /** Rule 2: every option is one the command's own parse accepts. */
+/** Rule 5: every option the command cannot run without is present. See {@link REQUIRED_OPTION_GROUPS}. */
+function checkRequiredOptions(
+  subject: ProblemSubject,
+  command: string,
+  argv: readonly string[]
+): MentionProblem[] {
+  const groups = REQUIRED_OPTION_GROUPS.get(command);
+  if (!groups) {
+    return [];
+  }
+  // `--ios` and `--ios=…` are the same option; a `--` ends this command's own words; and a help
+  // token like `--ios|--android` names both, so it splits on the bar the same way a reader reads it.
+  const separator = argv.indexOf('--');
+  const ownRaw = separator >= 0 ? argv.slice(0, separator) : argv;
+
+  // An interpolated argument (`--${platform}`) could be the required option itself, and the lint
+  // cannot read what it resolves to, so a missing-required claim would be a guess. Leave it be.
+  if (ownRaw.some((word) => isUnreadable(word))) {
+    return [];
+  }
+
+  const own = ownRaw
+    .flatMap((word) => word.split('|'))
+    .map((word) => (word.includes('=') ? word.slice(0, word.indexOf('=')) : word));
+  const problems: MentionProblem[] = [];
+  for (const group of groups) {
+    if (group.some((option) => own.includes(option))) {
+      continue;
+    }
+    const names = group.join(' or ');
+    problems.push({
+      subject,
+      rule: 'missing-required-option',
+      why: `"${PROGRAM_NAME} ${command}" needs one of ${names}, and this line names none, so running it exits 1 with BAD_ARGS.`,
+      how: `Add the platform the reader should run for, as in "${PROGRAM_PREFIX} ${command} ${group[0]}".`,
+    });
+  }
+  return problems;
+}
+
 function checkOptions(
   subject: ProblemSubject,
   command: string,

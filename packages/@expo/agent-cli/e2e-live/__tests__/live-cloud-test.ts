@@ -457,7 +457,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
   });
 
   it('smoke --cloud reports the phases it could reach, and stays on the backend it was given', async () => {
-    const result = await runLiveEasAsync(run, projectRoot, ['smoke', '--cloud', '--json'], {
+    const result = await runLiveEasAsync(run, projectRoot, ['smoke', '--cloud', '--ios', '--json'], {
       label: 'smoke-cloud',
       env: proxyEnv(),
     });

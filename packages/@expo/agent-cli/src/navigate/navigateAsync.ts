@@ -518,7 +518,7 @@ function attachNotConfirmed(opened: OpenRouteResult, options: NavigateOptions): 
         ? ` On a cloud session the usual cause is a system dialog nothing answered — read it with "npx eas simulator:exec npx ${AGENT_DEVICE_SPEC} alert get" and answer it with "npx eas simulator:exec npx ${AGENT_DEVICE_SPEC} alert accept".`
         : '';
   const look = cloud
-    ? `${PROGRAM_PREFIX} smoke --cloud --no-route-check`
+    ? `${PROGRAM_PREFIX} smoke --platform ${opened.platform} --cloud --no-route-check`
     : `${PROGRAM_PREFIX} smoke --platform ${opened.platform} --no-route-check`;
 
   return [

@@ -3,7 +3,9 @@
 // thing worth doing, a clean one has the checks this gate cannot make, and a project with no
 // TypeScript in it needs to know that nothing was checked rather than that everything passed.
 
+import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
+import { smokeCommand } from '../smoke/suggest';
 import { capFollowUps, type FollowUp } from './types';
 
 export interface TypeCheckFollowUpInput {
@@ -11,6 +13,8 @@ export interface TypeCheckFollowUpInput {
   checked: boolean;
   /** How many diagnostics it reported. */
   errorCount: number;
+  /** The platform the `smoke` gate this points at should run for. */
+  platform: NativePlatform;
   /**
    * The command that generates a declaration file the project expects and does not have.
    *
@@ -26,12 +30,13 @@ export function buildTypeCheckFollowUps({
   checked,
   errorCount,
   generatedTypesCommand,
+  platform,
 }: TypeCheckFollowUpInput): FollowUp[] {
   if (!checked) {
     return capFollowUps([
       {
         id: 'typecheck-not-run',
-        command: `${PROGRAM_PREFIX} smoke`,
+        command: smokeCommand(platform),
         why: 'Nothing was type-checked, so this proves nothing about the code: the bundle check inside the smoke gate is what still applies to a project without TypeScript.',
       },
     ]);
@@ -61,7 +66,7 @@ export function buildTypeCheckFollowUps({
   return capFollowUps([
     {
       id: 'typecheck-smoke',
-      command: `${PROGRAM_PREFIX} smoke`,
+      command: smokeCommand(platform),
       why: 'The types are consistent, which is not the same as the project bundling and running: this builds the entry bundle, opens the app and reports where it stops.',
     },
     {

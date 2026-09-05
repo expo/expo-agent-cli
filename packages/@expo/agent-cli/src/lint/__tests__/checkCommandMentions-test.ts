@@ -162,6 +162,28 @@ describe('rule 3 — the arguments have somewhere to go', () => {
   });
 });
 
+describe('rule 5 — a required option is present', () => {
+  it(`catches a bare smoke, which needs a platform now`, () => {
+    const [problem] = check(`error.suggestedCommand = 'npx @expo/agent-cli smoke';`);
+    expect(problem?.rule).toBe('missing-required-option');
+    expect(problem?.why).toContain('needs one of --ios or --android or --platform');
+  });
+
+  it(`passes smoke with any one of the platform flags`, () => {
+    expect(check(`const x = 'npx @expo/agent-cli smoke --ios';`)).toEqual([]);
+    expect(check(`const x = 'npx @expo/agent-cli smoke --android --cloud';`)).toEqual([]);
+    expect(check(`const x = 'npx @expo/agent-cli smoke --platform ios';`)).toEqual([]);
+  });
+
+  it(`reads the help form "smoke --ios|--android" as naming a platform`, () => {
+    expect(check('const x = `npx @expo/agent-cli smoke --ios|--android`;')).toEqual([]);
+  });
+
+  it(`says nothing when the platform is only known at runtime`, () => {
+    expect(check('const x = `npx @expo/agent-cli smoke --${platform}`;')).toEqual([]);
+  });
+});
+
 describe('rule 4 — a suggestion is runnable as printed', () => {
   it(`catches a placeholder in a "Try:" line`, () => {
     const [problem] = check(`error.suggestedCommand = 'npx @expo/agent-cli navigate <route>';`);

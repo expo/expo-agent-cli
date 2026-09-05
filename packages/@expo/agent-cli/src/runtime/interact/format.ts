@@ -12,6 +12,7 @@
 // (llp/0006 §Errors are prompts) — the recovery is a paste, never a re-read.
 
 import { PROGRAM_PREFIX } from '../../programName';
+import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
 import type { BundleCheckJson } from '../bundleCheck';
 import { wrapUntrustedAppOutput } from '../untrusted';
 import type {
@@ -477,13 +478,18 @@ export function explainBundleRefusal(
   { what, rerun }: { what: string; rerun: string }
 ): InteractFailure {
   if (bundle.ok !== false) {
+    // The interact commands read a native app, so the bundle's platform is `ios` or `android` on
+    // every path that reaches here. When it somehow is not, name both flags in the prose and let
+    // `rerun` — which is runnable as printed — be the machine-readable suggestion.
+    const smokePlatform = statedSmokePlatform(bundle.platform);
+    const smoke = smokePlatform ? smokeCommand(smokePlatform) : `${PROGRAM_PREFIX} smoke --ios`;
     return {
       message: [
         `The bundler had not finished building this project's entry bundle, so ${what}.`,
         `Why: ${bundle.reason ?? 'the bundler gave no answer about the entry bundle'}. Until that build finishes it is not known whether the app is running the code that is on disk, and this command would have described a runtime nobody can place.`,
-        `How: run "${PROGRAM_PREFIX} smoke" to wait for the bundle and the app together, then run "${rerun}" again. Pass --no-bundle-check to read the app without asking about the bundle first.`,
+        `How: run "${smoke}"${smokePlatform ? '' : '" or "--android"'} to wait for the bundle and the app together, then run "${rerun}" again. Pass --no-bundle-check to read the app without asking about the bundle first.`,
       ].join('\n'),
-      suggestedCommand: `${PROGRAM_PREFIX} smoke`,
+      suggestedCommand: smokePlatform ? smoke : rerun,
     };
   }
 

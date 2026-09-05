@@ -9,10 +9,12 @@ import { vol } from 'memfs';
 import type { BundlerReadyResult } from '../../runtime/waitReady';
 import {
   buildDetachSpawn,
+  detachFollowUps,
   needsOpenPlatformGrace,
   notReadyError,
   resolveDetachFailure,
 } from '../detachAsync';
+import type { DevDetachResultJson } from '../detachAsync';
 import { detachedLogPath, openDetachedLogSync, readDetachedLogSync } from '../logFile';
 import { resolveDevLogsOptions, DEFAULT_LOG_TAIL_LINES } from '../resolveLogsOptions';
 import { resolveDevOptions } from '../resolveOptions';
@@ -407,5 +409,42 @@ describe(notReadyError, () => {
         notReadyError(lock, '/project/.expo/dev.log', readyResult(), building).suggestedCommand
       ).toBe('npx @expo/agent-cli dev:logs');
     });
+  });
+});
+
+describe(detachFollowUps, () => {
+  function report(overrides: Partial<DevDetachResultJson> = {}): DevDetachResultJson {
+    return {
+      url: 'http://127.0.0.1:8081',
+      port: 8081,
+      pid: 1234,
+      logFile: '/project/.expo/dev/logs/dev-detached.log',
+      ready: null,
+      projectRootMatched: null,
+      alreadyRunning: false,
+      phase: 'serving',
+      portMoved: null,
+      tunnelUrl: null,
+      waitedMs: 10,
+      followups: [],
+      ...overrides,
+    };
+  }
+
+  // The smoke rung shows only when readiness is unknown, and it carries the platform the caller
+  // asked for — a bare `smoke` would exit 1 (F151).
+  it(`names the platform the caller passed`, () => {
+    const [first] = detachFollowUps(report({ ready: null }), 'android');
+    expect(first?.id).toBe('smoke');
+    expect(first?.command).toBe('npx @expo/agent-cli smoke --android');
+  });
+
+  it(`still states a platform when the caller named none`, () => {
+    const [first] = detachFollowUps(report({ ready: null }), 'ios');
+    expect(first?.command).toBe('npx @expo/agent-cli smoke --ios');
+  });
+
+  it(`drops the smoke rung once the bundler has answered`, () => {
+    expect(detachFollowUps(report({ ready: true }), 'ios').map((f) => f.id)).not.toContain('smoke');
   });
 });

@@ -12,6 +12,7 @@ import { event } from '../events';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../exitCodes';
 import { buildTypeCheckFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
+import { defaultSmokePlatformAsync } from '../smoke/suggest';
 import { runTypeCheckAsync } from './checkAsync';
 import { formatTypeCheckReport } from './format';
 import type { TypeCheckPayload } from './types';
@@ -47,6 +48,7 @@ export async function printTypeCheckAsync(
         checked: report.checked,
         errorCount: report.errorCount,
         generatedTypesCommand: report.generatedTypes?.command ?? null,
+        platform: await defaultSmokePlatformAsync(projectRoot),
       })
     : [];
 
