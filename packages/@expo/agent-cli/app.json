@@ -1,3 +1,12 @@
 {
-  "expo": {}
+  "expo": {
+    "name": "expo-agent-cli",
+    "slug": "expo-agent-cli",
+    "owner": "expo-ci",
+    "extra": {
+      "eas": {
+        "projectId": "a39c0791-951a-425d-8364-03c69b849a9f"
+      }
+    }
+  }
 }
