@@ -280,7 +280,7 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     const report = parseJson(result);
     expect(report.rule).toBe('expo-go');
     expect(report.buildLocation).toBeNull();
-    expect(report.steps.map((s: any) => s.argv)).toEqual([['expo', 'start', '--go', '--ios']]);
+    expect(report.steps.map((s: any) => s.argv)).toEqual([['expo', 'start', '--go']]);
   });
 
   // --- the generated-types gate: F64, which only a real scaffold has -----------------------------
@@ -306,7 +306,7 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     const result = await runLiveAsync(
       run,
       projectRoot,
-      ['dev', '--ios', '--no-open', '--detach', '--wait-ready', '--port', String(PORT), '--json'],
+      ['dev', '--ios', '--detach', '--wait-ready', '--port', String(PORT), '--json'],
       { label: 'dev-detach' }
     );
     expectExit(result, 0);
@@ -322,6 +322,26 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     expect(await httpStatusAsync(`http://127.0.0.1:${PORT}/status`)).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 8_000));
     expect(await httpStatusAsync(`http://127.0.0.1:${PORT}/status`)).toBe(200);
+  });
+
+  // @ref llp/0026-dev-owns-the-open.rfc.md — the whole point of `dev --ios`, measured on the
+  // machine: the detached child opens Expo Go on the dev server it started, through `simctl` and
+  // never AppleScript, so the app registers a debugger target without any command being run here.
+  it('the detached run opened the app, which is attached to the dev server', async () => {
+    const budgetMs = 120_000;
+    const startedAt = Date.now();
+    let targets: unknown[] = [];
+    while (Date.now() - startedAt < budgetMs) {
+      const response = await fetch(`http://127.0.0.1:${PORT}/json/list`).catch(() => null);
+      if (response?.ok) {
+        targets = (await response.json()) as unknown[];
+        if (targets.length > 0) {
+          break;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+    expect(targets.length).toBeGreaterThan(0);
   });
 
   it('typecheck passes once the dev server has written the generated types', async () => {

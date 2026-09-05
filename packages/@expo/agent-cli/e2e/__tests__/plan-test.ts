@@ -171,13 +171,16 @@ describe('@expo/agent-cli dev --plan', () => {
     // The plan is what a driving agent reads before it acts. It used to print
     // `expo start --go` whatever platform flag was passed, and call it "Opens the project in
     // Expo Go" — a command that opens nothing, described as the thing that does.
-    it('shows the platform flag it will really run with, and says what it does', async () => {
+    // @ref llp/0026-dev-owns-the-open.rfc.md — the platform flag stays off `expo start`, whose
+    // `--ios` form opens through an osascript a grant-less Mac refuses; the reason is what
+    // promises the open `dev` performs itself.
+    it('keeps the platform off expo start, and says what opens the app instead', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--json', '--ios']);
 
       const plan: StartPlan = JSON.parse(result.stdout);
-      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go', '--ios']]);
-      expect(plan.steps[0]!.reason).toContain('opens it on a booted iOS simulator');
+      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go']]);
+      expect(plan.steps[0]!.reason).toContain('opened on an iOS simulator');
     });
 
     // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run —
@@ -194,14 +197,12 @@ describe('@expo/agent-cli dev --plan', () => {
       ]);
 
       const plan: StartPlan = JSON.parse(result.stdout);
-      expect(plan.steps.map((step) => step.argv)).toEqual([
-        ['expo', 'start', '--go', '--ios', '--tunnel'],
-      ]);
+      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go', '--tunnel']]);
     });
 
     // Every plan acts on a named platform now, so the "opens nothing" sentence is not reachable
     // from this command any more — the required flag is what removed it.
-    it('always carries the platform onto the step that opens the app', async () => {
+    it('always promises the open on the platform the caller named', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
       const result = await executeAgentCliAsync(projectRoot, [
         'dev',
@@ -211,7 +212,8 @@ describe('@expo/agent-cli dev --plan', () => {
       ]);
 
       const plan: StartPlan = JSON.parse(result.stdout);
-      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go', '--android']]);
+      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go']]);
+      expect(plan.steps[0]!.reason).toContain('opened on an Android device or emulator');
       expect(plan.steps[0]!.reason).not.toContain('opens nothing on its own');
     });
   });

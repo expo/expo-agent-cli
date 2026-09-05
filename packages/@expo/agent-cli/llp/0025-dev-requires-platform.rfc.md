@@ -38,6 +38,8 @@ Two callers:
 
 `--detach` carries it through: the flag rides `detachArgv`, so the child run honors it too.
 
+_Superseded in part by [[0026-dev-owns-the-open]]:_ the open is `dev`'s own act now, so the platform flag never reaches `expo start` for anyone, and `--no-open` skips `dev`'s open rather than un-forwarding a flag.
+
 ## What did not change
 
 - `status` keeps its own platform default (native directories, then host). It only describes; nothing it runs acts on the guess.

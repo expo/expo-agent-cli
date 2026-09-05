@@ -149,28 +149,22 @@ const BUILDING_COMMANDS = ['run:ios', 'run:android'];
  * plan appends whatever the caller typed after its own arguments (`src/dev/forwardedArgs.ts`), so
  * they reach the step table exactly as typed.
  */
-const PLATFORM_OPEN_FLAGS = ['--ios', '-i', '--android', '-a', '--web', '-w'];
-
 /**
  * Whether a dev-server step also opens the app on a device.
  *
  * Pure, and exported for the test table, because it is the whole of the F140 decision: which runs
  * have work outstanding that can kill the dev server after it has answered `/status`.
  *
- * `run:ios` and `run:android` always do — launching the app is the last thing they do, and they
- * drive the same device tools. A plain `expo start` opens nothing until it is asked to.
+ * `run:ios` and `run:android` do — launching the app is the last thing they do, and their launch
+ * still runs through the AppleScript a Mac without the Automation grant refuses. An `expo start`
+ * step never does any more: `dev` keeps the platform flags away from it and opens the app itself,
+ * from its own process, where a refusal cannot take the dev server down (llp/0026).
  *
- * @param step the step as the plan table printed it, e.g. `expo start --go --ios --port 9201`.
+ * @param step the step as the plan table printed it, e.g. `expo run:ios`.
  */
 export function stepOpensPlatform(step: string): boolean {
-  const [, command, ...rest] = step.trim().split(/\s+/);
-  if (command == null) {
-    return false;
-  }
-  if (BUILDING_COMMANDS.includes(command)) {
-    return true;
-  }
-  return command === 'start' && rest.some((argument) => PLATFORM_OPEN_FLAGS.includes(argument));
+  const [, command] = step.trim().split(/\s+/);
+  return command != null && BUILDING_COMMANDS.includes(command);
 }
 
 /**

@@ -262,6 +262,9 @@ async function executePlanAsync(
   // was taken between the bind test and the dev server's own bind, and retrying forever on that
   // would be a loop nobody asked for.
   let retriedOnFreePort = false;
+  // @ref llp/0026-dev-owns-the-open.rfc.md — the open is armed once per plan, whatever the port
+  // retry does: the second bind is the same dev server, not a second app to open.
+  let openArmed = false;
 
   for (const [index, step] of plan.steps.entries()) {
     let args = resolveStepArgs(step, options, index === plan.steps.length - 1);
@@ -273,13 +276,33 @@ async function executePlanAsync(
     });
 
     const devServerStep = isDevServerStep(step);
-    const runStep = async (stepArgs: string[]) =>
-      devServerStep
-        ? await runDevServerAsync(projectRoot, stepArgs, {
-            agentSkills: options.agentSkills,
-            output,
-          })
-        : await runStepAsync(projectRoot, step, stepArgs, output);
+    // The open belongs to the `expo start` step alone: `expo run:*` installs and launches the app
+    // itself, and a build step serves nothing to open.
+    const opensApp = devServerStep && step.argv[1] === 'start' && shouldOpenApp(options);
+    let stepRunning = false;
+    const runStep = async (stepArgs: string[]) => {
+      if (!devServerStep) {
+        return await runStepAsync(projectRoot, step, stepArgs, output);
+      }
+      stepRunning = true;
+      return await runDevServerAsync(projectRoot, stepArgs, {
+        agentSkills: options.agentSkills,
+        output,
+        onDevServer: opensApp
+          ? (server) => {
+              if (openArmed) {
+                return;
+              }
+              openArmed = true;
+              // Fire and forget, on purpose: the dev server owns the foreground, and a failed
+              // open must not take it down. `stillWanted` stops the staging once it exits.
+              void openAppForRunAsync(projectRoot, plan, options, server.url, () => stepRunning);
+            }
+          : undefined,
+      }).finally(() => {
+        stepRunning = false;
+      });
+    };
 
     let result = await runStep(args);
     let portCollided = false;
@@ -591,8 +614,8 @@ function stopPromptFor(
     return {
       message: [
         `The plan stopped at "${failure.step.id}": macOS refused "${invocation}" permission to control Simulator.app.`,
-        `Why: --ios makes the Expo CLI drive Simulator.app through AppleScript, and macOS refuses an application that has not been granted Automation permission. The Expo CLI does not catch that rejection, so it ends the whole "expo start" process${failure.devServerStep ? ' — the dev server this run started exited with it, and nothing is listening for this project now' : ''}.`,
-        `How: grant the permission in System Settings › Privacy & Security › Automation, then run this command again. To keep going without it, re-run with --no-open ("${PROGRAM_PREFIX} dev --${platform} --detach --no-open"), which serves without opening anything, then open the app with "${PROGRAM_PREFIX} navigate /" — a deep link through "xcrun simctl openurl", which needs no grant.`,
+        `Why: the Expo CLI's launch step drives Simulator.app through AppleScript, and macOS refuses an application that has not been granted Automation permission. The Expo CLI does not catch that rejection, so it ends the whole process${failure.devServerStep ? ' — the dev server this run started exited with it, and nothing is listening for this project now' : ''}.`,
+        `How: grant the permission in System Settings › Privacy & Security › Automation, then run this command again. To keep going without it, run "${PROGRAM_PREFIX} dev --${platform} --detach" — the build is recorded, so the next run starts the dev server and opens the app through "xcrun simctl openurl", which needs no grant.`,
         // @ref llp/0004 §Implemented in v1 — F121. The `How:` above is the
         // recovery that used to walk straight back into a fifteen-minute rebuild, because the build
         // this run finished was not recorded. It is now, and the reader is told so on the line that
@@ -776,6 +799,64 @@ function resolveStepArgs(step: PlanStep, options: DevOptions, isLast: boolean): 
   // forwarded options (`withForwardedExpoArgs`, above), and a flag the argv holds is never added
   // twice. What this call is still for is the assertion above and a step that was rebuilt since.
   return forwardedStepArgs(step, options.expoArgs, { isLast }).args;
+}
+
+/**
+ * Whether this run opens the app itself once the dev server is up.
+ *
+ * @ref llp/0026-dev-owns-the-open.rfc.md
+ * Only for a native platform (`--web` is served, not opened), only when running rather than
+ * planning, and not under `--no-open`. `AGENT_CLI_NO_DEVICE` turns it off for a harness whose
+ * machines must not have their simulators touched — the stubbed e2e tier sets it.
+ */
+function shouldOpenApp(options: DevOptions): boolean {
+  return (
+    options.mode === 'run' &&
+    options.open &&
+    (options.platform === 'ios' || options.platform === 'android') &&
+    process.env.AGENT_CLI_NO_DEVICE !== '1'
+  );
+}
+
+/**
+ * Open the app for a running dev server, and say what happened on stderr.
+ *
+ * Never throws and never stops the server: the app not opening is a warning with the `navigate`
+ * door in it, because the dev server is still doing its job.
+ */
+async function openAppForRunAsync(
+  projectRoot: string,
+  plan: StartPlan,
+  options: DevOptions,
+  devServerUrl: string,
+  stillWanted: () => boolean
+): Promise<void> {
+  const platform = options.platform as NativePlatform;
+  const { openAppOnDeviceAsync, openAppFailureLine } =
+    require('./openApp') as typeof import('./openApp');
+  try {
+    const report = await openAppOnDeviceAsync(projectRoot, {
+      platform,
+      expoGo: plan.target === 'expo-go',
+      devServerUrl,
+      stillWanted,
+      interactive: isInteractive(),
+    });
+    if (report.opened) {
+      Log.progress(
+        `Opened the app on the ${platform === 'ios' ? 'iOS simulator' : 'Android device'}${
+          report.booted ? ' it booted' : ''
+        }.`
+      );
+    } else if (stillWanted()) {
+      Log.warn(openAppFailureLine(platform, report.reason ?? 'no reason was given'));
+    }
+  } catch (error: unknown) {
+    // `openAppOnDeviceAsync` promises not to throw; this guard is for the promise breaking.
+    Log.warn(
+      `The app was not opened: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`
+    );
+  }
 }
 
 /** Steps that start a dev server, and so get the skill sync of the `@expo/agent-cli start` wrapper. */

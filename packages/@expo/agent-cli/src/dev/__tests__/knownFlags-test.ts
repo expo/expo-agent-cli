@@ -83,7 +83,7 @@ describe('resolveDevOptions checks the flags first', () => {
 
     expect(options.port).toBe(8195);
     expect(options.json).toBe(true);
-    expect(options.expoArgs).toEqual(['--ios', '--go', '--port', '8195']);
+    expect(options.expoArgs).toEqual(['--go', '--port', '8195']);
   });
 });
 

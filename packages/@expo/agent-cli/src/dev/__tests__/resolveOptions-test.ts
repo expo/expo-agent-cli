@@ -28,7 +28,7 @@ describe(resolveDevOptions, () => {
   it(`should strip --no-agent-skills and skip the sync`, () => {
     expect(resolveDevOptions(['--ios', '--no-agent-skills', '--clear'])).toEqual({
       mode: 'run',
-      expoArgs: ['--ios', '--clear'],
+      expoArgs: ['--clear'],
       agentSkills: false,
       platform: 'ios',
       buildBackend: null,
@@ -53,7 +53,7 @@ describe(resolveDevOptions, () => {
   it(`should enter plan mode and strip the flag`, () => {
     expect(resolveDevOptions(['--ios', '--plan', '--port', '8082'])).toEqual({
       mode: 'plan',
-      expoArgs: ['--ios', '--port', '8082'],
+      expoArgs: ['--port', '8082'],
       agentSkills: true,
       platform: 'ios',
       buildBackend: null,
@@ -86,7 +86,7 @@ describe(resolveDevOptions, () => {
     const options = resolveDevOptions(['--ios', '--yes', '--clear']);
 
     expect(options.yes).toBe(true);
-    expect(options.expoArgs).toEqual(['--ios', '--clear']);
+    expect(options.expoArgs).toEqual(['--clear']);
     expect(resolveDevOptions(['--ios']).yes).toBe(false);
   });
 
@@ -101,8 +101,15 @@ describe(resolveDevOptions, () => {
     expect(resolveDevOptions([flag]).platform).toBe(platform);
   });
 
-  it(`should keep the platform flag in the expo start passthrough`, () => {
-    expect(resolveDevOptions(['--ios']).expoArgs).toEqual(['--ios']);
+  // @ref llp/0026-dev-owns-the-open.rfc.md — `expo start --ios` opens the app through an
+  // osascript a Mac without the Automation grant refuses; the open is this command's own now.
+  it(`should keep native platform flags away from the expo start passthrough`, () => {
+    expect(resolveDevOptions(['--ios']).expoArgs).toEqual([]);
+    expect(resolveDevOptions(['--android', '-a']).expoArgs).toEqual([]);
+  });
+
+  it(`should keep --web in the passthrough, which serves the web bundle`, () => {
+    expect(resolveDevOptions(['--web']).expoArgs).toEqual(['--web']);
   });
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
@@ -168,9 +175,8 @@ describe(resolveDevOptions, () => {
       expect(() => resolveDevOptions(['--no-open'])).toThrow(/Missing platform/);
     });
 
-    it(`should leave the platform in the passthrough without the flag`, () => {
+    it(`should open by default`, () => {
       expect(resolveDevOptions(['--ios']).open).toBe(true);
-      expect(resolveDevOptions(['--ios']).expoArgs).toEqual(['--ios']);
     });
 
     it(`should survive the detach round trip`, () => {
@@ -185,7 +191,7 @@ describe(resolveDevOptions, () => {
   it(`should ask for a JSON plan and strip the flag`, () => {
     expect(resolveDevOptions(['--android', '--plan', '--json'])).toEqual({
       mode: 'plan',
-      expoArgs: ['--android'],
+      expoArgs: [],
       agentSkills: true,
       platform: 'android',
       buildBackend: null,
@@ -234,7 +240,7 @@ describe(resolveDevOptions, () => {
 
     expect(options.fingerprintCache).toBe(false);
     // The flag is this command's own, so `expo start` never sees it.
-    expect(options.expoArgs).toEqual(['--ios', '--clear']);
+    expect(options.expoArgs).toEqual(['--clear']);
   });
 
   it(`should allow a cached fingerprint without the flag`, () => {

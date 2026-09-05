@@ -82,19 +82,14 @@ const TARGET_SETTLE_POLL_MS = 500;
 /**
  * The command line `--start` runs `@expo/agent-cli dev` with, before the platform flag is added.
  *
- * **`--no-open` is load-bearing** [observed live — 2026-08-24, on a Mac that had granted no
- * Automation permission]. Without it, the platform flag makes the plan run `expo start --ios`,
- * which drives Simulator.app through AppleScript; the Expo CLI does not catch a refusal there and
- * the dev server exits with it. This run watched exactly that: the first three phases answered
- * against a dev server that was already dying, and the fourth found nothing.
- *
- * This command opens the app itself — through `navigate`'s deep link and `simctl openurl`, which
- * need no Automation grant — so the dev server has nothing to open. The platform flag still goes
- * on the command (`dev` requires one now), and `--no-open` is what keeps it out of `expo start`.
+ * **`--no-open` is load-bearing.** `dev` opens the app itself once its dev server is up
+ * (llp/0026) — and this command must be the one that opens, because its phases carry the budgets
+ * and the verdicts a gate reports on. Two opens racing each other would also be two apps' worth of
+ * device state for one report.
  *
  * Exported for the test table, because the flag's absence is invisible in a diff and expensive live.
  *
- * @ref llp/0025-dev-requires-platform.rfc.md §--no-open
+ * @ref llp/0026-dev-owns-the-open.rfc.md
  */
 export const START_DEV_SERVER_ARGV: readonly string[] = [
   '--yes',

@@ -274,7 +274,7 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
     expectExit(result, 0);
     const report = parseJson(result);
     expect(report.target).toBe('expo-go');
-    expect(report.steps[0].argv).toEqual(['expo', 'start', '--go', '--android']);
+    expect(report.steps[0].argv).toEqual(['expo', 'start', '--go']);
     // F103: the one follow-up whose promise is "runs the plan above" has to ask for the same plan.
     // Without the flag it plans for iOS on this host, which is a different plan than the one printed.
     const dev = report.followups.find((followup: any) => followup.id === 'dev');

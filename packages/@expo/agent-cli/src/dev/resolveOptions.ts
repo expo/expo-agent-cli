@@ -1,4 +1,8 @@
-import { isPlatformFlag, namedPlatformFlags, resolvePlatformFlag } from '../plan/platformFlags';
+import {
+  isNativePlatformFlag,
+  namedPlatformFlags,
+  resolvePlatformFlag,
+} from '../plan/platformFlags';
 import type { PlanPlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { BuildBackend, RunTarget } from '../settings/types';
@@ -83,12 +87,14 @@ export interface DevOptions {
   /** Approve a plan with build-class steps up front (`--yes`), so no confirmation is asked for. */
   yes: boolean;
   /**
-   * Whether the dev-server step may open the app on the platform's device. `--no-open` clears it.
+   * Whether this run opens the app on the platform's device once the dev server is up.
+   * `--no-open` clears it, for a caller that opens the app itself — `smoke` does, and so does an
+   * agent that follows with `navigate`.
    *
-   * The platform still names what the plan builds and serves for; what goes away is the
-   * `expo start --ios`-style open, for a caller that opens the app itself — `smoke` does, and so
-   * does an agent that follows with `navigate`. That open is also the one step that needs a macOS
-   * Automation grant, so this flag is the way past a refused one.
+   * The open is this command's own act (`./openApp.ts`), through the device tools and never
+   * AppleScript, so it works headless and needs no macOS Automation grant.
+   *
+   * @ref llp/0026-dev-owns-the-open.rfc.md
    */
   open: boolean;
   /**
@@ -162,11 +168,13 @@ export function resolveDevOptions(argv: string[]): DevOptions {
   return {
     mode: argv.includes('--plan') ? 'plan' : 'run',
     // `--port` is *not* stripped: it is an `expo start` flag and the plan's last step is the one
-    // that acts on it. Reading it only records what was asked for. Under `--no-open` the platform
-    // flag is stripped too: it keeps naming what the plan is for, and it must not reach
-    // `expo start`, where it would open the app this caller said not to open.
+    // that acts on it. Reading it only records what was asked for. A native platform flag *is*
+    // stripped: it names what the plan is for, and this command performs the open itself
+    // (`./openApp.ts`) — handing it to `expo start` would open the app a second way, through the
+    // osascript that dies without an Automation grant. `--web` stays: serving the web bundle is
+    // `expo start`'s own job.
     expoArgs: argv.filter(
-      (arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !(open === false && isPlatformFlag(arg))
+      (arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !isNativePlatformFlag(arg)
     ),
     agentSkills: !argv.includes('--no-agent-skills'),
     platform: resolveRequiredPlatform(argv),

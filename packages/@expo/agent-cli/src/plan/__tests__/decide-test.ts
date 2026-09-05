@@ -167,17 +167,18 @@ describe(decideStartPlan, () => {
     });
 
     it.each([
-      ['ios', 'a booted iOS simulator'],
-      ['android', 'an attached Android device or emulator'],
+      ['ios', 'an iOS simulator'],
+      ['android', 'an Android device or emulator'],
     ] as const)(`should plan and describe the open that --%s performs`, (platform, device) => {
       const plan = decideStartPlan(createState(), {
         platform,
         requestedPlatform: platform,
       });
 
-      // The flag really is forwarded to `expo start`, so the printed argv has to show it.
-      expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go', `--${platform}`]]);
-      expect(plan.steps[0]!.reason).toContain(`opens it on ${device}`);
+      // The open is `dev`'s own act now (llp/0026), so the flag never reaches `expo start` — the
+      // argv stays clean and the reason is what promises the open.
+      expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go']]);
+      expect(plan.steps[0]!.reason).toContain(`opened on ${device}`);
       expect(plan.steps[0]!.reason).not.toContain('opens nothing');
     });
 
@@ -220,9 +221,9 @@ describe(decideStartPlan, () => {
         lastBuild: { ios: state.fingerprint.hash! },
       });
 
-      expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--dev-client', '--ios']]);
+      expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--dev-client']]);
       expect(plan.steps[0]!.reason).toContain(
-        'opens the development build on a booted iOS simulator'
+        'development build is then opened on an iOS simulator'
       );
     });
 

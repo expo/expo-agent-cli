@@ -18,6 +18,10 @@ import { resolveDevOptions } from '../resolveOptions';
 
 vi.mock('../../log');
 vi.mock('../planConsent', () => ({ hasPlanConsent: vi.fn() }));
+vi.mock('../openApp', () => ({
+  openAppOnDeviceAsync: vi.fn(),
+  openAppFailureLine: vi.fn((platform: string, reason: string) => `${platform}: ${reason}`),
+}));
 vi.mock('../../plan/emit', () => ({ emitStartPlan: vi.fn() }));
 vi.mock('../../plan/events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../plan/lastBuild', () => ({
@@ -195,9 +199,10 @@ describe(devAsync, () => {
         print: 'text',
         followups: [],
       });
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go', '--ios'], {
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
         agentSkills: true,
         output: 'inherit',
+        onDevServer: expect.any(Function),
       });
     });
 
@@ -268,8 +273,8 @@ describe(devAsync, () => {
 
       expect(runDevServerAsync).toHaveBeenCalledWith(
         projectRoot,
-        ['start', '--go', '--ios', '--port', '8082'],
-        { agentSkills: true, output: 'inherit' }
+        ['start', '--go', '--port', '8082'],
+        { agentSkills: true, output: 'inherit', onDevServer: expect.any(Function) }
       );
       expect(runExpoAsync).not.toHaveBeenCalled();
     });
@@ -279,9 +284,10 @@ describe(devAsync, () => {
 
       await devAsync(projectRoot, resolveDevOptions(['--ios', '--no-agent-skills']));
 
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go', '--ios'], {
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
         agentSkills: false,
         output: 'inherit',
+        onDevServer: expect.any(Function),
       });
     });
 
@@ -296,16 +302,79 @@ describe(devAsync, () => {
       });
     });
 
-    // `--no-open`: the platform decides the plan and never reaches `expo start`, whose `--ios`
-    // form opens the app — the one step a caller that opens the app itself said not to run.
-    it(`should keep the platform away from expo start under --no-open`, async () => {
-      mockProjectState();
+    // @ref llp/0026-dev-owns-the-open.rfc.md — the open is this command's own act, hung on the
+    // moment the dev server reports where it listens.
+    describe('the open', () => {
+      it(`should arm the open for a native run`, async () => {
+        mockProjectState();
 
-      await devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open']));
+        await devAsync(projectRoot, resolveDevOptions(['--ios']));
 
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
-        agentSkills: true,
-        output: 'inherit',
+        const [, , opts] = vi.mocked(runDevServerAsync).mock.calls[0]!;
+        expect(opts!.onDevServer).toEqual(expect.any(Function));
+      });
+
+      it(`should open the app once the dev server reports its port`, async () => {
+        mockProjectState();
+        const { openAppOnDeviceAsync } = await import('../openApp');
+        vi.mocked(openAppOnDeviceAsync).mockResolvedValue({
+          opened: true,
+          deviceId: 'UDID-1',
+          booted: false,
+          installedExpoGo: false,
+          reason: null,
+        });
+        vi.mocked(runDevServerAsync).mockImplementation(async (_root, _args, opts) => {
+          opts?.onDevServer?.({ url: 'http://127.0.0.1:8081', port: 8081 });
+          return devServerRun();
+        });
+
+        await devAsync(projectRoot, resolveDevOptions(['--ios']));
+        // The open is fire-and-forget; give its promise the turn it needs.
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(openAppOnDeviceAsync).toHaveBeenCalledWith(
+          projectRoot,
+          expect.objectContaining({
+            platform: 'ios',
+            expoGo: true,
+            devServerUrl: 'http://127.0.0.1:8081',
+          })
+        );
+      });
+
+      it(`should arm nothing under --no-open`, async () => {
+        mockProjectState();
+
+        await devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open']));
+
+        const [, args, opts] = vi.mocked(runDevServerAsync).mock.calls[0]!;
+        // The platform never reaches `expo start` either: its --ios form opens the app through
+        // the osascript this command exists to avoid.
+        expect(args).toEqual(['start', '--go']);
+        expect(opts!.onDevServer).toBeUndefined();
+      });
+
+      it(`should arm nothing for the web target, which is served rather than opened`, async () => {
+        mockProjectState();
+
+        await devAsync(projectRoot, resolveDevOptions(['--web']));
+
+        const [, , opts] = vi.mocked(runDevServerAsync).mock.calls[0]!;
+        expect(opts!.onDevServer).toBeUndefined();
+      });
+
+      it(`should arm nothing under AGENT_CLI_NO_DEVICE, which a stubbed harness sets`, async () => {
+        mockProjectState();
+        process.env.AGENT_CLI_NO_DEVICE = '1';
+        try {
+          await devAsync(projectRoot, resolveDevOptions(['--ios']));
+        } finally {
+          delete process.env.AGENT_CLI_NO_DEVICE;
+        }
+
+        const [, , opts] = vi.mocked(runDevServerAsync).mock.calls[0]!;
+        expect(opts!.onDevServer).toBeUndefined();
       });
     });
 
@@ -462,12 +531,11 @@ describe(devAsync, () => {
         { mode: 'smart', print: 'text', followups: [] }
       );
       expect(runExpoAsync).not.toHaveBeenCalled();
-      // `--ios` is an `expo start` option, so it reaches the dev server it asked for.
-      expect(runDevServerAsync).toHaveBeenCalledWith(
-        projectRoot,
-        ['start', '--dev-client', '--ios'],
-        { agentSkills: true, output: 'inherit' }
-      );
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--dev-client'], {
+        agentSkills: true,
+        output: 'inherit',
+        onDevServer: expect.any(Function),
+      });
     });
 
     it(`should warn that expo start options do not reach a build step`, async () => {
@@ -600,9 +668,10 @@ describe(devAsync, () => {
 
       await devAsync(projectRoot, resolveDevOptions(['--ios', '--no-followups']));
 
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go', '--ios'], {
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
         agentSkills: true,
         output: 'inherit',
+        onDevServer: expect.any(Function),
       });
     });
 
@@ -644,9 +713,10 @@ describe(devAsync, () => {
 
       await devAsync(projectRoot, resolveDevOptions(['--ios']));
 
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go', '--ios'], {
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
         agentSkills: true,
         output: 'tee',
+        onDevServer: expect.any(Function),
       });
     });
 
@@ -660,9 +730,10 @@ describe(devAsync, () => {
         print: 'none',
         followups: [],
       });
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go', '--ios'], {
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
         agentSkills: true,
         output: 'capture',
+        onDevServer: expect.any(Function),
       });
     });
 
@@ -810,8 +881,10 @@ describe(devAsync, () => {
       });
       // What actually happened: the process exited, so the dev server it started is gone.
       expect(error.message).toMatch(/nothing is listening for this project now/);
-      // The route that needs no Automation grant, which is the one an agent can take.
-      expect(error.message).toMatch(/npx @expo\/agent-cli navigate \//);
+      // The route that needs no Automation grant: the build is recorded, so the re-run starts
+      // the dev server and performs the open itself, through simctl.
+      expect(error.message).toMatch(/npx @expo\/agent-cli dev --ios --detach/);
+      expect(error.message).toMatch(/simctl openurl/);
       expect(Log.log).not.toHaveBeenCalled();
     });
 

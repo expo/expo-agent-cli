@@ -21,6 +21,17 @@ export function isPlatformFlag(arg: string): boolean {
 }
 
 /**
+ * Whether an argument names a native platform (`--ios`, `--android`, and their short forms).
+ *
+ * These never reach `expo start` from `dev` any more: that CLI's `--ios` opens the app through an
+ * osascript a Mac without the Automation grant refuses, and `dev` opens the app itself now
+ * (llp/0026). `--web` stays forwardable — serving the web bundle is `expo start`'s own job.
+ */
+export function isNativePlatformFlag(arg: string): boolean {
+  return arg in PLATFORM_FLAGS && PLATFORM_FLAGS[arg] !== 'web';
+}
+
+/**
  * The platform named on a command line, or `undefined` when it names none.
  *
  * The first platform flag wins, the way `arg` resolves repeated flags.

@@ -145,7 +145,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     // caller's `--ios` reaches it: the plan's last step *is* `expo start`, which owns that flag,
     // so unlike the local route it is appended rather than reported as an option that went
     // nowhere (`resolveStepArgs`).
-    expect(expoInvocationArgs(projectRoot)).toEqual([['start', '--dev-client', '--ios']]);
+    expect(expoInvocationArgs(projectRoot)).toEqual([['start', '--dev-client']]);
   });
 
   // `eas build:configure` exists in the plan for exactly one reason: without an `eas.json` there is
@@ -354,7 +354,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
       'development',
     ]);
     // The local route's own build step is `expo run:ios`, and it is not what ran.
-    expect(expoInvocationArgs(projectRoot)).toEqual([['start', '--dev-client', '--ios']]);
+    expect(expoInvocationArgs(projectRoot)).toEqual([['start', '--dev-client']]);
   });
 
   it('tells the cloud build it is CI, the way every captured step is told', async () => {

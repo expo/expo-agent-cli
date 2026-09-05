@@ -362,8 +362,13 @@ describe('@expo/agent-cli dev --detach', () => {
   // The stub reproduces exactly that ordering without a simulator, an AppleScript or a race: it
   // binds the port, answers `/status` — which is the readiness probe itself — and dies a fixed time
   // after that answer.
+  //
+  // The step under test is `expo run:ios` now (`bare-app`'s one-step plan): a plain `expo start`
+  // cannot die of the Automation refusal any more, because `dev` keeps the platform flag away from
+  // it and opens the app itself (llp/0026). `run:*` still launches through AppleScript, so it is
+  // the step the grace window still exists for.
   describe('a dev server that dies just after its bundler answered', () => {
-    /** Environment for a stub that comes up, answers `/status`, and then dies the way `--ios` does. */
+    /** Environment for a stub that comes up, answers `/status`, and then dies the way a launch does. */
     function diesAfterReadyEnv(projectRoot: string, port: number): Record<string, string> {
       return {
         ...stubExpoEnv(projectRoot),
@@ -377,12 +382,13 @@ describe('@expo/agent-cli dev --detach', () => {
     }
 
     it('refuses to report ready for a child that is about to be gone', async () => {
-      const projectRoot = await setupFixtureAsync('go-app');
+      const projectRoot = await setupFixtureAsync('bare-app');
+      await installStubFingerprintAsync(projectRoot);
 
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--detach', '--wait-ready', '--ios', '--yes', '--json'],
+          ['dev', '--detach', '--wait-ready', '--ios', '--local', '--yes', '--json'],
           { env: diesAfterReadyEnv(projectRoot, 8393), reject: false }
         );
 

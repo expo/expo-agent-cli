@@ -351,6 +351,9 @@ export function spawnAgentCli(
       CI: '1',
       FORCE_COLOR: '0',
       NO_COLOR: '1',
+      // This tier doubles the dev server, never a device (llp/0002 §Tier 0): without this, a
+      // `dev` run on a developer's Mac would boot a real simulator against a stub dev server.
+      AGENT_CLI_NO_DEVICE: '1',
       ...stubExpoEnv(cwd),
       ...env,
     },

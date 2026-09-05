@@ -125,6 +125,10 @@ describe('the flags this CLI writes onto a command line', () => {
     // an Expo Go 57.0.9, so a **downgrade**, which is the case `-d` exists for: without it the same
     // command fails with `INSTALL_FAILED_VERSION_DOWNGRADE`].
     //
+    // The two `-a  src/dev/openApp.ts` rows are macOS's own `open -a` (Simulator, then DeviceHub
+    // on Xcode 27), which surfaces the simulator window for a person. LaunchServices, not an Expo
+    // CLI, and no Automation grant — that absence is the whole reason the module exists.
+    //
     // `-q  src/project/nativeCode.ts` is `git check-ignore -q`, which tells a gitignored prebuild
     // directory from one that was `git add -f`'d. Git, not an Expo CLI.
     expect(sweep.foreignFlags.map(({ flag, file }) => `${flag}  ${file}`).sort())
@@ -161,6 +165,8 @@ describe('the flags this CLI writes onto a command line', () => {
           "--yes  src/smoke/smokeAsync.ts",
           "--yes  src/utils/easCli.ts",
           "-Fpc  src/dev/portListener.ts",
+          "-a  src/dev/openApp.ts",
+          "-a  src/dev/openApp.ts",
           "-ano  src/dev/portListener.ts",
           "-avd  src/device/bootDevice.ts",
           "-bool  src/device/approveScheme.ts",

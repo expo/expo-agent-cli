@@ -254,7 +254,7 @@ describe('@expo/agent-cli dev', () => {
       const plan = JSON.parse(next.stdout);
       // The whole point: one step, and it is the dev server.
       expect(plan.steps.map((step: { argv: string[] }) => step.argv)).toEqual([
-        ['expo', 'start', '--dev-client', '--ios'],
+        ['expo', 'start', '--dev-client'],
       ]);
     });
 
@@ -263,9 +263,8 @@ describe('@expo/agent-cli dev', () => {
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local']);
 
       expect(result.exitCode).toBe(0);
-      // Exactly once, not twice: the flag is in the plan's own argv now, and the passthrough that
-      // appends the user's `expo start` options must not add it a second time.
-      expect(invocationArgs(projectRoot)).toEqual([['start', '--dev-client', '--ios']]);
+      // No platform flag at all: the open is this command's own act now (llp/0026).
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--dev-client']]);
       // Nothing was built, so the record is untouched.
       expect(readLastBuildRecord(projectRoot)).toEqual({
         ios: RECORDED_HASH,
@@ -312,9 +311,7 @@ describe('@expo/agent-cli dev', () => {
     it('starts the dev server and nothing else while nothing changed', async () => {
       const projectRoot = await recordedProjectAsync();
 
-      expect(await planStepsAsync(projectRoot)).toEqual([
-        ['expo', 'start', '--dev-client', '--ios'],
-      ]);
+      expect(await planStepsAsync(projectRoot)).toEqual([['expo', 'start', '--dev-client']]);
     });
 
     it('prebuilds and builds again after the app config changed, because the project is CNG', async () => {
@@ -560,7 +557,7 @@ describe('@expo/agent-cli dev', () => {
       expect(result.exitCode).toBe(0);
       // `--go` appears once: the plan's own step already carries it, and the wrapper does not
       // repeat a flag the caller passed as well.
-      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--ios', '--tunnel']]);
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--tunnel']]);
     });
 
     it('forwards --host tunnel too, which is the option --tunnel sets', async () => {
@@ -575,7 +572,7 @@ describe('@expo/agent-cli dev', () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--ios', '--host', 'tunnel']]);
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--host', 'tunnel']]);
     });
 
     // A tunnelled run has no LAN URL worth naming: the point of the flag is a device that is not
@@ -608,7 +605,7 @@ describe('@expo/agent-cli dev', () => {
       );
 
       expect(result.exitCode).toBe(0);
-      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--ios', '--port', '8124']]);
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--port', '8124']]);
       const followups = JSON.parse(result.stdout).followups as { command: string }[];
       expect(followups.some((followup) => followup.command.endsWith(':8124'))).toBe(true);
     });
@@ -658,7 +655,7 @@ describe('@expo/agent-cli dev', () => {
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios']);
 
       expect(result.exitCode).toBe(0);
-      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--ios']]);
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--go']]);
       // The dev server step runs through the same wrapper as `@expo/agent-cli start`, whose skill sync is
       // covered by `wrapper-test.ts`.
       expect(result.stdout).toContain('stub_expo_dev_server_ready');
