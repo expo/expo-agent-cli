@@ -503,6 +503,104 @@ export function androidDevBuildGate(
   return ok;
 }
 
+/**
+ * The iOS twin of {@link devClientProjectGate}, on `AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT`.
+ *
+ * Separate from the Android one because the two are different projects: an installed build is bound
+ * to one platform's identifier, so the same directory rarely carries both. This one requires an
+ * `ios.bundleIdentifier` — without it `approveScheme` resolves no app id, and the "Open in …?"
+ * dialog it exists to suppress stays up (llp/0005 §The gate installs the app).
+ */
+export function iosDevClientProjectGate(): {
+  gate: Gate;
+  project: DevClientProject | null;
+} {
+  const named = process.env.AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT;
+  if (!named) {
+    return {
+      gate: missing(
+        'AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT is not set. This suite drives an iOS development build ' +
+          'already installed on the booted simulator, because making one costs about fifteen minutes ' +
+          'of Xcode. Point it at a project you have run "npx expo run:ios" in'
+      ),
+      project: null,
+    };
+  }
+  const root = path.resolve(named);
+  let config: any;
+  let dependencies: Record<string, string> = {};
+  try {
+    config = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8'))?.expo;
+    dependencies =
+      JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))?.dependencies ?? {};
+  } catch (error: any) {
+    return { gate: missing(`${root} has no readable app.json/package.json: ${error.message}`), project: null };
+  }
+  if (!dependencies['expo-dev-client']) {
+    return {
+      gate: missing(`${root} does not depend on expo-dev-client, so nothing there is a development build`),
+      project: null,
+    };
+  }
+  const scheme: string | null = config?.scheme ?? null;
+  const iosBundleId: string | null = config?.ios?.bundleIdentifier ?? null;
+  if (!scheme) {
+    return { gate: missing(`${root}'s app.json names no expo.scheme, so its build has no URL to open`), project: null };
+  }
+  if (!iosBundleId) {
+    return {
+      gate: missing(`${root}'s app.json names no ios.bundleIdentifier — without it the deep link raises a dialog nothing answers`),
+      project: null,
+    };
+  }
+  return {
+    gate: ok,
+    project: { root, scheme, androidPackage: config?.android?.package ?? null, iosBundleId },
+  };
+}
+
+/**
+ * The iOS build half: the bundle id is installed on the booted simulator, and the last-build record
+ * names ios — the same two facts {@link androidDevBuildGate} needs, so `@expo/agent-cli dev` serves the
+ * installed app instead of planning a fifteen-minute Xcode build.
+ */
+export function iosDevBuildGate(project: DevClientProject | null, simulator: Simulator | null): Gate {
+  if (!project) {
+    return missing('no iOS development-build project was resolved, so nothing could be looked for');
+  }
+  if (!simulator) {
+    return missing('no booted iOS simulator, so the installed build could not be looked for');
+  }
+  if (!project.iosBundleId) {
+    return missing(`${project.root}'s app.json names no ios.bundleIdentifier`);
+  }
+  try {
+    // `get_app_container` exits non-zero when the app is not installed, which is the whole check.
+    execFileSync('xcrun', ['simctl', 'get_app_container', simulator.udid, project.iosBundleId], {
+      encoding: 'utf8',
+      timeout: 60_000,
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+  } catch {
+    return missing(
+      `${project.iosBundleId} is not installed on ${simulator.udid} — run "npx expo run:ios" in ${project.root} once (about fifteen minutes), and this suite is what that buys`
+    );
+  }
+  const record = path.join(project.root, '.expo', 'agent-cli-last-build.json');
+  try {
+    if (JSON.parse(fs.readFileSync(record, 'utf8'))?.ios == null) {
+      return missing(
+        `${record} records no ios build, so "@expo/agent-cli dev" would plan one rather than serve the app that is installed — run "npx expo run:ios" through "npx @expo/agent-cli dev --ios", and stop it with "npx @expo/agent-cli dev:stop", which is what writes the record`
+      );
+    }
+  } catch {
+    return missing(
+      `${project.root} has no ${path.join('.expo', 'agent-cli-last-build.json')}, so "@expo/agent-cli dev" would plan a native build rather than serve the app that is already installed`
+    );
+  }
+  return ok;
+}
+
 /** Where the Expo CLI family keeps the session, per {@link stagingGate}'s environment. */
 export const STAGING_SESSION_FILE = path.join(os.homedir(), '.expo-staging', 'state.json');
 
@@ -702,6 +800,7 @@ export function cloudOptInGate(): Gate {
         'AGENT_CLI_LIVE_CLOUD=1 is not set — an EAS Simulator session bills from start to stop, so this suite never runs without being asked for by name'
       );
 }
+
 
 /**
  * A way to give the dev server an origin a datacenter can reach — and **not** `@expo/ngrok`.
