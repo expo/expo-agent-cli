@@ -22,7 +22,7 @@ import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import * as Log from '../log';
 import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
-import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
+import { defaultSmokePlatformAsync, devCommand, smokeCommand } from '../smoke/suggest';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
 import { CommandError } from '../utils/errors';
 import {
@@ -92,7 +92,9 @@ export async function devLogsAsync(projectRoot: string, options: DevLogsOptions)
       : null,
     followups: [],
   };
-  report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report, smokePlatform) : [];
+  report.followups = followUpsEnabled(options.followups)
+    ? buildFollowUps(report, smokePlatform)
+    : [];
 
   cliEvent('dev_logs', {
     logFile: report.logFile,
@@ -152,7 +154,7 @@ function buildFollowUps(report: DevLogsResultJson, smokePlatform: NativePlatform
     return [
       {
         id: 'dev-detach',
-        command: `${PROGRAM_PREFIX} dev --detach --wait-ready`,
+        command: devCommand(smokePlatform, '--detach --wait-ready'),
         why: 'These lines are from a dev server that is no longer running, so nothing is serving this project now.',
       },
     ];
@@ -191,11 +193,11 @@ function noLogError(
       : [
           `This project has no detached dev server log, so there is nothing to read.`,
           `Why: nothing has been written to ${logFile}, which means no "${PROGRAM_PREFIX} dev --detach" has run in this project.`,
-          `How: start one with "${PROGRAM_PREFIX} dev --detach --wait-ready", then run this command again.`,
+          `How: start one with "${devCommand(smokePlatform, '--detach --wait-ready')}", then run this command again.`,
         ].join('\n')
   );
   error.suggestedCommand = serverRunning
     ? smokeCommand(smokePlatform)
-    : `${PROGRAM_PREFIX} dev --detach --wait-ready`;
+    : devCommand(smokePlatform, '--detach --wait-ready');
   return error;
 }

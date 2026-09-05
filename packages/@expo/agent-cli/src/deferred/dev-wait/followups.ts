@@ -69,7 +69,7 @@ export function buildDevWaitFollowUps({
     return capFollowUps([
       {
         id: 'dev-wait-other-project',
-        command: `${PROGRAM_PREFIX} dev`,
+        command: `${PROGRAM_PREFIX} dev --${platform}`,
         why: 'The dev server that answered was started for another project, so start this one and pass --dev-server-url to wait on a specific dev server.',
       },
     ]);

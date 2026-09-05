@@ -285,7 +285,16 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
     const result = await runLiveAsync(
       run,
       projectRoot,
-      ['dev', '--detach', '--wait-ready', '--port', String(PORT), '--json'],
+      [
+        'dev',
+        '--android',
+        '--no-open',
+        '--detach',
+        '--wait-ready',
+        '--port',
+        String(PORT),
+        '--json',
+      ],
       { label: 'dev-detach' }
     );
     expectExit(result, 0);

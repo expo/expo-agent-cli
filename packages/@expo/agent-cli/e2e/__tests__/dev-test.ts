@@ -291,7 +291,7 @@ describe('@expo/agent-cli dev', () => {
     it('prints exactly one JSON object, with no subprocess output after it', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--yes', '--json']);
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json']);
 
       expect(result.exitCode).toBe(0);
       // The property, checked as the property: the stub writes its own lines on stdout, and this
@@ -304,7 +304,7 @@ describe('@expo/agent-cli dev', () => {
       const projectRoot = await setupAsync('go-app');
       const eventsFile = path.join(projectRoot, 'events.jsonl');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--yes', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json'], {
         env: { STUB_EXPO_EXIT_CODE: '1', STUB_EXPO_STDERR: NEEDS_INPUT, LOG_EVENTS: eventsFile },
         reject: false,
       });
@@ -334,7 +334,7 @@ describe('@expo/agent-cli dev', () => {
     it('starts on a free port it picks when the port is busy and none was named', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--yes', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json'], {
         env: { STUB_EXPO_PORT_BUSY: '8180' },
         reject: false,
       });
@@ -358,7 +358,7 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--yes', '--json', '--port', '8180'],
+        ['dev', '--ios', '--yes', '--json', '--port', '8180'],
         { env: { STUB_EXPO_PORT_BUSY: '8180' }, reject: false }
       );
 
@@ -375,7 +375,7 @@ describe('@expo/agent-cli dev', () => {
     it('exits 7 in human mode too, where the output is still captured', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--yes'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes'], {
         env: { STUB_EXPO_EXIT_CODE: '1', STUB_EXPO_STDERR: NEEDS_INPUT },
         reject: false,
       });
@@ -393,7 +393,7 @@ describe('@expo/agent-cli dev', () => {
     it('reports a failed step as a failure, and names no dev server', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--yes', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json'], {
         env: { STUB_EXPO_EXIT_CODE: '9' },
         reject: false,
       });
@@ -441,7 +441,7 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--yes', '--json', '--go', '--offline', '--clear'],
+        ['dev', '--ios', '--yes', '--json', '--go', '--offline', '--clear'],
         { reject: false }
       );
 
@@ -463,7 +463,7 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--json', '--tunnel', '--go'],
+        ['dev', '--ios', '--json', '--tunnel', '--go'],
         {
           env: { STUB_EXPO_DEV_SERVER_PORT: '8081' },
         }
@@ -472,7 +472,7 @@ describe('@expo/agent-cli dev', () => {
       expect(result.exitCode).toBe(0);
       // `--go` appears once: the plan's own step already carries it, and the wrapper does not
       // repeat a flag the caller passed as well.
-      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--tunnel']]);
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--ios', '--tunnel']]);
     });
 
     it('forwards --host tunnel too, which is the option --tunnel sets', async () => {
@@ -480,14 +480,14 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--json', '--host', 'tunnel'],
+        ['dev', '--ios', '--json', '--host', 'tunnel'],
         {
           env: { STUB_EXPO_DEV_SERVER_PORT: '8081' },
         }
       );
 
       expect(result.exitCode).toBe(0);
-      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--host', 'tunnel']]);
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--ios', '--host', 'tunnel']]);
     });
 
     // A tunnelled run has no LAN URL worth naming: the point of the flag is a device that is not
@@ -495,9 +495,13 @@ describe('@expo/agent-cli dev', () => {
     it('never names the LAN URL in the follow-ups of a tunnelled run', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--json', '--tunnel'], {
-        env: { STUB_EXPO_DEV_SERVER_PORT: '8081' },
-      });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--json', '--tunnel'],
+        {
+          env: { STUB_EXPO_DEV_SERVER_PORT: '8081' },
+        }
+      );
 
       const followups = JSON.parse(result.stdout).followups as { id: string; command: string }[];
       expect(followups.some((followup) => followup.command.startsWith('exp://'))).toBe(false);
@@ -509,12 +513,14 @@ describe('@expo/agent-cli dev', () => {
     it('forwards the port to the dev server and names it in the follow-ups', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--json', '--port', '8124'], {
-        env: { STUB_EXPO_DEV_SERVER_PORT: '8124' },
-      });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--json', '--port', '8124'],
+        { env: { STUB_EXPO_DEV_SERVER_PORT: '8124' } }
+      );
 
       expect(result.exitCode).toBe(0);
-      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--port', '8124']]);
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--ios', '--port', '8124']]);
       const followups = JSON.parse(result.stdout).followups as { command: string }[];
       expect(followups.some((followup) => followup.command.endsWith(':8124'))).toBe(true);
     });
@@ -561,10 +567,10 @@ describe('@expo/agent-cli dev', () => {
   describe('go-app — a plan of one step', () => {
     it('starts the dev server for Expo Go', async () => {
       const projectRoot = await setupAsync('go-app');
-      const result = await executeAgentCliAsync(projectRoot, ['dev']);
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios']);
 
       expect(result.exitCode).toBe(0);
-      expect(invocationArgs(projectRoot)).toEqual([['start', '--go']]);
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--ios']]);
       // The dev server step runs through the same wrapper as `@expo/agent-cli start`, whose skill sync is
       // covered by `wrapper-test.ts`.
       expect(result.stdout).toContain('stub_expo_dev_server_ready');
@@ -575,7 +581,7 @@ describe('@expo/agent-cli dev', () => {
       // The dev-server step of a plan is the same wrapper `@expo/agent-cli start` uses, so it takes the
       // same lock — a `dev` run has to be findable exactly like a `start` run.
       const projectRoot = await setupAsync('go-app');
-      const child = spawnAgentCli(projectRoot, ['dev'], {
+      const child = spawnAgentCli(projectRoot, ['dev', '--ios'], {
         env: { STUB_EXPO_DELAY_MS: '30000', STUB_EXPO_DEV_SERVER_PORT: '8088' },
       });
       try {

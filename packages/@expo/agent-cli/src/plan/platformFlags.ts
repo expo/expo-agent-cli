@@ -28,3 +28,20 @@ export function isPlatformFlag(arg: string): boolean {
 export function resolvePlatformFlag(argv: string[]): PlanPlatform | undefined {
   return argv.map((arg) => PLATFORM_FLAGS[arg]).find((platform) => platform != null);
 }
+
+/**
+ * Every distinct platform the command line names, in the order they appear.
+ *
+ * For the commands that require exactly one: they need to see a second platform
+ * to refuse it, which the first-one-wins resolver above cannot show them.
+ */
+export function namedPlatformFlags(argv: readonly string[]): PlanPlatform[] {
+  const named: PlanPlatform[] = [];
+  for (const arg of argv) {
+    const platform = PLATFORM_FLAGS[arg];
+    if (platform != null && !named.includes(platform)) {
+      named.push(platform);
+    }
+  }
+  return named;
+}

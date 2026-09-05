@@ -139,19 +139,38 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
     const started = await runLiveAsync(
       run,
       projectRoot,
-      ['dev', '--detach', '--wait-ready', '--yes', '--port', String(PORT), '--json'],
+      [
+        'dev',
+        '--ios',
+        '--no-open',
+        '--detach',
+        '--wait-ready',
+        '--yes',
+        '--port',
+        String(PORT),
+        '--json',
+      ],
       { label: 'dev-detach' }
     );
-    expectExit(started, 0, 'the gate said this project has a recorded ios build, so this must serve');
+    expectExit(
+      started,
+      0,
+      'the gate said this project has a recorded ios build, so this must serve'
+    );
     const report = parseJson(started);
     expect(report.ready).toBe(true);
     expect(report.port).toBe(PORT);
 
     // Open the build on the simulator: this is `navigate` doing over simctl what `--ios` could not do
     // over AppleScript, and its success is the wall this suite is about being gone.
-    const opened = await runLiveAsync(run, projectRoot, ['navigate', LAB_ROUTE, '--ios', '--json'], {
-      label: 'navigate-open',
-    });
+    const opened = await runLiveAsync(
+      run,
+      projectRoot,
+      ['navigate', LAB_ROUTE, '--ios', '--json'],
+      {
+        label: 'navigate-open',
+      }
+    );
     expectExit(opened, 0, 'navigate opens the build over simctl, no Automation grant needed');
 
     const attached = await waitForRuntimeAsync('beforeAll');
@@ -176,9 +195,14 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
   async function waitForRuntimeAsync(label: string): Promise<boolean> {
     return waitForAsync(
       async () => {
-        const probe = await runLiveAsync(run, projectRoot, ['runtime:eval', '1', '--ios', '--json'], {
-          label: `await-runtime-${label}`,
-        });
+        const probe = await runLiveAsync(
+          run,
+          projectRoot,
+          ['runtime:eval', '1', '--ios', '--json'],
+          {
+            label: `await-runtime-${label}`,
+          }
+        );
         return probe.exitCode === 0 && parseJson(probe).value === 1;
       },
       BOUND_MS,
@@ -219,9 +243,14 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
   // exit 22 with the simulator on a springboard "Open in …?" modal. `approveScheme` pre-approves the
   // scheme before the open, so the build's own screen comes up and the app attaches — no dialog.
   it('navigates a development build on iOS with no dialog to answer', async () => {
-    const result = await runLiveAsync(run, projectRoot, ['navigate', LAB_ROUTE, '--ios', '--json'], {
-      label: 'navigate',
-    });
+    const result = await runLiveAsync(
+      run,
+      projectRoot,
+      ['navigate', LAB_ROUTE, '--ios', '--json'],
+      {
+        label: 'navigate',
+      }
+    );
     expectExit(result, 0, 'approveScheme suppresses the springboard dialog that was the iOS wall');
     const report = parseJson(result);
     expect(report.deviceBackend).toBe('local-ios');
@@ -234,9 +263,14 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
   // --- the runtime family, which is the whole point of this file ----------------------------------
 
   it('evaluates JavaScript on the iOS development build', async () => {
-    const result = await runLiveAsync(run, projectRoot, ['runtime:eval', '1+1', '--ios', '--json'], {
-      label: 'runtime-eval',
-    });
+    const result = await runLiveAsync(
+      run,
+      projectRoot,
+      ['runtime:eval', '1+1', '--ios', '--json'],
+      {
+        label: 'runtime-eval',
+      }
+    );
     expectExit(result, 0);
     expect(parseJson(result)).toMatchObject({ threw: false, type: 'number', value: 2 });
   });
@@ -308,7 +342,11 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
     const result = await runLiveAsync(run, projectRoot, ['smoke', '--ios', '--json'], {
       label: 'smoke',
     });
-    expectExit(result, 0, 'a development build carries a CDP debugger on iOS, so every phase is reachable');
+    expectExit(
+      result,
+      0,
+      'a development build carries a CDP debugger on iOS, so every phase is reachable'
+    );
     const report = parseJson(result);
     expect(report.outcome).toBe('passed');
     const status = Object.fromEntries(report.phases.map((p: any) => [p.id, p.status]));

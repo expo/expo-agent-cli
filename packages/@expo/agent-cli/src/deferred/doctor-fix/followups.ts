@@ -7,6 +7,7 @@
 
 import { capFollowUps, type FollowUp } from '../../followups/types';
 import { PROGRAM_PREFIX } from '../../programName';
+import { devCommand, hostPlatform } from '../../smoke/suggest';
 import type { FixPlanPayload } from './fixTypes';
 
 /**
@@ -61,7 +62,7 @@ export function buildDoctorFixFollowUps(payload: FixPlanPayload): FollowUp[] {
   // find out whether it helped. `dev` is what decides whether a rebuild is needed first.
   followups.push({
     id: 'dev',
-    command: `${PROGRAM_PREFIX} dev`,
+    command: devCommand(hostPlatform()),
     why: 'The caches are gone; this rebuilds what the app needs and starts the dev server.',
   });
   if (payload.steps.some((step) => step.id === 'node-modules')) {

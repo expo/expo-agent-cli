@@ -38,7 +38,10 @@ function argv(...typed: string[]): string[] {
 }
 
 function options(...argv: string[]) {
-  return resolveDevOptions(argv);
+  // The platform is required; these tests are about consent, so one is filled in when the case
+  // does not name its own.
+  const hasPlatform = argv.some((arg) => ['--ios', '--android', '--web'].includes(arg));
+  return resolveDevOptions(hasPlatform ? argv : ['--ios', ...argv]);
 }
 
 beforeEach(() => {

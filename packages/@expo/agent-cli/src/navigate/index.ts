@@ -73,7 +73,7 @@ export const navigateHelp: CommandHelp = {
   notes: [
     `The URL shape follows the app: Expo Go uses exp://<host>/--/<route>, a development build`,
     `uses <scheme>://<route>. Which one is running is read from the dev server, so start it with`,
-    `"${PROGRAM_PREFIX} dev --detach" first.`,
+    `"${PROGRAM_PREFIX} dev --ios|--android --detach" first.`,
     `--print-url resolves everything and opens nothing. Use it for a device this machine cannot`,
     `drive — a phone, a cloud simulator — and hand the URL to whatever opens it.`,
     `A tunnelled dev server changes the host in the URL, and that host is read from the log a`,

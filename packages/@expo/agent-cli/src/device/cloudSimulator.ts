@@ -1053,16 +1053,20 @@ export function cloudPlatformUnknownError(sessionId: string | null): CommandErro
  * emulator finding of llp/0005 §Cloud simulator, with no `adb reverse`
  * available to fix it. A LAN address is no better: the session is not on this network.
  */
-export function cloudNeedsTunnelError(url: string, hostType: string | null): CommandError {
+export function cloudNeedsTunnelError(
+  url: string,
+  hostType: string | null,
+  platform: 'ios' | 'android'
+): CommandError {
   const error = new CommandError(
     'CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER',
     [
       `The dev server is only reachable from ${hostType === 'localhost' ? 'this machine' : 'this network'}, so a cloud simulator cannot load ${url} and nothing was opened.`,
       `Why: the URL carries a ${hostType ?? 'local'} host, and the simulator runs on EAS infrastructure — ${hostType === 'localhost' ? 'that host is the loopback of whatever resolves it, which there is a machine in a datacenter' : 'that address is on this network and the session is not'}. Opening it would land the app on an error screen with the device tool reporting success, which is the class of false green this command exists to remove.`,
-      `How: restart the dev server with a tunnel — "${PROGRAM_PREFIX} dev --detach --tunnel" — and run this command again. A tunnel serves the same dev server from any network, which is the one address a cloud simulator can use.`,
+      `How: restart the dev server with a tunnel — "${PROGRAM_PREFIX} dev --${platform} --detach --tunnel" — and run this command again. A tunnel serves the same dev server from any network, which is the one address a cloud simulator can use.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev --detach --tunnel`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev --${platform} --detach --tunnel`;
   return error;
 }
 

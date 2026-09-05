@@ -1,4 +1,4 @@
-import { resolvePlatformFlag } from '../plan/platformFlags';
+import { isPlatformFlag, namedPlatformFlags, resolvePlatformFlag } from '../plan/platformFlags';
 import type { PlanPlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { BuildBackend, RunTarget } from '../settings/types';
@@ -15,6 +15,7 @@ import { assertKnownDevFlags } from './knownFlags';
 const AGENT_CLI_ONLY_FLAGS = [
   '--eas',
   '--local',
+  '--no-open',
   '--no-agent-skills',
   '--no-followups',
   '--no-fingerprint-cache',
@@ -42,8 +43,15 @@ export interface DevOptions {
   expoArgs: string[];
   /** Sync skills shortly after the dev server starts, cleared by `--no-agent-skills`. */
   agentSkills: boolean;
-  /** Platform asked for on the command line, which the plan engine targets. */
-  platform?: PlanPlatform;
+  /**
+   * Platform asked for on the command line, which the plan engine targets.
+   *
+   * Required, like `smoke`'s: the plan differs per platform — what gets built, which device the
+   * app lands on — and the old host-based guess was wrong on any Mac developing for Android.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+   */
+  platform: PlanPlatform;
   /**
    * Where the caller asked the native build to run (`--eas`, `--local`), or null when neither.
    *
@@ -74,6 +82,15 @@ export interface DevOptions {
   fingerprintCache: boolean;
   /** Approve a plan with build-class steps up front (`--yes`), so no confirmation is asked for. */
   yes: boolean;
+  /**
+   * Whether the dev-server step may open the app on the platform's device. `--no-open` clears it.
+   *
+   * The platform still names what the plan builds and serves for; what goes away is the
+   * `expo start --ios`-style open, for a caller that opens the app itself — `smoke` does, and so
+   * does an agent that follows with `navigate`. That open is also the one step that needs a macOS
+   * Automation grant, so this flag is the way past a refused one.
+   */
+  open: boolean;
   /**
    * Port the dev server is asked to listen on (`--port`), or null when the command line names none.
    *
@@ -123,29 +140,44 @@ export function resolveDevOptions(argv: string[]): DevOptions {
   // end in `expo start` [friction run 5, F48-3].
   assertKnownDevFlags(argv);
 
+  // For the errors below: the platform the caller named, read leniently, so every message can
+  // quote a command line that would run. The strict read comes last — a caller with two things
+  // wrong should hear about the more specific one first, the way `smoke` orders its errors.
+  const example = resolvePlatformFlag(argv) ?? 'ios';
+
   const detach = argv.includes('--detach');
   const waitReady = argv.includes('--wait-ready');
   if (waitReady && !detach) {
-    throw waitReadyWithoutDetach();
+    throw waitReadyWithoutDetach(example);
   }
   if (detach && argv.includes('--plan')) {
-    throw detachWithPlan();
+    throw detachWithPlan(example);
   }
+
+  const buildBackend = resolveBuildBackend(argv, example);
+  const runTarget = resolveRunTarget(argv, example);
+  const port = resolvePort(argv, example);
+  const open = !argv.includes('--no-open');
 
   return {
     mode: argv.includes('--plan') ? 'plan' : 'run',
     // `--port` is *not* stripped: it is an `expo start` flag and the plan's last step is the one
-    // that acts on it. Reading it here only records what was asked for.
-    expoArgs: argv.filter((arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg)),
+    // that acts on it. Reading it only records what was asked for. Under `--no-open` the platform
+    // flag is stripped too: it keeps naming what the plan is for, and it must not reach
+    // `expo start`, where it would open the app this caller said not to open.
+    expoArgs: argv.filter(
+      (arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !(open === false && isPlatformFlag(arg))
+    ),
     agentSkills: !argv.includes('--no-agent-skills'),
-    platform: resolvePlatformFlag(argv),
-    buildBackend: resolveBuildBackend(argv),
-    runTarget: resolveRunTarget(argv),
+    platform: resolveRequiredPlatform(argv),
+    buildBackend,
+    runTarget,
     json: argv.includes('--json'),
     followups: !argv.includes('--no-followups'),
     fingerprintCache: !argv.includes('--no-fingerprint-cache'),
     yes: argv.includes('--yes'),
-    port: resolvePort(argv),
+    open,
+    port,
     detach,
     waitReady,
     detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
@@ -156,11 +188,44 @@ export function resolveDevOptions(argv: string[]): DevOptions {
 }
 
 /**
+ * The platform this run is for. Required, and the one flag of this command with no default.
+ *
+ * It used to default from the host — iOS on a Mac, Android elsewhere — and the guessed platform
+ * never reached `expo start`, so the plan opened nothing on a device. `smoke` dropped the same
+ * guess for the same reason (llp/0005 §Which platform is the caller's to say); `dev` follows it,
+ * with `--web` as a third answer because serving the web bundle is a plan this command owns.
+ *
+ * @ref llp/0025-dev-requires-platform.rfc.md
+ *
+ * @throws {CommandError} `BAD_ARGS` for no platform, or for two at once.
+ */
+function resolveRequiredPlatform(argv: string[]): PlanPlatform {
+  const named = namedPlatformFlags(argv);
+  if (named.length > 1) {
+    throw new CommandError(
+      'BAD_ARGS',
+      `--${named[0]} and --${named[1]} name two platforms, and one run plans for one. Run it twice, once per platform.`
+    );
+  }
+  if (named.length === 0) {
+    // One line, like `smoke`'s: a required flag that was not passed is obvious from the command
+    // line, and the reasoning lives here rather than in front of somebody who needs five characters.
+    const error = new CommandError(
+      'BAD_ARGS',
+      `Missing platform. Usage: ${PROGRAM_PREFIX} dev --ios|--android|--web, for example: ${PROGRAM_PREFIX} dev --ios`
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} dev --ios`;
+    throw error;
+  }
+  return named[0]!;
+}
+
+/**
  * Where the caller asked the build to run, or null when they did not say.
  *
  * @throws {CommandError} `BAD_ARGS` when both flags are passed, which asks for two places at once.
  */
-function resolveBuildBackend(argv: readonly string[]): BuildBackend | null {
+function resolveBuildBackend(argv: readonly string[], example: string): BuildBackend | null {
   const eas = argv.includes('--eas');
   const local = argv.includes('--local');
   if (eas && local) {
@@ -168,7 +233,7 @@ function resolveBuildBackend(argv: readonly string[]): BuildBackend | null {
       '--eas and --local name two different places for one build, so this run has no build to plan.',
       'Why: --eas builds in the cloud on EAS, which needs an Expo account; --local builds on this machine, which needs Xcode or the Android SDK. A plan contains one build, and it happens in one place.',
       'How: pass whichever you meant. Passing neither lets this command choose — the plan says which place it picked and why, before anything runs.',
-      `${PROGRAM_PREFIX} dev --plan --eas`
+      `${PROGRAM_PREFIX} dev --${example} --plan --eas`
     );
   }
   return eas ? 'eas' : local ? 'local' : null;
@@ -183,7 +248,7 @@ function resolveBuildBackend(argv: readonly string[]): BuildBackend | null {
  *
  * @throws {CommandError} `BAD_ARGS` when both are passed.
  */
-function resolveRunTarget(argv: readonly string[]): RunTarget | null {
+function resolveRunTarget(argv: readonly string[], example: string): RunTarget | null {
   const go = argv.includes('--go') || argv.includes('-g');
   const devClient = argv.includes('--dev-client') || argv.includes('-d');
   if (go && devClient) {
@@ -191,7 +256,7 @@ function resolveRunTarget(argv: readonly string[]): RunTarget | null {
       '--go and --dev-client name two different apps to run the project in, so this run has no target to plan for.',
       'Why: --go runs the project inside Expo Go, which needs no native build; --dev-client runs it inside a development build of this project, which needs one. A plan aims at one of them.',
       'How: pass whichever you meant. Passing neither lets this command choose — Expo Go when it can run the project, a development build when it cannot.',
-      `${PROGRAM_PREFIX} dev --plan --dev-client`
+      `${PROGRAM_PREFIX} dev --${example} --plan --dev-client`
     );
   }
   return go ? 'expo-go' : devClient ? 'dev-build' : null;
@@ -205,30 +270,32 @@ function opposite(what: string, why: string, how: string, suggestedCommand: stri
 }
 
 /** `--wait-ready` waits for a dev server this run would not have started. */
-function waitReadyWithoutDetach(): CommandError {
+function waitReadyWithoutDetach(example: string): CommandError {
+  // The smoke example needs a device platform, which `web` is not.
+  const smokeExample = example === 'web' ? 'ios' : example;
   const error = new CommandError(
     'BAD_ARGS',
     [
       `--wait-ready only means something with --detach, and --detach was not passed.`,
       `Why: without --detach this command runs the dev server in the foreground and does not return until it stops, so there is no moment at which it could report that the bundler is ready.`,
-      `How: pass both ("${PROGRAM_PREFIX} dev --detach --wait-ready"), or check a dev server that is already running with "${PROGRAM_PREFIX} smoke --ios|--android".`,
+      `How: pass both ("${PROGRAM_PREFIX} dev --${example} --detach --wait-ready"), or check a dev server that is already running with "${PROGRAM_PREFIX} smoke --${smokeExample}".`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev --detach --wait-ready`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev --${example} --detach --wait-ready`;
   return error;
 }
 
 /** `--plan` runs nothing, so there is nothing to detach. */
-function detachWithPlan(): CommandError {
+function detachWithPlan(example: string): CommandError {
   const error = new CommandError(
     'BAD_ARGS',
     [
       `--plan and --detach ask for opposite things, so this run would do nothing.`,
       `Why: --plan prints what would run and exits without running it, and --detach is about where the run goes. There is no plan-shaped thing to put in the background.`,
-      `How: run "${PROGRAM_PREFIX} dev --plan" to see the plan, then "${PROGRAM_PREFIX} dev --detach --yes" to run it in the background.`,
+      `How: run "${PROGRAM_PREFIX} dev --${example} --plan" to see the plan, then "${PROGRAM_PREFIX} dev --${example} --detach --yes" to run it in the background.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev --plan`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev --${example} --plan`;
   return error;
 }
 
@@ -240,7 +307,7 @@ function detachWithPlan(): CommandError {
  * here rather than by `expo start` a minute later, which is what every other flag of this command
  * already does.
  */
-function resolvePort(argv: string[]): number | null {
+function resolvePort(argv: string[], example: string): number | null {
   const separator = argv.indexOf('--');
   const own = separator >= 0 ? argv.slice(0, separator) : argv;
 
@@ -262,20 +329,20 @@ function resolvePort(argv: string[]): number | null {
   // A flag that was passed and named nothing is a mistake, not an absent flag.
   const port = Number(raw);
   if (raw == null || !Number.isInteger(port) || port < 1 || port > 65535) {
-    throw badPort(raw ?? '');
+    throw badPort(raw ?? '', example);
   }
   return port;
 }
 
-function badPort(raw: string): CommandError {
+function badPort(raw: string, example: string): CommandError {
   const error = new CommandError(
     'BAD_ARGS',
     [
       `--port must be a port number from 1 to 65535, but got ${raw || '(nothing)'}.`,
       `Why: the value is handed to "expo start", which listens on it.`,
-      `How: pass one, as in "${PROGRAM_PREFIX} dev --port 8082". Leaving --port out lets the Expo CLI pick, which works when 8081 is free.`,
+      `How: pass one, as in "${PROGRAM_PREFIX} dev --${example} --port 8082". Leaving --port out lets the Expo CLI pick, which works when 8081 is free.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev --port 8082`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev --${example} --port 8082`;
   return error;
 }

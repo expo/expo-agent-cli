@@ -62,6 +62,16 @@ export interface DecideStartPlanOptions {
    */
   requestedPlatform?: PlanPlatform;
   /**
+   * Whether the plan's dev-server step may open the app on a device (`false` for `--no-open`).
+   *
+   * `expo start --ios` opens the app, and on a Mac with no Automation grant that open kills the
+   * dev server (llp/0010 §Needs-human protocol). A caller that opens the app itself — `smoke`, or
+   * an agent that follows with `navigate` — plans for the platform and opens nothing.
+   *
+   * @ref llp/0025-dev-requires-platform.rfc.md §--no-open
+   */
+  open?: boolean;
+  /**
    * Fingerprint hashes of the last builds `@expo/agent-cli` ran. Passed in by the caller so the
    * decision table stays a pure function of probed state.
    */

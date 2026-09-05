@@ -306,7 +306,7 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     const result = await runLiveAsync(
       run,
       projectRoot,
-      ['dev', '--detach', '--wait-ready', '--port', String(PORT), '--json'],
+      ['dev', '--ios', '--no-open', '--detach', '--wait-ready', '--port', String(PORT), '--json'],
       { label: 'dev-detach' }
     );
     expectExit(result, 0);
@@ -377,9 +377,14 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
   });
 
   it('navigate --print-url resolves the URL and opens nothing', async () => {
-    const result = await runLiveAsync(run, projectRoot, ['navigate', LAB_ROUTE, '--print-url', '--json'], {
-      label: 'navigate-print-url',
-    });
+    const result = await runLiveAsync(
+      run,
+      projectRoot,
+      ['navigate', LAB_ROUTE, '--print-url', '--json'],
+      {
+        label: 'navigate-print-url',
+      }
+    );
     expectExit(result, 0);
     const report = parseJson(result);
     expect(report.url).toBe(`exp://127.0.0.1:${PORT}/--${LAB_ROUTE}`);
@@ -449,9 +454,7 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     expect(report.next.command).toBe('npx @expo/agent-cli smoke --ios');
     expect(report.device.state).toBe('present');
     expect(
-      report.device.devices.some(
-        (d: any) => d.deviceId === simulator.udid && d.platform === 'ios'
-      )
+      report.device.devices.some((d: any) => d.deviceId === simulator.udid && d.platform === 'ios')
     ).toBe(true);
   });
 
@@ -626,9 +629,14 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
       // or the first command races the file watcher and reads the last good bundle
       // [observed — 2026-09-05, `smoke --ios` exited 0 against just-broken code].
       const landed = await waitForAsync(async () => {
-        const probe = await runLiveAsync(run, projectRoot, ['runtime:reload', '--no-route-check', '--json'], {
-          label: 'break-settle',
-        });
+        const probe = await runLiveAsync(
+          run,
+          projectRoot,
+          ['runtime:reload', '--no-route-check', '--json'],
+          {
+            label: 'break-settle',
+          }
+        );
         return parseJson(probe).bundle?.ok === false;
       }, 60_000);
       expect(landed).toBe(true);

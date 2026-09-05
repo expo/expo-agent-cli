@@ -6,6 +6,7 @@ import { AGENT_DEVICE_SPEC } from '../device/cloudSimulator';
 import { openInPhrase } from '../navigate/connectUrl';
 import type { DeviceBackend, NavigatePlatform } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
+import { hostPlatform } from '../smoke/suggest';
 import { capFollowUps, type FollowUp } from './types';
 
 export interface NavigateFollowUpInput {
@@ -97,7 +98,7 @@ export function buildPrintUrlFollowUps({
   if (hostType === 'localhost' || hostType === 'lan') {
     followups.push({
       id: 'tunnel-for-reach',
-      command: `${PROGRAM_PREFIX} dev --detach --tunnel`,
+      command: `${PROGRAM_PREFIX} dev --${platform ?? hostPlatform()} --detach --tunnel`,
       why: `The dev server is only reachable from ${
         hostType === 'localhost' ? 'this machine' : 'this network'
       }, so a device anywhere else cannot load that URL; a tunnel serves the same dev server from any network.`,

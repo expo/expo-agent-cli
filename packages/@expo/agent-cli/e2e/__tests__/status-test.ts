@@ -2055,7 +2055,9 @@ process.exit(1);
         ]);
 
         const report: StatusReport = JSON.parse(result.stdout);
-        expect(report.next?.command).toBe('npx @expo/agent-cli dev');
+        expect(report.next?.command).toBe(
+          `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
+        );
         expect(report.next?.why).toBeNull();
       } finally {
         await stub.close();

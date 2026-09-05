@@ -403,13 +403,13 @@ describe(resolveDeepLinkUrl, () => {
       );
     });
 
-    // A caller who named none is offered none: a flag nobody typed would claim they asked for it,
-    // which is the other half of the same rule (`buildStartPlanFollowUps`, F103).
-    it(`is absent when the caller named none`, () => {
+    // `dev` requires a platform now, so a caller who named none is shown the host's — stated
+    // text they can change, not a flag smuggled into a run (llp/0005 §Which platform).
+    it(`states the host's platform when the caller named none`, () => {
       const result = resolveDeepLinkUrl({ route: '/profile/42', config: config(), isExpoGo: true });
 
       expect(result.ok === false && result.suggestedCommand).toBe(
-        'npx @expo/agent-cli dev --detach'
+        `npx @expo/agent-cli dev --detach --${process.platform === 'darwin' ? 'ios' : 'android'}`
       );
     });
   });
@@ -498,7 +498,9 @@ describe('the Try: line of a URL that could not be resolved', () => {
     if (result.ok) {
       return;
     }
-    expect(result.suggestedCommand).toBe('npx @expo/agent-cli dev --detach');
+    expect(result.suggestedCommand).toBe(
+      `npx @expo/agent-cli dev --detach --${process.platform === 'darwin' ? 'ios' : 'android'}`
+    );
     // The How: and the Try: name the same action, which they did not.
     expect(result.error).toContain('npx @expo/agent-cli dev --detach');
   });

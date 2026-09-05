@@ -86,10 +86,14 @@ describe(buildChangeFollowUps, () => {
       expect(cloud!.command).toBe('npx eas build --platform android --profile development');
     });
 
-    it(`should leave the platform out of both commands when the report named none`, () => {
+    // `dev` requires a platform, so the command states the host's when the report named none —
+    // stated text the caller can change, not a guess inside a run (llp/0005 §Which platform).
+    it(`should state the host's platform when the report named none`, () => {
       const [local, cloud] = buildChangeFollowUps(input({ platform: null }));
 
-      expect(local!.command).toBe('npx @expo/agent-cli dev');
+      expect(local!.command).toBe(
+        `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
+      );
       expect(local!.why).toContain('the platform toolchain');
       expect(cloud!.command).toBe('npx eas build --profile development');
     });

@@ -118,7 +118,7 @@ function readEnum<T extends string>(
     throw reject(
       `${where} › ${key} is ${describe(value)}, and the only values it takes are ${quoteList(allowed)}.`,
       `Why: ${KEY_HELP[key] ?? 'it names one of a fixed set of choices'}`,
-      `How: change it to one of ${quoteList(allowed)}, or remove the key to let this CLI decide for itself — "${PROGRAM_PREFIX} dev --plan" prints what it decides and why.`
+      `How: change it to one of ${quoteList(allowed)}, or remove the key to let this CLI decide for itself — "${PROGRAM_PREFIX} dev --ios|--android --plan" prints what it decides and why.`
     );
   }
   return value as T;

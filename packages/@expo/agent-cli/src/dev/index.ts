@@ -6,7 +6,7 @@ import { assertWithOptionsArgs } from '../utils/args';
 
 export const devRunHelp: CommandHelp = {
   command: 'dev:run',
-  usage: `${PROGRAM_PREFIX} dev`,
+  usage: `${PROGRAM_PREFIX} dev --ios|--android|--web`,
   options: [
     `--detach            Run the dev server in the background and give the terminal back`,
     `--wait-ready        With --detach, also wait for the bundler before reporting`,
@@ -15,9 +15,10 @@ export const devRunHelp: CommandHelp = {
     `--json              Print the plan as JSON, for --plan and for a run`,
     `--port <number>     Port for the dev server, so a busy 8081 needs no answer`,
     `--tunnel, --lan, --localhost   How a device reaches the dev server; passed to expo start`,
-    `--ios, --android, --web   Platform to plan for; the host decides when none is named`,
+    `--ios, --android, --web   Platform to get the app onto. Required; one per run`,
     `--eas, --local      Where the native build runs: in the cloud on EAS, or on this machine`,
     `--go, --dev-client  Which app to run the project in, when both would work`,
+    `--no-open           Serve without opening the app; open it yourself with navigate`,
     `--no-agent-skills   Skip linking agent skills from installed packages`,
     `--no-followups      Skip the "Suggested next:" section of suggested follow-up commands`,
     `--no-fingerprint-cache   Hash the project again rather than revalidating the cached hash`,
@@ -25,19 +26,19 @@ export const devRunHelp: CommandHelp = {
   ],
   examples: [
     {
-      run: `${PROGRAM_PREFIX} dev --plan`,
-      gets: 'what would run to get this app on a device, and why. Nothing runs',
+      run: `${PROGRAM_PREFIX} dev --ios --plan`,
+      gets: 'what would run to get this app on an iOS device, and why. Nothing runs',
     },
     {
-      run: `${PROGRAM_PREFIX} dev --detach --wait-ready`,
+      run: `${PROGRAM_PREFIX} dev --android --detach --wait-ready`,
       gets: 'the dev server in the background; its url, pid and log file are printed',
     },
     {
-      run: `${PROGRAM_PREFIX} dev --yes --json --port 8082`,
+      run: `${PROGRAM_PREFIX} dev --ios --yes --json --port 8082`,
       gets: 'the plan run with consent given up front, on that exact port, as one object',
     },
     {
-      run: `${PROGRAM_PREFIX} dev --eas --plan`,
+      run: `${PROGRAM_PREFIX} dev --ios --eas --plan`,
       gets: 'the plan with the build forced into the cloud, whatever this machine has',
     },
   ],
@@ -61,6 +62,9 @@ export const devRunHelp: CommandHelp = {
     ],
   },
   notes: [
+    `One command, whatever the project needs: the plan decides whether to prebuild, build, or`,
+    `just serve, and the platform flag is what puts the app on a device — booting a simulator or`,
+    `an emulator when none is up, the way expo run:ios and run:android do. It is required.`,
     `This command blocks: without --detach it holds this terminal until the dev server stops, so`,
     `the "Suggested next" commands cannot run in it. --detach starts the same server and exits.`,
     `A build runs in one of two places, and the plan picks before it prints. A local build`,

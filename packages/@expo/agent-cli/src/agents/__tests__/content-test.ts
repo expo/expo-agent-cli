@@ -87,8 +87,8 @@ describe(generateAgentsMdBlock, () => {
     for (const command of [
       '@expo/agent-cli status',
       '@expo/agent-cli status --json',
-      '`npx @expo/agent-cli dev` — get the app onto a device',
-      '@expo/agent-cli dev --plan',
+      `\`npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}\` — get the app onto that platform's device`,
+      'add --plan to print the steps without running them',
       '`npx @expo/agent-cli start` — `expo start` and nothing else',
       '@expo/agent-cli install',
       '@expo/agent-cli typecheck',

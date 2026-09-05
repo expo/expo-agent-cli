@@ -9,7 +9,7 @@ Design documents: `llp/0001-agentic-cli-on-expo-cli.rfc.md` and its child LLPs i
 | Step                         | Command                                   | Gets you                                       |
 | ---------------------------- | ----------------------------------------- | ---------------------------------------------- |
 | 1. Check the project         | `npx @expo/agent-cli status`              | what this project is, and what to run next     |
-| 2. Start the app             | `npx @expo/agent-cli dev --detach`        | the dev server starts, the terminal comes back |
+| 2. Start the app             | `npx @expo/agent-cli dev --ios --detach`  | the dev server starts, the terminal comes back |
 |                              | `npx @expo/agent-cli navigate /`          | the app opens a route, on a device             |
 | 3. Edit and reload           | `npx @expo/agent-cli runtime:reload`      | after your edit, the app runs the code on disk |
 |                              | `npx @expo/agent-cli runtime:errors`      | what it threw, over a time window              |

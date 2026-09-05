@@ -3,6 +3,7 @@
 // detected is attached as the correction, instead of failing later on a device.
 
 import { PROGRAM_PREFIX } from '../programName';
+import { devCommand, hostPlatform } from '../smoke/suggest';
 import type { InstallImpactReport } from '../project/types';
 import { capFollowUps, type FollowUp } from './types';
 
@@ -38,7 +39,7 @@ export function buildInstallFollowUps({
     const names = rebuild.map((report) => report.packageName).join(', ');
     followups.push({
       id: 'dev',
-      command: `${PROGRAM_PREFIX} dev`,
+      command: devCommand(hostPlatform()),
       why: `The app that is running now cannot load ${names}, which changed the native surface: this plans and makes the development build that can.`,
     });
   } else {

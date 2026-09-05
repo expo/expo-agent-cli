@@ -67,7 +67,7 @@ describe('@expo/agent-cli agents:setup', () => {
     // The command cheat sheet.
     expect(agentsMd).toContain('@expo/agent-cli status');
     expect(agentsMd).toContain('@expo/agent-cli status --json');
-    expect(agentsMd).toContain('@expo/agent-cli dev --plan');
+    expect(agentsMd).toContain('add --plan to print the steps without running them');
     expect(agentsMd).toContain('@expo/agent-cli install');
     expect(agentsMd).toContain('@expo/agent-cli runtime:eval');
     expect(agentsMd).toContain('@expo/agent-cli navigate');

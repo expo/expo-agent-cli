@@ -3,6 +3,7 @@
 // away, so every command here carries the `cd` that makes it pasteable.
 
 import { PROGRAM_PREFIX } from '../programName';
+import { devCommand, hostPlatform } from '../smoke/suggest';
 import { capFollowUps, type FollowUp } from './types';
 
 export interface NewFollowUpInput {
@@ -34,7 +35,7 @@ export function buildNewFollowUps({ directory, installed }: NewFollowUpInput): F
     },
     {
       id: 'dev',
-      command: inProject(`${PROGRAM_PREFIX} dev`),
+      command: inProject(devCommand(hostPlatform())),
       why: 'Runs the app, deciding between Expo Go, a development build and a plain dev server from the project state.',
     },
     {

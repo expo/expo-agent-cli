@@ -32,6 +32,7 @@
 import { EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import type { NavigatePlatform } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
+import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
 import type { CdpTarget } from './cdpClient';
 import {
@@ -291,7 +292,8 @@ export function reachTheAppLadder({
   // Carried onto every command in the ladder that takes it. `dev` has no `--cloud`; what a cloud
   // session needs from a dev server is a tunnel, because a datacenter cannot reach this loopback.
   const cloudFlag = cloud ? ' --cloud' : '';
-  const platformFlag = platform == null ? '' : ` --${platform}`;
+  // `dev` and `navigate` both take it, and `dev` requires it now, so a platform is always stated.
+  const platformFlag = ` --${platform ?? hostPlatform()}`;
   const navigate = `${PROGRAM_PREFIX} navigate /${platformFlag}${cloudFlag}`;
   // `dev` takes the platform too, and dropping it here was F142's sibling: a bare `dev` asks the
   // plan engine to pick a platform, and on a Mac it picks iOS — so the first rung of the ladder out
@@ -359,7 +361,7 @@ export function noDevServerError({
   );
   // The same command the How: names. They disagreed — `npx expo start` in one and `npx @expo/agent-cli dev`
   // in the other — which is one failure telling a reader two things [observed — friction run 5].
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev --detach${cloud ? ' --tunnel' : ''}${platform == null ? '' : ` --${platform}`}`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev --detach${cloud ? ' --tunnel' : ''} --${platform ?? hostPlatform()}`;
   return withData(error, { devServerUrl, devServerReachable: false, platform });
 }
 

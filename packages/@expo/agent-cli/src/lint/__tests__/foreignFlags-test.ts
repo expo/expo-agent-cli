@@ -61,10 +61,11 @@ describe('the flags this CLI writes onto a command line', () => {
     // Before a row lands here, run the command once against `npx <package>@latest` in a project
     // outside this repository (llp/0002 §A flag is not shipped until it has run against the published binary).
     //
-    // Two rows are this CLI re-invoking itself and need no such run: the `--help` `cli.ts`
-    // normalizes onto a command's own argv, and the three flags `smoke` gives `@expo/agent-cli
-    // dev`. They are here because leaving them out would mean keeping an exclusion list, which is
-    // a place for a real one to hide.
+    // A few rows are this CLI re-invoking itself and need no such run: the `--help` `cli.ts`
+    // normalizes onto a command's own argv, and the flags `smoke` gives `@expo/agent-cli dev` —
+    // `--no-open` among them, which is `dev`'s own flag for "serve without opening the app". They
+    // are here because leaving them out would mean keeping an exclusion list, which is a place for
+    // a real one to hide.
     //
     // `--yes  src/utils/easCli.ts` is the one row whose command line belongs to **npm's exec**
     // rather than to a member of the Expo family: it is what keeps the EAS CLI's runner from
@@ -141,6 +142,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--json  src/install/resolveOptions.ts",
           "--no-bundler  src/device/installDevBuild.ts",
           "--no-install  src/new/createExpo.ts",
+          "--no-open  src/smoke/smokeAsync.ts",
           "--noEmit  src/typecheck/checkAsync.ts",
           "--non-interactive  src/deploy/deployAsync.ts",
           "--platform  src/deploy/deployAsync.ts",

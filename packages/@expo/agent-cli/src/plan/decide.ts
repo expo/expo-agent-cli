@@ -230,7 +230,9 @@ function startExpoGoStep(options: DecideStartPlanOptions): PlanStep {
     'seconds',
     opensOn
       ? `Serves the project to Expo Go and opens it on ${deviceNoun(opensOn)}, booting one and installing Expo Go if it has to. No native build is needed.`
-      : `Serves the project to Expo Go, which needs no native build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android.`
+      : options.open === false
+        ? `Serves the project to Expo Go, which needs no native build. --no-open: nothing is opened, so open the app yourself — "${PROGRAM_NAME} navigate /" does.`
+        : `Serves the project to Expo Go, which needs no native build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android.`
   );
 }
 
@@ -242,7 +244,9 @@ function startDevClientStep(reason: string, options: DecideStartPlanOptions = {}
     'seconds',
     opensOn
       ? `Starts the dev server and opens the development build on ${deviceNoun(opensOn)}. ${reason}`
-      : `Starts the dev server for the existing development build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android. ${reason}`
+      : options.open === false
+        ? `Starts the dev server for the existing development build. --no-open: nothing is opened, so open the app yourself — "${PROGRAM_NAME} navigate /" does. ${reason}`
+        : `Starts the dev server for the existing development build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android. ${reason}`
   );
 }
 
@@ -252,7 +256,10 @@ function startDevClientStep(reason: string, options: DecideStartPlanOptions = {}
  * Only a flag the caller typed counts. `web` is left out: the plan's own `--web` row already
  * describes serving a browser, and a native plan is not the place to open one.
  */
-function openTargetOf({ requestedPlatform }: DecideStartPlanOptions): NativePlatform | null {
+function openTargetOf({ requestedPlatform, open }: DecideStartPlanOptions): NativePlatform | null {
+  if (open === false) {
+    return null;
+  }
   return requestedPlatform === 'ios' || requestedPlatform === 'android' ? requestedPlatform : null;
 }
 
@@ -435,7 +442,9 @@ function describeTargetPlatform(
   actsOnPlatform: boolean
 ): string {
   if (requestedPlatform === platform) {
-    return `Target platform: ${platform}, named on the command line.`;
+    return actsOnPlatform
+      ? `Target platform: ${platform}, named on the command line.`
+      : `Target platform: ${platform}, named on the command line. --no-open leaves the app unopened — run "${PROGRAM_NAME} navigate /" once the dev server is up.`;
   }
   return actsOnPlatform
     ? `No platform was named; this host suggests ${platform}, and the plan builds for it.`

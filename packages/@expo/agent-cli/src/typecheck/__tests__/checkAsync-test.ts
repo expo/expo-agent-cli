@@ -297,7 +297,7 @@ describe('a declaration file the project expects and does not have', () => {
     expect(report.generatedTypes).toEqual({
       file: 'expo-env.d.ts',
       referencedBy: 'tsconfig.json',
-      command: 'npx @expo/agent-cli dev --detach --wait-ready',
+      command: `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --wait-ready`,
     });
   });
 

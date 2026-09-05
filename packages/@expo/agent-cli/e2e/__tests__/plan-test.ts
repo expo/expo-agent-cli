@@ -154,10 +154,18 @@ describe('@expo/agent-cli dev --plan', () => {
       expect(output).toContain('expo start --go');
     });
 
-    it('plans the same way without an explicit platform', async () => {
-      const output = await planTextAsync('go-app');
+    // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say — `dev`
+    // follows `smoke`: the platform is required, and the refusal is one line with a runnable Try:.
+    it('refuses a run with no platform flag', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan'], {
+        reject: false,
+      });
 
-      expect(output).toContain('expo start --go');
+      expect(result.exitCode).toBe(1);
+      expect(result.all).toContain('Missing platform');
+      expect(result.all).toContain('npx @expo/agent-cli dev --ios');
+      expect(readStubExpoInvocations(projectRoot)).toEqual([]);
     });
 
     // The plan is what a driving agent reads before it acts. It used to print
@@ -181,21 +189,30 @@ describe('@expo/agent-cli dev --plan', () => {
         'dev',
         '--plan',
         '--json',
+        '--ios',
         '--tunnel',
       ]);
 
       const plan: StartPlan = JSON.parse(result.stdout);
-      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go', '--tunnel']]);
+      expect(plan.steps.map((step) => step.argv)).toEqual([
+        ['expo', 'start', '--go', '--ios', '--tunnel'],
+      ]);
     });
 
-    it('admits that a plain start opens nothing, and names what does', async () => {
+    // Every plan acts on a named platform now, so the "opens nothing" sentence is not reachable
+    // from this command any more — the required flag is what removed it.
+    it('always carries the platform onto the step that opens the app', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--json']);
+      const result = await executeAgentCliAsync(projectRoot, [
+        'dev',
+        '--plan',
+        '--json',
+        '--android',
+      ]);
 
       const plan: StartPlan = JSON.parse(result.stdout);
-      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go']]);
-      expect(plan.steps[0]!.reason).toContain('opens nothing on its own');
-      expect(plan.steps[0]!.reason).toContain('@expo/agent-cli navigate /');
+      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go', '--android']]);
+      expect(plan.steps[0]!.reason).not.toContain('opens nothing on its own');
     });
   });
 
@@ -639,7 +656,7 @@ describe('@expo/agent-cli dev --plan', () => {
 
     it('embeds the follow-ups in the JSON plan, which stays one object', async () => {
       const projectRoot = await setupAsync('go-app');
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--json']);
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--json', '--ios']);
 
       expect(result.exitCode).toBe(0);
       const plan: StartPlan = JSON.parse(result.stdout);
@@ -648,11 +665,17 @@ describe('@expo/agent-cli dev --plan', () => {
 
     it('leaves them out with --no-followups, keeping the key set', async () => {
       const projectRoot = await setupAsync('go-app');
-      const text = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--no-followups']);
+      const text = await executeAgentCliAsync(projectRoot, [
+        'dev',
+        '--plan',
+        '--ios',
+        '--no-followups',
+      ]);
       const json = await executeAgentCliAsync(projectRoot, [
         'dev',
         '--plan',
         '--json',
+        '--ios',
         '--no-followups',
       ]);
 
@@ -665,7 +688,7 @@ describe('@expo/agent-cli dev --plan', () => {
     });
 
     it('leaves them out for AGENT_CLI_NO_FOLLOWUPS', async () => {
-      const output = await planTextAsync('go-app', [], { AGENT_CLI_NO_FOLLOWUPS: '1' });
+      const output = await planTextAsync('go-app', ['--ios'], { AGENT_CLI_NO_FOLLOWUPS: '1' });
 
       expect(output).not.toContain('Suggested next:');
     });
@@ -673,7 +696,7 @@ describe('@expo/agent-cli dev --plan', () => {
     it('emits one cli:followups event for a driving agent', async () => {
       const projectRoot = await setupAsync('go-app');
       const eventsFile = path.join(projectRoot, 'events.jsonl');
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--ios'], {
         env: { LOG_EVENTS: eventsFile },
       });
 

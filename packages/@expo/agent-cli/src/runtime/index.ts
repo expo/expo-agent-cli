@@ -16,7 +16,7 @@ const SHARED_RUNTIME_OPTIONS = [
 /** The refusal every action of the family shares, in the two lines a caller has to act on. */
 const RUNTIME_CONNECTION_NOTE = [
   `Needs a dev server with the app connected to it. Without either, exit 1 with NO_DEV_SERVER`,
-  `or NO_APP_CONNECTED: run "${PROGRAM_PREFIX} dev --detach", then "${PROGRAM_PREFIX} navigate /".`,
+  `or NO_APP_CONNECTED: run "${PROGRAM_PREFIX} dev --ios|--android --detach", then "${PROGRAM_PREFIX} navigate /".`,
 ];
 
 export const runtimeEvalHelp: CommandHelp = {
