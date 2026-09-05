@@ -418,6 +418,11 @@ export async function execAsync(
       },
       (error: any, stdout, stderr) => {
         if (error && typeof error.code !== 'number') {
+          // A killed process (a timeout) rejects rather than resolving. Attach what it printed
+          // first: a command that created a billed resource before it hung — `eas simulator` — put
+          // the id there, and the caller's cleanup needs it.
+          error.stdout = String(stdout);
+          error.stderr = String(stderr);
           reject(error);
           return;
         }

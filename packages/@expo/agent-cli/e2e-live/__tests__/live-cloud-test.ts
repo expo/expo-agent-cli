@@ -299,29 +299,38 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     // dialog is not what is relied on here: `navigate --cloud` reads and accepts it
     // (`src/navigate/openRoute.ts §resolveOpenDialogAsync`), and this harness gets the session into
     // the state a person following the `eas-simulator` skill would have.
-    const started = await easAsync('simulator-start', [
-      'simulator',
-      '--platform',
-      'ios',
-      '--type',
-      'agent-device',
-      '--expo-go',
-      '--open-url',
-      `exp://${publicHost}`,
-      '--non-interactive',
-      '--name',
-      'agent-cli-live',
-      '--json',
-    ]);
-    // Read the session id from whatever the command printed, even when it failed. `eas simulator`
-    // creates the session **before** it waits for the device to be ready, so a start that times out
-    // on readiness has still billed one — and the `simulator:stop` cleanup can only stop what it can
-    // name. A bare stop does not reach it [observed — a session leaked when readiness timed out,
-    // 2026-09-05]. So capture the id first, then decide whether the start succeeded.
-    sessionId =
-      jsonSessionId(started.stdout) ??
-      `${started.stdout}\n${started.stderr}`.match(/id: ([0-9a-f-]{36})/i)?.[1] ??
-      null;
+    // `eas simulator` creates the session **before** it waits for the agent-device to be ready, so a
+    // start that hangs on readiness — seen on 2 of 3 runs, 2026-09-05 — still bills one. The
+    // readiness wait hangs the full timeout, which `execAsync` reports by killing the process and
+    // rejecting, so the id has to be pulled from the error too, not only the resolved result. The
+    // `simulator:stop` cleanup can only stop what it can name; a bare stop does not reach it.
+    const findSessionId = (stdout: string, stderr: string): string | null =>
+      jsonSessionId(stdout) ?? `${stdout}\n${stderr}`.match(/id: ([0-9a-f-]{36})/i)?.[1] ?? null;
+
+    let started: Awaited<ReturnType<typeof easAsync>>;
+    try {
+      started = await easAsync('simulator-start', [
+        'simulator',
+        '--platform',
+        'ios',
+        '--type',
+        'agent-device',
+        '--expo-go',
+        '--open-url',
+        `exp://${publicHost}`,
+        '--non-interactive',
+        '--name',
+        'agent-cli-live',
+        '--json',
+      ]);
+    } catch (error: any) {
+      sessionId = findSessionId(String(error?.stdout ?? ''), String(error?.stderr ?? ''));
+      if (sessionId) {
+        run.spend.cloudSessions += 1;
+      }
+      throw error;
+    }
+    sessionId = findSessionId(started.stdout, started.stderr);
     if (sessionId) {
       run.spend.cloudSessions += 1;
     }
