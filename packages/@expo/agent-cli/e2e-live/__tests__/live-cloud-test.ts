@@ -108,6 +108,15 @@ const RELOAD_TIMEOUT = '180s';
 /** The route the lab screen lives at, for the reload that names one. */
 const LAB_ROUTE = '/lab';
 
+/** The `id` of an `eas simulator --json` payload, or null when the output is not that object. */
+function jsonSessionId(stdout: string): string | null {
+  try {
+    return JSON.parse(stdout)?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on staging', () => {
   const run = new LiveRun('live-cloud');
   let projectRoot = '';
@@ -290,33 +299,55 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     // dialog is not what is relied on here: `navigate --cloud` reads and accepts it
     // (`src/navigate/openRoute.ts §resolveOpenDialogAsync`), and this harness gets the session into
     // the state a person following the `eas-simulator` skill would have.
-    const started = await easAsync('simulator-start', [
-      'simulator',
-      '--platform',
-      'ios',
-      '--type',
-      'agent-device',
-      '--expo-go',
-      '--open-url',
-      `exp://${publicHost}`,
-      '--non-interactive',
-      '--name',
-      'agent-cli-live',
-      '--json',
-    ]);
+    // `eas simulator` creates the session **before** it waits for the agent-device to be ready, so a
+    // start that hangs on readiness — seen on 2 of 3 runs, 2026-09-05 — still bills one. The
+    // readiness wait hangs the full timeout, which `execAsync` reports by killing the process and
+    // rejecting, so the id has to be pulled from the error too, not only the resolved result. The
+    // `simulator:stop` cleanup can only stop what it can name; a bare stop does not reach it.
+    const findSessionId = (stdout: string, stderr: string): string | null =>
+      jsonSessionId(stdout) ?? `${stdout}\n${stderr}`.match(/id: ([0-9a-f-]{36})/i)?.[1] ?? null;
+
+    let started: Awaited<ReturnType<typeof easAsync>>;
+    try {
+      started = await easAsync('simulator-start', [
+        'simulator',
+        '--platform',
+        'ios',
+        '--type',
+        'agent-device',
+        '--expo-go',
+        '--open-url',
+        `exp://${publicHost}`,
+        '--non-interactive',
+        '--name',
+        'agent-cli-live',
+        '--json',
+      ]);
+    } catch (error: any) {
+      sessionId = findSessionId(String(error?.stdout ?? ''), String(error?.stderr ?? ''));
+      if (sessionId) {
+        run.spend.cloudSessions += 1;
+      }
+      throw error;
+    }
+    sessionId = findSessionId(started.stdout, started.stderr);
+    if (sessionId) {
+      run.spend.cloudSessions += 1;
+    }
     if (started.exitCode !== 0) {
       throw new Error(
         `eas simulator failed (exit ${started.exitCode}): ${started.stderr.slice(-2000)}`
       );
     }
-    run.spend.cloudSessions += 1;
-    sessionId = JSON.parse(started.stdout)?.id ?? null;
     if (!sessionId) {
       throw new Error(
         `eas simulator --json printed no session id: ${started.stdout.slice(0, 500)}`
       );
     }
-  });
+    // Scaffold, install, a tunnel, a detached dev server and a billed simulator session: minutes.
+    // Without its own bound this hook hit vitest's 10s default and the suite never reached a test —
+    // which is why it had never been seen run.
+  }, 600_000);
 
   afterAll(async () => {
     await run.cleanUpAsync();
