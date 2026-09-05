@@ -39,6 +39,27 @@ Everything needs the bundle built first: **`bun run build`**.
 | `live-eas`       | `EXPO_STAGING=1`; a staging session in `~/.expo-staging/state.json`; `bunx` or `npx`; network to `staging.expo.dev`; an EAS-linked project on disk with finished builds and at least one ERRORED build (`AGENT_CLI_LIVE_EAS_PROJECT`). Optional: `AGENT_CLI_LIVE_EAS_OWNER` and `AGENT_CLI_LIVE_EAS_PROJECT_ID` override the livecheck fixture's hosting project                           |
 | `live-cloud`     | everything `live-eas` needs, **plus** `AGENT_CLI_LIVE_CLOUD=1` and a way to publish a local port — `tuft host`, or an origin of your own in `AGENT_CLI_LIVE_PUBLIC_ORIGIN`                                                                                                                                                                                                                 |
 
+### Two things about `live-local`
+
+**A first run on a simulator whose Expo Go is from another SDK installs the right one — a few
+hundred megabytes, once.** The scaffold is the current SDK; a simulator carrying an older Expo Go
+(54 against a 57 scaffold, seen 2026-09-05) makes `smoke --ios` download and install Expo Go for the
+scaffold's SDK before the app phase. It is cached after that and later runs pay nothing. A cold run
+can look slow for a minute for this reason; it is not a hang.
+
+**The break-and-fix block waits for the break to land before it asserts.** Metro compiles the entry
+bundle on request, so a just-appended syntax error is not observable until something asks for it. The
+block polls a bundle check until it reports the break, then asserts the six refusals — without that,
+the first command races the file watcher and reads the last good bundle.
+
+### The live-tier hooks carry their own timeout
+
+vitest's hook timeout defaults to 10s, and `testTimeout` does not raise it. A `beforeAll` that
+scaffolds, installs, boots, or bills is measured in minutes, so each such hook passes its own bound
+(`}, 600_000)`). `live-eas` and `live-cloud` were missing it and skipped their whole suite at the 10s
+wall until 2026-09-05 — which is why `live-cloud` had never been seen run. If a new suite's
+`beforeAll` does real work, give it a bound.
+
 ### Three things about `live-project`
 
 **Its gate is the network, and that is the reason it is a suite rather than rows in `live-local`**
@@ -177,6 +198,22 @@ npx eas simulator --platform ios --type agent-device --expo-go \
 ```
 
 A project with a development build of its own passes `--build-id <id>` instead of `--expo-go`.
+
+**The cloud device does not always become ready, and a session that never does has still been
+billed.** `eas simulator` creates the session, then waits for the agent-device to come up; that wait
+timed out on one run of two [observed — 2026-09-05]. The suite reads the session id from the start
+output whatever the exit code, so the `afterAll` stop reaches it either way. If a run is killed before
+`afterAll` (a `SIGKILL`, a wrapper timeout), stop it by hand from the scaffolded project:
+
+```bash
+cd <scratch>/cloudapp
+EXPO_STAGING=1 npx eas-cli@latest simulator:list --status in-progress --json
+EXPO_STAGING=1 npx eas-cli@latest simulator:stop --id <id> --non-interactive
+```
+
+Do not run `test:live:cloud` inside a wrapper that kills at a fixed wall time under the vitest
+timeout: the suite can take ten-plus minutes, and a kill during `afterAll` is exactly what leaks a
+session. Run it in the background and let it finish.
 
 ### The hard guard
 

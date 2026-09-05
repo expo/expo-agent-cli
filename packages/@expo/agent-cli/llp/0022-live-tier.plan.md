@@ -267,15 +267,19 @@ This table is abbreviated. The source of truth is the tests under `e2e-live/`.
 | `login` / `logout` / `register` | unreachable (mutates the machine session) | unreachable                              | unreachable                               | unreachable                               | n/a                                  | unreachable                       |
 | `inspect:build-log <build-id>`  | n/a                                       | n/a                                      | n/a                                       | unreachable (eas-cli has no `build:logs`) | n/a                                  | n/a                               |
 | native EAS build creation       | n/a                                       | n/a                                      | n/a                                       | unreachable in v1                         | n/a                                  | n/a                               |
-| `deploy --native`               | n/a                                       | n/a                                      | n/a                                       | open (bills a worker)                     | n/a                                  | n/a                               |
+| `deploy --native`               | n/a                                       | n/a                                      | n/a                                       | unreachable (create-launch has no staging; a run uploads to production) | n/a                    | n/a                               |
 | `dev --tunnel`                  | n/a                                       | unreachable (`@expo/ngrok` exits 1 here) | n/a (emulator uses `adb reverse`)         | n/a                                       | n/a (uses a proxy origin)            | n/a                               |
 | `runtime:eval`                  | n/a                                       | filled (returns `2`)                     | filled (exit 1, no debugger)              | n/a                                       | unreachable (no `--cloud` on `eval`) | filled (exit 0, `value: 2`)       |
 | `runtime:tap --verify`          | n/a                                       | filled                                   | unreachable (no debugger)                 | n/a                                       | unreachable                          | filled                            |
 | `smoke` (pass)                  | n/a                                       | filled (8 phases)                        | unreachable (22 on a working Expo Go app) | n/a                                       | n/a                                  | filled (0, all eight phases `ok`) |
 | `smoke --cloud`                 | n/a                                       | n/a                                      | n/a                                       | n/a                                       | filled                               | n/a                               |
 | `navigate --cloud`              | n/a                                       | n/a                                      | n/a                                       | n/a                                       | filled                               | n/a                               |
-| `runtime:stop --cloud`          | n/a                                       | n/a                                      | n/a                                       | n/a                                       | runnable                             | n/a                               |
-| `navigate --print-url`          | n/a                                       | open                                     | open                                      | n/a                                       | runnable                             | open                              |
+| `runtime:stop --cloud`          | n/a                                       | n/a                                      | n/a                                       | n/a                                       | filled (exit 0)                      | n/a                               |
+| `navigate --print-url`          | n/a                                       | filled (device untouched)                | open                                      | n/a                                       | filled (tunnel host)                 | open                              |
+| `runtime:type` (non-input)      | n/a                                       | filled (exit 20)                         | n/a                                       | n/a                                       | n/a                                  | n/a                               |
+| `skills` unsafe-name guard      | filled                                    | n/a                                      | n/a                                       | n/a                                       | n/a                                  | n/a                               |
+| `inspect:build-log` (a log)     | n/a                                       | n/a                                      | n/a                                       | filled (brotli refused, then decoded)     | n/a                                  | n/a                               |
+| `deploy --web`                  | n/a                                       | n/a                                      | n/a                                       | filled (URL serves the export)            | n/a                                  | n/a                               |
 | iOS development build           | n/a                                       | n/a                                      | n/a                                       | n/a                                       | n/a                                  | by hand                           |
 
 `live-android` is Expo Go. `live-devclient` is the app that has a debugger. Every
@@ -288,9 +292,19 @@ the thing it is for". The two are different claims about the same command.
 
 ## Limits
 
-- `live-cloud` has not been seen 7/7. The last runs took it to 6/7 and corrected the
-  last assertion against that run's own artifact. The corrected suite has not been run.
-  The next run of `test:live:cloud` is what closes it, and it is one session.
+- `live-cloud` and `live-eas` did not run at all until 2026-09-05: their `beforeAll`
+  hooks had no explicit timeout, so a setup measured in minutes hit vitest's 10s hook
+  default and the whole suite skipped. That, not the tests, is why `live-cloud` had never
+  been seen. With the bound, `live-eas` runs 10/10, and `live-cloud` reaches its tests.
+- `live-cloud` passes when the cloud device becomes ready: on such a run all seven tests
+  meet their assertions — `reload`/`reload --route`/`stop --cloud` exit 0, the
+  wrong-platform run refuses, and `navigate`/`smoke --cloud` return the 22 the suite is
+  written to accept because a cloud simulator lists no CDP target. Readiness itself is
+  flaky (one run ready, one timed out waiting) — EAS infra, not the CLI. A run that never
+  goes ready skips its tests; a skip is not a pass.
+- A cloud session that is created but never becomes ready has still been billed. The
+  `eas simulator` id is now read from the start output on failure too, so the cleanup can
+  always stop it — before this, a readiness timeout left a session in-progress.
 - These suites run the ncc bundle from this working tree. [[0002-testing-and-evals]] §A
   flag is not shipped still asks for one `npx <package>@latest` run in a project outside
   this repository before shipping. This tier narrows what that run has to discover. It
