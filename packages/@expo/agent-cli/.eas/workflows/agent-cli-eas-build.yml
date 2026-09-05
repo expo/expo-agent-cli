@@ -3,15 +3,19 @@
 # take — llp/0022 marks native EAS build creation "unreachable in v1" — so it proves two things at
 # once: that `@expo/agent-cli new` produces an app EAS can build, and that the build path works.
 #
-# Gated to dispatch and the "agent-cli-build" label, never per-PR: each run spends Android build
-# minutes on expo-ci.
+# Runs on every PR that touches the CLI (and on demand). Each run spends Android build minutes on
+# expo-ci — that cost is accepted here, unlike the tier-2 evals, which stay label-gated because they
+# also bill Anthropic tokens. The path filter keeps it off PRs that cannot change the build.
 name: agent-cli-eas-build
 
 on:
   workflow_dispatch: {}
-  pull_request_labeled:
-    labels:
-      - agent-cli-build
+  pull_request:
+    paths:
+      - packages/@expo/agent-cli/**
+      - bun.lock
+      - package.json
+      - bunfig.toml
 
 # Base dir is packages/@expo/agent-cli; the monorepo lives three levels up. The build step cds into
 # its own scratch app, so it does not rely on this default.
