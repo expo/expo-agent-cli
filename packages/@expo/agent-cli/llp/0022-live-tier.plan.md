@@ -300,11 +300,14 @@ the thing it is for". The two are different claims about the same command.
   meet their assertions — `reload`/`reload --route`/`stop --cloud` exit 0, the
   wrong-platform run refuses, and `navigate`/`smoke --cloud` return the 22 the suite is
   written to accept because a cloud simulator lists no CDP target. Readiness itself is
-  flaky (one run ready, one timed out waiting) — EAS infra, not the CLI. A run that never
-  goes ready skips its tests; a skip is not a pass.
+  flaky: of three runs on 2026-09-05, one went ready and passed its tests and two hung
+  waiting for the agent-device — EAS infra, not the CLI. A run that never goes ready skips
+  its tests; a skip is not a pass.
 - A cloud session that is created but never becomes ready has still been billed. The
-  `eas simulator` id is now read from the start output on failure too, so the cleanup can
-  always stop it — before this, a readiness timeout left a session in-progress.
+  readiness wait hangs the full timeout, which `execAsync` reports by killing the process
+  and rejecting — so the id has to be read from the throw, not only a resolved result.
+  With that, the `simulator:stop` cleanup can always name the session; the first cut
+  missed the throw path and left a session behind twice before it was caught.
 - These suites run the ncc bundle from this working tree. [[0002-testing-and-evals]] §A
   flag is not shipped still asks for one `npx <package>@latest` run in a project outside
   this repository before shipping. This tier narrows what that run has to discover. It
