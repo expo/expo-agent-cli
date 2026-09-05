@@ -21,7 +21,7 @@ import { readLastBuildFingerprints, recordLastBuildFingerprint } from '../plan/l
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
-import { defaultSmokePlatform, defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
+import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
 import { clearFingerprintMemo } from '../project/fingerprint';
 import { clearFingerprintCache } from '../project/fingerprintCache';
 import { probeProjectStateAsync } from '../project/probe';
@@ -76,10 +76,12 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // printed, so the steps an agent approves are the steps that run — never swapped mid-run
   // (llp/0008 §Plan-with-cost dry run).
   const resolved = await resolveStartPlanAsync(projectRoot, state, {
-    platform: options.platform ?? resolveDefaultPlatform(state),
-    // Only the flag the caller typed reaches `expo start`, and only that form opens the app on a
-    // device. The default above says what to *build* for and never appears on a command line.
+    // The caller's own flag, which the resolver requires: the plan builds for this platform and
+    // `expo start` opens the app on it — booting a simulator or an emulator when none is up, the
+    // same way `expo run:ios` and `expo run:android` do.
+    platform: options.platform,
     requestedPlatform: options.platform,
+    open: options.open,
     lastBuild: readLastBuildFingerprints(projectRoot),
     requestedBackend: options.buildBackend,
     requestedTarget: options.runTarget,
@@ -153,7 +155,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // nothing on stderr, and "a person must finish this" from the exit code
   // [observed — friction run 2, 2026-08-23: `dev --yes --json --ios`].
   if (run.exitCode !== 0 && run.failure) {
-    throw planStepFailedError(run.failure, stepOutputFor(options), run.exitCode);
+    throw planStepFailedError(run.failure, stepOutputFor(options), run.exitCode, options.platform);
   }
 
   if (options.json) {
@@ -260,6 +262,9 @@ async function executePlanAsync(
   // was taken between the bind test and the dev server's own bind, and retrying forever on that
   // would be a loop nobody asked for.
   let retriedOnFreePort = false;
+  // @ref llp/0026-dev-owns-the-open.rfc.md — the open is armed once per plan, whatever the port
+  // retry does: the second bind is the same dev server, not a second app to open.
+  let openArmed = false;
 
   for (const [index, step] of plan.steps.entries()) {
     let args = resolveStepArgs(step, options, index === plan.steps.length - 1);
@@ -271,13 +276,33 @@ async function executePlanAsync(
     });
 
     const devServerStep = isDevServerStep(step);
-    const runStep = async (stepArgs: string[]) =>
-      devServerStep
-        ? await runDevServerAsync(projectRoot, stepArgs, {
-            agentSkills: options.agentSkills,
-            output,
-          })
-        : await runStepAsync(projectRoot, step, stepArgs, output);
+    // The open belongs to the `expo start` step alone: `expo run:*` installs and launches the app
+    // itself, and a build step serves nothing to open.
+    const opensApp = devServerStep && step.argv[1] === 'start' && shouldOpenApp(options);
+    let stepRunning = false;
+    const runStep = async (stepArgs: string[]) => {
+      if (!devServerStep) {
+        return await runStepAsync(projectRoot, step, stepArgs, output);
+      }
+      stepRunning = true;
+      return await runDevServerAsync(projectRoot, stepArgs, {
+        agentSkills: options.agentSkills,
+        output,
+        onDevServer: opensApp
+          ? (server) => {
+              if (openArmed) {
+                return;
+              }
+              openArmed = true;
+              // Fire and forget, on purpose: the dev server owns the foreground, and a failed
+              // open must not take it down. `stillWanted` stops the staging once it exits.
+              void openAppForRunAsync(projectRoot, plan, options, server.url, () => stepRunning);
+            }
+          : undefined,
+      }).finally(() => {
+        stepRunning = false;
+      });
+    };
 
     let result = await runStep(args);
     let portCollided = false;
@@ -293,7 +318,7 @@ async function executePlanAsync(
         // server somewhere else would leave every command the caller had already written — and
         // every URL it had already printed — pointing at nothing.
         if (options.port != null) {
-          throw await portDemandedError(projectRoot, options.port);
+          throw await portDemandedError(projectRoot, options.port, options.platform);
         }
         // Once per plan. A second collision means the port this CLI picked was taken between the
         // bind test and the dev server's own bind, and retrying forever on that is a loop nobody
@@ -323,9 +348,9 @@ async function executePlanAsync(
       // F121, and **before** the needs-human throw below rather than after it: `expo run:*` builds,
       // installs and launches in one subprocess, and a launch that failed is not a build that did.
       // A build whose app is on the device is a fact of its own, so it is recorded here, and the
-      // step failure below is reported exactly as it was. The `macos-automation` recovery — "drop
-      // --ios and run npx @expo/agent-cli dev --yes" — is a dev server now instead of the same fifteen
-      // minutes over again, which is what made that handoff wrong rather than merely incomplete.
+      // step failure below is reported exactly as it was. The `macos-automation` recovery — start
+      // the dev server and deep-link in — no longer walks back into the same fifteen-minute build,
+      // which is what made that handoff wrong rather than merely incomplete.
       const buildRecorded = recordBuildReachedDevice(projectRoot, step, state, result);
       const failure: StepFailure = {
         step,
@@ -347,7 +372,7 @@ async function executePlanAsync(
       // on a port this CLI picked, and there is no answer a person could give that the retry did
       // not already try. It falls through to the ordinary step failure below.
       if (!portCollided) {
-        assertNotNeedsHuman(failure);
+        assertNotNeedsHuman(failure, options.platform);
       }
       // Every later step depends on this one having worked, so the plan stops here.
       return { exitCode, devServer, failure };
@@ -434,15 +459,21 @@ async function retryOnFreePortAsync(
  * to do did not happen (llp/0010 §Exit codes). It never suggests the command that just failed —
  * running it again unchanged stops in the same place until the port is freed.
  */
-async function portDemandedError(projectRoot: string, port: number): Promise<CommandError> {
+async function portDemandedError(
+  projectRoot: string,
+  port: number,
+  platform: PlanPlatform
+): Promise<CommandError> {
   const { findPortListenerAsync } = require('./portListener') as typeof import('./portListener');
   const { readDevServerLockAsync } = require('../devLock') as typeof import('../devLock');
-  const [listener, lock, free, smokePlatform] = await Promise.all([
+  const [listener, lock, free, defaultPlatform] = await Promise.all([
     findPortListenerAsync(port),
     readDevServerLockAsync(projectRoot),
     findFreePortAsync(port + 1),
     defaultSmokePlatformAsync(projectRoot),
   ]);
+  // The smoke example needs a device platform, which the caller's `--web` is not.
+  const smokePlatform = platform === 'web' ? defaultPlatform : platform;
 
   // The most useful special case: the process on that port is this project's own dev server, so
   // there is nothing to start and nothing to fix.
@@ -460,7 +491,7 @@ async function portDemandedError(projectRoot: string, port: number): Promise<Com
         : `Why: ${holder} is listening on it, and --port ${port} is a requirement rather than a preference — moving the dev server to another port would leave every URL and every command that names ${port} pointing at nothing.`,
       ours
         ? `How: use the dev server that is running ("${smokeCommand(smokePlatform)}" checks its bundle and its app), or stop it first with "${PROGRAM_PREFIX} dev:stop".`
-        : `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --yes --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
+        : `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --${platform} --yes --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
     ].join('\n')
   );
   // Never the command that just failed: it would stop in exactly the same place.
@@ -468,7 +499,7 @@ async function portDemandedError(projectRoot: string, port: number): Promise<Com
     ? smokeCommand(smokePlatform)
     : free == null
       ? `${PROGRAM_PREFIX} dev:stop --port ${port} --force`
-      : `${PROGRAM_PREFIX} dev --yes --port ${free}`;
+      : `${PROGRAM_PREFIX} dev --${platform} --yes --port ${free}`;
   error.exitCode = EXIT_OUTCOME_FAILED;
   return error;
 }
@@ -548,7 +579,7 @@ async function runEasStepAsync(
  *
  * @throws {NeedsHumanError} when the registry recognises what stopped the step.
  */
-function assertNotNeedsHuman(failure: StepFailure): void {
+function assertNotNeedsHuman(failure: StepFailure, platform: PlanPlatform): void {
   const invocation = invocationOf(failure);
   const needsHuman = classifySubprocessFailure({
     // The registry is keyed by tool, and an `eas build` that stops for a login is a different
@@ -563,14 +594,18 @@ function assertNotNeedsHuman(failure: StepFailure): void {
     return;
   }
 
-  throw needsHumanErrorFrom(needsHuman, stopPromptFor(needsHuman.scenario, failure, invocation));
+  throw needsHumanErrorFrom(
+    needsHuman,
+    stopPromptFor(needsHuman.scenario, failure, invocation, platform)
+  );
 }
 
 /** The what / why / how of one recognised stop, per scenario. */
 function stopPromptFor(
   scenario: string,
   failure: StepFailure,
-  invocation: string
+  invocation: string,
+  platform: PlanPlatform
 ): { message: string; code?: string } {
   if (scenario === 'macos-automation') {
     // The *first* line of the crash, not the last: an unhandled rejection ends with Node's own
@@ -579,14 +614,14 @@ function stopPromptFor(
     return {
       message: [
         `The plan stopped at "${failure.step.id}": macOS refused "${invocation}" permission to control Simulator.app.`,
-        `Why: --ios makes the Expo CLI drive Simulator.app through AppleScript, and macOS refuses an application that has not been granted Automation permission. The Expo CLI does not catch that rejection, so it ends the whole "expo start" process${failure.devServerStep ? ' — the dev server this run started exited with it, and nothing is listening for this project now' : ''}.`,
-        `How: grant the permission in System Settings › Privacy & Security › Automation, then run this command again. To keep going without it, drop --ios and open the app the way that needs no Automation grant: "${PROGRAM_PREFIX} dev --yes" to start the dev server, then "${PROGRAM_PREFIX} navigate /", which deep-links through "xcrun simctl openurl".`,
+        `Why: the Expo CLI's launch step drives Simulator.app through AppleScript, and macOS refuses an application that has not been granted Automation permission. The Expo CLI does not catch that rejection, so it ends the whole process${failure.devServerStep ? ' — the dev server this run started exited with it, and nothing is listening for this project now' : ''}.`,
+        `How: grant the permission in System Settings › Privacy & Security › Automation, then run this command again. To keep going without it, run "${PROGRAM_PREFIX} dev --${platform} --detach" — the build is recorded, so the next run starts the dev server and opens the app through "xcrun simctl openurl", which needs no grant.`,
         // @ref llp/0004 §Implemented in v1 — F121. The `How:` above is the
         // recovery that used to walk straight back into a fifteen-minute rebuild, because the build
         // this run finished was not recorded. It is now, and the reader is told so on the line that
         // sends them there.
         failure.buildRecorded
-          ? `Note: the app it built is installed on the simulator already, so that build is recorded and "${PROGRAM_PREFIX} dev --yes" starts a dev server rather than building again.`
+          ? `Note: the app it built is installed on the simulator already, so that build is recorded and "${PROGRAM_PREFIX} dev --${platform} --yes" starts a dev server rather than building again.`
           : '',
         said ? `\nWhat the tool printed:\n${said}` : '',
       ]
@@ -654,7 +689,8 @@ function firstLineMatching(failure: StepFailure, pattern: RegExp): string | null
 function planStepFailedError(
   failure: StepFailure,
   output: SubprocessOutput,
-  exitCode: number
+  exitCode: number,
+  platform: PlanPlatform
 ): CommandError {
   const invocation = invocationOf(failure);
   // @ref llp/0001-agentic-cli-on-expo-cli.rfc.md §Constraints — the process on the other side of
@@ -687,9 +723,9 @@ function planStepFailedError(
       // fact that decides what the next command costs, and nothing in the tool's own output says
       // it. Without this line the reader re-runs a step whose expensive half already worked.
       failure.buildRecorded
-        ? `Note: the app it built is installed on the device, so that build is recorded — the next "${PROGRAM_PREFIX} dev" starts a dev server for it instead of building again.`
+        ? `Note: the app it built is installed on the device, so that build is recorded — the next "${PROGRAM_PREFIX} dev --${platform}" starts a dev server for it instead of building again.`
         : '',
-      `How: run the command above yourself to see it fail with its whole output, or run "${PROGRAM_PREFIX} dev --plan" to see the steps this plan is made of.`,
+      `How: run the command above yourself to see it fail with its whole output, or run "${PROGRAM_PREFIX} dev --${platform} --plan" to see the steps this plan is made of.`,
       wrapperCrash
         ? wrapperCrashDetail({ tool, exitCode: failure.exitCode }, failure.binPath!)
         : tail
@@ -763,6 +799,64 @@ function resolveStepArgs(step: PlanStep, options: DevOptions, isLast: boolean): 
   // forwarded options (`withForwardedExpoArgs`, above), and a flag the argv holds is never added
   // twice. What this call is still for is the assertion above and a step that was rebuilt since.
   return forwardedStepArgs(step, options.expoArgs, { isLast }).args;
+}
+
+/**
+ * Whether this run opens the app itself once the dev server is up.
+ *
+ * @ref llp/0026-dev-owns-the-open.rfc.md
+ * Only for a native platform (`--web` is served, not opened), only when running rather than
+ * planning, and not under `--no-open`. `AGENT_CLI_NO_DEVICE` turns it off for a harness whose
+ * machines must not have their simulators touched — the stubbed e2e tier sets it.
+ */
+function shouldOpenApp(options: DevOptions): boolean {
+  return (
+    options.mode === 'run' &&
+    options.open &&
+    (options.platform === 'ios' || options.platform === 'android') &&
+    process.env.AGENT_CLI_NO_DEVICE !== '1'
+  );
+}
+
+/**
+ * Open the app for a running dev server, and say what happened on stderr.
+ *
+ * Never throws and never stops the server: the app not opening is a warning with the `navigate`
+ * door in it, because the dev server is still doing its job.
+ */
+async function openAppForRunAsync(
+  projectRoot: string,
+  plan: StartPlan,
+  options: DevOptions,
+  devServerUrl: string,
+  stillWanted: () => boolean
+): Promise<void> {
+  const platform = options.platform as NativePlatform;
+  const { openAppOnDeviceAsync, openAppFailureLine } =
+    require('./openApp') as typeof import('./openApp');
+  try {
+    const report = await openAppOnDeviceAsync(projectRoot, {
+      platform,
+      expoGo: plan.target === 'expo-go',
+      devServerUrl,
+      stillWanted,
+      interactive: isInteractive(),
+    });
+    if (report.opened) {
+      Log.progress(
+        `Opened the app on the ${platform === 'ios' ? 'iOS simulator' : 'Android device'}${
+          report.booted ? ' it booted' : ''
+        }.`
+      );
+    } else if (stillWanted()) {
+      Log.warn(openAppFailureLine(platform, report.reason ?? 'no reason was given'));
+    }
+  } catch (error: unknown) {
+    // `openAppOnDeviceAsync` promises not to throw; this guard is for the promise breaking.
+    Log.warn(
+      `The app was not opened: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`
+    );
+  }
 }
 
 /** Steps that start a dev server, and so get the skill sync of the `@expo/agent-cli start` wrapper. */
@@ -839,11 +933,6 @@ function resolveBuildPlatform(step: PlanStep): NativePlatform | null {
     return 'ios';
   }
   return step.argv[1] === 'run:android' ? 'android' : null;
-}
-
-/** The platform to plan for when the command line names none. See {@link defaultSmokePlatform}. */
-function resolveDefaultPlatform(state: ProjectState): PlanPlatform {
-  return defaultSmokePlatform(state.nativeDirs);
 }
 
 /** The CLIs a plan step may invoke. Everything else is a step this version cannot run. */

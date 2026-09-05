@@ -71,13 +71,21 @@ describe(buildDetachSpawn, () => {
   });
 
   it(`is what resolveDevOptions hands it`, () => {
-    const options = resolveDevOptions(['--detach', '--wait-ready', '--yes', '--port', '8195']);
+    const options = resolveDevOptions([
+      '--ios',
+      '--detach',
+      '--wait-ready',
+      '--yes',
+      '--port',
+      '8195',
+    ]);
 
     expect(options.detach).toBe(true);
     expect(options.waitReady).toBe(true);
     expect(buildDetachSpawn('/bin/cli.js', options.detachArgv).args).toEqual([
       '/bin/cli.js',
       'dev',
+      '--ios',
       '--yes',
       '--port',
       '8195',

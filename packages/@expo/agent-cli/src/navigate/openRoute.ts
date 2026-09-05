@@ -30,6 +30,7 @@ import {
 } from '../device/cloudSimulator';
 import { event as cliEvent } from '../events';
 import { PROGRAM_PREFIX } from '../programName';
+import { hostPlatform } from '../smoke/suggest';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../project/expoGo';
 import { readProjectNativeDirsAsync } from '../project/nativeCode';
 import {
@@ -472,7 +473,7 @@ export async function openRouteAsync(
     device.backend === 'cloud' &&
     (resolved.hostType === 'localhost' || resolved.hostType === 'lan')
   ) {
-    throw cloudNeedsTunnelError(resolved.url, resolved.hostType);
+    throw cloudNeedsTunnelError(resolved.url, resolved.hostType, device.platform);
   }
 
   // Decided before the reverse, because the two links need different ports forwarded: the launcher
@@ -1117,7 +1118,8 @@ function unreachableNamedDevServerError(
   reason: string | undefined,
   platform?: NavigatePlatform
 ): CommandError {
-  const platformFlag = platform == null ? '' : ` --${platform}`;
+  // Stated even when the caller named none: `dev` requires one now.
+  const platformFlag = ` --${platform ?? hostPlatform()}`;
   const error = new CommandError(
     'DEEP_LINK_UNRESOLVED',
     [

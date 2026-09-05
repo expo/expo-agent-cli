@@ -32,6 +32,7 @@ import { unknownOptionError } from '../utils/unknownOption';
 export const DEV_OWN_FLAGS: readonly string[] = [
   '--eas',
   '--local',
+  '--no-open',
   '--no-agent-skills',
   '--no-followups',
   '--no-fingerprint-cache',

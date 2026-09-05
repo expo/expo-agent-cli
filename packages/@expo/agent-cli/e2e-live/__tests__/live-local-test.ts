@@ -280,7 +280,7 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     const report = parseJson(result);
     expect(report.rule).toBe('expo-go');
     expect(report.buildLocation).toBeNull();
-    expect(report.steps.map((s: any) => s.argv)).toEqual([['expo', 'start', '--go', '--ios']]);
+    expect(report.steps.map((s: any) => s.argv)).toEqual([['expo', 'start', '--go']]);
   });
 
   // --- the generated-types gate: F64, which only a real scaffold has -----------------------------
@@ -306,7 +306,7 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     const result = await runLiveAsync(
       run,
       projectRoot,
-      ['dev', '--detach', '--wait-ready', '--port', String(PORT), '--json'],
+      ['dev', '--ios', '--detach', '--wait-ready', '--port', String(PORT), '--json'],
       { label: 'dev-detach' }
     );
     expectExit(result, 0);
@@ -322,6 +322,26 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     expect(await httpStatusAsync(`http://127.0.0.1:${PORT}/status`)).toBe(200);
     await new Promise((resolve) => setTimeout(resolve, 8_000));
     expect(await httpStatusAsync(`http://127.0.0.1:${PORT}/status`)).toBe(200);
+  });
+
+  // @ref llp/0026-dev-owns-the-open.rfc.md — the whole point of `dev --ios`, measured on the
+  // machine: the detached child opens Expo Go on the dev server it started, through `simctl` and
+  // never AppleScript, so the app registers a debugger target without any command being run here.
+  it('the detached run opened the app, which is attached to the dev server', async () => {
+    const budgetMs = 120_000;
+    const startedAt = Date.now();
+    let targets: unknown[] = [];
+    while (Date.now() - startedAt < budgetMs) {
+      const response = await fetch(`http://127.0.0.1:${PORT}/json/list`).catch(() => null);
+      if (response?.ok) {
+        targets = (await response.json()) as unknown[];
+        if (targets.length > 0) {
+          break;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    }
+    expect(targets.length).toBeGreaterThan(0);
   });
 
   it('typecheck passes once the dev server has written the generated types', async () => {
@@ -377,9 +397,14 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
   });
 
   it('navigate --print-url resolves the URL and opens nothing', async () => {
-    const result = await runLiveAsync(run, projectRoot, ['navigate', LAB_ROUTE, '--print-url', '--json'], {
-      label: 'navigate-print-url',
-    });
+    const result = await runLiveAsync(
+      run,
+      projectRoot,
+      ['navigate', LAB_ROUTE, '--print-url', '--json'],
+      {
+        label: 'navigate-print-url',
+      }
+    );
     expectExit(result, 0);
     const report = parseJson(result);
     expect(report.url).toBe(`exp://127.0.0.1:${PORT}/--${LAB_ROUTE}`);
@@ -449,9 +474,7 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     expect(report.next.command).toBe('npx @expo/agent-cli smoke --ios');
     expect(report.device.state).toBe('present');
     expect(
-      report.device.devices.some(
-        (d: any) => d.deviceId === simulator.udid && d.platform === 'ios'
-      )
+      report.device.devices.some((d: any) => d.deviceId === simulator.udid && d.platform === 'ios')
     ).toBe(true);
   });
 
@@ -626,9 +649,14 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
       // or the first command races the file watcher and reads the last good bundle
       // [observed — 2026-09-05, `smoke --ios` exited 0 against just-broken code].
       const landed = await waitForAsync(async () => {
-        const probe = await runLiveAsync(run, projectRoot, ['runtime:reload', '--no-route-check', '--json'], {
-          label: 'break-settle',
-        });
+        const probe = await runLiveAsync(
+          run,
+          projectRoot,
+          ['runtime:reload', '--no-route-check', '--json'],
+          {
+            label: 'break-settle',
+          }
+        );
         return parseJson(probe).bundle?.ok === false;
       }, 60_000);
       expect(landed).toBe(true);

@@ -217,15 +217,16 @@ describe('the command line --start uses', () => {
   it(`asks for a detached, ready dev server and nothing else`, () => {
     const { START_DEV_SERVER_ARGV } = require('../smokeAsync') as typeof import('../smokeAsync');
 
-    expect([...START_DEV_SERVER_ARGV]).toEqual(['--yes', '--detach', '--wait-ready']);
+    expect([...START_DEV_SERVER_ARGV]).toEqual(['--yes', '--detach', '--wait-ready', '--no-open']);
   });
 
-  it(`never names a platform, which would open the app from inside the start`, () => {
+  // The platform flag itself goes on the command at the call site — `dev` requires one — and
+  // `--no-open` is what keeps it out of `expo start`, where it would open the app from inside
+  // the start and die on a missing Automation grant.
+  it(`carries --no-open, so the platform flag opens nothing from inside the start`, () => {
     const { START_DEV_SERVER_ARGV } = require('../smokeAsync') as typeof import('../smokeAsync');
 
-    for (const flag of ['--ios', '--android', '--web', '--platform', '-i', '-a', '-w']) {
-      expect(START_DEV_SERVER_ARGV).not.toContain(flag);
-    }
+    expect(START_DEV_SERVER_ARGV).toContain('--no-open');
   });
 });
 

@@ -64,7 +64,7 @@ export function classifyAgainstRecordedBuild(
     // build it ran; a build made by EAS, by Xcode, or on another machine leaves nothing here.
     return undecided(
       null,
-      `no build is recorded for ${platform}, so there is nothing to compare this against — "${PROGRAM_NAME} dev" writes the record after a native build it runs`
+      `no build is recorded for ${platform}, so there is nothing to compare this against — "${PROGRAM_NAME} dev --${platform}" writes the record after a native build it runs`
     );
   }
 

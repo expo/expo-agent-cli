@@ -16,6 +16,7 @@ import {
   openUrlOnCloudSimulatorAsync,
 } from '../device/cloudSimulator';
 import { PROGRAM_PREFIX } from '../programName';
+import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import type { DeviceBackend } from './device';
@@ -193,7 +194,9 @@ export function resolveDeepLinkUrl({
 }: ResolveDeepLinkUrlParams): ResolveDeepLinkUrlResult {
   // Carried onto every command the failures below name, and onto nothing else: the URL is the same
   // URL whichever device opens it (F142).
-  const platformFlag = platform == null ? '' : ` --${platform}`;
+  // Stated even when the caller named none: `dev` requires one, and a suggestion is text the
+  // caller reads and can change (llp/0005 §Which platform is the caller's to say).
+  const platformFlag = ` --${platform ?? hostPlatform()}`;
   const trimmedRoute = route.trim();
   if (trimmedRoute.length === 0) {
     return {

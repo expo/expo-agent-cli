@@ -342,7 +342,7 @@ function inconclusiveWindowError(
   return [
     `--fail-on-error has nothing to judge: the runtime connected to ${devServerUrl} reports no errors, whatever the app does.`,
     `Why: ${evidence ?? 'the runtime answered no debugger call'}. Expo Go for Android ships a JavaScript engine with no Chrome DevTools Protocol debugger, so it acknowledges the calls that open this window and then sends nothing. Exiting 0 here would report health that nothing observed. ${log.reason ?? ''}`.trim(),
-    `How: start the dev server detached ("${PROGRAM_PREFIX} dev --detach"), which captures its log — this command reads the app's errors out of it when the runtime cannot answer. Or open the app in a development build, or on iOS, either of which carries a debuggable engine.`,
+    `How: start the dev server detached ("${PROGRAM_PREFIX} dev --ios|--android --detach"), which captures its log — this command reads the app's errors out of it when the runtime cannot answer. Or open the app in a development build, or on iOS, either of which carries a debuggable engine.`,
   ].join('\n');
 }
 
@@ -378,7 +378,7 @@ function readDevServerLogWindow(
       json: {
         ...NO_DEV_SERVER_LOG,
         logFile: detachedLogPath(projectRoot),
-        reason: `this project has no detached dev server log (${detachedLogPath(projectRoot)}), so there was nowhere else to read the app's errors from — start the dev server with "${PROGRAM_PREFIX} dev --detach" to get one`,
+        reason: `this project has no detached dev server log (${detachedLogPath(projectRoot)}), so there was nowhere else to read the app's errors from — start the dev server with "${PROGRAM_PREFIX} dev --ios|--android --detach" to get one`,
       },
       entries: [],
     };

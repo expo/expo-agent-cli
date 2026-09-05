@@ -416,7 +416,11 @@ describe(buildDevServerStatus, () => {
     const probe: DevServerProbe = { reachable: false, targets: [], reason: 'fetch failed' };
 
     expect(
-      buildDevServerStatus(url, probe, { source: 'default', ready: null, projectRootMatched: null })
+      buildDevServerStatus(url, probe, {
+        source: 'default',
+        ready: null,
+        projectRootMatched: null,
+      })
     ).toEqual({
       url,
       running: false,
@@ -482,7 +486,7 @@ describe(buildNextActionStatus, () => {
   it(`should report the Expo Go rule and the command that runs it`, () => {
     const next = buildNextActionStatus(mockState(), {}, 'ios', null);
 
-    expect(next.command).toBe('npx @expo/agent-cli dev');
+    expect(next.command).toBe('npx @expo/agent-cli dev --ios');
     expect(next.rule).toBe('expo-go');
     expect(next.target).toBe('expo-go');
     expect(next.steps[0]!.argv).toEqual(['expo', 'start', '--go']);
@@ -621,7 +625,14 @@ describe(buildNextActionStatus, () => {
         {},
         'ios',
         devServerStatus({ appsConnected: 1 }),
-        { state: 'absent', platform: null, deviceId: null, name: null, devices: [], reason: 'none' }
+        {
+          state: 'absent',
+          platform: null,
+          deviceId: null,
+          name: null,
+          devices: [],
+          reason: 'none',
+        }
       );
 
       expect(next.command).toBe(
@@ -652,7 +663,7 @@ describe(buildNextActionStatus, () => {
         devServerStatus({ projectRootMatched: false, appsConnected: 1 })
       );
 
-      expect(next.command).toBe('npx @expo/agent-cli dev');
+      expect(next.command).toBe('npx @expo/agent-cli dev --ios');
       expect(next.why).toBeNull();
       expect(next.steps[0]!.argv).toEqual(['expo', 'start', '--go']);
     });
@@ -792,7 +803,7 @@ describe(buildNextActionStatus, () => {
         devServerStatus({ running: false, ready: null })
       );
 
-      expect(next.command).toBe('npx @expo/agent-cli dev');
+      expect(next.command).toBe('npx @expo/agent-cli dev --ios');
       expect(next.why).toBeNull();
     });
   });

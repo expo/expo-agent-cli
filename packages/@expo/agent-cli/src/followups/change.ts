@@ -9,6 +9,7 @@
 
 import type { CachedBuild, ImpactClass } from '../impact/types';
 import { PROGRAM_PREFIX } from '../programName';
+import { hostPlatform } from '../smoke/suggest';
 import {
   easBuildCommand,
   localTool,
@@ -48,7 +49,8 @@ export function buildChangeFollowUps({
   buildBackend = null,
 }: ChangeFollowUpInput): FollowUp[] {
   const followups: FollowUp[] = [];
-  const platformFlag = platform ? ` --platform ${platform}` : '';
+  // `dev` requires a platform, so its command lines state one even when none was classified.
+  const devPlatform = platform ?? hostPlatform();
 
   if (impactClass === 'needs-native-build') {
     if (cachedBuild?.id) {
@@ -70,7 +72,7 @@ export function buildChangeFollowUps({
       const runsOnEas = buildBackend?.runsOn === 'eas';
       followups.push({
         id: 'change-native-build',
-        command: `${PROGRAM_PREFIX} dev${platformFlag ? ` --${platform}` : ''}`,
+        command: `${PROGRAM_PREFIX} dev --${devPlatform}`,
         why: runsOnEas
           ? `The native surface changed, so the installed app cannot run this code. This plans the rebuild ${EAS_WHERE} — ${buildBackend!.because} — and prints the plan before it starts anything.`
           : `The native surface changed, so the installed app cannot run this code. This rebuilds it ${LOCAL_WHERE} — the fast route when this machine has ${localTool(platform)}, because the plan engine prebuilds and rebuilds only what has to be.`,
@@ -78,7 +80,7 @@ export function buildChangeFollowUps({
       followups.push({
         id: runsOnEas ? 'change-local-build' : 'change-eas-build',
         command: runsOnEas
-          ? `${PROGRAM_PREFIX} dev${platformFlag ? ` --${platform}` : ''} --local`
+          ? `${PROGRAM_PREFIX} dev --${devPlatform} --local`
           : platform
             ? easBuildCommand(platform)
             : `npx eas build --profile ${EAS_DEVELOPMENT_PROFILE}`,
@@ -90,7 +92,7 @@ export function buildChangeFollowUps({
   } else if (impactClass === 'dev-client-compatible') {
     followups.push({
       id: 'change-restart-metro',
-      command: `${PROGRAM_PREFIX} dev:stop && ${PROGRAM_PREFIX} dev --detach`,
+      command: `${PROGRAM_PREFIX} dev:stop && ${PROGRAM_PREFIX} dev --${devPlatform} --detach`,
       why: 'The installed app is still the right one; what changed is a file the dev server read once at start-up, so only Metro has to come back.',
     });
   } else {

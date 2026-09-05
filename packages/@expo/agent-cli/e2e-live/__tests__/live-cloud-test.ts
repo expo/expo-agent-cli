@@ -253,7 +253,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     const dev = await runLiveEasAsync(
       run,
       projectRoot,
-      ['dev', '--detach', '--wait-ready', '--port', String(port), '--json'],
+      ['dev', '--ios', '--no-open', '--detach', '--wait-ready', '--port', String(port), '--json'],
       { label: 'dev-proxy', env: proxyEnv() }
     );
     expectExit(dev, 0);
@@ -488,10 +488,15 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
   });
 
   it('smoke --cloud reports the phases it could reach, and stays on the backend it was given', async () => {
-    const result = await runLiveEasAsync(run, projectRoot, ['smoke', '--cloud', '--ios', '--json'], {
-      label: 'smoke-cloud',
-      env: proxyEnv(),
-    });
+    const result = await runLiveEasAsync(
+      run,
+      projectRoot,
+      ['smoke', '--cloud', '--ios', '--json'],
+      {
+        label: 'smoke-cloud',
+        env: proxyEnv(),
+      }
+    );
     const report = parseJson(result);
     // 20 and 22 are both possible and both honest: S11 means the runtime phase has nothing to read, and
     // "could not decide" is the answer for that. What is asserted is which device it was about.

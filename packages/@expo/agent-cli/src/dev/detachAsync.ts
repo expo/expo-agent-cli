@@ -18,6 +18,7 @@
 // project is a thing people do on purpose in two terminals; two *detached* ones is a process
 // nobody can find, because only one of them can hold the lock that names it.
 
+import type { PlanPlatform } from '../plan/types';
 import { spawn } from 'child_process';
 import fs from 'fs';
 
@@ -236,7 +237,8 @@ export async function devDetachAsync(
       logFile,
       childExit,
       child.pid ?? null,
-      Date.now() - startedAt
+      Date.now() - startedAt,
+      options.platform
     );
   }
 
@@ -298,7 +300,14 @@ export async function devDetachAsync(
   }
 
   if (failure) {
-    throw detachFailureError(failure, { projectRoot, lock, logFile, verdict, childExit });
+    throw detachFailureError(failure, {
+      projectRoot,
+      lock,
+      logFile,
+      verdict,
+      childExit,
+      platform: options.platform,
+    });
   }
 
   return reportDetached(projectRoot, options, {
@@ -418,8 +427,36 @@ async function watchOpenPlatformGraceAsync(
     }
     failure ??= seen;
   }
+
+  // A child can be gone before its verdict is readable: the handoff block is written by the dying
+  // process, and on a slow filesystem it lands after the exit is already visible [observed —
+  // windows-2022 CI, 2026-09-05: exit seen inside the grace, verdict written after its budget].
+  // The child has exited, so this extra wait costs a dead run a moment and a healthy run nothing —
+  // and without it the caller gets "the process exited" for a stop that has a named scenario and
+  // an "Ask the user" line a beat behind it.
+  if (failure === 'child-exited' && verdict == null) {
+    const verdictDeadline = Date.now() + VERDICT_WAIT_MS;
+    while (verdict == null && Date.now() < verdictDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
+      verdict = readChildVerdictSync(projectRoot);
+    }
+    if (verdict != null) {
+      return {
+        failure: resolveDetachFailure({ exited: true, verdict, statusAnswering: null }),
+        verdict,
+      };
+    }
+  }
   return { failure, verdict };
 }
+
+/**
+ * How long a child that has already exited is given to finish writing its verdict.
+ *
+ * Generous next to the write it waits for, which is one append — the bound exists for the run
+ * where the verdict never comes, not for the one where it does.
+ */
+const VERDICT_WAIT_MS = 2_000;
 
 /** Why a detached run that had come up is not something this command may report success for. */
 export type DetachFailureKind =
@@ -516,12 +553,14 @@ function detachFailureError(
     logFile,
     verdict,
     childExit,
+    platform,
   }: {
     projectRoot: string;
     lock: DevServerLockInfo;
     logFile: string;
     verdict: DetachedChildVerdict | null;
     childExit: { code: number | null; signal: NodeJS.Signals | null } | null;
+    platform: PlanPlatform;
   }
 ): CommandError {
   if (kind === 'needs-human' && verdict?.scenario != null) {
@@ -552,7 +591,7 @@ function detachFailureError(
           } before this command could report it.`
         : `The dev server on ${lock.url} stopped answering before this command could report it.`,
       `Why: a detached run is two processes, and only this one is being read. The bundler answered while the other one was starting, and it is not there now — so "ready" would be a claim about a moment that has passed.`,
-      `How: read what it printed with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}), fix what it names, and start it again with "${PROGRAM_PREFIX} dev --detach --wait-ready". Running "${PROGRAM_PREFIX} dev --yes" in this terminal shows the same start in the foreground, which is the quickest way to watch it fail.${logTail(projectRoot)}`,
+      `How: read what it printed with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}), fix what it names, and start it again with "${PROGRAM_PREFIX} dev --${platform} --detach --wait-ready". Running "${PROGRAM_PREFIX} dev --${platform} --yes" in this terminal shows the same start in the foreground, which is the quickest way to watch it fail.${logTail(projectRoot)}`,
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_FAILED;
@@ -860,7 +899,8 @@ function notStartedError(
   logFile: string,
   childExit: { code: number | null; signal: NodeJS.Signals | null } | null,
   pid: number | null,
-  waitedMs: number
+  waitedMs: number,
+  platform: PlanPlatform
 ): CommandError {
   const how = childExit
     ? `it exited ${childExit.signal ? `on ${childExit.signal}` : `with code ${childExit.code}`} before it did`
@@ -871,7 +911,7 @@ function notStartedError(
     [
       `The detached dev server did not start${pid == null ? '' : ` (pid ${pid})`}.`,
       `Why: a dev server this CLI starts publishes its port on the project's lock as soon as it is listening, and ${how}. Without that lock nothing can find the dev server, so reporting one here would name a server no other command could reach.`,
-      `How: read what it printed in ${logFile}, or run "${PROGRAM_PREFIX} dev --yes" in this terminal to watch the same start happen in the foreground.${logTail(projectRoot)}`,
+      `How: read what it printed in ${logFile}, or run "${PROGRAM_PREFIX} dev --${platform} --yes" in this terminal to watch the same start happen in the foreground.${logTail(projectRoot)}`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
@@ -973,7 +1013,7 @@ function resolveBinPath(): string {
   if (!bin) {
     throw new CommandError(
       'DEV_DETACH_FAILED',
-      `Could not work out which script to start in the background, because this process was started without one (process.argv[1] is empty). Run "${PROGRAM_PREFIX} dev" instead, which needs no second process.`
+      `Could not work out which script to start in the background, because this process was started without one (process.argv[1] is empty). Run "${PROGRAM_PREFIX} dev --ios|--android|--web" instead, which needs no second process.`
     );
   }
   return bin;

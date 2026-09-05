@@ -81,7 +81,7 @@ export async function compareWithLastBuildAsync(
       // it ran; a build made by EAS, by Xcode, or by another machine leaves nothing here.
       fingerprintChanged: null,
       caveats: [
-        `No build is recorded for ${platform}, so there is nothing to compare against. "${PROGRAM_NAME} dev" writes this record after a native build it runs; for a cloud build, compare against it directly with --build <id>.`,
+        `No build is recorded for ${platform}, so there is nothing to compare against. "${PROGRAM_NAME} dev --${platform}" writes this record after a native build it runs; for a cloud build, compare against it directly with --build <id>.`,
       ],
       error: null,
     };

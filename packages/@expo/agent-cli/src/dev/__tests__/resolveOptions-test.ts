@@ -14,6 +14,7 @@ describe(resolveDevOptions, () => {
       fingerprintCache: true,
       followups: true,
       yes: false,
+      open: true,
       detach: false,
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
@@ -25,17 +26,18 @@ describe(resolveDevOptions, () => {
   });
 
   it(`should strip --no-agent-skills and skip the sync`, () => {
-    expect(resolveDevOptions(['--no-agent-skills', '--clear'])).toEqual({
+    expect(resolveDevOptions(['--ios', '--no-agent-skills', '--clear'])).toEqual({
       mode: 'run',
       expoArgs: ['--clear'],
       agentSkills: false,
-      platform: undefined,
+      platform: 'ios',
       buildBackend: null,
       runTarget: null,
       json: false,
       fingerprintCache: true,
       followups: true,
       yes: false,
+      open: true,
       detach: false,
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
@@ -45,21 +47,22 @@ describe(resolveDevOptions, () => {
   });
 
   it(`should run the plan without any mode flag`, () => {
-    expect(resolveDevOptions([]).mode).toBe('run');
+    expect(resolveDevOptions(['--ios']).mode).toBe('run');
   });
 
   it(`should enter plan mode and strip the flag`, () => {
-    expect(resolveDevOptions(['--plan', '--port', '8082'])).toEqual({
+    expect(resolveDevOptions(['--ios', '--plan', '--port', '8082'])).toEqual({
       mode: 'plan',
       expoArgs: ['--port', '8082'],
       agentSkills: true,
-      platform: undefined,
+      platform: 'ios',
       buildBackend: null,
       runTarget: null,
       json: false,
       fingerprintCache: true,
       followups: true,
       yes: false,
+      open: true,
       detach: false,
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
@@ -80,11 +83,11 @@ describe(resolveDevOptions, () => {
   });
 
   it(`should approve the plan up front with --yes and strip the flag`, () => {
-    const options = resolveDevOptions(['--yes', '--clear']);
+    const options = resolveDevOptions(['--ios', '--yes', '--clear']);
 
     expect(options.yes).toBe(true);
     expect(options.expoArgs).toEqual(['--clear']);
-    expect(resolveDevOptions([]).yes).toBe(false);
+    expect(resolveDevOptions(['--ios']).yes).toBe(false);
   });
 
   it.each([
@@ -98,26 +101,106 @@ describe(resolveDevOptions, () => {
     expect(resolveDevOptions([flag]).platform).toBe(platform);
   });
 
-  it(`should keep the platform flag in the expo start passthrough`, () => {
-    expect(resolveDevOptions(['--ios']).expoArgs).toEqual(['--ios']);
+  // @ref llp/0026-dev-owns-the-open.rfc.md — `expo start --ios` opens the app through an
+  // osascript a Mac without the Automation grant refuses; the open is this command's own now.
+  it(`should keep native platform flags away from the expo start passthrough`, () => {
+    expect(resolveDevOptions(['--ios']).expoArgs).toEqual([]);
+    expect(resolveDevOptions(['--android', '-a']).expoArgs).toEqual([]);
   });
 
-  it(`should use the first platform flag when several are given`, () => {
-    expect(resolveDevOptions(['--android', '--ios']).platform).toBe('android');
+  it(`should keep --web in the passthrough, which serves the web bundle`, () => {
+    expect(resolveDevOptions(['--web']).expoArgs).toEqual(['--web']);
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+  // The same rule `smoke` settled: the platform is the caller's to say, and this command has no
+  // default to fall back on. One line, because the fix is visible on the command line.
+  describe('the platform is required', () => {
+    it(`should refuse a run with no platform flag`, () => {
+      expect(() => resolveDevOptions([])).toThrow(/Missing platform/);
+      expect(() => resolveDevOptions(['--port', '8082'])).toThrow(/Missing platform/);
+      expect(() => resolveDevOptions(['--plan'])).toThrow(/Missing platform/);
+    });
+
+    it(`should suggest a runnable command`, () => {
+      try {
+        resolveDevOptions([]);
+        throw new Error('did not throw');
+      } catch (error: any) {
+        expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios');
+      }
+    });
+
+    it(`should refuse two platforms at once`, () => {
+      expect(() => resolveDevOptions(['--android', '--ios'])).toThrow(/two platforms/);
+      expect(() => resolveDevOptions(['--ios', '--web'])).toThrow(/two platforms/);
+    });
+
+    it(`should allow one platform said twice`, () => {
+      expect(resolveDevOptions(['--ios', '-i']).platform).toBe('ios');
+    });
+
+    // The more specific mistake is reported first, so a caller with two things wrong is not sent
+    // around twice: fixing the missing platform would only surface the conflict afterwards.
+    it(`should report a flag conflict before the missing platform`, () => {
+      expect(() => resolveDevOptions(['--eas', '--local'])).toThrow(/--eas and --local/);
+      expect(() => resolveDevOptions(['--wait-ready'])).toThrow(/--wait-ready/);
+    });
+
+    // The conflict errors quote command lines, and those lines carry the platform the caller
+    // typed, so following one does not walk into the missing-platform refusal.
+    it(`should keep the caller's platform in a conflict error`, () => {
+      try {
+        resolveDevOptions(['--android', '--eas', '--local']);
+        throw new Error('did not throw');
+      } catch (error: any) {
+        expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --android --plan --eas');
+      }
+    });
+  });
+
+  // The platform names what the plan is for; `--no-open` keeps it away from `expo start`, where
+  // it would open the app. This is how `smoke` starts a dev server, and the way past a refused
+  // macOS Automation grant.
+  describe('--no-open', () => {
+    it(`should keep the platform for the plan and strip it from the passthrough`, () => {
+      const options = resolveDevOptions(['--ios', '--no-open', '--clear']);
+
+      expect(options.open).toBe(false);
+      expect(options.platform).toBe('ios');
+      expect(options.expoArgs).toEqual(['--clear']);
+    });
+
+    it(`should still require a platform`, () => {
+      expect(() => resolveDevOptions(['--no-open'])).toThrow(/Missing platform/);
+    });
+
+    it(`should open by default`, () => {
+      expect(resolveDevOptions(['--ios']).open).toBe(true);
+    });
+
+    it(`should survive the detach round trip`, () => {
+      // The child is started with `detachArgv`, so the flag has to be on it: a child that opened
+      // the app would be exactly the run the parent was told not to start.
+      expect(resolveDevOptions(['--ios', '--no-open', '--detach']).detachArgv).toContain(
+        '--no-open'
+      );
+    });
   });
 
   it(`should ask for a JSON plan and strip the flag`, () => {
-    expect(resolveDevOptions(['--plan', '--json'])).toEqual({
+    expect(resolveDevOptions(['--android', '--plan', '--json'])).toEqual({
       mode: 'plan',
       expoArgs: [],
       agentSkills: true,
-      platform: undefined,
+      platform: 'android',
       buildBackend: null,
       runTarget: null,
       json: true,
       fingerprintCache: true,
       followups: true,
       yes: false,
+      open: true,
       detach: false,
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
@@ -127,25 +210,22 @@ describe(resolveDevOptions, () => {
   });
 
   it(`should not ask for JSON without the flag`, () => {
-    expect(resolveDevOptions(['--plan']).json).toBe(false);
-  });
-
-  it(`should report no platform when none is asked for`, () => {
-    expect(resolveDevOptions(['--port', '8082']).platform).toBeUndefined();
+    expect(resolveDevOptions(['--ios', '--plan']).json).toBe(false);
   });
 
   it(`should suppress the follow-ups and strip the flag`, () => {
-    expect(resolveDevOptions(['--no-followups', '--clear'])).toEqual({
+    expect(resolveDevOptions(['--web', '--no-followups', '--clear'])).toEqual({
       mode: 'run',
-      expoArgs: ['--clear'],
+      expoArgs: ['--web', '--clear'],
       agentSkills: true,
-      platform: undefined,
+      platform: 'web',
       buildBackend: null,
       runTarget: null,
       json: false,
       fingerprintCache: true,
       followups: false,
       yes: false,
+      open: true,
       detach: false,
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
@@ -156,7 +236,7 @@ describe(resolveDevOptions, () => {
 
   // @ref llp/0023-fingerprint-caching.rfc.md §Every consumer can turn it off
   it(`should refuse a cached fingerprint and strip the flag`, () => {
-    const options = resolveDevOptions(['--no-fingerprint-cache', '--clear']);
+    const options = resolveDevOptions(['--ios', '--no-fingerprint-cache', '--clear']);
 
     expect(options.fingerprintCache).toBe(false);
     // The flag is this command's own, so `expo start` never sees it.
@@ -164,11 +244,11 @@ describe(resolveDevOptions, () => {
   });
 
   it(`should allow a cached fingerprint without the flag`, () => {
-    expect(resolveDevOptions([]).fingerprintCache).toBe(true);
+    expect(resolveDevOptions(['--ios']).fingerprintCache).toBe(true);
   });
 
   it(`should keep the follow-ups without the flag`, () => {
-    expect(resolveDevOptions([]).followups).toBe(true);
+    expect(resolveDevOptions(['--ios']).followups).toBe(true);
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol — `--port` is the answer to the
@@ -176,27 +256,28 @@ describe(resolveDevOptions, () => {
   // `expo start` a minute later.
   describe('--port', () => {
     it(`should read every spelling of the flag`, () => {
-      expect(resolveDevOptions(['--port', '8082']).port).toBe(8082);
-      expect(resolveDevOptions(['--port=8082']).port).toBe(8082);
-      expect(resolveDevOptions(['-p', '8082']).port).toBe(8082);
+      expect(resolveDevOptions(['--ios', '--port', '8082']).port).toBe(8082);
+      expect(resolveDevOptions(['--ios', '--port=8082']).port).toBe(8082);
+      expect(resolveDevOptions(['--ios', '-p', '8082']).port).toBe(8082);
     });
 
     it(`should be null when the flag is not passed`, () => {
-      expect(resolveDevOptions([]).port).toBeNull();
       expect(resolveDevOptions(['--ios']).port).toBeNull();
     });
 
     it(`should reject a value that is not a port`, () => {
-      expect(() => resolveDevOptions(['--port', 'abc'])).toThrow(/must be a port number/);
-      expect(() => resolveDevOptions(['--port', '0'])).toThrow(/must be a port number/);
-      expect(() => resolveDevOptions(['--port', '70000'])).toThrow(/must be a port number/);
-      expect(() => resolveDevOptions(['--port'])).toThrow(/must be a port number/);
+      expect(() => resolveDevOptions(['--ios', '--port', 'abc'])).toThrow(/must be a port number/);
+      expect(() => resolveDevOptions(['--ios', '--port', '0'])).toThrow(/must be a port number/);
+      expect(() => resolveDevOptions(['--ios', '--port', '70000'])).toThrow(
+        /must be a port number/
+      );
+      expect(() => resolveDevOptions(['--ios', '--port'])).toThrow(/must be a port number/);
     });
 
     // Everything after the separator is forwarded to something else, so a `--port` there is that
     // tool's flag and this command has no opinion about it.
     it(`should ignore a port after the separator`, () => {
-      expect(resolveDevOptions(['--', '--port', 'abc']).port).toBeNull();
+      expect(resolveDevOptions(['--ios', '--', '--port', 'abc']).port).toBeNull();
     });
   });
 });

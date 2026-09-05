@@ -144,7 +144,7 @@ describe('@expo/agent-cli typecheck', () => {
     expect(payload.generatedTypes).toEqual({
       file: 'expo-env.d.ts',
       referencedBy: 'tsconfig.json',
-      command: 'npx @expo/agent-cli dev --detach --wait-ready',
+      command: `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --wait-ready`,
     });
     // The rung that can work comes first, and the one that says "fix the diagnostics" is gone.
     expect(payload.followups.map((followup: any) => followup.id)).toEqual([
@@ -167,7 +167,9 @@ describe('@expo/agent-cli typecheck', () => {
       result.stdout.indexOf('src/app/notes.tsx')
     );
     // The `Suggested next:` section goes to stdout in text mode, like the report above it.
-    expect(result.stdout).toContain('npx @expo/agent-cli dev --detach --wait-ready');
+    expect(result.stdout).toContain(
+      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --wait-ready`
+    );
   });
 
   it(`should say nothing about it once that file exists`, async () => {

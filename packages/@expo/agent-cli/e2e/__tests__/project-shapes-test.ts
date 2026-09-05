@@ -67,7 +67,9 @@ describe('a project whose path holds a space', () => {
     expect(result.exitCode).toBe(0);
     const report = JSON.parse(result.stdout);
     expect(report.project.root).toBe(projectRoot);
-    expect(report.next.command).toBe('npx @expo/agent-cli dev');
+    expect(report.next.command).toBe(
+      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
+    );
   });
 
   // The dev-server lock is a unix socket **inside the project**, so the project path is part of an
@@ -81,7 +83,7 @@ describe('a project whose path holds a space', () => {
 
     const detached = await executeAgentCliAsync(
       projectRoot,
-      ['dev', '--detach', '--yes', '--json'],
+      ['dev', '--ios', '--detach', '--yes', '--json'],
       {
         env: { STUB_EXPO_DEV_SERVER_PORT: '8099', STUB_EXPO_DELAY_MS: '15000' },
       }

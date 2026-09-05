@@ -72,7 +72,21 @@ export async function startAsync(projectRoot: string, options: StartOptions): Pr
 export async function runDevServerAsync(
   projectRoot: string,
   args: string[],
-  { agentSkills, output = 'inherit' }: { agentSkills: boolean; output?: SubprocessOutput }
+  {
+    agentSkills,
+    output = 'inherit',
+    onDevServer,
+  }: {
+    agentSkills: boolean;
+    output?: SubprocessOutput;
+    /**
+     * Told once, the moment the dev server reports where it listens.
+     *
+     * `dev` hangs its app-open on this (llp/0026): the port is only knowable after the spawn, and
+     * the subprocess does not return until the dev server stops.
+     */
+    onDevServer?: (server: { url: string; port: number }) => void;
+  }
 ): Promise<DevServerRun> {
   let timer: NodeJS.Timeout | undefined;
   if (agentSkills) {
@@ -105,6 +119,11 @@ export async function runDevServerAsync(
     // What the dev server itself said, which is the only thing a caller may claim about it.
     onResolved: (resolved) => {
       port = resolved;
+      // `default` means nothing reported one, and an open aimed at a guessed port is the false
+      // green the lock exists to prevent.
+      if (onDevServer && resolved.source !== 'default') {
+        onDevServer({ url: `http://127.0.0.1:${resolved.port}`, port: resolved.port });
+      }
     },
   });
 

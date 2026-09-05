@@ -273,7 +273,7 @@ function treeUnsupportedError(devServerUrl: string, reason: string | null): Comm
           ? '__REACT_DEVTOOLS_GLOBAL_HOOK__ is installed and carries no getFiberRoots, so no renderer registered with it'
           : 'the app has no __REACT_DEVTOOLS_GLOBAL_HOOK__ at all'
       }. These commands walk React's own fiber tree through that hook — a development bundle installs it, and a production bundle is expected not to.`,
-      `How: open the app from a development bundle: "${PROGRAM_PREFIX} dev" serves one, and "${PROGRAM_PREFIX} runtime:reload" puts a running app back onto it. "${PROGRAM_PREFIX} runtime:eval" still evaluates JavaScript in this runtime, which is how to read the app's state without the tree.`,
+      `How: open the app from a development bundle: "${PROGRAM_PREFIX} dev --ios|--android" serves one, and "${PROGRAM_PREFIX} runtime:reload" puts a running app back onto it. "${PROGRAM_PREFIX} runtime:eval" still evaluates JavaScript in this runtime, which is how to read the app's state without the tree.`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} runtime:eval "typeof __REACT_DEVTOOLS_GLOBAL_HOOK__"`;

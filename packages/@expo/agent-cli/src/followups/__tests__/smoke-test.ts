@@ -64,7 +64,7 @@ describe(buildSmokeFollowUps, () => {
 
   it(`names the detached start when no dev server answered`, () => {
     expect(commands({ devServerFound: false })).toContain(
-      'npx @expo/agent-cli dev --detach --yes --wait-ready'
+      'npx @expo/agent-cli dev --ios --detach --yes --wait-ready'
     );
   });
 
@@ -395,14 +395,16 @@ describe(`${buildSmokeFollowUps.name} after a build that failed`, () => {
   // And it still offers the foreground run, second: watching it fail is the right next step when
   // the log does not say enough.
   it(`still offers to watch the build in the foreground`, () => {
-    expect(commands(failedBuild)).toContain('npx @expo/agent-cli dev --detach --yes --wait-ready');
+    expect(commands(failedBuild)).toContain(
+      'npx @expo/agent-cli dev --ios --detach --yes --wait-ready'
+    );
   });
 
   // A start that failed without building keeps what it had: there is no long build to avoid, so
   // starting one in the foreground is the cheapest way to see the failure.
   it(`leads with the foreground start when nothing was built`, () => {
     expect(commands({ ...failedBuild, buildAttempted: false })[0]).toBe(
-      'npx @expo/agent-cli dev --detach --yes --wait-ready'
+      'npx @expo/agent-cli dev --ios --detach --yes --wait-ready'
     );
   });
 });

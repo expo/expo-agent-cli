@@ -14,7 +14,7 @@ import { decideStartPlan } from '../plan/decide';
 import type { LastBuildRecord } from '../plan/lastBuild';
 import type { LastBuildFingerprints, NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
-import { defaultSmokePlatform, smokeCommand } from '../smoke/suggest';
+import { defaultSmokePlatform, devCommand, smokeCommand } from '../smoke/suggest';
 import { decidesAgainstExpoGo } from '../project/expoGo';
 import type { FingerprintResult } from '../project/fingerprint';
 import type { ProjectState, StartPlan } from '../project/types';
@@ -37,19 +37,6 @@ const PLATFORMS: NativePlatform[] = ['ios', 'android'];
 
 /** How many characters of a fingerprint hash are shown, as in the plan engine. */
 const HASH_DISPLAY_LENGTH = 8;
-
-/**
- * The command the next action names: the one that decides a plan and runs it.
- *
- * @ref llp/0024-cli-ui.rfc.md §The template
- * Written `npx @expo/agent-cli …`, like every other command this CLI hands a caller — a `Try:` line, a
- * follow-up, an example in a `--help`. It used to be the bare `@expo/agent-cli dev`, which is the one
- * spelling that is not runnable: nothing puts `@expo/agent-cli` on the PATH of a project that installed it
- * [found by the wave-34 naive-agent walk]. `src/status/format.ts` rewrites it for the runner in use
- * as it prints, so a Bun project reads `bunx @expo/agent-cli dev`; the `--json` value stays as written,
- * exactly as a follow-up's does.
- */
-const NEXT_ACTION_COMMAND = `${PROGRAM_PREFIX} dev`;
 
 /**
  * The command the next action names when this directory is not an Expo app.
@@ -544,7 +531,10 @@ export function buildNextActionStatus(
     };
   }
   return {
-    command: NEXT_ACTION_COMMAND,
+    // The `npx @expo/agent-cli …` spelling, like every command this CLI hands a caller; the runner
+    // rewrite happens in `src/status/format.ts` (llp/0024 §The template). The platform is the one
+    // this report's plan was decided for, so the two lines cannot disagree.
+    command: devCommand(platform),
     rule: plan.rule,
     target: plan.target,
     steps: plan.steps,
