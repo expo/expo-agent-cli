@@ -427,8 +427,36 @@ async function watchOpenPlatformGraceAsync(
     }
     failure ??= seen;
   }
+
+  // A child can be gone before its verdict is readable: the handoff block is written by the dying
+  // process, and on a slow filesystem it lands after the exit is already visible [observed —
+  // windows-2022 CI, 2026-09-05: exit seen inside the grace, verdict written after its budget].
+  // The child has exited, so this extra wait costs a dead run a moment and a healthy run nothing —
+  // and without it the caller gets "the process exited" for a stop that has a named scenario and
+  // an "Ask the user" line a beat behind it.
+  if (failure === 'child-exited' && verdict == null) {
+    const verdictDeadline = Date.now() + VERDICT_WAIT_MS;
+    while (verdict == null && Date.now() < verdictDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
+      verdict = readChildVerdictSync(projectRoot);
+    }
+    if (verdict != null) {
+      return {
+        failure: resolveDetachFailure({ exited: true, verdict, statusAnswering: null }),
+        verdict,
+      };
+    }
+  }
   return { failure, verdict };
 }
+
+/**
+ * How long a child that has already exited is given to finish writing its verdict.
+ *
+ * Generous next to the write it waits for, which is one append — the bound exists for the run
+ * where the verdict never comes, not for the one where it does.
+ */
+const VERDICT_WAIT_MS = 2_000;
 
 /** Why a detached run that had come up is not something this command may report success for. */
 export type DetachFailureKind =
