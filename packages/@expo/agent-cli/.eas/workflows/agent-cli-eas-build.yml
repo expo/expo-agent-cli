@@ -1,0 +1,80 @@
+# A real EAS build, driven end to end: scaffold an app with @expo/agent-cli, then build it on EAS
+# under the expo-ci CI project. This is the one path neither GitHub CI nor the staging live tier can
+# take — llp/0022 marks native EAS build creation "unreachable in v1" — so it proves two things at
+# once: that `@expo/agent-cli new` produces an app EAS can build, and that the build path works.
+#
+# Runs on every PR that touches the CLI (and on demand). Each run spends Android build minutes on
+# expo-ci — that cost is accepted here, unlike the tier-2 evals, which stay label-gated because they
+# also bill Anthropic tokens. The path filter keeps it off PRs that cannot change the build.
+name: agent-cli-eas-build
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - packages/@expo/agent-cli/**
+      - bun.lock
+      - package.json
+      - bunfig.toml
+
+# Base dir is packages/@expo/agent-cli; the monorepo lives three levels up. Steps run from the repo
+# root so the `packages/…` paths and the bun workspace resolve; the last step then cds into its own
+# scratch app. `tools` pins Node and Bun — the runner's default Node is < 20, and `create-expo` uses
+# the `File` global that only exists from Node 20 (create-expo failed with `File is not defined`).
+defaults:
+  run:
+    working_directory: ../../..
+  tools:
+    node: 24
+    bun: 1.3.14
+
+jobs:
+  eas-build:
+    name: scaffold and build on EAS
+    runs_on: linux-medium
+    environment: production
+    steps:
+      - uses: eas/checkout
+
+      - name: Install dependencies
+        run: bun install --ignore-scripts --frozen-lockfile
+
+      - name: Build @expo/agent-cli
+        run: bun run --filter @expo/agent-cli build
+
+      - name: Scaffold, link, and build on EAS
+        run: |
+          set -euo pipefail
+          REPO="$(pwd)"
+          CLI="$REPO/packages/@expo/agent-cli/bin/cli.js"
+          # Scaffold with the CLI under test, into a scratch dir outside the repo checkout.
+          node "$CLI" new /tmp/buildprobe --name "Agent CLI Build Probe" --no-git --json
+          cd /tmp/buildprobe
+          # The development profile builds a dev client, so the project needs expo-dev-client. Install
+          # it with the CLI too, so this exercises the install path on the way to the build.
+          node "$CLI" install expo-dev-client
+          # Link the scratch app to the CI project and give it a development build profile.
+          npx --yes eas-cli@latest init --id a39c0791-951a-425d-8364-03c69b849a9f --non-interactive --force
+          # A non-interactive Android build needs an explicit package name; the scaffold has none.
+          node -e "const fs=require('fs'),p='app.json',d=JSON.parse(fs.readFileSync(p));d.expo.android={...(d.expo.android||{}),package:'com.expoci.buildprobe'};fs.writeFileSync(p,JSON.stringify(d,null,2))"
+          cat > eas.json <<'JSON'
+          {
+            "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
+            "build": {
+              "development": {
+                "developmentClient": true,
+                "distribution": "internal",
+                "android": { "buildType": "apk" }
+              }
+            }
+          }
+          JSON
+          # eas build archives the git HEAD, so the scratch app needs a repo with everything committed
+          # — including the projectId eas init just wrote and this eas.json. It was scaffolded --no-git,
+          # so init and commit here, after the config is in place.
+          git init -q
+          git -c user.email=ci@expo.dev -c user.name="Agent CLI CI" add -A
+          git -c user.email=ci@expo.dev -c user.name="Agent CLI CI" commit -q -m "build probe"
+          # A real Android development build. eas generates a keystore non-interactively, waits for
+          # the build, and exits non-zero if it fails — that exit code is the whole assertion.
+          npx --yes eas-cli@latest build --platform android --profile development --non-interactive
