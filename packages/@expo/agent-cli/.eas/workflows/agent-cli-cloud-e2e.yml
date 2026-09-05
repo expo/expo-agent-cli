@@ -5,7 +5,8 @@
 # its `AGENT_CLI_LIVE_PUBLIC_ORIGIN` escape hatch. There is no macOS gate on live-cloud — the device is
 # remote — so a Linux runner is fine.
 #
-# Manual for now (workflow_dispatch). Each run that reaches the session bills one EAS Simulator session.
+# Runs the suite once per platform — iOS and Android — since a session is one platform. Manual for now
+# (workflow_dispatch). Each pass that reaches the session bills one EAS Simulator session (two per run).
 # If the tunnel never reaches the world the suite fails at `navigate --print-url`, before any session is
 # billed, so a broken tunnel is a cheap failure.
 name: agent-cli-cloud-e2e
@@ -65,8 +66,17 @@ jobs:
           echo "tunnel origin: ${ORIGIN}"
 
           cd packages/@expo/agent-cli
-          AGENT_CLI_LIVE_EAS=1 \
-          AGENT_CLI_LIVE_CLOUD=1 \
-          AGENT_CLI_LIVE_PUBLIC_ORIGIN="${ORIGIN}" \
-          AGENT_CLI_LIVE_PORT="${PORT}" \
-            bun run test:live:cloud
+          # Both platforms, over the one tunnel: each pass starts its own dev server on the port and
+          # cleans it up, then the next reuses the tunnel. Each bills one cloud session. `|| rc=1` runs
+          # both even if the first fails, so a red run shows which platform broke.
+          rc=0
+          for PLATFORM in ios android; do
+            echo "===== live-cloud: ${PLATFORM} ====="
+            AGENT_CLI_LIVE_EAS=1 \
+            AGENT_CLI_LIVE_CLOUD=1 \
+            AGENT_CLI_LIVE_CLOUD_PLATFORM="${PLATFORM}" \
+            AGENT_CLI_LIVE_PUBLIC_ORIGIN="${ORIGIN}" \
+            AGENT_CLI_LIVE_PORT="${PORT}" \
+              bun run test:live:cloud || rc=1
+          done
+          exit "${rc}"

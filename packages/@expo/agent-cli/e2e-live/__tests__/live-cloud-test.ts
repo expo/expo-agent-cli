@@ -108,6 +108,14 @@ const RELOAD_TIMEOUT = '180s';
 /** The route the lab screen lives at, for the reload that names one. */
 const LAB_ROUTE = '/lab';
 
+/**
+ * Which platform the cloud session runs on. A session has one platform (llp/0022 §Limits), so the
+ * suite is run once per platform — the EAS workflow sets `AGENT_CLI_LIVE_CLOUD_PLATFORM=android` for
+ * the second pass. Everything platform-specific reads this; the mismatch test uses {@link OTHER_PLATFORM}.
+ */
+const CLOUD_PLATFORM = process.env.AGENT_CLI_LIVE_CLOUD_PLATFORM === 'android' ? 'android' : 'ios';
+const OTHER_PLATFORM = CLOUD_PLATFORM === 'ios' ? 'android' : 'ios';
+
 /** The `id` of an `eas simulator --json` payload, or null when the output is not that object. */
 function jsonSessionId(stdout: string): string | null {
   try {
@@ -311,7 +319,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
       started = await easAsync('simulator-start', [
         'simulator',
         '--platform',
-        'ios',
+        CLOUD_PLATFORM,
         '--type',
         'agent-device',
         '--expo-go',
@@ -371,7 +379,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     const report = parseJson(result);
     // `DeviceBackend` is `'cloud'` — one value for both platforms, with `platform` carrying the rest.
     expect(report.deviceBackend).toBe('cloud');
-    expect(report.platform).toBe('ios');
+    expect(report.platform).toBe(CLOUD_PLATFORM);
     // The URL has to name the public origin, not this machine. A localhost URL here is the S3 failure,
     // and it would be opened onto an error screen rather than refused.
     expect(report.url).toContain(publicHost);
@@ -494,7 +502,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     const result = await runLiveEasAsync(
       run,
       projectRoot,
-      ['smoke', '--cloud', '--ios', '--json'],
+      ['smoke', '--cloud', `--${CLOUD_PLATFORM}`, '--json'],
       {
         label: 'smoke-cloud',
         env: proxyEnv(),
@@ -505,13 +513,14 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     // "could not decide" is the answer for that. What is asserted is which device it was about.
     expect([0, 20, 22]).toContain(result.exitCode);
     expect(report.deviceBackend).toBe('cloud');
-    // A `--cloud` follow-up names which cloud simulator by platform, so `--ios --cloud` is right on an
-    // iOS session — the CLI builds it on purpose and its own hermetic test asserts it (followups
-    // reload-test.ts). What a cloud run must never do is send you to the *other* platform, which this
-    // session is not: an `--android` follow-up on an iOS cloud session would open nothing.
+    // A `--cloud` follow-up names which cloud simulator by platform, so a follow-up on the session's
+    // own platform is right — the CLI builds it on purpose and its own hermetic test asserts it
+    // (followups reload-test.ts). What a cloud run must never do is send you to the *other* platform,
+    // which this session is not: that follow-up would open nothing.
+    const otherFlag = new RegExp(`--${OTHER_PLATFORM}\\b`);
     for (const followup of report.followups ?? []) {
       if (followup.command.includes('@expo/agent-cli')) {
-        expect(followup.command).not.toMatch(/--android\b/);
+        expect(followup.command).not.toMatch(otherFlag);
       }
     }
   });
@@ -542,8 +551,9 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
   });
 
   it('a --cloud run against a platform the session is not is refused, not opened', async () => {
-    // llp/0022-live-tier.plan.md §Limits — "a session has one platform" was the unasserted row. The
-    // session here is iOS, so an `--android` run has to be refused rather than opened onto nothing.
+    // llp/0022-live-tier.plan.md §Limits — "a session has one platform" was the unasserted row. This
+    // session is one platform, so a run for the other one has to be refused rather than opened onto
+    // nothing.
     //
     // The refusal names the platform only once the CLI has read the session from the service. That
     // read is a cold `bunx eas-cli@latest`, which the registry can leave half-resolved and killed —
@@ -551,7 +561,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     // fact under test. A run that lands there is tried once more; a mismatch opens nothing, so the
     // retry bills no session.
     const attempt = () =>
-      runLiveEasAsync(run, projectRoot, ['navigate', '/', '--cloud', '--android', '--json'], {
+      runLiveEasAsync(run, projectRoot, ['navigate', '/', '--cloud', `--${OTHER_PLATFORM}`, '--json'], {
         label: 'navigate-cloud-mismatch',
         env: proxyEnv(),
       });
