@@ -124,6 +124,17 @@ export const ANCHORS: Anchor[] = [
     provenance: 'captured',
   },
   {
+    signature: 'deps.package-not-found-bun',
+    phase: 'install-dependencies',
+    kind: 'cause',
+    // bun writes its own shape — `error: GET <registry-url>/<pkg> - 404` — nothing like npm's, and
+    // EAS installs a bun-lockfile project with bun, so its 404s were unlocatable until this rule
+    // [observed — 2026-09-05, expo-ci build `b0b2c9ad`].
+    pattern: /^error: GET \S+\/([^/\s]+) - 404$/,
+    message: 'A dependency does not exist in the registry under that name (bun install).',
+    provenance: 'captured',
+  },
+  {
     signature: 'deps.no-matching-version',
     phase: 'install-dependencies',
     kind: 'cause',
