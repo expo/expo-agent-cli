@@ -542,16 +542,26 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
   });
 
   it('a --cloud run against a platform the session is not is refused, not opened', async () => {
-    const result = await runLiveEasAsync(
-      run,
-      projectRoot,
-      ['navigate', '/', '--cloud', '--android', '--json'],
-      { label: 'navigate-cloud-mismatch', env: proxyEnv() }
-    );
     // llp/0022-live-tier.plan.md §Limits — "a session has one platform" was the unasserted row. The
     // session here is iOS, so an `--android` run has to be refused rather than opened onto nothing.
+    //
+    // The refusal names the platform only once the CLI has read the session from the service. That
+    // read is a cold `bunx eas-cli@latest`, which the registry can leave half-resolved and killed —
+    // whose honest answer is `CLOUD_SIMULATOR_SESSION_UNKNOWN`, a transient rather than the platform
+    // fact under test. A run that lands there is tried once more; a mismatch opens nothing, so the
+    // retry bills no session.
+    const attempt = () =>
+      runLiveEasAsync(run, projectRoot, ['navigate', '/', '--cloud', '--android', '--json'], {
+        label: 'navigate-cloud-mismatch',
+        env: proxyEnv(),
+      });
+    let result = await attempt();
+    let report = parseJson(result);
+    if (report?.error?.code === 'CLOUD_SIMULATOR_SESSION_UNKNOWN') {
+      result = await attempt();
+      report = parseJson(result);
+    }
     expect(result.exitCode).not.toBe(0);
-    const report = parseJson(result);
     expect(JSON.stringify(report)).toMatch(/platform/i);
   });
 });
