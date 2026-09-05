@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "packages/@expo/*"
+    "packages/@expo/*",
+    "apps/*"
   ],
   "scripts": {
     "bundle": "bun run --filter expo-agent-cli bundle",
