@@ -20,6 +20,7 @@
       "package": "dev.expo.easexample"
     },
     "web": {
+      "output": "single",
       "favicon": "./assets/favicon.png"
     },
     "owner": "expo-ci",
