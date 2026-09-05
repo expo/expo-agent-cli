@@ -62,6 +62,12 @@ jobs:
             }
           }
           JSON
+          # eas build archives the git HEAD, so the scratch app needs a repo with everything committed
+          # — including the projectId eas init just wrote and this eas.json. It was scaffolded --no-git,
+          # so init and commit here, after the config is in place.
+          git init -q
+          git -c user.email=ci@expo.dev -c user.name="Agent CLI CI" add -A
+          git -c user.email=ci@expo.dev -c user.name="Agent CLI CI" commit -q -m "build probe"
           # A real Android development build. eas generates a keystore non-interactively, waits for
           # the build, and exits non-zero if it fails — that exit code is the whole assertion.
           npx --yes eas-cli@latest build --platform android --profile development --non-interactive
