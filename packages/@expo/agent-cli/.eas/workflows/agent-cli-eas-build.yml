@@ -55,6 +55,8 @@ jobs:
           node "$CLI" install expo-dev-client
           # Link the scratch app to the CI project and give it a development build profile.
           npx --yes eas-cli@latest init --id a39c0791-951a-425d-8364-03c69b849a9f --non-interactive --force
+          # A non-interactive Android build needs an explicit package name; the scaffold has none.
+          node -e "const fs=require('fs'),p='app.json',d=JSON.parse(fs.readFileSync(p));d.expo.android={...(d.expo.android||{}),package:'com.expoci.buildprobe'};fs.writeFileSync(p,JSON.stringify(d,null,2))"
           cat > eas.json <<'JSON'
           {
             "cli": { "version": ">= 16.0.0", "appVersionSource": "remote" },
