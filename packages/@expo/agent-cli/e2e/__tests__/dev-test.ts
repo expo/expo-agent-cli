@@ -274,6 +274,87 @@ describe('@expo/agent-cli dev', () => {
     });
   });
 
+  // The loop the fingerprint record exists for [asked — Kudo, 2026-09-05]: after one recorded
+  // build, `dev` knows whether the project needs a prebuild or a build, and starts the fastest way
+  // that is still correct. The stub fingerprint hashes the app config and package.json here
+  // (`STUB_FINGERPRINT_HASH_FROM_PROJECT`), so editing those files moves the fingerprint the way a
+  // real hasher would — the chain under test is edit → new hash → record no longer matches → the
+  // plan builds again.
+  describe('the plan after the project changes', () => {
+    const HASH_FROM_PROJECT = { STUB_FINGERPRINT_HASH_FROM_PROJECT: '1' };
+
+    /** Build once, so the record matches the project exactly as it is on disk now. */
+    async function recordedProjectAsync(): Promise<string> {
+      const projectRoot = await setupAsync('dev-client-fresh-app');
+      const built = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local'], {
+        env: HASH_FROM_PROJECT,
+      });
+      expect(built.exitCode).toBe(0);
+      return projectRoot;
+    }
+
+    /** The steps `dev --plan` would run, as argv lists. */
+    async function planStepsAsync(projectRoot: string): Promise<string[][]> {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--ios', '--json'], {
+        env: HASH_FROM_PROJECT,
+      });
+      expect(result.exitCode).toBe(0);
+      return JSON.parse(result.stdout).steps.map((step: { argv: string[] }) => step.argv);
+    }
+
+    it('starts the dev server and nothing else while nothing changed', async () => {
+      const projectRoot = await recordedProjectAsync();
+
+      expect(await planStepsAsync(projectRoot)).toEqual([
+        ['expo', 'start', '--dev-client', '--ios'],
+      ]);
+    });
+
+    it('prebuilds and builds again after the app config changed, because the project is CNG', async () => {
+      const projectRoot = await recordedProjectAsync();
+
+      const configPath = path.join(projectRoot, 'app.json');
+      const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+      config.expo.ios = { ...config.expo.ios, bundleIdentifier: 'com.example.changed' };
+      await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
+
+      expect(await planStepsAsync(projectRoot)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
+    it('builds again after a dependency changed the fingerprint', async () => {
+      const projectRoot = await recordedProjectAsync();
+
+      const packagePath = path.join(projectRoot, 'package.json');
+      const packageJson = JSON.parse(await fs.promises.readFile(packagePath, 'utf8'));
+      packageJson.dependencies = { ...packageJson.dependencies, 'react-native-mmkv': '^3.0.0' };
+      await fs.promises.writeFile(packagePath, JSON.stringify(packageJson, null, 2));
+
+      expect(await planStepsAsync(projectRoot)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
+    it('builds without a prebuild on a bare project, whose native directories are checked in', async () => {
+      const projectRoot = await recordedProjectAsync();
+      await fs.promises.mkdir(path.join(projectRoot, 'ios'), { recursive: true });
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'ios', 'Podfile'),
+        "platform :ios, '15.1'\n"
+      );
+
+      const configPath = path.join(projectRoot, 'app.json');
+      const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+      config.expo.ios = { ...config.expo.ios, bundleIdentifier: 'com.example.changed' };
+      await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
+
+      expect(await planStepsAsync(projectRoot)).toEqual([['expo', 'run:ios']]);
+    });
+  });
+
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope, §Needs-human protocol
   // `@expo/agent-cli dev --yes` is the documented non-interactive entry point. On a busy port it started
   // nothing, appended the subprocess log to its own JSON, exited 1, and told its caller to open a
