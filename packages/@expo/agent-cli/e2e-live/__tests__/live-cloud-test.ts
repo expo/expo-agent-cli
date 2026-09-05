@@ -316,7 +316,10 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
         `eas simulator --json printed no session id: ${started.stdout.slice(0, 500)}`
       );
     }
-  });
+    // Scaffold, install, a tunnel, a detached dev server and a billed simulator session: minutes.
+    // Without its own bound this hook hit vitest's 10s default and the suite never reached a test —
+    // which is why it had never been seen run.
+  }, 600_000);
 
   afterAll(async () => {
     await run.cleanUpAsync();
