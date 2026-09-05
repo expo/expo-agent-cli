@@ -68,7 +68,7 @@ import {
   networkGate,
   packageRunnerGate,
   publicOriginGate,
-  stagingGate,
+  easCiGate,
   writeLivecheckLink,
 } from '../prereq';
 import {
@@ -82,7 +82,7 @@ import {
   waitForAsync,
 } from '../utils';
 
-const staging = stagingGate();
+const staging = easCiGate();
 const gate = allOf(
   builtBinGate(),
   cloudOptInGate(),
@@ -129,11 +129,10 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
   let publicHost = '';
   let sessionId: string | null = null;
 
-  /** `eas` through the same package runner this CLI uses, on staging, with the evidence kept. */
+  /** `eas` through the same package runner this CLI uses, with the evidence kept. */
   async function easAsync(label: string, args: string[]) {
     const result = await execAsync('npx', ['--yes', 'eas-cli@latest', ...args], {
       cwd: projectRoot || run.tempDir,
-      env: { EXPO_STAGING: '1' },
       timeoutMs: BOUND_MS,
     });
     run.writeArtifact(

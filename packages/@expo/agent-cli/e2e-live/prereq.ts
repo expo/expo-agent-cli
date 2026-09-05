@@ -601,36 +601,49 @@ export function iosDevBuildGate(project: DevClientProject | null, simulator: Sim
   return ok;
 }
 
-/** Where the Expo CLI family keeps the session, per {@link stagingGate}'s environment. */
-export const STAGING_SESSION_FILE = path.join(os.homedir(), '.expo-staging', 'state.json');
+/**
+ * The account the EAS suites are allowed to touch.
+ *
+ * Staging used to be the safety: a sandbox nobody's real work lived in. The real rule was always
+ * "never a human's account", and a dedicated CI account states that directly. It is pinned in the
+ * target app's committed `owner` and asserted by {@link easProjectGate}, so a run cannot wander onto
+ * a personal account. Overridable for a fork's own CI account.
+ */
+export const EAS_CI_ACCOUNT = process.env.AGENT_CLI_LIVE_EAS_CI_ACCOUNT ?? 'expo-ci';
 
 /**
- * `EXPO_STAGING=1` **and** a session in the staging state file.
+ * The opt-in for the real EAS suites, plus a login.
  *
- * Two facts, one gate, because either alone is useless: the environment variable without a session
- * gets a suite of login prompts, and the session without the variable is a suite that would write
- * to production. The hard half — the variable being *absent* while an EAS suite runs — is
- * {@link assertStaging}, which throws rather than skips.
+ * `AGENT_CLI_LIVE_EAS=1` is the explicit "yes, run against the real EAS CI account" switch — the
+ * parallel of `AGENT_CLI_LIVE_CLOUD`. Auth is the ambient EAS session (which must have access to
+ * {@link EAS_CI_ACCOUNT}) or an `EXPO_TOKEN` in CI. This gate is the switch and the login; the
+ * account safety is {@link easProjectGate}'s owner check, not this.
  */
-export function stagingGate(): { gate: Gate; user: string | null } {
-  if (process.env.EXPO_STAGING !== '1') {
+export function easCiGate(): { gate: Gate; user: string | null } {
+  if (process.env.AGENT_CLI_LIVE_EAS !== '1') {
     return {
       gate: missing(
-        'EXPO_STAGING=1 is not set — the EAS suites only ever run against staging, so they refuse rather than touch a real account'
+        `AGENT_CLI_LIVE_EAS=1 is not set — the EAS suites run against the ${EAS_CI_ACCOUNT} CI account and cost real minutes, so they never run without being asked for by name`
       ),
       user: null,
     };
   }
+  if (process.env.EXPO_TOKEN) {
+    // A token's owner is not knowable without a whoami, and gates are synchronous. The suite reads
+    // it from the report instead; here, null means "logged in, name unknown".
+    return { gate: ok, user: null };
+  }
   let user: string | null = null;
   try {
-    user = JSON.parse(fs.readFileSync(STAGING_SESSION_FILE, 'utf8'))?.auth?.username ?? null;
+    user = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.expo', 'state.json'), 'utf8'))?.auth
+      ?.username ?? null;
   } catch {
     user = null;
   }
   if (!user) {
     return {
       gate: missing(
-        `no staging session was found in ${STAGING_SESSION_FILE} — sign in with "EXPO_STAGING=1 npx @expo/agent-cli login"`
+        `no EAS session and no EXPO_TOKEN — sign in with "npx @expo/agent-cli login" as an account with ${EAS_CI_ACCOUNT} access, or set EXPO_TOKEN`
       ),
       user: null,
     };
@@ -639,51 +652,48 @@ export function stagingGate(): { gate: Gate; user: string | null } {
 }
 
 /**
- * The hard guard: this process is not allowed to talk to production, ever.
+ * The hard guard, still called at every EAS call site rather than once in a `beforeAll`.
  *
- * Called from every EAS-touching helper rather than once in a `beforeAll`, and it throws rather
- * than skips. A suite that skips when it cannot reach staging has cost nobody anything; a suite
- * that runs `eas deploy` against production because a variable was dropped somewhere between the
- * gate and the spawn has, and no amount of gate at the top of the file prevents that — only a
- * check at the call site does.
+ * It no longer means "staging" — it means the caller explicitly opted in. The account safety moved
+ * to committed config (the target app's `owner`) and {@link easProjectGate}'s owner assertion; this
+ * stays as the loud per-call refusal if the opt-in was dropped between the gate and the spawn.
  */
-export function assertStaging(what: string): void {
-  if (process.env.EXPO_STAGING !== '1') {
+export function assertEasEnabled(what: string): void {
+  if (process.env.AGENT_CLI_LIVE_EAS !== '1') {
     throw new Error(
-      `Refusing to run ${what}: EXPO_STAGING is not "1", and this tier never touches a production account. ` +
-        `Re-run with EXPO_STAGING=1, or let the suite skip.`
+      `Refusing to run ${what}: AGENT_CLI_LIVE_EAS is not "1". These suites run against the ${EAS_CI_ACCOUNT} CI account; re-run with AGENT_CLI_LIVE_EAS=1, or let the suite skip.`
     );
   }
 }
 
-/** An EAS-linked project on disk to read builds from, copied read-only into the scratch area. */
+/** The committed example app the EAS suites read builds from. Relative to the repo root. */
+const EAS_EXAMPLE_APP = path.resolve(__dirname, '..', '..', '..', '..', 'apps', 'eas-example');
+
+/**
+ * An EAS-linked app to read builds from, owned by the CI account.
+ *
+ * Defaults to the committed `apps/eas-example`, so the suite has a reproducible, fingerprint-stable
+ * project and no external asset — `AGENT_CLI_LIVE_EAS_PROJECT` still overrides it. The owner check is
+ * the safety that replaced the staging sandbox: a project owned by anything other than
+ * {@link EAS_CI_ACCOUNT} is refused, so a run cannot read or write a personal account by mistake.
+ */
 export function easProjectGate(): { gate: Gate; source: string | null } {
-  const sourceEnv = process.env.AGENT_CLI_LIVE_EAS_PROJECT;
-  if (!sourceEnv) {
-    return {
-      gate: missing(
-        'no EAS-linked project to read builds from — set AGENT_CLI_LIVE_EAS_PROJECT to a project that has finished EAS builds on staging'
-      ),
-      source: null,
-    };
-  }
-  const source = path.resolve(sourceEnv);
+  const source = path.resolve(process.env.AGENT_CLI_LIVE_EAS_PROJECT ?? EAS_EXAMPLE_APP);
   if (!fs.existsSync(path.join(source, 'package.json'))) {
     return {
       gate: missing(
-        `no EAS-linked project to read builds from: ${source} has no package.json — point AGENT_CLI_LIVE_EAS_PROJECT at one that has finished EAS builds on staging`
+        `no EAS-linked app to read builds from: ${source} has no package.json — set AGENT_CLI_LIVE_EAS_PROJECT, or check apps/eas-example is present`
       ),
       source: null,
     };
   }
-  let projectId: string | null = null;
+  let config: any = null;
   try {
-    const config = JSON.parse(fs.readFileSync(path.join(source, 'app.json'), 'utf8'));
-    projectId = config?.expo?.extra?.eas?.projectId ?? null;
+    config = JSON.parse(fs.readFileSync(path.join(source, 'app.json'), 'utf8'))?.expo;
   } catch {
-    projectId = null;
+    config = null;
   }
-  if (!projectId) {
+  if (!config?.extra?.eas?.projectId) {
     return {
       gate: missing(
         `${source} is not linked to an EAS project (no expo.extra.eas.projectId in its app.json), so there are no builds to look up`
@@ -691,26 +701,32 @@ export function easProjectGate(): { gate: Gate; source: string | null } {
       source: null,
     };
   }
+  if (config.owner !== EAS_CI_ACCOUNT) {
+    return {
+      gate: missing(
+        `${source} is owned by "${config.owner ?? '(none)'}", not the ${EAS_CI_ACCOUNT} CI account — refusing, so no run touches a personal account`
+      ),
+      source: null,
+    };
+  }
   return { gate: ok, source };
 }
 
-/** The staging project the livecheck fixture deploys to. */
+/** The EAS project a scaffolded suite app links itself to. */
 export type LivecheckLink = { owner: string; slug: string; projectId: string };
 
 /**
- * Identity for the livecheck hosting project.
+ * Identity for the CI EAS project a scaffolded app (live-cloud) links to.
  *
- * The committed fixture is a shape, not an account. Override owner and project id with
- * `AGENT_CLI_LIVE_EAS_OWNER` and `AGENT_CLI_LIVE_EAS_PROJECT_ID` so a run talks to the caller's
- * staging project rather than a name in the tree.
+ * Defaults to the `expo-ci/expo-agent-cli` project the rest of the tier uses; `AGENT_CLI_LIVE_EAS_OWNER`
+ * and `AGENT_CLI_LIVE_EAS_PROJECT_ID` override owner and id for a fork's own CI project.
  */
 export function livecheckLink(): LivecheckLink {
-  const fixturePath = path.join(__dirname, 'fixtures', 'livecheck', 'app.json');
-  const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
   return {
-    owner: process.env.AGENT_CLI_LIVE_EAS_OWNER ?? fixture.expo.owner,
-    slug: fixture.expo.slug,
-    projectId: process.env.AGENT_CLI_LIVE_EAS_PROJECT_ID ?? fixture.expo.extra.eas.projectId,
+    owner: process.env.AGENT_CLI_LIVE_EAS_OWNER ?? EAS_CI_ACCOUNT,
+    slug: 'expo-agent-cli',
+    projectId:
+      process.env.AGENT_CLI_LIVE_EAS_PROJECT_ID ?? 'a39c0791-951a-425d-8364-03c69b849a9f',
   };
 }
 

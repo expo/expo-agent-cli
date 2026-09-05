@@ -20,7 +20,7 @@ import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import zlib from 'node:zlib';
 
-import { assertStaging, bin } from './prereq';
+import { assertEasEnabled, bin } from './prereq';
 
 export { bin } from './prereq';
 
@@ -316,11 +316,10 @@ export async function runLiveEasAsync(
   argv: string[],
   options: LiveOptions = {}
 ): Promise<LiveResult> {
-  assertStaging(`@expo/agent-cli ${argv.join(' ')}`);
-  return runLiveAsync(run, cwd, argv, {
-    ...options,
-    env: { ...options.env, EXPO_STAGING: '1' },
-  });
+  assertEasEnabled(`@expo/agent-cli ${argv.join(' ')}`);
+  // No forced environment: the account is pinned in the target app's committed owner, and auth is
+  // the ambient session or an EXPO_TOKEN the run already carries.
+  return runLiveAsync(run, cwd, argv, options);
 }
 
 /**

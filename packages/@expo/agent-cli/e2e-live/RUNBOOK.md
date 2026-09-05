@@ -10,7 +10,7 @@ Seven vitest suites that run the **published surface** of `@expo/agent-cli` — 
 ncc bundle in `build/cli/` — against **real backends**: the real npm registry and the project's own
 `expo` CLI, a real Metro, a real iOS simulator running Expo Go, a real Android emulator running the
 Expo Go APK, a real **development build** on that same emulator, a real Hermes debugger connection,
-and the real EAS service on staging.
+and the real EAS service on the `expo-ci` CI account.
 
 Nothing here is stubbed. The other two tiers are `bun run test` (unit) and `bun run test:e2e`, which runs
 whole `@expo/agent-cli` processes against a **stub** `expo`, `eas` and dev server. This tier exists because a
@@ -36,8 +36,8 @@ Everything needs the bundle built first: **`bun run build`**.
 | `live-local`     | macOS; a **booted** iOS simulator with **Expo Go** installed; network (npm, for the scaffold's install)                                                                                                                                                                                                                                                                                    |
 | `live-devclient` | everything `live-android`'s `adb`/device half needs, **plus** `AGENT_CLI_LIVE_DEVCLIENT_PROJECT` naming a project that (a) depends on `expo-dev-client`, (b) declares an `expo.scheme`, (c) has its `android.package` **installed** on the attached device, and (d) has an android entry in its `.expo/agent-cli-last-build.json`. It **does not boot** and **does not build** — see below |
 | `live-android`   | a runnable `adb` (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, `PATH`, or the SDK's default location); an **attached device or a bootable AVD**; **Expo Go** on it; network. A booted iOS simulator with Expo Go is an _optional_ extra that adds three tests — see below                                                                                                                           |
-| `live-eas`       | `EXPO_STAGING=1`; a staging session in `~/.expo-staging/state.json`; `bunx` or `npx`; network to `staging.expo.dev`; an EAS-linked project on disk with finished builds and at least one ERRORED build (`AGENT_CLI_LIVE_EAS_PROJECT`). Optional: `AGENT_CLI_LIVE_EAS_OWNER` and `AGENT_CLI_LIVE_EAS_PROJECT_ID` override the livecheck fixture's hosting project                           |
-| `live-cloud`     | everything `live-eas` needs, **plus** `AGENT_CLI_LIVE_CLOUD=1` and a way to publish a local port — `tuft host`, or an origin of your own in `AGENT_CLI_LIVE_PUBLIC_ORIGIN`                                                                                                                                                                                                                 |
+| `live-eas`       | `AGENT_CLI_LIVE_EAS=1`; a login with `expo-ci` access (ambient EAS session, or `EXPO_TOKEN` in CI); `bunx` or `npx`; network. Reads the committed `apps/eas-example` (seeded with a FINISHED and an ERRORED build); `AGENT_CLI_LIVE_EAS_PROJECT` overrides the app                                                                                                                          |
+| `live-cloud`     | everything `live-eas` needs (`AGENT_CLI_LIVE_EAS=1`), **plus** `AGENT_CLI_LIVE_CLOUD=1` and a way to publish a local port — `tuft host`, or an origin of your own in `AGENT_CLI_LIVE_PUBLIC_ORIGIN`                                                                                                                                                                                                                 |
 | `live-ios-devclient` | a **booted** iOS simulator, **plus** `AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT` naming a project that (a) depends on `expo-dev-client`, (b) declares `expo.scheme` and `expo.ios.bundleIdentifier`, (c) has that bundle id **installed** on the booted simulator, and (d) has an `ios` entry in `.expo/agent-cli-last-build.json`. It **does not build** — run `npx expo run:ios` once (~15 min) to make one |
 
 ### Two things about `live-local`
@@ -218,22 +218,25 @@ session. Run it in the background and let it finish.
 
 ### The hard guard
 
-`EXPO_STAGING=1` is checked at **every** EAS call site (`prereq.ts` §`assertStaging`), not once at the
-top of a file, and it **throws** rather than skipping. A suite that skips because it cannot reach
-staging has cost nobody anything. A suite that ran `eas deploy` against production because the variable
-was dropped somewhere between the gate and the spawn has.
+The EAS opt-in (`AGENT_CLI_LIVE_EAS=1`) is checked at **every** EAS call site (`prereq.ts`
+§`assertEasEnabled`), not once at the top of a file, and it **throws** rather than skipping. The
+account safety is separate and stronger: the target app's `owner` is committed as the CI account
+(`expo-ci`), and `easProjectGate` refuses any other owner — so a run cannot read or write a personal
+account even if the opt-in leaks. This replaced the old `EXPO_STAGING` sandbox.
 
 ### Environment variables
 
 | variable                        | effect                                                                                                                                                       |
 | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `EXPO_STAGING=1`                | required by `live-eas` and `live-cloud`. Nothing here ever talks to production                                                                               |
+| `AGENT_CLI_LIVE_EAS=1`          | opt-in for `live-eas` and `live-cloud`. They run against the `expo-ci` CI account, so they never run without being asked for by name                          |
+| `EXPO_TOKEN`                    | auth for the EAS suites in CI; locally the ambient EAS session (with `expo-ci` access) is used instead                                                        |
 | `AGENT_CLI_LIVE_CLOUD=1`        | the second opt-in for `live-cloud`, because its prerequisites can all hold on a machine whose owner did not mean to start a billing session                  |
 | `AGENT_CLI_LIVE_UDID`           | which booted simulator to use, when several are                                                                                                              |
 | `AGENT_CLI_LIVE_AVD`            | which AVD `live-android` boots, when several are listed and none is attached                                                                                 |
-| `AGENT_CLI_LIVE_EAS_PROJECT`    | the EAS-linked project `live-eas` copies and reads builds from. Required for that suite                                                                      |
-| `AGENT_CLI_LIVE_EAS_OWNER`      | Expo account that owns the livecheck hosting project. Overrides `e2e-live/fixtures/livecheck/app.json`                                                       |
-| `AGENT_CLI_LIVE_EAS_PROJECT_ID` | EAS project id for that hosting project. Overrides the same fixture                                                                                          |
+| `AGENT_CLI_LIVE_EAS_PROJECT`    | override the app `live-eas` reads builds from; defaults to the committed `apps/eas-example`                                                                   |
+| `AGENT_CLI_LIVE_EAS_CI_ACCOUNT` | the allowlisted CI account the owner check requires; defaults to `expo-ci`                                                                                    |
+| `AGENT_CLI_LIVE_EAS_OWNER`      | owner for the project a scaffolded suite app (live-cloud) links to; defaults to the CI account                                                               |
+| `AGENT_CLI_LIVE_EAS_PROJECT_ID` | EAS project id for that scaffolded-app link; defaults to the expo-agent-cli project                                                                          |
 | `AGENT_CLI_LIVE_PUBLIC_ORIGIN`  | an origin that already forwards to the dev-server port, for `live-cloud` on a machine without `tuft host`. Supplied origins are not torn down by the cleanup |
 | `AGENT_CLI_LIVE_PORT`           | first dev-server port to _try_ (default `8500`); each run binds the first free one upward from there                                                         |
 | `AGENT_CLI_LIVE_TEMP_DIR`       | root of the scratch area (default `os.tmpdir()`). **Must be outside every git checkout** — asserted at startup, because EAS uploads walk up to the git root  |
@@ -249,9 +252,9 @@ bun run test:live:local                     # ~1 min, free
 bun run test:live:android                   # ~2 min, free (includes an emulator boot)
 AGENT_CLI_LIVE_DEVCLIENT_PROJECT=~/dev/myapp \
   bun run test:live:devclient               # ~25 s, free — needs a built dev client, see above
-EXPO_STAGING=1 AGENT_CLI_LIVE_EAS_PROJECT=~/path/to/eas-app \
-  bun run test:live:eas                     # ~1 min, one web deployment
-EXPO_STAGING=1 AGENT_CLI_LIVE_CLOUD=1 bun run test:live:cloud   # bills a cloud session
+AGENT_CLI_LIVE_EAS=1 \
+  bun run test:live:eas                     # ~1 min, one web deployment; reads apps/eas-example
+AGENT_CLI_LIVE_EAS=1 AGENT_CLI_LIVE_CLOUD=1 bun run test:live:cloud   # bills a cloud session
 
 AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT=~/dev/ios-devbuild \
   bun run test:live:iosdevclient            # ~25 s, free — needs a built iOS dev client on the booted sim

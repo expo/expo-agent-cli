@@ -70,10 +70,18 @@ A missing prerequisite skips, and prints a sentence saying what to install or bo
 laptop with no simulator reporting a red suite would train everyone to ignore the whole
 tier.
 
-A prerequisite that is present and wrong throws. The case is `EXPO_STAGING` being unset
-while an EAS suite is about to write. `assertStaging` is called at every EAS call site
+A prerequisite that is present and wrong throws. The case is the EAS opt-in being unset
+while an EAS suite is about to write. `assertEasEnabled` is called at every EAS call site
 rather than once in a `beforeAll`, because "one call site forgot" is the failure mode it
 exists for.
+
+The EAS suites used to run against **staging** — a sandbox nobody's real work lived in —
+guarded by `EXPO_STAGING=1`. The real rule was always "never a human's account", and a
+dedicated CI account (`expo-ci`) states that directly, so the model moved: the opt-in is
+`AGENT_CLI_LIVE_EAS=1`, auth is the ambient session or an `EXPO_TOKEN`, and the safety is
+that the target app's `owner` is committed as the CI account and `easProjectGate` refuses
+anything else. The account is pinned in `apps/eas-example`, so a run cannot wander onto a
+personal one. `live-cloud` shares the guard; `live-eas` reads that committed app in place.
 
 Every gate is synchronous. Vitest decides which suites exist while the module body runs,
 so `describe.skip` needs its answer before any `beforeAll` could have awaited one. Each
@@ -216,12 +224,12 @@ without a rebuild. It is the suite that turns the iOS runtime column from `by ha
 
 ### live-eas
 
-Against staging and nothing else. About 50 s.
+Against the `expo-ci` CI account, reading the committed `apps/eas-example` in place. About 50 s.
 
-Reads, repeated freely: `whoami` (and that its `sessionFile` is the staging one),
+Reads, repeated freely: `whoami` (logged in as the account the run authenticates with),
 `status` agreeing with `whoami` about who is signed in, `status --explain` against the
-real builds of a real project, `status --explain --build` echoing the id it was given,
-and `inspect:build-log` on a log EAS actually served.
+real seeded builds of the example, `status --explain --build` echoing the id it was given,
+and `inspect:build-log` on a log EAS actually served. Plus `deploy --web` of the example.
 
 One write, idempotent: `deploy --web` of a five-dependency fixture. EAS Hosting gives
 each deploy its own preview URL, so a re-run adds a deployment and changes nothing that
