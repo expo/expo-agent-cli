@@ -45,9 +45,14 @@ jobs:
       - name: Scaffold, link, and build on EAS
         run: |
           set -euo pipefail
+          REPO="$(pwd)"
+          CLI="$REPO/packages/@expo/agent-cli/bin/cli.js"
           # Scaffold with the CLI under test, into a scratch dir outside the repo checkout.
-          node packages/@expo/agent-cli/bin/cli.js new /tmp/buildprobe --name "Agent CLI Build Probe" --no-git --json
+          node "$CLI" new /tmp/buildprobe --name "Agent CLI Build Probe" --no-git --json
           cd /tmp/buildprobe
+          # The development profile builds a dev client, so the project needs expo-dev-client. Install
+          # it with the CLI too, so this exercises the install path on the way to the build.
+          node "$CLI" install expo-dev-client
           # Link the scratch app to the CI project and give it a development build profile.
           npx --yes eas-cli@latest init --id a39c0791-951a-425d-8364-03c69b849a9f --non-interactive --force
           cat > eas.json <<'JSON'
