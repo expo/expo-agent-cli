@@ -10,11 +10,23 @@
 # development client of apps/eas-example on EAS (an `ios.simulator: true` build needs no code signing),
 # then the session installs and runs that client — which subsumes the old `agent-cli-eas-build` (a real
 # native EAS build). Each job that reaches its session bills one EAS Simulator session; a broken tunnel
-# fails at the origin check before any session is billed. Manual for now (workflow_dispatch).
+# fails at the origin check before any session is billed. It runs on demand (workflow_dispatch) and on
+# PRs that touch the cloud path or the app it builds (see the `paths` filter) — never on unrelated PRs.
 name: agent-cli-cloud-e2e
 
 on:
   workflow_dispatch: {}
+  # Automatic coverage of `--cloud`, scoped to PRs that change the cloud path or the app it builds, so
+  # unrelated PRs never bill a session. Paths are repo-relative.
+  pull_request:
+    paths:
+      - packages/@expo/agent-cli/src/navigate/**
+      - packages/@expo/agent-cli/src/runtime/**
+      - packages/@expo/agent-cli/src/device/**
+      - packages/@expo/agent-cli/src/smoke/**
+      - packages/@expo/agent-cli/e2e-live/__tests__/live-cloud-test.ts
+      - packages/@expo/agent-cli/.eas/workflows/agent-cli-cloud-e2e.yml
+      - apps/eas-example/**
 
 # Base dir is packages/@expo/agent-cli; the monorepo is three levels up. Steps run from the repo root so
 # the bun workspace resolves; the last step cds into the package to run the suite. Node 24 because the
