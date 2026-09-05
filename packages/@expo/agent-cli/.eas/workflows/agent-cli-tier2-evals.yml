@@ -14,6 +14,13 @@ on:
       - agent-cli-eval
   workflow_dispatch: {}
 
+# The EAS base directory is packages/@expo/agent-cli (where app.json + eas.json live), so a step's
+# default cwd is the package. These commands drive the bun workspace, which is the repo root — three
+# levels up. Setting it once here keeps every step's paths root-relative, as they were before the move.
+defaults:
+  run:
+    working_directory: ../../..
+
 jobs:
   tier2:
     name: tier 2 agent evals
