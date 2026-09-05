@@ -762,12 +762,12 @@ export function networkGate(): Gate {
   try {
     execFileSync(
       'curl',
-      ['-sS', '-o', '/dev/null', '-m', '20', '-w', '%{http_code}', 'https://staging.expo.dev'],
+      ['-sS', '-o', '/dev/null', '-m', '20', '-w', '%{http_code}', 'https://api.expo.dev'],
       { encoding: 'utf8', timeout: 40_000 }
     );
     return ok;
   } catch (error: any) {
-    return missing(`https://staging.expo.dev could not be reached: ${error.message}`);
+    return missing(`https://api.expo.dev could not be reached: ${error.message}`);
   }
 }
 

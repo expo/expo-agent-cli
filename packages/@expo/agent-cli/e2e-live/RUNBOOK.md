@@ -71,7 +71,7 @@ project's own `expo`: `install` adding a package, `agents:setup`, `skills:sync/l
 there would have made them unrunnable on every machine without a simulator. That is most machines, and
 it includes exactly the ones where "does the real registry still serve this" is the question being
 asked. `registryGate()` in `prereq.ts` is the gate, and it is deliberately _not_ `networkGate()`.
-Reaching `staging.expo.dev` is a fact about an EAS account's environment, and reaching
+Reaching `api.expo.dev` is a fact about an EAS account's environment, and reaching
 `registry.npmjs.org` is a fact about being online.
 
 **The package manager it scaffolds with comes from the environment, not from this suite.**
@@ -208,8 +208,8 @@ output whatever the exit code, so the `afterAll` stop reaches it either way. If 
 
 ```bash
 cd <scratch>/cloudapp
-EXPO_STAGING=1 npx eas-cli@latest simulator:list --status in-progress --json
-EXPO_STAGING=1 npx eas-cli@latest simulator:stop --id <id> --non-interactive
+npx eas-cli@latest simulator:list --status in-progress --json
+npx eas-cli@latest simulator:stop --id <id> --non-interactive
 ```
 
 Do not run `test:live:cloud` inside a wrapper that kills at a fixed wall time under the vitest
