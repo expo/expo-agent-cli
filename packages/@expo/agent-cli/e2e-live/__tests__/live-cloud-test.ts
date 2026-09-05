@@ -459,14 +459,18 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     // The cloud relaunch is two verbs, and the reason names both — that is the mechanism, quoted.
     expect(attempts.device.reason).toContain('--relaunch');
     expect(attempts.device.reason).toContain('open');
-    // The cost the rung spent, and the reason it was reached for — which has to agree with the
-    // socket count in the same object.
-    expect(attempts.device.reason).toContain("costs the app's JavaScript state");
-    expect(attempts.device.reason).toContain(
-      report.commandSocketClients > 0
-        ? 'nothing was seen to come of it'
-        : 'no client was registered'
-    );
+    // The relaunch costs the app's JavaScript state only when an app was there to lose it. The cloud
+    // rung shares `withRelaunchCost` with the local rung, which names the cost only for a pre-relaunch
+    // app count above zero — so a session that relaunched a not-running app says nothing about a cost
+    // that was not spent, and it would be a lie to demand the sentence here. When the cost IS named,
+    // the reason it was reached for has to agree with the socket count in the same object (F99).
+    if (attempts.device.reason.includes("costs the app's JavaScript state")) {
+      expect(attempts.device.reason).toContain(
+        (report.commandSocketClients ?? 0) > 0
+          ? 'nothing was seen to come of it'
+          : 'no client was registered'
+      );
+    }
   });
 
   it('runtime:reload --cloud --route puts the app on the route it names', async () => {
@@ -501,12 +505,13 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     // "could not decide" is the answer for that. What is asserted is which device it was about.
     expect([0, 20, 22]).toContain(result.exitCode);
     expect(report.deviceBackend).toBe('cloud');
-    // llp/0022-live-tier.plan.md: a cloud run that found nothing used to be answered with `--ios` follow-ups —
-    // "this is what opens one on a booted device" — to a host that reached for the cloud precisely
-    // because it has no booted device. Every follow-up of a `--cloud` run stays off the local flags.
+    // A `--cloud` follow-up names which cloud simulator by platform, so `--ios --cloud` is right on an
+    // iOS session — the CLI builds it on purpose and its own hermetic test asserts it (followups
+    // reload-test.ts). What a cloud run must never do is send you to the *other* platform, which this
+    // session is not: an `--android` follow-up on an iOS cloud session would open nothing.
     for (const followup of report.followups ?? []) {
       if (followup.command.includes('@expo/agent-cli')) {
-        expect(followup.command).not.toMatch(/--ios\b|--android\b/);
+        expect(followup.command).not.toMatch(/--android\b/);
       }
     }
   });
