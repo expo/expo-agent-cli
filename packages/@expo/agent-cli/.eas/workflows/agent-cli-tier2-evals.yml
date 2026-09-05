@@ -14,6 +14,18 @@ on:
       - agent-cli-eval
   workflow_dispatch: {}
 
+# The EAS base directory is packages/@expo/agent-cli (where app.json + eas.json live), so a step's
+# default cwd is the package. These commands drive the bun workspace, which is the repo root — three
+# levels up. Setting it once here keeps every step's paths root-relative, as they were before the move.
+# `tools` pins Node and Bun: the runner's default Node is < 20, too old for the CLI family's `File`
+# usage, and this replaces a manual bun install.
+defaults:
+  run:
+    working_directory: ../../..
+  tools:
+    node: 24
+    bun: 1.3.14
+
 jobs:
   tier2:
     name: tier 2 agent evals
@@ -24,9 +36,6 @@ jobs:
       summary: ${{ steps.evals.outputs.summary }}
     steps:
       - uses: eas/checkout
-
-      - name: Install Bun
-        run: npm install --global bun@1.3.14
 
       - name: Install dependencies
         run: bun install --ignore-scripts --frozen-lockfile

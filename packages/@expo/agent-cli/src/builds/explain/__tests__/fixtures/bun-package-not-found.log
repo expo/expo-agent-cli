@@ -1,0 +1,5 @@
+$ bun install --frozen-lockfile
+bun install v1.3.14 (0d9b296a)
+error: GET https://registry.npmjs.org/agent-cli-nonexistent-seed-pkg - 404
+error: agent-cli-nonexistent-seed-pkg@1.0.0 failed to resolve
+bun install --frozen-lockfile exited with non-zero code: 1

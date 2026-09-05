@@ -1,25 +1,24 @@
 // @ref llp/0022-live-tier.plan.md §live-eas
 //
-// The EAS half of the live tier, against **staging** and nothing else. Every invocation goes through
-// `runLiveEasAsync`, which asserts `EXPO_STAGING=1` at the call site rather than trusting the gate at
-// the top of the file — see `prereq.ts` §assertStaging for why that is not belt-and-braces.
+// The EAS half of the live tier, against the **expo-ci** CI account. Every invocation goes through
+// `runLiveEasAsync`, which asserts the `AGENT_CLI_LIVE_EAS=1` opt-in at the call site — see
+// `prereq.ts` §assertEasEnabled. The account is pinned in the committed `apps/eas-example` owner and
+// asserted by `easProjectGate`, which is the safety that replaced the staging sandbox.
 //
-// @ref llp/0022-live-tier.plan.md §Limits — "no live `eas build`,
-// `eas deploy` or simulator session runs anywhere in this suite" was the open row, and its four EAS
-// bugs were all in code with a passing unit test one call frame away. This is the row.
+// @ref llp/0022-live-tier.plan.md §Limits — its EAS bugs were all in code with a passing unit test
+// one call frame away, and this is the tier that runs the real service.
 //
-// The budget this suite spends, and the shape it takes from that:
+// The budget this suite spends:
 //
 //  - **Reads are free and repeated.** `whoami`, `status --explain`, `inspect:build-log`.
-//  - **One write per run, and it is idempotent.** `deploy --web` of the `livecheck` fixture. EAS
-//    Hosting gives each deploy its own preview URL, so re-running adds a deployment and changes
-//    nothing that existed — which is what makes it safe to run on every green build.
-//  - **No native build.** No v1 command creates one [observed — staging-live, 2026-08-26], so there
-//    is nothing here to test and nothing this suite could spend an EAS build worker on.
+//  - **One write per run, and it is idempotent.** `deploy --web`. EAS Hosting gives each deploy its
+//    own preview URL, so re-running adds a deployment and changes nothing that existed.
+//  - **No native build.** The suite reads builds; it does not make them (that is the
+//    `agent-cli-eas-build` EAS workflow's job).
 //
-// The read side reads a **copy** of an EAS-linked project, never the original: the copy gets a
-// `node_modules`, a `.expo` directory and whatever else the CLI writes, and the original is
-// somebody's working tree.
+// It reads `apps/eas-example` **in place** — a committed, expo-ci-linked app with a seeded FINISHED
+// build (matched by fingerprint) and a seeded ERRORED build (for `inspect:build-log`). The CLI only
+// writes gitignored `.expo/` and `dist/` there, so there is nothing to copy and no external asset.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -28,64 +27,50 @@ import {
   allOf,
   builtBinGate,
   describeLive,
+  easCiGate,
   easProjectGate,
   networkGate,
   packageRunnerGate,
-  stagingGate,
-  writeLivecheckLink,
 } from '../prereq';
 import {
   LiveRun,
-  copyTreeAsync,
   downloadBuildLogAsync,
   execAsync,
   expectExit,
-  fixturesDir,
   httpBodyAsync,
   httpStatusAsync,
-  installDependenciesAsync,
   parseJson,
   runLiveEasAsync,
 } from '../utils';
 
-const staging = stagingGate();
+const easCi = easCiGate();
 const easProject = easProjectGate();
 const gate = allOf(
   builtBinGate(),
-  staging.gate,
+  easCi.gate,
   packageRunnerGate(),
   networkGate(),
   easProject.gate
 );
 
-describeLive('live-eas', gate)('live-eas: the real service, on staging', () => {
+describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
   const run = new LiveRun('live-eas');
-  let readProjectRoot = '';
-  let deployProjectRoot = '';
+  // Read and deploy both run against the committed example, in place.
+  const projectRoot = easProject.source ?? '';
+  const readProjectRoot = projectRoot;
+  const deployProjectRoot = projectRoot;
 
   beforeAll(async () => {
     run.prepare();
-    // The read-side project: a copy of an EAS-linked project with finished builds on staging. APFS
-    // clones make this instant on macOS; elsewhere it is a real copy, which is why the gate points
-    // at a project rather than requiring one particular path.
-    readProjectRoot = path.join(run.tempDir, 'eas-read');
-    await copyTreeAsync(easProject.source as string, readProjectRoot);
-    await installDependenciesAsync(run, readProjectRoot);
-
-    // The write-side project: the tiny fixture, installed fresh. Owner and project id come from
-    // the fixture, or from AGENT_CLI_LIVE_EAS_OWNER / AGENT_CLI_LIVE_EAS_PROJECT_ID.
-    deployProjectRoot = path.join(run.tempDir, 'livecheck');
-    await copyTreeAsync(path.join(fixturesDir, 'livecheck'), deployProjectRoot);
-    writeLivecheckLink(deployProjectRoot);
-    await installDependenciesAsync(run, deployProjectRoot);
-
-    run.onCleanup('scratch projects', () => {
+    // Nothing to scaffold or install: the example is a committed app with node_modules from the
+    // workspace. The CLI writes only `.expo/` and `dist/`, both gitignored, so cleanup removes those
+    // rather than a scratch tree.
+    run.onCleanup('scratch state', () => {
       if (!process.env.AGENT_CLI_LIVE_KEEP) {
-        fs.rmSync(run.tempDir, { recursive: true, force: true });
+        fs.rmSync(path.join(projectRoot, '.expo'), { recursive: true, force: true });
+        fs.rmSync(path.join(projectRoot, 'dist'), { recursive: true, force: true });
       }
     });
-    // Two real dependency installs, one of them a full app: minutes, not the 10s a hook defaults to.
-    // The device suites already pass their own bound; this one was missing it.
   }, 600_000);
 
   afterAll(async () => {
@@ -93,27 +78,27 @@ describeLive('live-eas', gate)('live-eas: the real service, on staging', () => {
     console.log(run.costLine());
   });
 
-  it('the original project on disk is not the one being written to', () => {
-    // The read-only half of "read-only", asserted rather than intended. Everything after this point
-    // runs in `run.tempDir`; if that ever stops being true, this is where it is caught.
-    expect(readProjectRoot.startsWith(run.tempDir)).toBe(true);
-    expect(deployProjectRoot.startsWith(run.tempDir)).toBe(true);
-    expect(path.resolve(easProject.source as string).startsWith(run.tempDir)).toBe(false);
+  it('reads a CI-owned app, and never a personal account', () => {
+    // The safety that replaced the staging sandbox: the gate only resolved a source whose committed
+    // owner is the CI account, so every EAS op below is pinned to it.
+    const owner = JSON.parse(fs.readFileSync(path.join(projectRoot, 'app.json'), 'utf8')).expo.owner;
+    expect(owner).toBe('expo-ci');
   });
 
   // --- identity -----------------------------------------------------------------------------------
 
-  it('whoami answers from the staging session, and names the file it read', async () => {
+  it('whoami answers logged in, as the account the run authenticates with', async () => {
     const result = await runLiveEasAsync(run, readProjectRoot, ['whoami', '--json'], {
       label: 'whoami',
     });
     expectExit(result, 0);
     const report = parseJson(result);
     expect(report.loggedIn).toBe(true);
-    expect(report.user).toBe(staging.user);
-    // S6: the preamble used to hardcode `~/.expo/state.json`, which is the wrong file under
-    // EXPO_STAGING. The session file it reports has to be the one it actually read.
-    expect(report.sessionFile).toContain('.expo-staging');
+    // Locally the gate read the session's username; under EXPO_TOKEN in CI it is not knowable ahead
+    // of time, so it is only asserted when the gate had it.
+    if (easCi.user) {
+      expect(report.user).toBe(easCi.user);
+    }
   });
 
   it('status reports the same identity its own whoami does', async () => {
@@ -125,7 +110,9 @@ describeLive('live-eas', gate)('live-eas: the real service, on staging', () => {
     // F65: `status` said "auth unknown (nothing could answer)" on a machine whose session was on
     // disk and whose own `whoami` read it. Two commands, one answer.
     expect(report.auth.loggedIn).toBe(true);
-    expect(report.auth.user).toBe(staging.user);
+    if (easCi.user) {
+      expect(report.auth.user).toBe(easCi.user);
+    }
   });
 
   // --- the build read side ------------------------------------------------------------------------
@@ -257,7 +244,6 @@ describeLive('live-eas', gate)('live-eas: the real service, on staging', () => {
         ['--yes', 'eas-cli@latest', 'build:list', '--limit', '20', '--json', '--non-interactive'],
         {
           cwd: readProjectRoot,
-          env: { EXPO_STAGING: '1' },
           timeoutMs: 300_000,
         }
       );
@@ -326,7 +312,7 @@ describeLive('live-eas', gate)('live-eas: the real service, on staging', () => {
 
   // --- the one write ------------------------------------------------------------------------------
 
-  it('deploy --web ships the fixture, and the URL serves the bytes it produced', async () => {
+  it('deploy --web ships the example, and the URL serves the bytes it produced', async () => {
     const result = await runLiveEasAsync(run, deployProjectRoot, ['deploy', '--web', '--json'], {
       label: 'deploy-web',
     });
@@ -334,7 +320,7 @@ describeLive('live-eas', gate)('live-eas: the real service, on staging', () => {
     expectExit(result, 0);
     const report = parseJson(result);
     expect(report.targets).toEqual(['web']);
-    expect(report.web.url).toMatch(/^https:\/\/.+\.staging\.expo\.app$/);
+    expect(report.web.url).toMatch(/^https:\/\/.+\.expo\.app$/);
     expect(fs.existsSync(path.join(deployProjectRoot, report.web.exportDir))).toBe(true);
 
     // The assertion is not "something answered": it is that the address serves the bundle this
@@ -343,7 +329,7 @@ describeLive('live-eas', gate)('live-eas: the real service, on staging', () => {
     expect(await httpStatusAsync(report.web.url)).toBe(200);
     const html = await httpBodyAsync(report.web.url);
     run.writeArtifact('deployed-page.html', html);
-    expect(html).toContain('<title>Live Check</title>');
+    expect(html).toMatch(/<title>[^<]+<\/title>/);
     const bundleSrc = /src="([^"]*\/_expo\/static\/js\/web\/[^"]+)"/.exec(html)?.[1];
     expect(bundleSrc).toBeTruthy();
     const bundleUrl = new URL(bundleSrc as string, report.web.url).toString();

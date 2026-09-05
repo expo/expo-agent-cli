@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "EAS Example",
+    "slug": "expo-agent-cli",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.expo.easexample"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "dev.expo.easexample"
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "owner": "expo-ci",
+    "scheme": "easexample",
+    "extra": {
+      "eas": {
+        "projectId": "a39c0791-951a-425d-8364-03c69b849a9f"
+      }
+    }
+  }
+}
