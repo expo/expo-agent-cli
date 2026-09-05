@@ -61,16 +61,17 @@ jobs:
         working-directory: packages/@expo/agent-cli
 
   # E2E is the long pole of tier 0 (~320s run as one step), so it is sharded across parallel
-  # jobs instead. vitest splits by file, so each shard runs a slice of the 31 files; each builds
-  # its own ncc bundle because the suite spawns `bin/cli.js`. Both OSes run here — the win32
-  # shards are what exercise the skills linker's directory-junction path (nothing else does).
+  # jobs instead. A size-balanced sequencer (see e2e/vitest.config.ts) splits the 31 files so no
+  # shard gets both big ones; each builds its own ncc bundle because the suite spawns `bin/cli.js`.
+  # Both OSes run here — the win32 shards are what exercise the skills linker's directory-junction
+  # path (nothing else does).
   tier0-e2e:
     if: github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, windows-2022]
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
@@ -89,8 +90,8 @@ jobs:
       - name: 🛠 Build @expo/agent-cli
         run: bun run build
         working-directory: packages/@expo/agent-cli
-      - name: 🧪 E2E Test shard ${{ matrix.shard }}/4
-        run: bun run test:e2e -- --shard=${{ matrix.shard }}/4
+      - name: 🧪 E2E Test shard ${{ matrix.shard }}/3
+        run: bun run test:e2e -- --shard=${{ matrix.shard }}/3
         working-directory: packages/@expo/agent-cli
 
   # Windows unit coverage: `resolveSpawnTarget` and the win32 branches of the path helpers.
