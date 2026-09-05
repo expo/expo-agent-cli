@@ -84,7 +84,9 @@ describeLive('live-eas', gate)('live-eas: the real service, on staging', () => {
         fs.rmSync(run.tempDir, { recursive: true, force: true });
       }
     });
-  });
+    // Two real dependency installs, one of them a full app: minutes, not the 10s a hook defaults to.
+    // The device suites already pass their own bound; this one was missing it.
+  }, 600_000);
 
   afterAll(async () => {
     await run.cleanUpAsync();
