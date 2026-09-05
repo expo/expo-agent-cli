@@ -757,7 +757,7 @@ export function packageRunnerGate(): Gate {
   return missing('neither "bunx" nor "npx" is on PATH, so the EAS CLI cannot be reached at all');
 }
 
-/** Network egress to the staging API, so a suite does not report an offline laptop as a bug. */
+/** Network egress to the EAS API, so a suite does not report an offline laptop as a bug. */
 export function networkGate(): Gate {
   try {
     execFileSync(
@@ -775,7 +775,7 @@ export function networkGate(): Gate {
  * Network egress to the npm registry, which is what a scaffold and an install actually need.
  *
  * Separate from {@link networkGate} on purpose, and the difference is the whole reason `live-project`
- * has a gate of its own: reaching `staging.expo.dev` is a fact about an EAS account's environment,
+ * has a gate of its own: reaching `api.expo.dev` is a fact about an EAS account's environment,
  * and reaching the registry is a fact about being online. A suite that only scaffolds and installs
  * must not be gated on a service it never calls.
  */

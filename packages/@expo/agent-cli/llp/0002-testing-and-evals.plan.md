@@ -18,7 +18,7 @@ Testing infrastructure is built first, before feature work. [confirmed, Kudo, 20
 
 1. **Unit tests (vitest).** `bun run test` in this package. Everything deterministic is unit-tested: the project-state probe, decision tables, the impact classifier, tool input/output schemas, skill discovery.
 2. **E2E CLI tests.** (`test:e2e`, `e2e/vitest.config.ts`). Run bins against fixture projects, with no model involved. Per the process-boundary constraint in [[0001-agentic-cli-on-expo-cli]], e2e tests spawn the real `expo` CLI as a subprocess and assert on its JSONL events. The events contract is the API under test. Stubs stand in for sibling CLIs. A stub answers whatever it was written to answer.
-3. **Live CLI tests** (`test:live`, `e2e-live/vitest.config.ts`). The same published surface, against the real thing: a real Metro, a real booted simulator running Expo Go or a development build, a real Hermes debugger connection, and the real EAS service on staging. Nothing runs these automatically. Not `test`, not `test:e2e`, not CI. Each suite spends a simulator, an account, or a deployment. See [[0022-live-tier]].
+3. **Live CLI tests** (`test:live`, `e2e-live/vitest.config.ts`). The same published surface, against the real thing: a real Metro, a real booted simulator running Expo Go or a development build, a real Hermes debugger connection, and the real EAS service on the expo-ci account. Nothing runs these automatically. Not `test`, not `test:e2e`, not CI. Each suite spends a simulator, an account, or a deployment. See [[0022-live-tier]].
 4. **Evals.** A scenario is a fixture project, a task prompt, a driving agent, and a programmatic grader.
 
 ## Eval tiers

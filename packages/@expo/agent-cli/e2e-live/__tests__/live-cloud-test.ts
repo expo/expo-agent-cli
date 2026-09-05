@@ -1,9 +1,9 @@
 // @ref llp/0022-live-tier.plan.md §live-cloud
 //
-// The cloud-simulator half of the live tier. **Written and not yet run by its author** [2026-08-27,
-// wave 20]: the staging cloud-session budget belonged to another wave while this was being written, so
-// llp/0022-live-tier.plan.md §Coverage matrix marks these rows `runnable` rather than filled, and nothing here may be
-// read as evidence until somebody has seen it green.
+// The cloud-simulator half of the live tier. Runs against a real EAS Simulator session on the
+// expo-ci CI account. There is no macOS gate — the device is remote — so it also runs on a Linux CI
+// runner: the `agent-cli-cloud-e2e` EAS workflow runs it for both platforms over a cloudflared
+// tunnel, one billed session per platform.
 //
 // Every expectation in this file comes from wave 19's live run rather than from the type definitions:
 // `wave19-live/` holds the JSON each assertion below was written against, and the sequence it proved is
@@ -82,11 +82,11 @@ import {
   waitForAsync,
 } from '../utils';
 
-const staging = easCiGate();
+const easCi = easCiGate();
 const gate = allOf(
   builtBinGate(),
   cloudOptInGate(),
-  staging.gate,
+  easCi.gate,
   packageRunnerGate(),
   networkGate(),
   publicOriginGate()
@@ -125,7 +125,7 @@ function jsonSessionId(stdout: string): string | null {
   }
 }
 
-describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on staging', () => {
+describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-ci', () => {
   const run = new LiveRun('live-cloud');
   let projectRoot = '';
   let port = 0;
@@ -170,7 +170,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     projectRoot = parseJson(created).projectRoot;
 
     // `eas simulator` refuses a project EAS has never heard of, and a scratch scaffold is exactly
-    // that. Link it to the suite's standing staging project (the same one `live-eas` deploys to)
+    // that. Link it to the suite's standing CI project (the same one `live-eas` deploys to)
     // instead of creating one per run: `eas init --id` is what the refusal itself suggests, but it
     // stops on the slug mismatch in non-interactive mode, so the link is written the way `eas init`
     // would have written it. Identity comes from the livecheck fixture, or from
@@ -451,33 +451,39 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
     // never skipped on the strength of `--cloud` — wave 21's correction — so this attempt exists on
     // every run, whichever state the session is in.
     const attempts = Object.fromEntries(report.attempts.map((a: any) => [a.method, a]));
+    // **Rung 1 is always taken** — never skipped on the strength of `--cloud` (wave 21) — so this
+    // attempt exists on every run, whichever state the session is in.
     expect(attempts['dev-server']).toBeTruthy();
-    expect(attempts['dev-server'].ok).toBe(false);
-    expect(attempts['dev-server'].reason).toContain(
-      report.commandSocketClients > 0 ? 'did not act on it' : 'nothing to broadcast to'
-    );
 
-    // **And the relaunch is what reloads a cloud session, from either state.** Both of them have
-    // now been seen live, hours apart, on the same suite: zero clients on the socket (wave 19's
-    // state), and one client that took the broadcast and did nothing with it — 180 s of a 180 s
-    // budget, until the ladder learned to climb (F97, F99, 2026-08-27). So this asserts rung 2 and
-    // its two verbs, and does not pretend to know which state the session will be in.
-    expect(report.method).toBe('device');
-    expect(attempts.device.ok).toBe(true);
-    // The cloud relaunch is two verbs, and the reason names both — that is the mechanism, quoted.
-    expect(attempts.device.reason).toContain('--relaunch');
-    expect(attempts.device.reason).toContain('open');
-    // The relaunch costs the app's JavaScript state only when an app was there to lose it. The cloud
-    // rung shares `withRelaunchCost` with the local rung, which names the cost only for a pre-relaunch
-    // app count above zero — so a session that relaunched a not-running app says nothing about a cost
-    // that was not spent, and it would be a lie to demand the sentence here. When the cost IS named,
-    // the reason it was reached for has to agree with the socket count in the same object (F99).
-    if (attempts.device.reason.includes("costs the app's JavaScript state")) {
-      expect(attempts.device.reason).toContain(
-        (report.commandSocketClients ?? 0) > 0
-          ? 'nothing was seen to come of it'
-          : 'no client was registered'
+    // **Which rung reloads a cloud session is the platform's to decide** [observed — 2026-09-05, both
+    // platforms live in one workflow run]. On an Android cloud Expo Go the command-socket broadcast
+    // reaches the app and it acts on it, so rung 1 is enough and the ladder never climbs. On iOS it
+    // does not take — zero clients, or one that took the broadcast and did nothing with it (F97, F99,
+    // 2026-08-27) — so the ladder climbs to the device relaunch. The CLI reloads at the cheapest rung
+    // that works; this asserts whichever one that was, rather than a platform it guessed.
+    if (attempts['dev-server'].ok) {
+      expect(report.method).toBe('dev-server');
+    } else {
+      expect(attempts['dev-server'].reason).toContain(
+        report.commandSocketClients > 0 ? 'did not act on it' : 'nothing to broadcast to'
       );
+      expect(report.method).toBe('device');
+      expect(attempts.device.ok).toBe(true);
+      // The cloud relaunch is two verbs, and the reason names both — that is the mechanism, quoted.
+      expect(attempts.device.reason).toContain('--relaunch');
+      expect(attempts.device.reason).toContain('open');
+      // The relaunch costs the app's JavaScript state only when an app was there to lose it. The cloud
+      // rung shares `withRelaunchCost` with the local rung, which names the cost only for a pre-relaunch
+      // app count above zero — so a session that relaunched a not-running app says nothing about a cost
+      // that was not spent, and it would be a lie to demand the sentence here. When the cost IS named,
+      // the reason it was reached for has to agree with the socket count in the same object (F99).
+      if (attempts.device.reason.includes("costs the app's JavaScript state")) {
+        expect(attempts.device.reason).toContain(
+          (report.commandSocketClients ?? 0) > 0
+            ? 'nothing was seen to come of it'
+            : 'no client was registered'
+        );
+      }
     }
   });
 
