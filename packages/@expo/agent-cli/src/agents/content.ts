@@ -4,7 +4,7 @@
 // the same project always produces the same block and a rerun rewrites nothing.
 import { PROGRAM_PREFIX } from '../programName';
 import type { ProjectState } from '../project/types';
-import { defaultSmokePlatform, smokeCommand } from '../smoke/suggest';
+import { defaultSmokePlatform, devCommand, smokeCommand } from '../smoke/suggest';
 
 export interface AgentsMdContext {
   /** The probed project state, from `probeProjectStateAsync`. */
@@ -51,7 +51,7 @@ export function generateAgentsMdBlock({ state, projectName, skillsDirs }: Agents
     `- \`${PROGRAM_PREFIX} status --json\` — the same report as one object, with the raw project probe under \`probe\``,
     `- \`${PROGRAM_PREFIX} status --explain\` — the deep dive: which sources changed, whether an update can ship over the air, and whether EAS already has a build for this fingerprint`,
     `- \`${PROGRAM_PREFIX} status --assert js-only\` — a gate on what a change costs: exit 20 when it costs more than the class named, 22 when nothing could be measured, 0 otherwise`,
-    `- \`${PROGRAM_PREFIX} dev\` — get the app onto a device: it prints the plan, then runs it; \`${PROGRAM_PREFIX} dev --plan\` prints the steps without running them`,
+    `- \`${devCommand(defaultSmokePlatform(state.nativeDirs))}\` — get the app onto that platform's device: it prints the plan, then runs it. The platform flag (--ios, --android, --web) is required; add --plan to print the steps without running them`,
     `- \`${PROGRAM_PREFIX} start\` — \`expo start\` and nothing else: a dev server no planning may touch`,
     `- \`${PROGRAM_PREFIX} install <pkg>\` — install a package and report what it changes natively`,
     `- \`${PROGRAM_PREFIX} typecheck\` — run the TypeScript compiler of this project as a gate: exit 20 with the diagnostics, exit 0 when there are none. A bundle that builds and an app that does not throw do not cover this.`,

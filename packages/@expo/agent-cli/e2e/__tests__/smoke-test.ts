@@ -539,7 +539,7 @@ describe('@expo/agent-cli smoke', () => {
       expect(result.exitCode).toBe(20);
       expect(result.stderr).toContain('Why:');
       expect(result.stderr).toContain('How:');
-      expect(result.all).toContain('npx @expo/agent-cli dev --detach');
+      expect(result.all).toContain('npx @expo/agent-cli dev --ios --detach');
     });
   });
 

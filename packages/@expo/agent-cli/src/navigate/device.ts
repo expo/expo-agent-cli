@@ -314,7 +314,7 @@ export async function resolveDeviceAsync(
       [
         'No booted iOS simulator was found, so there is no device to open the deep link on.',
         `Why: ${probe.reason}.`,
-        `How: boot a simulator (from Xcode, or with "xcrun simctl boot"), start the dev server with "${PROGRAM_PREFIX} dev --detach", then run this command again.`,
+        `How: boot a simulator (from Xcode, or with "xcrun simctl boot"), start the dev server with "${PROGRAM_PREFIX} dev --ios --detach", then run this command again.`,
       ],
       context,
       cloud.probe

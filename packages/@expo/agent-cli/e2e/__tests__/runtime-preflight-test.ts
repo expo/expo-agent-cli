@@ -80,7 +80,9 @@ describe('no dev server is running', () => {
     expect(error.message).toContain(DEAD_URL);
     expect(error.message).toContain('npx @expo/agent-cli dev --detach');
     expect(error.message).toContain('npx @expo/agent-cli navigate /');
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --detach');
+    expect(error.suggestedCommand).toBe(
+      `npx @expo/agent-cli dev --detach --${process.platform === 'darwin' ? 'ios' : 'android'}`
+    );
     // And the counts the refusal observed, so an agent branches on numbers (llp/0010 §The `--json`
     // error envelope).
     expect(error.data).toEqual({
@@ -117,7 +119,9 @@ describe('no dev server is running', () => {
 
     const { error } = JSON.parse(result.stdout);
     expect(error.message).toContain('npx @expo/agent-cli dev --detach --tunnel');
-    expect(error.message).toContain('npx @expo/agent-cli navigate / --cloud');
+    expect(error.message).toContain(
+      `npx @expo/agent-cli navigate / --${process.platform === 'darwin' ? 'ios' : 'android'} --cloud`
+    );
   });
 });
 

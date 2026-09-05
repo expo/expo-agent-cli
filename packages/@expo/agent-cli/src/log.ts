@@ -118,6 +118,7 @@ export const Log = {
   exception,
   warn,
   log,
+  progress,
   debug,
   clear,
   exit,

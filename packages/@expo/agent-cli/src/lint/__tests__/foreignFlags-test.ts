@@ -61,10 +61,11 @@ describe('the flags this CLI writes onto a command line', () => {
     // Before a row lands here, run the command once against `npx <package>@latest` in a project
     // outside this repository (llp/0002 §A flag is not shipped until it has run against the published binary).
     //
-    // Two rows are this CLI re-invoking itself and need no such run: the `--help` `cli.ts`
-    // normalizes onto a command's own argv, and the three flags `smoke` gives `@expo/agent-cli
-    // dev`. They are here because leaving them out would mean keeping an exclusion list, which is
-    // a place for a real one to hide.
+    // A few rows are this CLI re-invoking itself and need no such run: the `--help` `cli.ts`
+    // normalizes onto a command's own argv, and the flags `smoke` gives `@expo/agent-cli dev` —
+    // `--no-open` among them, which is `dev`'s own flag for "serve without opening the app". They
+    // are here because leaving them out would mean keeping an exclusion list, which is a place for
+    // a real one to hide.
     //
     // `--yes  src/utils/easCli.ts` is the one row whose command line belongs to **npm's exec**
     // rather than to a member of the Expo family: it is what keeps the EAS CLI's runner from
@@ -124,6 +125,10 @@ describe('the flags this CLI writes onto a command line', () => {
     // an Expo Go 57.0.9, so a **downgrade**, which is the case `-d` exists for: without it the same
     // command fails with `INSTALL_FAILED_VERSION_DOWNGRADE`].
     //
+    // The two `-a  src/dev/openApp.ts` rows are macOS's own `open -a` (Simulator, then DeviceHub
+    // on Xcode 27), which surfaces the simulator window for a person. LaunchServices, not an Expo
+    // CLI, and no Automation grant — that absence is the whole reason the module exists.
+    //
     // `-q  src/project/nativeCode.ts` is `git check-ignore -q`, which tells a gitignored prebuild
     // directory from one that was `git add -f`'d. Git, not an Expo CLI.
     expect(sweep.foreignFlags.map(({ flag, file }) => `${flag}  ${file}`).sort())
@@ -141,6 +146,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--json  src/install/resolveOptions.ts",
           "--no-bundler  src/device/installDevBuild.ts",
           "--no-install  src/new/createExpo.ts",
+          "--no-open  src/smoke/smokeAsync.ts",
           "--noEmit  src/typecheck/checkAsync.ts",
           "--non-interactive  src/deploy/deployAsync.ts",
           "--platform  src/deploy/deployAsync.ts",
@@ -159,6 +165,8 @@ describe('the flags this CLI writes onto a command line', () => {
           "--yes  src/smoke/smokeAsync.ts",
           "--yes  src/utils/easCli.ts",
           "-Fpc  src/dev/portListener.ts",
+          "-a  src/dev/openApp.ts",
+          "-a  src/dev/openApp.ts",
           "-ano  src/dev/portListener.ts",
           "-avd  src/device/bootDevice.ts",
           "-bool  src/device/approveScheme.ts",

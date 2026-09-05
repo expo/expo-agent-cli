@@ -80,23 +80,23 @@ const LIVENESS_TIMEOUT_MS = 5_000;
 const TARGET_SETTLE_POLL_MS = 500;
 
 /**
- * The command line `--start` runs `@expo/agent-cli dev` with.
+ * The command line `--start` runs `@expo/agent-cli dev` with, before the platform flag is added.
  *
- * **The platform flag is deliberately absent**, and that is a correction rather than an omission
- * [observed live — 2026-08-24, on a Mac that had granted no Automation permission]. `--ios` makes
- * the plan run `expo start --ios`, which drives Simulator.app through AppleScript; the Expo CLI
- * does not catch a refusal there and the dev server exits with it (llp/0010 §Forwarded codes, and the exception
- * reports a failure, and its upstream ask). This run watched exactly that: the first three phases
- * answered against a dev server that was already dying, and the fourth found nothing.
+ * **`--no-open` is load-bearing.** `dev` opens the app itself once its dev server is up
+ * (llp/0026) — and this command must be the one that opens, because its phases carry the budgets
+ * and the verdicts a gate reports on. Two opens racing each other would also be two apps' worth of
+ * device state for one report.
  *
- * The recovery llp/0004 records for it is the one this command performs anyway — start the dev
- * server without opening anything, then open the app with `navigate`, which deep-links through
- * `simctl openurl` and needs no Automation grant. So there is nothing for the platform flag to
- * add here, and one whole failure mode for it to remove.
+ * Exported for the test table, because the flag's absence is invisible in a diff and expensive live.
  *
- * Exported for the test table, because that absence is invisible in a diff and expensive live.
+ * @ref llp/0026-dev-owns-the-open.rfc.md
  */
-export const START_DEV_SERVER_ARGV: readonly string[] = ['--yes', '--detach', '--wait-ready'];
+export const START_DEV_SERVER_ARGV: readonly string[] = [
+  '--yes',
+  '--detach',
+  '--wait-ready',
+  '--no-open',
+];
 
 /**
  * The port `--start` asks the dev server for, out of the dev server this run was pointed at.
@@ -326,7 +326,7 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
 
     // The detach path of `@expo/agent-cli dev`, with the readiness wait on: a foreground start would never
     // return, and this run has seven more phases to perform (llp/0004 §Daemonization).
-    // The argv is `START_DEV_SERVER_ARGV`, whose documentation says why it carries no platform.
+    // The argv is `START_DEV_SERVER_ARGV`, whose documentation says why it carries `--no-open`.
     startDevServer: async () => {
       // @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
       //
@@ -361,7 +361,11 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
         // read above is about the project as it was before it.
         forgetTarget();
       }
-      const argv = [...START_DEV_SERVER_ARGV, ...startPortArgs(options.devServerUrl)];
+      const argv = [
+        `--${options.platform}`,
+        ...START_DEV_SERVER_ARGV,
+        ...startPortArgs(options.devServerUrl),
+      ];
       try {
         // `print: false`: the detached start is one phase of this run, and this run prints one
         // report. Its `cli:dev_detach` event is still emitted, so nothing about it is hidden.

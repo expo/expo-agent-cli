@@ -221,7 +221,9 @@ describeLive('live-project', gate)(
         expect(impact.expoGoBundled).toBe(false);
         expect(impact.action).toBe('prebuild-and-build');
         const dev = payload.followups.find((entry: any) => entry.id === 'dev');
-        expect(dev.command).toBe('npx @expo/agent-cli dev');
+        expect(dev.command).toBe(
+          `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
+        );
         expect(dev.why).toContain('react-native-mmkv');
       });
 
@@ -616,7 +618,9 @@ describeLive('live-project', gate)(
         });
         expectExit(synced, 0);
         expect(
-          parseJson(synced).linked.some((l: string) => l.includes('bad name') || l.includes('escaped'))
+          parseJson(synced).linked.some(
+            (l: string) => l.includes('bad name') || l.includes('escaped')
+          )
         ).toBe(false);
 
         fs.rmSync(skillsRoot, { recursive: true, force: true });
@@ -828,7 +832,11 @@ describeLive('live-project', gate)(
             ['dev:stop', '--port', String(port), '--force', '--json'],
             { label: 'dev-stop-force-foreign' }
           );
-          expectExit(result, 20, 'a port that is not an Expo dev server is not this project to stop');
+          expectExit(
+            result,
+            20,
+            'a port that is not an Expo dev server is not this project to stop'
+          );
           const report = parseJson(result);
           expect(report.stopped).toBe(false);
           expect(report.forced).toBe(false);

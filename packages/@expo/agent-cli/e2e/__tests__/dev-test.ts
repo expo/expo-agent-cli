@@ -254,7 +254,7 @@ describe('@expo/agent-cli dev', () => {
       const plan = JSON.parse(next.stdout);
       // The whole point: one step, and it is the dev server.
       expect(plan.steps.map((step: { argv: string[] }) => step.argv)).toEqual([
-        ['expo', 'start', '--dev-client', '--ios'],
+        ['expo', 'start', '--dev-client'],
       ]);
     });
 
@@ -263,14 +263,99 @@ describe('@expo/agent-cli dev', () => {
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local']);
 
       expect(result.exitCode).toBe(0);
-      // Exactly once, not twice: the flag is in the plan's own argv now, and the passthrough that
-      // appends the user's `expo start` options must not add it a second time.
-      expect(invocationArgs(projectRoot)).toEqual([['start', '--dev-client', '--ios']]);
+      // No platform flag at all: the open is this command's own act now (llp/0026).
+      expect(invocationArgs(projectRoot)).toEqual([['start', '--dev-client']]);
       // Nothing was built, so the record is untouched.
       expect(readLastBuildRecord(projectRoot)).toEqual({
         ios: RECORDED_HASH,
         android: RECORDED_HASH,
       });
+    });
+  });
+
+  // The loop the fingerprint record exists for [asked — Kudo, 2026-09-05]: after one recorded
+  // build, `dev` knows whether the project needs a prebuild or a build, and starts the fastest way
+  // that is still correct. The stub fingerprint hashes the app config and package.json here
+  // (`STUB_FINGERPRINT_HASH_FROM_PROJECT`), so editing those files moves the fingerprint the way a
+  // real hasher would — the chain under test is edit → new hash → record no longer matches → the
+  // plan builds again.
+  describe('the plan after the project changes', () => {
+    const HASH_FROM_PROJECT = { STUB_FINGERPRINT_HASH_FROM_PROJECT: '1' };
+
+    /** Build once, so the record matches the project exactly as it is on disk now. */
+    async function recordedProjectAsync(): Promise<string> {
+      const projectRoot = await setupAsync('dev-client-fresh-app');
+      const built = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local'], {
+        env: HASH_FROM_PROJECT,
+      });
+      expect(built.exitCode).toBe(0);
+      return projectRoot;
+    }
+
+    /**
+     * The steps `dev --plan` would run, as argv lists.
+     *
+     * `--local` pins the backend: on a CI box with no Xcode the selector would route the rebuild
+     * to EAS, and these tests are about *when* a build is planned, not where it runs.
+     */
+    async function planStepsAsync(projectRoot: string): Promise<string[][]> {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--plan', '--ios', '--local', '--json'],
+        { env: HASH_FROM_PROJECT }
+      );
+      expect(result.exitCode).toBe(0);
+      return JSON.parse(result.stdout).steps.map((step: { argv: string[] }) => step.argv);
+    }
+
+    it('starts the dev server and nothing else while nothing changed', async () => {
+      const projectRoot = await recordedProjectAsync();
+
+      expect(await planStepsAsync(projectRoot)).toEqual([['expo', 'start', '--dev-client']]);
+    });
+
+    it('prebuilds and builds again after the app config changed, because the project is CNG', async () => {
+      const projectRoot = await recordedProjectAsync();
+
+      const configPath = path.join(projectRoot, 'app.json');
+      const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+      config.expo.ios = { ...config.expo.ios, bundleIdentifier: 'com.example.changed' };
+      await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
+
+      expect(await planStepsAsync(projectRoot)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
+    it('builds again after a dependency changed the fingerprint', async () => {
+      const projectRoot = await recordedProjectAsync();
+
+      const packagePath = path.join(projectRoot, 'package.json');
+      const packageJson = JSON.parse(await fs.promises.readFile(packagePath, 'utf8'));
+      packageJson.dependencies = { ...packageJson.dependencies, 'react-native-mmkv': '^3.0.0' };
+      await fs.promises.writeFile(packagePath, JSON.stringify(packageJson, null, 2));
+
+      expect(await planStepsAsync(projectRoot)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
+    it('builds without a prebuild on a bare project, whose native directories are checked in', async () => {
+      const projectRoot = await recordedProjectAsync();
+      await fs.promises.mkdir(path.join(projectRoot, 'ios'), { recursive: true });
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'ios', 'Podfile'),
+        "platform :ios, '15.1'\n"
+      );
+
+      const configPath = path.join(projectRoot, 'app.json');
+      const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+      config.expo.ios = { ...config.expo.ios, bundleIdentifier: 'com.example.changed' };
+      await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
+
+      expect(await planStepsAsync(projectRoot)).toEqual([['expo', 'run:ios']]);
     });
   });
 
@@ -291,7 +376,7 @@ describe('@expo/agent-cli dev', () => {
     it('prints exactly one JSON object, with no subprocess output after it', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--yes', '--json']);
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json']);
 
       expect(result.exitCode).toBe(0);
       // The property, checked as the property: the stub writes its own lines on stdout, and this
@@ -304,7 +389,7 @@ describe('@expo/agent-cli dev', () => {
       const projectRoot = await setupAsync('go-app');
       const eventsFile = path.join(projectRoot, 'events.jsonl');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--yes', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json'], {
         env: { STUB_EXPO_EXIT_CODE: '1', STUB_EXPO_STDERR: NEEDS_INPUT, LOG_EVENTS: eventsFile },
         reject: false,
       });
@@ -334,7 +419,7 @@ describe('@expo/agent-cli dev', () => {
     it('starts on a free port it picks when the port is busy and none was named', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--yes', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json'], {
         env: { STUB_EXPO_PORT_BUSY: '8180' },
         reject: false,
       });
@@ -358,7 +443,7 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--yes', '--json', '--port', '8180'],
+        ['dev', '--ios', '--yes', '--json', '--port', '8180'],
         { env: { STUB_EXPO_PORT_BUSY: '8180' }, reject: false }
       );
 
@@ -375,7 +460,7 @@ describe('@expo/agent-cli dev', () => {
     it('exits 7 in human mode too, where the output is still captured', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--yes'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes'], {
         env: { STUB_EXPO_EXIT_CODE: '1', STUB_EXPO_STDERR: NEEDS_INPUT },
         reject: false,
       });
@@ -393,7 +478,7 @@ describe('@expo/agent-cli dev', () => {
     it('reports a failed step as a failure, and names no dev server', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--yes', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json'], {
         env: { STUB_EXPO_EXIT_CODE: '9' },
         reject: false,
       });
@@ -441,7 +526,7 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--yes', '--json', '--go', '--offline', '--clear'],
+        ['dev', '--ios', '--yes', '--json', '--go', '--offline', '--clear'],
         { reject: false }
       );
 
@@ -463,7 +548,7 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--json', '--tunnel', '--go'],
+        ['dev', '--ios', '--json', '--tunnel', '--go'],
         {
           env: { STUB_EXPO_DEV_SERVER_PORT: '8081' },
         }
@@ -480,7 +565,7 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--json', '--host', 'tunnel'],
+        ['dev', '--ios', '--json', '--host', 'tunnel'],
         {
           env: { STUB_EXPO_DEV_SERVER_PORT: '8081' },
         }
@@ -495,9 +580,13 @@ describe('@expo/agent-cli dev', () => {
     it('never names the LAN URL in the follow-ups of a tunnelled run', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--json', '--tunnel'], {
-        env: { STUB_EXPO_DEV_SERVER_PORT: '8081' },
-      });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--json', '--tunnel'],
+        {
+          env: { STUB_EXPO_DEV_SERVER_PORT: '8081' },
+        }
+      );
 
       const followups = JSON.parse(result.stdout).followups as { id: string; command: string }[];
       expect(followups.some((followup) => followup.command.startsWith('exp://'))).toBe(false);
@@ -509,9 +598,11 @@ describe('@expo/agent-cli dev', () => {
     it('forwards the port to the dev server and names it in the follow-ups', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--json', '--port', '8124'], {
-        env: { STUB_EXPO_DEV_SERVER_PORT: '8124' },
-      });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--json', '--port', '8124'],
+        { env: { STUB_EXPO_DEV_SERVER_PORT: '8124' } }
+      );
 
       expect(result.exitCode).toBe(0);
       expect(invocationArgs(projectRoot)).toEqual([['start', '--go', '--port', '8124']]);
@@ -561,7 +652,7 @@ describe('@expo/agent-cli dev', () => {
   describe('go-app — a plan of one step', () => {
     it('starts the dev server for Expo Go', async () => {
       const projectRoot = await setupAsync('go-app');
-      const result = await executeAgentCliAsync(projectRoot, ['dev']);
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios']);
 
       expect(result.exitCode).toBe(0);
       expect(invocationArgs(projectRoot)).toEqual([['start', '--go']]);
@@ -575,7 +666,7 @@ describe('@expo/agent-cli dev', () => {
       // The dev-server step of a plan is the same wrapper `@expo/agent-cli start` uses, so it takes the
       // same lock — a `dev` run has to be findable exactly like a `start` run.
       const projectRoot = await setupAsync('go-app');
-      const child = spawnAgentCli(projectRoot, ['dev'], {
+      const child = spawnAgentCli(projectRoot, ['dev', '--ios'], {
         env: { STUB_EXPO_DELAY_MS: '30000', STUB_EXPO_DEV_SERVER_PORT: '8088' },
       });
       try {

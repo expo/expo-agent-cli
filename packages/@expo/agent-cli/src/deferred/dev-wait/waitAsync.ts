@@ -58,7 +58,12 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
   });
 
   if (!discovery.reachable) {
-    throw noDevServerError(discovery.devServerUrl, discovery.reason, options.devServerUrl != null);
+    throw noDevServerError(
+      discovery.devServerUrl,
+      discovery.reason,
+      options.devServerUrl != null,
+      options.platform
+    );
   }
 
   // One long-lived request, not a poll: `/status` answers when the bundler does, so a poll would
@@ -227,7 +232,8 @@ function bundleEvent(bundle: BundleCheckResult | null) {
 function noDevServerError(
   devServerUrl: string,
   reason: string | undefined,
-  explicit: boolean
+  explicit: boolean,
+  platform: 'ios' | 'android' | 'web'
 ): CommandError {
   const error = new CommandError(
     'NO_DEV_SERVER',
@@ -238,10 +244,10 @@ function noDevServerError(
           ? ''
           : ` The project's dev-server lock, the port in its start.log, 8081 and the ports "expo start" falls back to were all tried.`
       }`,
-      `How: start a dev server with "${PROGRAM_PREFIX} dev" and run this command again. ${howToNameTheDevServer(explicit)}`,
+      `How: start a dev server with "${PROGRAM_PREFIX} dev --${platform}" and run this command again. ${howToNameTheDevServer(explicit)}`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev --${platform}`;
   return error;
 }
 

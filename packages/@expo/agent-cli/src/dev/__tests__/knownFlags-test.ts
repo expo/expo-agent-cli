@@ -79,7 +79,7 @@ describe('resolveDevOptions checks the flags first', () => {
   // The check runs before the combination rules, so a run with two problems is told about the
   // one it can act on: an option that does not exist cannot have a meaningful interaction.
   it(`still resolves a command made only of options both CLIs have`, () => {
-    const options = resolveDevOptions(['--yes', '--go', '--port', '8195', '--json']);
+    const options = resolveDevOptions(['--ios', '--yes', '--go', '--port', '8195', '--json']);
 
     expect(options.port).toBe(8195);
     expect(options.json).toBe(true);

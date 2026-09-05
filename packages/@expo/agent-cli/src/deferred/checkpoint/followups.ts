@@ -6,7 +6,7 @@
 // put back is everything derived from them: `node_modules` and the installed app.
 
 import { capFollowUps, type FollowUp } from '../../followups/types';
-import { PROGRAM_PREFIX } from '../../programName';
+import { devCommand, hostPlatform } from '../../smoke/suggest';
 
 export interface UndoFollowUpInput {
   /** Project-relative paths the restore wrote. */
@@ -37,7 +37,7 @@ export function buildUndoFollowUps({ paths }: UndoFollowUpInput): FollowUp[] {
   if (paths.some((filePath) => NATIVE_PATH_PATTERN.test(filePath))) {
     followups.push({
       id: 'dev',
-      command: `${PROGRAM_PREFIX} dev`,
+      command: devCommand(hostPlatform()),
       why: 'Native project files were restored, so the app that is installed may no longer match the project: this plans and makes the build that does.',
     });
   }

@@ -34,7 +34,9 @@ describe(buildInstallFollowUps, () => {
     });
 
     expect(ids(followups)).toEqual(['dev', 'typecheck']);
-    expect(followups[0]!.command).toBe('npx @expo/agent-cli dev');
+    expect(followups[0]!.command).toBe(
+      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
+    );
     expect(followups[0]!.why).toContain('react-native-fancy');
     expect(followups[0]!.why).toContain('development build');
   });

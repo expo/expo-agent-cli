@@ -4,8 +4,12 @@
 
 ### 🛠 Breaking changes
 
+- `dev` now requires a platform flag (`--ios`, `--android`, or `--web`), like `smoke`. The plan always acts on the named platform: a fresh plan runs `expo start --<platform>`, which boots a simulator or an emulator and opens the app, and a stale plan prebuilds and builds through `expo run:<platform>`. A run with no platform exits 1 with a one-line usage error. Every suggestion the CLI prints now states a platform too. ([#7](https://github.com/expo/expo-agent-cli/pull/7) by [@kudo](https://github.com/kudo))
+
 ### 🎉 New features
 
+- `dev` opens the app itself once its dev server is up, through the same device tools `smoke` and `navigate` use: it boots a simulator or an emulator when none is up, installs the Expo Go release the project's SDK ships when it is missing, and deep-links through `simctl`/`adb` — never AppleScript, so it works headless and needs no macOS Automation grant. The platform flag no longer reaches `expo start` at all. ([#7](https://github.com/expo/expo-agent-cli/pull/7) by [@kudo](https://github.com/kudo))
+- `dev --no-open` serves without opening the app, for a caller that opens it itself — `smoke` starts its dev server this way. ([#7](https://github.com/expo/expo-agent-cli/pull/7) by [@kudo](https://github.com/kudo))
 - Initial agent-cli work. ([#49654](https://github.com/expo/expo-agent-cli/pull/1) by [@kudo](https://github.com/kudo))
 
 ### 🐛 Bug fixes

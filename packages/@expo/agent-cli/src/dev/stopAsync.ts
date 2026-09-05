@@ -35,6 +35,7 @@ import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
+import { devCommand, hostPlatform } from '../smoke/suggest';
 import { PACKAGER_STATUS_READY } from '../runtime/waitReady';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { windowsTaskkillCommand } from '../utils/windowsShim';
@@ -557,7 +558,7 @@ function buildFollowUps(report: DevStopResultJson): FollowUp[] {
     }
     followups.push({
       id: 'dev',
-      command: `${PROGRAM_PREFIX} dev --yes`,
+      command: devCommand(hostPlatform(), '--yes'),
       why: 'The dev server is stopped, so this is what starts one again when the app is needed.',
     });
     return followups;

@@ -36,6 +36,18 @@ import { simulatorHasAppAsync } from './installedApps';
 /** The serial an emulator started with `-ports 5554,5555` is always listed under. */
 export const EMULATOR_SERIAL = 'emulator-5554';
 
+/**
+ * How long a boot may take, per platform, before it is called a failure.
+ *
+ * Both are measured rather than chosen. A cold iOS simulator takes roughly a minute; an Android
+ * emulator takes several, which is why the live tier waits four. Generous, because the cost of a
+ * bound that is too short is a boot failure reported for a device that was coming up fine.
+ */
+export const BOOT_DEVICE_TIMEOUT_MS: Record<'ios' | 'android', number> = {
+  ios: 120_000,
+  android: 240_000,
+};
+
 /** How often a boot wait re-asks the device whether it is up. */
 const BOOT_POLL_MS = 2_000;
 

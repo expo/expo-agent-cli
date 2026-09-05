@@ -45,6 +45,7 @@ import {
   type CloudRunResult,
 } from '../../device/cloudSimulator';
 import { resolveDeviceAsync, type NavigateDevice } from '../../navigate/device';
+import { hostPlatform } from '../../smoke/suggest';
 import { resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { readConfiguredAppId, resolveAppId } from '../appId';
 import { debugEvent } from './events';
@@ -92,7 +93,11 @@ export async function reloadOnCloudSimulatorAsync(
   // is no `adb reverse` for a session in a datacenter. Refusing here is what stops the relaunch from
   // terminating an app it cannot start again.
   if (resolved.hostType === 'localhost' || resolved.hostType === 'lan') {
-    throw cloudNeedsTunnelError(resolved.url, resolved.hostType);
+    throw cloudNeedsTunnelError(
+      resolved.url,
+      resolved.hostType,
+      options.platform ?? hostPlatform()
+    );
   }
 
   const device = await resolveDeviceAsync(options.platform, {

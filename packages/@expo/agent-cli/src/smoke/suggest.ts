@@ -15,6 +15,11 @@ export function smokeCommand(platform: NativePlatform): string {
   return `${PROGRAM_PREFIX} smoke --${platform}`;
 }
 
+/** The `dev` command for a platform, always with the flag it requires too. */
+export function devCommand(platform: PlanPlatform, flags?: string): string {
+  return `${PROGRAM_PREFIX} dev --${platform}${flags ? ` ${flags}` : ''}`;
+}
+
 /** A platform another part of the run already settled, or null for `web`/nothing. */
 export function statedSmokePlatform(value: PlanPlatform | null | undefined): NativePlatform | null {
   return value === 'ios' || value === 'android' ? value : null;
@@ -24,12 +29,26 @@ export function statedSmokePlatform(value: PlanPlatform | null | undefined): Nat
  * The platform to name when nothing else did.
  *
  * A single checked-in native directory is the project's own answer. Otherwise only macOS can build
- * for iOS. This is the rule `status` and `dev` already default to, so their reports agree.
+ * for iOS. This is the rule `status` still defaults to, and the one `dev` used before its platform
+ * flag became required — so a stated suggestion and a `status` report agree.
  */
-export function defaultSmokePlatform(nativeDirs: { ios: boolean; android: boolean }): NativePlatform {
+export function defaultSmokePlatform(nativeDirs: {
+  ios: boolean;
+  android: boolean;
+}): NativePlatform {
   if (nativeDirs.ios !== nativeDirs.android) {
     return nativeDirs.ios ? 'ios' : 'android';
   }
+  return hostPlatform();
+}
+
+/**
+ * The platform to state when nothing at hand names one: the host's own.
+ *
+ * For a suggestion only, never for a run — a stated platform is text the caller reads and can
+ * change, where a default inside a command would be an invisible guess.
+ */
+export function hostPlatform(): NativePlatform {
   return process.platform === 'darwin' ? 'ios' : 'android';
 }
 

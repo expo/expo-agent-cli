@@ -204,7 +204,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
         : []),
       {
         id: 'dev-detach',
-        command: `${PROGRAM_PREFIX} dev --detach --yes --wait-ready`,
+        command: `${PROGRAM_PREFIX} dev --${input.platform} --detach --yes --wait-ready`,
         why: input.bootstrap
           ? 'This run tried to start a dev server and could not, so starting one on its own reports what stops it — and leaves it running rather than taking it away again.'
           : 'Nothing answered as a dev server, and --no-start made this run attach-only. That starts one and gives the terminal back.',

@@ -104,7 +104,9 @@ describe(`${preflightRuntimeAsync.name} with no dev server`, () => {
     expect(error.message).toContain(devServerUrl);
     expect(error.message).toContain('npx @expo/agent-cli dev --detach');
     expect(error.message).not.toContain('npx expo start');
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --detach');
+    expect(error.suggestedCommand).toBe(
+      `npx @expo/agent-cli dev --detach --${process.platform === 'darwin' ? 'ios' : 'android'}`
+    );
   });
 
   // Both halves of the family ask the same question, so the answer is the same object: an agent
@@ -137,7 +139,9 @@ describe(`${preflightRuntimeAsync.name} with no dev server`, () => {
     }).catch((e) => e);
 
     expect(error.message).toContain('npx @expo/agent-cli dev --detach --tunnel');
-    expect(error.message).toContain('npx @expo/agent-cli navigate / --cloud');
+    expect(error.message).toContain(
+      `npx @expo/agent-cli navigate / --${process.platform === 'darwin' ? 'ios' : 'android'} --cloud`
+    );
   });
 
   it(`should not retry a dev server that does not answer`, async () => {
@@ -326,9 +330,10 @@ describe(reachTheAppLadder, () => {
     );
   });
 
-  it(`offers no platform flag when the caller named none`, () => {
+  // `dev` requires a platform, so the ladder states the host's when the caller named none.
+  it(`states the host's platform when the caller named none`, () => {
     expect(reachTheAppLadder({ state: 'no-dev-server', cloud: false })).toContain(
-      'npx @expo/agent-cli dev --detach"'
+      `npx @expo/agent-cli dev --detach --${process.platform === 'darwin' ? 'ios' : 'android'}"`
     );
   });
 });

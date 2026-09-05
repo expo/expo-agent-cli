@@ -153,11 +153,13 @@ describe(parseDetachedChildPhase, () => {
   // @ref llp/0021-honest-reports.rfc.md §The rules — F140. The step that
   // opens the app is the step that can kill the dev server after it has answered `/status`, and it
   // is named in the plan table like every other step.
-  it(`reads a dev-server step that also opens a platform`, () => {
+  // An `expo start` step opens nothing any more: `dev` performs the open itself, from its own
+  // process, so a refused Automation grant cannot take the dev server down (llp/0026).
+  it(`reads a start step as one that opens nothing itself`, () => {
     expect(parseDetachedChildPhase(planLog([START_IOS]))).toEqual({
       phase: 'serving',
       step: 'expo start --go --ios --port 9201',
-      opensPlatform: true,
+      opensPlatform: false,
     });
   });
 });
@@ -166,10 +168,10 @@ describe(parseDetachedChildPhase, () => {
 // steps carry work that can end the process *after* the bundler has answered.
 describe(stepOpensPlatform, () => {
   it.each([
-    ['expo start --go --ios --port 9201', true],
-    ['expo start --android', true],
-    ['expo start --go -i', true],
-    ['expo start --web', true],
+    ['expo start --go --ios --port 9201', false],
+    ['expo start --android', false],
+    ['expo start --go -i', false],
+    ['expo start --web', false],
     // Always: `run:*` builds, installs and launches, and the launch drives the same device tools.
     ['expo run:ios', true],
     ['expo run:android --device', true],

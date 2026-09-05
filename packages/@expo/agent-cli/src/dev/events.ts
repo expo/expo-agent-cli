@@ -20,6 +20,16 @@ declare module '2g' {
     // listener). A reader of the stream can see which of them the verdict came from.
     'dev:stop_outcome': { processGone: boolean; lockGone: boolean; portFree: boolean };
     'dev:stop_done': { stopped: boolean; pid: number | null; reason: string | null };
+    // @ref llp/0026-dev-owns-the-open.rfc.md — the acts of the open, so an agent watching the
+    // stream sees the same walk the stderr narration describes.
+    'dev:open_app_boot': { platform: string };
+    'dev:open_app_install_expo_go': { platform: string; replaced: boolean };
+    'dev:open_app_opened': {
+      platform: string;
+      deviceId: string | null;
+      booted: boolean;
+      installedExpoGo: boolean;
+    };
   }
 }
 

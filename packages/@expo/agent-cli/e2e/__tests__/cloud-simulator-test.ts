@@ -794,7 +794,9 @@ describe('@expo/agent-cli runtime:reload --cloud', () => {
 
       expect(result.exitCode).toBe(1);
       expect(JSON.parse(result.stdout).error.code).toBe('CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER');
-      expect(result.stderr).toContain('dev --detach --tunnel');
+      expect(result.stderr).toContain(
+        `dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --tunnel`
+      );
       expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:exec')).toBe(false);
     } finally {
       await stub.close();

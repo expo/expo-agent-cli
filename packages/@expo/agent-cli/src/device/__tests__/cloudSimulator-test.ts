@@ -898,17 +898,17 @@ describe(cloudSessionUnavailableError, () => {
 
 describe(cloudNeedsTunnelError, () => {
   it(`refuses a loopback URL and names the tunnel as the fix`, () => {
-    const error = cloudNeedsTunnelError('exp://127.0.0.1:8081/--/?', 'localhost');
+    const error = cloudNeedsTunnelError('exp://127.0.0.1:8081/--/?', 'localhost', 'ios');
 
     expect(error.code).toBe('CLOUD_SIMULATOR_UNREACHABLE_DEV_SERVER');
     expect(error.message).toContain('exp://127.0.0.1:8081/--/?');
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --detach --tunnel');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --detach --tunnel');
   });
 
   it(`refuses a LAN URL too, because the session is not on this network`, () => {
-    expect(cloudNeedsTunnelError('exp://192.168.1.4:8081/--/?', 'lan').message).toContain(
-      'this network'
-    );
+    expect(
+      cloudNeedsTunnelError('exp://192.168.1.4:8081/--/?', 'lan', 'android').message
+    ).toContain('this network');
   });
 });
 

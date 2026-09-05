@@ -5,6 +5,7 @@
 import type { LocalDeviceState } from '../device/localDevice';
 import type { PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
+import { hostPlatform } from '../smoke/suggest';
 import type { ProjectState, StartPlan } from '../project/types';
 import { localTool, EAS_REQUIREMENT, EAS_WHERE, LOCAL_WHERE } from '../toolchain/runsOn';
 import type { ToolchainStatus } from '../toolchain/types';
@@ -213,7 +214,7 @@ function realDeviceFollowUp({
     return {
       id: 'real-device',
       command: lanUrl,
-      why: `${noLocalDevice}Open this URL in ${label} on a phone on the same network to run the app on a real device. A device that is not on this network — a cloud simulator — needs "${PROGRAM_PREFIX} dev --detach --tunnel" instead.`,
+      why: `${noLocalDevice}Open this URL in ${label} on a phone on the same network to run the app on a real device. A device that is not on this network — a cloud simulator — needs "${PROGRAM_PREFIX} dev --ios|--android --detach --tunnel" instead.`,
     };
   }
   return {
@@ -280,7 +281,8 @@ export function buildStartPlanFollowUps(
    */
   requestedPlatform?: PlanPlatform
 ): FollowUp[] {
-  const platformFlag = requestedPlatform ? ` --${requestedPlatform}` : '';
+  // `dev` requires a platform, so this flag always states one.
+  const platformFlag = ` --${requestedPlatform ?? hostPlatform()}`;
   const followups: FollowUp[] = [];
 
   // @ref llp/0015-backend-selection-and-config.rfc.md §The follow-ups of a chosen backend

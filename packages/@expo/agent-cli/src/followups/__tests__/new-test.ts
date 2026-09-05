@@ -6,7 +6,7 @@ describe(buildNewFollowUps, () => {
       expect.objectContaining({ id: 'status', command: 'cd my-app && npx @expo/agent-cli status' }),
       expect.objectContaining({
         id: 'dev',
-        command: 'cd my-app && npx @expo/agent-cli dev',
+        command: `cd my-app && npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`,
       }),
       expect.objectContaining({
         id: 'agents-setup',

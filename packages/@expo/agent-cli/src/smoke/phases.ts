@@ -599,18 +599,9 @@ export const START_DEV_SERVER_TIMEOUT_MS = 120_000;
  */
 export const BUILD_DEV_SERVER_TIMEOUT_MS = 1_800_000;
 
-/**
- * How long the run gives a device to boot, per platform, out of a budget of its own.
- *
- * Both are measured rather than chosen. A cold iOS simulator on this machine takes roughly a
- * minute; an Android emulator takes several, which is why the live tier waits four
- * (`e2e-live/utils.ts` §bootEmulatorAsync). Generous, because the cost of a bound that is too
- * short is a run that reports a boot failure for a device that was coming up fine.
- */
-export const BOOT_DEVICE_TIMEOUT_MS: Record<'ios' | 'android', number> = {
-  ios: 120_000,
-  android: 240_000,
-};
+// The boot budget lives beside the boot itself (`src/device/bootDevice.ts`), because `dev` opens
+// the app now too and must not import this phase table for one constant.
+export { BOOT_DEVICE_TIMEOUT_MS } from '../device/bootDevice';
 
 /** Every phase, in the order they are reported. */
 const PHASE_ORDER: SmokePhaseId[] = [
@@ -1219,24 +1210,28 @@ async function runPhasesAsync(
       // phase gives a plan that compiles. A download that finishes in twenty seconds is not made
       // slower by a bound it never reaches; a compile stopped at two minutes is a build reported as
       // failed for no reason (§It builds what the app needs, and says so first).
-      const installed = await recordBootstrap('install-app', async () => {
-        const result = await deps.installApp(device.deviceId!);
-        return result.ok
-          ? {
-              status: 'ok' as const,
-              reason: [
-                `installed ${result.version ?? 'the app'} on ${device.deviceId}`,
-                result.replaced ? `, replacing ${result.replaced}` : '',
-                `, and left it there`,
-              ].join(''),
-              value: result,
-            }
-          : {
-              status: 'failed' as const,
-              reason: result.reason ?? 'the install failed, and nothing said why',
-              value: result,
-            };
-      }, BUILD_DEV_SERVER_TIMEOUT_MS);
+      const installed = await recordBootstrap(
+        'install-app',
+        async () => {
+          const result = await deps.installApp(device.deviceId!);
+          return result.ok
+            ? {
+                status: 'ok' as const,
+                reason: [
+                  `installed ${result.version ?? 'the app'} on ${device.deviceId}`,
+                  result.replaced ? `, replacing ${result.replaced}` : '',
+                  `, and left it there`,
+                ].join(''),
+                value: result,
+              }
+            : {
+                status: 'failed' as const,
+                reason: result.reason ?? 'the install failed, and nothing said why',
+                value: result,
+              };
+        },
+        BUILD_DEV_SERVER_TIMEOUT_MS
+      );
       if (installed.ok) {
         // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got
         // it. **The install invalidates every read of the app that came before it.** `simctl

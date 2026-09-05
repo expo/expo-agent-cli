@@ -29,7 +29,8 @@ export const startHelp: CommandHelp = {
   next: ['navigate', 'runtime:errors', 'dev'],
   notes: [
     `This is expo start: it probes nothing and plans nothing, and it holds this terminal.`,
-    `To have the prebuild and the native build decided for you, run "${PROGRAM_PREFIX} dev" instead.`,
+    `To have the prebuild and the native build decided for you, run`,
+    `"${PROGRAM_PREFIX} dev --ios|--android|--web" instead; its platform flag is required.`,
     `It has no --json of its own; run "npx expo start --help" for the arguments it forwards.`,
   ],
 };

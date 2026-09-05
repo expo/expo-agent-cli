@@ -63,7 +63,9 @@ describe('@expo/agent-cli runtime:eval', () => {
     expect(result.exitCode).toBe(1);
     const report = JSON.parse(result.stdout);
     expect(report.error.code).toBe('NO_DEV_SERVER');
-    expect(report.error.suggestedCommand).toBe('npx @expo/agent-cli dev --detach');
+    expect(report.error.suggestedCommand).toBe(
+      `npx @expo/agent-cli dev --detach --${process.platform === 'darwin' ? 'ios' : 'android'}`
+    );
     expect(report.error.needsHuman).toBeFalsy();
   });
 

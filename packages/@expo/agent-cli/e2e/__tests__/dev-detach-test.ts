@@ -61,7 +61,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--yes', '--json'],
         { env: detachEnv(projectRoot, 8399) }
       );
 
@@ -91,7 +91,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--yes', '--json'],
         { env: detachEnv(projectRoot, 8398) }
       );
 
@@ -160,7 +160,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--yes', '--json'],
         { env: detachEnv(projectRoot, 8397) }
       );
 
@@ -180,7 +180,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--yes', '--json'],
         {
           env: {
             ...stubExpoEnv(projectRoot),
@@ -207,14 +207,18 @@ describe('@expo/agent-cli dev --detach', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--detach', '--yes'], {
-        env: {
-          ...stubExpoEnv(projectRoot),
-          STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
-          STUB_EXPO_PORT_BUSY: '8180',
-        },
-        reject: false,
-      });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--yes'],
+        {
+          env: {
+            ...stubExpoEnv(projectRoot),
+            STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+            STUB_EXPO_PORT_BUSY: '8180',
+          },
+          reject: false,
+        }
+      );
 
       expect(result.stdout).toContain('8180 was busy');
     } finally {
@@ -228,7 +232,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--yes', '--json'],
         { env: detachEnv(projectRoot, 8393) }
       );
 
@@ -246,7 +250,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const first = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--yes', '--json'],
         {
           env: detachEnv(projectRoot, 8397),
         }
@@ -255,7 +259,7 @@ describe('@expo/agent-cli dev --detach', () => {
 
       const second = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--yes', '--json'],
         { env: detachEnv(projectRoot, 8396) }
       );
 
@@ -276,7 +280,7 @@ describe('@expo/agent-cli dev --detach', () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const started = await executeAgentCliAsync(
       projectRoot,
-      ['dev', '--detach', '--yes', '--json'],
+      ['dev', '--ios', '--detach', '--yes', '--json'],
       {
         env: detachEnv(projectRoot, 8395),
       }
@@ -314,7 +318,7 @@ describe('@expo/agent-cli dev --detach', () => {
         projectRoot,
         // `--tunnel`, because that is the wait the child died inside of: the parent is still
         // waiting for a tunnel host when the process that would print one exits.
-        ['dev', '--detach', '--yes', '--tunnel', '--json'],
+        ['dev', '--ios', '--detach', '--yes', '--tunnel', '--json'],
         {
           env: {
             ...stubExpoEnv(projectRoot),
@@ -358,8 +362,13 @@ describe('@expo/agent-cli dev --detach', () => {
   // The stub reproduces exactly that ordering without a simulator, an AppleScript or a race: it
   // binds the port, answers `/status` — which is the readiness probe itself — and dies a fixed time
   // after that answer.
+  //
+  // The step under test is `expo run:ios` now (`bare-app`'s one-step plan): a plain `expo start`
+  // cannot die of the Automation refusal any more, because `dev` keeps the platform flag away from
+  // it and opens the app itself (llp/0026). `run:*` still launches through AppleScript, so it is
+  // the step the grace window still exists for.
   describe('a dev server that dies just after its bundler answered', () => {
-    /** Environment for a stub that comes up, answers `/status`, and then dies the way `--ios` does. */
+    /** Environment for a stub that comes up, answers `/status`, and then dies the way a launch does. */
     function diesAfterReadyEnv(projectRoot: string, port: number): Record<string, string> {
       return {
         ...stubExpoEnv(projectRoot),
@@ -373,12 +382,13 @@ describe('@expo/agent-cli dev --detach', () => {
     }
 
     it('refuses to report ready for a child that is about to be gone', async () => {
-      const projectRoot = await setupFixtureAsync('go-app');
+      const projectRoot = await setupFixtureAsync('bare-app');
+      await installStubFingerprintAsync(projectRoot);
 
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--detach', '--wait-ready', '--ios', '--yes', '--json'],
+          ['dev', '--detach', '--wait-ready', '--ios', '--local', '--yes', '--json'],
           { env: diesAfterReadyEnv(projectRoot, 8393), reject: false }
         );
 
@@ -454,7 +464,7 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--detach', '--yes', '--json'], {
+      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--yes', '--json'], {
         env: detachEnv(projectRoot, 8394),
       });
       // The stub prints its start line as soon as it runs; the file is written by the child.
@@ -484,7 +494,7 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--detach', '--yes', '--json'], {
+      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--yes', '--json'], {
         env: detachEnv(projectRoot, 8393),
       });
       await waitForAsync(() => fs.existsSync(path.join(projectRoot, LOG_PATH)), 5000);
@@ -586,7 +596,9 @@ describe('@expo/agent-cli dev:logs', () => {
     expect(result.exitCode).toBe(1);
     const { error } = JSON.parse(result.stdout);
     expect(error.code).toBe('NO_DEV_LOG');
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --detach --wait-ready');
+    expect(error.suggestedCommand).toBe(
+      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --wait-ready`
+    );
   });
 
   it('appears in the top-level help, next to the command that writes it', async () => {

@@ -53,14 +53,22 @@ export interface DecideStartPlanOptions {
   /**
    * The platform flag the caller actually typed, when they typed one.
    *
-   * Distinct from {@link platform}, which is always set — the caller falls back to the host or to
-   * the project's own native directories. Only a flag the user typed reaches `expo start`, and
-   * `expo start --ios` does something the plain form does not: it opens the app on a simulator,
-   * booting one and installing Expo Go if it has to [observed — `@expo/cli`
-   * `openPlatforms.ts` → `PlatformManager.openProjectInExpoGoAsync`]. The plan has to show the flag
-   * in the argv it prints, because the command really does run with it.
+   * Distinct from {@link platform}: `status` still resolves a default platform to describe a plan
+   * with, and only a flag the caller typed makes the plan's reasons promise an open. The open is
+   * `dev`'s own act now (`src/dev/openApp.ts`) — the flag never reaches `expo start`, whose
+   * `--ios` form opens through an osascript a Mac without the Automation grant refuses (llp/0026).
    */
   requestedPlatform?: PlanPlatform;
+  /**
+   * Whether the plan's dev-server step may open the app on a device (`false` for `--no-open`).
+   *
+   * `expo start --ios` opens the app, and on a Mac with no Automation grant that open kills the
+   * dev server (llp/0010 §Needs-human protocol). A caller that opens the app itself — `smoke`, or
+   * an agent that follows with `navigate` — plans for the platform and opens nothing.
+   *
+   * @ref llp/0026-dev-owns-the-open.rfc.md
+   */
+  open?: boolean;
   /**
    * Fingerprint hashes of the last builds `@expo/agent-cli` ran. Passed in by the caller so the
    * decision table stays a pure function of probed state.
