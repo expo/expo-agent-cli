@@ -149,6 +149,142 @@ export function bootedSimulatorGate(): {
   return { gate: ok, simulator };
 }
 
+/**
+ * A machine where `smoke` must bring its own device: **no** iOS simulator is booted, and a
+ * shut-down one that could open the app exists to be booted.
+ *
+ * The inverse of {@link bootedSimulatorGate}, and the reason it exists is the reason no other
+ * suite can fill this cell: `pickSimulator` prefers a booted device, so on the machine every other
+ * live suite wants — one with a simulator up — the boot and install phases never run. A booted
+ * simulator here **skips** rather than shutting it down: this tier does not take away a device
+ * somebody is looking at.
+ *
+ * "Could open the app" is read from disk (`Bundle/Application/<container>/<Name>.app/Info.plist`),
+ * because `simctl listapps` refuses on a shut-down device — the same fact, and the same reading,
+ * as `src/device/installedApps.ts`.
+ */
+export function bootstrapSimulatorGate(): { gate: Gate; simulators: Simulator[] } {
+  const mac = macosGate();
+  if (!mac.ok) {
+    return { gate: mac, simulators: [] };
+  }
+
+  let listed: string;
+  try {
+    listed = execFileSync('xcrun', ['simctl', 'list', 'devices', '--json'], {
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+  } catch (error: any) {
+    return {
+      gate: missing(`"xcrun simctl list devices" could not run: ${error.message}`),
+      simulators: [],
+    };
+  }
+
+  const booted: Simulator[] = [];
+  const shutDown: Simulator[] = [];
+  for (const [runtime, devices] of Object.entries(
+    JSON.parse(listed).devices as Record<string, any[]>
+  )) {
+    if (!/\.iOS-[\d-]+$/.test(runtime)) {
+      continue;
+    }
+    for (const device of devices) {
+      if (device.isAvailable === false) {
+        continue;
+      }
+      if (device.state === 'Booted') {
+        booted.push({ udid: device.udid, name: device.name });
+      } else if (device.state === 'Shutdown') {
+        shutDown.push({ udid: device.udid, name: device.name });
+      }
+    }
+  }
+
+  if (booted.length > 0) {
+    return {
+      gate: missing(
+        `a simulator is booted (${booted.map((simulator) => simulator.name).join(', ')}) — this ` +
+          `suite tests the boot smoke performs itself, so it needs a machine with none up. Shut ` +
+          `them down ("xcrun simctl shutdown all") and boot yours again after the run.`
+      ),
+      simulators: [],
+    };
+  }
+
+  const usable = shutDown.filter((simulator) => simulatorHasExpoGoOnDisk(simulator.udid));
+  if (usable.length === 0) {
+    return {
+      gate: missing(
+        'no shut-down iOS simulator has Expo Go installed, so a boot could not have opened the ' +
+          'app — boot one and run live-local once to put Expo Go on it, then shut it down'
+      ),
+      simulators: [],
+    };
+  }
+
+  return { gate: ok, simulators: usable };
+}
+
+/**
+ * Whether Expo Go is installed on a simulator that is not running, read from the disk layout.
+ *
+ * Synchronous, like every probe in this file, and bounded: one `plutil` per installed app until
+ * the first match.
+ */
+function simulatorHasExpoGoOnDisk(udid: string): boolean {
+  const containers = path.join(
+    os.homedir(),
+    'Library',
+    'Developer',
+    'CoreSimulator',
+    'Devices',
+    udid,
+    'data',
+    'Containers',
+    'Bundle',
+    'Application'
+  );
+  let containerDirs: string[];
+  try {
+    containerDirs = fs.readdirSync(containers);
+  } catch {
+    return false;
+  }
+  for (const container of containerDirs) {
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(path.join(containers, container));
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.endsWith('.app')) {
+        continue;
+      }
+      try {
+        const bundleId = execFileSync(
+          'plutil',
+          [
+            '-extract',
+            'CFBundleIdentifier',
+            'raw',
+            path.join(containers, container, entry, 'Info.plist'),
+          ],
+          { encoding: 'utf8', timeout: 10_000 }
+        ).trim();
+        if (bundleId === 'host.exp.Exponent') {
+          return true;
+        }
+      } catch {
+        continue;
+      }
+    }
+  }
+  return false;
+}
+
 /** Expo Go's Android package. One capital letter apart from the iOS one, which is the point. */
 export const EXPO_GO_ANDROID_PACKAGE = 'host.exp.exponent';
 

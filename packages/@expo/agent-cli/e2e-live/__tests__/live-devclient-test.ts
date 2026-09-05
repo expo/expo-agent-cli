@@ -177,7 +177,10 @@ describeDevClient('live-devclient: the loop on a real Android development build'
     // app [observed — wave 29, 2026-08-27]. The claim here is the *step*, not the label.
     expect(['bare-fresh', 'dev-client-fresh']).toContain(report.rule);
     expect(report.steps).toHaveLength(1);
-    expect(report.steps[0].argv).toEqual(['expo', 'start', '--dev-client', '--android']);
+    // No `--android` in the argv since [[0026-dev-owns-the-open]]: the platform flag never reaches
+    // `expo start` — `dev` opens the app itself — and the step's reason says where the open went.
+    expect(report.steps[0].argv).toEqual(['expo', 'start', '--dev-client']);
+    expect(report.steps[0].reason).toContain('Android');
     expect(report.buildLocation).toBeNull();
   });
 
@@ -390,6 +393,31 @@ describeDevClient('live-devclient: the loop on a real Android development build'
     expect(moved).toBe(true);
   });
 
+  it('navigate --print-url resolves the scheme link and touches no device', async () => {
+    const result = await runLiveAsync(
+      run,
+      projectRoot,
+      ['navigate', '/explore', '--print-url', '--android', '--json'],
+      { label: 'navigate-print-url' }
+    );
+    expectExit(result, 0);
+    const report = parseJson(result);
+    // The dev build's route link carries no host at all — the URL is the scheme and the route,
+    // and it is the same link whichever device eventually opens it (F142).
+    expect(report.url).toBe(`${project.scheme}://explore`);
+    expect(report.printUrl).toBe(true);
+    expect(report.target).toContain('development build');
+    expect(report.routeCheck).toMatchObject({ checked: true, ok: true, matched: '/explore' });
+    // No host in the link, so there is no host type to classify.
+    expect(report.hostType).toBeNull();
+    // Nothing was opened: the device fields stay null even though the emulator this suite drives
+    // is attached right now, and no `adb reverse` was installed on it.
+    expect(report.deviceId).toBeNull();
+    expect(report.deviceBackend).toBeNull();
+    expect(report.reversedPort).toBeNull();
+    expect(report.attached).toBeNull();
+  });
+
   it('stops the development build by its own package name', async () => {
     // Same precondition, and here it is what the assertions are *about*: `bundleIdSource` is
     // `dev-server` only when there is a connected app to read the id from, and `app-config` when
@@ -449,9 +477,20 @@ describeDevClient('live-devclient: the loop on a real Android development build'
       label: 'f123-stop-first',
     });
 
-    const result = await runLiveAsync(run, projectRoot, ['navigate', '/', '--android', '--json'], {
-      label: 'f123-navigate-cold',
-    });
+    // `--attach-timeout` raised above the 45s default, because this is the one open in the suite
+    // that pays a whole cold app start: a run on this emulator measured the launcher attach at just
+    // over the default, so the route link confirmed the app and `launch.attached` read false — a
+    // coin toss around the budget, not a finding ([[0022-live-tier]] §What a live assertion may be:
+    // a bound, never an expectation) [observed — 2026-09-05, launch.waitedMs 45438, route attach
+    // 1661ms right after].
+    const result = await runLiveAsync(
+      run,
+      projectRoot,
+      ['navigate', '/', '--android', '--attach-timeout', '120s', '--json'],
+      {
+        label: 'f123-navigate-cold',
+      }
+    );
     expectExit(result, 0, 'the launcher URL loads the app, so the route link reaches a loaded app');
     const report = parseJson(result);
     // Two links, in order: the launcher's, which loads the bundle…

@@ -6,7 +6,7 @@ here does and does not claim. That last part is worth reading before you quote a
 
 ## What this tier is
 
-Seven vitest suites that run the **published surface** of `@expo/agent-cli` — `bin/cli.js`, which loads the
+Eight vitest suites that run the **published surface** of `@expo/agent-cli` — `bin/cli.js`, which loads the
 ncc bundle in `build/cli/` — against **real backends**: the real npm registry and the project's own
 `expo` CLI, a real Metro, a real iOS simulator running Expo Go, a real Android emulator running the
 Expo Go APK, a real **development build** on that same emulator, a real Hermes debugger connection,
@@ -39,6 +39,7 @@ Everything needs the bundle built first: **`bun run build`**.
 | `live-eas`       | `AGENT_CLI_LIVE_EAS=1`; a login with `expo-ci` access (ambient EAS session, or `EXPO_TOKEN` in CI); `bunx` or `npx`; network. Reads the committed `apps/eas-example` (seeded with a FINISHED and an ERRORED build); `AGENT_CLI_LIVE_EAS_PROJECT` overrides the app                                                                                                                          |
 | `live-cloud`     | everything `live-eas` needs (`AGENT_CLI_LIVE_EAS=1`), **plus** `AGENT_CLI_LIVE_CLOUD=1` and a way to publish a local port — `tuft host`, or an origin of your own in `AGENT_CLI_LIVE_PUBLIC_ORIGIN`                                                                                                                                                                                                                 |
 | `live-ios-devclient` | a **booted** iOS simulator, **plus** `AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT` naming a project that (a) depends on `expo-dev-client`, (b) declares `expo.scheme` and `expo.ios.bundleIdentifier`, (c) has that bundle id **installed** on the booted simulator, and (d) has an `ios` entry in `.expo/agent-cli-last-build.json`. It **does not build** — run `npx expo run:ios` once (~15 min) to make one |
+| `live-bootstrap` | macOS; **no booted** simulator anywhere (`xcrun simctl shutdown all` first — the suite skips rather than shutting down a device you are using); a shut-down simulator that has Expo Go installed (run `live-local` once to make one); network (npm, for the scaffold's install). It measures the boot and dev-server start `smoke` performs itself, so the machine state every other suite needs is exactly the state this one refuses |
 
 ### Two things about `live-local`
 
@@ -116,6 +117,16 @@ platform attached. `beforeAll` prints which of the two runs you are getting:
 ```
 
 So **24 tests green and 21 tests green are different claims**, and the line above says which you have.
+
+**The mixed block does not install Expo Go, so the simulator's copy has to match the scaffold's SDK.**
+`navigate` opens what is there; only `smoke`'s `install-app` phase updates it. A simulator carrying an
+older Expo Go fails the block's `beforeAll` at the attach wait — exit 22 after the whole budget, while
+the simulator shows "Project is incompatible with this version of Expo Go" [observed — 2026-09-05,
+Expo Go 54.0.7 against an SDK 57 scaffold, 121s spent to learn it]. The gate checks that Expo Go is
+*present*, not which SDK it is, because the scaffold's SDK does not exist until `beforeAll` scaffolds.
+The fix is one `live-local` run (its smoke installs the right one), or `smoke --ios` in any current-SDK
+project.
+
 The block terminates Expo Go on the simulator when it ends, which is worth knowing if you run
 `test:live:local` straight afterwards. The app takes a few seconds to come back, and `live-local`'s
 break-and-fix block reports `NO_APP_CONNECTED` at exit 1 if it starts inside that window. Run it twice
@@ -259,7 +270,10 @@ AGENT_CLI_LIVE_EAS=1 AGENT_CLI_LIVE_CLOUD=1 bun run test:live:cloud   # bills a 
 AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT=~/dev/ios-devbuild \
   bun run test:live:iosdevclient            # ~25 s, free — needs a built iOS dev client on the booted sim
 
-bun run test:live                           # all seven; the ones that cannot run skip with a reason
+xcrun simctl shutdown all && \
+  bun run test:live:bootstrap               # ~60 s, free — needs NO booted simulator; boot yours again after
+
+bun run test:live                           # all eight; the ones that cannot run skip with a reason
 ```
 
 Every suite prints a **cost line** in `afterAll`, whether it passed or failed:

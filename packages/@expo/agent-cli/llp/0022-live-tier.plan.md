@@ -5,13 +5,13 @@
 **Systems:** the live tier (`e2e-live/`); the vitest projects (`vitest.config.ts`, `e2e/vitest.config.ts`); `package.json` scripts
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-27 · finalized 2026-08-28
-**Revised:** 2026-08-30
+**Revised:** 2026-08-30 · 2026-09-05
 **Related:** [[0002-testing-and-evals]], [[0005-runtime-loop-tools]], [[0016-v1-scope]], [[0021-honest-reports]]
 
 ## Summary
 
-Seven suites: `live-project`, `live-local`, `live-android`, `live-devclient`, `live-eas`,
-`live-cloud`, `live-ios-devclient`.
+Eight suites: `live-project`, `live-local`, `live-android`, `live-devclient`, `live-eas`,
+`live-cloud`, `live-ios-devclient`, `live-bootstrap`.
 
 [[0002-testing-and-evals]] already states the rule this document makes executable: a
 flag is not shipped until it has run against the published binary. It states it as a
@@ -52,7 +52,8 @@ That is why `live-project` exists as its own suite, and why a green unit test of
 
 `e2e-live/vitest.config.ts` is a fourth vitest project beside the unit config and `e2e/`. It
 is reachable only through `test:live`, `test:live:local`, `test:live:android`,
-`test:live:devclient`, `test:live:eas`, `test:live:cloud` and `test:live:iosdevclient`.
+`test:live:devclient`, `test:live:eas`, `test:live:cloud`, `test:live:iosdevclient` and
+`test:live:bootstrap`.
 No `test`, no `test:e2e`, no CI workflow names it. Every suite spends a real simulator, a real account, or a real
 deployment. A tier that can bill money must be asked for by name.
 
@@ -125,7 +126,7 @@ The scratch directory must be outside every git checkout for any suite that migh
 root. A scratch project inside this monorepo uploads the monorepo. The trap is silent,
 because the upload succeeds.
 
-## The seven suites
+## The eight suites
 
 ### live-project
 
@@ -222,6 +223,23 @@ in place. The lab screen is served over the wire, so the interact commands have 
 without a rebuild. It is the suite that turns the iOS runtime column from `by hand` into
 `filled`.
 
+### live-bootstrap
+
+The suite that runs where every other one refuses. `live-local` demands a booted
+simulator, and `pickSimulator` prefers one — so on the machine this tier usually runs
+on, `smoke`'s `boot-device` and `start-dev-server` phases never run, and "a run on a
+cold machine brings its own device and puts it back" was a claim only the stub tier had
+made. Its gate is the inverse of `live-local`'s: any booted simulator **skips** (this
+tier does not take away a device somebody is looking at), and a shut-down simulator
+with Expo Go on it must exist, read from disk the way `src/device/installedApps.ts`
+reads it, because `simctl listapps` refuses on a device that is not booted.
+
+One test, one `smoke --ios` run, on purpose: the run costs a scaffold, a boot, and a
+first compile — each an act under measurement — and a second test would pay the boot
+again to learn nothing, because putting the machine back is one of the assertions. The
+suite checks the report's word against the machine afterwards: no simulator booted, and
+the dev server's port answering nothing.
+
 ### live-eas
 
 Against the `expo-ci` CI account, reading the committed `apps/eas-example` in place. About 50 s.
@@ -300,12 +318,13 @@ This table is abbreviated. The source of truth is the tests under `e2e-live/`.
 | `smoke --cloud`                 | n/a                                       | n/a                                      | n/a                                       | n/a                                       | filled                               | n/a                               |
 | `navigate --cloud`              | n/a                                       | n/a                                      | n/a                                       | n/a                                       | filled                               | n/a                               |
 | `runtime:stop --cloud`          | n/a                                       | n/a                                      | n/a                                       | n/a                                       | filled (exit 0)                      | n/a                               |
-| `navigate --print-url`          | n/a                                       | filled (device untouched)                | open                                      | n/a                                       | filled (tunnel host)                 | open                              |
+| `navigate --print-url`          | n/a                                       | filled (device untouched)                | filled (no reverse installed)             | n/a                                       | filled (tunnel host)                 | filled (scheme link, no host)     |
 | `runtime:type` (non-input)      | n/a                                       | filled (exit 20)                         | n/a                                       | n/a                                       | n/a                                  | n/a                               |
 | `skills` unsafe-name guard      | filled                                    | n/a                                      | n/a                                       | n/a                                       | n/a                                  | n/a                               |
 | `inspect:build-log` (a log)     | n/a                                       | n/a                                      | n/a                                       | filled (brotli refused, then decoded)     | n/a                                  | n/a                               |
 | `deploy --web`                  | n/a                                       | n/a                                      | n/a                                       | filled (URL serves the export)            | n/a                                  | n/a                               |
 | iOS development build           | n/a                                       | n/a                                      | n/a                                       | n/a                                       | n/a                                  | filled (live-ios-devclient, 11/11) |
+| `smoke` on a cold machine (boot + own dev server) | n/a                     | filled (live-bootstrap: `boot-device` and `start-dev-server` ok, device shut down after, port free) | n/a | n/a                             | n/a                                  | n/a                               |
 
 `live-android` is Expo Go. `live-devclient` is the app that has a debugger. Every
 `unreachable` (no debugger) cell in the android column has a `filled` cell in the

@@ -16,6 +16,12 @@ name: agent-cli-cloud-e2e
 
 on:
   workflow_dispatch: {}
+  # Nightly, because the path filter below only sees changes on our side: EAS Simulator readiness,
+  # the Expo Go the session installs, and create-expo's scaffold all move without touching this
+  # repo, and the nightly run is what notices. 09:17 UTC is nowhere near a whole hour, so it does
+  # not compete with everyone else's on-the-hour crons. Four billed sessions per night.
+  schedule:
+    - cron: '17 9 * * *'
   # Automatic coverage of `--cloud`, scoped to PRs that change the cloud path or the app it builds, so
   # unrelated PRs never bill a session. Paths are repo-relative.
   pull_request:
