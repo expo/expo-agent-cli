@@ -555,6 +555,20 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     expect(refusedReport.called).toBe(false);
   });
 
+  it('runtime:type refuses a testID that is not a text input with 20', async () => {
+    const result = await runLiveAsync(
+      run,
+      projectRoot,
+      ['runtime:type', 'x', '--testID', 'plain-text', '--json'],
+      { label: 'type-non-input' }
+    );
+    expectExit(result, 20, 'a Text is not something to type into');
+    const report = parseJson(result);
+    expect(report.called).toBe(false);
+    // The refusal names why rather than only that it did not happen.
+    expect(report.reason).toBeTruthy();
+  });
+
   it('runtime:errors reads the runtime over its own debugger connection', async () => {
     const result = await runLiveAsync(run, projectRoot, ['runtime:errors', '--json'], {
       label: 'errors',
