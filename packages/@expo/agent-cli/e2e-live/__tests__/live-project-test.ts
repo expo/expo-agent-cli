@@ -35,6 +35,7 @@
 //    compared byte for byte, which is the only form of "nothing was added" worth the name.
 
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 
 import { allOf, builtBinGate, describeLive, registryGate } from '../prereq';
@@ -779,6 +780,32 @@ describeLive('live-project', gate)(
         // nothing it does not own.
         expect(result.all).toContain('unknown or unexpected option: --wat');
         expect(result.all).not.toContain('BAD_ARGS');
+      });
+
+      // @ref llp/0005-runtime-loop-tools.rfc.md §Stopping the app. `--force` needs two proofs before
+      // it signals a pid, and the stub tier pins the refusal against a fake socket. This is the same
+      // refusal against a real one, through the published bin: the safety property is that `--force`
+      // does not kill a process that is not this project's dev server.
+      it('dev:stop --port --force refuses a real socket that is not an Expo dev server', async () => {
+        const server = net.createServer((socket) => socket.destroy());
+        await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+        const port = (server.address() as net.AddressInfo).port;
+        try {
+          const result = await runLiveAsync(
+            run,
+            projectRoot,
+            ['dev:stop', '--port', String(port), '--force', '--json'],
+            { label: 'dev-stop-force-foreign' }
+          );
+          expectExit(result, 20, 'a port that is not an Expo dev server is not this project to stop');
+          const report = parseJson(result);
+          expect(report.stopped).toBe(false);
+          expect(report.forced).toBe(false);
+          // The listener is still alive: --force refused rather than signalling a stranger.
+          expect(server.listening).toBe(true);
+        } finally {
+          await new Promise<void>((resolve) => server.close(() => resolve()));
+        }
       });
     });
 
