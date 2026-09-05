@@ -6,7 +6,7 @@ here does and does not claim. That last part is worth reading before you quote a
 
 ## What this tier is
 
-Six vitest suites that run the **published surface** of `@expo/agent-cli` — `bin/cli.js`, which loads the
+Seven vitest suites that run the **published surface** of `@expo/agent-cli` — `bin/cli.js`, which loads the
 ncc bundle in `build/cli/` — against **real backends**: the real npm registry and the project's own
 `expo` CLI, a real Metro, a real iOS simulator running Expo Go, a real Android emulator running the
 Expo Go APK, a real **development build** on that same emulator, a real Hermes debugger connection,
@@ -38,6 +38,7 @@ Everything needs the bundle built first: **`bun run build`**.
 | `live-android`   | a runnable `adb` (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, `PATH`, or the SDK's default location); an **attached device or a bootable AVD**; **Expo Go** on it; network. A booted iOS simulator with Expo Go is an _optional_ extra that adds three tests — see below                                                                                                                           |
 | `live-eas`       | `EXPO_STAGING=1`; a staging session in `~/.expo-staging/state.json`; `bunx` or `npx`; network to `staging.expo.dev`; an EAS-linked project on disk with finished builds and at least one ERRORED build (`AGENT_CLI_LIVE_EAS_PROJECT`). Optional: `AGENT_CLI_LIVE_EAS_OWNER` and `AGENT_CLI_LIVE_EAS_PROJECT_ID` override the livecheck fixture's hosting project                           |
 | `live-cloud`     | everything `live-eas` needs, **plus** `AGENT_CLI_LIVE_CLOUD=1` and a way to publish a local port — `tuft host`, or an origin of your own in `AGENT_CLI_LIVE_PUBLIC_ORIGIN`                                                                                                                                                                                                                 |
+| `live-ios-devclient` | a **booted** iOS simulator, **plus** `AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT` naming a project that (a) depends on `expo-dev-client`, (b) declares `expo.scheme` and `expo.ios.bundleIdentifier`, (c) has that bundle id **installed** on the booted simulator, and (d) has an `ios` entry in `.expo/agent-cli-last-build.json`. It **does not build** — run `npx expo run:ios` once (~15 min) to make one |
 
 ### Two things about `live-local`
 
@@ -252,7 +253,10 @@ EXPO_STAGING=1 AGENT_CLI_LIVE_EAS_PROJECT=~/path/to/eas-app \
   bun run test:live:eas                     # ~1 min, one web deployment
 EXPO_STAGING=1 AGENT_CLI_LIVE_CLOUD=1 bun run test:live:cloud   # bills a cloud session
 
-bun run test:live                           # all six; the ones that cannot run skip with a reason
+AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT=~/dev/ios-devbuild \
+  bun run test:live:iosdevclient            # ~25 s, free — needs a built iOS dev client on the booted sim
+
+bun run test:live                           # all seven; the ones that cannot run skip with a reason
 ```
 
 Every suite prints a **cost line** in `afterAll`, whether it passed or failed:

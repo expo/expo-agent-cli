@@ -10,8 +10,8 @@
 
 ## Summary
 
-Six suites: `live-project`, `live-local`, `live-android`, `live-devclient`, `live-eas`,
-`live-cloud`.
+Seven suites: `live-project`, `live-local`, `live-android`, `live-devclient`, `live-eas`,
+`live-cloud`, `live-ios-devclient`.
 
 [[0002-testing-and-evals]] already states the rule this document makes executable: a
 flag is not shipped until it has run against the published binary. It states it as a
@@ -52,8 +52,8 @@ That is why `live-project` exists as its own suite, and why a green unit test of
 
 `e2e-live/vitest.config.ts` is a fourth vitest project beside the unit config and `e2e/`. It
 is reachable only through `test:live`, `test:live:local`, `test:live:android`,
-`test:live:devclient`, `test:live:eas` and `test:live:cloud`. No `test`, no `test:e2e`,
-no CI workflow names it. Every suite spends a real simulator, a real account, or a real
+`test:live:devclient`, `test:live:eas`, `test:live:cloud` and `test:live:iosdevclient`.
+No `test`, no `test:e2e`, no CI workflow names it. Every suite spends a real simulator, a real account, or a real
 deployment. A tier that can bill money must be asked for by name.
 
 `maxWorkers: 1`. Two suites cannot share one simulator, one dev-server port range, or
@@ -117,7 +117,7 @@ The scratch directory must be outside every git checkout for any suite that migh
 root. A scratch project inside this monorepo uploads the monorepo. The trap is silent,
 because the upload succeeds.
 
-## The six suites
+## The seven suites
 
 ### live-project
 
@@ -194,11 +194,25 @@ It uses the project in place. This suite makes no EAS call, so the scratch-outsi
 rule does not apply. It `dev:stop`s before it starts, because one detached dev server
 per project is the rule and this is the first suite whose project may already have one.
 
-iOS is measured by hand, and is deliberately not in the suite. Every way this CLI opens
-an app on a local iOS simulator is `xcrun simctl openurl`, and on iOS 26.5 that raises
-`Open in "<app>"?` for a development build's scheme, on every call. A suite that needed
-somebody to tap Open would be a suite that never runs. Those rows are `by hand` in the
-matrix.
+iOS now has its own suite, `live-ios-devclient`, and the wall that kept it out is gone.
+Every local iOS open is `xcrun simctl openurl`, and on iOS 26.5 that used to raise
+`Open in "<app>"?` for a development build's scheme on every call — a suite that needed
+somebody to tap Open would be a suite that never runs. `src/device/approveScheme.ts`
+pre-approves the scheme before the open, so the link launches the app instead of the
+modal, and the suite drives the whole runtime family on a real iOS build unattended
+[observed — 2026-09-05, 11/11]. One difference from the Android suite: its dev server is
+started **without** `--ios`, because `--ios` makes `expo start` focus Simulator.app over
+AppleScript and macOS refuses that without an Automation grant. The plan is
+`expo start --dev-client`, and `navigate --ios` opens the build over simctl instead.
+
+### live-ios-devclient
+
+The iOS twin of `live-devclient`, same shape: it does not build, it names an
+already-built project (`AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT`), the gate checks the app
+is installed on the booted simulator and its build is recorded, and it drives the project
+in place. The lab screen is served over the wire, so the interact commands have testIDs
+without a rebuild. It is the suite that turns the iOS runtime column from `by hand` into
+`filled`.
 
 ### live-eas
 
@@ -280,7 +294,7 @@ This table is abbreviated. The source of truth is the tests under `e2e-live/`.
 | `skills` unsafe-name guard      | filled                                    | n/a                                      | n/a                                       | n/a                                       | n/a                                  | n/a                               |
 | `inspect:build-log` (a log)     | n/a                                       | n/a                                      | n/a                                       | filled (brotli refused, then decoded)     | n/a                                  | n/a                               |
 | `deploy --web`                  | n/a                                       | n/a                                      | n/a                                       | filled (URL serves the export)            | n/a                                  | n/a                               |
-| iOS development build           | n/a                                       | n/a                                      | n/a                                       | n/a                                       | n/a                                  | by hand                           |
+| iOS development build           | n/a                                       | n/a                                      | n/a                                       | n/a                                       | n/a                                  | filled (live-ios-devclient, 11/11) |
 
 `live-android` is Expo Go. `live-devclient` is the app that has a debugger. Every
 `unreachable` (no debugger) cell in the android column has a `filled` cell in the
