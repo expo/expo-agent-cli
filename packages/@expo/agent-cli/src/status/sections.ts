@@ -14,6 +14,7 @@ import { decideStartPlan } from '../plan/decide';
 import type { LastBuildRecord } from '../plan/lastBuild';
 import type { LastBuildFingerprints, NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
+import { defaultSmokePlatform, smokeCommand } from '../smoke/suggest';
 import { decidesAgainstExpoGo } from '../project/expoGo';
 import type { FingerprintResult } from '../project/fingerprint';
 import type { ProjectState, StartPlan } from '../project/types';
@@ -60,41 +61,27 @@ const NEXT_ACTION_COMMAND = `${PROGRAM_PREFIX} dev`;
 const NOT_AN_APP_COMMAND = `${PROGRAM_PREFIX} new my-app`;
 
 /**
- * The gate to put in front of anything that reads the app, once a dev server is up.
- *
- * One command for both the app-attached and the nothing-attached case, rather than `runtime:errors`
- * for the first: this is the only command that proves the project's own bundle *compiles*, which is
- * the fact a report full of green lines was missing. What to do once it passes is a follow-up, and
- * the `runtime-errors` follow-up already says it — `next` naming it too would be the duplication
- * that `status` keeps its follow-ups silent to avoid.
- */
-const VERIFY_COMMAND = `${PROGRAM_PREFIX} smoke`;
-
-/**
- * The gate, with the platform it should be run for.
+ * The gate to put in front of anything that reads the app, once a dev server is up, with the
+ * platform it should be run for.
  *
  * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
  *
- * `smoke` requires `--ios` or `--android` now, so a bare {@link VERIFY_COMMAND} is a suggestion
- * that exits 1 — which is the worst kind of thing for `status.next` to print, because `next` is
- * read as "run this" [found by the tier-0 evals, 2026-09-04].
+ * One command for both the app-attached and the nothing-attached case: this is the only command
+ * that proves the project's own bundle *compiles*, which is the fact a report full of green lines
+ * was missing. What to do once it passes is a follow-up the `runtime-errors` rung already carries.
  *
- * The platform is **stated rather than defaulted**, and that is the whole point: this is text the
- * caller reads and can change, where the old default inside `smoke` was invisible. It is chosen
- * from the strongest evidence available, in this order:
- *
- *  1. A device this machine actually has booted, which is the fact `smoke` itself would have to go
- *     looking for. A machine with an Android emulator running gets `--android`.
- *  2. Otherwise {@link resolveDefaultPlatform}, which reads the project's own checked-in native
- *     directories before it falls back to the host — the same answer `status` already prints for
- *     the `dev` plan, so the two lines of one report cannot name two platforms.
+ * `smoke` requires `--ios` or `--android` now, so a bare gate is a suggestion that exits 1 — the
+ * worst kind of thing for `status.next` to print, since `next` is read as "run this". The platform
+ * is **stated rather than defaulted**: it is text the caller reads and can change, chosen from the
+ * strongest evidence first — a booted device, then {@link defaultSmokePlatform}, the same answer
+ * `status` prints for the `dev` plan, so two lines of one report cannot name two platforms.
  */
 function verifyCommand(device: LocalDeviceStatus | null, state: ProjectState): string {
   const booted =
     device?.state === 'present' && (device.platform === 'ios' || device.platform === 'android')
       ? device.platform
       : null;
-  return `${VERIFY_COMMAND} --${booted ?? resolveDefaultPlatform(state)}`;
+  return smokeCommand(booted ?? defaultSmokePlatform(state.nativeDirs));
 }
 
 /**
@@ -595,7 +582,7 @@ function verifyAction(
       ? {
           // An EAS Simulator session is iOS (`resolveDeviceAsync`'s cloud fallback asks for iOS and
           // nothing else), so the platform here is a fact about the session rather than a choice.
-          command: `${VERIFY_COMMAND} --ios --cloud`,
+          command: `${smokeCommand('ios')} --cloud`,
           why: 'a dev server is running with an app connected and this project has an EAS Simulator session, so the gate runs against that session — a plain "smoke" would look for a simulator on this machine',
         }
       : {
@@ -714,11 +701,7 @@ function lanHostForPort(port: number | null): string | null {
  * checked-in native directory is the project's own answer, otherwise only macOS can build for iOS.
  */
 export function resolveDefaultPlatform(state: ProjectState): PlanPlatform {
-  const { ios, android } = state.nativeDirs;
-  if (ios !== android) {
-    return ios ? 'ios' : 'android';
-  }
-  return process.platform === 'darwin' ? 'ios' : 'android';
+  return defaultSmokePlatform(state.nativeDirs);
 }
 
 function shortHash(hash: string): string {

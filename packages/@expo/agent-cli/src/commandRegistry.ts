@@ -1011,7 +1011,7 @@ const absentCapabilities: {
   },
   logs: {
     absent: `the log this CLI keeps is the dev server's, and it is "${PROGRAM_PREFIX} dev:logs"`,
-    instead: `That reads what a dev server started with "${PROGRAM_PREFIX} dev --detach" has printed. For the two questions a log is more often opened for: "${PROGRAM_PREFIX} smoke" says whether the bundler finished, whether this project compiles and whether the app came up, and "${PROGRAM_PREFIX} runtime:errors" collects what the running app threw over a time window.`,
+    instead: `That reads what a dev server started with "${PROGRAM_PREFIX} dev --detach" has printed. For the two questions a log is more often opened for: "${PROGRAM_PREFIX} smoke --ios|--android" says whether the bundler finished, whether this project compiles and whether the app came up, and "${PROGRAM_PREFIX} runtime:errors" collects what the running app threw over a time window.`,
     suggestedCommand: `${PROGRAM_PREFIX} dev:logs`,
   },
 };

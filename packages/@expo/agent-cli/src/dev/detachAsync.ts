@@ -28,7 +28,9 @@ import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import * as Log from '../log';
 import { needsHumanErrorFrom, needsHumanOf } from '../needsHuman/error';
 import { findNeedsHumanScenario } from '../needsHuman/registry';
+import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
+import { defaultSmokePlatformAsync, smokeCommand, statedSmokePlatform } from '../smoke/suggest';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../runtime/waitReady';
 import { requestsTunnel } from '../start/followUps';
@@ -175,6 +177,11 @@ export async function devDetachAsync(
 ): Promise<number> {
   const startedAt = Date.now();
 
+  // The platform the `smoke` follow-up should name: the one the caller asked to run for, else the
+  // project's own default. `smoke` requires a platform now, so a follow-up without one exits 1.
+  const smokePlatform =
+    statedSmokePlatform(options.platform) ?? (await defaultSmokePlatformAsync(projectRoot));
+
   // Asked before anything is spawned. A second detached dev server for one project cannot hold the
   // lock, so nothing would be able to find it or stop it afterwards.
   const running = await readDevServerLockAsync(projectRoot);
@@ -189,6 +196,7 @@ export async function devDetachAsync(
       // Whatever the dev server that is already up advertised. Nothing is waited for here: this
       // run started nothing, so there is no tunnel of its own on its way.
       tunnelUrl: await currentTunnelUrlAsync(projectRoot, running.url),
+      smokePlatform,
     });
   }
 
@@ -302,6 +310,7 @@ export async function devDetachAsync(
     print,
     tunnelUrl,
     phase,
+    smokePlatform,
   });
 }
 
@@ -637,6 +646,7 @@ function reportDetached(
     print,
     tunnelUrl,
     phase,
+    smokePlatform,
   }: {
     lock: DevServerLockInfo;
     alreadyRunning: boolean;
@@ -645,6 +655,8 @@ function reportDetached(
     startedAt: number;
     print: boolean;
     tunnelUrl: string | null;
+    /** The platform the `smoke` follow-up names. See {@link detachFollowUps}. */
+    smokePlatform: NativePlatform;
     /**
      * The phase the caller already read, when it read one.
      *
@@ -674,7 +686,9 @@ function reportDetached(
     waitedMs: Date.now() - startedAt,
     followups: [],
   };
-  report.followups = followUpsEnabled(options.followups) ? detachFollowUps(report) : [];
+  report.followups = followUpsEnabled(options.followups)
+    ? detachFollowUps(report, smokePlatform)
+    : [];
 
   cliEvent('dev_detach', {
     url: report.url,
@@ -770,13 +784,21 @@ function printHumanReport(report: DevDetachResultJson): void {
   Log.log(lines.join('\n'));
 }
 
-/** @ref llp/0009-smart-followups.rfc.md §Examples per command */
-function detachFollowUps(report: DevDetachResultJson): FollowUp[] {
+/**
+ * @ref llp/0009-smart-followups.rfc.md §Examples per command
+ *
+ * Exported for the test table, like `buildDetachSpawn` and `notReadyError`. A pure function of the
+ * report and the platform, so the platform the `smoke` follow-up names comes from the caller.
+ */
+export function detachFollowUps(
+  report: DevDetachResultJson,
+  smokePlatform: NativePlatform
+): FollowUp[] {
   const followups: FollowUp[] = [];
   if (report.ready == null) {
     followups.push({
       id: 'smoke',
-      command: `${PROGRAM_PREFIX} smoke`,
+      command: smokeCommand(smokePlatform),
       why: 'The dev server is up, but nothing has said whether its bundler finished, whether this project compiles, or whether the app comes up on it.',
     });
   }

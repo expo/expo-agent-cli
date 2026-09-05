@@ -21,6 +21,7 @@ import { readLastBuildFingerprints, recordLastBuildFingerprint } from '../plan/l
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
+import { defaultSmokePlatform, defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
 import { clearFingerprintMemo } from '../project/fingerprint';
 import { clearFingerprintCache } from '../project/fingerprintCache';
 import { probeProjectStateAsync } from '../project/probe';
@@ -436,10 +437,11 @@ async function retryOnFreePortAsync(
 async function portDemandedError(projectRoot: string, port: number): Promise<CommandError> {
   const { findPortListenerAsync } = require('./portListener') as typeof import('./portListener');
   const { readDevServerLockAsync } = require('../devLock') as typeof import('../devLock');
-  const [listener, lock, free] = await Promise.all([
+  const [listener, lock, free, smokePlatform] = await Promise.all([
     findPortListenerAsync(port),
     readDevServerLockAsync(projectRoot),
     findFreePortAsync(port + 1),
+    defaultSmokePlatformAsync(projectRoot),
   ]);
 
   // The most useful special case: the process on that port is this project's own dev server, so
@@ -457,13 +459,13 @@ async function portDemandedError(projectRoot: string, port: number): Promise<Com
         ? `Why: this project's own dev server is already on port ${port}, held by ${holder}. Nothing was started, because there is already one there.`
         : `Why: ${holder} is listening on it, and --port ${port} is a requirement rather than a preference — moving the dev server to another port would leave every URL and every command that names ${port} pointing at nothing.`,
       ours
-        ? `How: use the dev server that is running ("${PROGRAM_PREFIX} smoke" checks its bundle and its app), or stop it first with "${PROGRAM_PREFIX} dev:stop".`
+        ? `How: use the dev server that is running ("${smokeCommand(smokePlatform)}" checks its bundle and its app), or stop it first with "${PROGRAM_PREFIX} dev:stop".`
         : `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --yes --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
     ].join('\n')
   );
   // Never the command that just failed: it would stop in exactly the same place.
   error.suggestedCommand = ours
-    ? `${PROGRAM_PREFIX} smoke`
+    ? smokeCommand(smokePlatform)
     : free == null
       ? `${PROGRAM_PREFIX} dev:stop --port ${port} --force`
       : `${PROGRAM_PREFIX} dev --yes --port ${free}`;
@@ -839,18 +841,9 @@ function resolveBuildPlatform(step: PlanStep): NativePlatform | null {
   return step.argv[1] === 'run:android' ? 'android' : null;
 }
 
-/**
- * The platform to plan for when the command line names none.
- *
- * A single checked-in native directory is the project's own answer. Otherwise the host decides:
- * only macOS can build for iOS.
- */
+/** The platform to plan for when the command line names none. See {@link defaultSmokePlatform}. */
 function resolveDefaultPlatform(state: ProjectState): PlanPlatform {
-  const { ios, android } = state.nativeDirs;
-  if (ios !== android) {
-    return ios ? 'ios' : 'android';
-  }
-  return process.platform === 'darwin' ? 'ios' : 'android';
+  return defaultSmokePlatform(state.nativeDirs);
 }
 
 /** The CLIs a plan step may invoke. Everything else is a step this version cannot run. */

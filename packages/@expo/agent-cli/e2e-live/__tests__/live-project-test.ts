@@ -791,11 +791,12 @@ describeLive('live-project', gate)(
         });
         expectExit(forwarded, 0);
 
-        const { command, args } = require('../../src/utils/expoCli').resolveExpoCli(projectRoot, [
-          'config',
-          '--json',
-        ]);
-        const direct = require('node:child_process').execFileSync(command, [...args], {
+        // The project's own bin, resolved by the harness rather than imported from `src/`: this
+        // suite tests the built bundle, and requiring a TypeScript module at runtime does not
+        // resolve under node anyway. A scaffold always has its own `node_modules/.bin/expo`.
+        const command = path.join(projectRoot, 'node_modules', '.bin', 'expo');
+        expect(fs.existsSync(command)).toBe(true);
+        const direct = require('node:child_process').execFileSync(command, ['config', '--json'], {
           cwd: projectRoot,
           encoding: 'utf8',
           env: { ...process.env, NODE_ENV: undefined, FORCE_COLOR: '0', NO_COLOR: '1' },

@@ -1,0 +1,39 @@
+// @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say
+//
+// `smoke` requires `--ios` or `--android` now (`./resolveOptions.ts`), so any next action that
+// names a bare `smoke` prints a command that exits 1 when a reader runs it — F151. The first sweep
+// caught the report surfaces; it missed the ones that state a platform from the project rather than
+// from a device. This is the one place the rule lives, so the next such site imports it instead of
+// copying it.
+
+import { readProjectNativeDirsAsync } from '../project/nativeCode';
+import type { NativePlatform, PlanPlatform } from '../plan/types';
+import { PROGRAM_PREFIX } from '../programName';
+
+/** The `smoke` command for a platform, always with the flag it now requires. */
+export function smokeCommand(platform: NativePlatform): string {
+  return `${PROGRAM_PREFIX} smoke --${platform}`;
+}
+
+/** A platform another part of the run already settled, or null for `web`/nothing. */
+export function statedSmokePlatform(value: PlanPlatform | null | undefined): NativePlatform | null {
+  return value === 'ios' || value === 'android' ? value : null;
+}
+
+/**
+ * The platform to name when nothing else did.
+ *
+ * A single checked-in native directory is the project's own answer. Otherwise only macOS can build
+ * for iOS. This is the rule `status` and `dev` already default to, so their reports agree.
+ */
+export function defaultSmokePlatform(nativeDirs: { ios: boolean; android: boolean }): NativePlatform {
+  if (nativeDirs.ios !== nativeDirs.android) {
+    return nativeDirs.ios ? 'ios' : 'android';
+  }
+  return process.platform === 'darwin' ? 'ios' : 'android';
+}
+
+/** {@link defaultSmokePlatform}, reading the native dirs off disk — two `stat`s on a CNG project. */
+export async function defaultSmokePlatformAsync(projectRoot: string): Promise<NativePlatform> {
+  return defaultSmokePlatform(await readProjectNativeDirsAsync(projectRoot));
+}

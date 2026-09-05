@@ -20,7 +20,9 @@ import { readDevServerLockAsync } from '../devLock';
 import { event as cliEvent } from '../events';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import * as Log from '../log';
+import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
+import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
 import { CommandError } from '../utils/errors';
 import {
@@ -65,10 +67,13 @@ export interface DevLogsResultJson {
  */
 export async function devLogsAsync(projectRoot: string, options: DevLogsOptions): Promise<number> {
   const read = readDetachedLogSync(projectRoot, options.tail);
-  const lock = await readDevServerLockAsync(projectRoot);
+  const [lock, smokePlatform] = await Promise.all([
+    readDevServerLockAsync(projectRoot),
+    defaultSmokePlatformAsync(projectRoot),
+  ]);
 
   if (!read) {
-    throw noLogError(projectRoot, lock != null);
+    throw noLogError(projectRoot, lock != null, smokePlatform);
   }
 
   // Read over the **whole** log rather than the tail this command was asked for: the `Waiting on`
@@ -87,7 +92,7 @@ export async function devLogsAsync(projectRoot: string, options: DevLogsOptions)
       : null,
     followups: [],
   };
-  report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
+  report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report, smokePlatform) : [];
 
   cliEvent('dev_logs', {
     logFile: report.logFile,
@@ -142,7 +147,7 @@ function reachLine(report: DevLogsResultJson): string | null {
 }
 
 /** @ref llp/0009-smart-followups.rfc.md §Examples per command */
-function buildFollowUps(report: DevLogsResultJson): FollowUp[] {
+function buildFollowUps(report: DevLogsResultJson, smokePlatform: NativePlatform): FollowUp[] {
   if (!report.devServer) {
     return [
       {
@@ -155,7 +160,7 @@ function buildFollowUps(report: DevLogsResultJson): FollowUp[] {
   return [
     {
       id: 'smoke',
-      command: `${PROGRAM_PREFIX} smoke`,
+      command: smokeCommand(smokePlatform),
       why: 'The log says what the bundler printed; this says whether it finished, whether this project still compiles, and whether the app comes up on it.',
     },
   ];
@@ -169,7 +174,11 @@ function buildFollowUps(report: DevLogsResultJson): FollowUp[] {
  * terminal — there is nothing this command could have printed, and saying "no log" without saying
  * why would send the caller looking for a file that was never going to exist.
  */
-function noLogError(projectRoot: string, serverRunning: boolean): CommandError {
+function noLogError(
+  projectRoot: string,
+  serverRunning: boolean,
+  smokePlatform: NativePlatform
+): CommandError {
   const logFile = detachedLogPath(projectRoot);
   const error = new CommandError(
     'NO_DEV_LOG',
@@ -177,7 +186,7 @@ function noLogError(projectRoot: string, serverRunning: boolean): CommandError {
       ? [
           `This project has a dev server running, but no log to read: it was started attached.`,
           `Why: only "${PROGRAM_PREFIX} dev --detach" writes to ${logFile}. A dev server started in a terminal writes to that terminal, and nothing captured it — so its output is there and nowhere else.`,
-          `How: read it in the terminal it is running in. To get a log next time, stop it with "${PROGRAM_PREFIX} dev:stop" and start it again with "${PROGRAM_PREFIX} dev --detach". For what the bundler is doing right now, "${PROGRAM_PREFIX} smoke" answers without a log.`,
+          `How: read it in the terminal it is running in. To get a log next time, stop it with "${PROGRAM_PREFIX} dev:stop" and start it again with "${PROGRAM_PREFIX} dev --detach". For what the bundler is doing right now, "${smokeCommand(smokePlatform)}" answers without a log.`,
         ].join('\n')
       : [
           `This project has no detached dev server log, so there is nothing to read.`,
@@ -186,7 +195,7 @@ function noLogError(projectRoot: string, serverRunning: boolean): CommandError {
         ].join('\n')
   );
   error.suggestedCommand = serverRunning
-    ? `${PROGRAM_PREFIX} smoke`
+    ? smokeCommand(smokePlatform)
     : `${PROGRAM_PREFIX} dev --detach --wait-ready`;
   return error;
 }

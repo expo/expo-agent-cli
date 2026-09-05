@@ -8,7 +8,9 @@ import { event } from '../events';
 import { EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { buildRuntimeErrorsFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
+import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
+import { smokeCommand } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
 import {
   CdpClient,
@@ -75,7 +77,7 @@ export async function runtimeEvalAsync(
       throw evaluateUnsupportedError(devServerUrl);
     }
     if (error instanceof CdpPromisePendingError) {
-      throw promisePendingError(devServerUrl, expression, timeoutMs, error);
+      throw promisePendingError(devServerUrl, expression, timeoutMs, error, options.platform);
     }
     throw new CommandError(
       'RUNTIME_EVALUATE_FAILED',
@@ -117,15 +119,17 @@ function promisePendingError(
   devServerUrl: string,
   expression: string,
   timeoutMs: number,
-  cause: CdpPromisePendingError
+  cause: CdpPromisePendingError,
+  platform: NativePlatform | null | undefined
 ): CommandError {
+  const smokePlatform = platform ?? (process.platform === 'darwin' ? 'ios' : 'android');
   const error = new CommandError(
     'RUNTIME_PROMISE_PENDING',
     cause.lost
       ? [
           `The promise the expression returned was lost before it settled (dev server ${devServerUrl}).`,
           `Why: the app reloaded during the wait, which clears the globals this command parks the outcome on, so the value it resolved to — if it ever did — cannot be read any more.`,
-          `How: run the expression again once the app has finished reloading ("${PROGRAM_PREFIX} smoke" waits for the bundle and the app together).`,
+          `How: run the expression again once the app has finished reloading ("${smokeCommand(smokePlatform)}" waits for the bundle and the app together).`,
         ].join('\n')
       : [
           `The promise the expression returned had not settled after ${timeoutMs}ms (dev server ${devServerUrl}).`,

@@ -38,8 +38,9 @@ import { resolveDeviceAsync, type NavigateDevice } from '../../navigate/device';
 import { isCallerNamedDevServer } from '../../navigate/openRoute';
 import { checkRoute, routeNotFoundError, type RouteCheckJson } from '../../navigate/routeCheck';
 import { decideExpoGoTarget } from '../../navigate/target';
-import type { NativePlatform } from '../../plan/types';
+import type { NativePlatform, PlanPlatform } from '../../plan/types';
 import { PROGRAM_PREFIX } from '../../programName';
+import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../../project/expoGo';
 import { readProjectNativeDirsAsync } from '../../project/nativeCode';
 import {
@@ -1613,6 +1614,13 @@ function explainStrandedApp(report: ReloadResultJson, options: ReloadOptions): s
 
 /** The what / why / how for a reload that did not end where it was supposed to. */
 export function explainReloadFailure(report: ReloadResultJson, options: ReloadOptions): string {
+  // The `smoke` this points at needs a platform now. Prefer the device this reload ran against,
+  // then the flag the caller passed, then the host's default — and carry `--cloud` through.
+  const smokePlatform =
+    statedSmokePlatform((report.platform as PlanPlatform | null) ?? options.platform) ??
+    (process.platform === 'darwin' ? 'ios' : 'android');
+  const smokeBase = `${smokeCommand(smokePlatform)}${options.cloud ? ' --cloud' : ''}`;
+
   // The refusal comes first, because nothing was attempted: an attempts list that is empty for
   // this reason must not read as "no method worked" (friction run 4, F38).
   if (report.bundle.ok === false) {
@@ -1639,7 +1647,7 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
         `The bundler was still building this project's entry bundle after ${options.timeoutMs}ms, so the app was not reloaded.`
       ),
       `Why: ${report.bundle.reason}. Until that build finishes it is not known whether a reload would fetch working code, and nothing was attempted rather than reload onto an answer nobody has.`,
-      `How: run this command again with a longer --timeout — a first build of a large app takes tens of seconds — or run "${PROGRAM_PREFIX} smoke" first and reload once it is green.`,
+      `How: run this command again with a longer --timeout — a first build of a large app takes tens of seconds — or run "${smokeBase}" first and reload once it is green.`,
     ].join('\n');
   }
   // @ref llp/0005 §Cloud simulator. The relaunch ran and nothing was observed: the app
@@ -1652,7 +1660,7 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
         `The app was ${report.method === 'device' ? 'relaunched' : 'asked to reload itself'}${options.cloud ? ' on the cloud simulator' : ''}, and nothing was observed to confirm it reloaded.`
       ),
       `Why: two observations were watched for ${options.timeoutMs}ms and neither happened. The dev server listed no debugger target it had not listed before (${report.devServerUrl}/json/list named ${report.appsConnected}), which a cloud simulator often never does — an app has run this project on one with that list empty throughout. And ${report.bundlesAfterReload.reason ?? 'the dev server served no bundle after the relaunch'}. So the app may be running the new code invisibly, or it may not have come back.`,
-      `How: look at the screen — "${PROGRAM_PREFIX} smoke --cloud --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach --tunnel" so its output is recorded.` : ''}`.trim(),
+      `How: look at the screen — "${smokeCommand(smokePlatform)} --cloud --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach --tunnel" so its output is recorded.` : ''}`.trim(),
     ].join('\n');
   }
   if (!report.reloaded) {
@@ -1679,7 +1687,7 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
         `The app reloaded, but it had not reconnected to the dev server ${options.timeoutMs}ms later.`
       ),
       `Why: its debugger target list (${report.devServerUrl}/json/list) was empty, so no app is running this project's JavaScript — the app either closed or is still loading a cold bundle, which can take longer than this wait.`,
-      `How: run "${PROGRAM_PREFIX} smoke" to wait for the bundle and the app together, or run this command again with a longer --timeout. If the app is not on screen, "${PROGRAM_PREFIX} navigate /" opens it. Nothing is known to be wrong; the wait ran out first.`,
+      `How: run "${smokeBase}" to wait for the bundle and the app together, or run this command again with a longer --timeout. If the app is not on screen, "${PROGRAM_PREFIX} navigate /" opens it. Nothing is known to be wrong; the wait ran out first.`,
     ].join('\n');
   }
   return [
@@ -1687,6 +1695,6 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
       `The app reloaded, but its JavaScript had not registered again ${options.timeoutMs}ms later.`
     ),
     `Why: ${report.devServerUrl}/json/list still names ${report.appsConnected === 1 ? 'the same debugger target' : `only the same ${report.appsConnected} debugger targets`} it named before the reload, and the dev server never reuses a target id — so the runtime that answers now is the one from before, not a reloaded one. Its errors and its state describe the run this reload was meant to replace.`,
-    `How: run this command again with a longer --timeout, or run "${PROGRAM_PREFIX} smoke" and read the app after it. Do not believe "${PROGRAM_PREFIX} runtime:errors" until a reload reports a reconnected app.`,
+    `How: run this command again with a longer --timeout, or run "${smokeBase}" and read the app after it. Do not believe "${PROGRAM_PREFIX} runtime:errors" until a reload reports a reconnected app.`,
   ].join('\n');
 }

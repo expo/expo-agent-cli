@@ -211,7 +211,7 @@ function waitReadyWithoutDetach(): CommandError {
     [
       `--wait-ready only means something with --detach, and --detach was not passed.`,
       `Why: without --detach this command runs the dev server in the foreground and does not return until it stops, so there is no moment at which it could report that the bundler is ready.`,
-      `How: pass both ("${PROGRAM_PREFIX} dev --detach --wait-ready"), or check a dev server that is already running with "${PROGRAM_PREFIX} smoke".`,
+      `How: pass both ("${PROGRAM_PREFIX} dev --detach --wait-ready"), or check a dev server that is already running with "${PROGRAM_PREFIX} smoke --ios|--android".`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} dev --detach --wait-ready`;

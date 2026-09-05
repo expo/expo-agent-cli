@@ -520,7 +520,7 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
   });
 
   it('smoke passes on a working app, with the phases it claims', async () => {
-    const result = await runLiveAsync(run, projectRoot, ['smoke', '--json'], {
+    const result = await runLiveAsync(run, projectRoot, ['smoke', '--ios', '--json'], {
       label: 'smoke-green',
     });
     expectExit(result, 0);
@@ -557,7 +557,7 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     });
 
     it.each([
-      ['smoke', ['smoke', '--json']],
+      ['smoke', ['smoke', '--ios', '--json']],
       ['runtime:tree', ['runtime:tree', '--testID', 'inc-btn', '--json']],
       ['runtime:tap', ['runtime:tap', 'inc-btn', '--json']],
       ['runtime:type', ['runtime:type', 'x', '--testID', 'name-input', '--json']],
@@ -603,7 +603,7 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     // the app to be back before asking. Bounded, not slept — see `waitForLabScreenAsync`.
     expect(await waitForLabScreenAsync('recovered')).toBe(true);
 
-    const smoke = await runLiveAsync(run, projectRoot, ['smoke', '--json'], {
+    const smoke = await runLiveAsync(run, projectRoot, ['smoke', '--ios', '--json'], {
       label: 'smoke-recovered',
     });
     expectExit(smoke, 0);

@@ -301,7 +301,10 @@ export function reachTheAppLadder({
   if (state === 'no-dev-server') {
     return `start one with "${dev}" in the project root and open the app with "${navigate}", then run this command again.`;
   }
-  return `open the app on a device or simulator with "${navigate}" — or, when the device is a phone or a cloud simulator this machine cannot drive, get the URL to open on it with "${PROGRAM_PREFIX} navigate /${platformFlag} --print-url". Then let "${PROGRAM_PREFIX} smoke${cloudFlag}" wait for the bundle and the app together, and run this command again.`;
+  // `smoke` requires a platform now, so name one even when the caller did not: the app runs on a
+  // device of some platform, and the host's default is the right guess when nothing else said.
+  const smokePlatform = platform ?? (process.platform === 'darwin' ? 'ios' : 'android');
+  return `open the app on a device or simulator with "${navigate}" — or, when the device is a phone or a cloud simulator this machine cannot drive, get the URL to open on it with "${PROGRAM_PREFIX} navigate /${platformFlag} --print-url". Then let "${PROGRAM_PREFIX} smoke --${smokePlatform}${cloudFlag}" wait for the bundle and the app together, and run this command again.`;
 }
 
 /** Attach the observed counts to a refusal, in the shape the whole family uses. */
