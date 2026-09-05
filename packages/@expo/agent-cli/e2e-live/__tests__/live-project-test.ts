@@ -594,6 +594,37 @@ describeLive('live-project', gate)(
         );
       });
 
+      // The name guard on a real filesystem, where a symlink escape is a real one rather than a
+      // string. A skill directory whose name is not `[A-Za-z0-9._-]+` — a traversal, or a space — is
+      // not discovered and not linked.
+      it('ignores a skill whose directory name is not safe', async () => {
+        const skillsRoot = path.join(projectRoot, 'node_modules', 'expo-haptics', 'skills');
+        fs.mkdirSync(path.join(skillsRoot, 'bad name'), { recursive: true });
+        fs.writeFileSync(path.join(skillsRoot, 'bad name', 'SKILL.md'), '---\nname: x\n---\n');
+        fs.mkdirSync(path.join(skillsRoot, '..', 'escaped'), { recursive: true });
+
+        const listed = await runLiveAsync(run, projectRoot, ['skills:list', '--json'], {
+          label: 'skills-list-unsafe',
+        });
+        expectExit(listed, 0);
+        const names = parseJson(listed).skills.map((s: any) => s.name ?? s.skill);
+        expect(names).not.toContain('bad name');
+        expect(names).not.toContain('escaped');
+
+        const synced = await runLiveAsync(run, projectRoot, ['skills:sync', '--json'], {
+          label: 'skills-sync-unsafe',
+        });
+        expectExit(synced, 0);
+        expect(
+          parseJson(synced).linked.some((l: string) => l.includes('bad name') || l.includes('escaped'))
+        ).toBe(false);
+
+        fs.rmSync(skillsRoot, { recursive: true, force: true });
+        await runLiveAsync(run, projectRoot, ['skills:sync', '--json'], {
+          label: 'skills-resync-after-unsafe',
+        });
+      });
+
       // The guard wave 16 added, and the one place this group's four actions do not agree: `clean` is
       // cleanup rather than action on an app, so it answers where the other three refuse (llp/0004-smart-start-and-project-state.rfc.md).
       it('cleans in a directory that is not an Expo app, where list and sync refuse', async () => {
