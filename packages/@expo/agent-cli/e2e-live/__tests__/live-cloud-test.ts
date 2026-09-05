@@ -108,6 +108,15 @@ const RELOAD_TIMEOUT = '180s';
 /** The route the lab screen lives at, for the reload that names one. */
 const LAB_ROUTE = '/lab';
 
+/** The `id` of an `eas simulator --json` payload, or null when the output is not that object. */
+function jsonSessionId(stdout: string): string | null {
+  try {
+    return JSON.parse(stdout)?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on staging', () => {
   const run = new LiveRun('live-cloud');
   let projectRoot = '';
@@ -304,13 +313,23 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on stagi
       'agent-cli-live',
       '--json',
     ]);
+    // Read the session id from whatever the command printed, even when it failed. `eas simulator`
+    // creates the session **before** it waits for the device to be ready, so a start that times out
+    // on readiness has still billed one — and the `simulator:stop` cleanup can only stop what it can
+    // name. A bare stop does not reach it [observed — a session leaked when readiness timed out,
+    // 2026-09-05]. So capture the id first, then decide whether the start succeeded.
+    sessionId =
+      jsonSessionId(started.stdout) ??
+      `${started.stdout}\n${started.stderr}`.match(/id: ([0-9a-f-]{36})/i)?.[1] ??
+      null;
+    if (sessionId) {
+      run.spend.cloudSessions += 1;
+    }
     if (started.exitCode !== 0) {
       throw new Error(
         `eas simulator failed (exit ${started.exitCode}): ${started.stderr.slice(-2000)}`
       );
     }
-    run.spend.cloudSessions += 1;
-    sessionId = JSON.parse(started.stdout)?.id ?? null;
     if (!sessionId) {
       throw new Error(
         `eas simulator --json printed no session id: ${started.stdout.slice(0, 500)}`
