@@ -1,0 +1,12 @@
+{
+  "id": "dev-logs-none",
+  "fixture": "e2e/fixtures/go-app",
+  "taskPrompt": "show the detached dev server's log for this project",
+  "drivingAgent": "deterministic",
+  "tiers": [0],
+  "command": {
+    "argv": ["dev:logs", "--json"],
+    "timeoutMs": 60000
+  },
+  "graders": [{ "type": "exit-code", "expect": 1 }]
+}
