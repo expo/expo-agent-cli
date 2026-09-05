@@ -130,16 +130,29 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
     // is not this run's and may already have one on a port this suite did not choose.
     await runLiveAsync(run, projectRoot, ['dev:stop', '--json'], { label: 'dev-stop-before' });
 
+    // The dev server is started **without** `--ios`, unlike live-devclient's `--android`. `--ios`
+    // makes `expo start` focus Simulator.app through AppleScript, which macOS refuses without an
+    // Automation grant — the Expo CLI does not catch that and takes the whole start down with it
+    // (llp/0005 §The gate installs the app). So the plan is `expo start --dev-client`, which opens
+    // nothing, and `navigate --ios` below opens the app through `xcrun simctl openurl` instead — the
+    // one path that needs no Automation and the one this suite exists to prove.
     const started = await runLiveAsync(
       run,
       projectRoot,
-      ['dev', '--detach', '--wait-ready', '--ios', '--yes', '--port', String(PORT), '--json'],
+      ['dev', '--detach', '--wait-ready', '--yes', '--port', String(PORT), '--json'],
       { label: 'dev-detach' }
     );
     expectExit(started, 0, 'the gate said this project has a recorded ios build, so this must serve');
     const report = parseJson(started);
     expect(report.ready).toBe(true);
     expect(report.port).toBe(PORT);
+
+    // Open the build on the simulator: this is `navigate` doing over simctl what `--ios` could not do
+    // over AppleScript, and its success is the wall this suite is about being gone.
+    const opened = await runLiveAsync(run, projectRoot, ['navigate', LAB_ROUTE, '--ios', '--json'], {
+      label: 'navigate-open',
+    });
+    expectExit(opened, 0, 'navigate opens the build over simctl, no Automation grant needed');
 
     const attached = await waitForRuntimeAsync('beforeAll');
     if (!attached) {
@@ -247,8 +260,8 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
     );
     expectExit(result, 0);
     const report = parseJson(result);
-    expect(report.tapped).toBe(true);
-    expect(report.verified?.changed).toBe(true);
+    expect(report.called).toBe(true);
+    expect(report.verify.changed).toBe(true);
   });
 
   it('types into a real input, and refuses a testID that is not one with 20', async () => {
