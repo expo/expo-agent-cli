@@ -269,6 +269,20 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     ).toBe(true);
   });
 
+  // The Android plan is covered in live-android; this is the iOS twin, and it pins the one thing a
+  // stub cannot: a real scaffold with no native dirs and an Expo Go-compatible graph plans Expo Go
+  // and no build.
+  it('dev --plan --ios plans Expo Go and nothing to build', async () => {
+    const result = await runLiveAsync(run, projectRoot, ['dev', '--plan', '--ios', '--json'], {
+      label: 'dev-plan-ios',
+    });
+    expectExit(result, 0);
+    const report = parseJson(result);
+    expect(report.rule).toBe('expo-go');
+    expect(report.buildLocation).toBeNull();
+    expect(report.steps.map((s: any) => s.argv)).toEqual([['expo', 'start', '--go', '--ios']]);
+  });
+
   // --- the generated-types gate: F64, which only a real scaffold has -----------------------------
 
   it('typecheck on a brand-new project fails, and says which file the Expo CLI has yet to write', async () => {
@@ -331,6 +345,19 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     expect(fs.existsSync(report.logFile)).toBe(true);
   });
 
+  it('dev:logs --tail bounds the read to the lines asked for', async () => {
+    const result = await runLiveAsync(run, projectRoot, ['dev:logs', '--tail', '5', '--json'], {
+      label: 'dev-logs-tail',
+    });
+    expectExit(result, 0);
+    const report = parseJson(result);
+    expect(report.lines.length).toBeLessThanOrEqual(5);
+    // A real dev server writes far more than five lines by now, so the tail is a real cut, not the
+    // whole file happening to be short.
+    expect(report.totalLines).toBeGreaterThan(report.lines.length);
+    expect(report.truncated).toBe(true);
+  });
+
   // --- getting the app onto the device -------------------------------------------------------------
 
   it('navigate opens the route on the simulator and the app attaches', async () => {
@@ -347,6 +374,21 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     // `attached` is the only claim in this report that needs a runtime on the other end, and it is
     // the one the stub tier cannot make: it means a CDP target appeared for the app.
     expect(report.attached).toBe(true);
+  });
+
+  it('navigate --print-url resolves the URL and opens nothing', async () => {
+    const result = await runLiveAsync(run, projectRoot, ['navigate', LAB_ROUTE, '--print-url', '--json'], {
+      label: 'navigate-print-url',
+    });
+    expectExit(result, 0);
+    const report = parseJson(result);
+    expect(report.url).toBe(`exp://127.0.0.1:${PORT}/--${LAB_ROUTE}`);
+    expect(report.printUrl).toBe(true);
+    // The point of --print-url is that no device is touched: the five device fields stay null even
+    // though a simulator is booted right here.
+    expect(report.deviceId).toBeNull();
+    expect(report.deviceBackend).toBeNull();
+    expect(['localhost', 'lan']).toContain(report.hostType);
   });
 
   it('navigate refuses a route the project does not have, and lists the ones it has', async () => {
@@ -392,6 +434,25 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
     }
 
     expect(await waitForLabScreenAsync('after-reload')).toBe(true);
+  });
+
+  // With a dev server up and an app attached, `status.next` is the smoke gate — and it carries the
+  // platform now, the fix a bare `smoke` used to break (F151). The booted simulator this run drives
+  // is the device it names, and it appears in the device list.
+  it('status names the platform-carrying gate and lists the booted simulator', async () => {
+    const result = await runLiveAsync(run, projectRoot, ['status', '--json'], {
+      label: 'status-next',
+    });
+    expectExit(result, 0);
+    const report = parseJson(result);
+    expect(report.next.rule).toBe('expo-go');
+    expect(report.next.command).toBe('npx @expo/agent-cli smoke --ios');
+    expect(report.device.state).toBe('present');
+    expect(
+      report.device.devices.some(
+        (d: any) => d.deviceId === simulator.udid && d.platform === 'ios'
+      )
+    ).toBe(true);
   });
 
   // --- reading and driving the running app ---------------------------------------------------------
@@ -544,8 +605,19 @@ describeLive('live-local', gate)('live-local: the whole loop on a real simulator
   describe('the break-and-fix cycle', () => {
     const broken = `${'\n'}this is not valid typescript at all ((((${'\n'}`;
 
-    beforeAll(() => {
+    beforeAll(async () => {
       fs.appendFileSync(labFile, broken);
+      // Metro compiles the entry bundle on request, so the break is not observable until something
+      // asks for it. Wait for a bundle check to actually report it broken before the assertions,
+      // or the first command races the file watcher and reads the last good bundle
+      // [observed — 2026-09-05, `smoke --ios` exited 0 against just-broken code].
+      const landed = await waitForAsync(async () => {
+        const probe = await runLiveAsync(run, projectRoot, ['runtime:reload', '--no-route-check', '--json'], {
+          label: 'break-settle',
+        });
+        return parseJson(probe).bundle?.ok === false;
+      }, 60_000);
+      expect(landed).toBe(true);
     });
 
     afterAll(async () => {
