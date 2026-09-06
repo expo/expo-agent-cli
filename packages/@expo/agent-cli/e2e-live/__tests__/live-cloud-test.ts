@@ -514,39 +514,56 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       appFlags = ['--expo-go', '--open-url', `exp://${publicHost}`];
     }
 
-    let started: Awaited<ReturnType<typeof easAsync>>;
-    try {
-      started = await easAsync(
-        'simulator-start',
-        [
-          'simulator',
-          '--platform',
-          CLOUD_PLATFORM,
-          '--type',
-          'agent-device',
-          ...appFlags,
-          '--non-interactive',
-          '--name',
-          'agent-cli-live',
-          '--json',
-        ],
-        SESSION_START_MS
-      );
-    } catch (error: any) {
-      sessionId = findSessionId(String(error?.stdout ?? ''), String(error?.stderr ?? ''));
+    const startArgs = [
+      'simulator',
+      '--platform',
+      CLOUD_PLATFORM,
+      '--type',
+      'agent-device',
+      ...appFlags,
+      '--non-interactive',
+      '--name',
+      'agent-cli-live',
+      '--json',
+    ];
+    // The start gets one retry. A session is sometimes created and then never becomes ready, and
+    // `eas simulator` gives up on it with exit 1 after its own internal wait [observed — expo-ci,
+    // 2026-09-06, three workflow runs: the run's *second* Android session missed readiness while
+    // its first was fine, on an account with nothing else in progress]. The missed session is
+    // stopped before the retry, so whatever slot it holds is returned; a second miss is reported
+    // the way a single one always was.
+    let started: Awaited<ReturnType<typeof easAsync>> | null = null;
+    for (let attempt = 1; attempt <= 2 && !started; attempt += 1) {
+      const label = attempt === 1 ? 'simulator-start' : 'simulator-start-retry';
+      let result: Awaited<ReturnType<typeof easAsync>>;
+      try {
+        result = await easAsync(label, startArgs, SESSION_START_MS);
+      } catch (error: any) {
+        sessionId = findSessionId(String(error?.stdout ?? ''), String(error?.stderr ?? ''));
+        if (sessionId) {
+          run.spend.cloudSessions += 1;
+        }
+        throw error;
+      }
+      sessionId = findSessionId(result.stdout, result.stderr);
       if (sessionId) {
         run.spend.cloudSessions += 1;
       }
-      throw error;
+      if (result.exitCode === 0) {
+        started = result;
+      } else if (attempt === 2) {
+        throw new Error(
+          `eas simulator failed (exit ${result.exitCode}): ${result.stderr.slice(-2000)}`
+        );
+      } else {
+        if (sessionId) {
+          await easAsync('simulator-stop-after-miss', ['simulator:stop', '--id', sessionId]);
+          sessionId = null;
+        }
+      }
     }
-    sessionId = findSessionId(started.stdout, started.stderr);
-    if (sessionId) {
-      run.spend.cloudSessions += 1;
-    }
-    if (started.exitCode !== 0) {
-      throw new Error(
-        `eas simulator failed (exit ${started.exitCode}): ${started.stderr.slice(-2000)}`
-      );
+    if (!started) {
+      throw new Error('eas simulator never produced a start result (harness, not a finding)');
     }
     if (!sessionId) {
       throw new Error(
@@ -556,7 +573,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // Scaffold, install, a tunnel, a detached dev server and a billed simulator session: minutes.
     // Without its own bound this hook hit vitest's 10s default and the suite never reached a test —
     // which is why it had never been seen run.
-  }, 900_000);
+  }, 1_500_000);
 
   afterAll(async () => {
     await run.cleanUpAsync();
