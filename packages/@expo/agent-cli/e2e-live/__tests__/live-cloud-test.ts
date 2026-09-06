@@ -2,23 +2,30 @@
 //
 // The cloud-simulator half of the live tier. Runs against a real EAS Simulator session on the
 // expo-ci CI account. There is no macOS gate — the device is remote — so it also runs on a Linux CI
-// runner: the `agent-cli-cloud-e2e` EAS workflow runs it for both platforms over a cloudflared
-// tunnel, one billed session per platform.
+// runner: the `agent-cli-cloud-e2e` EAS workflow runs it for both platforms and both modes, one
+// billed session per job, over the dev server's own tunnel.
 //
 // Every expectation in this file comes from wave 19's live run rather than from the type definitions:
 // `wave19-live/` holds the JSON each assertion below was written against, and the sequence it proved is
 // the sequence `beforeAll` performs. Four facts decide the whole shape of this suite — the first three
 // from that run, the fourth from this suite's own first live run:
 //
-//  1. **The dev server needs a public origin, and a tunnel is not how it gets one here.**
+//  1. **The dev server needs a public origin, and since 2026-09-05 the tunnel is how it gets one.**
 //     `exp://127.0.0.1:<port>` names the loopback of the machine that opens it, and that machine is in
-//     a datacenter. `--tunnel` is the documented answer and it **does not work on this machine**: the
-//     Expo CLI logs `Tunnel URL not found … falling back to LAN URL` twelve times and then exits 1 on
+//     a datacenter. `--tunnel` is the documented answer and its **v1 does not work**: `@expo/ngrok`
+//     logs `Tunnel URL not found … falling back to LAN URL` twelve times and then exits 1 on
 //     `TypeError: Cannot read properties of undefined (reading 'body')` [observed — wave19-live,
-//     `01-dev-tunnel.err`]. What works is a proxy origin: `tuft host add <port>` for a public name and
-//     `EXPO_PACKAGER_PROXY_URL` so the dev server advertises it. Wave 19 taught `advertisedUrl` to read
-//     that origin out of the manifest rather than the log, because a proxied run prints
-//     `Waiting on http://localhost:<port>` and puts the real origin only in `launchAsset.url`.
+//     `01-dev-tunnel.err`]. Its v2 does: under `EXPO_UNSTABLE_TUNNEL_V2=1`, `expo start --tunnel` uses
+//     `@expo/ws-tunnel` on the Expo account — no ngrok anywhere — and advertises an `….on.expo.app`
+//     origin that serves `packager-status:running` to the world [verified live — 2026-09-05, through
+//     this CLI's own `dev --tunnel`]. So the suite's default is the server's own tunnel, which also
+//     makes the tunnel part of the tested surface instead of harness plumbing. The proxy path is kept
+//     as the `AGENT_CLI_LIVE_PUBLIC_ORIGIN` hatch — a reverse proxy the caller already has, advertised
+//     via `EXPO_PACKAGER_PROXY_URL` — because the v2 flag is `UNSTABLE`-prefixed and a suite with one
+//     way to reach the world stops running the day that way changes. Wave 19 taught `advertisedUrl` to
+//     read the origin out of the manifest rather than the log, which is what makes both modes one code
+//     path: a proxied run prints `Waiting on http://localhost:<port>` and puts the real origin only in
+//     `launchAsset.url`, and a tunnel run is read the same way.
 //  2. **A bare cloud session has no app on it.** A session started without `--expo-go` comes up with
 //     nothing installed, `apps --platform ios` lists only the controller's own test runner, and every
 //     `open` of an `exp://` URL fails with `LSApplicationWorkspaceErrorDomain error 115` [observed —
@@ -68,7 +75,6 @@ import {
   EAS_EXAMPLE_APP,
   networkGate,
   packageRunnerGate,
-  publicOriginGate,
   easCiGate,
   writeLivecheckLink,
 } from '../prereq';
@@ -89,8 +95,7 @@ const gate = allOf(
   cloudOptInGate(),
   easCi.gate,
   packageRunnerGate(),
-  networkGate(),
-  publicOriginGate()
+  networkGate()
 );
 
 /**
@@ -125,6 +130,12 @@ const OTHER_PLATFORM = CLOUD_PLATFORM === 'ios' ? 'android' : 'ios';
  * platform. `eas-example` is minimal (root route, no `/lab`), so the route-reload test is expo-go only.
  */
 const CLOUD_MODE = process.env.AGENT_CLI_LIVE_CLOUD_MODE === 'dev-build' ? 'dev-build' : 'expo-go';
+
+/**
+ * A public origin the caller already has, which switches the suite to proxy mode (fact 1's hatch).
+ * Empty means the default: the dev server's own tunnel, v2.
+ */
+const PROXY_ORIGIN = (process.env.AGENT_CLI_LIVE_PUBLIC_ORIGIN ?? '').replace(/\/+$/, '');
 const CLOUD_BUILD_ID = process.env.AGENT_CLI_LIVE_CLOUD_BUILD_ID ?? '';
 /** The dev-build app's URL scheme, declared in `apps/eas-example/app.json`. */
 const EAS_EXAMPLE_SCHEME = 'easexample';
@@ -143,9 +154,8 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   const run = new LiveRun('live-cloud');
   let projectRoot = '';
   let port = 0;
-  /** The `tuft host` name this run created, or the host of a caller-supplied origin. */
-  let hostName = '';
-  /** The origin the dev server advertises, e.g. `https://agent-cli-live-8500.tuft.host`. */
+  /** The origin the dev server advertises, e.g. `https://c-….on.expo.app`. Known up front in proxy
+   *  mode; read back from the server's own advertisement in tunnel mode. */
   let origin = '';
   /** Host and port of {@link origin}, which is what an `exp://` link carries. */
   let publicHost = '';
@@ -164,9 +174,52 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     return result;
   }
 
-  /** The environment every command in this suite needs, so the dev server advertises the origin. */
-  function proxyEnv() {
-    return { EXPO_PACKAGER_PROXY_URL: origin };
+  /**
+   * Wait until the cloud app is settled on the dev server: at least one debugger target listed, and
+   * the same set of target ids across two polls five seconds apart.
+   *
+   * The reload ladder's dev-server rung watches the command socket for a drop-and-reconnect, and a
+   * relaunch from the *previous* test that is still landing produces exactly that signature: the
+   * broadcast is declared acted-on for an app that never reloaded, the run never climbs, and the
+   * verification honestly reports 22 three minutes later [observed — 2026-09-06, iOS Expo Go over
+   * the ws-tunnel: `reload --route` right after `reload`, churn `reconnected: 1` from the earlier
+   * relaunch, then no new target for 180s]. The same race, and the same fix, as `live-android`'s
+   * settle before its own second reload.
+   */
+  async function waitForCloudAppSettledAsync(label: string): Promise<boolean> {
+    let previous = '';
+    let stable = false;
+    await waitForAsync(
+      async () => {
+        const listed = await execAsync('curl', ['-sS', '-m', '10', `http://127.0.0.1:${port}/json/list`], {
+          timeoutMs: 30_000,
+        });
+        let ids: string[] = [];
+        try {
+          ids = (JSON.parse(listed.stdout) as { id?: string }[]).map((t) => t.id ?? '').sort();
+        } catch {
+          return false;
+        }
+        const now = ids.join(',');
+        stable = ids.length > 0 && now === previous;
+        previous = now;
+        run.writeArtifact(`settle-${label}.txt`, `targets: ${now || '(none)'} stable: ${stable}`);
+        return stable;
+      },
+      120_000,
+      5_000
+    );
+    return stable;
+  }
+
+  /**
+   * The environment every command in this suite runs with. Proxy mode advertises the caller's
+   * origin; tunnel mode opts `expo start --tunnel` into v2. One env for the whole run, because the
+   * command that reads it (the dev server start) and the commands that merely inherit it are not
+   * worth telling apart here.
+   */
+  function suiteEnv() {
+    return PROXY_ORIGIN ? { EXPO_PACKAGER_PROXY_URL: origin } : { EXPO_UNSTABLE_TUNNEL_V2: '1' };
   }
 
   beforeAll(async () => {
@@ -238,14 +291,6 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
         fs.rmSync(run.tempDir, { recursive: true, force: true });
       }
     });
-    run.onCleanup('tuft host stop', async () => {
-      // Only what this suite created. An origin the caller supplied is theirs, and taking it down would
-      // be a cleanup acting outside its own run.
-      if (hostName && !process.env.AGENT_CLI_LIVE_PUBLIC_ORIGIN) {
-        const stopped = await execAsync('tuft', ['host', 'stop', hostName], { timeoutMs: 120_000 });
-        run.writeArtifact('cleanup-host-stop.txt', stopped.stdout + stopped.stderr);
-      }
-    });
     run.onCleanup('dev:stop', async () => {
       await runLiveEasAsync(run, projectRoot, ['dev:stop', '--json'], {
         label: 'cleanup-dev-stop',
@@ -259,31 +304,15 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       await easAsync('simulator-stop', sessionId ? [...args, '--id', sessionId] : args);
     });
 
-    // A public origin. Either one the caller already has — a reverse proxy, a Cloudflare tunnel, an
-    // ngrok that actually starts — or one from `tuft host`. `--force` because a re-run reuses the name,
-    // and a name left pointing at a dead port by a crashed run must not stop this one.
-    if (process.env.AGENT_CLI_LIVE_PUBLIC_ORIGIN) {
-      origin = process.env.AGENT_CLI_LIVE_PUBLIC_ORIGIN.replace(/\/+$/, '');
-      hostName = new URL(origin).host;
+    // A public origin, when the caller brought one (fact 1's hatch). The default is the dev
+    // server's own tunnel, whose origin does not exist yet — it is read back after the start below.
+    if (PROXY_ORIGIN) {
+      origin = PROXY_ORIGIN;
+      publicHost = new URL(origin).host;
       console.log(
         `[live] using AGENT_CLI_LIVE_PUBLIC_ORIGIN (${origin}); it has to already forward to port ${port}`
       );
-    } else {
-      hostName = `agent-cli-live-${port}`;
-      const hosted = await execAsync(
-        'tuft',
-        ['host', 'add', String(port), '--name', hostName, '--force'],
-        { timeoutMs: 120_000 }
-      );
-      run.writeArtifact('tuft-host-add.txt', hosted.stdout + hosted.stderr);
-      if (hosted.exitCode !== 0) {
-        throw new Error(
-          `"tuft host add ${port}" failed (exit ${hosted.exitCode}): ${hosted.stderr.slice(-1000)}`
-        );
-      }
-      origin = `https://${hostName}.tuft.host`;
     }
-    publicHost = new URL(origin).host;
 
     // In dev-build mode the dev client is installed on the remote cloud sim, not this machine — but
     // `dev` decides serve-vs-build from the *local* last-build record and would try to build one here.
@@ -307,13 +336,15 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       );
     }
 
-    // The dev server, told to advertise that origin. **Not** `--tunnel`: see the header, fact 1.
+    // The dev server. In tunnel mode `--tunnel` (v2, via suiteEnv) is what makes the origin; in
+    // proxy mode the origin is advertised through EXPO_PACKAGER_PROXY_URL instead (fact 1).
     // `--no-open` serves without opening a local device — the device is the cloud sim — and in
     // dev-build mode `--dev-client` serves the installed dev client instead of Expo Go.
     const devArgs = [
       'dev',
       `--${CLOUD_PLATFORM}`,
       ...(CLOUD_MODE === 'dev-build' ? ['--dev-client'] : []),
+      ...(PROXY_ORIGIN ? [] : ['--tunnel']),
       '--no-open',
       '--detach',
       '--wait-ready',
@@ -322,47 +353,90 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       '--json',
     ];
     const dev = await runLiveEasAsync(run, projectRoot, devArgs, {
-      label: 'dev-proxy',
-      env: proxyEnv(),
+      label: 'dev-public',
+      env: suiteEnv(),
     });
     expectExit(dev, 0);
     expect(parseJson(dev).port).toBe(port);
 
-    // That the origin actually reached the world, checked before a session is billed to find out.
-    if (CLOUD_MODE === 'dev-build') {
-      // A dev build's route link is `easexample://` with no host, so the Expo Go `--print-url` check
-      // does not apply. Ask the running dev server's `/status` through the public origin instead: a
-      // `packager-status:running` answer proves the tunnel forwards to the server the cloud sim will
-      // load the bundle from.
-      const reached = await execAsync('curl', ['-sS', '-m', '20', `${origin}/status`], {
-        timeoutMs: 40_000,
-      });
-      run.writeArtifact(
-        'devbuild-origin-status.txt',
-        `GET ${origin}/status\n\n${reached.stdout}\n${reached.stderr}`
-      );
-      if (!reached.stdout.includes('packager-status:running')) {
-        throw new Error(
-          `the dev server is not reachable over the public origin ${origin}: "GET ${origin}/status" ` +
-            `answered "${reached.stdout.slice(0, 200)}". A cloud simulator cannot reach it, so no ` +
-            `session is worth starting.`
-        );
-      }
-    } else {
-      // `--print-url` needs no device and is the cheapest question with this answer.
+    // The origin the server actually advertises, read through the CLI itself. In tunnel mode this
+    // is the only place the origin exists at all; in proxy mode the same read verifies the caller's
+    // origin is the one being advertised. `--print-url` needs no device and is the cheapest question
+    // with this answer for Expo Go; a dev build's route link carries no host, so there the launcher
+    // URL in `status` is what names the origin.
+    if (CLOUD_MODE === 'expo-go') {
       const printed = await runLiveEasAsync(run, projectRoot, ['navigate', '/', '--print-url', '--json'], {
         label: 'print-url',
-        env: proxyEnv(),
+        env: suiteEnv(),
       });
       expectExit(printed, 0);
       const printedReport = parseJson(printed);
-      if (printedReport.hostType !== 'tunnel' || !String(printedReport.url).includes(publicHost)) {
+      const advertisedHost = String(printedReport.url).match(/^exp:\/\/([^/]+)/)?.[1] ?? '';
+      if (printedReport.hostType !== 'tunnel' || !advertisedHost) {
         throw new Error(
-          `the dev server is not advertising the public origin ${origin}: navigate --print-url reported ` +
+          `the dev server is not advertising a public origin: navigate --print-url reported ` +
             `hostType ${printedReport.hostType} and url ${printedReport.url}. A cloud simulator cannot ` +
             `reach it, so no session is worth starting. Evidence: ${printed.artifact}`
         );
       }
+      if (PROXY_ORIGIN && advertisedHost !== publicHost) {
+        throw new Error(
+          `the dev server advertises ${advertisedHost}, not the supplied origin ${origin}. ` +
+            `Evidence: ${printed.artifact}`
+        );
+      }
+      if (!PROXY_ORIGIN) {
+        publicHost = advertisedHost;
+        // The ws-tunnel host serves https; the launch URL below carries only the host, so the
+        // scheme matters only to this suite's own reachability check.
+        origin = `https://${advertisedHost}`;
+      }
+    } else {
+      const status = await runLiveEasAsync(run, projectRoot, ['status', '--json'], {
+        label: 'status-origin',
+        env: suiteEnv(),
+      });
+      expectExit(status, 0);
+      const launcher: string =
+        (parseJson(status)?.devServer?.openUrls ?? []).find(
+          (entry: any) => entry.target === 'dev-build'
+        )?.url ?? '';
+      const advertised = launcher.match(/[?&]url=([^&]+)/)?.[1] ?? '';
+      const advertisedOrigin = decodeURIComponent(advertised).replace(/\/+$/, '');
+      if (!advertisedOrigin) {
+        throw new Error(
+          `the dev server advertises no dev-build launcher URL to read the origin from ` +
+            `(got "${launcher}"). Evidence: ${status.artifact}`
+        );
+      }
+      if (PROXY_ORIGIN && new URL(advertisedOrigin).host !== publicHost) {
+        throw new Error(
+          `the dev server advertises ${advertisedOrigin}, not the supplied origin ${origin}. ` +
+            `Evidence: ${status.artifact}`
+        );
+      }
+      if (!PROXY_ORIGIN) {
+        origin = advertisedOrigin;
+        publicHost = new URL(origin).host;
+      }
+    }
+
+    // That the origin actually reached the world, checked before a session is billed to find out:
+    // `packager-status:running` through the public origin proves it forwards to the server the
+    // cloud sim will load the bundle from — whichever of the two modes made it.
+    const reached = await execAsync('curl', ['-sSL', '-m', '20', `${origin}/status`], {
+      timeoutMs: 40_000,
+    });
+    run.writeArtifact(
+      'origin-status.txt',
+      `GET ${origin}/status\n\n${reached.stdout}\n${reached.stderr}`
+    );
+    if (!reached.stdout.includes('packager-status:running')) {
+      throw new Error(
+        `the dev server is not reachable over the public origin ${origin}: "GET ${origin}/status" ` +
+          `answered "${reached.stdout.slice(0, 200)}". A cloud simulator cannot reach it, so no ` +
+          `session is worth starting.`
+      );
     }
 
     // The session, with `--expo-go` **and `--open-url`**. `eas simulator`, not
@@ -486,7 +560,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   it('navigate --cloud opens the route on the cloud simulator, over the public origin', async () => {
     const result = await runLiveEasAsync(run, projectRoot, ['navigate', '/', '--cloud', '--json'], {
       label: 'navigate-cloud',
-      env: proxyEnv(),
+      env: suiteEnv(),
     });
     const report = parseJson(result);
     // `DeviceBackend` is `'cloud'` — one value for both platforms, with `platform` carrying the rest.
@@ -543,7 +617,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       run,
       projectRoot,
       ['runtime:reload', '--cloud', '--timeout', RELOAD_TIMEOUT, '--json'],
-      { label: 'reload-cloud', env: proxyEnv() }
+      { label: 'reload-cloud', env: suiteEnv() }
     );
     expectExit(result, 0);
     const report = parseJson(result);
@@ -608,11 +682,15 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   // Expo Go only: the route reload needs the `/lab` screen, which the scaffold has and the minimal
   // dev-build app (`apps/eas-example`, root route only) does not.
   onExpoGo('runtime:reload --cloud --route puts the app on the route it names', async () => {
+    // The reload above may have relaunched the app, and a broadcast into that landing is mistaken
+    // for its own answer — see waitForCloudAppSettledAsync, which this wait exists for.
+    expect(await waitForCloudAppSettledAsync('before-reload-route')).toBe(true);
+
     const result = await runLiveEasAsync(
       run,
       projectRoot,
       ['runtime:reload', '--cloud', '--route', LAB_ROUTE, '--timeout', RELOAD_TIMEOUT, '--json'],
-      { label: 'reload-cloud-route', env: proxyEnv() }
+      { label: 'reload-cloud-route', env: suiteEnv() }
     );
     expectExit(result, 0);
     const report = parseJson(result);
@@ -631,7 +709,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       ['smoke', '--cloud', `--${CLOUD_PLATFORM}`, '--json'],
       {
         label: 'smoke-cloud',
-        env: proxyEnv(),
+        env: suiteEnv(),
       }
     );
     const report = parseJson(result);
@@ -654,7 +732,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   it('runtime:stop --cloud ends the app without ending the session', async () => {
     const result = await runLiveEasAsync(run, projectRoot, ['runtime:stop', '--cloud', '--json'], {
       label: 'stop-cloud',
-      env: proxyEnv(),
+      env: suiteEnv(),
     });
     expectExit(result, 0);
     const report = parseJson(result);
@@ -689,7 +767,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     const attempt = () =>
       runLiveEasAsync(run, projectRoot, ['navigate', '/', '--cloud', `--${OTHER_PLATFORM}`, '--json'], {
         label: 'navigate-cloud-mismatch',
-        env: proxyEnv(),
+        env: suiteEnv(),
       });
     let result = await attempt();
     let report = parseJson(result);

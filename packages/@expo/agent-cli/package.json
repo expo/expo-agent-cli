@@ -44,6 +44,7 @@
     "test:live:eas": "vitest run --config e2e-live/vitest.config.ts live-eas",
     "test:live:cloud": "vitest run --config e2e-live/vitest.config.ts live-cloud",
     "test:live:iosdevclient": "vitest run --config e2e-live/vitest.config.ts live-ios-devclient",
+    "test:live:bootstrap": "vitest run --config e2e-live/vitest.config.ts live-bootstrap",
     "prepublishOnly": "bun run clean && bun run build:prod"
   },
   "devDependencies": {

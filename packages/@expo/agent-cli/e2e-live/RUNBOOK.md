@@ -6,7 +6,7 @@ here does and does not claim. That last part is worth reading before you quote a
 
 ## What this tier is
 
-Seven vitest suites that run the **published surface** of `@expo/agent-cli` — `bin/cli.js`, which loads the
+Eight vitest suites that run the **published surface** of `@expo/agent-cli` — `bin/cli.js`, which loads the
 ncc bundle in `build/cli/` — against **real backends**: the real npm registry and the project's own
 `expo` CLI, a real Metro, a real iOS simulator running Expo Go, a real Android emulator running the
 Expo Go APK, a real **development build** on that same emulator, a real Hermes debugger connection,
@@ -37,8 +37,9 @@ Everything needs the bundle built first: **`bun run build`**.
 | `live-devclient` | everything `live-android`'s `adb`/device half needs, **plus** `AGENT_CLI_LIVE_DEVCLIENT_PROJECT` naming a project that (a) depends on `expo-dev-client`, (b) declares an `expo.scheme`, (c) has its `android.package` **installed** on the attached device, and (d) has an android entry in its `.expo/agent-cli-last-build.json`. It **does not boot** and **does not build** — see below |
 | `live-android`   | a runnable `adb` (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, `PATH`, or the SDK's default location); an **attached device or a bootable AVD**; **Expo Go** on it; network. A booted iOS simulator with Expo Go is an _optional_ extra that adds three tests — see below                                                                                                                           |
 | `live-eas`       | `AGENT_CLI_LIVE_EAS=1`; a login with `expo-ci` access (ambient EAS session, or `EXPO_TOKEN` in CI); `bunx` or `npx`; network. Reads the committed `apps/eas-example` (seeded with a FINISHED and an ERRORED build); `AGENT_CLI_LIVE_EAS_PROJECT` overrides the app                                                                                                                          |
-| `live-cloud`     | everything `live-eas` needs (`AGENT_CLI_LIVE_EAS=1`), **plus** `AGENT_CLI_LIVE_CLOUD=1` and a way to publish a local port — `tuft host`, or an origin of your own in `AGENT_CLI_LIVE_PUBLIC_ORIGIN`                                                                                                                                                                                                                 |
+| `live-cloud`     | everything `live-eas` needs (`AGENT_CLI_LIVE_EAS=1`), **plus** `AGENT_CLI_LIVE_CLOUD=1`. The public origin is the dev server's own tunnel (`--tunnel` under `EXPO_UNSTABLE_TUNNEL_V2=1`, on the same EAS auth) — no proxy needed; `AGENT_CLI_LIVE_PUBLIC_ORIGIN` remains the hatch for a reverse proxy of your own                                                                                                    |
 | `live-ios-devclient` | a **booted** iOS simulator, **plus** `AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT` naming a project that (a) depends on `expo-dev-client`, (b) declares `expo.scheme` and `expo.ios.bundleIdentifier`, (c) has that bundle id **installed** on the booted simulator, and (d) has an `ios` entry in `.expo/agent-cli-last-build.json`. It **does not build** — run `npx expo run:ios` once (~15 min) to make one |
+| `live-bootstrap` | macOS; **no booted** simulator anywhere (`xcrun simctl shutdown all` first — the suite skips rather than shutting down a device you are using); a shut-down simulator that has Expo Go installed (run `live-local` once to make one); network (npm, for the scaffold's install). It measures the boot and dev-server start `smoke` performs itself, so the machine state every other suite needs is exactly the state this one refuses |
 
 ### Two things about `live-local`
 
@@ -116,6 +117,16 @@ platform attached. `beforeAll` prints which of the two runs you are getting:
 ```
 
 So **24 tests green and 21 tests green are different claims**, and the line above says which you have.
+
+**The mixed block does not install Expo Go, so the simulator's copy has to match the scaffold's SDK.**
+`navigate` opens what is there; only `smoke`'s `install-app` phase updates it. A simulator carrying an
+older Expo Go fails the block's `beforeAll` at the attach wait — exit 22 after the whole budget, while
+the simulator shows "Project is incompatible with this version of Expo Go" [observed — 2026-09-05,
+Expo Go 54.0.7 against an SDK 57 scaffold, 121s spent to learn it]. The gate checks that Expo Go is
+*present*, not which SDK it is, because the scaffold's SDK does not exist until `beforeAll` scaffolds.
+The fix is one `live-local` run (its smoke installs the right one), or `smoke --ios` in any current-SDK
+project.
+
 The block terminates Expo Go on the simulator when it ends, which is worth knowing if you run
 `test:live:local` straight afterwards. The app takes a few seconds to come back, and `live-local`'s
 break-and-fix block reports `NO_APP_CONNECTED` at exit 1 if it starts inside that window. Run it twice
@@ -161,24 +172,22 @@ build that is not running, then navigates it` and passes in about 3 s. The suite
 
 Both are live facts from wave 19, not preferences, and the suite is built around them.
 
-**A tunnel is not how the dev server gets a public origin here.** A cloud simulator cannot load
-`exp://127.0.0.1:<port>`, because that is the loopback of the machine that opens the link and that
+**The dev server's own tunnel is the public origin — v2, not the ngrok one.** A cloud simulator cannot
+load `exp://127.0.0.1:<port>`, because that is the loopback of the machine that opens the link and that
 machine is in a datacenter, and it cannot load a LAN address either. The documented answer is
-`expo start --tunnel`, and **it does not work on this machine**. The Expo CLI logs `Tunnel URL not found
-… falling back to LAN URL` twelve times and then exits 1 on `TypeError: Cannot read properties of
-undefined (reading 'body')`, pointing at ngrok's status page [observed — `wave19-live/01-dev-tunnel.err`].
-What works is a proxy origin:
-
-```bash
-tuft host add 8500 --name my-live-run          # → https://my-live-run.tuft.host
-EXPO_PACKAGER_PROXY_URL=https://my-live-run.tuft.host \
-  npx @expo/agent-cli dev --detach --wait-ready --port 8500
-```
-
-The suite does this itself, and checks the origin actually took **before** it starts anything that
-bills: `navigate / --print-url` has to report `hostType: "tunnel"`. A proxied dev server prints
-`Waiting on http://localhost:<port>` and names the real origin only in its manifest, which is why wave 19
-taught `src/dev/advertisedUrl.ts` to read the manifest.
+`expo start --tunnel`, whose **v1 does not work**: `@expo/ngrok` logs `Tunnel URL not found … falling
+back to LAN URL` twelve times and then exits 1 on `TypeError: Cannot read properties of undefined
+(reading 'body')` [observed — `wave19-live/01-dev-tunnel.err`]. Under `EXPO_UNSTABLE_TUNNEL_V2=1` the
+same flag uses `@expo/ws-tunnel` on the Expo account instead — no ngrok — and advertises an
+`….on.expo.app` origin that serves the world [verified live — 2026-09-05]. The suite starts its dev
+server with `--tunnel` and that env, reads the origin back from what the server advertises
+(`navigate / --print-url` for Expo Go; the `?url=` of the dev-build launcher in `status` for a dev
+build, whose route link carries no host), and curls `<origin>/status` for `packager-status:running`
+**before** it starts anything that bills. `AGENT_CLI_LIVE_PUBLIC_ORIGIN` keeps the old proxy path — a
+reverse proxy of your own, advertised via `EXPO_PACKAGER_PROXY_URL` — because the v2 flag is
+`UNSTABLE`-prefixed. A proxied dev server prints `Waiting on http://localhost:<port>` and names the
+real origin only in its manifest, which is why wave 19 taught `src/dev/advertisedUrl.ts` to read the
+manifest — the read that now serves both modes.
 
 **A bare cloud session has no Expo Go on it, so always `--expo-go`.** A session started without it comes
 up with nothing installed. `apps --platform ios` lists only the controller's own test runner, and every
@@ -237,7 +246,7 @@ account even if the opt-in leaks. This replaced the old `EXPO_STAGING` sandbox.
 | `AGENT_CLI_LIVE_EAS_CI_ACCOUNT` | the allowlisted CI account the owner check requires; defaults to `expo-ci`                                                                                    |
 | `AGENT_CLI_LIVE_EAS_OWNER`      | owner for the project a scaffolded suite app (live-cloud) links to; defaults to the CI account                                                               |
 | `AGENT_CLI_LIVE_EAS_PROJECT_ID` | EAS project id for that scaffolded-app link; defaults to the expo-agent-cli project                                                                          |
-| `AGENT_CLI_LIVE_PUBLIC_ORIGIN`  | an origin that already forwards to the dev-server port, for `live-cloud` on a machine without `tuft host`. Supplied origins are not torn down by the cleanup |
+| `AGENT_CLI_LIVE_PUBLIC_ORIGIN`  | an origin that already forwards to the dev-server port — switches `live-cloud` from the dev server's own tunnel to a proxy you run. Supplied origins are not torn down by the cleanup |
 | `AGENT_CLI_LIVE_PORT`           | first dev-server port to _try_ (default `8500`); each run binds the first free one upward from there                                                         |
 | `AGENT_CLI_LIVE_TEMP_DIR`       | root of the scratch area (default `os.tmpdir()`). **Must be outside every git checkout** — asserted at startup, because EAS uploads walk up to the git root  |
 | `AGENT_CLI_LIVE_KEEP=1`         | keep the scratch project after the run, for debugging                                                                                                        |
@@ -259,7 +268,10 @@ AGENT_CLI_LIVE_EAS=1 AGENT_CLI_LIVE_CLOUD=1 bun run test:live:cloud   # bills a 
 AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT=~/dev/ios-devbuild \
   bun run test:live:iosdevclient            # ~25 s, free — needs a built iOS dev client on the booted sim
 
-bun run test:live                           # all seven; the ones that cannot run skip with a reason
+xcrun simctl shutdown all && \
+  bun run test:live:bootstrap               # ~60 s, free — needs NO booted simulator; boot yours again after
+
+bun run test:live                           # all eight; the ones that cannot run skip with a reason
 ```
 
 Every suite prints a **cost line** in `afterAll`, whether it passed or failed:
@@ -277,7 +289,7 @@ Every suite prints a **cost line** in `afterAll`, whether it passed or failed:
 | `live-android`   | **~103 s measured** (24 tests, 36 `@expo/agent-cli` runs) — of which ~40 s is the emulator boot; ~80 s against an emulator that was already up         | none                                                                           | nothing, **unless the emulator was already booted**: an emulator this run started is killed, one it found is left as it was. The dev server is stopped, Expo Go force-stopped on the emulator and terminated on the simulator, the scratch project deleted    |
 | `live-devclient` | **~25 s measured** (15 tests, 26 `@expo/agent-cli` runs) against an emulator that is already up and an app that is already built                       | none                                                                           | the named project's dev server is stopped and its development build is force-stopped; the project itself, its `.expo/` and the installed app are left as they were                                                                                            |
 | `live-eas`       | ~50 s (measured, 9 tests)                                                                                                                              | one EAS Hosting preview deployment per run                                     | one deployment of the `livecheck` fixture. Idempotent: EAS Hosting gives each deploy its own preview URL, so a re-run adds one and changes nothing that existed. No native build — no v1 command creates one                                                  |
-| `live-cloud`     | **~4 min measured** (237 s, 7 tests) — and variable: one cloud reload took 18.5 s, another 48 s, and an unproved one spent its whole 180 s `--timeout` | one EAS Simulator session, billed from `eas simulator` to `eas simulator:stop` | nothing, if `afterAll` ran: the session is stopped (with `--id`, so only this run's), the `tuft host` name released, the dev server stopped, the scratch project deleted. The session stop is unconditional, including when this process never learned the id |
+| `live-cloud`     | **~4 min measured** (237 s, 7 tests) — and variable: one cloud reload took 18.5 s, another 48 s, and an unproved one spent its whole 180 s `--timeout` | one EAS Simulator session, billed from `eas simulator` to `eas simulator:stop` | nothing, if `afterAll` ran: the session is stopped (with `--id`, so only this run's), the dev server stopped (its tunnel dies with it), the scratch project deleted. The session stop is unconditional, including when this process never learned the id |
 
 ## Evidence
 

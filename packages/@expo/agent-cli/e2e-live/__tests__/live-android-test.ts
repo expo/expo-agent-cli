@@ -369,6 +369,27 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
     expect(screenshot.why).toContain('npx @expo/agent-cli smoke --android');
   });
 
+  it('navigate --print-url resolves the URL and touches neither the emulator nor adb', async () => {
+    const result = await runLiveAsync(
+      run,
+      projectRoot,
+      ['navigate', LAB_ROUTE, '--print-url', '--android', '--json'],
+      { label: 'navigate-print-url' }
+    );
+    expectExit(result, 0);
+    const report = parseJson(result);
+    expect(report.url).toBe(`exp://127.0.0.1:${PORT}/--${LAB_ROUTE}`);
+    expect(report.printUrl).toBe(true);
+    // F50 in reverse: opening a loopback link on Android needs `adb reverse`, and this run opened
+    // nothing — so it may not install one. A caller who pastes this URL somewhere else must not be
+    // depending on a reverse this command quietly set up.
+    expect(report.reversedPort).toBeNull();
+    // No device was touched, even though an emulator is attached to this very run.
+    expect(report.deviceId).toBeNull();
+    expect(report.deviceBackend).toBeNull();
+    expect(report.attached).toBeNull();
+  });
+
   it('dev:logs carries the Android bundle the emulator asked for', async () => {
     const result = await runLiveAsync(run, projectRoot, ['dev:logs', '--json'], {
       label: 'dev-logs',
@@ -551,6 +572,14 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
   });
 
   it('runtime:reload --route checks the route and opens it on the emulator', async () => {
+    // The reload above may still be landing, and a broadcast that arrives while the app is
+    // mid-reload is dropped: the churn watch sees no reconnect inside its 8s, the run climbs to
+    // the device rung, and a force-stop + cold relaunch is measured instead of a route reload —
+    // and on a loaded emulator the relaunch overruns the budget and every test after inherits an
+    // app that is not back yet [observed — 2026-09-05, twice: `method: "device"` where a settled
+    // run answers `"dev-server"`]. The same wait `smoke` below already takes, for the same reason.
+    expect(await waitForAndroidRuntimeAsync('before-reload-route')).toBe(true);
+
     const result = await runLiveAsync(
       run,
       projectRoot,
@@ -690,10 +719,16 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
   // Conditional rather than gated: an Android-only machine still runs everything above.
   (simulator ? describe : describe.skip)('with an iOS app on the same dev server', () => {
     beforeAll(async () => {
+      // `--attach-timeout` far above the 45s default: this is the one open on iOS in this suite,
+      // so it pays Expo Go's whole cold start *and* Metro's first iOS compile — every test above
+      // is Android-only, so no iOS bundle exists yet, and the same budget smoke gives a first
+      // compile is 3 minutes. A busy machine measured 46.5s and then 121s for an app that was
+      // coming up fine ([[0022-live-tier]] §What a live assertion may be: a bound, never an
+      // expectation) [observed — 2026-09-05, twice].
       const opened = await runLiveAsync(
         run,
         projectRoot,
-        ['navigate', LAB_ROUTE, '--ios', '--json'],
+        ['navigate', LAB_ROUTE, '--ios', '--attach-timeout', '240s', '--json'],
         { label: 'navigate-ios-for-mixed' }
       );
       expectExit(opened, 0, 'the mixed-platform block needs the app open on the simulator too');
@@ -714,7 +749,7 @@ describeAndroid('live-android: the loop on a real Android emulator', () => {
             `to tell apart. Listed: ${JSON.stringify(await listedTargetsAsync())}`
         );
       }
-    }, 180_000);
+    }, 360_000);
 
     afterAll(async () => {
       // The simulator is left as it was found, minus the app this block opened.

@@ -5,13 +5,13 @@
 **Systems:** the live tier (`e2e-live/`); the vitest projects (`vitest.config.ts`, `e2e/vitest.config.ts`); `package.json` scripts
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-27 · finalized 2026-08-28
-**Revised:** 2026-08-30
+**Revised:** 2026-08-30 · 2026-09-05
 **Related:** [[0002-testing-and-evals]], [[0005-runtime-loop-tools]], [[0016-v1-scope]], [[0021-honest-reports]]
 
 ## Summary
 
-Seven suites: `live-project`, `live-local`, `live-android`, `live-devclient`, `live-eas`,
-`live-cloud`, `live-ios-devclient`.
+Eight suites: `live-project`, `live-local`, `live-android`, `live-devclient`, `live-eas`,
+`live-cloud`, `live-ios-devclient`, `live-bootstrap`.
 
 [[0002-testing-and-evals]] already states the rule this document makes executable: a
 flag is not shipped until it has run against the published binary. It states it as a
@@ -52,7 +52,8 @@ That is why `live-project` exists as its own suite, and why a green unit test of
 
 `e2e-live/vitest.config.ts` is a fourth vitest project beside the unit config and `e2e/`. It
 is reachable only through `test:live`, `test:live:local`, `test:live:android`,
-`test:live:devclient`, `test:live:eas`, `test:live:cloud` and `test:live:iosdevclient`.
+`test:live:devclient`, `test:live:eas`, `test:live:cloud`, `test:live:iosdevclient` and
+`test:live:bootstrap`.
 No `test`, no `test:e2e`, no CI workflow names it. Every suite spends a real simulator, a real account, or a real
 deployment. A tier that can bill money must be asked for by name.
 
@@ -125,7 +126,7 @@ The scratch directory must be outside every git checkout for any suite that migh
 root. A scratch project inside this monorepo uploads the monorepo. The trap is silent,
 because the upload succeeds.
 
-## The seven suites
+## The eight suites
 
 ### live-project
 
@@ -222,6 +223,23 @@ in place. The lab screen is served over the wire, so the interact commands have 
 without a rebuild. It is the suite that turns the iOS runtime column from `by hand` into
 `filled`.
 
+### live-bootstrap
+
+The suite that runs where every other one refuses. `live-local` demands a booted
+simulator, and `pickSimulator` prefers one — so on the machine this tier usually runs
+on, `smoke`'s `boot-device` and `start-dev-server` phases never run, and "a run on a
+cold machine brings its own device and puts it back" was a claim only the stub tier had
+made. Its gate is the inverse of `live-local`'s: any booted simulator **skips** (this
+tier does not take away a device somebody is looking at), and a shut-down simulator
+with Expo Go on it must exist, read from disk the way `src/device/installedApps.ts`
+reads it, because `simctl listapps` refuses on a device that is not booted.
+
+One test, one `smoke --ios` run, on purpose: the run costs a scaffold, a boot, and a
+first compile — each an act under measurement — and a second test would pay the boot
+again to learn nothing, because putting the machine back is one of the assertions. The
+suite checks the report's word against the machine afterwards: no simulator booted, and
+the dev server's port answering nothing.
+
 ### live-eas
 
 Against the `expo-ci` CI account, reading the committed `apps/eas-example` in place. About 50 s.
@@ -250,12 +268,13 @@ A real EAS Simulator session. Gated twice: on prerequisites, like every suite, a
 `AGENT_CLI_LIVE_CLOUD=1`, because its prerequisites can all hold on a machine whose
 owner did not mean to start a billing session from a test run.
 
-A tunnel is not how the dev server gets a public origin on this machine.
-`expo start --tunnel` fails here (`Tunnel URL not found`, then a TypeError out of
-ngrok). What works is a proxy origin: a public name for the port and
-`EXPO_PACKAGER_PROXY_URL` so the dev server advertises it. The suite checks the origin
-took (`navigate / --print-url` must report `hostType: "tunnel"`) before it starts
-anything that bills.
+The dev server's own tunnel is the public origin — v2. `expo start --tunnel` v1 fails
+(`Tunnel URL not found`, then a TypeError out of ngrok); under `EXPO_UNSTABLE_TUNNEL_V2=1`
+the same flag uses `@expo/ws-tunnel` on the Expo account and works [verified live —
+2026-09-05]. So the suite starts `dev --tunnel`, reads the advertised origin back through
+the CLI, and curls `<origin>/status` before it starts anything that bills — the tunnel is
+tested surface now, not harness plumbing. `AGENT_CLI_LIVE_PUBLIC_ORIGIN` keeps the proxy
+path (`EXPO_PACKAGER_PROXY_URL`) as the hatch, because the v2 flag is `UNSTABLE`-prefixed.
 
 A cloud reload takes whichever rung works, and which one that is turns out to be the
 platform's to decide [observed — 2026-09-05, both platforms live in one workflow run].
@@ -293,19 +312,20 @@ This table is abbreviated. The source of truth is the tests under `e2e-live/`.
 | `inspect:build-log <build-id>`  | n/a                                       | n/a                                      | n/a                                       | unreachable (eas-cli has no `build:logs`) | n/a                                  | n/a                               |
 | native EAS build creation       | n/a                                       | n/a                                      | n/a                                       | covered by the `agent-cli-cloud-e2e` dev-build jobs (build + run `apps/eas-example`), not this tier | n/a    | n/a                               |
 | `deploy --native`               | n/a                                       | n/a                                      | n/a                                       | unreachable (create-launch has no staging; a run uploads to production) | n/a                    | n/a                               |
-| `dev --tunnel`                  | n/a                                       | unreachable (`@expo/ngrok` exits 1 here) | n/a (emulator uses `adb reverse`)         | n/a                                       | n/a (uses a proxy origin)            | n/a                               |
+| `dev --tunnel`                  | n/a                                       | unreachable (v1: `@expo/ngrok` exits 1 here) | n/a (emulator uses `adb reverse`)         | n/a                                       | filled (v2: serves every session's origin) | n/a                               |
 | `runtime:eval`                  | n/a                                       | filled (returns `2`)                     | filled (exit 1, no debugger)              | n/a                                       | unreachable (no `--cloud` on `eval`) | filled (exit 0, `value: 2`)       |
 | `runtime:tap --verify`          | n/a                                       | filled                                   | unreachable (no debugger)                 | n/a                                       | unreachable                          | filled                            |
 | `smoke` (pass)                  | n/a                                       | filled (8 phases)                        | unreachable (22 on a working Expo Go app) | n/a                                       | n/a                                  | filled (0, all eight phases `ok`) |
 | `smoke --cloud`                 | n/a                                       | n/a                                      | n/a                                       | n/a                                       | filled                               | n/a                               |
 | `navigate --cloud`              | n/a                                       | n/a                                      | n/a                                       | n/a                                       | filled                               | n/a                               |
 | `runtime:stop --cloud`          | n/a                                       | n/a                                      | n/a                                       | n/a                                       | filled (exit 0)                      | n/a                               |
-| `navigate --print-url`          | n/a                                       | filled (device untouched)                | open                                      | n/a                                       | filled (tunnel host)                 | open                              |
+| `navigate --print-url`          | n/a                                       | filled (device untouched)                | filled (no reverse installed)             | n/a                                       | filled (tunnel host)                 | filled (scheme link, no host)     |
 | `runtime:type` (non-input)      | n/a                                       | filled (exit 20)                         | n/a                                       | n/a                                       | n/a                                  | n/a                               |
 | `skills` unsafe-name guard      | filled                                    | n/a                                      | n/a                                       | n/a                                       | n/a                                  | n/a                               |
 | `inspect:build-log` (a log)     | n/a                                       | n/a                                      | n/a                                       | filled (brotli refused, then decoded)     | n/a                                  | n/a                               |
 | `deploy --web`                  | n/a                                       | n/a                                      | n/a                                       | filled (URL serves the export)            | n/a                                  | n/a                               |
 | iOS development build           | n/a                                       | n/a                                      | n/a                                       | n/a                                       | n/a                                  | filled (live-ios-devclient, 11/11) |
+| `smoke` on a cold machine (boot + own dev server) | n/a                     | filled (live-bootstrap: `boot-device` and `start-dev-server` ok, device shut down after, port free) | n/a | n/a                             | n/a                                  | n/a                               |
 
 `live-android` is Expo Go. `live-devclient` is the app that has a debugger. Every
 `unreachable` (no debugger) cell in the android column has a `filled` cell in the
