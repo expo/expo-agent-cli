@@ -491,6 +491,22 @@ describe(resolveCommand, () => {
     }
   });
 
+  // @ref llp/0002-testing-and-evals.plan.md
+  //
+  // This row loads **every command module in the package**, which is most of the source behind one
+  // `it`. That is the point of it — a command whose module throws on import is broken in a way no
+  // other test would notice — and it also means the work is real rather than a wait, so the two
+  // things that make a test flaky are both worth spelling out.
+  //
+  // **The loads run together.** Sequentially they took 5.4s against vitest's 5s default and failed
+  // roughly half the time [observed — 2026-09-06]; concurrently, 2.0s. Nothing here depends on
+  // module *order*, so the `await` in a loop was only ever serialising a transform pipeline that
+  // can overlap.
+  //
+  // **The budget is named anyway.** 2s of honest work under a 5s default is not headroom on a cold
+  // CI runner — the matrix has a Windows box, and the first load of a graph this size pays for
+  // every transform in it. A number chosen for this test cannot be crossed by a machine having a
+  // slow morning; the failure it is meant to catch is a module that throws, and that throws fast.
   it('loads every registered command', async () => {
     const loaders = [
       ...Object.entries(topLevelCommands).map(
@@ -503,11 +519,12 @@ describe(resolveCommand, () => {
       ),
     ];
 
-    for (const [name, load] of loaders) {
-      expect(typeof (await load())).toBe(`function`);
-      expect(name).toBeTruthy();
+    const loaded = await Promise.all(loaders.map(([, load]) => load()));
+
+    for (const [index, [name]] of loaders.entries()) {
+      expect(typeof loaded[index], `${name} did not load a command function`).toBe(`function`);
     }
-  });
+  }, 60_000);
 });
 
 describe(withAction, () => {

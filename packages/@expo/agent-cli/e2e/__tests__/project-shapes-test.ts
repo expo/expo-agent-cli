@@ -51,6 +51,21 @@ async function copyFixtureIntoAsync(fixtureName: string, target: string): Promis
   return target;
 }
 
+/**
+ * How long the stub dev server stays up while this file's tests work against it.
+ *
+ * Sized against **the test's own runtime**, not against a guess at how long the assertions take.
+ * A stub that exits first is not a dev server that stopped — the lock stops answering, `dev:stop`
+ * correctly reports `stopped: false`, and the row fails claiming the stop did not work
+ * [observed — 2026-09-06]. The row below spawns four subprocesses (the detach, the lock wait,
+ * `dev:logs`, `dev:stop`) and was measured at 13.4s alone on an idle machine, which left the old
+ * 15s budget no room at all once the suite ran sharded and in parallel.
+ *
+ * A generous value costs nothing when the test passes: the `finally` stops the server, and the
+ * delay is only ever reached by a run that already failed.
+ */
+const STUB_ALIVE_MS = '60000';
+
 describe('a project whose path holds a space', () => {
   // Every path this CLI builds crosses a shell or a spawn at some point — the `.cmd` shim on
   // Windows, the `sh` shim everywhere else, the `adb exec-out` redirection, the screenshot file.
@@ -85,7 +100,7 @@ describe('a project whose path holds a space', () => {
       projectRoot,
       ['dev', '--ios', '--detach', '--json'],
       {
-        env: { STUB_EXPO_DEV_SERVER_PORT: '8099', STUB_EXPO_DELAY_MS: '15000' },
+        env: { STUB_EXPO_DEV_SERVER_PORT: '8099', STUB_EXPO_DELAY_MS: STUB_ALIVE_MS },
       }
     );
     expect(detached.exitCode).toBe(0);
