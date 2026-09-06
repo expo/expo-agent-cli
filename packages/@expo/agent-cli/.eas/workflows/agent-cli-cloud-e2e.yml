@@ -101,6 +101,10 @@ jobs:
 
   cloud-e2e-dev-build-android:
     name: live-cloud on EAS (Android, dev build)
+    # Serialized behind the Expo Go Android job: Android simulator capacity is limited, and two
+    # concurrent Android sessions leave one waiting past the readiness bound — observed twice on
+    # PR #20 (2026-09-06), a different Android job losing the race each run.
+    needs: [cloud-e2e-expo-go-android]
     runs_on: linux-medium
     environment: production
     env:
