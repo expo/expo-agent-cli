@@ -50,7 +50,7 @@ export interface ReloadOptions {
    * a way no stub could catch: the tunnel carries the **bundle**, over HTTP, and the app holds no
    * client on the dev server's command socket through it. The broadcast reached nobody, and the
    * fallback then force-stopped the app and could not start it again
-   * [observed — live staging, 2026-08-26, S12; hit again, 2026-08-27].
+   * [observed — live run S12, 2026-08-26; hit again, 2026-08-27].
    *
    * So the flag changes the **ladder**. On a cloud session the relaunch is the primary mechanism —
    * one controller verb, `open <app-id> <url> --relaunch` — and `auto` reaches it even with an app

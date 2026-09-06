@@ -1,7 +1,8 @@
 // Deferred from v1 (2026-08-26) — kept as reference, imported by nothing; see llp/0010
 //
-import recordedInProgress from '../../../__fixtures__/eas/build-view-in-progress.staging.json';
-import recordedInQueue from '../../../__fixtures__/eas/build-view-in-queue.staging.json';
+import recordedInProgress from '../../../__fixtures__/eas/build-view-in-progress.json';
+import recordedInQueue from '../../../__fixtures__/eas/build-view-in-queue.json';
+import recordedNew from '../../../__fixtures__/eas/build-view-new.json';
 import recordedView from '../../../__fixtures__/eas/build-view.json';
 import { parseLastJsonObject, readBuildDetails, readProgress } from '../parseView';
 import { resolveTerminalStatus } from '../status';
@@ -92,13 +93,15 @@ describe(`the recorded build:view payload`, () => {
   });
 });
 
-// The two statuses a wait actually spends its time in, recorded live on staging rather than
-// guessed — see `src/__fixtures__/eas/README.md` §The non-terminal statuses.
+// The statuses a wait actually spends its time in, recorded live from the production service
+// rather than guessed — see `src/__fixtures__/eas/README.md` §The non-terminal statuses.
 describe(`the recorded non-terminal payloads`, () => {
-  it(`pins the spelling of the two statuses a wait polls through`, () => {
+  it(`pins the spelling of the statuses a wait polls through`, () => {
+    expect(recordedNew.status).toBe('NEW');
     expect(recordedInQueue.status).toBe('IN_QUEUE');
     expect(recordedInProgress.status).toBe('IN_PROGRESS');
-    // Neither may end a wait. Getting this wrong reports an outcome nobody observed.
+    // None may end a wait. Getting this wrong reports an outcome nobody observed.
+    expect(resolveTerminalStatus(recordedNew.status)).toBeNull();
     expect(resolveTerminalStatus(recordedInQueue.status)).toBeNull();
     expect(resolveTerminalStatus(recordedInProgress.status)).toBeNull();
   });
@@ -124,7 +127,7 @@ describe(`the recorded non-terminal payloads`, () => {
   // No `eas --json` payload contains a literal null: the CLI's sanitizer deletes those keys before
   // printing. A fixture that had one would mean the recording was edited.
   it(`carries no null anywhere, because the EAS CLI strips them`, () => {
-    for (const payload of [recordedInQueue, recordedInProgress]) {
+    for (const payload of [recordedNew, recordedInQueue, recordedInProgress]) {
       expect(JSON.stringify(payload)).not.toContain('null');
     }
   });

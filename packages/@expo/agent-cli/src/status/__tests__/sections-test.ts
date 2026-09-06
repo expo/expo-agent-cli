@@ -1057,7 +1057,7 @@ describe(applyOpenUrls, () => {
     ready: true,
     projectRootMatched: true,
     hostType: 'tunnel',
-    tunnelUrl: 'https://x8fj2.on.staging.expo.app',
+    tunnelUrl: 'https://x8fj2.on.expo.app',
     openUrls: [],
   };
 
@@ -1072,7 +1072,7 @@ describe(applyOpenUrls, () => {
         label: 'development build',
         // https inside the parameter, because a tunnel terminates TLS — the same string
         // `UrlCreator.constructDevClientUrl` builds.
-        url: 'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.staging.expo.app',
+        url: 'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.expo.app',
       },
     ]);
   });

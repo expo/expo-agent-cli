@@ -1,0 +1,37 @@
+{
+  "id": "4c50db97-4506-45a5-9775-791b92af6f29",
+  "status": "IN_QUEUE",
+  "platform": "IOS",
+  "artifacts": {},
+  "fingerprint": {
+    "id": "01a072dc-10a0-7db2-8d36-ea2498b7d9cc",
+    "hash": "6246ca11e01a0b756e100326b8bd9e3ba2a29300"
+  },
+  "initiatingActor": {
+    "id": "3ecd85d1-3944-49e0-b70d-ef8084553c03",
+    "displayName": "kudochien"
+  },
+  "logFiles": [],
+  "app": {
+    "id": "a39c0791-951a-425d-8364-03c69b849a9f",
+    "name": "expo-agent-cli",
+    "slug": "expo-agent-cli",
+    "ownerAccount": {
+      "id": "8ced76ee-7280-4b2e-82a9-2e22339b9b92",
+      "name": "expo-ci"
+    }
+  },
+  "distribution": "INTERNAL",
+  "buildProfile": "development",
+  "appIdentifier": "dev.expo.easexample",
+  "sdkVersion": "57.0.0",
+  "appVersion": "1.0.0",
+  "appBuildVersion": "1",
+  "gitCommitHash": "a7a71c7e2ebd94279736e6470f5ccd2acbafb529",
+  "gitCommitMessage": "[agent-cli] Use production tunnel hosts in synthetic test data",
+  "priority": "HIGH",
+  "createdAt": "2026-09-06T06:46:04.145Z",
+  "updatedAt": "2026-09-06T06:46:05.267Z",
+  "expirationDate": "2026-12-05T06:46:04.175Z",
+  "isForIosSimulator": true
+}

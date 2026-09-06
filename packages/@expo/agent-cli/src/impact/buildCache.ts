@@ -181,7 +181,7 @@ export function buildViewArgs(buildId: string): string[] {
  *
  * The fact `status --explain --build <id>` was missing. A build is made for exactly one platform,
  * and the comparison against it was being copied onto **both** — so an iOS
- * development-simulator build was reported as able to run android code [observed — live staging,
+ * development-simulator build was reported as able to run android code [observed — live run,
  * 2026-08-26, S1].
  *
  * **Never throws and never fails a command.** No EAS CLI, no account, a build id that is not

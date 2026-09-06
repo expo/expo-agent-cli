@@ -89,12 +89,14 @@ function errorLine(error: NonNullable<BuildWaitReport['build']['error']>): strin
  * The three metrics are **milliseconds**, and are passed to `formatDuration` — which also takes
  * milliseconds — unscaled. They used to be multiplied by 1000, on the assumption that they were
  * seconds, which printed `queued 169h 54m` for a build that queued for ten minutes [observed —
- * 2026-08-26, staging build `77e676e2…`].
+ * 2026-08-26, EAS build `77e676e2…`].
  *
  * What settles the unit is that the three sum to the build's own wall clock: 5464 + 611690 +
  * 120280 = 737434, against a `createdAt`→`completedAt` span of 737434 ms to the millisecond. A
  * number that large cannot be seconds — 611690 s is 170 hours — and the recorded prod payload in
- * `src/__fixtures__/eas/build-view.json` reads the same way.
+ * `src/__fixtures__/eas/build-view.json` reads the same way. Re-observed on two production builds
+ * [2026-09-06]: 997 + 24379 + 213774 = 239150 and 4526 + 4409 + 333532 = 342467, each matching its
+ * span to the millisecond.
  */
 function metricsLine(metrics: NonNullable<BuildWaitReport['build']['metrics']>): string {
   return (

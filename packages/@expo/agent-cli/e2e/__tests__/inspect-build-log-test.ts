@@ -381,7 +381,7 @@ describe('the registry', () => {
   });
 });
 
-// @ref llp/0012-build-explain.rfc.md §Is this a log at all — live staging, S8.
+// @ref llp/0012-build-explain.rfc.md §Is this a log at all — live run S8.
 //
 // An EAS build log fetched without decoding its brotli body was read as a clean build: exit 0,
 // `failure: null`, and ten kilobytes of control characters in `logTail`.

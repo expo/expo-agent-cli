@@ -164,7 +164,7 @@ describe('auth commands outside an Expo project', () => {
     expect(result.stderr).not.toContain(path.join(os.homedir(), '.expo', 'state.json'));
   });
 
-  // @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract — live staging, S7. `--json` is
+  // @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract — live run S7. `--json` is
   // this CLI's contract and neither CLI it forwards to has such a flag, so the flag was ignored and
   // an agent that asked for one object got a line of prose.
   it(`should answer whoami --json with one object`, async () => {

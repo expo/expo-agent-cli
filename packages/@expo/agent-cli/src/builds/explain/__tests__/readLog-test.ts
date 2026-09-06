@@ -49,7 +49,7 @@ describe('readLogStreamAsync', () => {
   });
 
   // An EAS Build log is JSONL, one bunyan record per line — not the plain text every other log
-  // this reads is [observed — 2026-08-26, staging build 77e676e2…, 644 records]. Left wrapped, the
+  // this reads is [observed — 2026-08-26, EAS build 77e676e2…, 644 records]. Left wrapped, the
   // rule table matches inside a JSON blob, the phase markers are invisible, and every context line
   // a reader is shown is 400 characters of metadata around the sentence they wanted.
   it('unwraps an EAS Build JSONL record to the message it carries', async () => {
@@ -178,13 +178,13 @@ describe('readLogFileAsync', () => {
   });
 });
 
-// @ref llp/0012-build-explain.rfc.md §Is this a log at all — live staging, S8.
+// @ref llp/0012-build-explain.rfc.md §Is this a log at all — live run S8.
 //
 // EAS serves a build log **brotli-encoded**, and a caller who saved the response without decoding it
 // handed this command 26 KB of compressed bytes. It answered exit 0 with `failure: null` — "the log
 // was read and nothing failed" — and put ~10 KB of control characters into `logTail`. The two
 // samples that settle the threshold were measured: the undecoded response was 55% control characters
-// and the same log decoded was 0% [observed — staging evidence 35 and 37, 2026-08-26].
+// and the same log decoded was 0% [observed — live-run evidence 35 and 37, 2026-08-26].
 describe('whether the input is a log at all', () => {
   it('reads a real log as text', async () => {
     const read = await readLogStreamAsync(

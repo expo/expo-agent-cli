@@ -1,6 +1,6 @@
 // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run
-// Friction run 7's F71 and live staging's S5: `dev --plan --tunnel` printed a command that was not
-// the command the run executed.
+// Friction run 7's F71 and the 2026-08-26 live run's S5: `dev --plan --tunnel` printed a command
+// that was not the command the run executed.
 
 import type { PlanStep, StartPlan } from '../../project/types';
 import { forwardedStepArgs, withForwardedExpoArgs } from '../forwardedArgs';

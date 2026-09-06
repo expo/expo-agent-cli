@@ -399,7 +399,7 @@ describe('@expo/agent-cli navigate --cloud', () => {
   //
   // The link went to the system, the system asked "Open in 'Expo Go'?", and on an unattended cloud
   // device nothing answered it — so `attached` was false for a reason that had nothing to do with
-  // the app [observed — live staging, 2026-08-26; again live cloud, 2026-08-27, 60.9 s]. The dialog
+  // the app [observed — live run, 2026-08-26; again live cloud, 2026-08-27, 60.9 s]. The dialog
   // is one this command's own open produced, so this command answers it, and only it: the alert is
   // **read first**, and accepted only when it names the app the URL was for.
   it(`answers the open-in-app dialog its own link raised, and then looks again`, async () => {

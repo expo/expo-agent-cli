@@ -5,13 +5,13 @@
 // `beforeAll` could have awaited one. Each probe is therefore a `statSync` or one short
 // `execFileSync`, and each returns a sentence rather than a boolean — a skipped live suite whose
 // reason is "false" tells a reader nothing, and the most common reason (no session, no simulator,
-// no `EXPO_STAGING`) is a thing they can fix in one command.
+// no `AGENT_CLI_LIVE_EAS`) is a thing they can fix in one command.
 //
 // The other half of the design is the direction the gates fail in. A missing prerequisite **skips**:
 // this tier runs on the machine of whoever has the prerequisites, and a laptop with no simulator
 // reporting a red suite would train everyone to ignore it. A prerequisite that is *present and
-// wrong* — `EXPO_STAGING` unset while a suite is about to write to a real account — **throws**,
-// because the cost of getting that one wrong is a mutation on production.
+// wrong* — `AGENT_CLI_LIVE_EAS` unset while a suite is about to call the real service — **throws**,
+// because the cost of getting that one wrong is an unasked-for spend on a real account.
 
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';

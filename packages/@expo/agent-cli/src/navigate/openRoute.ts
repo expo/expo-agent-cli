@@ -872,7 +872,7 @@ function androidLaunchActivityFor(
  * **On a cloud session there is a second recovery, for a second cause** (S10). The link is handed to
  * the system, iOS asks "Open in 'Expo Go'?", and on a device nobody is sitting in front of, that
  * dialog is never answered — so nothing loads, and the honest `attached: false` this produces is
- * about a modal rather than about the app [observed — live staging, 2026-08-26, where
+ * about a modal rather than about the app [observed — live run, 2026-08-26, where
  * `agent-device alert accept` proved the causality; and again live cloud, 2026-08-27, 60.9 s].
  *
  * @see resolveOpenDialogAsync — why answering it is this command's to do, and what stops that from

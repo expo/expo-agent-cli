@@ -80,7 +80,7 @@ describe(formatBuildWaitReport, () => {
             xcodeBuildLogsUrl: 'https://expo.dev/artifacts/logs.txt',
           },
           fingerprint: { hash: 'a1b2c3' },
-          // The metrics of a real build, verbatim [observed — 2026-08-26, staging build
+          // The metrics of a real build, verbatim [observed — 2026-08-26, EAS build
           // 77e676e2…]. They are **milliseconds**, which the three add up to prove: 5464 + 611690
           // + 120280 = 737434 ms, and that build ran 12m 17s by its own createdAt/completedAt.
           metrics: { buildWaitTime: 5464, buildQueueTime: 611690, buildDuration: 120280 },

@@ -27,7 +27,7 @@ describe('layer 1 — the EAS phase header', () => {
   });
 
   // What EAS Build actually writes, now that a log has been read. Not a decorated title: a
-  // `Start phase:` marker naming a SCREAMING_SNAKE step [observed — 2026-08-26, staging build
+  // `Start phase:` marker naming a SCREAMING_SNAKE step [observed — 2026-08-26, EAS build
   // 77e676e2…, every phase boundary in the log]. The guessed titles above are kept because they
   // cost nothing and a local log may still use them; this is what the real thing looks like.
   it.each([

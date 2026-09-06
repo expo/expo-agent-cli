@@ -48,7 +48,7 @@ The exception is a command that adds a verdict. `doctor` is `0` when every check
 
 ### EAS JSON
 
-No `eas --json` payload can contain a `null`. `printJsonOnlyOutput` deletes every key whose value is null [observed, 2026-08-26, staging]. Absence is the only way that wire has of saying one. No parser may try to tell "the service said null" from "the service said nothing".
+No `eas --json` payload can contain a `null`. `printJsonOnlyOutput` deletes every key whose value is null [observed, 2026-08-26; re-observed on production, 2026-09-06]. Absence is the only way that wire has of saying one. No parser may try to tell "the service said null" from "the service said nothing".
 
 ### The fourth: `typecheck`
 

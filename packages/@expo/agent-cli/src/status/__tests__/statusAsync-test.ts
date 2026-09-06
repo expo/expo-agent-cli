@@ -647,7 +647,7 @@ describe(collectStatusReportAsync, () => {
       });
     });
 
-    // @ref llp/0021-honest-reports.rfc.md §The rules — live staging,
+    // @ref llp/0021-honest-reports.rfc.md §The rules — live run,
     // S1. The one comparison used to be copied onto every platform, which reported an iOS
     // simulator build as able to run android code.
     it(`should put the build's answer on the build's platform only`, async () => {

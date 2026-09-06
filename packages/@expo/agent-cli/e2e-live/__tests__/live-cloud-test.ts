@@ -108,6 +108,18 @@ const gate = allOf(
  */
 const BOUND_MS = 300_000;
 
+/**
+ * How long the session start alone gets.
+ *
+ * Creating the session is fast; what varies is the wait for the agent-device to become **ready** —
+ * the same command's create→ready span was 3.3 minutes at one point on 2026-09-06 and past five at
+ * another, on an account with nothing else running. Under {@link BOUND_MS} that variance became a
+ * suite failure with a killed `eas simulator` and a session the `catch` had to stop. The device
+ * boot is EAS's to pace (Android support is declared in-development by the CLI itself), so the
+ * start gets double the bound rather than an assertion about how long a datacenter takes.
+ */
+const SESSION_START_MS = 600_000;
+
 /** What `--timeout` is set to on a cloud reload, spelled the way that option parses. */
 const RELOAD_TIMEOUT = '180s';
 
@@ -162,10 +174,10 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   let sessionId: string | null = null;
 
   /** `eas` through the same package runner this CLI uses, with the evidence kept. */
-  async function easAsync(label: string, args: string[]) {
+  async function easAsync(label: string, args: string[], timeoutMs: number = BOUND_MS) {
     const result = await execAsync('npx', ['--yes', 'eas-cli@latest', ...args], {
       cwd: projectRoot || run.tempDir,
-      timeoutMs: BOUND_MS,
+      timeoutMs,
     });
     run.writeArtifact(
       `eas-${label}.txt`,
@@ -502,35 +514,56 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       appFlags = ['--expo-go', '--open-url', `exp://${publicHost}`];
     }
 
-    let started: Awaited<ReturnType<typeof easAsync>>;
-    try {
-      started = await easAsync('simulator-start', [
-        'simulator',
-        '--platform',
-        CLOUD_PLATFORM,
-        '--type',
-        'agent-device',
-        ...appFlags,
-        '--non-interactive',
-        '--name',
-        'agent-cli-live',
-        '--json',
-      ]);
-    } catch (error: any) {
-      sessionId = findSessionId(String(error?.stdout ?? ''), String(error?.stderr ?? ''));
+    const startArgs = [
+      'simulator',
+      '--platform',
+      CLOUD_PLATFORM,
+      '--type',
+      'agent-device',
+      ...appFlags,
+      '--non-interactive',
+      '--name',
+      'agent-cli-live',
+      '--json',
+    ];
+    // The start gets one retry. A session is sometimes created and then never becomes ready, and
+    // `eas simulator` gives up on it with exit 1 after its own internal wait [observed — expo-ci,
+    // 2026-09-06, three workflow runs: the run's *second* Android session missed readiness while
+    // its first was fine, on an account with nothing else in progress]. The missed session is
+    // stopped before the retry, so whatever slot it holds is returned; a second miss is reported
+    // the way a single one always was.
+    let started: Awaited<ReturnType<typeof easAsync>> | null = null;
+    for (let attempt = 1; attempt <= 2 && !started; attempt += 1) {
+      const label = attempt === 1 ? 'simulator-start' : 'simulator-start-retry';
+      let result: Awaited<ReturnType<typeof easAsync>>;
+      try {
+        result = await easAsync(label, startArgs, SESSION_START_MS);
+      } catch (error: any) {
+        sessionId = findSessionId(String(error?.stdout ?? ''), String(error?.stderr ?? ''));
+        if (sessionId) {
+          run.spend.cloudSessions += 1;
+        }
+        throw error;
+      }
+      sessionId = findSessionId(result.stdout, result.stderr);
       if (sessionId) {
         run.spend.cloudSessions += 1;
       }
-      throw error;
+      if (result.exitCode === 0) {
+        started = result;
+      } else if (attempt === 2) {
+        throw new Error(
+          `eas simulator failed (exit ${result.exitCode}): ${result.stderr.slice(-2000)}`
+        );
+      } else {
+        if (sessionId) {
+          await easAsync('simulator-stop-after-miss', ['simulator:stop', '--id', sessionId]);
+          sessionId = null;
+        }
+      }
     }
-    sessionId = findSessionId(started.stdout, started.stderr);
-    if (sessionId) {
-      run.spend.cloudSessions += 1;
-    }
-    if (started.exitCode !== 0) {
-      throw new Error(
-        `eas simulator failed (exit ${started.exitCode}): ${started.stderr.slice(-2000)}`
-      );
+    if (!started) {
+      throw new Error('eas simulator never produced a start result (harness, not a finding)');
     }
     if (!sessionId) {
       throw new Error(
@@ -540,7 +573,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // Scaffold, install, a tunnel, a detached dev server and a billed simulator session: minutes.
     // Without its own bound this hook hit vitest's 10s default and the suite never reached a test —
     // which is why it had never been seen run.
-  }, 600_000);
+  }, 1_500_000);
 
   afterAll(async () => {
     await run.cleanUpAsync();

@@ -182,7 +182,8 @@ export function resolveRegisterCli(
  *
  * Not a constant. `~/.expo/state.json` is the usual answer and it was printed as though it were the
  * only one: under `EXPO_STAGING=1` the whole family reads `~/.expo-staging/state.json`, so a notice
- * naming the first is a notice about a file the run never touched [observed — live staging, S6].
+ * naming the first is a notice about a file the run never touched [observed — live run S6,
+ * 2026-08-26].
  *
  * The same three rules the family uses, in the same order [observed — `@expo/cli`
  * `api/user/UserSettings.ts` `getExpoHomeDirectory`, and eas-cli resolves the same directory]:
@@ -292,7 +293,7 @@ export function agentCliAuthPassthrough(command: string): Command {
       // The one thing a forwarded command cannot forward: `--json` is this CLI's contract and
       // neither `expo whoami` nor `eas whoami` has such a flag, so the flag reached the other CLI,
       // was ignored, and an agent that asked for one object got a line of prose at exit 0
-      // [observed — live staging, S7]. `whoami` is a *read*, so this one can be answered here.
+      // [observed — live run S7]. `whoami` is a *read*, so this one can be answered here.
       if (command === 'whoami' && args.includes('--json')) {
         process.exitCode = await printWhoamiJsonAsync(projectRoot, cli, args);
         return;

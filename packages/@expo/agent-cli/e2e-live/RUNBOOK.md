@@ -36,7 +36,7 @@ Everything needs the bundle built first: **`bun run build`**.
 | `live-local`     | macOS; a **booted** iOS simulator with **Expo Go** installed; network (npm, for the scaffold's install)                                                                                                                                                                                                                                                                                    |
 | `live-devclient` | everything `live-android`'s `adb`/device half needs, **plus** `AGENT_CLI_LIVE_DEVCLIENT_PROJECT` naming a project that (a) depends on `expo-dev-client`, (b) declares an `expo.scheme`, (c) has its `android.package` **installed** on the attached device, and (d) has an android entry in its `.expo/agent-cli-last-build.json`. It **does not boot** and **does not build** — see below |
 | `live-android`   | a runnable `adb` (`ANDROID_HOME`, `ANDROID_SDK_ROOT`, `PATH`, or the SDK's default location); an **attached device or a bootable AVD**; **Expo Go** on it; network. A booted iOS simulator with Expo Go is an _optional_ extra that adds three tests — see below                                                                                                                           |
-| `live-eas`       | `AGENT_CLI_LIVE_EAS=1`; a login with `expo-ci` access (ambient EAS session, or `EXPO_TOKEN` in CI); `bunx` or `npx`; network. Reads the committed `apps/eas-example` (seeded with a FINISHED and an ERRORED build); `AGENT_CLI_LIVE_EAS_PROJECT` overrides the app                                                                                                                          |
+| `live-eas`       | `AGENT_CLI_LIVE_EAS=1`; a login with `expo-ci` access (ambient EAS session, or `EXPO_TOKEN` in CI); `bunx` or `npx`; network. Reads the committed `apps/eas-example` (seeded with a FINISHED and an ERRORED build — reseed the ERRORED one, if newer builds push it out of the latest 20, by building a copy of the app with a bogus dependency pinned in `bun.lock`: a bun 404 is a failure the anchor table locates); `AGENT_CLI_LIVE_EAS_PROJECT` overrides the app                                                                                                                          |
 | `live-cloud`     | everything `live-eas` needs (`AGENT_CLI_LIVE_EAS=1`), **plus** `AGENT_CLI_LIVE_CLOUD=1`. The public origin is the dev server's own tunnel (`--tunnel` under `EXPO_UNSTABLE_TUNNEL_V2=1`, on the same EAS auth) — no proxy needed; `AGENT_CLI_LIVE_PUBLIC_ORIGIN` remains the hatch for a reverse proxy of your own                                                                                                    |
 | `live-ios-devclient` | a **booted** iOS simulator, **plus** `AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT` naming a project that (a) depends on `expo-dev-client`, (b) declares `expo.scheme` and `expo.ios.bundleIdentifier`, (c) has that bundle id **installed** on the booted simulator, and (d) has an `ios` entry in `.expo/agent-cli-last-build.json`. It **does not build** — run `npx expo run:ios` once (~15 min) to make one |
 | `live-bootstrap` | macOS; **no booted** simulator anywhere (`xcrun simctl shutdown all` first — the suite skips rather than shutting down a device you are using); a shut-down simulator that has Expo Go installed (run `live-local` once to make one); network (npm, for the scaffold's install). It measures the boot and dev-server start `smoke` performs itself, so the machine state every other suite needs is exactly the state this one refuses |
@@ -298,6 +298,13 @@ Every invocation writes its argv, cwd, exit code, duration and full output to
 than quoting kilobytes of a bundler's opinion into a terminal. A stub failure is reproducible from the
 test file. A live failure is a fact about a moment, so the moment is kept.
 
+The `S1`–`S14` findings cited across `src/` are from the 2026-08-26 live run (which ran against the
+EAS staging service; the tier has since moved to the `expo-ci` production account, llp/0022 §The
+account). They were re-verified against production on 2026-09-06: live-project 34, live-local 37,
+live-android 25, live-eas 8 and live-cloud 7 tests green on this tier, and the build-log,
+build-wait and fixture facts re-observed directly on production builds `4c50db97…`, `52a1c2f2…`
+and `fcb47bc4…` (`src/__fixtures__/eas/README.md`).
+
 ## What green claims — and what it does not
 
 **Claims.** The command ran, against the real thing, and the invariant held on this machine at this
@@ -320,7 +327,7 @@ export produced, a log line that appeared inside a generous bound.
 --android` returns 2 and `smoke --android` exits 0 with eight phases `ok`, on the same emulator.
   The two suites together are what make the refusal a fact about Expo Go's engine rather than about
   Android.
-- **Native builds.** No v1 command creates an EAS build [observed — staging-live, 2026-08-26], so
+- **Native builds.** No v1 command creates an EAS build [observed — live run, 2026-08-26], so
   every claim about build _creation_ is untested here and cannot be tested here.
 - **That an Android stop had taken effect when the command returned.** `am force-stop` is
   asynchronous. It exits as soon as ActivityManager takes the request, and `pidof` still answers for a

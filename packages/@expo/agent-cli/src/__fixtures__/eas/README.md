@@ -31,38 +31,38 @@ Nothing else is altered: keys, casing, ordering and null-ness are as the CLI pri
 | `whoami.txt` | `eas whoami` | The account name is the **first** line; the email, and an `Accounts:` list when the actor belongs to more than their personal account, follow it. See `src/needsHuman/preflight.ts`. |
 | `simulator-availability.json` | `eas simulator:availability --json --non-interactive` | `{ available, accountName }`. The one `simulator:*` payload that can be recorded without starting a session. See `src/device/cloudSimulator.ts`. |
 
-## The non-terminal statuses, recorded on staging
+## The non-terminal statuses
 
-`IN_QUEUE` and `IN_PROGRESS` are only observable while a build is running, which used to make them
-unrecordable: starting a build is a mutating, billable call. **Staging is neither**, so they are
-recorded now [the staging builds were authorized, 2026-08-26].
+`NEW`, `IN_QUEUE` and `IN_PROGRESS` are only observable while a build is running, so recording them
+takes a build started for the purpose: two were [authorized for the re-observation run, 2026-09-05],
+one per platform, both of the committed `apps/eas-example`.
 
-Captured with `EXPO_STAGING=1`, `eas-cli/22.5.0`, signed in as `alice`, against
-`@bob/SampleApp` (project `861a6e66-a6c4-4314-abbf-b52f0bf80cef`) — a different account and
-project from the prod recordings above, because the staging service has its own accounts. Same
-trimming rules.
+Captured 2026-09-06 with `eas-cli/23.2.0 darwin-arm64 node-v26.5.0`, signed in as `kudochien`,
+against `@expo-ci/expo-agent-cli` (project `a39c0791-951a-425d-8364-03c69b849a9f`) — the same
+account and project the live tier runs against. Same trimming rules.
 
 | File | Command | What it pins |
 | --- | --- | --- |
-| `build-view-in-queue.staging.json` | `eas build:view <id> --json` on a queued iOS simulator build | `IN_QUEUE` is the spelling, `logFiles` is `[]` and `artifacts` is `{}` before the build starts |
-| `build-view-in-progress.staging.json` | the same, on a running Android build | `IN_PROGRESS` is the spelling, and `logFiles` is **populated while the build is still running** — a log is fetchable before there is a result |
+| `build-view-new.json` | `eas build:view <id> --json` on the first poll after an Android build was submitted | `NEW` is the spelling, and it looks exactly like `IN_QUEUE`: `logFiles` is `[]`, `artifacts` is `{}` |
+| `build-view-in-queue.json` | the same, on a queued iOS simulator build | `IN_QUEUE` is the spelling, `logFiles` is `[]` and `artifacts` is `{}` before the build starts |
+| `build-view-in-progress.json` | the same, on a running Android build | `IN_PROGRESS` is the spelling, and `logFiles` is **populated while the build is still running** — a log is fetchable before there is a result |
 
 Two facts these settle, both of which `src/builds/parseView.ts` rests on:
 
-- **`queuePosition` and `estimatedWaitTimeLeftSeconds` are absent from both.** Not null — absent.
-  They are requested on every query (`graphql/types/Build.js` lists them beside `isForIosSimulator`,
-  which does arrive), and they did not appear on a single one of 47 polls across a ~10-minute
-  `IN_QUEUE` and the `IN_PROGRESS` that followed, on either platform.
+- **`queuePosition` and `estimatedWaitTimeLeftSeconds` are absent from every one.** Not null —
+  absent. They are requested on every query (`graphql/types/Build.js` lists them beside
+  `isForIosSimulator`, which does arrive), and they did not appear on a single poll of either build,
+  across `NEW`, `IN_QUEUE`, `IN_PROGRESS` and `FINISHED`. The original 2026-08-26 recording saw the
+  same across 47 polls of a ~10-minute queue.
 - **No `--json` output of this CLI ever contains a `null`.** `printJsonOnlyOutput` sanitizes every
   payload first, and the sanitizer **drops each key whose value is null** along with `__typename`
   [observed — `utils/json.js`: `if (key !== '__typename' && value[key] !== null)`]. So absence is
   the only way the wire can say "null", and a parser must not try to tell the two apart. This
   applies to every `eas --json` payload in this directory, not only these two.
 
-`NEW` and `PENDING_CANCEL` are still unrecorded: `NEW` is held for a shorter window than one poll
-caught, and `PENDING_CANCEL` needs a cancellation to land mid-flight. `CANCELED` / `CANCELLED` stay
-`[inferred]`; `src/builds/status.ts` accepts both spellings and treats an unrecognized status as
-non-terminal, so none of the three can hang a wait.
+`PENDING_CANCEL` is still unrecorded: it needs a cancellation to land mid-flight. `CANCELED` /
+`CANCELLED` stay `[inferred]`; `src/builds/status.ts` accepts both spellings and treats an
+unrecognized status as non-terminal, so neither can hang a wait.
 
 ## What could not be recorded, and why
 - **Every other `simulator:*` payload.** `simulator:get`, `simulator:exec` and `simulator:stop` all
@@ -91,14 +91,15 @@ recorded.
 | `simulator-list-in-progress.json` | the same command while the session was up |
 | `simulator-list-stopped.json` | `eas simulator:list --limit 5 --json` after `simulator:stop` |
 
-### The Android half, recorded on staging
+### The Android half
 
-Every session recording above is **iOS**. `simulator-list-android-in-progress.staging.json` is the
-other half [observed — 2026-08-26, `EXPO_STAGING=1`, `eas-cli/22.5.0`, account `bob`, project
-`SampleApp`], captured from a session that had a **real development build installed on it** —
+Every session recording above is **iOS**. `simulator-list-android-in-progress.json` is the other
+half [observed — 2026-09-06, `eas-cli/23.2.0`, account `expo-ci`, project `expo-agent-cli`],
+captured from a session that had a **real development build installed on it** —
 `eas simulator --platform android --build-id <id> --type agent-device`, where the build is the APK
-of the app under test rather than Expo Go. The session was stopped when the run finished
-(`{"id": …, "status": "STOPPED"}`).
+of the app under test rather than Expo Go. The page also carries a concurrent **iOS** session (the
+PR's cloud e2e was running on the same account), so both platform enums appear in one payload. The
+sessions were stopped when their runs finished (`{"id": …, "status": "STOPPED"}`).
 
 It carries no credential: the daemon URL and token come back from `eas simulator --json` on stdout
 and are deliberately not recorded here, the same rule the iOS recordings follow.

@@ -8,7 +8,7 @@
 // the **bundle** and not the client command socket. The broadcast reached nobody, the fallback
 // force-stopped the app with `close`, and the relaunch was refused — leaving a billed session with
 // nothing running on it and the controller's own session ended
-// [observed — live staging, 2026-08-26, S12; hit again, 2026-08-27, with "1 app connected"
+// [observed — live run S12, 2026-08-26; hit again, 2026-08-27, with "1 app connected"
 // on screen].
 //
 // **What it does instead.** Two controller verbs, both of them the controller's own answer to this

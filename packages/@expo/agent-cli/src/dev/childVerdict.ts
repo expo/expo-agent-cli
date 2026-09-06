@@ -4,7 +4,7 @@
 // A detached run has two processes and one caller, and only one of them prints to the caller's
 // terminal. When the child fails it does the whole job properly — it classifies the failure, names
 // the scenario, and writes the what/why/how — into a file nobody is watching, while the parent that
-// *is* being read says `Bundler ready` and exits 0 [observed — friction run 7, F61; live staging,
+// *is* being read says `Bundler ready` and exits 0 [observed — friction run 7, F61; live run,
 // S4]. The verdict is not missing. It is in the wrong place.
 //
 // So this reads it back. The two lines it looks for are written by `logCmdError` and

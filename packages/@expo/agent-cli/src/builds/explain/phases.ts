@@ -48,8 +48,9 @@ const HEADER_DECORATION = [
 /**
  * The step names EAS Build writes into its log, and the phases they are.
  *
- * This is the real format, read off a real log at last [observed — 2026-08-26, staging build
- * `77e676e2…`]: every boundary is a record whose message is `Start phase: <NAME>` or
+ * This is the real format, read off a real log at last [observed — 2026-08-26, EAS build
+ * `77e676e2…`; re-observed — 2026-09-06, production builds `52a1c2f2…` and `4c50db97…`]:
+ * every boundary is a record whose message is `Start phase: <NAME>` or
  * `End phase: <NAME>`, and the names are SCREAMING_SNAKE rather than the prose titles
  * {@link EAS_PHASE_LABELS} guesses at. The eighteen seen in one iOS build were `SPIN_UP_BUILDER`,
  * `INSTALL_CUSTOM_TOOLS`, `PREPARE_PROJECT`, `PRE_INSTALL_HOOK`, `READ_EAS_JSON`,

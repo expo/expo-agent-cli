@@ -94,7 +94,7 @@ describe(buildDetachSpawn, () => {
 });
 
 // @ref llp/0021-honest-reports.rfc.md §The rules — friction run
-// 7's F61 and live staging's S4. Three facts in, one verdict out.
+// 7's F61 and the 2026-08-26 live run's S4. Three facts in, one verdict out.
 describe(resolveDetachFailure, () => {
   const healthy = { exited: false, verdict: null, statusAnswering: true };
 

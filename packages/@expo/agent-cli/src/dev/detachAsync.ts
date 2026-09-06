@@ -267,7 +267,7 @@ export async function devDetachAsync(
   // The last thing before anything is claimed. Everything above is a fact about a moment that has
   // passed: the lock answered, the bundler answered, the tunnel wait ran — and a child that died in
   // between left the caller with `Bundler ready` and exit 0 for a dev server that was gone
-  // [observed — friction run 7, F61; live staging, S4]. `ready: true` is only ever printed for a
+  // [observed — friction run 7, F61; live run S4]. `ready: true` is only ever printed for a
   // process that is alive and a `/status` that still answers, here, now.
   // @ref llp/0021-honest-reports.rfc.md §The rules
   const phase = readChildPhaseSync(projectRoot);
@@ -625,7 +625,7 @@ function currentTunnelUrlSync(projectRoot: string): string | null {
  *
  * The log is asked first because it costs nothing, and because `Waiting on <url>` is the dev
  * server's own announcement. It is not always there: a detached `--tunnel` run's log held no host
- * at all while the tunnel was up [observed — live staging, 2026-08-26, S3]. The manifest of the dev
+ * at all while the tunnel was up [observed — live run S3, 2026-08-26]. The manifest of the dev
  * server this run already has a lock for carries the same address, one request away.
  */
 async function currentTunnelUrlAsync(

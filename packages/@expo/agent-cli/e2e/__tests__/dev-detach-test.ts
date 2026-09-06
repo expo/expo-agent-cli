@@ -306,8 +306,9 @@ describe('@expo/agent-cli dev --detach', () => {
 
   // @ref llp/0021-honest-reports.rfc.md §The rules
   //
-  // Friction run 7's F61 and live staging's S4, which are one finding: the child had already
-  // classified the stop, written the scenario and the what/why/how into its log, and exited — while
+  // Friction run 7's F61 and the 2026-08-26 live run's S4, which are one finding: the child had
+  // already classified the stop, written the scenario and the what/why/how into its log, and
+  // exited — while
   // the parent, the only process the caller is reading, printed `Bundler ready` and exit 0. The
   // verdict was never missing. It was in the wrong process.
   it('hands on the child’s own verdict instead of reporting a dev server that has gone', async () => {

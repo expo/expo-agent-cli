@@ -153,7 +153,7 @@ export interface ReloadAttempt {
    * The application id this attempt stopped and could not start again, or null.
    *
    * The device method is a force-stop and a relaunch, so a relaunch that is refused leaves the app
-   * **closed** — a state this command produced and used to say nothing about [live staging, S12: a
+   * **closed** — a state this command produced and used to say nothing about [live run S12: a
    * cloud session was left with no app running, and the report said only "The app was not
    * reloaded"]. Null for every attempt that stopped nothing, including a stop that itself failed.
    */
@@ -565,7 +565,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   //
   // Watched **alongside** the dev server's own output, on every rung. Some apps register no debugger
   // target at all — Expo Go loaded this project on a cloud session and `/json/list` stayed empty for
-  // three minutes [observed — live staging, S11] — and a relaunched app re-registers under the page
+  // three minutes [observed — live run S11] — and a relaunched app re-registers under the page
   // id it had before, so on both of those the bundle the dev server finished is the observation that
   // is left (`./bundleSignal.ts`).
   const connection =
@@ -1450,7 +1450,7 @@ const METHOD_PHRASE: { [method: string]: string } = {
 /**
  * What the app being off the screen may mean after a cloud relaunch was refused, and how to fix it.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live staging, S12.
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live run S12.
  *
  * The old fallback `close`d the app and then failed to open it, which left a billed session with
  * nothing running and said so nowhere. The one-verb relaunch cannot strand the app *and* claim to
@@ -1590,7 +1590,7 @@ function printHumanReport(report: ReloadResultJson, options: ReloadOptions): voi
  * What this run left behind, when the fallback stopped the app and could not start it again.
  *
  * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live
- * staging, S12.
+ * run S12.
  *
  * Said out loud because it is a state the command *produced*: the app is not on the screen, and on a
  * cloud session the reopen this command would use is the one that just failed — so the recovery is a

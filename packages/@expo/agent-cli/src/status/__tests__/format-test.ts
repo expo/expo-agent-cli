@@ -833,12 +833,12 @@ describe(formatStatusReport, () => {
           ready: true,
           projectRootMatched: true,
           hostType: 'tunnel',
-          tunnelUrl: 'https://x8fj2.on.staging.expo.app',
+          tunnelUrl: 'https://x8fj2.on.expo.app',
           openUrls: [
             {
               target: 'dev-build',
               label: 'development build',
-              url: 'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.staging.expo.app',
+              url: 'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.expo.app',
             },
           ],
           appsListed: 0,
@@ -849,7 +849,7 @@ describe(formatStatusReport, () => {
       const rendered = report(value);
       expect(rendered).toContain('open in development build:');
       expect(rendered).toContain(
-        'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.staging.expo.app'
+        'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.expo.app'
       );
     });
 
@@ -1173,7 +1173,7 @@ describe('the eas build line', () => {
   });
 
   // @ref llp/0021-honest-reports.rfc.md §The rules — live
-  // staging, S9. The clipped end of this sentence is the clause that says what to do.
+  // run S9. The clipped end of this sentence is the clause that says what to do.
   it(`prints a reason too long for the line under it, rather than clipping it`, () => {
     const reason =
       'the eas at /Users/somebody/.tuft-bin/eas exited 101 and printed nothing an eas run would print, so it may not be the real CLI — check that file';
