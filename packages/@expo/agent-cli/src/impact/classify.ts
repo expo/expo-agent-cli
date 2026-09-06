@@ -65,6 +65,39 @@ const REASON_PREFIX_KINDS: { prefix: string; kind: ChangeKind }[] = [
   { prefix: 'expoConfig', kind: 'app-config' },
 ];
 
+/**
+ * Whether a change of this kind means the native project has to be **generated** again.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
+ *
+ * The second question hiding inside `needs-native-build`. Every kind below moved the fingerprint,
+ * so every one of them needs the app compiled again — but only some of them change what `prebuild`
+ * would *write*, and a prebuild that regenerates an identical native project is a minute spent to
+ * produce the file that was already there.
+ *
+ * The split is the one {@link describeKind} already states in prose, read off the same table rather
+ * than invented beside it: a config plugin "writes different native code", an app config change
+ * "reaches the native project", and an `eas.json` edit "moves the fingerprint without changing
+ * generated native code, so a cloud build is enough and prebuild is not needed".
+ *
+ * `native-project` is false for a reason that is not thrift: those are the checked-in `ios/` and
+ * `android/` directories, and prebuild would *overwrite* the thing that changed. The bare rows of
+ * the decision table have never prebuilt, and this keeps that true when the answer comes from here.
+ *
+ * `unknown` is true, on the same conservative reading that makes its class `needs-native-build`:
+ * a source this CLI cannot name might well be one prebuild owns, and an unnecessary prebuild costs
+ * a minute where a skipped one costs a build that does not contain the change.
+ */
+export const KIND_NEEDS_PREBUILD: Record<ChangeKind, boolean> = {
+  'native-module': true,
+  'native-project': false,
+  'config-plugin': true,
+  'app-config': true,
+  'build-config': false,
+  'build-scripts': false,
+  unknown: true,
+};
+
 /** What every {@link ChangeKind} costs. */
 export const KIND_CLASSES: Record<ChangeKind, ImpactClass> = {
   'native-module': 'needs-native-build',

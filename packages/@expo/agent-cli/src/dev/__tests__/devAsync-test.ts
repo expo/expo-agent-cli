@@ -4,7 +4,7 @@ import os from 'os';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
-import { readLastBuildFingerprints, recordLastBuildFingerprint } from '../../plan/lastBuild';
+import { readLastBuildRecord, recordLastBuildFingerprint } from '../../plan/lastBuild';
 import { clearFingerprintMemo } from '../../project/fingerprint';
 import { clearFingerprintCache } from '../../project/fingerprintCache';
 import { probeProjectStateAsync } from '../../project/probe';
@@ -23,7 +23,7 @@ vi.mock('../openApp', () => ({
 vi.mock('../../plan/emit', () => ({ emitStartPlan: vi.fn() }));
 vi.mock('../../plan/events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../plan/lastBuild', () => ({
-  readLastBuildFingerprints: vi.fn(() => ({})),
+  readLastBuildRecord: vi.fn(() => ({})),
   recordLastBuildFingerprint: vi.fn(),
 }));
 vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
@@ -137,7 +137,7 @@ function mockLanAddress(address: string | null) {
 beforeEach(() => {
   vol.reset();
   mockReported.length = 0;
-  vi.mocked(readLastBuildFingerprints).mockReturnValue({});
+  vi.mocked(readLastBuildRecord).mockReturnValue({});
   vi.mocked(runExpoAsync).mockResolvedValue(0);
   vi.mocked(isInteractive).mockReturnValue(true);
   vi.mocked(spawnExpoAsync).mockResolvedValue({
@@ -523,7 +523,7 @@ describe(devAsync, () => {
 
     it(`should reuse a development build recorded for the current fingerprint`, async () => {
       mockStaleDevClientState();
-      vi.mocked(readLastBuildFingerprints).mockReturnValue({ ios: fingerprintHash });
+      vi.mocked(readLastBuildRecord).mockReturnValue({ ios: { hash: fingerprintHash, sources: null } });
 
       await devAsync(projectRoot, resolveDevOptions(['--ios']));
 
@@ -628,7 +628,7 @@ describe(devAsync, () => {
     });
 
     it(`should offer a tunnel for a development build, which needs no exp:// URL`, async () => {
-      vi.mocked(readLastBuildFingerprints).mockReturnValue({ ios: fingerprintHash });
+      vi.mocked(readLastBuildRecord).mockReturnValue({ ios: { hash: fingerprintHash, sources: null } });
       mockStaleDevClientState();
 
       await devAsync(projectRoot, resolveDevOptions(['--ios']));

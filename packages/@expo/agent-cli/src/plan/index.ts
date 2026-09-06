@@ -6,7 +6,7 @@
 export { decideStartPlan } from './decide';
 export { emitStartPlan } from './emit';
 export { formatStartPlan, formatTimeClass } from './format';
-export { readLastBuildFingerprints, recordLastBuildFingerprint } from './lastBuild';
+export { readLastBuildRecord, recordLastBuildFingerprint } from './lastBuild';
 export type { StartPlanMode } from './emit';
 export type {
   DecideStartPlanOptions,

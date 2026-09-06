@@ -2,6 +2,7 @@
 // Types local to the plan engine. The shared probe/plan contract lives in `src/project/types.ts`.
 
 import type { BuildBackendChoice } from '../toolchain/selectBackend';
+import type { LastBuildRecord } from './lastBuild';
 import type { RunTargetChoice } from './runTarget';
 
 /** A platform that needs a native app to run the project. */
@@ -12,6 +13,11 @@ export type PlanPlatform = NativePlatform | 'web';
 
 /**
  * The fingerprint hash of the last development build `@expo/agent-cli` ran, per platform.
+ *
+ * @deprecated The decision table takes the whole `LastBuildRecord` now: a hash answers "is the last
+ * build stale" and nothing else, and the table also has to ask *what* went stale to know whether a
+ * prebuild is part of the answer (llp/0004 §Decision table). Kept as a name for the hash-only view,
+ * which `impact` still builds for a comparison that was never about planning.
  *
  * @see ./lastBuild.ts for the `.expo` file this is read from.
  */
@@ -37,6 +43,12 @@ export type StartPlanRule =
   | 'dev-client-fresh'
   /** The native project must be generated and built before the app can run. */
   | 'dev-client-stale'
+  /**
+   * The build is stale, but nothing `prebuild` writes has changed, so the native project is kept.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §Decision table
+   */
+  | 'dev-client-rebuild'
   /** Native directories are checked in and match the last build. */
   | 'bare-fresh'
   /** Native directories are checked in and must be built. */
@@ -70,10 +82,16 @@ export interface DecideStartPlanOptions {
    */
   open?: boolean;
   /**
-   * Fingerprint hashes of the last builds `@expo/agent-cli` ran. Passed in by the caller so the
-   * decision table stays a pure function of probed state.
+   * What the last builds `@expo/agent-cli` ran were made from, per platform. Passed in by the
+   * caller so the decision table stays a pure function of probed state.
+   *
+   * The **whole record**, hash and `sources` together, and not only the hashes it used to be. The
+   * hash decides whether the build is stale; the sources decide whether `prebuild` is part of what
+   * makes it fresh again, which is a different question and one a hash cannot answer
+   * (llp/0004 §Decision table). A record written by an older CLI carries `sources: null`, and the
+   * table falls back to planning a prebuild — the answer it always gave.
    */
-  lastBuild?: LastBuildFingerprints;
+  lastBuild?: LastBuildRecord;
   /**
    * Where this plan's native build runs, when the caller has resolved it.
    *

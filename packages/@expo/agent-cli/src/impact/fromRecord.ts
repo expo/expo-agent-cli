@@ -19,7 +19,7 @@ import type { NativePlatform } from '../plan/types';
 import { PROGRAM_NAME } from '../programName';
 import type { FingerprintSource } from '../project/fingerprint';
 import { diffFingerprintSourcesLocally } from '../project/localDiff';
-import { classifyFingerprintDiff } from './classify';
+import { classifyFingerprintDiff, KIND_NEEDS_PREBUILD } from './classify';
 import type { ChangedFiles, ChangedSource, ImpactClass } from './types';
 
 /** What a change costs, as far as the data already in hand can establish it. */
@@ -40,6 +40,18 @@ export interface RecordedImpact {
    * for the same reason), and a headline with fifty rows attached is not a headline.
    */
   changedSources: ChangedSource[];
+  /**
+   * Whether the native project has to be generated again, or null when nothing was established.
+   *
+   * @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
+   *
+   * The question `class` does not answer. `needs-native-build` covers both "a config plugin now
+   * writes different native code" and "`eas.json` changed", and only the first of those makes
+   * `prebuild` produce a different `ios/`. Null rather than `true` for an undecided comparison,
+   * for the same reason `class` is null there: the caller that has to gate on something applies
+   * its own conservative default, and a report says it could not tell.
+   */
+  needsPrebuild: boolean | null;
 }
 
 /**
@@ -95,11 +107,41 @@ export function classifyAgainstRecordedBuild(
       `the native fingerprint is unchanged, so nothing here needs the app built again`,
     changedCount: classified.changedSources.length,
     changedSources: classified.changedSources,
+    needsPrebuild: decideNeedsPrebuild(fingerprintChanged, classified.changedSources),
   };
 }
 
+/**
+ * Whether the native project has to be generated again, from the sources that moved.
+ *
+ * Any one source that prebuild owns is enough, the same way the strongest class wins: a diff
+ * holding an `eas.json` edit *and* a new config plugin needs the native project regenerated.
+ *
+ * **A hash that moved over an empty diff is `null`, not `false`.** The two sides fingerprinted to
+ * different hashes and the source lists cannot say why — a sourcer that emitted no sources, or two
+ * lists this CLI could build no identity for. "Nothing prebuild owns changed" would be a claim
+ * about a diff that was never seen, and it is the one wrong answer that is expensive: the caller
+ * skips the prebuild and builds a native project that does not contain the change.
+ */
+function decideNeedsPrebuild(
+  fingerprintChanged: boolean,
+  changedSources: ChangedSource[]
+): boolean | null {
+  if (changedSources.length) {
+    return changedSources.some((source) => KIND_NEEDS_PREBUILD[source.kind] === true);
+  }
+  return fingerprintChanged ? null : false;
+}
+
 function undecided(fingerprintChanged: boolean | null, reason: string): RecordedImpact {
-  return { class: null, fingerprintChanged, reason, changedCount: null, changedSources: [] };
+  return {
+    class: null,
+    fingerprintChanged,
+    reason,
+    changedCount: null,
+    changedSources: [],
+    needsPrebuild: null,
+  };
 }
 
 /**

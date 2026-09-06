@@ -303,7 +303,7 @@ export async function collectStatusReportAsync(
     applyOpenUrls(report.devServer, state, devBuildScheme);
     report.next = buildNextActionStatus(
       state,
-      lastBuild,
+      record,
       options.platform ?? resolveDefaultPlatform(state),
       report.devServer,
       report.device,
@@ -319,7 +319,7 @@ export async function collectStatusReportAsync(
       // toolchain probe folded in — rather than the one the project's state alone implies. The two
       // differ on exactly the machines where it matters, and a `status` that reported
       // "expo run:ios" on a Linux box would be the report disagreeing with the command.
-      await attemptPlanAsync(projectRoot, state, lastBuild, options)
+      await attemptPlanAsync(projectRoot, state, record, options)
     );
   } else {
     // One cause, one note. The other three sections are left null, and the project line says why.
@@ -622,7 +622,7 @@ function devBuildSchemeSync(projectRoot: string): string | null {
 async function attemptPlanAsync(
   projectRoot: string,
   state: ProjectState,
-  lastBuild: LastBuildFingerprints,
+  lastBuild: LastBuildRecord,
   options: StatusOptions
 ): Promise<StartPlan | null> {
   const { resolveStartPlanAsync } =

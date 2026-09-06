@@ -1022,7 +1022,7 @@ async function resolveSmokeTargetAsync(
 ): Promise<SmokeTarget> {
   const { probeProjectStateAsync } =
     require('../project/probe') as typeof import('../project/probe');
-  const { readLastBuildFingerprints } =
+  const { readLastBuildRecord } =
     require('../plan/lastBuild') as typeof import('../plan/lastBuild');
   const { resolveStartPlanAsync } =
     require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
@@ -1045,7 +1045,7 @@ async function resolveSmokeTargetAsync(
     const state = await probeProjectStateAsync(projectRoot);
     plan = await resolveStartPlanAsync(projectRoot, state, {
       platform: options.platform,
-      lastBuild: readLastBuildFingerprints(projectRoot),
+      lastBuild: readLastBuildRecord(projectRoot),
     });
   } catch {
     // The probe is a courtesy, not a gate: a project it could not read is one this knows nothing

@@ -1,7 +1,40 @@
+import type { FingerprintSource } from '../../project/fingerprint';
 import type { ProjectState } from '../../project/types';
 import type { BuildBackendChoice } from '../../toolchain/selectBackend';
 import { decideStartPlan } from '../decide';
+import type { LastBuildRecord } from '../lastBuild';
+import type { NativePlatform } from '../types';
 import type { RunTargetChoice } from '../runTarget';
+
+/**
+ * A recorded build that stored only a hash, which is what an older CLI wrote.
+ *
+ * The default for every row that is about *freshness*: with no `sources` there is nothing to diff,
+ * so the table cannot tell what moved and keeps the prebuild it always planned. The rows that are
+ * about the newer question pass sources through {@link recordedWithSources}.
+ */
+function recorded(platform: NativePlatform, hash: string): LastBuildRecord {
+  return { [platform]: { hash, sources: null } };
+}
+
+/** The app config, which prebuild reads and writes native code from. */
+function appConfig(hash: string): FingerprintSource {
+  return { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash };
+}
+
+/** `eas.json`, which moves the fingerprint without changing what prebuild would write. */
+function easJson(hash: string): FingerprintSource {
+  return { type: 'file', filePath: 'eas.json', reasons: ['easBuild'], hash };
+}
+
+/** A recorded build whose sources can be diffed against the probed ones. */
+function recordedWithSources(
+  platform: NativePlatform,
+  hash: string,
+  sources: FingerprintSource[]
+): LastBuildRecord {
+  return { [platform]: { hash, sources } };
+}
 
 function createState(overrides: Partial<ProjectState> = {}): ProjectState {
   return {
@@ -202,7 +235,7 @@ describe(decideStartPlan, () => {
       const state = createDevClientState();
       const plan = decideStartPlan(state, {
         platform: 'ios',
-        lastBuild: { ios: state.fingerprint.hash! },
+        lastBuild: recorded('ios', state.fingerprint.hash!),
       });
 
       expect(plan.rule).toBe('dev-client-fresh');
@@ -218,7 +251,7 @@ describe(decideStartPlan, () => {
       const plan = decideStartPlan(state, {
         platform: 'ios',
         requestedPlatform: 'ios',
-        lastBuild: { ios: state.fingerprint.hash! },
+        lastBuild: recorded('ios', state.fingerprint.hash!),
       });
 
       expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--dev-client']]);
@@ -231,7 +264,7 @@ describe(decideStartPlan, () => {
       const state = createDevClientState();
       const plan = decideStartPlan(state, {
         platform: 'android',
-        lastBuild: { ios: state.fingerprint.hash! },
+        lastBuild: recorded('ios', state.fingerprint.hash!),
       });
 
       expect(plan.rule).toBe('dev-client-stale');
@@ -241,10 +274,57 @@ describe(decideStartPlan, () => {
       const state = createState({ usesDevClient: true });
       const plan = decideStartPlan(state, {
         platform: 'ios',
-        lastBuild: { ios: state.fingerprint.hash! },
+        lastBuild: recorded('ios', state.fingerprint.hash!),
       });
 
       expect(plan.rule).toBe('dev-client-fresh');
+    });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
+  //
+  // The row this split was made for. The fingerprint moved, so the build is stale and something has
+  // to run — but what moved is `eas.json`, which prebuild does not write, so regenerating an
+  // identical `ios/` would spend a minute to produce the file already there.
+  describe('rule: dev-client-rebuild', () => {
+    it(`should build without prebuilding when only the build config moved`, () => {
+      const state = createDevClientState({
+        fingerprint: { hash: 'head', sources: [appConfig('a'), easJson('changed')] },
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', [appConfig('a'), easJson('a')]),
+      });
+
+      expect(plan.rule).toBe('dev-client-rebuild');
+      expect(plan.target).toBe('dev-client');
+      expect(argvOf(plan.steps)).toEqual([['expo', 'run:ios']]);
+      expect(plan.reasons.join('\n')).toMatch(/Nothing that prebuild writes has changed/);
+    });
+
+    it(`should say what moved, so the skipped prebuild is not a silent decision`, () => {
+      const state = createDevClientState({
+        fingerprint: { hash: 'head', sources: [easJson('changed')] },
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', [easJson('a')]),
+      });
+
+      expect(plan.reasons.join('\n')).toMatch(/build configuration changed/);
+      expect(plan.reasons.join('\n')).toMatch(/prebuild is not needed/);
+    });
+
+    it(`should still be a build, so a plan that runs on EAS keeps its build location`, () => {
+      const state = createDevClientState({
+        fingerprint: { hash: 'head', sources: [easJson('changed')] },
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', [easJson('a')]),
+      });
+
+      expect(plan.buildLocation).not.toBeNull();
     });
   });
 
@@ -265,7 +345,7 @@ describe(decideStartPlan, () => {
     it(`should prebuild and build when the fingerprint changed`, () => {
       const plan = decideStartPlan(createDevClientState(), {
         platform: 'android',
-        lastBuild: { android: 'a-different-hash' },
+        lastBuild: recorded('android', 'a-different-hash'),
       });
 
       expect(plan.rule).toBe('dev-client-stale');
@@ -276,11 +356,78 @@ describe(decideStartPlan, () => {
       expect(plan.reasons.join('\n')).toMatch(/differs from the last recorded build/);
     });
 
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
+    //
+    // The conservative half of the split, and the one that has to keep working: a record with no
+    // `sources` is what every older CLI wrote, and there is nothing to diff against it. The table
+    // cannot tell what moved, so it plans the prebuild it always planned.
+    it(`should still prebuild when the record stored only a hash`, () => {
+      const plan = decideStartPlan(createDevClientState(), {
+        platform: 'ios',
+        lastBuild: recorded('ios', 'a-different-hash'),
+      });
+
+      expect(plan.rule).toBe('dev-client-stale');
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+      expect(plan.reasons.join('\n')).toMatch(/stored only a hash/);
+    });
+
+    // Found by `e2e/__tests__/dev-test.ts` before this row existed here: the stub fingerprint
+    // returns `sources: []`, so the hash moved over a diff that explains nothing — and the split
+    // read "no source prebuild owns changed" out of a list it never saw, and skipped the prebuild.
+    // A change nobody can account for is the case the conservative default is *for*.
+    it(`should prebuild when the hash moved but the diff explains nothing`, () => {
+      const state = createDevClientState({ fingerprint: { hash: 'head', sources: [] } });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', []),
+      });
+
+      expect(plan.rule).toBe('dev-client-stale');
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
+    it(`should prebuild when the app config is what moved`, () => {
+      const state = createDevClientState({
+        fingerprint: { hash: 'head', sources: [appConfig('changed'), easJson('a')] },
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', [appConfig('a'), easJson('a')]),
+      });
+
+      expect(plan.rule).toBe('dev-client-stale');
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+      expect(plan.reasons.join('\n')).toMatch(/app config changed/);
+    });
+
+    it(`should prebuild when one source of a mixed diff is one prebuild owns`, () => {
+      const state = createDevClientState({
+        fingerprint: { hash: 'head', sources: [appConfig('changed'), easJson('changed')] },
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', [appConfig('a'), easJson('a')]),
+      });
+
+      expect(plan.rule).toBe('dev-client-stale');
+      expect(argvOf(plan.steps)[0]).toEqual(['expo', 'prebuild', '--platform', 'ios']);
+    });
+
     it(`should build when the fingerprint could not be computed`, () => {
       const state = createDevClientState({
         fingerprint: { hash: null, error: 'fingerprint exited with code 1' },
       });
-      const plan = decideStartPlan(state, { platform: 'ios', lastBuild: { ios: 'any-hash' } });
+      const plan = decideStartPlan(state, { platform: 'ios', lastBuild: recorded('ios', 'any-hash') });
 
       expect(plan.rule).toBe('dev-client-stale');
       expect(plan.reasons).toContain('Fingerprint error: fingerprint exited with code 1');
@@ -291,7 +438,7 @@ describe(decideStartPlan, () => {
 
     it(`should build when the fingerprint is missing without an error`, () => {
       const state = createDevClientState({ fingerprint: { hash: null } });
-      const plan = decideStartPlan(state, { platform: 'ios', lastBuild: { ios: 'any-hash' } });
+      const plan = decideStartPlan(state, { platform: 'ios', lastBuild: recorded('ios', 'any-hash') });
 
       expect(plan.rule).toBe('dev-client-stale');
       expect(plan.reasons.join('\n')).toMatch(/fingerprint is unavailable/i);
@@ -352,7 +499,7 @@ describe(decideStartPlan, () => {
       const state = createDevClientState({ nativeDirs: { ios: true, android: false } });
       const plan = decideStartPlan(state, {
         platform: 'ios',
-        lastBuild: { ios: state.fingerprint.hash! },
+        lastBuild: recorded('ios', state.fingerprint.hash!),
       });
 
       expect(plan.rule).toBe('bare-fresh');
@@ -385,7 +532,7 @@ describe(decideStartPlan, () => {
       const state = createDevClientState({ usesDevClient: false });
       const plan = decideStartPlan(state, {
         platform: 'ios',
-        lastBuild: { ios: state.fingerprint.hash! },
+        lastBuild: recorded('ios', state.fingerprint.hash!),
       });
 
       expect(plan.rule).toBe('needs-dev-client');
@@ -414,14 +561,14 @@ describe(decideStartPlan, () => {
       [
         'dev-client-fresh',
         createDevClientState(),
-        { platform: 'ios', lastBuild: { ios: 'abc123def4567890' } },
+        { platform: 'ios', lastBuild: recorded('ios', 'abc123def4567890') },
       ],
       ['dev-client-stale', createDevClientState(), { platform: 'ios' }],
       ['bare-stale', createDevClientState({ nativeDirs: { ios: true, android: false } }), {}],
       [
         'bare-fresh',
         createDevClientState({ nativeDirs: { ios: true, android: false } }),
-        { lastBuild: { ios: 'abc123def4567890' } },
+        { lastBuild: recorded('ios', 'abc123def4567890') },
       ],
       ['needs-dev-client', createDevClientState({ usesDevClient: false }), { platform: 'ios' }],
     ];

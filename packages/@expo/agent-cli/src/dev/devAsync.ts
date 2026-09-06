@@ -17,7 +17,7 @@ import { classifySubprocessFailure, lastNonEmptyLine } from '../needsHuman/detec
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { emitStartPlan } from '../plan/emit';
 import { event as planEvent } from '../plan/events';
-import { readLastBuildFingerprints, recordLastBuildFingerprint } from '../plan/lastBuild';
+import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBuild';
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
@@ -81,7 +81,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     platform: options.platform,
     requestedPlatform: options.platform,
     open: options.open,
-    lastBuild: readLastBuildFingerprints(projectRoot),
+    lastBuild: readLastBuildRecord(projectRoot),
     requestedBackend: options.buildBackend,
     requestedTarget: options.runTarget,
   });

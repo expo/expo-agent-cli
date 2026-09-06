@@ -5,7 +5,7 @@
 **Systems:** project-state probe (`src/project/`); plan engine (`src/plan/`); smart `dev` (`src/dev/`); `@expo/agent-cli status` (`src/status/`); dev-server lock (`src/devLock/`); `@expo/fingerprint`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20 · finalized 2026-08-28
-**Revised:** 2026-09-05
+**Revised:** 2026-09-06
 **Related:** [[0001-agentic-cli-on-expo-cli]], [[0002-testing-and-evals]], [[0008-guardrails]], [[0011-impact-and-freshness]], [[0015-backend-selection-and-config]], [[0021-honest-reports]]
 
 ## Summary
@@ -39,6 +39,7 @@ The project-state probe reads:
 | Expo Go compatible, Go installed                         | start Metro, then open in Expo Go                       |
 | Dev client installed, fingerprint matches last build     | start Metro, then open the dev client                   |
 | Fingerprint changed (new native module or config plugin) | prebuild (CNG), native build, install, start            |
+| Fingerprint changed, but not in anything prebuild writes | native build, install, start. no prebuild               |
 | Build cache hit for the current fingerprint              | download and install the cached build, then start Metro |
 | Bare project, native dirs dirty                          | pod install / gradle sync, build, start                 |
 | Web                                                      | start Metro for web                                     |
@@ -51,6 +52,39 @@ the caller is standing in.
 Every command that would act on the plan stops before the table is reached. The row is
 also what the commands that only describe the directory print, so the guard and the
 engine cannot disagree.
+
+### A stale build is two questions
+
+The two "fingerprint changed" rows used to be one. Splitting them is the difference between
+"something moved" and "what moved", and the hash can only answer the first.
+
+`dev-client-stale` is the row that was always there: the native project has to be written again,
+then compiled. `dev-client-rebuild` is the narrower one under it, for a fingerprint that moved
+without changing anything `prebuild` produces — an `eas.json` edit, a `package.json` `scripts`
+entry. Regenerating an identical `ios/` there spends a minute to write the file that was
+already on disk.
+
+**The split is not a second classifier.** `src/impact/classify.ts` has sorted a fingerprint diff by
+{@link ChangeKind} since [[0011-impact-and-freshness]], and it already says which side each kind
+falls on — a config plugin "writes different native code", an `eas.json` edit "moves the
+fingerprint without changing generated native code, so a cloud build is enough and prebuild is not
+needed". `KIND_NEEDS_PREBUILD` is that prose as a table, and the decision table reads it. Two
+places deciding this separately is exactly how they would come to disagree.
+
+The comparison is `classifyAgainstRecordedBuild`, in process: it diffs the `sources` on the
+recorded build against the ones the probe took. No subprocess and no second fingerprint run, which
+is what makes it affordable on the path `dev` takes every time.
+
+**Undecided means prebuild.** Three inputs cannot answer: a record written before this CLI stored
+`sources`, a fingerprint run that returned none, and — the one that is easy to miss — a hash that
+moved over a diff explaining nothing. That last one is not "nothing prebuild owns changed"; it is
+two hashes disagreeing about a project neither side can account for, and reading it as `false`
+skips the prebuild and builds a native project without the change in it. It costs a minute to be
+wrong in the other direction.
+
+`bare-*` is untouched. Those rows never prebuilt — the native directories are checked in, and
+prebuild would overwrite the thing that changed — and `native-project` is on the `false` side of
+`KIND_NEEDS_PREBUILD` so an answer arriving from here keeps that true.
 
 ## Not an Expo app
 

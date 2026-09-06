@@ -3,7 +3,6 @@ import { vol } from 'memfs';
 
 import {
   LAST_BUILD_FILE_NAME,
-  readLastBuildFingerprints,
   readLastBuildRecord,
   recordLastBuildFingerprint,
 } from '../lastBuild';
@@ -23,32 +22,35 @@ beforeEach(() => {
   vol.reset();
 });
 
-describe(readLastBuildFingerprints, () => {
+// These rows read `readLastBuildRecord` because the hashes-only reader they were written against
+// is gone: the plan engine takes the whole record now (llp/0004 §Decision table), and nothing was
+// left calling it. The hardening they cover is the record reader's own and outlived the view.
+describe(`${readLastBuildRecord.name} — an unreadable record`, () => {
   it(`should return nothing when the project has no record`, () => {
     vol.fromJSON({ '/project/package.json': '{}' });
 
-    expect(readLastBuildFingerprints(projectRoot)).toEqual({});
+    expect(readLastBuildRecord(projectRoot)).toEqual({});
   });
 
   it(`should read the recorded hash of every platform`, () => {
     vol.fromJSON({ [lastBuildFile]: JSON.stringify({ ios: 'hash-ios', android: 'hash-android' }) });
 
-    expect(readLastBuildFingerprints(projectRoot)).toEqual({
-      ios: 'hash-ios',
-      android: 'hash-android',
+    expect(readLastBuildRecord(projectRoot)).toEqual({
+      ios: { hash: 'hash-ios', sources: null },
+      android: { hash: 'hash-android', sources: null },
     });
   });
 
   it(`should ignore a corrupt record instead of failing the command`, () => {
     vol.fromJSON({ [lastBuildFile]: '{ not json' });
 
-    expect(readLastBuildFingerprints(projectRoot)).toEqual({});
+    expect(readLastBuildRecord(projectRoot)).toEqual({});
   });
 
   it(`should ignore a record that is not an object`, () => {
     vol.fromJSON({ [lastBuildFile]: '"hash-ios"' });
 
-    expect(readLastBuildFingerprints(projectRoot)).toEqual({});
+    expect(readLastBuildRecord(projectRoot)).toEqual({});
   });
 
   it(`should ignore unknown platforms and non-string hashes`, () => {
@@ -56,7 +58,7 @@ describe(readLastBuildFingerprints, () => {
       [lastBuildFile]: JSON.stringify({ ios: 'hash-ios', android: 42, windows: 'hash-windows' }),
     });
 
-    expect(readLastBuildFingerprints(projectRoot)).toEqual({ ios: 'hash-ios' });
+    expect(readLastBuildRecord(projectRoot)).toEqual({ ios: { hash: 'hash-ios', sources: null } });
   });
 });
 
@@ -66,7 +68,7 @@ describe(recordLastBuildFingerprint, () => {
 
     recordLastBuildFingerprint(projectRoot, 'ios', 'hash-ios');
 
-    expect(readLastBuildFingerprints(projectRoot)).toEqual({ ios: 'hash-ios' });
+    expect(readLastBuildRecord(projectRoot)).toEqual({ ios: { hash: 'hash-ios', sources: null } });
     expect(fs.existsSync(lastBuildFile)).toBe(true);
   });
 
@@ -75,9 +77,9 @@ describe(recordLastBuildFingerprint, () => {
 
     recordLastBuildFingerprint(projectRoot, 'ios', 'hash-ios');
 
-    expect(readLastBuildFingerprints(projectRoot)).toEqual({
-      ios: 'hash-ios',
-      android: 'hash-android',
+    expect(readLastBuildRecord(projectRoot)).toEqual({
+      ios: { hash: 'hash-ios', sources: null },
+      android: { hash: 'hash-android', sources: null },
     });
   });
 
@@ -86,7 +88,7 @@ describe(recordLastBuildFingerprint, () => {
 
     recordLastBuildFingerprint(projectRoot, 'ios', 'new-hash');
 
-    expect(readLastBuildFingerprints(projectRoot)).toEqual({ ios: 'new-hash' });
+    expect(readLastBuildRecord(projectRoot)).toEqual({ ios: { hash: 'new-hash', sources: null } });
   });
 
   it(`should replace a corrupt record`, () => {
@@ -94,7 +96,9 @@ describe(recordLastBuildFingerprint, () => {
 
     recordLastBuildFingerprint(projectRoot, 'android', 'hash-android');
 
-    expect(readLastBuildFingerprints(projectRoot)).toEqual({ android: 'hash-android' });
+    expect(readLastBuildRecord(projectRoot)).toEqual({
+      android: { hash: 'hash-android', sources: null },
+    });
   });
 
   it(`should never fail the command when the record cannot be written`, () => {
@@ -177,11 +181,4 @@ describe(readLastBuildRecord, () => {
     expect(readLastBuildRecord(projectRoot)).toEqual({});
   });
 
-  it(`should read the hash of a v2 entry through the hashes-only reader`, () => {
-    vol.fromJSON({
-      [lastBuildFile]: JSON.stringify({ ios: { hash: 'hash-ios', sources: [source] } }),
-    });
-
-    expect(readLastBuildFingerprints(projectRoot)).toEqual({ ios: 'hash-ios' });
-  });
 });
