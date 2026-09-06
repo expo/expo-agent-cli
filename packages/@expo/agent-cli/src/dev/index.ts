@@ -11,7 +11,6 @@ export const devRunHelp: CommandHelp = {
     `--detach            Run the dev server in the background and give the terminal back`,
     `--wait-ready        With --detach, also wait for the bundler before reporting`,
     `--plan              Print what must run to get this app on a device, then exit`,
-    `--yes               Consent up front to a plan that builds, which otherwise stops`,
     `--json              Print the plan as JSON, for --plan and for a run`,
     `--port <number>     Port for the dev server, so a busy 8081 needs no answer`,
     `--tunnel, --lan, --localhost   How a device reaches the dev server; passed to expo start`,
@@ -34,8 +33,8 @@ export const devRunHelp: CommandHelp = {
       gets: 'the dev server in the background; its url, pid and log file are printed',
     },
     {
-      run: `${PROGRAM_PREFIX} dev --ios --yes --json --port 8082`,
-      gets: 'the plan run with consent given up front, on that exact port, as one object',
+      run: `${PROGRAM_PREFIX} dev --ios --json --port 8082`,
+      gets: 'the plan run on that exact port, reported as one object when it is done',
     },
     {
       run: `${PROGRAM_PREFIX} dev --ios --eas --plan`,

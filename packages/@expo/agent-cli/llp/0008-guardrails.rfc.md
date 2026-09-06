@@ -2,17 +2,19 @@
 
 **Type:** RFC
 **Status:** Active
-**Systems:** `src/dev/planConsent.ts`; `src/utils/consent.ts`; runtime fences (`src/runtime/untrusted.ts`)
+**Systems:** `src/dev/devAsync.ts`; `src/utils/consent.ts` (deferred `doctor:fix` only); runtime fences (`src/runtime/untrusted.ts`)
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20
-**Revised:** 2026-08-30
+**Revised:** 2026-09-06
 **Related:** [[0001-agentic-cli-on-expo-cli]], [[0004-smart-start-and-project-state]], [[0016-v1-scope]], [[0017-deferred-commands]]
 
 ## Summary
 
 Cheap mechanisms that make it safe for a driving agent to act autonomously on an Expo project.
 
-Shipped: plan-with-cost dry runs, consent as a re-run, `--yes`, a TTY stop that exits 0 with `Nothing ran`, and untrusted-content fences.
+Shipped: plan-with-cost dry runs, `dev --plan` as the dry run a caller asks for, and untrusted-content fences.
+
+`dev` itself has no consent gate. It prints the plan and runs it, in a terminal as much as out of one. The two gates that used to be here — a `? Run this plan? ›` prompt, then a `Nothing ran` stop that handed back the same line with `--yes` — are both gone, and so is `--yes` itself. §The plan is announced, not negotiated is the record of why.
 
 Checkpoints are deferred. See [[0017-deferred-commands]]. Code is on `src/deferred/checkpoint/`. Nothing in the v1 surface takes a snapshot. `runGitAsync` and `resolveWorkTreeAsync` stayed live in `src/utils/git.ts` because `src/impact/` reads a diff through them.
 
@@ -22,25 +24,29 @@ MCP permission-tier metadata is not built. There is no MCP server. It is scoped 
 
 Before acting, emit the plan with time-class estimates, as in "prebuild ~2 min, pod install ~4 min, dev build ~8 min", for one-shot approval. The smart start `--plan` contract ([[0004-smart-start-and-project-state]]) is the first implementation. Shipped as `@expo/agent-cli dev --plan`, and as the plan `@expo/agent-cli dev` prints before it runs it.
 
-## Consent is a re-run, never a prompt
+## The plan is announced, not negotiated
 
-This CLI asks no questions. [confirmed, Kudo, 2026-08-29] Where a guardrail used to open a prompt, the command now prints what it was about to do, prints the command that does it, and ends. Consent is the caller running that command.
+`dev` prints the plan it decided on, then runs it. There is no second act of consent. [confirmed, Kudo, 2026-09-06: "i want the `dev` acts like agent that will run the plan as well"]
 
-An agent can give it. A `? Run this plan? › (Y/n)` needs a keystroke on a TTY. An agent driving this CLI through a pty gets the cursor and nothing to type into it. One driving it through a pipe used to get a different behaviour than the person who wrote its prompt saw. A command line is the one form of consent every caller can produce.
+This is the third position this section has held, and the reason it moved twice is that the first two both answered "how should a person approve this?" when the question that mattered was "who is this command for?".
 
-It is specific. The line handed back is the caller's own `process.argv` plus `--yes` (`src/utils/consent.ts`), so what gets approved is the run that was described, down to `--ios` and `--port`.
+The first was a prompt — `? Run this plan? › (Y/n)`. It was removed because an agent cannot answer one. A `(Y/n)` needs a keystroke on a TTY; an agent driving this CLI through a pty gets the cursor and nothing to type into it, and one driving it through a pipe got a different behaviour than the person who wrote its prompt saw.
 
-It leaves a record. The approved run is a command in the caller's history or the agent's transcript, not a keystroke nobody can show afterwards.
+The second was a stop [confirmed, Kudo, 2026-08-29]. Same plan on screen, but the command ended there and handed back the caller's own `process.argv` plus `--yes`. That fixed the hang and kept the gate, and its trigger was a TTY: a run with no terminal is an agent or a CI job that asked for the work and is waiting for it, so only a watched run stopped.
 
-The guardrail's trigger is still a terminal. A run with no TTY is an agent or a CI job that asked for the work and is waiting for it. Stopping that would break the path this CLI exists for. `--json` counts as machine use for the same reason. `--yes` is that consent. `--json` and every non-interactive run never stop.
+The TTY is what was wrong with it. It made one command two commands. `dev --ios` in an agent's transcript built the app; the same line pasted into a terminal printed a plan and refused, and the fix was to type a flag whose only effect was to undo the refusal. A person watching the plan go by is not more in need of protection than the agent that was never asked — they are just the one the CLI could detect, which is not the same thing. Detecting a terminal answers "is somebody looking", and the gate was being justified by "did somebody ask for this", and those two questions have different answers.
 
-**The exit code of a stop is `0`.** Nothing ran, and nothing is wrong. The text leads with `Nothing ran`. `cli:start_plan_needs_consent` carries the same fact with the `rerun` command, because an agent that reads only the exit code would otherwise see a success it did not get. That risk is named in [[0010-agent-conventions]] §Exit codes rather than solved by a second code.
+Somebody did ask. `dev --ios` means get this app onto an iOS device, and on a project whose development build is missing or stale, a prebuild and a native build **are** that — not a surprise the command sprang on the way, but the work itself. A guardrail in front of the requested work is a guardrail against the request.
 
-No prompt module remains in the package. The `prompts` dependency is gone. The `skills` / `agents:setup` agent checklist was not converted. It was removed: it selected among detected agents, which is the answer the non-interactive path already gave for free. `--agent` is the override.
+So what remains is the dry run, and it is a command rather than a mode: **`--plan` prints the plan and exits, for every caller, terminal or not** (§Plan-with-cost dry run). A caller who wants to see before running says so. One that does not, does not.
 
-Out of scope, and deliberately unchanged: a forwarded CLI that prompts. `expo login` asks for a password on purpose. The needs-human protocol ([[0010-agent-conventions]]) is what covers it.
+`--yes` is gone, not accepted-and-ignored. A no-op flag is a flag callers keep passing to get a behaviour they already have, and it would have outlived every reader of this document. `cli:start_plan_needs_consent` is off the event stream for the same reason. `dev` no longer refers to `src/utils/consent.ts`; the deferred `doctor:fix --apply` is its last caller, and that does not ship ([[0017-deferred-commands]]).
 
-The deferred `doctor:fix --apply` used the same consent pattern. It does not ship.
+**What did not change is that this CLI asks no questions.** No prompt module remains in the package and the `prompts` dependency is still gone. The `skills` / `agents:setup` agent checklist stays removed — it selected among detected agents, which is the answer the non-interactive path already gave for free, and `--agent` is the override.
+
+Also unchanged, and deliberately: a forwarded CLI that prompts. `expo login` asks for a password on purpose. The needs-human protocol ([[0010-agent-conventions]]) is what covers it.
+
+**A destructive command is a different question.** Nothing in v1 deletes a caller's files, so nothing needs an answer here yet. The one command that would have — the deferred `doctor:fix --apply` — kept the re-run pattern, and the argument above does not reach it: `doctor:fix` deleting `node_modules` is not the work its caller asked for, it is what the tool decided the work required. That distinction, not the presence of a TTY, is the line a future guardrail should be drawn on.
 
 ## Untrusted-content marking
 
@@ -52,4 +58,6 @@ A command whose targets are gitignored must state that its recovery does not cov
 
 ## Testing
 
-Checkpoint/undo was deterministic. Its suites moved to `src/deferred/checkpoint/__tests__/` with the code and are not run. Plan-emission is covered by the smart start tests. Consent is covered by `src/dev/__tests__/planConsent-test.ts`.
+Checkpoint/undo was deterministic. Its suites moved to `src/deferred/checkpoint/__tests__/` with the code and are not run. Plan-emission is covered by the smart start tests.
+
+That a plan which builds runs unasked is covered by `src/dev/__tests__/devAsync-test.ts` §a plan that builds, which runs the stale-dev-client case on both sides of the TTY check — the axis the old gate turned on, pinned so it cannot come back by accident. `src/dev/__tests__/resolveOptions-test.ts` pins that `--yes` is refused rather than ignored, and `e2e/__tests__/dev-test.ts` asserts that neither `Run this plan?` nor `Nothing ran` appears in a real run.

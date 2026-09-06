@@ -1,7 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Plan contract
-// What `@expo/agent-cli dev` does: probe the project, decide what must run, emit the plan, then (unless
-// `--plan` stopped us, or a person declined it) run its steps as subprocesses. The plain
-// `expo start` wrapper is `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
+// What `@expo/agent-cli dev` does: probe the project, decide what must run, emit the plan, then
+// (unless `--plan` stopped us) run its steps as subprocesses. The plain `expo start` wrapper is
+// `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
 
 import { outputTail } from '../deploy/parseOutput';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
@@ -41,7 +41,6 @@ import {
 import { appReachedDevice } from './buildEvidence';
 import { event as devEvent } from './events';
 import { forwardedStepArgs, withForwardedExpoArgs } from './forwardedArgs';
-import { hasPlanConsent } from './planConsent';
 import {
   detectPortCollision,
   findFreePortAsync,
@@ -126,7 +125,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Where a build runs
-  // On stderr, and before the confirmation, because this is the one thing that decides whether the
+  // On stderr, and before the first step, because this is the one thing that decides whether the
   // plan below is worth starting: a build that cannot run here fails many minutes in, at a compiler
   // error about a toolchain, and the command that does work is `eas build`. Said out loud even in
   // `--json` mode, where the plan carrying the same fact is not printed until the run is over.
@@ -139,13 +138,10 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     reportFollowUps('dev', await resolveRunFollowUpsAsync(projectRoot, plan, options, null), {});
   }
 
-  // @ref llp/0008-guardrails.rfc.md §Consent is a re-run, never a prompt — the plan was printed
-  // above, so a run that stops here has already shown what it stopped short of. Stopping is not a
-  // failure: nothing ran, and nothing is wrong, so the command exits 0.
-  if (!hasPlanConsent(plan, options)) {
-    return 0;
-  }
-
+  // @ref llp/0008-guardrails.rfc.md §The plan is announced, not negotiated — the plan was printed
+  // above, and then it runs. `dev` was asked to get this app onto a device, and a build is how that
+  // is done; there is no second act of consent, in a terminal or out of one. `--plan` is the run
+  // that stops.
   const run = await executePlanAsync(projectRoot, plan, state, options);
 
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope
@@ -153,7 +149,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // the plan object with its success-shaped follow-ups and leave only the exit code disagreeing —
   // and when the code was the Expo CLI's own `7`, an agent read a started dev server on stdout,
   // nothing on stderr, and "a person must finish this" from the exit code
-  // [observed — friction run 2, 2026-08-23: `dev --yes --json --ios`].
+  // [observed — friction run 2, 2026-08-23: `dev --yes --json --ios`, when `--yes` still existed].
   if (run.exitCode !== 0 && run.failure) {
     throw planStepFailedError(run.failure, stepOutputFor(options), run.exitCode, options.platform);
   }
@@ -491,7 +487,7 @@ async function portDemandedError(
         : `Why: ${holder} is listening on it, and --port ${port} is a requirement rather than a preference — moving the dev server to another port would leave every URL and every command that names ${port} pointing at nothing.`,
       ours
         ? `How: use the dev server that is running ("${smokeCommand(smokePlatform)}" checks its bundle and its app), or stop it first with "${PROGRAM_PREFIX} dev:stop".`
-        : `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --${platform} --yes --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
+        : `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --${platform} --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
     ].join('\n')
   );
   // Never the command that just failed: it would stop in exactly the same place.
@@ -499,7 +495,7 @@ async function portDemandedError(
     ? smokeCommand(smokePlatform)
     : free == null
       ? `${PROGRAM_PREFIX} dev:stop --port ${port} --force`
-      : `${PROGRAM_PREFIX} dev --${platform} --yes --port ${free}`;
+      : `${PROGRAM_PREFIX} dev --${platform} --port ${free}`;
   error.exitCode = EXIT_OUTCOME_FAILED;
   return error;
 }
@@ -621,7 +617,7 @@ function stopPromptFor(
         // this run finished was not recorded. It is now, and the reader is told so on the line that
         // sends them there.
         failure.buildRecorded
-          ? `Note: the app it built is installed on the simulator already, so that build is recorded and "${PROGRAM_PREFIX} dev --${platform} --yes" starts a dev server rather than building again.`
+          ? `Note: the app it built is installed on the simulator already, so that build is recorded and "${PROGRAM_PREFIX} dev --${platform}" starts a dev server rather than building again.`
           : '',
         said ? `\nWhat the tool printed:\n${said}` : '',
       ]

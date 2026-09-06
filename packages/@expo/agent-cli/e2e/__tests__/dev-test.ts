@@ -52,7 +52,7 @@ describe('@expo/agent-cli dev', () => {
 
     expect(result.exitCode).toBe(0);
     expect(result.all).toContain('--plan');
-    expect(result.all).toContain('--yes');
+    expect(result.all).toContain('--detach');
     // The plain `expo start` wrapper is a command of its own now, and is named here.
     expect(result.all).toContain('npx @expo/agent-cli start');
   });
@@ -71,7 +71,6 @@ describe('@expo/agent-cli dev', () => {
     expect(result.all).toContain('npx @expo/agent-cli dev runs dev:run');
     // The options of the action the bare name runs, in the listing's own output.
     expect(result.all).toContain('--plan');
-    expect(result.all).toContain('--yes');
     expect(result.all).toContain('--port');
     // The listing comes first: the options belong to the action it just named.
     expect(result.all.indexOf('dev:logs')).toBeLessThan(result.all.indexOf('--plan'));
@@ -87,14 +86,13 @@ describe('@expo/agent-cli dev', () => {
     expect(result.all).not.toContain('--passthrough');
   });
 
-  // @ref llp/0008-guardrails.rfc.md §Consent is a re-run, never a prompt
+  // @ref llp/0008-guardrails.rfc.md §The plan is announced, not negotiated
   it('runs a plan that builds, with no terminal watching it go by', async () => {
-    // An agent and a CI job get the plan and its execution. The guardrail of llp/0008 is for a
-    // person watching a terminal, and since wave 41 it is a stop rather than a question — so this
-    // run must show neither. The question is gone from the program entirely; the stop belongs to
-    // the interactive branch, which no e2e can reach (`spawnAgentCli` closes stdin, pipes stdout
-    // and sets `CI=1`, and `isInteractive()` needs all three the other way). Its own contract is
-    // pinned in `src/dev/__tests__/planConsent-test.ts`.
+    // Every caller gets the plan and its execution. There used to be a stop here for a person
+    // watching a terminal — a question before wave 41, a `Nothing ran` re-run hint after it — and
+    // neither survives: `dev` runs the plan it printed, and `--plan` is the run that stops. No e2e
+    // could reach the interactive branch anyway (`spawnAgentCli` closes stdin, pipes stdout and
+    // sets `CI=1`), so the terminal half is pinned in `src/dev/__tests__/devAsync-test.ts`.
     const projectRoot = await setupAsync('dev-client-app');
     const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local']);
 
@@ -360,7 +358,7 @@ describe('@expo/agent-cli dev', () => {
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope, §Needs-human protocol
-  // `@expo/agent-cli dev --yes` is the documented non-interactive entry point. On a busy port it started
+  // `@expo/agent-cli dev` is the documented non-interactive entry point. On a busy port it started
   // nothing, appended the subprocess log to its own JSON, exited 1, and told its caller to open a
   // dev server it had not started [observed — friction run, 2026-08-23].
   describe('a run with no terminal', () => {
@@ -376,7 +374,7 @@ describe('@expo/agent-cli dev', () => {
     it('prints exactly one JSON object, with no subprocess output after it', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json']);
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json']);
 
       expect(result.exitCode).toBe(0);
       // The property, checked as the property: the stub writes its own lines on stdout, and this
@@ -389,7 +387,7 @@ describe('@expo/agent-cli dev', () => {
       const projectRoot = await setupAsync('go-app');
       const eventsFile = path.join(projectRoot, 'events.jsonl');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
         env: { STUB_EXPO_EXIT_CODE: '1', STUB_EXPO_STDERR: NEEDS_INPUT, LOG_EVENTS: eventsFile },
         reject: false,
       });
@@ -419,7 +417,7 @@ describe('@expo/agent-cli dev', () => {
     it('starts on a free port it picks when the port is busy and none was named', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
         env: { STUB_EXPO_PORT_BUSY: '8180' },
         reject: false,
       });
@@ -443,7 +441,7 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--yes', '--json', '--port', '8180'],
+        ['dev', '--ios', '--json', '--port', '8180'],
         { env: { STUB_EXPO_PORT_BUSY: '8180' }, reject: false }
       );
 
@@ -460,7 +458,7 @@ describe('@expo/agent-cli dev', () => {
     it('exits 7 in human mode too, where the output is still captured', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios'], {
         env: { STUB_EXPO_EXIT_CODE: '1', STUB_EXPO_STDERR: NEEDS_INPUT },
         reject: false,
       });
@@ -478,7 +476,7 @@ describe('@expo/agent-cli dev', () => {
     it('reports a failed step as a failure, and names no dev server', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--yes', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
         env: { STUB_EXPO_EXIT_CODE: '9' },
         reject: false,
       });
@@ -506,7 +504,7 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--yes', '--json', '--bogus'],
+        ['dev', '--json', '--bogus'],
         {
           reject: false,
         }
@@ -526,7 +524,7 @@ describe('@expo/agent-cli dev', () => {
 
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--yes', '--json', '--go', '--offline', '--clear'],
+        ['dev', '--ios', '--json', '--go', '--offline', '--clear'],
         { reject: false }
       );
 

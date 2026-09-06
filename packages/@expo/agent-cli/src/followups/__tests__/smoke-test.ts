@@ -64,7 +64,7 @@ describe(buildSmokeFollowUps, () => {
 
   it(`names the detached start when no dev server answered`, () => {
     expect(commands({ devServerFound: false })).toContain(
-      'npx @expo/agent-cli dev --ios --detach --yes --wait-ready'
+      'npx @expo/agent-cli dev --ios --detach --wait-ready'
     );
   });
 
@@ -291,7 +291,7 @@ describe(`${buildSmokeFollowUps.name} for an app that cannot run the project`, (
   };
 
   it(`leads with the build that can run the project`, () => {
-    expect(commands(mismatched)[0]).toBe('npx @expo/agent-cli dev --ios --yes');
+    expect(commands(mismatched)[0]).toBe('npx @expo/agent-cli dev --ios');
   });
 
   // The rule itself: never offer a re-run of this gate for a state a re-run cannot change.
@@ -302,7 +302,7 @@ describe(`${buildSmokeFollowUps.name} for an app that cannot run the project`, (
   // And it keeps the platform, like every other follow-up here (F58).
   it(`names the platform the run was about`, () => {
     expect(commands({ ...mismatched, platform: 'android' })[0]).toBe(
-      'npx @expo/agent-cli dev --android --yes'
+      'npx @expo/agent-cli dev --android'
     );
   });
 });
@@ -333,7 +333,7 @@ describe(`${buildSmokeFollowUps.name} for the wrong version of Expo Go`, () => {
   });
 
   it(`never suggests a native build for a project that fits in Expo Go`, () => {
-    expect(commands(stale).join(' ')).not.toContain('dev --ios --yes');
+    expect(commands(stale).join(' ')).not.toContain('dev --ios');
   });
 
   // And it keeps the platform and the route, like every other follow-up here (F58).
@@ -365,7 +365,7 @@ describe(`${buildSmokeFollowUps.name} for a device without the app`, () => {
   // that told it is the whole of the fix.
   it(`leads with the run that installs it, not with a separate dev`, () => {
     expect(commands(missing)[0]).toBe('npx @expo/agent-cli smoke --ios');
-    expect(commands(missing).join(' ')).not.toContain('dev --ios --yes');
+    expect(commands(missing).join(' ')).not.toContain('dev --ios');
   });
 
   it(`never suggests opening a link the device has already refused`, () => {
@@ -396,7 +396,7 @@ describe(`${buildSmokeFollowUps.name} after a build that failed`, () => {
   // the log does not say enough.
   it(`still offers to watch the build in the foreground`, () => {
     expect(commands(failedBuild)).toContain(
-      'npx @expo/agent-cli dev --ios --detach --yes --wait-ready'
+      'npx @expo/agent-cli dev --ios --detach --wait-ready'
     );
   });
 
@@ -404,7 +404,7 @@ describe(`${buildSmokeFollowUps.name} after a build that failed`, () => {
   // starting one in the foreground is the cheapest way to see the failure.
   it(`leads with the foreground start when nothing was built`, () => {
     expect(commands({ ...failedBuild, buildAttempted: false })[0]).toBe(
-      'npx @expo/agent-cli dev --ios --detach --yes --wait-ready'
+      'npx @expo/agent-cli dev --ios --detach --wait-ready'
     );
   });
 });

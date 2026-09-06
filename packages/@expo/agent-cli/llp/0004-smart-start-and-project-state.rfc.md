@@ -114,9 +114,10 @@ Emit the plan first as a structured event (steps, reasons, and time-class estima
 then execute, streaming JSONL progress. `--plan` stops after emitting, so a driving
 agent can present it for approval ([[0008-guardrails]]).
 
-An interactive terminal facing a plan with build-class steps stops before those steps
-and prints the command that runs them with `--yes`. Non-interactive runs proceed.
-Consent is a re-run. See [[0008-guardrails]] §Consent is a re-run, never a prompt.
+Every run proceeds, terminal or not: `dev` runs the plan it printed, and a plan with
+build-class steps is no exception — those steps are the work the command was asked for.
+`--plan` is the dry run, and it is the caller's to ask for.
+See [[0008-guardrails]] §The plan is announced, not negotiated.
 
 ### A step's reason describes the step
 

@@ -83,7 +83,7 @@ describe('a project whose path holds a space', () => {
 
     const detached = await executeAgentCliAsync(
       projectRoot,
-      ['dev', '--ios', '--detach', '--yes', '--json'],
+      ['dev', '--ios', '--detach', '--json'],
       {
         env: { STUB_EXPO_DEV_SERVER_PORT: '8099', STUB_EXPO_DELAY_MS: '15000' },
       }

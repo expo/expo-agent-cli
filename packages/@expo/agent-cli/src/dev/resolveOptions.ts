@@ -24,7 +24,6 @@ const AGENT_CLI_ONLY_FLAGS = [
   '--no-followups',
   '--no-fingerprint-cache',
   '--plan',
-  '--yes',
   '--json',
   '--detach',
   '--wait-ready',
@@ -84,8 +83,6 @@ export interface DevOptions {
    * rather than on a revalidated record can say so.
    */
   fingerprintCache: boolean;
-  /** Approve a plan with build-class steps up front (`--yes`), so no confirmation is asked for. */
-  yes: boolean;
   /**
    * Whether this run opens the app on the platform's device once the dev server is up.
    * `--no-open` clears it, for a caller that opens the app itself — `smoke` does, and so does an
@@ -183,7 +180,6 @@ export function resolveDevOptions(argv: string[]): DevOptions {
     json: argv.includes('--json'),
     followups: !argv.includes('--no-followups'),
     fingerprintCache: !argv.includes('--no-fingerprint-cache'),
-    yes: argv.includes('--yes'),
     open,
     port,
     detach,
@@ -300,7 +296,7 @@ function detachWithPlan(example: string): CommandError {
     [
       `--plan and --detach ask for opposite things, so this run would do nothing.`,
       `Why: --plan prints what would run and exits without running it, and --detach is about where the run goes. There is no plan-shaped thing to put in the background.`,
-      `How: run "${PROGRAM_PREFIX} dev --${example} --plan" to see the plan, then "${PROGRAM_PREFIX} dev --${example} --detach --yes" to run it in the background.`,
+      `How: run "${PROGRAM_PREFIX} dev --${example} --plan" to see the plan, then "${PROGRAM_PREFIX} dev --${example} --detach" to run it in the background.`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} dev --${example} --plan`;

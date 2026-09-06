@@ -4,7 +4,7 @@
 // Put this project's **development build** on a device that has not got it.
 //
 // The other half of `./installExpoGo.ts`, and the half that used to be a refusal. `smoke` would
-// find a device without the app and name `@expo/agent-cli dev --<platform> --yes` — a correct
+// find a device without the app and name `@expo/agent-cli dev --<platform>` — a correct
 // instruction and a dead end for an agent, which cannot take it without leaving the loop this CLI
 // exists to serve [confirmed, Kudo, 2026-09-04: "smoke should be self-served without running dev
 // first", "if the app isn't installed, smoke should install it?"].

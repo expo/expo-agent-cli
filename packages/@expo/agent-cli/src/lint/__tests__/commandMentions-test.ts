@@ -90,7 +90,7 @@ describe(extractCommandMentions, () => {
 
     it(`reads a command beside a why as a follow-up rung`, () => {
       const [mention] = at(
-        `const f = { id: 'dev', command: 'npx @expo/agent-cli dev --yes', why: 'because' };`
+        `const f = { id: 'dev', command: 'npx @expo/agent-cli dev --ios', why: 'because' };`
       );
       expect(mention?.role).toBe('followup-command');
     });

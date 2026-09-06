@@ -145,7 +145,6 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
         '--no-open',
         '--detach',
         '--wait-ready',
-        '--yes',
         '--port',
         String(PORT),
         '--json',

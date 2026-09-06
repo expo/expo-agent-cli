@@ -162,7 +162,6 @@ describe('the flags this CLI writes onto a command line', () => {
           "--yes  src/device/expoGoVersion.ts",
           "--yes  src/device/installExpoGo.ts",
           "--yes  src/new/createExpo.ts",
-          "--yes  src/smoke/smokeAsync.ts",
           "--yes  src/utils/easCli.ts",
           "-Fpc  src/dev/portListener.ts",
           "-a  src/dev/openApp.ts",

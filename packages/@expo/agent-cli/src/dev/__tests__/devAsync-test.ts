@@ -13,11 +13,9 @@ import { runDevServerAsync, type DevServerRun } from '../../start/startAsync';
 import { runExpoAsync, spawnExpoAsync } from '../../utils/expoCli';
 import { isInteractive } from '../../utils/interactive';
 import { devAsync } from '../devAsync';
-import { hasPlanConsent } from '../planConsent';
 import { resolveDevOptions } from '../resolveOptions';
 
 vi.mock('../../log');
-vi.mock('../planConsent', () => ({ hasPlanConsent: vi.fn() }));
 vi.mock('../openApp', () => ({
   openAppOnDeviceAsync: vi.fn(),
   openAppFailureLine: vi.fn((platform: string, reason: string) => `${platform}: ${reason}`),
@@ -147,7 +145,6 @@ beforeEach(() => {
     result: { exitCode: 0, stdout: '', stderr: '' },
   });
   vi.mocked(runDevServerAsync).mockResolvedValue(devServerRun());
-  vi.mocked(hasPlanConsent).mockReturnValue(true);
   mockLanAddress('192.168.1.5');
 });
 
@@ -219,35 +216,39 @@ describe(devAsync, () => {
     });
   });
 
-  // @ref llp/0008-guardrails.rfc.md §Consent is a re-run, never a prompt
-  describe('consent', () => {
-    it(`should check the plan for consent before anything runs`, async () => {
+  // @ref llp/0008-guardrails.rfc.md §The plan is announced, not negotiated
+  //
+  // The case this table is here for: `dev --ios` in a terminal, on a project whose development
+  // build is stale, so the plan is a prebuild and a native build — minutes of work that writes into
+  // the project. That used to stop and hand back the same line with `--yes`. It runs.
+  describe('a plan that builds', () => {
+    it.each([
+      ['a terminal', true],
+      ['a pipe', false],
+    ])(`should run the build steps in %s, asking nothing`, async (_where, interactive) => {
       mockStaleDevClientState();
-
-      await devAsync(projectRoot, resolveDevOptions(['--ios']));
-
-      expect(hasPlanConsent).toHaveBeenCalledWith(
-        expect.objectContaining({ rule: 'dev-client-stale' }),
-        expect.objectContaining({ mode: 'run' })
-      );
-    });
-
-    it(`should run nothing and exit 0 when the plan has no consent`, async () => {
-      mockStaleDevClientState();
-      vi.mocked(hasPlanConsent).mockReturnValue(false);
+      vi.mocked(isInteractive).mockReturnValue(interactive);
 
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
-      expect(runExpoAsync).not.toHaveBeenCalled();
-      expect(runDevServerAsync).not.toHaveBeenCalled();
+      // Either spawner, because which one runs a step is a question about stdio, not about
+      // consent: a terminal gets `runExpoAsync` and its inherited stdio, a pipe gets
+      // `spawnExpoAsync` with `tee` (`stepOutputFor`).
+      const prebuild = [
+        ...vi.mocked(runExpoAsync).mock.calls,
+        ...vi.mocked(spawnExpoAsync).mock.calls,
+      ].map(([, args]) => args);
+      expect(prebuild).toContainEqual(['prebuild', '--platform', 'ios']);
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios'], expect.anything());
     });
 
-    it(`should never check in --plan mode, which runs nothing anyway`, async () => {
+    it(`should still run nothing in --plan mode, which is the run that stops`, async () => {
       mockStaleDevClientState();
 
-      await devAsync(projectRoot, resolveDevOptions(['--plan', '--ios']));
+      await expect(devAsync(projectRoot, resolveDevOptions(['--plan', '--ios']))).resolves.toBe(0);
 
-      expect(hasPlanConsent).not.toHaveBeenCalled();
+      expect(runExpoAsync).not.toHaveBeenCalled();
+      expect(runDevServerAsync).not.toHaveBeenCalled();
     });
   });
 
@@ -472,7 +473,7 @@ describe(devAsync, () => {
 
       // Exit 7, because that is what the observed run was: the launch step is `osascript`, and the
       // Automation refusal is a stop only a person can clear. The record is written **before** that
-      // handoff is thrown — its own `How:` sends the reader to `npx @expo/agent-cli dev --yes`, which used
+      // handoff is thrown — its own `How:` sends the reader to `npx @expo/agent-cli dev --ios`, which used
       // to be the same fifteen minutes over again.
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
         exitCode: 7,
@@ -685,7 +686,7 @@ describe(devAsync, () => {
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope, §Needs-human protocol
-  // The run nobody is watching. `@expo/agent-cli dev --yes` is the documented non-interactive entry point,
+  // The run nobody is watching. `@expo/agent-cli dev` is the documented non-interactive entry point,
   // and on a busy port it used to start nothing, print unparseable stdout, and tell its caller to
   // open another project's app [observed — friction run, 2026-08-23].
   describe('a run with no terminal', () => {
@@ -758,7 +759,7 @@ describe(devAsync, () => {
       );
 
       await expect(
-        devAsync(projectRoot, resolveDevOptions(['--ios', '--yes', '--json']))
+        devAsync(projectRoot, resolveDevOptions(['--ios', '--json']))
       ).rejects.toMatchObject({
         isNeedsHuman: true,
         exitCode: 7,
@@ -775,7 +776,7 @@ describe(devAsync, () => {
         .mockResolvedValueOnce(devServerRun({ exitCode: 1, stderr: PORT_TAKEN }))
         .mockResolvedValue(devServerRun({ exitCode: 0 }));
 
-      await expect(devAsync(projectRoot, resolveDevOptions(['--ios', '--yes']))).resolves.toBe(0);
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
       const [, retryArgs] = vi.mocked(runDevServerAsync).mock.calls[1]!;
       expect(retryArgs.slice(0, 2)).toEqual(['start', '--go']);
@@ -799,7 +800,7 @@ describe(devAsync, () => {
 
       const error = await devAsync(
         projectRoot,
-        resolveDevOptions(['--ios', '--yes', '--port', '8180'])
+        resolveDevOptions(['--ios', '--port', '8180'])
       ).then(
         () => null,
         (thrown) => thrown
@@ -869,7 +870,7 @@ describe(devAsync, () => {
         })
       );
 
-      const error = await devAsync(projectRoot, resolveDevOptions(['--yes', '--json', '--ios']))
+      const error = await devAsync(projectRoot, resolveDevOptions(['--json', '--ios']))
         .then(() => null)
         .catch((thrown) => thrown);
 

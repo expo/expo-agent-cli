@@ -81,9 +81,9 @@ ${stepLines(oneTimeSetup, null)}
       { "error": { "code", "message", "suggestedCommand", "needsHuman", "data" } }
 
   ${color.heading('Nothing here asks you a question')}
-    No command opens a prompt, so nothing can block waiting for a keystroke. A step that costs
-    minutes stops instead, prints what it would have done, and prints the line that does it —
-    your own command with --yes on the end. Run that line to consent; nothing ran until you do.
+    No command opens a prompt, so nothing can block waiting for a keystroke. A command that
+    costs minutes prints the plan it decided on, then runs it. To see that plan without running
+    anything, ask for it: dev --plan.
 
   ${color.heading('Errors are prompts — the recovery is on the last lines, under one of three names')}
     Try: <command>        the tool did not work (1, and any failure it raised itself)

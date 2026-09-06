@@ -214,7 +214,7 @@ export type SmokeAppMismatchKind =
    * @ref llp/0005-runtime-loop-tools.rfc.md §A refused link is a device without the app
    * The development-build case, and the reason it is a *third* kind: `smoke` installs Expo Go for
    * itself, and a development build is this project's own artefact to compile — so the answer is
-   * `dev --<platform> --yes` and not a re-run of anything.
+   * `dev --<platform>` and not a re-run of anything.
    */
   | 'app-not-installed';
 

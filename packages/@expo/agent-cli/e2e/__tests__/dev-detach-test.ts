@@ -61,7 +61,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--json'],
         { env: detachEnv(projectRoot, 8399) }
       );
 
@@ -91,7 +91,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--json'],
         { env: detachEnv(projectRoot, 8398) }
       );
 
@@ -131,7 +131,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--detach', '--yes', '--ios', '--local', '--json'],
+        ['dev', '--detach', '--ios', '--local', '--json'],
         {
           env: {
             ...stubExpoEnv(projectRoot),
@@ -160,7 +160,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--json'],
         { env: detachEnv(projectRoot, 8397) }
       );
 
@@ -180,7 +180,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--json'],
         {
           env: {
             ...stubExpoEnv(projectRoot),
@@ -209,7 +209,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--yes'],
+        ['dev', '--ios', '--detach'],
         {
           env: {
             ...stubExpoEnv(projectRoot),
@@ -232,7 +232,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--json'],
         { env: detachEnv(projectRoot, 8393) }
       );
 
@@ -250,7 +250,7 @@ describe('@expo/agent-cli dev --detach', () => {
     try {
       const first = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--json'],
         {
           env: detachEnv(projectRoot, 8397),
         }
@@ -259,7 +259,7 @@ describe('@expo/agent-cli dev --detach', () => {
 
       const second = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--yes', '--json'],
+        ['dev', '--ios', '--detach', '--json'],
         { env: detachEnv(projectRoot, 8396) }
       );
 
@@ -280,7 +280,7 @@ describe('@expo/agent-cli dev --detach', () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const started = await executeAgentCliAsync(
       projectRoot,
-      ['dev', '--ios', '--detach', '--yes', '--json'],
+      ['dev', '--ios', '--detach', '--json'],
       {
         env: detachEnv(projectRoot, 8395),
       }
@@ -319,7 +319,7 @@ describe('@expo/agent-cli dev --detach', () => {
         projectRoot,
         // `--tunnel`, because that is the wait the child died inside of: the parent is still
         // waiting for a tunnel host when the process that would print one exits.
-        ['dev', '--ios', '--detach', '--yes', '--tunnel', '--json'],
+        ['dev', '--ios', '--detach', '--tunnel', '--json'],
         {
           env: {
             ...stubExpoEnv(projectRoot),
@@ -389,7 +389,7 @@ describe('@expo/agent-cli dev --detach', () => {
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--detach', '--wait-ready', '--ios', '--local', '--yes', '--json'],
+          ['dev', '--detach', '--wait-ready', '--ios', '--local', '--json'],
           { env: diesAfterReadyEnv(projectRoot, 8393), reject: false }
         );
 
@@ -418,7 +418,7 @@ describe('@expo/agent-cli dev --detach', () => {
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['dev', '--detach', '--wait-ready', '--ios', '--yes', '--json'],
+          ['dev', '--detach', '--wait-ready', '--ios', '--json'],
           {
             env: {
               ...diesAfterReadyEnv(projectRoot, 8392),
@@ -465,7 +465,7 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--yes', '--json'], {
+      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
         env: detachEnv(projectRoot, 8394),
       });
       // The stub prints its start line as soon as it runs; the file is written by the child.
@@ -495,7 +495,7 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--yes', '--json'], {
+      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
         env: detachEnv(projectRoot, 8393),
       });
       await waitForAsync(() => fs.existsSync(path.join(projectRoot, LOG_PATH)), 5000);

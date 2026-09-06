@@ -37,7 +37,6 @@ export const DEV_OWN_FLAGS: readonly string[] = [
   '--no-followups',
   '--no-fingerprint-cache',
   '--plan',
-  '--yes',
   '--json',
   '--detach',
   '--wait-ready',
