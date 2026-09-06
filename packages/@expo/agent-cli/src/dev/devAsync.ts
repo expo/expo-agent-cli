@@ -339,7 +339,19 @@ async function executePlanAsync(
     exitCode = result.exitCode;
     planEvent('start_plan_step_exit', { id: step.id, code: exitCode });
 
-    if (exitCode !== 0) {
+    if (exitCode !== 0 && step.id === 'install' && appReachedDevice(`${result.stdout}\n${result.stderr}`)) {
+      // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+      // The install step's job is the app on the device, and the output says it got there — so a
+      // non-zero exit is about what `expo run:*` does *after* the install, which on a Mac without
+      // the Automation grant is the AppleScript launch (observed 2026-09-04, and the reason
+      // `installDevBuildAsync` judges this command by its result rather than its exit code). The
+      // dev server still to come deep-links into the app itself, so the launch is not load-bearing
+      // here. Failing the plan over it would stop the one step the caller was waiting for.
+      Log.warn(
+        `The ${step.argv[1]} install put the app on the device, then exited with ${exitCode} — most likely the launch, which the dev server's own open replaces. Continuing.`
+      );
+      exitCode = 0;
+    } else if (exitCode !== 0) {
       // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
       // F121, and **before** the needs-human throw below rather than after it: `expo run:*` builds,
       // installs and launches in one subprocess, and a launch that failed is not a build that did.
@@ -860,6 +872,14 @@ function isDevServerStep(step: PlanStep): boolean {
   if (step.argv[0] !== 'expo') {
     // `eas build` finishes with an artifact and starts nothing. The dev server of an EAS-backed
     // plan is the `expo start --dev-client` step that follows it.
+    return false;
+  }
+  if (step.argv.includes('--no-bundler')) {
+    // The install step of an `*-install` plan (llp/0004 §A current build is not an installed app).
+    // `--no-bundler` is the flag that says it serves nothing, so running it through the dev-server
+    // runner would publish a lock naming a port nothing will listen on, for as long as the install
+    // takes — and every reader of that lock (`status`, `smoke`, `dev:stop`, a `--detach` parent
+    // waiting on another port) would be told about a dev server that does not exist.
     return false;
   }
   const command = step.argv[1];

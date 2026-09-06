@@ -148,7 +148,7 @@ export function decideStartPlan(
         ? plan(
             'bare-install',
             'bare',
-            [installStep(platform), startDevClientStep(build.summary, options)],
+            [installStep(platform, options.installDevice ?? null), startDevClientStep(build.summary, options)],
             [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
           )
         : plan(
@@ -177,7 +177,7 @@ export function decideStartPlan(
         ? plan(
             'dev-client-install',
             'dev-client',
-            [installStep(platform), startDevClientStep(build.summary, options)],
+            [installStep(platform, options.installDevice ?? null), startDevClientStep(build.summary, options)],
             [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
           )
         : plan(
@@ -362,10 +362,12 @@ function prebuildStep(platform: NativePlatform): PlanStep {
  * another one — compiles from scratch here. Naming the cheap case and stating what makes it cheap
  * is honest in a way that either time class alone is not.
  */
-function installStep(platform: NativePlatform): PlanStep {
+function installStep(platform: NativePlatform, device: string | null): PlanStep {
   return step(
     'install',
-    ['expo', `run:${platform}`, '--no-bundler'],
+    // `--device` pins the install to the device the presence probe asked, when the platform could
+    // name it. In the argv itself, not added at run time: the plan approved is the plan run.
+    ['expo', `run:${platform}`, '--no-bundler', ...(device != null ? ['--device', device] : [])],
     'a-minute',
     `Installs the existing ${platform} development build on the device and launches it. The project fingerprint matches the recorded build, so there is nothing to compile and this reuses what ${platform === 'ios' ? 'Xcode' : 'Gradle'} already built — a machine whose build cache is cold compiles first, which takes minutes. --no-bundler because the next step is the dev server.`,
     'local'

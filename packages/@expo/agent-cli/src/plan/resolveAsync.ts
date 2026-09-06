@@ -3,7 +3,7 @@
 // flags they typed, this host, and what the toolchain probe found. Everything it calls is pure
 // except the probe and two file reads, and it is the only module that knows the order they go in.
 
-import { probeAppPresenceAsync, type AppPresence } from '../device/appPresence';
+import { probeAppPresenceAsync, type AppPresenceProbe } from '../device/appPresence';
 import { easJsonExistsSync } from '../followups/projectFiles';
 import type { ProjectState, StartPlan } from '../project/types';
 import { readAgentCliSettings, settingsBuildBackend } from '../settings';
@@ -13,7 +13,7 @@ import { selectBuildBackend } from '../toolchain/selectBackend';
 import type { ToolchainProbe } from '../toolchain/types';
 import { decideStartPlan } from './decide';
 import { selectRunTarget } from './runTarget';
-import type { DecideStartPlanOptions } from './types';
+import type { DecideStartPlanOptions, StartPlanRule } from './types';
 
 /**
  * The rules whose plan is "the app is already on a device, so just serve it".
@@ -24,7 +24,7 @@ import type { DecideStartPlanOptions } from './types';
  * has nothing to ask about: `web` opens a browser, `expo-go` runs in a published app that
  * `expo start` offers to install itself, and `not-expo-app` has no app.
  */
-const AWAITS_A_DEVICE: ReadonlySet<string> = new Set(['dev-client-fresh', 'bare-fresh']);
+const AWAITS_A_DEVICE = new Set<StartPlanRule | string>(['dev-client-fresh', 'bare-fresh']);
 
 export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
   /** Where a flag on this command line asked the build to run, or null when none did. */
@@ -34,7 +34,7 @@ export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
   /** `process.platform`. Injected so the selection can be exercised for other hosts. */
   hostPlatform?: NodeJS.Platform;
   /** Injected for tests, so the device question is answerable without a device. */
-  probeAppPresence?: (projectRoot: string, platform: 'ios' | 'android') => Promise<AppPresence>;
+  probeAppPresence?: (projectRoot: string, platform: 'ios' | 'android') => Promise<AppPresenceProbe>;
 }
 
 /**
@@ -80,24 +80,51 @@ export async function resolveStartPlanAsync(
   if (!draft.buildLocation) {
     // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
     //
-    // No build to choose a backend for, which is the *only* shape of plan where the device question
-    // is worth two subprocesses. A plan that builds ends in `expo run:*`, and that command installs
-    // what it built — so asking whether the app is on the device would buy a fact nothing reads.
-    // A plan that does not build is the one that assumed the app was already there.
+    // The device question is asked only where its answer would be acted on, and every guard here
+    // is one of the ways it would not be:
     //
-    // Skipped unless the plan is a development build waiting on a device: `web` opens a browser,
-    // `expo-go` is a runtime `expo start` installs itself, and `not-expo-app` has no app at all.
-    if (!AWAITS_A_DEVICE.has(draft.rule) || planOptions.platform == null) {
+    // - The rule has to be one that assumed an installed app. `web` opens a browser, `expo-go` is
+    //   a runtime `expo start` offers to install itself, `not-expo-app` has no app. A plan that
+    //   builds never reaches this branch, and rightly: it ends in `expo run:*`, which installs
+    //   what it built.
+    // - This run has to be the one that opens the app. The install exists to serve the open, so a
+    //   `--no-open` caller — `smoke`, which installs the app itself in its own phase, or an agent
+    //   that opens with `navigate` — keeps the serve-only plan, and this also keeps `dev` from
+    //   touching a device a caller said to leave alone. `status` passes no `requestedPlatform`,
+    //   so it skips too, which keeps its report instant and internally consistent.
+    // - The backend has to be local. `expo run:* --no-bundler` compiles when the toolchain cache
+    //   is cold, and a caller who routed builds to EAS with `--eas` or config did not ask for a
+    //   local compile on the way to a dev server.
+    const opensOn =
+      planOptions.open !== false &&
+      (planOptions.requestedPlatform === 'ios' || planOptions.requestedPlatform === 'android')
+        ? planOptions.requestedPlatform
+        : null;
+    if (!AWAITS_A_DEVICE.has(draft.rule) || opensOn == null) {
       return draft;
     }
-    const platform = planOptions.platform;
-    if (platform !== 'ios' && platform !== 'android') {
+    if ((requestedBackend ?? settingsBuildBackend(settings, opensOn)) === 'eas') {
       return draft;
     }
-    const appPresence = await probeAppPresence(projectRoot, platform);
+    const { presence, installDevice } = await probeAppPresence(projectRoot, opensOn);
+    if (presence === 'missing') {
+      // The install needs the local toolchain even when nothing compiles — `expo run:ios` runs
+      // through Xcode either way — so a machine without it keeps the serve-only plan rather than
+      // gaining a step that can only fail. The same probe a building plan pays for, on the one
+      // fresh path that is about to act like one.
+      const toolchain = await detectToolchainAsync(opensOn);
+      if (toolchain.status !== 'present') {
+        return draft;
+      }
+    }
     // Run again rather than patch the draft: the table is the one place a rule and its steps are
     // decided together, and a plan assembled anywhere else is a second table to keep in step.
-    return decideStartPlan(state, { ...planOptions, runTarget, appPresence });
+    return decideStartPlan(state, {
+      ...planOptions,
+      runTarget,
+      appPresence: presence,
+      installDevice,
+    });
   }
 
   const { platform } = draft.buildLocation;

@@ -15,7 +15,7 @@ import { capFollowUps, type FollowUp } from './types';
 export const DEFAULT_DEV_SERVER_PORT = 8081;
 
 /** Plan rules whose plan contains a native build, so recording one makes the next plan cheaper. */
-const BUILDING_RULES = ['dev-client-stale', 'bare-stale', 'needs-dev-client'];
+const BUILDING_RULES = ['dev-client-stale', 'dev-client-rebuild', 'bare-stale', 'needs-dev-client'];
 
 export interface StartFollowUpInput {
   /** The app the dev server is opened in runs inside Expo Go, which takes an `exp://` URL. */

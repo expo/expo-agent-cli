@@ -108,8 +108,9 @@ describe('the device probe', () => {
 
     const plan = await resolveStartPlanAsync(projectRoot, state, {
       platform: 'ios',
+      requestedPlatform: 'ios',
       lastBuild,
-      probeAppPresence: async () => 'missing',
+      probeAppPresence: async () => ({ presence: 'missing', installDevice: null }),
     });
 
     expect(plan.rule).toBe('dev-client-install');
@@ -119,14 +120,30 @@ describe('the device probe', () => {
     ]);
   });
 
+  // In the argv itself, not added at run time: the plan approved is the plan run.
+  it(`pins the install to the device the probe asked`, async () => {
+    writeProject();
+    const { state, lastBuild } = freshProject();
+
+    const plan = await resolveStartPlanAsync(projectRoot, state, {
+      platform: 'ios',
+      requestedPlatform: 'ios',
+      lastBuild,
+      probeAppPresence: async () => ({ presence: 'missing', installDevice: 'UDID-1' }),
+    });
+
+    expect(argvOf(plan)[0]).toEqual(['expo', 'run:ios', '--no-bundler', '--device', 'UDID-1']);
+  });
+
   it(`starts the dev server alone when the device has it`, async () => {
     writeProject();
     const { state, lastBuild } = freshProject();
 
     const plan = await resolveStartPlanAsync(projectRoot, state, {
       platform: 'ios',
+      requestedPlatform: 'ios',
       lastBuild,
-      probeAppPresence: async () => 'present',
+      probeAppPresence: async () => ({ presence: 'present', installDevice: null }),
     });
 
     expect(plan.rule).toBe('dev-client-fresh');
@@ -140,14 +157,85 @@ describe('the device probe', () => {
 
     await resolveStartPlanAsync(projectRoot, state, {
       platform: 'android',
+      requestedPlatform: 'android',
       lastBuild: { android: { hash: state.fingerprint.hash!, sources: null } },
       probeAppPresence: async (_root, platform) => {
         asked.push(platform);
-        return 'present';
+        return { presence: 'present', installDevice: null };
       },
     });
 
     expect(asked).toEqual(['android']);
+  });
+
+  // The install exists to serve the open. A --no-open caller — `smoke`, which installs the app in
+  // its own phase, or an agent that opens with `navigate` — said it manages the device itself, so
+  // `dev` must not touch one on the way to the dev server.
+  it(`is not spent when the run opens nothing`, async () => {
+    writeProject();
+    const { state, lastBuild } = freshProject();
+
+    const plan = await resolveStartPlanAsync(projectRoot, state, {
+      platform: 'ios',
+      requestedPlatform: 'ios',
+      open: false,
+      lastBuild,
+      probeAppPresence: neverProbed,
+    });
+
+    expect(plan.rule).toBe('dev-client-fresh');
+  });
+
+  // `status` resolves the plan without a requestedPlatform, and must keep doing so: its report
+  // promises to be instant, and a probe here would also make its `next` line disagree with the
+  // sections that never probe.
+  it(`is not spent without a typed platform flag, which is how status calls this`, async () => {
+    writeProject();
+    const { state, lastBuild } = freshProject();
+
+    const plan = await resolveStartPlanAsync(projectRoot, state, {
+      platform: 'ios',
+      lastBuild,
+      probeAppPresence: neverProbed,
+    });
+
+    expect(plan.rule).toBe('dev-client-fresh');
+  });
+
+  // `expo run:* --no-bundler` compiles when the toolchain cache is cold; a caller who routed
+  // builds to EAS did not ask for a local compile on the way to a dev server.
+  it(`is not spent when the caller routed builds to EAS`, async () => {
+    writeProject();
+    const { state, lastBuild } = freshProject();
+
+    const plan = await resolveStartPlanAsync(projectRoot, state, {
+      platform: 'ios',
+      requestedPlatform: 'ios',
+      lastBuild,
+      requestedBackend: 'eas',
+      probeAppPresence: neverProbed,
+    });
+
+    expect(plan.rule).toBe('dev-client-fresh');
+  });
+
+  // The install needs the toolchain even when nothing compiles: `expo run:ios` runs through Xcode
+  // either way. A machine without it keeps the serve-only plan rather than gaining a step that can
+  // only fail.
+  it(`keeps the serve-only plan when this machine cannot run the install`, async () => {
+    writeProject();
+    stubToolchain('missing');
+    const { state, lastBuild } = freshProject();
+
+    const plan = await resolveStartPlanAsync(projectRoot, state, {
+      platform: 'ios',
+      requestedPlatform: 'ios',
+      lastBuild,
+      probeAppPresence: async () => ({ presence: 'missing', installDevice: null }),
+    });
+
+    expect(plan.rule).toBe('dev-client-fresh');
+    expect(argvOf(plan)).toEqual([['expo', 'start', '--dev-client']]);
   });
 
   // The cost rule. A build installs what it builds, so the answer would change nothing and the
@@ -157,6 +245,7 @@ describe('the device probe', () => {
 
     const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
       platform: 'ios',
+      requestedPlatform: 'ios',
       probeAppPresence: neverProbed,
     });
 
@@ -171,6 +260,7 @@ describe('the device probe', () => {
 
     await resolveStartPlanAsync(projectRoot, expoGoState(), {
       platform,
+      requestedPlatform: platform,
       probeAppPresence: neverProbed,
     });
   });

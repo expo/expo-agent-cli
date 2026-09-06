@@ -116,6 +116,14 @@ export interface DecideStartPlanOptions {
    */
   appPresence?: AppPresence;
   /**
+   * What `expo run:<platform> --device` calls the device the presence probe asked, or null.
+   *
+   * Read only when {@link appPresence} is `missing`: the install step is pinned to the device that
+   * was actually checked, so a machine with two devices cannot install on one and keep serving
+   * nothing to the other. Null runs the install unpinned, and the Expo CLI picks the device.
+   */
+  installDevice?: string | null;
+  /**
    * Where this plan's native build runs, when the caller has resolved it.
    *
    * The **selection happens here, at planning time**, and never mid-run: a plan whose steps say

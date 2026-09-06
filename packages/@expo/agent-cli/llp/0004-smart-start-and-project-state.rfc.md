@@ -67,27 +67,57 @@ and `bare-fresh` with one step in front: `expo run:<platform> --no-bundler`, whi
 `smoke` already installs a development build with (`src/device/installDevBuild.ts`). The Expo CLI
 owns "compile what is missing, reusing the toolchain's cache, then install and launch", and
 llp/0001 constraint 4 says to invoke that rather than reimplement it. `--no-bundler` because the dev
-server is the step after it.
+server is the step after it. The platform switch behind the question — `simctl` for a simulator,
+`pm path` for Android, disk-exists guard and all — is `src/device/hasApp.ts`, extracted from `smoke`
+so the two callers cannot drift.
 
 **Only `missing` moves a plan.** The probe is three-valued and the third value is load-bearing:
 `unknown` is what a machine with no booted device answers, and a project whose config names no
-`bundleIdentifier`, and a platform tool that would not run. Those all plan exactly what this table
-planned before it could ask. That is what makes the probe safe to put on the hot path — a probe
-that fails cannot cost anybody anything, because failing is the old behaviour.
+`bundleIdentifier`, a platform tool that would not run, an unreadable simulator tree, and a deadline
+that expired (2.5 s, the same discipline the other two device-probe callers apply). Those all plan
+exactly what this table planned before it could ask. That is what makes the probe safe to put on
+the hot path — a probe that fails cannot cost anybody anything, because failing is the old
+behaviour. `AGENT_CLI_NO_DEVICE` answers `unknown` without spawning, so a stubbed harness's runs do
+not depend on the host machine's simulators.
 
 The asymmetry is why `unknown` leans that way. A false `missing` spends a minute installing
 something that was already there; a false `present` is the bug above. But `unknown` is not a third
 cost to weigh, it is yesterday's plan.
 
-**A plan that builds never asks.** It ends in `expo run:*`, which installs what it built, so the
-answer would change nothing and the two subprocesses would be spent on every stale run.
-`resolveStartPlanAsync` gates on that: no build location, and a rule that assumed an installed app.
-`expo-go` is left out with it — that runtime is a published app `expo start` offers to install
-itself — and so are `web` and `not-expo-app`, which have no app to look for.
+**The question is asked only where its answer would be acted on**, and `resolveStartPlanAsync`
+holds all of the gates:
+
+- **A plan that builds never asks.** It ends in `expo run:*`, which installs what it built, so the
+  answer would change nothing and the subprocesses would be spent on every stale run. `expo-go` is
+  left out with it — that runtime is a published app `expo start` offers to install itself — and so
+  are `web` and `not-expo-app`, which have no app to look for.
+- **Only the run that opens the app asks.** The install exists to serve the open, so the gate is
+  the same condition as the open's: a typed native platform flag, and not `--no-open`. That keeps
+  `dev` off devices a caller said to leave alone — `smoke` spawns `dev` with `--no-open` and
+  installs the app in its own phase — and it keeps `status` consistent and instant: `status`
+  resolves plans without a `requestedPlatform`, so it never probes, and its `next` line cannot
+  disagree with sections that never probe either.
+- **Only a local-backend run asks.** `expo run:* --no-bundler` compiles when the toolchain cache is
+  cold, and a caller who routed builds to EAS did not ask for a local compile on the way to a dev
+  server. When the answer is `missing`, the toolchain is checked too: the install runs through
+  Xcode or Gradle even when nothing compiles, so a machine without them keeps the serve-only plan
+  rather than gaining a step that can only fail.
+
+The install is pinned to the device that was asked: the probe hands back what
+`expo run:<platform> --device` calls it (the UDID on iOS, the resolved name on Android), and it
+goes into the step's argv at planning time — the plan approved is the plan run. And the step is
+judged by its result, the way `installDevBuildAsync` already judges the same command: `expo run:*`
+launches the app after installing it, that launch can fail on a permission the install does not
+need (the macOS Automation grant), and output showing the app reached the device makes a non-zero
+exit a warning rather than a stopped plan.
 
 `decideStartPlan` stays a pure function of probed state. The device is asked by
 `resolveStartPlanAsync`, which is already where the toolchain probe happens, and the answer arrives
-as `DecideStartPlanOptions.appPresence` the way `lastBuild` and `buildBackend` do.
+as `DecideStartPlanOptions.appPresence` the way `lastBuild` and `buildBackend` do. The plan runner
+knows the install step by its `--no-bundler`: it is the one `expo run:*` that must not be treated
+as a dev-server step, or a lock naming a port nothing listens on would be published for as long as
+the install takes (`src/dev/devAsync.ts` §isDevServerStep), and the detach-phase parser reads it as
+the compiling half of the plan, not the serving half (`src/dev/childVerdict.ts`).
 
 ### A stale build is two questions
 

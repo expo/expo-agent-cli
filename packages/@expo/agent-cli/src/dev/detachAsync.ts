@@ -257,7 +257,7 @@ export async function devDetachAsync(
       // @ref ./childVerdict.ts §parseDetachedChildPhase — F125. The child's own log says which half
       // of its plan it is in, and a plan that is compiling has not started a dev server for this
       // report to describe.
-      throw notReadyError(lock, logFile, result, readChildPhaseSync(projectRoot));
+      throw notReadyError(lock, logFile, result, readChildPhaseSync(projectRoot), options.platform);
     }
   }
 
@@ -933,7 +933,8 @@ export function notReadyError(
   lock: DevServerLockInfo,
   logFile: string,
   result: BundlerReadyResult,
-  phase: DetachedChildPhase = { phase: 'serving', step: null, opensPlatform: false }
+  phase: DetachedChildPhase = { phase: 'serving', step: null, opensPlatform: false },
+  platform: PlanPlatform | null = null
 ): CommandError {
   // @ref llp/0021-honest-reports.rfc.md §The rules — F125. A plan whose
   // dev-server step is `expo run:*` holds the lock while a compiler runs, so every sentence below
@@ -941,7 +942,7 @@ export function notReadyError(
   // is still running" would describe Gradle. The wording follows the phase, and nothing else here
   // changes: the wait really did give up, and the exit code is the same.
   if (phase.phase === 'building') {
-    return stillBuildingError(lock, logFile, result, phase);
+    return stillBuildingError(lock, logFile, result, phase, platform);
   }
 
   const strangerAnswered = result.projectRootMatched === false;
@@ -986,15 +987,19 @@ function stillBuildingError(
   lock: DevServerLockInfo,
   logFile: string,
   result: BundlerReadyResult,
-  phase: DetachedChildPhase
+  phase: DetachedChildPhase,
+  platform: PlanPlatform | null
 ): CommandError {
   const step = phase.step ?? 'the build step';
+  // The run's own platform when the caller had it, else read off the step row — the line below
+  // once said `--android` to every caller, iOS runs included.
+  const flag = platform ?? (step.includes('run:ios') ? 'ios' : 'android');
   const error = new CommandError(
     'DEV_DETACH_NOT_READY',
     [
       `No dev server is listening on ${lock.url} yet: the plan is still building, at "${step}" (pid ${lock.pid}), and --wait-ready gave up after ${result.waitedMs}ms.`,
       `Why: "${step}" is one command that builds the app, installs it, and only then starts the dev server. The port above is published when that step *starts*, so it names where the dev server will be rather than where one is — and a local build takes many minutes, which is longer than this wait. The build has not failed and it has not stopped; it is still going, in the process this command started.`,
-      `How: watch it with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}) and run "${PROGRAM_PREFIX} status" when it is done — the dev server answers on ${lock.url} the moment the build finishes. Stop the build with "${PROGRAM_PREFIX} dev:stop". To avoid the wait entirely, build once with "${PROGRAM_PREFIX} dev --android" in a terminal: a recorded build makes the next detached run a dev server rather than a compiler.`,
+      `How: watch it with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}) and run "${PROGRAM_PREFIX} status" when it is done — the dev server answers on ${lock.url} the moment the build finishes. Stop the build with "${PROGRAM_PREFIX} dev:stop". To avoid the wait entirely, build once with "${PROGRAM_PREFIX} dev --${flag}" in a terminal: a recorded build makes the next detached run a dev server rather than a compiler.`,
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_FAILED;

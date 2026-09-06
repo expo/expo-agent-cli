@@ -13,12 +13,11 @@ import { devDetachAsync } from '../dev/detachAsync';
 import { resolveDevOptions } from '../dev/resolveOptions';
 import { resolveDevStopOptions } from '../dev/resolveStopOptions';
 import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
-import { androidHasAppAsync } from '../device/androidApps';
 import { bootDeviceAsync, shutdownDeviceAsync } from '../device/bootDevice';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
 import { installDevBuildAsync } from '../device/installDevBuild';
 import { installExpoGoAsync } from '../device/installExpoGo';
-import { simulatorDiskExistsAsync, simulatorHasAppAsync } from '../device/installedApps';
+import { hasAppOnDeviceAsync } from '../device/hasApp';
 import { captureScreenshotAsync, defaultScreenshotPath } from '../device/screenshot';
 import { event } from '../events';
 import { EXIT_OK } from '../exitCodes';
@@ -248,26 +247,10 @@ function explainOutcome(run: SmokeRun): string {
  * already drifted once — the install decision asked Android for *Expo Go's* application id whatever
  * the project's app was, which was right while only Expo Go was ever installed and wrong the moment
  * a development build could be.
+ *
+ * The switch itself lives in `src/device/hasApp.ts` now, because the plan engine asks the same
+ * question (llp/0004 §A current build is not an installed app).
  */
-async function hasAppOnDeviceAsync(
-  deviceId: string,
-  backend: DeviceBackend | null,
-  appId: string
-): Promise<boolean | null> {
-  if (backend === 'local-android') {
-    return await androidHasAppAsync(deviceId, appId);
-  }
-  if (backend !== 'local-ios') {
-    // A cloud session's device is not this machine's, so nothing here can read it
-    // (llp/0005 §Cloud simulator).
-    return null;
-  }
-  // @ref src/device/installedApps §simulatorDiskExistsAsync — asked **before** the app is looked
-  // for, because "no apps" and "could not look" are the same answer from that read.
-  return (await simulatorDiskExistsAsync(deviceId))
-    ? await simulatorHasAppAsync(deviceId, appId)
-    : null;
-}
 
 /**
  * The real dependencies: for each phase, the function the command that owns that question calls.
