@@ -268,12 +268,13 @@ A real EAS Simulator session. Gated twice: on prerequisites, like every suite, a
 `AGENT_CLI_LIVE_CLOUD=1`, because its prerequisites can all hold on a machine whose
 owner did not mean to start a billing session from a test run.
 
-A tunnel is not how the dev server gets a public origin on this machine.
-`expo start --tunnel` fails here (`Tunnel URL not found`, then a TypeError out of
-ngrok). What works is a proxy origin: a public name for the port and
-`EXPO_PACKAGER_PROXY_URL` so the dev server advertises it. The suite checks the origin
-took (`navigate / --print-url` must report `hostType: "tunnel"`) before it starts
-anything that bills.
+The dev server's own tunnel is the public origin — v2. `expo start --tunnel` v1 fails
+(`Tunnel URL not found`, then a TypeError out of ngrok); under `EXPO_UNSTABLE_TUNNEL_V2=1`
+the same flag uses `@expo/ws-tunnel` on the Expo account and works [verified live —
+2026-09-05]. So the suite starts `dev --tunnel`, reads the advertised origin back through
+the CLI, and curls `<origin>/status` before it starts anything that bills — the tunnel is
+tested surface now, not harness plumbing. `AGENT_CLI_LIVE_PUBLIC_ORIGIN` keeps the proxy
+path (`EXPO_PACKAGER_PROXY_URL`) as the hatch, because the v2 flag is `UNSTABLE`-prefixed.
 
 A cloud reload takes whichever rung works, and which one that is turns out to be the
 platform's to decide [observed — 2026-09-05, both platforms live in one workflow run].
@@ -311,7 +312,7 @@ This table is abbreviated. The source of truth is the tests under `e2e-live/`.
 | `inspect:build-log <build-id>`  | n/a                                       | n/a                                      | n/a                                       | unreachable (eas-cli has no `build:logs`) | n/a                                  | n/a                               |
 | native EAS build creation       | n/a                                       | n/a                                      | n/a                                       | covered by the `agent-cli-cloud-e2e` dev-build jobs (build + run `apps/eas-example`), not this tier | n/a    | n/a                               |
 | `deploy --native`               | n/a                                       | n/a                                      | n/a                                       | unreachable (create-launch has no staging; a run uploads to production) | n/a                    | n/a                               |
-| `dev --tunnel`                  | n/a                                       | unreachable (`@expo/ngrok` exits 1 here) | n/a (emulator uses `adb reverse`)         | n/a                                       | n/a (uses a proxy origin)            | n/a                               |
+| `dev --tunnel`                  | n/a                                       | unreachable (v1: `@expo/ngrok` exits 1 here) | n/a (emulator uses `adb reverse`)         | n/a                                       | filled (v2: serves every session's origin) | n/a                               |
 | `runtime:eval`                  | n/a                                       | filled (returns `2`)                     | filled (exit 1, no debugger)              | n/a                                       | unreachable (no `--cloud` on `eval`) | filled (exit 0, `value: 2`)       |
 | `runtime:tap --verify`          | n/a                                       | filled                                   | unreachable (no debugger)                 | n/a                                       | unreachable                          | filled                            |
 | `smoke` (pass)                  | n/a                                       | filled (8 phases)                        | unreachable (22 on a working Expo Go app) | n/a                                       | n/a                                  | filled (0, all eight phases `ok`) |

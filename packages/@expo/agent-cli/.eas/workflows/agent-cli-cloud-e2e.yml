@@ -1,9 +1,9 @@
 # Run agent-cli's `--cloud` e2e suite (live-cloud) on EAS, against real EAS Simulator sessions. This is
 # the coverage GitHub CI cannot take: a cloud simulator runs in a datacenter, so the app's dev server
-# has to be reachable over a public origin — locally that comes from `tuft host`, which no CI runner
-# has, so here a cloudflared quick tunnel provides it and the tested suite runs through its
-# `AGENT_CLI_LIVE_PUBLIC_ORIGIN` hatch. There is no macOS gate on live-cloud (the device is remote), so
-# a Linux runner is fine.
+# has to be reachable over a public origin. The suite makes that origin itself: it starts its dev
+# server with `--tunnel` under `EXPO_UNSTABLE_TUNNEL_V2=1` (`@expo/ws-tunnel` on the job's own EAS
+# auth — no ngrok, no cloudflared), so the tunnel is part of the tested surface. There is no macOS
+# gate on live-cloud (the device is remote), so a Linux runner is fine.
 #
 # Four parallel jobs, {iOS, Android} × {Expo Go, dev build}, no `needs` between them so EAS runs them at
 # once. The Expo Go jobs scaffold an app and run it in Expo Go; the dev-build jobs first build a real
@@ -44,29 +44,12 @@ jobs:
         run: bun install --ignore-scripts --frozen-lockfile
       - name: Build @expo/agent-cli
         run: bun run --filter @expo/agent-cli build
-      - name: Run live-cloud over a cloudflared tunnel
+      - name: Run live-cloud over the dev server's own tunnel
         run: |
           set -euo pipefail
-          PORT=8500
-          curl -fsSL -o /tmp/cloudflared \
-            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-          chmod +x /tmp/cloudflared
-          /tmp/cloudflared tunnel --no-autoupdate --url "http://localhost:${PORT}" > /tmp/cf.log 2>&1 &
-          CF_PID=$!
-          trap 'kill "${CF_PID}" 2>/dev/null || true' EXIT
-          ORIGIN=""
-          for _ in $(seq 1 30); do
-            ORIGIN="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log | head -1 || true)"
-            [ -n "${ORIGIN}" ] && break
-            sleep 2
-          done
-          if [ -z "${ORIGIN}" ]; then echo "cloudflared never printed a tunnel URL:"; cat /tmp/cf.log; exit 1; fi
-          echo "tunnel origin: ${ORIGIN} (${AGENT_CLI_LIVE_CLOUD_MODE} ${AGENT_CLI_LIVE_CLOUD_PLATFORM})"
           cd packages/@expo/agent-cli
           AGENT_CLI_LIVE_EAS=1 \
           AGENT_CLI_LIVE_CLOUD=1 \
-          AGENT_CLI_LIVE_PUBLIC_ORIGIN="${ORIGIN}" \
-          AGENT_CLI_LIVE_PORT="${PORT}" \
             bun run test:live:cloud
 
   cloud-e2e-expo-go-android:
@@ -82,29 +65,12 @@ jobs:
         run: bun install --ignore-scripts --frozen-lockfile
       - name: Build @expo/agent-cli
         run: bun run --filter @expo/agent-cli build
-      - name: Run live-cloud over a cloudflared tunnel
+      - name: Run live-cloud over the dev server's own tunnel
         run: |
           set -euo pipefail
-          PORT=8500
-          curl -fsSL -o /tmp/cloudflared \
-            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-          chmod +x /tmp/cloudflared
-          /tmp/cloudflared tunnel --no-autoupdate --url "http://localhost:${PORT}" > /tmp/cf.log 2>&1 &
-          CF_PID=$!
-          trap 'kill "${CF_PID}" 2>/dev/null || true' EXIT
-          ORIGIN=""
-          for _ in $(seq 1 30); do
-            ORIGIN="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log | head -1 || true)"
-            [ -n "${ORIGIN}" ] && break
-            sleep 2
-          done
-          if [ -z "${ORIGIN}" ]; then echo "cloudflared never printed a tunnel URL:"; cat /tmp/cf.log; exit 1; fi
-          echo "tunnel origin: ${ORIGIN} (${AGENT_CLI_LIVE_CLOUD_MODE} ${AGENT_CLI_LIVE_CLOUD_PLATFORM})"
           cd packages/@expo/agent-cli
           AGENT_CLI_LIVE_EAS=1 \
           AGENT_CLI_LIVE_CLOUD=1 \
-          AGENT_CLI_LIVE_PUBLIC_ORIGIN="${ORIGIN}" \
-          AGENT_CLI_LIVE_PORT="${PORT}" \
             bun run test:live:cloud
 
   cloud-e2e-dev-build-ios:
@@ -125,29 +91,12 @@ jobs:
           set -euo pipefail
           cd apps/eas-example
           npx --yes eas-cli@latest build --platform "${AGENT_CLI_LIVE_CLOUD_PLATFORM}" --profile development --non-interactive
-      - name: Run live-cloud over a cloudflared tunnel
+      - name: Run live-cloud over the dev server's own tunnel
         run: |
           set -euo pipefail
-          PORT=8500
-          curl -fsSL -o /tmp/cloudflared \
-            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-          chmod +x /tmp/cloudflared
-          /tmp/cloudflared tunnel --no-autoupdate --url "http://localhost:${PORT}" > /tmp/cf.log 2>&1 &
-          CF_PID=$!
-          trap 'kill "${CF_PID}" 2>/dev/null || true' EXIT
-          ORIGIN=""
-          for _ in $(seq 1 30); do
-            ORIGIN="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log | head -1 || true)"
-            [ -n "${ORIGIN}" ] && break
-            sleep 2
-          done
-          if [ -z "${ORIGIN}" ]; then echo "cloudflared never printed a tunnel URL:"; cat /tmp/cf.log; exit 1; fi
-          echo "tunnel origin: ${ORIGIN} (${AGENT_CLI_LIVE_CLOUD_MODE} ${AGENT_CLI_LIVE_CLOUD_PLATFORM})"
           cd packages/@expo/agent-cli
           AGENT_CLI_LIVE_EAS=1 \
           AGENT_CLI_LIVE_CLOUD=1 \
-          AGENT_CLI_LIVE_PUBLIC_ORIGIN="${ORIGIN}" \
-          AGENT_CLI_LIVE_PORT="${PORT}" \
             bun run test:live:cloud
 
   cloud-e2e-dev-build-android:
@@ -168,27 +117,10 @@ jobs:
           set -euo pipefail
           cd apps/eas-example
           npx --yes eas-cli@latest build --platform "${AGENT_CLI_LIVE_CLOUD_PLATFORM}" --profile development --non-interactive
-      - name: Run live-cloud over a cloudflared tunnel
+      - name: Run live-cloud over the dev server's own tunnel
         run: |
           set -euo pipefail
-          PORT=8500
-          curl -fsSL -o /tmp/cloudflared \
-            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-          chmod +x /tmp/cloudflared
-          /tmp/cloudflared tunnel --no-autoupdate --url "http://localhost:${PORT}" > /tmp/cf.log 2>&1 &
-          CF_PID=$!
-          trap 'kill "${CF_PID}" 2>/dev/null || true' EXIT
-          ORIGIN=""
-          for _ in $(seq 1 30); do
-            ORIGIN="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cf.log | head -1 || true)"
-            [ -n "${ORIGIN}" ] && break
-            sleep 2
-          done
-          if [ -z "${ORIGIN}" ]; then echo "cloudflared never printed a tunnel URL:"; cat /tmp/cf.log; exit 1; fi
-          echo "tunnel origin: ${ORIGIN} (${AGENT_CLI_LIVE_CLOUD_MODE} ${AGENT_CLI_LIVE_CLOUD_PLATFORM})"
           cd packages/@expo/agent-cli
           AGENT_CLI_LIVE_EAS=1 \
           AGENT_CLI_LIVE_CLOUD=1 \
-          AGENT_CLI_LIVE_PUBLIC_ORIGIN="${ORIGIN}" \
-          AGENT_CLI_LIVE_PORT="${PORT}" \
             bun run test:live:cloud
