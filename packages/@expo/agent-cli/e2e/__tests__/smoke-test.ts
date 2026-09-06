@@ -950,7 +950,7 @@ describe('@expo/agent-cli smoke', () => {
     //
     // **This case used to assert the opposite**, and the assertion was the policy: a device without
     // this project's development build was refused before the boot, and the reason named
-    // `dev --ios --yes`. That is a correct instruction and a dead end for an agent, which cannot
+    // `dev --ios`. That is a correct instruction and a dead end for an agent, which cannot
     // take it without leaving the loop this command exists to serve
     // [Kudo, 2026-09-04: "smoke should be self-served without running dev first"]. So the boot goes
     // ahead for either kind of app, and the install phase puts the app there.
@@ -1203,7 +1203,7 @@ describe('@expo/agent-cli smoke', () => {
         // fail identically for ever, and not a native build, which this project does not need.
         const commands = report.followups.map((followup: any) => followup.command);
         expect(commands[0]).toBe('npx @expo/agent-cli smoke --android');
-        expect(commands.join(' ')).not.toContain('dev --android --yes');
+        expect(commands.join(' ')).not.toContain('dev --android');
       } finally {
         await release();
         await stub.close();

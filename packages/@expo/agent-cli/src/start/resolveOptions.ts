@@ -22,7 +22,7 @@ export interface StartOptions {
  * `@expo/agent-cli start` is `expo start` (llp/0006 §The `@expo/agent-cli` launcher): only the two flags the
  * wrapper itself owns are stripped, and everything else reaches `expo start` untouched — including
  * flags `expo start` rejects, so the Expo CLI stays the one that reports a bad argument. The
- * plan-first engine is `@expo/agent-cli dev`, which owns `--plan`, `--yes` and `--json`.
+ * plan-first engine is `@expo/agent-cli dev`, which owns `--plan` and `--json`.
  *
  * @see llp/0003-knowledge-tools-and-skills.rfc.md §Skills shipped from Expo modules
  */

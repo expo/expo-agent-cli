@@ -77,7 +77,7 @@ describe('where each row of the decision table runs', () => {
   it(`labels a fresh dev-client plan as building nothing, because it builds nothing`, () => {
     const plan = decideStartPlan(createDevClientState(), {
       platform: 'ios',
-      lastBuild: { ios: 'abc123def4567890' },
+      lastBuild: { ios: { hash: 'abc123def4567890', sources: null } },
     });
 
     expect(plan.rule).toBe('dev-client-fresh');

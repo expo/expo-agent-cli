@@ -11,7 +11,6 @@ import { resolveDevOptions } from '../resolveOptions';
 describe(assertKnownDevFlags, () => {
   it.each([
     ['--plan'],
-    ['--yes'],
     ['--json'],
     ['--detach'],
     ['--wait-ready'],
@@ -33,7 +32,7 @@ describe(assertKnownDevFlags, () => {
   it(`refuses an option neither CLI has, before anything is planned`, () => {
     const error = (() => {
       try {
-        assertKnownDevFlags(['--yes', '--bogus']);
+        assertKnownDevFlags(['--plan', '--bogus']);
       } catch (thrown: any) {
         return thrown;
       }
@@ -67,19 +66,19 @@ describe(assertKnownDevFlags, () => {
 
   // Everything after `--` belongs to another tool, so this command has no business judging it.
   it(`leaves everything after a -- separator alone`, () => {
-    expect(() => assertKnownDevFlags(['--yes', '--', '--whatever-it-wants'])).not.toThrow();
+    expect(() => assertKnownDevFlags(['--plan', '--', '--whatever-it-wants'])).not.toThrow();
   });
 });
 
 describe('resolveDevOptions checks the flags first', () => {
   it(`refuses an unknown option instead of forwarding it to expo start`, () => {
-    expect(() => resolveDevOptions(['--yes', '--bogus'])).toThrow(/--bogus/);
+    expect(() => resolveDevOptions(['--plan', '--bogus'])).toThrow(/--bogus/);
   });
 
   // The check runs before the combination rules, so a run with two problems is told about the
   // one it can act on: an option that does not exist cannot have a meaningful interaction.
   it(`still resolves a command made only of options both CLIs have`, () => {
-    const options = resolveDevOptions(['--ios', '--yes', '--go', '--port', '8195', '--json']);
+    const options = resolveDevOptions(['--ios', '--plan', '--go', '--port', '8195', '--json']);
 
     expect(options.port).toBe(8195);
     expect(options.json).toBe(true);

@@ -2200,10 +2200,14 @@ process.exit(1);
       const deadUrl = await getUnusedDevServerUrlAsync();
 
       const timeAsync = async (args: string[]): Promise<number> => {
-        // Best of two: what is under test is the floor, and a scheduler hiccup only ever raises a
-        // sample above it.
+        // Best of four: what is under test is the floor, and a scheduler hiccup only ever raises a
+        // sample above it — so **more samples only ever make this estimate truer**, and cannot
+        // inflate it the way they would for a mean. Two was not enough. The suite runs sharded and
+        // in parallel, so both samples of one side landing on a busy moment is ordinary, and that
+        // is the whole of the flake this row had [observed — 2026-09-06]. Four spawns per side cost
+        // about two seconds against a 60s budget.
         const runs: number[] = [];
-        for (let attempt = 0; attempt < 2; attempt++) {
+        for (let attempt = 0; attempt < 4; attempt++) {
           const startedAt = Date.now();
           const result = await executeAgentCliAsync(projectRoot, args);
           expect(result.exitCode).toBe(0);

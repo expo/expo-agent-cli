@@ -2,10 +2,10 @@
 
 **Type:** RFC
 **Status:** Active
-**Systems:** project-state probe (`src/project/`); plan engine (`src/plan/`); smart `dev` (`src/dev/`); `@expo/agent-cli status` (`src/status/`); dev-server lock (`src/devLock/`); `@expo/fingerprint`
+**Systems:** project-state probe (`src/project/`); plan engine (`src/plan/`); smart `dev` (`src/dev/`); app presence on a device (`src/device/appPresence.ts`); `@expo/agent-cli status` (`src/status/`); dev-server lock (`src/devLock/`); `@expo/fingerprint`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20 · finalized 2026-08-28
-**Revised:** 2026-09-05
+**Revised:** 2026-09-06
 **Related:** [[0001-agentic-cli-on-expo-cli]], [[0002-testing-and-evals]], [[0008-guardrails]], [[0011-impact-and-freshness]], [[0015-backend-selection-and-config]], [[0021-honest-reports]]
 
 ## Summary
@@ -38,7 +38,9 @@ The project-state probe reads:
 | Not an Expo app (no `expo` dependency)                   | nothing. no steps                                       |
 | Expo Go compatible, Go installed                         | start Metro, then open in Expo Go                       |
 | Dev client installed, fingerprint matches last build     | start Metro, then open the dev client                   |
+| Fingerprint matches, and the device has not got the app  | install the built app, then start Metro                 |
 | Fingerprint changed (new native module or config plugin) | prebuild (CNG), native build, install, start            |
+| Fingerprint changed, but not in anything prebuild writes | native build, install, start. no prebuild               |
 | Build cache hit for the current fingerprint              | download and install the cached build, then start Metro |
 | Bare project, native dirs dirty                          | pod install / gradle sync, build, start                 |
 | Web                                                      | start Metro for web                                     |
@@ -51,6 +53,104 @@ the caller is standing in.
 Every command that would act on the plan stops before the table is reached. The row is
 also what the commands that only describe the directory print, so the guard and the
 engine cannot disagree.
+
+### A current build is not an installed app
+
+A fingerprint that matches the recorded build proves the *build* is current. It says nothing about
+where that build is. `dev` read the match as "there is nothing to do but serve", so a project whose
+build was recorded on this machine and then wiped with the simulator — or never installed at all,
+because the build was made by EAS — got a dev server and no app to answer it. The plan was right
+about the build and wrong about the run.
+
+So the two "fresh" rows ask the device. `dev-client-install` and `bare-install` are `dev-client-fresh`
+and `bare-fresh` with one step in front: `expo run:<platform> --no-bundler`, which is the command
+`smoke` already installs a development build with (`src/device/installDevBuild.ts`). The Expo CLI
+owns "compile what is missing, reusing the toolchain's cache, then install and launch", and
+llp/0001 constraint 4 says to invoke that rather than reimplement it. `--no-bundler` because the dev
+server is the step after it. The platform switch behind the question — `simctl` for a simulator,
+`pm path` for Android, disk-exists guard and all — is `src/device/hasApp.ts`, extracted from `smoke`
+so the two callers cannot drift.
+
+**Only `missing` moves a plan.** The probe is three-valued and the third value is load-bearing:
+`unknown` is what a machine with no booted device answers, and a project whose config names no
+`bundleIdentifier`, a platform tool that would not run, an unreadable simulator tree, and a deadline
+that expired (2.5 s, the same discipline the other two device-probe callers apply). Those all plan
+exactly what this table planned before it could ask. That is what makes the probe safe to put on
+the hot path — a probe that fails cannot cost anybody anything, because failing is the old
+behaviour. `AGENT_CLI_NO_DEVICE` answers `unknown` without spawning, so a stubbed harness's runs do
+not depend on the host machine's simulators.
+
+The asymmetry is why `unknown` leans that way. A false `missing` spends a minute installing
+something that was already there; a false `present` is the bug above. But `unknown` is not a third
+cost to weigh, it is yesterday's plan.
+
+**The question is asked only where its answer would be acted on**, and `resolveStartPlanAsync`
+holds all of the gates:
+
+- **A plan that builds never asks.** It ends in `expo run:*`, which installs what it built, so the
+  answer would change nothing and the subprocesses would be spent on every stale run. `expo-go` is
+  left out with it — that runtime is a published app `expo start` offers to install itself — and so
+  are `web` and `not-expo-app`, which have no app to look for.
+- **Only the run that opens the app asks.** The install exists to serve the open, so the gate is
+  the same condition as the open's: a typed native platform flag, and not `--no-open`. That keeps
+  `dev` off devices a caller said to leave alone — `smoke` spawns `dev` with `--no-open` and
+  installs the app in its own phase — and it keeps `status` consistent and instant: `status`
+  resolves plans without a `requestedPlatform`, so it never probes, and its `next` line cannot
+  disagree with sections that never probe either.
+- **Only a local-backend run asks.** `expo run:* --no-bundler` compiles when the toolchain cache is
+  cold, and a caller who routed builds to EAS did not ask for a local compile on the way to a dev
+  server. When the answer is `missing`, the toolchain is checked too: the install runs through
+  Xcode or Gradle even when nothing compiles, so a machine without them keeps the serve-only plan
+  rather than gaining a step that can only fail.
+
+The install is pinned to the device that was asked: the probe hands back what
+`expo run:<platform> --device` calls it (the UDID on iOS, the resolved name on Android), and it
+goes into the step's argv at planning time — the plan approved is the plan run. And the step is
+judged by its result, the way `installDevBuildAsync` already judges the same command: `expo run:*`
+launches the app after installing it, that launch can fail on a permission the install does not
+need (the macOS Automation grant), and output showing the app reached the device makes a non-zero
+exit a warning rather than a stopped plan.
+
+`decideStartPlan` stays a pure function of probed state. The device is asked by
+`resolveStartPlanAsync`, which is already where the toolchain probe happens, and the answer arrives
+as `DecideStartPlanOptions.appPresence` the way `lastBuild` and `buildBackend` do. The plan runner
+knows the install step by its `--no-bundler`: it is the one `expo run:*` that must not be treated
+as a dev-server step, or a lock naming a port nothing listens on would be published for as long as
+the install takes (`src/dev/devAsync.ts` §isDevServerStep), and the detach-phase parser reads it as
+the compiling half of the plan, not the serving half (`src/dev/childVerdict.ts`).
+
+### A stale build is two questions
+
+The two "fingerprint changed" rows used to be one. Splitting them is the difference between
+"something moved" and "what moved", and the hash can only answer the first.
+
+`dev-client-stale` is the row that was always there: the native project has to be written again,
+then compiled. `dev-client-rebuild` is the narrower one under it, for a fingerprint that moved
+without changing anything `prebuild` produces — an `eas.json` edit, a `package.json` `scripts`
+entry. Regenerating an identical `ios/` there spends a minute to write the file that was
+already on disk.
+
+**The split is not a second classifier.** `src/impact/classify.ts` has sorted a fingerprint diff by
+{@link ChangeKind} since [[0011-impact-and-freshness]], and it already says which side each kind
+falls on — a config plugin "writes different native code", an `eas.json` edit "moves the
+fingerprint without changing generated native code, so a cloud build is enough and prebuild is not
+needed". `KIND_NEEDS_PREBUILD` is that prose as a table, and the decision table reads it. Two
+places deciding this separately is exactly how they would come to disagree.
+
+The comparison is `classifyAgainstRecordedBuild`, in process: it diffs the `sources` on the
+recorded build against the ones the probe took. No subprocess and no second fingerprint run, which
+is what makes it affordable on the path `dev` takes every time.
+
+**Undecided means prebuild.** Three inputs cannot answer: a record written before this CLI stored
+`sources`, a fingerprint run that returned none, and — the one that is easy to miss — a hash that
+moved over a diff explaining nothing. That last one is not "nothing prebuild owns changed"; it is
+two hashes disagreeing about a project neither side can account for, and reading it as `false`
+skips the prebuild and builds a native project without the change in it. It costs a minute to be
+wrong in the other direction.
+
+`bare-*` is untouched. Those rows never prebuilt — the native directories are checked in, and
+prebuild would overwrite the thing that changed — and `native-project` is on the `false` side of
+`KIND_NEEDS_PREBUILD` so an answer arriving from here keeps that true.
 
 ## Not an Expo app
 
@@ -114,9 +214,10 @@ Emit the plan first as a structured event (steps, reasons, and time-class estima
 then execute, streaming JSONL progress. `--plan` stops after emitting, so a driving
 agent can present it for approval ([[0008-guardrails]]).
 
-An interactive terminal facing a plan with build-class steps stops before those steps
-and prints the command that runs them with `--yes`. Non-interactive runs proceed.
-Consent is a re-run. See [[0008-guardrails]] §Consent is a re-run, never a prompt.
+Every run proceeds, terminal or not: `dev` runs the plan it printed, and a plan with
+build-class steps is no exception — those steps are the work the command was asked for.
+`--plan` is the dry run, and it is the caller's to ask for.
+See [[0008-guardrails]] §The plan is announced, not negotiated.
 
 ### A step's reason describes the step
 

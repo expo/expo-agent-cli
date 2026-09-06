@@ -115,7 +115,7 @@ describeDevClient('live-devclient: the loop on a real Android development build'
     const started = await runLiveAsync(
       run,
       projectRoot,
-      ['dev', '--detach', '--wait-ready', '--android', '--yes', '--port', String(PORT), '--json'],
+      ['dev', '--detach', '--wait-ready', '--android', '--port', String(PORT), '--json'],
       { label: 'dev-detach' }
     );
     expectExit(started, 0, 'the gate said this project has a recorded build, so this must serve');

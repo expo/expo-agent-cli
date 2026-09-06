@@ -13,12 +13,11 @@ import { devDetachAsync } from '../dev/detachAsync';
 import { resolveDevOptions } from '../dev/resolveOptions';
 import { resolveDevStopOptions } from '../dev/resolveStopOptions';
 import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
-import { androidHasAppAsync } from '../device/androidApps';
 import { bootDeviceAsync, shutdownDeviceAsync } from '../device/bootDevice';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
 import { installDevBuildAsync } from '../device/installDevBuild';
 import { installExpoGoAsync } from '../device/installExpoGo';
-import { simulatorDiskExistsAsync, simulatorHasAppAsync } from '../device/installedApps';
+import { hasAppOnDeviceAsync } from '../device/hasApp';
 import { captureScreenshotAsync, defaultScreenshotPath } from '../device/screenshot';
 import { event } from '../events';
 import { EXIT_OK } from '../exitCodes';
@@ -92,7 +91,6 @@ const TARGET_SETTLE_POLL_MS = 500;
  * @ref llp/0026-dev-owns-the-open.rfc.md
  */
 export const START_DEV_SERVER_ARGV: readonly string[] = [
-  '--yes',
   '--detach',
   '--wait-ready',
   '--no-open',
@@ -249,26 +247,10 @@ function explainOutcome(run: SmokeRun): string {
  * already drifted once — the install decision asked Android for *Expo Go's* application id whatever
  * the project's app was, which was right while only Expo Go was ever installed and wrong the moment
  * a development build could be.
+ *
+ * The switch itself lives in `src/device/hasApp.ts` now, because the plan engine asks the same
+ * question (llp/0004 §A current build is not an installed app).
  */
-async function hasAppOnDeviceAsync(
-  deviceId: string,
-  backend: DeviceBackend | null,
-  appId: string
-): Promise<boolean | null> {
-  if (backend === 'local-android') {
-    return await androidHasAppAsync(deviceId, appId);
-  }
-  if (backend !== 'local-ios') {
-    // A cloud session's device is not this machine's, so nothing here can read it
-    // (llp/0005 §Cloud simulator).
-    return null;
-  }
-  // @ref src/device/installedApps §simulatorDiskExistsAsync — asked **before** the app is looked
-  // for, because "no apps" and "could not look" are the same answer from that read.
-  return (await simulatorDiskExistsAsync(deviceId))
-    ? await simulatorHasAppAsync(deviceId, appId)
-    : null;
-}
 
 /**
  * The real dependencies: for each phase, the function the command that owns that question calls.
@@ -330,10 +312,10 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
     startDevServer: async () => {
       // @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
       //
-      // This used to refuse. `--yes` on the detached child consents to whatever plan it makes, and
-      // for a project whose development build is missing or stale that plan is a compiler — so the
-      // gate named `dev` and stopped, which is a correct instruction and a dead end for a loop that
-      // cannot leave itself to take it.
+      // This used to refuse. The detached child runs whatever plan it makes, and for a project
+      // whose development build is missing or stale that plan is a compiler — so the gate named
+      // `dev` and stopped, which is a correct instruction and a dead end for a loop that cannot
+      // leave itself to take it.
       //
       // It now runs the plan, and **says so before it starts**. A command that silently blocks for
       // twenty minutes is indistinguishable from one that has hung, so the one thing the caller
@@ -666,7 +648,7 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       // ordinary state of a fresh clone (@ref src/project/expoGo §RULES_OUT_EXPO_GO).
       if (decidesAgainstExpoGo(await checkExpoGoCompatibilityAsync(projectRoot)) === false) {
         return {
-          mismatch: `the app that answered is Expo Go (${expoGo}), and this project cannot run in Expo Go — its native code is not in that runtime, so this window is about Expo Go rather than about this project. "${PROGRAM_PREFIX} dev --${options.platform} --yes" makes the development build that can run it`,
+          mismatch: `the app that answered is Expo Go (${expoGo}), and this project cannot run in Expo Go — its native code is not in that runtime, so this window is about Expo Go rather than about this project. "${PROGRAM_PREFIX} dev --${options.platform}" makes the development build that can run it`,
           kind: 'expo-go-incompatible' as const,
           note: null,
         };
@@ -1002,7 +984,7 @@ interface SmokeTarget {
    * true for exactly one plan rule, `expo-go`, on the reasoning that Expo Go is a published binary
    * to download and a development build is this project's own artefact to compile — so the compile
    * belonged to `dev`. The distinction is real and it is not the caller's problem: an agent told
-   * "run `dev --ios --yes` first" cannot take that instruction without leaving the loop this
+   * "run `dev --ios` first" cannot take that instruction without leaving the loop this
    * command exists to serve, which is the same dead end §Putting Expo Go on a simulator that has
    * not got it was written against.
    *
@@ -1023,7 +1005,7 @@ async function resolveSmokeTargetAsync(
 ): Promise<SmokeTarget> {
   const { probeProjectStateAsync } =
     require('../project/probe') as typeof import('../project/probe');
-  const { readLastBuildFingerprints } =
+  const { readLastBuildRecord } =
     require('../plan/lastBuild') as typeof import('../plan/lastBuild');
   const { resolveStartPlanAsync } =
     require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
@@ -1046,7 +1028,7 @@ async function resolveSmokeTargetAsync(
     const state = await probeProjectStateAsync(projectRoot);
     plan = await resolveStartPlanAsync(projectRoot, state, {
       platform: options.platform,
-      lastBuild: readLastBuildFingerprints(projectRoot),
+      lastBuild: readLastBuildRecord(projectRoot),
     });
   } catch {
     // The probe is a courtesy, not a gate: a project it could not read is one this knows nothing
@@ -1072,7 +1054,7 @@ async function resolveSmokeTargetAsync(
     // records for the plan's platform flag]; a development build is `dev`'s to make.
     installWith: expoGo
       ? `npx expo start --${options.platform}`
-      : `${PROGRAM_PREFIX} dev --${options.platform} --yes`,
+      : `${PROGRAM_PREFIX} dev --${options.platform}`,
     installWithKind: expoGo ? 'expo-go' : 'native-build',
   };
 }

@@ -1,7 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Plan contract
-// What `@expo/agent-cli dev` does: probe the project, decide what must run, emit the plan, then (unless
-// `--plan` stopped us, or a person declined it) run its steps as subprocesses. The plain
-// `expo start` wrapper is `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
+// What `@expo/agent-cli dev` does: probe the project, decide what must run, emit the plan, then
+// (unless `--plan` stopped us) run its steps as subprocesses. The plain `expo start` wrapper is
+// `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
 
 import { outputTail } from '../deploy/parseOutput';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
@@ -17,7 +17,7 @@ import { classifySubprocessFailure, lastNonEmptyLine } from '../needsHuman/detec
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { emitStartPlan } from '../plan/emit';
 import { event as planEvent } from '../plan/events';
-import { readLastBuildFingerprints, recordLastBuildFingerprint } from '../plan/lastBuild';
+import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBuild';
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
@@ -41,7 +41,6 @@ import {
 import { appReachedDevice } from './buildEvidence';
 import { event as devEvent } from './events';
 import { forwardedStepArgs, withForwardedExpoArgs } from './forwardedArgs';
-import { hasPlanConsent } from './planConsent';
 import {
   detectPortCollision,
   findFreePortAsync,
@@ -82,7 +81,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     platform: options.platform,
     requestedPlatform: options.platform,
     open: options.open,
-    lastBuild: readLastBuildFingerprints(projectRoot),
+    lastBuild: readLastBuildRecord(projectRoot),
     requestedBackend: options.buildBackend,
     requestedTarget: options.runTarget,
   });
@@ -126,7 +125,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Where a build runs
-  // On stderr, and before the confirmation, because this is the one thing that decides whether the
+  // On stderr, and before the first step, because this is the one thing that decides whether the
   // plan below is worth starting: a build that cannot run here fails many minutes in, at a compiler
   // error about a toolchain, and the command that does work is `eas build`. Said out loud even in
   // `--json` mode, where the plan carrying the same fact is not printed until the run is over.
@@ -139,13 +138,10 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     reportFollowUps('dev', await resolveRunFollowUpsAsync(projectRoot, plan, options, null), {});
   }
 
-  // @ref llp/0008-guardrails.rfc.md §Consent is a re-run, never a prompt — the plan was printed
-  // above, so a run that stops here has already shown what it stopped short of. Stopping is not a
-  // failure: nothing ran, and nothing is wrong, so the command exits 0.
-  if (!hasPlanConsent(plan, options)) {
-    return 0;
-  }
-
+  // @ref llp/0008-guardrails.rfc.md §The plan is announced, not negotiated — the plan was printed
+  // above, and then it runs. `dev` was asked to get this app onto a device, and a build is how that
+  // is done; there is no second act of consent, in a terminal or out of one. `--plan` is the run
+  // that stops.
   const run = await executePlanAsync(projectRoot, plan, state, options);
 
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope
@@ -153,7 +149,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // the plan object with its success-shaped follow-ups and leave only the exit code disagreeing —
   // and when the code was the Expo CLI's own `7`, an agent read a started dev server on stdout,
   // nothing on stderr, and "a person must finish this" from the exit code
-  // [observed — friction run 2, 2026-08-23: `dev --yes --json --ios`].
+  // [observed — friction run 2, 2026-08-23: `dev --yes --json --ios`, when `--yes` still existed].
   if (run.exitCode !== 0 && run.failure) {
     throw planStepFailedError(run.failure, stepOutputFor(options), run.exitCode, options.platform);
   }
@@ -343,7 +339,19 @@ async function executePlanAsync(
     exitCode = result.exitCode;
     planEvent('start_plan_step_exit', { id: step.id, code: exitCode });
 
-    if (exitCode !== 0) {
+    if (exitCode !== 0 && step.id === 'install' && appReachedDevice(`${result.stdout}\n${result.stderr}`)) {
+      // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+      // The install step's job is the app on the device, and the output says it got there — so a
+      // non-zero exit is about what `expo run:*` does *after* the install, which on a Mac without
+      // the Automation grant is the AppleScript launch (observed 2026-09-04, and the reason
+      // `installDevBuildAsync` judges this command by its result rather than its exit code). The
+      // dev server still to come deep-links into the app itself, so the launch is not load-bearing
+      // here. Failing the plan over it would stop the one step the caller was waiting for.
+      Log.warn(
+        `The ${step.argv[1]} install put the app on the device, then exited with ${exitCode} — most likely the launch, which the dev server's own open replaces. Continuing.`
+      );
+      exitCode = 0;
+    } else if (exitCode !== 0) {
       // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
       // F121, and **before** the needs-human throw below rather than after it: `expo run:*` builds,
       // installs and launches in one subprocess, and a launch that failed is not a build that did.
@@ -491,7 +499,7 @@ async function portDemandedError(
         : `Why: ${holder} is listening on it, and --port ${port} is a requirement rather than a preference — moving the dev server to another port would leave every URL and every command that names ${port} pointing at nothing.`,
       ours
         ? `How: use the dev server that is running ("${smokeCommand(smokePlatform)}" checks its bundle and its app), or stop it first with "${PROGRAM_PREFIX} dev:stop".`
-        : `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --${platform} --yes --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
+        : `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --${platform} --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
     ].join('\n')
   );
   // Never the command that just failed: it would stop in exactly the same place.
@@ -499,7 +507,7 @@ async function portDemandedError(
     ? smokeCommand(smokePlatform)
     : free == null
       ? `${PROGRAM_PREFIX} dev:stop --port ${port} --force`
-      : `${PROGRAM_PREFIX} dev --${platform} --yes --port ${free}`;
+      : `${PROGRAM_PREFIX} dev --${platform} --port ${free}`;
   error.exitCode = EXIT_OUTCOME_FAILED;
   return error;
 }
@@ -621,7 +629,7 @@ function stopPromptFor(
         // this run finished was not recorded. It is now, and the reader is told so on the line that
         // sends them there.
         failure.buildRecorded
-          ? `Note: the app it built is installed on the simulator already, so that build is recorded and "${PROGRAM_PREFIX} dev --${platform} --yes" starts a dev server rather than building again.`
+          ? `Note: the app it built is installed on the simulator already, so that build is recorded and "${PROGRAM_PREFIX} dev --${platform}" starts a dev server rather than building again.`
           : '',
         said ? `\nWhat the tool printed:\n${said}` : '',
       ]
@@ -864,6 +872,14 @@ function isDevServerStep(step: PlanStep): boolean {
   if (step.argv[0] !== 'expo') {
     // `eas build` finishes with an artifact and starts nothing. The dev server of an EAS-backed
     // plan is the `expo start --dev-client` step that follows it.
+    return false;
+  }
+  if (step.argv.includes('--no-bundler')) {
+    // The install step of an `*-install` plan (llp/0004 §A current build is not an installed app).
+    // `--no-bundler` is the flag that says it serves nothing, so running it through the dev-server
+    // runner would publish a lock naming a port nothing will listen on, for as long as the install
+    // takes — and every reader of that lock (`status`, `smoke`, `dev:stop`, a `--detach` parent
+    // waiting on another port) would be told about a dev server that does not exist.
     return false;
   }
   const command = step.argv[1];

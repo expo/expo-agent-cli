@@ -1,7 +1,9 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
 // Types local to the plan engine. The shared probe/plan contract lives in `src/project/types.ts`.
 
+import type { AppPresence } from '../device/appPresence';
 import type { BuildBackendChoice } from '../toolchain/selectBackend';
+import type { LastBuildRecord } from './lastBuild';
 import type { RunTargetChoice } from './runTarget';
 
 /** A platform that needs a native app to run the project. */
@@ -12,6 +14,11 @@ export type PlanPlatform = NativePlatform | 'web';
 
 /**
  * The fingerprint hash of the last development build `@expo/agent-cli` ran, per platform.
+ *
+ * @deprecated The decision table takes the whole `LastBuildRecord` now: a hash answers "is the last
+ * build stale" and nothing else, and the table also has to ask *what* went stale to know whether a
+ * prebuild is part of the answer (llp/0004 §Decision table). Kept as a name for the hash-only view,
+ * which `impact` still builds for a comparison that was never about planning.
  *
  * @see ./lastBuild.ts for the `.expo` file this is read from.
  */
@@ -35,10 +42,28 @@ export type StartPlanRule =
   | 'expo-go'
   /** A development build exists for the current fingerprint. */
   | 'dev-client-fresh'
+  /**
+   * The build is current, and the device has not got it, so it is installed before the dev server.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+   */
+  | 'dev-client-install'
   /** The native project must be generated and built before the app can run. */
   | 'dev-client-stale'
+  /**
+   * The build is stale, but nothing `prebuild` writes has changed, so the native project is kept.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §Decision table
+   */
+  | 'dev-client-rebuild'
   /** Native directories are checked in and match the last build. */
   | 'bare-fresh'
+  /**
+   * Native directories match the last build, and the device has not got the app.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+   */
+  | 'bare-install'
   /** Native directories are checked in and must be built. */
   | 'bare-stale'
   /** The project cannot run in Expo Go and has no `expo-dev-client` dependency yet. */
@@ -70,10 +95,34 @@ export interface DecideStartPlanOptions {
    */
   open?: boolean;
   /**
-   * Fingerprint hashes of the last builds `@expo/agent-cli` ran. Passed in by the caller so the
-   * decision table stays a pure function of probed state.
+   * What the last builds `@expo/agent-cli` ran were made from, per platform. Passed in by the
+   * caller so the decision table stays a pure function of probed state.
+   *
+   * The **whole record**, hash and `sources` together, and not only the hashes it used to be. The
+   * hash decides whether the build is stale; the sources decide whether `prebuild` is part of what
+   * makes it fresh again, which is a different question and one a hash cannot answer
+   * (llp/0004 §Decision table). A record written by an older CLI carries `sources: null`, and the
+   * table falls back to planning a prebuild — the answer it always gave.
    */
-  lastBuild?: LastBuildFingerprints;
+  lastBuild?: LastBuildRecord;
+  /**
+   * Whether the device this run would open has the development build already.
+   *
+   * @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+   *
+   * Passed in, like {@link lastBuild} and {@link buildBackend}, because asking a device is I/O and
+   * this table is a pure function of probed state. `'unknown'` and `undefined` mean the same thing
+   * and are the default: the plan that was made before anything could ask.
+   */
+  appPresence?: AppPresence;
+  /**
+   * What `expo run:<platform> --device` calls the device the presence probe asked, or null.
+   *
+   * Read only when {@link appPresence} is `missing`: the install step is pinned to the device that
+   * was actually checked, so a machine with two devices cannot install on one and keep serving
+   * nothing to the other. Null runs the install unpinned, and the Expo CLI picks the device.
+   */
+  installDevice?: string | null;
   /**
    * Where this plan's native build runs, when the caller has resolved it.
    *

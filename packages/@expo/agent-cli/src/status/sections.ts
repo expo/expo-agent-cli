@@ -479,7 +479,15 @@ export function buildLocalDeviceStatus(probe: LocalDeviceProbe): LocalDeviceStat
  */
 export function buildNextActionStatus(
   state: ProjectState,
-  lastBuild: LastBuildFingerprints,
+  /**
+   * What the last builds were made from, per platform.
+   *
+   * The whole record rather than the hashes this used to take, because the one thing it is read
+   * for is the fallback plan below, and the decision table needs the `sources` beside each hash to
+   * know whether a stale build starts with a prebuild (llp/0004 §Decision table). The freshness
+   * line, which is the hash-only question, is a different section.
+   */
+  lastBuild: LastBuildRecord,
   platform: PlanPlatform,
   devServer: DevServerStatus | null,
   device: LocalDeviceStatus | null = null,

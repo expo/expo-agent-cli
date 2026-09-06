@@ -181,26 +181,36 @@ export function stepOpensPlatform(step: string): boolean {
 export function parseDetachedChildPhase(rawLines: readonly string[]): DetachedChildPhase {
   const lines = rawLines.flatMap((line) => line.split('\n'));
 
-  // The **last** dev-server step of the plan, which is the one the lock belongs to: a plan is a
-  // list run in order, and only its last step serves.
-  let step: string | null = null;
+  // Two rows matter, and they are not always the same row. The last dev-server step is the one the
+  // lock belongs to: a plan is a list run in order, and only its last step serves. The last
+  // *compiling* step is the one that decides the phase — in a stale plan they are one `expo run:*`
+  // row, but an `*-install` plan (llp/0004 §A current build is not an installed app) puts a
+  // `run:* --no-bundler` install ahead of an `expo start` that serves, and reading only the serving
+  // row there reported `serving` while the install was still compiling a cold cache — the exact
+  // F125 misreport this parser exists to prevent.
+  let servingStep: string | null = null;
+  let compilingStep: string | null = null;
   for (const line of lines) {
     const command = PLAN_STEP_ROW.exec(line)?.[1]?.trim();
-    if (command && DEV_SERVER_COMMANDS.includes(command.split(/\s+/)[1] ?? '')) {
-      step = command;
+    if (!command) {
+      continue;
     }
-  }
-  const opensPlatform = step != null && stepOpensPlatform(step);
-  if (step == null || !BUILDING_COMMANDS.includes(step.split(/\s+/)[1] ?? '')) {
-    return { phase: 'serving', step, opensPlatform };
+    const verb = command.split(/\s+/)[1] ?? '';
+    if (BUILDING_COMMANDS.includes(verb)) {
+      compilingStep = command;
+    }
+    if (DEV_SERVER_COMMANDS.includes(verb) && !command.includes('--no-bundler')) {
+      servingStep = command;
+    }
   }
 
   // The install is what says the compiler finished: it is the next thing `expo run:*` does, and it
-  // is the marker F121 already reads for exactly that reason. After it, the same step is starting a
-  // dev server, and a bundler that has not answered yet is about the wait rather than about a build.
-  return {
-    phase: appReachedDevice(lines.join('\n')) ? 'serving' : 'building',
-    step,
-    opensPlatform,
-  };
+  // is the marker F121 already reads for exactly that reason. After it, what remains of the plan is
+  // a dev server, and a bundler that has not answered yet is about the wait rather than a build.
+  if (compilingStep != null && !appReachedDevice(lines.join('\n'))) {
+    return { phase: 'building', step: compilingStep, opensPlatform: true };
+  }
+
+  const step = servingStep ?? compilingStep;
+  return { phase: 'serving', step, opensPlatform: step != null && stepOpensPlatform(step) };
 }

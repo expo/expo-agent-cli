@@ -13,7 +13,6 @@ describe(resolveDevOptions, () => {
       json: false,
       fingerprintCache: true,
       followups: true,
-      yes: false,
       open: true,
       detach: false,
       waitReady: false,
@@ -36,7 +35,6 @@ describe(resolveDevOptions, () => {
       json: false,
       fingerprintCache: true,
       followups: true,
-      yes: false,
       open: true,
       detach: false,
       waitReady: false,
@@ -61,7 +59,6 @@ describe(resolveDevOptions, () => {
       json: false,
       fingerprintCache: true,
       followups: true,
-      yes: false,
       open: true,
       detach: false,
       waitReady: false,
@@ -82,12 +79,12 @@ describe(resolveDevOptions, () => {
     expect(() => resolveDevOptions([flag])).toThrow(new RegExp(flag));
   });
 
-  it(`should approve the plan up front with --yes and strip the flag`, () => {
-    const options = resolveDevOptions(['--ios', '--yes', '--clear']);
-
-    expect(options.yes).toBe(true);
-    expect(options.expoArgs).toEqual(['--clear']);
-    expect(resolveDevOptions(['--ios']).yes).toBe(false);
+  // @ref llp/0008-guardrails.rfc.md §The plan is announced, not negotiated
+  // `--yes` was the consent for a plan that builds. `dev` runs that plan either way now, so the
+  // flag is gone rather than accepted-and-ignored — a flag that does nothing is a flag a caller
+  // keeps passing to get a behaviour they already have.
+  it(`should refuse --yes, which no longer exists`, () => {
+    expect(() => resolveDevOptions(['--ios', '--yes'])).toThrow(/--yes/);
   });
 
   it.each([
@@ -199,7 +196,6 @@ describe(resolveDevOptions, () => {
       json: true,
       fingerprintCache: true,
       followups: true,
-      yes: false,
       open: true,
       detach: false,
       waitReady: false,
@@ -224,7 +220,6 @@ describe(resolveDevOptions, () => {
       json: false,
       fingerprintCache: true,
       followups: false,
-      yes: false,
       open: true,
       detach: false,
       waitReady: false,

@@ -15,11 +15,26 @@ import type { DevServerLockInfo } from './types';
 /**
  * How long a reader waits for the lock to answer.
  *
- * The lock writes one line the moment a connection lands, over a local socket, so an answer that
- * takes longer than this is not coming. Kept short because a reader is usually a command a person
- * or an agent is waiting on.
+ * The lock writes one line the moment a connection lands, over a local socket, so this is a
+ * ceiling on a slow answer rather than a cost anybody pays for a fast one.
+ *
+ * **It is only ever paid when a lock exists and its holder is busy.** The two ordinary outcomes
+ * both settle on an event, not on this timer: no dev server means no socket file and no listener,
+ * which is an `error` on connect and immediate, and a responsive dev server writes its line on
+ * `connect` and is immediate too. The timer is reached in exactly one state — something accepted
+ * the connection and has not answered yet — and that state is a *running* dev server whose process
+ * has not got round to its socket handler.
+ *
+ * It was 250 ms, which is a plausible stall for a Node event loop under load and therefore the
+ * wrong budget. The cost of expiring is not a slow answer, it is a **wrong** one: the reader falls
+ * through to the default port, finds nothing, and reports `NO_DEV_SERVER` with a `How:` line
+ * telling the caller to start a dev server they are already running — so the recovery on offer is
+ * to start a second one [observed — reproduced 3/3 under CPU load, 2026-09-06, as a flake in
+ * `e2e/__tests__/runtime-reload-test.ts`; 3/3 pass at this value under the same load].
+ *
+ * Still bounded, because a holder that never answers must not hang the command.
  */
-export const DEV_LOCK_CONNECT_TIMEOUT_MS = 250;
+export const DEV_LOCK_CONNECT_TIMEOUT_MS = 2000;
 
 /** Cap on what a reader will buffer, so a socket that streams forever cannot grow this process. */
 const MAX_ANSWER_BYTES = 64 * 1024;

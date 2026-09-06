@@ -217,7 +217,7 @@ describe('the command line --start uses', () => {
   it(`asks for a detached, ready dev server and nothing else`, () => {
     const { START_DEV_SERVER_ARGV } = require('../smokeAsync') as typeof import('../smokeAsync');
 
-    expect([...START_DEV_SERVER_ARGV]).toEqual(['--yes', '--detach', '--wait-ready', '--no-open']);
+    expect([...START_DEV_SERVER_ARGV]).toEqual(['--detach', '--wait-ready', '--no-open']);
   });
 
   // The platform flag itself goes on the command at the call site — `dev` requires one — and

@@ -25,15 +25,15 @@ afterEach(() => vol.reset());
 
 describe(buildDetachSpawn, () => {
   it(`runs this CLI again, on this process' own Node`, () => {
-    const spawn = buildDetachSpawn('/bin/cli.js', ['--yes']);
+    const spawn = buildDetachSpawn('/bin/cli.js', ['--ios']);
 
     expect(spawn.command).toBe(process.execPath);
-    expect(spawn.args).toEqual(['/bin/cli.js', 'dev', '--yes']);
+    expect(spawn.args).toEqual(['/bin/cli.js', 'dev', '--ios']);
   });
 
   // The one thing that must not survive: a child given `--detach` would detach a detached run.
   it(`strips --detach, so the child is the run`, () => {
-    expect(buildDetachSpawn('/bin/cli.js', ['--detach', '--yes']).args).not.toContain('--detach');
+    expect(buildDetachSpawn('/bin/cli.js', ['--detach', '--ios']).args).not.toContain('--detach');
   });
 
   // The wait is the parent's, and the child has nobody to report it to.
@@ -52,7 +52,6 @@ describe(buildDetachSpawn, () => {
   it(`keeps everything the dev server needs`, () => {
     const { args } = buildDetachSpawn('/bin/cli.js', [
       '--detach',
-      '--yes',
       '--port',
       '8195',
       '--ios',
@@ -62,7 +61,6 @@ describe(buildDetachSpawn, () => {
     expect(args).toEqual([
       '/bin/cli.js',
       'dev',
-      '--yes',
       '--port',
       '8195',
       '--ios',
@@ -75,7 +73,6 @@ describe(buildDetachSpawn, () => {
       '--ios',
       '--detach',
       '--wait-ready',
-      '--yes',
       '--port',
       '8195',
     ]);
@@ -86,7 +83,6 @@ describe(buildDetachSpawn, () => {
       '/bin/cli.js',
       'dev',
       '--ios',
-      '--yes',
       '--port',
       '8195',
     ]);

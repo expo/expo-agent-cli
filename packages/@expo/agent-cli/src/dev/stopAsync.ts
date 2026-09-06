@@ -558,7 +558,7 @@ function buildFollowUps(report: DevStopResultJson): FollowUp[] {
     }
     followups.push({
       id: 'dev',
-      command: devCommand(hostPlatform(), '--yes'),
+      command: devCommand(hostPlatform()),
       why: 'The dev server is stopped, so this is what starts one again when the app is needed.',
     });
     return followups;

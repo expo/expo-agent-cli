@@ -20,7 +20,7 @@ import path from 'path';
 import type { FingerprintSource } from '../project/fingerprint';
 import { ensureDotExpoProjectDirectoryInitialized } from '../utils/dotExpo';
 import { debugEvent } from './events';
-import type { LastBuildFingerprints, NativePlatform } from './types';
+import type { NativePlatform } from './types';
 
 /** Name of the record inside the project's `.expo` directory. */
 export const LAST_BUILD_FILE_NAME = 'agent-cli-last-build.json';
@@ -99,24 +99,6 @@ function parseEntry(value: unknown): LastBuildFingerprint | null {
     hash: entry.hash,
     sources: Array.isArray(entry.sources) ? (entry.sources as FingerprintSource[]) : null,
   };
-}
-
-/**
- * Read the fingerprint hashes recorded for the project's last development builds.
- *
- * The shape the plan engine and `status` have always read: the freshness question is a hash
- * comparison, and neither of them has anything to do with the sources.
- */
-export function readLastBuildFingerprints(projectRoot: string): LastBuildFingerprints {
-  const record = readLastBuildRecord(projectRoot);
-  const fingerprints: LastBuildFingerprints = {};
-  for (const platform of PLATFORMS) {
-    const entry = record[platform];
-    if (entry) {
-      fingerprints[platform] = entry.hash;
-    }
-  }
-  return fingerprints;
 }
 
 /**
