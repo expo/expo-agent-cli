@@ -1,6 +1,6 @@
 {
   "name": "@expo/agent-cli",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Agent-native CLI on top of the Expo CLI family",
   "keywords": [
     "agent",
