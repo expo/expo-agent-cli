@@ -121,7 +121,7 @@ describe(reverseLoopbackPortAsync, () => {
 describe(`${loopbackPortOfUrl.name} — a tunnelled run`, () => {
   it.each([
     ['a ws tunnel host', 'exp://znakdiwe5j2n5o0.boltexpo.dev/--/?'],
-    ['a signed tunnel host', 'exp://sample-notes.on.staging.expo.app/--/notes'],
+    ['a signed tunnel host', 'exp://sample-notes.on.expo.app/--/notes'],
     [
       'a dev launcher URL carrying a tunnel origin',
       'myapp://expo-development-client/?url=https%3A%2F%2Fabc.boltexpo.dev',

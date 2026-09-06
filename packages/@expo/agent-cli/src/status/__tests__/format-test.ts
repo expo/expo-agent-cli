@@ -833,12 +833,12 @@ describe(formatStatusReport, () => {
           ready: true,
           projectRootMatched: true,
           hostType: 'tunnel',
-          tunnelUrl: 'https://x8fj2.on.staging.expo.app',
+          tunnelUrl: 'https://x8fj2.on.expo.app',
           openUrls: [
             {
               target: 'dev-build',
               label: 'development build',
-              url: 'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.staging.expo.app',
+              url: 'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.expo.app',
             },
           ],
           appsListed: 0,
@@ -849,7 +849,7 @@ describe(formatStatusReport, () => {
       const rendered = report(value);
       expect(rendered).toContain('open in development build:');
       expect(rendered).toContain(
-        'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.staging.expo.app'
+        'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.expo.app'
       );
     });
 
