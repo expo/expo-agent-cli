@@ -5,6 +5,7 @@
 import { vol } from 'memfs';
 
 import type { ProjectState } from '../../project/types';
+import type { LastBuildRecord } from '../lastBuild';
 import { resetSettingsCache } from '../../settings';
 import { detectToolchainAsync } from '../../toolchain';
 import type { ToolchainProbe, ToolchainStatus } from '../../toolchain/types';
@@ -65,6 +66,11 @@ function argvOf(plan: { steps: { argv: string[] }[] }): string[][] {
   return plan.steps.map((step) => step.argv);
 }
 
+/** A probe that fails the test if it is called at all, for the rows about not spending it. */
+const neverProbed = async (): Promise<never> => {
+  throw new Error('the device was probed for a plan that has nothing to learn from it');
+};
+
 beforeEach(() => {
   resetSettingsCache();
   vol.reset();
@@ -74,10 +80,99 @@ beforeEach(() => {
 describe('a plan that builds nothing', () => {
   it(`asks the machine nothing at all`, async () => {
     writeProject();
-    const plan = await resolveStartPlanAsync(projectRoot, expoGoState(), { platform: 'ios' });
+    const plan = await resolveStartPlanAsync(projectRoot, expoGoState(), {
+      platform: 'ios',
+      probeAppPresence: neverProbed,
+    });
 
     expect(plan.rule).toBe('expo-go');
     expect(detectToolchainAsync).not.toHaveBeenCalled();
+  });
+});
+
+// @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+//
+// Where the two subprocesses of the device probe are spent, and where they are not. The rule is
+// narrow on purpose: only a plan that *does not build* has anything to learn from the device,
+// because a plan that builds ends in `expo run:*` and that command installs what it built.
+describe('the device probe', () => {
+  /** A project whose recorded build matches, which is the state that makes the device the question. */
+  function freshProject(): { state: ProjectState; lastBuild: LastBuildRecord } {
+    const state = devClientState();
+    return { state, lastBuild: { ios: { hash: state.fingerprint.hash!, sources: null } } };
+  }
+
+  it(`installs before the dev server when the device has not got the app`, async () => {
+    writeProject();
+    const { state, lastBuild } = freshProject();
+
+    const plan = await resolveStartPlanAsync(projectRoot, state, {
+      platform: 'ios',
+      lastBuild,
+      probeAppPresence: async () => 'missing',
+    });
+
+    expect(plan.rule).toBe('dev-client-install');
+    expect(argvOf(plan)).toEqual([
+      ['expo', 'run:ios', '--no-bundler'],
+      ['expo', 'start', '--dev-client'],
+    ]);
+  });
+
+  it(`starts the dev server alone when the device has it`, async () => {
+    writeProject();
+    const { state, lastBuild } = freshProject();
+
+    const plan = await resolveStartPlanAsync(projectRoot, state, {
+      platform: 'ios',
+      lastBuild,
+      probeAppPresence: async () => 'present',
+    });
+
+    expect(plan.rule).toBe('dev-client-fresh');
+    expect(argvOf(plan)).toEqual([['expo', 'start', '--dev-client']]);
+  });
+
+  it(`asks about the platform the plan targets`, async () => {
+    writeProject();
+    const { state } = freshProject();
+    const asked: string[] = [];
+
+    await resolveStartPlanAsync(projectRoot, state, {
+      platform: 'android',
+      lastBuild: { android: { hash: state.fingerprint.hash!, sources: null } },
+      probeAppPresence: async (_root, platform) => {
+        asked.push(platform);
+        return 'present';
+      },
+    });
+
+    expect(asked).toEqual(['android']);
+  });
+
+  // The cost rule. A build installs what it builds, so the answer would change nothing and the
+  // subprocesses would be spent on every stale run.
+  it(`is not spent on a plan that builds`, async () => {
+    writeProject();
+
+    const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
+      platform: 'ios',
+      probeAppPresence: neverProbed,
+    });
+
+    expect(plan.rule).toBe('dev-client-stale');
+  });
+
+  it.each([
+    ['an Expo Go project, whose runtime expo start installs itself', 'ios' as const],
+    ['web, which opens a browser', 'web' as const],
+  ])(`is not spent on %s`, async (_case, platform) => {
+    writeProject();
+
+    await resolveStartPlanAsync(projectRoot, expoGoState(), {
+      platform,
+      probeAppPresence: neverProbed,
+    });
   });
 });
 

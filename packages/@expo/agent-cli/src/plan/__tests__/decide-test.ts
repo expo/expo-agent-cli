@@ -281,6 +281,107 @@ describe(decideStartPlan, () => {
     });
   });
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+  //
+  // A matching fingerprint proves the *build* is current and says nothing about where it is. These
+  // rows are the difference between the two.
+  describe('the device the app would open on', () => {
+    /** A project whose recorded build matches, which is what makes the device the open question. */
+    function freshState() {
+      const state = createDevClientState();
+      return {
+        state,
+        lastBuild: recorded('ios', state.fingerprint.hash!),
+      };
+    }
+
+    it(`should install before starting when the device has not got the app`, () => {
+      const { state, lastBuild } = freshState();
+      const plan = decideStartPlan(state, { platform: 'ios', lastBuild, appPresence: 'missing' });
+
+      expect(plan.rule).toBe('dev-client-install');
+      expect(plan.target).toBe('dev-client');
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
+      ]);
+      expect(plan.reasons.join('\n')).toMatch(/has not got this development build/);
+    });
+
+    it(`should say the install compiles nothing, and what would make that untrue`, () => {
+      const { state, lastBuild } = freshState();
+      const plan = decideStartPlan(state, { platform: 'ios', lastBuild, appPresence: 'missing' });
+
+      expect(plan.steps[0]!.reason).toMatch(/nothing to compile/);
+      // The honest half: the toolchain cache is not the fingerprint's to promise.
+      expect(plan.steps[0]!.reason).toMatch(/cache is cold compiles first/);
+    });
+
+    it(`should only start the dev server when the device already has the app`, () => {
+      const { state, lastBuild } = freshState();
+      const plan = decideStartPlan(state, { platform: 'ios', lastBuild, appPresence: 'present' });
+
+      expect(plan.rule).toBe('dev-client-fresh');
+      expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--dev-client']]);
+    });
+
+    // Said out loud even though it changed nothing, so a reader can tell "the app is there" from
+    // "nothing asked" — the two produce the same plan and are not the same fact.
+    it(`should report a device that has the app, on the plan it did not change`, () => {
+      const { state, lastBuild } = freshState();
+      const plan = decideStartPlan(state, { platform: 'ios', lastBuild, appPresence: 'present' });
+
+      expect(plan.reasons.join('\n')).toMatch(/already has this development build/);
+    });
+
+    // The safety property of the whole feature: a probe that could not answer plans what this
+    // table planned before the probe existed.
+    it.each([['unknown' as const], [undefined]])(
+      `should plan the bare start for %s, which is what nothing-asked means`,
+      (appPresence) => {
+        const { state, lastBuild } = freshState();
+        const plan = decideStartPlan(state, { platform: 'ios', lastBuild, appPresence });
+
+        expect(plan.rule).toBe('dev-client-fresh');
+        expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--dev-client']]);
+        expect(plan.reasons.join('\n')).not.toMatch(/development build installed|has not got/);
+      }
+    );
+
+    it(`should never add an install to a plan that builds, because the build installs`, () => {
+      const plan = decideStartPlan(createDevClientState(), {
+        platform: 'ios',
+        appPresence: 'missing',
+      });
+
+      expect(plan.rule).toBe('dev-client-stale');
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
+    // The bare rows have the same hole and the same fix: native directories checked in say nothing
+    // about what is on the simulator.
+    it(`should install for a bare project whose device has not got the app`, () => {
+      const state = createState({
+        nativeDirs: { ios: true, android: false },
+        usesDevClient: true,
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recorded('ios', state.fingerprint.hash!),
+        appPresence: 'missing',
+      });
+
+      expect(plan.rule).toBe('bare-install');
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'run:ios', '--no-bundler'],
+        ['expo', 'start', '--dev-client'],
+      ]);
+    });
+  });
+
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
   //
   // The row this split was made for. The fingerprint moved, so the build is stale and something has

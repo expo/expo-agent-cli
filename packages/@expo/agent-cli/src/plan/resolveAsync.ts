@@ -3,6 +3,7 @@
 // flags they typed, this host, and what the toolchain probe found. Everything it calls is pure
 // except the probe and two file reads, and it is the only module that knows the order they go in.
 
+import { probeAppPresenceAsync, type AppPresence } from '../device/appPresence';
 import { easJsonExistsSync } from '../followups/projectFiles';
 import type { ProjectState, StartPlan } from '../project/types';
 import { readAgentCliSettings, settingsBuildBackend } from '../settings';
@@ -14,6 +15,17 @@ import { decideStartPlan } from './decide';
 import { selectRunTarget } from './runTarget';
 import type { DecideStartPlanOptions } from './types';
 
+/**
+ * The rules whose plan is "the app is already on a device, so just serve it".
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+ *
+ * The two rows that assume an installed app without ever having asked. Every other buildless rule
+ * has nothing to ask about: `web` opens a browser, `expo-go` runs in a published app that
+ * `expo start` offers to install itself, and `not-expo-app` has no app.
+ */
+const AWAITS_A_DEVICE: ReadonlySet<string> = new Set(['dev-client-fresh', 'bare-fresh']);
+
 export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
   /** Where a flag on this command line asked the build to run, or null when none did. */
   requestedBackend?: BuildBackend | null;
@@ -21,26 +33,42 @@ export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
   requestedTarget?: RunTarget | null;
   /** `process.platform`. Injected so the selection can be exercised for other hosts. */
   hostPlatform?: NodeJS.Platform;
+  /** Injected for tests, so the device question is answerable without a device. */
+  probeAppPresence?: (projectRoot: string, platform: 'ios' | 'android') => Promise<AppPresence>;
 }
 
 /**
  * Decide the plan, backend and all.
  *
  * The table is run **twice**, and deliberately: the first pass is what tells us whether this
- * project needs a native build at all and for which platform, and only a plan with a build in it
- * has a backend question to answer. Both passes are pure functions with no I/O, so the second one
+ * project needs a native build at all and for which platform, and only then is there a question
+ * worth asking the machine. The table itself is a pure function either way, so the second pass
  * costs nothing measurable — and paying for it keeps `decideStartPlan` a function of *project*
  * state, with the host and the config staying the caller's business (llp/0004 §Where a build runs).
  *
- * The probe is skipped entirely when the answer cannot change anything: a caller who asked for the
- * cloud is not made to wait on two subprocesses that ask about this machine's Xcode.
+ * **Which question the draft earns depends on whether it builds**, and the two are exclusive:
+ *
+ * - A plan that builds asks the *toolchain* — can this machine compile for this platform — because
+ *   that decides whether the steps are `expo run:*` or `eas build`.
+ * - A plan that does not build asks the *device* — has it got the app already — because that is the
+ *   assumption a buildless plan is making (llp/0004 §A current build is not an installed app).
+ *
+ * Neither is asked when the answer cannot change anything: a caller who asked for the cloud is not
+ * made to wait on two subprocesses about this machine's Xcode, and a plan whose own `expo run:*`
+ * installs the app is not made to wait on two about a simulator.
  */
 export async function resolveStartPlanAsync(
   projectRoot: string,
   state: ProjectState,
   options: ResolveStartPlanOptions = {}
 ): Promise<StartPlan> {
-  const { requestedBackend = null, requestedTarget = null, hostPlatform, ...planOptions } = options;
+  const {
+    requestedBackend = null,
+    requestedTarget = null,
+    hostPlatform,
+    probeAppPresence = probeAppPresenceAsync,
+    ...planOptions
+  } = options;
 
   const { settings } = readAgentCliSettings(projectRoot);
   const runTarget = selectRunTarget({
@@ -50,8 +78,26 @@ export async function resolveStartPlanAsync(
 
   const draft = decideStartPlan(state, { ...planOptions, runTarget });
   if (!draft.buildLocation) {
-    // Nothing to build, so nothing to choose and nothing to probe. Most plans end here.
-    return draft;
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+    //
+    // No build to choose a backend for, which is the *only* shape of plan where the device question
+    // is worth two subprocesses. A plan that builds ends in `expo run:*`, and that command installs
+    // what it built — so asking whether the app is on the device would buy a fact nothing reads.
+    // A plan that does not build is the one that assumed the app was already there.
+    //
+    // Skipped unless the plan is a development build waiting on a device: `web` opens a browser,
+    // `expo-go` is a runtime `expo start` installs itself, and `not-expo-app` has no app at all.
+    if (!AWAITS_A_DEVICE.has(draft.rule) || planOptions.platform == null) {
+      return draft;
+    }
+    const platform = planOptions.platform;
+    if (platform !== 'ios' && platform !== 'android') {
+      return draft;
+    }
+    const appPresence = await probeAppPresence(projectRoot, platform);
+    // Run again rather than patch the draft: the table is the one place a rule and its steps are
+    // decided together, and a plan assembled anywhere else is a second table to keep in step.
+    return decideStartPlan(state, { ...planOptions, runTarget, appPresence });
   }
 
   const { platform } = draft.buildLocation;

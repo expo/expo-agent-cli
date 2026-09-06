@@ -2,7 +2,7 @@
 
 **Type:** RFC
 **Status:** Active
-**Systems:** project-state probe (`src/project/`); plan engine (`src/plan/`); smart `dev` (`src/dev/`); `@expo/agent-cli status` (`src/status/`); dev-server lock (`src/devLock/`); `@expo/fingerprint`
+**Systems:** project-state probe (`src/project/`); plan engine (`src/plan/`); smart `dev` (`src/dev/`); app presence on a device (`src/device/appPresence.ts`); `@expo/agent-cli status` (`src/status/`); dev-server lock (`src/devLock/`); `@expo/fingerprint`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20 · finalized 2026-08-28
 **Revised:** 2026-09-06
@@ -38,6 +38,7 @@ The project-state probe reads:
 | Not an Expo app (no `expo` dependency)                   | nothing. no steps                                       |
 | Expo Go compatible, Go installed                         | start Metro, then open in Expo Go                       |
 | Dev client installed, fingerprint matches last build     | start Metro, then open the dev client                   |
+| Fingerprint matches, and the device has not got the app  | install the built app, then start Metro                 |
 | Fingerprint changed (new native module or config plugin) | prebuild (CNG), native build, install, start            |
 | Fingerprint changed, but not in anything prebuild writes | native build, install, start. no prebuild               |
 | Build cache hit for the current fingerprint              | download and install the cached build, then start Metro |
@@ -52,6 +53,41 @@ the caller is standing in.
 Every command that would act on the plan stops before the table is reached. The row is
 also what the commands that only describe the directory print, so the guard and the
 engine cannot disagree.
+
+### A current build is not an installed app
+
+A fingerprint that matches the recorded build proves the *build* is current. It says nothing about
+where that build is. `dev` read the match as "there is nothing to do but serve", so a project whose
+build was recorded on this machine and then wiped with the simulator — or never installed at all,
+because the build was made by EAS — got a dev server and no app to answer it. The plan was right
+about the build and wrong about the run.
+
+So the two "fresh" rows ask the device. `dev-client-install` and `bare-install` are `dev-client-fresh`
+and `bare-fresh` with one step in front: `expo run:<platform> --no-bundler`, which is the command
+`smoke` already installs a development build with (`src/device/installDevBuild.ts`). The Expo CLI
+owns "compile what is missing, reusing the toolchain's cache, then install and launch", and
+llp/0001 constraint 4 says to invoke that rather than reimplement it. `--no-bundler` because the dev
+server is the step after it.
+
+**Only `missing` moves a plan.** The probe is three-valued and the third value is load-bearing:
+`unknown` is what a machine with no booted device answers, and a project whose config names no
+`bundleIdentifier`, and a platform tool that would not run. Those all plan exactly what this table
+planned before it could ask. That is what makes the probe safe to put on the hot path — a probe
+that fails cannot cost anybody anything, because failing is the old behaviour.
+
+The asymmetry is why `unknown` leans that way. A false `missing` spends a minute installing
+something that was already there; a false `present` is the bug above. But `unknown` is not a third
+cost to weigh, it is yesterday's plan.
+
+**A plan that builds never asks.** It ends in `expo run:*`, which installs what it built, so the
+answer would change nothing and the two subprocesses would be spent on every stale run.
+`resolveStartPlanAsync` gates on that: no build location, and a rule that assumed an installed app.
+`expo-go` is left out with it — that runtime is a published app `expo start` offers to install
+itself — and so are `web` and `not-expo-app`, which have no app to look for.
+
+`decideStartPlan` stays a pure function of probed state. The device is asked by
+`resolveStartPlanAsync`, which is already where the toolchain probe happens, and the answer arrives
+as `DecideStartPlanOptions.appPresence` the way `lastBuild` and `buildBackend` do.
 
 ### A stale build is two questions
 

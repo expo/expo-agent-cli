@@ -107,6 +107,28 @@ export function decideStartPlan(
   // anything?" is a question the plan has to answer either way, and a plan that mentions the
   // preference only when it changed something leaves the reader unable to tell the two apart.
   const targetFacts = runTargetReasons(runTarget, state);
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+  //
+  // Only `'missing'` moves a plan. `'unknown'` is the answer on every machine that cannot be asked
+  // — no device booted, no `bundleIdentifier` in the config, a platform tool that would not run —
+  // and it has to keep planning what this table planned before it could ask, or a probe that fails
+  // becomes a minute of install on every run it fails on.
+  const missingFromDevice = options.appPresence === 'missing';
+  /**
+   * What the device answered, said out loud on the rows where it changed nothing.
+   *
+   * A plan that mentioned the device only when it added a step would leave the reader unable to
+   * tell "the app is on the simulator" from "nothing asked" — the same rule {@link runTargetReasons}
+   * follows for a preference that did not move anything.
+   */
+  const presenceFacts =
+    options.appPresence === 'present'
+      ? [`The ${platform} device already has this development build installed.`]
+      : options.appPresence === 'missing'
+        ? [
+            `The ${platform} device has not got this development build, so it is installed before the dev server starts.`,
+          ]
+        : [];
   /** The steps that make and install the app, per the backend that was chosen. */
   const buildSteps = (reason: string, prebuild: boolean): PlanStep[] =>
     backend?.runsOn === 'eas'
@@ -121,32 +143,49 @@ export function decideStartPlan(
   // never regenerates them with prebuild. `expo run:*` performs the pod install / gradle sync
   // that the LLP table calls for before building.
   if (state.nativeDirs.ios || state.nativeDirs.android) {
-    return build.fresh
-      ? plan(
-          'bare-fresh',
-          'bare',
-          [startDevClientStep(build.summary, options)],
-          [...facts, ...build.reasons, ...targetFacts]
-        )
-      : plan(
-          'bare-stale',
-          'bare',
-          buildSteps(build.summary, false),
-          [...factsWhen(true), ...build.reasons, ...targetFacts, ...buildFacts],
-          location()
-        );
+    if (build.fresh) {
+      return missingFromDevice
+        ? plan(
+            'bare-install',
+            'bare',
+            [installStep(platform), startDevClientStep(build.summary, options)],
+            [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
+          )
+        : plan(
+            'bare-fresh',
+            'bare',
+            [startDevClientStep(build.summary, options)],
+            [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
+          );
+    }
+    return plan(
+      'bare-stale',
+      'bare',
+      buildSteps(build.summary, false),
+      [...factsWhen(true), ...build.reasons, ...targetFacts, ...buildFacts],
+      location()
+    );
   }
 
   // From here the project uses Continuous Native Generation: no native directories exist, so a
   // build always starts with prebuild.
   if (state.usesDevClient) {
     if (build.fresh) {
-      return plan(
-        'dev-client-fresh',
-        'dev-client',
-        [startDevClientStep(build.summary, options)],
-        [...facts, ...build.reasons, ...targetFacts]
-      );
+      // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+      // A matching fingerprint proves the build is current and says nothing about where it is.
+      return missingFromDevice
+        ? plan(
+            'dev-client-install',
+            'dev-client',
+            [installStep(platform), startDevClientStep(build.summary, options)],
+            [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
+          )
+        : plan(
+            'dev-client-fresh',
+            'dev-client',
+            [startDevClientStep(build.summary, options)],
+            [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
+          );
     }
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
     // Two stale rows rather than one, split on what moved rather than on whether anything did.
@@ -300,6 +339,35 @@ function prebuildStep(platform: NativePlatform): PlanStep {
     ['expo', 'prebuild', '--platform', platform],
     'a-minute',
     `Generates the ${platform} native project from the app config and the installed packages. Runs ${LOCAL_WHERE}, as the first half of a local build.`,
+    'local'
+  );
+}
+
+/**
+ * Put an existing development build on the device, without building and without a bundler.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+ *
+ * `expo run:<platform> --no-bundler`, which is the same command `smoke` installs a development
+ * build with (`src/device/installDevBuild.ts`) — the Expo CLI already owns "compile what is
+ * missing, reusing the toolchain's cache, then install and launch", and llp/0001 constraint 4 says
+ * to invoke that rather than reimplement it. `--no-bundler` is what separates this from
+ * {@link runStep}: the dev server is the step after this one, and a second Metro would be a second
+ * answer to which bundle the app is running.
+ *
+ * **`a-minute`, and the reason says why it might not be.** This step is only ever planned when the
+ * fingerprint matches the recorded build, so the compiler has nothing to do and Xcode or Gradle
+ * answers out of its cache. That cache is not the fingerprint's to promise: it lives outside the
+ * project, and a machine that cleaned it — or never had it, because the recorded build was made on
+ * another one — compiles from scratch here. Naming the cheap case and stating what makes it cheap
+ * is honest in a way that either time class alone is not.
+ */
+function installStep(platform: NativePlatform): PlanStep {
+  return step(
+    'install',
+    ['expo', `run:${platform}`, '--no-bundler'],
+    'a-minute',
+    `Installs the existing ${platform} development build on the device and launches it. The project fingerprint matches the recorded build, so there is nothing to compile and this reuses what ${platform === 'ios' ? 'Xcode' : 'Gradle'} already built — a machine whose build cache is cold compiles first, which takes minutes. --no-bundler because the next step is the dev server.`,
     'local'
   );
 }

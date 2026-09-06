@@ -1,6 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
 // Types local to the plan engine. The shared probe/plan contract lives in `src/project/types.ts`.
 
+import type { AppPresence } from '../device/appPresence';
 import type { BuildBackendChoice } from '../toolchain/selectBackend';
 import type { LastBuildRecord } from './lastBuild';
 import type { RunTargetChoice } from './runTarget';
@@ -41,6 +42,12 @@ export type StartPlanRule =
   | 'expo-go'
   /** A development build exists for the current fingerprint. */
   | 'dev-client-fresh'
+  /**
+   * The build is current, and the device has not got it, so it is installed before the dev server.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+   */
+  | 'dev-client-install'
   /** The native project must be generated and built before the app can run. */
   | 'dev-client-stale'
   /**
@@ -51,6 +58,12 @@ export type StartPlanRule =
   | 'dev-client-rebuild'
   /** Native directories are checked in and match the last build. */
   | 'bare-fresh'
+  /**
+   * Native directories match the last build, and the device has not got the app.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+   */
+  | 'bare-install'
   /** Native directories are checked in and must be built. */
   | 'bare-stale'
   /** The project cannot run in Expo Go and has no `expo-dev-client` dependency yet. */
@@ -92,6 +105,16 @@ export interface DecideStartPlanOptions {
    * table falls back to planning a prebuild — the answer it always gave.
    */
   lastBuild?: LastBuildRecord;
+  /**
+   * Whether the device this run would open has the development build already.
+   *
+   * @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+   *
+   * Passed in, like {@link lastBuild} and {@link buildBackend}, because asking a device is I/O and
+   * this table is a pure function of probed state. `'unknown'` and `undefined` mean the same thing
+   * and are the default: the plan that was made before anything could ask.
+   */
+  appPresence?: AppPresence;
   /**
    * Where this plan's native build runs, when the caller has resolved it.
    *
