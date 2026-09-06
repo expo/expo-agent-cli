@@ -108,6 +108,18 @@ const gate = allOf(
  */
 const BOUND_MS = 300_000;
 
+/**
+ * How long the session start alone gets.
+ *
+ * Creating the session is fast; what varies is the wait for the agent-device to become **ready** —
+ * the same command's create→ready span was 3.3 minutes at one point on 2026-09-06 and past five at
+ * another, on an account with nothing else running. Under {@link BOUND_MS} that variance became a
+ * suite failure with a killed `eas simulator` and a session the `catch` had to stop. The device
+ * boot is EAS's to pace (Android support is declared in-development by the CLI itself), so the
+ * start gets double the bound rather than an assertion about how long a datacenter takes.
+ */
+const SESSION_START_MS = 600_000;
+
 /** What `--timeout` is set to on a cloud reload, spelled the way that option parses. */
 const RELOAD_TIMEOUT = '180s';
 
@@ -162,10 +174,10 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   let sessionId: string | null = null;
 
   /** `eas` through the same package runner this CLI uses, with the evidence kept. */
-  async function easAsync(label: string, args: string[]) {
+  async function easAsync(label: string, args: string[], timeoutMs: number = BOUND_MS) {
     const result = await execAsync('npx', ['--yes', 'eas-cli@latest', ...args], {
       cwd: projectRoot || run.tempDir,
-      timeoutMs: BOUND_MS,
+      timeoutMs,
     });
     run.writeArtifact(
       `eas-${label}.txt`,
@@ -504,18 +516,22 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
 
     let started: Awaited<ReturnType<typeof easAsync>>;
     try {
-      started = await easAsync('simulator-start', [
-        'simulator',
-        '--platform',
-        CLOUD_PLATFORM,
-        '--type',
-        'agent-device',
-        ...appFlags,
-        '--non-interactive',
-        '--name',
-        'agent-cli-live',
-        '--json',
-      ]);
+      started = await easAsync(
+        'simulator-start',
+        [
+          'simulator',
+          '--platform',
+          CLOUD_PLATFORM,
+          '--type',
+          'agent-device',
+          ...appFlags,
+          '--non-interactive',
+          '--name',
+          'agent-cli-live',
+          '--json',
+        ],
+        SESSION_START_MS
+      );
     } catch (error: any) {
       sessionId = findSessionId(String(error?.stdout ?? ''), String(error?.stderr ?? ''));
       if (sessionId) {
@@ -540,7 +556,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // Scaffold, install, a tunnel, a detached dev server and a billed simulator session: minutes.
     // Without its own bound this hook hit vitest's 10s default and the suite never reached a test —
     // which is why it had never been seen run.
-  }, 600_000);
+  }, 900_000);
 
   afterAll(async () => {
     await run.cleanUpAsync();
