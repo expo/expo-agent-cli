@@ -291,19 +291,26 @@ describe('@expo/agent-cli dev', () => {
     }
 
     /**
-     * The steps `dev --plan` would run, as argv lists.
+     * The plan `dev --plan` prints, parsed.
      *
      * `--local` pins the backend: on a CI box with no Xcode the selector would route the rebuild
      * to EAS, and these tests are about *when* a build is planned, not where it runs.
      */
-    async function planStepsAsync(projectRoot: string): Promise<string[][]> {
+    async function planAsync(
+      projectRoot: string
+    ): Promise<{ rule: string; steps: string[][] }> {
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--plan', '--ios', '--local', '--json'],
         { env: HASH_FROM_PROJECT }
       );
       expect(result.exitCode).toBe(0);
-      return JSON.parse(result.stdout).steps.map((step: { argv: string[] }) => step.argv);
+      const plan = JSON.parse(result.stdout);
+      return { rule: plan.rule, steps: plan.steps.map((step: { argv: string[] }) => step.argv) };
+    }
+
+    async function planStepsAsync(projectRoot: string): Promise<string[][]> {
+      return (await planAsync(projectRoot)).steps;
     }
 
     it('starts the dev server and nothing else while nothing changed', async () => {
@@ -324,6 +331,36 @@ describe('@expo/agent-cli dev', () => {
         ['expo', 'prebuild', '--platform', 'ios'],
         ['expo', 'run:ios'],
       ]);
+    });
+
+    // The reason these transitions are e2e tests at all: the whole chain — build, record with
+    // sources, re-fingerprint, diff, classify, plan — runs through the published bundle, so a
+    // break anywhere in it shows up as the wrong step list here.
+    it('starts only the dev server when a JS file changed', async () => {
+      const projectRoot = await recordedProjectAsync();
+
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'index.js'),
+        'console.log("edited: the fingerprint does not read JS, so the build still matches");\n'
+      );
+
+      const plan = await planAsync(projectRoot);
+      expect(plan.rule).toBe('dev-client-fresh');
+      expect(plan.steps).toEqual([['expo', 'start', '--dev-client']]);
+    });
+
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §A stale build is two questions
+    it('builds without prebuilding when only eas.json changed', async () => {
+      const projectRoot = await recordedProjectAsync();
+
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'eas.json'),
+        JSON.stringify({ build: { development: { developmentClient: true } } }, null, 2)
+      );
+
+      const plan = await planAsync(projectRoot);
+      expect(plan.rule).toBe('dev-client-rebuild');
+      expect(plan.steps).toEqual([['expo', 'run:ios']]);
     });
 
     it('builds again after a dependency changed the fingerprint', async () => {
