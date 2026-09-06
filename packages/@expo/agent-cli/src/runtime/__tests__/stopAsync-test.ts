@@ -347,7 +347,7 @@ describe(runtimeStopAsync, () => {
   });
 });
 
-// @ref llp/0005-runtime-loop-tools.rfc.md §Stopping the app — live staging, S13.
+// @ref llp/0005-runtime-loop-tools.rfc.md §Stopping the app — live run S13.
 //
 // On a cloud session `wasRunning` is null: the controller closes the app in front and answers the
 // same way whatever application id it was given. The follow-up read that null as `false` and

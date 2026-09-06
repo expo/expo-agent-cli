@@ -112,7 +112,7 @@ export function buildExplainReport(read: ReadLogResult, options: ExplainOptions)
 /**
  * The error for a source that is not a log.
  *
- * @ref llp/0012-build-explain.rfc.md §Is this a log at all — live staging, S8.
+ * @ref llp/0012-build-explain.rfc.md §Is this a log at all — live run S8.
  *
  * Exit `22` rather than `20`, and never `0`: nothing about the build was measured, so this is
  * llp/0010's "nothing was shown to be wrong and nothing was proved right" — the same code

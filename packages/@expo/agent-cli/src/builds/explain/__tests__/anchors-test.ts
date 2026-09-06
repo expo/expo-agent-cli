@@ -83,7 +83,7 @@ describe('anchorFor', () => {
     expect(found?.anchor.suggestedCommand?.(found.match)).toBeNull();
   });
 
-  // A real EAS build failure, verbatim [observed — 2026-08-26, staging build 77e676e2…]. What
+  // A real EAS build failure, verbatim [observed — 2026-08-26, EAS build 77e676e2…]. What
   // `Cannot find module` names is a *specifier*, and a specifier is very often a deep import: the
   // suggestion has to install the package, because `npx expo install <pkg>/package.json` is not a
   // package name and the command fails on the reader's machine.

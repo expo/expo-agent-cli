@@ -6,7 +6,7 @@
 // naming the most common cause. On an unlinked project that line said "most often an account that is
 // not signed in" to somebody who was signed in, while the real cause — `EAS project not configured`,
 // and the `eas init` that fixes it — sat in the raw output under a different heading
-// [observed — live staging, 2026-08-26, S2; friction run 7, F67].
+// [observed — live run S2, 2026-08-26; friction run 7, F67].
 //
 // The EAS CLI's own message is a better source than a guess, and the two strings below are stable
 // enough to key on: both were observed live, and both are the *whole* explanation the CLI gives.
@@ -46,7 +46,7 @@ interface EasFailureSignature {
 
 /**
  * `Accounts you can create projects in: alice, expo, expo-services, bob` — the EAS CLI's own
- * list, printed under the two `eas init` forms [observed — friction run 9, live staging].
+ * list, printed under the two `eas init` forms [observed — friction run 9; live run, 2026-08-26].
  */
 const ACCOUNTS_LINE = /^\s*Accounts you can create projects in:\s*(.+?)\s*$/im;
 

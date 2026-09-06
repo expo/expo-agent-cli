@@ -51,7 +51,9 @@ const TRIM_CHUNK = 10_000;
  * The message of an EAS Build log record, or the line unchanged when it is not one.
  *
  * **An EAS Build log is JSONL**, one bunyan record per line — `{name, pid, phase, buildId, source,
- * level, msg, time, v, logId}` [observed — 2026-08-26, staging build `77e676e2…`, 644 records].
+ * level, msg, time, v, logId}` [observed — 2026-08-26, EAS build `77e676e2…`, 644 records;
+ * re-observed — 2026-09-06, production build `52a1c2f2…`, 812 records, plus per-record extras
+ * like `marker` and `durationMs`].
  * That is not what the rest of this module was built for, and leaving it wrapped costs three
  * things at once: the rule table matches inside a JSON blob rather than against the sentence a
  * tool printed, the `Start phase:` markers never reach `phases.ts`, and every context line a
@@ -90,9 +92,10 @@ const TEXT_SAMPLE_CHARS = 8_192;
  * The share of control characters above which the input is not a log.
  *
  * Measured rather than guessed: an EAS build log saved without decoding its brotli body was **55%**
- * control characters, and the same log decoded was **0%** [observed — live staging, 2026-08-26,
- * evidence 35 and 37]. Two per cent leaves room for the odd stray byte a real log carries and is
- * nowhere near either measurement.
+ * control characters, and the same log decoded was **0%** [observed — live run, 2026-08-26,
+ * evidence 35 and 37; re-measured — 2026-09-06, production build `52a1c2f2…`: 54% and 0%]. Two per
+ * cent leaves room for the odd stray byte a real log carries and is nowhere near either
+ * measurement.
  */
 const MAX_CONTROL_RATIO = 0.02;
 
@@ -126,7 +129,7 @@ export interface ReadLogResult {
    *
    * False for a log that was never decoded: EAS serves one brotli-encoded, and a caller who saved
    * the response as-is got exit 0, `failure: null` and ten kilobytes of control characters in
-   * `logTail` [live staging, S8]. Measured on {@link TEXT_SAMPLE_CHARS} characters of the start,
+   * `logTail` [live run S8]. Measured on {@link TEXT_SAMPLE_CHARS} characters of the start,
    * **after** the ANSI codes are stripped — count them raw and a colourful Gradle log fails this.
    */
   looksLikeText: boolean;

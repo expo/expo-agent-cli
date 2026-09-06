@@ -442,7 +442,7 @@ async function refineFreshnessAsync(
  * `eas fingerprint:compare --build-id` takes **no platform**, because a build was made for exactly
  * one and which one is a fact about the build rather than a question to ask. That used to mean the
  * one answer was copied onto *every* platform, which reported an iOS simulator build as able to run
- * android code [observed — live staging, 2026-08-26, S1]. So the build's own platform is asked for,
+ * android code [observed — live run S1, 2026-08-26]. So the build's own platform is asked for,
  * and only that platform's headline is replaced; the others say they were not compared. The
  * `fresh`/`stale` states are left alone on all of them, because they are about the project's own
  * record and that question did not change.

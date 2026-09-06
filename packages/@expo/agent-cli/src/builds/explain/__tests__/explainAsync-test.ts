@@ -159,7 +159,7 @@ describe('the fixtures directory', () => {
   });
 });
 
-// @ref llp/0012-build-explain.rfc.md §Is this a log at all — live staging, S8.
+// @ref llp/0012-build-explain.rfc.md §Is this a log at all — live run S8.
 //
 // A brotli-encoded EAS log saved without decoding it was read as a clean build: exit 0,
 // `failure: null`, and ~10 KB of control characters in `logTail`. Nothing about that input was a

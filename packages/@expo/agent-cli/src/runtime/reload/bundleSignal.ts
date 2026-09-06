@@ -4,7 +4,7 @@
 //
 // `runtime:reload` has two proofs, and both of them are a connection to the dev server: peer churn
 // on the client command socket, and a debugger target the dev server had never listed. An app on a
-// cloud simulator over a tunnel had neither [observed — live staging, 2026-08-26, S11: Expo Go
+// cloud simulator over a tunnel had neither [observed — live run S11, 2026-08-26: Expo Go
 // loaded this project's manifest on the session and `/json/list` stayed empty for three minutes].
 // A reload that cannot be proved is reported as unproved, which is right and is also a dead end: the
 // command could never exit 0 on the device it exists for.

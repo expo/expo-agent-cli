@@ -1,0 +1,32 @@
+{
+  "sessions": [
+    {
+      "id": "01a07577-bad8-712a-b34f-3c2bdf3b66b1",
+      "name": "agent-cli-live",
+      "tags": [],
+      "type": "agent-device",
+      "status": "IN_PROGRESS",
+      "platform": "IOS",
+      "createdAt": "2026-09-06T06:46:16.024Z",
+      "startedAt": "2026-09-06T06:47:30.205Z",
+      "deviceRunSessionUrl": "https://expo.dev/accounts/expo-ci/projects/expo-agent-cli/simulator-sessions/01a07577-bad8-712a-b34f-3c2bdf3b66b1"
+    },
+    {
+      "id": "01a07577-0cfa-7c90-b2f2-7b98a9110323",
+      "name": "agent-cli-live",
+      "tags": [],
+      "type": "agent-device",
+      "status": "IN_PROGRESS",
+      "platform": "ANDROID",
+      "createdAt": "2026-09-06T06:45:31.514Z",
+      "startedAt": "2026-09-06T06:48:50.362Z",
+      "deviceRunSessionUrl": "https://expo.dev/accounts/expo-ci/projects/expo-agent-cli/simulator-sessions/01a07577-0cfa-7c90-b2f2-7b98a9110323"
+    }
+  ],
+  "pageInfo": {
+    "hasNextPage": false,
+    "hasPreviousPage": false,
+    "startCursor": "eyJpZCI6IjAxYTA3NTc3LWJhZDgtNzEyYS1iMzRmLTNjMmJkZjNiNjZiMSJ9",
+    "endCursor": "eyJpZCI6IjAxYTA3NTc3LTBjZmEtN2M5MC1iMmYyLTdiOThhOTExMDMyMyJ9"
+  }
+}

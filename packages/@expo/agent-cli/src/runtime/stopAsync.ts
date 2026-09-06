@@ -271,7 +271,7 @@ export function buildStopFollowUps(report: RuntimeStopResultJson): FollowUp[] {
       command: `${PROGRAM_PREFIX} navigate /${flag}`,
       // Three arms, not two. `wasRunning: null` is the cloud case — the controller closes the app
       // in front and says nothing about which id that was — and a falsy check read it as `false`,
-      // so the follow-up asserted "The app was not running" about an app that was [live staging,
+      // so the follow-up asserted "The app was not running" about an app that was [live run,
       // S13: Expo Go was running, `wasRunning: null`, and the line said it was not].
       why:
         report.wasRunning == null

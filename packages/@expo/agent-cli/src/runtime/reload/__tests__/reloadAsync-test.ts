@@ -794,7 +794,7 @@ describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => 
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live
-// staging, S12.
+// run S12.
 //
 // The device fallback is a force-stop and a relaunch. When the relaunch is refused, the app is left
 // **closed** — and on a cloud session the controller's own session app is what was closed, which
@@ -1073,7 +1073,7 @@ describe('an app the command socket cannot see', () => {
 // a cloud session has to reach that dev server through a tunnel to be running the bundle at all".
 // Live, the tunnel carried the **bundle** and not the client command socket: the broadcast reached
 // nobody, the fallback stopped the app, and the relaunch was refused
-// [observed — live staging, 2026-08-26, S12; reproduced, 2026-08-27].
+// [observed — live run S12, 2026-08-26; reproduced, 2026-08-27].
 describe('reloading an app on a cloud simulator session', () => {
   const SESSION_LISTING = JSON.stringify({
     sessions: [
@@ -1226,7 +1226,7 @@ describe('reloading an app on a cloud simulator session', () => {
 
   // The broadcast is asked and never sent, and the reason is the observation rather than an
   // assumption: the socket held no client, which is what a cloud session over a tunnel is
-  // [observed — live staging, S12]. Wave 21 asks it rather than skipping it on the strength of
+  // [observed — live run S12]. Wave 21 asks it rather than skipping it on the strength of
   // `--cloud`, because the flag names a *device backend* and not a fact about this socket.
   it(`sends no broadcast to a command socket a cloud session never registered on`, async () => {
     writeCloudProject();

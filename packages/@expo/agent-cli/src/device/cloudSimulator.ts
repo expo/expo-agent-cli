@@ -56,7 +56,7 @@ export type CloudPlatform = 'ios' | 'android';
  * proves nothing about what is running — what it is genuinely true about is *which* session this
  * project last started, and that makes it a **preference** when the service reports more than one.
  *
- * A live run made that case stronger and one of its facts wrong [observed — 2026-08-26, staging,
+ * A live run made that case stronger and one of its facts wrong [observed — 2026-08-26,
  * `eas-cli` 22.5.0, `eas simulator --platform android --build-id … --type agent-device --json`].
  * The claim used to be that a `--json` start does not write the file at all [read from
  * `eas-cli@22.2.0` `build/simulator/env.js`]. It **does** write it — and writes it **empty**: three
@@ -281,7 +281,7 @@ export function buildCloudAlertArgs({
  *
  * The alert this exists for is the one S10 is: "Open in 'Expo Go'?", which SpringBoard raises when a
  * custom-scheme URL is handed to the system, and which nothing on an unattended cloud device answers
- * [observed — live staging, 2026-08-26, S10; `agent-device alert accept` proved the causality].
+ * [observed — live run S10, 2026-08-26; `agent-device alert accept` proved the causality].
  *
  * **Read as text rather than parsed**, deliberately. What `alert get` prints for a *present* alert
  * has not been seen by anything in this package — only the empty answer has — so a parser for it
@@ -1089,7 +1089,7 @@ export function cloudNeedsTunnelError(
 /**
  * What to do about a device the controller says is already in use.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live staging, S14.
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live run S14.
  *
  * `DEVICE_IN_USE` is the one controller refusal whose remedy is in its own message: it names the
  * session that holds the device. The general advice for a refused verb — "a session can end between

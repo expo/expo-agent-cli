@@ -90,7 +90,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run
   // Here, before anything is printed. The options a caller typed for `expo start` used to be folded
   // in while the step ran, so `--plan --tunnel` printed a command without `--tunnel` and the run
-  // passed it [observed — friction run 7, F71; live staging, S5].
+  // passed it [observed — friction run 7, F71; live run S5].
   const { plan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
   if (dropped.length) {
     const last = plan.steps[plan.steps.length - 1]!;

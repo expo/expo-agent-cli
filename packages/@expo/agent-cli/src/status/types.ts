@@ -147,7 +147,7 @@ export interface FreshnessComparison {
    * asked of EAS — or the one the caller named with `--platform`. Null means the comparison is
    * attributed to no platform at all, and every platform's impact says it was not compared: one
    * build is one platform, and copying its verdict onto both said an iOS build could run android
-   * code [live staging, S1].
+   * code [live run S1].
    */
   platform: 'ios' | 'android' | null;
 }

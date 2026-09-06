@@ -92,7 +92,7 @@ function installPackage(name: string | undefined): string | null {
  *
  * What a resolver names when it fails is a **specifier**, and a specifier is routinely a deep
  * import — the failure that made this necessary reads `Cannot find module
- * '@expo/expo-modules-macros-plugin/package.json'` [observed — 2026-08-26, staging build
+ * '@expo/expo-modules-macros-plugin/package.json'` [observed — 2026-08-26, EAS build
  * `77e676e2…`, an EAS `INSTALL_PODS` failure]. Passing that through produced
  * `npx expo install @expo/expo-modules-macros-plugin/package.json`, which is not a package name and
  * fails on the reader's machine — the one thing a suggested command must never do.

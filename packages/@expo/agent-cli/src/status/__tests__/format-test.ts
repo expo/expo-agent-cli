@@ -1173,7 +1173,7 @@ describe('the eas build line', () => {
   });
 
   // @ref llp/0021-honest-reports.rfc.md §The rules — live
-  // staging, S9. The clipped end of this sentence is the clause that says what to do.
+  // run S9. The clipped end of this sentence is the clause that says what to do.
   it(`prints a reason too long for the line under it, rather than clipping it`, () => {
     const reason =
       'the eas at /Users/somebody/.tuft-bin/eas exited 101 and printed nothing an eas run would print, so it may not be the real CLI — check that file';

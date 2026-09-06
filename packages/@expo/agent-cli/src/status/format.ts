@@ -300,7 +300,7 @@ function buildsLine(builds: BuildsStatus): string {
     // A reason too long for this line is printed under it rather than clipped: the actionable half
     // of "the eas at … exited 101 and printed nothing an eas run would print, so it may not be the
     // real CLI — check that file" is the last clause, and that is the clause a width cut removed
-    // [observed — live staging, S9].
+    // [observed — live run S9].
     const inline = platform.reason && !isLongReason(platform.reason) ? ` (${platform.reason})` : '';
     return `${platform.platform}: ${chalk.yellow('unknown')}${chalk.dim(inline)}`;
   });
@@ -377,7 +377,7 @@ const SECTIONS_WITH_VALUES: readonly StatusSectionName[] = [
  *
  * Printed whole, indented, and never summarized: this is the half a reader has to act on, and
  * clipping it at a line width is what left the text report with the useless half of the sentence
- * [live staging, S9].
+ * [live run S9].
  */
 function sectionNoteLines(report: StatusReport): string[] {
   const indent = ' '.repeat(LABEL_WIDTH);

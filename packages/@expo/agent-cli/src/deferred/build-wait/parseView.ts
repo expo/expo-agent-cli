@@ -136,7 +136,7 @@ export function readBuildDetails(payload: BuildViewPayload | null): BuildWaitDet
  * and both are real `BuildFragment` fields, requested on every query [observed — eas-cli 22.5.0
  * `graphql/types/Build.js` lists them beside `isForIosSimulator`, which does arrive].
  *
- * **Expect them to be missing anyway.** Neither appeared once across a full live wait on staging —
+ * **Expect them to be missing anyway.** Neither appeared once across a full live wait —
  * ~10 min `IN_QUEUE` then `IN_PROGRESS`, iOS and Android, 37 and 10 polls [observed — 2026-08-26,
  * builds `77e676e2…` and `04994b5e…`]. Two things stack up: the service leaves them null unless it
  * has a position to report, and `printJsonOnlyOutput` **deletes every null key** before printing

@@ -970,7 +970,7 @@ describe(cloudVerbFailedError, () => {
     expect(error.message).toContain('spawn eas ENOENT');
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live staging, S14.
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live run S14.
   //
   // `DEVICE_IN_USE` means the device is **held**, and the caller's `how` said the opposite: "a
   // session can end between the moment it was listed and the moment a verb reaches it. Start a new

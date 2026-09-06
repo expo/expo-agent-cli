@@ -184,8 +184,9 @@ describe('@expo/agent-cli dev --plan', () => {
     });
 
     // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run —
-    // friction run 7's F71 and live staging's S5. The plan printed `expo start --go` while the run
-    // executed `expo start --go --tunnel`, so what an agent approved was not what happened.
+    // friction run 7's F71 and the 2026-08-26 live run's S5. The plan printed `expo start --go`
+    // while the run executed `expo start --go --tunnel`, so what an agent approved was not what
+    // happened.
     it('prints every forwarded flag, because the plan approved is the plan run', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
       const result = await executeAgentCliAsync(projectRoot, [

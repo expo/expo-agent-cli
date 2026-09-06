@@ -222,7 +222,7 @@ export async function resolveDevServerReachAsync(projectRoot: string): Promise<D
   // live runs settled that:
   //
   //  - `Waiting on <url>` is printed once, by a *terminal* run — a detached `--tunnel` run's log
-  //    did not contain the tunnel host at all while the tunnel was up [observed — live staging,
+  //    did not contain the tunnel host at all while the tunnel was up [observed — live run,
   //    2026-08-26, S3], so every command that needed the address a device uses reported null and
   //    asked the caller for `--dev-server-url`;
   //  - a dev server serving a **public origin** through a proxy prints
