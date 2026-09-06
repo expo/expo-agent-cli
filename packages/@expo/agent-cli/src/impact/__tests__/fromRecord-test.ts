@@ -31,6 +31,25 @@ function recorded(hash: string, sources: FingerprintSource[] | null): LastBuildF
 }
 
 describe(classifyAgainstRecordedBuild, () => {
+  // @ref ../fromRecord §MEMO — `status` asks this twice per platform, about the same two lists,
+  // and the diff underneath walks every fingerprint source. The identity of the answer is the
+  // observable half of "it was not computed again".
+  it(`should answer a repeat of the same question without diffing again`, () => {
+    const record = recorded('base', [appConfig('a')]);
+    const head = { hash: 'head', sources: [appConfig('a'), nativeModule('b')] };
+
+    const first = classifyAgainstRecordedBuild('ios', record, head);
+
+    expect(classifyAgainstRecordedBuild('ios', record, head)).toBe(first);
+    // Per platform, because the answer is: the same record and the same working tree still say
+    // different things about ios and android.
+    expect(classifyAgainstRecordedBuild('android', record, head)).not.toBe(first);
+    // And per input, so a second record with the same hashes never reads the first's answer.
+    expect(
+      classifyAgainstRecordedBuild('ios', recorded('base', [appConfig('a')]), head)
+    ).not.toBe(first);
+  });
+
   it(`should classify an added autolinked module as needing a native build`, () => {
     const impact = classifyAgainstRecordedBuild('ios', recorded('base', [appConfig('a')]), {
       hash: 'head',

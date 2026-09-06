@@ -36,6 +36,25 @@ const EXPO_GO_TARGET = {
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=1&page=1',
 };
 
+/**
+ * The same, for a project whose app is a development build rather than Expo Go.
+ *
+ * The application id is the difference and the whole of it: a target listed under
+ * `host.exp.Exponent` is Expo Go's, and a run that decided this project needs a development build
+ * would be reading the wrong app's runtime.
+ */
+const DEV_BUILD_TARGET = {
+  id: '1',
+  appId: 'com.example.devclientfreshapp',
+  // The name the stub `xcrun` reports as booted, and the reason this target counts as an iOS one:
+  // nothing about a development build's app id names a platform, so `platformOfTarget` falls
+  // through to the device index the simulator list builds (`src/runtime/targetPlatform.ts`). Expo
+  // Go needs none of this — its bundle id *is* the evidence — which is why the constant above has
+  // no device name and this one must.
+  deviceName: 'iPhone 17 Pro',
+  webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=1&page=1',
+};
+
 /** The eight bytes every PNG starts with, as a JS string escape the stub can write. */
 const PNG_HEADER_ESCAPE = '\\x89PNG\\r\\n\\x1a\\n';
 
@@ -1221,14 +1240,29 @@ describe('@expo/agent-cli smoke', () => {
   describe('the URL that loads the app', () => {
     it('opens the dev-client loading link before the route link', async () => {
       const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
-      const readXcrun = await installStubXcrunAsync(projectRoot);
-      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+      const opened = path.join(projectRoot, '.app-opened');
+      const readXcrun = await installStubXcrunAsync(projectRoot, opened);
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        // The app the loading link loads. It appears when the stub `xcrun` has opened a URL, so
+        // this run's own first open is what puts it there — and the wait that follows the launcher
+        // link ends on the app arriving rather than on the budget expiring, which is what keeps
+        // this test to a few seconds while the budget above stays generous.
+        targets: [DEV_BUILD_TARGET],
+        targetsAppearWithFile: opened,
+      });
       const release = await holdLockForAsync(projectRoot, stub);
 
       try {
         await executeAgentCliAsync(
           projectRoot,
-          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '6s'],
+          // A minute, where this used to say six seconds. The ladder under test is gated on the
+          // run having a budget left to wait with, and `--timeout` is spent by everything before
+          // the app phase — the install of this fixture's development build alone took 5.8 s of
+          // the six on a loaded machine, so the gate read "no time to load the app" and opened the
+          // route link on its own [observed — 48 busy processes, 2026-09-06: `opens[0]` was
+          // `exp+dev-client-fresh-app://`]. The number is not a wait: nothing here waits it out.
+          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '60s'],
           { env: stubExpoEnv(projectRoot), reject: false }
         );
 
@@ -1238,6 +1272,9 @@ describe('@expo/agent-cli smoke', () => {
         // The loading link first, and it carries the dev server this run settled on.
         expect(opens[0]).toContain('expo-development-client/?url=');
         expect(opens[0]).toContain(encodeURIComponent(stub.url));
+        // And the route link after it, into the app the first one loaded — the pair is the finding,
+        // and a run that opened only one of them would be the F123 shape either way round.
+        expect(opens[1]).toBe('exp+dev-client-fresh-app://');
       } finally {
         release();
         await stub.close();

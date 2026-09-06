@@ -21,7 +21,7 @@ import * as Log from '../log';
 import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
 import { readLastBuildRecord, type LastBuildRecord } from '../plan/lastBuild';
-import type { LastBuildFingerprints, NativePlatform, PlanPlatform } from '../plan/types';
+import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { readProjectPackageJsonAsync } from '../project/nodeModules';
 import { probeProjectStateAsync } from '../project/probe';
 import type { ProjectState, StartPlan } from '../project/types';
@@ -261,7 +261,6 @@ export async function collectStatusReportAsync(
     // (llp/0004 §Status), and `readLastBuildRecord`
     // is one file read whichever of the two shapes the caller wants out of it.
     const record = readLastBuildRecord(projectRoot);
-    const lastBuild = fingerprintsOf(record);
     // The probe rides along whole, so `--json` is also the project brief: the sections round its
     // facts off for a terminal, and a caller that wants them exactly reads `probe`.
     //
@@ -278,7 +277,7 @@ export async function collectStatusReportAsync(
     report.probe = { ...state, fingerprint: { ...state.fingerprint, sources: undefined } };
     report.project = buildProjectStatus(state, packageName);
     report.expoGo = buildExpoGoStatus(state);
-    report.freshness = buildFreshnessStatus(state, lastBuild, record, {
+    report.freshness = buildFreshnessStatus(state, record, {
       explain: !!options.explain,
     });
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
@@ -583,18 +582,6 @@ async function resolveOtaSafetyAsync(
     null
   );
   return resolveOtaSafety(runtimeVersion, changed);
-}
-
-/** The hashes alone, out of a record that was read once for both of its shapes. */
-function fingerprintsOf(record: LastBuildRecord): LastBuildFingerprints {
-  const fingerprints: LastBuildFingerprints = {};
-  for (const platform of ['ios', 'android'] as NativePlatform[]) {
-    const entry = record[platform];
-    if (entry) {
-      fingerprints[platform] = entry.hash;
-    }
-  }
-  return fingerprints;
 }
 
 /**

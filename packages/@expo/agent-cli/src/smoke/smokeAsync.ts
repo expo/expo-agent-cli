@@ -42,6 +42,7 @@ import {
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
 import {
   buildDeviceNameIndexIfNeededAsync,
+  platformOfTarget,
   scopeTargets,
   type DeviceNameIndex,
 } from '../runtime/targetPlatform';
@@ -293,11 +294,37 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
     target = null;
   };
 
-  let deviceIndex: Promise<DeviceNameIndex> | null = null;
-  const indexAsync = (devServerUrl: string) =>
-    (deviceIndex ??= probeDevServerAsync(devServerUrl).then((probe) =>
-      buildDeviceNameIndexIfNeededAsync(probe.targets)
-    ));
+  /**
+   * What this machine's device tools reported, kept for as long as it still answers.
+   *
+   * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say — F51, F152.
+   *
+   * The index exists to place a target whose own fields name no platform, and it is built by
+   * spawning `xcrun` and `adb`, so it is asked for exactly when its answer could change the
+   * outcome (`buildDeviceNameIndexIfNeededAsync`). **A gate asks that question before the app it is
+   * waiting for exists**, and a cached "nothing to place" is then an answer about an empty list:
+   * the first probe of this run finds no targets, `EMPTY_DEVICE_INDEX` is cached, and the
+   * development build that attaches a moment later — whose app id is the project's own and whose
+   * device name is a simulator's — cannot be placed by it. Every wait after that counted zero, so
+   * `smoke --ios` against a development build spent its whole budget and reported "no app had
+   * attached" about an app that had [observed — `smoke-test.ts` "opens the dev-client loading link
+   * before the route link", 55.8 s of a 60 s budget with the app listed throughout, 2026-09-06].
+   *
+   * So the cache is kept only while it still places what is listed **now**. An empty list places
+   * vacuously and costs nothing, which is the case the laziness was for; a list the cache cannot
+   * read is the case it was never an answer to.
+   */
+  let deviceIndex: DeviceNameIndex | null = null;
+  const indexAsync = async (devServerUrl: string): Promise<DeviceNameIndex> => {
+    const probe = await probeDevServerAsync(devServerUrl);
+    const placesEverything =
+      deviceIndex != null &&
+      probe.targets.every((target) => platformOfTarget(target, deviceIndex!).platform != null);
+    if (placesEverything) {
+      return deviceIndex!;
+    }
+    return (deviceIndex = await buildDeviceNameIndexIfNeededAsync(probe.targets));
+  };
 
   return {
     discoverDevServer: (explicitUrl) =>
