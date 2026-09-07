@@ -71,6 +71,89 @@ describe(classifyAgainstRecordedBuild, () => {
     ]);
   });
 
+  // @ref ../classify §sourceNeedsPrebuild. Both halves of the module split, next to each other,
+  // because the pair is the finding: the operation is what tells an added dependency apart from an
+  // SDK upgrade, and only one of the two changes what prebuild would write.
+  it(`should need no prebuild for a module that was added or removed`, () => {
+    const before = [appConfig('a'), nativeModule('b')];
+
+    const added = classifyAgainstRecordedBuild('ios', recorded('base', [appConfig('a')]), {
+      hash: 'head',
+      sources: before,
+    });
+    const removed = classifyAgainstRecordedBuild('ios', recorded('base', before), {
+      hash: 'head',
+      sources: [appConfig('a')],
+    });
+
+    // Still a build — the binary does not contain the module either way — and not a prebuild.
+    expect(added).toMatchObject({ class: 'needs-native-build', needsPrebuild: false });
+    expect(removed).toMatchObject({ class: 'needs-native-build', needsPrebuild: false });
+  });
+
+  // @ref ../classify §TEMPLATE_PACKAGES — the one dependency that is an exception to the rule
+  // above [asked — Kudo, 2026-09-07]. Prebuild generates the native project from the template the
+  // installed `expo` selects, so this package's own movement changes the output and not only the
+  // inputs. `expo-observe` is the near miss that must not read as it.
+  it(`should need a prebuild when the expo package itself moved`, () => {
+    const withoutExpo = [appConfig('a')];
+    const expoModule: FingerprintSource = {
+      type: 'dir',
+      filePath: 'node_modules/expo',
+      reasons: ['expoAutolinkingIos'],
+      hash: 'e1',
+    };
+
+    const added = classifyAgainstRecordedBuild('ios', recorded('base', withoutExpo), {
+      hash: 'head',
+      sources: [...withoutExpo, expoModule],
+    });
+
+    expect(added).toMatchObject({ needsPrebuild: true });
+    // The same operation, one directory along, is the case the split exists for.
+    expect(
+      classifyAgainstRecordedBuild('ios', recorded('base', withoutExpo), {
+        hash: 'head',
+        sources: [...withoutExpo, { ...expoModule, filePath: 'node_modules/expo-observe' }],
+      })
+    ).toMatchObject({ needsPrebuild: false });
+  });
+
+  it(`should recognise the expo package in every shape the fingerprint labels it with`, () => {
+    const before = [appConfig('a')];
+    const labels = [
+      { filePath: 'node_modules/expo' },
+      // `path.relative` on Windows, which is where the sourcer builds this path.
+      { filePath: 'node_modules\\expo' },
+      // A nested install, which is still this project's `expo`.
+      { filePath: 'apps/mobile/node_modules/expo' },
+      // The pinned-package shape, which the sourcer emits as `contents` with the reason as its
+      // id [observed — `@expo/fingerprint` `sourcer/Packages.ts`]. Its label is that id.
+      { type: 'contents', id: 'package:expo' },
+    ];
+
+    for (const label of labels) {
+      const impact = classifyAgainstRecordedBuild('ios', recorded('base', before), {
+        hash: 'head',
+        sources: [
+          ...before,
+          { type: 'dir', reasons: ['expoAutolinkingIos'], hash: 'e1', ...label } as FingerprintSource,
+        ],
+      });
+      expect(impact.needsPrebuild, JSON.stringify(label)).toBe(true);
+    }
+  });
+
+  it(`should need a prebuild when a module's own contents changed`, () => {
+    const impact = classifyAgainstRecordedBuild(
+      'ios',
+      recorded('base', [appConfig('a'), nativeModule('b')]),
+      { hash: 'head', sources: [appConfig('a'), nativeModule('b2')] }
+    );
+
+    expect(impact).toMatchObject({ class: 'needs-native-build', needsPrebuild: true });
+  });
+
   // An empty diff is decided, not a fallback: the sources were compared one by one.
   it(`should classify an unmoved native surface as js-only`, () => {
     const sources = [appConfig('a'), nativeModule('b')];

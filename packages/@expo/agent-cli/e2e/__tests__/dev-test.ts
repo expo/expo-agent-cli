@@ -275,10 +275,17 @@ describe('@expo/agent-cli dev', () => {
 
   // The loop the fingerprint record exists for [asked — Kudo, 2026-09-05]: after one recorded
   // build, `dev` knows whether the project needs a prebuild or a build, and starts the fastest way
-  // that is still correct. The stub fingerprint hashes the app config and package.json here
-  // (`STUB_FINGERPRINT_HASH_FROM_PROJECT`), so editing those files moves the fingerprint the way a
-  // real hasher would — the chain under test is edit → new hash → record no longer matches → the
-  // plan builds again.
+  // that is still correct. The stub fingerprint hashes the app config, eas.json and package.json
+  // here (`STUB_FINGERPRINT_HASH_FROM_PROJECT`) and emits a source per file and per dependency, so
+  // editing those files moves the fingerprint the way a real hasher would — the chain under test
+  // is edit → new hash → record no longer matches → the plan builds again.
+  //
+  // **And which plan**, which is the second question the sources answer (llp/0004 §A stale build
+  // is two questions). A hash that moved says the recorded build is stale and nothing more; what
+  // has to run to fix it depends on *what* moved, and the cases below are the four answers: a JS
+  // edit that is not a change at all, a dependency that needs the app compiled again, an app
+  // config or an SDK that needs the native project generated first, and an `eas.json` edit that
+  // needs neither.
   describe('the plan after the project changes', () => {
     const HASH_FROM_PROJECT = { STUB_FINGERPRINT_HASH_FROM_PROJECT: '1' };
 
@@ -313,6 +320,17 @@ describe('@expo/agent-cli dev', () => {
 
     async function planStepsAsync(projectRoot: string): Promise<string[][]> {
       return (await planAsync(projectRoot)).steps;
+    }
+
+    /** Rewrite the project's dependencies, the way `expo install` and an SDK upgrade both do. */
+    async function editDependenciesAsync(
+      projectRoot: string,
+      edit: (dependencies: Record<string, string>) => Record<string, string>
+    ): Promise<void> {
+      const packagePath = path.join(projectRoot, 'package.json');
+      const packageJson = JSON.parse(await fs.promises.readFile(packagePath, 'utf8'));
+      packageJson.dependencies = edit(packageJson.dependencies);
+      await fs.promises.writeFile(packagePath, JSON.stringify(packageJson, null, 2));
     }
 
     it('starts the dev server and nothing else while nothing changed', async () => {
@@ -365,15 +383,88 @@ describe('@expo/agent-cli dev', () => {
       expect(plan.steps).toEqual([['expo', 'run:ios']]);
     });
 
-    it('builds again after a dependency changed the fingerprint', async () => {
+    // @ref ../../src/impact/classify §sourceNeedsPrebuild. The run this split was asked for
+    // [Kudo, 2026-09-07]: `npx expo install expo-observe`, and then `dev --ios`. What prebuild
+    // writes comes from the template, the app config and the plugins the app config applies, and a
+    // new dependency is none of the three — so the prebuild it used to plan here regenerated an
+    // identical `ios/`. The app still has to be compiled again, which is the step that remains.
+    //
+    // **`expo-observe` by name, and it is the assertion's own evidence.** The package ships no
+    // config plugin — an `expo-module.config.json` and nothing else [observed — 57.0.19, 2026-09-07]
+    // — so there is provably nothing for a prebuild to write differently. A stand-in package would
+    // have made this a test of the rule; this makes it a test of a run somebody actually does.
+    it('builds without prebuilding after a native module was installed', async () => {
       const projectRoot = await recordedProjectAsync();
+      await editDependenciesAsync(projectRoot, (dependencies) => ({
+        ...dependencies,
+        'expo-observe': '~57.0.19',
+      }));
 
-      const packagePath = path.join(projectRoot, 'package.json');
-      const packageJson = JSON.parse(await fs.promises.readFile(packagePath, 'utf8'));
-      packageJson.dependencies = { ...packageJson.dependencies, 'react-native-mmkv': '^3.0.0' };
-      await fs.promises.writeFile(packagePath, JSON.stringify(packageJson, null, 2));
+      const plan = await planAsync(projectRoot);
+      expect(plan.rule).toBe('dev-client-rebuild');
+      expect(plan.steps).toEqual([['expo', 'run:ios']]);
+    });
 
-      expect(await planStepsAsync(projectRoot)).toEqual([
+    it('builds without prebuilding after a native module was removed', async () => {
+      const projectRoot = await recordedProjectAsync();
+      await editDependenciesAsync(projectRoot, ({ 'expo-camera': _removed, ...rest }) => rest);
+
+      const plan = await planAsync(projectRoot);
+      expect(plan.rule).toBe('dev-client-rebuild');
+      expect(plan.steps).toEqual([['expo', 'run:ios']]);
+    });
+
+    // The other side of the same split. An SDK upgrade moves the versions of the modules that are
+    // already installed, and the prebuild template travels with the SDK — so the native project it
+    // would generate really is a different one.
+    it('prebuilds after the installed versions moved, which is what an SDK upgrade looks like', async () => {
+      const projectRoot = await recordedProjectAsync();
+      await editDependenciesAsync(projectRoot, (dependencies) =>
+        Object.fromEntries(Object.keys(dependencies).map((name) => [name, '99.0.0']))
+      );
+
+      const plan = await planAsync(projectRoot);
+      expect(plan.rule).toBe('dev-client-stale');
+      expect(plan.steps).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
+    // @ref ../../src/impact/classify §TEMPLATE_PACKAGES — the exception, on the package it is
+    // about [asked — Kudo, 2026-09-07]. Upgrading the SDK is not "a dependency moved": prebuild
+    // generates the native project from the template the installed `expo` selects, so this one
+    // package's own movement changes the output rather than only the inputs.
+    it('prebuilds after the expo package itself was upgraded', async () => {
+      const projectRoot = await recordedProjectAsync();
+      await editDependenciesAsync(projectRoot, (dependencies) => ({
+        ...dependencies,
+        expo: '55.0.0',
+      }));
+
+      const plan = await planAsync(projectRoot);
+      expect(plan.steps).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
+    // And the case that makes skipping the prebuild for an installed module safe: a package that
+    // needs generated code ships a config plugin and is named in the app config to apply it, so
+    // the app config moves too — and that source has always demanded a prebuild.
+    it('prebuilds when the installed module came with an app config change', async () => {
+      const projectRoot = await recordedProjectAsync();
+      await editDependenciesAsync(projectRoot, (dependencies) => ({
+        ...dependencies,
+        'expo-observe': '~57.0.19',
+      }));
+      const configPath = path.join(projectRoot, 'app.json');
+      const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+      config.expo.plugins = ['expo-observe'];
+      await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
+
+      const plan = await planAsync(projectRoot);
+      expect(plan.steps).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
         ['expo', 'run:ios'],
       ]);

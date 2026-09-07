@@ -134,12 +134,23 @@ already on disk.
 {@link ChangeKind} since [[0011-impact-and-freshness]], and it already says which side each kind
 falls on — a config plugin "writes different native code", an `eas.json` edit "moves the
 fingerprint without changing generated native code, so a cloud build is enough and prebuild is not
-needed". `KIND_NEEDS_PREBUILD` is that prose as a table, and the decision table reads it. Two
-places deciding this separately is exactly how they would come to disagree.
+needed". `KIND_NEEDS_PREBUILD` is that prose as a table, `sourceNeedsPrebuild` is the one
+row that needs the diff's *operation* as well, and the decision table reads them. Two places
+deciding this separately is exactly how they would come to disagree.
 
 The comparison is `classifyAgainstRecordedBuild`, in process: it diffs the `sources` on the
 recorded build against the ones the probe took. No subprocess and no second fingerprint run, which
 is what makes it affordable on the path `dev` takes every time.
+
+**A module entering or leaving `node_modules` is on the cheap side, and the operation is what says so** [asked — Kudo, 2026-09-07]. The first cut of the table put every `native-module` change on the prebuild side, so `npx expo install expo-observe` — a package that ships no config plugin — cost a prebuild that regenerated an identical `ios/`. That is the same minute the `eas.json` row exists to save, on the change a project makes far more often.
+
+What `prebuild` writes comes from three things: the template, the app config, and the config plugins the app config applies. A new dependency is none of them. A package that *does* need generated code ships a config plugin and is named in the app config to apply it, and both of those move sources of their own — `config-plugin` and `app-config`, which have always been on the prebuild side. So this row can be honest without any other row becoming less careful.
+
+The linking still happens, later and dynamically, which is the other half of why the prebuild is not owed. `expo run:ios` runs `pod install` when the dependency list has moved [reference — `@expo/cli` 57.0.22, `runIosAsync` → `maybePromptToSyncPodsAsync` → `hasPackageJsonDependencyListChangedAsync`; `install` defaults to true]. The generated `settings.gradle` calls `expoAutolinking.useExpoModules()` and `autolinkLibrariesFromCommand(...)`, both resolved at Gradle **configure** time [reference — `expo-template-bare-minimum`, `android/settings.gradle`]. Neither reads a file the prebuild would have rewritten. And a project whose gitignored `ios/` is simply absent is prebuilt by `expo run:*` itself, so the cheap row cannot leave a run with no native project to build.
+
+**The SDK itself is the exception, by name** [asked — Kudo, 2026-09-07]. `expo prebuild` generates the native project from `expo-template-bare-minimum` at the version the installed `expo` selects, so that one package is the dependency whose own movement changes prebuild's *output* rather than only its inputs. It is planned as a prebuild whatever the operation was (`src/impact/classify.ts` §TEMPLATE_PACKAGES). `react-native` is deliberately not in that set: its version is pinned by the template rather than the other way round. The rule is belt and braces rather than a hole being closed — an upgrade moves the package's contents, which is a `changed` operation, and a hash that moved with nothing to explain it is undecided, which prebuilds too — but it means the guarantee no longer depends on how the fingerprint happens to represent the upgrade.
+
+**`changed` is the operation this does not skip, and that is the SDK upgrade.** Bumping Expo moves every autolinked module's contents at once, and the prebuild template travels with the SDK — so the project it would generate really is a different one. Telling the two apart by the operation rather than by the kind is what makes the cheap answer available without giving up the expensive one (`src/impact/classify.ts` §sourceNeedsPrebuild).
 
 **Undecided means prebuild.** Three inputs cannot answer: a record written before this CLI stored
 `sources`, a fingerprint run that returned none, and — the one that is easy to miss — a hash that
