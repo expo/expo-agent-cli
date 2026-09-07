@@ -19,7 +19,7 @@ import type { NativePlatform } from '../plan/types';
 import { PROGRAM_NAME } from '../programName';
 import type { FingerprintSource } from '../project/fingerprint';
 import { diffFingerprintSourcesLocally } from '../project/localDiff';
-import { classifyFingerprintDiff, KIND_NEEDS_PREBUILD } from './classify';
+import { classifyFingerprintDiff, sourceNeedsPrebuild } from './classify';
 import type { ChangedFiles, ChangedSource, ImpactClass } from './types';
 
 /** What a change costs, as far as the data already in hand can establish it. */
@@ -194,7 +194,7 @@ function decideNeedsPrebuild(
   changedSources: ChangedSource[]
 ): boolean | null {
   if (changedSources.length) {
-    return changedSources.some((source) => KIND_NEEDS_PREBUILD[source.kind] === true);
+    return changedSources.some(sourceNeedsPrebuild);
   }
   return fingerprintChanged ? null : false;
 }

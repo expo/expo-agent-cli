@@ -27,6 +27,16 @@ function easJson(hash: string): FingerprintSource {
   return { type: 'file', filePath: 'eas.json', reasons: ['easBuild'], hash };
 }
 
+/** One autolinked native module, in the shape the fingerprint sourcer emits for it. */
+function nativeModule(name: string, hash: string): FingerprintSource {
+  return {
+    type: 'dir',
+    filePath: `node_modules/${name}`,
+    reasons: ['expoAutolinkingIos'],
+    hash,
+  };
+}
+
 /** A recorded build whose sources can be diffed against the probed ones. */
 function recordedWithSources(
   platform: NativePlatform,
@@ -427,9 +437,95 @@ describe(decideStartPlan, () => {
 
       expect(plan.buildLocation).not.toBeNull();
     });
+
+    // @ref ../../impact/classify §sourceNeedsPrebuild — the row this split was widened for
+    // [asked — Kudo, 2026-09-07]. `npx expo install expo-observe` is the ordinary way a project
+    // grows, and it used to cost a prebuild that regenerated an identical `ios/`: what prebuild
+    // writes comes from the template, the app config and the plugins the app config applies, and a
+    // new dependency is none of the three.
+    it(`should build without prebuilding when a native module was added`, () => {
+      const state = createDevClientState({
+        fingerprint: {
+          hash: 'head',
+          sources: [appConfig('a'), nativeModule('expo-router', 'r1'), nativeModule('expo-observe', 'o1')],
+        },
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', [
+          appConfig('a'),
+          nativeModule('expo-router', 'r1'),
+        ]),
+      });
+
+      expect(plan.rule).toBe('dev-client-rebuild');
+      expect(argvOf(plan.steps)).toEqual([['expo', 'run:ios']]);
+    });
+
+    // Removing one is the same fact in the other direction: `pod install` and the Gradle
+    // autolinking read `node_modules` as it is now, and neither reads a file prebuild rewrites.
+    it(`should build without prebuilding when a native module was removed`, () => {
+      const state = createDevClientState({
+        fingerprint: { hash: 'head', sources: [appConfig('a')] },
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', [
+          appConfig('a'),
+          nativeModule('expo-observe', 'o1'),
+        ]),
+      });
+
+      expect(plan.rule).toBe('dev-client-rebuild');
+      expect(argvOf(plan.steps)).toEqual([['expo', 'run:ios']]);
+    });
   });
 
   describe('rule: dev-client-stale', () => {
+    // The other side of the module split. An SDK upgrade moves every autolinked module's
+    // *contents* at once, and the prebuild template travels with the SDK — so the native project
+    // it would generate really is a different one, and regenerating it is the point.
+    it(`should prebuild when an autolinked module's contents changed`, () => {
+      const state = createDevClientState({
+        fingerprint: { hash: 'head', sources: [appConfig('a'), nativeModule('expo-router', 'r2')] },
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', [
+          appConfig('a'),
+          nativeModule('expo-router', 'r1'),
+        ]),
+      });
+
+      expect(plan.rule).toBe('dev-client-stale');
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
+    // And the case that makes skipping the prebuild for an added module safe: a package that needs
+    // generated code ships a config plugin and is named in the app config to apply it, so the app
+    // config moves too — and that source has always demanded a prebuild.
+    it(`should prebuild when the module that was added also moved the app config`, () => {
+      const state = createDevClientState({
+        fingerprint: {
+          hash: 'head',
+          sources: [appConfig('changed'), nativeModule('expo-observe', 'o1')],
+        },
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', [appConfig('a')]),
+      });
+
+      expect(plan.rule).toBe('dev-client-stale');
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
     it(`should prebuild and build when no build was recorded`, () => {
       const plan = decideStartPlan(createDevClientState(), { platform: 'ios' });
 

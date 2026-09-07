@@ -87,6 +87,10 @@ const REASON_PREFIX_KINDS: { prefix: string; kind: ChangeKind }[] = [
  * `unknown` is true, on the same conservative reading that makes its class `needs-native-build`:
  * a source this CLI cannot name might well be one prebuild owns, and an unnecessary prebuild costs
  * a minute where a skipped one costs a build that does not contain the change.
+ *
+ * **`native-module` is the one row with a second question behind it**, and
+ * {@link sourceNeedsPrebuild} is where that question is asked. The value here is the conservative
+ * half of its answer, so a caller that reads the kind alone still over-plans rather than under.
  */
 export const KIND_NEEDS_PREBUILD: Record<ChangeKind, boolean> = {
   'native-module': true,
@@ -97,6 +101,42 @@ export const KIND_NEEDS_PREBUILD: Record<ChangeKind, boolean> = {
   'build-scripts': false,
   unknown: true,
 };
+
+/**
+ * Whether one changed source means the native project has to be **generated** again.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
+ *
+ * The kind decides it, with one exception, and the exception is the ordinary case: **an autolinked
+ * module that entered or left `node_modules` does not change what prebuild would write.** What
+ * prebuild writes is a function of three things — the template, the app config, and the config
+ * plugins the app config applies — and a new dependency is none of them. A package that does need
+ * generated code ships a config plugin and is named in the app config to apply it, and both of
+ * those move sources of their own (`config-plugin`, `app-config`), which are `true` in the table
+ * above. So the module rows can be honest without anything else having to be conservative.
+ *
+ * The linking still happens; it happens **later, and dynamically**, which is the other half of why
+ * skipping the prebuild is safe. On iOS `expo run:ios` runs `pod install` when the dependency list
+ * has moved [reference — `@expo/cli` 57.0.22, `src/run/ios/runIosAsync` → `maybePromptToSyncPods`
+ * → `hasPackageJsonDependencyListChanged`; `install` defaults to true and only `--no-install`
+ * clears it]. On Android the generated `settings.gradle` calls `expoAutolinking.useExpoModules()`
+ * and `autolinkLibrariesFromCommand(...)`, both of which resolve at Gradle **configure** time
+ * [reference — `expo-template-bare-minimum`, `android/settings.gradle`]. Neither reads a file
+ * prebuild would have rewritten. And a project whose `ios/` is simply not there — a fresh clone,
+ * since prebuild's output is gitignored — is prebuilt by `expo run:*` itself, so this decision
+ * cannot leave a run with no native project to build.
+ *
+ * **`changed` is the shape this does not skip**, and that is the SDK upgrade. Bumping Expo moves
+ * every autolinked module's contents at once *and* the prebuild template travels with the SDK, so
+ * the generated project really is different and regenerating it is the point. Telling the two apart
+ * by the operation is what makes the cheap answer available without giving up the expensive one.
+ */
+export function sourceNeedsPrebuild(source: ChangedSource): boolean {
+  if (source.kind === 'native-module' && source.op !== 'changed') {
+    return false;
+  }
+  return KIND_NEEDS_PREBUILD[source.kind];
+}
 
 /** What every {@link ChangeKind} costs. */
 export const KIND_CLASSES: Record<ChangeKind, ImpactClass> = {

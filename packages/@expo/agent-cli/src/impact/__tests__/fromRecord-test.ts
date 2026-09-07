@@ -71,6 +71,36 @@ describe(classifyAgainstRecordedBuild, () => {
     ]);
   });
 
+  // @ref ../classify §sourceNeedsPrebuild. Both halves of the module split, next to each other,
+  // because the pair is the finding: the operation is what tells an added dependency apart from an
+  // SDK upgrade, and only one of the two changes what prebuild would write.
+  it(`should need no prebuild for a module that was added or removed`, () => {
+    const before = [appConfig('a'), nativeModule('b')];
+
+    const added = classifyAgainstRecordedBuild('ios', recorded('base', [appConfig('a')]), {
+      hash: 'head',
+      sources: before,
+    });
+    const removed = classifyAgainstRecordedBuild('ios', recorded('base', before), {
+      hash: 'head',
+      sources: [appConfig('a')],
+    });
+
+    // Still a build — the binary does not contain the module either way — and not a prebuild.
+    expect(added).toMatchObject({ class: 'needs-native-build', needsPrebuild: false });
+    expect(removed).toMatchObject({ class: 'needs-native-build', needsPrebuild: false });
+  });
+
+  it(`should need a prebuild when a module's own contents changed`, () => {
+    const impact = classifyAgainstRecordedBuild(
+      'ios',
+      recorded('base', [appConfig('a'), nativeModule('b')]),
+      { hash: 'head', sources: [appConfig('a'), nativeModule('b2')] }
+    );
+
+    expect(impact).toMatchObject({ class: 'needs-native-build', needsPrebuild: true });
+  });
+
   // An empty diff is decided, not a fallback: the sources were compared one by one.
   it(`should classify an unmoved native surface as js-only`, () => {
     const sources = [appConfig('a'), nativeModule('b')];
