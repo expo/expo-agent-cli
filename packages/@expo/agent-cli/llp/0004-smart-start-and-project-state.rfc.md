@@ -179,7 +179,8 @@ bare React Native app" flow.
 | Command                                                 | In a directory that is not an Expo app                                        |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `dev`, `start`, `smoke`, `navigate`, `deploy`, `doctor` | stop with `NOT_EXPO_APP`, exit 1, before planning or spawning                 |
-| `agents:setup`, `skills:sync` / `:list` / `:show`       | stop the same way. they read what the installed Expo packages ship            |
+| `skills:sync` / `:list` / `:show`       | stop the same way. they read what the installed Expo packages ship            |
+| `agents:setup`                                           | offers confirmed user-home plugin/skills installation; skips project phases |
 | `status`                                                | reports. `project.isExpoApp: false`. a `next` that says so. does not refuse   |
 | `typecheck`                                             | unchanged. `checked: false`, "no TypeScript", exit 0                          |
 | `install`, `new`                                        | unchanged. these are the two ways out of this state, and they are never gated |

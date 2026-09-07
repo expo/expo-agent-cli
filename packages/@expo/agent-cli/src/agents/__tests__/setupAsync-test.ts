@@ -17,7 +17,7 @@ vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
 vi.mock('../../skills/skillsAsync', () => ({ syncSkillsAsync: vi.fn() }));
 vi.mock('../../skills/discovery', () => ({ discoverSkillsAsync: vi.fn(async () => []) }));
 vi.mock('../../skills/agents', async () => ({
-  ...await vi.importActual('../../skills/agents'),
+  ...(await vi.importActual('../../skills/agents')),
   resolveAgentsAsync: vi.fn(),
   getPersistedAgentIdsAsync: vi.fn(async () => null),
   detectInstalledAgentsAsync: vi.fn(async () => []),
@@ -35,7 +35,14 @@ const usageSkill: DiscoveredSkill = {
 };
 
 function options(overrides: Partial<SetupOptions> = {}): SetupOptions {
-  return { agents: [], agentsMd: true, agentSkills: true, ...overrides };
+  return {
+    agents: ['claude-code'],
+    agentsMd: true,
+    agentSkills: true,
+    plugins: false,
+    yes: true,
+    ...overrides,
+  };
 }
 
 function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
@@ -68,6 +75,10 @@ describe(runSetupAsync, () => {
 
     expect(report).toEqual({
       projectRoot,
+      scope: 'project',
+      cancelled: false,
+      plugins: [],
+      errors: [],
       agents: ['claude-code'],
       skills: {
         synced: true,
@@ -139,6 +150,17 @@ describe(runSetupAsync, () => {
     expect(vol.readFileSync('/project/CLAUDE.md', 'utf8')).toBe('# Rules\n');
     expect(report.notes).toEqual([expect.stringContaining('CLAUDE.md')]);
   });
+
+  it('should still generate AGENTS.md when package skills cannot be discovered', async () => {
+    vi.mocked(discoverSkillsAsync).mockRejectedValueOnce(
+      Object.assign(new Error('Cannot find module'), { code: 'MODULE_NOT_FOUND' })
+    );
+    const report = await runSetupAsync(projectRoot, options());
+    expect(report.errors).toEqual([expect.stringContaining('Install the project dependencies')]);
+    expect(report.skills).toBeNull();
+    expect(report.agentsMd?.action).toBe('created');
+    expect(syncSkillsAsync).not.toHaveBeenCalled();
+  });
 });
 
 describe(printSetupAsync, () => {
@@ -150,8 +172,12 @@ describe(printSetupAsync, () => {
     expect(Object.keys(report).sort()).toEqual([
       'agents',
       'agentsMd',
+      'cancelled',
+      'errors',
       'notes',
+      'plugins',
       'projectRoot',
+      'scope',
       'skills',
     ]);
   });
@@ -159,7 +185,8 @@ describe(printSetupAsync, () => {
   it('should print a terse text summary by default', async () => {
     await printSetupAsync(projectRoot, options());
 
-    const output = vi.mocked(Log.log)
+    const output = vi
+      .mocked(Log.log)
       .mock.calls.map((call) => call.join(' '))
       .join('\n');
     expect(output).toContain('AGENTS.md');
@@ -176,6 +203,10 @@ describe(printSetupAsync, () => {
       skillsDiscovered: 1,
       agentsMdAction: 'created',
       noteCount: 0,
+      scope: 'project',
+      cancelled: false,
+      plugins: [],
+      errors: [],
     });
   });
 });

@@ -178,7 +178,7 @@ export const commandGroups: { [group: string]: CommandGroup } = {
     summary: 'Set this project up for coding agents',
     actions: {
       setup: {
-        summary: 'Write AGENTS.md and link the agent skills',
+        summary: 'Set up Expo agents in a project or user home',
         load: () => import('./agents').then((i) => i.agentCliAgentsSetup),
         help: () => import('./agents').then((i) => i.agentsSetupHelp),
       },
@@ -616,7 +616,7 @@ export const oneTimeSetup: WorkflowStep = {
   rungs: [
     { run: 'new <directory>', gets: 'create a project' },
     { run: 'install <package>', gets: 'add it at the version this SDK wants' },
-    { run: 'agents:setup', gets: 'write AGENTS.md, link the agent skills' },
+    { run: 'agents:setup', gets: 'confirm agent setup for a project or user home' },
   ],
 };
 

@@ -19,7 +19,7 @@ Design documents: `llp/0001-agentic-cli-on-expo-cli.rfc.md` and its child LLPs i
 | 5. Release                   | `npx @expo/agent-cli deploy`              | the web app to EAS Hosting                     |
 | One-time setup               | `npx @expo/agent-cli new my-app`          | create a project                               |
 |                              | `npx @expo/agent-cli install expo-sqlite` | add a package at the version this SDK wants    |
-|                              | `npx @expo/agent-cli agents:setup`        | write AGENTS.md, link the agent skills         |
+|                              | `npx @expo/agent-cli agents:setup`        | confirm agent setup for a project or user home         |
 
 `npx @expo/agent-cli help workflow` is this loop in one screen, plus exit codes, `--json`, and what to do when a command fails.
 
@@ -46,12 +46,33 @@ Design documents: `llp/0001-agentic-cli-on-expo-cli.rfc.md` and its child LLPs i
 | `deploy`                                                       | Ship the web app to EAS Hosting, or the native app with `--native`  |
 | `inspect:build-log`                                            | Find the line in a native build log that says why it failed         |
 | `inspect:config-plugins`                                       | What the config plugins produced. Experimental                      |
-| `agents:setup`                                                 | Write `AGENTS.md` and link agent skills                             |
+| `agents:setup`                                                 | Set up Expo agents in a project or user home                             |
 | `skills:sync` / `skills:list` / `skills:show` / `skills:clean` | Discover and link skills shipped by installed modules               |
 
 Grouped commands use `group:action`, the way `eas-cli` does. The space form is the same command: `skills list` is `skills:list`. Bare `skills` syncs, bare `doctor` checks, bare `dev` runs the plan.
 
 Commands this CLI does not wrap go to the project's `expo` CLI: `run`, `run:ios`, `run:android`, `prebuild`, `config`, `export`, `export:web`, `export:embed`, `serve`, `customize`, `lint`, `login`, `logout`, `register`, `whoami`.
+
+## Set up a coding agent
+
+Run `npx @expo/agent-cli agents:setup` to select agents and an installation scope, review the commands, and confirm. It also works before creating an Expo app: outside a project, setup installs into your user home. Inside an Expo app, choose Project or User home. Package skill synchronization and the existing `AGENTS.md` generator still run in that app, even when the plugin installation targets your home. `CLAUDE.md` is never rewritten.
+
+- Claude Code uses `expo@claude-plugins-official` with an explicit user/project scope. The official marketplace must already be registered; for a fresh Claude configuration, run `claude plugin marketplace add anthropics/claude-plugins-official` first.
+- Codex user setup registers `expo/skills` at `main` and installs `expo@expo-plugins`. Codex's plugin CLI has no project scope, so selecting Project installs Expo skills for Codex instead.
+- Other agents use `bunx skills add expo/skills --skill '*'` (or `npx` when Bun is unavailable), with the selected agent and scope passed explicitly.
+
+For automation, accept the plan explicitly:
+
+```sh
+npx @expo/agent-cli agents:setup --yes --scope user --agent codex --json
+npx @expo/agent-cli agents:setup --yes --scope project --agent claude-code --json
+```
+
+`--json` alone does not accept setup. Without a terminal, omit `--yes` to receive a confirmation-required error without installing anything. Declining the interactive confirmation leaves files unchanged.
+
+Use `--no-plugins` to skip official plugin/skills installation, `--no-agent-skills` to skip package skill synchronization, and `--no-agents-md` to skip the generator. Existing installations are inspected and retained; setup does not run broad updates or replace skills from another source. Use each plugin marketplace or the skills CLI to manage updates. Start a new agent session after installation; MCP tools may require sign-in separately.
+
+The JSON report includes the selected `scope`, `cancelled`, per-agent `plugins`, and `errors`, alongside the existing project results. Outside a project, `projectRoot`, `skills`, and `agentsMd` are null. If an installer fails, independent project setup still runs; the final report preserves completed steps and exits with code 20. Invalid arguments or missing noninteractive confirmation exit with code 1; declining confirmation exits with code 0 and `cancelled: true`.
 
 ## Config
 

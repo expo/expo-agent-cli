@@ -34,7 +34,7 @@ Headless CI mode: structured pass/fail invocations with `--json` and exit codes,
 
 Every CLI error is a driving agent's next prompt. `CommandError.suggestedCommand` prints a trailing `Try: <command>` line and rides the `cli:error` JSONL event. Every error event carries machine-readable fields, a cause classification, and a suggested next step.
 
-`agents:setup` writes and maintains a managed section in the project's `AGENTS.md`: SDK version, targets, the right commands, project quirks. It orients every agent, including ones that never call a tool.
+`agents:setup` writes and maintains a managed section in the project's `AGENTS.md`: SDK version, targets, the right commands, project quirks. It orients every agent, including ones that never call a tool. Setup now also works without a project, installs official Expo plugins/skills at a confirmed scope, and offers `--yes` for noninteractive use. Its instruction-file generators are unchanged; see [[0006.000-local-expo-ui-docs]]. [confirmed, Kudo, 2026-09-08]
 
 ## Output contract
 
@@ -54,7 +54,7 @@ The package ships as a model-free CLI.
 
 | Command                                               | What it does                                                                       |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `agents:setup`                                        | install Expo skills, and write the AGENTS.md managed block                         |
+| `agents:setup`                                        | confirm home/project Expo plugin/skills installation, plus project setup when available                         |
 | `skills:sync\|list\|show\|clean`                      | [[0003-knowledge-tools-and-skills]]                                                |
 | `install`, `start`                                    | wrap the `expo` equivalents as subprocesses, with skill sync                       |
 | `dev` / `dev:stop` / `dev:logs`                       | the smart-start engine of [[0004-smart-start-and-project-state]]                   |

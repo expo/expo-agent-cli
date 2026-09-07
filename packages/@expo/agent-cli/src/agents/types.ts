@@ -8,6 +8,11 @@ export interface SetupOptions {
   agentsMd: boolean;
   /** Link the agent skills of the installed packages. Disabled by `--no-agent-skills`. */
   agentSkills: boolean;
+  /** Install official Expo plugins or skills. Disabled by --no-plugins. */
+  plugins?: boolean;
+  /** Accept the setup plan without prompting. */
+  yes?: boolean;
+  scope?: SetupScope;
   /** Print the report as one JSON object instead of the text summary. */
   json?: boolean;
 }
@@ -36,7 +41,11 @@ export interface SetupSkillsResult {
 
 /** The whole answer of one `@expo/agent-cli agents:setup` run, and the shape `--json` prints. */
 export interface SetupReport {
-  projectRoot: string;
+  projectRoot: string | null;
+  scope: SetupScope;
+  cancelled: boolean;
+  plugins: PluginSetupResult[];
+  errors: string[];
   /** Null when `--no-agent-skills` skipped the sync. */
   skills: SetupSkillsResult | null;
   /** Null when `--no-agents-md` skipped the file. */
@@ -45,4 +54,29 @@ export interface SetupReport {
   agents: string[];
   /** Things worth telling the user that are not failures, e.g. an unlinked `CLAUDE.md`. */
   notes: string[];
+}
+
+export type SetupScope = 'user' | 'project';
+
+export interface InstallCommand {
+  command: string;
+  args: string[];
+}
+
+export interface AgentInstallPlan {
+  agent: string;
+  name: string;
+  provider: 'claude' | 'codex' | 'skills';
+  scope: SetupScope;
+  destination: string;
+  commands: InstallCommand[];
+}
+
+export interface PluginSetupResult {
+  agent: string;
+  provider: AgentInstallPlan['provider'];
+  scope: SetupScope;
+  destination: string;
+  status: 'installed' | 'already-present' | 'failed';
+  reason: string | null;
 }

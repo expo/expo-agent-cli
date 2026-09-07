@@ -15,6 +15,10 @@ declare module '2g' {
       /** `created`, `updated`, `skipped`, or null when `--no-agents-md` skipped the file. */
       agentsMdAction: string | null;
       noteCount: number;
+      scope: import('./types').SetupScope;
+      cancelled: boolean;
+      plugins: import('./types').PluginSetupResult[];
+      errors: string[];
     };
   }
 }
