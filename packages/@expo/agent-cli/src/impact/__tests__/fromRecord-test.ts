@@ -91,6 +91,59 @@ describe(classifyAgainstRecordedBuild, () => {
     expect(removed).toMatchObject({ class: 'needs-native-build', needsPrebuild: false });
   });
 
+  // @ref ../classify §TEMPLATE_PACKAGES — the one dependency that is an exception to the rule
+  // above [asked — Kudo, 2026-09-07]. Prebuild generates the native project from the template the
+  // installed `expo` selects, so this package's own movement changes the output and not only the
+  // inputs. `expo-observe` is the near miss that must not read as it.
+  it(`should need a prebuild when the expo package itself moved`, () => {
+    const withoutExpo = [appConfig('a')];
+    const expoModule: FingerprintSource = {
+      type: 'dir',
+      filePath: 'node_modules/expo',
+      reasons: ['expoAutolinkingIos'],
+      hash: 'e1',
+    };
+
+    const added = classifyAgainstRecordedBuild('ios', recorded('base', withoutExpo), {
+      hash: 'head',
+      sources: [...withoutExpo, expoModule],
+    });
+
+    expect(added).toMatchObject({ needsPrebuild: true });
+    // The same operation, one directory along, is the case the split exists for.
+    expect(
+      classifyAgainstRecordedBuild('ios', recorded('base', withoutExpo), {
+        hash: 'head',
+        sources: [...withoutExpo, { ...expoModule, filePath: 'node_modules/expo-observe' }],
+      })
+    ).toMatchObject({ needsPrebuild: false });
+  });
+
+  it(`should recognise the expo package in every shape the fingerprint labels it with`, () => {
+    const before = [appConfig('a')];
+    const labels = [
+      { filePath: 'node_modules/expo' },
+      // `path.relative` on Windows, which is where the sourcer builds this path.
+      { filePath: 'node_modules\\expo' },
+      // A nested install, which is still this project's `expo`.
+      { filePath: 'apps/mobile/node_modules/expo' },
+      // The pinned-package shape, which the sourcer emits as `contents` with the reason as its
+      // id [observed — `@expo/fingerprint` `sourcer/Packages.ts`]. Its label is that id.
+      { type: 'contents', id: 'package:expo' },
+    ];
+
+    for (const label of labels) {
+      const impact = classifyAgainstRecordedBuild('ios', recorded('base', before), {
+        hash: 'head',
+        sources: [
+          ...before,
+          { type: 'dir', reasons: ['expoAutolinkingIos'], hash: 'e1', ...label } as FingerprintSource,
+        ],
+      });
+      expect(impact.needsPrebuild, JSON.stringify(label)).toBe(true);
+    }
+  });
+
   it(`should need a prebuild when a module's own contents changed`, () => {
     const impact = classifyAgainstRecordedBuild(
       'ios',

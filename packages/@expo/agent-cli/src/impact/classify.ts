@@ -133,9 +133,54 @@ export const KIND_NEEDS_PREBUILD: Record<ChangeKind, boolean> = {
  */
 export function sourceNeedsPrebuild(source: ChangedSource): boolean {
   if (source.kind === 'native-module' && source.op !== 'changed') {
-    return false;
+    return namesTemplatePackage(source);
   }
   return KIND_NEEDS_PREBUILD[source.kind];
+}
+
+/**
+ * The packages whose version chooses what `prebuild` writes.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §A stale build is two questions
+ *
+ * One entry, and it is the SDK [asked — Kudo, 2026-09-07]. `expo prebuild` generates the native
+ * project from `expo-template-bare-minimum` at the version the installed `expo` selects, so the
+ * `expo` package is the one dependency whose own movement changes the output rather than only the
+ * inputs — the exception to everything {@link sourceNeedsPrebuild} says about a dependency.
+ *
+ * `react-native` is deliberately **not** here. Its version is pinned by the template rather than
+ * the other way round, so a bump of it alone does not change what prebuild writes, and a bump that
+ * comes with an SDK upgrade is already covered by the `expo` row beside it.
+ *
+ * This is belt and braces rather than a hole being closed: an SDK upgrade moves this package's
+ * *contents*, which is a `changed` operation and needs no exception, and a hash that moved with no
+ * source to explain it is undecided, which prebuilds too. What the rule buys is that the guarantee
+ * stops depending on how the fingerprint happens to represent the upgrade.
+ */
+const TEMPLATE_PACKAGES = ['expo'];
+
+/**
+ * Whether a changed source is one of {@link TEMPLATE_PACKAGES}.
+ *
+ * Three shapes, because {@link sourceLabel} produces three and the fingerprint uses all of them: a
+ * module directory (`node_modules/expo`, and `node_modules\expo` on Windows, where the sourcer
+ * builds it with `path.relative`), a pinned-package id (`package:expo`), and a bare package name
+ * with an optional version. Matching on whole path segments rather than on a prefix is what keeps
+ * `node_modules/expo-observe` — the very package this split was asked for — from reading as the SDK.
+ */
+function namesTemplatePackage({ path }: ChangedSource): boolean {
+  if (path == null) {
+    return false;
+  }
+  const segments = path.split(/[\\/]/);
+  const afterModules = segments.lastIndexOf('node_modules');
+  const name =
+    afterModules >= 0
+      ? segments.slice(afterModules + 1).join('/')
+      : path.startsWith('package:')
+        ? path.slice('package:'.length)
+        : (path.split('@')[0] ?? path);
+  return TEMPLATE_PACKAGES.includes(name);
 }
 
 /** What every {@link ChangeKind} costs. */

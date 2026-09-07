@@ -526,6 +526,28 @@ describe(decideStartPlan, () => {
       ]);
     });
 
+    // @ref ../../impact/classify §TEMPLATE_PACKAGES. The SDK is the one dependency whose own
+    // movement changes what prebuild writes rather than only what it reads, so it is planned as a
+    // prebuild whatever the operation was [asked — Kudo, 2026-09-07].
+    it(`should prebuild when the expo package itself moved`, () => {
+      const state = createDevClientState({
+        fingerprint: {
+          hash: 'head',
+          sources: [appConfig('a'), nativeModule('expo', 'sdk-55')],
+        },
+      });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recordedWithSources('ios', 'base', [appConfig('a')]),
+      });
+
+      expect(plan.rule).toBe('dev-client-stale');
+      expect(argvOf(plan.steps)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ]);
+    });
+
     it(`should prebuild and build when no build was recorded`, () => {
       const plan = decideStartPlan(createDevClientState(), { platform: 'ios' });
 
