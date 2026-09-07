@@ -384,15 +384,20 @@ describe('@expo/agent-cli dev', () => {
     });
 
     // @ref ../../src/impact/classify §sourceNeedsPrebuild. The run this split was asked for
-    // [Kudo, 2026-09-07]: `npx expo install <package>`, and then `dev --ios`. What prebuild writes
-    // comes from the template, the app config and the plugins the app config applies, and a new
-    // dependency is none of the three — so the prebuild it used to plan here regenerated an
+    // [Kudo, 2026-09-07]: `npx expo install expo-observe`, and then `dev --ios`. What prebuild
+    // writes comes from the template, the app config and the plugins the app config applies, and a
+    // new dependency is none of the three — so the prebuild it used to plan here regenerated an
     // identical `ios/`. The app still has to be compiled again, which is the step that remains.
+    //
+    // **`expo-observe` by name, and it is the assertion's own evidence.** The package ships no
+    // config plugin — an `expo-module.config.json` and nothing else [observed — 57.0.19, 2026-09-07]
+    // — so there is provably nothing for a prebuild to write differently. A stand-in package would
+    // have made this a test of the rule; this makes it a test of a run somebody actually does.
     it('builds without prebuilding after a native module was installed', async () => {
       const projectRoot = await recordedProjectAsync();
       await editDependenciesAsync(projectRoot, (dependencies) => ({
         ...dependencies,
-        'react-native-mmkv': '^3.0.0',
+        'expo-observe': '~57.0.19',
       }));
 
       const plan = await planAsync(projectRoot);
