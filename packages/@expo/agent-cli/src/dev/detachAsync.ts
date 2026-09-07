@@ -46,6 +46,7 @@ import {
 } from './childVerdict';
 import { event } from './events';
 import { openDetachedLogSync, readDetachedLogSync } from './logFile';
+import { isProcessAlive } from './processLiveness';
 import { parsePortMove, type PortMove } from './portCollision';
 import type { DevOptions } from './resolveOptions';
 
@@ -255,6 +256,19 @@ export async function devDetachAsync(
     );
   }
 
+  /**
+   * Whether the child this run started is gone, asked of the process rather than of an event.
+   *
+   * `hasExited` above is the parent's *observation* of the exit, and it is the only witness this
+   * file had. It is a good one and it is not the only one available: the lock names the child's
+   * pid, and `isProcessAlive` answers on every platform without touching the process. Reading both
+   * closes the window where a child has ended and the `exit` event has not been delivered yet —
+   * the whole point of the checks below is to be right about a process that is already gone, and
+   * an answer that depends on the event loop having caught up is one more ordering to lose to
+   * (@ref ./detachAsync §waitFailureAsync — F153).
+   */
+  const childIsGone = () => hasExited() || !isProcessAlive(lock.pid);
+
   let ready: boolean | null = null;
   let projectRootMatched: boolean | null = null;
   if (options.waitReady) {
@@ -270,7 +284,7 @@ export async function devDetachAsync(
     projectRootMatched = result.projectRootMatched;
     if (!result.ready) {
       // The child's own answer outranks this wait's. @ref ./detachAsync §waitFailureAsync
-      const stopped = await waitFailureAsync(projectRoot, hasExited());
+      const stopped = await waitFailureAsync(projectRoot, childIsGone());
       if (stopped) {
         throw detachFailureError(stopped.failure, {
           projectRoot,
@@ -288,7 +302,7 @@ export async function devDetachAsync(
     }
   }
 
-  const tunnelUrl = await waitForTunnelUrlAsync(projectRoot, options, hasExited);
+  const tunnelUrl = await waitForTunnelUrlAsync(projectRoot, options, childIsGone);
 
   // The last thing before anything is claimed. Everything above is a fact about a moment that has
   // passed: the lock answered, the bundler answered, the tunnel wait ran — and a child that died in
@@ -299,7 +313,7 @@ export async function devDetachAsync(
   const phase = readChildPhaseSync(projectRoot);
   let verdict = readChildVerdictSync(projectRoot);
   let failure = resolveDetachFailure({
-    exited: hasExited(),
+    exited: childIsGone(),
     verdict,
     statusAnswering: ready === true ? await isBundlerAnsweringAsync(lock.url) : null,
   });
@@ -311,7 +325,7 @@ export async function devDetachAsync(
   // open for a moment and the same three facts are asked again.
   if (failure == null && needsOpenPlatformGrace({ ready, phase })) {
     const grace = await watchOpenPlatformGraceAsync(projectRoot, lock.url, {
-      hasExited,
+      hasExited: childIsGone,
       budgetMs: Math.min(
         OPEN_PLATFORM_GRACE_MS,
         // Bounded by the budget the caller gave the whole run, never beyond it: a `--wait-ready`
@@ -460,7 +474,7 @@ async function watchOpenPlatformGraceAsync(
   // The child has exited, so this extra wait costs a dead run a moment and a healthy run nothing —
   // and without it the caller gets "the process exited" for a stop that has a named scenario and
   // an "Ask the user" line a beat behind it.
-  if (failure === 'child-exited' && verdict == null) {
+  if (failure === 'child-exited' && verdict?.scenario == null) {
     verdict = await waitForChildVerdictAsync(projectRoot);
     if (verdict != null) {
       return {
@@ -481,19 +495,33 @@ async function watchOpenPlatformGraceAsync(
 const VERDICT_WAIT_MS = 2_000;
 
 /**
- * Read the child's verdict, giving a child that is already gone a moment to finish writing one.
+ * Read the child's **final** verdict, giving a child that is already gone time to finish writing it.
  *
  * "The child has exited" and "the child's verdict is readable" are two moments, and the second is
  * the later one: the handoff block is written by the dying process. On a slow filesystem the gap is
- * wide enough to be observed [observed — windows-2022 CI, 2026-09-05]. Only a run with no verdict
- * yet ever waits, so a healthy run pays nothing and a dead one pays a moment.
+ * wide enough to be observed [observed — windows-2022 CI, 2026-09-05].
+ *
+ * **A verdict without a scenario is not the end of that write**, and stopping at the first one was
+ * this wait's own bug [observed — windows-2022 CI, 2026-09-06: exit 20 where the child's log named
+ * `macos-automation`]. `logCmdError` prints the failure and *then* the handoff block, in two
+ * writes (`src/utils/errors.ts`), and `parseDetachedChildVerdict` answers as soon as the first of
+ * them is on disk. A reader that landed between the two took `Error: …` as the child's conclusion
+ * and reported "the process exited" for a stop that had a named scenario and an "Ask the user"
+ * line a beat behind it — the exact misreport this wait exists to prevent, one line further in.
+ *
+ * So the wait ends on a **scenario**, and the deadline is what ends it otherwise. The cost is
+ * bounded and is paid only by a run that has already failed: a child that died with no handoff to
+ * write spends {@link VERDICT_WAIT_MS} before it is reported as gone, which is the wrong answer's
+ * price for making the right one reachable.
+ *
+ * @returns the last verdict read, which is null when the child wrote none at all.
  */
 async function waitForChildVerdictAsync(projectRoot: string): Promise<DetachedChildVerdict | null> {
   let verdict = readChildVerdictSync(projectRoot);
   const deadline = Date.now() + VERDICT_WAIT_MS;
-  while (verdict == null && Date.now() < deadline) {
+  while (verdict?.scenario == null && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
-    verdict = readChildVerdictSync(projectRoot);
+    verdict = readChildVerdictSync(projectRoot) ?? verdict;
   }
   return verdict;
 }
