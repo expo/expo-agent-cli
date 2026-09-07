@@ -46,6 +46,7 @@ import {
 } from './childVerdict';
 import { event } from './events';
 import { openDetachedLogSync, readDetachedLogSync } from './logFile';
+import { isProcessAlive } from './processLiveness';
 import { parsePortMove, type PortMove } from './portCollision';
 import type { DevOptions } from './resolveOptions';
 
@@ -220,16 +221,29 @@ export async function devDetachAsync(
   child.unref();
 
   let childExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
+  /**
+   * Aborted when the child is gone, which ends every wait below.
+   *
+   * A wait for a bundler is a wait for the process that would start one, and this run started
+   * exactly one of those. Without it, `--wait-ready` spends its whole budget re-asking a port
+   * nothing can answer on again: the retry that exists so a cold `expo run:ios` build is waited out
+   * (`src/runtime/waitReady.ts`) cannot tell that build apart from a corpse, and both look like a
+   * refused connection.
+   */
+  const childGone = new AbortController();
   child.once('exit', (code, signal) => {
     childExit = { code, signal };
+    childGone.abort();
   });
   child.once('error', () => {
     childExit = { code: null, signal: null };
+    childGone.abort();
   });
+  const hasExited = () => childExit != null;
 
   const lock = await waitForLockAsync(projectRoot, {
     timeoutMs: options.detachTimeoutMs,
-    hasExited: () => childExit != null,
+    hasExited,
   });
   if (!lock) {
     throw notStartedError(
@@ -242,6 +256,19 @@ export async function devDetachAsync(
     );
   }
 
+  /**
+   * Whether the child this run started is gone, asked of the process rather than of an event.
+   *
+   * `hasExited` above is the parent's *observation* of the exit, and it is the only witness this
+   * file had. It is a good one and it is not the only one available: the lock names the child's
+   * pid, and `isProcessAlive` answers on every platform without touching the process. Reading both
+   * closes the window where a child has ended and the `exit` event has not been delivered yet —
+   * the whole point of the checks below is to be right about a process that is already gone, and
+   * an answer that depends on the event loop having caught up is one more ordering to lose to
+   * (@ref ./detachAsync §waitFailureAsync — F153).
+   */
+  const childIsGone = () => hasExited() || !isProcessAlive(lock.pid);
+
   let ready: boolean | null = null;
   let projectRootMatched: boolean | null = null;
   if (options.waitReady) {
@@ -250,10 +277,24 @@ export async function devDetachAsync(
     const result = await waitForBundlerReadyAsync(lock.url, {
       timeoutMs: Math.max(1000, options.detachTimeoutMs - (Date.now() - startedAt)),
       projectRoot,
+      // @ref ./detachAsync §childGone — a dead child never answers, so the wait ends with it.
+      signal: childGone.signal,
     });
     ready = result.ready;
     projectRootMatched = result.projectRootMatched;
     if (!result.ready) {
+      // The child's own answer outranks this wait's. @ref ./detachAsync §waitFailureAsync
+      const stopped = await waitFailureAsync(projectRoot, childIsGone());
+      if (stopped) {
+        throw detachFailureError(stopped.failure, {
+          projectRoot,
+          lock,
+          logFile,
+          verdict: stopped.verdict,
+          childExit,
+          platform: options.platform,
+        });
+      }
       // @ref ./childVerdict.ts §parseDetachedChildPhase — F125. The child's own log says which half
       // of its plan it is in, and a plan that is compiling has not started a dev server for this
       // report to describe.
@@ -261,8 +302,7 @@ export async function devDetachAsync(
     }
   }
 
-  const hasExited = () => childExit != null;
-  const tunnelUrl = await waitForTunnelUrlAsync(projectRoot, options, hasExited);
+  const tunnelUrl = await waitForTunnelUrlAsync(projectRoot, options, childIsGone);
 
   // The last thing before anything is claimed. Everything above is a fact about a moment that has
   // passed: the lock answered, the bundler answered, the tunnel wait ran — and a child that died in
@@ -273,7 +313,7 @@ export async function devDetachAsync(
   const phase = readChildPhaseSync(projectRoot);
   let verdict = readChildVerdictSync(projectRoot);
   let failure = resolveDetachFailure({
-    exited: hasExited(),
+    exited: childIsGone(),
     verdict,
     statusAnswering: ready === true ? await isBundlerAnsweringAsync(lock.url) : null,
   });
@@ -285,7 +325,7 @@ export async function devDetachAsync(
   // open for a moment and the same three facts are asked again.
   if (failure == null && needsOpenPlatformGrace({ ready, phase })) {
     const grace = await watchOpenPlatformGraceAsync(projectRoot, lock.url, {
-      hasExited,
+      hasExited: childIsGone,
       budgetMs: Math.min(
         OPEN_PLATFORM_GRACE_MS,
         // Bounded by the budget the caller gave the whole run, never beyond it: a `--wait-ready`
@@ -434,12 +474,8 @@ async function watchOpenPlatformGraceAsync(
   // The child has exited, so this extra wait costs a dead run a moment and a healthy run nothing —
   // and without it the caller gets "the process exited" for a stop that has a named scenario and
   // an "Ask the user" line a beat behind it.
-  if (failure === 'child-exited' && verdict == null) {
-    const verdictDeadline = Date.now() + VERDICT_WAIT_MS;
-    while (verdict == null && Date.now() < verdictDeadline) {
-      await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
-      verdict = readChildVerdictSync(projectRoot);
-    }
+  if (failure === 'child-exited' && verdict?.scenario == null) {
+    verdict = await waitForChildVerdictAsync(projectRoot);
     if (verdict != null) {
       return {
         failure: resolveDetachFailure({ exited: true, verdict, statusAnswering: null }),
@@ -457,6 +493,75 @@ async function watchOpenPlatformGraceAsync(
  * where the verdict never comes, not for the one where it does.
  */
 const VERDICT_WAIT_MS = 2_000;
+
+/**
+ * Read the child's **final** verdict, giving a child that is already gone time to finish writing it.
+ *
+ * "The child has exited" and "the child's verdict is readable" are two moments, and the second is
+ * the later one: the handoff block is written by the dying process. On a slow filesystem the gap is
+ * wide enough to be observed [observed — windows-2022 CI, 2026-09-05].
+ *
+ * **A verdict without a scenario is not the end of that write**, and stopping at the first one was
+ * this wait's own bug [observed — windows-2022 CI, 2026-09-06: exit 20 where the child's log named
+ * `macos-automation`]. `logCmdError` prints the failure and *then* the handoff block, in two
+ * writes (`src/utils/errors.ts`), and `parseDetachedChildVerdict` answers as soon as the first of
+ * them is on disk. A reader that landed between the two took `Error: …` as the child's conclusion
+ * and reported "the process exited" for a stop that had a named scenario and an "Ask the user"
+ * line a beat behind it — the exact misreport this wait exists to prevent, one line further in.
+ *
+ * So the wait ends on a **scenario**, and the deadline is what ends it otherwise. The cost is
+ * bounded and is paid only by a run that has already failed: a child that died with no handoff to
+ * write spends {@link VERDICT_WAIT_MS} before it is reported as gone, which is the wrong answer's
+ * price for making the right one reachable.
+ *
+ * @returns the last verdict read, which is null when the child wrote none at all.
+ */
+async function waitForChildVerdictAsync(projectRoot: string): Promise<DetachedChildVerdict | null> {
+  let verdict = readChildVerdictSync(projectRoot);
+  const deadline = Date.now() + VERDICT_WAIT_MS;
+  while (verdict?.scenario == null && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
+    verdict = readChildVerdictSync(projectRoot) ?? verdict;
+  }
+  return verdict;
+}
+
+/**
+ * Why a `--wait-ready` that never got its answer is the child's failure rather than the wait's.
+ *
+ * @ref llp/0021-honest-reports.rfc.md §The rules — rule 2, F153, and the F61 family.
+ *
+ * `waitForBundlerReadyAsync` reports one fact: this bundler did not answer inside the budget. Two
+ * very different runs produce it. In one the plan is compiling and nothing has gone wrong, which is
+ * what {@link notReadyError} and its `building` wording are for. In the other the child is **gone**,
+ * and there that wording is false in every sentence — nothing is "still running", no build is
+ * "still going", and the reason it stopped is sitting in the child's log under a scenario name and
+ * an "Ask the user" line.
+ *
+ * Which of the two a `--wait-ready` reported used to depend on the order two processes happened to
+ * reach: the child's needs-human classification won only when the parent's last `/status` probe was
+ * slower than the child's death, and under load it was not [observed — `dev-detach-test.ts`
+ * "refuses to report ready for a child that is about to be gone", exit 20 instead of 7 with 48 busy
+ * processes on the machine, 2026-09-06]. An ordering is not evidence, so it is no longer read: the
+ * child is asked directly, and its own answer is the report.
+ *
+ * `statusAnswering` is **null**, not `false`. A bundler that has not answered is the state this
+ * whole branch is about, and calling it `not-answering` here would turn every ordinary cold
+ * `run:ios` build into a failure. Only the two facts that are conclusive on their own count — a
+ * handoff block in the log, and a child that is gone.
+ *
+ * @returns the failure and the verdict behind it, or null when the wait really was only a wait.
+ */
+async function waitFailureAsync(
+  projectRoot: string,
+  exited: boolean
+): Promise<{ failure: DetachFailureKind; verdict: DetachedChildVerdict | null } | null> {
+  const verdict = exited
+    ? await waitForChildVerdictAsync(projectRoot)
+    : readChildVerdictSync(projectRoot);
+  const failure = resolveDetachFailure({ exited, verdict, statusAnswering: null });
+  return failure ? { failure, verdict } : null;
+}
 
 /** Why a detached run that had come up is not something this command may report success for. */
 export type DetachFailureKind =

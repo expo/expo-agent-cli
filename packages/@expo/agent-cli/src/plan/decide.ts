@@ -138,25 +138,41 @@ export function decideStartPlan(
     backend?.runsOn === 'eas'
       ? easBuildLocation(platform, backend)
       : localBuildLocation(platform, backend);
+  /**
+   * The plan for a project whose recorded build is current: serve it, or install it and serve it.
+   *
+   * @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+   *
+   * One shape, two targets. `bare` and `dev-client` differ in nothing here — the fingerprint
+   * matched, so neither compiles anything, and both ask the same question about the device — and
+   * writing it twice made the pair of rows a place where one target could gain an install the
+   * other did not [review of #21]. The rule names stay distinct because they are what a reader and
+   * `--json` see; the steps and the reasons are decided once.
+   */
+  const currentBuildPlan = (target: 'bare' | 'dev-client'): StartPlan =>
+    missingFromDevice
+      ? plan(
+          `${target}-install`,
+          target,
+          [
+            installStep(platform, options.installDevice ?? null),
+            startDevClientStep(build.summary, options),
+          ],
+          [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
+        )
+      : plan(
+          `${target}-fresh`,
+          target,
+          [startDevClientStep(build.summary, options)],
+          [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
+        );
 
   // Checked-in native directories are the strongest signal: the project is bare, so the plan
   // never regenerates them with prebuild. `expo run:*` performs the pod install / gradle sync
   // that the LLP table calls for before building.
   if (state.nativeDirs.ios || state.nativeDirs.android) {
     if (build.fresh) {
-      return missingFromDevice
-        ? plan(
-            'bare-install',
-            'bare',
-            [installStep(platform, options.installDevice ?? null), startDevClientStep(build.summary, options)],
-            [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
-          )
-        : plan(
-            'bare-fresh',
-            'bare',
-            [startDevClientStep(build.summary, options)],
-            [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
-          );
+      return currentBuildPlan('bare');
     }
     return plan(
       'bare-stale',
@@ -173,19 +189,7 @@ export function decideStartPlan(
     if (build.fresh) {
       // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
       // A matching fingerprint proves the build is current and says nothing about where it is.
-      return missingFromDevice
-        ? plan(
-            'dev-client-install',
-            'dev-client',
-            [installStep(platform, options.installDevice ?? null), startDevClientStep(build.summary, options)],
-            [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
-          )
-        : plan(
-            'dev-client-fresh',
-            'dev-client',
-            [startDevClientStep(build.summary, options)],
-            [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
-          );
+      return currentBuildPlan('dev-client');
     }
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
     // Two stale rows rather than one, split on what moved rather than on whether anything did.

@@ -65,6 +65,72 @@ export function classifyAgainstRecordedBuild(
   recorded: LastBuildFingerprint | null,
   head: { hash: string | null; sources?: FingerprintSource[] | null }
 ): RecordedImpact {
+  const cached = recorded == null ? null : readMemo(recorded, head, platform);
+  if (cached) {
+    return cached;
+  }
+  const answer = classifyUncachedAgainstRecordedBuild(platform, recorded, head);
+  if (recorded != null) {
+    writeMemo(recorded, head, platform, answer);
+  }
+  return answer;
+}
+
+/**
+ * The answers already computed for one recorded build and one working-tree fingerprint.
+ *
+ * @ref llp/0011-impact-and-freshness.rfc.md §Two things called impact
+ *
+ * `status` asks this question **twice per platform**: once through the decision table, which needs
+ * to know whether fixing a stale build starts with a prebuild, and once through the freshness
+ * section, which prints what moved. The two are the same question about the same two lists, and
+ * the diff underneath walks every fingerprint source — tens of thousands of entries on a real
+ * project [observed — ~25 KB of sources for iOS on an SDK 57 Expo Router app, 2026-08-24]. So the
+ * second ask reads the first's answer [review of #21].
+ *
+ * Keyed on the **identity** of the two inputs rather than on their hashes, which is what makes the
+ * cache impossible to get wrong: one run reads the record once and probes the project once, so the
+ * two calls carry the same two objects, and two different objects never share an answer even when
+ * their hashes agree. It is a `WeakMap`, so a run that is over takes its entries with it.
+ */
+const MEMO = new WeakMap<
+  LastBuildFingerprint,
+  WeakMap<object, Map<NativePlatform, RecordedImpact>>
+>();
+
+function readMemo(
+  recorded: LastBuildFingerprint,
+  head: object,
+  platform: NativePlatform
+): RecordedImpact | null {
+  return MEMO.get(recorded)?.get(head)?.get(platform) ?? null;
+}
+
+function writeMemo(
+  recorded: LastBuildFingerprint,
+  head: object,
+  platform: NativePlatform,
+  answer: RecordedImpact
+): void {
+  let byHead = MEMO.get(recorded);
+  if (!byHead) {
+    byHead = new WeakMap();
+    MEMO.set(recorded, byHead);
+  }
+  let byPlatform = byHead.get(head);
+  if (!byPlatform) {
+    byPlatform = new Map();
+    byHead.set(head, byPlatform);
+  }
+  byPlatform.set(platform, answer);
+}
+
+/** {@link classifyAgainstRecordedBuild}, without the memo in front of it. */
+function classifyUncachedAgainstRecordedBuild(
+  platform: NativePlatform,
+  recorded: LastBuildFingerprint | null,
+  head: { hash: string | null; sources?: FingerprintSource[] | null }
+): RecordedImpact {
   if (!head.hash) {
     return undecided(
       null,

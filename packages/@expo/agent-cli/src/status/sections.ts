@@ -12,7 +12,7 @@ import { buildConnectUrls, openInPhrase, type ConnectUrl } from '../navigate/con
 import { decideExpoGoTarget } from '../navigate/target';
 import { decideStartPlan } from '../plan/decide';
 import type { LastBuildRecord } from '../plan/lastBuild';
-import type { LastBuildFingerprints, NativePlatform, PlanPlatform } from '../plan/types';
+import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatform, devCommand, smokeCommand } from '../smoke/suggest';
 import { decidesAgainstExpoGo } from '../project/expoGo';
@@ -121,15 +121,19 @@ export function buildExpoGoStatus(state: ProjectState): ExpoGoStatus {
  */
 export function buildFreshnessStatus(
   state: ProjectState,
-  lastBuild: LastBuildFingerprints,
   /**
-   * The whole record, which carries the sources a hash alone cannot.
+   * What `.expo/agent-cli-last-build.json` holds, whole.
    *
    * @ref llp/0004-smart-start-and-project-state.rfc.md §Status
-   * This is what turns `stale` from a fact into an answer: the probe already computed the working
-   * tree's sources to get its hash, the record already holds the ones the last build was made
-   * from, and the diff between two lists in memory costs nothing. Optional so the section stays
-   * testable from hashes alone; a caller that passes nothing gets freshness with no headline.
+   * The record carries the sources a hash alone cannot, and that is what turns `stale` from a fact
+   * into an answer: the probe already computed the working tree's sources to get its hash, the
+   * record already holds the ones the last build was made from, and the diff between two lists in
+   * memory costs nothing.
+   *
+   * **One argument, where there used to be two** [review of #21]. This took the hashes as well,
+   * and the hashes are `record[platform].hash` — so a caller could hand over a pair that disagreed
+   * and get a freshness verdict measured against one build and explained by another. Nothing can
+   * now say two different things about the same record.
    */
   record: LastBuildRecord = {},
   /** Whether the caller asked for the per-source list (`--explain`). */
@@ -143,7 +147,7 @@ export function buildFreshnessStatus(
     platformFreshness(
       platform,
       hash,
-      lastBuild[platform] ?? null,
+      record[platform]?.hash ?? null,
       hash == null
         ? null
         : classifyAgainstRecordedBuild(platform, record[platform] ?? null, state.fingerprint),

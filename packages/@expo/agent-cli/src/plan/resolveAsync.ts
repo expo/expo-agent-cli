@@ -13,18 +13,27 @@ import { selectBuildBackend } from '../toolchain/selectBackend';
 import type { ToolchainProbe } from '../toolchain/types';
 import { decideStartPlan } from './decide';
 import { selectRunTarget } from './runTarget';
-import type { DecideStartPlanOptions, StartPlanRule } from './types';
+import type { DecideStartPlanOptions } from './types';
 
 /**
- * The rules whose plan is "the app is already on a device, so just serve it".
+ * Whether this plan assumes an app that is already on a device, without having asked one.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
  *
- * The two rows that assume an installed app without ever having asked. Every other buildless rule
- * has nothing to ask about: `web` opens a browser, `expo-go` runs in a published app that
- * `expo start` offers to install itself, and `not-expo-app` has no app.
+ * Read off the plan rather than listed by name. A list of rule names is a second copy of the
+ * decision table, kept in a file the table does not import — and a row added there would go on
+ * planning a dev server for an app that is not installed, silently, because nothing would fail
+ * [review of #21]. What actually matters is the two properties the caller below acts on, and both
+ * are in the plan already:
+ *
+ *  - **it builds nothing** — a plan that ends in `expo run:*` installs what it built, so there is
+ *    nothing to ask and nothing to add;
+ *  - **it runs a native app of this project** — `web` opens a browser, `expo-go` runs in a
+ *    published app `expo start` offers to install itself, and `not-expo-app` has no app at all.
  */
-const AWAITS_A_DEVICE = new Set<StartPlanRule | string>(['dev-client-fresh', 'bare-fresh']);
+function awaitsADevice(plan: StartPlan): boolean {
+  return plan.buildLocation == null && (plan.target === 'dev-client' || plan.target === 'bare');
+}
 
 export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
   /** Where a flag on this command line asked the build to run, or null when none did. */
@@ -100,7 +109,7 @@ export async function resolveStartPlanAsync(
       (planOptions.requestedPlatform === 'ios' || planOptions.requestedPlatform === 'android')
         ? planOptions.requestedPlatform
         : null;
-    if (!AWAITS_A_DEVICE.has(draft.rule) || opensOn == null) {
+    if (!awaitsADevice(draft) || opensOn == null) {
       return draft;
     }
     if ((requestedBackend ?? settingsBuildBackend(settings, opensOn)) === 'eas') {

@@ -1,5 +1,4 @@
 import * as network from '../../followups/network';
-import type { LastBuildFingerprints } from '../../plan/types';
 import type { ProjectState } from '../../project/types';
 import type { DevServerProbe } from '../../runtime/devServer';
 import {
@@ -219,9 +218,9 @@ describe(buildFreshnessStatus, () => {
   });
 
   it(`should report a platform whose recorded build matches as fresh`, () => {
-    const lastBuild: LastBuildFingerprints = { ios: 'abcdef0123456789' };
-
-    const status = buildFreshnessStatus(mockState(), lastBuild);
+    const status = buildFreshnessStatus(mockState(), {
+      ios: { hash: 'abcdef0123456789', sources: null },
+    });
 
     expect(axis(status, 'ios', 'local')).toMatchObject({
       platform: 'ios',
@@ -237,7 +236,9 @@ describe(buildFreshnessStatus, () => {
   });
 
   it(`should report a platform whose recorded build differs as stale`, () => {
-    const status = buildFreshnessStatus(mockState(), { android: '99999999deadbeef' });
+    const status = buildFreshnessStatus(mockState(), {
+      android: { hash: '99999999deadbeef', sources: null },
+    });
 
     const android = axis(status, 'android', 'local');
     expect(android.state).toBe('stale');
