@@ -1,9 +1,10 @@
 // @ref llp/0006-agent-native-cli-surface.rfc.md §Surface improvements
-// One managed block inside a file the user owns. Existing Expo install instructions are
+// One managed block inside a file the user owns. Supported Expo command instructions are
 // migrated to agent-cli; other instructions outside the markers are preserved.
 import fs from 'fs';
 import path from 'path';
 
+import { forwardedCommands } from '../commandRegistry';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import type { AgentsMdResult, ClaudeMdResult } from './types';
@@ -13,6 +14,8 @@ export const AGENTS_MD_FILE = 'AGENTS.md';
 
 export const BLOCK_START = '<!-- BEGIN EXPO AGENT CLI MANAGED BLOCK -->';
 export const BLOCK_END = '<!-- END EXPO AGENT CLI MANAGED BLOCK -->';
+
+const EXPO_COMMANDS = new Set(['install', 'start', 'add', ...forwardedCommands]);
 
 /**
  * Return the contents of `AGENTS.md` with the managed block set to `blockBody`.
@@ -68,7 +71,7 @@ export async function writeManagedBlockAsync(
     throw error;
   });
   const next = applyManagedBlock(
-    contents == null ? null : rewriteExpoInstallCommands(contents),
+    contents == null ? null : rewriteExpoCommands(contents),
     blockBody
   );
 
@@ -80,17 +83,23 @@ export async function writeManagedBlockAsync(
   return { path: AGENTS_MD_FILE, action: contents == null ? 'created' : 'updated' };
 }
 
-/** Keep template install examples consistent with the managed commands, including Bun runners. */
-function rewriteExpoInstallCommands(contents: string): string {
+/** Keep template examples consistent with the managed commands, including Bun runners. */
+function rewriteExpoCommands(contents: string): string {
   return contents
     .replace(
-      /(?<![\w@/.-])((?:npx|bunx)(?:[ \t]+(?:--yes|-y|--bun))*[ \t]+)expo([ \t]+install)(?![\w./-])/g,
-      '$1@expo/agent-cli$2'
+      /(?<![\w@/.-])((?:npx|bunx)(?:[ \t]+(?:--yes|-y|--bun))*[ \t]+)(?:expo([ \t]+[a-z][\w:-]*)|expo-doctor(?:@latest)?)(?![\w@./-])/g,
+      (match, runner: string, command: string | undefined) =>
+        command && !EXPO_COMMANDS.has(command.trim())
+          ? match
+          : `${runner}@expo/agent-cli${command ?? ' doctor'}`
     )
     // Bare examples start a line or a quoted command; do not rewrite part of another runner.
     .replace(
-      /(^[ \t]*|[`'"])expo([ \t]+install)(?![\w./-])/gm,
-      (_match, prefix: string, command: string) => `${prefix}${PROGRAM_PREFIX}${command}`
+      /(^[ \t]*|[`'"])(?:expo([ \t]+[a-z][\w:-]*)|expo-doctor(?:@latest)?)(?![\w@./-])/gm,
+      (match, prefix: string, command: string | undefined) =>
+        command && !EXPO_COMMANDS.has(command.trim())
+          ? match
+          : `${prefix}${PROGRAM_PREFIX}${command ?? ' doctor'}`
     );
 }
 

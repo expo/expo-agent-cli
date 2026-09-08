@@ -1,5 +1,6 @@
 import { vol } from 'memfs';
 
+import { forwardedCommands } from '../../commandRegistry';
 import {
   AGENTS_MD_FILE,
   applyManagedBlock,
@@ -106,6 +107,46 @@ describe(applyManagedBlock, () => {
 });
 
 describe(writeManagedBlockAsync, () => {
+  it.each([
+    ['npx expo start --clear', 'npx @expo/agent-cli start --clear'],
+    ['bunx expo start --web', 'bunx @expo/agent-cli start --web'],
+    ['expo start', 'npx @expo/agent-cli start'],
+    ['npx --yes expo lint', 'npx --yes @expo/agent-cli lint'],
+    ['bunx --bun expo lint --fix', 'bunx --bun @expo/agent-cli lint --fix'],
+    ['expo lint', 'npx @expo/agent-cli lint'],
+    ['npx expo-doctor', 'npx @expo/agent-cli doctor'],
+    ['bunx expo-doctor', 'bunx @expo/agent-cli doctor'],
+    ['npx -y expo-doctor@latest', 'npx -y @expo/agent-cli doctor'],
+    ['expo-doctor', 'npx @expo/agent-cli doctor'],
+    ['npx expo prebuild --clean', 'npx @expo/agent-cli prebuild --clean'],
+    ['bunx expo run:ios --device', 'bunx @expo/agent-cli run:ios --device'],
+    ['expo export --platform web', 'npx @expo/agent-cli export --platform web'],
+    ['npx expo add expo-camera', 'npx @expo/agent-cli add expo-camera'],
+  ])('should migrate %s in inline and fenced examples', async (command, expected) => {
+    vol.writeFileSync(
+      `${projectRoot}/AGENTS.md`,
+      `Use \`${command}\`.\n\n\`\`\`sh\n${command}\n\`\`\`\n`
+    );
+
+    await writeManagedBlockAsync(projectRoot, 'Body line.');
+
+    expect(vol.readFileSync(`${projectRoot}/AGENTS.md`, 'utf8')).toBe(
+      applyManagedBlock(`Use \`${expected}\`.\n\n\`\`\`sh\n${expected}\n\`\`\`\n`, 'Body line.')
+    );
+    expect((await writeManagedBlockAsync(projectRoot, 'Body line.')).action).toBe('skipped');
+  });
+
+  it.each(forwardedCommands)(
+    'should migrate the registered Expo passthrough command %s',
+    async (command) => {
+      vol.writeFileSync(`${projectRoot}/AGENTS.md`, `Run \`npx expo ${command}\`.\n`);
+      await writeManagedBlockAsync(projectRoot, 'Body line.');
+      expect(vol.readFileSync(`${projectRoot}/AGENTS.md`, 'utf8')).toContain(
+        `Run \`npx @expo/agent-cli ${command}\`.`
+      );
+    }
+  );
+
   it('should rewrite Expo install instructions while preserving runners, arguments, and other text', async () => {
     const before = [
       '# My rules',
@@ -115,7 +156,9 @@ describe(writeManagedBlockAsync, () => {
       'bunx --bun expo install expo-router -- --dev',
       'expo install expo-sqlite',
       '```',
-      'Keep `npx expo start`, `expo prebuild`, and `npx @expo/agent-cli install`.',
+      'Keep `npx expo unknown-command`, `expo unknown-command`, and `npx @expo/agent-cli install`.',
+      'Keep `expo starter`, `expo lint-extra`, `./expo-doctor`, and `expo-doctor-helper`.',
+      'Keep `npx expo-doctor@1.0.0`, `npx expo-doctor@next`, and `pnpm expo-doctor`.',
       'Keep `my-expo install`, `./expo install`, and `expo installer`.',
       'Keep `pnpm expo install`, `yarn expo install`, and `npx --offline expo install`.',
       '',
