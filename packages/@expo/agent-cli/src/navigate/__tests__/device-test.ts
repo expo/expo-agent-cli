@@ -359,8 +359,8 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(error.message).toContain('eas simulator --platform ios');
   });
 
-  // `--cloud` names the device, so no local tool is asked at all.
-  it(`asks no local tool when --cloud named the backend`, async () => {
+  // `--eas` names the device, so no local tool is asked at all.
+  it(`asks no local tool when --eas named the backend`, async () => {
     mockPlatform('darwin');
     cloudProject('sess-1');
     mockSpawnQueue([{ stdout: liveSession }]);
@@ -384,7 +384,7 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(error.message).toContain('--ios');
   });
 
-  it(`names how to start a session when --cloud finds none`, async () => {
+  it(`names how to start a session when --eas finds none`, async () => {
     cloudProject(null);
     mockSpawnQueue(noSessions);
 

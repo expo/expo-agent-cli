@@ -5,7 +5,7 @@
 **Systems:** the plan engine (`src/plan/decide.ts`, `src/plan/resolveAsync.ts`, `src/plan/runTarget.ts`); the toolchain probe (`src/toolchain/`); the developer config (`src/settings/`); EAS CLI resolution (`src/utils/easCli.ts`, `src/utils/packageRunner.ts`, `src/utils/processGroup.ts`); project-local bin resolution (`src/utils/projectBin.ts`); `@expo/agent-cli dev`; `@expo/agent-cli status`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-26
-**Revised:** 2026-08-30
+**Revised:** 2026-08-30 · 2026-09-08
 **Related:** [[0004-smart-start-and-project-state]], [[0008-guardrails]], [[0009-smart-followups]], [[0010-agent-conventions]], [[0011-impact-and-freshness]]
 
 ## Summary
@@ -44,6 +44,14 @@ Detection only ever pushes a build to the cloud. There is no row that moves a bu
 An explicit choice is honoured even where it cannot work, and is marked `doomed`. The caller may know something this CLI cannot see. What the plan does instead of overriding them is say so. The `Build:` line is red, and a reason reads "the plan above is the plan that runs, and its build step will fail".
 
 Every choice carries two spellings of the same sentence: `why`, as `Building <where>: <because>`, for the plan's reason list; and `because` on its own for the `status` line.
+
+## One flag for EAS
+
+[decided, Kudo, 2026-09-08] `--eas` is the one flag that puts a command on EAS. On `dev` it has always named the build backend. The device commands — `smoke`, `navigate`, `runtime:reload`, `runtime:stop` — named the same service `--cloud` for the device backend, an EAS Simulator session ([[0005-runtime-loop-tools]] §Cloud simulator). Two spellings for one place: `dev --cloud` and `smoke --eas` were both refused as unknown options [observed — 1.0.9].
+
+`--eas` wins because it names the service rather than a place, matches `buildBackend: "eas"` in the developer config, and pairs with `--local`. The meaning is one sentence: **everything this command does runs on EAS** — the build on EAS Build, the device on EAS Simulator, and the dev server through a tunnel so that device can reach it.
+
+`--cloud` is removed outright, with no alias [Kudo, 2026-09-08]: a `--cloud` on any command line is the ordinary unknown-option error, which names `--help`. The surface is young enough that one name from now on is worth more than a release of two. Every printed command line — follow-ups, `Try:` lines, the `--help` — says `--eas`.
 
 ## The plan approved is the plan run
 

@@ -448,7 +448,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — wave 21.
     //
     // **Rung one: the broadcast, when there is a client to broadcast to.** `getpeers` answers that
-    // question, and the answer — not `--cloud`, not the location of the device — is what picks the
+    // question, and the answer — not `--eas`, not the location of the device — is what picks the
     // rung. A pinned `--method` skips this, as a pinned method always has.
     if (options.method === 'auto' || options.method === 'dev-server') {
       // The count from `/json/list` goes in, so the reason this attempt gives can tell "no app is
@@ -503,7 +503,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
       }
     }
 
-    // **Rung two: the relaunch, on the device backend in play.** `--cloud` names *which* backend may
+    // **Rung two: the relaunch, on the device backend in play.** `--eas` names *which* backend may
     // act: the session's controller (`./cloudReload.ts`, wave 19's two verbs) or a device booted on
     // this machine.
     //
@@ -1264,7 +1264,7 @@ async function reloadOnDeviceAsync(
   let device: NavigateDevice;
   try {
     // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator.
-    // `required` and never `fallback`: only `--cloud` sends this to a device that bills by the
+    // `required` and never `fallback`: only `--eas` sends this to a device that bills by the
     // minute, and a machine with nothing booted is told it has nothing.
     device = await resolveDeviceAsync(options.platform, {
       cloud: options.cloud ? 'required' : 'off',
@@ -1615,11 +1615,11 @@ function explainStrandedApp(report: ReloadResultJson, options: ReloadOptions): s
 /** The what / why / how for a reload that did not end where it was supposed to. */
 export function explainReloadFailure(report: ReloadResultJson, options: ReloadOptions): string {
   // The `smoke` this points at needs a platform now. Prefer the device this reload ran against,
-  // then the flag the caller passed, then the host's default — and carry `--cloud` through.
+  // then the flag the caller passed, then the host's default — and carry `--eas` through.
   const smokePlatform =
     statedSmokePlatform((report.platform as PlanPlatform | null) ?? options.platform) ??
     (process.platform === 'darwin' ? 'ios' : 'android');
-  const smokeBase = `${smokeCommand(smokePlatform)}${options.cloud ? ' --cloud' : ''}`;
+  const smokeBase = `${smokeCommand(smokePlatform)}${options.cloud ? ' --eas' : ''}`;
 
   // The refusal comes first, because nothing was attempted: an attempts list that is empty for
   // this reason must not read as "no method worked" (friction run 4, F38).
@@ -1660,7 +1660,7 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
         `The app was ${report.method === 'device' ? 'relaunched' : 'asked to reload itself'}${options.cloud ? ' on the cloud simulator' : ''}, and nothing was observed to confirm it reloaded.`
       ),
       `Why: two observations were watched for ${options.timeoutMs}ms and neither happened. The dev server listed no debugger target it had not listed before (${report.devServerUrl}/json/list named ${report.appsConnected}), which a cloud simulator often never does — an app has run this project on one with that list empty throughout. And ${report.bundlesAfterReload.reason ?? 'the dev server served no bundle after the relaunch'}. So the app may be running the new code invisibly, or it may not have come back.`,
-      `How: look at the screen — "${smokeCommand(smokePlatform)} --cloud --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach --tunnel" so its output is recorded.` : ''}`.trim(),
+      `How: look at the screen — "${smokeCommand(smokePlatform)} --eas --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach --tunnel" so its output is recorded.` : ''}`.trim(),
     ].join('\n');
   }
   if (!report.reloaded) {

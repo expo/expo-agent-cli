@@ -4,6 +4,7 @@
 
 ### 🛠 Breaking changes
 
+- `--cloud` is `--eas` on `smoke`, `navigate`, `runtime:reload` and `runtime:stop`, the flag `dev` already used for the same service. One name now means "on EAS", for the build and for the device. `--cloud` is removed, with no alias: it is an unknown option now. Every command line this CLI prints says `--eas`. ([#34](https://github.com/expo/expo-agent-cli/pull/34) by [@kudo](https://github.com/kudo))
 - `dev` now requires a platform flag (`--ios`, `--android`, or `--web`), like `smoke`. The plan always acts on the named platform: a fresh plan runs `expo start --<platform>`, which boots a simulator or an emulator and opens the app, and a stale plan prebuilds and builds through `expo run:<platform>`. A run with no platform exits 1 with a one-line usage error. Every suggestion the CLI prints now states a platform too. ([#7](https://github.com/expo/expo-agent-cli/pull/7) by [@kudo](https://github.com/kudo))
 
 ### 🎉 New features

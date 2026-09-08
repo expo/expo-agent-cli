@@ -1,6 +1,6 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
 //
-// `@expo/agent-cli navigate --cloud` end to end, against a stub `eas` bin installed the way npm installs a
+// `@expo/agent-cli navigate --eas` end to end, against a stub `eas` bin installed the way npm installs a
 // real one. Nothing here touches EAS: no account, no session, no billing.
 //
 // This file exists because of what the unit tests **cannot** claim. The argv is pinned there, in
@@ -181,7 +181,7 @@ function easInvocations(projectRoot: string): string[][] {
 }
 
 /**
- * A `navigate --cloud` run that reaches the device without a dev server.
+ * A `navigate --eas` run that reaches the device without a dev server.
  *
  * `--scheme` is what makes that possible: it produces a development build's `<scheme>://<route>`,
  * which carries no host, so there is nothing for the tunnel check to refuse and no dev server to
@@ -197,7 +197,7 @@ function navigateCloud(
     [
       'navigate',
       '/notes',
-      '--cloud',
+      '--eas',
       '--scheme',
       'myapp',
       '--no-wait-attach',
@@ -208,7 +208,7 @@ function navigateCloud(
   );
 }
 
-describe('@expo/agent-cli navigate --cloud', () => {
+describe('@expo/agent-cli navigate --eas', () => {
   it(`opens the link through simulator:exec, with the session's own platform`, async () => {
     const projectRoot = await setupAsync('go-app');
     await writeSessionFileAsync(projectRoot, 'sess-e2e');
@@ -420,7 +420,7 @@ describe('@expo/agent-cli navigate --cloud', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['navigate', '/', '--cloud', '--attach-timeout', '2s', '--json', '--no-followups'],
+        ['navigate', '/', '--eas', '--attach-timeout', '2s', '--json', '--no-followups'],
         {
           reject: false,
           env: { STUB_SIM_ALERT: `Open in "Expo Go"?\nCancel / Open` },
@@ -469,7 +469,7 @@ describe('@expo/agent-cli navigate --cloud', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['navigate', '/', '--cloud', '--attach-timeout', '2s', '--json', '--no-followups'],
+        ['navigate', '/', '--eas', '--attach-timeout', '2s', '--json', '--no-followups'],
         { reject: false }
       );
 
@@ -499,7 +499,7 @@ describe('@expo/agent-cli navigate --cloud', () => {
 
     const result = await executeAgentCliAsync(
       projectRoot,
-      ['navigate', '/', '--cloud', '--dev-server-url', devServer.url, '--no-wait-attach'],
+      ['navigate', '/', '--eas', '--dev-server-url', devServer.url, '--no-wait-attach'],
       { reject: false }
     );
     await devServer.close();
@@ -511,7 +511,7 @@ describe('@expo/agent-cli navigate --cloud', () => {
   });
 });
 
-describe('@expo/agent-cli runtime:stop --cloud', () => {
+describe('@expo/agent-cli runtime:stop --eas', () => {
   // The controller's `close <app-id>` ends the named app and leaves the billed machine up. The
   // pinned argv is the point: `--shutdown` would tear down the session, and `simulator:stop` would
   // end it outright — neither of which is what this command was asked to do.
@@ -521,7 +521,7 @@ describe('@expo/agent-cli runtime:stop --cloud', () => {
 
     const result = await executeAgentCliAsync(
       projectRoot,
-      ['runtime:stop', '--cloud', '--app-id', 'host.exp.Exponent', '--json', '--no-followups'],
+      ['runtime:stop', '--eas', '--app-id', 'host.exp.Exponent', '--json', '--no-followups'],
       { reject: false }
     );
 
@@ -551,7 +551,7 @@ describe('@expo/agent-cli runtime:stop --cloud', () => {
     expect(invocations.some((argv) => argv[0] === 'simulator:stop')).toBe(false);
   });
 
-  // `--cloud` is the only way a stop reaches a session: a machine with no local device is told it
+  // `--eas` is the only way a stop reaches a session: a machine with no local device is told it
   // has none rather than quietly handed a device that bills by the minute.
   it(`never reaches for a session that was not named`, async () => {
     const projectRoot = await setupAsync('go-app');
@@ -564,10 +564,10 @@ describe('@expo/agent-cli runtime:stop --cloud', () => {
     expect(easInvocations(projectRoot)).toEqual([]);
   });
 
-  it(`says how to start a session when --cloud finds none`, async () => {
+  it(`says how to start a session when --eas finds none`, async () => {
     const projectRoot = await setupAsync('go-app');
 
-    const result = await executeAgentCliAsync(projectRoot, ['runtime:stop', '--cloud'], {
+    const result = await executeAgentCliAsync(projectRoot, ['runtime:stop', '--eas'], {
       reject: false,
       env: { STUB_SIM_SESSIONS: '0' },
     });
@@ -578,12 +578,12 @@ describe('@expo/agent-cli runtime:stop --cloud', () => {
   });
 });
 
-// The two remaining `--cloud` commands. `navigate` and `runtime:stop` above had suites; these two
+// The two remaining `--eas` commands. `navigate` and `runtime:stop` above had suites; these two
 // take the same flag, walk the same ladder through `resolveDeviceAsync`, and had none — so the
 // cloud half of `smoke` and of `runtime:reload` was reachable only by running it against a real
 // billed session. What is asked here is the same three questions: which binary was spawned, with
 // which argv, and what a run with no session is told.
-describe('@expo/agent-cli smoke --cloud', () => {
+describe('@expo/agent-cli smoke --eas', () => {
   // The device-dependent phases go to the session rather than to this machine's tools. The local
   // half of this is `smoke-test.ts` ("hands xcrun simctl io the udid and the path"), and the two
   // have to be checked separately because they cross different process boundaries.
@@ -596,7 +596,7 @@ describe('@expo/agent-cli smoke --cloud', () => {
     try {
       await executeAgentCliAsync(
         projectRoot,
-        ['smoke', '--ios', '--cloud', '--dev-server-url', stub.url, '--json', '--timeout', '2s'],
+        ['smoke', '--ios', '--eas', '--dev-server-url', stub.url, '--json', '--timeout', '2s'],
         { reject: false }
       );
 
@@ -612,7 +612,7 @@ describe('@expo/agent-cli smoke --cloud', () => {
   //
   // The dev server here advertises a **tunnel** origin in its manifest, and no `--dev-server-url` is
   // passed: this is exactly the shape of the live run where `navigate --print-url` reported
-  // `hostType: tunnel` over `exp://agent-cli-live-8500.tuft.host/--/?` and `smoke --cloud` refused
+  // `hostType: tunnel` over `exp://agent-cli-live-8500.tuft.host/--/?` and `smoke --eas` refused
   // `exp://127.0.0.1:8500/--/?` as unreachable, three minutes apart, against the same dev server.
   // What the gate opens has to be the host the dev server advertised, not the port it listens on.
   it(`opens the host the dev server advertised, not the loopback it listens on`, async () => {
@@ -635,7 +635,7 @@ describe('@expo/agent-cli smoke --cloud', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['smoke', '--cloud', '--ios', '--json', '--timeout', '4s', '--no-followups'],
+        ['smoke', '--eas', '--ios', '--json', '--timeout', '4s', '--no-followups'],
         { reject: false }
       );
 
@@ -655,7 +655,7 @@ describe('@expo/agent-cli smoke --cloud', () => {
     }
   });
 
-  // A gate must not pass on a device it never found. `--cloud` is `required` for `smoke`'s device
+  // A gate must not pass on a device it never found. `--eas` is `required` for `smoke`'s device
   // phases, so an account with no session is told so rather than quietly falling back here.
   it(`reports the missing session rather than falling back to this machine`, async () => {
     const projectRoot = await setupAsync('go-app');
@@ -663,7 +663,7 @@ describe('@expo/agent-cli smoke --cloud', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['smoke', '--ios', '--cloud', '--dev-server-url', stub.url, '--json', '--timeout', '2s'],
+        ['smoke', '--ios', '--eas', '--dev-server-url', stub.url, '--json', '--timeout', '2s'],
         { reject: false, env: { STUB_SIM_SESSIONS: '0' } }
       );
 
@@ -677,10 +677,10 @@ describe('@expo/agent-cli smoke --cloud', () => {
       expect(app.reason).toContain('EAS Simulator session');
       expect(report.deviceBackend).toBeNull();
       // And the ladder stays on the backend this run asked for: a suggestion that dropped
-      // `--cloud` would send a host that reached for the cloud to a device it may not have.
+      // `--eas` would send a host that reached for the cloud to a device it may not have.
       for (const followup of report.followups as { command: string }[]) {
         if (/@expo\/agent-cli (smoke|navigate)\b/.test(followup.command)) {
-          expect(followup.command).toContain('--cloud');
+          expect(followup.command).toContain('--eas');
         }
       }
       // No verb was sent to a session that does not exist.
@@ -691,7 +691,7 @@ describe('@expo/agent-cli smoke --cloud', () => {
   });
 });
 
-describe('@expo/agent-cli runtime:reload --cloud', () => {
+describe('@expo/agent-cli runtime:reload --eas', () => {
   // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — wave 19.
   //
   // The reload on a cloud session is **two** controller verbs, and this is where the argv leaving a
@@ -720,7 +720,7 @@ describe('@expo/agent-cli runtime:reload --cloud', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['runtime:reload', '--cloud', '--timeout', '2s', '--json', '--no-followups'],
+        ['runtime:reload', '--eas', '--timeout', '2s', '--json', '--no-followups'],
         { reject: false }
       );
 
@@ -781,7 +781,7 @@ describe('@expo/agent-cli runtime:reload --cloud', () => {
         projectRoot,
         [
           'runtime:reload',
-          '--cloud',
+          '--eas',
           '--dev-server-url',
           stub.url,
           '--timeout',
@@ -803,7 +803,7 @@ describe('@expo/agent-cli runtime:reload --cloud', () => {
     }
   });
 
-  it(`says how to start a session when --cloud finds none`, async () => {
+  it(`says how to start a session when --eas finds none`, async () => {
     const projectRoot = await setupAsync('go-app');
     const stub = await startStubDevServerAsync({
       targets: [],
@@ -820,7 +820,7 @@ describe('@expo/agent-cli runtime:reload --cloud', () => {
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['runtime:reload', '--cloud', '--timeout', '2s', '--json', '--no-followups'],
+        ['runtime:reload', '--eas', '--timeout', '2s', '--json', '--no-followups'],
         { reject: false, env: { STUB_SIM_SESSIONS: '0' } }
       );
 

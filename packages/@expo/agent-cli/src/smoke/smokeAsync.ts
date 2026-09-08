@@ -187,7 +187,7 @@ function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
     // The `start-dev-server` phase is only in the list for a run that performed one, and it is
     // charged as a build when the plan compiled (@ref ./phases §BUILD_DEV_SERVER_TIMEOUT_MS).
     buildAttempted: run.buildAttempted,
-    // `required` is `--cloud`; `fallback` is a run that would only reach a session if this machine
+    // `required` is `--eas`; `fallback` is a run that would only reach a session if this machine
     // had no device, and a ladder must not put a billed session on a line the caller never asked
     // for (llp/0005 §Cloud simulator).
     cloud: options.cloud === 'required',
@@ -438,7 +438,7 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       };
     },
 
-    // @ref src/device/bootDevice.ts. Local only, and that is not a gap: `--cloud` names a session
+    // @ref src/device/bootDevice.ts. Local only, and that is not a gap: `--eas` names a session
     // somebody else started and pays for, and the phase that calls this never runs for one.
     //
     // The app this run is about is handed over, so the boot picks a device that **has** it and

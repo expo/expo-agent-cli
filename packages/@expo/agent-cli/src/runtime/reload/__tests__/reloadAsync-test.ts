@@ -662,7 +662,7 @@ describe(reloadAsync, () => {
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — F99, the second live-cloud run.
   //
-  // The evidence that settled it, in one pair of runs. `runtime:reload --cloud` found one client on
+  // The evidence that settled it, in one pair of runs. `runtime:reload --eas` found one client on
   // the command socket, broadcast to it, and nothing happened for the whole 180 s budget: no fresh
   // debugger target, no bundle. The **next** command, seconds later, found **zero** clients — so the
   // broadcast had taken the client away without reloading the app — climbed to the relaunch, and
@@ -1123,7 +1123,7 @@ describe('reloading an app on a cloud simulator session', () => {
   //     `SQLiteGetResultsError … UNIQUE constraint failed: updates.scope_key, updates.commit_time`
   //     [observed — 2026-08-27, twice, session `01a04378-…`].
   //  2. `open <url>` then deep-links the route into the app that is now running, which is the same
-  //     verb `navigate --cloud` runs and the one that loaded the project live.
+  //     verb `navigate --eas` runs and the one that loaded the project live.
   //
   // No `close` anywhere: that is the verb that ended the controller's own session and stranded the
   // app (S12). And no `exp+<slug>://` launcher form — the URL is the manifest-derived one.
@@ -1227,7 +1227,7 @@ describe('reloading an app on a cloud simulator session', () => {
   // The broadcast is asked and never sent, and the reason is the observation rather than an
   // assumption: the socket held no client, which is what a cloud session over a tunnel is
   // [observed — live run S12]. Wave 21 asks it rather than skipping it on the strength of
-  // `--cloud`, because the flag names a *device backend* and not a fact about this socket.
+  // `--eas`, because the flag names a *device backend* and not a fact about this socket.
   it(`sends no broadcast to a command socket a cloud session never registered on`, async () => {
     writeCloudProject();
     mockDevServer([]);
@@ -1389,7 +1389,7 @@ describe('reloading an app on a cloud simulator session', () => {
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — wave 21.
 //
-// `--cloud` used to change the ladder: it skipped the broadcast on the strength of the flag. The
+// `--eas` used to change the ladder: it skipped the broadcast on the strength of the flag. The
 // flag names which **device backend** may relaunch, and the rung is chosen by one observable fact —
 // whether the dev server's client command socket holds a client. A cloud session that did register
 // one is reloaded the cheap way, and a local app that did not is relaunched, because in both cases
@@ -1408,7 +1408,7 @@ describe('the rung the ladder picks', () => {
     ],
   });
 
-  it(`broadcasts on --cloud when the command socket does hold a client`, async () => {
+  it(`broadcasts on --eas when the command socket does hold a client`, async () => {
     writeProject({ ...NPX_FILES });
     resetPackageRunnerCache();
     const server = mockDevServer([EXPO_GO_TARGET]);

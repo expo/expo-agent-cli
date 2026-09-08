@@ -68,12 +68,12 @@ describe('resolveRuntimeStopOptions and the cloud backend', () => {
   // controller had no verb that ends one app. `agent-device close <appId>` is that verb, so the
   // flag now names the backend the way it does on `navigate`.
   it(`names the cloud backend rather than refusing it`, () => {
-    expect(resolveRuntimeStopOptions(['--cloud']).cloud).toBe(true);
+    expect(resolveRuntimeStopOptions(['--eas']).cloud).toBe(true);
     expect(resolveRuntimeStopOptions([]).cloud).toBe(false);
   });
 
   it(`still takes a platform alongside it, because a session is iOS or Android too`, () => {
-    expect(resolveRuntimeStopOptions(['--cloud', '--android'])).toMatchObject({
+    expect(resolveRuntimeStopOptions(['--eas', '--android'])).toMatchObject({
       cloud: true,
       platform: 'android',
     });

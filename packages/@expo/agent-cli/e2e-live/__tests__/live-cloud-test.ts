@@ -590,8 +590,8 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     expect(fs.readFileSync(envFile, 'utf8')).toContain(sessionId as string);
   });
 
-  it('navigate --cloud opens the route on the cloud simulator, over the public origin', async () => {
-    const result = await runLiveEasAsync(run, projectRoot, ['navigate', '/', '--cloud', '--json'], {
+  it('navigate --eas opens the route on the cloud simulator, over the public origin', async () => {
+    const result = await runLiveEasAsync(run, projectRoot, ['navigate', '/', '--eas', '--json'], {
       label: 'navigate-cloud',
       env: suiteEnv(),
     });
@@ -645,11 +645,11 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   // So both entry states are real and the reload is the relaunch from either. That the broadcast
   // does not reload Expo Go on a cloud simulator is upstream of this CLI; what is asserted here is
   // that the command reaches the rung that works and proves what it did.
-  it('runtime:reload --cloud reloads the app and proves it, climbing to the rung that works', async () => {
+  it('runtime:reload --eas reloads the app and proves it, climbing to the rung that works', async () => {
     const result = await runLiveEasAsync(
       run,
       projectRoot,
-      ['runtime:reload', '--cloud', '--timeout', RELOAD_TIMEOUT, '--json'],
+      ['runtime:reload', '--eas', '--timeout', RELOAD_TIMEOUT, '--json'],
       { label: 'reload-cloud', env: suiteEnv() }
     );
     expectExit(result, 0);
@@ -714,7 +714,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
 
   // Expo Go only: the route reload needs the `/lab` screen, which the scaffold has and the minimal
   // dev-build app (`apps/eas-example`, root route only) does not.
-  onExpoGo('runtime:reload --cloud --route puts the app on the route it names', async () => {
+  onExpoGo('runtime:reload --eas --route puts the app on the route it names', async () => {
     // The reload above may have relaunched the app, and a broadcast into that landing is mistaken
     // for its own answer — see waitForCloudAppSettledAsync, which this wait exists for.
     expect(await waitForCloudAppSettledAsync('before-reload-route')).toBe(true);
@@ -722,7 +722,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     const result = await runLiveEasAsync(
       run,
       projectRoot,
-      ['runtime:reload', '--cloud', '--route', LAB_ROUTE, '--timeout', RELOAD_TIMEOUT, '--json'],
+      ['runtime:reload', '--eas', '--route', LAB_ROUTE, '--timeout', RELOAD_TIMEOUT, '--json'],
       { label: 'reload-cloud-route', env: suiteEnv() }
     );
     expectExit(result, 0);
@@ -735,11 +735,11 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     expect(report.url).toBe(`exp://${publicHost}/--${LAB_ROUTE}`);
   });
 
-  it('smoke --cloud reports the phases it could reach, and stays on the backend it was given', async () => {
+  it('smoke --eas reports the phases it could reach, and stays on the backend it was given', async () => {
     const result = await runLiveEasAsync(
       run,
       projectRoot,
-      ['smoke', '--cloud', `--${CLOUD_PLATFORM}`, '--json'],
+      ['smoke', '--eas', `--${CLOUD_PLATFORM}`, '--json'],
       {
         label: 'smoke-cloud',
         env: suiteEnv(),
@@ -762,8 +762,8 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     }
   });
 
-  it('runtime:stop --cloud ends the app without ending the session', async () => {
-    const result = await runLiveEasAsync(run, projectRoot, ['runtime:stop', '--cloud', '--json'], {
+  it('runtime:stop --eas ends the app without ending the session', async () => {
+    const result = await runLiveEasAsync(run, projectRoot, ['runtime:stop', '--eas', '--json'], {
       label: 'stop-cloud',
       env: suiteEnv(),
     });
@@ -787,7 +787,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     expect(listed.stdout).toContain(sessionId as string);
   });
 
-  it('a --cloud run against a platform the session is not is refused, not opened', async () => {
+  it('a --eas run against a platform the session is not is refused, not opened', async () => {
     // llp/0022-live-tier.plan.md §Limits — "a session has one platform" was the unasserted row. This
     // session is one platform, so a run for the other one has to be refused rather than opened onto
     // nothing.
@@ -798,7 +798,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // fact under test. A run that lands there is tried once more; a mismatch opens nothing, so the
     // retry bills no session.
     const attempt = () =>
-      runLiveEasAsync(run, projectRoot, ['navigate', '/', '--cloud', `--${OTHER_PLATFORM}`, '--json'], {
+      runLiveEasAsync(run, projectRoot, ['navigate', '/', '--eas', `--${OTHER_PLATFORM}`, '--json'], {
         label: 'navigate-cloud-mismatch',
         env: suiteEnv(),
       });

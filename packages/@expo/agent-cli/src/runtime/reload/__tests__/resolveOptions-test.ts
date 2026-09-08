@@ -94,12 +94,12 @@ describe('resolveReloadOptions and the cloud backend', () => {
   // Only the device method changes: the dev-server broadcast already reaches a cloud session,
   // which has to be attached to this dev server through a tunnel to be running the bundle at all.
   it(`names the cloud backend for the device method`, () => {
-    expect(resolveReloadOptions(['--cloud']).cloud).toBe(true);
+    expect(resolveReloadOptions(['--eas']).cloud).toBe(true);
     expect(resolveReloadOptions([]).cloud).toBe(false);
   });
 
   it(`takes a platform alongside it, because a session is iOS or Android too`, () => {
-    expect(resolveReloadOptions(['--cloud', '--ios', '--method', 'device'])).toMatchObject({
+    expect(resolveReloadOptions(['--eas', '--ios', '--method', 'device'])).toMatchObject({
       cloud: true,
       platform: 'ios',
       method: 'device',

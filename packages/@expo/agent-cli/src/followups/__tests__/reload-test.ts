@@ -45,6 +45,6 @@ describe(`${buildReloadFollowUps.name} and the session's platform`, () => {
       'npx eas simulator:exec npx agent-device@latest screenshot screen.png'
     );
     // The backend is carried on: `navigate /` alone looks for a device on this machine.
-    expect(commands).toContain('npx @expo/agent-cli navigate / --ios --cloud');
+    expect(commands).toContain('npx @expo/agent-cli navigate / --ios --eas');
   });
 });

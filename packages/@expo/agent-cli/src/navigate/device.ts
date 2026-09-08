@@ -8,7 +8,7 @@
 // simulator:*` (`src/device/cloudSimulator.ts`). It is opt-in per caller rather than always
 // considered, because it is the only backend that costs money and the only one whose invocations
 // this package has never verified against a live service. `navigate` and `smoke` put it on their
-// ladder as a *fallback*; `runtime:stop` and `runtime:reload` reach for it only when `--cloud`
+// ladder as a *fallback*; `runtime:stop` and `runtime:reload` reach for it only when `--eas`
 // names it, so a session that happens to be up never quietly bills a run a local device would have
 // served.
 
@@ -276,7 +276,7 @@ export async function probeCloudDeviceAsync(
 /**
  * Resolve the device to open the deep link on.
  *
- * Three backends and one order. `--cloud` (`cloud: 'required'`) names the cloud session and nothing
+ * Three backends and one order. `--eas` (`cloud: 'required'`) names the cloud session and nothing
  * else is looked at, because a caller that named a device meant that device. Otherwise a **local**
  * device wins: it is free, it is instant, and it is what a developer at a keyboard is looking at.
  * The cloud is the last rung, taken only when the local probes found nothing and this project has a
@@ -389,12 +389,12 @@ export async function resolveDeviceAsync(
 
 /** How much of the ladder a caller wants: whether the cloud backend is on it, and how. */
 export type CloudPreference =
-  /** `--cloud`: the session is the device, and no local tool is even asked. */
+  /** `--eas`: the session is the device, and no local tool is even asked. */
   | 'required'
   /** The default for the device-facing commands: local first, cloud when there is none. */
   | 'fallback'
   /**
-   * Never. The default, and what a `runtime:*` action keeps until `--cloud` names the backend.
+   * Never. The default, and what a `runtime:*` action keeps until `--eas` names the backend.
    *
    * Not because the acts are impossible — the controller has `close <app-id>` and `open <url>`,
    * which is the whole of the stop-and-relaunch pair — but because a session **bills by the
@@ -438,7 +438,7 @@ async function cloudFallbackAsync(
  * Resolve the cloud session as the device, for a run that named it.
  *
  * Every failure here is about the session rather than about this machine, which is why none of them
- * reuses {@link noDeviceError}: a caller that passed `--cloud` is not helped by "boot a simulator".
+ * reuses {@link noDeviceError}: a caller that passed `--eas` is not helped by "boot a simulator".
  */
 async function resolveCloudDeviceAsync(
   platform: NavigatePlatform | undefined,
@@ -529,14 +529,14 @@ function cloudSessionLine(probe: CloudSessionProbe | null): string | null {
     return probe.otherSessionCount > 0
       ? `Or: this project has ${probe.otherSessionCount} running EAS Simulator session${
           probe.otherSessionCount === 1 ? '' : 's'
-        } this CLI cannot drive — ${probe.reason ?? 'none of them is an agent-device session'}. Start one it can with "${CLOUD_SESSION_START_COMMAND}" and pass --cloud.`
+        } this CLI cannot drive — ${probe.reason ?? 'none of them is an agent-device session'}. Start one it can with "${CLOUD_SESSION_START_COMMAND}" and pass --eas.`
       : null;
   }
   if (probe.state === 'active') {
     // Reached when the session is live and is for the *other* platform, or reported none.
     return `Or: this project has a running EAS Simulator session${
       probe.platform ? ` (${probe.platform})` : ''
-    }, and it is not the device this run asked for. Run this command again with --cloud and no platform flag to use it.`;
+    }, and it is not the device this run asked for. Run this command again with --eas and no platform flag to use it.`;
   }
-  return `Or: this project has an EAS Simulator session on record and it is not usable — ${probe.reason ?? 'the service did not report it as running'}. Start a new one with "${CLOUD_SESSION_START_COMMAND}" and pass --cloud.`;
+  return `Or: this project has an EAS Simulator session on record and it is not usable — ${probe.reason ?? 'the service did not report it as running'}. Start a new one with "${CLOUD_SESSION_START_COMMAND}" and pass --eas.`;
 }

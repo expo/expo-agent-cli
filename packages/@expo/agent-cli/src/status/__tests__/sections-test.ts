@@ -935,7 +935,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       true
     );
 
-    expect(next.command).toBe('npx @expo/agent-cli navigate / --cloud');
+    expect(next.command).toBe('npx @expo/agent-cli navigate / --eas');
     expect(next.why).toContain('EAS Simulator session');
   });
 
@@ -950,7 +950,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       false
     );
 
-    expect(next.command).not.toContain('--cloud');
+    expect(next.command).not.toContain('--eas');
   });
 
   // @ref llp/0021-honest-reports.rfc.md §The rules — K7(a).
@@ -969,7 +969,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       true
     );
 
-    expect(next.command).toBe('npx @expo/agent-cli smoke --ios --cloud');
+    expect(next.command).toBe('npx @expo/agent-cli smoke --ios --eas');
     expect(next.why).toContain('EAS Simulator session');
   });
 
@@ -1017,7 +1017,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       true
     );
 
-    expect(next.command).toBe('npx @expo/agent-cli navigate / --cloud');
+    expect(next.command).toBe('npx @expo/agent-cli navigate / --eas');
     expect(next.why).toContain('could not answer');
   });
 

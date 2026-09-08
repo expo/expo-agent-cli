@@ -42,7 +42,7 @@ export interface ReloadOptions {
   /** Platform to reload on. Undefined means "whichever device is booted". */
   platform?: NavigatePlatform;
   /**
-   * `--cloud`: the reload acts on this project's EAS Simulator session.
+   * `--eas`: the reload acts on this project's EAS Simulator session.
    *
    * **This used to say the flag changed only the fallback**, on the grounds that "the dev-server
    * broadcast reaches a cloud session already — a cloud session has to reach that dev server
@@ -92,7 +92,7 @@ const RELOAD_ARGS = {
   '--android': Boolean,
   // @ref llp/0005 §Cloud simulator. One controller verb does both halves:
   // `open <app-id> <url> --relaunch` terminates the app process and launches it on the URL.
-  '--cloud': Boolean,
+  '--eas': Boolean,
   '--dev-server-url': String,
   // Sugar for the URL above (llp/0005 §One preflight for the runtime family).
   '--port': String,
@@ -142,7 +142,7 @@ export function resolveReloadOptions(argv: string[]): ReloadOptions {
     platform: resolveDevicePlatform(args, 'runtime:reload', {
       bothHint: 'run the command twice, once per device.',
     }),
-    cloud: !!args['--cloud'],
+    cloud: !!args['--eas'],
     scheme: args['--scheme'] ? String(args['--scheme']) : undefined,
     appId: args['--app-id'] ? String(args['--app-id']) : undefined,
     timeoutMs: resolveDuration(args['--timeout'], '--timeout', DEFAULT_RELOAD_TIMEOUT_MS, {

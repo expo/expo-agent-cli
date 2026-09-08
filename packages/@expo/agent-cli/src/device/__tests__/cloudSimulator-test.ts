@@ -365,7 +365,7 @@ describe('the argv of every eas simulator invocation', () => {
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
 //
-// The gate that keeps `navigate --cloud` from answering *any* system prompt. What `alert get` prints
+// The gate that keeps `navigate --eas` from answering *any* system prompt. What `alert get` prints
 // for a present alert has not been seen by anything in this package, so this reads the output as
 // text rather than parsing a shape invented here — and it says no to everything that does not name
 // the app whose URL the run just sent.
@@ -1025,7 +1025,7 @@ describe(cloudVerbNotSupportedError, () => {
 
     expect(error.code).toBe('CLOUD_SIMULATOR_UNSUPPORTED');
     expect(error.message).toContain('ends the whole session');
-    expect(error.message).toContain('npx @expo/agent-cli navigate / --cloud');
+    expect(error.message).toContain('npx @expo/agent-cli navigate / --eas');
   });
 });
 

@@ -5,7 +5,7 @@
 **Systems:** `@expo/agent-cli` runtime commands (`src/runtime/`, `src/runtime/preflight.ts`, `src/navigate/`, `src/runtime/reload/`, `src/project/routes.ts`); `@expo/agent-cli smoke` (`src/smoke/`, `src/device/screenshot.ts`, `src/device/bootDevice.ts`, `src/device/installedApps.ts`); the cloud device layer (`src/device/cloudSimulator.ts`); the Android device layer (`src/device/adb.ts`, `src/navigate/adbReverse.ts`, `src/runtime/targetPlatform.ts`, `src/runtime/targetLiveness.ts`, `src/dev/logErrors.ts`); `@expo/cli` CDP debugging layer and dev-server message socket; `expo-router` link handling; LogBox
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20 · finalized 2026-08-28
-**Revised:** 2026-08-30
+**Revised:** 2026-08-30 · 2026-09-08
 **Related:** [[0001-agentic-cli-on-expo-cli]], [[0008-guardrails]], [[0010-agent-conventions]], [[0016-v1-scope]], [[0017-deferred-commands]], [[0018-interaction-commands]], [[0021-honest-reports]], [[0022-live-tier]]
 
 ## Summary
@@ -636,6 +636,8 @@ Follow-ups keep the platform flag the run had. `navigate --android`'s screenshot
 On a local iOS simulator, every `simctl openurl` of a development-build scheme raises a springboard confirmation, `Open in "<app>"?`, on every call. The four gates that let `navigate --cloud` answer the dialog start with "only on `--cloud`". Whether that gate should be about the device rather than about the flag is open. With the dialog answered by hand, the iOS development build behaves like the Android one.
 
 ## Cloud simulator
+
+_Renamed 2026-09-08:_ the flag this section calls `--cloud` is **`--eas`** now, on every command that has it — `smoke`, `navigate`, `runtime:reload`, `runtime:stop`. `dev` already said `--eas` for the build backend ([[0015-backend-selection-and-config]] §One flag for EAS), and two names for one service meant `dev --cloud` and `smoke --eas` were both refused as unknown options [observed — 1.0.9]. `--cloud` is gone, not aliased [Kudo, 2026-09-08]. The text below keeps the name it was written with; read `--cloud` as `--eas`.
 
 Device resolution has a third backend: a simulator that runs on EAS [confirmed, Kudo, 2026-08-26]. `@expo/agent-cli navigate --cloud` drives it. A machine with no local device reaches for it as a fallback on `navigate` and `smoke`. `runtime:stop` and `runtime:reload` take `--cloud` and reach for it only when named, so a session that happens to be up never quietly bills a run that a local device would have served.
 
