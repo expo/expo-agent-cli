@@ -70,7 +70,7 @@ When Claude Code is selected, setup creates a missing `CLAUDE.md` containing `@A
 
 The confirmation plan names the shared instruction writes before they run. Report `claudeMd` as created/updated/skipped, or null when not targeted, alongside `agentsMd`. A Claude-file failure leaves the successful AGENTS.md result intact and is included in the partial failure report. No instruction files are created in user home. [observed]
 
-Include a compact package-skill index with direct, relative links to verified `SKILL.md` files. Only package-provided links belong in this index; keep it current with skill synchronization and cleanup as defined by [[0003-knowledge-tools-and-skills]] §Instruction skill index. [confirmed, Kudo, 2026-09-08]
+Before the package index, direct agents to `expo-overview` when it is available in their skill list; it routes Expo/EAS goals to the relevant skill. Reference its name rather than copying its map or assuming an installation path. Include a compact package-skill index with direct, relative links to verified `SKILL.md` files. Only package-provided links belong in this index; keep it current with skill synchronization and cleanup as defined by [[0003-knowledge-tools-and-skills]] §Instruction skill index. [confirmed, Kudo, 2026-09-08]
 
 ## Output contract
 

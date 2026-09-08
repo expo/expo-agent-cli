@@ -79,6 +79,10 @@ export function generateAgentsMdBlock({
       defaultSmokePlatform(state.nativeDirs)
     )}\` — the whole gate in one command: the dev server bundles, the app is up, and nothing threw`,
     '',
+    '## Expo skills',
+    '',
+    'For Expo or EAS work, start with the `expo-overview` skill when it is available in your agent’s skill list. It routes your goal to the relevant Expo or EAS skill. Then read any matching package skills listed below for guidance specific to the installed packages.',
+    '',
     renderSkillIndex(linkedSkills),
     '',
     'Commands end with a `Suggested next:` section — suggested follow-up commands, not required steps. Run one only when it serves your current goal.',

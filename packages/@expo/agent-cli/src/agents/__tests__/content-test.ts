@@ -126,6 +126,19 @@ describe(generateAgentsMdBlock, () => {
     expect(block).not.toContain('.claude/skills');
   });
 
+  it('should point to expo-overview before the package index even when no package skills are linked', () => {
+    const block = generateAgentsMdBlock({
+      state: createProjectState(),
+      projectName: 'my-app',
+      linkedSkills: [],
+    });
+
+    expect(block).toContain('start with the `expo-overview` skill when it is available');
+    expect(block.indexOf('`expo-overview`')).toBeLessThan(block.indexOf('## Package skills'));
+    expect(block).toContain('No linked package skills are available.');
+    expect(block).not.toContain('/.codex/plugins/');
+  });
+
   it('should generate the same block twice, so a rerun rewrites nothing', () => {
     const context = {
       state: createProjectState(),
