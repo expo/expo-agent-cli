@@ -19,7 +19,6 @@ const options = (overrides: Partial<SetupOptions> = {}): SetupOptions => ({
 
 const prompt = () => ({
   selectAgents: vi.fn<SetupPrompt['selectAgents']>().mockResolvedValue(['claude-code', 'codex']),
-  selectScope: vi.fn<SetupPrompt['selectScope']>().mockResolvedValue('project'),
   confirm: vi.fn<SetupPrompt['confirm']>().mockResolvedValue(true),
 });
 
@@ -51,7 +50,7 @@ describe('Preparing agent setup', () => {
   });
 
   it('should reject project scope when no Expo project exists', async () => {
-    await expect(prepareSetupAsync(null, options({ yes: true, scope: 'project' }))).rejects.toThrow(
+    await expect(prepareSetupAsync(null, options({ yes: true, project: true }))).rejects.toThrow(
       'No Expo project'
     );
   });
@@ -60,30 +59,30 @@ describe('Preparing agent setup', () => {
     await expect(prepareSetupAsync(null, options(), null)).rejects.toThrow('--yes');
   });
 
-  it('should allow selecting home scope inside a project and declining without writes', async () => {
+  it('should default to home scope inside a project and allow declining without writes', async () => {
     vol.fromJSON({ '/app/package.json': '{}' });
     const before = vol.toJSON();
     const questions = prompt();
-    questions.selectScope.mockResolvedValue('user');
     questions.confirm.mockResolvedValue(false);
     const plan = await prepareSetupAsync('/app', options(), questions);
     expect(plan).toMatchObject({ scope: 'user', confirmed: false });
     expect(vol.toJSON()).toEqual(before);
   });
 
-  it('should select both detected plugin agents and explain Codex project skills before confirming', async () => {
+  it('should select both detected plugin agents and install plugins at home by default', async () => {
     vi.mocked(findExecutableOnPath).mockImplementation((name) =>
       name === 'claude' || name === 'codex' ? `/bin/${name}` : null
     );
     const questions = prompt();
     const plan = await prepareSetupAsync('/app', options({ agents: [] }), questions);
     expect(plan.agents.map((agent) => agent.id)).toEqual(['claude-code', 'codex']);
-    expect(plan.installers.map((item) => item.provider)).toEqual(['claude', 'skills']);
+    expect(plan).toMatchObject({ scope: 'user', destination: '/home', confirmed: true });
+    expect(plan.installers.map((item) => item.provider)).toEqual(['claude', 'codex']);
     expect(questions.selectAgents).toHaveBeenCalledWith(expect.any(Array), [
       'claude-code',
       'codex',
     ]);
-    expect(questions.selectScope).toHaveBeenCalledWith('/app', '/home', true);
+    expect(questions.confirm).toHaveBeenCalledOnce();
   });
 
   it('should cancel on EOF before selecting agents', async () => {
@@ -98,16 +97,20 @@ describe('Preparing agent setup', () => {
     const questions = prompt();
     const plan = await prepareSetupAsync('/app', options({ yes: true }), questions);
     expect(plan.confirmed).toBe(true);
+    expect(plan.scope).toBe('user');
     expect(questions.selectAgents).not.toHaveBeenCalled();
-    expect(questions.selectScope).not.toHaveBeenCalled();
     expect(questions.confirm).not.toHaveBeenCalled();
   });
 
-  it('should cancel before confirmation when scope selection is cancelled', async () => {
+  it('should install Codex skills in the project only when explicitly requested', async () => {
     const questions = prompt();
-    questions.selectScope.mockResolvedValue(null);
-    const plan = await prepareSetupAsync('/app', options(), questions);
-    expect(plan.confirmed).toBe(false);
-    expect(questions.confirm).not.toHaveBeenCalled();
+    const plan = await prepareSetupAsync(
+      '/app',
+      options({ project: true, agents: ['codex'] }),
+      questions
+    );
+    expect(plan).toMatchObject({ scope: 'project', destination: '/app', confirmed: true });
+    expect(plan.installers.map((item) => item.provider)).toEqual(['skills']);
+    expect(questions.confirm).toHaveBeenCalledOnce();
   });
 });

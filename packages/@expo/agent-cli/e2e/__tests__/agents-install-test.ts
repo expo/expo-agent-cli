@@ -179,7 +179,7 @@ process.stderr.rows = 40;`
   it('should use Codex project skills and preserve those files through module sync and cleanup', async () => {
     const result = await executeAgentCliAsync(
       projectRoot,
-      ['agents:setup', '--yes', '--scope', 'project', '--agent', 'codex', '--json'],
+      ['agents:setup', '--yes', '--project', '--agent', 'codex', '--json'],
       { env }
     );
     expect(JSON.parse(result.stdout)).toMatchObject({
@@ -207,21 +207,25 @@ process.stderr.rows = 40;`
     );
   });
 
-  it('should install at home while still setting up the current project', async () => {
-    const result = await executeAgentCliAsync(
-      projectRoot,
-      ['agents:setup', '--yes', '--scope', 'user', '--agent', 'claude-code', '--json'],
-      { env }
-    );
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      projectRoot,
-      scope: 'user',
-      errors: [],
-      skills: { synced: true },
-      agentsMd: { action: 'created' },
-    });
-    expect(invocations().every((call) => call.cwd === homeDir)).toBe(true);
-  });
+  it.each(['claude-code', 'codex'])(
+    'should install the %s plugin at home by default and set up the project',
+    async (agent) => {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['agents:setup', '--yes', '--agent', agent, '--json'],
+        { env }
+      );
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        projectRoot,
+        scope: 'user',
+        plugins: [{ agent, provider: agent === 'codex' ? 'codex' : 'claude', status: 'installed' }],
+        errors: [],
+        skills: { synced: true },
+        agentsMd: { action: 'created' },
+      });
+      expect(invocations().every((call) => call.cwd === homeDir)).toBe(true);
+    }
+  );
 
   it('should use npx when bunx is unavailable', async () => {
     await fs.promises.rm(path.join(binDir, 'bunx'));
@@ -255,7 +259,7 @@ process.stderr.rows = 40;`
     );
     const result = await executeAgentCliAsync(
       freshApp,
-      ['agents:setup', '--yes', '--scope', 'project', '--agent', 'cursor', '--json'],
+      ['agents:setup', '--yes', '--project', '--agent', 'cursor', '--json'],
       { env, reject: false }
     );
     expect(result.exitCode).toBe(20);
@@ -266,6 +270,21 @@ process.stderr.rows = 40;`
       agentsMd: { action: 'created' },
       errors: [expect.stringContaining('Install the project dependencies')],
     });
+  });
+
+  it('should reject project installation outside an Expo app without writes', async () => {
+    const result = await executeAgentCliAsync(
+      scratch,
+      ['agents:setup', '--project', '--yes', '--agent', 'codex', '--json'],
+      { env, reject: false }
+    );
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error).toMatchObject({
+      code: 'BAD_ARGS',
+      message: expect.stringContaining('No Expo project'),
+    });
+    expect(invocations()).toEqual([]);
+    expect(fs.existsSync(path.join(scratch, 'AGENTS.md'))).toBe(false);
   });
 
   it('should require consent without invoking an installer in a noninteractive run', async () => {
@@ -281,7 +300,7 @@ process.stderr.rows = 40;`
   it('should preserve independent project setup when marketplace installation fails', async () => {
     const result = await executeAgentCliAsync(
       projectRoot,
-      ['agents:setup', '--yes', '--scope', 'user', '--agent', 'codex', '--json'],
+      ['agents:setup', '--yes', '--agent', 'codex', '--json'],
       { env: { ...env, SETUP_STUB_FAIL: '1' }, reject: false }
     );
     expect(result.exitCode).toBe(20);
@@ -303,7 +322,7 @@ process.stderr.rows = 40;`
     ['EOF', null],
   ])('should cancel on %s at confirmation without writes', async (_label, keys) => {
     const result = await runInteractiveAsync(
-      ['--agent', 'claude-code', '--scope', 'project'],
+      ['--agent', 'claude-code', '--project'],
       [{ prompt: 'Continue with setup?', keys }]
     );
     expect(result.exitCode, result.all).toBe(0);
@@ -314,13 +333,10 @@ process.stderr.rows = 40;`
     expect(fs.existsSync(path.join(projectRoot, '.expo', 'agent-skill-links.json'))).toBe(false);
   });
 
-  it('should accept interactive home selection and confirmation while preserving project setup', async () => {
+  it('should confirm home installation by default while preserving project setup', async () => {
     const result = await runInteractiveAsync(
       ['--agent', 'claude-code'],
-      [
-        { prompt: 'Where should Expo', keys: '\u001b[B\r' },
-        { prompt: 'Continue with setup?', keys: 'y' },
-      ]
+      [{ prompt: 'Continue with setup?', keys: 'y' }]
     );
     expect(result.exitCode, result.all).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
@@ -330,6 +346,9 @@ process.stderr.rows = 40;`
       skills: { synced: true },
     });
     expect(invocations().every((call) => call.cwd === homeDir)).toBe(true);
+    expect(result.stderr).toContain(homeDir);
+    expect(result.stderr).toContain(`Sync package skills in ${projectRoot}.`);
+    expect(result.stderr).not.toContain('Where should Expo');
   });
 
   it('should toggle preselected agents with arrows and Space and install only the chosen agent', async () => {
@@ -337,14 +356,13 @@ process.stderr.rows = 40;`
       [],
       [
         { prompt: 'Which agents should Expo set up?', keys: ' \u001b[B \u001b[B \r' },
-        { prompt: 'Where should Expo', keys: '\r' },
         { prompt: 'Continue with setup?', keys: 'y' },
       ]
     );
     expect(result.exitCode, result.all).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
       agents: ['cursor'],
-      scope: 'project',
+      scope: 'user',
       plugins: [{ agent: 'cursor', status: 'installed' }],
     });
     expect(invocations().every((call) => call.name === 'bunx')).toBe(true);
@@ -352,7 +370,7 @@ process.stderr.rows = 40;`
 
   it('should require at least one selected agent before continuing', async () => {
     const result = await runInteractiveAsync(
-      ['--scope', 'project'],
+      ['--project'],
       [
         { prompt: 'Which agents should Expo set up?', keys: ' \u001b[B\u001b[B \r' },
         { prompt: 'Please select at least one option.', keys: '\u001b' },
@@ -363,11 +381,11 @@ process.stderr.rows = 40;`
     expect(invocations()).toEqual([]);
   });
 
-  it.each([
-    [[], 'Which agents should Expo set up?'],
-    [['--agent', 'claude-code'], 'Where should Expo'],
-  ] as const)('should cancel selection before installing (%j)', async (args, message) => {
-    const result = await runInteractiveAsync([...args], [{ prompt: message, keys: '\u001b' }]);
+  it('should cancel agent selection before installing', async () => {
+    const result = await runInteractiveAsync(
+      [],
+      [{ prompt: 'Which agents should Expo set up?', keys: '\u001b' }]
+    );
     expect(result.exitCode, result.all).toBe(0);
     expect(JSON.parse(result.stdout).cancelled).toBe(true);
     expect(invocations()).toEqual([]);

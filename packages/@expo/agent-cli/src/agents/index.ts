@@ -9,7 +9,7 @@ export const agentsSetupHelp: CommandHelp = {
   usage: `${PROGRAM_PREFIX} agents:setup`,
   options: [
     `--yes               Accept the setup plan without prompting`,
-    `--scope <scope>     Install in user home or project (user|project)`,
+    `--project           Install plugins/skills in the Expo project instead of user home`,
     `--no-plugins        Skip official Expo plugin/skills installation`,
     `--agent <agent>     Set up for specific agents (can be used multiple times)`,
     `--no-agents-md      Do not create or update AGENTS.md`,
@@ -20,11 +20,15 @@ export const agentsSetupHelp: CommandHelp = {
   examples: [
     {
       run: `${PROGRAM_PREFIX} agents:setup`,
-      gets: 'choose agents and installation scope, then confirm setup',
+      gets: 'choose agents and confirm user-home installation plus any project setup',
     },
     {
-      run: `${PROGRAM_PREFIX} agents:setup --yes --scope user --agent claude-code --json`,
+      run: `${PROGRAM_PREFIX} agents:setup --yes --agent claude-code --json`,
       gets: 'install the Claude Expo plugin in user home; report project setup when available',
+    },
+    {
+      run: `${PROGRAM_PREFIX} agents:setup --project --agent codex`,
+      gets: 'confirm project-local Expo skills installation for Codex',
     },
     {
       run: `${PROGRAM_PREFIX} agents:setup --no-plugins`,
@@ -48,8 +52,9 @@ export const agentsSetupHelp: CommandHelp = {
     ],
   },
   notes: [
-    `Outside an Expo project, only user-home installation runs. Codex project scope installs skills;`,
-    `its plugin and marketplace require user scope. Use --yes for non-interactive setup.`,
+    `Plugins/skills install in user home by default. --project requires an Expo app and installs`,
+    `skills for Codex instead of its user-wide plugin. Use --yes for non-interactive setup.`,
+    `Inside an Expo app, package skill sync and AGENTS.md generation run with either scope.`,
     `Safe to run again at any time. Everything outside the AGENTS.md block markers is yours and`,
     `is left untouched, and CLAUDE.md is never written.`,
   ],
@@ -62,7 +67,7 @@ export const agentCliAgentsSetup: Command = async (argv) => {
       '--help': Boolean,
       '--json': Boolean,
       '--yes': Boolean,
-      '--scope': String,
+      '--project': Boolean,
       '--no-plugins': Boolean,
       '--agent': [String],
       '--no-agents-md': Boolean,
@@ -86,7 +91,7 @@ export const agentCliAgentsSetup: Command = async (argv) => {
     const projectRoot = findSetupProjectRoot(process.cwd());
     await printSetupAsync(projectRoot, {
       yes: !!args['--yes'],
-      scope: args['--scope'] as import('./types').SetupScope | undefined,
+      project: !!args['--project'],
       plugins: !args['--no-plugins'],
       agents: args['--agent'] ?? [],
       agentsMd: !args['--no-agents-md'],

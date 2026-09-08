@@ -48,25 +48,22 @@ export async function prepareSetupAsync(
       );
     }
   }
-  if (options.scope && !['user', 'project'].includes(options.scope)) {
-    throw new CommandError('BAD_ARGS', 'Use --scope user or --scope project.');
-  }
-  if (options.scope === 'project' && !projectRoot) {
+  if (options.project && !projectRoot) {
     throw new CommandError(
       'BAD_ARGS',
-      'No Expo project was found. Use --scope user, or run setup inside an Expo app.'
+      'No Expo project was found. Omit --project to install in user home, or run setup inside an Expo app.'
     );
   }
   const interactive = prompt !== undefined ? !!prompt : !!process.stdin.isTTY && isInteractive();
   if (!options.yes && !interactive) {
     throw new CommandError(
       'SETUP_CONFIRMATION_REQUIRED',
-      `Setup needs confirmation. Run in a terminal, or pass --yes --scope user|project --agent <agent> to ${PROGRAM_PREFIX} agents:setup.`
+      `Setup needs confirmation. Run in a terminal, or pass --yes --agent <agent> to ${PROGRAM_PREFIX} agents:setup.`
     );
   }
 
   const questions = options.yes ? null : (prompt ?? createSetupPrompt());
-  let scope: SetupScope = options.scope ?? (projectRoot ? 'project' : 'user');
+  const scope: SetupScope = options.project ? 'project' : 'user';
   let agents: SkillsAgent[] = [];
   const makePlan = (confirmed: boolean): SetupPlan => {
     const destination = scope === 'project' ? projectRoot! : os.homedir();
@@ -99,15 +96,6 @@ export async function prepareSetupAsync(
     );
   }
   agents = [...new Set(ids)].map((id) => all.find((agent) => agent.id === id)!);
-  if (!options.yes && !options.scope && projectRoot) {
-    const selected = await questions!.selectScope(
-      projectRoot,
-      os.homedir(),
-      agents.some((agent) => agent.id === 'codex') && options.plugins !== false
-    );
-    if (selected == null) return makePlan(false);
-    scope = selected;
-  }
   const plan = makePlan(false);
   const lines = [`Set up Expo agents (${scope}): ${plan.destination}`];
   for (const installer of plan.installers) {

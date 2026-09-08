@@ -12,7 +12,8 @@ export interface SetupOptions {
   plugins?: boolean;
   /** Accept the setup plan without prompting. */
   yes?: boolean;
-  scope?: SetupScope;
+  /** Install in the project instead of user home. Requires an Expo project. */
+  project?: boolean;
   /** Print the report as one JSON object instead of the text summary. */
   json?: boolean;
 }

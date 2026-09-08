@@ -1,15 +1,9 @@
-import { confirm, isCancel, multiselect, select, type CommonOptions } from '@clack/prompts';
+import { confirm, isCancel, multiselect, type CommonOptions } from '@clack/prompts';
 
 import type { SkillsAgent } from '../skills/types';
-import type { SetupScope } from './types';
 
 export interface SetupPrompt {
   selectAgents(agents: SkillsAgent[], defaults: string[]): Promise<string[] | null>;
-  selectScope(
-    projectRoot: string,
-    homeDir: string,
-    includesCodex: boolean
-  ): Promise<SetupScope | null>;
   confirm(): Promise<boolean | null>;
 }
 
@@ -27,27 +21,6 @@ export function createSetupPrompt(): SetupPrompt {
           })),
           initialValues: defaults,
           required: true,
-        })
-      );
-    },
-    selectScope(projectRoot, homeDir, includesCodex) {
-      return askAsync((io) =>
-        select<SetupScope>({
-          ...io,
-          message: 'Where should Expo plugins/skills be installed?',
-          options: [
-            {
-              value: 'project',
-              label: 'Project',
-              hint: `${projectRoot}${includesCodex ? ' · Expo skills for Codex' : ''}`,
-            },
-            {
-              value: 'user',
-              label: 'User home',
-              hint: `${homeDir}${includesCodex ? ' · Expo plugin and marketplace for Codex' : ''}`,
-            },
-          ],
-          initialValue: 'project',
         })
       );
     },

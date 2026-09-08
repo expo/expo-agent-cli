@@ -75,7 +75,7 @@ describe(runSetupAsync, () => {
 
     expect(report).toEqual({
       projectRoot,
-      scope: 'project',
+      scope: 'user',
       cancelled: false,
       plugins: [],
       errors: [],
@@ -203,7 +203,7 @@ describe(printSetupAsync, () => {
       skillsDiscovered: 1,
       agentsMdAction: 'created',
       noteCount: 0,
-      scope: 'project',
+      scope: 'user',
       cancelled: false,
       plugins: [],
       errors: [],

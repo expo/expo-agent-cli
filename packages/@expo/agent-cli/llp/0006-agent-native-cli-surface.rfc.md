@@ -38,7 +38,7 @@ Every CLI error is a driving agent's next prompt. `CommandError.suggestedCommand
 
 ## Agent setup
 
-`agents:setup` works before an Expo project exists. It detects agents, lets the user select targets and scope, displays the proposed commands and project writes, and asks for confirmation. Outside an Expo app, installation targets user home. Inside an app, the user chooses Project or User home. [confirmed, Kudo, 2026-09-08]
+`agents:setup` works before an Expo project exists. It detects agents, lets the user select targets, displays the proposed commands and project writes, and asks for confirmation. Installation defaults to user home, including inside an Expo app. `--project` explicitly selects project-local installation and fails when no Expo app is found; there is no interactive scope question. [confirmed, Kudo, 2026-09-08]
 
 Project detection checks for a declared Expo dependency, so a fresh clone without installed dependencies still offers project scope. A missing project skips package skill synchronization and instruction-file generation; it does not create home-level `AGENTS.md`, `CLAUDE.md`, or a project selection cache. Other commands retain their Expo-app guards. [observed]
 
@@ -47,16 +47,16 @@ Project detection checks for a declared Expo dependency, so a fresh clone withou
 The official knowledge source is `expo/skills`, installed through each agent's supported installer. No local documentation mirror is included. [confirmed, Kudo, 2026-09-08]
 
 - Claude Code installs `expo@claude-plugins-official` with `claude plugin install` and explicit `--scope user|project`. Its official marketplace must already be registered; a fresh configuration needs `claude plugin marketplace add anthropics/claude-plugins-official`. [observed]
-- Codex user setup runs `codex plugin marketplace add expo/skills --ref main`, then `codex plugin add expo@expo-plugins`. Its plugin CLI has no project scope, so the scope menu explicitly offers project-local Codex skills as the Project alternative. [observed]
+- Codex user setup runs `codex plugin marketplace add expo/skills --ref main`, then `codex plugin add expo@expo-plugins`. Its plugin CLI has no project scope, so `--project` installs project-local Codex skills instead. [observed]
 - Other agents, and Codex project setup, use `bunx skills add expo/skills --skill '*'`, falling back to npx. The installer receives the selected agent, explicit noninteractive consent, and `--global` for user scope. The wildcard is a literal subprocess argument. [observed]
 
 Setup inspects existing installations after confirmation, reuses matching installations in the selected scope, and verifies installation through the owning CLI. It reports conflicting sources or disabled plugins rather than replacing or enabling them, and avoids broad updates. Plugin and standalone skill files remain owned by their installers; module `skills:sync` and `skills:clean` retain their existing ownership boundaries ([[0003-knowledge-tools-and-skills]]). [observed]
 
 ### Confirmation and project phases
 
-The three setup questions use `@clack/prompts`, pinned to 1.7.0: a multi-select with detected/configured agents preselected, a scope select, and a confirmation defaulting to No. Prompt output goes to stderr. The adapter also maps stdin EOF and Ctrl-D to cancellation and pauses input after each question so completed setup exits normally. This is the repository's only owned interactive prompt flow. [confirmed, Kudo, 2026-09-08; observed adapter behavior]
+The two setup questions use `@clack/prompts`, pinned to 1.7.0: a multi-select with detected/configured agents preselected and a confirmation defaulting to No. Prompt output goes to stderr. The adapter also maps stdin EOF and Ctrl-D to cancellation and pauses input after each question so completed setup exits normally. This is the repository's only owned interactive prompt flow. [confirmed, Kudo, 2026-09-08; observed adapter behavior]
 
-`--yes` accepts the setup plan for automation; `--scope user|project` and repeatable `--agent` flags make the selection explicit. Non-TTY runs without `--yes` fail promptly; `--json` alone is not consent. Decline, EOF, or Ctrl-C before confirmation causes no setup writes or installer invocations. This is the interactive exception described in [[0008-guardrails]]. [observed]
+`--yes` accepts the setup plan for automation; `--project` overrides the user-home default and repeatable `--agent` flags make agent selection explicit. Non-TTY runs without `--yes` fail promptly; `--json` alone is not consent. Decline, EOF, or Ctrl-C before confirmation causes no setup writes or installer invocations. This is the interactive exception described in [[0008-guardrails]]. [observed]
 
 When an app is available, setup also runs its existing `skills:sync` and instruction-file generation, even when the plugin installation targets user home. Generator behavior is unchanged. `--no-plugins` skips official plugin/skills installation, `--no-agent-skills` skips package skill synchronization, and `--no-agents-md` skips the generator. [confirmed, Kudo, 2026-09-08; observed flag behavior]
 
