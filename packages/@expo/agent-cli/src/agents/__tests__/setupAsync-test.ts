@@ -66,6 +66,9 @@ beforeEach(() => {
   vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'my-app' }) });
   mockState();
   vi.mocked(discoverSkillsAsync).mockResolvedValue([usageSkill]);
+  vol.fromJSON({ [usageSkill.path + '/SKILL.md']: '# Usage' });
+  vol.mkdirSync('/project/.claude/skills', { recursive: true });
+  vol.symlinkSync(usageSkill.path, '/project/.claude/skills/usage');
   vi.mocked(resolveAgentsAsync).mockResolvedValue({ agents: [claudeCode], source: 'flags' });
 });
 
@@ -88,6 +91,7 @@ describe(runSetupAsync, () => {
         skillsDirs: ['.claude/skills'],
       },
       agentsMd: { path: 'AGENTS.md', action: 'created' },
+      claudeMd: { path: 'CLAUDE.md', action: 'created' },
       notes: [],
     });
     expect(vol.readFileSync('/project/AGENTS.md', 'utf8')).toContain(
@@ -102,6 +106,7 @@ describe(runSetupAsync, () => {
     expect(syncSkillsAsync).toHaveBeenCalledWith(projectRoot, {
       agents: ['claude-code'],
       dryRun: false,
+      updateAgentsMd: false,
     });
   });
 
@@ -138,17 +143,29 @@ describe(runSetupAsync, () => {
     const report = await runSetupAsync(projectRoot, options({ agentsMd: false }));
 
     expect(report.agentsMd).toBeNull();
+    expect(report.claudeMd).toBeNull();
+    expect(vol.existsSync('/project/CLAUDE.md')).toBe(false);
     expect(vol.existsSync('/project/AGENTS.md')).toBe(false);
     expect(syncSkillsAsync).toHaveBeenCalled();
   });
 
-  it('should never write CLAUDE.md, and note one that does not reference AGENTS.md', async () => {
+  it('should preserve CLAUDE.md content and append the shared instructions import', async () => {
     vol.writeFileSync('/project/CLAUDE.md', '# Rules\n');
 
     const report = await runSetupAsync(projectRoot, options());
 
-    expect(vol.readFileSync('/project/CLAUDE.md', 'utf8')).toBe('# Rules\n');
-    expect(report.notes).toEqual([expect.stringContaining('CLAUDE.md')]);
+    expect(vol.readFileSync('/project/CLAUDE.md', 'utf8')).toBe('# Rules\n\n@AGENTS.md\n');
+    expect(report.claudeMd).toEqual({ path: 'CLAUDE.md', action: 'updated' });
+  });
+
+  it('should report a Claude-file failure while preserving the generated AGENTS.md', async () => {
+    vol.writeFileSync('/outside.md', '# Global rules');
+    vol.symlinkSync('/outside.md', '/project/CLAUDE.md');
+    const report = await runSetupAsync(projectRoot, options());
+    expect(report.agentsMd?.action).toBe('created');
+    expect(report.claudeMd).toBeNull();
+    expect(report.errors).toEqual([expect.stringContaining('CLAUDE.md')]);
+    expect(vol.readFileSync('/outside.md', 'utf8')).toBe('# Global rules');
   });
 
   it('should still generate AGENTS.md when package skills cannot be discovered', async () => {
@@ -173,6 +190,7 @@ describe(printSetupAsync, () => {
       'agents',
       'agentsMd',
       'cancelled',
+      'claudeMd',
       'errors',
       'notes',
       'plugins',
@@ -202,6 +220,7 @@ describe(printSetupAsync, () => {
       skillsSynced: true,
       skillsDiscovered: 1,
       agentsMdAction: 'created',
+      claudeMdAction: 'created',
       noteCount: 0,
       scope: 'user',
       cancelled: false,

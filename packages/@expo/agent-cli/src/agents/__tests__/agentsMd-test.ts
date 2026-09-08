@@ -5,7 +5,7 @@ import {
   applyManagedBlock,
   BLOCK_END,
   BLOCK_START,
-  checkClaudeMdReferenceAsync,
+  ensureClaudeMdReferenceAsync,
   writeManagedBlockAsync,
 } from '../agentsMd';
 
@@ -144,30 +144,74 @@ describe(writeManagedBlockAsync, () => {
   });
 });
 
-describe(checkClaudeMdReferenceAsync, () => {
-  it('should return null when the project has no CLAUDE.md', async () => {
-    await expect(checkClaudeMdReferenceAsync(projectRoot)).resolves.toBeNull();
+describe(ensureClaudeMdReferenceAsync, () => {
+  beforeEach(() => vol.writeFileSync(`${projectRoot}/AGENTS.md`, '# Shared rules\n'));
+
+  it('should create a Claude import when the file is missing', async () => {
+    expect(await ensureClaudeMdReferenceAsync(projectRoot)).toEqual({
+      path: 'CLAUDE.md',
+      action: 'created',
+    });
+    expect(vol.readFileSync(`${projectRoot}/CLAUDE.md`, 'utf8')).toBe('@AGENTS.md\n');
   });
 
-  it('should return null when CLAUDE.md points at AGENTS.md', async () => {
-    vol.writeFileSync(`${projectRoot}/CLAUDE.md`, '# Rules\n\nSee AGENTS.md for the project.\n');
-
-    await expect(checkClaudeMdReferenceAsync(projectRoot)).resolves.toBeNull();
+  it('should preserve existing content and append an import even when it mentions AGENTS.md', async () => {
+    const before = '# Rules\nSee AGENTS.md.\n';
+    vol.writeFileSync(`${projectRoot}/CLAUDE.md`, before);
+    expect(await ensureClaudeMdReferenceAsync(projectRoot)).toEqual({
+      path: 'CLAUDE.md',
+      action: 'updated',
+    });
+    expect(vol.readFileSync(`${projectRoot}/CLAUDE.md`, 'utf8')).toBe(before + '\n@AGENTS.md\n');
+    expect((await ensureClaudeMdReferenceAsync(projectRoot)).action).toBe('skipped');
   });
 
-  it('should return null when CLAUDE.md is a symlink to AGENTS.md', async () => {
-    vol.writeFileSync(`${projectRoot}/AGENTS.md`, '# Rules\n');
+  it.each(['@AGENTS.md\n', 'See @./AGENTS.md for shared rules.\n'])(
+    'should retain an existing import (%s)',
+    async (contents) => {
+      vol.writeFileSync(`${projectRoot}/CLAUDE.md`, contents);
+      expect((await ensureClaudeMdReferenceAsync(projectRoot)).action).toBe('skipped');
+      expect(vol.readFileSync(`${projectRoot}/CLAUDE.md`, 'utf8')).toBe(contents);
+    }
+  );
+
+  it('should ignore imports inside comments and code examples', async () => {
+    const contents = '<!-- @AGENTS.md -->\n```md\n@AGENTS.md\n```\n`@AGENTS.md`\n';
+    vol.writeFileSync(`${projectRoot}/CLAUDE.md`, contents);
+    await ensureClaudeMdReferenceAsync(projectRoot);
+    expect(vol.readFileSync(`${projectRoot}/CLAUDE.md`, 'utf8')).toBe(contents + '\n@AGENTS.md\n');
+  });
+
+  it.each(['```md\nExample', '<!-- Notes'])(
+    'should refuse to append inside an unclosed block (%s)',
+    async (contents) => {
+      vol.writeFileSync(`${projectRoot}/CLAUDE.md`, contents);
+      await expect(ensureClaudeMdReferenceAsync(projectRoot)).rejects.toThrow(/unclosed/);
+      expect(vol.readFileSync(`${projectRoot}/CLAUDE.md`, 'utf8')).toBe(contents);
+    }
+  );
+
+  it('should reuse a CLAUDE.md symlink to AGENTS.md', async () => {
     vol.symlinkSync(`${projectRoot}/AGENTS.md`, `${projectRoot}/CLAUDE.md`);
-
-    await expect(checkClaudeMdReferenceAsync(projectRoot)).resolves.toBeNull();
+    expect((await ensureClaudeMdReferenceAsync(projectRoot)).action).toBe('skipped');
+    expect(vol.lstatSync(`${projectRoot}/CLAUDE.md`).isSymbolicLink()).toBe(true);
   });
 
-  it('should note a CLAUDE.md that never mentions AGENTS.md', async () => {
-    vol.writeFileSync(`${projectRoot}/CLAUDE.md`, '# Rules\n\nRun the tests.\n');
+  it('should refuse to write through other CLAUDE.md symlinks', async () => {
+    vol.writeFileSync('/outside.md', '# Global rules');
+    vol.symlinkSync('/outside.md', `${projectRoot}/CLAUDE.md`);
+    await expect(ensureClaudeMdReferenceAsync(projectRoot)).rejects.toThrow(/symlink/i);
+    expect(vol.readFileSync('/outside.md', 'utf8')).toBe('# Global rules');
+  });
 
-    await expect(checkClaudeMdReferenceAsync(projectRoot)).resolves.toEqual(
-      expect.stringContaining('CLAUDE.md')
-    );
+  it('should share the managed block when AGENTS.md links to a regular root CLAUDE.md', async () => {
+    vol.unlinkSync(`${projectRoot}/AGENTS.md`);
+    vol.writeFileSync(`${projectRoot}/CLAUDE.md`, '# Claude rules\n');
+    vol.symlinkSync(`${projectRoot}/CLAUDE.md`, `${projectRoot}/AGENTS.md`);
+    await writeManagedBlockAsync(projectRoot, 'Shared block');
+    expect((await ensureClaudeMdReferenceAsync(projectRoot)).action).toBe('skipped');
+    expect(vol.readFileSync(`${projectRoot}/CLAUDE.md`, 'utf8')).toContain('Shared block');
+    expect(vol.readFileSync(`${projectRoot}/CLAUDE.md`, 'utf8')).not.toContain('@AGENTS.md');
   });
 });
 

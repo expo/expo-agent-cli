@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
 
+import { refreshSkillIndexAsync } from '../agents/skillIndex';
 import {
   buildSkillsSyncFollowUps,
   followUpsEnabled,
@@ -51,6 +52,9 @@ export async function syncSkillsAsync(projectRoot: string, options: SkillsOption
     !options.agents.length &&
     (await getPersistedAgentIdsAsync(projectRoot)) == null
   ) {
+    if (!options.dryRun && options.updateAgentsMd !== false) {
+      await refreshSkillIndexAsync(projectRoot, skills, uniqueSkillsDirs(getAllAgents()));
+    }
     // Nothing to link and nobody to link it for: still a report, because a run asked for JSON gets
     // one whether or not it had work to do (llp/0006 §Output contract).
     if (options.json) {
@@ -85,6 +89,10 @@ export async function syncSkillsAsync(projectRoot: string, options: SkillsOption
   await updateGitIgnoreAsync(projectRoot, uniqueSkillsDirs(getAllAgents()), {
     dryRun: options.dryRun,
   });
+
+  if (!options.dryRun && options.updateAgentsMd !== false) {
+    await refreshSkillIndexAsync(projectRoot, skills, uniqueSkillsDirs(getAllAgents()));
+  }
 
   const skillPackages = [...new Set(skills.map((skill) => skill.packageName))];
   // @ref llp/0017-deferred-commands.reference.md §Not built — agent-aware rendering: a detected agent is
@@ -216,7 +224,9 @@ export async function showSkillsAsync(
   if (!packageSkills.length) {
     throw new CommandError(
       'BAD_ARGS',
-      `No skills found for "${packageName}". The package is not installed, or it ships no skills/<name>/SKILL.md directory. Run ${chalk.bold(`${PROGRAM_PREFIX} skills:list`)} to see the packages that provide skills.`
+      `No skills found for "${packageName}". The package is not installed, or it ships no skills/<name>/SKILL.md directory. Run ${chalk.bold(
+        `${PROGRAM_PREFIX} skills:list`
+      )} to see the packages that provide skills.`
     );
   }
 
@@ -251,6 +261,7 @@ export async function cleanSkillsAsync(
     dryRun: options.dryRun,
   });
   await updateGitIgnoreAsync(projectRoot, skillsDirs, { dryRun: options.dryRun });
+  if (!options.dryRun) await refreshSkillIndexAsync(projectRoot, [], skillsDirs);
 
   if (options.json) {
     const report: SkillsCleanJson = {
@@ -289,7 +300,8 @@ export async function autoSyncSkillsAsync(
     }
 
     const packageNames = options.packages?.map(parsePackageNameFromSpec);
-    let skills = await discoverSkillsAsync(projectRoot);
+    const allSkills = await discoverSkillsAsync(projectRoot);
+    let skills = allSkills;
     if (packageNames) {
       skills = skills.filter((skill) => packageNames.includes(skill.packageName));
     }
@@ -303,14 +315,15 @@ export async function autoSyncSkillsAsync(
     if (created.length || pruned.length) {
       await updateGitIgnoreAsync(projectRoot, uniqueSkillsDirs(getAllAgents()), {});
     }
+    await refreshSkillIndexAsync(projectRoot, allSkills, uniqueSkillsDirs(getAllAgents()));
     // The caller may own stdout, e.g. it prints one JSON object (`--json`), and a line about
     // linked skills in the middle of that object is what makes it unparseable.
     if ((created.length || pruned.length) && !options.silent) {
       Log.log(
         chalk.gray(
-          `Synced agent skills: ${created.length} linked, ${pruned.length} removed. Run ${chalk.bold(
-            `${PROGRAM_PREFIX} skills:list`
-          )} for details.`
+          `Synced agent skills: ${created.length} linked, ${
+            pruned.length
+          } removed. Run ${chalk.bold(`${PROGRAM_PREFIX} skills:list`)} for details.`
         )
       );
     }

@@ -58,9 +58,19 @@ The two setup questions use `@clack/prompts`, pinned to 1.7.0: a multi-select wi
 
 `--yes` accepts the setup plan for automation; `--project` overrides the user-home default and repeatable `--agent` flags make agent selection explicit. Non-TTY runs without `--yes` fail promptly; `--json` alone is not consent. Decline, EOF, or Ctrl-C before confirmation causes no setup writes or installer invocations. This is the interactive exception described in [[0008-guardrails]]. [observed]
 
-When an app is available, setup also runs its existing `skills:sync` and instruction-file generation, even when the plugin installation targets user home. Generator behavior is unchanged. `--no-plugins` skips official plugin/skills installation, `--no-agent-skills` skips package skill synchronization, and `--no-agents-md` skips the generator. [confirmed, Kudo, 2026-09-08; observed flag behavior]
+When an app is available, setup also runs its existing `skills:sync` and instruction-file generation, even when the plugin installation targets user home. The shared instruction behavior is described below. `--no-plugins` skips official plugin/skills installation, `--no-agent-skills` skips package skill synchronization, and `--no-agents-md` skips all instruction-file writes, including skill-index refresh during setup. [confirmed, Kudo, 2026-09-08; observed flag behavior]
 
 Installer failures preserve completed work and allow independent project phases to run. Missing dependencies are reported with instructions to install them; setup does not install Expo automatically. Under `--json`, one report goes to stdout and installer progress goes to stderr. Invalid arguments or missing consent exit 1; declining confirmation exits 0 with `cancelled: true`; installer or project-phase failures return the partial report and exit 20. Installation does not prove that a new agent session has loaded skills or that MCP tools are authenticated. [observed]
+
+### Shared instruction files
+
+Keep existing template and user instructions outside the Expo managed block. Inside it, explicitly prefer agent-cli for equivalent Expo install/start/lint, TypeScript and expo-doctor operations, explain that installation retains SDK-compatible resolution, and preserve the `bunx` convention when `bun.lock` is present. Do not migrate arbitrary user command sections. [confirmed, Kudo, 2026-09-08]
+
+When Claude Code is selected, setup creates a missing `CLAUDE.md` containing `@AGENTS.md` or appends the import to an existing regular file without replacing its text. Recognize an active import rather than accepting any mention of the filename; comments and code examples do not count. Existing `CLAUDE.md` → `AGENTS.md` symlinks are reused. Allow `AGENTS.md` → a regular `CLAUDE.md` directly in the same project root so either conventional layout shares one block, with no generated self-import. Other instruction-file symlinks are refused for writes. [observed; Claude import behavior: https://code.claude.com/docs/en/memory#agentsmd]
+
+The confirmation plan names the shared instruction writes before they run. Report `claudeMd` as created/updated/skipped, or null when not targeted, alongside `agentsMd`. A Claude-file failure leaves the successful AGENTS.md result intact and is included in the partial failure report. No instruction files are created in user home. [observed]
+
+Before the package index, direct agents to `expo-overview` when it is available in their skill list; it routes Expo/EAS goals to the relevant skill. Reference its name rather than copying its map or assuming an installation path. Include a compact package-skill index with direct, relative links to verified `SKILL.md` files. Only package-provided links belong in this index; keep it current with skill synchronization and cleanup as defined by [[0003-knowledge-tools-and-skills]] §Instruction skill index. [confirmed, Kudo, 2026-09-08]
 
 ## Output contract
 

@@ -5,7 +5,7 @@
 **Systems:** `src/skills/`; SDK packages in `packages/`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20
-**Revised:** 2026-08-30
+**Revised:** 2026-09-08
 **Related:** [[0001-agentic-cli-on-expo-cli]]
 
 ## Summary
@@ -35,6 +35,14 @@ Shipping the consumer before the producer is a decision.
 ## Skipped, not silent
 
 A skill the sync could not link (a directory the user created holds the name, or two packages claim the same link name) is a `skipped` list, carrying the reason (`occupied` or `duplicate-name`) and, for a name clash, the package that kept the name. A report that lists what a command did and omits what it could not do is a report of a run with nothing left over ([[0021-honest-reports]]).
+
+## Instruction skill index
+
+`agents:setup` includes a Package / Skill / Read table in its `AGENTS.md` managed block. Tell agents to read the relevant skill before using or modifying a listed package. Use the discovered package and skill names, with one row per package skill and relative links to each verified agent-directory `SKILL.md`. Multiple skills per package are supported. A same-named directory is not proof of a package link: require a symlink whose resolved skill file matches the discovered source. This excludes occupied paths, broken links, and losing duplicate names. Escape metadata for Markdown and Claude import syntax rather than treating it as generated instructions. [confirmed intent, Kudo, 2026-09-08; observed verification]
+
+The index has its own markers inside the Expo managed block. Explicit sync, automatic sync, and cleanup refresh only this section after link changes, including an empty result when links disappear. A package-scoped auto-sync uses the full discovery result for the index so other packages' linked skills remain listed. Dry runs never write; an absent file or absent index is not created outside setup. Setup suppresses sync's index refresh because it owns instruction generation and must honor `--no-agents-md`. Plugin and standalone skills remain outside module ownership and this index. [observed]
+
+An older managed block receives the index on the next setup run. Unmatched index markers fail with recovery guidance rather than deleting neighboring content. If setup cannot inspect package skills, its generated section reports that uncertainty instead of claiming there are no links. [observed]
 
 ## Testing
 

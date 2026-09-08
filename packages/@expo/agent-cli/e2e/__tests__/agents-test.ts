@@ -33,7 +33,7 @@ describe('@expo/agent-cli agents:setup', () => {
     projectRoot = await setupFixtureAsync('skills-app');
   });
 
-  it('prints usage with `agents:setup --help`', async () => {
+  it('should print usage with `agents:setup --help`', async () => {
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
       '--yes',
@@ -48,7 +48,7 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(result.all).toContain('--json');
   });
 
-  it('links the skills and creates AGENTS.md with the managed block', async () => {
+  it('should link the skills and creates AGENTS.md with the managed block', async () => {
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
       '--yes',
@@ -80,10 +80,11 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(agentsMd).toContain('@expo/agent-cli navigate');
     expect(agentsMd).toContain('@expo/agent-cli skills:list');
     // The linked skills location.
-    expect(agentsMd).toContain('.claude/skills');
+    expect(agentsMd).toContain('[.claude/skills/usage/SKILL.md](.claude/skills/usage/SKILL.md)');
+    expect(readProjectFile(projectRoot, 'CLAUDE.md')).toBe('@AGENTS.md\n');
   });
 
-  it('writes a byte-identical AGENTS.md on a rerun', async () => {
+  it('should write a byte-identical AGENTS.md on a rerun', async () => {
     await executeAgentCliAsync(projectRoot, [
       'agents:setup',
       '--yes',
@@ -106,7 +107,7 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(result.stdout).toContain('skipped');
   });
 
-  it('preserves user content outside the managed block', async () => {
+  it('should preserve user content outside the managed block', async () => {
     const before = ['# House rules', '', 'Never force push.', ''].join('\n');
     await fs.promises.writeFile(path.join(projectRoot, 'AGENTS.md'), before);
 
@@ -133,7 +134,7 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(readProjectFile(projectRoot, 'AGENTS.md')).toBe(withBlock);
   });
 
-  it('leaves CLAUDE.md alone and notes that it does not reference AGENTS.md', async () => {
+  it('should append a Claude import while preserving its existing rules', async () => {
     const claudeMd = '# Rules for this project\n';
     await fs.promises.writeFile(path.join(projectRoot, 'CLAUDE.md'), claudeMd);
 
@@ -145,11 +146,11 @@ describe('@expo/agent-cli agents:setup', () => {
       'claude-code',
     ]);
 
-    expect(readProjectFile(projectRoot, 'CLAUDE.md')).toBe(claudeMd);
+    expect(readProjectFile(projectRoot, 'CLAUDE.md')).toBe(claudeMd + '\n@AGENTS.md\n');
     expect(result.all).toContain('CLAUDE.md');
   });
 
-  it('writes only AGENTS.md with `--no-agent-skills`', async () => {
+  it('should write only AGENTS.md with `--no-agent-skills`', async () => {
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
       '--yes',
@@ -162,7 +163,7 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills', 'usage'))).toBe(false);
   });
 
-  it('links only the skills with `--no-agents-md`', async () => {
+  it('should link only the skills with `--no-agents-md`', async () => {
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
       '--yes',
@@ -177,7 +178,7 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(fs.existsSync(path.join(projectRoot, '.claude', 'skills', 'usage'))).toBe(true);
   });
 
-  it('prints exactly one JSON object with `--json`', async () => {
+  it('should print exactly one JSON object with `--json`', async () => {
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
       '--yes',
@@ -194,6 +195,7 @@ describe('@expo/agent-cli agents:setup', () => {
       'agents',
       'agentsMd',
       'cancelled',
+      'claudeMd',
       'errors',
       'notes',
       'plugins',
@@ -212,7 +214,7 @@ describe('@expo/agent-cli agents:setup', () => {
     });
   });
 
-  it('reports an unknown agent', async () => {
+  it('should report an unknown agent', async () => {
     const result = await executeAgentCliAsync(
       projectRoot,
       ['agents:setup', '--yes', '--no-plugins', '--agent', 'nope'],
@@ -224,4 +226,109 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(result.exitCode).not.toBe(0);
     expect(result.all).toContain('nope');
   });
+  it('should refresh and prune the skill index with sync and cleanup while preserving other instructions', async () => {
+    await fs.promises.writeFile(path.join(projectRoot, 'AGENTS.md'), '# User rules\n');
+    await executeAgentCliAsync(projectRoot, [
+      'agents:setup',
+      '--yes',
+      '--no-plugins',
+      '--agent',
+      'codex',
+    ]);
+    const initial = readProjectFile(projectRoot, 'AGENTS.md')!;
+    expect(readProjectFile(projectRoot, 'CLAUDE.md')).toBeNull();
+    const packageDir = path.join(projectRoot, 'node_modules/fake-module-with-skills');
+    const extraDir = path.join(packageDir, 'skills/extra');
+    await fs.promises.mkdir(extraDir);
+    await fs.promises.writeFile(path.join(extraDir, 'SKILL.md'), '# Extra guidance');
+    await executeAgentCliAsync(projectRoot, ['skills:sync', '--dry-run', '--json']);
+    expect(readProjectFile(projectRoot, 'AGENTS.md')).toBe(initial);
+    await executeAgentCliAsync(projectRoot, ['skills:sync', '--json']);
+    const updated = readProjectFile(projectRoot, 'AGENTS.md')!;
+    expect(updated).toContain('| fake-module-with-skills | extra |');
+    expect(updated).toContain('| fake-module-with-skills | usage |');
+    expect(updated.startsWith('# User rules\n')).toBe(true);
+    await executeAgentCliAsync(projectRoot, ['skills:clean', '--dry-run', '--json']);
+    expect(readProjectFile(projectRoot, 'AGENTS.md')).toBe(updated);
+    await fs.promises.rm(extraDir, { recursive: true });
+    await executeAgentCliAsync(projectRoot, ['skills:sync', '--json']);
+    expect(readProjectFile(projectRoot, 'AGENTS.md')).toBe(initial);
+    await executeAgentCliAsync(projectRoot, ['skills:clean', '--json']);
+    const cleaned = readProjectFile(projectRoot, 'AGENTS.md')!;
+    expect(cleaned).toContain('No linked package skills are available.');
+    expect(cleaned).not.toContain('usage/SKILL.md');
+    expect(cleaned.split('<!-- BEGIN EXPO PACKAGE SKILLS -->')[0]).toBe(
+      initial.split('<!-- BEGIN EXPO PACKAGE SKILLS -->')[0]
+    );
+  });
+
+  it('should not refresh either instruction file when setup opts out', async () => {
+    await executeAgentCliAsync(projectRoot, [
+      'agents:setup',
+      '--yes',
+      '--no-plugins',
+      '--agent',
+      'claude-code',
+    ]);
+    const before = readProjectFile(projectRoot, 'AGENTS.md');
+    const claude = readProjectFile(projectRoot, 'CLAUDE.md');
+    const extraDir = path.join(projectRoot, 'node_modules/fake-module-with-skills/skills/extra');
+    await fs.promises.mkdir(extraDir);
+    await fs.promises.writeFile(path.join(extraDir, 'SKILL.md'), '# Extra guidance');
+    await executeAgentCliAsync(projectRoot, [
+      'agents:setup',
+      '--yes',
+      '--no-plugins',
+      '--agent',
+      'claude-code',
+      '--no-agents-md',
+    ]);
+    expect(readProjectFile(projectRoot, 'AGENTS.md')).toBe(before);
+    expect(readProjectFile(projectRoot, 'CLAUDE.md')).toBe(claude);
+    expect(fs.existsSync(path.join(projectRoot, '.claude/skills/extra'))).toBe(true);
+  });
+
+  it('should omit a user-owned skill that occupies the package link name', async () => {
+    await fs.promises.mkdir(path.join(projectRoot, '.agents/skills/usage'), { recursive: true });
+    await fs.promises.writeFile(
+      path.join(projectRoot, '.agents/skills/usage/SKILL.md'),
+      '# User guidance'
+    );
+    await executeAgentCliAsync(projectRoot, [
+      'agents:setup',
+      '--yes',
+      '--no-plugins',
+      '--agent',
+      'codex',
+    ]);
+    expect(readProjectFile(projectRoot, 'AGENTS.md')).toContain(
+      'No linked package skills are available.'
+    );
+    expect(readProjectFile(projectRoot, 'AGENTS.md')).not.toContain('| fake-module-with-skills |');
+  });
+  it.skipIf(process.platform === 'win32')(
+    'should reuse a root CLAUDE.md target through setup and skill cleanup',
+    async () => {
+      await fs.promises.writeFile(path.join(projectRoot, 'CLAUDE.md'), '# Shared user rules\n');
+      await fs.promises.symlink('CLAUDE.md', path.join(projectRoot, 'AGENTS.md'));
+      await executeAgentCliAsync(projectRoot, [
+        'agents:setup',
+        '--yes',
+        '--no-plugins',
+        '--agent',
+        'claude-code',
+      ]);
+      const contents = readProjectFile(projectRoot, 'CLAUDE.md')!;
+      expect(contents).toContain(BLOCK_START);
+      expect(contents).toContain('.claude/skills/usage/SKILL.md');
+      expect(contents).not.toContain('@AGENTS.md');
+      await executeAgentCliAsync(projectRoot, ['skills:clean', '--json']);
+      expect(readProjectFile(projectRoot, 'CLAUDE.md')).toContain(
+        'No linked package skills are available.'
+      );
+      expect((await fs.promises.lstat(path.join(projectRoot, 'AGENTS.md'))).isSymbolicLink()).toBe(
+        true
+      );
+    }
+  );
 });

@@ -26,6 +26,8 @@ export interface SkillsAgent {
 }
 
 export interface SkillsOptions {
+  /** Internal opt-out when agents:setup owns instruction generation for this run. */
+  updateAgentsMd?: boolean;
   /** Agent ids passed via `--agent`, skips the interactive prompt. */
   agents: string[];
   /** Print planned changes without writing. */
