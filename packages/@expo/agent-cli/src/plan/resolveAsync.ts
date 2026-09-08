@@ -12,8 +12,11 @@ import { applyToolchainProbe, detectToolchainAsync } from '../toolchain';
 import { selectBuildBackend } from '../toolchain/selectBackend';
 import type { ToolchainProbe } from '../toolchain/types';
 import { decideStartPlan } from './decide';
+import { lookUpEasSimulatorBuildAsync } from './easBuildLookup';
 import { selectRunTarget } from './runTarget';
-import type { DecideStartPlanOptions } from './types';
+import type { DecideStartPlanOptions, NativePlatform, PlanEasBuild } from './types';
+import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
+import { hasBuildProfileSync } from '../utils/easJson';
 
 /**
  * Whether this plan assumes an app that is already on a device, without having asked one.
@@ -44,6 +47,16 @@ export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
   hostPlatform?: NodeJS.Platform;
   /** Injected for tests, so the device question is answerable without a device. */
   probeAppPresence?: (projectRoot: string, platform: 'ios' | 'android') => Promise<AppPresenceProbe>;
+  /**
+   * Injected for tests: whether EAS has a finished simulator build of this fingerprint.
+   *
+   * @ref llp/0027-everything-on-eas.rfc.md §Reuse
+   */
+  lookUpEasBuild?: (projectRoot: string, platform: NativePlatform) => Promise<PlanEasBuild | null>;
+  /** Injected for tests: whether `eas.json` has the simulator dev-client profile. */
+  hasSimulatorProfile?: (projectRoot: string) => boolean;
+  /** Whether the per-platform fingerprint the EAS lookup needs may come from the `.expo` record. */
+  fingerprintCache?: boolean;
 }
 
 /**
@@ -76,6 +89,10 @@ export async function resolveStartPlanAsync(
     requestedTarget = null,
     hostPlatform,
     probeAppPresence = probeAppPresenceAsync,
+    lookUpEasBuild = (root, platform) =>
+      lookUpEasSimulatorBuildAsync(root, platform, { fingerprintCache: options.fingerprintCache }),
+    hasSimulatorProfile = (root) => hasBuildProfileSync(root, EAS_SIMULATOR_PROFILE),
+    fingerprintCache: _fingerprintCache,
     ...planOptions
   } = options;
 
@@ -104,8 +121,12 @@ export async function resolveStartPlanAsync(
     // - The backend has to be local. `expo run:* --no-bundler` compiles when the toolchain cache
     //   is cold, and a caller who routed builds to EAS with `--eas` or config did not ask for a
     //   local compile on the way to a dev server.
+    // - The device has to be on this machine. An EAS Simulator session started with `--build-id`
+    //   has the app by construction (llp/0027), so there is no presence to ask about, and no
+    //   local tool to ask it with.
     const opensOn =
       planOptions.open !== false &&
+      planOptions.deviceBackend !== 'eas' &&
       (planOptions.requestedPlatform === 'ios' || planOptions.requestedPlatform === 'android')
         ? planOptions.requestedPlatform
         : null;
@@ -150,11 +171,21 @@ export async function resolveStartPlanAsync(
     probe,
   });
 
+  // @ref llp/0027-everything-on-eas.rfc.md §Reuse
+  // Two more facts, only for a build that runs on EAS for a device that is on EAS: whether the
+  // simulator profile the build names exists in `eas.json`, and whether EAS already has the build.
+  // The second is not asked of a project that has yet to install `expo-dev-client`: that install
+  // moves the fingerprint, so a build found now is a build of a project that is about to change.
+  const onEas = buildBackend.runsOn === 'eas' && planOptions.deviceBackend === 'eas';
+  const easBuild =
+    onEas && draft.rule !== 'needs-dev-client' ? await lookUpEasBuild(projectRoot, platform) : null;
+
   const plan = decideStartPlan(state, {
     ...planOptions,
     runTarget,
     buildBackend,
     easJson: buildBackend.runsOn === 'eas' ? easJsonExistsSync(projectRoot) : undefined,
+    ...(onEas ? { easBuild, easSimulatorProfile: hasSimulatorProfile(projectRoot) } : {}),
   });
 
   // The probe's caveats — an SDK the tooling finds and a tool of it the shell does not — belong to

@@ -24,6 +24,13 @@ export interface StartTargetHint {
   /** The run only serves a web bundle, so no phone or simulator is involved. */
   web: boolean;
   /**
+   * Whether the run's device is an EAS Simulator session (`dev --eas`), which changes which rungs
+   * make sense: the open is `navigate / --eas`, and there is no phone and no build to offer.
+   *
+   * @ref llp/0027-everything-on-eas.rfc.md
+   */
+  eas?: boolean;
+  /**
    * The port to name in a URL, `null` when none can be vouched for, and absent to read it off the
    * arguments the way `@expo/agent-cli start` does.
    *
@@ -79,7 +86,7 @@ export async function resolveStartFollowUpsAsync(
     return [];
   }
 
-  const { expoGo, web } = hint;
+  const { expoGo, web, eas = false } = hint;
   const port = 'port' in hint ? hint.port : resolveDevServerPort(options.expoArgs);
   // A web run has no device in it at all, so the probe is not worth even a bounded wait.
   const localDevice = web ? 'unknown' : await probeLocalDeviceWithinBudgetAsync();
@@ -104,6 +111,7 @@ export async function resolveStartFollowUpsAsync(
     cloudSession: localDevice === 'absent' && readCloudSessionIdSync(projectRoot) != null,
     easJson: easJsonExistsSync(projectRoot),
     localBuild: hint.localBuild ?? null,
+    onEas: eas,
   });
 }
 

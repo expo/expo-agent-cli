@@ -9,6 +9,7 @@ describe(resolveDevOptions, () => {
       agentSkills: true,
       platform: 'web',
       buildBackend: null,
+      deviceBackend: 'local',
       runTarget: null,
       json: false,
       fingerprintCache: true,
@@ -31,6 +32,7 @@ describe(resolveDevOptions, () => {
       agentSkills: false,
       platform: 'ios',
       buildBackend: null,
+      deviceBackend: 'local',
       runTarget: null,
       json: false,
       fingerprintCache: true,
@@ -55,6 +57,7 @@ describe(resolveDevOptions, () => {
       agentSkills: true,
       platform: 'ios',
       buildBackend: null,
+      deviceBackend: 'local',
       runTarget: null,
       json: false,
       fingerprintCache: true,
@@ -192,6 +195,7 @@ describe(resolveDevOptions, () => {
       agentSkills: true,
       platform: 'android',
       buildBackend: null,
+      deviceBackend: 'local',
       runTarget: null,
       json: true,
       fingerprintCache: true,
@@ -216,6 +220,7 @@ describe(resolveDevOptions, () => {
       agentSkills: true,
       platform: 'web',
       buildBackend: null,
+      deviceBackend: 'local',
       runTarget: null,
       json: false,
       fingerprintCache: true,
@@ -274,5 +279,51 @@ describe(resolveDevOptions, () => {
     it(`should ignore a port after the separator`, () => {
       expect(resolveDevOptions(['--ios', '--', '--port', 'abc']).port).toBeNull();
     });
+  });
+});
+
+// @ref llp/0027-everything-on-eas.rfc.md
+describe('--eas puts the device on EAS', () => {
+  it(`sets the device backend and implies --tunnel for expo start`, () => {
+    const options = resolveDevOptions(['--ios', '--eas']);
+    expect(options.buildBackend).toBe('eas');
+    expect(options.deviceBackend).toBe('eas');
+    expect(options.expoArgs).toEqual(['--tunnel']);
+  });
+
+  it(`adds no second --tunnel when the caller typed one, in either spelling`, () => {
+    expect(resolveDevOptions(['--ios', '--eas', '--tunnel']).expoArgs).toEqual(['--tunnel']);
+    expect(resolveDevOptions(['--ios', '--eas', '--host', 'tunnel']).expoArgs).toEqual([
+      '--host',
+      'tunnel',
+    ]);
+  });
+
+  it(`keeps the device local, and adds nothing, without the flag`, () => {
+    const options = resolveDevOptions(['--ios', '--local']);
+    expect(options.deviceBackend).toBe('local');
+    expect(options.expoArgs).toEqual([]);
+  });
+
+  it(`refuses --web, which EAS Simulator has no device for`, () => {
+    expect(() => resolveDevOptions(['--web', '--eas'])).toThrow(
+      /--eas and --web ask for two different places/
+    );
+  });
+
+  it(`refuses a LAN or loopback host the session cannot reach`, () => {
+    expect(() => resolveDevOptions(['--ios', '--eas', '--lan'])).toThrow(/--eas and --lan/);
+    expect(() => resolveDevOptions(['--android', '--eas', '--localhost'])).toThrow(
+      /--eas and --localhost/
+    );
+    expect(() => resolveDevOptions(['--ios', '--eas', '--host', 'lan'])).toThrow(
+      /--eas and --host lan/
+    );
+  });
+
+  it(`hands the child of --detach the same argv, so it implies the tunnel again itself`, () => {
+    const options = resolveDevOptions(['--ios', '--eas', '--detach']);
+    expect(options.detachArgv).toEqual(['--ios', '--eas', '--detach']);
+    expect(options.expoArgs).toEqual(['--tunnel']);
   });
 });

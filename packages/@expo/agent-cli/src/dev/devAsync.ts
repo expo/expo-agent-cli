@@ -28,7 +28,14 @@ import { probeProjectStateAsync } from '../project/probe';
 import type { PlanStep, ProjectState, StartPlan } from '../project/types';
 import { resolveStartFollowUpsAsync } from '../start/followUps';
 import { runDevServerAsync, type DevServerRun } from '../start/startAsync';
-import { localTool, EAS_REQUIREMENT, EAS_WHERE, LOCAL_WHERE } from '../toolchain/runsOn';
+import {
+  localTool,
+  EAS_REQUIREMENT,
+  EAS_SIMULATOR_PROFILE,
+  EAS_WHERE,
+  LOCAL_WHERE,
+} from '../toolchain/runsOn';
+import { ensureSimulatorProfileSync } from '../utils/easJson';
 import { CommandError } from '../utils/errors';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
 import { isInteractive } from '../utils/interactive';
@@ -84,6 +91,10 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     lastBuild: readLastBuildRecord(projectRoot),
     requestedBackend: options.buildBackend,
     requestedTarget: options.runTarget,
+    // @ref llp/0027-everything-on-eas.rfc.md — `--eas` puts the device on EAS too, which changes
+    // the build profile, adds the tunnel, and lets the resolver ask EAS for a build it already has.
+    deviceBackend: options.deviceBackend,
+    fingerprintCache: options.fingerprintCache,
   });
 
   // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run
@@ -261,6 +272,9 @@ async function executePlanAsync(
   // @ref llp/0026-dev-owns-the-open.rfc.md — the open is armed once per plan, whatever the port
   // retry does: the second bind is the same dev server, not a second app to open.
   let openArmed = false;
+  // @ref llp/0027-everything-on-eas.rfc.md §The open is a session — the EAS build the session
+  // installs: the one the plan found, or the one this run's `eas build` step makes below.
+  let easBuildId: string | null = plan.easBuild?.id ?? null;
 
   for (const [index, step] of plan.steps.entries()) {
     let args = resolveStepArgs(step, options, index === plan.steps.length - 1);
@@ -292,13 +306,31 @@ async function executePlanAsync(
               openArmed = true;
               // Fire and forget, on purpose: the dev server owns the foreground, and a failed
               // open must not take it down. `stillWanted` stops the staging once it exits.
-              void openAppForRunAsync(projectRoot, plan, options, server.url, () => stepRunning);
+              void openAppForRunAsync(
+                projectRoot,
+                plan,
+                options,
+                server.url,
+                () => stepRunning,
+                easBuildId
+              );
             }
           : undefined,
       }).finally(() => {
         stepRunning = false;
       });
     };
+
+    // @ref llp/0027-everything-on-eas.rfc.md §The build is a simulator build
+    // Said in the plan's reasons, and done here, right before the build that names the profile:
+    // `eas build --profile development-simulator` against an `eas.json` without it stops at "profile
+    // not found", after the upload. The write is three keys under `build`, and nothing else moves.
+    if (step.id === 'eas-build' && options.deviceBackend === 'eas') {
+      if (ensureSimulatorProfileSync(projectRoot)) {
+        devEvent('eas_json_profile_added', { profile: EAS_SIMULATOR_PROFILE });
+        Log.progress(`Added the "${EAS_SIMULATOR_PROFILE}" build profile to eas.json.`);
+      }
+    }
 
     let result = await runStep(args);
     let portCollided = false;
@@ -387,6 +419,21 @@ async function executePlanAsync(
     }
 
     recordBuildOf(projectRoot, step, state);
+    if (step.id === 'eas-build' && options.deviceBackend === 'eas') {
+      // The build that just finished is the newest finished one of its profile, and its id is what
+      // the session installs. Asked of EAS rather than parsed out of the step, whose output went to
+      // the terminal (`./openAppEas.ts` §findLatestSimulatorBuildIdAsync).
+      const { findLatestSimulatorBuildIdAsync } =
+        require('./openAppEas') as typeof import('./openAppEas');
+      easBuildId = await findLatestSimulatorBuildIdAsync(projectRoot, resolveEasBuildPlatform(step));
+      if (easBuildId) {
+        devEvent('eas_build_named', { buildId: easBuildId });
+      } else {
+        Log.warn(
+          `The build finished, and "eas build:list" did not name it — so no EAS Simulator session will be started with it. Once "npx eas build:list --build-profile ${EAS_SIMULATOR_PROFILE} --status finished" shows it, run this command again: the plan will find the build and skip straight to the session.`
+        );
+      }
+    }
     // @ref llp/0023-fingerprint-caching.rfc.md §What invalidates an answer
     // After the step, not before: an install, a prebuild or a build has just changed the project,
     // and every fingerprint measured before it is a statement about the project as it was.
@@ -786,6 +833,7 @@ async function resolveRunFollowUpsAsync(
     {
       expoGo: plan.target === 'expo-go',
       web: plan.target === 'web',
+      eas: options.deviceBackend === 'eas',
       port,
       // Whatever the plan's own probe established, and null when it planned no build and probed
       // nothing. The cloud-build rung reads it to say why the cloud is still worth choosing.
@@ -822,7 +870,9 @@ function shouldOpenApp(options: DevOptions): boolean {
     options.mode === 'run' &&
     options.open &&
     (options.platform === 'ios' || options.platform === 'android') &&
-    process.env.AGENT_CLI_NO_DEVICE !== '1'
+    // The harness switch is about *this machine's* devices. An EAS Simulator session is reached
+    // through the `eas` on PATH, which the stubbed tier doubles, so the open runs there.
+    (options.deviceBackend === 'eas' || process.env.AGENT_CLI_NO_DEVICE !== '1')
   );
 }
 
@@ -837,9 +887,14 @@ async function openAppForRunAsync(
   plan: StartPlan,
   options: DevOptions,
   devServerUrl: string,
-  stillWanted: () => boolean
+  stillWanted: () => boolean,
+  easBuildId: string | null = null
 ): Promise<void> {
   const platform = options.platform as NativePlatform;
+  if (options.deviceBackend === 'eas') {
+    await openAppOnEasForRunAsync(projectRoot, plan, platform, devServerUrl, stillWanted, easBuildId);
+    return;
+  }
   const { openAppOnDeviceAsync, openAppFailureLine } =
     require('./openApp') as typeof import('./openApp');
   try {
@@ -865,6 +920,54 @@ async function openAppForRunAsync(
       `The app was not opened: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`
     );
   }
+}
+
+/**
+ * Open the app on an EAS Simulator session for a running dev server, and say what happened.
+ *
+ * @ref llp/0027-everything-on-eas.rfc.md §The open is a session
+ * The same contract as the local open: never throws, never stops the server, and a session that
+ * was started says so with the command that stops it — it bills until then.
+ */
+async function openAppOnEasForRunAsync(
+  projectRoot: string,
+  plan: StartPlan,
+  platform: NativePlatform,
+  devServerUrl: string,
+  stillWanted: () => boolean,
+  easBuildId: string | null
+): Promise<void> {
+  const { openAppOnEasAsync, openAppOnEasFailureLine } =
+    require('./openAppEas') as typeof import('./openAppEas');
+  try {
+    const report = await openAppOnEasAsync(projectRoot, {
+      platform,
+      expoGo: plan.target === 'expo-go',
+      devServerUrl,
+      buildId: easBuildId,
+      stillWanted,
+    });
+    if (report.opened) {
+      Log.progress(
+        `Opened the app on EAS Simulator session ${report.sessionId ?? '(id unknown)'}${
+          report.started ? ', started by this run' : ', which was already up'
+        }.${report.sessionUrl ? ` Watch it at ${report.sessionUrl}.` : ''} It bills until "npx eas simulator:stop".`
+      );
+    } else if (stillWanted()) {
+      Log.warn(openAppOnEasFailureLine(platform, report.reason ?? 'no reason was given'));
+    }
+  } catch (error: unknown) {
+    // `openAppOnEasAsync` promises not to throw; this guard is for the promise breaking.
+    Log.warn(
+      `The app was not opened on EAS: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`
+    );
+  }
+}
+
+/** The platform an `eas build` step builds for, read off its argv. */
+function resolveEasBuildPlatform(step: PlanStep): NativePlatform {
+  const index = step.argv.indexOf('--platform');
+  return step.argv[index + 1] === 'android' ? 'android' : 'ios';
 }
 
 /** Steps that start a dev server, and so get the skill sync of the `@expo/agent-cli start` wrapper. */

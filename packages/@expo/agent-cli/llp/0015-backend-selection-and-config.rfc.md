@@ -51,6 +51,8 @@ Every choice carries two spellings of the same sentence: `why`, as `Building <wh
 
 `--eas` wins because it names the service rather than a place, matches `buildBackend: "eas"` in the developer config, and pairs with `--local`. The meaning is one sentence: **everything this command does runs on EAS** — the build on EAS Build, the device on EAS Simulator, and the dev server through a tunnel so that device can reach it.
 
+What "everything on EAS" is made of on `dev` — the tunnel, the simulator profile, the session — is [[0027-everything-on-eas]].
+
 `--cloud` is removed outright, with no alias [Kudo, 2026-09-08]: a `--cloud` on any command line is the ordinary unknown-option error, which names `--help`. The surface is young enough that one name from now on is worth more than a release of two. Every printed command line — follow-ups, `Try:` lines, the `--help` — says `--eas`.
 
 ## The plan approved is the plan run

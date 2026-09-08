@@ -26,19 +26,23 @@
 // - STUB_EAS_WHOAMI_EXIT: non-zero for a signed-out machine (`Not logged in` on stderr)
 //
 // `build:configure`
-// - STUB_EAS_CONFIGURE_EXIT: exit code (default 0). Exit 0 writes an `eas.json` with the two
-//   profiles the real command writes plus `development-simulator`, unless one exists
+// - STUB_EAS_CONFIGURE_EXIT: exit code (default 0). Exit 0 writes an `eas.json` with exactly the
+//   profiles the real command writes (`development`, `preview`, `production`), unless one exists
 //
 // `build`
 // - STUB_EAS_BUILD_EXIT / STUB_EAS_BUILD_STDERR: exit code, and what goes to stderr first — where
 //   the real CLI puts its auth refusal and its prompt stops
 // - STUB_EAS_BUILD_ID: the id of the build it reports (default `build-e2e`)
 //   With `--json` it prints the array of `BuildFragment` the real command prints after `--wait`.
+//   A finished build is **remembered** in `stub-eas-builds.json` under the cwd, so a later
+//   `build:list` names it the way the service would — which is how `dev --eas` learns the id of
+//   the build it just made.
 //
 // `build:list`
 // - STUB_EAS_BUILD_LIST: the JSON to print verbatim (wins over the filter below)
 // - STUB_EAS_BUILDS: a JSON array of builds to *filter* by the argv — `--platform`, `--status`,
-//   `--fingerprint-hash`, `--build-profile`, `--limit` — the way the service does
+//   `--fingerprint-hash`, `--build-profile`, `--limit` — the way the service does. The builds
+//   `build` remembered are listed with them, newest first
 // - STUB_EAS_BUILD_LIST_EXIT / STUB_EAS_BUILD_LIST_STDOUT: a refusal, on the stream the real CLI
 //   uses (stdout for the explanation, one `Error:` line on stderr)
 //
@@ -67,6 +71,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const LOG_NAME = 'stub-eas-invocations.jsonl';
+/** Where a finished `build` is remembered for `build:list`, under the cwd. */
+const BUILDS_NAME = 'stub-eas-builds.json';
 const args = process.argv.slice(2);
 const cwd = process.cwd();
 
@@ -117,9 +123,9 @@ if (command === 'build:configure') {
   }
   const easJson = path.join(cwd, 'eas.json');
   if (!fs.existsSync(easJson)) {
-    // The profiles the real command writes [observed — eas-cli 23.2 `build/configure.ts`
-    // EAS_JSON_DEFAULT], plus the simulator dev-client profile `eas build:dev` creates, which is the
-    // one an EAS Simulator or a local simulator can install.
+    // Exactly the profiles the real command writes [observed — eas-cli 23.2 `build/configure.ts`
+    // EAS_JSON_DEFAULT] — and so **no** simulator dev-client profile: `development` is a device
+    // build, and adding the simulator one is `dev --eas`'s own act (`src/utils/easJson.ts`).
     fs.writeFileSync(
       easJson,
       JSON.stringify(
@@ -127,11 +133,6 @@ if (command === 'build:configure') {
           cli: { version: '>= 23.0.0', appVersionSource: 'remote' },
           build: {
             development: { developmentClient: true, distribution: 'internal' },
-            'development-simulator': {
-              developmentClient: true,
-              distribution: 'internal',
-              ios: { simulator: true },
-            },
             preview: { distribution: 'internal' },
             production: { autoIncrement: true },
           },
@@ -172,6 +173,14 @@ if (command === 'build') {
     process.exit(exitCode);
   }
   const build = stubBuild();
+  // Remembered, newest first, so `build:list` answers about it the way the service would.
+  let remembered = [];
+  try {
+    remembered = JSON.parse(fs.readFileSync(path.join(cwd, BUILDS_NAME), 'utf8'));
+  } catch {
+    remembered = [];
+  }
+  fs.writeFileSync(path.join(cwd, BUILDS_NAME), JSON.stringify([build, ...remembered]));
   if (has('--json')) {
     // `--json` puts the progress on stderr and one array on stdout [observed — eas-cli 23.2
     // `runBuildAndSubmit.ts`, `printJsonOnlyOutput(builds)` after the wait].
@@ -199,6 +208,11 @@ if (command === 'build:list') {
     builds = JSON.parse(process.env.STUB_EAS_BUILDS || '[]');
   } catch {
     builds = [];
+  }
+  try {
+    builds = [...JSON.parse(fs.readFileSync(path.join(cwd, BUILDS_NAME), 'utf8')), ...builds];
+  } catch {
+    // No build was made under this cwd.
   }
   const platform = valueOf('--platform');
   const status = valueOf('--status');

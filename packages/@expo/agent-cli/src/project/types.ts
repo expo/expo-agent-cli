@@ -120,4 +120,11 @@ export interface StartPlan {
    * @see llp/0004-smart-start-and-project-state.rfc.md §Where a build runs
    */
   buildLocation: PlanBuildLocation | null;
+  /**
+   * The EAS build this plan rests on instead of making one, when the device is an EAS Simulator.
+   *
+   * Set only by a plan for `deviceBackend: 'eas'` that found a finished build of this fingerprint
+   * (llp/0027 §Reuse). The run hands its id to `eas simulator --build-id`. Absent or null otherwise.
+   */
+  easBuild?: { id: string; profile: string } | null;
 }

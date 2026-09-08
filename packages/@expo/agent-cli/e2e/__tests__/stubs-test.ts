@@ -277,15 +277,14 @@ describe('the shared stub eas', () => {
     expect(result.stderr).toContain('Timed out');
   });
 
-  it('writes an eas.json with a simulator dev-client profile on build:configure', () => {
+  it('writes the real eas.json on build:configure — a device profile, and no simulator one', () => {
     const result = eas(['build:configure', '-p', 'ios']);
     expect(result.code).toBe(0);
     const easJson = JSON.parse(fs.readFileSync(path.join(cwd, 'eas.json'), 'utf8'));
-    expect(easJson.build['development-simulator']).toEqual({
-      developmentClient: true,
-      distribution: 'internal',
-      ios: { simulator: true },
-    });
+    expect(easJson.build.development).toEqual({ developmentClient: true, distribution: 'internal' });
+    // The simulator profile is `dev --eas`'s to add (`src/utils/easJson.ts`); a stub that wrote it
+    // would hide that write from every e2e.
+    expect(easJson.build['development-simulator']).toBeUndefined();
   });
 
   it('refuses a verb it does not know, so a command reaching a new one is a red test and not a pass', () => {

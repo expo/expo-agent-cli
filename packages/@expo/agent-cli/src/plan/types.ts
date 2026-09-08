@@ -155,4 +155,40 @@ export interface DecideStartPlanOptions {
    * one rather than adding a configure step that may be pointless.
    */
   easJson?: boolean;
+  /**
+   * Where the device this run opens the app on is: this machine, or an EAS Simulator session.
+   *
+   * @ref llp/0027-everything-on-eas.rfc.md
+   * `eas` is what `--eas` means on `dev` now — not only where the build runs, but where the app
+   * runs. The plan changes in three places: the build profile is the simulator one
+   * ({@link EAS_SIMULATOR_PROFILE}), the dev server is tunnelled so a datacenter can reach it, and
+   * the open is a session start rather than a `simctl` call. Absent means `local`.
+   */
+  deviceBackend?: DeviceBackend;
+  /**
+   * A finished EAS build of this fingerprint, when the resolver found one, so the plan builds nothing.
+   *
+   * Only read when {@link deviceBackend} is `eas`: the session installs a build by id, so a build EAS
+   * already has is a build this run does not have to make. Null or absent means none was found —
+   * or nobody looked — and the plan builds.
+   */
+  easBuild?: PlanEasBuild | null;
+  /**
+   * Whether `eas.json` has the {@link EAS_SIMULATOR_PROFILE} profile.
+   *
+   * Only read when {@link deviceBackend} is `eas` and the plan builds. `false` makes the plan say
+   * that the profile is added before the build. Absent means nobody looked.
+   */
+  easSimulatorProfile?: boolean;
+}
+
+/** Where the app runs: a device on this machine, or an EAS Simulator session. */
+export type DeviceBackend = 'local' | 'eas';
+
+/** An EAS build the plan rests on rather than makes. */
+export interface PlanEasBuild {
+  /** The build id, which `eas simulator --build-id` installs. */
+  id: string;
+  /** The profile it was built with. */
+  profile: string;
 }

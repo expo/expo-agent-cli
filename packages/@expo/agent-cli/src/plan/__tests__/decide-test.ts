@@ -1078,3 +1078,138 @@ describe(decideStartPlan, () => {
     });
   });
 });
+
+// @ref llp/0027-everything-on-eas.rfc.md
+// `--eas` puts the *device* on EAS as well as the build. Three things change in a plan, and each is
+// pinned here on its own: the build profile, the reason the dev-server step gives for what opens
+// where, and the row that rests on a build EAS already has.
+describe('the EAS device', () => {
+  const eas = { platform: 'ios' as const, requestedPlatform: 'ios' as const, deviceBackend: 'eas' as const };
+
+  it(`builds with the simulator dev-client profile, never the device one`, () => {
+    const plan = decideStartPlan(createDevClientState(), { ...eas, buildBackend: backend('eas') });
+
+    expect(argvOf(plan.steps)).toEqual([
+      ['eas', 'build', '--platform', 'ios', '--profile', 'development-simulator'],
+      ['expo', 'start', '--dev-client'],
+    ]);
+    expect(plan.steps[0]!.reason).toContain('a simulator build, which needs no signing');
+    expect(plan.steps[0]!.reason).not.toContain('build:run');
+    expect(plan.reasons.join('\n')).toContain(
+      'The "development" profile is a device build, and no simulator can install one.'
+    );
+  });
+
+  it(`says the profile is added to eas.json when the file has not got it`, () => {
+    const plan = decideStartPlan(createDevClientState(), {
+      ...eas,
+      buildBackend: backend('eas'),
+      easSimulatorProfile: false,
+    });
+
+    expect(plan.reasons.join('\n')).toContain(
+      'eas.json has no "development-simulator" profile, so @expo/agent-cli adds one before the build'
+    );
+  });
+
+  it(`says nothing about adding the profile when eas.json has it`, () => {
+    const plan = decideStartPlan(createDevClientState(), {
+      ...eas,
+      buildBackend: backend('eas'),
+      easSimulatorProfile: true,
+    });
+
+    expect(plan.reasons.join('\n')).not.toContain('adds one before the build');
+  });
+
+  it(`keeps the device profile when the device is local, whatever the build backend`, () => {
+    const plan = decideStartPlan(createDevClientState(), {
+      platform: 'ios',
+      requestedPlatform: 'ios',
+      buildBackend: backend('eas'),
+    });
+
+    expect(argvOf(plan.steps)[0]).toEqual([
+      'eas',
+      'build',
+      '--platform',
+      'ios',
+      '--profile',
+      'development',
+    ]);
+  });
+
+  it(`opens the development build on a session, and says the session bills`, () => {
+    const plan = decideStartPlan(createDevClientState(), { ...eas, buildBackend: backend('eas') });
+
+    const start = plan.steps.at(-1)!;
+    expect(start.argv).toEqual(['expo', 'start', '--dev-client']);
+    expect(start.reason).toContain('through a tunnel');
+    expect(start.reason).toContain('EAS Simulator session is started with that build');
+  });
+
+  it(`opens Expo Go on a session for a project Expo Go can run`, () => {
+    const plan = decideStartPlan(createState(), eas);
+
+    expect(plan.rule).toBe('expo-go');
+    expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go']]);
+    expect(plan.steps[0]!.reason).toContain('EAS Simulator session (iOS) running the Expo Go this SDK ships');
+    expect(plan.steps[0]!.reason).toContain('npx eas simulator:stop');
+  });
+
+  it(`rests on a finished EAS build of this fingerprint instead of making one`, () => {
+    const found = { id: 'build-1', profile: 'development-simulator' };
+    const plan = decideStartPlan(createDevClientState(), {
+      ...eas,
+      buildBackend: backend('eas'),
+      easBuild: found,
+    });
+
+    expect(plan.rule).toBe('dev-client-fresh');
+    expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--dev-client']]);
+    expect(plan.buildLocation).toBeNull();
+    expect(plan.easBuild).toEqual(found);
+    expect(plan.reasons).toContain(
+      'EAS already has a finished "development-simulator" build for this fingerprint (build-1), so nothing is built: the EAS Simulator session installs that build.'
+    );
+    expect(plan.steps[0]!.reason).toContain('one is started that installs the build by id');
+  });
+
+  it(`ignores a found build when the device is local — a local simulator has to have the app`, () => {
+    const plan = decideStartPlan(createDevClientState(), {
+      platform: 'ios',
+      requestedPlatform: 'ios',
+      buildBackend: backend('eas'),
+      easBuild: { id: 'build-1', profile: 'development-simulator' },
+    });
+
+    expect(plan.rule).toBe('dev-client-stale');
+    expect(plan.easBuild).toBeUndefined();
+  });
+
+  it(`rests on a found build for a bare project too`, () => {
+    const plan = decideStartPlan(
+      createDevClientState({ nativeDirs: { ios: true, android: false } }),
+      { ...eas, buildBackend: backend('eas'), easBuild: { id: 'b', profile: 'development-simulator' } }
+    );
+
+    expect(plan.rule).toBe('bare-fresh');
+    expect(plan.steps.map((step) => step.id)).toEqual(['start']);
+  });
+
+  it(`still installs expo-dev-client and builds when the project has not got it, found build or not`, () => {
+    const plan = decideStartPlan(
+      createState({ expoGo: { compatible: false, reasons: [] } }),
+      { ...eas, buildBackend: backend('eas'), easBuild: { id: 'b', profile: 'development-simulator' } }
+    );
+
+    expect(plan.rule).toBe('needs-dev-client');
+    expect(plan.steps.map((step) => step.id)).toEqual(['install-dev-client', 'eas-build', 'start']);
+  });
+
+  it(`leaves a plan with no --eas exactly as it was`, () => {
+    const local = decideStartPlan(createDevClientState(), { platform: 'ios', requestedPlatform: 'ios' });
+    expect(local.easBuild).toBeUndefined();
+    expect('easBuild' in local).toBe(false);
+  });
+});

@@ -24,6 +24,25 @@ declare module '2g' {
     // stream sees the same walk the stderr narration describes.
     'dev:open_app_boot': { platform: string };
     'dev:open_app_install_expo_go': { platform: string; replaced: boolean };
+    /** `dev --eas` added the simulator dev-client profile to `eas.json` before the build. */
+    'dev:eas_json_profile_added': { profile: string };
+    /** The `eas build` step finished, and this is the build EAS lists for it. */
+    'dev:eas_build_named': { buildId: string };
+    /** The EAS Simulator open waited for the dev server's tunnel host, and this is what it got. */
+    'dev:open_app_eas_tunnel': { platform: string; host: string | null };
+    /** A session this project already had is the one the app is opened on. */
+    'dev:open_app_eas_session_reused': { platform: string; sessionId: string };
+    /** No session was up, so one is started, with the app named on the command line. */
+    'dev:open_app_eas_session_start': {
+      platform: string;
+      app: 'expo-go' | 'dev-build';
+      buildId: string | null;
+    };
+    'dev:open_app_eas_opened': {
+      platform: string;
+      sessionId: string | null;
+      started: boolean;
+    };
     'dev:open_app_opened': {
       platform: string;
       deviceId: string | null;

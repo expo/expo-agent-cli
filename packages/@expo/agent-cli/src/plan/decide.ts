@@ -9,6 +9,7 @@ import {
   localRequirement,
   EAS_DEVELOPMENT_PROFILE,
   EAS_REQUIREMENT,
+  EAS_SIMULATOR_PROFILE,
   EAS_WHERE,
   LOCAL_WHERE,
 } from '../toolchain/runsOn';
@@ -102,7 +103,7 @@ export function decideStartPlan(
   // A `expo start` step only reaches a device when the caller typed the flag that opens one.
   const facts = factsWhen(openTargetOf(options) != null);
   /** The extra sentences a plan that *builds* gains from the backend it was given. */
-  const buildFacts = backendReasons(backend, platform, options.easJson);
+  const buildFacts = backendReasons(backend, platform, options);
   // Said on **every** native row, not only the one a preference moved. "Did my config do
   // anything?" is a question the plan has to answer either way, and a plan that mentions the
   // preference only when it changed something leaves the reader unable to tell the two apart.
@@ -167,12 +168,45 @@ export function decideStartPlan(
           [...facts, ...build.reasons, ...presenceFacts, ...targetFacts]
         );
 
+  /**
+   * @ref llp/0027-everything-on-eas.rfc.md §Reuse
+   *
+   * The plan for a stale project whose fingerprint EAS already has a finished simulator build of.
+   * Only on the EAS device: the session installs a build by id, so a build EAS has is a build this
+   * run does not make. The last-build record is not consulted — it answers "does the app on a
+   * local device match", and there is no local device here — and the app-presence rows are not
+   * either: a session started with `--build-id` has the app by construction.
+   */
+  const easBuildPlan = (target: 'bare' | 'dev-client'): StartPlan | null => {
+    const found = options.deviceBackend === 'eas' ? options.easBuild : null;
+    if (!found) {
+      return null;
+    }
+    return plan(
+      `${target}-fresh`,
+      target,
+      [startDevClientStep(build.summary, options)],
+      [
+        ...facts,
+        ...build.reasons,
+        `EAS already has a finished "${found.profile}" build for this fingerprint (${found.id}), so nothing is built: the EAS Simulator session installs that build.`,
+        ...targetFacts,
+      ],
+      null,
+      found
+    );
+  };
+
   // Checked-in native directories are the strongest signal: the project is bare, so the plan
   // never regenerates them with prebuild. `expo run:*` performs the pod install / gradle sync
   // that the LLP table calls for before building.
   if (state.nativeDirs.ios || state.nativeDirs.android) {
     if (build.fresh) {
       return currentBuildPlan('bare');
+    }
+    const reused = easBuildPlan('bare');
+    if (reused) {
+      return reused;
     }
     return plan(
       'bare-stale',
@@ -190,6 +224,10 @@ export function decideStartPlan(
       // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
       // A matching fingerprint proves the build is current and says nothing about where it is.
       return currentBuildPlan('dev-client');
+    }
+    const reused = easBuildPlan('dev-client');
+    if (reused) {
+      return reused;
     }
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Decision table
     // Two stale rows rather than one, split on what moved rather than on whether anything did.
@@ -253,9 +291,14 @@ function plan(
   target: StartPlan['target'],
   steps: PlanStep[],
   reasons: string[],
-  buildLocation: StartPlan['buildLocation'] = null
+  buildLocation: StartPlan['buildLocation'] = null,
+  easBuild: StartPlan['easBuild'] = null
 ): StartPlan {
-  return { target, rule, steps, reasons, buildLocation };
+  // Only present when set: every existing reader compares plans structurally, and a plan that
+  // rests on no EAS build is the plan it always was.
+  return easBuild
+    ? { target, rule, steps, reasons, buildLocation, easBuild }
+    : { target, rule, steps, reasons, buildLocation };
 }
 
 /**
@@ -289,11 +332,13 @@ function startExpoGoStep(options: DecideStartPlanOptions): PlanStep {
     'start',
     ['expo', 'start', '--go'],
     'seconds',
-    opensOn
-      ? `Serves the project to Expo Go, which needs no native build. The app is then opened on ${plainDeviceNoun(opensOn)}; one is booted, and Expo Go installed, when missing.`
-      : options.open === false
-        ? `Serves the project to Expo Go, which needs no native build. --no-open: nothing is opened, so open the app yourself — "${PROGRAM_NAME} navigate /" does.`
-        : `Serves the project to Expo Go, which needs no native build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android.`
+    opensOn && options.deviceBackend === 'eas'
+      ? `Serves the project to Expo Go through a tunnel, which needs no native build. The app is then opened on an EAS Simulator session (${plainPlatformNoun(opensOn)}) running the Expo Go this SDK ships; the session this project has is reused, or one is started — and a session bills until "npx eas simulator:stop".`
+      : opensOn
+        ? `Serves the project to Expo Go, which needs no native build. The app is then opened on ${plainDeviceNoun(opensOn)}; one is booted, and Expo Go installed, when missing.`
+        : options.open === false
+          ? `Serves the project to Expo Go, which needs no native build. --no-open: nothing is opened, so open the app yourself — "${PROGRAM_NAME} navigate /" does.`
+          : `Serves the project to Expo Go, which needs no native build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android.`
   );
 }
 
@@ -303,9 +348,11 @@ function startDevClientStep(reason: string, options: DecideStartPlanOptions = {}
     'start',
     ['expo', 'start', '--dev-client'],
     'seconds',
-    opensOn
-      ? `Starts the dev server; the development build is then opened on ${plainDeviceNoun(opensOn)}, booting one when none is up. ${reason}`
-      : options.open === false
+    opensOn && options.deviceBackend === 'eas'
+      ? `Starts the dev server through a tunnel; the development build is then opened on an EAS Simulator session (${plainPlatformNoun(opensOn)}) — the session this project has is reused, or one is started that installs the build by id, and it bills until "npx eas simulator:stop". ${reason}`
+      : opensOn
+        ? `Starts the dev server; the development build is then opened on ${plainDeviceNoun(opensOn)}, booting one when none is up. ${reason}`
+        : options.open === false
         ? `Starts the dev server for the existing development build. --no-open: nothing is opened, so open the app yourself — "${PROGRAM_NAME} navigate /" does. ${reason}`
         : `Starts the dev server for the existing development build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android. ${reason}`
   );
@@ -327,6 +374,11 @@ function openTargetOf({ requestedPlatform, open }: DecideStartPlanOptions): Nati
 /** The device the open lands on. No state adjective: the open boots one itself when none is up. */
 function plainDeviceNoun(platform: NativePlatform): string {
   return platform === 'ios' ? 'an iOS simulator' : 'an Android device or emulator';
+}
+
+/** The platform of a session, for a sentence that already said the device is on EAS. */
+function plainPlatformNoun(platform: NativePlatform): string {
+  return platform === 'ios' ? 'iOS' : 'Android';
 }
 
 /**
@@ -408,6 +460,9 @@ function easRouteSteps(
   reason: string,
   options: DecideStartPlanOptions
 ): PlanStep[] {
+  const onEas = options.deviceBackend === 'eas';
+  // @ref llp/0027-everything-on-eas.rfc.md §The build is a simulator build
+  const profile = onEas ? EAS_SIMULATOR_PROFILE : EAS_DEVELOPMENT_PROFILE;
   const configure: PlanStep[] =
     options.easJson === false
       ? [
@@ -415,7 +470,9 @@ function easRouteSteps(
             'eas-configure',
             ['eas', 'build:configure'],
             'a-minute',
-            `Creates eas.json, which the build below reads to know what the "${EAS_DEVELOPMENT_PROFILE}" profile is. This project has none yet.`
+            onEas
+              ? `Creates eas.json. This project has none yet; the "${profile}" profile the build below needs is added to it next.`
+              : `Creates eas.json, which the build below reads to know what the "${profile}" profile is. This project has none yet.`
           ),
         ]
       : [];
@@ -424,16 +481,20 @@ function easRouteSteps(
     ...configure,
     step(
       'eas-build',
-      ['eas', 'build', '--platform', platform, '--profile', EAS_DEVELOPMENT_PROFILE],
+      ['eas', 'build', '--platform', platform, '--profile', profile],
       'many-minutes',
-      `Builds the ${platform} development build ${EAS_WHERE} (a cloud build, which needs ${EAS_REQUIREMENT} rather than ${localRequirement(platform)}) and ends with a downloadable artifact. Install it on a device before the dev server can reach it — "npx eas build:run --platform ${platform} --latest" does that on a booted simulator or an attached device. ${reason}`,
+      onEas
+        ? `Builds the ${platform} development build ${EAS_WHERE} with the "${profile}" profile — a simulator build, which needs no signing and is what an EAS Simulator session installs (a cloud build, which needs ${EAS_REQUIREMENT} rather than ${localRequirement(platform)}). Nothing is downloaded here: the session that opens the app installs it by build id. ${reason}`
+        : `Builds the ${platform} development build ${EAS_WHERE} (a cloud build, which needs ${EAS_REQUIREMENT} rather than ${localRequirement(platform)}) and ends with a downloadable artifact. Install it on a device before the dev server can reach it — "npx eas build:run --platform ${platform} --latest" does that on a booted simulator or an attached device. ${reason}`,
       'eas'
     ),
     step(
       'start',
       ['expo', 'start', '--dev-client'],
       'seconds',
-      `Starts the dev server for the build above. Unlike a local build, "eas build" does not start one — and it serves nothing until the artifact is installed.`
+      onEas
+        ? `Starts the dev server through a tunnel, for the build above. Once it is up, the EAS Simulator session is started with that build, and the app is opened on it. Unlike a local build, "eas build" starts no dev server.`
+        : `Starts the dev server for the build above. Unlike a local build, "eas build" does not start one — and it serves nothing until the artifact is installed.`
     ),
   ];
 }
@@ -447,11 +508,12 @@ function easRouteSteps(
 function backendReasons(
   backend: BuildBackendChoice | null,
   platform: NativePlatform,
-  easJson: boolean | undefined
+  options: DecideStartPlanOptions
 ): string[] {
   if (!backend) {
     return [];
   }
+  const { easJson } = options;
   const reasons = [backend.why];
 
   if (backend.doomed) {
@@ -468,6 +530,17 @@ function backendReasons(
       reasons.push(
         `This project has no eas.json, so the plan configures one first; that step may ask which platforms to set up.`
       );
+    }
+    // @ref llp/0027-everything-on-eas.rfc.md §The build is a simulator build
+    if (options.deviceBackend === 'eas') {
+      reasons.push(
+        `The app runs on an EAS Simulator session, so the build uses the "${EAS_SIMULATOR_PROFILE}" profile: a simulator build, which no signing is needed for and which a simulator can install. The "${EAS_DEVELOPMENT_PROFILE}" profile is a device build, and no simulator can install one.`
+      );
+      if (options.easSimulatorProfile === false) {
+        reasons.push(
+          `eas.json has no "${EAS_SIMULATOR_PROFILE}" profile, so ${PROGRAM_NAME} adds one before the build (developmentClient, internal distribution, ios.simulator) — the same profile "eas build:dev" creates. Nothing else in the file is touched.`
+        );
+      }
     }
   }
 

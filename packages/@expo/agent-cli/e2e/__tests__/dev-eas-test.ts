@@ -21,6 +21,8 @@ import {
   installStubFingerprintAsync,
   readStubExpoInvocations,
   setupFixtureAsync,
+  stubExpoEnv,
+  waitForAsync,
 } from '../utils';
 
 /** The record `src/plan/lastBuild.ts` writes, relative to the project root. */
@@ -87,15 +89,29 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas']);
 
     expect(result.exitCode).toBe(0);
+    // @ref llp/0027-everything-on-eas.rfc.md — `--eas` puts the device on EAS too, so the build is
+    // the simulator profile, and the finished build is named by one `build:list` so the session can
+    // install it by id.
     expect(easInvocationArgs(projectRoot)).toEqual([
       ['build:configure'],
-      ['build', '--platform', 'ios', '--profile', 'development'],
+      ['build', '--platform', 'ios', '--profile', 'development-simulator'],
+      [
+        'build:list',
+        '--platform',
+        'ios',
+        '--build-profile',
+        'development-simulator',
+        '--status',
+        'finished',
+        '--limit',
+        '1',
+        '--json',
+        '--non-interactive',
+      ],
     ]);
-    // The dev server is the `expo` step that follows, because `eas build` starts none. The
-    // caller's `--ios` reaches it: the plan's last step *is* `expo start`, which owns that flag,
-    // so unlike the local route it is appended rather than reported as an option that went
-    // nowhere (`resolveStepArgs`).
-    expect(expoInvocationArgs(projectRoot)).toEqual([['start', '--dev-client']]);
+    // The dev server is the `expo` step that follows, because `eas build` starts none. It is
+    // tunnelled, because the device is a machine on EAS that cannot reach this loopback.
+    expect(expoInvocationArgs(projectRoot)).toEqual([['start', '--dev-client', '--tunnel']]);
   });
 
   // `eas build:configure` exists in the plan for exactly one reason: without an `eas.json` there is
@@ -110,8 +126,13 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas']);
 
     expect(result.exitCode).toBe(0);
-    expect(easInvocationArgs(projectRoot)).toEqual([
-      ['build', '--platform', 'ios', '--profile', 'development'],
+    expect(easInvocationArgs(projectRoot).map((args) => args[0])).toEqual(['build', 'build:list']);
+    expect(easInvocationArgs(projectRoot)[0]).toEqual([
+      'build',
+      '--platform',
+      'ios',
+      '--profile',
+      'development-simulator',
     ]);
   });
 
@@ -126,7 +147,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
       '--platform',
       'android',
       '--profile',
-      'development',
+      'development-simulator',
     ]);
   });
 
@@ -315,5 +336,278 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     const log = readStubEasInvocations(projectRoot);
     expect(log.length).toBeGreaterThan(0);
     expect(log.every((invocation) => invocation.ci === '1')).toBe(true);
+  });
+});
+
+// @ref llp/0027-everything-on-eas.rfc.md
+//
+// `--eas` puts the *device* on EAS as well as the build. What crosses the process boundary here and
+// nowhere else: the profile the `eas build` is asked for, the `eas.json` write that precedes it, the
+// `build:list` that names the finished build, `--tunnel` on the dev server, and the `eas simulator`
+// start with the app and the tunnelled URL on its command line — plus the reuse of a session that
+// is up and of a build EAS already has.
+describe('@expo/agent-cli dev --eas — the device on EAS', () => {
+  /** How long the stub dev server stays up: long enough for the child's open to reach the stub eas. */
+  const STUB_ALIVE_MS = '20000';
+  const TUNNEL_HOST = 'abc.tunnel.example';
+
+  /** A stub dev server that binds, advertises a tunnel, and stays up; and a stub eas with no session. */
+  function easRunEnv(projectRoot: string, port: number): Record<string, string> {
+    return {
+      ...stubExpoEnv(projectRoot),
+      STUB_EXPO_DEV_SERVER_PORT: String(port),
+      STUB_EXPO_LISTEN: '1',
+      STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+      STUB_EXPO_TUNNEL_HOST: TUNNEL_HOST,
+      STUB_EXPO_TUNNEL_DELAY_MS: '200',
+      STUB_SIM_SESSIONS: '0',
+    };
+  }
+
+  /** Stop whatever the test started, so a failed assertion never leaves a process behind. */
+  async function cleanUpAsync(projectRoot: string): Promise<void> {
+    await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+      env: stubExpoEnv(projectRoot),
+      reject: false,
+    });
+  }
+
+  /** Give the fixture a scheme, which a development build's launch URL is built from. */
+  async function writeSchemeAsync(projectRoot: string, scheme: string): Promise<void> {
+    const file = path.join(projectRoot, 'app.json');
+    const appJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+    appJson.expo.scheme = scheme;
+    await fs.promises.writeFile(file, JSON.stringify(appJson, null, 2));
+  }
+
+  /** The recorded `eas` invocations, once one starting with `verb` has been recorded. */
+  async function easInvocationsAfterAsync(projectRoot: string, verb: string): Promise<string[][]> {
+    await waitForAsync(() => easInvocationArgs(projectRoot).some((args) => args[0] === verb), 15_000);
+    return easInvocationArgs(projectRoot);
+  }
+
+  it('plans the simulator profile, the tunnel, and says the profile is added first', async () => {
+    const projectRoot = await setupAsync();
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--plan', '--json']);
+
+    expect(result.exitCode).toBe(0);
+    const plan = JSON.parse(result.stdout);
+    expect(plan.steps.map((step: { argv: string[] }) => step.argv)).toEqual([
+      ['eas', 'build:configure'],
+      ['eas', 'build', '--platform', 'ios', '--profile', 'development-simulator'],
+      ['expo', 'start', '--dev-client', '--tunnel'],
+    ]);
+    expect(plan.reasons.join('\n')).toContain('eas.json has no "development-simulator" profile');
+    expect(plan.steps[2].reason).toContain('EAS Simulator session is started with that build');
+    // A plan runs nothing. The one thing it may ask EAS — whether a finished build of this
+    // fingerprint exists — needs a per-platform fingerprint, and this fixture ships no fingerprint
+    // tool, so nothing is asked (`src/plan/easBuildLookup.ts` answers null before spawning).
+    expect(easInvocationArgs(projectRoot)).toEqual([]);
+  });
+
+  it('refuses --web and a host the session cannot reach, before anything runs', async () => {
+    const projectRoot = await setupAsync();
+
+    const web = await executeAgentCliAsync(projectRoot, ['dev', '--web', '--eas', '--json'], {
+      reject: false,
+    });
+    expect(web.exitCode).toBe(1);
+    expect(JSON.parse(web.stdout).error.message).toContain('--eas and --web');
+
+    const lan = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--lan', '--json'], {
+      reject: false,
+    });
+    expect(lan.exitCode).toBe(1);
+    expect(JSON.parse(lan.stdout).error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --eas');
+    expect(easInvocationArgs(projectRoot)).toEqual([]);
+    expect(expoInvocationArgs(projectRoot)).toEqual([]);
+  });
+
+  it('builds the simulator profile, adds it to eas.json, names the build, and starts a session with it', async () => {
+    const projectRoot = await setupAsync();
+    await writeSchemeAsync(projectRoot, 'devclient');
+
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+        { env: easRunEnv(projectRoot, 8531) }
+      );
+      expect(result.exitCode).toBe(0);
+
+      // The write this CLI does itself, between `build:configure` and `build`: the real configure
+      // writes a device profile only, and the session cannot install a device build.
+      const easJson = JSON.parse(await fs.promises.readFile(path.join(projectRoot, 'eas.json'), 'utf8'));
+      expect(easJson.build.development).toEqual({ developmentClient: true, distribution: 'internal' });
+      expect(easJson.build['development-simulator']).toEqual({
+        developmentClient: true,
+        distribution: 'internal',
+        ios: { simulator: true },
+      });
+
+      const invocations = await easInvocationsAfterAsync(projectRoot, 'simulator');
+      expect(invocations).toContainEqual(['build:configure']);
+      expect(invocations).toContainEqual([
+        'build',
+        '--platform',
+        'ios',
+        '--profile',
+        'development-simulator',
+      ]);
+      // The build that just finished, named by asking EAS for the newest finished one of its profile.
+      expect(invocations).toContainEqual([
+        'build:list',
+        '--platform',
+        'ios',
+        '--build-profile',
+        'development-simulator',
+        '--status',
+        'finished',
+        '--limit',
+        '1',
+        '--json',
+        '--non-interactive',
+      ]);
+      // The session, with the build and the tunnelled launch URL on its command line.
+      const start = invocations.find((args) => args[0] === 'simulator')!;
+      expect(start.slice(0, 7)).toEqual([
+        'simulator',
+        '--platform',
+        'ios',
+        '--type',
+        'agent-device',
+        '--build-id',
+        'build-e2e',
+      ]);
+      expect(start[start.indexOf('--open-url') + 1]).toBe(
+        `devclient://expo-development-client/?url=${encodeURIComponent(`https://${TUNNEL_HOST}`)}`
+      );
+      expect(start).toContain('--non-interactive');
+      // The dev server was tunnelled, which is what makes that URL reachable.
+      expect(expoInvocationArgs(projectRoot)).toContainEqual(['start', '--dev-client', '--tunnel']);
+      // The stub wrote the dotenv the real command writes, so every later `--eas` finds the session.
+      expect(
+        await fs.promises.readFile(path.join(projectRoot, '.env.eas-simulator'), 'utf8')
+      ).toContain('EAS_SIMULATOR_SESSION_ID=sess-e2e-started');
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  it('starts a session running Expo Go for a project Expo Go can run, and builds nothing', async () => {
+    const projectRoot = await setupAsync('go-app');
+
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+        { env: easRunEnv(projectRoot, 8532) }
+      );
+      expect(result.exitCode).toBe(0);
+
+      const invocations = await easInvocationsAfterAsync(projectRoot, 'simulator');
+      expect(invocations.map((args) => args[0])).not.toContain('build');
+      const start = invocations.find((args) => args[0] === 'simulator')!;
+      expect(start).toContain('--expo-go');
+      expect(start[start.indexOf('--open-url') + 1]).toBe(`exp://${TUNNEL_HOST}`);
+      expect(expoInvocationArgs(projectRoot)).toContainEqual(['start', '--go', '--tunnel']);
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  it('reuses the session this project already has, and opens the app on it instead of starting one', async () => {
+    const projectRoot = await setupAsync('go-app');
+
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+        // The stub's default session: `sess-e2e`, iOS, in progress.
+        { env: { ...easRunEnv(projectRoot, 8533), STUB_SIM_SESSIONS: '1' } }
+      );
+      expect(result.exitCode).toBe(0);
+
+      const invocations = await easInvocationsAfterAsync(projectRoot, 'simulator:exec');
+      expect(invocations.map((args) => args[0])).not.toContain('simulator');
+      const open = invocations.find((args) => args[0] === 'simulator:exec')!;
+      expect(open.slice(0, 4)).toEqual(['simulator:exec', 'npx', 'agent-device@latest', 'open']);
+      expect(open[4]).toMatch(new RegExp(`^exp://${TUNNEL_HOST.replace(/\./g, '\\.')}/--/\\??$`));
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  it('rests on a finished EAS build of this fingerprint and skips the build', async () => {
+    const projectRoot = await setupAsync('dev-client-fresh-app');
+    const hash = 'feedfacefeedfacefeedfacefeedfacefeedface';
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--plan', '--json'], {
+      env: {
+        // A fingerprint that no longer matches the recorded local build, so the plan would build…
+        STUB_FINGERPRINT_HASH: hash,
+        // …except that EAS has a finished simulator build of exactly it.
+        STUB_EAS_BUILDS: JSON.stringify([
+          {
+            id: 'build-reuse',
+            platform: 'IOS',
+            status: 'FINISHED',
+            fingerprintHash: hash,
+            buildProfile: 'development-simulator',
+          },
+        ]),
+      },
+    });
+
+    expect(result.exitCode).toBe(0);
+    const plan = JSON.parse(result.stdout);
+    expect(plan.rule).toBe('dev-client-fresh');
+    expect(plan.easBuild).toEqual({ id: 'build-reuse', profile: 'development-simulator' });
+    expect(plan.steps.map((step: { argv: string[] }) => step.argv)).toEqual([
+      ['expo', 'start', '--dev-client', '--tunnel'],
+    ]);
+    expect(plan.reasons).toContain(
+      'EAS already has a finished "development-simulator" build for this fingerprint (build-reuse), so nothing is built: the EAS Simulator session installs that build.'
+    );
+    // The lookup that found it, narrowed to the one kind of build a session can install.
+    expect(easInvocationArgs(projectRoot)).toContainEqual([
+      'build:list',
+      '--platform',
+      'ios',
+      '--fingerprint-hash',
+      hash,
+      '--status',
+      'finished',
+      '--build-profile',
+      'development-simulator',
+      '--limit',
+      '1',
+      '--json',
+      '--non-interactive',
+    ]);
+  });
+
+  it('builds when EAS has a finished build of another fingerprint only', async () => {
+    const projectRoot = await setupAsync('dev-client-fresh-app');
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--plan', '--json'], {
+      env: {
+        STUB_FINGERPRINT_HASH: 'feedfacefeedfacefeedfacefeedfacefeedface',
+        STUB_EAS_BUILDS: JSON.stringify([
+          {
+            id: 'build-old',
+            platform: 'IOS',
+            status: 'FINISHED',
+            fingerprintHash: 'other',
+            buildProfile: 'development-simulator',
+          },
+        ]),
+      },
+    });
+
+    const plan = JSON.parse(result.stdout);
+    expect(plan.easBuild).toBeUndefined();
+    expect(plan.steps.map((step: { argv: string[] }) => step.argv[1])).toContain('build');
   });
 });

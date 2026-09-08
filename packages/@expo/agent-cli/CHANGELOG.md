@@ -9,12 +9,14 @@
 
 ### 🎉 New features
 
+- `dev --eas` runs everything on EAS: the dev server is tunnelled, a native build (when the plan needs one) is the `development-simulator` profile on EAS Build — added to `eas.json` when it is missing, and skipped when EAS already has a finished build of this fingerprint — and the app is opened on this project's EAS Simulator session, which is started with Expo Go or with that build when none is up. `--eas` refuses `--web`, `--lan` and `--localhost`. Before, `--eas` moved only the build, and did nothing at all for an Expo Go project. ([#36](https://github.com/expo/expo-agent-cli/pull/36) by [@kudo](https://github.com/kudo))
 - `dev` opens the app itself once its dev server is up, through the same device tools `smoke` and `navigate` use: it boots a simulator or an emulator when none is up, installs the Expo Go release the project's SDK ships when it is missing, and deep-links through `simctl`/`adb` — never AppleScript, so it works headless and needs no macOS Automation grant. The platform flag no longer reaches `expo start` at all. ([#7](https://github.com/expo/expo-agent-cli/pull/7) by [@kudo](https://github.com/kudo))
 - `dev --no-open` serves without opening the app, for a caller that opens it itself — `smoke` starts its dev server this way. ([#7](https://github.com/expo/expo-agent-cli/pull/7) by [@kudo](https://github.com/kudo))
 - Initial agent-cli work. ([#49654](https://github.com/expo/expo-agent-cli/pull/1) by [@kudo](https://github.com/kudo))
 
 ### 🐛 Bug fixes
 
+- `dev --eas` no longer builds the `development` profile, which is a device build no simulator can install — not the EAS Simulator, and not the one on this Mac, so the `eas build:run` the old plan suggested could not have installed it either. ([#36](https://github.com/expo/expo-agent-cli/pull/36) by [@kudo](https://github.com/kudo))
 - `inspect:build-log` now locates a `bun install` dependency 404. EAS builds a bun-lockfile project with bun, whose error shape is nothing like npm's, so those failures were unlocatable before. ([#15](https://github.com/expo/expo-agent-cli/pull/15) by [@kudo](https://github.com/kudo))
 - Commands no longer suggest a bare `smoke`, which exits 1 now that the gate requires `--ios` or `--android`. Every next-action that named it — on `dev`, `dev:logs`, `typecheck`, the interact commands, `runtime:reload`, `runtime:eval`, `navigate`, and the `AGENTS.md` written into a project — names a platform, and a lint rule fails on any printed `smoke` that does not. ([#6](https://github.com/expo/expo-agent-cli/pull/6) by [@kudo](https://github.com/kudo))
 - The Expo Go check now compares native modules against a vendored autolink dump of Expo Go, and falls back to `bundledNativeModules.json` for an SDK this CLI has not recaptured. ([#3](https://github.com/expo/expo-agent-cli/pull/3) by [@kudo](https://github.com/kudo))

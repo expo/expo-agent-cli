@@ -451,3 +451,117 @@ describe('a flag on the command line', () => {
     );
   });
 });
+
+// @ref llp/0027-everything-on-eas.rfc.md §Reuse
+describe('the EAS device', () => {
+  const eas = {
+    platform: 'ios' as const,
+    requestedPlatform: 'ios' as const,
+    requestedBackend: 'eas' as const,
+    deviceBackend: 'eas' as const,
+  };
+
+  it(`asks EAS for a finished simulator build of this fingerprint, and rests on it when there is one`, async () => {
+    writeProject({ 'eas.json': { build: { 'development-simulator': { ios: { simulator: true } } } } });
+    const lookUpEasBuild = vi.fn(async () => ({ id: 'build-9', profile: 'development-simulator' }));
+
+    const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
+      ...eas,
+      lookUpEasBuild,
+      probeAppPresence: neverProbed,
+    });
+
+    expect(lookUpEasBuild).toHaveBeenCalledWith(projectRoot, 'ios');
+    expect(plan.rule).toBe('dev-client-fresh');
+    expect(plan.easBuild).toEqual({ id: 'build-9', profile: 'development-simulator' });
+    expect(argvOf(plan)).toEqual([['expo', 'start', '--dev-client']]);
+    // The toolchain is not asked either: the caller asked for the cloud by name.
+    expect(detectToolchainAsync).not.toHaveBeenCalled();
+  });
+
+  it(`builds when EAS has none, and says the profile is added when eas.json lacks it`, async () => {
+    writeProject({ 'eas.json': { build: { development: {} } } });
+
+    const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
+      ...eas,
+      lookUpEasBuild: async () => null,
+      probeAppPresence: neverProbed,
+    });
+
+    expect(argvOf(plan)).toEqual([
+      ['eas', 'build', '--platform', 'ios', '--profile', 'development-simulator'],
+      ['expo', 'start', '--dev-client'],
+    ]);
+    expect(plan.reasons.join('\n')).toContain('eas.json has no "development-simulator" profile');
+  });
+
+  it(`reads the profile out of the real eas.json when nothing is injected`, async () => {
+    writeProject({
+      'eas.json': { build: { 'development-simulator': { developmentClient: true } } },
+    });
+
+    const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
+      ...eas,
+      lookUpEasBuild: async () => null,
+      probeAppPresence: neverProbed,
+    });
+
+    expect(plan.reasons.join('\n')).not.toContain('adds one before the build');
+  });
+
+  it(`does not ask EAS for a project that has yet to install expo-dev-client`, async () => {
+    writeProject();
+    const lookUpEasBuild = vi.fn(async () => ({ id: 'stale', profile: 'development-simulator' }));
+
+    const plan = await resolveStartPlanAsync(
+      projectRoot,
+      devClientState({ usesDevClient: false, expoGo: { compatible: false, reasons: [] } }),
+      { ...eas, lookUpEasBuild, probeAppPresence: neverProbed }
+    );
+
+    expect(lookUpEasBuild).not.toHaveBeenCalled();
+    expect(plan.rule).toBe('needs-dev-client');
+  });
+
+  it(`asks no local device about the app: the session has it by construction`, async () => {
+    writeProject();
+    const probeAppPresence = vi.fn(neverProbed);
+
+    const plan = await resolveStartPlanAsync(
+      projectRoot,
+      devClientState({ fingerprint: { hash: 'same' } }),
+      {
+        ...eas,
+        lastBuild: { ios: { hash: 'same', sources: null } } as unknown as LastBuildRecord,
+        lookUpEasBuild: async () => null,
+        probeAppPresence,
+      }
+    );
+
+    expect(probeAppPresence).not.toHaveBeenCalled();
+    expect(plan.rule).toBe('dev-client-fresh');
+  });
+
+  it(`asks EAS nothing when the device is local, even for a cloud build`, async () => {
+    writeProject();
+    const lookUpEasBuild = vi.fn(async () => ({ id: 'x', profile: 'development-simulator' }));
+
+    const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
+      platform: 'ios',
+      requestedPlatform: 'ios',
+      requestedBackend: 'eas',
+      lookUpEasBuild,
+      probeAppPresence: neverProbed,
+    });
+
+    expect(lookUpEasBuild).not.toHaveBeenCalled();
+    expect(argvOf(plan)).toContainEqual([
+      'eas',
+      'build',
+      '--platform',
+      'ios',
+      '--profile',
+      'development',
+    ]);
+  });
+});

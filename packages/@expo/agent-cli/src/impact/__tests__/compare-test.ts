@@ -350,6 +350,19 @@ describe(buildCacheArgs, () => {
       '--non-interactive',
     ]);
   });
+
+  // @ref llp/0027-everything-on-eas.rfc.md §Reuse — a session installs by id, and only a simulator
+  // build is one it can install, so `dev --eas` narrows the lookup to that profile.
+  it(`should narrow the lookup to one build profile when a caller needs one kind of build`, () => {
+    const args = buildCacheArgs('ios', 'abc', { profile: 'development-simulator' });
+    expect(args.slice(args.indexOf('--status'), args.indexOf('--limit'))).toEqual([
+      '--status',
+      'finished',
+      '--build-profile',
+      'development-simulator',
+    ]);
+    expect(buildCacheArgs('ios', 'abc', { profile: null })).toEqual(buildCacheArgs('ios', 'abc'));
+  });
 });
 
 describe(findCachedBuildAsync, () => {
