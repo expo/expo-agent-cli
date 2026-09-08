@@ -29,7 +29,12 @@ import os from 'os';
 import path from 'path';
 
 import { CommandError } from '../utils/errors';
-import { spawnCaptureAsync, type SpawnCaptureResult } from '../utils/spawnCapture';
+import {
+  spawnCaptureAsync,
+  spawnCaptureBufferAsync,
+  type SpawnCaptureBufferResult,
+  type SpawnCaptureResult,
+} from '../utils/spawnCapture';
 
 /** Where the `adb` this CLI runs came from. Reported, because it decides what to fix. */
 export type AdbSource =
@@ -198,6 +203,31 @@ export async function runAdbAsync(
 ): Promise<AdbRunResult> {
   const adb = options.adb ?? resolveAdb();
   const result = await spawnCaptureAsync(adb.bin, args, {
+    cwd: options.cwd,
+    timeoutMs: options.timeoutMs,
+  });
+  return { ...result, adb, notRunnable: result.spawnError != null };
+}
+
+/** {@link AdbRunResult}, with stdout kept as bytes. */
+export interface AdbRawRunResult extends SpawnCaptureBufferResult {
+  adb: AdbResolution;
+  /** @see AdbRunResult.notRunnable */
+  notRunnable: boolean;
+}
+
+/**
+ * Run one `adb` command whose stdout is a file rather than text, e.g. `exec-out dd`.
+ *
+ * The same contract as {@link runAdbAsync}. Only the capture differs: the bytes stay a Buffer,
+ * because a slice of an APK does not survive a round trip through UTF-8.
+ */
+export async function runAdbRawAsync(
+  args: string[],
+  options: { cwd?: string; timeoutMs?: number; adb?: AdbResolution } = {}
+): Promise<AdbRawRunResult> {
+  const adb = options.adb ?? resolveAdb();
+  const result = await spawnCaptureBufferAsync(adb.bin, args, {
     cwd: options.cwd,
     timeoutMs: options.timeoutMs,
   });
