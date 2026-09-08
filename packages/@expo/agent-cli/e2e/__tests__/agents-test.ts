@@ -34,7 +34,12 @@ describe('@expo/agent-cli agents:setup', () => {
   });
 
   it('prints usage with `agents:setup --help`', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['agents:setup', '--help']);
+    const result = await executeAgentCliAsync(projectRoot, [
+      'agents:setup',
+      '--yes',
+      '--no-plugins',
+      '--help',
+    ]);
 
     expect(result.exitCode).toBe(0);
     expect(result.all).toContain('--agent');
@@ -46,6 +51,8 @@ describe('@expo/agent-cli agents:setup', () => {
   it('links the skills and creates AGENTS.md with the managed block', async () => {
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
+      '--yes',
+      '--no-plugins',
       '--agent',
       'claude-code',
     ]);
@@ -77,11 +84,19 @@ describe('@expo/agent-cli agents:setup', () => {
   });
 
   it('writes a byte-identical AGENTS.md on a rerun', async () => {
-    await executeAgentCliAsync(projectRoot, ['agents:setup', '--agent', 'claude-code']);
+    await executeAgentCliAsync(projectRoot, [
+      'agents:setup',
+      '--yes',
+      '--no-plugins',
+      '--agent',
+      'claude-code',
+    ]);
     const first = readProjectFile(projectRoot, 'AGENTS.md')!;
 
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
+      '--yes',
+      '--no-plugins',
       '--agent',
       'claude-code',
     ]);
@@ -95,14 +110,26 @@ describe('@expo/agent-cli agents:setup', () => {
     const before = ['# House rules', '', 'Never force push.', ''].join('\n');
     await fs.promises.writeFile(path.join(projectRoot, 'AGENTS.md'), before);
 
-    await executeAgentCliAsync(projectRoot, ['agents:setup', '--agent', 'claude-code']);
+    await executeAgentCliAsync(projectRoot, [
+      'agents:setup',
+      '--yes',
+      '--no-plugins',
+      '--agent',
+      'claude-code',
+    ]);
     const withBlock = readProjectFile(projectRoot, 'AGENTS.md')!;
 
     expect(withBlock.startsWith(before)).toBe(true);
     expect(withBlock).toContain(BLOCK_START);
 
     // A second run rewrites only the block, so the user content stays byte for byte.
-    await executeAgentCliAsync(projectRoot, ['agents:setup', '--agent', 'claude-code']);
+    await executeAgentCliAsync(projectRoot, [
+      'agents:setup',
+      '--yes',
+      '--no-plugins',
+      '--agent',
+      'claude-code',
+    ]);
     expect(readProjectFile(projectRoot, 'AGENTS.md')).toBe(withBlock);
   });
 
@@ -112,6 +139,8 @@ describe('@expo/agent-cli agents:setup', () => {
 
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
+      '--yes',
+      '--no-plugins',
       '--agent',
       'claude-code',
     ]);
@@ -121,7 +150,12 @@ describe('@expo/agent-cli agents:setup', () => {
   });
 
   it('writes only AGENTS.md with `--no-agent-skills`', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['agents:setup', '--no-agent-skills']);
+    const result = await executeAgentCliAsync(projectRoot, [
+      'agents:setup',
+      '--yes',
+      '--no-plugins',
+      '--no-agent-skills',
+    ]);
 
     expect(result.exitCode).toBe(0);
     expect(readProjectFile(projectRoot, 'AGENTS.md')).toContain(BLOCK_START);
@@ -131,6 +165,8 @@ describe('@expo/agent-cli agents:setup', () => {
   it('links only the skills with `--no-agents-md`', async () => {
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
+      '--yes',
+      '--no-plugins',
       '--agent',
       'claude-code',
       '--no-agents-md',
@@ -144,6 +180,8 @@ describe('@expo/agent-cli agents:setup', () => {
   it('prints exactly one JSON object with `--json`', async () => {
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
+      '--yes',
+      '--no-plugins',
       '--agent',
       'claude-code',
       '--json',
@@ -155,8 +193,12 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(Object.keys(report).sort()).toEqual([
       'agents',
       'agentsMd',
+      'cancelled',
+      'errors',
       'notes',
+      'plugins',
       'projectRoot',
+      'scope',
       'skills',
     ]);
     expect(report.agents).toEqual(['claude-code']);
@@ -171,9 +213,13 @@ describe('@expo/agent-cli agents:setup', () => {
   });
 
   it('reports an unknown agent', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['agents:setup', '--agent', 'nope'], {
-      reject: false,
-    });
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['agents:setup', '--yes', '--no-plugins', '--agent', 'nope'],
+      {
+        reject: false,
+      }
+    );
 
     expect(result.exitCode).not.toBe(0);
     expect(result.all).toContain('nope');

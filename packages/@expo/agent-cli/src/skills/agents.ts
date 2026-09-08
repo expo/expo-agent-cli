@@ -120,11 +120,8 @@ export type AgentSelectionSource = 'flags' | 'cache' | 'detected';
  * `.expo/agent-skill-links.json`, then marker detection.
  *
  * @ref llp/0008-guardrails.rfc.md §Consent is a re-run, never a prompt
- * A terminal used to get a checklist of agents here, with the detected ones ticked. It is gone: a
- * question this CLI cannot ask is a question it must not have, and the answer it was collecting is
- * the one the non-interactive path had already been giving for free. The same project now answers
- * the same way whoever runs it, and `--agent` is how a caller overrides the detection — once, into
- * the cache that the next run reads.
+ * Keep module skill resolution noninteractive. `agents:setup` collects and confirms a selection
+ * before composing this resolver; direct skill commands use flags, the cache, or detection.
  */
 export async function resolveAgentsAsync(
   projectRoot: string,

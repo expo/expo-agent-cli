@@ -1,11 +1,11 @@
 {
   "id": "agents-setup",
   "fixture": "e2e/fixtures/skills-app",
-  "taskPrompt": "set this project up for an agent: write the AGENTS.md guide and link the skills its packages ship",
+  "taskPrompt": "set this project up for an agent: write the AGENTS.md guide and link the skills its packages ship; use --yes --no-plugins to confirm project setup without installing external plugins",
   "drivingAgent": "deterministic",
   "tiers": [0, 1, 2],
   "command": {
-    "argv": ["agents:setup", "--agent", "claude-code"],
+    "argv": ["agents:setup", "--yes", "--no-plugins", "--agent", "claude-code"],
     "timeoutMs": 60000
   },
   "graders": [

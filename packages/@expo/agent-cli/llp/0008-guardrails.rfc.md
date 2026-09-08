@@ -42,7 +42,7 @@ So what remains is the dry run, and it is a command rather than a mode: **`--pla
 
 `--yes` is gone, not accepted-and-ignored. A no-op flag is a flag callers keep passing to get a behaviour they already have, and it would have outlived every reader of this document. `cli:start_plan_needs_consent` is off the event stream for the same reason. `dev` no longer refers to `src/utils/consent.ts`; the deferred `doctor:fix --apply` is its last caller, and that does not ship ([[0017-deferred-commands]]).
 
-**What did not change is that this CLI asks no questions.** No prompt module remains in the package and the `prompts` dependency is still gone. The `skills` / `agents:setup` agent checklist stays removed — it selected among detected agents, which is the answer the non-interactive path already gave for free, and `--agent` is the override.
+**Agent setup is an explicit exception.** `agents:setup` selects agents and home/project scope, displays the installation and project-write plan, and asks for confirmation. `--yes` accepts that plan for automation; without a terminal it is required. Cancellation before confirmation writes nothing. [confirmed, Kudo, 2026-09-08; [[0006-agent-native-cli-surface]]] Standalone `skills:sync` retains noninteractive selection and `--agent` overrides. Other commands keep the behavior described above.
 
 Also unchanged, and deliberately: a forwarded CLI that prompts. `expo login` asks for a password on purpose. The needs-human protocol ([[0010-agent-conventions]]) is what covers it.
 

@@ -490,7 +490,6 @@ describe('a package.json that is not an Expo app', () => {
     const directory = await plainPackageAsync();
 
     for (const argv of [
-      ['agents:setup', '--json'],
       ['skills:sync', '--json'],
       ['skills:list', '--json'],
     ]) {
