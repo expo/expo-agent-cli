@@ -474,11 +474,12 @@ describe(lookUpCachedBuildAsync, () => {
       stderr: recordedUnconfigured.stderr,
     });
 
-    await expect(lookUpCachedBuildAsync(easCli, projectRoot, 'ios', 'abc')).resolves.toEqual({
-      state: 'unknown',
-      reason:
-        'EAS project not configured. This command cannot configure it in non-interactive mode. Run one of the following, then re-run this command:',
-    });
+    const outcome = await lookUpCachedBuildAsync(easCli, projectRoot, 'ios', 'abc');
+    expect(outcome).toMatchObject({ state: 'unknown' });
+    // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — in this CLI's words, with the fix,
+    // rather than the first line of that explanation with the `eas init` forms cut off.
+    expect((outcome as { reason: string }).reason).toContain('not linked to an EAS project');
+    expect((outcome as { reason: string }).reason).toContain('npx eas init --account');
   });
 
   // @ref src/utils/wrapperCrash.ts — the binary under the name `eas` may be a wrapper, a shim or a

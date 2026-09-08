@@ -11,6 +11,7 @@
 // answer that names the tool and quotes what it printed is the right answer when nothing specific
 // matched. A confident wrong guess is worse than "the EAS CLI needed input".
 
+import { classifyEasFailure } from '../utils/easFailure';
 import type { NeedsHuman } from '../utils/errors';
 import { needsHumanOf } from './error';
 import { needsHumanScenarios, type NeedsHumanTool } from './registry';
@@ -53,6 +54,7 @@ export function classifySubprocessFailure(failure: SubprocessFailure): NeedsHuma
     return null;
   }
 
+
   for (const scenario of needsHumanScenarios) {
     if (!scenario.tools.includes(failure.tool)) {
       continue;
@@ -60,8 +62,14 @@ export function classifySubprocessFailure(failure: SubprocessFailure): NeedsHuma
     if (scenario.signatures.some((signature) => signature.test(output))) {
       return needsHumanOf(scenario, {
         detectedBy: 'exit-signature',
-        // A generic row names no command of its own: the one to run is the one that stopped.
-        command: scenario.generic ? failure.invocation : undefined,
+        // A generic row names no command of its own: the one to run is the one that stopped. The
+        // unlinked-project row names `eas init`, and the account goes in when the EAS CLI listed
+        // exactly one (llp/0027 §What EAS said).
+        command: scenario.generic
+          ? failure.invocation
+          : scenario.id === 'eas-project-unlinked'
+            ? (classifyEasFailure(output)?.command ?? undefined)
+            : undefined,
       });
     }
   }

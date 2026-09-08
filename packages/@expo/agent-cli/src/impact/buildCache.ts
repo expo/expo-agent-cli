@@ -8,6 +8,7 @@
 // implication is the other CLI's and this one does not depend on it.
 
 import { easCliArgs, easCliLabel, mayDownloadEasCli, type EasCli } from '../utils/easCli';
+import { classifyEasFailure } from '../utils/easFailure';
 import { spawnSubprocessAsync } from '../utils/subprocess';
 import {
   looksLikeRunnerNoise,
@@ -285,6 +286,14 @@ export function describeLookupFailure(
       invocation,
       runnerNoiseLine(result.stderr)
     );
+  }
+  // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — the sentences this CLI recognises are
+  // answered in its own words, with the command that fixes them. The first line of the real output
+  // for an unlinked project ends in "Run one of the following, then re-run this command:" and the
+  // following is what a one-line reason cut off [observed — `status --explain`, 2026-09-08].
+  const cause = classifyEasFailure(`${result.stdout}\n${result.stderr}`);
+  if (cause) {
+    return cause.summary;
   }
   const line = firstLine(result.stdout) ?? firstLine(result.stderr);
   if (!line) {

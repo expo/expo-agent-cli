@@ -34,6 +34,7 @@ import { classifySubprocessFailure } from '../needsHuman/detect';
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { PROGRAM_PREFIX } from '../programName';
 import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/easCli';
+import { classifyEasFailure } from '../utils/easFailure';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import {
@@ -707,12 +708,17 @@ export async function probeCloudSessionAsync({
     );
   }
   if (result.exitCode !== 0) {
+    // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — a refusal this CLI recognises is
+    // answered in its own words, with the fix; anything else quotes the CLI's first line.
+    const cause = classifyEasFailure(`${result.stdout}\n${result.stderr}`);
     return {
       ...unknownSession(
         preferredId,
-        `"${result.command}" exited ${result.exitCode ?? 'on a signal'}${
-          firstLine(result.stderr) ? `: ${firstLine(result.stderr)}` : ''
-        }`
+        cause
+          ? `"${result.command}" exited ${result.exitCode ?? 'on a signal'}: ${cause.summary}`
+          : `"${result.command}" exited ${result.exitCode ?? 'on a signal'}${
+              firstLine(result.stderr) ? `: ${firstLine(result.stderr)}` : ''
+            }`
       ),
       failure: result,
     };
@@ -982,6 +988,11 @@ export function cloudSessionUnavailableError(probe: CloudSessionProbe): CommandE
  * has said nothing about the world.
  */
 export function cloudSessionUnknownError(probe: CloudSessionProbe): CommandError {
+  // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — when the listing failed on a sentence
+  // this CLI recognises, the `How:` is the fix rather than "run the listing yourself".
+  const cause = probe.failure
+    ? classifyEasFailure(`${probe.failure.stdout}\n${probe.failure.stderr}`)
+    : null;
   const error = new CommandError(
     'CLOUD_SIMULATOR_SESSION_UNKNOWN',
     [
@@ -991,10 +1002,12 @@ export function cloudSessionUnknownError(probe: CloudSessionProbe): CommandError
           ? `${CLOUD_SESSION_ENV_FILE} names session ${probe.sessionId}, and whether that session is still up is exactly what could not be read — so this is not being reported as "no session", which would be an instruction to start a second billed one.`
           : 'What this project has running could not be listed, so "no session" would be a guess, and acting on it would start a second billed one next to any that is up.'
       }`,
-      `How: run "npx eas simulator:list --status in-progress" to see what the CLI says, and check that the "eas" being run is the EAS CLI. Then run this command again, or open the URL elsewhere with "${PROGRAM_PREFIX} navigate <route> --print-url".`,
+      cause
+        ? `How: ${cause.how}`
+        : `How: run "npx eas simulator:list --status in-progress" to see what the CLI says, and check that the "eas" being run is the EAS CLI. Then run this command again, or open the URL elsewhere with "${PROGRAM_PREFIX} navigate <route> --print-url".`,
     ].join('\n')
   );
-  error.suggestedCommand = 'npx eas simulator:list --status in-progress';
+  error.suggestedCommand = cause?.command ?? 'npx eas simulator:list --status in-progress';
 
   // The same layer-3 hand-off a device verb does. A signed-out account stops the *question* about
   // the session exactly as it stops the answer, and both are a login rather than a broken CLI.

@@ -73,6 +73,16 @@ A `--eas` run's follow-ups are aimed at the session: `navigate / --eas`, `runtim
 
 `dev:stop --eas` also ends this project's session: the one the listing reports in progress (dotenv as the tiebreaker), stopped **by id** — the bare `eas simulator:stop` ends whatever the dotenv names, which may be a session another run is driving. Reported under `session: { id, stopped, reason }`; `id: null` is a project with none, and exit 20 is a session that would not stop, because it is still billing. Without the flag the session is untouched, as before: a session costs money, and ending one is asked for by name.
 
+## What EAS said
+
+Three surfaces quoted the EAS CLI's refusal by its first line, and for an unlinked project that line is `EAS project not configured. This command cannot configure it in non-interactive mode. Run one of the following, then re-run this command:` — with the following, the two `eas init` forms, cut off [observed — `status --explain`, `runtime:stop --eas`, 2026-09-08]. `deploy` had already solved this for itself (`classifyEasDeployFailure`, F143): read the whole output, recognise the sentence, answer with the fix and the account the CLI listed.
+
+That classifier is `src/utils/easFailure.ts` now, `classifyEasFailure`, with a one-line `summary` beside the `why`/`how`/`command` it had, and it is read wherever this CLI quotes an `eas` refusal: the build lookup of `status --explain` (`describeLookupFailure`), the session listing behind every `--eas` device command (`probeCloudSessionAsync`, and `cloudSessionUnknownError`'s `How:` and `Try:`), and a failed `eas` step of `dev` (`planStepFailedError`, which then names `eas init` rather than the command that just failed). Anything the classifier does not recognise keeps the first line, as before.
+
+It is also a needs-human scenario of its own, `eas-project-unlinked` (`EAS_PROJECT_NOT_LINKED`), placed before the generic `eas-prompt` row: the EAS CLI's explanation contains "cannot configure it in non-interactive mode", and the generic row read that as a question waiting in a terminal — `dev --eas` exited 7 telling the caller to answer a prompt that does not exist [observed — 2026-09-08]. The handoff stays exit 7, because which account a project belongs to is a person's decision ([[0007-deploy-and-headless]] §deploy, F143); the classifier fills the account in when the CLI listed exactly one, and every surface — `deploy`, `dev`, the `--eas` device commands — hands over the same `eas init` line.
+
+`eas init` and `eas *:configure` are not wrapped, on purpose [Kudo, 2026-09-08]: they are one-time, they prompt, and the account is the person's to choose. This CLI names them, with the account filled in when the EAS CLI listed exactly one.
+
 ## What did not change
 
 - `--eas` on `navigate`, `runtime:reload`, `runtime:stop` names the device only, as the renamed `--cloud` did ([[0015-backend-selection-and-config]] §One flag for EAS).

@@ -4,18 +4,37 @@ import { describeLookupFailure } from '../buildCache';
 const INVOCATION = 'bunx eas-cli@latest';
 
 describe(describeLookupFailure, () => {
+  // @ref llp/0027-everything-on-eas.rfc.md §What EAS said
+  it('answers an unlinked project in its own words, with the eas init that links it', () => {
+    // The shape a real refusal takes [observed — live against an unlinked project, 2026-08-26]:
+    // the explanation on stdout, one sentence on stderr. The first line of that explanation ends
+    // in "Run one of the following, then re-run this command:" and a reason that quoted it lost the
+    // following [observed — `status --explain`, 2026-09-08].
+    const reason = describeLookupFailure(
+      {
+        exitCode: 1,
+        stdout:
+          'EAS project not configured. This command cannot configure it in non-interactive mode. Run one of the following, then re-run this command:\n\n  eas init --account <account-name> --non-interactive\n\nAccounts you can create projects in: bob\n',
+        stderr: 'Error: build:list command failed.\n',
+      },
+      INVOCATION
+    );
+    expect(reason).toContain('not linked to an EAS project');
+    expect(reason).toContain('npx eas init --account bob --non-interactive');
+    expect(reason).not.toContain('Run one of the following');
+  });
+
   it('quotes the explanation the CLI put on stdout, not the one sentence on stderr', () => {
-    // The shape a real refusal takes [observed — live against an unlinked project, 2026-08-26].
     expect(
       describeLookupFailure(
         {
           exitCode: 1,
-          stdout: 'EAS project not configured.\nRun "eas init --force" to configure it.\n',
+          stdout: 'Something this CLI does not recognise.\nMore about it.\n',
           stderr: 'Error: build:list command failed.\n',
         },
         INVOCATION
       )
-    ).toBe('EAS project not configured.');
+    ).toBe('Something this CLI does not recognise.');
   });
 
   it('falls back to stderr when the CLI said nothing on stdout', () => {
@@ -66,6 +85,6 @@ describe(describeLookupFailure, () => {
         },
         INVOCATION
       )
-    ).toBe('EAS project not configured.');
+    ).toContain('not linked to an EAS project');
   });
 });

@@ -3,7 +3,7 @@
 // signature, so an unlinked project was told it was not signed in while the real cause sat in the
 // raw output.
 
-import { classifyEasDeployFailure } from '../easFailure';
+import { classifyEasFailure } from '../easFailure';
 
 /** The whole of what an unlinked project's `eas deploy` prints [observed — friction run 9]. */
 const UNLINKED_OUTPUT = [
@@ -21,11 +21,11 @@ const UNLINKED_OUTPUT = [
   '    Error: deploy command failed.',
 ].join('\n');
 
-describe(classifyEasDeployFailure, () => {
+describe(classifyEasFailure, () => {
   // The whole finding: this output is what an unlinked project produces, and "not signed in" is
   // what the old single `Why:` line said about it.
   it(`should read an unlinked project, and name eas init`, () => {
-    const cause = classifyEasDeployFailure(
+    const cause = classifyEasFailure(
       [
         'EAS project not configured.',
         'Run "eas init" to configure this project, or "eas init --id <id>" to link an existing one.',
@@ -44,7 +44,7 @@ describe(classifyEasDeployFailure, () => {
   // prompt in: handing it back is handing back the same dead end one command earlier. The runnable
   // form needs a value, and the EAS CLI's own output is where that value is.
   it(`should name the non-interactive form of the fix`, () => {
-    const cause = classifyEasDeployFailure(UNLINKED_OUTPUT);
+    const cause = classifyEasFailure(UNLINKED_OUTPUT);
 
     expect(cause?.command).toBe('npx eas init --account <account-name> --non-interactive');
     // Both forms in the How:, because linking an existing project and creating a new one are
@@ -55,7 +55,7 @@ describe(classifyEasDeployFailure, () => {
 
   // The accounts are the one value this CLI cannot invent, and the tool printed them.
   it(`should quote the accounts the EAS CLI listed`, () => {
-    expect(classifyEasDeployFailure(UNLINKED_OUTPUT)?.how).toContain(
+    expect(classifyEasFailure(UNLINKED_OUTPUT)?.how).toContain(
       'alice, expo, expo-services, bob'
     );
   });
@@ -63,7 +63,7 @@ describe(classifyEasDeployFailure, () => {
   // With one account there is no choice to make, so the line has no hole in it and an agent can run
   // it — which is the difference between a handoff and a next action.
   it(`should fill the account in when the EAS CLI named exactly one`, () => {
-    const cause = classifyEasDeployFailure(
+    const cause = classifyEasFailure(
       ['EAS project not configured.', 'Accounts you can create projects in: bob'].join('\n')
     );
 
@@ -75,15 +75,34 @@ describe(classifyEasDeployFailure, () => {
     ['Error: Not logged in'],
     ['An Expo user account is required. Must be logged in.'],
   ])(`should read a signed-out machine from %p`, (output) => {
-    expect(classifyEasDeployFailure(output)?.command).toBe('npx eas login');
+    expect(classifyEasFailure(output)?.command).toBe('npx eas login');
   });
 
   // Nothing recognised is not a licence to guess: the caller says so instead.
   it(`should answer null for output it does not recognise`, () => {
-    expect(classifyEasDeployFailure('Error: deploy command failed.')).toBeNull();
+    expect(classifyEasFailure('Error: deploy command failed.')).toBeNull();
   });
 
   it(`should answer null for empty output`, () => {
-    expect(classifyEasDeployFailure('')).toBeNull();
+    expect(classifyEasFailure('')).toBeNull();
+  });
+});
+
+// @ref llp/0027-everything-on-eas.rfc.md §What EAS said
+describe('the one-line summary', () => {
+  it(`names the fix for an unlinked project, with the account when there is one`, () => {
+    const summary = classifyEasFailure(
+      ['EAS project not configured.', 'Accounts you can create projects in: bob'].join('\n')
+    )?.summary;
+    expect(summary).toContain('not linked to an EAS project');
+    expect(summary).toContain('npx eas init --account bob --non-interactive');
+  });
+
+  it(`leaves the account a hole when several could be meant`, () => {
+    expect(classifyEasFailure(UNLINKED_OUTPUT)?.summary).toContain('--account <account-name>');
+  });
+
+  it(`names the login for a signed-out machine`, () => {
+    expect(classifyEasFailure('You are not logged in')?.summary).toContain('npx eas login');
   });
 });

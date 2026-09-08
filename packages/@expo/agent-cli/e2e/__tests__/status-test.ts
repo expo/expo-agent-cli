@@ -1466,11 +1466,11 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
       expect(result.exitCode).toBe(0);
       const report: StatusReport = JSON.parse(result.stdout);
-      expect(iosOf(report)).toMatchObject({
-        state: 'unknown',
-        reason:
-          'EAS project not configured. This command cannot configure it in non-interactive mode.',
-      });
+      // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — in this CLI's words, with the fix,
+      // rather than the first line of the EAS CLI's explanation with the rest cut off.
+      expect(iosOf(report)).toMatchObject({ state: 'unknown' });
+      expect(iosOf(report).reason).toContain('not linked to an EAS project');
+      expect(iosOf(report).reason).toContain('npx eas init --account');
       expect(report.errors).toEqual({});
     });
 
