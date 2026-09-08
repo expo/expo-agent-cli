@@ -97,6 +97,14 @@ export interface DevStopResultJson {
   /** Origin the dev server listened on, when a lock named one. */
   url: string | null;
   /**
+   * The EAS Simulator session `--eas` asked to end, or null when it did not ask.
+   *
+   * @ref llp/0027-everything-on-eas.rfc.md §dev:stop
+   * `stopped: false` with an `id` is a session that is still billing, and the reason says why the
+   * stop did not take; `id: null` is a project with no session in progress on record.
+   */
+  session?: { id: string | null; stopped: boolean; reason: string | null } | null;
+  /**
    * Whether a lock answered for **the target**: this CLI's dev server or a stranger's.
    *
    * False when this project holds a lock for a different port than `--port` named, because that
@@ -197,6 +205,11 @@ export async function devStopAsync(
       ? await stopLockedDevServerAsync(lock, options, startedAt)
       : await stopUnlockedDevServerAsync(options, startedAt, lock);
 
+  // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
+  // answered: a session that will not stop is reported beside a dev server that did, not instead.
+  if (options.eas) {
+    report.session = await stopProjectEasSessionAsync(projectRoot);
+  }
   report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
 
   event('stop_done', {
@@ -212,8 +225,10 @@ export async function devStopAsync(
     reason: report.reason,
   });
 
-  const exitCode =
-    report.stopped || report.reason === 'not-running' ? EXIT_OK : EXIT_OUTCOME_FAILED;
+  const devServerOk = report.stopped || report.reason === 'not-running';
+  // A session that was asked to stop and did not is a thing still running — and billing.
+  const sessionOk = report.session == null || report.session.stopped || report.session.id == null;
+  const exitCode = devServerOk && sessionOk ? EXIT_OK : EXIT_OUTCOME_FAILED;
   onReport?.(report);
 
   // The event above is emitted whatever happens: a caller that suppresses the report is still
@@ -230,6 +245,36 @@ export async function devStopAsync(
     reportFollowUps('dev:stop', report.followups, { json: options.json });
   }
   return exitCode;
+}
+
+/**
+ * End this project's EAS Simulator session, when it has one in progress.
+ *
+ * @ref llp/0027-everything-on-eas.rfc.md §dev:stop
+ * Found the way every `--eas` command finds it — the service's listing, with the dotenv as the
+ * tiebreaker — and stopped **by id**: the bare `eas simulator:stop` ends whatever the dotenv names,
+ * which may be a session another run is driving. No session is an answer, not a failure.
+ */
+async function stopProjectEasSessionAsync(
+  projectRoot: string
+): Promise<NonNullable<DevStopResultJson['session']>> {
+  const { probeCloudSessionAsync } =
+    require('../device/cloudSimulator') as typeof import('../device/cloudSimulator');
+  const { stopEasSessionAsync } = require('./openAppEas') as typeof import('./openAppEas');
+  const probe = await probeCloudSessionAsync({ projectRoot });
+  if (probe.state !== 'active' || probe.sessionId == null) {
+    return {
+      id: null,
+      stopped: false,
+      reason:
+        probe.state === 'none' || probe.state === 'inactive'
+          ? null
+          : (probe.reason ?? 'whether this project has a session could not be established'),
+    };
+  }
+  const result = await stopEasSessionAsync(projectRoot, probe.sessionId);
+  debugEvent('stop_session', { sessionId: probe.sessionId, ok: result.ok });
+  return { id: probe.sessionId, stopped: result.ok, reason: result.reason };
 }
 
 /** The ordinary path: a lock answers, so the pid to signal is known and so is what it owns. */
@@ -581,6 +626,17 @@ function printHumanReport(report: DevStopResultJson): void {
       report.forced ? chalk.dim(' · forced') : ''
     }`,
   ];
+  if (report.session) {
+    lines.push(
+      report.session.id == null
+        ? chalk`{bold Session} ${chalk.dim('none in progress for this project')}`
+        : chalk`{bold Session} ${report.session.id}${
+            report.session.stopped
+              ? chalk.dim(' · stopped')
+              : chalk.red(` · still running — ${report.session.reason ?? 'no reason given'}`)
+          }`
+    );
+  }
   if (report.pid != null) {
     lines.push(
       chalk`{bold Process} ${report.pid}${report.signal ? chalk.dim(` · sent ${report.signal}`) : chalk.dim(' · not signalled')}`

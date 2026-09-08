@@ -697,3 +697,171 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
     }
   });
 });
+
+// @ref llp/0027-everything-on-eas.rfc.md §smoke
+describe('@expo/agent-cli smoke --eas brings its own session', () => {
+  it(`starts a session with Expo Go and the tunnelled URL when none is up, finds it, and ends it by id`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    const stub = await startStubDevServerAsync({
+      targets: [],
+      projectRoot,
+      manifestOrigin: 'https://stub-tunnel.example',
+    });
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: stub.url,
+      port: stub.port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['smoke', '--eas', '--ios', '--json', '--timeout', '4s', '--no-followups'],
+        // No session on the account — apart from the one this run is about to start, which the
+        // stub remembers the way the service does.
+        { reject: false, env: { STUB_SIM_SESSIONS: '0' } }
+      );
+
+      const report = JSON.parse(result.stdout);
+      const phase = report.phases.find((entry: { id: string }) => entry.id === 'start-session');
+      expect(phase).toMatchObject({ status: 'ok' });
+      expect(phase.reason).toContain('started EAS Simulator session sess-e2e-started for this run');
+
+      const invocations = easInvocations(projectRoot);
+      const start = invocations.find((argv) => argv[0] === 'simulator')!;
+      expect(start).toContain('--expo-go');
+      expect(start[start.indexOf('--open-url') + 1]).toBe('exp://stub-tunnel.example');
+      expect(start[start.indexOf('--name') + 1]).toContain('agent-cli smoke');
+      // The session it started is the device the rest of the run drove…
+      expect(report.deviceId).toBe('sess-e2e-started');
+      expect(report.deviceBackend).toBe('cloud');
+      // …and the one it ended on the way out, by id and never bare.
+      expect(invocations).toContainEqual([
+        'simulator:stop',
+        '--id',
+        'sess-e2e-started',
+        '--non-interactive',
+      ]);
+    } finally {
+      await releaseLock();
+      await stub.close();
+    }
+  });
+
+  it(`reuses the session in progress and leaves it running`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    const stub = await startStubDevServerAsync({
+      targets: [],
+      projectRoot,
+      manifestOrigin: 'https://stub-tunnel.example',
+    });
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: stub.url,
+      port: stub.port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['smoke', '--eas', '--ios', '--json', '--timeout', '4s', '--no-followups'],
+        { reject: false }
+      );
+
+      const report = JSON.parse(result.stdout);
+      const phase = report.phases.find((entry: { id: string }) => entry.id === 'start-session');
+      expect(phase).toMatchObject({ status: 'ok' });
+      expect(phase.reason).toContain('sess-e2e was already up');
+      const invocations = easInvocations(projectRoot);
+      expect(invocations.some((argv) => argv[0] === 'simulator')).toBe(false);
+      expect(invocations.some((argv) => argv[0] === 'simulator:stop')).toBe(false);
+    } finally {
+      await releaseLock();
+      await stub.close();
+    }
+  });
+
+  it(`never compiles: a development build with nothing finished on EAS is a failed phase naming dev --eas`, async () => {
+    const projectRoot = await setupAsync('dev-client-fresh-app');
+    const stub = await startStubDevServerAsync({
+      targets: [],
+      projectRoot,
+      manifestOrigin: 'https://stub-tunnel.example',
+    });
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: stub.url,
+      port: stub.port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['smoke', '--eas', '--ios', '--json', '--timeout', '4s', '--no-followups'],
+        { reject: false, env: { STUB_SIM_SESSIONS: '0' } }
+      );
+
+      expect(result.exitCode).not.toBe(0);
+      const report = JSON.parse(result.stdout);
+      expect(report.ok).toBe(false);
+      const phase = report.phases.find((entry: { id: string }) => entry.id === 'start-session');
+      expect(phase).toMatchObject({ status: 'failed' });
+      expect(phase.reason).toContain('npx @expo/agent-cli dev --ios --eas');
+      const invocations = easInvocations(projectRoot);
+      expect(invocations.some((argv) => argv[0] === 'build')).toBe(false);
+      expect(invocations.some((argv) => argv[0] === 'simulator')).toBe(false);
+    } finally {
+      await releaseLock();
+      await stub.close();
+    }
+  });
+});
+
+// @ref llp/0027-everything-on-eas.rfc.md §dev:stop
+describe('@expo/agent-cli dev:stop --eas', () => {
+  it(`ends the session in progress by id, and reports it`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    const report = JSON.parse(result.stdout);
+    expect(report.session).toEqual({ id: 'sess-e2e', stopped: true, reason: null });
+    expect(easInvocations(projectRoot)).toContainEqual([
+      'simulator:stop',
+      '--id',
+      'sess-e2e',
+      '--non-interactive',
+    ]);
+  });
+
+  it(`answers a project with no session, and stops nothing`, async () => {
+    const projectRoot = await setupAsync('go-app');
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+      reject: false,
+      env: { STUB_SIM_SESSIONS: '0' },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).session).toEqual({ id: null, stopped: false, reason: null });
+    expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:stop')).toBe(false);
+  });
+
+  it(`touches no session without the flag`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], { reject: false });
+
+    expect(JSON.parse(result.stdout).session).toBeUndefined();
+    expect(easInvocations(projectRoot)).toEqual([]);
+  });
+});

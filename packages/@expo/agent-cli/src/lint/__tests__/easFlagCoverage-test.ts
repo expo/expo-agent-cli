@@ -73,7 +73,7 @@ describe('every command that takes --eas', () => {
   it(`is the set this test knows about — a new one has to be added on purpose`, () => {
     // Pinned so that a command gaining the flag is a visible diff here, next to the rule that it
     // needs an e2e, rather than a silent pass of the loop below.
-    expect(easCommands).toEqual(['dev', 'navigate', 'runtime:reload', 'runtime:stop', 'smoke']);
+    expect(easCommands).toEqual(['dev', 'dev:stop', 'navigate', 'runtime:reload', 'runtime:stop', 'smoke']);
   });
 
   it(`is run with --eas by a stub e2e, as a whole process against the stub eas`, () => {

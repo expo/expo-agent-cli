@@ -9,6 +9,7 @@ describe(resolveDevStopOptions, () => {
   // means, and guessing the default port is how one ends up reporting on another project's.
   it(`should look at no port and send SIGTERM by default`, () => {
     expect(resolveDevStopOptions([])).toEqual({
+      eas: false,
       port: null,
       signal: 'SIGTERM',
       force: false,
@@ -32,6 +33,7 @@ describe(resolveDevStopOptions, () => {
         '--no-followups',
       ])
     ).toEqual({
+      eas: false,
       port: 8170,
       signal: 'SIGKILL',
       force: true,
@@ -78,3 +80,11 @@ function expectThrow(run: () => unknown): any {
   }
   throw new Error('Expected the call to throw, but it returned');
 }
+
+// @ref llp/0027-everything-on-eas.rfc.md §dev:stop
+describe('--eas', () => {
+  it(`asks for the EAS Simulator session to be ended too`, () => {
+    expect(resolveDevStopOptions(['--eas']).eas).toBe(true);
+    expect(resolveDevStopOptions([]).eas).toBe(false);
+  });
+});

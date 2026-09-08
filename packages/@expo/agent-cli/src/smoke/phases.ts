@@ -139,6 +139,17 @@ export interface SmokeReleaseResult {
   reason: string | null;
 }
 
+/** What making sure there is an EAS Simulator session amounted to. */
+export interface SmokeSessionResult {
+  ok: boolean;
+  /** The session that is up, or null. */
+  sessionId: string | null;
+  /** Whether this run started it, which is what registers the cleanup. */
+  started: boolean;
+  /** Why there is none. Null exactly when {@link ok} is true. */
+  reason: string | null;
+}
+
 /** What asking the runtime to evaluate `1` amounted to. */
 export interface SmokeEvaluateResult {
   /** The runtime answered, whatever it answered with. */
@@ -246,6 +257,19 @@ export interface SmokeDeps {
    * asks is "is it not running now", and a start that died on its own has answered it.
    */
   stopDevServer(): Promise<SmokeReleaseResult>;
+  /**
+   * Make sure this project has an EAS Simulator session on this run's platform with the app on it.
+   *
+   * @ref llp/0027-everything-on-eas.rfc.md §smoke
+   * The `--eas` counterpart of {@link bootDevice} and {@link installApp} in one: a session is started
+   * with the app on its command line, or the one in progress is reused. Only called on `--eas`, and
+   * only for a run allowed to bring its own environment. A development build with no finished
+   * simulator build of this fingerprint on EAS is a failure here, never a build — a gate does not
+   * spend fifteen minutes compiling.
+   */
+  ensureEasSession(devServerUrl: string): Promise<SmokeSessionResult>;
+  /** End the session this run started. Only ever called for one this run started. */
+  stopEasSession(sessionId: string): Promise<SmokeReleaseResult>;
   /** Boot a device for this run's platform, telling {@link SmokeBootRegister} the id first. */
   bootDevice(register: SmokeBootRegister): Promise<SmokeBootResult>;
   /** Shut down the device this run booted. Only ever called for one this run booted. */
@@ -584,6 +608,16 @@ const RUNTIME_READY_POLL_MS = 500;
 export const START_DEV_SERVER_TIMEOUT_MS = 120_000;
 
 /**
+ * How long the `start-session` phase may take: the EAS CLI's own readiness wait, and then some.
+ *
+ * @ref llp/0027-everything-on-eas.rfc.md §smoke
+ * A session boots a virtual machine and installs an app; two to four minutes was the observed
+ * range, and the EAS CLI gives up on one that never becomes ready after ten [observed — expo-ci,
+ * 2026-09-06]. Bootstrap, like the boot: none of it is charged to `--timeout`.
+ */
+export const START_SESSION_TIMEOUT_MS = 900_000;
+
+/**
  * How long the start phase gets when the plan it runs **builds** first.
  *
  * @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
@@ -609,6 +643,8 @@ const PHASE_ORDER: SmokePhaseId[] = [
   'dev-server',
   'bundler-ready',
   'bundle',
+  // @ref llp/0027-everything-on-eas.rfc.md §smoke — the EAS device's counterpart of the boot.
+  'start-session',
   'boot-device',
   // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it.
   // After the boot and not before it: `simctl install` answers `Unable to lookup in current state:
@@ -637,6 +673,7 @@ const PHASE_ORDER: SmokePhaseId[] = [
  */
 const CONDITIONAL_PHASES = new Set<SmokePhaseId>([
   'start-dev-server',
+  'start-session',
   'boot-device',
   'install-app',
 ]);
@@ -1111,6 +1148,51 @@ async function runPhasesAsync(
    * the dev server still lists is one the install has already killed.
    */
   let appReplaced = false;
+
+  // @ref llp/0027-everything-on-eas.rfc.md §smoke
+  // `--eas` named the device, and the device it named is not on this machine. The run still brings
+  // its own environment: the session in progress on this platform, or one it starts with the app
+  // on its command line — and ends again afterwards, the way a booted simulator is shut down.
+  if (options.bootstrap && options.cloud === 'required') {
+    const session = await recordBootstrap(
+      'start-session',
+      async () => {
+        const result = await deps.ensureEasSession(devServerUrl);
+        if (result.ok && result.sessionId != null && result.started) {
+          cleanups.push({
+            resource: 'session',
+            target: result.sessionId,
+            release: () => deps.stopEasSession(result.sessionId!),
+          });
+        }
+        return result.ok
+          ? {
+              status: 'ok' as const,
+              reason: result.started
+                ? `started EAS Simulator session ${result.sessionId} for this run, and stopped it again afterwards`
+                : `EAS Simulator session ${result.sessionId} was already up`,
+              value: result,
+            }
+          : {
+              status: 'failed' as const,
+              reason: result.reason ?? 'no session came up, and nothing said why',
+              value: result,
+            };
+      },
+      START_SESSION_TIMEOUT_MS
+    );
+    if (session.ok && session.sessionId != null) {
+      environment.device = session.started ? 'booted' : 'reused';
+    } else {
+      environment.device = 'failed';
+      skipRest('app', 'no EAS Simulator session was reached, so there was nothing to open the app on and nothing to read');
+      return done('failed', {
+        ...base,
+        bundle,
+        screenshot: noScreenshot('no EAS Simulator session was reached, so nothing was photographed'),
+      });
+    }
+  }
 
   // `--eas` named the device, and the device it named is not on this machine: booting a
   // simulator here would be answering a question about a session with a laptop (llp/0005 §Cloud simulator).

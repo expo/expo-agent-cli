@@ -327,7 +327,9 @@ describe(openAppOnEasAsync, () => {
 
     expect(report.opened).toBe(false);
     expect(report.reason).toContain('advertised no tunnel host');
-    expect(probeCloudSessionAsync).not.toHaveBeenCalled();
+    // The session was looked for first, and none was up — so the tunnel was needed, and missing.
+    expect(probeCloudSessionAsync).toHaveBeenCalled();
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
 
   it(`stops quietly when the dev server is gone before the tunnel came up`, async () => {
@@ -373,5 +375,53 @@ describe(openAppOnEasAsync, () => {
       buildId: null,
     });
     expect(report.reason).toContain('no package runner');
+  });
+});
+
+describe('the session half on its own', () => {
+  const { ensureEasSessionAsync, buildSessionStopArgs, stopEasSessionAsync } =
+    require('../openAppEas') as typeof import('../openAppEas');
+
+  it(`ends a session by id and never bare`, () => {
+    expect(buildSessionStopArgs('sess-1')).toEqual(['simulator:stop', '--id', 'sess-1', '--non-interactive']);
+  });
+
+  it(`reports a stop that took, and quotes one that did not`, async () => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({ stdout: 'stopped', stderr: '', exitCode: 0, spawnError: null } as any);
+    await expect(stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI)).resolves.toEqual({ ok: true, reason: null });
+    expect(vi.mocked(spawnCaptureAsync).mock.calls[0]![1]).toEqual(['--yes', 'eas-cli', ...buildSessionStopArgs('sess-1')]);
+
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({ stdout: '', stderr: 'Session not found', exitCode: 1, spawnError: null } as any);
+    const failed = await stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI);
+    expect(failed.ok).toBe(false);
+    expect(failed.reason).toContain('Session not found');
+    await expect(stopEasSessionAsync(projectRoot, 'sess-1', null)).resolves.toMatchObject({ ok: false });
+  });
+
+  it(`names the session it reused, with the URL it would open, and starts nothing`, async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue({ state: 'active', sessionId: 'sess-up', platform: 'ios' } as any);
+    const report = await ensureEasSessionAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+    expect(report).toMatchObject({ ok: true, sessionId: 'sess-up', started: false, openUrl: null });
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+    // Nothing waited on the tunnel: a session that is up is driven by `openRouteAsync`, which
+    // resolves the link itself.
+    expect(fetchAdvertisedUrlAsync).not.toHaveBeenCalled();
+  });
+
+  it(`takes the session name a caller gives it`, async () => {
+    await ensureEasSessionAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+      sessionName: 'my-app — agent-cli smoke',
+    });
+    const args = vi.mocked(spawnCaptureAsync).mock.calls[0]![1];
+    expect(args[args.indexOf('--name') + 1]).toBe('my-app — agent-cli smoke');
   });
 });

@@ -35,6 +35,14 @@ export type SmokePhaseId =
   | 'bundler-ready'
   /** Does this project's own entry bundle compile? */
   | 'bundle'
+  /**
+   * Was an EAS Simulator session started for this run? Conditional, like `start-dev-server`.
+   *
+   * @ref llp/0027-everything-on-eas.rfc.md §smoke
+   * Only on `--eas`, and only when the run may bring its own environment: the session is the
+   * device, and a run that found one up has not skipped a start.
+   */
+  | 'start-session'
   /** Was a simulator or an emulator booted for this run? Conditional, like `start-dev-server`. */
   | 'boot-device'
   /**
@@ -135,7 +143,7 @@ export type SmokeDevServerDisposition =
 export type SmokeDeviceDisposition = 'reused' | 'booted' | 'failed' | 'absent';
 
 /** Which of the two things a run can bring with it. */
-export type SmokeResource = 'dev-server' | 'device';
+export type SmokeResource = 'dev-server' | 'device' | 'session';
 
 /** One thing this run started and then put back. */
 export interface SmokeCleanupJson {

@@ -11,7 +11,7 @@ export const smokeHelp: CommandHelp = {
     `--route <route>            Open this route before the error window`,
     `--ios, --android           Platform to drive. Required: nothing here is guessed from the host`,
     `--platform <ios|android>   The same, spelled the way --json reports it`,
-    `--eas                      Drive this project's EAS Simulator session, not a local device`,
+    `--eas                      Drive this project's EAS Simulator session; start one when none is up`,
     `--start                    Start what is missing. The default; this only says it out loud`,
     `--no-start                 Read what is already running, and fail when nothing is`,
     `--window ${DURATION_METAVAR}        How long to watch for errors (default: 3s)`,

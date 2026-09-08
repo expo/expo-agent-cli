@@ -158,6 +158,9 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
       register({ deviceId: 'SIM-BOOTED', backend: 'local-ios' });
       return { ok: true, deviceId: 'SIM-BOOTED', backend: 'local-ios' as const, reason: null };
     },
+    // A session that was already up, by default: the `--eas` cases override it.
+    ensureEasSession: async () => ({ ok: true, sessionId: 'sess-up', started: false, reason: null }),
+    stopEasSession: async (sessionId) => ({ ok: true, target: sessionId, reason: null }),
     // Nothing to install by default: the device this run settled on already has the app.
     installNeededOnDevice: async () => false,
     installApp: async () => ({ ok: true, version: null, replaced: null, reason: null }),
@@ -2886,5 +2889,88 @@ describe(`${runSmokePhasesAsync.name} and an install it was told is needed`, () 
     expect(install).toMatchObject({ status: 'ok' });
     // The row reads without a version, rather than printing `null` or omitting the act.
     expect(install!.reason).toContain('installed the app');
+  });
+});
+
+// @ref llp/0027-everything-on-eas.rfc.md §smoke
+// The EAS device's bootstrap: a session instead of a boot. Conditional like the boot, cleaned up
+// like the boot, and a run that cannot reach one stops at the same place a run with no device does.
+describe('the start-session phase, on --eas', () => {
+  const cloudDeps = (overrides: Partial<SmokeDeps> = {}) =>
+    deps({
+      probeDevice: async () => ({ deviceId: 'sess-up', backend: 'cloud' as const, reason: null }),
+      waitForAppConnection: async () => ({ appsConnected: 1, timedOut: false, waitedMs: 3 }),
+      ...overrides,
+    });
+
+  it(`records a session this run started, and ends it again afterwards`, async () => {
+    const stopEasSession = vi.fn(async (sessionId: string) => ({ ok: true, target: sessionId, reason: null }));
+    const run = await runSmokePhasesAsync(
+      cloudDeps({
+        ensureEasSession: async () => ({ ok: true, sessionId: 'sess-new', started: true, reason: null }),
+        stopEasSession,
+      }),
+      options({ bootstrap: true, cloud: 'required' })
+    );
+
+    expect(statusOf(run, 'start-session')).toBe('ok');
+    expect(run.phases.find((phase) => phase.id === 'start-session')?.reason).toContain(
+      'started EAS Simulator session sess-new for this run, and stopped it again afterwards'
+    );
+    expect(run.environment.device).toBe('booted');
+    expect(stopEasSession).toHaveBeenCalledWith('sess-new');
+  });
+
+  it(`records a session that was already up, and leaves it running`, async () => {
+    const stopEasSession = vi.fn();
+    const run = await runSmokePhasesAsync(
+      cloudDeps({
+        ensureEasSession: async () => ({ ok: true, sessionId: 'sess-up', started: false, reason: null }),
+        stopEasSession,
+      }),
+      options({ bootstrap: true, cloud: 'required' })
+    );
+
+    expect(statusOf(run, 'start-session')).toBe('ok');
+    expect(run.environment.device).toBe('reused');
+    expect(stopEasSession).not.toHaveBeenCalled();
+  });
+
+  it(`stops the run where a missing device stops it when no session can be reached`, async () => {
+    const run = await runSmokePhasesAsync(
+      cloudDeps({
+        ensureEasSession: async () => ({
+          ok: false,
+          sessionId: null,
+          started: false,
+          reason: 'no EAS Simulator session is up, and EAS has no finished build to start one with',
+        }),
+      }),
+      options({ bootstrap: true, cloud: 'required' })
+    );
+
+    expect(run.outcome).toBe('failed');
+    expect(statusOf(run, 'start-session')).toBe('failed');
+    expect(run.phases.find((phase) => phase.id === 'start-session')?.reason).toContain(
+      'no finished build'
+    );
+    expect(statusOf(run, 'app')).toBe('skipped');
+    expect(run.environment.device).toBe('failed');
+  });
+
+  it(`has no such phase on a run that may not bring its own environment, or on a local device`, async () => {
+    const ensureEasSession = vi.fn();
+    const noStart = await runSmokePhasesAsync(
+      cloudDeps({ ensureEasSession }),
+      options({ bootstrap: false, cloud: 'required' })
+    );
+    expect(statusOf(noStart, 'start-session')).toBeUndefined();
+
+    const local = await runSmokePhasesAsync(
+      deps({ ensureEasSession }),
+      options({ bootstrap: true, cloud: 'fallback' })
+    );
+    expect(statusOf(local, 'start-session')).toBeUndefined();
+    expect(ensureEasSession).not.toHaveBeenCalled();
   });
 });

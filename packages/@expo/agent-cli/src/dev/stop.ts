@@ -10,6 +10,7 @@ export const devStopHelp: CommandHelp = {
   command: 'dev:stop',
   usage: `${PROGRAM_PREFIX} dev:stop`,
   options: [
+    `--eas                 Also end this project's EAS Simulator session (bills until stopped)`,
     `--port <port>         Look at this port when no lock answers for the project`,
     `--signal <signal>     SIGTERM (default), SIGINT, or SIGKILL`,
     `--force               Stop a dev server on --port that no lock answers for`,
@@ -31,6 +32,10 @@ export const devStopHelp: CommandHelp = {
       run: `${PROGRAM_PREFIX} dev:stop --port 8081 --force`,
       gets: 'stops a dev server on that port that this CLI did not start',
     },
+    {
+      run: `${PROGRAM_PREFIX} dev:stop --eas`,
+      gets: 'the dev server, and the EAS Simulator session a dev --eas run opened the app on',
+    },
   ],
   next: ['dev', 'status'],
   json: {
@@ -49,6 +54,7 @@ export const devStopHelp: CommandHelp = {
       'portStillAnswering',
       'reason',
       'detail',
+      'session',
       'waitedMs',
       'followups',
     ],
