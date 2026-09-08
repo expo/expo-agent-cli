@@ -10,6 +10,7 @@ import {
   installStubBinAsync,
   setupFixtureAsync,
   waitForExitAsync,
+  waitForAsync,
 } from '../utils';
 
 describe('Installing agents through setup', () => {
@@ -96,6 +97,49 @@ if (name === 'claude') {
           .split('\n')
           .map((line) => JSON.parse(line) as { name: string; args: string[]; cwd: string })
       : [];
+
+  async function runInteractiveAsync(
+    args: string[],
+    steps: { prompt: string; keys: string | null }[]
+  ) {
+    // Exercise Clack's real key handling over pipes, with terminal capabilities supplied by the test.
+    const preload = path.join(scratch, 'tty.cjs');
+    await fs.promises.writeFile(
+      preload,
+      `process.stdin.isTTY = true;
+process.stdin.setRawMode = (raw) => raw ? process.stdin.ref() : process.stdin.unref();
+process.stdout.isTTY = true;
+process.stderr.isTTY = true;
+process.stdout.columns = process.stderr.columns = 100;
+process.stderr.rows = 40;`
+    );
+    const child = spawn(
+      process.execPath,
+      ['--require', preload, bin, 'agents:setup', ...args, '--json'],
+      {
+        cwd: projectRoot,
+        env: { ...process.env, ...env, CI: '0', FORCE_COLOR: '0' },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }
+    );
+    const output = collectOutput(child);
+    const ended = waitForExitAsync(child, output);
+    try {
+      for (const step of steps) {
+        expect(
+          await waitForAsync(() => output.stderr.includes(step.prompt), 10000),
+          output.all
+        ).toBe(true);
+        if (step.keys === null) child.stdin!.end();
+        else child.stdin!.write(step.keys);
+      }
+      expect(await waitForAsync(() => child.exitCode !== null, 15000), output.all).toBe(true);
+      return await ended;
+    } finally {
+      if (child.exitCode === null) child.kill();
+      await ended;
+    }
+  }
 
   it('should install both plugins at home outside a project and reuse them on rerun', async () => {
     const args = ['agents:setup', '--yes', '--agent', 'claude-code', '--agent', 'codex', '--json'];
@@ -250,66 +294,34 @@ if (name === 'claude') {
     expect(invocations().some((call) => call.args.includes('expo@expo-plugins'))).toBe(false);
   });
 
-  it.each(['n\n', ''])(
-    'should cancel on a declined interactive confirmation or EOF (%j) without writes',
-    async (answer) => {
-      // Give the pipe the terminal capabilities the entry point checks; answers still cross stdin.
-      const preload = path.join(scratch, 'tty.cjs');
-      await fs.promises.writeFile(
-        preload,
-        'process.stdin.isTTY = true; process.stdout.isTTY = true;'
-      );
-      const child = spawn(
-        process.execPath,
-        [
-          '--require',
-          preload,
-          bin,
-          'agents:setup',
-          '--agent',
-          'claude-code',
-          '--scope',
-          'project',
-          '--json',
-        ],
-        {
-          cwd: projectRoot,
-          env: { ...process.env, ...env, CI: '0', FORCE_COLOR: '0' },
-          stdio: ['pipe', 'pipe', 'pipe'],
-        }
-      );
-      const output = collectOutput(child);
-      const ended = waitForExitAsync(child, output);
-      child.stdin!.end(answer);
-      const result = await ended;
-      expect(result.exitCode, result.all).toBe(0);
-      expect(JSON.parse(result.stdout).cancelled).toBe(true);
-      expect(result.stderr).toContain('Continue?');
-      expect(invocations()).toEqual([]);
-      expect(fs.existsSync(path.join(projectRoot, 'AGENTS.md'))).toBe(false);
-      expect(fs.existsSync(path.join(projectRoot, '.expo', 'agent-skill-links.json'))).toBe(false);
-    }
-  );
+  it.each([
+    ['No', 'n'],
+    ['default No', '\r'],
+    ['Escape', '\u001b'],
+    ['Ctrl-C', '\u0003'],
+    ['Ctrl-D', '\u0004'],
+    ['EOF', null],
+  ])('should cancel on %s at confirmation without writes', async (_label, keys) => {
+    const result = await runInteractiveAsync(
+      ['--agent', 'claude-code', '--scope', 'project'],
+      [{ prompt: 'Continue with setup?', keys }]
+    );
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout).cancelled).toBe(true);
+    expect(result.stderr).toContain('Continue with setup?');
+    expect(invocations()).toEqual([]);
+    expect(fs.existsSync(path.join(projectRoot, 'AGENTS.md'))).toBe(false);
+    expect(fs.existsSync(path.join(projectRoot, '.expo', 'agent-skill-links.json'))).toBe(false);
+  });
 
   it('should accept interactive home selection and confirmation while preserving project setup', async () => {
-    const preload = path.join(scratch, 'tty.cjs');
-    await fs.promises.writeFile(
-      preload,
-      'process.stdin.isTTY = true; process.stdout.isTTY = true;'
+    const result = await runInteractiveAsync(
+      ['--agent', 'claude-code'],
+      [
+        { prompt: 'Where should Expo', keys: '\u001b[B\r' },
+        { prompt: 'Continue with setup?', keys: 'y' },
+      ]
     );
-    const child = spawn(
-      process.execPath,
-      ['--require', preload, bin, 'agents:setup', '--agent', 'claude-code', '--json'],
-      {
-        cwd: projectRoot,
-        env: { ...process.env, ...env, CI: '0', FORCE_COLOR: '0' },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }
-    );
-    const output = collectOutput(child);
-    const ended = waitForExitAsync(child, output);
-    child.stdin!.end('2\nyes\n');
-    const result = await ended;
     expect(result.exitCode, result.all).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
       cancelled: false,
@@ -318,5 +330,47 @@ if (name === 'claude') {
       skills: { synced: true },
     });
     expect(invocations().every((call) => call.cwd === homeDir)).toBe(true);
+  });
+
+  it('should toggle preselected agents with arrows and Space and install only the chosen agent', async () => {
+    const result = await runInteractiveAsync(
+      [],
+      [
+        { prompt: 'Which agents should Expo set up?', keys: ' \u001b[B \u001b[B \r' },
+        { prompt: 'Where should Expo', keys: '\r' },
+        { prompt: 'Continue with setup?', keys: 'y' },
+      ]
+    );
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      agents: ['cursor'],
+      scope: 'project',
+      plugins: [{ agent: 'cursor', status: 'installed' }],
+    });
+    expect(invocations().every((call) => call.name === 'bunx')).toBe(true);
+  });
+
+  it('should require at least one selected agent before continuing', async () => {
+    const result = await runInteractiveAsync(
+      ['--scope', 'project'],
+      [
+        { prompt: 'Which agents should Expo set up?', keys: ' \u001b[B\u001b[B \r' },
+        { prompt: 'Please select at least one option.', keys: '\u001b' },
+      ]
+    );
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout).cancelled).toBe(true);
+    expect(invocations()).toEqual([]);
+  });
+
+  it.each([
+    [[], 'Which agents should Expo set up?'],
+    [['--agent', 'claude-code'], 'Where should Expo'],
+  ] as const)('should cancel selection before installing (%j)', async (args, message) => {
+    const result = await runInteractiveAsync([...args], [{ prompt: message, keys: '\u001b' }]);
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout).cancelled).toBe(true);
+    expect(invocations()).toEqual([]);
+    expect(fs.existsSync(path.join(projectRoot, 'AGENTS.md'))).toBe(false);
   });
 });

@@ -54,6 +54,8 @@ Setup inspects existing installations after confirmation, reuses matching instal
 
 ### Confirmation and project phases
 
+The three setup questions use `@clack/prompts`, pinned to 1.7.0: a multi-select with detected/configured agents preselected, a scope select, and a confirmation defaulting to No. Prompt output goes to stderr. The adapter also maps stdin EOF and Ctrl-D to cancellation and pauses input after each question so completed setup exits normally. This is the repository's only owned interactive prompt flow. [confirmed, Kudo, 2026-09-08; observed adapter behavior]
+
 `--yes` accepts the setup plan for automation; `--scope user|project` and repeatable `--agent` flags make the selection explicit. Non-TTY runs without `--yes` fail promptly; `--json` alone is not consent. Decline, EOF, or Ctrl-C before confirmation causes no setup writes or installer invocations. This is the interactive exception described in [[0008-guardrails]]. [observed]
 
 When an app is available, setup also runs its existing `skills:sync` and instruction-file generation, even when the plugin installation targets user home. Generator behavior is unchanged. `--no-plugins` skips official plugin/skills installation, `--no-agent-skills` skips package skill synchronization, and `--no-agents-md` skips the generator. [confirmed, Kudo, 2026-09-08; observed flag behavior]

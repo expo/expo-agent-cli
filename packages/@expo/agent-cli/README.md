@@ -57,6 +57,8 @@ Commands this CLI does not wrap go to the project's `expo` CLI: `run`, `run:ios`
 
 Run `npx @expo/agent-cli agents:setup` to select agents and an installation scope, review the commands, and confirm. It also works before creating an Expo app: outside a project, setup installs into your user home. Inside an Expo app, choose Project or User home. Package skill synchronization and the existing `AGENTS.md` generator still run in that app, even when the plugin installation targets your home. `CLAUDE.md` is never rewritten.
 
+Use the arrow keys to navigate, Space to toggle agents, and Enter to continue. Detected or previously configured agents start selected. Escape or Ctrl-C cancels setup before installation; the final confirmation defaults to No.
+
 - Claude Code uses `expo@claude-plugins-official` with an explicit user/project scope. The official marketplace must already be registered; for a fresh Claude configuration, run `claude plugin marketplace add anthropics/claude-plugins-official` first.
 - Codex user setup registers `expo/skills` at `main` and installs `expo@expo-plugins`. Codex's plugin CLI has no project scope, so selecting Project installs Expo skills for Codex instead.
 - Other agents use `bunx skills add expo/skills --skill '*'` (or `npx` when Bun is unavailable), with the selected agent and scope passed explicitly.

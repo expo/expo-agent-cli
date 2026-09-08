@@ -49,6 +49,7 @@
   },
   "devDependencies": {
     "2g": "^0.4.3",
+    "@clack/prompts": "1.7.0",
     "@types/getenv": "^1.0.0",
     "@types/node": "^22.14.0",
     "@types/ws": "^8.5.4",
