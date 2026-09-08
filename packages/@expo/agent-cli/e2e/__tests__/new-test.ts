@@ -225,26 +225,33 @@ describe('@expo/agent-cli new', () => {
     expect(instructions).toContain('npx @expo/agent-cli install <pkg>');
   });
 
-  it('should rewrite template install instructions even when dependency installation is skipped', async () => {
-    const workDir = await setupWorkDirAsync();
-    const result = await executeAgentCliAsync(workDir, ['new', 'my-app', '--no-install', '--json'], {
-      env: {
-        STUB_CREATE_EXPO_AGENTS_MD:
-          '# Template rules\nUse `bunx expo install expo-camera`.\nKeep this rule.\n',
-      },
-    });
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      created: true,
-      installed: false,
-      agentsMd: { path: 'AGENTS.md', action: 'updated' },
-      errors: [],
-    });
-    const instructions = fs.readFileSync(path.join(workDir, 'my-app', 'AGENTS.md'), 'utf8');
-    expect(instructions).toContain(
-      '# Template rules\nUse `bunx @expo/agent-cli install expo-camera`.\nKeep this rule.\n'
-    );
-    expect(instructions).toContain('BEGIN EXPO AGENT CLI MANAGED BLOCK');
-  });
+  it.each([{ flags: [] }, { flags: ['--no-install'] }])(
+    'should rewrite template Expo commands with flags $flags',
+    async ({ flags }) => {
+      const workDir = await setupWorkDirAsync();
+      const result = await executeAgentCliAsync(workDir, ['new', 'my-app', ...flags, '--json'], {
+        env: {
+          STUB_CREATE_EXPO_AGENTS_MD:
+            '# Template rules\nUse `bunx expo install expo-camera`.\n' +
+            'Run `bunx expo start --clear`, `npx expo lint`, and `npx expo-doctor@latest`.\n' +
+            'Keep this rule.\n',
+        },
+      });
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        created: true,
+        installed: !flags.includes('--no-install'),
+        agentsMd: { path: 'AGENTS.md', action: 'updated' },
+        errors: [],
+      });
+      const instructions = fs.readFileSync(path.join(workDir, 'my-app', 'AGENTS.md'), 'utf8');
+      expect(instructions).toContain(
+        '# Template rules\nUse `bunx @expo/agent-cli install expo-camera`.\n' +
+          'Run `bunx @expo/agent-cli start --clear`, `npx @expo/agent-cli lint`, and `npx @expo/agent-cli doctor`.\n' +
+          'Keep this rule.\n'
+      );
+      expect(instructions).toContain('BEGIN EXPO AGENT CLI MANAGED BLOCK');
+    }
+  );
 
   it('should report instruction failures without losing the created project or template rules', async () => {
     const workDir = await setupWorkDirAsync();
