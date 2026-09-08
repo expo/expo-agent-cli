@@ -11,6 +11,11 @@ import path from 'node:path';
 import { WebSocketServer } from 'ws';
 
 import {
+  installStubEasAsync as installSharedStubEasAsync,
+  STUB_EAS_LOG_NAME,
+  stubEasCommands,
+} from '../stubEas';
+import {
   clearStubFingerprintInvocations,
   documentedJsonKeys,
   executeAgentCliAsync,
@@ -142,9 +147,6 @@ type StatusReport = {
 
 /** The hash the stub `@expo/fingerprint` bin of `dev-client-fresh-app` prints. */
 const FIXTURE_FINGERPRINT_HASH = '0f1e2d3c4b5a69788796a5b4c3d2e1f001234567';
-
-/** File the stub `eas` bin appends one JSON line to per invocation. */
-const STUB_EAS_LOG_NAME = 'stub-eas-invocations.jsonl';
 
 /** One debugger target, the shape `expo start` reports for a connected app. */
 const CDP_TARGET = {
@@ -1249,41 +1251,6 @@ const hash = platform === 'ios'
 process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 `;
 
-    /**
-     * An `eas` bin answering both commands `status` may reach for, recording every invocation.
-     *
-     * - STUB_EAS_USER: the account `whoami` names (default `e2e-user`)
-     * - STUB_EAS_BUILD_LIST: the JSON `build:list` prints (default `[]`, i.e. no build)
-     * - STUB_EAS_BUILD_LIST_STDOUT / STUB_EAS_BUILD_LIST_EXIT: a refusal, on the stream the real
-     *   CLI puts it on
-     */
-    const STUB_EAS = `#!/usr/bin/env node
-'use strict';
-const fs = require('node:fs');
-const path = require('node:path');
-const args = process.argv.slice(2);
-fs.appendFileSync(
-  path.join(process.cwd(), ${JSON.stringify(STUB_EAS_LOG_NAME)}),
-  JSON.stringify({ args }) + '\\n'
-);
-if (args[0] === 'whoami') {
-  process.stdout.write((process.env.STUB_EAS_USER || 'e2e-user') + '\\n');
-  process.exit(0);
-}
-if (args[0] === 'build:list') {
-  const exitCode = Number(process.env.STUB_EAS_BUILD_LIST_EXIT || 0);
-  if (exitCode !== 0) {
-    process.stdout.write((process.env.STUB_EAS_BUILD_LIST_STDOUT || 'refused') + '\\n');
-    process.stderr.write('    Error: build:list command failed.\\n');
-    process.exit(exitCode);
-  }
-  process.stdout.write((process.env.STUB_EAS_BUILD_LIST || '[]') + '\\n');
-  process.exit(0);
-}
-process.stderr.write('stub eas: unexpected command ' + args[0] + '\\n');
-process.exit(1);
-`;
-
     /** Copy the fixture and install both stubs over the ones `setupAsync` put there. */
     async function setupWithEasAsync(fixture = 'dev-client-fresh-app'): Promise<string> {
       const projectRoot = await setupAsync(fixture);
@@ -1292,30 +1259,19 @@ process.exit(1);
 
       const fingerprintStub = path.join(binDir, 'fingerprint-platform-stub.js');
       await fs.promises.writeFile(fingerprintStub, STUB_FINGERPRINT);
-      const easStub = path.join(binDir, 'eas-builds-stub.js');
-      await fs.promises.writeFile(easStub, STUB_EAS);
-
       for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
         await installStubBinAsync(dir, 'fingerprint', fingerprintStub);
       }
-      // One runner, because there is one rung; and the pin, so the EAS CLI is what answers `whoami`.
-      await installStubEasRunnerAsync(binDir, easStub);
+      // The shared stub `eas` (`e2e/stubs/eas.js`; the `STUB_EAS_*` variables below are documented
+      // there), behind one runner because there is one rung; and the pin, so the EAS CLI is what
+      // answers `whoami`.
+      await installSharedStubEasAsync(projectRoot);
       await pinEasCliAsync(projectRoot);
       return projectRoot;
     }
 
     /** The commands the stub `eas` was asked for, in order. */
-    function easCommands(projectRoot: string): string[] {
-      const logPath = path.join(projectRoot, STUB_EAS_LOG_NAME);
-      if (!fs.existsSync(logPath)) {
-        return [];
-      }
-      return fs
-        .readFileSync(logPath, 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => (JSON.parse(line) as { args: string[] }).args[0]!);
-    }
+    const easCommands = stubEasCommands;
 
     function iosOf(report: StatusReport) {
       return report.builds!.platforms.find((platform) => platform.platform === 'ios')!;
@@ -1521,22 +1477,8 @@ process.exit(1);
     // The auth section already answered this, so the lookup asks nobody a second time.
     it('reports a signed-out machine as unknown without calling eas build:list', async () => {
       const projectRoot = await setupWithEasAsync();
-      await fs.promises.writeFile(
-        path.join(projectRoot, '.stub-bin', 'eas-builds-stub.js'),
-        `#!/usr/bin/env node
-'use strict';
-const fs = require('node:fs');
-const path = require('node:path');
-fs.appendFileSync(
-  path.join(process.cwd(), ${JSON.stringify(STUB_EAS_LOG_NAME)}),
-  JSON.stringify({ args: process.argv.slice(2) }) + '\\n'
-);
-process.stderr.write('Not logged in\\n');
-process.exit(1);
-`
-      );
 
-      const report = await reportInAsync(projectRoot, ['--explain']);
+      const report = await reportInAsync(projectRoot, ['--explain'], { STUB_EAS_WHOAMI_EXIT: '1' });
 
       expect(report.auth?.loggedIn).toBe(false);
       expect(iosOf(report)).toMatchObject({ state: 'unknown' });

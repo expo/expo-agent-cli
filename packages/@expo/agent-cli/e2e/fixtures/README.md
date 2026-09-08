@@ -65,6 +65,18 @@ Each fixture ships its own copy of these, because a fixture must stand alone onc
   no dump for (these fixtures are SDK 54). Only `expo-camera`, `expo-dev-client` and
   `react-native-web` are in it, so any other native module is "unbundled".
 
+One double is shared rather than copied, because no fixture ships an `eas` and the CLI never resolves
+one — every EAS-backed command runs `npx eas-cli` through a package runner (`src/utils/easCli.ts`):
+
+- `e2e/stubs/eas.js` — the stub `eas`. `installStubEasAsync` (`e2e/stubEas.ts`) copies it into the
+  fixture copy's `.stub-bin` behind a stub `npx`/`bunx`, and `stubEasArgs` reads back what it was
+  asked, one JSON line per invocation in `stub-eas-invocations.jsonl`. It answers `whoami`, `build`,
+  `build:list` (filtered by `--fingerprint-hash` and friends from `STUB_EAS_BUILDS`),
+  `build:configure`, and the `simulator:*` family — `simulator:start` writes `.env.eas-simulator` the
+  way the real command does, unless `--json`. Every knob is an environment variable documented at the
+  top of the script. A verb it does not know exits 1 with `unhandled command`, so a command that
+  reaches a new one is a red test and never a pass.
+
 ## The fingerprint tool
 
 Only `dev-client-fresh-app` ships one, as a stub `@expo/fingerprint` package. Everywhere else the
