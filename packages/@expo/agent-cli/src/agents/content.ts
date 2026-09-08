@@ -50,7 +50,7 @@ export function generateAgentsMdBlock({
     '',
     '## Commands',
     '',
-    'For the operations listed below, use `@expo/agent-cli` in place of the equivalent commands elsewhere in this file. Package installation still uses Expo’s SDK-compatible version resolution. Use `bunx` instead of `npx` when `bun.lock` is present.',
+    'For the operations listed below, use `@expo/agent-cli` in place of the equivalent commands elsewhere in this file or in loaded skills. Package installation still uses Expo’s SDK-compatible version resolution. Use `bunx` instead of `npx` when `bun.lock` is present.',
     '',
     'Most commands take `--json` for a machine-readable report.',
     '',

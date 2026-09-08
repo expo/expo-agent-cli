@@ -18,6 +18,8 @@ type NewProjectReport = {
   created: boolean;
   installed: boolean;
   gitInitialized: boolean;
+  agentsMd: { path: string; action: string } | null;
+  errors: string[];
   followups: { id: string; command: string; why: string }[];
 };
 
@@ -66,6 +68,9 @@ fs.writeFileSync(
   path.join(projectRoot, 'package.json'),
   JSON.stringify({ name, version: '1.0.0', dependencies: { expo: '54.0.0' } }, null, 2)
 );
+if (process.env.STUB_CREATE_EXPO_AGENTS_MD) {
+  fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), process.env.STUB_CREATE_EXPO_AGENTS_MD);
+}
 if (process.env.STUB_CREATE_EXPO_NO_APP_JSON === '1') {
   fs.writeFileSync(path.join(projectRoot, 'app.config.js'), 'module.exports = { name: 1 };');
 } else {
@@ -193,7 +198,9 @@ describe('@expo/agent-cli new', () => {
     // The top-level key set is the contract of the command (llp/0006 §Output contract): a
     // renamed or dropped field has to fail a test, not a caller.
     expect(Object.keys(report).sort()).toEqual([
+      'agentsMd',
       'created',
+      'errors',
       'followups',
       'gitInitialized',
       'installed',
@@ -205,12 +212,54 @@ describe('@expo/agent-cli new', () => {
       name: null,
       created: true,
       installed: true,
+      agentsMd: { path: 'AGENTS.md', action: 'created' },
+      errors: [],
     });
     expect(report.followups.map((followup) => followup.id)).toEqual([
       'status',
       'dev',
       'agents-setup',
     ]);
+    const instructions = fs.readFileSync(path.join(workDir, 'my-app', 'AGENTS.md'), 'utf8');
+    expect(instructions).toContain('BEGIN EXPO AGENT CLI MANAGED BLOCK');
+    expect(instructions).toContain('npx @expo/agent-cli install <pkg>');
+  });
+
+  it('should rewrite template install instructions even when dependency installation is skipped', async () => {
+    const workDir = await setupWorkDirAsync();
+    const result = await executeAgentCliAsync(workDir, ['new', 'my-app', '--no-install', '--json'], {
+      env: {
+        STUB_CREATE_EXPO_AGENTS_MD:
+          '# Template rules\nUse `bunx expo install expo-camera`.\nKeep this rule.\n',
+      },
+    });
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      created: true,
+      installed: false,
+      agentsMd: { path: 'AGENTS.md', action: 'updated' },
+      errors: [],
+    });
+    const instructions = fs.readFileSync(path.join(workDir, 'my-app', 'AGENTS.md'), 'utf8');
+    expect(instructions).toContain(
+      '# Template rules\nUse `bunx @expo/agent-cli install expo-camera`.\nKeep this rule.\n'
+    );
+    expect(instructions).toContain('BEGIN EXPO AGENT CLI MANAGED BLOCK');
+  });
+
+  it('should report instruction failures without losing the created project or template rules', async () => {
+    const workDir = await setupWorkDirAsync();
+    const original = '<!-- BEGIN EXPO AGENT CLI MANAGED BLOCK -->\nKeep this rule.\n';
+    const result = await executeAgentCliAsync(workDir, ['new', 'my-app', '--json'], {
+      env: { STUB_CREATE_EXPO_AGENTS_MD: original },
+      reject: false,
+    });
+    expect(result.exitCode).toBe(20);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      created: true,
+      agentsMd: null,
+      errors: [expect.stringContaining('AGENTS.md')],
+    });
+    expect(fs.readFileSync(path.join(workDir, 'my-app', 'AGENTS.md'), 'utf8')).toBe(original);
   });
 
   it(`should keep the repository create-expo initialized`, async () => {
@@ -286,6 +335,7 @@ describe('@expo/agent-cli new', () => {
     expect(result.exitCode).toBe(3);
     // Even a failure prints exactly one object, or a caller parsing stdout has nothing to read.
     expect(JSON.parse(result.stdout)).toMatchObject({ created: false, followups: [] });
+    expect(fs.existsSync(path.join(workDir, 'my-app', 'AGENTS.md'))).toBe(false);
     expect(result.stderr).toContain('files that might be overwritten');
   });
 

@@ -44,6 +44,15 @@ describe('Finding an optional setup project', () => {
 });
 
 describe('Preparing agent setup', () => {
+  it('should preselect Grok Build when its executable is on PATH', async () => {
+    vi.mocked(findExecutableOnPath).mockImplementation((name) =>
+      name === 'grok' ? '/bin/grok' : null
+    );
+    const plan = await prepareSetupAsync(null, options({ agents: [], yes: true }));
+    expect(plan.agents.map((agent) => agent.id)).toEqual(['grok']);
+    expect(plan.installers[0]?.provider).toBe('skills');
+  });
+
   it('should default to user scope outside a project with explicit consent', async () => {
     const plan = await prepareSetupAsync(null, options({ yes: true }));
     expect(plan).toMatchObject({ scope: 'user', destination: '/home', confirmed: true });

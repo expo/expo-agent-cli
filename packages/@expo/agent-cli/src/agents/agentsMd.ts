@@ -1,9 +1,10 @@
 // @ref llp/0006-agent-native-cli-surface.rfc.md §Surface improvements
-// One managed block inside a file the user owns. Everything outside the two markers is the
-// user's, and is preserved byte for byte, so a rerun is safe at any time.
+// One managed block inside a file the user owns. Existing Expo install instructions are
+// migrated to agent-cli; other instructions outside the markers are preserved.
 import fs from 'fs';
 import path from 'path';
 
+import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import type { AgentsMdResult, ClaudeMdResult } from './types';
 
@@ -66,7 +67,10 @@ export async function writeManagedBlockAsync(
     if (error.code === 'ENOENT') return null;
     throw error;
   });
-  const next = applyManagedBlock(contents, blockBody);
+  const next = applyManagedBlock(
+    contents == null ? null : rewriteExpoInstallCommands(contents),
+    blockBody
+  );
 
   if (next === contents) {
     return { path: AGENTS_MD_FILE, action: 'skipped' };
@@ -74,6 +78,20 @@ export async function writeManagedBlockAsync(
 
   await fs.promises.writeFile(filePath, next);
   return { path: AGENTS_MD_FILE, action: contents == null ? 'created' : 'updated' };
+}
+
+/** Keep template install examples consistent with the managed commands, including Bun runners. */
+function rewriteExpoInstallCommands(contents: string): string {
+  return contents
+    .replace(
+      /(?<![\w@/.-])((?:npx|bunx)(?:[ \t]+(?:--yes|-y|--bun))*[ \t]+)expo([ \t]+install)(?![\w./-])/g,
+      '$1@expo/agent-cli$2'
+    )
+    // Bare examples start a line or a quoted command; do not rewrite part of another runner.
+    .replace(
+      /(^[ \t]*|[`'"])expo([ \t]+install)(?![\w./-])/gm,
+      (_match, prefix: string, command: string) => `${prefix}${PROGRAM_PREFIX}${command}`
+    );
 }
 
 /** Only the conventional AGENTS.md → root CLAUDE.md alias is writable through a symlink. */

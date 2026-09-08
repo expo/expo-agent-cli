@@ -62,6 +62,7 @@ Use the arrow keys to navigate, Space to toggle agents, and Enter to continue. D
 - Claude Code uses `expo@claude-plugins-official` with an explicit user/project scope. The official marketplace must already be registered; for a fresh Claude configuration, run `claude plugin marketplace add anthropics/claude-plugins-official` first.
 - Codex user setup registers `expo/skills` at `main` and installs `expo@expo-plugins`. Codex's plugin CLI has no project scope, so `--project` installs Expo skills for Codex instead.
 - Other agents use `bunx skills add expo/skills --skill '*'` (or `npx` when Bun is unavailable), with the selected agent and scope passed explicitly.
+- Grok Build uses `--agent grok` and `.grok/skills` for package skill links. Setup detects `.grok` in the project or user home (respecting `GROK_HOME`), and the `grok` executable. Grok reads `AGENTS.md` directly.
 
 For automation, accept the plan explicitly:
 
@@ -78,7 +79,9 @@ The JSON report includes the selected `scope`, `cancelled`, per-agent `plugins`,
 
 ### Shared project instructions
 
-Setup creates or updates the Expo managed block in the project-root `AGENTS.md`, preserving existing template and user instructions outside that block. The block directs agents to use agent-cli for equivalent Expo install/start/lint, TypeScript, and expo-doctor operations; it retains Expo's SDK-compatible package installation and the template's `bunx` convention for projects with `bun.lock`.
+Setup creates or updates the Expo managed block in the project-root `AGENTS.md`. It also rewrites existing `npx expo install`, `bunx expo install`, and bare `expo install` command examples to agent-cli, keeping runner options and package arguments. Other template and user instructions are preserved. The block directs agents to use agent-cli for equivalent Expo install/start/lint, TypeScript, and expo-doctor operations, including commands suggested by loaded skills; it retains Expo's SDK-compatible package installation and the template's `bunx` convention for projects with `bun.lock`.
+
+`new` writes these same instructions after creating a project, including with `--no-install`. It does not install agent plugins or ask setup questions. Its JSON report includes `agentsMd` and `errors`; if instruction generation fails after scaffolding succeeds, `created` remains true and the command exits with code 20. Run `agents:setup` in the new project to retry instructions and configure agent skills.
 
 For selected Claude Code agents, setup creates `CLAUDE.md` with `@AGENTS.md`, or appends that import to an existing regular file. A plain mention such as “See AGENTS.md” is not a file import. Existing active imports and `CLAUDE.md` symlinks to `AGENTS.md` are retained. The reverse layout, `AGENTS.md` symlinked directly to a regular project-root `CLAUDE.md`, also shares one managed block without adding a self-import. Other instruction-file symlinks are not written through. See [Claude's shared instruction documentation](https://code.claude.com/docs/en/memory#agentsmd).
 

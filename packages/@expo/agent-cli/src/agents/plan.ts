@@ -82,6 +82,7 @@ export async function prepareSetupAsync(
   if (!cached?.length) {
     if (findExecutableOnPath('claude')) defaults.add('claude-code');
     if (findExecutableOnPath('codex')) defaults.add('codex');
+    if (findExecutableOnPath('grok')) defaults.add('grok');
   }
   let ids = options.agents.length ? options.agents : [...defaults];
   if (!options.yes && !options.agents.length) {
@@ -108,7 +109,7 @@ export async function prepareSetupAsync(
     if (options.agentSkills) lines.push(`Sync package skills in ${projectRoot}.`);
     if (options.agentsMd) {
       lines.push(
-        `Update the AGENTS.md managed block in ${projectRoot} (or its regular root CLAUDE.md target).`
+        `Update the AGENTS.md managed block and rewrite Expo install commands to agent-cli in ${projectRoot} (or its regular root CLAUDE.md target).`
       );
       if (agents.some((agent) => agent.id === 'claude-code')) {
         lines.push(
