@@ -146,6 +146,19 @@ describe(readSessionId, () => {
       'abc-123'
     );
   });
+  it(`reads the line the dotenv-writing form prints, which carries a suffix after the id`, () => {
+    // [observed — live, expo-ci, 2026-09-08]
+    expect(
+      readSessionId(
+        '✔ Simulator session created (id: 01a08318-958d-7369-a88e-ab94a2c55fae, saved to .env.eas-simulator) https://expo.dev/accounts/expo-ci/projects/expo-agent-cli/simulator-sessions/01a08318-958d-7369-a88e-ab94a2c55fae\n'
+      )
+    ).toBe('01a08318-958d-7369-a88e-ab94a2c55fae');
+  });
+  it(`falls back to the id in the session page's URL`, () => {
+    expect(
+      readSessionId('see https://expo.dev/accounts/e/projects/p/simulator-sessions/abc-1 for it\n')
+    ).toBe('abc-1');
+  });
   it(`reads the --json form`, () => {
     expect(readSessionId('progress\n{"id":"sess-json","type":"agent-device"}\n')).toBe('sess-json');
   });

@@ -142,9 +142,17 @@ export function buildLatestSimulatorBuildArgs(platform: NativePlatform): string[
  * too, for a caller that passed it.
  */
 export function readSessionId(output: string): string | null {
-  const created = /\(id:\s*([^\s)]+)\)/.exec(output);
+  // `(id: <id>)` with `--json`, and `(id: <id>, saved to .env.eas-simulator)` without it — the
+  // form this CLI runs, which the first regex here did not read [observed — live, expo-ci,
+  // 2026-09-08: "Opened the app on EAS Simulator session (id unknown)" beside the session's URL].
+  const created = /\(id:\s*([^\s,)]+)/.exec(output);
   if (created) {
     return created[1]!;
+  }
+  // The session page names it too, and is printed on the same line.
+  const fromUrl = /simulator-sessions\/([^\s/)]+)/.exec(output);
+  if (fromUrl) {
+    return fromUrl[1]!;
   }
   const start = output.indexOf('{');
   if (start >= 0) {
