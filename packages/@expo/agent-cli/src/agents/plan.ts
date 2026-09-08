@@ -92,7 +92,9 @@ export async function prepareSetupAsync(
   if (!ids.length && (options.plugins !== false || (projectRoot && options.agentSkills))) {
     throw new CommandError(
       'BAD_ARGS',
-      `No coding agent was detected. Pass --agent <agent>: ${all.map((agent) => agent.id).join(', ')}.`
+      `No coding agent was detected. Pass --agent <agent>: ${all
+        .map((agent) => agent.id)
+        .join(', ')}.`
     );
   }
   agents = [...new Set(ids)].map((id) => all.find((agent) => agent.id === id)!);
@@ -104,8 +106,16 @@ export async function prepareSetupAsync(
   }
   if (projectRoot) {
     if (options.agentSkills) lines.push(`Sync package skills in ${projectRoot}.`);
-    if (options.agentsMd)
-      lines.push(`Update the existing AGENTS.md managed block in ${projectRoot}.`);
+    if (options.agentsMd) {
+      lines.push(
+        `Update the AGENTS.md managed block in ${projectRoot} (or its regular root CLAUDE.md target).`
+      );
+      if (agents.some((agent) => agent.id === 'claude-code')) {
+        lines.push(
+          `Ensure CLAUDE.md imports AGENTS.md in ${projectRoot}, preserving existing instructions and shared-file links.`
+        );
+      }
+    }
   } else {
     lines.push('No Expo project: project skill sync and instruction-file generation are skipped.');
   }

@@ -12,7 +12,7 @@ export const agentsSetupHelp: CommandHelp = {
     `--project           Install plugins/skills in the Expo project instead of user home`,
     `--no-plugins        Skip official Expo plugin/skills installation`,
     `--agent <agent>     Set up for specific agents (can be used multiple times)`,
-    `--no-agents-md      Do not create or update AGENTS.md`,
+    `--no-agents-md      Do not create or update AGENTS.md or CLAUDE.md`,
     `--no-agent-skills   Do not link the agent skills of the installed packages`,
     `--json              Print the result as JSON`,
     `-h, --help          Usage info`,
@@ -47,6 +47,7 @@ export const agentsSetupHelp: CommandHelp = {
       'errors',
       'skills',
       'agentsMd',
+      'claudeMd',
       'agents',
       'notes',
     ],
@@ -56,7 +57,7 @@ export const agentsSetupHelp: CommandHelp = {
     `skills for Codex instead of its user-wide plugin. Use --yes for non-interactive setup.`,
     `Inside an Expo app, package skill sync and AGENTS.md generation run with either scope.`,
     `Safe to run again at any time. Everything outside the AGENTS.md block markers is yours and`,
-    `is left untouched, and CLAUDE.md is never written.`,
+    `is left untouched. For Claude, setup creates or appends an @AGENTS.md import to CLAUDE.md.`,
   ],
 };
 

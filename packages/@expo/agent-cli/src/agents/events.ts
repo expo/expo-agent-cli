@@ -14,6 +14,7 @@ declare module '2g' {
       skillsDiscovered: number;
       /** `created`, `updated`, `skipped`, or null when `--no-agents-md` skipped the file. */
       agentsMdAction: string | null;
+      claudeMdAction: string | null;
       noteCount: number;
       scope: import('./types').SetupScope;
       cancelled: boolean;

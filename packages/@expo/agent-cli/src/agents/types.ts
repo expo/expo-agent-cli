@@ -4,7 +4,7 @@
 export interface SetupOptions {
   /** Agent ids from `--agent`, resolved the same way `@expo/agent-cli skills:sync` resolves them. */
   agents: string[];
-  /** Maintain the managed block in the project's `AGENTS.md`. Disabled by `--no-agents-md`. */
+  /** Maintain the shared instructions and Claude import. Disabled by `--no-agents-md`. */
   agentsMd: boolean;
   /** Link the agent skills of the installed packages. Disabled by `--no-agent-skills`. */
   agentSkills: boolean;
@@ -51,9 +51,11 @@ export interface SetupReport {
   skills: SetupSkillsResult | null;
   /** Null when `--no-agents-md` skipped the file. */
   agentsMd: AgentsMdResult | null;
+  /** The Claude import, when Claude was selected and instruction setup ran. */
+  claudeMd: ClaudeMdResult | null;
   /** Agent ids this run targeted, from the flags, the cached selection, or detection. */
   agents: string[];
-  /** Things worth telling the user that are not failures, e.g. an unlinked `CLAUDE.md`. */
+  /** Setup notes that are not failures, such as skipped project phases. */
   notes: string[];
 }
 
@@ -80,4 +82,9 @@ export interface PluginSetupResult {
   destination: string;
   status: 'installed' | 'already-present' | 'failed';
   reason: string | null;
+}
+
+export interface ClaudeMdResult {
+  path: 'CLAUDE.md';
+  action: AgentsMdAction;
 }

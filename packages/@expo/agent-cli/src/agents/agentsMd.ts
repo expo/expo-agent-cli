@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { CommandError } from '../utils/errors';
-import type { AgentsMdResult } from './types';
+import type { AgentsMdResult, ClaudeMdResult } from './types';
 
 /** The file the block is maintained in, relative to the project root. */
 export const AGENTS_MD_FILE = 'AGENTS.md';
@@ -61,19 +61,11 @@ export async function writeManagedBlockAsync(
   projectRoot: string,
   blockBody: string
 ): Promise<AgentsMdResult> {
-  const filePath = path.join(projectRoot, AGENTS_MD_FILE);
-  // `writeFile` follows a symlink, so a link committed by the project would aim this write at
-  // whatever it points at — a shell profile, an SSH `authorized_keys`, a global agent config.
-  // The block also carries project-supplied text, so the content is not ours either.
-  const stats = await fs.promises.lstat(filePath).catch(() => null);
-  if (stats?.isSymbolicLink()) {
-    throw new CommandError(
-      'AGENTS_MD_SYMLINK',
-      `${AGENTS_MD_FILE} is a symlink, so writing the managed block would edit the file it points at rather than a file in this project. Replace it with a regular file, or delete it, then run the command again.`
-    );
-  }
-
-  const contents = await fs.promises.readFile(filePath, 'utf8').catch(() => null);
+  const filePath = await resolveAgentsMdPathAsync(projectRoot);
+  const contents = await fs.promises.readFile(filePath, 'utf8').catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
   const next = applyManagedBlock(contents, blockBody);
 
   if (next === contents) {
@@ -84,37 +76,100 @@ export async function writeManagedBlockAsync(
   return { path: AGENTS_MD_FILE, action: contents == null ? 'created' : 'updated' };
 }
 
-/**
- * Note a `CLAUDE.md` that never points at `AGENTS.md`.
- *
- * `@expo/agent-cli` maintains one file only: writing into a second agent instruction file would edit
- * content nobody asked it to own. An agent that reads `CLAUDE.md` alone would then miss the
- * block, so say so instead of fixing it silently. Returns null when there is nothing to say.
- */
-export async function checkClaudeMdReferenceAsync(projectRoot: string): Promise<string | null> {
-  const claudeMdPath = path.join(projectRoot, 'CLAUDE.md');
-  const stats = await fs.promises.lstat(claudeMdPath).catch(() => null);
-  if (stats == null) {
-    return null;
+/** Only the conventional AGENTS.md → root CLAUDE.md alias is writable through a symlink. */
+export async function resolveAgentsMdPathAsync(projectRoot: string): Promise<string> {
+  const filePath = path.join(projectRoot, AGENTS_MD_FILE);
+  const stats = await fs.promises.lstat(filePath).catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  if (stats?.isSymbolicLink()) {
+    const target = path.resolve(path.dirname(filePath), await fs.promises.readlink(filePath));
+    const claudePath = path.join(projectRoot, 'CLAUDE.md');
+    const claudeStats = await fs.promises.lstat(claudePath).catch(() => null);
+    if (target === path.resolve(claudePath) && claudeStats?.isFile()) return claudePath;
+    throw new CommandError(
+      'AGENTS_MD_SYMLINK',
+      'AGENTS.md is a symlink. Setup only writes through a link to the regular CLAUDE.md in this project root. Use a regular AGENTS.md or that shared-file layout.'
+    );
   }
+  if (stats && !stats.isFile()) {
+    throw new CommandError('AGENTS_MD_NOT_FILE', 'AGENTS.md must be a regular file.');
+  }
+  return filePath;
+}
 
-  // A symlink to AGENTS.md is the same file, so the block is already there.
-  if (stats.isSymbolicLink()) {
-    const [claudeMdTarget, agentsMdTarget] = await Promise.all([
-      fs.promises.realpath(claudeMdPath).catch(() => null),
-      fs.promises.realpath(path.join(projectRoot, AGENTS_MD_FILE)).catch(() => null),
-    ]);
-    if (claudeMdTarget != null && claudeMdTarget === agentsMdTarget) {
-      return null;
+/** Share the project instructions through Claude's file import syntax without replacing user text. */
+export async function ensureClaudeMdReferenceAsync(projectRoot: string): Promise<ClaudeMdResult> {
+  const filePath = path.join(projectRoot, 'CLAUDE.md');
+  const stats = await fs.promises.lstat(filePath).catch((error) => {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  });
+  const [claudeTarget, agentsTarget] = await Promise.all([
+    fs.promises.realpath(filePath).catch(() => null),
+    fs.promises.realpath(path.join(projectRoot, AGENTS_MD_FILE)).catch(() => null),
+  ]);
+  if (claudeTarget != null && claudeTarget === agentsTarget) {
+    return { path: 'CLAUDE.md', action: 'skipped' };
+  }
+  if (stats?.isSymbolicLink() || (stats && !stats.isFile())) {
+    throw new CommandError(
+      'CLAUDE_MD_NOT_FILE',
+      'CLAUDE.md is a symlink to another file or is not a regular file. Setup only reuses a symlink to AGENTS.md; it will not change another target.'
+    );
+  }
+  const contents = stats ? await fs.promises.readFile(filePath, 'utf8') : '';
+  const { prose, openBlock } = claudeImportText(contents);
+  if (/(?:^|\s)@(?:\.\/)?AGENTS\.md(?=$|[\s,;:!?]|\.(?:\s|$))/.test(prose)) {
+    return { path: 'CLAUDE.md', action: 'skipped' };
+  }
+  if (openBlock) {
+    throw new CommandError(
+      'CLAUDE_MD_UNCLOSED_BLOCK',
+      'CLAUDE.md has an unclosed code block or HTML comment. Close it before rerunning setup so the AGENTS.md import can be read as instructions.'
+    );
+  }
+  const separator = !contents
+    ? ''
+    : contents.endsWith('\n\n')
+      ? ''
+      : contents.endsWith('\n')
+        ? '\n'
+        : '\n\n';
+  await fs.promises.writeFile(filePath, contents + separator + '@AGENTS.md\n');
+  return { path: 'CLAUDE.md', action: stats ? 'updated' : 'created' };
+}
+
+/** Imports inside Markdown examples and comments do not load shared instructions. */
+function claudeImportText(contents: string): { prose: string; openBlock: boolean } {
+  let openComment = false;
+  const uncommented = contents.replace(/<!--[\s\S]*?(?:-->|$)/g, (comment) => {
+    if (!comment.endsWith('-->')) openComment = true;
+    return '';
+  });
+  let fence: string | null = null;
+  const lines: string[] = [];
+  for (const line of uncommented.split('\n')) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+    if (fence) {
+      if (
+        marker &&
+        marker[1]![0] === fence[0] &&
+        marker[1]!.length >= fence.length &&
+        !marker[2]!.trim()
+      )
+        fence = null;
+    } else if (marker) {
+      fence = marker[1]!;
+    } else if (!/^( {4}|\t)/.test(line)) {
+      lines.push(line);
     }
   }
-
-  const contents = await fs.promises.readFile(claudeMdPath, 'utf8').catch(() => null);
-  if (contents?.includes(AGENTS_MD_FILE)) {
-    return null;
-  }
-
-  return `CLAUDE.md exists and does not mention ${AGENTS_MD_FILE}. This command never writes CLAUDE.md, so add a line like "See ${AGENTS_MD_FILE}." to it, or make it a symlink to ${AGENTS_MD_FILE}, for agents that read CLAUDE.md only.`;
+  return {
+    prose: lines.join('\n').replace(/(`+)[\s\S]*?\1/g, ''),
+    openBlock: openComment || fence != null,
+  };
 }
 
 function withTrailingNewline(contents: string): string {

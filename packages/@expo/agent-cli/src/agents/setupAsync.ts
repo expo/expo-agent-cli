@@ -16,12 +16,13 @@ import {
 } from '../skills/agents';
 import { discoverSkillsAsync } from '../skills/discovery';
 import { syncSkillsAsync } from '../skills/skillsAsync';
-import type { SkillsAgent } from '../skills/types';
-import { checkClaudeMdReferenceAsync, writeManagedBlockAsync } from './agentsMd';
+import type { DiscoveredSkill, SkillsAgent } from '../skills/types';
+import { ensureClaudeMdReferenceAsync, writeManagedBlockAsync } from './agentsMd';
 import { generateAgentsMdBlock } from './content';
 import { event } from './events';
 import { installAgentAsync } from './installers';
 import { prepareSetupAsync } from './plan';
+import { collectLinkedSkillsAsync } from './skillIndex';
 import { withStdoutRedirectedAsync } from './stdout';
 import type { SetupOptions, SetupReport } from './types';
 
@@ -40,6 +41,7 @@ export async function printSetupAsync(
     skillsSynced: report.skills?.synced ?? false,
     skillsDiscovered: report.skills?.discovered ?? 0,
     agentsMdAction: report.agentsMd?.action ?? null,
+    claudeMdAction: report.claudeMd?.action ?? null,
     noteCount: report.notes.length,
     scope: report.scope,
     cancelled: report.cancelled,
@@ -75,6 +77,7 @@ export async function runSetupAsync(
     errors: [],
     skills: null,
     agentsMd: null,
+    claudeMd: null,
     agents: plan.agents.map((agent) => agent.id),
     notes: [],
   };
@@ -99,15 +102,17 @@ async function setupProjectAsync(
   report: SetupReport
 ): Promise<void> {
   let agents: SkillsAgent[] = [];
+  let discovered: DiscoveredSkill[] | null = null;
   if (options.agentSkills) {
     try {
       const resolved = await resolveAgentsAsync(projectRoot, { agents: options.agents });
       agents = resolved.agents;
-      const discovered = await discoverSkillsAsync(projectRoot);
+      discovered = await discoverSkillsAsync(projectRoot);
       const syncAsync = () =>
         syncSkillsAsync(projectRoot, {
           agents: agents.map((agent) => agent.id),
           dryRun: false,
+          updateAgentsMd: false,
         });
       await (options.json ? withStdoutRedirectedAsync(syncAsync) : syncAsync());
       report.skills = {
@@ -136,16 +141,30 @@ async function setupProjectAsync(
         probeProjectStateAsync(projectRoot),
         readProjectPackageJsonAsync(projectRoot),
       ]);
+      discovered ??= await discoverSkillsAsync(projectRoot).catch(() => null);
+      const linkedSkills =
+        discovered == null
+          ? null
+          : await collectLinkedSkillsAsync(
+              projectRoot,
+              discovered,
+              uniqueSkillsDirs(getAllAgents())
+            );
       const block = generateAgentsMdBlock({
         state,
         projectName: packageJson?.name ?? null,
-        skillsDirs: uniqueSkillsDirs(agents),
+        linkedSkills,
       });
       report.agentsMd = await writeManagedBlockAsync(projectRoot, block);
-      const note = await checkClaudeMdReferenceAsync(projectRoot);
-      if (note) report.notes.push(note);
     } catch (error) {
       report.errors.push(`AGENTS.md: ${errorMessage(error)}`);
+    }
+    if (report.agentsMd && options.agents.includes('claude-code')) {
+      try {
+        report.claudeMd = await ensureClaudeMdReferenceAsync(projectRoot);
+      } catch (error) {
+        report.errors.push(`CLAUDE.md: ${errorMessage(error)}`);
+      }
     }
   }
 }
@@ -212,6 +231,8 @@ function summaryLines(report: SetupReport): string[] {
       )
     );
   }
+
+  if (report.claudeMd) row('CLAUDE.md', `${report.claudeMd.action} (shared instructions)`);
 
   if (report.projectRoot) row('Next', chalk.bold(`${PROGRAM_PREFIX} status`));
 

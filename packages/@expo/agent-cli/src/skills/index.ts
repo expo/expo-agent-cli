@@ -37,6 +37,7 @@ export const skillsSyncHelp: CommandHelp = {
   notes: [
     `"${PROGRAM_PREFIX} skills" runs this action. Only symlinks this CLI created are managed, so a`,
     `file of your own with the same name is reported as skipped rather than replaced.`,
+    `An existing AGENTS.md package-skill index is refreshed after sync; --dry-run leaves it unchanged.`,
   ],
 };
 
@@ -109,7 +110,7 @@ export const skillsCleanHelp: CommandHelp = {
   },
   notes: [
     `Only symlinks into node_modules count as managed, so this is safe to run in a project that`,
-    `keeps hand-written skills in the same directories.`,
+    `keeps hand-written skills in the same directories. Its existing AGENTS.md skill index is refreshed.`,
   ],
 };
 

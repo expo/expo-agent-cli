@@ -55,7 +55,7 @@ Commands this CLI does not wrap go to the project's `expo` CLI: `run`, `run:ios`
 
 ## Set up a coding agent
 
-Run `npx @expo/agent-cli agents:setup` to select agents, review the commands, and confirm installation into your user home. It works both inside an Expo app and before creating one. Pass `--project` to install plugins/skills in the current Expo project instead; this flag requires an Expo app. Package skill synchronization and the existing `AGENTS.md` generator still run in that app, even when the plugin installation targets your home. `CLAUDE.md` is never rewritten.
+Run `npx @expo/agent-cli agents:setup` to select agents, review the commands, and confirm installation into your user home. It works both inside an Expo app and before creating one. Pass `--project` to install plugins/skills in the current Expo project instead; this flag requires an Expo app. Package skill synchronization and instruction-file setup still run in that app, even when the plugin installation targets your home.
 
 Use the arrow keys to navigate, Space to toggle agents, and Enter to continue. Detected or previously configured agents start selected. Escape or Ctrl-C cancels setup before installation; the final confirmation defaults to No.
 
@@ -72,9 +72,19 @@ npx @expo/agent-cli agents:setup --yes --project --agent claude-code --json
 
 `--json` alone does not accept setup. Without a terminal, omit `--yes` to receive a confirmation-required error without installing anything. Declining the interactive confirmation leaves files unchanged.
 
-Use `--no-plugins` to skip official plugin/skills installation, `--no-agent-skills` to skip package skill synchronization, and `--no-agents-md` to skip the generator. Existing installations are inspected and retained; setup does not run broad updates or replace skills from another source. Use each plugin marketplace or the skills CLI to manage updates. Start a new agent session after installation; MCP tools may require sign-in separately.
+Use `--no-plugins` to skip official plugin/skills installation, `--no-agent-skills` to skip package skill synchronization, and `--no-agents-md` to skip all instruction-file writes. Existing installations are inspected and retained; setup does not run broad updates or replace skills from another source. Use each plugin marketplace or the skills CLI to manage updates. Start a new agent session after installation; MCP tools may require sign-in separately.
 
-The JSON report includes the selected `scope`, `cancelled`, per-agent `plugins`, and `errors`, alongside the existing project results. Outside a project, `projectRoot`, `skills`, and `agentsMd` are null. If an installer fails, independent project setup still runs; the final report preserves completed steps and exits with code 20. Invalid arguments or missing noninteractive confirmation exit with code 1; declining confirmation exits with code 0 and `cancelled: true`.
+The JSON report includes the selected `scope`, `cancelled`, per-agent `plugins`, and `errors`, alongside the project results, including `agentsMd` and `claudeMd` file actions. Outside a project, `projectRoot`, `skills`, `agentsMd`, and `claudeMd` are null. If an installer fails, independent project setup still runs; the final report preserves completed steps and exits with code 20. Invalid arguments or missing noninteractive confirmation exit with code 1; declining confirmation exits with code 0 and `cancelled: true`.
+
+### Shared project instructions
+
+Setup creates or updates the Expo managed block in the project-root `AGENTS.md`, preserving existing template and user instructions outside that block. The block directs agents to use agent-cli for equivalent Expo install/start/lint, TypeScript, and expo-doctor operations; it retains Expo's SDK-compatible package installation and the template's `bunx` convention for projects with `bun.lock`.
+
+For selected Claude Code agents, setup creates `CLAUDE.md` with `@AGENTS.md`, or appends that import to an existing regular file. A plain mention such as “See AGENTS.md” is not a file import. Existing active imports and `CLAUDE.md` symlinks to `AGENTS.md` are retained. The reverse layout, `AGENTS.md` symlinked directly to a regular project-root `CLAUDE.md`, also shares one managed block without adding a self-import. Other instruction-file symlinks are not written through. See [Claude's shared instruction documentation](https://code.claude.com/docs/en/memory#agentsmd).
+
+The managed block includes a Package / Skill / Read table for verified, linked package skills. Links are project-relative and point to `SKILL.md`; missing links, user-owned conflicts, and losing duplicate names are omitted. Multiple skills from one package get separate rows. Plugins and standalone skills installed from `expo/skills` remain owned by their installers and are outside this package-skill index.
+
+After setup creates the index, `skills:sync`, automatic skill sync during install/start/dev, and `skills:clean` refresh only its marked section. Other instructions and project facts stay unchanged. Dry runs never refresh it, and these commands do not create instruction files or add an index to a file that setup has not opted in. Rerunning setup upgrades an older managed block to include the index.
 
 ## Config
 
