@@ -13,6 +13,8 @@ interface AgentDefinition extends SkillsAgent {
   projectMarkers: string[];
   /** Directories inside the user home directory that indicate the agent is installed. */
   homeMarkers: string[];
+  /** An agent-specific override for its user configuration directory. */
+  homeDirectoryEnv?: string;
 }
 
 // The skill directory conventions follow https://github.com/vercel-labs/skills
@@ -60,6 +62,14 @@ const AGENTS: AgentDefinition[] = [
     projectMarkers: ['.gemini'],
     homeMarkers: ['.gemini'],
   },
+  {
+    id: 'grok',
+    displayName: 'Grok Build',
+    skillsDir: '.grok/skills',
+    projectMarkers: ['.grok'],
+    homeMarkers: ['.grok'],
+    homeDirectoryEnv: 'GROK_HOME',
+  },
 ];
 
 /** All agents that `npx @expo/agent-cli skills` can link skills for. */
@@ -77,9 +87,12 @@ export async function detectInstalledAgentsAsync(projectRoot: string): Promise<S
   const homeDir = os.homedir();
   const detected = await Promise.all(
     AGENTS.map(async (agent) => {
+      const homeOverride = agent.homeDirectoryEnv && process.env[agent.homeDirectoryEnv]?.trim();
       const markers = [
         ...agent.projectMarkers.map((marker) => path.join(projectRoot, marker)),
-        ...agent.homeMarkers.map((marker) => path.join(homeDir, marker)),
+        ...(homeOverride
+          ? [homeOverride]
+          : agent.homeMarkers.map((marker) => path.join(homeDir, marker))),
       ];
       const results = await Promise.all(markers.map((marker) => directoryExistsAsync(marker)));
       return results.some(Boolean) ? toPublicAgent(agent) : null;

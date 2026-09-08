@@ -6,8 +6,6 @@ import chalk from 'chalk';
 import { EXIT_OUTCOME_FAILED, exitWithCodeAsync } from '../exitCodes';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
-import { readProjectPackageJsonAsync } from '../project/nodeModules';
-import { probeProjectStateAsync } from '../project/probe';
 import {
   detectInstalledAgentsAsync,
   getAllAgents,
@@ -17,12 +15,11 @@ import {
 import { discoverSkillsAsync } from '../skills/discovery';
 import { syncSkillsAsync } from '../skills/skillsAsync';
 import type { DiscoveredSkill, SkillsAgent } from '../skills/types';
-import { ensureClaudeMdReferenceAsync, writeManagedBlockAsync } from './agentsMd';
-import { generateAgentsMdBlock } from './content';
+import { ensureClaudeMdReferenceAsync } from './agentsMd';
 import { event } from './events';
 import { installAgentAsync } from './installers';
 import { prepareSetupAsync } from './plan';
-import { collectLinkedSkillsAsync } from './skillIndex';
+import { writeProjectInstructionsAsync } from './projectInstructions';
 import { withStdoutRedirectedAsync } from './stdout';
 import type { SetupOptions, SetupReport } from './types';
 
@@ -137,25 +134,7 @@ async function setupProjectAsync(
 
   if (options.agentsMd) {
     try {
-      const [state, packageJson] = await Promise.all([
-        probeProjectStateAsync(projectRoot),
-        readProjectPackageJsonAsync(projectRoot),
-      ]);
-      discovered ??= await discoverSkillsAsync(projectRoot).catch(() => null);
-      const linkedSkills =
-        discovered == null
-          ? null
-          : await collectLinkedSkillsAsync(
-              projectRoot,
-              discovered,
-              uniqueSkillsDirs(getAllAgents())
-            );
-      const block = generateAgentsMdBlock({
-        state,
-        projectName: packageJson?.name ?? null,
-        linkedSkills,
-      });
-      report.agentsMd = await writeManagedBlockAsync(projectRoot, block);
+      report.agentsMd = await writeProjectInstructionsAsync(projectRoot, discovered);
     } catch (error) {
       report.errors.push(`AGENTS.md: ${errorMessage(error)}`);
     }

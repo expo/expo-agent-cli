@@ -4,6 +4,9 @@
 import chalk from 'chalk';
 import path from 'path';
 
+import { writeProjectInstructionsAsync } from '../agents/projectInstructions';
+import type { AgentsMdResult } from '../agents/types';
+import { EXIT_OUTCOME_FAILED } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps } from '../followups';
 import { buildNewFollowUps } from '../followups/new';
 import type { FollowUp } from '../followups/types';
@@ -37,14 +40,17 @@ export interface NewProjectReport {
   installed: boolean;
   /** The project is its own git repository. */
   gitInitialized: boolean;
+  /** Instructions written after scaffolding, or null when creation or instruction setup failed. */
+  agentsMd: AgentsMdResult | null;
+  errors: string[];
   followups: FollowUp[];
 }
 
 /**
  * Create a new Expo project without a terminal.
  *
- * @returns the exit code to end the command with: `create-expo`'s own, so a failed scaffold fails
- * the caller with the code the tool reported.
+ * @returns the scaffolder's exit code on failure, or 20 if the project was created but its
+ * instructions could not be written.
  */
 export async function createNewProjectAsync(cwd: string, options: NewOptions): Promise<number> {
   const projectRoot = path.resolve(cwd, options.directory);
@@ -93,11 +99,20 @@ export async function createNewProjectAsync(cwd: string, options: NewOptions): P
   }
 
   const git = await resolveGitStateAsync(projectRoot, { ...options, createdProjectDirectory });
+  let agentsMd: AgentsMdResult | null = null;
+  const errors: string[] = [];
+  try {
+    agentsMd = await writeProjectInstructionsAsync(projectRoot);
+  } catch (error) {
+    errors.push(`AGENTS.md: ${error instanceof Error ? error.message : String(error)}`);
+  }
   event('created', {
     projectRoot,
     name,
     installed: options.install,
     gitInitialized: git.initialized,
+    agentsMdAction: agentsMd?.action ?? null,
+    errors,
   });
 
   const followups = followUpsEnabled(options.followups)
@@ -111,6 +126,8 @@ export async function createNewProjectAsync(cwd: string, options: NewOptions): P
     installed: options.install,
     gitInitialized: git.initialized,
     followups,
+    agentsMd,
+    errors,
   };
 
   if (options.json) {
@@ -122,7 +139,8 @@ export async function createNewProjectAsync(cwd: string, options: NewOptions): P
   }
 
   reportFollowUps('new', followups, { json: options.json });
-  return 0;
+  for (const error of errors) Log.warn(error);
+  return errors.length ? EXIT_OUTCOME_FAILED : 0;
 }
 
 /** How the `create-expo` subprocess is wired, per the three cases above. */
@@ -159,6 +177,8 @@ function reportFailure(
       created: false,
       installed: false,
       gitInitialized: false,
+      agentsMd: null,
+      errors: [],
       followups: [],
     };
     Log.log(JSON.stringify(report, null, 2));
@@ -186,6 +206,7 @@ function summaryLines(report: NewProjectReport, gitDetail: string): string[] {
   }
   row('Install', report.installed ? 'done' : 'skipped (--no-install)');
   row('Git', gitDetail);
+  row('AGENTS.md', report.agentsMd?.action ?? 'failed (see errors)');
 
   return lines;
 }

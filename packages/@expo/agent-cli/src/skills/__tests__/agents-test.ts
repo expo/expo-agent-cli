@@ -28,9 +28,12 @@ function writeSkillsCache(json: object) {
 }
 
 beforeEach(() => {
+  vi.stubEnv('GROK_HOME', '');
   vol.reset();
   createDirectories(projectRoot);
 });
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe('Listing agents', () => {
   it('should list every supported agent with its skills directory', () => {
@@ -41,11 +44,30 @@ describe('Listing agents', () => {
       { id: 'opencode', displayName: 'OpenCode', skillsDir: '.agents/skills' },
       { id: 'windsurf', displayName: 'Windsurf', skillsDir: '.agents/skills' },
       { id: 'gemini-cli', displayName: 'Gemini CLI', skillsDir: '.agents/skills' },
+      { id: 'grok', displayName: 'Grok Build', skillsDir: '.grok/skills' },
     ]);
   });
 });
 
 describe('Detecting installed agents', () => {
+  it('should honor the Grok user configuration directory override', async () => {
+    vi.stubEnv('GROK_HOME', '/custom-grok');
+    createDirectories('/custom-grok');
+    expect((await detectInstalledAgentsAsync(projectRoot)).map((agent) => agent.id)).toEqual([
+      'grok',
+    ]);
+  });
+
+  it.each(['/project/.grok', path.join(os.homedir(), '.grok')])(
+    'should detect Grok Build from %s',
+    async (marker) => {
+      createDirectories(marker);
+      expect(await detectInstalledAgentsAsync(projectRoot)).toEqual([
+        { id: 'grok', displayName: 'Grok Build', skillsDir: '.grok/skills' },
+      ]);
+    }
+  );
+
   it('should detect agents from project marker directories', async () => {
     createDirectories(`${projectRoot}/.claude`, `${projectRoot}/.cursor`);
 

@@ -1,5 +1,6 @@
 import { vol } from 'memfs';
 
+import { getAllAgents } from '../../skills/agents';
 import { findExecutableOnPath, spawnSubprocessAsync } from '../../utils/subprocess';
 import { buildInstallerPlans, installAgentAsync } from '../installers';
 
@@ -22,6 +23,31 @@ beforeEach(() => {
 });
 
 describe('Planning official Expo installation', () => {
+  it.each(['project', 'user'] as const)(
+    'should install Grok Build skills in %s scope',
+    (scope) => {
+      const grok = getAllAgents().find((agent) => agent.id === 'grok')!;
+      const plan = buildInstallerPlans([grok], scope, '/destination')[0]!;
+      expect(plan.provider).toBe('skills');
+      expect(plan.commands).toEqual([
+        {
+          command: 'bunx',
+          args: [
+            'skills',
+            'add',
+            'expo/skills',
+            '--skill',
+            '*',
+            '--agent',
+            'grok',
+            '--yes',
+            ...(scope === 'user' ? ['--global'] : []),
+          ],
+        },
+      ]);
+    }
+  );
+
   it('should use the requested plugins at user scope', () => {
     const plans = buildInstallerPlans(agents.slice(0, 2), 'user', '/home');
     expect(plans[0]!.commands[0]!.args).toEqual([

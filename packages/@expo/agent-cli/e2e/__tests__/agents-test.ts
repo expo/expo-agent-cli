@@ -107,6 +107,33 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(result.stdout).toContain('skipped');
   });
 
+  it('should link and index package skills for Grok Build and migrate template install commands', async () => {
+    fs.writeFileSync(
+      path.join(projectRoot, 'AGENTS.md'),
+      '# Rules\nUse `bunx expo install expo-camera`.\n'
+    );
+    const result = await executeAgentCliAsync(projectRoot, [
+      'agents:setup',
+      '--yes',
+      '--no-plugins',
+      '--agent',
+      'grok',
+      '--json',
+    ]);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      agents: ['grok'],
+      skills: { synced: true, skillsDirs: ['.grok/skills'] },
+      agentsMd: { path: 'AGENTS.md', action: 'updated' },
+      errors: [],
+    });
+    expect(fs.existsSync(path.join(projectRoot, '.grok', 'skills', 'usage', 'SKILL.md'))).toBe(
+      true
+    );
+    const instructions = readProjectFile(projectRoot, 'AGENTS.md')!;
+    expect(instructions).toContain('Use `bunx @expo/agent-cli install expo-camera`.');
+    expect(instructions).toContain('[.grok/skills/usage/SKILL.md](.grok/skills/usage/SKILL.md)');
+  });
+
   it('should preserve user content outside the managed block', async () => {
     const before = ['# House rules', '', 'Never force push.', ''].join('\n');
     await fs.promises.writeFile(path.join(projectRoot, 'AGENTS.md'), before);

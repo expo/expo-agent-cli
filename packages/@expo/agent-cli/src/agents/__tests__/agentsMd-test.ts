@@ -106,6 +106,38 @@ describe(applyManagedBlock, () => {
 });
 
 describe(writeManagedBlockAsync, () => {
+  it('should rewrite Expo install instructions while preserving runners, arguments, and other text', async () => {
+    const before = [
+      '# My rules',
+      'Use `bunx expo install expo-camera` for compatible versions.',
+      '```sh',
+      'npx --yes expo install --fix',
+      'bunx --bun expo install expo-router -- --dev',
+      'expo install expo-sqlite',
+      '```',
+      'Keep `npx expo start`, `expo prebuild`, and `npx @expo/agent-cli install`.',
+      'Keep `my-expo install`, `./expo install`, and `expo installer`.',
+      'Keep `pnpm expo install`, `yarn expo install`, and `npx --offline expo install`.',
+      '',
+    ].join('\n');
+    vol.writeFileSync(`${projectRoot}/AGENTS.md`, before);
+
+    await writeManagedBlockAsync(projectRoot, 'Body line.');
+
+    const contents = vol.readFileSync(`${projectRoot}/AGENTS.md`, 'utf8');
+    expect(contents).toBe(
+      applyManagedBlock(
+        before
+          .replace('bunx expo install', 'bunx @expo/agent-cli install')
+          .replace('npx --yes expo install', 'npx --yes @expo/agent-cli install')
+          .replace('bunx --bun expo install', 'bunx --bun @expo/agent-cli install')
+          .replace('\nexpo install', '\nnpx @expo/agent-cli install'),
+        'Body line.'
+      )
+    );
+    expect((await writeManagedBlockAsync(projectRoot, 'Body line.')).action).toBe('skipped');
+  });
+
   it('should create AGENTS.md when the project has none', async () => {
     await expect(writeManagedBlockAsync(projectRoot, 'Body line.')).resolves.toEqual({
       path: AGENTS_MD_FILE,

@@ -14,6 +14,8 @@ declare module '2g' {
       name: string | null;
       installed: boolean;
       gitInitialized: boolean;
+      agentsMdAction: 'created' | 'updated' | 'skipped' | null;
+      errors: string[];
     };
   }
 }
