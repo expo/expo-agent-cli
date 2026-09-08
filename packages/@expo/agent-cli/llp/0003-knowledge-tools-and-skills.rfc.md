@@ -16,7 +16,7 @@ The distribution channel for Expo knowledge: skills shipped with the modules the
 
 SDK packages carry their own skill covering usage, pitfalls, and config-plugin notes. Installing a package then teaches the driving agent automatically. [confirmed, Kudo seed, 2026-08-18]
 
-Discovery is a directory convention, `skills/*/SKILL.md`, found via autolinking, not a `package.json` field. Scope is co-located module skills (for example `expo-sqlite/skills/`). Module synchronization remains scoped to package-provided skills. `agents:setup` additionally installs official Expo plugins or `expo/skills` through their own installers; those files stay outside module link ownership. [confirmed, Kudo, 2026-09-08; [[0006.000-local-expo-ui-docs]]]
+Discovery is a directory convention, `skills/*/SKILL.md`, found via autolinking, not a `package.json` field. Scope is co-located module skills (for example `expo-sqlite/skills/`). Module synchronization remains scoped to package-provided skills. `agents:setup` additionally installs official Expo plugins or `expo/skills` through their own installers; those files stay outside module link ownership. [confirmed, Kudo, 2026-09-08; [[0006-agent-native-cli-surface]]]
 
 The code lives in this package, not in `@expo/cli`. Four proof-of-concept PRs against `@expo/cli` (#48592, #48972, #48973, #49018) stay unmerged. The code was copied here. [confirmed, Kudo, 2026-08-20]
 

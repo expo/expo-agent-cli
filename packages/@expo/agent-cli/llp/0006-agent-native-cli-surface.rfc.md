@@ -2,11 +2,11 @@
 
 **Type:** RFC
 **Status:** Active
-**Systems:** `packages/@expo/cli`; JSONL events; `@expo/agent-cli` launcher (`src/commandRegistry.ts`, `src/cli.ts`)
+**Systems:** `packages/@expo/cli`; JSONL events; `@expo/agent-cli` launcher (`src/commandRegistry.ts`, `src/cli.ts`); agent setup (`src/agents/`)
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20
-**Revised:** 2026-08-30
-**Related:** [[0001-agentic-cli-on-expo-cli]], [[0004-smart-start-and-project-state]], [[0024-cli-ui]]
+**Revised:** 2026-09-08
+**Related:** [[0001-agentic-cli-on-expo-cli]], [[0003-knowledge-tools-and-skills]], [[0004-smart-start-and-project-state]], [[0008-guardrails]], [[0024-cli-ui]]
 
 ## Summary
 
@@ -34,7 +34,31 @@ Headless CI mode: structured pass/fail invocations with `--json` and exit codes,
 
 Every CLI error is a driving agent's next prompt. `CommandError.suggestedCommand` prints a trailing `Try: <command>` line and rides the `cli:error` JSONL event. Every error event carries machine-readable fields, a cause classification, and a suggested next step.
 
-`agents:setup` writes and maintains a managed section in the project's `AGENTS.md`: SDK version, targets, the right commands, project quirks. It orients every agent, including ones that never call a tool. Setup now also works without a project, installs official Expo plugins/skills at a confirmed scope, and offers `--yes` for noninteractive use. Its instruction-file generators are unchanged; see [[0006.000-local-expo-ui-docs]]. [confirmed, Kudo, 2026-09-08]
+`agents:setup` writes and maintains a managed section in the project's `AGENTS.md`: SDK version, targets, the right commands, project quirks. It orients every agent, including ones that never call a tool. See [Agent setup](#agent-setup) for installation and confirmation behavior.
+
+## Agent setup
+
+`agents:setup` works before an Expo project exists. It detects agents, lets the user select targets and scope, displays the proposed commands and project writes, and asks for confirmation. Outside an Expo app, installation targets user home. Inside an app, the user chooses Project or User home. [confirmed, Kudo, 2026-09-08]
+
+Project detection checks for a declared Expo dependency, so a fresh clone without installed dependencies still offers project scope. A missing project skips package skill synchronization and instruction-file generation; it does not create home-level `AGENTS.md`, `CLAUDE.md`, or a project selection cache. Other commands retain their Expo-app guards. [observed]
+
+### Installation and scope
+
+The official knowledge source is `expo/skills`, installed through each agent's supported installer. No local documentation mirror is included. [confirmed, Kudo, 2026-09-08]
+
+- Claude Code installs `expo@claude-plugins-official` with `claude plugin install` and explicit `--scope user|project`. Its official marketplace must already be registered; a fresh configuration needs `claude plugin marketplace add anthropics/claude-plugins-official`. [observed]
+- Codex user setup runs `codex plugin marketplace add expo/skills --ref main`, then `codex plugin add expo@expo-plugins`. Its plugin CLI has no project scope, so the scope menu explicitly offers project-local Codex skills as the Project alternative. [observed]
+- Other agents, and Codex project setup, use `bunx skills add expo/skills --skill '*'`, falling back to npx. The installer receives the selected agent, explicit noninteractive consent, and `--global` for user scope. The wildcard is a literal subprocess argument. [observed]
+
+Setup inspects existing installations after confirmation, reuses matching installations in the selected scope, and verifies installation through the owning CLI. It reports conflicting sources or disabled plugins rather than replacing or enabling them, and avoids broad updates. Plugin and standalone skill files remain owned by their installers; module `skills:sync` and `skills:clean` retain their existing ownership boundaries ([[0003-knowledge-tools-and-skills]]). [observed]
+
+### Confirmation and project phases
+
+`--yes` accepts the setup plan for automation; `--scope user|project` and repeatable `--agent` flags make the selection explicit. Non-TTY runs without `--yes` fail promptly; `--json` alone is not consent. Decline, EOF, or Ctrl-C before confirmation causes no setup writes or installer invocations. This is the interactive exception described in [[0008-guardrails]]. [observed]
+
+When an app is available, setup also runs its existing `skills:sync` and instruction-file generation, even when the plugin installation targets user home. Generator behavior is unchanged. `--no-plugins` skips official plugin/skills installation, `--no-agent-skills` skips package skill synchronization, and `--no-agents-md` skips the generator. [confirmed, Kudo, 2026-09-08; observed flag behavior]
+
+Installer failures preserve completed work and allow independent project phases to run. Missing dependencies are reported with instructions to install them; setup does not install Expo automatically. Under `--json`, one report goes to stdout and installer progress goes to stderr. Invalid arguments or missing consent exit 1; declining confirmation exits 0 with `cancelled: true`; installer or project-phase failures return the partial report and exit 20. Installation does not prove that a new agent session has loaded skills or that MCP tools are authenticated. [observed]
 
 ## Output contract
 
@@ -109,3 +133,5 @@ Implemented: `start` and `install` add skill sync and follow-ups to `expo start`
 ## Testing
 
 Event-schema snapshot tests. E2E subprocess runs against fixtures, asserting event sequences. A TTY-free CI environment as the default test condition ([[0002-testing-and-evals]]).
+
+Agent setup adds planning and installer unit tests plus subprocess e2e for home/project scope, exact installer arguments, reruns, confirmation and cancellation, missing dependencies, partial failures, JSON output, and preservation of module and generator behavior. Live installer checks use isolated configurations; new-session activation and MCP authentication require separate manual verification.

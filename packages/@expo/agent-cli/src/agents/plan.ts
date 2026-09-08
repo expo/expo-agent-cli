@@ -1,4 +1,4 @@
-// @ref llp/0006.000-local-expo-ui-docs.plan.md §Setup flow
+// @ref llp/0006-agent-native-cli-surface.rfc.md §Agent setup
 import os from 'os';
 import path from 'path';
 
