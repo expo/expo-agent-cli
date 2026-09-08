@@ -234,6 +234,7 @@ describe('@expo/agent-cli new', () => {
           STUB_CREATE_EXPO_AGENTS_MD:
             '# Template rules\nUse `bunx expo install expo-camera`.\n' +
             'Run `bunx expo start --clear`, `npx expo lint`, and `npx expo-doctor@latest`.\n' +
+            'Build with `npx expo prebuild --clean` and `bunx expo run:ios`.\n' +
             'Keep this rule.\n',
         },
       });
@@ -247,6 +248,7 @@ describe('@expo/agent-cli new', () => {
       expect(instructions).toContain(
         '# Template rules\nUse `bunx @expo/agent-cli install expo-camera`.\n' +
           'Run `bunx @expo/agent-cli start --clear`, `npx @expo/agent-cli lint`, and `npx @expo/agent-cli doctor`.\n' +
+          'Build with `npx @expo/agent-cli prebuild --clean` and `bunx @expo/agent-cli run:ios`.\n' +
           'Keep this rule.\n'
       );
       expect(instructions).toContain('BEGIN EXPO AGENT CLI MANAGED BLOCK');

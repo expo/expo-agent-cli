@@ -4,6 +4,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { forwardedCommands } from '../commandRegistry';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import type { AgentsMdResult, ClaudeMdResult } from './types';
@@ -13,6 +14,8 @@ export const AGENTS_MD_FILE = 'AGENTS.md';
 
 export const BLOCK_START = '<!-- BEGIN EXPO AGENT CLI MANAGED BLOCK -->';
 export const BLOCK_END = '<!-- END EXPO AGENT CLI MANAGED BLOCK -->';
+
+const EXPO_COMMANDS = new Set(['install', 'start', 'add', ...forwardedCommands]);
 
 /**
  * Return the contents of `AGENTS.md` with the managed block set to `blockBody`.
@@ -84,15 +87,19 @@ export async function writeManagedBlockAsync(
 function rewriteExpoCommands(contents: string): string {
   return contents
     .replace(
-      /(?<![\w@/.-])((?:npx|bunx)(?:[ \t]+(?:--yes|-y|--bun))*[ \t]+)(?:expo([ \t]+(?:install|start|lint))|expo-doctor(?:@latest)?)(?![\w@./-])/g,
-      (_match, runner: string, command: string | undefined) =>
-        `${runner}@expo/agent-cli${command ?? ' doctor'}`
+      /(?<![\w@/.-])((?:npx|bunx)(?:[ \t]+(?:--yes|-y|--bun))*[ \t]+)(?:expo([ \t]+[a-z][\w:-]*)|expo-doctor(?:@latest)?)(?![\w@./-])/g,
+      (match, runner: string, command: string | undefined) =>
+        command && !EXPO_COMMANDS.has(command.trim())
+          ? match
+          : `${runner}@expo/agent-cli${command ?? ' doctor'}`
     )
     // Bare examples start a line or a quoted command; do not rewrite part of another runner.
     .replace(
-      /(^[ \t]*|[`'"])(?:expo([ \t]+(?:install|start|lint))|expo-doctor(?:@latest)?)(?![\w@./-])/gm,
-      (_match, prefix: string, command: string | undefined) =>
-        `${prefix}${PROGRAM_PREFIX}${command ?? ' doctor'}`
+      /(^[ \t]*|[`'"])(?:expo([ \t]+[a-z][\w:-]*)|expo-doctor(?:@latest)?)(?![\w@./-])/gm,
+      (match, prefix: string, command: string | undefined) =>
+        command && !EXPO_COMMANDS.has(command.trim())
+          ? match
+          : `${prefix}${PROGRAM_PREFIX}${command ?? ' doctor'}`
     );
 }
 

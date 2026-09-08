@@ -43,7 +43,7 @@ The diagnosis is the EAS CLI's own `EAS project not configured` sentence. That s
 
 `@expo/agent-cli new <dir> [--name] [--no-install] [--no-git] [--json]` runs `create-expo --yes` as a subprocess, does a git init when appropriate, and offers follow-ups into the new project. Zero-TTY is asserted in e2e.
 
-After successful scaffolding, `new` writes the same project-root `AGENTS.md` instructions as `agents:setup`, including migration of template `expo install`, `expo start`, `expo lint`, and `expo-doctor` command examples described in [[0006-agent-native-cli-surface]] §Shared instruction files. This also runs with `--no-install`, where unavailable installed-package facts remain unknown. It does not run agent installers or interactive setup. [confirmed, Kudo, 2026-09-08; expanded command migration, 2026-09-09]
+After successful scaffolding, `new` writes the same project-root `AGENTS.md` instructions as `agents:setup`, including migration of all wrapped and registered passthrough Expo command examples and `expo-doctor`, as described in [[0006-agent-native-cli-surface]] §Shared instruction files. This also runs with `--no-install`, where unavailable installed-package facts remain unknown. It does not run agent installers or interactive setup. [confirmed, Kudo, 2026-09-08; expanded command migration, 2026-09-09]
 
 The JSON report adds `agentsMd` (created/updated/skipped, or null) and `errors`. An instruction failure preserves `created: true` and the scaffold, reports the error, and exits 20. A failed scaffold does not write instructions and retains the scaffolder's exit code. [observed]
 

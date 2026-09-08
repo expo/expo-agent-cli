@@ -109,7 +109,7 @@ export async function prepareSetupAsync(
     if (options.agentSkills) lines.push(`Sync package skills in ${projectRoot}.`);
     if (options.agentsMd) {
       lines.push(
-        `Update the AGENTS.md managed block and rewrite Expo install/start/lint and expo-doctor commands to agent-cli in ${projectRoot} (or its regular root CLAUDE.md target).`
+        `Update the AGENTS.md managed block and rewrite supported Expo CLI and expo-doctor commands to agent-cli in ${projectRoot} (or its regular root CLAUDE.md target).`
       );
       if (agents.some((agent) => agent.id === 'claude-code')) {
         lines.push(
