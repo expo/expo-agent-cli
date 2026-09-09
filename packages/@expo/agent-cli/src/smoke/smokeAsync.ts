@@ -494,6 +494,7 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
         devServerUrl,
         buildId: build?.id ?? null,
         sessionName: `${path.basename(projectRoot)} — agent-cli smoke`,
+        cleanupAfterRun: true,
       });
       return {
         ok: result.ok,

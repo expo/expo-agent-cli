@@ -75,6 +75,8 @@ export interface EnsureEasSessionOptions {
   stillWanted?: () => boolean;
   /** What the session is called on expo.dev, for a person scanning the list later. */
   sessionName?: string;
+  /** The caller owns cleanup, as smoke does. */
+  cleanupAfterRun?: boolean;
   /** Injected for tests. */
   waits?: { tunnelMs?: number; sessionStartMs?: number };
 }
@@ -359,7 +361,9 @@ export async function ensureEasSessionAsync(
   Log.progress(
     `Starting an EAS Simulator session (${platform}) with ${
       options.expoGo ? 'the Expo Go this SDK ships' : `build ${options.buildId}`
-    } — a few minutes, nothing is stuck. The session bills until "${easCommandPrefix()} simulator:stop".`
+    } — a few minutes, nothing is stuck. ${options.cleanupAfterRun
+      ? 'This run will stop the session afterwards.'
+      : `The session bills until "${PROGRAM_PREFIX} dev:stop --eas".`}`
   );
   const result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
     cwd: projectRoot,

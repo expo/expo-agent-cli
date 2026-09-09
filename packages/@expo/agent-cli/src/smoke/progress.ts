@@ -78,7 +78,7 @@ function phaseSentence(
     case 'boot-device':
       return `Booting an ${options.platform} device — a cold one takes a minute or two`;
     case 'start-session':
-      return `Reaching an EAS Simulator session (${options.platform}) — starting one takes a few minutes, and it bills until stopped`;
+      return `Reaching an EAS Simulator session (${options.platform}) — starting one takes a few minutes; this run stops any session it creates`;
     case 'install-app':
       // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
       // Two very different waits behind one phase, and the line has to say which: a download is

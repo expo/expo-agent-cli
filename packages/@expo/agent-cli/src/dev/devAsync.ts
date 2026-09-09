@@ -1016,7 +1016,7 @@ async function openAppOnEasForRunAsync(
       Log.progress(
         `Opened the app on EAS Simulator session ${report.sessionId ?? '(id unknown)'}${
           report.started ? ', started by this run' : ', which was already up'
-        }.${report.sessionUrl ? ` Watch it at ${report.sessionUrl}.` : ''} It bills until "${easCommandPrefix()} simulator:stop".`
+        }.${report.sessionUrl ? ` Watch it at ${report.sessionUrl}.` : ''} It bills until "${PROGRAM_PREFIX} dev:stop --eas".`
       );
     } else if (stillWanted()) {
       Log.warn(openAppOnEasFailureLine(platform, report.reason ?? 'no reason was given'));

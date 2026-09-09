@@ -448,6 +448,12 @@ describe(`${buildStartFollowUps.name} — a tunnelled run, and a machine with no
   // The rule that keeps a working machine working: a probe that could not run establishes nothing.
   // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — the rung is not
   // dropped on a machine with no device, it is aimed at the device this project does have.
+  it('offers agent-cli to stop both the dev server and EAS session', () => {
+    const followups = buildStartFollowUps({ ...base, onEas: true });
+    expect(followups.find((item) => item.id === 'stop-session')?.command).toBe('npx @expo/agent-cli dev:stop --eas');
+    expect(followups.find((item) => item.id === 'stop-session')?.why).not.toContain('keeps running');
+  });
+
   it(`aims the deep-link rung at the cloud session when this machine has no device`, () => {
     const followups = buildStartFollowUps({
       ...base,

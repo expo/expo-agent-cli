@@ -116,7 +116,7 @@ export function buildStartFollowUps(input: StartFollowUpInput): FollowUp[] {
         {
           id: 'open-app-eas',
           command: `${PROGRAM_PREFIX} navigate / --eas`,
-          why: `The dev server is tunnelled and the app runs on this project's EAS Simulator session; this deep-links a route onto that session. The session bills until "${easCommandPrefix()} simulator:stop".`,
+          why: `The dev server is tunnelled and the app runs on this project's EAS Simulator session; this deep-links a route onto that session. The session bills until "${PROGRAM_PREFIX} dev:stop --eas".`,
         },
       ]
     : input.localDevice !== 'absent'
@@ -134,7 +134,7 @@ export function buildStartFollowUps(input: StartFollowUpInput): FollowUp[] {
             {
               id: 'open-app-cloud',
               command: `${PROGRAM_PREFIX} navigate / --eas`,
-              why: `This machine has no booted simulator and no attached device, and this project has an EAS Simulator session on record — so this deep-links the app onto that instead. It needs a tunnelled dev server, and the session bills until "${easCommandPrefix()} simulator:stop".`,
+              why: `This machine has no booted simulator and no attached device, and this project has an EAS Simulator session on record — so this deep-links the app onto that instead. It needs a tunnelled dev server, and the session bills until "${PROGRAM_PREFIX} dev:stop --eas".`,
             },
           ]
         : [];
@@ -150,8 +150,8 @@ export function buildStartFollowUps(input: StartFollowUpInput): FollowUp[] {
       runtimeErrors,
       {
         id: 'stop-session',
-        command: `${easCommandPrefix()} simulator:stop`,
-        why: 'Ends the EAS Simulator session this run opened the app on, and its billing. The dev server keeps running.',
+        command: `${PROGRAM_PREFIX} dev:stop --eas`,
+        why: "Stops this project's dev server and EAS Simulator session, ending its billing.",
       },
     ]);
   }
