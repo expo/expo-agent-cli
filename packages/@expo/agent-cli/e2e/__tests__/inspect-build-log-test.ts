@@ -322,7 +322,7 @@ describe('when no report can be produced', () => {
     expect(result.stderr).toContain("cannot fetch a build's logs yet");
     // The two forms that do work, and the command that finds the log, in the lines a reader acts on.
     expect(result.stderr).toContain('--file');
-    expect(result.stderr).toContain(`Try: npx eas build:view ${buildId}`);
+    expect(result.stderr).toContain(`Try: npx --yes eas-cli@latest build:view ${buildId}`);
   });
 
   it('reports an unknown flag rather than ignoring it', async () => {
@@ -364,7 +364,7 @@ describe('the registry', () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.all).toContain('npx eas build');
+    expect(result.all).toContain('npx --yes eas-cli@latest build');
     expect(result.all).toContain('npx @expo/agent-cli inspect:build-log');
   });
 

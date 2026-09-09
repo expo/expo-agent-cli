@@ -37,7 +37,7 @@ const plan: StartPlan = {
     detail: 'Xcode 16.2 at /Applications/Xcode.app/Contents/Developer.',
     caveats: [],
     selection: null,
-    alternativeCommand: 'npx eas build --platform ios --profile development',
+    alternativeCommand: 'npx --yes eas-cli@latest build --platform ios --profile development',
   },
 };
 
@@ -144,7 +144,7 @@ describe(formatStartPlan, () => {
       });
 
       expect(output).toContain('Not found: xcode-select is not on PATH.');
-      expect(output).toContain('Instead: npx eas build --platform ios --profile development');
+      expect(output).toContain('Instead: npx --yes eas-cli@latest build --platform ios --profile development');
     });
 
     it(`should not call an unprobeable machine a machine without the toolchain`, () => {
@@ -160,7 +160,7 @@ describe(formatStartPlan, () => {
       expect(output).toContain('Not established');
       expect(output).not.toContain('Not found');
       expect(output).toContain(
-        'If it is missing: npx eas build --platform ios --profile development'
+        'If it is missing: npx --yes eas-cli@latest build --platform ios --profile development'
       );
     });
   });
@@ -176,7 +176,7 @@ describe('the Build line of a plan whose backend was chosen', () => {
       status: null,
       detail: null,
       caveats: [],
-      alternativeCommand: 'npx eas build --platform ios --profile development',
+      alternativeCommand: 'npx --yes eas-cli@latest build --platform ios --profile development',
       selection: null,
       ...overrides,
     };
@@ -215,7 +215,7 @@ describe('the Build line of a plan whose backend was chosen', () => {
 
     expect(line).toContain('Chosen because --local was passed.');
     expect(line).toContain('Not found: xcode-select is not on PATH.');
-    expect(line).toContain('Instead: npx eas build --platform ios --profile development');
+    expect(line).toContain('Instead: npx --yes eas-cli@latest build --platform ios --profile development');
   });
 
   it(`names the cloud and what it needs`, () => {

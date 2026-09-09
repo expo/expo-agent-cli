@@ -63,7 +63,7 @@ describe('the reserved build-id positional', () => {
       throw new Error('expected a throw');
     } catch (error: any) {
       expect(error.code).toBe('BUILD_ID_UNSUPPORTED');
-      expect(error.suggestedCommand).toBe(`npx eas build:view ${BUILD_ID}`);
+      expect(error.suggestedCommand).toBe(`npx --yes eas-cli@latest build:view ${BUILD_ID}`);
       // The two forms that do work, in the line a reader acts on.
       expect(error.message).toContain('--file');
       expect(error.message).toContain('inspect:build-log');

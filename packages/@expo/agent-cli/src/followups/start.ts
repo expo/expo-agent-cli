@@ -10,6 +10,7 @@ import type { ProjectState, StartPlan } from '../project/types';
 import { localTool, EAS_REQUIREMENT, EAS_WHERE, LOCAL_WHERE } from '../toolchain/runsOn';
 import type { ToolchainStatus } from '../toolchain/types';
 import { capFollowUps, type FollowUp } from './types';
+import { easCommandPrefix } from '../utils/easCli';
 
 /** Where `expo start` listens when the command line names no port. */
 export const DEFAULT_DEV_SERVER_PORT = 8081;
@@ -115,7 +116,7 @@ export function buildStartFollowUps(input: StartFollowUpInput): FollowUp[] {
         {
           id: 'open-app-eas',
           command: `${PROGRAM_PREFIX} navigate / --eas`,
-          why: `The dev server is tunnelled and the app runs on this project's EAS Simulator session; this deep-links a route onto that session. The session bills until "npx eas simulator:stop".`,
+          why: `The dev server is tunnelled and the app runs on this project's EAS Simulator session; this deep-links a route onto that session. The session bills until "${easCommandPrefix()} simulator:stop".`,
         },
       ]
     : input.localDevice !== 'absent'
@@ -133,7 +134,7 @@ export function buildStartFollowUps(input: StartFollowUpInput): FollowUp[] {
             {
               id: 'open-app-cloud',
               command: `${PROGRAM_PREFIX} navigate / --eas`,
-              why: 'This machine has no booted simulator and no attached device, and this project has an EAS Simulator session on record — so this deep-links the app onto that instead. It needs a tunnelled dev server, and the session bills until "npx eas simulator:stop".',
+              why: `This machine has no booted simulator and no attached device, and this project has an EAS Simulator session on record — so this deep-links the app onto that instead. It needs a tunnelled dev server, and the session bills until "${easCommandPrefix()} simulator:stop".`,
             },
           ]
         : [];
@@ -149,7 +150,7 @@ export function buildStartFollowUps(input: StartFollowUpInput): FollowUp[] {
       runtimeErrors,
       {
         id: 'stop-session',
-        command: 'npx eas simulator:stop',
+        command: `${easCommandPrefix()} simulator:stop`,
         why: 'Ends the EAS Simulator session this run opened the app on, and its billing. The dev server keeps running.',
       },
     ]);
@@ -280,12 +281,12 @@ export function buildEasBuildFollowUp(
   return easJson
     ? {
         id: 'eas-build',
-        command: 'npx eas build --profile production',
+        command: `${easCommandPrefix()} build --profile production`,
         why: `eas.json is configured, so a production build can be started ${EAS_WHERE} — a cloud build, which needs ${EAS_REQUIREMENT} rather than Xcode or the Android SDK ${LOCAL_WHERE}.${stillWorthIt}`,
       }
     : {
         id: 'eas-build-configure',
-        command: 'npx eas build:configure',
+        command: `${easCommandPrefix()} build:configure`,
         why: `There is no eas.json yet, so EAS Build — the cloud build, which needs ${EAS_REQUIREMENT} rather than Xcode or the Android SDK ${LOCAL_WHERE} — has to be configured before the first one.${stillWorthIt}`,
       };
 }
@@ -322,8 +323,8 @@ export function buildStartPlanFollowUps(
   if (location?.runsOn === 'eas') {
     followups.push({
       id: 'eas-account',
-      command: 'npx eas whoami',
-      why: `The plan builds ${EAS_WHERE}, which needs ${EAS_REQUIREMENT} — this says which one this machine is signed in as, before a build is queued under it. "npx eas login" if it is none.`,
+      command: `${easCommandPrefix()} whoami`,
+      why: `The plan builds ${EAS_WHERE}, which needs ${EAS_REQUIREMENT} — this says which one this machine is signed in as, before a build is queued under it. "${easCommandPrefix()} login" if it is none.`,
     });
   } else if (location?.runsOn === 'local' && location.status === 'missing') {
     // Reached only when a flag or the config asked to build here on a machine that cannot: with

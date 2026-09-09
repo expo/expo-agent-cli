@@ -190,7 +190,7 @@ describe(buildStatusFollowUps, () => {
       const followups = buildStatusFollowUps(withBuild('stale'));
 
       expect(ids(followups)).toEqual(['cached-build']);
-      expect(followups[0]!.command).toBe(`npx eas build:download --build-id ${BUILD_ID}`);
+      expect(followups[0]!.command).toBe(`npx --yes eas-cli@latest build:download --build-id ${BUILD_ID}`);
     });
 
     it(`should offer nothing when the installed build already matches`, () => {
@@ -328,7 +328,7 @@ describe(buildNavigateFollowUps, () => {
     });
     const screenshot = followups.find((followup) => followup.id === 'screenshot');
 
-    expect(screenshot?.command).toContain('eas simulator:exec');
+    expect(screenshot?.command).toContain('eas-cli@latest simulator:exec');
     expect(screenshot?.command).toContain('screenshot screen.png');
     expect(screenshot?.command).not.toContain('xcrun');
     expect(screenshot?.command).not.toContain('sess-1');

@@ -6,6 +6,7 @@
 import { PROGRAM_PREFIX } from '../programName';
 import { parseArgsOrThrow, strayArgumentError } from '../utils/args';
 import { CommandError } from '../utils/errors';
+import { easCommandPrefix } from '../utils/easCli';
 
 export interface DeployOptions {
   /** Deploy the web export to EAS Hosting. */
@@ -88,7 +89,7 @@ export function resolveDeployOptions(argv: string[]): DeployOptions {
   }
   if (args['--profile'] != null) {
     throw badArgs(
-      `--profile is not part of a native deploy any more. Why: it named a build profile in eas.json, and the native rail no longer starts an EAS Build — it uploads your project source to launch.expo.dev. How: run "${USAGE_COMMAND} --native", or run "npx eas build --profile ${String(args['--profile'])}" directly if that build is what you want.`,
+      `--profile is not part of a native deploy any more. Why: it named a build profile in eas.json, and the native rail no longer starts an EAS Build — it uploads your project source to launch.expo.dev. How: run "${USAGE_COMMAND} --native", or run "${easCommandPrefix()} build --profile ${String(args['--profile'])}" directly if that build is what you want.`,
       `${USAGE_COMMAND} --native`
     );
   }

@@ -374,7 +374,7 @@ describe('@expo/agent-cli dev --plan', () => {
         runsOn: 'local',
         platform: 'ios',
         requirement: 'Xcode on this machine',
-        alternativeCommand: 'npx eas build --platform ios --profile development',
+        alternativeCommand: 'npx --yes eas-cli@latest build --platform ios --profile development',
       });
       // The status is this host's own answer and the fixtures cannot decide it, so what is pinned
       // is that a probe ran at all and answered with one of the three words it may answer with.
@@ -407,7 +407,7 @@ describe('@expo/agent-cli dev --plan', () => {
       // The steps are the cloud route, so the local one is not in them at all.
       expect(output).not.toContain('expo run:ios');
       // And the ladder leads with what a cloud build needs rather than with the route it took.
-      expect(output).toMatch(/Suggested next:\s*\n\s*npx eas whoami/);
+      expect(output).toMatch(/Suggested next:\s*\n\s*npx --yes eas-cli@latest whoami/);
     });
 
     it('says which host fact chose the EAS route, before anything runs', async () => {
@@ -448,7 +448,7 @@ describe('@expo/agent-cli dev --plan', () => {
       });
       expect(plan.buildLocation!.selection!.because).toContain('ANDROID_HOME');
       expect(plan.steps.map((step) => step.argv[0])).toContain('eas');
-      expect(plan.followups[0]!.command).toBe('npx eas whoami');
+      expect(plan.followups[0]!.command).toBe('npx --yes eas-cli@latest whoami');
     });
 
     // @ref llp/0015-backend-selection-and-config.rfc.md §The selection
@@ -474,7 +474,7 @@ describe('@expo/agent-cli dev --plan', () => {
         status: 'missing',
         selection: { source: 'flag' },
       });
-      expect(plan.followups[0]!.command).toBe('npx eas build --platform ios --profile development');
+      expect(plan.followups[0]!.command).toBe('npx --yes eas-cli@latest build --platform ios --profile development');
     });
 
     it('honours --eas on a machine that could build here', async () => {

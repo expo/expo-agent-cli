@@ -77,6 +77,7 @@ import {
 import { reloadOnCloudSimulatorAsync } from './cloudReload';
 import { debugEvent, event } from './events';
 import type { ReloadOptions } from './resolveOptions';
+import { easCommandPrefix } from '../../utils/easCli';
 
 /**
  * How long the app's message socket has to come back before the broadcast is judged to have done
@@ -1465,7 +1466,7 @@ function explainCloudRelaunchRefusal(report: ReloadResultJson): string[] {
   const appId = /relaunched (\S+)/.exec(failed.reason)?.[1] ?? 'the app';
   return [
     `Whether the app is still on the screen is not known: the relaunch verb terminates the app before it launches it, so a refusal may have left the session with nothing running — and the controller does not say which half it got to.`,
-    `To put it back by hand, run "npx eas simulator:exec npx ${AGENT_DEVICE_SPEC} open ${appId === 'the app' ? '<app-id>' : appId} --platform ${report.platform ?? 'ios'}" — opening the application id rather than a deep link avoids the "Open in Expo Go?" dialog that nothing can answer on a cloud device. "npx eas simulator:stop --id ${report.deviceId ?? '<session-id>'}" ends the session and its billing.`,
+    `To put it back by hand, run "${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} open ${appId === 'the app' ? '<app-id>' : appId} --platform ${report.platform ?? 'ios'}" — opening the application id rather than a deep link avoids the "Open in Expo Go?" dialog that nothing can answer on a cloud device. "${easCommandPrefix()} simulator:stop --id ${report.deviceId ?? '<session-id>'}" ends the session and its billing.`,
   ];
 }
 
@@ -1607,7 +1608,7 @@ function explainStrandedApp(report: ReloadResultJson, options: ReloadOptions): s
       ? `The app was left closed: the device fallback stopped ${appId} on the cloud session and the relaunch was refused, so the session is still billing with nothing running on it, and this command cannot put it back — the reopen it would use is the one that just failed.`
       : `The app was left closed: the device fallback stopped ${appId} and the relaunch was refused, so nothing is running on the device now.`,
     options.cloud
-      ? `To reopen it by hand, run "npx eas simulator:exec npx ${AGENT_DEVICE_SPEC} open ${appId}" — opening the application id rather than a deep link avoids the "Open in Expo Go?" dialog that nothing can answer on a cloud device. "npx eas simulator:stop" ends the session and its billing.`
+      ? `To reopen it by hand, run "${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} open ${appId}" — opening the application id rather than a deep link avoids the "Open in Expo Go?" dialog that nothing can answer on a cloud device. "${easCommandPrefix()} simulator:stop" ends the session and its billing.`
       : `Run "${PROGRAM_PREFIX} navigate /" to open it again.`,
   ];
 }

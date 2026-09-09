@@ -56,6 +56,7 @@ import {
   type PortCollision,
 } from './portCollision';
 import type { DevOptions } from './resolveOptions';
+import { easCommandPrefix } from '../utils/easCli';
 
 /** Where `expo start` listens when nothing names a port, for the free-port scan to start from. */
 const DEFAULT_METRO_PORT = 8081;
@@ -431,7 +432,7 @@ async function executePlanAsync(
         devEvent('eas_build_named', { buildId: easBuildId });
       } else {
         Log.warn(
-          `The build finished, and "eas build:list" did not name it — so no EAS Simulator session will be started with it. Once "npx eas build:list --build-profile ${EAS_SIMULATOR_PROFILE} --status finished" shows it, run this command again: the plan will find the build and skip straight to the session.`
+          `The build finished, and "eas build:list" did not name it — so no EAS Simulator session will be started with it. Once "${easCommandPrefix()} build:list --build-profile ${EAS_SIMULATOR_PROFILE} --status finished" shows it, run this command again: the plan will find the build and skip straight to the session.`
         );
       }
     }
@@ -694,7 +695,7 @@ function stopPromptFor(
       message: [
         `The plan stopped at "${failure.step.id}": "${invocation}" refused, because this project is not linked to an EAS project.`,
         `Why: ${cause?.why ?? 'the EAS CLI reported that this project is not linked to an EAS project, so there is nothing on EAS to act on.'}`,
-        `How: ${cause?.how ?? 'link it once with "npx eas init --account <account-name> --non-interactive", then run this command again.'}`,
+        `How: ${cause?.how ?? `link it once with "${easCommandPrefix()} init --account <account-name> --non-interactive", then run this command again.`}`,
       ].join('\n'),
     };
   }
@@ -976,7 +977,7 @@ async function openAppOnEasForRunAsync(
       Log.progress(
         `Opened the app on EAS Simulator session ${report.sessionId ?? '(id unknown)'}${
           report.started ? ', started by this run' : ', which was already up'
-        }.${report.sessionUrl ? ` Watch it at ${report.sessionUrl}.` : ''} It bills until "npx eas simulator:stop".`
+        }.${report.sessionUrl ? ` Watch it at ${report.sessionUrl}.` : ''} It bills until "${easCommandPrefix()} simulator:stop".`
       );
     } else if (stillWanted()) {
       Log.warn(openAppOnEasFailureLine(platform, report.reason ?? 'no reason was given'));

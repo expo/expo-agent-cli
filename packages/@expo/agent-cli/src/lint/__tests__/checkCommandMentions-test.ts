@@ -193,7 +193,7 @@ describe('rule 4 — a suggestion is runnable as printed', () => {
 
   it(`catches a placeholder in a follow-up, whichever CLI it names`, () => {
     const [problem] = check(
-      `const f = { id: 'x', command: 'npx eas build --profile <profile>', why: 'w' };`
+      `const f = { id: 'x', command: 'npx --yes eas-cli@latest build --profile <profile>', why: 'w' };`
     );
     expect(problem?.rule).toBe('placeholder');
     expect(problem?.subject.role).toBe('followup-command');
@@ -252,7 +252,7 @@ describe('what the check counts', () => {
     const source = [
       `const a = 'npx @expo/agent-cli dev:stop --json';`,
       'const b = `npx @expo/agent-cli ${command} --help`;',
-      `const c = { id: 'x', command: 'npx eas login', why: 'w' };`,
+      `const c = { id: 'x', command: 'npx --yes eas-cli@latest login', why: 'w' };`,
     ].join('\n');
     expect(
       checkCommandMentions(

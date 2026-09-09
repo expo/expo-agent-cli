@@ -11,7 +11,7 @@ describe(buildDeployFollowUps, () => {
         id: 'open-deployment',
         command: 'https://my-app--7xk2m1.expo.app',
       }),
-      expect.objectContaining({ id: 'eas-deploy-prod', command: 'npx eas deploy --prod' }),
+      expect.objectContaining({ id: 'eas-deploy-prod', command: 'npx --yes eas-cli@latest deploy --prod' }),
     ]);
   });
 

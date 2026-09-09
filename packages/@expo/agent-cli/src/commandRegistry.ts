@@ -23,6 +23,7 @@ import type { CommandHelp } from './help/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from './programName';
 import type { Command } from './types';
 import { color } from './utils/color';
+import { easCommandPrefix } from './utils/easCli';
 
 /** Loads one command module on demand, so `@expo/agent-cli --help` never pays for the whole CLI. */
 export type CommandLoader = () => Promise<Command>;
@@ -1006,8 +1007,13 @@ const absentCapabilities: {
   // to `inspect:build-log` — so the answer moved here, where a name this CLI does not have belongs.
   build: {
     absent: `starting a build is the EAS CLI's job, not this one's`,
-    instead: `Run "npx eas build" with the flags you meant to pass here — this CLI wraps no build verb, and never did. What it has is "${PROGRAM_PREFIX} inspect:build-log", which reads the log a finished build left behind and says what failed in it.`,
-    suggestedCommand: 'npx eas build',
+    // Getters, so the runner is resolved when the line is printed and not when this module loads.
+    get instead() {
+      return `Run "${easCommandPrefix()} build" with the flags you meant to pass here — this CLI wraps no build verb, and never did. What it has is "${PROGRAM_PREFIX} inspect:build-log", which reads the log a finished build left behind and says what failed in it.`;
+    },
+    get suggestedCommand() {
+      return `${easCommandPrefix()} build`;
+    },
   },
   logs: {
     absent: `the log this CLI keeps is the dev server's, and it is "${PROGRAM_PREFIX} dev:logs"`,

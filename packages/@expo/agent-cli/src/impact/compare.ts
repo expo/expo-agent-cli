@@ -16,6 +16,7 @@ import {
   runnerNoiseReason,
 } from '../utils/wrapperCrash';
 import type { ComparisonSide } from './types';
+import { easCommandPrefix } from '../utils/easCli';
 
 /** What every comparison mode answers with. */
 export interface Comparison {
@@ -243,7 +244,7 @@ export async function compareWithEasBuildAsync(
               `Why: "${[easCliLabel(easCli), ...args].join(' ')}" ${describeExit(result.exitCode, result.spawnError)}${
                 result.stderr.trim() ? `: ${outputTail(result.stderr)}` : ''
               }`,
-              `How: check the id with "npx eas build:list --limit 5 --json --non-interactive", and that this machine is signed in to the account that owns it.`,
+              `How: check the id with "${easCommandPrefix()} build:list --limit 5 --json --non-interactive", and that this machine is signed in to the account that owns it.`,
             ].join('\n'),
     };
   }

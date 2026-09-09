@@ -6,6 +6,7 @@
 import { IMPACT_CLASS_ORDER, type ImpactClass } from '../impact/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
+import { easCommandPrefix } from '../utils/easCli';
 
 /**
  * The class `--assert` names, or null when the flag was not given.
@@ -50,7 +51,7 @@ export function resolveBuildId(value: unknown, { explain }: { explain: boolean }
       [
         `--build needs the id of an EAS build.`,
         `Why: it compares this working tree against the fingerprint EAS computed for one specific build, which is server ground truth and needs no local record.`,
-        `How: find the id with "npx eas build:list --limit 5 --json --non-interactive", then pass it as "--explain --build <id>".`,
+        `How: find the id with "${easCommandPrefix()} build:list --limit 5 --json --non-interactive", then pass it as "--explain --build <id>".`,
       ].join('\n')
     );
   }

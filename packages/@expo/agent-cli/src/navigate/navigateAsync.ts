@@ -29,6 +29,7 @@ import {
 } from './openRoute';
 import type { NavigateOptions } from './resolveOptions';
 import type { RouteCheckJson } from './routeCheck';
+import { easCommandPrefix } from '../utils/easCli';
 
 /**
  * Machine shape of `@expo/agent-cli navigate --json`.
@@ -515,7 +516,7 @@ function attachNotConfirmed(opened: OpenRouteResult, options: NavigateOptions): 
     alert?.accepted === true
       ? ` The dialog this link raised was accepted and the app still did not connect, so the next thing to look at is the screen rather than the modal.`
       : cloud
-        ? ` On a cloud session the usual cause is a system dialog nothing answered — read it with "npx eas simulator:exec npx ${AGENT_DEVICE_SPEC} alert get" and answer it with "npx eas simulator:exec npx ${AGENT_DEVICE_SPEC} alert accept".`
+        ? ` On a cloud session the usual cause is a system dialog nothing answered — read it with "${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} alert get" and answer it with "${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} alert accept".`
         : '';
   const look = cloud
     ? `${PROGRAM_PREFIX} smoke --platform ${opened.platform} --eas --no-route-check`

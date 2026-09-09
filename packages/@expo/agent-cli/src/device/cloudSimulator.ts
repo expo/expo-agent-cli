@@ -42,6 +42,7 @@ import {
   looksLikeWrapperCrash,
   runnerCrashDetail,
 } from '../utils/wrapperCrash';
+import { easCommandPrefix } from '../utils/easCli';
 
 /** Platforms an EAS Simulator session can run. The same two the local backends drive. */
 export type CloudPlatform = 'ios' | 'android';
@@ -132,8 +133,9 @@ export const CLOUD_SIMULATOR_WAITLIST_URL = 'https://expo.dev/services/simulator
  * `oclif.manifest.json`, and run live]. A project with a development build of its own passes
  * `--build-id <id>` instead, which is the other observed way to have an app on the session.
  */
-export const CLOUD_SESSION_START_COMMAND =
-  'npx eas simulator --platform ios --type agent-device --expo-go --non-interactive --name "expo-agent-cli"';
+export function cloudSessionStartCommand(): string {
+  return `${easCommandPrefix()} simulator --platform ios --type agent-device --expo-go --non-interactive --name "expo-agent-cli"`;
+}
 
 // ---- The argv, as pure functions -------------------------------------------------------------
 //
@@ -946,7 +948,7 @@ async function runEasAsync(
  * reader knows the file on disk is stale rather than wrong.
  */
 export function cloudSessionUnavailableError(probe: CloudSessionProbe): CommandError {
-  const start = CLOUD_SESSION_START_COMMAND;
+  const start = cloudSessionStartCommand();
 
   if (probe.available === false) {
     const error = new CommandError(
@@ -971,7 +973,7 @@ export function cloudSessionUnavailableError(probe: CloudSessionProbe): CommandE
       // `--id` is named rather than left out: `simulator:stop` defaults to `.env.eas-simulator`,
       // and a session started with `--json` writes that file empty, so the bare form has nothing to
       // read [observed — 2026-08-26, live]. Advice that bills by the minute has to work first time.
-      `How: start one with "${start}", then run this command again. "--expo-go" is not optional advice: a session started without it comes up with no app installed, and every link opened on it is refused. A project with a development build of its own passes "--build-id <id>" instead. The session bills until it is stopped, so end it with "npx eas simulator:stop --id <session-id>" when the run is done. To see what this project has running, "npx eas simulator:list --status in-progress" lists it, with the id. To open the link somewhere this CLI does not drive, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL and asks for no device.`,
+      `How: start one with "${start}", then run this command again. "--expo-go" is not optional advice: a session started without it comes up with no app installed, and every link opened on it is refused. A project with a development build of its own passes "--build-id <id>" instead. The session bills until it is stopped, so end it with "${easCommandPrefix()} simulator:stop --id <session-id>" when the run is done. To see what this project has running, "${easCommandPrefix()} simulator:list --status in-progress" lists it, with the id. To open the link somewhere this CLI does not drive, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL and asks for no device.`,
     ].join('\n')
   );
   error.suggestedCommand = start;
@@ -1004,10 +1006,10 @@ export function cloudSessionUnknownError(probe: CloudSessionProbe): CommandError
       }`,
       cause
         ? `How: ${cause.how}`
-        : `How: run "npx eas simulator:list --status in-progress" to see what the CLI says, and check that the "eas" being run is the EAS CLI. Then run this command again, or open the URL elsewhere with "${PROGRAM_PREFIX} navigate <route> --print-url".`,
+        : `How: run "${easCommandPrefix()} simulator:list --status in-progress" to see what the CLI says, and check that the "eas" being run is the EAS CLI. Then run this command again, or open the URL elsewhere with "${PROGRAM_PREFIX} navigate <route> --print-url".`,
     ].join('\n')
   );
-  error.suggestedCommand = cause?.command ?? 'npx eas simulator:list --status in-progress';
+  error.suggestedCommand = cause?.command ?? `${easCommandPrefix()} simulator:list --status in-progress`;
 
   // The same layer-3 hand-off a device verb does. A signed-out account stops the *question* about
   // the session exactly as it stops the answer, and both are a login rather than a broken CLI.
@@ -1130,7 +1132,7 @@ function heldDeviceHow(message: string): string {
     session
       ? `The device is held by the session named ${JSON.stringify(session)}, so bind this verb to that session — the controller takes --session ${session} — or wait for whatever is holding it to let go.`
       : `The device is held by another session, so bind this verb to the session that holds it (the controller takes --session <name>), or wait for it to let go.`,
-    `Do not start a second session: that bills another machine and leaves this one held. "npx eas simulator:list --status in-progress" shows which sessions are up.`,
+    `Do not start a second session: that bills another machine and leaves this one held. "${easCommandPrefix()} simulator:list --status in-progress" shows which sessions are up.`,
   ].join(' ');
 }
 
@@ -1166,7 +1168,7 @@ export function cloudVerbFailedError(
     );
     // The listing either way: for a session that may have ended it is how to find out, and for a
     // held device it is how to see which session is holding it. Neither starts anything.
-    error.suggestedCommand = 'npx eas simulator:list --status in-progress';
+    error.suggestedCommand = `${easCommandPrefix()} simulator:list --status in-progress`;
     return error;
   }
 
@@ -1218,10 +1220,10 @@ export function cloudVerbNotSupportedError(action: string): CommandError {
     [
       `${action} is not something this CLI can do on a cloud simulator, so nothing ran.`,
       `Why: the controller that drives an EAS Simulator session has no verb for it. "eas simulator:stop" ends the whole session — the remote machine and everything on it — which is a larger act than the one asked for here, and doing it under this name would report a session teardown as the act that was requested.`,
-      `How: to put the app back into a known state, open a route on it again with "${PROGRAM_PREFIX} navigate / --eas". To end the session itself, and its billing, run "npx eas simulator:stop".`,
+      `How: to put the app back into a known state, open a route on it again with "${PROGRAM_PREFIX} navigate / --eas". To end the session itself, and its billing, run "${easCommandPrefix()} simulator:stop".`,
     ].join('\n')
   );
-  error.suggestedCommand = 'npx eas simulator:stop';
+  error.suggestedCommand = `${easCommandPrefix()} simulator:stop`;
   return error;
 }
 

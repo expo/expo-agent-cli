@@ -47,7 +47,7 @@ describe(classifySubprocessFailure, () => {
     expect(classifySubprocessFailure(failure({ stderr: SAMPLES.easNotLoggedIn }))).toEqual({
       scenario: 'eas-login',
       need: 'Sign in to an Expo account on this machine.',
-      command: 'npx eas login',
+      command: 'npx --yes eas-cli@latest login',
       url: 'https://expo.dev/settings/access-tokens',
       unattendedEnv: ['EXPO_TOKEN'],
       resumable: true,
@@ -74,9 +74,9 @@ describe(classifySubprocessFailure, () => {
   it('falls back to the generic EAS scenario for a prompt it cannot name', () => {
     expect(
       classifySubprocessFailure(
-        failure({ stderr: SAMPLES.easNonInteractive, invocation: 'npx eas deploy' })
+        failure({ stderr: SAMPLES.easNonInteractive, invocation: 'npx --yes eas-cli@latest deploy' })
       )
-    ).toMatchObject({ scenario: 'eas-prompt', command: 'npx eas deploy' });
+    ).toMatchObject({ scenario: 'eas-prompt', command: 'npx --yes eas-cli@latest deploy' });
   });
 
   it.each([
@@ -151,12 +151,12 @@ describe(classifySubprocessFailure, () => {
           tool: 'eas',
           exitCode: null,
           promptHang: '? Select a platform',
-          invocation: 'npx eas deploy',
+          invocation: 'npx --yes eas-cli@latest deploy',
         })
       )
     ).toMatchObject({
       scenario: 'eas-prompt',
-      command: 'npx eas deploy',
+      command: 'npx --yes eas-cli@latest deploy',
       detectedBy: 'prompt-pattern',
     });
   });
@@ -207,7 +207,7 @@ describe('an unlinked project is not a prompt', () => {
     expect(
       classifySubprocessFailure({
         tool: 'eas',
-        invocation: 'npx eas build --platform ios',
+        invocation: 'npx --yes eas-cli@latest build --platform ios',
         exitCode: 1,
         stdout:
           'EAS project not configured. This command cannot configure it in non-interactive mode. Run one of the following, then re-run this command:\n  eas init --account <account-name> --non-interactive\nAccounts you can create projects in: bob\n',
@@ -215,7 +215,7 @@ describe('an unlinked project is not a prompt', () => {
       })
     ).toMatchObject({
       scenario: 'eas-project-unlinked',
-      command: 'npx eas init --account bob --non-interactive',
+      command: 'npx --yes eas-cli@latest init --account bob --non-interactive',
       detectedBy: 'exit-signature',
     });
   });
@@ -224,7 +224,7 @@ describe('an unlinked project is not a prompt', () => {
     expect(
       classifySubprocessFailure({
         tool: 'eas',
-        invocation: 'npx eas build --platform ios',
+        invocation: 'npx --yes eas-cli@latest build --platform ios',
         exitCode: 1,
         stdout: '',
         stderr: 'Either log in with "eas login" or set the EXPO_TOKEN environment variable to authenticate.\n',

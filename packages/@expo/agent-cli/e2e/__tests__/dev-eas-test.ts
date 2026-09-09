@@ -93,7 +93,6 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     // the simulator profile, and the finished build is named by one `build:list` so the session can
     // install it by id.
     expect(easInvocationArgs(projectRoot)).toEqual([
-      ['build:configure'],
       ['build', '--platform', 'ios', '--profile', 'development-simulator'],
       [
         'build:list',
@@ -180,10 +179,14 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     expect(expoInvocationArgs(projectRoot)).toEqual([]);
   });
 
+  // The configure step exists only for a build routed to EAS by *config* with the device kept
+  // local: `--eas` puts the device on EAS too, and that plan writes the one profile it needs into
+  // eas.json itself (llp/0027 §The build is a simulator build).
   it('stops at a failing build:configure without starting the build', async () => {
     const projectRoot = await setupAsync();
+    await writeAgentCliConfigAsync(projectRoot, { buildBackend: 'eas' });
 
-    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas'], {
+    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios'], {
       env: { STUB_EAS_CONFIGURE_EXIT: '1' },
       reject: false,
     });
@@ -212,7 +215,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     const report = JSON.parse(result.stdout);
     expect(report.error.needsHuman).toMatchObject({
       scenario: 'eas-login',
-      command: 'npx eas login',
+      command: 'npx --yes eas-cli@latest login',
     });
     // The code is the scenario's, not the Expo CLI's prompt code: they are different stops with
     // different recoveries, and an agent that branches on the code has to be able to tell them
@@ -295,7 +298,6 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     expect(
       report.steps.map((step: { id: string; runsOn: string | null }) => [step.id, step.runsOn])
     ).toEqual([
-      ['eas-configure', null],
       ['eas-build', 'eas'],
       ['start', null],
     ]);
@@ -393,13 +395,15 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
     expect(result.exitCode).toBe(0);
     const plan = JSON.parse(result.stdout);
+    // No `build:configure`: `dev` writes the one profile the build needs into eas.json itself.
     expect(plan.steps.map((step: { argv: string[] }) => step.argv)).toEqual([
-      ['eas', 'build:configure'],
       ['eas', 'build', '--platform', 'ios', '--profile', 'development-simulator'],
       ['expo', 'start', '--dev-client', '--tunnel'],
     ]);
-    expect(plan.reasons.join('\n')).toContain('eas.json has no "development-simulator" profile');
-    expect(plan.steps[2].reason).toContain('EAS Simulator session is started with that build');
+    expect(plan.reasons.join('\n')).toContain(
+      'This project has no eas.json, so @expo/agent-cli writes one with the "development-simulator" profile'
+    );
+    expect(plan.steps[1].reason).toContain('EAS Simulator session is started with that build');
     // A plan runs nothing. The one thing it may ask EAS — whether a finished build of this
     // fingerprint exists — needs a per-platform fingerprint, and this fixture ships no fingerprint
     // tool, so nothing is asked (`src/plan/easBuildLookup.ts` answers null before spawning).
@@ -436,10 +440,10 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       );
       expect(result.exitCode).toBe(0);
 
-      // The write this CLI does itself, between `build:configure` and `build`: the real configure
-      // writes a device profile only, and the session cannot install a device build.
+      // The write this CLI does itself, right before `build`: the file did not exist, and no
+      // `build:configure` ran — the profile this build needs is the whole of what is written.
       const easJson = JSON.parse(await fs.promises.readFile(path.join(projectRoot, 'eas.json'), 'utf8'));
-      expect(easJson.build.development).toEqual({ developmentClient: true, distribution: 'internal' });
+      expect(easJson.build.development).toBeUndefined();
       expect(easJson.build['development-simulator']).toEqual({
         developmentClient: true,
         distribution: 'internal',
@@ -447,7 +451,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       });
 
       const invocations = await easInvocationsAfterAsync(projectRoot, 'simulator');
-      expect(invocations).toContainEqual(['build:configure']);
+      expect(invocations.map((args) => args[0])).not.toContain('build:configure');
       expect(invocations).toContainEqual([
         'build',
         '--platform',
@@ -637,12 +641,12 @@ describe('@expo/agent-cli dev --eas on a project EAS does not know', () => {
     expect(report.error.code).toBe('EAS_PROJECT_NOT_LINKED');
     expect(report.error.needsHuman).toMatchObject({
       scenario: 'eas-project-unlinked',
-      command: 'npx eas init --account e2e-user --non-interactive',
+      command: 'npx --yes eas-cli@latest init --account e2e-user --non-interactive',
     });
     expect(report.error.message).toContain('not linked to an EAS project');
     expect(report.error.message).not.toContain('needed an answer');
     // The fix, not the command that just failed.
-    expect(report.error.suggestedCommand).toBe('npx eas init --account e2e-user --non-interactive');
+    expect(report.error.suggestedCommand).toBe('npx --yes eas-cli@latest init --account e2e-user --non-interactive');
     expect(expoInvocationArgs(projectRoot)).toEqual([]);
   });
 });

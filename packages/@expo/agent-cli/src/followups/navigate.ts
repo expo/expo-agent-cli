@@ -8,6 +8,7 @@ import type { DeviceBackend, NavigatePlatform } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
 import { hostPlatform } from '../smoke/suggest';
 import { capFollowUps, type FollowUp } from './types';
+import { easCommandPrefix } from '../utils/easCli';
 
 export interface NavigateFollowUpInput {
   /**
@@ -130,7 +131,7 @@ export function buildNavigateFollowUps({
         on === 'cloud'
           ? // [inferred] — the controller's own verb, run through the session bridge. Never
             // `xcrun`: there is no simulator on this machine to point it at.
-            `npx eas simulator:exec npx ${AGENT_DEVICE_SPEC} screenshot screen.png`
+            `${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} screenshot screen.png`
           : on === 'local-ios'
             ? `xcrun simctl io ${deviceId} screenshot screen.png`
             : `${adbPath} -s ${deviceId} exec-out screencap -p > screen.png`,

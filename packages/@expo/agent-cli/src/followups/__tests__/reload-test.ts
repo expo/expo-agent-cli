@@ -42,7 +42,7 @@ describe(`${buildReloadFollowUps.name} and the session's platform`, () => {
     expect(commands.join('\n')).not.toContain('simctl');
     expect(commands.join('\n')).not.toContain('adb');
     expect(commands).toContain(
-      'npx eas simulator:exec npx agent-device@latest screenshot screen.png'
+      'npx --yes eas-cli@latest simulator:exec npx agent-device@latest screenshot screen.png'
     );
     // The backend is carried on: `navigate /` alone looks for a device on this machine.
     expect(commands).toContain('npx @expo/agent-cli navigate / --ios --eas');

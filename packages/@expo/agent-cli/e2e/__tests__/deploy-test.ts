@@ -189,7 +189,7 @@ function readStubNpxInvocations(projectRoot: string): { args: string[]; cwd: str
  * `stubExpoEnv()` puts on `PATH`.
  *
  * @ref llp/0015-backend-selection-and-config.rfc.md §Resolving the EAS CLI
- * `deploy` reaches the EAS CLI one way — `npx --yes eas-cli@latest deploy` — so the stub `npx` is
+ * `deploy` reaches the EAS CLI one way — `npx --yes eas-cli deploy` — so the stub `npx` is
  * not a fallback rig any more, it is *the* thing under test. There is no stub `eas` bin beside it:
  * nothing resolves a file by that name, and installing one would test a rung that no longer exists.
  */
@@ -530,7 +530,7 @@ describe('@expo/agent-cli deploy', () => {
           code: 'EAS_DEPLOY_FAILED',
           // The non-interactive form, because the run that failed had no terminal to prompt in
           // either (F143).
-          suggestedCommand: 'npx eas init --account <account-name> --non-interactive',
+          suggestedCommand: 'npx --yes eas-cli init --account <account-name> --non-interactive',
         });
         expect(error.needsHuman).toMatchObject({ scenario: 'eas-project-unlinked' });
         expect(error.message).not.toContain('.stub-bin');
@@ -538,7 +538,7 @@ describe('@expo/agent-cli deploy', () => {
 
       // @ref llp/0007-deploy-and-headless.rfc.md §deploy — **F143.** The unlinked
       // project reaches the person-shaped band, because linking is a decision only they can make.
-      // Exit 7 was right and the line under it was not: `Ask the user  npx eas deploy` named the
+      // Exit 7 was right and the line under it was not: `Ask the user  npx --yes eas-cli deploy` named the
       // command that had just failed, while the `How:` two lines above already said `eas init`
       // [observed — friction run 9]. The generic registry row fills in the invocation that stopped,
       // which is right for a tool that went silent and wrong for one that said what was missing.
@@ -564,12 +564,12 @@ describe('@expo/agent-cli deploy', () => {
         // non-interactive mode", and the generic prompt row used to answer for it.
         expect(lastLines(result.stderr, 2)).toEqual([
           'Needs a human   eas-project-unlinked',
-          'Ask the user    npx eas init --account <account-name> --non-interactive',
+          'Ask the user    npx --yes eas-cli init --account <account-name> --non-interactive',
         ]);
         // The accounts the person has to choose between, quoted from the tool's own output.
         expect(result.stderr).toContain('alice, bob');
         // And never the line that produced this failure.
-        expect(result.stderr).not.toContain('Ask the user    npx eas deploy');
+        expect(result.stderr).not.toContain('Ask the user    npx --yes eas-cli deploy');
       });
 
       // One account is not a choice, so the same failure hands back a line that can be run as is.
@@ -588,7 +588,7 @@ describe('@expo/agent-cli deploy', () => {
         });
 
         expect(lastLines(result.stderr, 1)).toEqual([
-          'Ask the user    npx eas init --account bob --non-interactive',
+          'Ask the user    npx --yes eas-cli init --account bob --non-interactive',
         ]);
       });
     });
@@ -645,7 +645,7 @@ describe('@expo/agent-cli deploy', () => {
 
         expect(lastLines(result.stderr, 3)).toEqual([
           'Needs a human   eas-login',
-          'Ask the user    npx eas login',
+          'Ask the user    npx --yes eas-cli login',
           'Or set          EXPO_TOKEN  (https://expo.dev/settings/access-tokens)',
         ]);
         expect(
@@ -694,7 +694,7 @@ describe('@expo/agent-cli deploy', () => {
         expect(result.exitCode).toBe(EXIT_NEEDS_HUMAN);
         expect(lastLines(result.stderr, 3)).toEqual([
           'Needs a human   eas-login',
-          'Ask the user    npx eas login',
+          'Ask the user    npx --yes eas-cli login',
           'Or set          EXPO_TOKEN  (https://expo.dev/settings/access-tokens)',
         ]);
         const events = readEvents(eventsFile);
@@ -703,7 +703,7 @@ describe('@expo/agent-cli deploy', () => {
           // The code the deploy has always raised, now carrying the handoff.
           code: 'EAS_DEPLOY_FAILED',
           scenario: 'eas-login',
-          command: 'npx eas login',
+          command: 'npx --yes eas-cli login',
           detectedBy: 'exit-signature',
         });
         // The stub never saw a terminal: nothing here can answer a prompt.
@@ -758,7 +758,7 @@ describe('@expo/agent-cli deploy', () => {
         expect(result.stderr).toContain('? Select a platform');
         expect(lastLines(result.stderr, 2)).toEqual([
           'Needs a human   eas-prompt',
-          'Ask the user    npx eas deploy',
+          'Ask the user    npx --yes eas-cli deploy',
         ]);
         expect(
           readEvents(eventsFile).find((entry) => entry._e === 'cli:needs_human')

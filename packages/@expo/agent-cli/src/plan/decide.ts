@@ -18,6 +18,7 @@ import type { BuildBackendChoice } from '../toolchain/selectBackend';
 import { classifyAgainstRecordedBuild } from '../impact/fromRecord';
 import type { LastBuildRecord } from './lastBuild';
 import type { DecideStartPlanOptions, NativePlatform, StartPlanRule } from './types';
+import { easCommandPrefix } from '../utils/easCli';
 
 /** How many characters of a fingerprint hash are shown to humans and agents. */
 const HASH_DISPLAY_LENGTH = 8;
@@ -333,7 +334,7 @@ function startExpoGoStep(options: DecideStartPlanOptions): PlanStep {
     ['expo', 'start', '--go'],
     'seconds',
     opensOn && options.deviceBackend === 'eas'
-      ? `Serves the project to Expo Go through a tunnel, which needs no native build. The app is then opened on an EAS Simulator session (${plainPlatformNoun(opensOn)}) running the Expo Go this SDK ships; the session this project has is reused, or one is started — and a session bills until "npx eas simulator:stop".`
+      ? `Serves the project to Expo Go through a tunnel, which needs no native build. The app is then opened on an EAS Simulator session (${plainPlatformNoun(opensOn)}) running the Expo Go this SDK ships; the session this project has is reused, or one is started — and a session bills until "${easCommandPrefix()} simulator:stop".`
       : opensOn
         ? `Serves the project to Expo Go, which needs no native build. The app is then opened on ${plainDeviceNoun(opensOn)}; one is booted, and Expo Go installed, when missing.`
         : options.open === false
@@ -349,7 +350,7 @@ function startDevClientStep(reason: string, options: DecideStartPlanOptions = {}
     ['expo', 'start', '--dev-client'],
     'seconds',
     opensOn && options.deviceBackend === 'eas'
-      ? `Starts the dev server through a tunnel; the development build is then opened on an EAS Simulator session (${plainPlatformNoun(opensOn)}) — the session this project has is reused, or one is started that installs the build by id, and it bills until "npx eas simulator:stop". ${reason}`
+      ? `Starts the dev server through a tunnel; the development build is then opened on an EAS Simulator session (${plainPlatformNoun(opensOn)}) — the session this project has is reused, or one is started that installs the build by id, and it bills until "${easCommandPrefix()} simulator:stop". ${reason}`
       : opensOn
         ? `Starts the dev server; the development build is then opened on ${plainDeviceNoun(opensOn)}, booting one when none is up. ${reason}`
         : options.open === false
@@ -463,16 +464,18 @@ function easRouteSteps(
   const onEas = options.deviceBackend === 'eas';
   // @ref llp/0027-everything-on-eas.rfc.md §The build is a simulator build
   const profile = onEas ? EAS_SIMULATOR_PROFILE : EAS_DEVELOPMENT_PROFILE;
+  // No `eas build:configure` on the EAS device: `dev` writes the one profile that build needs into
+  // `eas.json` itself, creating the file when there is none (`src/utils/easJson.ts`), and the
+  // configure step's other output — device profiles, a submit section — is nothing this plan reads
+  // [Kudo, 2026-09-09].
   const configure: PlanStep[] =
-    options.easJson === false
+    options.easJson === false && !onEas
       ? [
           step(
             'eas-configure',
             ['eas', 'build:configure'],
             'a-minute',
-            onEas
-              ? `Creates eas.json. This project has none yet; the "${profile}" profile the build below needs is added to it next.`
-              : `Creates eas.json, which the build below reads to know what the "${profile}" profile is. This project has none yet.`
+            `Creates eas.json, which the build below reads to know what the "${profile}" profile is. This project has none yet.`
           ),
         ]
       : [];
@@ -485,7 +488,7 @@ function easRouteSteps(
       'many-minutes',
       onEas
         ? `Builds the ${platform} development build ${EAS_WHERE} with the "${profile}" profile — a simulator build, which needs no signing and is what an EAS Simulator session installs (a cloud build, which needs ${EAS_REQUIREMENT} rather than ${localRequirement(platform)}). Nothing is downloaded here: the session that opens the app installs it by build id. ${reason}`
-        : `Builds the ${platform} development build ${EAS_WHERE} (a cloud build, which needs ${EAS_REQUIREMENT} rather than ${localRequirement(platform)}) and ends with a downloadable artifact. Install it on a device before the dev server can reach it — "npx eas build:run --platform ${platform} --latest" does that on a booted simulator or an attached device. ${reason}`,
+        : `Builds the ${platform} development build ${EAS_WHERE} (a cloud build, which needs ${EAS_REQUIREMENT} rather than ${localRequirement(platform)}) and ends with a downloadable artifact. Install it on a device before the dev server can reach it — "${easCommandPrefix()} build:run --platform ${platform} --latest" does that on a booted simulator or an attached device. ${reason}`,
       'eas'
     ),
     step(
@@ -526,7 +529,7 @@ function backendReasons(
     reasons.push(
       `The cloud build generates the native project itself, so this plan has no prebuild step.`
     );
-    if (easJson === false) {
+    if (easJson === false && options.deviceBackend !== 'eas') {
       reasons.push(
         `This project has no eas.json, so the plan configures one first; that step may ask which platforms to set up.`
       );
@@ -538,7 +541,9 @@ function backendReasons(
       );
       if (options.easSimulatorProfile === false) {
         reasons.push(
-          `eas.json has no "${EAS_SIMULATOR_PROFILE}" profile, so ${PROGRAM_NAME} adds one before the build (developmentClient, internal distribution, ios.simulator) — the same profile "eas build:dev" creates. Nothing else in the file is touched.`
+          easJson === false
+            ? `This project has no eas.json, so ${PROGRAM_NAME} writes one with the "${EAS_SIMULATOR_PROFILE}" profile before the build (developmentClient, internal distribution, ios.simulator) — the same profile "eas build:dev" creates. No "eas build:configure": nothing else that step writes is read here.`
+            : `eas.json has no "${EAS_SIMULATOR_PROFILE}" profile, so ${PROGRAM_NAME} adds one before the build (developmentClient, internal distribution, ios.simulator) — the same profile "eas build:dev" creates. Nothing else in the file is touched.`
         );
       }
     }

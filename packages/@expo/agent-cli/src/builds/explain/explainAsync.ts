@@ -18,6 +18,7 @@ import { detectPhases } from './phases';
 import { readLogFileAsync, readLogStreamAsync, type ReadLogResult } from './readLog';
 import type { ExplainOptions } from './resolveOptions';
 import type { ExplainReport } from './types';
+import { easCommandPrefix } from '../../utils/easCli';
 
 /**
  * Read one build log and report what failed in it.
@@ -130,7 +131,7 @@ function notALogError(options: ExplainOptions, controlRatio: number): CommandErr
     [
       `${where} is not a build log, so nothing was read from it.`,
       `Why: ${Math.round(controlRatio * 100)}% of the start of it is control characters, which no log contains — this is binary, and the usual reason is a log that is still compressed. EAS serves build logs brotli-encoded, so a response saved without decoding it looks exactly like this. Reporting "no error located" for it would say the build passed.`,
-      `How: decode it first — "brotli --decompress --output build.log build.log.br", or "curl --compressed" when fetching it — then pass the decoded file with "--file build.log". "npx eas build:view <id>" prints where a build's logs are.`,
+      `How: decode it first — "brotli --decompress --output build.log build.log.br", or "curl --compressed" when fetching it — then pass the decoded file with "--file build.log". "${easCommandPrefix()} build:view <id>" prints where a build's logs are.`,
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_TIMEOUT;

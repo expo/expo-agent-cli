@@ -14,6 +14,7 @@ import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
+import { easCommandPrefix } from '../utils/easCli';
 
 export const inspectBuildLogHelp: CommandHelp = {
   command: 'inspect:build-log',
@@ -55,7 +56,7 @@ export const inspectBuildLogHelp: CommandHelp = {
     `produced · 22 what arrived is not text, most often a log still brotli-compressed.`,
     `"${PROGRAM_PREFIX} inspect:build-log <build-id>" is reserved and does not work yet: eas-cli has no`,
     `build:logs, so an EAS build's log has to be saved and passed with --file. Run`,
-    `"npx eas build:view" for where those files are.`,
+    `"${easCommandPrefix()} build:view" for where those files are.`,
   ],
 };
 

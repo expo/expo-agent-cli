@@ -33,20 +33,20 @@ describe(classifyEasFailure, () => {
       ].join('\n')
     );
 
-    expect(cause?.command).toContain('npx eas init');
+    expect(cause?.command).toContain('npx --yes eas-cli@latest init');
     expect(cause?.why).toContain('not linked');
     // The sentence has to rule the wrong answer out, because that is the answer it replaces.
     expect(cause?.why).toContain('not about being signed in');
   });
 
-  // @ref llp/0007-deploy-and-headless.rfc.md §deploy — **F143.** `npx eas init` on
+  // @ref llp/0007-deploy-and-headless.rfc.md §deploy — **F143.** `npx --yes eas-cli@latest init` on
   // its own is a command that prompts, and this failure exists because the run had no terminal to
   // prompt in: handing it back is handing back the same dead end one command earlier. The runnable
   // form needs a value, and the EAS CLI's own output is where that value is.
   it(`should name the non-interactive form of the fix`, () => {
     const cause = classifyEasFailure(UNLINKED_OUTPUT);
 
-    expect(cause?.command).toBe('npx eas init --account <account-name> --non-interactive');
+    expect(cause?.command).toBe('npx --yes eas-cli@latest init --account <account-name> --non-interactive');
     // Both forms in the How:, because linking an existing project and creating a new one are
     // different intentions and only the caller knows which one they have.
     expect(cause?.how).toContain('--id <project-id> --non-interactive');
@@ -67,7 +67,7 @@ describe(classifyEasFailure, () => {
       ['EAS project not configured.', 'Accounts you can create projects in: bob'].join('\n')
     );
 
-    expect(cause?.command).toBe('npx eas init --account bob --non-interactive');
+    expect(cause?.command).toBe('npx --yes eas-cli@latest init --account bob --non-interactive');
   });
 
   it.each([
@@ -75,7 +75,7 @@ describe(classifyEasFailure, () => {
     ['Error: Not logged in'],
     ['An Expo user account is required. Must be logged in.'],
   ])(`should read a signed-out machine from %p`, (output) => {
-    expect(classifyEasFailure(output)?.command).toBe('npx eas login');
+    expect(classifyEasFailure(output)?.command).toBe('npx --yes eas-cli@latest login');
   });
 
   // Nothing recognised is not a licence to guess: the caller says so instead.
@@ -95,7 +95,7 @@ describe('the one-line summary', () => {
       ['EAS project not configured.', 'Accounts you can create projects in: bob'].join('\n')
     )?.summary;
     expect(summary).toContain('not linked to an EAS project');
-    expect(summary).toContain('npx eas init --account bob --non-interactive');
+    expect(summary).toContain('npx --yes eas-cli@latest init --account bob --non-interactive');
   });
 
   it(`leaves the account a hole when several could be meant`, () => {
@@ -103,6 +103,6 @@ describe('the one-line summary', () => {
   });
 
   it(`names the login for a signed-out machine`, () => {
-    expect(classifyEasFailure('You are not logged in')?.summary).toContain('npx eas login');
+    expect(classifyEasFailure('You are not logged in')?.summary).toContain('npx --yes eas-cli@latest login');
   });
 });

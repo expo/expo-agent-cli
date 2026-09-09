@@ -37,6 +37,7 @@ import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { parseCachedBuild } from '../impact/buildCache';
 import { fetchAdvertisedUrlAsync } from './advertisedUrl';
 import { event } from './events';
+import { easCommandPrefix } from '../utils/easCli';
 
 /** How long the dev server may take to advertise a tunnel host before the open gives up. */
 export const EAS_TUNNEL_WAIT_MS = 120_000;
@@ -337,7 +338,7 @@ export async function ensureEasSessionAsync(
   // 4. No usable session: start one, with the app and the URL on the command line.
   if (!options.expoGo && !options.buildId) {
     return failed(
-      `no EAS build to install on a new session: nothing named a finished "${EAS_SIMULATOR_PROFILE}" build of this project for ${platform}. Build one with "npx eas build --platform ${platform} --profile ${EAS_SIMULATOR_PROFILE}" and run this again.`,
+      `no EAS build to install on a new session: nothing named a finished "${EAS_SIMULATOR_PROFILE}" build of this project for ${platform}. Build one with "${easCommandPrefix()} build --platform ${platform} --profile ${EAS_SIMULATOR_PROFILE}" and run this again.`,
       { tunnelHost, openUrl }
     );
   }
@@ -358,7 +359,7 @@ export async function ensureEasSessionAsync(
   Log.progress(
     `Starting an EAS Simulator session (${platform}) with ${
       options.expoGo ? 'the Expo Go this SDK ships' : `build ${options.buildId}`
-    } — a few minutes, nothing is stuck. The session bills until "npx eas simulator:stop".`
+    } — a few minutes, nothing is stuck. The session bills until "${easCommandPrefix()} simulator:stop".`
   );
   const result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
     cwd: projectRoot,
@@ -378,7 +379,7 @@ export async function ensureEasSessionAsync(
     return failed(
       `"${easCliLabel(easCli)} ${args.join(' ')}" exited ${result.exitCode}: ${said}${
         sessionId
-          ? ` — the session ${sessionId} was created before it failed and may be billing; "npx eas simulator:stop --id ${sessionId}" ends it`
+          ? ` — the session ${sessionId} was created before it failed and may be billing; "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`
           : ''
       }`,
       { tunnelHost, openUrl, sessionId, sessionUrl }

@@ -880,7 +880,7 @@ describe(cloudSessionUnavailableError, () => {
     const error = cloudSessionUnavailableError(probe);
 
     expect(error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
-    expect(error.message).toContain('eas simulator --platform ios --type agent-device --expo-go');
+    expect(error.message).toContain('eas-cli@latest simulator --platform ios --type agent-device --expo-go');
     expect(error.message).toContain('--type agent-device');
     expect(error.message).toContain('bills until it is stopped');
     expect(error.suggestedCommand).toContain('--expo-go');
@@ -983,7 +983,7 @@ describe(cloudVerbFailedError, () => {
   it(`says the device is held rather than that the session may have ended`, () => {
     const error = cloudVerbFailedError(inUse, {
       what: 'the deep link was not opened.',
-      how: 'Check the session is still running with "npx eas simulator:list --status in-progress" — a session can end between the moment it was listed and the moment a verb reaches it. Start a new one if it has.',
+      how: 'Check the session is still running with "npx --yes eas-cli@latest simulator:list --status in-progress" — a session can end between the moment it was listed and the moment a verb reaches it. Start a new one if it has.',
     });
 
     expect(error.code).toBe('CLOUD_SIMULATOR_DEVICE_REFUSED');

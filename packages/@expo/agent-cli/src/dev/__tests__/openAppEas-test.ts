@@ -269,7 +269,7 @@ describe(openAppOnEasAsync, () => {
     });
 
     expect(report.opened).toBe(false);
-    expect(report.reason).toContain('npx eas build --platform ios --profile development-simulator');
+    expect(report.reason).toContain('npx --yes eas-cli@latest build --platform ios --profile development-simulator');
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
 
@@ -363,7 +363,7 @@ describe(openAppOnEasAsync, () => {
     expect(report.opened).toBe(false);
     expect(report.sessionId).toBe('sess-billed');
     expect(report.reason).toContain('exited 1');
-    expect(report.reason).toContain('npx eas simulator:stop --id sess-billed');
+    expect(report.reason).toContain('npx --yes eas-cli@latest simulator:stop --id sess-billed');
   });
 
   it(`says when no eas can be run at all`, async () => {

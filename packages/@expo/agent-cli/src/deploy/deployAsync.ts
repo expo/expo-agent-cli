@@ -42,6 +42,7 @@ import { resolveCreateLaunchCli } from './launchCli';
 import { outputTail, parseDeploymentUrl } from './parseOutput';
 import type { DeployOptions } from './resolveOptions';
 import type { DeployReport, DeployTarget, WebDeployResult } from './types';
+import { easCommandPrefix } from '../utils/easCli';
 
 /** Where `expo export` writes the web bundle when no `--output-dir` is given. */
 const EXPORT_DIR = 'dist';
@@ -54,7 +55,8 @@ const LABEL_WIDTH = 12;
 
 /** The two commands of the web rail, as a person would run them without this wrapper. */
 const EXPORT_COMMAND = 'npx expo export --platform web';
-const DEPLOY_COMMAND = 'npx eas deploy';
+/** The command a person runs to reproduce the upload, in this project's runner spelling. */
+const deployCommand = (): string => `${easCommandPrefix()} deploy`;
 
 /**
  * Deploy a project, and print where it went.
@@ -261,7 +263,7 @@ async function deployWebAsync(
     // Read once and used twice: the diagnosis and the handoff are the same conclusion about the same
     // output, and a handoff that names something else is F143.
     const cause = classifyEasFailure(outputText);
-    throw handoffOr(easDeployFailed(upload, output, cause), deployed, 'eas', DEPLOY_COMMAND, cause);
+    throw handoffOr(easDeployFailed(upload, output, cause), deployed, 'eas', deployCommand(), cause);
   }
 
   const url = parseDeploymentUrl(outputText);

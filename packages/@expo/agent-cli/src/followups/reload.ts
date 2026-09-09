@@ -6,6 +6,7 @@ import { AGENT_DEVICE_SPEC } from '../device/cloudSimulator';
 import type { DeviceBackend } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
 import { capFollowUps, type FollowUp } from './types';
+import { easCommandPrefix } from '../utils/easCli';
 
 export interface ReloadFollowUpInput {
   /**
@@ -65,7 +66,7 @@ export function buildReloadFollowUps({
         on === 'cloud'
           ? // The controller's own verb, run through the session bridge. Never `xcrun`: there is no
             // simulator on this machine to point it at.
-            `npx eas simulator:exec npx ${AGENT_DEVICE_SPEC} screenshot screen.png`
+            `${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} screenshot screen.png`
           : platform === 'ios'
             ? `xcrun simctl io ${deviceId} screenshot screen.png`
             : `${adbPath} -s ${deviceId} exec-out screencap -p > screen.png`,

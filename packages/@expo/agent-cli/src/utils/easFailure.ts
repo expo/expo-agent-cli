@@ -20,6 +20,8 @@
 // both have answers to, and only one of them needs a person.
 
 /** What the EAS CLI's own words say, when they say something this CLI can act on. */
+import { easCommandPrefix } from './easCli';
+
 export interface EasFailureCause {
   /** Which sentence was recognised. */
   id: 'eas-project-unlinked' | 'eas-login';
@@ -94,14 +96,14 @@ const SIGNATURES: readonly EasFailureSignature[] = [
       const account = accounts.length === 1 ? accounts[0]! : '<account-name>';
       return {
         id: 'eas-project-unlinked',
-        summary: `this project is not linked to an EAS project — link it once with "npx eas init --account ${account} --non-interactive" (or --id <project-id> for one that exists)`,
+        summary: `this project is not linked to an EAS project — link it once with "${easCommandPrefix()} init --account ${account} --non-interactive" (or --id <project-id> for one that exists)`,
         why: 'the EAS CLI reported that this project is not linked to an EAS project, so there is nothing on EAS to act on. This is not about being signed in.',
-        how: `link it once, which writes the project id into the app config: "npx eas init --account ${account} --non-interactive" creates a new project under that account, and "npx eas init --id <project-id> --non-interactive" links one that already exists. Then run this command again.${
+        how: `link it once, which writes the project id into the app config: "${easCommandPrefix()} init --account ${account} --non-interactive" creates a new project under that account, and "${easCommandPrefix()} init --id <project-id> --non-interactive" links one that already exists. Then run this command again.${
           accounts.length > 1
             ? ` The EAS CLI listed these accounts: ${accounts.join(', ')} — only a person can choose which one this project belongs to.`
             : ''
         }`,
-        command: `npx eas init --account ${account} --non-interactive`,
+        command: `${easCommandPrefix()} init --account ${account} --non-interactive`,
       };
     },
   },
@@ -111,10 +113,10 @@ const SIGNATURES: readonly EasFailureSignature[] = [
     pattern: /\bnot logged in\b|\beas login\b|\bmust be logged in\b/i,
     cause: () => ({
       id: 'eas-login',
-      summary: 'this machine is not signed in to an Expo account — "npx eas login", or EXPO_TOKEN for a machine with nobody at it',
+      summary: `this machine is not signed in to an Expo account — "${easCommandPrefix()} login", or EXPO_TOKEN for a machine with nobody at it`,
       why: 'the EAS CLI reported that this machine is not signed in to an Expo account, and the run was non-interactive, so it could not ask.',
-      how: 'sign in with "npx eas login", or set EXPO_TOKEN to an access token from expo.dev for a machine with nobody at it, then run this command again.',
-      command: 'npx eas login',
+      how: `sign in with "${easCommandPrefix()} login", or set EXPO_TOKEN to an access token from expo.dev for a machine with nobody at it, then run this command again.`,
+      command: `${easCommandPrefix()} login`,
     }),
   },
 ];

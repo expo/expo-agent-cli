@@ -14,7 +14,7 @@ const followups: FollowUp[] = [
     command: 'npx @expo/agent-cli runtime:errors',
     why: 'Reads the app errors.',
   },
-  { id: 'eas-build', command: 'npx eas build', why: 'Ships the app.' },
+  { id: 'eas-build', command: 'npx --yes eas-cli@latest build', why: 'Ships the app.' },
 ];
 
 afterEach(() => {
@@ -95,7 +95,7 @@ describe(formatFollowUps, () => {
     expect(lines[1]).toContain('Suggested next:');
     expect(lines[2]).toContain('npx @expo/agent-cli runtime:errors');
     expect(lines[2]).toContain('— Reads the app errors.');
-    expect(lines[3]).toContain('npx eas build');
+    expect(lines[3]).toContain('npx --yes eas-cli@latest build');
   });
 
   it(`should align the commands into one column`, () => {
@@ -125,7 +125,7 @@ describe(`${formatFollowUps.name} — the runner in use`, () => {
     expect(printed).toContain('bunx @expo/agent-cli runtime:errors');
     expect(printed).not.toContain('npx @expo/agent-cli');
     // `npx eas` names a different package under Bun, so it is not this substitution's to change.
-    expect(printed).toContain('npx eas build');
+    expect(printed).toContain('npx --yes eas-cli@latest build');
   });
 
   // The machine channel does not move with the shell: `npx @expo/agent-cli` runs in a Bun project too, and

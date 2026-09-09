@@ -99,11 +99,11 @@ describe(needsHumanError, () => {
     expect(error.code).toBe('EAS_LOGIN_REQUIRED');
     expect(error.exitCode).toBe(7);
     expect(error.isNeedsHuman).toBe(true);
-    expect(error.suggestedCommand).toBe('npx eas login');
+    expect(error.suggestedCommand).toBe('npx --yes eas-cli@latest login');
     expect(error.needsHuman).toEqual({
       scenario: 'eas-login',
       need: 'Sign in to an Expo account on this machine.',
-      command: 'npx eas login',
+      command: 'npx --yes eas-cli@latest login',
       url: 'https://expo.dev/settings/access-tokens',
       unattendedEnv: ['EXPO_TOKEN'],
       resumable: true,

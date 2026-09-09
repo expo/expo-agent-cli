@@ -13,7 +13,7 @@
     "line": 12,
     "matchedLine": "error: Signing for \"notesapp\" requires a development team. Select a development team in the Signing & Capabilities editor. (in target 'notesapp' from project 'notesapp')",
     "confidence": "high",
-    "suggestedCommand": "npx eas credentials --platform ios"
+    "suggestedCommand": "npx --yes eas-cli@latest credentials --platform ios"
   },
   "otherSignatures": [
     "13:ios.signing.no-team",

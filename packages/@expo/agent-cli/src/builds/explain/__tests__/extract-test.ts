@@ -20,6 +20,13 @@ import { readLogFileAsync, readLogStreamAsync } from '../readLog';
 // `vi.unmock` is hoisted above the imports, so it belongs below them (`import/first`).
 vi.unmock('fs');
 vi.unmock('node:fs');
+// The fixtures pin the spelling of an EAS command line, and this file reads the real filesystem —
+// where this repository's own `bun.lock` would make `easCommandPrefix()` answer `bunx eas-cli@latest`
+// for the cwd. What the fixtures are about is the anchor's verb, not this machine's runner.
+vi.mock('../../../utils/easCli', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../utils/easCli')>()),
+  easCommandPrefix: () => 'npx --yes eas-cli@latest',
+}));
 
 const FIXTURES = path.join(__dirname, 'fixtures');
 
