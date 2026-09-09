@@ -162,7 +162,7 @@ describe(buildEffectiveConfig, () => {
       // What, why, how — and the "how" is a command the reader can run.
       expect(error.message).toContain('no introspected native results');
       expect(error.message).toContain('_internal.modResults');
-      expect(error.suggestedCommand).toBe('npx expo config --type introspect --json');
+      expect(error.suggestedCommand).toBe('npx @expo/agent-cli config --type introspect --json');
     }
   });
 

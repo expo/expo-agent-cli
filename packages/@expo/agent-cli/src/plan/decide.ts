@@ -334,7 +334,7 @@ function startExpoGoStep(options: DecideStartPlanOptions): PlanStep {
     ['expo', 'start', '--go'],
     'seconds',
     opensOn && options.deviceBackend === 'eas'
-      ? `Serves the project to Expo Go through a tunnel, which needs no native build. The app is then opened on an EAS Simulator session (${plainPlatformNoun(opensOn)}) running the Expo Go this SDK ships; the session this project has is reused, or one is started — and a session bills until "${easCommandPrefix()} simulator:stop".`
+      ? `Serves the project to Expo Go through a tunnel, which needs no native build. The app is then opened on an EAS Simulator session (${plainPlatformNoun(opensOn)}) running the Expo Go this SDK ships; the session this project has is reused, or one is started — and a session bills until "${PROGRAM_PREFIX} dev:stop --eas".`
       : opensOn
         ? `Serves the project to Expo Go, which needs no native build. The app is then opened on ${plainDeviceNoun(opensOn)}; one is booted, and Expo Go installed, when missing.`
         : options.open === false
@@ -350,7 +350,7 @@ function startDevClientStep(reason: string, options: DecideStartPlanOptions = {}
     ['expo', 'start', '--dev-client'],
     'seconds',
     opensOn && options.deviceBackend === 'eas'
-      ? `Starts the dev server through a tunnel; the development build is then opened on an EAS Simulator session (${plainPlatformNoun(opensOn)}) — the session this project has is reused, or one is started that installs the build by id, and it bills until "${easCommandPrefix()} simulator:stop". ${reason}`
+      ? `Starts the dev server through a tunnel; the development build is then opened on an EAS Simulator session (${plainPlatformNoun(opensOn)}) — the session this project has is reused, or one is started that installs the build by id, and it bills until "${PROGRAM_PREFIX} dev:stop --eas". ${reason}`
       : opensOn
         ? `Starts the dev server; the development build is then opened on ${plainDeviceNoun(opensOn)}, booting one when none is up. ${reason}`
         : options.open === false

@@ -310,7 +310,7 @@ describe(buildStartPlanFollowUps, () => {
       );
 
       expect(ids(followups)).toEqual(['eas-account', 'dev', 'build-freshness']);
-      expect(followups[0]!.command).toBe('npx --yes eas-cli@latest whoami');
+      expect(followups[0]!.command).toBe('npx @expo/agent-cli whoami');
       expect(followups[0]!.why).toContain('an Expo account');
       // The plan already went to the cloud, so offering the cloud again says nothing.
       expect(ids(followups)).not.toContain('eas-build-instead');

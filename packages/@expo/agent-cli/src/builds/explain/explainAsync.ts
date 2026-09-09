@@ -153,12 +153,12 @@ function emptyLogError(options: ExplainOptions): CommandError {
       ? [
           `Nothing arrived on stdin, so there is no log to explain.`,
           `Why: this run read stdin because it is not a terminal, and the stream closed without a byte on it. An empty log is not a log with no errors in it — nothing was read at all.`,
-          `How: check that the command on the left of the pipe wrote something, and that its errors are included: "npx expo run:ios 2>&1 | ${PROGRAM_PREFIX} inspect:build-log". Or read a saved log with "--file <path>".`,
+          `How: check that the command on the left of the pipe wrote something, and that its errors are included: "${PROGRAM_PREFIX} run:ios 2>&1 | ${PROGRAM_PREFIX} inspect:build-log". Or read a saved log with "--file <path>".`,
         ].join('\n')
       : [
           `The log at ${options.source.path} is empty, so there is nothing to explain.`,
           `Why: the file exists and was read, and it held no bytes. An empty log is not a log with no errors in it.`,
-          `How: check that the build actually wrote to this path, and that stderr was captured too: "npx expo run:ios > build.log 2>&1".`,
+          `How: check that the build actually wrote to this path, and that stderr was captured too: "${PROGRAM_PREFIX} run:ios > build.log 2>&1".`,
         ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} inspect:build-log --help`;

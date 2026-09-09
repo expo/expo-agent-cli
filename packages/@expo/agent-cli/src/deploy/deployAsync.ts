@@ -199,7 +199,7 @@ async function resolveTargetsAsync(
     [
       `No deploy target was given, and this project has no web app to default to.`,
       `Why: react-native-web is not a dependency, so there is no web bundle to export; the native target is never assumed, because it uploads your project source and then needs a person in a browser.`,
-      `How: pass --native to launch the native app, or add web support with "npx expo install react-native-web react-dom" and pass --web.`,
+      `How: pass --native to launch the native app, or add web support with "${PROGRAM_PREFIX} install react-native-web react-dom" and pass --web.`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} deploy --native`;
@@ -249,7 +249,7 @@ async function deployWebAsync(
         .filter(Boolean)
         .join('\n')
     );
-    error.suggestedCommand = 'npx expo export --platform web';
+    error.suggestedCommand = `${PROGRAM_PREFIX} export --platform web`;
     throw handoffOr(error, exported, 'expo', EXPORT_COMMAND);
   }
 

@@ -3,6 +3,7 @@
 // this plan would need, and one that folds in what the machine answered. Kept out of `decide.ts`
 // because that module is a pure function of *project* state and this is a fact about the host.
 
+import { PROGRAM_PREFIX } from '../programName';
 import type { NativePlatform } from '../plan/types';
 import type { StartPlan } from '../project/types';
 import {
@@ -57,7 +58,7 @@ export function easBuildLocation(
     status: null,
     detail: null,
     caveats: [],
-    alternativeCommand: `npx expo run:${platform}`,
+    alternativeCommand: `${PROGRAM_PREFIX} run:${platform}`,
     selection,
   };
 }

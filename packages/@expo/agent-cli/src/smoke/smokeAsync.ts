@@ -1156,7 +1156,7 @@ async function resolveSmokeTargetAsync(
     // `PlatformManager.openProjectInExpoGoAsync`, the same finding llp/0004 §Decision table
     // records for the plan's platform flag]; a development build is `dev`'s to make.
     installWith: expoGo
-      ? `npx expo start --${options.platform}`
+      ? `${PROGRAM_PREFIX} start --${options.platform}`
       : `${PROGRAM_PREFIX} dev --${options.platform}${options.cloud === 'required' ? ' --eas' : ''}`,
     installWithKind: expoGo ? 'expo-go' : 'native-build',
   };

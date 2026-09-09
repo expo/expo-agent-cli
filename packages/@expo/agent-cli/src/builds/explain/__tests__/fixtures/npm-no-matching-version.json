@@ -13,7 +13,7 @@
     "line": 2,
     "matchedLine": "npm error notarget No matching version found for react@99.99.99.",
     "confidence": "high",
-    "suggestedCommand": "npx expo install --check"
+    "suggestedCommand": "npx @expo/agent-cli install --check"
   },
   "otherSignatures": [
     "1:deps.install-failed"

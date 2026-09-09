@@ -380,7 +380,7 @@ export async function resolveDeviceAsync(
     [
       'No booted device was found, so there is no device to open the deep link on.',
       `Why: ${reasons.join('; ')}.`,
-      'How: open the app on a simulator or device (for example with "npx expo run:ios" or "npx expo run:android"), then run this command again. Pass --ios or --android to name the platform to look on.',
+      `How: open the app on a simulator or device (for example with "${PROGRAM_PREFIX} run:ios" or "${PROGRAM_PREFIX} run:android"), then run this command again. Pass --ios or --android to name the platform to look on.`,
     ],
     context,
     cloud.probe

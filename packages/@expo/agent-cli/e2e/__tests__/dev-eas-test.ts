@@ -234,7 +234,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     const report = JSON.parse(result.stdout);
     expect(report.error.needsHuman).toMatchObject({
       scenario: 'eas-login',
-      command: 'npx --yes eas-cli@latest login',
+      command: 'npx @expo/agent-cli login',
     });
     // The code is the scenario's, not the Expo CLI's prompt code: they are different stops with
     // different recoveries, and an agent that branches on the code has to be able to tell them

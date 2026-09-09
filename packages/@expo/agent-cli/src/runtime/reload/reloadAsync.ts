@@ -1608,7 +1608,7 @@ function explainStrandedApp(report: ReloadResultJson, options: ReloadOptions): s
       ? `The app was left closed: the device fallback stopped ${appId} on the cloud session and the relaunch was refused, so the session is still billing with nothing running on it, and this command cannot put it back — the reopen it would use is the one that just failed.`
       : `The app was left closed: the device fallback stopped ${appId} and the relaunch was refused, so nothing is running on the device now.`,
     options.cloud
-      ? `To reopen it by hand, run "${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} open ${appId}" — opening the application id rather than a deep link avoids the "Open in Expo Go?" dialog that nothing can answer on a cloud device. "${easCommandPrefix()} simulator:stop" ends the session and its billing.`
+      ? `To reopen it by hand, run "${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} open ${appId}" — opening the application id rather than a deep link avoids the "Open in Expo Go?" dialog that nothing can answer on a cloud device. "${PROGRAM_PREFIX} dev:stop --eas" ends the session and its billing.`
       : `Run "${PROGRAM_PREFIX} navigate /" to open it again.`,
   ];
 }

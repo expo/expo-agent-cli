@@ -880,10 +880,10 @@ describe(cloudSessionUnavailableError, () => {
     const error = cloudSessionUnavailableError(probe);
 
     expect(error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
-    expect(error.message).toContain('eas-cli@latest simulator --platform ios --type agent-device --expo-go');
-    expect(error.message).toContain('--type agent-device');
-    expect(error.message).toContain('bills until it is stopped');
-    expect(error.suggestedCommand).toContain('--expo-go');
+    expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
+    expect(error.message).toContain('selects Expo Go or a development build');
+    expect(error.message).toContain('npx @expo/agent-cli dev:stop --eas');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --eas');
   });
 
   // An account that cannot have the feature must never be told to start a session.

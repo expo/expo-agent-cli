@@ -118,23 +118,11 @@ export const CLOUD_SESSION_LIST_LIMIT = 25;
 export const CLOUD_SIMULATOR_WAITLIST_URL = 'https://expo.dev/services/simulators';
 
 /**
- * The command that starts a session this CLI can actually drive, in one place.
- *
- * `--expo-go` is the part that was missing, and its absence made every piece of advice in this
- * package a dead end for an Expo Go project: a session started without it comes up with **no app on
- * it**. `apps --platform ios` on such a session listed only the controller's own test runner, and
- * every `open` of an `exp://` URL failed with `LSApplicationWorkspaceErrorDomain error 115` — the
- * simulator has nothing registered for the scheme [observed — live, 2026-08-27, session
- * `01a04375-…`]. The same start with `--expo-go` listed `Expo Go (host.exp.Exponent)` and loaded the
- * project [observed — live, session `01a04378-…`].
- *
- * `eas simulator` rather than `eas simulator:start`: that is the command name in the CLI's own
- * manifest, and it is the one carrying `--expo-go` [observed — `eas-cli@22.6.0`
- * `oclif.manifest.json`, and run live]. A project with a development build of its own passes
- * `--build-id <id>` instead, which is the other observed way to have an app on the session.
+ * Start a usable app, including Metro and the project's Expo Go/development-build choice.
+ * Keep this in the foreground: detached dev may reuse Metro without opening a session.
  */
 export function cloudSessionStartCommand(): string {
-  return `${easCommandPrefix()} simulator --platform ios --type agent-device --expo-go --non-interactive --name "expo-agent-cli"`;
+  return `${PROGRAM_PREFIX} dev --ios --eas`;
 }
 
 // ---- The argv, as pure functions -------------------------------------------------------------
@@ -970,10 +958,7 @@ export function cloudSessionUnavailableError(probe: CloudSessionProbe): CommandE
     [
       'No EAS Simulator session this CLI can drive is running for this project, so there is no cloud simulator to open the link on.',
       `Why: ${probe.reason ?? 'the service listed no running session'}. A cloud simulator is a session that is started, driven and stopped — unlike a local simulator, there is nothing to find that somebody else left booted.`,
-      // `--id` is named rather than left out: `simulator:stop` defaults to `.env.eas-simulator`,
-      // and a session started with `--json` writes that file empty, so the bare form has nothing to
-      // read [observed — 2026-08-26, live]. Advice that bills by the minute has to work first time.
-      `How: start one with "${start}", then run this command again. "--expo-go" is not optional advice: a session started without it comes up with no app installed, and every link opened on it is refused. A project with a development build of its own passes "--build-id <id>" instead. The session bills until it is stopped, so end it with "${easCommandPrefix()} simulator:stop --id <session-id>" when the run is done. To see what this project has running, "${easCommandPrefix()} simulator:list --status in-progress" lists it, with the id. To open the link somewhere this CLI does not drive, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL and asks for no device.`,
+      `How: start the app with "${start}". Once it opens, run this command again in another terminal. This starts a tunnelled dev server and selects Expo Go or a development build for the project. End the dev server and session with "${PROGRAM_PREFIX} dev:stop --eas" when done. To see this project's sessions, "${easCommandPrefix()} simulator:list --status in-progress" lists them with their ids. To open the link elsewhere, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL.`,
     ].join('\n')
   );
   error.suggestedCommand = start;
@@ -1220,10 +1205,10 @@ export function cloudVerbNotSupportedError(action: string): CommandError {
     [
       `${action} is not something this CLI can do on a cloud simulator, so nothing ran.`,
       `Why: the controller that drives an EAS Simulator session has no verb for it. "eas simulator:stop" ends the whole session — the remote machine and everything on it — which is a larger act than the one asked for here, and doing it under this name would report a session teardown as the act that was requested.`,
-      `How: to put the app back into a known state, open a route on it again with "${PROGRAM_PREFIX} navigate / --eas". To end the session itself, and its billing, run "${easCommandPrefix()} simulator:stop".`,
+      `How: to put the app back into a known state, open a route on it again with "${PROGRAM_PREFIX} navigate / --eas". To end the session itself, and its billing, run "${PROGRAM_PREFIX} dev:stop --eas".`,
     ].join('\n')
   );
-  error.suggestedCommand = `${easCommandPrefix()} simulator:stop`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev:stop --eas`;
   return error;
 }
 

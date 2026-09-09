@@ -20,6 +20,7 @@
 // both have answers to, and only one of them needs a person.
 
 /** What the EAS CLI's own words say, when they say something this CLI can act on. */
+import { PROGRAM_PREFIX } from '../programName';
 import { easCommandPrefix } from './easCli';
 
 export interface EasFailureCause {
@@ -113,10 +114,10 @@ const SIGNATURES: readonly EasFailureSignature[] = [
     pattern: /\bnot logged in\b|\beas login\b|\bmust be logged in\b/i,
     cause: () => ({
       id: 'eas-login',
-      summary: `this machine is not signed in to an Expo account — "${easCommandPrefix()} login", or EXPO_TOKEN for a machine with nobody at it`,
+      summary: `this machine is not signed in to an Expo account — "${PROGRAM_PREFIX} login", or EXPO_TOKEN for a machine with nobody at it`,
       why: 'the EAS CLI reported that this machine is not signed in to an Expo account, and the run was non-interactive, so it could not ask.',
-      how: `sign in with "${easCommandPrefix()} login", or set EXPO_TOKEN to an access token from expo.dev for a machine with nobody at it, then run this command again.`,
-      command: `${easCommandPrefix()} login`,
+      how: `sign in with "${PROGRAM_PREFIX} login", or set EXPO_TOKEN to an access token from expo.dev for a machine with nobody at it, then run this command again.`,
+      command: `${PROGRAM_PREFIX} login`,
     }),
   },
 ];

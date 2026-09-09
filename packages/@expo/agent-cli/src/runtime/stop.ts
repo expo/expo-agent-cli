@@ -4,7 +4,6 @@ import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
-import { easCommandPrefix } from '../utils/easCli';
 
 export const runtimeStopHelp: CommandHelp = {
   command: 'runtime:stop',
@@ -60,7 +59,7 @@ export const runtimeStopHelp: CommandHelp = {
     `connected to the dev server, the app config, then Expo Go — and bundleIdSource says which.`,
     `The one runtime command that needs no dev server: it acts on a device, not on a debugger.`,
     `--eas stops the app, never the EAS Simulator session, which keeps billing. End the`,
-    `session with "${easCommandPrefix()} simulator:stop".`,
+    `session and dev server with "${PROGRAM_PREFIX} dev:stop --eas".`,
     `Exit 20 has one cause: --app-id named an app that is not running while the dev server`,
     `reports a different one that is. Nothing was stopped — most often a typo in the id.`,
   ],

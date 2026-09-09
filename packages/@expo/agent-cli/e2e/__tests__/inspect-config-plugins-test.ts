@@ -314,7 +314,7 @@ describe('@expo/agent-cli inspect:config-plugins', () => {
 
       expect(result.exitCode).toBe(1);
       expect(result.all).toContain('no introspected native results');
-      expect(result.all).toContain('Try: npx expo config --type introspect --json');
+      expect(result.all).toContain('Try: npx @expo/agent-cli config --type introspect --json');
     });
 
     it('reports a failed expo CLI in the words the CLI used, and exits 1', async () => {

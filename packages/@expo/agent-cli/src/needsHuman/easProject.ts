@@ -1,4 +1,5 @@
 // @ref llp/0027-everything-on-eas.rfc.md §Check the EAS project before starting the environment
+import { PROGRAM_PREFIX } from '../programName';
 import { parseIntrospectedConfig } from '../config/introspectAsync';
 import { easCommandPrefix } from '../utils/easCli';
 import { CommandError } from '../utils/errors';
@@ -43,7 +44,7 @@ export async function assertEasProjectConfiguredAsync(projectRoot: string): Prom
       'EAS_PROJECT_CONFIG_UNREADABLE',
       `Could not check the EAS project before starting: ${cause instanceof Error ? cause.message : String(cause)}. Fix "expo config --json" in this project and retry.`
     );
-    error.suggestedCommand = 'npx expo config --json';
+    error.suggestedCommand = `${PROGRAM_PREFIX} config --json`;
     throw error;
   }
   const projectId = config.extra?.eas?.projectId;

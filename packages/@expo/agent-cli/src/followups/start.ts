@@ -323,8 +323,8 @@ export function buildStartPlanFollowUps(
   if (location?.runsOn === 'eas') {
     followups.push({
       id: 'eas-account',
-      command: `${easCommandPrefix()} whoami`,
-      why: `The plan builds ${EAS_WHERE}, which needs ${EAS_REQUIREMENT} — this says which one this machine is signed in as, before a build is queued under it. "${easCommandPrefix()} login" if it is none.`,
+      command: `${PROGRAM_PREFIX} whoami`,
+      why: `The plan builds ${EAS_WHERE}, which needs ${EAS_REQUIREMENT} — this says which one this machine is signed in as, before a build is queued under it. "${PROGRAM_PREFIX} login" if it is none.`,
     });
   } else if (location?.runsOn === 'local' && location.status === 'missing') {
     // Reached only when a flag or the config asked to build here on a machine that cannot: with

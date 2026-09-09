@@ -75,7 +75,7 @@ describe('anchorFor', () => {
   it('hands back the match, so a caller can build the command from its groups', () => {
     const found = anchorFor('Unable to resolve module expo-camera from /app/src/index.tsx:');
     expect(found?.anchor.signature).toBe('bundle.unresolved-module');
-    expect(found?.anchor.suggestedCommand?.(found.match)).toBe('npx expo install expo-camera');
+    expect(found?.anchor.suggestedCommand?.(found.match)).toBe('npx @expo/agent-cli install expo-camera');
   });
 
   it('suggests nothing for a relative import, which no install fixes', () => {
@@ -85,7 +85,7 @@ describe('anchorFor', () => {
 
   // A real EAS build failure, verbatim [observed — 2026-08-26, EAS build 77e676e2…]. What
   // `Cannot find module` names is a *specifier*, and a specifier is very often a deep import: the
-  // suggestion has to install the package, because `npx expo install <pkg>/package.json` is not a
+  // suggestion has to install the package, because `npx @expo/agent-cli install <pkg>/package.json` is not a
   // package name and the command fails on the reader's machine.
   it('installs the package, not the deep import path that named it', () => {
     const found = anchorFor(
@@ -94,18 +94,18 @@ describe('anchorFor', () => {
 
     expect(found?.anchor.signature).toBe('deps.module-not-found');
     expect(found?.anchor.suggestedCommand?.(found.match)).toBe(
-      'npx expo install @expo/expo-modules-macros-plugin'
+      'npx @expo/agent-cli install @expo/expo-modules-macros-plugin'
     );
   });
 
   it('keeps the scope on a scoped package, and stops at the first segment otherwise', () => {
     const scoped = anchorFor("Error: Cannot find module '@react-native/babel-preset'");
     expect(scoped?.anchor.suggestedCommand?.(scoped.match)).toBe(
-      'npx expo install @react-native/babel-preset'
+      'npx @expo/agent-cli install @react-native/babel-preset'
     );
 
     const deep = anchorFor("Error: Cannot find module 'expo-router/entry/index.js'");
-    expect(deep?.anchor.suggestedCommand?.(deep.match)).toBe('npx expo install expo-router');
+    expect(deep?.anchor.suggestedCommand?.(deep.match)).toBe('npx @expo/agent-cli install expo-router');
   });
 
   it('reads both npm error prefixes, because both are still in logs', () => {

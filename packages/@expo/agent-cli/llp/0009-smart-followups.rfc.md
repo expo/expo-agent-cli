@@ -68,3 +68,17 @@ The `src/followups/` engine ships a `Next:` text block, a `followups` key in eve
 ## Testing
 
 Follow-up computation is pure logic over already-probed state, so it is exhaustively unit-tested. Tier-1 and tier-2 evals assert that follow-up `id`s appear after key commands, and that a weak model can act on them.
+
+## Prefer this CLI in hints
+
+[asked — Kudo, 2026-09-09] User-facing follow-ups, recovery commands, and help examples
+prefer `@expo/agent-cli` whenever it exposes the same action, including its forwarded Expo
+commands. Preserve arguments and platform/backend intent. Expo and EAS login share the same
+account session, so either authentication failure recommends `@expo/agent-cli login`.
+
+Keep external commands when this CLI has no equivalent: EAS artifact builds/downloads,
+production Hosting promotion, Update publishing, credentials, project linking, and simulator
+controller operations. Exact-session cleanup retains `eas simulator:stop --id <id>`; ordinary
+project shutdown recommends `@expo/agent-cli dev:stop --eas`. Bootstrap advice must still work
+when the project CLI or package runner is missing. Labels and captured output describing the
+subprocess that actually ran remain faithful to that subprocess.

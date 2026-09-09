@@ -47,7 +47,7 @@ describe(classifySubprocessFailure, () => {
     expect(classifySubprocessFailure(failure({ stderr: SAMPLES.easNotLoggedIn }))).toEqual({
       scenario: 'eas-login',
       need: 'Sign in to an Expo account on this machine.',
-      command: 'npx --yes eas-cli@latest login',
+      command: 'npx @expo/agent-cli login',
       url: 'https://expo.dev/settings/access-tokens',
       unattendedEnv: ['EXPO_TOKEN'],
       resumable: true,
@@ -116,7 +116,7 @@ describe(classifySubprocessFailure, () => {
       classifySubprocessFailure(
         failure({ tool: 'create-launch', stderr: SAMPLES.launchUnauthenticated })
       )
-    ).toMatchObject({ scenario: 'expo-login', command: 'npx expo login' });
+    ).toMatchObject({ scenario: 'expo-login', command: 'npx @expo/agent-cli login' });
   });
 
   it('never matches a signature against another tool’s output', () => {

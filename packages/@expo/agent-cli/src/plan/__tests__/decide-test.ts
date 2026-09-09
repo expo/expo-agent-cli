@@ -440,7 +440,7 @@ describe(decideStartPlan, () => {
     });
 
     // @ref ../../impact/classify §sourceNeedsPrebuild — the row this split was widened for
-    // [asked — Kudo, 2026-09-07]. `npx expo install expo-observe` is the ordinary way a project
+    // [asked — Kudo, 2026-09-07]. `npx @expo/agent-cli install expo-observe` is the ordinary way a project
     // grows, and it used to cost a prebuild that regenerated an identical `ios/`: what prebuild
     // writes comes from the template, the app config and the plugins the app config applies, and a
     // new dependency is none of the three.
@@ -891,7 +891,7 @@ describe(decideStartPlan, () => {
       expect(plan.buildLocation).toMatchObject({
         runsOn: 'eas',
         platform: 'android',
-        alternativeCommand: 'npx expo run:android',
+        alternativeCommand: 'npx @expo/agent-cli run:android',
         selection: chosen,
       });
     });
@@ -1170,7 +1170,7 @@ describe('the EAS device', () => {
     expect(plan.rule).toBe('expo-go');
     expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go']]);
     expect(plan.steps[0]!.reason).toContain('EAS Simulator session (iOS) running the Expo Go this SDK ships');
-    expect(plan.steps[0]!.reason).toContain('npx --yes eas-cli@latest simulator:stop');
+    expect(plan.steps[0]!.reason).toContain('npx @expo/agent-cli dev:stop --eas');
   });
 
   it(`rests on a finished EAS build of this fingerprint instead of making one`, () => {

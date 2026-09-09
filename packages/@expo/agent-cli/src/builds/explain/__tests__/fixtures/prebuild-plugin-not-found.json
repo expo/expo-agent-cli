@@ -13,7 +13,7 @@
     "line": 1,
     "matchedLine": "PluginError: Failed to resolve plugin for module \"expo-nonexistent-plugin-xyz\" relative to \"/private/tmp/wave6-explain-scratch/prebuild-plugin\". Do you have node modules installed?",
     "confidence": "high",
-    "suggestedCommand": "npx expo install expo-nonexistent-plugin-xyz"
+    "suggestedCommand": "npx @expo/agent-cli install expo-nonexistent-plugin-xyz"
   },
   "otherSignatures": [
     "2:prebuild.plugin-not-found"
