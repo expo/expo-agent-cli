@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  breakXcodeSelectAsync,
   executeAgentCliAsync,
   holdDevLockAsync,
   installStubBinAsync,
@@ -23,6 +24,7 @@ import {
   readDevLockAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
+  readStubExpoInvocations,
   stubExpoEnv,
   type StubDevServer,
 } from '../utils';
@@ -578,6 +580,14 @@ describe('@expo/agent-cli smoke', () => {
     it('says it is building, on stderr, before it waits', async () => {
       // No recorded build for its fingerprint, so the plan compiles.
       const projectRoot = await setupFixtureAsync('dev-client-app');
+      // The PATH below has no toolchain, and a bare run on such a machine stops before it builds,
+      // naming --eas (llp/0015 §The selection). The project's config chooses EAS instead, which is
+      // a choice and not detection's guess — so the build starts, and this case is about the
+      // sentence it prints first.
+      const file = path.join(projectRoot, 'package.json');
+      const manifest = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+      manifest.expo = { ...manifest.expo, agentCli: { buildBackend: 'eas' } };
+      await fs.promises.writeFile(file, JSON.stringify(manifest, null, 2));
 
       const result = await executeAgentCliAsync(
         projectRoot,
@@ -1728,5 +1738,31 @@ describe('@expo/agent-cli smoke', () => {
     const smoke = events.find((entry) => entry._e === 'cli:smoke');
     expect(smoke).toMatchObject({ outcome: 'failed', started: false });
     expect(smoke.phases).toHaveLength(9);
+  });
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken.
+// The gate's start phase would build, and the only route this machine leaves is EAS, which uses EAS
+// credits. Nothing asked for that, so the phase fails with the line that would, and nothing is spawned.
+describe('a machine that cannot build, with no --eas', () => {
+  it('fails the start phase naming smoke --eas and the credits it costs, and spawns nothing', async () => {
+    const projectRoot = await setupFixtureAsync('dev-client-app');
+    await breakXcodeSelectAsync(projectRoot);
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['smoke', '--ios', '--json', '--port', '59121', '--timeout', '4s'],
+      { env: stubExpoEnv(projectRoot), reject: false }
+    );
+
+    expect(result.exitCode).toBe(20);
+    const report = JSON.parse(result.stdout);
+    expect(report.ok).toBe(false);
+    const start = report.phases.find((phase: { id: string }) => phase.id === 'start-dev-server');
+    expect(start).toMatchObject({ status: 'failed' });
+    expect(start.reason).toContain('uses EAS credits');
+    expect(start.reason).toContain('npx @expo/agent-cli smoke --ios --eas');
+    // Nothing was spawned: the stub `expo` was never run at all.
+    expect(readStubExpoInvocations(projectRoot)).toEqual([]);
   });
 });

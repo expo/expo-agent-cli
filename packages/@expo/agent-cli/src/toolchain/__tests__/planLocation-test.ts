@@ -220,6 +220,7 @@ describe('folding the probe into a plan that already chose its backend', () => {
       because,
       why: `Building on this machine: ${because}`,
       doomed: false,
+      implicit: false,
     };
   }
 

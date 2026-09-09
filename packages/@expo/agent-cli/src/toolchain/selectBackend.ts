@@ -28,6 +28,15 @@ export interface BuildBackendChoice {
   runsOn: RunsOn;
   source: BackendSource;
   /**
+   * Nobody chose this: detection did (`host`, `toolchain`).
+   *
+   * @ref llp/0015-backend-selection-and-config.rfc.md §The selection — the route is *named*, never
+   * *taken*. A build on EAS and an EAS Simulator session use EAS credits, so a run that would land
+   * there because this machine cannot build stops and asks for `--eas` [Kudo, 2026-09-09]. A flag or
+   * the `package.json` config is a person's own choice and runs.
+   */
+  implicit: boolean;
+  /**
    * One sentence, in the form the plan prints under `WHY`.
    *
    * Written here rather than by each reader, so `--plan`, `status` and the follow-ups say the
@@ -133,7 +142,8 @@ function choice(
   doomed: boolean = false
 ): BuildBackendChoice {
   const where = runsOn === 'eas' ? EAS_WHERE : LOCAL_WHERE;
-  return { runsOn, source, because, why: `Building ${where}: ${because}`, doomed };
+  const implicit = source === 'host' || source === 'toolchain';
+  return { runsOn, source, because, why: `Building ${where}: ${because}`, doomed, implicit };
 }
 
 /** Why the build stays here, per what the probe managed to establish. */

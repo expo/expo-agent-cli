@@ -109,6 +109,7 @@ Flags beat `package.json`. `package.json` beats detection. Unknown keys are erro
 
 ## Notes
 
+- A machine that cannot build locally (no Xcode, no Android SDK, a Windows host asked for iOS) is never routed to EAS on its own: `dev` and `smoke` stop and name `--eas`, because an EAS build and an EAS Simulator session use EAS credits. Pass `--eas`, or set `buildBackend: "eas"` in the config, to take that route.
 - `smoke --ios --eas` gates the app on this project's EAS Simulator session: it reuses the session in progress, or starts one with Expo Go or the finished EAS build of this fingerprint and ends it afterwards (`start-session` phase). It never builds; a development build with nothing finished on EAS is a failure naming `dev --ios --eas`. `dev:stop --eas` ends the session too.
 - `dev --ios --eas` runs everything on EAS: the dev server is tunnelled, a build (when one is needed) is the `development-simulator` profile on EAS Build — added to `eas.json` when missing, skipped when EAS already has a finished build of this fingerprint — and the app is opened on this project's EAS Simulator session, which is started with Expo Go or that build when none is up. A session bills until `npx --yes eas-cli@latest simulator:stop`. `--eas` on `smoke`, `navigate`, `runtime:reload` and `runtime:stop` names that session as the device.
 - Expo Go on Android has no debugger. Use a development build to drive the app there.

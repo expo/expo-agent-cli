@@ -1243,6 +1243,7 @@ describe('the build line', () => {
         because: 'this machine has Xcode — Xcode 16.2 at /Applications/Xcode.app.',
         why: 'Building on this machine: this machine has Xcode — Xcode 16.2 at /Applications/Xcode.app.',
         doomed: false,
+        implicit: false,
       },
       ...overrides,
     };
@@ -1274,6 +1275,7 @@ describe('the build line', () => {
         because: 'this host runs linux and a ios build needs Xcode, which does not exist for it.',
         why: 'Building in the cloud on EAS: this host runs linux and a ios build needs Xcode, which does not exist for it.',
         doomed: false,
+        implicit: true,
       },
     });
     const rendered = line(

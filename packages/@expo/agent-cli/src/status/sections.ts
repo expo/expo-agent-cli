@@ -547,7 +547,14 @@ export function buildNextActionStatus(
     // The `npx @expo/agent-cli …` spelling, like every command this CLI hands a caller; the runner
     // rewrite happens in `src/status/format.ts` (llp/0024 §The template). The platform is the one
     // this report's plan was decided for, so the two lines cannot disagree.
-    command: devCommand(platform),
+    // `--eas` when the plan's EAS route was detection's and not the caller's: a bare `dev` stops
+    // there and asks for the flag (llp/0015 §The selection), and a `next` has to be a line that runs.
+    command: devCommand(
+      platform,
+      plan.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit
+        ? '--eas'
+        : undefined
+    ),
     rule: plan.rule,
     target: plan.target,
     steps: plan.steps,

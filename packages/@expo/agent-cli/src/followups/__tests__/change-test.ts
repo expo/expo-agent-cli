@@ -30,6 +30,8 @@ function backend(runsOn: 'local' | 'eas') {
     because,
     why: `Building ${runsOn === 'eas' ? 'in the cloud on EAS' : 'on this machine'}: ${because}`,
     doomed: false,
+    // Detection's choice (`host`), which a bare `dev` stops on (llp/0015 §The selection).
+    implicit: runsOn === 'eas',
   };
 }
 
@@ -49,10 +51,11 @@ describe(buildChangeFollowUps, () => {
 
       expect(ids(followups).slice(0, 2)).toEqual(['change-native-build', 'change-local-build']);
       // Still `@expo/agent-cli dev` first: it is the command that makes a plan, and on this host the plan
-      // it makes is the cloud one.
-      expect(followups[0]!.command).toBe('npx @expo/agent-cli dev --ios');
+      // it makes is the cloud one — with the flag that takes it, since a bare `dev` stops there.
+      expect(followups[0]!.command).toBe('npx @expo/agent-cli dev --ios --eas');
       expect(followups[0]!.why).toContain('in the cloud on EAS');
       expect(followups[0]!.why).toContain('this host runs linux');
+      expect(followups[0]!.why).toContain('EAS credits');
     });
 
     it(`should offer --local as the way past a choice the caller disagrees with`, () => {

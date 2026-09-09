@@ -71,10 +71,15 @@ export function buildChangeFollowUps({
       // one. What the choice changes is the sentence, which now says which route that plan takes
       // and why, rather than offering a local build to a host that has no toolchain for it.
       const runsOnEas = buildBackend?.runsOn === 'eas';
+      // @ref llp/0015-backend-selection-and-config.rfc.md §The selection — a route detection named
+      // is one a bare `dev` stops on; the line offered carries the flag that takes it, and its cost.
+      const implicitEas = runsOnEas && buildBackend?.implicit === true;
       followups.push({
         id: 'change-native-build',
-        command: `${PROGRAM_PREFIX} dev --${devPlatform}`,
-        why: runsOnEas
+        command: `${PROGRAM_PREFIX} dev --${devPlatform}${implicitEas ? ' --eas' : ''}`,
+        why: implicitEas
+          ? `The native surface changed, so the installed app cannot run this code. This rebuilds it ${EAS_WHERE} — ${buildBackend!.because} — and runs the app on an EAS Simulator session, which uses EAS credits; without --eas the same command stops and says so.`
+          : runsOnEas
           ? `The native surface changed, so the installed app cannot run this code. This plans the rebuild ${EAS_WHERE} — ${buildBackend!.because} — and prints the plan before it starts anything.`
           : `The native surface changed, so the installed app cannot run this code. This rebuilds it ${LOCAL_WHERE} — the fast route when this machine has ${localTool(platform)}, because the plan engine prebuilds and rebuilds only what has to be.`,
       });

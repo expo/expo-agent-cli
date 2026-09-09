@@ -302,6 +302,7 @@ describe(buildStartPlanFollowUps, () => {
               because: 'this host runs linux.',
               why: 'Building in the cloud on EAS: this host runs linux.',
               doomed: false,
+              implicit: true,
             },
           }),
         }),
