@@ -88,7 +88,7 @@ export interface SmokeFollowUpInput {
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
    * The same fact as {@link platform}, for the other half of "which device is this run about", and
-   * carried for the same reason: a `smoke --cloud` that found no session used to be answered with
+   * carried for the same reason: a `smoke --eas` that found no session used to be answered with
    * `npx @expo/agent-cli navigate / --ios`, which is a ladder off the backend the caller chose onto a
    * booted device the host that reached for the cloud may not have at all. `src/followups/reload.ts`
    * already carried it; this did not.
@@ -98,10 +98,10 @@ export interface SmokeFollowUpInput {
 
 export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   const sameRoute = input.route == null ? '' : ` --route ${input.route}`;
-  // Every command that takes `--cloud` keeps it, so a suggested run is the run the caller asked
+  // Every command that takes `--eas` keeps it, so a suggested run is the run the caller asked
   // for. The commands that do not take it — `dev --detach`, `typecheck`, `status`,
   // `runtime:errors` — are unaffected: none of them is about a device.
-  const onCloud = input.cloud ? ' --cloud' : '';
+  const onCloud = input.cloud ? ' --eas' : '';
   // The flag first, so a reader sees what the command is about before what it opens.
   const same = ` --${input.platform}${sameRoute}${onCloud}`;
   const otherPlatform = input.platform === 'android' ? 'ios' : 'android';
@@ -282,7 +282,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
         why: "This runtime reports nothing over the debugger, so that command falls back to the dev server's own log, which does carry the app's errors — with a code frame. It needs a dev server started with --detach.",
       },
       // Not on a cloud run: a session is one device, so "the other platform" is a *different*
-      // session — one this CLI was never told about. Naming it with `--cloud` would name a session
+      // session — one this CLI was never told about. Naming it with `--eas` would name a session
       // that does not exist, and naming it without would drop the backend the caller chose, so the
       // honest ladder here is one rung.
       ...(input.cloud

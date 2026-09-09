@@ -2,7 +2,7 @@
 // @ref llp/0021-honest-reports.rfc.md §The rules
 // Reloading the app on an EAS Simulator session, which is a different act from reloading it here.
 //
-// **The premise this replaces.** `runtime:reload --cloud` shipped believing the cloud changed only
+// **The premise this replaces.** `runtime:reload --eas` shipped believing the cloud changed only
 // the fallback: "the dev-server broadcast reaches a cloud session already — a cloud session has to
 // reach that dev server through a tunnel to be running the bundle at all". Live, the tunnel carried
 // the **bundle** and not the client command socket. The broadcast reached nobody, the fallback
@@ -30,7 +30,7 @@
 // line on the dev server and the app's debugger target back. Neither verb hands the link to the
 // system while nothing is running, so the "Open in 'Expo Go'?" dialog (S10) does not appear.
 //
-// **The URL is the one that opens the app**, resolved by the same function `navigate --cloud` uses
+// **The URL is the one that opens the app**, resolved by the same function `navigate --eas` uses
 // (`src/navigate/openRoute.ts`): the manifest-derived tunnel host, never `exp+<slug>://<host>`. And
 // the tunnel precondition is checked **before** anything is asked of the device, which is the other
 // half of the S12 fix — a run that stops the app and only then discovers the URL is unusable is how
@@ -74,7 +74,7 @@ export async function reloadOnCloudSimulatorAsync(
   options: ReloadOptions,
   { devServerUrl, targetAppIds }: { devServerUrl: string; targetAppIds: string[] }
 ): Promise<CloudReloadResult> {
-  // The same resolution `navigate --cloud` runs, which is the one that has been seen to open an app
+  // The same resolution `navigate --eas` runs, which is the one that has been seen to open an app
   // on a live session [observed — 2026-08-26, exit 0]. `routeCheck: false` because the caller
   // checked the route already, and checking it twice would walk the routes twice.
   const resolved = await resolveRouteUrlAsync(projectRoot, {
@@ -169,7 +169,7 @@ export async function reloadOnCloudSimulatorAsync(
     };
   }
 
-  // Step two: the link, into the app that is now running. The same verb `navigate --cloud` runs.
+  // Step two: the link, into the app that is now running. The same verb `navigate --eas` runs.
   const linked = await openUrlOnCloudSimulatorAsync({
     projectRoot,
     url: resolved.url,

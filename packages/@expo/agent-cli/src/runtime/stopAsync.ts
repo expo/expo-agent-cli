@@ -96,7 +96,7 @@ export async function runtimeStopAsync(
   options: RuntimeStopOptions
 ): Promise<number> {
   // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator.
-  // `required` and never `fallback`: a session bills by the minute, so `--cloud` is the only way a
+  // `required` and never `fallback`: a session bills by the minute, so `--eas` is the only way a
   // stop reaches one, and a machine with no local device is told it has none rather than quietly
   // handed a paid device it did not ask for.
   const device = await resolveDeviceAsync(options.platform, {
@@ -256,15 +256,15 @@ export function buildStopFollowUps(report: RuntimeStopResultJson): FollowUp[] {
       },
     ];
   }
-  // `--cloud` is carried through: the app was stopped on the session, and `navigate /` without the
+  // `--eas` is carried through: the app was stopped on the session, and `navigate /` without the
   // flag would look for a device on this machine — which is the machine that has none.
   //
   // On a local backend the **platform** is carried for the same reason and it is F103: this command
   // stopped the app on one device, and `navigate /` with no flag opens it on whichever device the
   // host defaults to — the iOS simulator, on a Mac, after a stop on the emulator. A cloud session
-  // needs no platform beside `--cloud`, which already names the one device it has.
+  // needs no platform beside `--eas`, which already names the one device it has.
   const onCloud = report.deviceBackend === 'cloud';
-  const flag = onCloud ? ' --cloud' : ` --${report.platform}`;
+  const flag = onCloud ? ' --eas' : ` --${report.platform}`;
   return [
     {
       id: 'navigate',

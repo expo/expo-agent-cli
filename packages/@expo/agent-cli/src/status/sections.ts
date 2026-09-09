@@ -501,7 +501,7 @@ export function buildNextActionStatus(
    *
    * One `stat` of `.env.eas-simulator`, taken by the caller: `status` promises to be instant, so
    * whether the session is still *running* — which costs an `eas` start-up — is not asked here. A
-   * file that names a dead session costs one `navigate --cloud` that says so, which is a far
+   * file that names a dead session costs one `navigate --eas` that says so, which is a far
    * cheaper wrong answer than a slow report.
    *
    * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
@@ -584,7 +584,7 @@ function verifyAction(
       ? {
           // An EAS Simulator session is iOS (`resolveDeviceAsync`'s cloud fallback asks for iOS and
           // nothing else), so the platform here is a fact about the session rather than a choice.
-          command: `${smokeCommand('ios')} --cloud`,
+          command: `${smokeCommand('ios')} --eas`,
           why: 'a dev server is running with an app connected and this project has an EAS Simulator session, so the gate runs against that session — a plain "smoke" would look for a simulator on this machine',
         }
       : {
@@ -603,7 +603,7 @@ function verifyAction(
   // **command this CLI can run**: the URLs are things a person has to open somewhere else.
   if (cloudLoop) {
     return {
-      command: `${OPEN_APP_COMMAND} --cloud`,
+      command: `${OPEN_APP_COMMAND} --eas`,
       why: `no app is connected and ${
         device?.state === 'absent'
           ? 'this machine has no booted simulator or attached device'

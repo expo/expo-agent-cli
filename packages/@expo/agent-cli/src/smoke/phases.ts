@@ -1112,7 +1112,7 @@ async function runPhasesAsync(
    */
   let appReplaced = false;
 
-  // `--cloud` named the device, and the device it named is not on this machine: booting a
+  // `--eas` named the device, and the device it named is not on this machine: booting a
   // simulator here would be answering a question about a session with a laptop (llp/0005 §Cloud simulator).
   if (options.bootstrap && options.cloud !== 'required') {
     // The **app** is asked about first, and the device only if nothing answers. Two reasons, and

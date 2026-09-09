@@ -118,19 +118,19 @@ describe('resolveNavigateOptions and the cloud backend', () => {
     expect(resolveNavigateOptions(['/']).cloud).toBe('fallback');
   });
 
-  it(`makes the session the device with --cloud`, () => {
-    expect(resolveNavigateOptions(['/', '--cloud']).cloud).toBe('required');
+  it(`makes the session the device with --eas`, () => {
+    expect(resolveNavigateOptions(['/', '--eas']).cloud).toBe('required');
   });
 
   // A session is iOS or Android too, so this pair is not the `--ios`/`--android` pair: naming both
   // the backend and the platform is a meaningful thing to type.
-  it(`accepts a platform alongside --cloud`, () => {
-    const options = resolveNavigateOptions(['/', '--cloud', '--ios']);
+  it(`accepts a platform alongside --eas`, () => {
+    const options = resolveNavigateOptions(['/', '--eas', '--ios']);
     expect(options).toMatchObject({ cloud: 'required', platform: 'ios' });
   });
 
-  it(`refuses --cloud with --print-url, which asks for no device at all`, () => {
-    expect(() => resolveNavigateOptions(['/', '--cloud', '--print-url'])).toThrow(
+  it(`refuses --eas with --print-url, which asks for no device at all`, () => {
+    expect(() => resolveNavigateOptions(['/', '--eas', '--print-url'])).toThrow(
       /opposite things/
     );
   });

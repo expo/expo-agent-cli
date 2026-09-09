@@ -171,7 +171,7 @@ describe('rule 5 — a required option is present', () => {
 
   it(`passes smoke with any one of the platform flags`, () => {
     expect(check(`const x = 'npx @expo/agent-cli smoke --ios';`)).toEqual([]);
-    expect(check(`const x = 'npx @expo/agent-cli smoke --android --cloud';`)).toEqual([]);
+    expect(check(`const x = 'npx @expo/agent-cli smoke --android --eas';`)).toEqual([]);
     expect(check(`const x = 'npx @expo/agent-cli smoke --platform ios';`)).toEqual([]);
   });
 

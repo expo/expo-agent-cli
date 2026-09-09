@@ -178,11 +178,11 @@ describe(buildSmokeFollowUps, () => {
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
 // The same rule the `platform` comment above states, for the other fact that decides which device a
-// run is about. A `smoke --cloud` that could not find a session was answered with
+// run is about. A `smoke --eas` that could not find a session was answered with
 // `npx @expo/agent-cli navigate / --ios` and `npx @expo/agent-cli smoke --ios` — a ladder off the backend the
 // caller chose, onto a booted device the host that reached for the cloud may not have at all.
 describe('a run that asked for the cloud', () => {
-  it(`keeps --cloud on every command that takes it`, () => {
+  it(`keeps --eas on every command that takes it`, () => {
     for (const overrides of [
       { devServerFound: false },
       { appsConnected: 0 },
@@ -191,7 +191,7 @@ describe('a run that asked for the cloud', () => {
     ]) {
       for (const command of commands({ ...overrides, cloud: true })) {
         if (/@expo\/agent-cli (smoke|navigate|runtime:reload)\b/.test(command)) {
-          expect(command).toContain('--cloud');
+          expect(command).toContain('--eas');
         }
       }
     }
@@ -201,12 +201,12 @@ describe('a run that asked for the cloud', () => {
     const followups = buildSmokeFollowUps(input({ appsConnected: 0, cloud: true }));
     const navigate = followups.find((followup) => followup.id === 'navigate')!;
 
-    expect(navigate.command).toBe('npx @expo/agent-cli navigate / --ios --cloud');
+    expect(navigate.command).toBe('npx @expo/agent-cli navigate / --ios --eas');
     expect(navigate.why).not.toContain('booted device');
   });
 
   // The one rung a cloud run cannot have: a session is one device, so "try the other platform" is
-  // a different session this CLI was never told about, and suggesting it with --cloud would name a
+  // a different session this CLI was never told about, and suggesting it with --eas would name a
   // session that does not exist while suggesting it without would leave the backend silently.
   it(`never offers the other platform, which is another session`, () => {
     expect(commands({ runtimeSupported: false, cloud: true })).not.toContain(
@@ -223,7 +223,7 @@ describe('a run that asked for the cloud', () => {
       { failing: 2, outcome: 'failed' as const },
     ]) {
       for (const command of commands(overrides)) {
-        expect(command).not.toContain('--cloud');
+        expect(command).not.toContain('--eas');
       }
     }
   });

@@ -392,17 +392,17 @@ describe(buildStopFollowUps, () => {
     expect(why).toContain('cloud simulator session');
   });
 
-  it(`still carries --cloud into the command it suggests`, () => {
+  it(`still carries --eas into the command it suggests`, () => {
     expect(
       buildStopFollowUps(report({ wasRunning: null, deviceBackend: 'cloud' }))[0]!.command
-    ).toBe('npx @expo/agent-cli navigate / --cloud');
+    ).toBe('npx @expo/agent-cli navigate / --eas');
   });
 
   // F103 — found live on 2026-08-27: `runtime:stop --android` suggested `npx @expo/agent-cli navigate /`,
   // which on this Mac opens the app on the **iOS simulator**. The app that was just stopped is on
   // the emulator, so the one command offered as the way back goes to a different device.
   //
-  // `--cloud` is left alone deliberately: that flag already names the device, and a session has
+  // `--eas` is left alone deliberately: that flag already names the device, and a session has
   // exactly one, so a platform beside it says nothing (the assertion above pins that).
   it(`carries the platform of the device it stopped into the way back (F103)`, () => {
     expect(

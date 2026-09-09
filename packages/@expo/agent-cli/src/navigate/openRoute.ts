@@ -1005,7 +1005,7 @@ const EXPO_GO_DIALOG_LABEL = 'Expo Go';
  *
  * **Why this command answers a system dialog at all.** llp/0008 keeps this CLI out of the business
  * of granting permissions on somebody's behalf, and that is not what this is. The caller ran
- * `--cloud <route>`, which *is* the instruction "open this route on the cloud simulator". iOS then
+ * `--eas <route>`, which *is* the instruction "open this route on the cloud simulator". iOS then
  * asked whether it may do the thing that was just asked for, on a machine in a datacenter with
  * nobody in front of it. Answering it completes the requested action and authorises nothing beyond
  * it — and the precedent is one file up: the Android stuck-app recovery is already automatic rather
@@ -1014,7 +1014,7 @@ const EXPO_GO_DIALOG_LABEL = 'Expo Go';
  *
  * **What keeps that from becoming "answer any prompt".** Four gates, and all four are cheap:
  *
- *  1. only on `--cloud` — a dialog on the machine at somebody's desk has somebody at it;
+ *  1. only on `--eas` — a dialog on the machine at somebody's desk has somebody at it;
  *  2. only after **this run's own** open exited 0;
  *  3. only when nothing attached within the caller's budget, so the happy path spends no verb;
  *  4. the alert is **read before it is answered**, and answered only when it names the app the URL

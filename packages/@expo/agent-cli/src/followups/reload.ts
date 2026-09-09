@@ -80,7 +80,7 @@ export function buildReloadFollowUps({
       id: 'navigate',
       // The backend the reload used, carried on: `navigate /` without it looks for a device on
       // this machine, which is the machine a cloud run has none on.
-      command: `${PROGRAM_PREFIX} navigate /${flag}${on === 'cloud' ? ' --cloud' : ''}`,
+      command: `${PROGRAM_PREFIX} navigate /${flag}${on === 'cloud' ? ' --eas' : ''}`,
       why: 'The app resumed on the route it was launched with; this puts it back on the root route.',
     });
   }

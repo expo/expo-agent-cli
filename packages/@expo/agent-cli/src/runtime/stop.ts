@@ -11,7 +11,7 @@ export const runtimeStopHelp: CommandHelp = {
   options: [
     `--ios, --platform ios   Stop the app on the booted iOS simulator`,
     `--android               Stop the app on the attached Android device`,
-    `--cloud                 Stop the app on this project's EAS Simulator session`,
+    `--eas                   Stop the app on this project's EAS Simulator session`,
     `--app-id <id>           Application id to stop, instead of the one this works out`,
     `--dev-server-url <url>  Dev server to ask which app is running (default: the project's own)`,
     `--port <number>         Dev server on this port, short for --dev-server-url`,
@@ -58,7 +58,7 @@ export const runtimeStopHelp: CommandHelp = {
     `a development build are different applications. Evidence is ranked — --app-id, the app`,
     `connected to the dev server, the app config, then Expo Go — and bundleIdSource says which.`,
     `The one runtime command that needs no dev server: it acts on a device, not on a debugger.`,
-    `--cloud stops the app, never the EAS Simulator session, which keeps billing. End the`,
+    `--eas stops the app, never the EAS Simulator session, which keeps billing. End the`,
     `session with "npx eas simulator:stop".`,
     `Exit 20 has one cause: --app-id named an app that is not running while the dev server`,
     `reports a different one that is. Nothing was stopped — most often a typo in the id.`,

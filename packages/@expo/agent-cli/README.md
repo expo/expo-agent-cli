@@ -35,7 +35,7 @@ Design documents: `llp/0001-agentic-cli-on-expo-cli.rfc.md` and its child LLPs i
 | `dev`                                                          | Plan how to get the app on a device, then do it                     |
 | `start`                                                        | `expo start` and nothing else, then sync skills                     |
 | `dev:logs` / `dev:stop`                                        | Read or stop a detached dev server                                  |
-| `navigate`                                                     | Open a route on a simulator, a device, or EAS Simulator (`--cloud`) |
+| `navigate`                                                     | Open a route on a simulator, a device, or EAS Simulator (`--eas`) |
 | `runtime:reload`                                               | Put the running app back on the code on disk                        |
 | `runtime:errors` / `runtime:eval`                              | Read runtime errors, or evaluate JS in the running app              |
 | `runtime:tree` / `runtime:tap` / `runtime:type`                | Drive the app by `testID`                                           |

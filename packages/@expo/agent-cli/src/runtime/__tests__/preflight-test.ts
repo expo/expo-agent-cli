@@ -126,10 +126,10 @@ describe(`${preflightRuntimeAsync.name} with no dev server`, () => {
   });
 
   // @ref llp/0005 §Cloud simulator — the F5x/S5 rule. A caller who passed
-  // `--cloud` is on a machine whose device is in a datacenter, so a suggestion that drops the flag
+  // `--eas` is on a machine whose device is in a datacenter, so a suggestion that drops the flag
   // sends them to a local simulator they have not got, and one that drops `--tunnel` starts a dev
   // server the session cannot reach.
-  it(`should keep --cloud and the tunnel in the ladder when the caller passed --cloud`, async () => {
+  it(`should keep --eas and the tunnel in the ladder when the caller passed --eas`, async () => {
     mockDevServer(null);
 
     const error = await preflightRuntimeAsync({
@@ -140,7 +140,7 @@ describe(`${preflightRuntimeAsync.name} with no dev server`, () => {
 
     expect(error.message).toContain('npx @expo/agent-cli dev --detach --tunnel');
     expect(error.message).toContain(
-      `npx @expo/agent-cli navigate / --${process.platform === 'darwin' ? 'ios' : 'android'} --cloud`
+      `npx @expo/agent-cli navigate / --${process.platform === 'darwin' ? 'ios' : 'android'} --eas`
     );
   });
 
@@ -307,7 +307,7 @@ describe(`${preflightRuntimeAsync.name} with no app connected`, () => {
 });
 
 // @ref llp/0021-honest-reports.rfc.md §How they show up — F58, S5, F103,
-// F142. The ladder already kept `--cloud` and the platform on `navigate`, and dropped the platform
+// F142. The ladder already kept `--eas` and the platform on `navigate`, and dropped the platform
 // from the `dev` that comes before it — and a bare `dev` plans for whichever platform this machine's
 // probe picks, so the first rung of the ladder out was a different run from the one asked for.
 describe(reachTheAppLadder, () => {
@@ -322,7 +322,7 @@ describe(reachTheAppLadder, () => {
     }
   });
 
-  // `--cloud` is not `dev`'s flag; what a cloud session needs from a dev server is a tunnel. Both
+  // `--eas` is not `dev`'s flag; what a cloud session needs from a dev server is a tunnel. Both
   // still have to be on the one line, in the order the CLI accepts them.
   it(`keeps the tunnel next to the platform for a cloud session`, () => {
     expect(reachTheAppLadder({ state: 'no-dev-server', cloud: true, platform: 'ios' })).toContain(

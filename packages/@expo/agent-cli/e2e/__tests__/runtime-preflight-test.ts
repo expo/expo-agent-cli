@@ -107,20 +107,20 @@ describe('no dev server is running', () => {
   });
 
   // @ref llp/0005 §Cloud simulator — the F5x/S5 rule. A caller who passed
-  // `--cloud` is on a machine whose device is elsewhere: a suggestion without the flag sends them
+  // `--eas` is on a machine whose device is elsewhere: a suggestion without the flag sends them
   // to a simulator they have not got, and one without `--tunnel` starts a dev server the session
   // cannot reach.
-  it('keeps --cloud and --tunnel in the ladder when the caller passed --cloud', async () => {
+  it('keeps --eas and --tunnel in the ladder when the caller passed --eas', async () => {
     const result = await executeAgentCliAsync(
       projectRoot,
-      ['runtime:reload', '--cloud', '--dev-server-url', DEAD_URL, '--json'],
+      ['runtime:reload', '--eas', '--dev-server-url', DEAD_URL, '--json'],
       { reject: false, env: stubExpoEnv(projectRoot) }
     );
 
     const { error } = JSON.parse(result.stdout);
     expect(error.message).toContain('npx @expo/agent-cli dev --detach --tunnel');
     expect(error.message).toContain(
-      `npx @expo/agent-cli navigate / --${process.platform === 'darwin' ? 'ios' : 'android'} --cloud`
+      `npx @expo/agent-cli navigate / --${process.platform === 'darwin' ? 'ios' : 'android'} --eas`
     );
   });
 });

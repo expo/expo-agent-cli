@@ -18,7 +18,7 @@
 //
 //   What  which list is empty, and on which dev server
 //   Why   no app is connected, **or** no dev server is running there — never the two conflated
-//   How   the ladder out, with `--cloud` kept on every command in it when the caller passed it
+//   How   the ladder out, with `--eas` kept on every command in it when the caller passed it
 //
 // **Two exit codes, and the difference is whether asking again can help** (llp/0010 §Exit codes).
 // No dev server is `1`: nothing answered, and nothing this CLI can do in a second changes that, so
@@ -128,7 +128,7 @@ export interface RuntimePreflightOptions {
   /** Require an app on this platform instead of any app. */
   platform?: NavigatePlatform;
   /**
-   * The caller passed `--cloud`, so every command in the ladder keeps the flag.
+   * The caller passed `--eas`, so every command in the ladder keeps the flag.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — F5x and S5. A
    * suggestion that drops it sends a caller to a local simulator their machine has not got, and one
@@ -289,9 +289,11 @@ export function reachTheAppLadder({
   cloud: boolean;
   platform?: NavigatePlatform;
 }): string {
-  // Carried onto every command in the ladder that takes it. `dev` has no `--cloud`; what a cloud
-  // session needs from a dev server is a tunnel, because a datacenter cannot reach this loopback.
-  const cloudFlag = cloud ? ' --cloud' : '';
+  // Carried onto every command in the ladder that takes it as a device flag. `dev` takes `--eas` as
+  // its build backend and not as a device (llp/0015 §One flag for EAS), so it is not put there;
+  // what a cloud session needs from a dev server is a tunnel, because a datacenter cannot reach
+  // this loopback.
+  const cloudFlag = cloud ? ' --eas' : '';
   // `dev` and `navigate` both take it, and `dev` requires it now, so a platform is always stated.
   const platformFlag = ` --${platform ?? hostPlatform()}`;
   const navigate = `${PROGRAM_PREFIX} navigate /${platformFlag}${cloudFlag}`;
@@ -399,7 +401,7 @@ export function noAppConnectedError({
   );
   // 22 rather than 1: the CLI worked and could not *conclude*, which is what this band is for.
   error.exitCode = EXIT_OUTCOME_TIMEOUT;
-  error.suggestedCommand = `${PROGRAM_PREFIX} navigate /${platform == null ? '' : ` --${platform}`}${cloud ? ' --cloud' : ''}`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} navigate /${platform == null ? '' : ` --${platform}`}${cloud ? ' --eas' : ''}`;
   return withData(error, { devServerUrl, devServerReachable: true, platform });
 }
 
@@ -426,7 +428,7 @@ function noAppOnPlatformError(
       ? [
           `No ${platform} app is connected to the Expo dev server at ${devServerUrl}, so there is nothing on ${platform} to read.`,
           `Why: its debugger target list names ${others.length} app${others.length === 1 ? '' : 's'}, and ${others.length === 1 ? 'it is' : 'they are'} on ${uniqueOthers.join(' and ')}${scoped.undetermined.length > 0 ? `, plus ${scoped.undetermined.length} whose platform nothing in the target names` : ''}. Reading one of those would answer a question about ${uniqueOthers[0]} while reporting it as ${platform}.`,
-          `How: open the app on ${platform} with "${PROGRAM_PREFIX} navigate / --${platform}${cloud ? ' --cloud' : ''}", then run this command again. Drop --${platform} to read whichever app is connected.`,
+          `How: open the app on ${platform} with "${PROGRAM_PREFIX} navigate / --${platform}${cloud ? ' --eas' : ''}", then run this command again. Drop --${platform} to read whichever app is connected.`,
         ].join('\n')
       : [
           `No app connected to the Expo dev server at ${devServerUrl} could be shown to be running on ${platform}.`,
@@ -436,7 +438,7 @@ function noAppOnPlatformError(
   );
   error.suggestedCommand =
     uniqueOthers.length > 0
-      ? `${PROGRAM_PREFIX} navigate / --${platform}${cloud ? ' --cloud' : ''}`
+      ? `${PROGRAM_PREFIX} navigate / --${platform}${cloud ? ' --eas' : ''}`
       : `${PROGRAM_PREFIX} status --json`;
   return withData(error, {
     devServerUrl,

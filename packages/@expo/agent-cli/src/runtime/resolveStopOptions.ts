@@ -12,7 +12,7 @@ export interface RuntimeStopOptions {
   /** Platform to stop the app on. Undefined means "whichever device is booted". */
   platform?: NavigatePlatform;
   /**
-   * `--cloud`: stop the app on this project's EAS Simulator session rather than on a local device.
+   * `--eas`: stop the app on this project's EAS Simulator session rather than on a local device.
    *
    * Named rather than fallen back to. A session bills by the minute, so a run that a local device
    * would have served must never quietly become a cloud one — which is why this is `required` on
@@ -36,7 +36,7 @@ const RUNTIME_STOP_ARGS = {
   // could be refused by name: the first cut believed the controller had no verb that ends one app.
   // Reading `agent-device@0.20.10` found `close <appId>`, so the flag now does what an agent that
   // learned it from `navigate` expects it to do.
-  '--cloud': Boolean,
+  '--eas': Boolean,
   '--app-id': String,
   '--dev-server-url': String,
   // Sugar for the two flags above (llp/0005 §One preflight for the runtime family).
@@ -68,7 +68,7 @@ export function resolveRuntimeStopOptions(argv: string[]): RuntimeStopOptions {
     platform: resolveDevicePlatform(args, 'runtime:stop', {
       bothHint: 'run the command twice, once per device.',
     }),
-    cloud: !!args['--cloud'],
+    cloud: !!args['--eas'],
     appId: args['--app-id'] ? String(args['--app-id']) : undefined,
     devServerUrl: resolveDevServerTarget(args['--dev-server-url'], args['--port'], 'runtime:stop'),
     json: !!args['--json'],

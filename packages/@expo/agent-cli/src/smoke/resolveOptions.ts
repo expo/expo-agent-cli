@@ -44,7 +44,7 @@ export interface SmokeOptions {
   /** Platform to drive and to build the entry bundle for. */
   platform: SmokePlatform;
   /**
-   * Which device backends the device-dependent phases may use, decided by `--cloud`.
+   * Which device backends the device-dependent phases may use, decided by `--eas`.
    *
    * The same ladder `navigate` resolves, and it has to be: the `route` phase *is* `navigate`, and a
    * gate whose route phase and screenshot phase looked at different devices would photograph one
@@ -105,7 +105,7 @@ const SMOKE_ARGS = {
   '--platform': String,
   '--ios': Boolean,
   '--android': Boolean,
-  '--cloud': Boolean,
+  '--eas': Boolean,
   // `--start` is what this command does by default now, and it stays accepted rather than being
   // removed: it is on command lines people have already written, and it still names the truth.
   '--start': Boolean,
@@ -192,7 +192,7 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
   return {
     route: args['--route'] ? String(args['--route']) : null,
     platform,
-    cloud: args['--cloud'] ? 'required' : 'fallback',
+    cloud: args['--eas'] ? 'required' : 'fallback',
     bootstrap,
     windowMs: resolveDuration(args['--window'], '--window', DEFAULT_SMOKE_WINDOW_MS, {
       // A window of zero catches nothing and would report an empty one as evidence, which is the

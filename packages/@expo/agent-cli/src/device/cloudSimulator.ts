@@ -1026,7 +1026,7 @@ export function cloudPlatformMismatchError(
       `How: run this command with --${session} (or with no platform flag, which takes the session's own), or start a ${wanted} session and run it again.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} navigate / --cloud --${session}`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} navigate / --eas --${session}`;
   return error;
 }
 
@@ -1040,7 +1040,7 @@ export function cloudPlatformUnknownError(sessionId: string | null): CommandErro
       `How: name it — run this command again with --ios or --android.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} navigate / --cloud --ios`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} navigate / --eas --ios`;
   return error;
 }
 
@@ -1205,7 +1205,7 @@ export function cloudVerbNotSupportedError(action: string): CommandError {
     [
       `${action} is not something this CLI can do on a cloud simulator, so nothing ran.`,
       `Why: the controller that drives an EAS Simulator session has no verb for it. "eas simulator:stop" ends the whole session — the remote machine and everything on it — which is a larger act than the one asked for here, and doing it under this name would report a session teardown as the act that was requested.`,
-      `How: to put the app back into a known state, open a route on it again with "${PROGRAM_PREFIX} navigate / --cloud". To end the session itself, and its billing, run "npx eas simulator:stop".`,
+      `How: to put the app back into a known state, open a route on it again with "${PROGRAM_PREFIX} navigate / --eas". To end the session itself, and its billing, run "npx eas simulator:stop".`,
     ].join('\n')
   );
   error.suggestedCommand = 'npx eas simulator:stop';

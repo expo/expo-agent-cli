@@ -456,7 +456,7 @@ describe(`${buildStartFollowUps.name} — a tunnelled run, and a machine with no
     const open = followups.find((followup) => followup.id === 'open-app-cloud');
 
     expect(ids(followups)).not.toContain('open-app');
-    expect(open?.command).toBe('npx @expo/agent-cli navigate / --cloud');
+    expect(open?.command).toBe('npx @expo/agent-cli navigate / --eas');
     expect(open?.why).toContain('bills until');
   });
 
