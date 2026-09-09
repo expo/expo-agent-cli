@@ -40,8 +40,10 @@ describe('@expo/agent-cli skills', () => {
     expect(example).toBeDefined();
     const result = await executeAgentCliAsync(projectRoot, example!.split(' '), { reject: false });
     expect(result.exitCode, result.all).toBe(0);
-    expect(fs.realpathSync(path.join(projectRoot, '.claude/skills/usage'))).toBe(
-      fs.realpathSync(path.join(projectRoot, 'node_modules/fake-module-with-skills/skills/usage'))
+    // Resolve Windows short/long profile paths consistently, as in the sync tests below.
+    const realpath = fs.realpathSync.native ?? fs.realpathSync;
+    expect(realpath(path.join(projectRoot, '.claude/skills/usage'))).toBe(
+      realpath(path.join(projectRoot, 'node_modules/fake-module-with-skills/skills/usage'))
     );
   });
 

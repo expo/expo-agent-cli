@@ -94,3 +94,7 @@ The initial expanded-suite baseline is 4/5 locally. Qwen calls setup without con
 then stops with advice after the error despite the prompt authorizing confirmation. That case
 remains a real failing eval in the advisory job: it is neither skipped nor marked as an expected
 failure. A future model or help change can improve this baseline without changing the grader.
+
+The first expanded GitHub CPU run completed all five cases in 250 seconds: 3/5 passed. In addition
+to setup, the iOS plan case caught Qwen accepting status's default Android plan on Linux. The
+platform assertion stays explicit; a valid plan for the wrong platform is not success.
