@@ -169,12 +169,12 @@ describe(runCreateLaunchAsync, () => {
     } catch (error: any) {
       expect(error).toBeInstanceOf(CommandError);
       expect(error.code).toBe('LAUNCH_NOT_AUTHENTICATED');
-      expect(error.suggestedCommand).toBe('npx expo login');
+      expect(error.suggestedCommand).toBe('npx @expo/agent-cli login');
       expect(error.exitCode).toBe(EXIT_NEEDS_HUMAN);
       expect(error.needsHuman).toEqual({
         scenario: 'expo-login',
         need: 'Sign in to an Expo account on this machine.',
-        command: 'npx expo login',
+        command: 'npx @expo/agent-cli login',
         url: 'https://expo.dev/settings/access-tokens',
         unattendedEnv: ['EXPO_TOKEN'],
         resumable: true,

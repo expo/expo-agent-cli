@@ -31,7 +31,6 @@ import type {
   PlatformFreshness,
   ProjectStatus,
 } from './types';
-import { easCommandPrefix } from '../utils/easCli';
 
 /** Platforms the freshness section reports, in print order. */
 const PLATFORMS: NativePlatform[] = ['ios', 'android'];
@@ -616,7 +615,7 @@ function verifyAction(
         device?.state === 'absent'
           ? 'this machine has no booted simulator or attached device'
           : "this machine's device tools could not answer"
-      }, so this opens the app on this project's EAS Simulator session instead — it needs a tunnelled dev server, and the session bills until "${easCommandPrefix()} simulator:stop"`,
+      }, so this opens the app on this project's EAS Simulator session instead — it needs a tunnelled dev server, and the session bills until "${PROGRAM_PREFIX} dev:stop --eas"`,
     };
   }
 

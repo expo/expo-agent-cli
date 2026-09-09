@@ -645,7 +645,7 @@ describe('@expo/agent-cli deploy', () => {
 
         expect(lastLines(result.stderr, 3)).toEqual([
           'Needs a human   eas-login',
-          'Ask the user    npx --yes eas-cli login',
+          'Ask the user    npx @expo/agent-cli login',
           'Or set          EXPO_TOKEN  (https://expo.dev/settings/access-tokens)',
         ]);
         expect(
@@ -694,7 +694,7 @@ describe('@expo/agent-cli deploy', () => {
         expect(result.exitCode).toBe(EXIT_NEEDS_HUMAN);
         expect(lastLines(result.stderr, 3)).toEqual([
           'Needs a human   eas-login',
-          'Ask the user    npx --yes eas-cli login',
+          'Ask the user    npx @expo/agent-cli login',
           'Or set          EXPO_TOKEN  (https://expo.dev/settings/access-tokens)',
         ]);
         const events = readEvents(eventsFile);
@@ -703,7 +703,7 @@ describe('@expo/agent-cli deploy', () => {
           // The code the deploy has always raised, now carrying the handoff.
           code: 'EAS_DEPLOY_FAILED',
           scenario: 'eas-login',
-          command: 'npx --yes eas-cli login',
+          command: 'npx @expo/agent-cli login',
           detectedBy: 'exit-signature',
         });
         // The stub never saw a terminal: nothing here can answer a prompt.
@@ -894,7 +894,7 @@ describe('@expo/agent-cli deploy', () => {
       // The last three lines are the handoff, and the recovery is on the last one.
       expect(lastLines(result.stderr, 3)).toEqual([
         'Needs a human   expo-login',
-        'Ask the user    npx expo login',
+        'Ask the user    npx @expo/agent-cli login',
         'Or set          EXPO_TOKEN  (https://expo.dev/settings/access-tokens)',
       ]);
       expect(readEvents(eventsFile).find((entry) => entry._e === 'cli:needs_human')).toMatchObject({

@@ -2,6 +2,7 @@
 import chalk from 'chalk';
 
 import * as Log from '../log';
+import { PROGRAM_PREFIX } from '../programName';
 import { classifyInstallImpactAsync } from '../project/impact';
 import type { InstallImpact, InstallImpactReport } from '../project/types';
 import { event } from './events';
@@ -17,7 +18,7 @@ const IMPACT_LABELS: Record<InstallImpact, string> = {
 const ACTION_LABELS: Record<InstallImpactReport['action'], string> = {
   none: 'nothing has to rerun',
   reload: 'reload the app, the native runtime is unchanged',
-  'prebuild-and-build': 'run npx expo prebuild, then build and install the app again',
+  'prebuild-and-build': `run "${PROGRAM_PREFIX} prebuild", then build and install the app again`,
   'native-sync': 'run pod install / gradle sync, then build and install the app again',
 };
 

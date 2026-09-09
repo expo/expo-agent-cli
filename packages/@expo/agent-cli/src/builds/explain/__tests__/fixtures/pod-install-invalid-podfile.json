@@ -19,7 +19,7 @@
     "line": 2,
     "matchedLine": "[!] Invalid `Podfile` file: cannot load such file -- /private/tmp/wave6-explain-scratch/pods-raise/node_modules/react-native/scripts/react_native_pods.",
     "confidence": "high",
-    "suggestedCommand": "npx expo prebuild --clean --platform ios"
+    "suggestedCommand": "npx @expo/agent-cli prebuild --clean --platform ios"
   },
   "otherSignatures": []
 }

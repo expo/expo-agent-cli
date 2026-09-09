@@ -166,7 +166,7 @@ export function evaluateUnsupportedError(devServerUrl: string): CommandError {
       // still serve, `dev --plan` prints the **Expo Go** path, because the plan engine only reaches
       // the development-build steps when a native module makes Expo Go incompatible
       // (`src/plan/decide.ts`). So the sentence names what does help instead.
-      `How: run "${PROGRAM_PREFIX} runtime:errors --android", which falls back to the dev server's own log when the runtime cannot answer — the app's errors are there, with a code frame. Expo Go on iOS answers this command directly. To leave Expo Go behind, "npx expo run:android" builds and installs this project's own Android app; "${PROGRAM_PREFIX} dev --plan --android" prints the Expo Go path while Expo Go can still serve this project.`,
+      `How: run "${PROGRAM_PREFIX} runtime:errors --android", which falls back to the dev server's own log when the runtime cannot answer — the app's errors are there, with a code frame. Expo Go on iOS answers this command directly. To leave Expo Go behind, "${PROGRAM_PREFIX} run:android" builds and installs this project's own Android app; "${PROGRAM_PREFIX} dev --plan --android" prints the Expo Go path while Expo Go can still serve this project.`,
     ].join('\n')
   );
   // The platform is on it, so the command a driving agent runs next reads the same app (F54).

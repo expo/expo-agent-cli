@@ -112,8 +112,11 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   const { plan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
   if (dropped.length) {
     const last = plan.steps[plan.steps.length - 1]!;
+    const directCommand = last.argv[0] === 'expo'
+      ? `${PROGRAM_PREFIX} ${last.argv.slice(1).join(' ')}`
+      : `npx ${last.argv.join(' ')}`;
     Log.warn(
-      `The plan ends with "${last.argv.join(' ')}" instead of "expo start", so these options were not passed on: ${dropped.join(' ')}. Run "${PROGRAM_NAME} start ${dropped.join(' ')}" once the app is installed, or pass them to "npx ${last.argv.join(' ')}" yourself.`
+      `The plan ends with "${last.argv.join(' ')}" instead of "expo start", so these options were not passed on: ${dropped.join(' ')}. Run "${PROGRAM_PREFIX} start ${dropped.join(' ')}" once the app is installed, or pass them to "${directCommand}" yourself.`
     );
   }
 
@@ -1016,7 +1019,7 @@ async function openAppOnEasForRunAsync(
       Log.progress(
         `Opened the app on EAS Simulator session ${report.sessionId ?? '(id unknown)'}${
           report.started ? ', started by this run' : ', which was already up'
-        }.${report.sessionUrl ? ` Watch it at ${report.sessionUrl}.` : ''} It bills until "${easCommandPrefix()} simulator:stop".`
+        }.${report.sessionUrl ? ` Watch it at ${report.sessionUrl}.` : ''} It bills until "${PROGRAM_PREFIX} dev:stop --eas".`
       );
     } else if (stillWanted()) {
       Log.warn(openAppOnEasFailureLine(platform, report.reason ?? 'no reason was given'));

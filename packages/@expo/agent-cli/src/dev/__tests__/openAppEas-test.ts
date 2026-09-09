@@ -1,4 +1,5 @@
 // @ref llp/0027-everything-on-eas.rfc.md §The open is a session
+import * as Log from '../../log';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { resolveEasCli } from '../../utils/easCli';
@@ -387,6 +388,16 @@ describe(openAppOnEasAsync, () => {
 describe('the session half on its own', () => {
   const { ensureEasSessionAsync, buildSessionStopArgs, stopEasSessionAsync } =
     require('../openAppEas') as typeof import('../openAppEas');
+
+  it('describes smoke cleanup without asking the caller to stop its session', async () => {
+    await ensureEasSessionAsync(projectRoot, {
+      platform: 'ios', expoGo: true, devServerUrl: DEV_SERVER, buildId: null,
+      cleanupAfterRun: true,
+    });
+    const messages = vi.mocked(Log.progress).mock.calls.map(([message]) => message).join('\n');
+    expect(messages).toContain('This run will stop the session afterwards');
+    expect(messages).not.toContain('bills until');
+  });
 
   it(`ends a session by id and never bare`, () => {
     expect(buildSessionStopArgs('sess-1')).toEqual(['simulator:stop', '--id', 'sess-1', '--non-interactive']);

@@ -85,7 +85,7 @@ function installPackage(name: string | undefined): string | null {
   if (!name || name.startsWith('.') || name.startsWith('/')) {
     return null;
   }
-  return `npx expo install ${packageNameOf(name)}`;
+  return `${PROGRAM_PREFIX} install ${packageNameOf(name)}`;
 }
 
 /**
@@ -141,7 +141,7 @@ export const ANCHORS: Anchor[] = [
     kind: 'cause',
     pattern: /^npm (?:ERR!|error) notarget No matching version found for (\S+?)\.?$/,
     message: 'A dependency was requested at a version that was never published.',
-    suggestedCommand: () => 'npx expo install --check',
+    suggestedCommand: () => `${PROGRAM_PREFIX} install --check`,
     provenance: 'captured',
   },
   {
@@ -151,7 +151,7 @@ export const ANCHORS: Anchor[] = [
     pattern: /^npm (?:ERR!|error) ERESOLVE (?:unable to resolve dependency tree|could not resolve)/,
     message:
       'Two dependencies ask for incompatible versions of the same package, so npm produced no tree.',
-    suggestedCommand: () => 'npx expo install --fix',
+    suggestedCommand: () => `${PROGRAM_PREFIX} install --fix`,
     provenance: 'captured',
   },
   {
@@ -239,7 +239,7 @@ export const ANCHORS: Anchor[] = [
     kind: 'cause',
     pattern: /^\[!\] CocoaPods could not find compatible versions for pod [`'"]([^`'"]+)/,
     message: 'Two pods require versions of the same pod that cannot both be satisfied.',
-    suggestedCommand: () => 'npx expo install --check',
+    suggestedCommand: () => `${PROGRAM_PREFIX} install --check`,
     provenance: 'format',
   },
   {
@@ -248,7 +248,7 @@ export const ANCHORS: Anchor[] = [
     kind: 'cause',
     pattern: /^\[!\] Invalid `Podfile` file: (.+)$/,
     message: 'The Podfile did not evaluate, so no dependency was resolved at all.',
-    suggestedCommand: () => 'npx expo prebuild --clean --platform ios',
+    suggestedCommand: () => `${PROGRAM_PREFIX} prebuild --clean --platform ios`,
     provenance: 'captured',
   },
   {

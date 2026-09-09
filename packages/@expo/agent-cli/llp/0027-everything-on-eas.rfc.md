@@ -121,3 +121,7 @@ The creation message identifies a new session. An overwrite warning naming a pre
 ### Attach the controller after a smoke session starts
 
 EAS's `--open-url` launches the app, but does not create an `agent-device` controller session. A fresh smoke run must still perform its normal app open even if Metro already lists a debugger target. That open binds the controller before observation and screenshots; it also uses the existing rule that an app opened by this run needs no additional reload. A reused session with an attached app keeps the existing reload check. [observed — SDK 57 on EAS iOS, 2026-09-09: without the controller open, screenshot exited `SESSION_NOT_FOUND: No active session. Run open first.`]
+
+### Stop hints
+
+Normal dev progress and follow-ups name `agent-cli dev:stop --eas`, which stops both the project's dev server and its EAS session. Smoke instead explains that it stops sessions it creates after the run. Exact-ID EAS stop commands remain appropriate when reporting a particular session whose startup or cleanup failed. [confirmed — Kudo, 2026-09-09]

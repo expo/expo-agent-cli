@@ -310,7 +310,7 @@ describe(buildStartPlanFollowUps, () => {
       );
 
       expect(ids(followups)).toEqual(['eas-account', 'dev', 'build-freshness']);
-      expect(followups[0]!.command).toBe('npx --yes eas-cli@latest whoami');
+      expect(followups[0]!.command).toBe('npx @expo/agent-cli whoami');
       expect(followups[0]!.why).toContain('an Expo account');
       // The plan already went to the cloud, so offering the cloud again says nothing.
       expect(ids(followups)).not.toContain('eas-build-instead');
@@ -448,6 +448,12 @@ describe(`${buildStartFollowUps.name} — a tunnelled run, and a machine with no
   // The rule that keeps a working machine working: a probe that could not run establishes nothing.
   // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — the rung is not
   // dropped on a machine with no device, it is aimed at the device this project does have.
+  it('offers agent-cli to stop both the dev server and EAS session', () => {
+    const followups = buildStartFollowUps({ ...base, onEas: true });
+    expect(followups.find((item) => item.id === 'stop-session')?.command).toBe('npx @expo/agent-cli dev:stop --eas');
+    expect(followups.find((item) => item.id === 'stop-session')?.why).not.toContain('keeps running');
+  });
+
   it(`aims the deep-link rung at the cloud session when this machine has no device`, () => {
     const followups = buildStartFollowUps({
       ...base,

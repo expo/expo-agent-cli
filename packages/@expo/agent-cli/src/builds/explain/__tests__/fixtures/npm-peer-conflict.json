@@ -13,7 +13,7 @@
     "line": 2,
     "matchedLine": "npm error ERESOLVE unable to resolve dependency tree",
     "confidence": "high",
-    "suggestedCommand": "npx expo install --fix"
+    "suggestedCommand": "npx @expo/agent-cli install --fix"
   },
   "otherSignatures": [
     "1:deps.install-failed"

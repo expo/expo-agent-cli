@@ -6,6 +6,7 @@
 // project. That is the whole hard part of `inspect:config-plugins`, and it belongs to the CLI the project
 // installed, so this module only starts it and parses what it printed.
 
+import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import { resolveExpoCli } from '../utils/expoCli';
 import { spawnSubprocessAsync } from '../utils/subprocess';
@@ -59,10 +60,10 @@ export async function introspectConfigAsync(projectRoot: string): Promise<Intros
       [
         `The Expo CLI could not evaluate this project's config (expo config exited with code ${result.exitCode}).`,
         `Why: ${said || 'the CLI stopped without a message. A config plugin that throws, an unreadable app config, or a missing dependency all end here.'}`,
-        `How: fix what it reported and run this command again. Running "npx expo config --type introspect --json" directly shows the same failure without this wrapper.`,
+        `How: fix what it reported and run this command again. Running "${PROGRAM_PREFIX} config --type introspect --json" shows the config evaluator’s failure directly.`,
       ].join('\n')
     );
-    error.suggestedCommand = 'npx expo config --type introspect --json';
+    error.suggestedCommand = `${PROGRAM_PREFIX} config --type introspect --json`;
     throw error;
   }
 
@@ -73,10 +74,10 @@ export async function introspectConfigAsync(projectRoot: string): Promise<Intros
       [
         `The Expo CLI finished, but it did not print a config, so there is nothing to report.`,
         `Why: "expo config --json" prints one JSON object describing the project, and this run printed something else${outputTail(result.stdout) ? `:\n${outputTail(result.stdout)}` : '.'}`,
-        `How: check the installed version of the expo package, then run the command again. Running "npx expo config --type introspect --json" directly shows the same output without this wrapper.`,
+        `How: check the installed version of the expo package, then run the command again. Running "${PROGRAM_PREFIX} config --type introspect --json" shows the config evaluator’s output directly.`,
       ].join('\n')
     );
-    error.suggestedCommand = 'npx expo config --type introspect --json';
+    error.suggestedCommand = `${PROGRAM_PREFIX} config --type introspect --json`;
     throw error;
   }
 

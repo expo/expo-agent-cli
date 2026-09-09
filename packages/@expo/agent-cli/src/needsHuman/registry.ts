@@ -59,10 +59,7 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'eas-login',
     code: 'EAS_LOGIN_REQUIRED',
     need: 'Sign in to an Expo account on this machine.',
-    // Read when the row is used, not when this module loads: the resolver reads the project.
-    get command() {
-      return `${easCommandPrefix()} login`;
-    },
+    command: `${PROGRAM_PREFIX} login`,
     url: ACCESS_TOKENS_URL,
     unattendedEnv: ['EXPO_TOKEN'],
     resumable: true,
@@ -75,7 +72,7 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'expo-login',
     code: 'EXPO_LOGIN_REQUIRED',
     need: 'Sign in to an Expo account on this machine.',
-    command: 'npx expo login',
+    command: `${PROGRAM_PREFIX} login`,
     url: ACCESS_TOKENS_URL,
     unattendedEnv: ['EXPO_TOKEN'],
     resumable: true,

@@ -75,7 +75,7 @@ describe(classifyEasFailure, () => {
     ['Error: Not logged in'],
     ['An Expo user account is required. Must be logged in.'],
   ])(`should read a signed-out machine from %p`, (output) => {
-    expect(classifyEasFailure(output)?.command).toBe('npx --yes eas-cli@latest login');
+    expect(classifyEasFailure(output)?.command).toBe('npx @expo/agent-cli login');
   });
 
   // Nothing recognised is not a licence to guess: the caller says so instead.
@@ -103,6 +103,6 @@ describe('the one-line summary', () => {
   });
 
   it(`names the login for a signed-out machine`, () => {
-    expect(classifyEasFailure('You are not logged in')?.summary).toContain('npx --yes eas-cli@latest login');
+    expect(classifyEasFailure('You are not logged in')?.summary).toContain('npx @expo/agent-cli login');
   });
 });

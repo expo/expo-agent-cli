@@ -42,7 +42,7 @@ export const deployHelp: CommandHelp = {
   notes: [
     `--native stops at a URL a person has to open, and exits 7: the store account, the signing`,
     `and the submission all happen there. Hand the URL over; no command finishes it for you.`,
-    `Sign in once with "npx expo login", or set EXPO_TOKEN on a machine that cannot.`,
+    `Sign in once with "${PROGRAM_PREFIX} login", or set EXPO_TOKEN on a machine that cannot.`,
   ],
 };
 

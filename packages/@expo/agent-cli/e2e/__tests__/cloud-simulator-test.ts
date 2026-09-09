@@ -130,7 +130,7 @@ describe('@expo/agent-cli navigate --eas', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('No EAS Simulator session this CLI can drive is running');
-    expect(result.stderr).toContain('eas-cli@latest simulator --platform ios --type agent-device --expo-go');
+    expect(result.stderr).toContain('@expo/agent-cli dev --ios --eas');
     // The listing, then the read-only availability question, and nothing that could start or bill
     // anything.
     expect(easInvocations(projectRoot)).toEqual([
@@ -192,7 +192,7 @@ describe('@expo/agent-cli navigate --eas', () => {
     });
 
     expect(result.exitCode).toBe(7);
-    expect(result.stderr).toContain('eas-cli@latest login');
+    expect(result.stderr).toContain('@expo/agent-cli login');
     expect(result.stderr).toContain('EXPO_TOKEN');
   });
 
@@ -221,7 +221,7 @@ describe('@expo/agent-cli navigate --eas', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('sess-e2e');
     expect(result.stderr).toContain('has ended');
-    expect(result.stderr).toContain('eas-cli@latest simulator --platform ios --type agent-device --expo-go');
+    expect(result.stderr).toContain('@expo/agent-cli dev --ios --eas');
   });
 
   it(`explains a verb the session refused, and how to check the session`, async () => {
@@ -431,7 +431,7 @@ describe('@expo/agent-cli runtime:stop --eas', () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain('eas-cli@latest simulator --platform ios --type agent-device --expo-go');
+    expect(result.stderr).toContain('@expo/agent-cli dev --ios --eas');
     expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:exec')).toBe(false);
   });
 });
@@ -687,7 +687,7 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
       expect(result.exitCode).toBe(1);
       const envelope = JSON.parse(result.stdout);
       expect(envelope.error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
-      expect(envelope.error.message).toContain('--expo-go');
+      expect(envelope.error.message).toContain('npx @expo/agent-cli dev --ios --eas');
       expect(envelope.reloaded).toBeUndefined();
       // And no verb was sent to a session that does not exist.
       expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:exec')).toBe(false);

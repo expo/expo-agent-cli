@@ -399,7 +399,7 @@ describe('@expo/agent-cli dev --plan', () => {
       // The steps are the cloud route, so the local one is not in them at all.
       expect(output).not.toContain('expo run:ios');
       // And the ladder leads with what a cloud build needs rather than with the route it took.
-      expect(output).toMatch(/Suggested next:\s*\n\s*npx --yes eas-cli@latest whoami/);
+      expect(output).toMatch(/Suggested next:\s*\n\s*npx @expo\/agent-cli whoami/);
       // @ref llp/0015 §The selection — named, not taken: the plan says it will not run as is, and
       // the `dev` line offered carries the flag that takes it.
       expect(output).toContain('use EAS credits');
@@ -452,7 +452,7 @@ describe('@expo/agent-cli dev --plan', () => {
         runsOn: 'eas',
         platform: 'ios',
         requirement: 'an Expo account',
-        alternativeCommand: 'npx expo run:ios',
+        alternativeCommand: 'npx @expo/agent-cli run:ios',
       });
       // `host` on a machine that is not macOS, `toolchain` on a Mac whose xcode-select is stubbed.
       // Both are the answer "this machine cannot"; which of the two depends on the runner.
@@ -479,7 +479,7 @@ describe('@expo/agent-cli dev --plan', () => {
       });
       expect(plan.buildLocation!.selection!.because).toContain('ANDROID_HOME');
       expect(plan.steps.map((step) => step.argv[0])).toContain('eas');
-      expect(plan.followups[0]!.command).toBe('npx --yes eas-cli@latest whoami');
+      expect(plan.followups[0]!.command).toBe('npx @expo/agent-cli whoami');
     });
 
     // @ref llp/0015-backend-selection-and-config.rfc.md §The selection

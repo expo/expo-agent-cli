@@ -11,6 +11,7 @@
 // what llp/0009 caps the budget to keep out. It is also why deferring `doctor:fix` (llp/0016) cost
 // this builder nothing: it never named that command.
 
+import { forwardedCommands } from '../commandRegistry';
 import type { DoctorCheck, DoctorReport } from '../doctor/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { capFollowUps, type FollowUp } from './types';
@@ -22,7 +23,7 @@ import { capFollowUps, type FollowUp } from './types';
  * command and `"expo.install.exclude"` is a package.json key, and only the first word tells them
  * apart [both observed in one real run of expo-doctor 1.20.1].
  */
-const COMMAND_TOOLS = ['npx', 'npm', 'yarn', 'pnpm', 'bun', 'expo', 'eas', 'pod', 'watchman'];
+const COMMAND_TOOLS = ['npx', 'bunx', 'npm', 'yarn', 'pnpm', 'bun', 'expo', 'eas', 'pod', 'watchman'];
 
 /** Quoted spans of advice text, in the three ways expo-doctor writes them. */
 const QUOTED = /`([^`]+)`|'([^']+)'|"([^"]+)"/g;
@@ -52,25 +53,15 @@ export function extractAdviceAction(check: DoctorCheck): string | null {
   return url ? url[0].replace(/[.,)]+$/, '') : null;
 }
 
-/**
- * Advice this CLI has a command of its own for.
- *
- * expo-doctor's advice is written for a person, so it names the Expo CLI: `npx expo install --check`
- * [observed — friction run 7, F78]. The reader of a `Suggested next:` line here is usually an agent
- * driving *this* CLI, and `@expo/agent-cli install --check` runs the same check and adds the structured
- * `check` object the rest of the surface expects. Nothing else is rewritten: a rewrite is a claim
- * that the two commands do the same thing, and this is the only pair where that has been verified
- * (`src/install/`).
- */
-const AGENT_CLI_EQUIVALENTS: readonly { advice: RegExp; command: string }[] = [
-  { advice: /^(?:npx\s+)?expo\s+install\s+--check$/, command: `${PROGRAM_PREFIX} install --check` },
-  { advice: /^(?:npx\s+)?expo\s+install\s+--fix$/, command: `${PROGRAM_PREFIX} install --fix` },
-];
-
-/** The same action, spelled as this CLI's command when this CLI has one. */
+/** Keep arguments intact when the registry exposes the same Expo action. */
 function preferAgentCli(action: string): string {
-  const equivalent = AGENT_CLI_EQUIVALENTS.find((entry) => entry.advice.test(action));
-  return equivalent?.command ?? action;
+  const expo = /^(?:(?:npx|bunx)\s+)?expo\s+(\S+)([\s\S]*)$/.exec(action);
+  if (expo && ['start', 'install', 'add', ...forwardedCommands].includes(expo[1]!)) {
+    return `${PROGRAM_PREFIX} ${expo[1]}${expo[2]}`;
+  }
+  // Login shares the Expo session. EAS-specific auth flags are not interchangeable.
+  const auth = /^(?:(?:npx|bunx)\s+)?(?:eas|eas-cli(?:@latest)?)\s+(login|logout|whoami)$/.exec(action);
+  return auth ? `${PROGRAM_PREFIX} ${auth[1]}` : action;
 }
 
 /** What to do about the checks that failed, at most one action per check. */

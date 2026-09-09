@@ -138,10 +138,10 @@ function missingModResultsError(): CommandError {
     [
       `The Expo CLI answered, but its config carries no introspected native results, so there is no effective configuration to report.`,
       `Why: this command reads "_internal.modResults" out of "expo config --type introspect --json", which the CLI fills by compiling the config plugins. A CLI older than SDK 50 does not produce it, and a run that failed before the plugins compiled does not either.`,
-      `How: run "npx expo config --type introspect --json" in this project to see what the CLI printed, and upgrade the project's expo package if the "_internal" block is missing there too.`,
+      `How: run "${PROGRAM_PREFIX} config --type introspect --json" in this project to see what the CLI printed, and upgrade the project's expo package if the "_internal" block is missing there too.`,
     ].join('\n')
   );
-  error.suggestedCommand = 'npx expo config --type introspect --json';
+  error.suggestedCommand = `${PROGRAM_PREFIX} config --type introspect --json`;
   return error;
 }
 

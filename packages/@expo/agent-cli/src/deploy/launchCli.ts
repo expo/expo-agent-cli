@@ -186,7 +186,7 @@ function failureError(
       message: [
         `Launch needs an Expo account, and this machine is not signed in to one.`,
         `Why: the launch runs as you — the upload, the store account and the signing all belong to your Expo account — and the launch CLI found no session and no EXPO_TOKEN.`,
-        `How: run "npx expo login" once on this machine, or set EXPO_TOKEN to a personal access token from https://expo.dev/settings/access-tokens for a machine that cannot sign in interactively.`,
+        `How: run "${PROGRAM_PREFIX} login" once on this machine, or set EXPO_TOKEN to a personal access token from https://expo.dev/settings/access-tokens for a machine that cannot sign in interactively.`,
       ].join('\n'),
     });
   }
