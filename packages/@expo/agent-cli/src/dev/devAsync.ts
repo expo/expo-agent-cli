@@ -29,6 +29,7 @@ import type { PlanStep, ProjectState, StartPlan } from '../project/types';
 import { resolveStartFollowUpsAsync } from '../start/followUps';
 import { runDevServerAsync, type DevServerRun } from '../start/startAsync';
 import {
+  localRequirement,
   localTool,
   EAS_REQUIREMENT,
   EAS_SIMULATOR_PROFILE,
@@ -125,6 +126,13 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     return 0;
   }
 
+  // @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken.
+  // Detection may say the cloud is the only route this host leaves; it may not spend the caller's
+  // EAS credits on that finding. A flag or the config is a person's own choice and runs.
+  if (plan.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit) {
+    throw implicitEasRouteError(plan, options.platform);
+  }
+
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope
   // The plan is always emitted before anything runs — on the `cli:start_plan` event for a driving
   // agent, and as a table for a person. In `--json` mode it is *not* printed here: stdout is
@@ -175,6 +183,28 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   }
 
   return run.exitCode;
+}
+
+/**
+ * The stop for a plan whose EAS route nobody chose.
+ *
+ * @ref llp/0015-backend-selection-and-config.rfc.md §The selection
+ * Exit 1 with the two ways out, like every other refusal of a command line that has not said
+ * enough: the platform flag, `--eas` against `--local`. The plan is not run and nothing is spawned,
+ * so nothing has been billed by the time this is read.
+ */
+function implicitEasRouteError(plan: StartPlan, platform: PlanPlatform): CommandError {
+  const location = plan.buildLocation!;
+  const error = new CommandError(
+    'EAS_ROUTE_NOT_CHOSEN',
+    [
+      `This machine cannot build for ${platform}, and nothing asked for the build to run on EAS — so nothing ran.`,
+      `Why: ${location.selection?.because ?? `this machine has no ${localTool(location.platform)}.`} A build on EAS and an EAS Simulator session use EAS credits, and this CLI spends them only when asked: with --eas on the command line, or "buildBackend": "eas" under expo.agentCli in package.json.`,
+      `How: run "${PROGRAM_PREFIX} dev --${platform} --eas" to build on EAS and run the app on an EAS Simulator session, or install ${localRequirement(location.platform)} and run "${PROGRAM_PREFIX} dev --${platform} --local" to build here. "${PROGRAM_PREFIX} dev --${platform} --plan" shows the steps either way.`,
+    ].join('\n')
+  );
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev --${platform} --eas`;
+  return error;
 }
 
 /**

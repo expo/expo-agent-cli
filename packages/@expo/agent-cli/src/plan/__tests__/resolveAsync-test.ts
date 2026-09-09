@@ -287,7 +287,11 @@ describe('detection', () => {
       ['eas', 'build', '--platform', 'ios', '--profile', 'development'],
       ['expo', 'start', '--dev-client'],
     ]);
-    expect(plan.buildLocation).toMatchObject({ runsOn: 'eas', selection: { source: 'toolchain' } });
+    expect(plan.buildLocation).toMatchObject({
+      runsOn: 'eas',
+      selection: { source: 'toolchain', implicit: true },
+    });
+    expect(plan.reasons.join('\n')).toContain('use EAS credits');
   });
 
   it(`blames the host, not the install, when no install could help`, async () => {

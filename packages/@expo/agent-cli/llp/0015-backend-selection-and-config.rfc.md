@@ -39,6 +39,8 @@ Three properties of that table are load-bearing.
 
 Detection only ever pushes a build to the cloud. There is no row that moves a build back to this machine, because "this machine has Xcode" is not a reason to prefer a local build over one the caller asked for in the cloud.
 
+**Detection names the route; it does not take it** [Kudo, 2026-09-09]. Rows 3 and 4 mark their choice `implicit`. A build on EAS and an EAS Simulator session use EAS credits, and a finding about this host is not a person deciding to spend them — on a Windows machine, `dev --ios` used to queue a cloud build with nothing but the host's inability behind it. So an implicit EAS route is *described* and *stopped*: `dev` prints the plan under `--plan` with a reason saying it will not run as is, and a bare `dev` exits 1 with `EAS_ROUTE_NOT_CHOSEN`, naming `--eas` (which also puts the app on an EAS Simulator session, [[0027-everything-on-eas]]) and `--local`; `smoke` fails its `start-dev-server` phase with the same reason before spawning anything; `status` and the `--plan` follow-ups offer `dev --<platform> --eas`, a line that runs. Rows 1 and 2 — the flag, and `buildBackend` in the package.json config — are a person's own choice and run with no stop.
+
 `unknown` leaves the build here. A probe that could not run has established nothing, and routing a caller into a build queue over a toolchain nobody could reach is worse than the local plan they would otherwise have got.
 
 An explicit choice is honoured even where it cannot work, and is marked `doomed`. The caller may know something this CLI cannot see. What the plan does instead of overriding them is say so. The `Build:` line is red, and a reason reads "the plan above is the plan that runs, and its build step will fail".

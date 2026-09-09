@@ -189,6 +189,7 @@ describe('the Build line of a plan whose backend was chosen', () => {
       because: 'this machine has Xcode.',
       why: 'Building on this machine: this machine has Xcode.',
       doomed: false,
+      implicit: false,
       ...overrides,
     };
   }

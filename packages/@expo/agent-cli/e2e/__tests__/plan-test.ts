@@ -12,6 +12,8 @@ import {
   installStubFingerprintAsync,
   readStubExpoInvocations,
   setupFixtureAsync,
+  stubExpoEnv,
+  breakXcodeSelectAsync,
 } from '../utils';
 
 /** The shape `dev --plan --json` prints, per `src/project/types.ts`. */
@@ -55,16 +57,6 @@ const TIME_CLASSES = ['seconds', 'a-minute', 'minutes', 'many-minutes'];
  * built for the test. A host that is not macOS answers `missing` before it spawns anything, which
  * is the same answer by a different route — so the assertions hold on either.
  */
-async function breakXcodeSelectAsync(projectRoot: string): Promise<void> {
-  const binDir = path.join(projectRoot, '.stub-bin');
-  const stubScript = path.join(binDir, 'xcode-select-stub.js');
-  await fs.promises.mkdir(binDir, { recursive: true });
-  await fs.promises.writeFile(
-    stubScript,
-    "process.stderr.write('xcode-select: error: unable to get active developer directory\\n');\nprocess.exit(2);\n"
-  );
-  await installStubBinAsync(binDir, 'xcode-select', stubScript);
-}
 
 /** Copy a fixture and install both stub bins the plan engine may reach for. */
 async function setupAsync(fixtureName: string): Promise<string> {
@@ -408,6 +400,45 @@ describe('@expo/agent-cli dev --plan', () => {
       expect(output).not.toContain('expo run:ios');
       // And the ladder leads with what a cloud build needs rather than with the route it took.
       expect(output).toMatch(/Suggested next:\s*\n\s*npx --yes eas-cli@latest whoami/);
+      // @ref llp/0015 §The selection — named, not taken: the plan says it will not run as is, and
+      // the `dev` line offered carries the flag that takes it.
+      expect(output).toContain('use EAS credits');
+      expect(output).toContain('npx @expo/agent-cli dev --ios --eas');
+    });
+
+    // @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken.
+    it('stops a bare dev on that machine, naming --eas and what it costs, and spawns nothing', async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      await breakXcodeSelectAsync(projectRoot);
+
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
+        env: stubExpoEnv(projectRoot),
+        reject: false,
+      });
+
+      expect(result.exitCode).toBe(1);
+      const { error } = JSON.parse(result.stdout);
+      expect(error.code).toBe('EAS_ROUTE_NOT_CHOSEN');
+      expect(error.message).toContain('use EAS credits');
+      expect(error.message).toContain('"buildBackend": "eas"');
+      expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --eas');
+      expect(readStubExpoInvocations(projectRoot)).toEqual([]);
+    });
+
+    it('runs the EAS route when the package.json config chose it, with no stop', async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      await breakXcodeSelectAsync(projectRoot);
+      const file = path.join(projectRoot, 'package.json');
+      const manifest = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+      manifest.expo = { ...manifest.expo, agentCli: { buildBackend: 'eas' } };
+      await fs.promises.writeFile(file, JSON.stringify(manifest, null, 2));
+
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--json', '--ios']);
+      const plan: StartPlan = JSON.parse(result.stdout);
+
+      expect(plan.buildLocation).toMatchObject({ runsOn: 'eas', selection: { source: 'config', implicit: false } });
+      expect(plan.reasons.join('\n')).not.toContain('does not take that route on its own');
+      expect(plan.followups.map((followup) => followup.command)).toContain('npx @expo/agent-cli dev --ios');
     });
 
     it('says which host fact chose the EAS route, before anything runs', async () => {

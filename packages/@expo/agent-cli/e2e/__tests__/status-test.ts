@@ -16,6 +16,7 @@ import {
   stubEasCommands,
 } from '../stubEas';
 import {
+  breakXcodeSelectAsync,
   clearStubFingerprintInvocations,
   documentedJsonKeys,
   executeAgentCliAsync,
@@ -2186,5 +2187,23 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       expect(report.next).not.toBeNull();
       expect(report.devServer?.running).toBe(false);
     });
+  });
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken. A `next`
+// has to be a line that runs, and a bare `dev` stops on a route detection chose.
+describe('status on a machine that cannot build', () => {
+  // `status` takes no platform flag: it plans for the host's default, iOS on a Mac and Android
+  // elsewhere. A broken `xcode-select` makes a Mac the machine that cannot build; on the other
+  // runners the default is Android and the runner's own Android SDK decides, so this case says
+  // nothing there [observed — tier0-linux and tier0-windows, 2026-09-09].
+  it.skipIf(process.platform !== 'darwin')('offers dev --eas as the next step, and says why in the plan', async () => {
+    const projectRoot = await setupAsync('dev-client-app');
+    await breakXcodeSelectAsync(projectRoot);
+
+    const report = await reportInAsync(projectRoot);
+
+    expect(report.next!.command).toBe('npx @expo/agent-cli dev --ios --eas');
+    expect(report.next!.steps.map((step) => step.argv[0])).toContain('eas');
   });
 });

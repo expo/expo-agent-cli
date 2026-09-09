@@ -526,6 +526,12 @@ function backendReasons(
   }
 
   if (backend.runsOn === 'eas') {
+    // @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken.
+    if (backend.implicit) {
+      reasons.push(
+        `Nothing asked for EAS — no --eas, and no buildBackend in the package.json config; this host is what left the cloud as the route. A build on EAS and an EAS Simulator session use EAS credits, so ${PROGRAM_NAME} does not take that route on its own: this plan is described and not run. Pass --eas to take it (the app then runs on an EAS Simulator session), or install ${localRequirement(platform)} and pass --local to build here.`
+      );
+    }
     reasons.push(
       `The cloud build generates the native project itself, so this plan has no prebuild step.`
     );

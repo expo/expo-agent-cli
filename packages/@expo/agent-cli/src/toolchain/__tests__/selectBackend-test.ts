@@ -167,6 +167,8 @@ describe('choosing where a build runs', () => {
     expect(choice.runsOn).toBe(row.expected.runsOn);
     expect(choice.source).toBe(row.expected.source);
     expect(choice.doomed).toBe(row.expected.doomed ?? false);
+    // Detection names a route; only a flag or the config takes it (llp/0015 §The selection).
+    expect(choice.implicit).toBe(row.expected.source === 'host' || row.expected.source === 'toolchain');
     // Every choice explains itself, because the plan prints this sentence verbatim — and the
     // cause on its own, for the `status` line that has already printed the place.
     expect(choice.why).toBe(

@@ -32,7 +32,8 @@ import { PROGRAM_PREFIX } from '../programName';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../project/expoGo';
 import { readSdkVersionAsync } from '../project/nodeModules';
 import type { StartPlan } from '../project/types';
-import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
+import { EAS_SIMULATOR_PROFILE, localRequirement } from '../toolchain/runsOn';
+import { smokeCommand } from './suggest';
 import { checkEntryBundleAsync } from '../runtime/bundleCheck';
 import { CdpClient, isMethodNotFoundError } from '../runtime/cdpClient';
 import { discoverDevServerAsync, probeDevServerAsync } from '../runtime/devServer';
@@ -353,6 +354,17 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       // JSON object and nothing else (llp/0006 §Output contract), and as an event too so a reader
       // of the stream sees it without parsing English.
       const target = await targetAsync();
+      // @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken. A
+      // build that would land on EAS because this machine cannot build, and that nobody asked for,
+      // uses EAS credits: the gate says so and stops, before anything is spawned. `--eas` takes it.
+      if (target.buildLocation?.runsOn === 'eas' && target.buildLocation.selection?.implicit) {
+        return {
+          ok: false,
+          devServerUrl: null,
+          built: false,
+          reason: `this machine cannot build for ${options.platform} (${target.buildLocation.selection.because}) and the build would land on EAS, which uses EAS credits — so it is not started without being asked. Run "${smokeCommand(options.platform)} --eas" to build there and gate the app on an EAS Simulator session, or install ${localRequirement(options.platform)} and run this again`,
+        };
+      }
       if (target.buildLocation != null) {
         // `runsOn` is where it compiles: this machine, or EAS. Worth saying, because the two have
         // very different costs and the caller may not have chosen either on purpose.

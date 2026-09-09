@@ -1144,3 +1144,21 @@ export async function holdDevLockAsync(
     }
   };
 }
+
+/**
+ * Make `xcode-select -p` fail in a fixture copy, the way a Mac without Xcode answers.
+ *
+ * The toolchain probe reads that answer, so a plan made in this project takes the machine for one
+ * that cannot build for iOS (llp/0015 §The selection). On a host that is not macOS the probe says
+ * so on its own, and this changes nothing.
+ */
+export async function breakXcodeSelectAsync(projectRoot: string): Promise<void> {
+  const binDir = path.join(projectRoot, '.stub-bin');
+  const stubScript = path.join(binDir, 'xcode-select-stub.js');
+  await fs.promises.mkdir(binDir, { recursive: true });
+  await fs.promises.writeFile(
+    stubScript,
+    "process.stderr.write('xcode-select: error: unable to get active developer directory\\n');\nprocess.exit(2);\n"
+  );
+  await installStubBinAsync(binDir, 'xcode-select', stubScript);
+}
