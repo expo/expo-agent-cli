@@ -32,24 +32,25 @@ jobs:
         run: |
           mkdir -p evals/artifacts/tier2
           printf '%s\n' '{"status":"error","reason":"Setup or test runner did not complete"}' > evals/artifacts/tier2/outcome.json
+          printf '1\n' > evals/artifacts/tier2/runner-exit-code
           set-output artifacts "$PWD/evals/artifacts/tier2"
       - name: Check credentials before installing tools
         id: preflight
         run: node evals/tier2/preflight.mjs --eas
       - name: Install workspace dependencies
-        if: ${{ steps.preflight.outputs.enabled == 'true' }}
+        if: ${{ steps.preflight.outputs.mode == 'run' }}
         working_directory: ../../..
         run: |
           set -eo pipefail
           bun install --ignore-scripts --frozen-lockfile 2>&1 | tee packages/@expo/agent-cli/evals/artifacts/tier2/workspace-install.log
       - name: Build CLI under test
-        if: ${{ steps.preflight.outputs.enabled == 'true' }}
+        if: ${{ steps.preflight.outputs.mode == 'run' }}
         working_directory: ../../..
         run: |
           set -eo pipefail
           bun run --filter @expo/agent-cli build 2>&1 | tee packages/@expo/agent-cli/evals/artifacts/tier2/cli-build.log
       - name: Install pinned Tier2 tools
-        if: ${{ steps.preflight.outputs.enabled == 'true' }}
+        if: ${{ steps.preflight.outputs.mode == 'run' }}
         run: |
           set -eo pipefail
           npm install --global @anthropic-ai/claude-code@2.1.267 2>&1 | tee evals/artifacts/tier2/claude-install.log
@@ -58,21 +59,19 @@ jobs:
           node "$tier2_tools/node_modules/playwright/cli.js" install --with-deps chromium 2>&1 | tee evals/artifacts/tier2/chromium-install.log
           set-env TIER2_PLAYWRIGHT_ROOT "$tier2_tools"
       - name: Run long Tier2 eval
-        if: ${{ steps.preflight.outputs.enabled == 'true' }}
+        if: ${{ steps.preflight.outputs.mode == 'run' }}
         id: evals
         run: |
           set -o pipefail
           set +e
           bunx --no-install vitest run --config evals/tier2/vitest.config.mts 2>&1 | tee evals/artifacts/tier2/runner.log
           code=$?
-          set-output code "$code"
+          printf '%s\n' "$code" > evals/artifacts/tier2/runner-exit-code
           exit "$code"
       - name: Report outcome, errors, or skip
         id: report
         if: ${{ always() }}
-        env:
-          TIER2_RUN_CODE: ${{ steps.evals.outputs.code || steps.preflight.outputs.code }}
-        run: node evals/tier2/report.mjs "$TIER2_RUN_CODE" --eas
+        run: node evals/tier2/report.mjs --eas
       - name: Upload Tier2 evidence
         uses: eas/upload_artifact
         if: ${{ always() }}

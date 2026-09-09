@@ -14,6 +14,7 @@ await writeFile(
   `${directory}/preflight.json`,
   JSON.stringify({ enabled: !reason, reason }, null, 2) + '\n'
 );
+await writeFile(`${directory}/runner-exit-code`, reason ? '0\n' : '1\n');
 console.log(reason ?? 'Tier2 prerequisites present; setup may proceed');
 if (process.argv.includes('--eas')) {
   for (const [name, value] of Object.entries({

@@ -4,10 +4,13 @@ import { fileURLToPath } from 'node:url';
 import { workflowReport } from './outcome.mjs';
 
 // Run after Vitest even if setup failed. A missing/stale success must never make CI green.
-const rawCode = process.argv[2];
-const runnerCode = /^\d+$/.test(rawCode ?? '') ? Number(rawCode) : 1;
 const directory = fileURLToPath(new URL('../artifacts/tier2', import.meta.url));
 await mkdir(directory, { recursive: true });
+// Read persisted status instead of a workflow expression: a zero-valued output may be lost.
+const argument = process.argv.slice(2).find((value) => !value.startsWith('--'));
+const rawCode =
+  argument ?? (await readFile(`${directory}/runner-exit-code`, 'utf8').catch(() => '')).trim();
+const runnerCode = /^\d+$/.test(rawCode) ? Number(rawCode) : 1;
 let outcome;
 try {
   outcome = JSON.parse(await readFile(`${directory}/outcome.json`, 'utf8'));
