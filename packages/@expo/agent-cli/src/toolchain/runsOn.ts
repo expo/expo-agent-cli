@@ -25,8 +25,20 @@ export const EAS_WHERE = 'in the cloud on EAS';
 /** What an EAS build needs before it can start, in the caller's terms. */
 export const EAS_REQUIREMENT = 'an Expo account';
 
-/** The profile an EAS build of a development client is started with. */
+/** The profile an EAS build of a development client is started with, for a device at a desk. */
 export const EAS_DEVELOPMENT_PROFILE = 'development';
+
+/**
+ * The profile an EAS build of a development client is started with when the device is an EAS
+ * Simulator — or any simulator.
+ *
+ * @ref llp/0027-everything-on-eas.rfc.md §The build is a simulator build
+ * `development` is a *device* build (`distribution: internal`, signed), and no simulator can install
+ * one: not the EAS Simulator, not the one on this desk. `eas build:dev` names this profile for the
+ * same reason, and creates it with the same three keys (`developmentClient`, `internal`,
+ * `ios.simulator`) [observed — eas-cli 23.2 `commands/build/dev.ts`].
+ */
+export const EAS_SIMULATOR_PROFILE = 'development-simulator';
 
 /** One word per place, for a column in a table. */
 export const RUNS_ON_LABELS: Record<RunsOn, string> = {

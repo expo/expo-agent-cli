@@ -510,7 +510,7 @@ describe('@expo/agent-cli dev --plan', () => {
       const dev = await executeAgentCliAsync(projectRoot, ['dev:run', '--help']);
 
       expect(dev.all).toContain('A local');
-      expect(dev.all).toContain('A cloud build (eas build) happens');
+      expect(dev.all).toContain('A cloud build (eas build) runs on EAS');
     });
   });
 

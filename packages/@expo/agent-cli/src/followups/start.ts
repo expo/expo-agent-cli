@@ -63,6 +63,15 @@ export interface StartFollowUpInput {
    * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
    */
   cloudSession?: boolean;
+  /**
+   * The run put the app on an EAS Simulator session itself (`dev --eas`).
+   *
+   * @ref llp/0027-everything-on-eas.rfc.md
+   * The device rungs are aimed at that session: the open is `navigate / --eas`, the phone rung is
+   * left out — the device is in a datacenter — and so is the cloud-build rung, because the run that
+   * printed this already built there when it had to.
+   */
+  onEas?: boolean;
   /** `http://localhost:<port>`, the page a browser opens. Null when no port can be vouched for. */
   webUrl?: string | null;
   /**
@@ -101,8 +110,15 @@ export function buildStartFollowUps(input: StartFollowUpInput): FollowUp[] {
   // nothing. Left out entirely on a machine with no device, where it is an instruction to run
   // something that cannot work — `simctl` and `adb` drive a *local* simulator or an attached
   // device, and the run that found this had neither [observed — dogfood, 2026-08-24].
-  const openApp: FollowUp[] =
-    input.localDevice !== 'absent'
+  const openApp: FollowUp[] = input.onEas
+    ? [
+        {
+          id: 'open-app-eas',
+          command: `${PROGRAM_PREFIX} navigate / --eas`,
+          why: `The dev server is tunnelled and the app runs on this project's EAS Simulator session; this deep-links a route onto that session. The session bills until "npx eas simulator:stop".`,
+        },
+      ]
+    : input.localDevice !== 'absent'
       ? [
           {
             id: 'open-app',
@@ -122,14 +138,27 @@ export function buildStartFollowUps(input: StartFollowUpInput): FollowUp[] {
           ]
         : [];
 
+  const runtimeErrors: FollowUp = {
+    id: 'runtime-errors',
+    command: `${PROGRAM_PREFIX} runtime:errors`,
+    why: 'Reads the errors the running app reports; reproduce the problem while it listens.',
+  };
+  if (input.onEas) {
+    return capFollowUps([
+      ...openApp,
+      runtimeErrors,
+      {
+        id: 'stop-session',
+        command: 'npx eas simulator:stop',
+        why: 'Ends the EAS Simulator session this run opened the app on, and its billing. The dev server keeps running.',
+      },
+    ]);
+  }
+
   return capFollowUps([
     ...openApp,
     realDeviceFollowUp(input),
-    {
-      id: 'runtime-errors',
-      command: `${PROGRAM_PREFIX} runtime:errors`,
-      why: 'Reads the errors the running app reports; reproduce the problem while it listens.',
-    },
+    runtimeErrors,
     buildEasBuildFollowUp(input.easJson, input.localBuild ?? null),
   ]);
 }

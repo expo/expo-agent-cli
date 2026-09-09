@@ -3,7 +3,7 @@ import {
   namedPlatformFlags,
   resolvePlatformFlag,
 } from '../plan/platformFlags';
-import type { PlanPlatform } from '../plan/types';
+import type { DeviceBackend, PlanPlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { BuildBackend, RunTarget } from '../settings/types';
 import { CommandError } from '../utils/errors';
@@ -62,6 +62,15 @@ export interface DevOptions {
    * what the toolchain probe found (llp/0015 §The selection).
    */
   buildBackend: BuildBackend | null;
+  /**
+   * Where the app runs: a device on this machine, or an EAS Simulator session.
+   *
+   * @ref llp/0027-everything-on-eas.rfc.md
+   * `eas` exactly when `--eas` was passed: the one flag means "on EAS" for the build and for the
+   * device alike (llp/0015 §One flag for EAS). It also implies `--tunnel`, because a session on EAS
+   * cannot reach this machine's loopback.
+   */
+  deviceBackend: DeviceBackend;
   /**
    * Which app the caller asked the plan to aim at (`--go`, `--dev-client`), or null when neither.
    *
@@ -161,6 +170,10 @@ export function resolveDevOptions(argv: string[]): DevOptions {
   const runTarget = resolveRunTarget(argv, example);
   const port = resolvePort(argv, example);
   const open = !argv.includes('--no-open');
+  const deviceBackend: DeviceBackend = buildBackend === 'eas' ? 'eas' : 'local';
+  if (deviceBackend === 'eas') {
+    assertEasRunFits(argv);
+  }
 
   return {
     mode: argv.includes('--plan') ? 'plan' : 'run',
@@ -170,12 +183,17 @@ export function resolveDevOptions(argv: string[]): DevOptions {
     // (`./openApp.ts`) — handing it to `expo start` would open the app a second way, through the
     // osascript that dies without an Automation grant. `--web` stays: serving the web bundle is
     // `expo start`'s own job.
-    expoArgs: argv.filter(
-      (arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !isNativePlatformFlag(arg)
-    ),
+    expoArgs: [
+      ...argv.filter((arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !isNativePlatformFlag(arg)),
+      // @ref llp/0027-everything-on-eas.rfc.md §The dev server is tunnelled
+      // Implied, never asked for: an EAS Simulator session is a machine in a datacenter, and
+      // `exp://127.0.0.1:8081` names *its* loopback. A caller who typed `--tunnel` already has it.
+      ...(deviceBackend === 'eas' && !namesTunnel(argv) ? ['--tunnel'] : []),
+    ],
     agentSkills: !argv.includes('--no-agent-skills'),
     platform: resolveRequiredPlatform(argv),
     buildBackend,
+    deviceBackend,
     runTarget,
     json: argv.includes('--json'),
     followups: !argv.includes('--no-followups'),
@@ -222,6 +240,45 @@ function resolveRequiredPlatform(argv: string[]): PlanPlatform {
     throw error;
   }
   return named[0]!;
+}
+
+/** Whether the argv already asks `expo start` for a tunnel, in either spelling. */
+function namesTunnel(argv: readonly string[]): boolean {
+  const host = argv.indexOf('--host');
+  return argv.includes('--tunnel') || (host >= 0 && argv[host + 1] === 'tunnel');
+}
+
+/**
+ * The combinations `--eas` has no meaning with.
+ *
+ * @ref llp/0027-everything-on-eas.rfc.md
+ * @throws {CommandError} `BAD_ARGS` for `--web`, which EAS Simulator has no device for, and for a
+ * host the session cannot reach (`--lan`, `--localhost`, `--host lan|localhost`).
+ */
+function assertEasRunFits(argv: string[]): void {
+  if (argv.includes('--web')) {
+    throw opposite(
+      '--eas and --web ask for two different places to run the app, so this run has no plan.',
+      'Why: --eas runs the app on an EAS Simulator session, which is an iOS simulator or an Android emulator in the cloud; --web serves it to a browser on this machine, which needs no build and no device.',
+      `How: pass one. "${PROGRAM_PREFIX} dev --web" serves the web app here; "${PROGRAM_PREFIX} deploy" is the EAS command for the web app.`,
+      `${PROGRAM_PREFIX} dev --web`
+    );
+  }
+  const host = argv.indexOf('--host');
+  const named =
+    argv.find((arg) => arg === '--lan' || arg === '--localhost') ??
+    (host >= 0 && (argv[host + 1] === 'lan' || argv[host + 1] === 'localhost')
+      ? `--host ${argv[host + 1]}`
+      : null);
+  if (named) {
+    const example = resolvePlatformFlag(argv) ?? 'ios';
+    throw opposite(
+      `--eas and ${named} name a dev server address the EAS Simulator session cannot reach, so this run has no plan.`,
+      `Why: --eas opens the app on a session in a datacenter, and a LAN or loopback address names this machine's network. The session needs a tunnel, which --eas sets up on its own.`,
+      `How: drop ${named}. "${PROGRAM_PREFIX} dev --${example} --eas" tunnels the dev server itself.`,
+      `${PROGRAM_PREFIX} dev --${example} --eas`
+    );
+  }
 }
 
 /**

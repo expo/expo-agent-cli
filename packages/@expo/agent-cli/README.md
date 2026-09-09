@@ -32,7 +32,7 @@ Design documents: `llp/0001-agentic-cli-on-expo-cli.rfc.md` and its child LLPs i
 | `new`                                                          | Create a project without prompts                                    |
 | `install` / `add`                                              | Run `expo install`, then sync that package's skills                 |
 | `status`                                                       | What this project is, whether a rebuild is needed, what to run next |
-| `dev`                                                          | Plan how to get the app on a device, then do it                     |
+| `dev`                                                          | Plan how to get the app on a device, then do it. `--eas` does it all on EAS |
 | `start`                                                        | `expo start` and nothing else, then sync skills                     |
 | `dev:logs` / `dev:stop`                                        | Read or stop a detached dev server                                  |
 | `navigate`                                                     | Open a route on a simulator, a device, or EAS Simulator (`--eas`) |
@@ -109,6 +109,7 @@ Flags beat `package.json`. `package.json` beats detection. Unknown keys are erro
 
 ## Notes
 
+- `dev --ios --eas` runs everything on EAS: the dev server is tunnelled, a build (when one is needed) is the `development-simulator` profile on EAS Build — added to `eas.json` when missing, skipped when EAS already has a finished build of this fingerprint — and the app is opened on this project's EAS Simulator session, which is started with Expo Go or that build when none is up. A session bills until `npx eas simulator:stop`. `--eas` on `smoke`, `navigate`, `runtime:reload` and `runtime:stop` names that session as the device.
 - Expo Go on Android has no debugger. Use a development build to drive the app there.
 - `runtime:tree`, `runtime:tap`, and `runtime:type` call the app's props. They do not touch the screen. They need a development bundle.
 - `smoke` reloads an app that is already running before it reads it, because that app is holding the bundle from before your edit. A reload it cannot prove is exit 22, never a pass. Pass `--no-reload` to read the app where it is.

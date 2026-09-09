@@ -60,7 +60,11 @@ export function runnerDownloadNote(easCli: EasCli | null): string {
  * errored build with the same fingerprint is not a build you can install — and `--limit 1` is what
  * keeps this cheap enough to run without asking.
  */
-export function buildCacheArgs(platform: 'ios' | 'android', hash: string): string[] {
+export function buildCacheArgs(
+  platform: 'ios' | 'android',
+  hash: string,
+  { profile }: { profile?: string | null } = {}
+): string[] {
   return [
     'build:list',
     '--platform',
@@ -69,6 +73,10 @@ export function buildCacheArgs(platform: 'ios' | 'android', hash: string): strin
     hash,
     '--status',
     'finished',
+    // Only when a caller needs a *particular* kind of build. `dev --eas` does: a session installs
+    // by build id, and a finished device build of the right fingerprint is not one it can install
+    // (llp/0027 §The build is a simulator build). `status` asks about any finished build.
+    ...(profile ? ['--build-profile', profile] : []),
     '--limit',
     '1',
     '--json',
@@ -106,7 +114,10 @@ export async function lookUpCachedBuildAsync(
   projectRoot: string,
   platform: 'ios' | 'android',
   hash: string | null,
-  { timeoutMs = BUILD_CACHE_TIMEOUT_MS }: { timeoutMs?: number } = {}
+  {
+    timeoutMs = BUILD_CACHE_TIMEOUT_MS,
+    profile = null,
+  }: { timeoutMs?: number; profile?: string | null } = {}
 ): Promise<BuildLookupOutcome> {
   if (!easCli) {
     // Not "no EAS CLI is installed" any more — this CLI runs the published one through a package
@@ -124,7 +135,7 @@ export async function lookUpCachedBuildAsync(
 
   const result = await spawnSubprocessAsync(
     easCli.command,
-    easCliArgs(easCli, buildCacheArgs(platform, hash)),
+    easCliArgs(easCli, buildCacheArgs(platform, hash, { profile })),
     {
       cwd: projectRoot,
       output: 'capture',
