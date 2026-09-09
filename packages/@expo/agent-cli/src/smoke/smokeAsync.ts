@@ -28,6 +28,7 @@ import * as Log from '../log';
 import { resolveDeviceAsync, type DeviceBackend } from '../navigate/device';
 import { openRouteAsync } from '../navigate/openRoute';
 import { EXPO_GO_APP_IDS } from '../navigate/target';
+import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
 import { PROGRAM_PREFIX } from '../programName';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../project/expoGo';
 import { readSdkVersionAsync } from '../project/nodeModules';
@@ -133,6 +134,9 @@ export function startPortArgs(devServerUrl: string | null): string[] {
  * gets the `1` and the envelope every other tool failure in this CLI gets.
  */
 export async function smokeAsync(projectRoot: string, options: SmokeOptions): Promise<number> {
+  if (options.cloud === 'required') {
+    await assertEasProjectConfiguredAsync(projectRoot);
+  }
   const run = await runSmokePhasesAsync(buildSmokeDeps(projectRoot, options), options);
 
   event('smoke', {

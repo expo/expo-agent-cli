@@ -19,6 +19,14 @@ So `dev --ios --eas` now ends with the app running on an EAS Simulator session:
 
 [[0026-dev-owns-the-open]] made `dev` open the app on a local device itself. This is the same act for the other device.
 
+## Check the EAS project before starting the environment
+
+`dev --eas` (including `--detach`) and `smoke --eas` read `expo config --json` before starting the environment. A config-selected EAS build gets the same check after the plan resolves. A missing or empty `extra.eas.projectId` stops with `EAS_PROJECT_NOT_LINKED`, exit 7, and the existing `eas init --id` / `--account` handoff. `--plan` remains available without setup. [confirmed — Kudo, 2026-09-09]
+
+The project ID comes from the evaluated config, including dynamic configuration and environment variables. A failed evaluation, timeout, or unreadable response stops with `EAS_PROJECT_CONFIG_UNREADABLE`, not a claim that the project is unlinked. The check has a 30-second budget. It establishes local linkage configuration, not server-side access or account permissions; the EAS commands retain their own checks. `eas project:info` is not used as a read-only gate because its project context may create/link a project. [observed — eas-cli 23.2.0 `getProjectIdAsync`]
+
+An `eas.json` without a project ID is insufficient. A linked project without `eas.json` can still run: the simulator profile is generated when a build needs it. Other `--eas` device commands already query the project's EAS session before acting; cleanup is not gated on config evaluation, so a broken config does not prevent stopping Metro.
+
 ## The dev server is tunnelled
 
 `exp://127.0.0.1:8081` names the loopback of whatever resolves it (llp/0005 §Cloud simulator). `resolveDevOptions` appends `--tunnel` to the forwarded `expo start` options when `--eas` is passed and no tunnel was asked for already (`--tunnel` or `--host tunnel`). `--lan`, `--localhost` and `--host lan|localhost` are refused with `--eas`: they name an address the session cannot reach, and a run that accepted them would end with an app on an error screen and a report of success. `--web` is refused too — EAS Simulator has no browser to offer, and `deploy` is the EAS command for the web app.
@@ -103,3 +111,5 @@ It is also a needs-human scenario of its own, `eas-project-unlinked` (`EAS_PROJE
   - `smoke --ios --eas` against that session: `start-session` reported the session as already up; `app` was inconclusive — `easexample://` opened, no debugger target attached within 3 min, and the screenshot was the dev launcher's screen — the same `/json/list`-stays-empty behaviour of a cloud session [[0005-runtime-loop-tools]] §Cloud simulator records. Exit 22, never a pass.
   - `dev:stop --eas`: the dev server stopped and the session ended by id; `simulator:list --status in-progress` then listed nothing.
   - Not yet run live: `dev --android --eas`, and the Expo Go form of the session start (`--expo-go`), which the `live-cloud` suite exercises on its own.
+
+Live check, 2026-09-09: a fresh SDK 57 app created with this CLI (`new <dir> --no-git --json`, dependencies installed) followed by `dev --ios --eas --json` stopped at the project-linkage preflight with exit 7. No Metro or EAS session was started. Separately, `start --tunnel` with `EXPO_UNSTABLE_TUNNEL_V2` unset advertised a `*.on.expo.app` URL; the server was stopped after checking it. [observed]

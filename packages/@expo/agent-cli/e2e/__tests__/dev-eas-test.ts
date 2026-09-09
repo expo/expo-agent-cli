@@ -126,7 +126,10 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     ]);
     // The dev server is the `expo` step that follows, because `eas build` starts none. It is
     // tunnelled, because the device is a machine on EAS that cannot reach this loopback.
-    expect(expoInvocationArgs(projectRoot)).toEqual([['start', '--dev-client', '--tunnel']]);
+    expect(expoInvocationArgs(projectRoot)).toEqual([
+      ['config', '--json'],
+      ['start', '--dev-client', '--tunnel'],
+    ]);
   });
 
   // `eas build:configure` exists in the plan for exactly one reason: without an `eas.json` there is
@@ -192,7 +195,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     expect(result.all).toContain(`the EAS CLI's own`);
     expect(result.all).not.toContain(`the Expo CLI's own`);
     // The dev server step depends on the build, so nothing after it ran.
-    expect(expoInvocationArgs(projectRoot)).toEqual([]);
+    expect(expoInvocationArgs(projectRoot)).toEqual([['config', '--json']]);
   });
 
   // The configure step exists only for a build routed to EAS by *config* with the device kept
@@ -267,6 +270,11 @@ describe('@expo/agent-cli dev — the EAS route', () => {
   it('refuses the run when neither an eas binary nor a package runner exists', async () => {
     const projectRoot = await setupFixtureAsync('dev-client-app');
     await installStubFingerprintAsync(projectRoot);
+
+    const appFile = path.join(projectRoot, 'app.json');
+    const app = JSON.parse(await fs.promises.readFile(appFile, 'utf8'));
+    app.expo.extra = { eas: { projectId: 'f52a76f7-9fc7-4b59-becd-6d84e9f129d7' } };
+    await fs.promises.writeFile(appFile, JSON.stringify(app));
 
     const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--json'], {
       // An empty PATH addition is not enough: the machine's own `eas` would be found. The resolver
@@ -343,7 +351,10 @@ describe('@expo/agent-cli dev — the EAS route', () => {
       'development',
     ]);
     // The local route's own build step is `expo run:ios`, and it is not what ran.
-    expect(expoInvocationArgs(projectRoot)).toEqual([['start', '--dev-client']]);
+    expect(expoInvocationArgs(projectRoot)).toEqual([
+      ['config', '--json'],
+      ['start', '--dev-client'],
+    ]);
   });
 
   it('tells the cloud build it is CI, the way every captured step is told', async () => {
@@ -663,6 +674,6 @@ describe('@expo/agent-cli dev --eas on a project EAS does not know', () => {
     expect(report.error.message).not.toContain('needed an answer');
     // The fix, not the command that just failed.
     expect(report.error.suggestedCommand).toBe('npx --yes eas-cli@latest init --account e2e-user --non-interactive');
-    expect(expoInvocationArgs(projectRoot)).toEqual([]);
+    expect(expoInvocationArgs(projectRoot)).toEqual([['config', '--json']]);
   });
 });
