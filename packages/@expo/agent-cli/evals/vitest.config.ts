@@ -9,7 +9,7 @@ export default defineConfig({
     fileParallelism: false,
     maxWorkers: 1,
     retry: 0,
-    testTimeout: 190_000,
+    testTimeout: 250_000,
     reporters: ['vitest-evals/reporter', 'json'],
     outputFile: {
       json: path.join(

@@ -645,7 +645,7 @@ export const helpSections: HelpSection[] = [
   {
     title: 'Develop',
     commands: ['dev', 'dev:logs', 'dev:stop', 'start', 'stop', 'install', 'typecheck'],
-    note: 'dev blocks this terminal; dev --detach does not, and dev:logs reads what it printed.',
+    note: 'dev blocks this terminal; dev --detach does not, and dev:logs reads what it printed. dev --plan --ios (or --android, --web) prints a plan without running it; add --json for JSON.',
   },
   {
     title: 'Understand the project',
@@ -655,7 +655,11 @@ export const helpSections: HelpSection[] = [
   { title: 'Debug a running app', commands: ['smoke', 'navigate', ...actionNames('runtime')] },
   { title: 'Create a project', commands: ['new'] },
   { title: 'Deployment', commands: ['deploy'] },
-  { title: 'Agent setup', commands: [...actionNames('agents'), ...actionNames('skills')] },
+  {
+    title: 'Agent setup',
+    commands: [...actionNames('agents'), ...actionNames('skills')],
+    note: 'agents:setup --yes --agent <agent> --json runs without prompting; --no-plugins skips plugin installation.',
+  },
   { title: 'Learn', commands: ['help'] },
   {
     title: 'Account',

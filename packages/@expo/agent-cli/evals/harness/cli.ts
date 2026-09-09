@@ -29,7 +29,7 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
   async run({ input, signal: parentSignal, setArtifact }) {
     if (!/^[a-z0-9-]+$/.test(input.id)) throw new Error('Eval id must be kebab-case');
     const signal = AbortSignal.any([
-      AbortSignal.timeout(180_000),
+      AbortSignal.timeout(240_000),
       ...(parentSignal ? [parentSignal] : []),
     ]);
     const root = copyWorkspace(input.fixture, input.linkDependencies);

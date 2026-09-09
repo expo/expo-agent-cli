@@ -1,9 +1,9 @@
 import type { Message } from './loop';
 
-export const model = process.env.AGENT_CLI_EVAL_MODEL ?? 'qwen3:4b-instruct';
+export const model = process.env.AGENT_CLI_EVAL_MODEL ?? 'qwen3:8b';
 const host = process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434';
 // The digest, not just the mutable tag, identifies the weights used by the default CI driver.
-export const defaultDigest = '0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0';
+export const defaultDigest = '500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41';
 
 async function request(route: string, signal: AbortSignal, body?: unknown) {
   const response = await fetch(new URL(route, host), {
@@ -24,8 +24,7 @@ export async function identifyModel(signal: AbortSignal) {
   const installed = tags.models?.find((entry: { name: string }) => entry.name === model);
   if (!installed) throw new Error(`Ollama model ${model} is not installed`);
   const expected =
-    process.env.AGENT_CLI_EVAL_MODEL_DIGEST ??
-    (model === 'qwen3:4b-instruct' ? defaultDigest : undefined);
+    process.env.AGENT_CLI_EVAL_MODEL_DIGEST ?? (model === 'qwen3:8b' ? defaultDigest : undefined);
   if (expected && installed.digest !== expected)
     throw new Error(`Ollama model digest mismatch: ${installed.digest}, expected ${expected}`);
   return {
@@ -37,7 +36,7 @@ export async function identifyModel(signal: AbortSignal) {
 
 /** Translate the internal loop history to Ollama's native tool-call protocol. */
 export function nativeMessages(messages: Message[]) {
-  let toolPending = false;
+  let toolsPending = 0;
   return messages.map((message) => {
     if (message.role === 'assistant') {
       let action;
@@ -46,17 +45,20 @@ export function nativeMessages(messages: Message[]) {
       } catch {
         /* preserve malformed output */
       }
-      if (action && Object.hasOwn(action, 'run')) {
-        toolPending = true;
+      if (action && (Object.hasOwn(action, 'run') || Array.isArray(action.runs))) {
+        const calls = Array.isArray(action.runs) ? action.runs : [action.run];
+        toolsPending = calls.length;
         return {
           role: 'assistant',
           content: '',
-          tool_calls: [{ function: { name: 'run_cli', arguments: { argv: action.run } } }],
+          tool_calls: calls.map((argv: unknown) => ({
+            function: { name: 'run_cli', arguments: { argv } },
+          })),
         };
       }
     }
-    if (message.role === 'user' && toolPending) {
-      toolPending = false;
+    if (message.role === 'user' && toolsPending > 0) {
+      toolsPending--;
       return { role: 'tool', tool_name: 'run_cli', content: message.content };
     }
     return message;
@@ -96,8 +98,8 @@ export async function chat(
   const response = await request('/api/chat', signal, body);
   record(body, response);
   const calls = response.message?.tool_calls;
-  if (calls?.length > 1) throw new Error('Expected one CLI call per turn');
-  if (calls?.length && calls[0].function?.name !== 'run_cli')
+  if (calls?.length > 12) throw new Error('Model requested too many CLI calls');
+  if (calls?.some((call: { function?: { name?: string } }) => call.function?.name !== 'run_cli'))
     throw new Error('Unknown tool requested by Ollama');
   if (response.done_reason === 'length') throw new Error('Model exhausted its output token budget');
   if (!calls?.length && !response.message?.content?.trim())
@@ -105,7 +107,14 @@ export async function chat(
   return {
     content: JSON.stringify(
       calls?.length
-        ? { run: calls[0].function.arguments?.argv ?? null }
+        ? calls.length === 1
+          ? { run: calls[0].function.arguments?.argv ?? null }
+          : {
+              runs: calls.map(
+                (call: { function: { arguments?: { argv?: unknown } } }) =>
+                  call.function.arguments?.argv ?? null
+              ),
+            }
         : { done: true, summary: response.message.content }
     ),
     request: body,
