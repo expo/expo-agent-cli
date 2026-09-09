@@ -24,6 +24,8 @@ it('runs a fresh project against real locked packages without copying node_modul
   const root = copyWorkspace('evals/fixtures/real-app', true);
   roots.push(root);
   expect(fs.lstatSync(path.join(root, 'node_modules')).isSymbolicLink()).toBe(true);
-  expect(JSON.parse(fs.readFileSync(path.join(root, 'node_modules/expo/package.json'), 'utf8')).version).toBe('57.0.19');
+  expect(
+    JSON.parse(fs.readFileSync(path.join(root, 'node_modules/expo/package.json'), 'utf8')).version
+  ).toBe('57.0.19');
   expect(snapshot(root)).toHaveProperty('index.js');
 });

@@ -9,7 +9,7 @@ describeEval('agent skills integration', { harness: cliHarness }, (it) => {
     const { output } = await run({
       id: 'skills-sync',
       prompt: 'Sync this project’s installed package skills for Claude Code.',
-      fixture: 'e2e/fixtures/skills-app',
+      fixture: 'evals/fixtures/claude-skills-app',
     });
     const link = path.join(output.root, '.claude/skills/usage');
     expect(fs.realpathSync(link), 'link resolves to the installed package skill').toBe(

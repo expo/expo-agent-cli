@@ -28,7 +28,11 @@ export async function identifyModel(signal: AbortSignal) {
     (model === 'qwen3:4b-instruct' ? defaultDigest : undefined);
   if (expected && installed.digest !== expected)
     throw new Error(`Ollama model digest mismatch: ${installed.digest}, expected ${expected}`);
-  return { model, digest: installed.digest as string, ollamaVersion: version.version as string };
+  return {
+    model,
+    digest: installed.digest as string,
+    ollamaVersion: version.version as string,
+  };
 }
 
 /** Translate the internal loop history to Ollama's native tool-call protocol. */
@@ -42,7 +46,7 @@ export function nativeMessages(messages: Message[]) {
       } catch {
         /* preserve malformed output */
       }
-      if (Array.isArray(action?.run)) {
+      if (action && Object.hasOwn(action, 'run')) {
         toolPending = true;
         return {
           role: 'assistant',
@@ -78,7 +82,9 @@ export async function chat(
             'Execute @expo/agent-cli in the project directory and return its exit code, stdout and stderr. Use --help to discover commands and flags.',
           parameters: {
             type: 'object',
-            properties: { argv: { type: 'array', items: { type: 'string' }, minItems: 1 } },
+            properties: {
+              argv: { type: 'array', items: { type: 'string' }, minItems: 1 },
+            },
             required: ['argv'],
           },
         },
@@ -99,7 +105,7 @@ export async function chat(
   return {
     content: JSON.stringify(
       calls?.length
-        ? { run: calls[0].function.arguments?.argv }
+        ? { run: calls[0].function.arguments?.argv ?? null }
         : { done: true, summary: response.message.content }
     ),
     request: body,
