@@ -117,3 +117,7 @@ Live check, 2026-09-09: a fresh SDK 57 app created with this CLI (`new <dir> --n
 ### Smoke session ownership and cleanup
 
 The creation message identifies a new session. An overwrite warning naming a previous session is not a creation receipt and must never select the cleanup target. A session created before a failed readiness wait still belongs to the smoke run and is registered for cleanup. The start phase reports creation only; the environment summary reports the actual session cleanup result. Reused sessions remain running. [observed — regression tests, 2026-09-09]
+
+### Attach the controller after a smoke session starts
+
+EAS's `--open-url` launches the app, but does not create an `agent-device` controller session. A fresh smoke run must still perform its normal app open even if Metro already lists a debugger target. That open binds the controller before observation and screenshots; it also uses the existing rule that an app opened by this run needs no additional reload. A reused session with an attached app keeps the existing reload check. [observed — SDK 57 on EAS iOS, 2026-09-09: without the controller open, screenshot exited `SESSION_NOT_FOUND: No active session. Run open first.`]

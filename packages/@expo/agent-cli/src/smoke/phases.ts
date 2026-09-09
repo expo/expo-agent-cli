@@ -1446,7 +1446,11 @@ async function runPhasesAsync(
       (await deps.waitForAppConnection(devServerUrl, Math.min(remaining(), APP_PROBE_MS)));
     // `!appReplaced` is the whole of the fix above: an install replaced the app, so a count that
     // says one is attached is describing the process the install ended.
-    if (!appReplaced && first.appsConnected > 0) {
+    // EAS's --open-url launches the app without opening an agent-device controller session.
+    // Go through the normal open once for a session we created, even if Metro already sees the
+    // app. This binds the controller for screenshots and makes a second reload unnecessary.
+    const needsCloudController = options.cloud === 'required' && environment.device === 'booted';
+    if (!appReplaced && first.appsConnected > 0 && !needsCloudController) {
       return { status: 'ok' as const, value: first };
     }
 

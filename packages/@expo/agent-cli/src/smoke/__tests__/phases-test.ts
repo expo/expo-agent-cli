@@ -2941,6 +2941,20 @@ describe('the start-session phase, on --eas', () => {
     expect(run.environment.cleanup).toContainEqual(expect.objectContaining({ resource: 'session', ok: false }));
   });
 
+  it.each([true, false])('reloads an attached EAS app only when the session was reused (started: %s)', async (started) => {
+    const reloadApp = vi.fn(async () => ({ ok: true, verifiedBy: 'fresh-debugger-target' as const,
+      knownTargetIds: ['old'], freshTargets: 1, commandSocketReconnected: false, bundleServed: false, reason: null }));
+    const openRoute = vi.fn(async (route: string) => opened({ route, deviceId: 'sess-up', deviceBackend: 'cloud' }));
+    const run = await runSmokePhasesAsync(cloudDeps({
+      ensureEasSession: async () => ({ ok: true, sessionId: 'sess-up', started, reason: null }),
+      openRoute,
+      reloadApp,
+    }), options({ bootstrap: true, cloud: 'required' }));
+    expect(openRoute).toHaveBeenCalledTimes(started ? 1 : 0);
+    expect(reloadApp).toHaveBeenCalledTimes(started ? 0 : 1);
+    expect(statusOf(run, 'reload')).toBe(started ? 'skipped' : 'ok');
+  });
+
   it(`records a session that was already up, and leaves it running`, async () => {
     const stopEasSession = vi.fn();
     const run = await runSmokePhasesAsync(
