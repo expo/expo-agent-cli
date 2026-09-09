@@ -125,3 +125,7 @@ EAS's `--open-url` launches the app, but does not create an `agent-device` contr
 ### Stop hints
 
 Normal dev progress and follow-ups name `agent-cli dev:stop --eas`, which stops both the project's dev server and its EAS session. Smoke instead explains that it stops sessions it creates after the run. Exact-ID EAS stop commands remain appropriate when reporting a particular session whose startup or cleanup failed. [confirmed — Kudo, 2026-09-09]
+
+### The dev run owns sessions it creates
+
+When Metro exits, including after SIGINT/Ctrl-C or SIGTERM, `dev --eas` waits for its outstanding app-open operation and stops the session it created by exact ID. A reused session is left running. A failed readiness wait can still return a created session and receives the same cleanup. Signal handling remains installed until cleanup completes. If interruption arrives during creation, the run waits for that bounded operation to return a receipt rather than abandoning a potentially billed session. `--detach` transfers this lifetime to the child; the parent's normal return does not stop the session. [confirmed — Kudo, 2026-09-09; observed — subprocess regression tests]
