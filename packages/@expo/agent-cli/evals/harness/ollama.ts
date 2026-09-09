@@ -24,7 +24,8 @@ export async function identifyModel(signal: AbortSignal) {
   const installed = tags.models?.find((entry: { name: string }) => entry.name === model);
   if (!installed) throw new Error(`Ollama model ${model} is not installed`);
   const expected =
-    process.env.AGENT_CLI_EVAL_MODEL_DIGEST ?? (model === 'qwen3:4b-instruct' ? defaultDigest : undefined);
+    process.env.AGENT_CLI_EVAL_MODEL_DIGEST ??
+    (model === 'qwen3:4b-instruct' ? defaultDigest : undefined);
   if (expected && installed.digest !== expected)
     throw new Error(`Ollama model digest mismatch: ${installed.digest}, expected ${expected}`);
   return { model, digest: installed.digest as string, ollamaVersion: version.version as string };

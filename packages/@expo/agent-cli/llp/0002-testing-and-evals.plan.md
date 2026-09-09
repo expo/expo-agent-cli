@@ -43,7 +43,10 @@ keeps complete command/model records and actual model identity for triage; no au
 
 Run Tier 1 on every relevant PR when measured CPU time permits. Establish real GitHub Actions
 evidence before expanding coverage, then enhance Tier 2. This supersedes weekly-only expansion
-as a default; cadence follows measured runtime. The legacy JSON runner remains during migration.
+as a default; cadence follows measured runtime. The legacy JSON runner remains for Tier 0 and the old Tier 2 during migration.
+GitHub Actions now invokes `test:evals` for the entire migrated Tier 1 suite on each relevant PR.
+The initial pair is skill linking and a read-only compatibility report over real, locked Expo
+dependencies; measured CI evidence belongs with the introducing PR.
 
 ## Graders
 

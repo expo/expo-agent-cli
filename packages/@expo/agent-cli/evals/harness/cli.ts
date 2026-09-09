@@ -8,7 +8,13 @@ import { chat, identifyModel } from './ollama';
 import { runProcess } from './process';
 import { artifactRoot, cliBin, copyWorkspace, packageRoot, snapshot } from './workspace';
 
-export type EvalInput = { id: string; prompt: string; fixture: string; maxTurns?: number };
+export type EvalInput = {
+  id: string;
+  prompt: string;
+  fixture: string;
+  linkDependencies?: boolean;
+  maxTurns?: number;
+};
 export type EvalOutput = {
   root: string;
   before: Record<string, string>;
@@ -25,7 +31,7 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
       AbortSignal.timeout(180_000),
       ...(parentSignal ? [parentSignal] : []),
     ]);
-    const root = copyWorkspace(input.fixture);
+    const root = copyWorkspace(input.fixture, input.linkDependencies);
     fs.mkdirSync(artifactRoot, { recursive: true });
     const artifacts = fs.mkdtempSync(path.join(artifactRoot, `${input.id}-`));
     const events: LoopEvent[] = [];
