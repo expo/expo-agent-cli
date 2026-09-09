@@ -9,7 +9,7 @@
 //   node evals/run.mjs --dry-run                  Validate every scenario and print the plan
 //   node evals/run.mjs --tier 0                   Run the tier 0 scenarios
 //   node evals/run.mjs --tier 0 --scenario <id>   Run one scenario
-//   node evals/run.mjs --tier 1                   Run the tier 1 scenarios with a local model
+//   bun run test:evals                           Run Tier 1 with Vitest and Ollama
 //                                                 via Ollama (OLLAMA_HOST, AGENT_CLI_EVAL_MODEL)
 //   node evals/run.mjs --tier 2                   Run the tier 2 scenarios with Claude Code
 //                                                 headless (ANTHROPIC_API_KEY required)
@@ -37,14 +37,6 @@ const DRIVING_AGENTS = {
 const GRADER_TYPES = ['exit-code', 'path-exists', 'jsonl-event', 'http-probe'];
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-// Tier 1: best-effort agent-in-the-loop with a local model (LLP 0002). The model is pinned and
-// decoding is greedy (temperature 0, fixed seed) so runs are as reproducible as inference gets.
-const OLLAMA_HOST = process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434';
-const TIER1_MODEL = process.env.AGENT_CLI_EVAL_MODEL ?? 'qwen3:4b';
-const TIER1_MAX_TURNS = 8;
-const TIER1_OUTPUT_LIMIT = 800;
-const TIER1_SEED = 42;
-
 // Tier 2: a frontier agent (Claude Code headless) drives the scenario for real. Runs from the
 // label-triggered EAS workflow (.eas/workflows/agent-cli-tier2-evals.yml); needs ANTHROPIC_API_KEY.
 const TIER2_AGENT_BIN = process.env.AGENT_CLI_TIER2_AGENT ?? 'claude';
@@ -56,7 +48,7 @@ const USAGE = `Run the @expo/agent-cli eval scenarios.
 Usage: node evals/run.mjs [options]
 
 Options:
-  --tier <0|1|2>     Run the scenarios of one tier. Omit with --dry-run to plan every tier.
+  --tier <0|2>       Run legacy JSON scenarios. Tier 1 uses bun run test:evals.
   --scenario <id>    Limit to one scenario. Can be repeated.
   --dry-run          Validate the scenarios and print the plan without executing anything.
   -h, --help         Usage info
@@ -483,254 +475,15 @@ function indent(text, prefix) {
     .join('\n');
 }
 
-/* -------------------------------------------------------------------------- */
-/* Tier 1 execution — local model over Ollama                                 */
-/* -------------------------------------------------------------------------- */
-
-// The command list below duplicates the CLI surface, so it drifts whenever a command or flag is
-// added. Source of truth: `topLevelCommands` and `commandGroups` in src/commandRegistry.ts, and the
-// `printHelp` block of each command's index.ts. Update this prompt and TIER2_COMMAND_SUMMARY
-// together when either changes.
-// The `--help` escape hatch keeps a stale list from being a dead end for the model.
-const TIER1_SYSTEM_PROMPT = `You are an autonomous agent completing a task in an Expo project using the \`@expo/agent-cli\` CLI.
-
-Available commands:
-  @expo/agent-cli status [--json]               Where the project is now and what would happen next; --json adds the raw project probe
-  @expo/agent-cli dev                           Print what must run to get the app running, then run it
-  @expo/agent-cli dev --plan                    Print what must run to get the app running, then exit without running it
-  @expo/agent-cli start                         Start the dev server with expo start, without planning anything
-  @expo/agent-cli skills:sync --agent <agent>   Link agent skills from installed packages
-  @expo/agent-cli skills:list [--json]          List discovered skills
-  @expo/agent-cli skills:show <package>         Print a package's skill
-  @expo/agent-cli skills:clean                  Remove managed skill links
-  @expo/agent-cli install <packages..>          Install packages with expo, then sync skills (@expo/agent-cli add is the same command)
-
-A command with a colon is a group and an action, e.g. \`skills:list\` lists the skills of the \`skills\` group.
-
-Valid --agent values: claude-code, cursor, codex, opencode, windsurf, gemini-cli
-
-Respond with EXACTLY ONE JSON object and nothing else:
-  {"run": ["skills:sync", "--agent", "claude-code"]}      to execute an @expo/agent-cli command
-  {"done": true, "summary": "<what you accomplished>"}    when the task is complete
-
-These expo commands are forwarded to the project's \`expo\` CLI, e.g. \`@expo/agent-cli prebuild --clean\` runs \`expo prebuild --clean\`:
-  run, run:ios, run:android, prebuild, config, export, export:web, export:embed, serve, customize, lint, login, logout, register, whoami
-
-Any name in neither list is not a command: it fails instead of running anything.
-
-Rules: one command per turn; wait for the result before deciding the next step; prefer the fewest commands that complete the task. Do not invent flags: if you need a flag that is not listed above, run the command with --help first and read the real flags from the output.`;
-
-// Plain http.request instead of fetch: Node's fetch (undici) enforces a 5-minute headers
-// timeout, which a slow CPU-only CI runner can exceed on a long-context inference call
-// (observed: HeadersTimeoutError on the 2nd turn of dev-plan, expo/expo#49229 tier 1).
-const TIER1_REQUEST_TIMEOUT_MS = 900_000;
-
-function chatOllama(messages) {
-  const body = JSON.stringify({
-    model: TIER1_MODEL,
-    messages,
-    stream: false,
-    format: 'json',
-    options: { temperature: 0, seed: TIER1_SEED },
-  });
-  const url = new URL('/api/chat', OLLAMA_HOST);
-  const client = url.protocol === 'https:' ? https : http;
-
-  return new Promise((resolve, reject) => {
-    const request = client.request(
-      url,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
-        timeout: TIER1_REQUEST_TIMEOUT_MS,
-      },
-      (response) => {
-        let data = '';
-        response.on('data', (chunk) => (data += chunk));
-        response.on('end', () => {
-          if ((response.statusCode ?? 0) >= 400) {
-            reject(new Error(`Ollama /api/chat responded ${response.statusCode}: ${data}`));
-            return;
-          }
-          try {
-            resolve(JSON.parse(data)?.message?.content ?? '');
-          } catch (error) {
-            reject(new Error(`Ollama /api/chat returned invalid JSON: ${error.message}`));
-          }
-        });
-      }
-    );
-    request.on('timeout', () => {
-      request.destroy(
-        new Error(`Ollama /api/chat timed out after ${TIER1_REQUEST_TIMEOUT_MS / 1000}s`)
-      );
-    });
-    request.on('error', reject);
-    request.end(body);
-  });
-}
-
-async function checkOllamaAsync() {
-  let tags;
-  try {
-    const response = await fetch(`${OLLAMA_HOST}/api/tags`);
-    tags = await response.json();
-  } catch {
-    return (
-      `Ollama is not reachable at ${OLLAMA_HOST}, so the tier 1 model driver cannot run. ` +
-      `Start it with \`ollama serve\`, or point OLLAMA_HOST at a running instance.`
-    );
-  }
-  const models = (tags?.models ?? []).map((model) => model.name);
-  const found = models.some((name) => name === TIER1_MODEL || name === `${TIER1_MODEL}:latest`);
-  if (!found) {
-    return (
-      `The pinned tier 1 model "${TIER1_MODEL}" is not available in Ollama (installed: ${models.join(', ') || 'none'}). ` +
-      `Pull it first with \`ollama pull ${TIER1_MODEL}\`, or override AGENT_CLI_EVAL_MODEL.`
-    );
-  }
-  return undefined;
-}
-
-/** Parse the model's reply into {run} | {done} | undefined. Tolerates fenced or wrapped JSON. */
-function parseTier1Action(content) {
-  const candidates = [content];
-  const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced) {
-    candidates.push(fenced[1]);
-  }
-  const braced = content.match(/\{[\s\S]*\}/);
-  if (braced) {
-    candidates.push(braced[0]);
-  }
-  for (const candidate of candidates) {
-    let action;
-    try {
-      action = JSON.parse(candidate.trim());
-    } catch {
-      continue;
-    }
-    if (action && typeof action === 'object') {
-      if (Array.isArray(action.run) && action.run.every((part) => typeof part === 'string')) {
-        return { run: action.run };
-      }
-      if (action.done === true) {
-        return { done: true, summary: typeof action.summary === 'string' ? action.summary : '' };
-      }
-    }
-  }
-  return undefined;
-}
-
 function truncate(text, limit) {
   return text.length > limit ? `${text.slice(0, limit)}\n[truncated]` : text;
-}
-
-async function runTier1Scenario(scenario) {
-  const fixtureDir = path.join(PACKAGE_ROOT, scenario.fixture);
-  if (!fs.existsSync(fixtureDir)) {
-    return { pass: false, reason: `fixture not found: ${scenario.fixture}` };
-  }
-
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), `agent-cli-eval1-${scenario.id}-`));
-  copyFixture(fixtureDir, workspace);
-
-  const messages = [
-    { role: 'system', content: TIER1_SYSTEM_PROMPT },
-    { role: 'user', content: `Task: ${scenario.taskPrompt}\nWorking directory: the project root.` },
-  ];
-
-  const startedAt = Date.now();
-  let lastResult;
-  let commandsRun = 0;
-  let done = false;
-
-  for (let turn = 1; turn <= TIER1_MAX_TURNS; turn++) {
-    let content;
-    const turnStartedAt = Date.now();
-    try {
-      content = await chatOllama(messages);
-      console.log(
-        `    turn ${turn}: inference ${((Date.now() - turnStartedAt) / 1000).toFixed(1)}s`
-      );
-    } catch (error) {
-      // An inference failure fails this scenario, not the whole runner.
-      console.log(`    turn ${turn}: inference failed — ${error.message}`);
-      console.log(`    workspace kept for triage: ${workspace}`);
-      return { pass: false, reason: `inference failed on turn ${turn}: ${error.message}` };
-    }
-    messages.push({ role: 'assistant', content });
-
-    const action = parseTier1Action(content);
-    if (!action) {
-      messages.push({
-        role: 'user',
-        content:
-          'Your reply was not a single valid JSON action. Respond with {"run": [...]} or {"done": true, "summary": "..."} only.',
-      });
-      console.log(`    turn ${turn}: unparseable reply`);
-      continue;
-    }
-
-    if (action.done) {
-      done = true;
-      console.log(`    turn ${turn}: done — ${action.summary || '(no summary)'}`);
-      break;
-    }
-
-    commandsRun++;
-    const result = await runCli(action.run, {
-      cwd: workspace,
-      // Scenario env (e.g. LOG_EVENTS) applies in every tier — the graders read the same
-      // files regardless of which driver ran the command.
-      env: { ...process.env, CI: '1', ...(scenario.command?.env ?? {}) },
-      timeoutMs: DEFAULT_TIMEOUT_MS,
-    });
-    lastResult = result;
-    console.log(
-      `    turn ${turn}: @expo/agent-cli ${action.run.join(' ')} (exit ${result.exitCode})`
-    );
-    messages.push({
-      role: 'user',
-      content: JSON.stringify({
-        exitCode: result.exitCode,
-        stdout: truncate(result.stdout, TIER1_OUTPUT_LIMIT),
-        stderr: truncate(result.stderr, TIER1_OUTPUT_LIMIT),
-      }),
-    });
-  }
-
-  const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-  console.log(
-    `    model: ${TIER1_MODEL}, ${commandsRun} command(s), done=${done}, ${elapsedSeconds}s`
-  );
-
-  const grades = [];
-  for (const grader of scenario.graders) {
-    const grade = await applyGrader(grader, {
-      workspace,
-      result: lastResult ?? { exitCode: -1, stdout: '', stderr: '' },
-    });
-    grades.push({ grader, ...grade });
-    console.log(`    ${grade.pass ? 'PASS' : 'FAIL'} ${describeGrader(grader)} — ${grade.detail}`);
-  }
-
-  const pass = grades.every((grade) => grade.pass);
-  if (pass) {
-    fs.rmSync(workspace, { recursive: true, force: true });
-  } else {
-    console.log(`    workspace kept for triage: ${workspace}`);
-    console.log(indent(JSON.stringify(messages, null, 2), '    transcript: '));
-  }
-
-  return { pass, reason: pass ? undefined : 'one or more graders failed' };
 }
 
 /* -------------------------------------------------------------------------- */
 /* Tier 2 execution — frontier agent (Claude Code headless)                   */
 /* -------------------------------------------------------------------------- */
 
-/** Kept next to TIER1_SYSTEM_PROMPT's list on purpose — see the drift note above it. */
+/** Legacy Tier 2 command context, until the long-task Vitest suite replaces this runner. */
 const TIER2_COMMAND_SUMMARY =
   'Available commands: status [--json] (--json adds the raw project probe), dev [--plan] (dev alone prints the plan and runs it), ' +
   'start (expo start, no planning), skills:sync|skills:list|skills:show|skills:clean ' +
@@ -794,7 +547,7 @@ async function runTier2Scenario(scenario) {
     `    agent: ${TIER2_AGENT_BIN} headless, exit ${result.exitCode}, ${elapsedSeconds}s`
   );
   if (result.stdout.trim()) {
-    console.log(indent(truncate(result.stdout.trim(), TIER1_OUTPUT_LIMIT), '    agent said: '));
+    console.log(indent(truncate(result.stdout.trim(), 800), '    agent said: '));
   }
 
   const grades = [];
@@ -843,6 +596,11 @@ async function main() {
     return 1;
   }
 
+  if (options.tier === 1) {
+    console.error('Tier 1 moved to Vitest: run bun run test:evals (or AGENT_CLI_EVAL_DRY=1 bun run test:evals for outcome checks without a model).');
+    return 1;
+  }
+
   const loaded = loadScenarios();
   if (!loaded.length) {
     console.error(`No scenarios found in ${path.relative(PACKAGE_ROOT, SCENARIOS_DIR)}`);
@@ -878,7 +636,7 @@ async function main() {
     scenarios = scenarios.filter((scenario) => options.scenarios.includes(scenario.id));
   }
 
-  const tiers = options.tier === undefined ? TIERS : [options.tier];
+  const tiers = options.tier === undefined ? [0, 2] : [options.tier];
   const plan = tiers.map((tier) => ({
     tier,
     scenarios: scenarios.filter((scenario) => scenario.tiers.includes(tier)),
@@ -899,9 +657,6 @@ async function main() {
         for (const grader of scenario.graders) {
           console.log(`    grader:       ${describeGrader(grader)}`);
         }
-      }
-      if (tier === 1 && tierScenarios.length) {
-        console.log(`  (tier 1 runs with model ${TIER1_MODEL} via Ollama at ${OLLAMA_HOST})`);
       }
       if (tier === 2 && tierScenarios.length) {
         console.log(`  (tier 2 runs with ${TIER2_AGENT_BIN} headless; needs ANTHROPIC_API_KEY)`);
@@ -935,29 +690,13 @@ async function main() {
     return 1;
   }
 
-  if (tier === 1) {
-    const problem = await checkOllamaAsync();
-    if (problem) {
-      console.error(problem);
-      return 1;
-    }
-  }
-
-  console.log(
-    `@expo/agent-cli evals — tier ${tier}, ${selected.length} scenario(s)` +
-      (tier === 1 ? ` — model ${TIER1_MODEL} via ${OLLAMA_HOST}` : '') +
-      '\n'
-  );
+  console.log(`@expo/agent-cli evals — tier ${tier}, ${selected.length} scenario(s)\n`);
 
   const failures = [];
   for (const scenario of selected) {
     console.log(`  ${scenario.id} — ${scenario.taskPrompt}`);
     const outcome =
-      tier === 2
-        ? await runTier2Scenario(scenario)
-        : tier === 1
-          ? await runTier1Scenario(scenario)
-          : await runTier0Scenario(scenario);
+      tier === 2 ? await runTier2Scenario(scenario) : await runTier0Scenario(scenario);
     if (!outcome.pass) {
       failures.push({ scenario, reason: outcome.reason });
       console.log(`  FAIL ${scenario.id}: ${outcome.reason}\n`);

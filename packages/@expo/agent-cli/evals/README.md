@@ -25,7 +25,7 @@ CLI subprocesses use an empty temporary home so installed local agents cannot in
 `AGENT_CLI_EVAL_MODEL` and optionally `AGENT_CLI_EVAL_MODEL_DIGEST` for an explicit experiment.
 The adapter records the actual digest, Ollama version, Node version, CLI version, and CI commit.
 Qwen runs with thinking disabled, temperature 0, seed 42, a 512-token generation limit, and an
-8192-token context. There are six turns and a three-minute deadline per case, with a one-minute
+8192-token context. There are six turns, twelve CLI calls, and a three-minute deadline per case, with a one-minute
 limit per CLI call. There are no automatic retries or pass@k masking.
 
 ```ts
@@ -58,8 +58,8 @@ assertions passed; the Vitest result is the test verdict. Infrastructure failure
 command timeouts, and exhausted turn budgets throw instead of scoring an untouched workspace.
 Set `AGENT_CLI_EVAL_KEEP=1` to retain temporary projects locally. Failed traces survive cleanup.
 
-The JSON scenarios and `run.mjs` still serve Tier 0 and the previous Tier 1/2 entrypoints during
-the migration. Model evals are explicitly invoked; ordinary unit/e2e commands do not run models.
+The JSON scenarios and `run.mjs` still serve Tier 0 and the previous Tier 2 entrypoint during
+the migration. The old `--tier 1` driver has been removed; it points callers to `test:evals`. Model evals are explicitly invoked; ordinary unit/e2e commands do not run models.
 
 ## GitHub Actions
 
@@ -78,3 +78,19 @@ source/config preservation and the observed CLI calls are checked independently.
 `fixtures/claude-skills-app` starts with Claude project settings, but no linked skills. This models
 a call from an agent already using the project. The first GitHub trial found that Qwen stops with
 advice when no agent is detected; that failed recovery is not covered by this happy-path case.
+
+## Short task coverage
+
+- Discover installed skills: exact package/skill metadata and preserved project files.
+- Sync skills: a working link to the installed skill and readable content.
+- Set up Claude Code: generated instructions, a Claude import, working skill links, no external plugins, and preserved fixture files.
+- Plan development: an iOS development-client plan from `dev --plan` or the structured `status` report, with no execution or source changes. The plan may choose local or EAS based on runner capabilities.
+- Inspect a real Expo app: compatible Expo Go report, no server start, and preserved sources/configuration.
+
+Native tool batches run in order and return one result per call before the next model turn.
+Invalid batches execute nothing; the call/deadline budgets apply to the entire case.
+
+The initial expanded-suite baseline is 4/5 locally. Qwen calls setup without confirmation flags,
+then stops with advice after the error despite the prompt authorizing confirmation. That case
+remains a real failing eval in the advisory job: it is neither skipped nor marked as an expected
+failure. A future model or help change can improve this baseline without changing the grader.

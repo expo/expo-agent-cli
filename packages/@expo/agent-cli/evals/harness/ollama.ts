@@ -37,7 +37,7 @@ export async function identifyModel(signal: AbortSignal) {
 
 /** Translate the internal loop history to Ollama's native tool-call protocol. */
 export function nativeMessages(messages: Message[]) {
-  let toolPending = false;
+  let toolsPending = 0;
   return messages.map((message) => {
     if (message.role === 'assistant') {
       let action;
@@ -46,17 +46,20 @@ export function nativeMessages(messages: Message[]) {
       } catch {
         /* preserve malformed output */
       }
-      if (action && Object.hasOwn(action, 'run')) {
-        toolPending = true;
+      if (action && (Object.hasOwn(action, 'run') || Array.isArray(action.runs))) {
+        const calls = Array.isArray(action.runs) ? action.runs : [action.run];
+        toolsPending = calls.length;
         return {
           role: 'assistant',
           content: '',
-          tool_calls: [{ function: { name: 'run_cli', arguments: { argv: action.run } } }],
+          tool_calls: calls.map((argv: unknown) => ({
+            function: { name: 'run_cli', arguments: { argv } },
+          })),
         };
       }
     }
-    if (message.role === 'user' && toolPending) {
-      toolPending = false;
+    if (message.role === 'user' && toolsPending > 0) {
+      toolsPending--;
       return { role: 'tool', tool_name: 'run_cli', content: message.content };
     }
     return message;
@@ -96,8 +99,8 @@ export async function chat(
   const response = await request('/api/chat', signal, body);
   record(body, response);
   const calls = response.message?.tool_calls;
-  if (calls?.length > 1) throw new Error('Expected one CLI call per turn');
-  if (calls?.length && calls[0].function?.name !== 'run_cli')
+  if (calls?.length > 12) throw new Error('Model requested too many CLI calls');
+  if (calls?.some((call: { function?: { name?: string } }) => call.function?.name !== 'run_cli'))
     throw new Error('Unknown tool requested by Ollama');
   if (response.done_reason === 'length') throw new Error('Model exhausted its output token budget');
   if (!calls?.length && !response.message?.content?.trim())
@@ -105,7 +108,14 @@ export async function chat(
   return {
     content: JSON.stringify(
       calls?.length
-        ? { run: calls[0].function.arguments?.argv ?? null }
+        ? calls.length === 1
+          ? { run: calls[0].function.arguments?.argv ?? null }
+          : {
+              runs: calls.map(
+                (call: { function: { arguments?: { argv?: unknown } } }) =>
+                  call.function.arguments?.argv ?? null
+              ),
+            }
         : { done: true, summary: response.message.content }
     ),
     request: body,
