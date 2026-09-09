@@ -22,7 +22,7 @@ vi.mock('../../../devLock', () => ({
   readLastLoggedDevServerPort: vi.fn(() => null),
 }));
 vi.mock('../../messageSocket', async () => ({
-  ...await vi.importActual('../../messageSocket'),
+  ...(await vi.importActual('../../messageSocket')),
   connectMessageSocketAsync: vi.fn(),
 }));
 
@@ -900,8 +900,9 @@ describe('an app the command socket cannot see', () => {
         : (answers.call ?? 'sent'),
       type: 'string',
     }));
-    vi.spyOn(require('../../cdpClient'), 'CdpClient')
-      .mockImplementation(() => ({ evaluateAsync }) as any);
+    vi.spyOn(require('../../cdpClient'), 'CdpClient').mockImplementation(function () {
+      return { evaluateAsync } as any;
+    });
     return evaluateAsync;
   }
 
@@ -914,8 +915,12 @@ describe('an app the command socket cannot see', () => {
     const server = mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{}]).socket);
     const evaluateAsync = mockCdp();
-    // The app registers a new runtime after the call, which is the only proof of this method.
-    setTimeout(() => server.listing([RELOADED_EXPO_GO_TARGET]), 10).unref();
+    // Register the fresh runtime after the reload request, never before the baseline probe.
+    // A wall-clock timer races the probe on a busy runner.
+    evaluateAsync.mockImplementation(async (expression: string) => {
+      if (!expression.includes('no-expo-global')) server.listing([RELOADED_EXPO_GO_TARGET]);
+      return { value: expression.includes('no-expo-global') ? 'ready' : 'sent', type: 'string' };
+    });
 
     await expect(
       reloadAsync(projectRoot, options({ json: true, method: 'runtime' }))
@@ -1052,8 +1057,9 @@ describe('an app the command socket cannot see', () => {
       // The reload tore down the context that was answering, which is the usual outcome.
       throw new Error('The app did not answer the Runtime.evaluate request within 4000ms.');
     });
-    vi.spyOn(require('../../cdpClient'), 'CdpClient')
-      .mockImplementation(() => ({ evaluateAsync }) as any);
+    vi.spyOn(require('../../cdpClient'), 'CdpClient').mockImplementation(function () {
+      return { evaluateAsync } as any;
+    });
     setTimeout(() => server.listing([RELOADED_EXPO_GO_TARGET]), 10).unref();
 
     await expect(
@@ -1112,7 +1118,8 @@ describe('reloading an app on a cloud simulator session', () => {
 
   /** The argv of every `eas` this run spawned, as one string per spawn. */
   function spawnedCommands(): string[] {
-    return vi.mocked(spawn)
+    return vi
+      .mocked(spawn)
       .mock.calls.map(([bin, args]) => [bin, ...((args as string[]) ?? [])].join(' '));
   }
 
@@ -1593,10 +1600,9 @@ describe('the verification payload', () => {
     writeProject();
     const server = mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{}]).socket);
-    vi.spyOn(require('../../cdpClient'), 'CdpClient')
-      .mockImplementation(
-        () => ({ evaluateAsync: vi.fn(async () => ({ value: 'ready', type: 'string' })) }) as any
-      );
+    vi.spyOn(require('../../cdpClient'), 'CdpClient').mockImplementation(function () {
+      return { evaluateAsync: vi.fn(async () => ({ value: 'ready', type: 'string' })) } as any;
+    });
     setTimeout(() => server.listing([RELOADED_EXPO_GO_TARGET]), 10).unref();
 
     await expect(

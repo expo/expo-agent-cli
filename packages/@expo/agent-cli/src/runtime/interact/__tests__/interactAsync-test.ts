@@ -16,7 +16,7 @@ import { DEFAULT_MAX_NODES } from '../resolveOptions';
 import type { Mock } from 'vitest';
 
 vi.mock('../../cdpClient', async () => ({
-  ...await vi.importActual('../../cdpClient'),
+  ...(await vi.importActual('../../cdpClient')),
   CdpClient: vi.fn(),
 }));
 
@@ -39,7 +39,9 @@ function mockEvaluate(...values: unknown[]) {
     const value = values.length > 1 ? values.shift() : values[0];
     return { value, type: 'object' };
   });
-  vi.mocked(CdpClient).mockImplementation(() => ({ evaluateAsync }) as any);
+  vi.mocked(CdpClient).mockImplementation(function () {
+    return { evaluateAsync } as any;
+  });
   return evaluateAsync;
 }
 
@@ -48,7 +50,9 @@ function mockEvaluateThrowing(error: unknown) {
   const evaluateAsync = vi.fn(async () => {
     throw error;
   });
-  vi.mocked(CdpClient).mockImplementation(() => ({ evaluateAsync }) as any);
+  vi.mocked(CdpClient).mockImplementation(function () {
+    return { evaluateAsync } as any;
+  });
   return evaluateAsync;
 }
 
@@ -293,7 +297,9 @@ describe('a runtime with no fiber tree to walk', () => {
       exceptionText: 'TypeError: undefined is not an object',
       exceptionStack: null,
     }));
-    vi.mocked(CdpClient).mockImplementation(() => ({ evaluateAsync }) as any);
+    vi.mocked(CdpClient).mockImplementation(function () {
+      return { evaluateAsync } as any;
+    });
 
     await expect(runtimeTreeAsync(treeOptions)).rejects.toMatchObject({
       code: 'RUNTIME_TREE_FAILED',
