@@ -28,6 +28,23 @@ Testing infrastructure is built first, before feature work. [confirmed, Kudo, 20
 - **Tier 2, frontier model (scheduled and pre-release).** Claude Code headless (`claude -p`, Bash allowed, max 12 turns) drives the full scenario set via `runTier2Scenario` in `evals/run.mjs`. It runs from a label-triggered EAS workflow (`packages/@expo/agent-cli/.eas/workflows/agent-cli-tier2-evals.yml`, label `agent-cli-eval` or dispatch). The workflows live under the package because that is the EAS base directory — `app.json` links it to the `expo-ci/expo-agent-cli` CI project and `eas.json` sits beside it. Advisory only: the job never fails, and a `github-comment` job posts pass/fail plus a log excerpt to the PR. Prerequisite: `ANTHROPIC_API_KEY` in the EAS `production` environment.
 - **The `--eas` e2e, and a real EAS build with it.** `agent-cli-cloud-e2e` (`packages/@expo/agent-cli/.eas/workflows/`) runs the live-cloud suite on EAS as four parallel jobs — `{iOS, Android} × {Expo Go, dev build}` — against real EAS Simulator sessions, over a cloudflared tunnel (the cloud sim is in a datacenter and needs a public origin; GitHub CI has no way to give it one). The **dev-build** jobs first build a real development client of `apps/eas-example` on EAS (an `ios.simulator: true` build needs no code signing), then run the `--eas` suite against that client on a cloud simulator. So one workflow both creates a real native EAS build — the one path GitHub CI and the local live tier cannot take, [[0022-live-tier]] marks native build creation `unreachable in v1` — and tests agent-cli's whole cloud path against it. `@expo/agent-cli` has no EAS build command by design, so the build itself is eas-cli; the app is committed, linked, and build-ready. Runs under `EXPO_TOKEN` from the project's production environment. (This subsumed an earlier `agent-cli-eas-build` workflow that only built.)
 
+## Agent integration migration (2026-09-09)
+
+[confirmed, user, 2026-09-09] Tier 1 means a short prompt exercising calls from an agent;
+Tier 2 means a longer end-to-end task. Keep Ollama for Tier 1 and Claude on EAS for Tier 2.
+Use `vitest-evals` directly for the Vitest suite/harness API instead of maintaining a bespoke
+Vitest wrapper. The CLI package uses Vitest 4, the library's supported peer version.
+
+The first migrated case is `evals/tier1/skills-sync.eval.ts`, invoked by `test:evals`.
+`test:eval-harness` verifies the adapter without a model. The model selects argv from the public
+CLI help; graders never provide the answer to the agent. A finished loop is distinct from a
+passed assertion. A missing model, timeout, or exhausted turn budget errors the test. Each run
+keeps complete command/model records and actual model identity for triage; no automatic retries.
+
+Run Tier 1 on every relevant PR when measured CPU time permits. Establish real GitHub Actions
+evidence before expanding coverage, then enhance Tier 2. This supersedes weekly-only expansion
+as a default; cadence follows measured runtime. The legacy JSON runner remains during migration.
+
 ## Graders
 
 Programmatic and model-free: the dev server responds; the app boots; `expo-doctor` passes; the expected files changed; the JSONL event stream contains the expected events. Graders never read transcripts to decide pass/fail.

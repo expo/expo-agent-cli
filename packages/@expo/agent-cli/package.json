@@ -33,7 +33,7 @@
     "clean": "expo-module clean",
     "lint": "oxlint --config oxlint.config.mjs .",
     "format": "expo-module format",
-    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.tests.json && tsc -p e2e/tsconfig.json && tsc -p e2e-live/tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.tests.json && tsc -p e2e/tsconfig.json && tsc -p e2e-live/tsconfig.json && tsc -p evals/tsconfig.json",
     "test": "vitest run",
     "test:e2e": "vitest run --config e2e/vitest.config.ts",
     "test:live": "vitest run --config e2e-live/vitest.config.ts",
@@ -45,7 +45,9 @@
     "test:live:cloud": "vitest run --config e2e-live/vitest.config.ts live-cloud",
     "test:live:iosdevclient": "vitest run --config e2e-live/vitest.config.ts live-ios-devclient",
     "test:live:bootstrap": "vitest run --config e2e-live/vitest.config.ts live-bootstrap",
-    "prepublishOnly": "bun run clean && bun run build:prod"
+    "prepublishOnly": "bun run clean && bun run build:prod",
+    "test:eval-harness": "vitest run --config evals/harness/vitest.config.ts",
+    "test:evals": "vitest run --config evals/vitest.config.ts"
   },
   "devDependencies": {
     "2g": "^0.4.3",
@@ -63,6 +65,8 @@
     "memfs": "^3.2.0",
     "typescript": "~6.0.3",
     "vitest": "^4.1.11",
-    "ws": "^8.12.1"
+    "ws": "^8.12.1",
+    "vitest-evals": "0.16.1",
+    "tinyrainbow": "3.1.0"
   }
 }
