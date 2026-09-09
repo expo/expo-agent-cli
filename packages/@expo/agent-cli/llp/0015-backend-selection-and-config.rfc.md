@@ -91,6 +91,8 @@ otherwise                  ->  <runner> eas-cli@latest
 runner                     ->  bunx, when the project uses bun; else npx --yes
 ```
 
+**What is printed is what is spawned** [Kudo, 2026-09-09]. Every EAS command line this CLI hands a reader — a `Try:`, a follow-up, a needs-human `Ask the user`, a `How:` — is written with `easCommandPrefix()` (`src/utils/easCli.ts`): the same runner and package spec the resolver above would spawn for this project, so a bun project reads `bunx eas-cli`, a pinned project `npx --yes eas-cli`, everyone else `npx --yes eas-cli@latest`. Seventy-one lines used to say `npx eas …`, which runs nothing — there is no package called `eas`. A lint (`src/lint/__tests__/easCommandSpelling-test.ts`) fails on the bare form.
+
 The runners already prefer the project's own copy, so a "project bin first" rung was doing nothing the runner does not do. A runner resolves a package and never a file on `PATH`, so a stray `eas` is not spawned at all. The impostor guards stay (`utils/wrapperCrash.ts`) because "unreachable" is a claim about today's resolver rather than about the process boundary.
 
 Load-bearing rules of the rung:

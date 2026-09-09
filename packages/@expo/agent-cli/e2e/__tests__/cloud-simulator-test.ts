@@ -130,7 +130,7 @@ describe('@expo/agent-cli navigate --eas', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('No EAS Simulator session this CLI can drive is running');
-    expect(result.stderr).toContain('eas simulator --platform ios --type agent-device --expo-go');
+    expect(result.stderr).toContain('eas-cli@latest simulator --platform ios --type agent-device --expo-go');
     // The listing, then the read-only availability question, and nothing that could start or bill
     // anything.
     expect(easInvocations(projectRoot)).toEqual([
@@ -192,7 +192,7 @@ describe('@expo/agent-cli navigate --eas', () => {
     });
 
     expect(result.exitCode).toBe(7);
-    expect(result.stderr).toContain('eas login');
+    expect(result.stderr).toContain('eas-cli@latest login');
     expect(result.stderr).toContain('EXPO_TOKEN');
   });
 
@@ -221,7 +221,7 @@ describe('@expo/agent-cli navigate --eas', () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('sess-e2e');
     expect(result.stderr).toContain('has ended');
-    expect(result.stderr).toContain('eas simulator --platform ios --type agent-device --expo-go');
+    expect(result.stderr).toContain('eas-cli@latest simulator --platform ios --type agent-device --expo-go');
   });
 
   it(`explains a verb the session refused, and how to check the session`, async () => {
@@ -232,7 +232,7 @@ describe('@expo/agent-cli navigate --eas', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('Remote daemon is unavailable');
-    expect(result.stderr).toContain('npx eas simulator:list --status in-progress');
+    expect(result.stderr).toContain('npx --yes eas-cli@latest simulator:list --status in-progress');
   });
 
   // @ref llp/0005 §Cloud simulator. The controller's own
@@ -431,7 +431,7 @@ describe('@expo/agent-cli runtime:stop --eas', () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain('eas simulator --platform ios --type agent-device --expo-go');
+    expect(result.stderr).toContain('eas-cli@latest simulator --platform ios --type agent-device --expo-go');
     expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:exec')).toBe(false);
   });
 });
@@ -884,6 +884,6 @@ describe('an --eas command on a project EAS does not know', () => {
     const envelope = JSON.parse(result.stdout);
     expect(envelope.error.message).toContain('not linked to an EAS project');
     expect(envelope.error.message).not.toMatch(/re-run this command:\s*\./);
-    expect(envelope.error.suggestedCommand).toBe('npx eas init --account e2e-user --non-interactive');
+    expect(envelope.error.suggestedCommand).toBe('npx --yes eas-cli@latest init --account e2e-user --non-interactive');
   });
 });

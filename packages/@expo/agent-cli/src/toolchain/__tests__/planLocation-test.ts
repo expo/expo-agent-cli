@@ -102,7 +102,7 @@ describe('where each row of the decision table runs', () => {
       requirement: 'Xcode on this machine',
       // Nothing probed the machine here, which is not the same as having probed and not known.
       status: null,
-      alternativeCommand: 'npx eas build --platform ios --profile development',
+      alternativeCommand: 'npx --yes eas-cli@latest build --platform ios --profile development',
     });
   });
 
@@ -117,7 +117,7 @@ describe('where each row of the decision table runs', () => {
     expect(plan.buildLocation).toMatchObject({
       platform: 'android',
       requirement: 'the Android SDK and a JDK on this machine',
-      alternativeCommand: 'npx eas build --platform android --profile development',
+      alternativeCommand: 'npx --yes eas-cli@latest build --platform android --profile development',
     });
   });
 
@@ -162,7 +162,7 @@ describe('applyToolchainProbe', () => {
     expect(applied.buildLocation).toMatchObject({ status: 'missing' });
     const why = applied.reasons.join(' ');
     expect(why).toContain('xcode-select is not on PATH');
-    expect(why).toContain('npx eas build --platform ios --profile development');
+    expect(why).toContain('npx --yes eas-cli@latest build --platform ios --profile development');
     expect(why).toContain('an Expo account');
     // The plan is not rewritten: the caller may have an answer this CLI cannot see, and a plan
     // that quietly swapped its own steps would no longer be the plan that was approved.
@@ -181,7 +181,7 @@ describe('applyToolchainProbe', () => {
     expect(why).toContain('could not be established');
     expect(why).not.toContain('cannot run it');
     // The alternative is still named, because it is the answer if the machine turns out to lack it.
-    expect(why).toContain('npx eas build --platform ios --profile development');
+    expect(why).toContain('npx --yes eas-cli@latest build --platform ios --profile development');
   });
 
   it(`carries the probe's caveats into the reasons, where a reader will meet them`, () => {

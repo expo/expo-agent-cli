@@ -8,6 +8,7 @@ import { PROGRAM_NAME, PROGRAM_PREFIX } from '../../programName';
 import { parseArgsOrThrow } from '../../utils/args';
 import { CommandError } from '../../utils/errors';
 import { DEFAULT_CONTEXT_AFTER, DEFAULT_CONTEXT_BEFORE } from './extract';
+import { easCommandPrefix } from '../../utils/easCli';
 
 export interface ExplainOptions {
   source: { kind: 'file'; path: string } | { kind: 'stdin' };
@@ -195,9 +196,9 @@ function buildIdUnsupported(value: string): CommandError {
     [
       `"${PROGRAM_NAME} inspect:build-log ${value}" cannot fetch a build's logs yet, so it has nothing to explain.`,
       `Why: eas-cli has no "build:logs" command, so there is no supported way for this CLI to read an EAS build's log. The argument is reserved for when there is; it is not a typo.`,
-      `How: save the log and pass it in — "npx eas build:view ${value}" prints where the log files are — then run "${PROGRAM_PREFIX} inspect:build-log --file <path>". A local build's output pipes straight in: "npx expo run:ios 2>&1 | ${PROGRAM_PREFIX} inspect:build-log".`,
+      `How: save the log and pass it in — "${easCommandPrefix()} build:view ${value}" prints where the log files are — then run "${PROGRAM_PREFIX} inspect:build-log --file <path>". A local build's output pipes straight in: "npx expo run:ios 2>&1 | ${PROGRAM_PREFIX} inspect:build-log".`,
     ].join('\n')
   );
-  error.suggestedCommand = `npx eas build:view ${value}`;
+  error.suggestedCommand = `${easCommandPrefix()} build:view ${value}`;
   return error;
 }

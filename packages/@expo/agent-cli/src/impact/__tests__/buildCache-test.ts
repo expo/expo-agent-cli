@@ -20,7 +20,7 @@ describe(describeLookupFailure, () => {
       INVOCATION
     );
     expect(reason).toContain('not linked to an EAS project');
-    expect(reason).toContain('npx eas init --account bob --non-interactive');
+    expect(reason).toContain('npx --yes eas-cli@latest init --account bob --non-interactive');
     expect(reason).not.toContain('Run one of the following');
   });
 

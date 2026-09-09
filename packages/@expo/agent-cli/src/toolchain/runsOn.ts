@@ -4,6 +4,7 @@
 // mean the same thing in all of them.
 
 import type { NativePlatform } from '../plan/types';
+import { easCommandPrefix } from '../utils/easCli';
 
 /**
  * Where a build runs.
@@ -88,5 +89,5 @@ export function easBuildCommand(
   platform: NativePlatform,
   profile: string = EAS_DEVELOPMENT_PROFILE
 ): string {
-  return `npx eas build --platform ${platform} --profile ${profile}`;
+  return `${easCommandPrefix()} build --platform ${platform} --profile ${profile}`;
 }

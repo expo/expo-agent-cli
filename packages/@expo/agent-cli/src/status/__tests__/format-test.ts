@@ -1137,7 +1137,7 @@ describe('the eas build line', () => {
     expect(rendered).toContain('ios: finished build');
     expect(rendered).toContain('simulator');
     expect(rendered).toContain(
-      'npx eas build:download --build-id 21d7d434-6495-4e74-b8c7-68ecd0dff489'
+      'npx --yes eas-cli@latest build:download --build-id 21d7d434-6495-4e74-b8c7-68ecd0dff489'
     );
   });
 
@@ -1208,7 +1208,7 @@ describe('a section that printed a line and still failed', () => {
   const failure = [
     'Could not compare against EAS build abc123.',
     'Why: "eas fingerprint:compare --build-id abc123" exited with 1.',
-    'How: check the id with "npx eas build:list --limit 5 --json --non-interactive".',
+    'How: check the id with "npx --yes eas-cli@latest build:list --limit 5 --json --non-interactive".',
   ].join('\n');
 
   it(`prints the failure, in full, in the text report`, () => {
@@ -1236,7 +1236,7 @@ describe('the build line', () => {
       status: null,
       detail: null,
       caveats: [],
-      alternativeCommand: 'npx eas build --platform ios --profile development',
+      alternativeCommand: 'npx --yes eas-cli@latest build --platform ios --profile development',
       selection: {
         runsOn: 'local',
         source: 'default',

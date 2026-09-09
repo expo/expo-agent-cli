@@ -9,6 +9,7 @@
 // have been one.
 
 import type { FollowUp } from './types';
+import { easCommandPrefix } from '../utils/easCli';
 
 /**
  * Download the build EAS already has, instead of making the one it would match.
@@ -18,7 +19,7 @@ import type { FollowUp } from './types';
 export function cachedBuildFollowUp(buildId: string): FollowUp {
   return {
     id: 'cached-build',
-    command: `npx eas build:download --build-id ${buildId}`,
+    command: `${easCommandPrefix()} build:download --build-id ${buildId}`,
     why: `The installed build no longer matches this project, and EAS already has a finished one made from this exact fingerprint (${buildId}) — downloading it is the same app a rebuild would produce, without the build.`,
   };
 }

@@ -17,7 +17,7 @@ function mockBuildLocation(overrides: Partial<PlanBuildLocation> = {}): PlanBuil
     status: null,
     detail: null,
     caveats: [],
-    alternativeCommand: 'npx eas build --platform ios --profile development',
+    alternativeCommand: 'npx --yes eas-cli@latest build --platform ios --profile development',
     selection: null,
     ...overrides,
   };
@@ -280,7 +280,7 @@ describe(buildStartPlanFollowUps, () => {
       );
 
       expect(ids(followups)).toEqual(['eas-build-instead', 'dev', 'build-freshness']);
-      expect(followups[0]!.command).toBe('npx eas build --platform ios --profile development');
+      expect(followups[0]!.command).toBe('npx --yes eas-cli@latest build --platform ios --profile development');
       // The bare tool name, because the sentence has already said where: "this machine has no
       // Xcode on this machine" is what the requirement string produces when it is dropped in.
       expect(followups[0]!.why).toContain('this machine does not have Xcode');
@@ -309,7 +309,7 @@ describe(buildStartPlanFollowUps, () => {
       );
 
       expect(ids(followups)).toEqual(['eas-account', 'dev', 'build-freshness']);
-      expect(followups[0]!.command).toBe('npx eas whoami');
+      expect(followups[0]!.command).toBe('npx --yes eas-cli@latest whoami');
       expect(followups[0]!.why).toContain('an Expo account');
       // The plan already went to the cloud, so offering the cloud again says nothing.
       expect(ids(followups)).not.toContain('eas-build-instead');
@@ -360,7 +360,7 @@ describe(buildEasBuildFollowUp, () => {
     const followup = buildEasBuildFollowUp(false);
 
     expect(followup.id).toBe('eas-build-configure');
-    expect(followup.command).toBe('npx eas build:configure');
+    expect(followup.command).toBe('npx --yes eas-cli@latest build:configure');
     expect(followup.why).toContain('cloud build');
     expect(followup.why).toContain('an Expo account');
   });

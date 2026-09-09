@@ -8,6 +8,7 @@
 
 /** A tool whose captured output the signatures of a scenario are matched against. */
 import { PROGRAM_PREFIX } from '../programName';
+import { easCommandPrefix } from '../utils/easCli';
 
 export type NeedsHumanTool = 'expo' | 'eas' | 'create-launch';
 
@@ -58,7 +59,10 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'eas-login',
     code: 'EAS_LOGIN_REQUIRED',
     need: 'Sign in to an Expo account on this machine.',
-    command: 'npx eas login',
+    // Read when the row is used, not when this module loads: the resolver reads the project.
+    get command() {
+      return `${easCommandPrefix()} login`;
+    },
     url: ACCESS_TOKENS_URL,
     unattendedEnv: ['EXPO_TOKEN'],
     resumable: true,
@@ -103,7 +107,10 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'asc-api-key-create',
     code: 'ASC_API_KEY_REQUIRED',
     need: 'Create an App Store Connect API key in the Apple portal, or hand an existing one over.',
-    command: 'npx eas credentials --platform ios',
+    // Read when the row is used, not when this module loads: the resolver reads the project.
+    get command() {
+      return `${easCommandPrefix()} credentials --platform ios`;
+    },
     url: 'https://appstoreconnect.apple.com/access/integrations/api',
     unattendedEnv: [],
     resumable: true,
@@ -114,7 +121,10 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'apple-auth',
     code: 'APPLE_AUTH_REQUIRED',
     need: 'Sign in to Apple and approve the two-factor prompt on a trusted device.',
-    command: 'npx eas credentials --platform ios',
+    // Read when the row is used, not when this module loads: the resolver reads the project.
+    get command() {
+      return `${easCommandPrefix()} credentials --platform ios`;
+    },
     url: 'https://developer.apple.com/account',
     // The variable names are observed in the eas-cli build output. Two-factor approval stays a
     // person even with all four set [inferred].
@@ -134,7 +144,10 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'ios-credentials',
     code: 'IOS_CREDENTIALS_REQUIRED',
     need: 'Set up the iOS signing credentials for this project.',
-    command: 'npx eas credentials --platform ios',
+    // Read when the row is used, not when this module loads: the resolver reads the project.
+    get command() {
+      return `${easCommandPrefix()} credentials --platform ios`;
+    },
     url: null,
     unattendedEnv: [],
     resumable: true,
@@ -147,7 +160,10 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'android-keystore',
     code: 'ANDROID_KEYSTORE_REQUIRED',
     need: 'Set up the Android keystore for this project.',
-    command: 'npx eas credentials --platform android',
+    // Read when the row is used, not when this module loads: the resolver reads the project.
+    get command() {
+      return `${easCommandPrefix()} credentials --platform android`;
+    },
     url: null,
     unattendedEnv: [],
     resumable: true,
@@ -158,7 +174,10 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'device-register',
     code: 'DEVICE_REGISTRATION_REQUIRED',
     need: 'Register the iOS device: run the command, then scan the code on the phone.',
-    command: 'npx eas device:create',
+    // Read when the row is used, not when this module loads: the resolver reads the project.
+    get command() {
+      return `${easCommandPrefix()} device:create`;
+    },
     url: null,
     unattendedEnv: [],
     resumable: true,
@@ -182,7 +201,10 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'eas-env-list',
     code: 'EAS_ENV_LIST_INTERACTIVE',
     need: 'Run `eas env:list` yourself: it has no non-interactive mode.',
-    command: 'npx eas env:list',
+    // Read when the row is used, not when this module loads: the resolver reads the project.
+    get command() {
+      return `${easCommandPrefix()} env:list`;
+    },
     url: null,
     unattendedEnv: [],
     // Nothing a person does makes the flag exist, so a re-run stops in the same place.
@@ -194,7 +216,10 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'eas-profile-selection',
     code: 'EAS_PROFILE_REQUIRED',
     need: 'Name the build profile and the platform: the EAS CLI prompts for both.',
-    command: 'npx eas config --platform ios --profile production',
+    // Read when the row is used, not when this module loads: the resolver reads the project.
+    get command() {
+      return `${easCommandPrefix()} config --platform ios --profile production`;
+    },
     url: null,
     unattendedEnv: [],
     resumable: true,
@@ -223,7 +248,10 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     id: 'eas-project-unlinked',
     code: 'EAS_PROJECT_NOT_LINKED',
     need: 'Link this project to an EAS project — which account it belongs to is yours to choose.',
-    command: 'npx eas init --account <account-name> --non-interactive',
+    // Read when the row is used, not when this module loads: the resolver reads the project.
+    get command() {
+      return `${easCommandPrefix()} init --account <account-name> --non-interactive`;
+    },
     url: null,
     unattendedEnv: [],
     resumable: true,

@@ -21,6 +21,7 @@ import {
 import type { BuildBackendChoice } from '../toolchain/selectBackend';
 import { cachedBuildFollowUp } from './cachedBuild';
 import { capFollowUps, type FollowUp } from './types';
+import { easCommandPrefix } from '../utils/easCli';
 
 export interface ChangeFollowUpInput {
   impactClass: ImpactClass;
@@ -83,7 +84,7 @@ export function buildChangeFollowUps({
           ? `${PROGRAM_PREFIX} dev --${devPlatform} --local`
           : platform
             ? easBuildCommand(platform)
-            : `npx eas build --profile ${EAS_DEVELOPMENT_PROFILE}`,
+            : `${easCommandPrefix()} build --profile ${EAS_DEVELOPMENT_PROFILE}`,
         why: runsOnEas
           ? `The same rebuild ${LOCAL_WHERE}, forced past the choice above: faster and free when this machine really does have ${localTool(platform)} somewhere nothing probed.`
           : `The same rebuild ${EAS_WHERE}: slower to start and it needs ${EAS_REQUIREMENT}, and it works without ${localTool(platform)} ${LOCAL_WHERE} and ends in an artifact with a URL somebody else can install.`,
@@ -112,7 +113,7 @@ export function buildChangeFollowUps({
   } else if (otaSafe === true && impactClass !== 'needs-native-build') {
     followups.push({
       id: 'change-ota-safe',
-      command: 'npx eas update --auto',
+      command: `${easCommandPrefix()} update --auto`,
       why: 'The native surface is unchanged and the runtimeVersion policy agrees, so this change can ship over the air without a new build.',
     });
   }

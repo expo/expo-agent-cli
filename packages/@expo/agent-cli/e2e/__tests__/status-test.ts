@@ -1470,7 +1470,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       // rather than the first line of the EAS CLI's explanation with the rest cut off.
       expect(iosOf(report)).toMatchObject({ state: 'unknown' });
       expect(iosOf(report).reason).toContain('not linked to an EAS project');
-      expect(iosOf(report).reason).toContain('npx eas init --account');
+      expect(iosOf(report).reason).toContain('npx --yes eas-cli init --account');
       expect(report.errors).toEqual({});
     });
 
@@ -1501,7 +1501,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain('eas build');
-      expect(result.stdout).toContain(`npx eas build:download --build-id ${BUILD_ID}`);
+      expect(result.stdout).toContain(`npx --yes eas-cli build:download --build-id ${BUILD_ID}`);
 
       const report = await reportInAsync(projectRoot, ['--explain'], env);
       expect(report.followups.map((followup) => followup.id)).toContain('cached-build');

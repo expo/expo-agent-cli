@@ -122,6 +122,22 @@ export function easCliArgs(easCli: EasCli, args: string[]): string[] {
  * reader would type, and `/opt/homebrew/bin/bunx eas-cli` is a line that says nothing more while
  * looking like it says something about this machine. The path is still what gets spawned.
  */
+/**
+ * How an EAS CLI command line is **written** for the reader of this project's output.
+ *
+ * @ref llp/0015-backend-selection-and-config.rfc.md §Resolving the EAS CLI
+ * The same spelling this CLI spawns: `npx --yes eas-cli@latest`, `npx --yes eas-cli` when the
+ * project pins the CLI, `bunx eas-cli…` for a bun project. `npx eas` — the spelling every printed
+ * line used to carry — runs nothing: there is no package called `eas` [Kudo, 2026-09-09]. A line a
+ * reader is meant to run has to be one that runs, in the package manager they are already using.
+ *
+ * @param projectRoot the project whose lockfile and pin decide the spelling; the cwd, which is the
+ * project for every command of this CLI, when the caller has none in hand.
+ */
+export function easCommandPrefix(projectRoot: string = process.cwd()): string {
+  return easCliInvocation(projectRoot).source;
+}
+
 export function easCliLabel(easCli: EasCli): string {
   return easCli.source;
 }

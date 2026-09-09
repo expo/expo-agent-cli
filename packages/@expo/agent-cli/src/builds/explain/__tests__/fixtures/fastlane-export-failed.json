@@ -13,7 +13,7 @@
     "line": 7,
     "matchedLine": "error: exportArchive: No signing certificate \"iOS Distribution\" found",
     "confidence": "high",
-    "suggestedCommand": "npx eas credentials --platform ios"
+    "suggestedCommand": "npx --yes eas-cli@latest credentials --platform ios"
   },
   "otherSignatures": [
     "8:ios.export.failed",

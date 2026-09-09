@@ -46,7 +46,7 @@ function needsHuman(overrides: Partial<NeedsHuman> = {}): NeedsHuman {
   return {
     scenario: 'eas-login',
     need: 'Sign in to an Expo account on this machine.',
-    command: 'npx eas login',
+    command: 'npx --yes eas-cli@latest login',
     url: 'https://expo.dev/settings/access-tokens',
     unattendedEnv: ['EXPO_TOKEN'],
     resumable: true,
@@ -104,14 +104,14 @@ describe(logCmdError, () => {
     expect(emitted[0]!.payload).toEqual({
       code: 'EAS_LOGIN_REQUIRED',
       message: 'Nobody is signed in.',
-      suggestedCommand: 'npx eas login',
+      suggestedCommand: 'npx --yes eas-cli@latest login',
       needsHuman: true,
     });
     expect(emitted[1]!.payload).toEqual({
       code: 'EAS_LOGIN_REQUIRED',
       scenario: 'eas-login',
       need: 'Sign in to an Expo account on this machine.',
-      command: 'npx eas login',
+      command: 'npx --yes eas-cli@latest login',
       url: 'https://expo.dev/settings/access-tokens',
       unattendedEnv: ['EXPO_TOKEN'],
       resumable: true,
@@ -133,7 +133,7 @@ describe(logCmdError, () => {
 
     expect(vi.mocked(warn).mock.calls.map(([line]) => line)).toEqual([
       'Needs a human   eas-login',
-      'Ask the user    npx eas login',
+      'Ask the user    npx --yes eas-cli@latest login',
       'Or set          EXPO_TOKEN  (https://expo.dev/settings/access-tokens)',
     ]);
   });
@@ -200,7 +200,7 @@ describe(logCmdError, () => {
         error: {
           code: 'EAS_LOGIN_REQUIRED',
           message: 'Nobody is signed in.',
-          suggestedCommand: 'npx eas login',
+          suggestedCommand: 'npx --yes eas-cli@latest login',
           needsHuman: needsHuman(),
           data: null,
         },
@@ -239,13 +239,13 @@ describe(formatNeedsHumanBlock, () => {
       formatNeedsHumanBlock(
         needsHuman({
           scenario: 'asc-api-key-create',
-          command: 'npx eas credentials --platform ios',
+          command: 'npx --yes eas-cli@latest credentials --platform ios',
           url: 'https://appstoreconnect.apple.com',
           unattendedEnv: [],
         })
       )[1]
     ).toBe(
-      'Ask the user    npx eas credentials --platform ios  (https://appstoreconnect.apple.com)'
+      'Ask the user    npx --yes eas-cli@latest credentials --platform ios  (https://appstoreconnect.apple.com)'
     );
   });
 

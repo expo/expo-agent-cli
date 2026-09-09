@@ -23,6 +23,7 @@ import type {
   StatusReport,
   StatusSectionName,
 } from './types';
+import { easCommandPrefix } from '../utils/easCli';
 
 /** Width of the label column, matching the other commands. */
 const LABEL_WIDTH = 12;
@@ -309,7 +310,7 @@ function buildsLine(builds: BuildsStatus): string {
   // report and the follow-ups carry the rest.
   const first = found[0];
   if (first?.buildId) {
-    facts.push(chalk.cyan(`npx eas build:download --build-id ${first.buildId}`));
+    facts.push(chalk.cyan(`${easCommandPrefix()} build:download --build-id ${first.buildId}`));
   }
 
   const lines = [facts.join(SEPARATOR)];

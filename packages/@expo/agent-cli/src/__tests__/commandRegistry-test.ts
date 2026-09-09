@@ -621,7 +621,7 @@ describe(formatGroupHelp, () => {
 describe('a group whose name is another CLI’s verb', () => {
   const group = {
     summary: 'Synthetic group named after another CLI’s verb',
-    bareNameCommand: 'npx eas build',
+    bareNameCommand: 'npx --yes eas-cli@latest build',
     actions: {
       explain: {
         summary: 'Synthetic action',
@@ -653,9 +653,9 @@ describe('a group whose name is another CLI’s verb', () => {
       const message = flagsWithoutActionMessage('build', ['--platform', 'ios']);
 
       expect(message).toContain('"@expo/agent-cli build --platform ios"');
-      expect(message).toContain('"npx eas build"');
+      expect(message).toContain('"npx --yes eas-cli@latest build"');
       expect(flagsWithoutActionSuggestion('build', ['--platform', 'ios'])).toBe(
-        'npx eas build --platform ios'
+        'npx --yes eas-cli@latest build --platform ios'
       );
     });
   });
@@ -689,9 +689,9 @@ describe('the build verb, which this CLI no longer groups anything under', () =>
   it('answers with the CLI that does start a build, and with the log reader that stayed', () => {
     const message = unknownCommandMessage('build');
 
-    expect(message).toContain('npx eas build');
+    expect(message).toContain('npx --yes eas-cli@latest build');
     expect(message).toContain('npx @expo/agent-cli inspect:build-log');
-    expect(unknownCommandSuggestion('build')).toBe('npx eas build');
+    expect(unknownCommandSuggestion('build')).toBe('npx --yes eas-cli@latest build');
   });
 });
 

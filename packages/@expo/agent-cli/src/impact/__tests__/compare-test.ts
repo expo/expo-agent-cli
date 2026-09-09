@@ -183,7 +183,7 @@ describe(compareWithEasBuildAsync, () => {
 
     expect(result.error).toContain('build-1');
     expect(result.error).toContain('Build not found');
-    expect(result.error).toContain('eas build:list');
+    expect(result.error).toContain('eas-cli@latest build:list');
   });
 
   // The "How" line of the ordinary error is advice about the build id and the sign-in, and neither
@@ -479,7 +479,7 @@ describe(lookUpCachedBuildAsync, () => {
     // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — in this CLI's words, with the fix,
     // rather than the first line of that explanation with the `eas init` forms cut off.
     expect((outcome as { reason: string }).reason).toContain('not linked to an EAS project');
-    expect((outcome as { reason: string }).reason).toContain('npx eas init --account');
+    expect((outcome as { reason: string }).reason).toContain('npx --yes eas-cli@latest init --account');
   });
 
   // @ref src/utils/wrapperCrash.ts — the binary under the name `eas` may be a wrapper, a shim or a

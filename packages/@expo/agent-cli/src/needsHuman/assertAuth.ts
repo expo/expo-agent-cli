@@ -8,6 +8,7 @@
 
 import { needsHumanError } from './error';
 import { readAuthPreflightAsync, type AuthPreflight } from './preflight';
+import { easCommandPrefix } from '../utils/easCli';
 
 export interface AssertSignedInOptions {
   /** What this command was about to do, e.g. `deploy this project`. */
@@ -43,7 +44,7 @@ export async function assertSignedInAsync(
     message: [
       `No Expo account is signed in on this machine, so ${action} would fail.`,
       `Why: ${because}, and "eas whoami" answered that nobody is signed in — asked before anything ran, so nothing was spent finding out.`,
-      `How: sign in with "npx eas login", or, on a machine with nobody at the keyboard, set EXPO_TOKEN to an access token from expo.dev.`,
+      `How: sign in with "${easCommandPrefix()} login", or, on a machine with nobody at the keyboard, set EXPO_TOKEN to an access token from expo.dev.`,
     ].join('\n'),
   });
 }

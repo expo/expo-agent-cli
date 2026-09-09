@@ -70,8 +70,8 @@ describe(renderForInvoker, () => {
   // `npx eas-cli` is a different package name under Bun and `npx expo` may be too, so a blanket
   // swap would produce lines that do not run. Only this CLI's own name is safe to rewrite.
   it(`leaves other CLIs alone`, () => {
-    expect(renderForInvoker('npx eas build --profile production', 'bunx')).toBe(
-      'npx eas build --profile production'
+    expect(renderForInvoker('npx --yes eas-cli@latest build --profile production', 'bunx')).toBe(
+      'npx --yes eas-cli@latest build --profile production'
     );
     expect(renderForInvoker('npx expo start --tunnel', 'bunx')).toBe('npx expo start --tunnel');
   });

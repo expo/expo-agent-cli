@@ -188,7 +188,7 @@ describe(startAsync, () => {
     expect(printed()).toContain('http://localhost:8134');
     expect(printed()).toContain('npx @expo/agent-cli typecheck');
     expect(printed()).toContain('npx @expo/agent-cli deploy --web');
-    expect(printed()).not.toContain('npx eas build');
+    expect(printed()).not.toContain('npx --yes eas-cli@latest build');
 
     end(0);
     await promise;

@@ -3,6 +3,7 @@
 // launch is not finished until someone opens it in a browser.
 
 import { capFollowUps, type FollowUp } from './types';
+import { easCommandPrefix } from '../utils/easCli';
 
 export interface DeployFollowUpInput {
   /** The web deployment that ran, or null when no web target was deployed. */
@@ -38,7 +39,7 @@ export function buildDeployFollowUps({ web, launch }: DeployFollowUpInput): Foll
     }
     followups.push({
       id: 'eas-deploy-prod',
-      command: 'npx eas deploy --prod',
+      command: `${easCommandPrefix()} deploy --prod`,
       why: 'This deploy got a preview URL; --prod publishes the same export to the production URL.',
     });
   }

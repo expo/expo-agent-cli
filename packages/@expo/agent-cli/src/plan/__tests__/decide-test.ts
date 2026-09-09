@@ -915,7 +915,7 @@ describe(decideStartPlan, () => {
         buildBackend: backend('eas'),
       });
 
-      expect(plan.steps[0]!.reason).toContain('npx eas build:run --platform ios --latest');
+      expect(plan.steps[0]!.reason).toContain('npx --yes eas-cli@latest build:run --platform ios --latest');
       expect(plan.steps[1]!.reason).toContain('serves nothing until the artifact is installed');
     });
 
@@ -1112,6 +1112,21 @@ describe('the EAS device', () => {
     );
   });
 
+  it(`writes eas.json itself when there is none, and runs no build:configure`, () => {
+    const plan = decideStartPlan(createDevClientState(), {
+      ...eas,
+      buildBackend: backend('eas'),
+      easJson: false,
+      easSimulatorProfile: false,
+    });
+
+    expect(plan.steps.map((step) => step.id)).toEqual(['eas-build', 'start']);
+    expect(plan.reasons.join('\n')).toContain(
+      'This project has no eas.json, so @expo/agent-cli writes one with the "development-simulator" profile before the build'
+    );
+    expect(plan.reasons.join('\n')).not.toContain('so the plan configures one first');
+  });
+
   it(`says nothing about adding the profile when eas.json has it`, () => {
     const plan = decideStartPlan(createDevClientState(), {
       ...eas,
@@ -1154,7 +1169,7 @@ describe('the EAS device', () => {
     expect(plan.rule).toBe('expo-go');
     expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go']]);
     expect(plan.steps[0]!.reason).toContain('EAS Simulator session (iOS) running the Expo Go this SDK ships');
-    expect(plan.steps[0]!.reason).toContain('npx eas simulator:stop');
+    expect(plan.steps[0]!.reason).toContain('npx --yes eas-cli@latest simulator:stop');
   });
 
   it(`rests on a finished EAS build of this fingerprint instead of making one`, () => {

@@ -25,6 +25,7 @@
 
 import { PROGRAM_PREFIX } from '../../programName';
 import type { PhaseName } from './types';
+import { easCommandPrefix } from '../../utils/easCli';
 
 /**
  * How many rules this table may hold.
@@ -314,7 +315,7 @@ export const ANCHORS: Anchor[] = [
     kind: 'cause',
     pattern: /^\s*error: Signing for "([^"]+)" requires a development team\./,
     message: 'The Xcode target has no Apple development team, so it cannot be signed.',
-    suggestedCommand: () => 'npx eas credentials --platform ios',
+    suggestedCommand: () => `${easCommandPrefix()} credentials --platform ios`,
     docsUrl: 'https://docs.expo.dev/app-signing/app-credentials/',
     provenance: 'format',
   },
@@ -324,7 +325,7 @@ export const ANCHORS: Anchor[] = [
     kind: 'cause',
     pattern: /^\s*error: No profiles for '([^']+)' were found/,
     message: 'No provisioning profile matches this bundle identifier.',
-    suggestedCommand: () => 'npx eas credentials --platform ios',
+    suggestedCommand: () => `${easCommandPrefix()} credentials --platform ios`,
     docsUrl: 'https://docs.expo.dev/app-signing/app-credentials/',
     provenance: 'format',
   },
@@ -436,7 +437,7 @@ export const ANCHORS: Anchor[] = [
     kind: 'cause',
     pattern: /^\s*error: exportArchive: (.+)$/,
     message: 'Xcode built the archive and then refused to export an .ipa from it.',
-    suggestedCommand: () => 'npx eas credentials --platform ios',
+    suggestedCommand: () => `${easCommandPrefix()} credentials --platform ios`,
     docsUrl: 'https://docs.expo.dev/app-signing/app-credentials/',
     provenance: 'format',
   },
@@ -446,7 +447,7 @@ export const ANCHORS: Anchor[] = [
     kind: 'cause',
     pattern: /Provisioning profile "([^"]+)" doesn't include signing certificate/,
     message: 'The provisioning profile was not issued for the certificate the build signed with.',
-    suggestedCommand: () => 'npx eas credentials --platform ios',
+    suggestedCommand: () => `${easCommandPrefix()} credentials --platform ios`,
     docsUrl: 'https://docs.expo.dev/app-signing/app-credentials/',
     provenance: 'format',
   },

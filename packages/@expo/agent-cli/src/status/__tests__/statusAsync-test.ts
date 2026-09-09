@@ -66,6 +66,8 @@ vi.mock('../../utils/easCli', () => ({
     runner: 'npx',
     pinned: false,
   })),
+  // The spelling every printed EAS command line carries (llp/0015 §Resolving the EAS CLI).
+  easCommandPrefix: () => 'npx --yes eas-cli@latest',
 }));
 vi.mock('../../impact/runtimeVersion', () => ({
   resolveRuntimeVersionAsync: vi.fn(async () => ({
