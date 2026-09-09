@@ -360,6 +360,12 @@ describe('a machine with no eas-cli installed', () => {
     const projectRoot = await setupFixtureAsync('dev-client-app');
     await installStubFingerprintAsync(projectRoot);
 
+    // Link the fixture so the preflight reaches the missing-runner condition under test.
+    const appFile = path.join(projectRoot, 'app.json');
+    const app = JSON.parse(await fs.promises.readFile(appFile, 'utf8'));
+    app.expo.extra = { eas: { projectId: 'f52a76f7-9fc7-4b59-becd-6d84e9f129d7' } };
+    await fs.promises.writeFile(appFile, JSON.stringify(app));
+
     const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--json'], {
       // A `PATH` with neither an `eas` nor a runner on it. The fixture's own `.stub-bin` has no
       // `npx`, so this is the one machine shape where the ladder runs out.
