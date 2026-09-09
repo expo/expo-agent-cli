@@ -519,7 +519,10 @@ describe('@expo/agent-cli deploy', () => {
           reject: false,
         });
 
-        expect(result.exitCode).toBe(1);
+        // The handoff band, whatever the length of the CLI's explanation: this short form used to
+        // exit 1 while the full one exited 7, because only the full one carried the "in
+        // non-interactive mode" the generic prompt row keyed on (llp/0027 §What EAS said).
+        expect(result.exitCode).toBe(EXIT_NEEDS_HUMAN);
         // The EAS CLI's own sentence decides it, not the exit signature (S2).
         expect(result.stderr).toContain('not linked');
         const { error } = JSON.parse(result.stdout);
@@ -529,6 +532,7 @@ describe('@expo/agent-cli deploy', () => {
           // either (F143).
           suggestedCommand: 'npx eas init --account <account-name> --non-interactive',
         });
+        expect(error.needsHuman).toMatchObject({ scenario: 'eas-project-unlinked' });
         expect(error.message).not.toContain('.stub-bin');
       });
 
@@ -556,8 +560,10 @@ describe('@expo/agent-cli deploy', () => {
         });
 
         expect(result.exitCode).toBe(EXIT_NEEDS_HUMAN);
+        // Its own scenario since llp/0027 §What EAS said: the EAS CLI's explanation contains "in
+        // non-interactive mode", and the generic prompt row used to answer for it.
         expect(lastLines(result.stderr, 2)).toEqual([
-          'Needs a human   eas-prompt',
+          'Needs a human   eas-project-unlinked',
           'Ask the user    npx eas init --account <account-name> --non-interactive',
         ]);
         // The accounts the person has to choose between, quoted from the tool's own output.

@@ -611,3 +611,38 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     expect(plan.steps.map((step: { argv: string[] }) => step.argv[1])).toContain('build');
   });
 });
+
+// @ref llp/0027-everything-on-eas.rfc.md §What EAS said
+describe('@expo/agent-cli dev --eas on a project EAS does not know', () => {
+  it('names eas init as the fix when the cloud build stops on an unlinked project', async () => {
+    const projectRoot = await setupAsync();
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--json'], {
+      env: {
+        STUB_EAS_BUILD_EXIT: '1',
+        STUB_EAS_BUILD_STDERR: [
+          'EAS project not configured. This command cannot configure it in non-interactive mode. Run one of the following, then re-run this command:',
+          '  eas init --account <account-name> --non-interactive',
+          'Accounts you can create projects in: e2e-user',
+        ].join('\n'),
+      },
+      reject: false,
+    });
+
+    // A person's decision — which account — so the handoff band, with its own scenario rather than
+    // the generic prompt one that used to answer for it (exit 7 telling the caller to answer a
+    // question in a terminal).
+    expect(result.exitCode).toBe(7);
+    const report = JSON.parse(result.stdout);
+    expect(report.error.code).toBe('EAS_PROJECT_NOT_LINKED');
+    expect(report.error.needsHuman).toMatchObject({
+      scenario: 'eas-project-unlinked',
+      command: 'npx eas init --account e2e-user --non-interactive',
+    });
+    expect(report.error.message).toContain('not linked to an EAS project');
+    expect(report.error.message).not.toContain('needed an answer');
+    // The fix, not the command that just failed.
+    expect(report.error.suggestedCommand).toBe('npx eas init --account e2e-user --non-interactive');
+    expect(expoInvocationArgs(projectRoot)).toEqual([]);
+  });
+});

@@ -214,6 +214,23 @@ export const needsHumanScenarios: NeedsHumanScenario[] = [
     signatures: [],
   },
   {
+    // @ref llp/0027-everything-on-eas.rfc.md §What EAS said
+    // An unlinked project. Which account it belongs to is a decision only a person makes, so the
+    // handoff is right (llp/0007 §deploy, F143) — and it is its own row because the EAS CLI's
+    // explanation contains "cannot configure it in non-interactive mode", which the generic prompt
+    // row below read as a question waiting in a terminal. The classifier fills the account in when
+    // the CLI listed exactly one (`src/utils/easFailure.ts`).
+    id: 'eas-project-unlinked',
+    code: 'EAS_PROJECT_NOT_LINKED',
+    need: 'Link this project to an EAS project — which account it belongs to is yours to choose.',
+    command: 'npx eas init --account <account-name> --non-interactive',
+    url: null,
+    unattendedEnv: [],
+    resumable: true,
+    tools: ['eas'],
+    signatures: [/EAS project not configured/i],
+  },
+  {
     id: 'expo-prompt',
     code: 'EXPO_NEEDS_INPUT',
     need: 'Answer what the Expo CLI asked for, in a terminal.',

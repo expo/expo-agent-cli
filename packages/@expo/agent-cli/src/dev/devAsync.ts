@@ -35,6 +35,7 @@ import {
   EAS_WHERE,
   LOCAL_WHERE,
 } from '../toolchain/runsOn';
+import { classifyEasFailure } from '../utils/easFailure';
 import { ensureSimulatorProfileSync } from '../utils/easJson';
 import { CommandError } from '../utils/errors';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
@@ -685,6 +686,19 @@ function stopPromptFor(
     };
   }
 
+  // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — the EAS CLI said what was missing,
+  // and the person-shaped half is the choice of account, not a question in a terminal.
+  if (scenario === 'eas-project-unlinked') {
+    const cause = classifyEasFailure(`${failure.stdout}\n${failure.stderr}`);
+    return {
+      message: [
+        `The plan stopped at "${failure.step.id}": "${invocation}" refused, because this project is not linked to an EAS project.`,
+        `Why: ${cause?.why ?? 'the EAS CLI reported that this project is not linked to an EAS project, so there is nothing on EAS to act on.'}`,
+        `How: ${cause?.how ?? 'link it once with "npx eas init --account <account-name> --non-interactive", then run this command again.'}`,
+      ].join('\n'),
+    };
+  }
+
   // A prompt is the one case where the *last* line is the answer: it is the question the CLI
   // stopped on, and nothing was printed after it.
   //
@@ -767,6 +781,13 @@ function planStepFailedError(
   // In `tee` and `inherit` mode the tool's own output already reached the terminal, and repeating
   // it would bury the three lines that say what to do.
   const tail = output === 'capture' ? outputTail(`${failure.stdout}${failure.stderr}`, 12) : '';
+  // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — an `eas` step that stopped on a
+  // sentence this CLI recognises (an unlinked project, a signed-out machine) gets the fix as its
+  // `How:`, not "run it yourself and read the output". Only what was captured can be read.
+  const cause =
+    tool === 'eas' && output !== 'inherit'
+      ? classifyEasFailure(`${failure.stdout}\n${failure.stderr}`)
+      : null;
   const error = new CommandError(
     'PLAN_STEP_FAILED',
     [
@@ -780,7 +801,10 @@ function planStepFailedError(
       failure.buildRecorded
         ? `Note: the app it built is installed on the device, so that build is recorded — the next "${PROGRAM_PREFIX} dev --${platform}" starts a dev server for it instead of building again.`
         : '',
-      `How: run the command above yourself to see it fail with its whole output, or run "${PROGRAM_PREFIX} dev --${platform} --plan" to see the steps this plan is made of.`,
+      cause ? `The EAS CLI said: ${cause.why}` : '',
+      cause
+        ? `How: ${cause.how}`
+        : `How: run the command above yourself to see it fail with its whole output, or run "${PROGRAM_PREFIX} dev --${platform} --plan" to see the steps this plan is made of.`,
       wrapperCrash
         ? wrapperCrashDetail({ tool, exitCode: failure.exitCode }, failure.binPath!)
         : tail
@@ -790,7 +814,8 @@ function planStepFailedError(
       .filter(Boolean)
       .join('\n')
   );
-  error.suggestedCommand = invocation;
+  // The fix, when there is one, and never the command that just failed in that case (F67).
+  error.suggestedCommand = cause?.command ?? invocation;
   error.exitCode = exitCode;
   return error;
 }

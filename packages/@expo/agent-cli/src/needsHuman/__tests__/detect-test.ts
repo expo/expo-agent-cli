@@ -200,3 +200,35 @@ describe(lastNonEmptyLine, () => {
     expect(lastNonEmptyLine('\n \n')).toBeNull();
   });
 });
+
+// @ref llp/0027-everything-on-eas.rfc.md §What EAS said
+describe('an unlinked project is not a prompt', () => {
+  it(`is its own handoff, naming eas init with the account, rather than a question in a terminal`, () => {
+    expect(
+      classifySubprocessFailure({
+        tool: 'eas',
+        invocation: 'npx eas build --platform ios',
+        exitCode: 1,
+        stdout:
+          'EAS project not configured. This command cannot configure it in non-interactive mode. Run one of the following, then re-run this command:\n  eas init --account <account-name> --non-interactive\nAccounts you can create projects in: bob\n',
+        stderr: 'Error: build command failed.\n',
+      })
+    ).toMatchObject({
+      scenario: 'eas-project-unlinked',
+      command: 'npx eas init --account bob --non-interactive',
+      detectedBy: 'exit-signature',
+    });
+  });
+
+  it(`still hands a signed-out machine to a person`, () => {
+    expect(
+      classifySubprocessFailure({
+        tool: 'eas',
+        invocation: 'npx eas build --platform ios',
+        exitCode: 1,
+        stdout: '',
+        stderr: 'Either log in with "eas login" or set the EXPO_TOKEN environment variable to authenticate.\n',
+      })?.scenario
+    ).toBe('eas-login');
+  });
+});

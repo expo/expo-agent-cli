@@ -35,7 +35,7 @@ import {
   wrapperCrashDetail,
   type WrapperCrashTool,
 } from '../utils/wrapperCrash';
-import { classifyEasDeployFailure, type EasDeployCause } from './easFailure';
+import { classifyEasFailure, type EasFailureCause } from '../utils/easFailure';
 import { debugEvent, event } from './events';
 import { launchProjectAsync } from './launchAsync';
 import { resolveCreateLaunchCli } from './launchCli';
@@ -260,7 +260,7 @@ async function deployWebAsync(
   if (deployed.exitCode !== 0 || deployed.promptHang) {
     // Read once and used twice: the diagnosis and the handoff are the same conclusion about the same
     // output, and a handoff that names something else is F143.
-    const cause = classifyEasDeployFailure(outputText);
+    const cause = classifyEasFailure(outputText);
     throw handoffOr(easDeployFailed(upload, output, cause), deployed, 'eas', DEPLOY_COMMAND, cause);
   }
 
@@ -333,7 +333,7 @@ async function uploadToEasHostingAsync(
 function easDeployFailed(
   upload: EasUpload,
   output: CapturedOutput,
-  cause: EasDeployCause | null
+  cause: EasFailureCause | null
 ): CommandError {
   const { result } = upload;
   // The invocation that actually ran, which is what a reader has to reproduce. It is already
@@ -417,7 +417,7 @@ function handoffOr(
   result: { exitCode: number | null; stdout: string; stderr: string; promptHang?: string },
   tool: NeedsHumanTool,
   invocation: string,
-  cause: EasDeployCause | null = null
+  cause: EasFailureCause | null = null
 ): CommandError {
   const needsHuman = classifySubprocessFailure({ tool, invocation, ...result });
   if (!needsHuman) {

@@ -865,3 +865,25 @@ describe('@expo/agent-cli dev:stop --eas', () => {
     expect(easInvocations(projectRoot)).toEqual([]);
   });
 });
+
+// @ref llp/0027-everything-on-eas.rfc.md §What EAS said
+describe('an --eas command on a project EAS does not know', () => {
+  it(`says the project is not linked, and names eas init, instead of the cut-off first line`, async () => {
+    const projectRoot = await setupAsync('go-app');
+
+    const result = await executeAgentCliAsync(projectRoot, ['runtime:stop', '--eas', '--json'], {
+      reject: false,
+      env: {
+        STUB_SIM_GET_EXIT: '1',
+        STUB_SIM_STDERR:
+          'EAS project not configured. This command cannot configure it in non-interactive mode. Run one of the following, then re-run this command:\nAccounts you can create projects in: e2e-user',
+      },
+    });
+
+    expect(result.exitCode).not.toBe(0);
+    const envelope = JSON.parse(result.stdout);
+    expect(envelope.error.message).toContain('not linked to an EAS project');
+    expect(envelope.error.message).not.toMatch(/re-run this command:\s*\./);
+    expect(envelope.error.suggestedCommand).toBe('npx eas init --account e2e-user --non-interactive');
+  });
+});

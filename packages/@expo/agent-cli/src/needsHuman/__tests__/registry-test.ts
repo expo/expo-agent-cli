@@ -62,7 +62,7 @@ describe('needsHumanScenarios', () => {
     }
   });
 
-  it('holds the fourteen scenarios of the protocol', () => {
+  it('holds the fifteen scenarios of the protocol', () => {
     expect(needsHumanScenarios.map((scenario) => scenario.id)).toEqual([
       'eas-login',
       'expo-login',
@@ -76,6 +76,7 @@ describe('needsHumanScenarios', () => {
       'eas-env-list',
       'eas-profile-selection',
       'agent-selection',
+      'eas-project-unlinked',
       'expo-prompt',
       'eas-prompt',
     ]);

@@ -1,6 +1,9 @@
 // @ref llp/0007-deploy-and-headless.rfc.md §deploy
 // @ref llp/0021-honest-reports.rfc.md §The rules
-// Why `eas deploy` stopped, read out of what it said.
+// @ref llp/0027-everything-on-eas.rfc.md §What EAS said
+// Why an `eas` run stopped, read out of what it said. Written for `eas deploy`, and now read by
+// every place this CLI quotes the EAS CLI's refusal: the build lookup of `status --explain`, the
+// session listing behind every `--eas` device command, and a failed `eas` step of `dev`.
 //
 // The upload used to be diagnosed from its *exit signature* alone: one `Why:` line, written once,
 // naming the most common cause. On an unlinked project that line said "most often an account that is
@@ -17,11 +20,22 @@
 // both have answers to, and only one of them needs a person.
 
 /** What the EAS CLI's own words say, when they say something this CLI can act on. */
-export interface EasDeployCause {
+export interface EasFailureCause {
+  /** Which sentence was recognised. */
+  id: 'eas-project-unlinked' | 'eas-login';
   /** The `Why:` line, in this CLI's voice, about what the tool reported. */
   why: string;
   /** The `How:` line. */
   how: string;
+  /**
+   * The whole thing in one line, for a status row or a `reason` that has one line to say it in.
+   *
+   * @ref llp/0027-everything-on-eas.rfc.md §What EAS said
+   * The first line of what the EAS CLI printed was what those rows quoted, and for an unlinked
+   * project that line is "Run one of the following, then re-run this command:" with the following
+   * cut off [observed — `status --explain`, `runtime:stop --eas`, 2026-09-08].
+   */
+  summary: string;
   /**
    * The command to put on the `Try:` line, or null when the fix is not one command.
    *
@@ -30,6 +44,9 @@ export interface EasDeployCause {
    */
   command: string | null;
 }
+
+/** @deprecated The name this had when only `deploy` read it. */
+export type EasDeployCause = EasFailureCause;
 
 /** One recognisable sentence of the EAS CLI's, and what it means. */
 interface EasFailureSignature {
@@ -41,7 +58,7 @@ interface EasFailureSignature {
    * Because one of these reads a *value* out of it: the accounts a project can be created under are
    * the caller's own, this CLI cannot know them, and the EAS CLI prints them right there.
    */
-  cause: (output: string) => EasDeployCause;
+  cause: (output: string) => EasFailureCause;
 }
 
 /**
@@ -76,7 +93,9 @@ const SIGNATURES: readonly EasFailureSignature[] = [
       // A single account is not a choice, so the line has no hole in it and an agent can run it.
       const account = accounts.length === 1 ? accounts[0]! : '<account-name>';
       return {
-        why: 'the EAS CLI reported that this project is not linked to an EAS project, so there is nothing on EAS to deploy to. This is not about being signed in.',
+        id: 'eas-project-unlinked',
+        summary: `this project is not linked to an EAS project — link it once with "npx eas init --account ${account} --non-interactive" (or --id <project-id> for one that exists)`,
+        why: 'the EAS CLI reported that this project is not linked to an EAS project, so there is nothing on EAS to act on. This is not about being signed in.',
         how: `link it once, which writes the project id into the app config: "npx eas init --account ${account} --non-interactive" creates a new project under that account, and "npx eas init --id <project-id> --non-interactive" links one that already exists. Then run this command again.${
           accounts.length > 1
             ? ` The EAS CLI listed these accounts: ${accounts.join(', ')} — only a person can choose which one this project belongs to.`
@@ -91,7 +110,9 @@ const SIGNATURES: readonly EasFailureSignature[] = [
     // is what the old single `Why:` line assumed every failure was.
     pattern: /\bnot logged in\b|\beas login\b|\bmust be logged in\b/i,
     cause: () => ({
-      why: 'the EAS CLI reported that this machine is not signed in to an Expo account, and the upload ran non-interactively, so it could not ask.',
+      id: 'eas-login',
+      summary: 'this machine is not signed in to an Expo account — "npx eas login", or EXPO_TOKEN for a machine with nobody at it',
+      why: 'the EAS CLI reported that this machine is not signed in to an Expo account, and the run was non-interactive, so it could not ask.',
       how: 'sign in with "npx eas login", or set EXPO_TOKEN to an access token from expo.dev for a machine with nobody at it, then run this command again.',
       command: 'npx eas login',
     }),
@@ -106,6 +127,9 @@ const SIGNATURES: readonly EasFailureSignature[] = [
  * @param output stdout and stderr together — the CLI puts the whole explanation of an unlinked
  * project on stdout and one summary line on stderr, so reading either alone loses one of them.
  */
-export function classifyEasDeployFailure(output: string): EasDeployCause | null {
+export function classifyEasFailure(output: string): EasFailureCause | null {
   return SIGNATURES.find((signature) => signature.pattern.test(output))?.cause(output) ?? null;
 }
+
+/** @deprecated The name this had when only `deploy` read it. */
+export const classifyEasDeployFailure = classifyEasFailure;
