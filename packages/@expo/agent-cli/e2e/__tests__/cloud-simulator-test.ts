@@ -687,7 +687,7 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
       expect(result.exitCode).toBe(1);
       const envelope = JSON.parse(result.stdout);
       expect(envelope.error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
-      expect(envelope.error.message).toContain('--expo-go');
+      expect(envelope.error.message).toContain('npx @expo/agent-cli dev --ios --eas');
       expect(envelope.reloaded).toBeUndefined();
       // And no verb was sent to a session that does not exist.
       expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:exec')).toBe(false);
