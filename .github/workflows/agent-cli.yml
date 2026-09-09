@@ -137,8 +137,8 @@ jobs:
     continue-on-error: true
     timeout-minutes: 15
     env:
-      AGENT_CLI_EVAL_MODEL: qwen3:4b-instruct
-      AGENT_CLI_EVAL_MODEL_DIGEST: 0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0
+      AGENT_CLI_EVAL_MODEL: qwen3:8b
+      AGENT_CLI_EVAL_MODEL_DIGEST: 500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

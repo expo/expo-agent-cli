@@ -31,8 +31,8 @@ export const agentsSetupHelp: CommandHelp = {
       gets: 'confirm project-local Expo skills installation for Codex',
     },
     {
-      run: `${PROGRAM_PREFIX} agents:setup --no-plugins`,
-      gets: 'run the existing project skill sync and AGENTS.md generation only',
+      run: `${PROGRAM_PREFIX} agents:setup --yes --agent claude-code --no-plugins --json`,
+      gets: 'create the Claude project guide and link package skills without installing plugins or prompting',
     },
   ],
   next: ['skills:list', 'status', 'dev'],

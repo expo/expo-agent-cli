@@ -1,9 +1,9 @@
 import type { Message } from './loop';
 
-export const model = process.env.AGENT_CLI_EVAL_MODEL ?? 'qwen3:4b-instruct';
+export const model = process.env.AGENT_CLI_EVAL_MODEL ?? 'qwen3:8b';
 const host = process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434';
 // The digest, not just the mutable tag, identifies the weights used by the default CI driver.
-export const defaultDigest = '0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0';
+export const defaultDigest = '500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41';
 
 async function request(route: string, signal: AbortSignal, body?: unknown) {
   const response = await fetch(new URL(route, host), {
@@ -24,8 +24,7 @@ export async function identifyModel(signal: AbortSignal) {
   const installed = tags.models?.find((entry: { name: string }) => entry.name === model);
   if (!installed) throw new Error(`Ollama model ${model} is not installed`);
   const expected =
-    process.env.AGENT_CLI_EVAL_MODEL_DIGEST ??
-    (model === 'qwen3:4b-instruct' ? defaultDigest : undefined);
+    process.env.AGENT_CLI_EVAL_MODEL_DIGEST ?? (model === 'qwen3:8b' ? defaultDigest : undefined);
   if (expected && installed.digest !== expected)
     throw new Error(`Ollama model digest mismatch: ${installed.digest}, expected ${expected}`);
   return {

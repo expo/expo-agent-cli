@@ -4,7 +4,7 @@ import { expect } from 'vitest';
 import { describeEval } from 'vitest-evals';
 import { cliHarness } from '../harness/cli';
 import { jsonReports } from '../harness/results';
-import { snapshot } from '../harness/workspace';
+import { packageRoot, snapshot } from '../harness/workspace';
 
 describeEval('agent project setup', { harness: cliHarness }, (it) => {
   it('writes usable guidance and links package skills without external plugins', async ({
@@ -45,8 +45,19 @@ describeEval('agent project setup', { harness: cliHarness }, (it) => {
       fs.realpathSync(path.join(output.root, 'node_modules/fake-module-with-skills/skills/usage'))
     );
     const after = snapshot(output.root);
-    for (const [file, hash] of Object.entries(output.before))
-      expect(after[file], `preserves ${file}`).toBe(hash);
+    // Skill linking intentionally appends its managed ignore block. Preserve every original
+    // byte and require exactly that addition rather than rejecting a successful setup.
+    const originalIgnore = fs.readFileSync(
+      path.join(packageRoot, 'evals/fixtures/claude-skills-app/.gitignore'),
+      'utf8'
+    );
+    expect(fs.readFileSync(path.join(output.root, '.gitignore'), 'utf8')).toBe(
+      originalIgnore +
+        '# @generated expo skills start\n.claude/skills/usage\n# @generated expo skills end\n'
+    );
+    for (const [file, hash] of Object.entries(output.before)) {
+      if (file !== '.gitignore') expect(after[file], `preserves ${file}`).toBe(hash);
+    }
     expect(
       output.commands
         .filter(

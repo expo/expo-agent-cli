@@ -48,6 +48,28 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(result.all).toContain('--json');
   });
 
+  it('executes the project-only setup example from help without a terminal', async () => {
+    const help = await executeAgentCliAsync(projectRoot, ['agents:setup', '--help']);
+    const example = help.stdout
+      .split('\n')
+      .find(
+        (line) =>
+          line.includes('$ npx @expo/agent-cli agents:setup') && line.includes('--no-plugins')
+      );
+    expect(example).toBeDefined();
+    const argv = example!.split('@expo/agent-cli ')[1]!.trim().split(/\s+/);
+    const result = await executeAgentCliAsync(projectRoot, argv, { reject: false });
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      cancelled: false,
+      plugins: [],
+      errors: [],
+      skills: { synced: true, agents: ['claude-code'] },
+    });
+    expect(readProjectFile(projectRoot, 'AGENTS.md')).toContain(BLOCK_START);
+    expect(readProjectFile(projectRoot, 'CLAUDE.md')).toContain('@AGENTS.md');
+  });
+
   it('should link the skills and creates AGENTS.md with the managed block', async () => {
     const result = await executeAgentCliAsync(projectRoot, [
       'agents:setup',
