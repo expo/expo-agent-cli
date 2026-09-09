@@ -12,6 +12,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
+import { CommandError } from './errors';
 
 /** The profile `dev --eas` adds, as `eas build:dev` writes it [observed — eas-cli 23.2]. */
 export const EAS_SIMULATOR_PROFILE_CONTENTS = {
@@ -46,24 +47,50 @@ export function hasBuildProfileSync(projectRoot: string, profile: string): boole
  * Add the simulator dev-client profile to `eas.json` when it is not there.
  *
  * Only the profile is written; every other key of the file is kept as it was. A missing file is
- * created with only that profile in it — `eas build:configure` is the plan's own step for the
- * rest, and it runs before this does.
+ * created with only that profile in it. Unreadable or invalid existing configuration is preserved
+ * and reported as an error.
  *
  * @returns whether the file changed.
  */
 export function ensureSimulatorProfileSync(projectRoot: string): boolean {
-  if (hasBuildProfileSync(projectRoot, EAS_SIMULATOR_PROFILE)) {
+  const filePath = easJsonPath(projectRoot);
+  let contents: string;
+  try {
+    contents = fs.readFileSync(filePath, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      throw new CommandError(
+        'EAS_JSON_READ',
+        `Cannot read ${filePath}: ${error instanceof Error ? error.message : String(error)}. Fix access to eas.json and retry.`
+      );
+    }
+    contents = '{}';
+  }
+  let current: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(contents);
+    if (!isObject(parsed) || ('build' in parsed && !isObject(parsed.build))) {
+      throw new Error('the root and build section must be JSON objects');
+    }
+    current = parsed;
+  } catch (error) {
+    throw new CommandError(
+      'EAS_JSON_INVALID',
+      `Cannot add the simulator profile to ${filePath}: ${error instanceof Error ? error.message : String(error)}. Fix eas.json and retry.`
+    );
+  }
+  const build = (current.build ?? {}) as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(build, EAS_SIMULATOR_PROFILE)) {
     return false;
   }
-  const current = readEasJsonSync(projectRoot) ?? {};
-  const build =
-    current.build != null && typeof current.build === 'object' && !Array.isArray(current.build)
-      ? (current.build as Record<string, unknown>)
-      : {};
   const next = {
     ...current,
     build: { ...build, [EAS_SIMULATOR_PROFILE]: EAS_SIMULATOR_PROFILE_CONTENTS },
   };
   fs.writeFileSync(easJsonPath(projectRoot), JSON.stringify(next, null, 2) + '\n');
   return true;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
 }

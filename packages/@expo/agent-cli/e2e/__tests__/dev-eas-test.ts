@@ -79,6 +79,22 @@ async function writeAgentCliConfigAsync(projectRoot: string, config: unknown): P
 }
 
 describe('@expo/agent-cli dev — the EAS route', () => {
+  it('preserves malformed eas.json and stops before submitting a build', async () => {
+    const projectRoot = await setupAsync();
+    const file = path.join(projectRoot, 'eas.json');
+    const contents = '{"build": {"production": {}}';
+    await fs.promises.writeFile(file, contents);
+    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--json'], {
+      reject: false,
+    });
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe('EAS_JSON_INVALID');
+    expect(result.stderr).toContain('Fix eas.json and retry');
+    expect(await fs.promises.readFile(file, 'utf8')).toBe(contents);
+    expect(easInvocationArgs(projectRoot).some((args) => args[0] === 'build')).toBe(false);
+    expect(expoInvocationArgs(projectRoot).some((args) => args[0] === 'start')).toBe(false);
+  });
+
   // @ref llp/0015-backend-selection-and-config.rfc.md §What the EAS route is made of
   // Three steps, two CLIs, one order. `dev-test.ts` asserts the same property of the local route
   // (`prebuild` then `run:ios`), and the reason it has to be asserted separately here is that the

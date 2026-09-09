@@ -33,6 +33,8 @@ The detached child re-resolves its own argv, so `dev --detach --eas` implies the
 
 A plan for a local device keeps the `development` profile it always built. Whether it should also move to a simulator build on a Mac — `expo run:ios` builds for the simulator, and so does a session — is left open here; it is a change to a plan nobody asked about.
 
+The profile writer only treats `ENOENT` as a missing file. If an existing `eas.json` cannot be read or parsed, or its root or `build` section is not an object, it stops with an actionable error before submitting the build and preserves the file. The tolerant read used by planning is not evidence that an existing file is safe to replace. [observed — regression tests in `easJson-test.ts` and `dev-eas-test.ts`, 2026-09-09]
+
 ## Reuse
 
 A session installs a build by id. A finished simulator build of this exact fingerprint on EAS is therefore a build the run does not have to make, and a native build is the fifteen minutes everything else in this command is measured against. `lookUpEasSimulatorBuildAsync` asks the same question `eas build:dev` asks: the per-platform fingerprint (an EAS build carries one per platform, so the probe's project hash cannot be handed to the lookup), `--build-profile development-simulator`, `--status finished`. `buildCacheArgs` gained the optional profile filter for it; `status` keeps asking about any finished build.
