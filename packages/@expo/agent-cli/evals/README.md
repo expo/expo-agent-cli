@@ -25,7 +25,7 @@ CLI subprocesses use an empty temporary home so installed local agents cannot in
 `AGENT_CLI_EVAL_MODEL` and optionally `AGENT_CLI_EVAL_MODEL_DIGEST` for an explicit experiment.
 The adapter records the actual digest, Ollama version, Node version, CLI version, and CI commit.
 Qwen runs with thinking disabled, temperature 0, seed 42, a 512-token generation limit, and an
-8192-token context. There are six turns, twelve CLI calls, and a three-minute deadline per case, with a one-minute
+8192-token context. There are six turns, twelve CLI calls, and a four-minute deadline per case, with a one-minute
 limit per CLI call. There are no automatic retries or pass@k masking.
 
 ```ts
