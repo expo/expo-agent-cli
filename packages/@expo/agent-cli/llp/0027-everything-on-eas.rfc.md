@@ -25,6 +25,8 @@ So `dev --ios --eas` now ends with the app running on an EAS Simulator session:
 
 The detached child re-resolves its own argv, so `dev --detach --eas` implies the tunnel in the child and the parent's tunnel wait (`waitForTunnelUrlAsync`) already knows to expect one.
 
+The launcher defaults `EXPO_UNSTABLE_TUNNEL_V2` to `1` for every child, including detached servers, so `--tunnel` dogfoods tunnel v2. An explicit value is preserved; `EXPO_UNSTABLE_TUNNEL_V2=0` opts out. This does not turn a tunnel on for runs that did not request one. [confirmed — Kudo, 2026-09-09]
+
 ## The build is a simulator build
 
 `eas build:configure` writes `development` as `developmentClient: true, distribution: 'internal'` [observed — eas-cli 23.2 `build/configure.ts`]. That is a **device** build: signed, for a phone. No simulator installs it — not the EAS Simulator, not the one on this desk — so the old `dev --eas` plan built something its own `build:run` sentence could not install on a Mac's simulator either. A finding of this work, not only of the cloud device.
