@@ -2915,10 +2915,30 @@ describe('the start-session phase, on --eas', () => {
 
     expect(statusOf(run, 'start-session')).toBe('ok');
     expect(run.phases.find((phase) => phase.id === 'start-session')?.reason).toContain(
-      'started EAS Simulator session sess-new for this run, and stopped it again afterwards'
+      'started EAS Simulator session sess-new for this run'
     );
     expect(run.environment.device).toBe('booted');
     expect(stopEasSession).toHaveBeenCalledWith('sess-new');
+  });
+
+  it('cleans up a created session even when readiness fails', async () => {
+    const stopEasSession = vi.fn(async (sessionId: string) => ({ ok: true, target: sessionId, reason: null }));
+    const run = await runSmokePhasesAsync(cloudDeps({
+      ensureEasSession: async () => ({ ok: false, sessionId: 'sess-billed', started: true, reason: 'readiness timed out' }),
+      stopEasSession,
+    }), options({ bootstrap: true, cloud: 'required' }));
+    expect(run.outcome).toBe('failed');
+    expect(stopEasSession).toHaveBeenCalledWith('sess-billed');
+    expect(run.environment.cleanup).toContainEqual(expect.objectContaining({ resource: 'session', target: 'sess-billed', ok: true }));
+  });
+
+  it('does not claim a session stopped when cleanup fails', async () => {
+    const run = await runSmokePhasesAsync(cloudDeps({
+      ensureEasSession: async () => ({ ok: true, sessionId: 'sess-new', started: true, reason: null }),
+      stopEasSession: async () => ({ ok: false, target: 'sess-new', reason: 'offline' }),
+    }), options({ bootstrap: true, cloud: 'required' }));
+    expect(run.phases.find((phase) => phase.id === 'start-session')?.reason).not.toContain('stopped');
+    expect(run.environment.cleanup).toContainEqual(expect.objectContaining({ resource: 'session', ok: false }));
   });
 
   it(`records a session that was already up, and leaves it running`, async () => {

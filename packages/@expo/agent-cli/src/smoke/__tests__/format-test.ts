@@ -315,6 +315,17 @@ describe(formatSmokeResult, () => {
       expect(printed).toContain('stopped again');
     });
 
+    it.each([true, false])('reports the EAS session cleanup result (%s)', (ok) => {
+      const printed = formatSmokeResult(run({
+        deviceId: 'sess-new', deviceBackend: 'cloud',
+        environment: { devServer: 'reused', device: 'booted', deviceChoice: null,
+          cleanup: [{ resource: 'session', target: 'sess-new', ok, reason: ok ? null : 'offline', ms: 10 }],
+        },
+      }), options());
+      expect(printed).toContain(ok ? 'stopped again' : 'NOT stopped');
+      expect(printed).not.toContain('still running');
+    });
+
     // The one line a reader must not miss, and the one the verdict deliberately does not carry:
     // the app is fine and there is a dev server on this machine that this run put there.
     it(`says what it left behind, on a run that passed`, () => {

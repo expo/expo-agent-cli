@@ -165,7 +165,7 @@ function environmentLine(run: SmokeRun): string | null {
     acts.push(
       `booted ${run.deviceId ?? 'a device'}${
         run.environment.deviceChoice ? chalk.dim(` — ${run.environment.deviceChoice}`) : ''
-      }${stoppedSuffix(run, 'device')}`
+      }${stoppedSuffix(run, run.deviceBackend === 'cloud' ? 'session' : 'device')}`
     );
   }
   return acts.length > 0 ? acts.join(SEPARATOR) : null;
@@ -182,7 +182,7 @@ function stoppedSuffix(run: SmokeRun, resource: SmokeResource): string {
 
 /** The word a person uses for one of the two things a run can bring. */
 function cleanupName(resource: SmokeResource): string {
-  return resource === 'dev-server' ? 'dev server' : 'device';
+  return resource === 'dev-server' ? 'dev server' : resource === 'session' ? 'EAS Simulator session' : 'device';
 }
 
 /** The verdict, in the word an agent reads and a colour a person does. */

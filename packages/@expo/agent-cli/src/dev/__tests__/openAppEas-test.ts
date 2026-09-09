@@ -154,6 +154,11 @@ describe(readSessionId, () => {
       )
     ).toBe('01a08318-958d-7369-a88e-ab94a2c55fae');
   });
+  it('ignores an older session named by an overwrite warning', () => {
+    const warning = 'Overwriting previous simulator session (id: sess-old).';
+    expect(readSessionId(`${warning}\nSimulator session created (id: sess-new, saved to .env.eas-simulator)`)).toBe('sess-new');
+    expect(readSessionId(warning)).toBeNull();
+  });
   it(`falls back to the id in the session page's URL`, () => {
     expect(
       readSessionId('see https://expo.dev/accounts/e/projects/p/simulator-sessions/abc-1 for it\n')
@@ -362,6 +367,7 @@ describe(openAppOnEasAsync, () => {
 
     expect(report.opened).toBe(false);
     expect(report.sessionId).toBe('sess-billed');
+    expect(report.started).toBe(true);
     expect(report.reason).toContain('exited 1');
     expect(report.reason).toContain('npx --yes eas-cli@latest simulator:stop --id sess-billed');
   });
