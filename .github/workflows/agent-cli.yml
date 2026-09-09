@@ -56,6 +56,9 @@ jobs:
       - name: 🧪 Test @expo/agent-cli
         run: bun run test
         working-directory: packages/@expo/agent-cli
+      - name: 🧪 Eval adapter tests
+        run: bun run test:eval-harness
+        working-directory: packages/@expo/agent-cli
       - name: 🎯 Tier 0 evals
         run: bun evals/run.mjs --tier 0
         working-directory: packages/@expo/agent-cli
