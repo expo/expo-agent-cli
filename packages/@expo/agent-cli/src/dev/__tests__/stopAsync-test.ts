@@ -33,6 +33,7 @@ function lock(overrides: Record<string, unknown> = {}) {
 
 function options(overrides: Partial<DevStopOptions> = {}): DevStopOptions {
   return {
+    eas: false,
     port: null,
     signal: 'SIGTERM',
     force: false,
@@ -488,5 +489,70 @@ describe(looksLikeDevServerProcess, () => {
 
   it.each(['nginx', 'Docker', 'python3', ''])(`should not recognize %s`, (command) => {
     expect(looksLikeDevServerProcess({ pid: 1, command })).toBe(false);
+  });
+});
+
+// @ref llp/0027-everything-on-eas.rfc.md §dev:stop
+describe('dev:stop --eas', () => {
+  const cloud = () => require('../../device/cloudSimulator') as typeof import('../../device/cloudSimulator');
+  const eas = () => require('../openAppEas') as typeof import('../openAppEas');
+
+  beforeEach(() => {
+    vi.spyOn(cloud(), 'probeCloudSessionAsync');
+    vi.spyOn(eas(), 'stopEasSessionAsync');
+  });
+
+  it(`ends the session in progress by id, and says so beside the dev server`, async () => {
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue({
+      state: 'active',
+      sessionId: 'sess-1',
+      platform: 'ios',
+    } as any);
+    vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
+
+    const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+    expect(code).toBe(EXIT_OK);
+    expect(eas().stopEasSessionAsync).toHaveBeenCalledWith(projectRoot, 'sess-1');
+    const report = JSON.parse(printed());
+    expect(report.session).toEqual({ id: 'sess-1', stopped: true, reason: null });
+  });
+
+  it(`reports no session as an answer, and exits 0`, async () => {
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue({
+      state: 'none',
+      sessionId: null,
+      platform: null,
+      reason: 'nothing listed',
+    } as any);
+
+    const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+    expect(code).toBe(EXIT_OK);
+    expect(eas().stopEasSessionAsync).not.toHaveBeenCalled();
+    expect(JSON.parse(printed()).session).toEqual({ id: null, stopped: false, reason: null });
+  });
+
+  it(`exits 20 when the session would not stop — it is still billing`, async () => {
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue({
+      state: 'active',
+      sessionId: 'sess-1',
+      platform: 'ios',
+    } as any);
+    vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({
+      ok: false,
+      reason: '"npx eas simulator:stop --id sess-1 --non-interactive" exited 1: refused',
+    });
+
+    const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+    expect(code).toBe(EXIT_OUTCOME_FAILED);
+    expect(JSON.parse(printed()).session).toMatchObject({ id: 'sess-1', stopped: false });
+  });
+
+  it(`asks nothing about a session without the flag`, async () => {
+    await devStopAsync(projectRoot, options());
+    expect(cloud().probeCloudSessionAsync).not.toHaveBeenCalled();
+    expect(JSON.parse(printed()).session).toBeUndefined();
   });
 });

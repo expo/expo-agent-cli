@@ -50,7 +50,8 @@
 // - STUB_SIM_AVAILABLE: `false` for an account without the feature
 //
 // `simulator:list` / `simulator:get`
-// - STUB_SIM_SESSIONS: `0` for a project with nothing running
+// - STUB_SIM_SESSIONS: `0` for a project with nothing running (apart from sessions this stub
+//   started under the cwd, below)
 // - STUB_SIM_ID / STUB_SIM_STATUS / STUB_SIM_PLATFORM / STUB_SIM_TYPE: the one listed session
 //   (defaults `sess-e2e`, `IN_PROGRESS`, `IOS`, `agent-device`)
 // - STUB_SIM_GET_EXIT / STUB_SIM_STDERR: a refusal, with the real CLI's wording on stderr
@@ -59,7 +60,13 @@
 // - STUB_SIM_START_EXIT / STUB_SIM_START_STDERR: a session that never became ready
 // - STUB_SIM_START_ID: the id of the session it creates (default `sess-e2e-started`). Without
 //   `--json` it writes `.env.eas-simulator`, the way the real command does; with `--json` it does
-//   not, and prints the object the real command prints instead
+//   not, and prints the object the real command prints instead. A started session is
+//   **remembered** in `stub-eas-sessions.json` under the cwd: `simulator:list` lists it as in
+//   progress until `simulator:stop --id <id>` marks it stopped — the service's own memory, so a
+//   run that starts a session and then looks for it finds it
+//
+// `simulator:stop`
+// - marks the `--id` session stopped in that file; a bare stop marks whatever `.env.eas-simulator` names
 //
 // `simulator:exec`
 // - STUB_SIM_EXEC_EXIT / STUB_SIM_STDERR: a verb the session refused
@@ -71,6 +78,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const LOG_NAME = 'stub-eas-invocations.jsonl';
+/** Where sessions this stub started are remembered for `simulator:list`, under the cwd. */
+const SESSIONS_NAME = 'stub-eas-sessions.json';
 /** Where a finished `build` is remembered for `build:list`, under the cwd. */
 const BUILDS_NAME = 'stub-eas-builds.json';
 const args = process.argv.slice(2);
@@ -96,6 +105,7 @@ const exitWith = (stream, text, code) => {
   process.exit(code);
 };
 const printJson = (value) => process.stdout.write(JSON.stringify(value) + '\n');
+const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 
 if (process.env.STUB_EAS_CRASH === '1' || process.env.STUB_SIM_CRASH === '1') {
   // What a shim, a stale link, or a binary from another project looks like: a crash with no Expo
@@ -219,7 +229,6 @@ if (command === 'build:list') {
   const fingerprint = valueOf('--fingerprint-hash');
   const profile = valueOf('--build-profile') || valueOf('--profile');
   const limit = Number(valueOf('--limit') || builds.length || 0);
-  const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
   const listed = builds.filter(
     (build) =>
       (!platform || same(build.platform, platform)) &&
@@ -233,7 +242,20 @@ if (command === 'build:list') {
 
 // ---- EAS Simulator ------------------------------------------------------------------------------
 
-/** The session `simulator:list` and `simulator:get` describe. */
+/** The sessions this stub started under this cwd, newest first. */
+function rememberedSessions() {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(cwd, SESSIONS_NAME), 'utf8'));
+  } catch {
+    return [];
+  }
+}
+
+function writeRememberedSessions(sessions) {
+  fs.writeFileSync(path.join(cwd, SESSIONS_NAME), JSON.stringify(sessions));
+}
+
+/** The session the environment describes, which `simulator:list` and `simulator:get` answer with. */
 function stubSession() {
   return {
     id: process.env.STUB_SIM_ID || 'sess-e2e',
@@ -277,7 +299,14 @@ if (command === 'simulator:list') {
   if (exitCode !== 0) {
     exitWith(process.stderr, process.env.STUB_SIM_STDERR || 'Session not found', exitCode);
   }
-  const sessions = process.env.STUB_SIM_SESSIONS === '0' ? [] : [stubSession()];
+  const wanted = valueOf('--status');
+  const remembered = rememberedSessions().filter(
+    (session) => !wanted || same(session.status, wanted.replace('-', '_'))
+  );
+  const sessions = [
+    ...remembered,
+    ...(process.env.STUB_SIM_SESSIONS === '0' ? [] : [stubSession()]),
+  ];
   printJson({ sessions, pageInfo: { hasNextPage: false } });
   process.exit(0);
 }
@@ -318,6 +347,19 @@ if (command === 'simulator' || command === 'simulator:start') {
     // `--json` suppresses the dotenv write [observed — eas-cli 23.2 `simulator/index.ts`].
     writeSessionEnv(id);
   }
+  writeRememberedSessions([
+    {
+      id,
+      name: valueOf('--name') ?? 'stub session',
+      type: valueOf('--type') || 'agent-device',
+      status: 'IN_PROGRESS',
+      platform: (valueOf('--platform') || 'ios').toUpperCase(),
+      createdAt: new Date().toISOString(),
+      // What the session was started with, so a test can read the app off the listing too.
+      app: has('--expo-go') ? 'expo-go' : valueOf('--build-id') ? `build:${valueOf('--build-id')}` : null,
+    },
+    ...rememberedSessions(),
+  ]);
   process.stderr.write(`Simulator session created (id: ${id}) https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/${id}\n`);
   if (json) {
     printJson({
@@ -338,7 +380,23 @@ if (command === 'simulator' || command === 'simulator:start') {
 }
 
 if (command === 'simulator:stop') {
-  exitWith(process.stdout, 'Simulator session stopped', 0);
+  const id =
+    valueOf('--id') ??
+    (() => {
+      try {
+        return /EAS_SIMULATOR_SESSION_ID=(\S+)/.exec(
+          fs.readFileSync(path.join(cwd, '.env.eas-simulator'), 'utf8')
+        )?.[1];
+      } catch {
+        return undefined;
+      }
+    })();
+  writeRememberedSessions(
+    rememberedSessions().map((session) =>
+      session.id === id ? { ...session, status: 'STOPPED' } : session
+    )
+  );
+  exitWith(process.stdout, `Simulator session stopped${id ? ` (id: ${id})` : ''}`, 0);
 }
 
 if (command === 'simulator:exec') {

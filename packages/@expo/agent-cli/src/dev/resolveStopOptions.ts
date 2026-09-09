@@ -20,6 +20,15 @@ export const DEV_STOP_SIGNALS: NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGKILL
 
 export interface DevStopOptions {
   /**
+   * `--eas`: also end this project's EAS Simulator session, the one `dev --eas` opened the app on.
+   *
+   * @ref llp/0027-everything-on-eas.rfc.md §dev:stop
+   * Named rather than implied: a session bills, and stopping one somebody else is driving is the
+   * one thing a stop must not do by accident. The session is found the way every `--eas` command
+   * finds it, and stopped by id.
+   */
+  eas: boolean;
+  /**
    * Port to look at when no lock answers, or null to look at none.
    *
    * Null rather than 8081: without a lock this command has not been *told* which dev server the
@@ -40,6 +49,7 @@ export interface DevStopOptions {
 }
 
 const DEV_STOP_ARGS = {
+  '--eas': Boolean,
   '--port': String,
   '--signal': String,
   '--force': Boolean,
@@ -74,6 +84,7 @@ export function resolveDevStopOptions(argv: string[]): DevStopOptions {
   }
 
   return {
+    eas: !!args['--eas'],
     port: args['--port'] == null ? null : parsePort(args['--port']),
     signal,
     force: !!args['--force'],

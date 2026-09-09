@@ -8,12 +8,14 @@
 // the same function the command that owns the question already calls.
 
 import chalk from 'chalk';
+import path from 'path';
 
 import { devDetachAsync } from '../dev/detachAsync';
 import { resolveDevOptions } from '../dev/resolveOptions';
 import { resolveDevStopOptions } from '../dev/resolveStopOptions';
 import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
 import { bootDeviceAsync, shutdownDeviceAsync } from '../device/bootDevice';
+import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
 import { installDevBuildAsync } from '../device/installDevBuild';
 import { installExpoGoAsync } from '../device/installExpoGo';
@@ -30,6 +32,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../project/expoGo';
 import { readSdkVersionAsync } from '../project/nodeModules';
 import type { StartPlan } from '../project/types';
+import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { checkEntryBundleAsync } from '../runtime/bundleCheck';
 import { CdpClient, isMethodNotFoundError } from '../runtime/cdpClient';
 import { discoverDevServerAsync, probeDevServerAsync } from '../runtime/devServer';
@@ -373,6 +376,10 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       const argv = [
         `--${options.platform}`,
         ...START_DEV_SERVER_ARGV,
+        // @ref llp/0027-everything-on-eas.rfc.md §smoke — the device is on EAS, so the dev server
+        // is tunnelled and a build the plan needs is the simulator profile on EAS Build. `--no-open`
+        // above keeps the session start this run's own (`ensureEasSession`).
+        ...(options.cloud === 'required' ? ['--eas'] : []),
         ...startPortArgs(options.devServerUrl),
       ];
       try {
@@ -436,6 +443,53 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
         target: stopped?.url ?? (stopped?.port == null ? null : `port ${stopped.port}`),
         reason: code === EXIT_OK ? null : (stopped?.detail ?? 'the dev server did not stop'),
       };
+    },
+
+    // @ref llp/0027-everything-on-eas.rfc.md §smoke
+    // The EAS device's boot-and-install: the session in progress on this platform, or one started
+    // with the app named. A development build needs a finished simulator build of this fingerprint
+    // on EAS; the gate never compiles one — `dev --eas` does, and is named.
+    ensureEasSession: async (devServerUrl) => {
+      const { ensureEasSessionAsync } = require('../dev/openAppEas') as typeof import('../dev/openAppEas');
+      const { lookUpEasSimulatorBuildAsync } =
+        require('../plan/easBuildLookup') as typeof import('../plan/easBuildLookup');
+      const target = await targetAsync();
+      const expoGo = target.installWithKind === 'expo-go';
+      const build = expoGo ? null : await lookUpEasSimulatorBuildAsync(projectRoot, options.platform);
+      if (!expoGo && build == null) {
+        // Asked before the session, so a session is never started for an app it cannot have.
+        const probe = await probeCloudSessionAsync({
+          projectRoot,
+          platform: options.platform,
+        });
+        if (probe.state === 'active' && probe.platform === options.platform && probe.sessionId) {
+          return { ok: true, sessionId: probe.sessionId, started: false, reason: null };
+        }
+        return {
+          ok: false,
+          sessionId: null,
+          started: false,
+          reason: `no EAS Simulator session is up, and EAS has no finished "${EAS_SIMULATOR_PROFILE}" build of this project's ${options.platform} fingerprint to start one with — "${PROGRAM_PREFIX} dev --${options.platform} --eas" builds it and starts the session; this gate compiles nothing`,
+        };
+      }
+      const result = await ensureEasSessionAsync(projectRoot, {
+        platform: options.platform,
+        expoGo,
+        devServerUrl,
+        buildId: build?.id ?? null,
+        sessionName: `${path.basename(projectRoot)} — agent-cli smoke`,
+      });
+      return {
+        ok: result.ok,
+        sessionId: result.sessionId,
+        started: result.started,
+        reason: result.reason,
+      };
+    },
+    stopEasSession: async (sessionId) => {
+      const { stopEasSessionAsync } = require('../dev/openAppEas') as typeof import('../dev/openAppEas');
+      const result = await stopEasSessionAsync(projectRoot, sessionId);
+      return { ok: result.ok, target: sessionId, reason: result.reason };
     },
 
     // @ref src/device/bootDevice.ts. Local only, and that is not a gap: `--eas` names a session
@@ -1056,6 +1110,11 @@ async function resolveSmokeTargetAsync(
     plan = await resolveStartPlanAsync(projectRoot, state, {
       platform: options.platform,
       lastBuild: readLastBuildRecord(projectRoot),
+      // @ref llp/0027-everything-on-eas.rfc.md §smoke — the same plan `dev --eas` makes, so the
+      // build this names is the simulator profile on EAS and the session can install it.
+      ...(options.cloud === 'required'
+        ? { requestedBackend: 'eas' as const, deviceBackend: 'eas' as const }
+        : {}),
     });
   } catch {
     // The probe is a courtesy, not a gate: a project it could not read is one this knows nothing
@@ -1081,7 +1140,7 @@ async function resolveSmokeTargetAsync(
     // records for the plan's platform flag]; a development build is `dev`'s to make.
     installWith: expoGo
       ? `npx expo start --${options.platform}`
-      : `${PROGRAM_PREFIX} dev --${options.platform}`,
+      : `${PROGRAM_PREFIX} dev --${options.platform}${options.cloud === 'required' ? ' --eas' : ''}`,
     installWithKind: expoGo ? 'expo-go' : 'native-build',
   };
 }

@@ -1,6 +1,7 @@
 // @ref llp/0027-everything-on-eas.rfc.md §The open is a session
 // What `dev --eas` does once its dev server is up: get the app onto an EAS Simulator session and
-// open it there. The counterpart of `./openApp.ts`, for a device that is in a datacenter.
+// open it there. The counterpart of `./openApp.ts`, for a device that is in a datacenter. `smoke
+// --eas` uses the same session half (`ensureEasSessionAsync`) as its bootstrap.
 //
 // Three facts shape it:
 //
@@ -52,10 +53,13 @@ const TUNNEL_POLL_MS = 2_000;
  */
 export const EAS_SESSION_START_TIMEOUT_MS = 15 * 60_000;
 
+/** How long `eas simulator:stop` may take. */
+export const EAS_SESSION_STOP_TIMEOUT_MS = 60_000;
+
 /** How long the `build:list` that names the build this run just made may take. */
 const BUILD_LOOKUP_TIMEOUT_MS = 60_000;
 
-export interface OpenAppOnEasOptions {
+export interface EnsureEasSessionOptions {
   platform: NativePlatform;
   /** Whether the plan aims at Expo Go, which the session installs itself with `--expo-go`. */
   expoGo: boolean;
@@ -66,11 +70,33 @@ export interface OpenAppOnEasOptions {
    * the run built one and could not name it — which is reported rather than guessed around.
    */
   buildId: string | null;
-  /** Whether the open is still worth performing, checked between the slow stages. */
+  /** Whether the work is still worth performing, checked between the slow stages. */
   stillWanted?: () => boolean;
+  /** What the session is called on expo.dev, for a person scanning the list later. */
+  sessionName?: string;
   /** Injected for tests. */
   waits?: { tunnelMs?: number; sessionStartMs?: number };
 }
+
+/** What making sure there is a session with the app on it amounted to. */
+export interface EnsureEasSessionReport {
+  /** A session on this platform is up, with the app on it (started) or at least drivable (reused). */
+  ok: boolean;
+  /** The session, or null when none was reached. */
+  sessionId: string | null;
+  /** Whether this run started the session, rather than finding one up. */
+  started: boolean;
+  /** The tunnel host the session was pointed at, when one was found. */
+  tunnelHost: string | null;
+  /** The URL that loads the app against this dev server, once the tunnel was known. */
+  openUrl: string | null;
+  /** Where a person watches the session, when the EAS CLI printed it. */
+  sessionUrl: string | null;
+  /** Why there is no session. Null exactly when {@link ok} is true. */
+  reason: string | null;
+}
+
+export type OpenAppOnEasOptions = EnsureEasSessionOptions;
 
 /** What one open on EAS amounted to. */
 export interface OpenAppOnEasReport {
@@ -114,6 +140,11 @@ export function buildSessionStartArgs({
     '--name',
     name,
   ];
+}
+
+/** The argv that ends one session, by id — never the bare form, which stops whatever the dotenv names. */
+export function buildSessionStopArgs(sessionId: string): string[] {
+  return ['simulator:stop', '--id', sessionId, '--non-interactive'];
 }
 
 /** The `build:list` that names the newest finished simulator build of a platform. */
@@ -200,35 +231,78 @@ export async function findLatestSimulatorBuildIdAsync(
   return parseCachedBuild(result.stdout)?.id ?? null;
 }
 
-export async function openAppOnEasAsync(
+/**
+ * Make sure this project has an EAS Simulator session on `platform` with the app on it.
+ *
+ * Reuses the session in progress on that platform when there is one, and otherwise starts one with
+ * the app and the tunnelled launch URL on its command line. Never throws.
+ */
+export async function ensureEasSessionAsync(
   projectRoot: string,
-  options: OpenAppOnEasOptions
-): Promise<OpenAppOnEasReport> {
+  options: EnsureEasSessionOptions
+): Promise<EnsureEasSessionReport> {
   const { platform } = options;
   const stillWanted = options.stillWanted ?? (() => true);
-  const stopped = (reason: string, partial: Partial<OpenAppOnEasReport> = {}): OpenAppOnEasReport => ({
-    opened: false,
+  const failed = (
+    reason: string,
+    partial: Partial<EnsureEasSessionReport> = {}
+  ): EnsureEasSessionReport => ({
+    ok: false,
     sessionId: null,
     started: false,
     tunnelHost: null,
+    openUrl: null,
     sessionUrl: null,
     reason,
     ...partial,
   });
 
-  // 1. The tunnel. Asked of the dev server itself: its manifest names the origin a device uses.
+  // 1. A session this project already has, on this platform, is the device: reuse it. Asked before
+  //    the tunnel, because a session that is up needs no URL from here — `openRouteAsync` builds
+  //    the deep link it is sent — and a gate whose dev server carries no tunnel yet must not wait
+  //    two minutes to learn that the session it is about to drive was there all along.
+  const easCli = resolveEasCli(projectRoot);
+  if (!easCli) {
+    return failed(
+      'no "eas" is in node_modules/.bin or on PATH, and no package runner ("npx" or "bunx") is on PATH to download one, so no EAS Simulator session could be reached'
+    );
+  }
+  const probe = await probeCloudSessionAsync({
+    projectRoot,
+    easCli,
+    platform: platform as CloudPlatform,
+    timeoutMs: CLOUD_SESSION_TIMEOUT_MS,
+  });
+  if (probe.state === 'active' && probe.platform === platform && probe.sessionId) {
+    event('open_app_eas_session_reused', { platform, sessionId: probe.sessionId });
+    return {
+      ok: true,
+      sessionId: probe.sessionId,
+      started: false,
+      tunnelHost: null,
+      openUrl: null,
+      sessionUrl: null,
+      reason: null,
+    };
+  }
+  if (!stillWanted()) {
+    return failed('the dev server stopped before a session was started');
+  }
+
+  // 2. The tunnel, which a session about to be started is pointed at. Asked of the dev server
+  //    itself: its manifest names the origin a device uses.
   const tunnelHost = await waitForTunnelHostAsync(options, stillWanted);
   event('open_app_eas_tunnel', { platform, host: tunnelHost });
   if (!tunnelHost) {
     if (!stillWanted()) {
-      return stopped('the dev server stopped before its tunnel came up');
+      return failed('the dev server stopped before its tunnel came up');
     }
-    return stopped(
+    return failed(
       `the dev server advertised no tunnel host within ${Math.round((options.waits?.tunnelMs ?? EAS_TUNNEL_WAIT_MS) / 1000)}s, and a session on EAS cannot reach this machine's loopback — the dev server has to run with --tunnel`
     );
   }
 
-  // 2. The URL the app opens on the session, in the form the app it is takes: `exp://<host>` for
+  // 3. The URL the app opens on the session, in the form the app it is takes: `exp://<host>` for
   //    Expo Go, `<scheme>://expo-development-client/?url=…` for a development build. Resolved the
   //    way `navigate` resolves it, so the two commands never disagree about the link.
   let openUrl: string;
@@ -244,77 +318,27 @@ export async function openAppOnEasAsync(
     const target = options.expoGo ? 'expo-go' : 'dev-build';
     const connect = resolved.connect.find((entry) => entry.target === target);
     if (!connect) {
-      return stopped(
+      return failed(
         `no URL to point ${options.expoGo ? 'Expo Go' : 'the development build'} at this dev server could be built — ${resolved.resolution}`,
         { tunnelHost }
       );
     }
     openUrl = connect.url;
   } catch (error: unknown) {
-    return stopped(error instanceof Error ? firstLine(error.message) : String(error), {
+    return failed(error instanceof Error ? firstLine(error.message) : String(error), {
       tunnelHost,
     });
   }
 
   if (!stillWanted()) {
-    return stopped('the dev server stopped before a session was reached', { tunnelHost });
-  }
-
-  // 3. A session this project already has, on this platform, is the device: reuse it.
-  const easCli = resolveEasCli(projectRoot);
-  if (!easCli) {
-    return stopped(
-      'no "eas" is in node_modules/.bin or on PATH, and no package runner ("npx" or "bunx") is on PATH to download one, so no EAS Simulator session could be reached',
-      { tunnelHost }
-    );
-  }
-  const probe = await probeCloudSessionAsync({
-    projectRoot,
-    easCli,
-    platform: platform as CloudPlatform,
-    timeoutMs: CLOUD_SESSION_TIMEOUT_MS,
-  });
-  if (probe.state === 'active' && probe.platform === platform && probe.sessionId) {
-    event('open_app_eas_session_reused', { platform, sessionId: probe.sessionId });
-    Log.progress(`Opening the app on EAS Simulator session ${probe.sessionId}, which is already up.`);
-    try {
-      const result = await openRouteAsync(projectRoot, {
-        route: '/',
-        platform,
-        devServerUrl: options.devServerUrl,
-        devServerUrlSource: 'discovered',
-        routeCheck: false,
-        command: 'navigate',
-        cloud: 'required',
-      });
-      if (result.exitCode !== 0) {
-        return stopped(
-          `the session refused the deep link ("${result.command}" exited ${result.exitCode})`,
-          { tunnelHost, sessionId: probe.sessionId }
-        );
-      }
-    } catch (error: unknown) {
-      return stopped(error instanceof Error ? firstLine(error.message) : String(error), {
-        tunnelHost,
-        sessionId: probe.sessionId,
-      });
-    }
-    event('open_app_eas_opened', { platform, sessionId: probe.sessionId, started: false });
-    return {
-      opened: true,
-      sessionId: probe.sessionId,
-      started: false,
-      tunnelHost,
-      sessionUrl: null,
-      reason: null,
-    };
+    return failed('the dev server stopped before a session was started', { tunnelHost, openUrl });
   }
 
   // 4. No usable session: start one, with the app and the URL on the command line.
   if (!options.expoGo && !options.buildId) {
-    return stopped(
+    return failed(
       `no EAS build to install on a new session: nothing named a finished "${EAS_SIMULATOR_PROFILE}" build of this project for ${platform}. Build one with "npx eas build --platform ${platform} --profile ${EAS_SIMULATOR_PROFILE}" and run this again.`,
-      { tunnelHost }
+      { tunnelHost, openUrl }
     );
   }
   const app = options.expoGo
@@ -324,7 +348,7 @@ export async function openAppOnEasAsync(
     platform,
     app,
     openUrl,
-    name: `${path.basename(projectRoot)} — agent-cli dev`,
+    name: options.sessionName ?? `${path.basename(projectRoot)} — agent-cli dev`,
   });
   event('open_app_eas_session_start', {
     platform,
@@ -344,28 +368,116 @@ export async function openAppOnEasAsync(
   const sessionId = readSessionId(output);
   const sessionUrl = readSessionUrl(output);
   if (result.spawnError) {
-    return stopped(`"${easCliLabel(easCli)} ${args[0]}" could not be run (${result.spawnError})`, {
+    return failed(`"${easCliLabel(easCli)} ${args[0]}" could not be run (${result.spawnError})`, {
       tunnelHost,
+      openUrl,
     });
   }
   if (result.exitCode !== 0) {
     const said = firstLine(result.stderr) || firstLine(result.stdout) || 'it printed nothing';
-    return stopped(
+    return failed(
       `"${easCliLabel(easCli)} ${args.join(' ')}" exited ${result.exitCode}: ${said}${
         sessionId
           ? ` — the session ${sessionId} was created before it failed and may be billing; "npx eas simulator:stop --id ${sessionId}" ends it`
           : ''
       }`,
-      { tunnelHost, sessionId, sessionUrl }
+      { tunnelHost, openUrl, sessionId, sessionUrl }
     );
   }
-  event('open_app_eas_opened', { platform, sessionId, started: true });
-  return { opened: true, sessionId, started: true, tunnelHost, sessionUrl, reason: null };
+  return { ok: true, sessionId, started: true, tunnelHost, openUrl, sessionUrl, reason: null };
+}
+
+/**
+ * End one session by id. Never throws.
+ *
+ * By id and never the bare `simulator:stop`, which stops whatever `.env.eas-simulator` names —
+ * possibly a session somebody else is driving.
+ */
+export async function stopEasSessionAsync(
+  projectRoot: string,
+  sessionId: string,
+  easCli: EasCli | null = resolveEasCli(projectRoot)
+): Promise<{ ok: boolean; reason: string | null }> {
+  if (!easCli) {
+    return { ok: false, reason: 'no "eas" or package runner is on PATH to stop the session with' };
+  }
+  const args = buildSessionStopArgs(sessionId);
+  const result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
+    cwd: projectRoot,
+    timeoutMs: EAS_SESSION_STOP_TIMEOUT_MS,
+  });
+  if (result.spawnError) {
+    return { ok: false, reason: `"${easCliLabel(easCli)} ${args[0]}" could not be run (${result.spawnError})` };
+  }
+  if (result.exitCode !== 0) {
+    return {
+      ok: false,
+      reason: `"${easCliLabel(easCli)} ${args.join(' ')}" exited ${result.exitCode}: ${
+        firstLine(result.stderr) || firstLine(result.stdout) || 'it printed nothing'
+      }`,
+    };
+  }
+  return { ok: true, reason: null };
+}
+
+export async function openAppOnEasAsync(
+  projectRoot: string,
+  options: OpenAppOnEasOptions
+): Promise<OpenAppOnEasReport> {
+  const { platform } = options;
+  const stillWanted = options.stillWanted ?? (() => true);
+  const session = await ensureEasSessionAsync(projectRoot, options);
+  const base = {
+    sessionId: session.sessionId,
+    started: session.started,
+    tunnelHost: session.tunnelHost,
+    sessionUrl: session.sessionUrl,
+  };
+  if (!session.ok) {
+    return { ...base, opened: false, reason: session.reason ?? 'no session was reached' };
+  }
+  if (session.started) {
+    // `--open-url` opened the app as the session came up; there is nothing further to send.
+    event('open_app_eas_opened', { platform, sessionId: session.sessionId, started: true });
+    return { ...base, opened: true, reason: null };
+  }
+
+  // A session that was already up gets the deep link the way `navigate --eas` sends it.
+  Log.progress(`Opening the app on EAS Simulator session ${session.sessionId}, which is already up.`);
+  if (!stillWanted()) {
+    return { ...base, opened: false, reason: 'the dev server stopped before the app was opened' };
+  }
+  try {
+    const result = await openRouteAsync(projectRoot, {
+      route: '/',
+      platform,
+      devServerUrl: options.devServerUrl,
+      devServerUrlSource: 'discovered',
+      routeCheck: false,
+      command: 'navigate',
+      cloud: 'required',
+    });
+    if (result.exitCode !== 0) {
+      return {
+        ...base,
+        opened: false,
+        reason: `the session refused the deep link ("${result.command}" exited ${result.exitCode})`,
+      };
+    }
+  } catch (error: unknown) {
+    return {
+      ...base,
+      opened: false,
+      reason: error instanceof Error ? firstLine(error.message) : String(error),
+    };
+  }
+  event('open_app_eas_opened', { platform, sessionId: session.sessionId, started: false });
+  return { ...base, opened: true, reason: null };
 }
 
 /** The dev server's advertised tunnel host, polled for until it appears or the wait runs out. */
 async function waitForTunnelHostAsync(
-  options: OpenAppOnEasOptions,
+  options: EnsureEasSessionOptions,
   stillWanted: () => boolean
 ): Promise<string | null> {
   const deadline = Date.now() + (options.waits?.tunnelMs ?? EAS_TUNNEL_WAIT_MS);
@@ -382,7 +494,9 @@ async function waitForTunnelHostAsync(
     }
     if (!announced) {
       announced = true;
-      Log.progress('Waiting for the dev server’s tunnel, which the EAS Simulator session opens the app through.');
+      Log.progress(
+        'Waiting for the dev server’s tunnel, which the EAS Simulator session opens the app through.'
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, TUNNEL_POLL_MS));
   }
