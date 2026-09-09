@@ -1,5 +1,6 @@
 // @ref llp/0002-testing-and-evals.plan.md
 import { spawn } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
 
 export type ProcessResult = {
   exitCode: number;
@@ -14,6 +15,8 @@ export function runProcess(
   args: string[],
   options: { cwd: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal }
 ): Promise<ProcessResult> {
+  if (process.platform === 'win32')
+    throw new Error('Agent eval subprocesses require POSIX process groups (Linux or macOS)');
   options.signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, {
@@ -39,18 +42,29 @@ export function runProcess(
       timedOut = true;
       kill();
     };
-    const collect = (text: string, chunk: Buffer) => {
-      if (text.length + chunk.length > 4 * 1024 * 1024) {
-        overflow = true;
-        kill();
-      }
-      return (text + chunk.toString()).slice(0, 4 * 1024 * 1024);
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    const exceedsLimit = (bytes: number) => {
+      if (bytes <= 4 * 1024 * 1024) return false;
+      overflow = true;
+      kill();
+      return true;
     };
-    child.stdout.on('data', (chunk) => {
-      stdout = collect(stdout, chunk);
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdoutBytes += chunk.length;
+      if (!exceedsLimit(stdoutBytes)) stdout += stdoutDecoder.write(chunk);
     });
-    child.stderr.on('data', (chunk) => {
-      stderr = collect(stderr, chunk);
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderrBytes += chunk.length;
+      if (!exceedsLimit(stderrBytes)) stderr += stderrDecoder.write(chunk);
+    });
+    child.stdout.on('end', () => {
+      stdout += stdoutDecoder.end();
+    });
+    child.stderr.on('end', () => {
+      stderr += stderrDecoder.end();
     });
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) abort();

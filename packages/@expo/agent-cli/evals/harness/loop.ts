@@ -1,11 +1,24 @@
 // @ref llp/0002-testing-and-evals.plan.md
 import type { ProcessResult } from './process';
-export type Message = { role: 'system' | 'user' | 'assistant'; content: string };
+export type Message = {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+};
 export type CommandResult = ProcessResult & { argv: string[] };
 export type LoopEvent =
   | { type: 'message'; role: 'user' | 'assistant'; content: string }
-  | { type: 'tool_call'; id: string; name: string; arguments: { argv: string[] } }
-  | { type: 'tool_result'; toolCallId: string; name: string; content: CommandResult };
+  | {
+      type: 'tool_call';
+      id: string;
+      name: string;
+      arguments: { argv: string[] };
+    }
+  | {
+      type: 'tool_result';
+      toolCallId: string;
+      name: string;
+      content: CommandResult;
+    };
 
 /** Only the model chooses argv. The adapter supplies the public help, not scenario answers. */
 export async function runLoop(options: {
@@ -23,9 +36,10 @@ export async function runLoop(options: {
       content: `You complete tasks in the current Expo project using the run_cli tool.
 Call the CLI with argv (command and flags). Read each result before deciding the next step.
 Use --help to discover flags, and prefer --json when available. Do not invent flags.
+Execute the requested work yourself. If a command fails, use its error and help to recover; do not merely tell the user which command to run.
 Do not start, build, install or deploy unless the user requests it.
 Public CLI help:\n${options.help}
-When the requested task is complete, stop calling tools and summarize the result.
+When the requested task is complete, stop calling tools. Your final answer must be one short sentence (at most 30 words); do not repeat command output.
 Suggested next commands are optional, not additional tasks. /no_think`,
     },
     { role: 'user', content: options.prompt },
@@ -63,7 +77,7 @@ Suggested next commands are optional, not additional tasks. /no_think`,
     ) {
       messages.push({
         role: 'user',
-        content: 'Invalid action. Return {"run":["command",...]} OR {"done":true,"summary":"..."}.',
+        content: 'Invalid run_cli arguments. Call run_cli with a nonempty argv array of strings.',
       });
       continue;
     }
@@ -74,7 +88,10 @@ Suggested next commands are optional, not additional tasks. /no_think`,
       name: 'expo-agent-cli',
       arguments: { argv: action.run },
     });
-    const result = { argv: action.run as string[], ...(await options.execute(action.run)) };
+    const result = {
+      argv: action.run as string[],
+      ...(await options.execute(action.run)),
+    };
     commands.push(result);
     options.record({
       type: 'tool_result',
@@ -89,10 +106,19 @@ Suggested next commands are optional, not additional tasks. /no_think`,
       role: 'user',
       content: JSON.stringify({
         exitCode: result.exitCode,
-        stdout: clip(result.stdout),
+        stdout: clip(compactJson(result.stdout)),
         stderr: clip(result.stderr),
       }),
     });
   }
   throw new Error('Agent exhausted its turn budget without completing the task');
+}
+
+/** Preserve every JSON field while avoiding pretty-print whitespace in model context. */
+function compactJson(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text));
+  } catch {
+    return text;
+  }
 }

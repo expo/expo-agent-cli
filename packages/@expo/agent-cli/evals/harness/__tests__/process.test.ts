@@ -7,7 +7,12 @@ it('collects stdout, stderr, and a nonzero exit independently', async () => {
     ['-e', 'console.log("out"); console.error("err"); process.exit(7)'],
     { cwd: process.cwd() }
   );
-  expect(r).toMatchObject({ exitCode: 7, stdout: 'out\n', stderr: 'err\n', timedOut: false });
+  expect(r).toMatchObject({
+    exitCode: 7,
+    stdout: 'out\n',
+    stderr: 'err\n',
+    timedOut: false,
+  });
 });
 it('terminates an unresponsive child on deadline', async () => {
   const r = await runProcess(process.execPath, ['-e', 'setInterval(()=>{}, 1000)'], {
@@ -21,4 +26,16 @@ it('rejects a missing executable rather than treating it as a task outcome', asy
   await expect(
     runProcess('/no-such-eval-executable', [], { cwd: process.cwd() })
   ).rejects.toThrow();
+});
+
+it('preserves UTF-8 characters split between subprocess chunks', async () => {
+  const r = await runProcess(
+    process.execPath,
+    [
+      '-e',
+      'process.stdout.write(Buffer.from([0xc3])); setTimeout(() => process.stdout.write(Buffer.from([0xa9])), 20)',
+    ],
+    { cwd: process.cwd() }
+  );
+  expect(r.stdout).toBe('é');
 });

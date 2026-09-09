@@ -124,61 +124,66 @@ jobs:
         run: bun run test
         working-directory: packages/@expo/agent-cli
 
-  # Tier 1 of LLP 0002: agent-in-the-loop, best-effort, report-only.
-  # `continue-on-error` keeps it non-blocking until its pass rate is stable over a
-  # trailing window (LLP 0002, "Flake containment").
+  # Short real agent integration tests. Every relevant PR runs the entire Tier 1 suite.
+  # Advisory until repeated CI evidence establishes reliability; individual results stay visible.
   tier1-agent-eval:
-    # Runs on PRs too (decision 2026-08-22): proven cost is ~4m37s/run on a 4 vCPU
-    # runner (2.5 GB model pull ~2 min, inference 157 s), which is acceptable per-PR.
-    # Still report-only via continue-on-error.
     if: >-
       github.event_name == 'pull_request' ||
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'schedule' && github.repository == 'expo/expo-agent-cli')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     continue-on-error: true
-    timeout-minutes: 45
+    timeout-minutes: 15
+    env:
+      AGENT_CLI_EVAL_MODEL: qwen3:4b-instruct
+      AGENT_CLI_EVAL_MODEL_DIGEST: 0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0
     steps:
-      - name: 👀 Checkout
+      - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: 🥟 Setup bun
+      - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.14
-      - name: ⬢ Setup Node
+      - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
-      - name: 📦 Install dependencies
+      - name: Install locked dependencies (including the real Expo fixture)
         run: bun install --ignore-scripts --frozen-lockfile
-      - name: 🛠 Build @expo/agent-cli
-        run: bun run build
-        working-directory: packages/@expo/agent-cli
-      # Tier 1 driver: Ollama on the runner, CPU-only (chosen over hosted free tiers —
-      # GitHub Models retired 2026-07-30; Groq/Gemini/OpenRouter remain optional fast
-      # lanes behind a repo secret). Model pinned, temperature 0, fixed seed. Spike
-      # numbers (Apple M4, local): skills-sync passes 5/5 at ~23.5 s/run with a single
-      # correct command per run; expect a few multiples slower on a 4 vCPU runner.
-      # No model cache on purpose: a weekly job would lose the LRU race for the shared
-      # 10 GB pool, and a cold pull costs only a few minutes (LLP 0002).
-      # The graders stay programmatic (see evals/schema.md) and the job stays report-only.
-      - name: 🦙 Install Ollama
+      - name: Build CLI
+        run: bun run --filter @expo/agent-cli build
+      - name: Install Ollama
         run: curl -fsSL https://ollama.com/install.sh | sh
-      - name: 🦙 Start Ollama and pull the pinned model
+        env:
+          OLLAMA_VERSION: 0.32.15
+      - name: Start Ollama and pull the model
         run: |
-          ollama serve > /tmp/ollama-serve.log 2>&1 &
+          ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 &
           for _ in $(seq 1 30); do
             curl -fsS http://127.0.0.1:11434/api/version && break
             sleep 1
           done
+          curl -fsS http://127.0.0.1:11434/api/version
           ollama pull "$AGENT_CLI_EVAL_MODEL"
-        env:
-          AGENT_CLI_EVAL_MODEL: qwen3:4b
-      # Per-PR runs use only the cheapest scenario: CPU inference on the standard runner is
-      # too variable for the longer ones (observed: start-plan turn-2 ranging 23s local to
-      # >900s on a slow runner). The full set runs on the weekly cron and manual dispatch.
-      - name: 🤖 Tier 1 evals (report-only)
-        run: bun evals/run.mjs --tier 1 ${{ github.event_name == 'pull_request' && '--scenario skills-sync' || '' }}
+      - name: Agent integration evals
+        id: evals
+        run: bun run test:evals
         working-directory: packages/@expo/agent-cli
-        env:
-          AGENT_CLI_EVAL_MODEL: qwen3:4b
+      - name: Eval summary and failure annotations
+        if: always() && steps.evals.outcome != 'skipped'
+        uses: getsentry/vitest-evals@abea6a519955e5df56ecb2a2d83bae9c821561e1 # v0
+        with:
+          results: packages/@expo/agent-cli/evals/.artifacts/results.json
+          publish-check: false
+      - name: Preserve eval evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: tier1-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          include-hidden-files: true
+          retention-days: 14
+          path: |
+            packages/@expo/agent-cli/evals/.artifacts/
+            ${{ runner.temp }}/ollama.log

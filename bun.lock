@@ -50,6 +50,15 @@
         "ws": "^8.12.1",
       },
     },
+    "packages/@expo/agent-cli/evals/fixtures/real-app": {
+      "name": "agent-cli-eval-real-app",
+      "version": "1.0.0",
+      "dependencies": {
+        "expo": "57.0.19",
+        "react": "19.2.3",
+        "react-native": "0.86.3",
+      },
+    },
     "packages/expo-agent-cli": {
       "name": "expo-agent-cli",
       "version": "1.0.3",
@@ -791,6 +800,8 @@
     "agent-base": ["agent-base@6.0.2", "", { "dependencies": { "debug": "4" } }, "sha512-RZNwNclF7+MS/8bDg70amg32dyeZGZxiDuQmZxKLAlQjr3jGyLx+4Kkk58UO7D2QdgFIQCovuSuZESne6RG6XQ=="],
 
     "agent-cli-detector": ["agent-cli-detector@0.1.6", "", { "bin": { "agent-cli-detector": "dist/cli.js" } }, "sha512-vKrPeEVN3upDF3GjWxsWBbwQgMtNJ8VB1cduPvK3svmmz4ENpS7yaPxbogsbe3w+xp9xp2Cu+0Ar41rjAR4+lA=="],
+
+    "agent-cli-eval-real-app": ["agent-cli-eval-real-app@workspace:packages/@expo/agent-cli/evals/fixtures/real-app"],
 
     "ajv": ["ajv@6.15.0", "", { "dependencies": { "fast-deep-equal": "^3.1.1", "fast-json-stable-stringify": "^2.0.0", "json-schema-traverse": "^0.4.1", "uri-js": "^4.2.2" } }, "sha512-fgFx7Hfoq60ytK2c7DhnF8jIvzYgOMxfugjLOSMHjLIPgenqa7S7oaagATUq99mV6IYvN2tRmC0wnTYX6iPbMw=="],
 

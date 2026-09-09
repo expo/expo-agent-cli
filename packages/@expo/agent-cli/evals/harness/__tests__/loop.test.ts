@@ -59,3 +59,33 @@ describe('agent command loop', () => {
     await expect(runLoop(o)).rejects.toThrow('timed out');
   });
 });
+
+it('asks for a corrected native tool call after malformed arguments', async () => {
+  const o = options();
+  o.chat
+    .mockResolvedValueOnce('{"run":[]}')
+    .mockResolvedValueOnce('{"run":["skills:sync"]}')
+    .mockResolvedValueOnce('{"done":true}');
+  await runLoop(o);
+  expect(o.chat.mock.calls[1][0].at(-1).content).toContain('run_cli');
+  expect(o.execute).toHaveBeenCalledTimes(1);
+});
+
+it('compacts structured output without dropping fields and records the original result', async () => {
+  const o = options();
+  const report = { project: { sdk: '57', compatible: true }, reasons: [] };
+  const stdout = JSON.stringify(report, null, 2);
+  o.execute.mockResolvedValue({ ...result, stdout });
+  o.chat
+    .mockResolvedValueOnce('{"run":["status","--json"]}')
+    .mockResolvedValueOnce('{"done":true}');
+  await runLoop(o);
+  const feedback = JSON.parse(o.chat.mock.calls[1][0].at(-1).content);
+  expect(feedback.stdout).toBe(JSON.stringify(report));
+  expect(o.record).toHaveBeenCalledWith(
+    expect.objectContaining({
+      type: 'tool_result',
+      content: expect.objectContaining({ stdout }),
+    })
+  );
+});

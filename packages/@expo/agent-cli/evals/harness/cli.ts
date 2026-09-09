@@ -1,6 +1,7 @@
 // @ref llp/0002-testing-and-evals.plan.md
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { onTestFinished } from 'vitest';
 import { createHarness } from 'vitest-evals';
 import { runLoop, type CommandResult, type LoopEvent } from './loop';
@@ -8,7 +9,13 @@ import { chat, identifyModel } from './ollama';
 import { runProcess } from './process';
 import { artifactRoot, cliBin, copyWorkspace, packageRoot, snapshot } from './workspace';
 
-export type EvalInput = { id: string; prompt: string; fixture: string; maxTurns?: number };
+export type EvalInput = {
+  id: string;
+  prompt: string;
+  fixture: string;
+  linkDependencies?: boolean;
+  maxTurns?: number;
+};
 export type EvalOutput = {
   root: string;
   before: Record<string, string>;
@@ -25,15 +32,17 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
       AbortSignal.timeout(180_000),
       ...(parentSignal ? [parentSignal] : []),
     ]);
-    const root = copyWorkspace(input.fixture);
+    const root = copyWorkspace(input.fixture, input.linkDependencies);
     fs.mkdirSync(artifactRoot, { recursive: true });
     const artifacts = fs.mkdtempSync(path.join(artifactRoot, `${input.id}-`));
     const events: LoopEvent[] = [];
     const before = snapshot(root);
+    const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-eval-home-'));
     const started = Date.now();
     const write = (name: string, value: unknown) =>
       fs.writeFileSync(path.join(artifacts, name), JSON.stringify(value, null, 2));
     onTestFinished(() => {
+      fs.rmSync(isolatedHome, { recursive: true, force: true });
       write('workspace.json', { before, after: snapshot(root) });
       if (process.env.AGENT_CLI_EVAL_KEEP !== '1')
         fs.rmSync(root, { recursive: true, force: true });
@@ -42,6 +51,11 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
     setArtifact('prompt', input.prompt);
     const env = {
       ...process.env,
+      // Child processes get an empty user profile; local agent installs cannot alter detection.
+      HOME: isolatedHome,
+      USERPROFILE: isolatedHome,
+      XDG_CONFIG_HOME: path.join(isolatedHome, '.config'),
+      GROK_HOME: '',
       CI: '1',
       NO_COLOR: '1',
       npm_config_user_agent: '',
@@ -71,7 +85,13 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
         cliVersion: JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf8'))
           .version,
         commit: process.env.GITHUB_SHA ?? null,
-        options: { think: false, temperature: 0, seed: 42, num_predict: 512, num_ctx: 8192 },
+        options: {
+          think: false,
+          temperature: 0,
+          seed: 42,
+          num_predict: 512,
+          num_ctx: 8192,
+        },
       };
       write('metadata.json', metadata);
       setArtifact('versions', metadata);
@@ -82,13 +102,17 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
         maxTurns: input.maxTurns,
         chat: async (messages) => {
           const reply = await chat(messages, signal, (request, response) => {
+            const usage = response as {
+              prompt_eval_count?: number;
+              eval_count?: number;
+            };
+            inputTokens += Number(usage.prompt_eval_count ?? 0);
+            outputTokens += Number(usage.eval_count ?? 0);
             fs.appendFileSync(
               path.join(artifacts, 'inference.jsonl'),
               `${JSON.stringify({ request, response })}\n`
             );
           });
-          inputTokens += reply.usage.inputTokens;
-          outputTokens += reply.usage.outputTokens;
           return reply.content;
         },
         execute: (argv) =>
@@ -112,12 +136,18 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
       return {
         output: { root, before, ...outcome },
         events,
-        usage: { inputTokens, outputTokens, totalTokens: inputTokens + outputTokens },
+        usage: {
+          inputTokens,
+          outputTokens,
+          totalTokens: inputTokens + outputTokens,
+        },
       };
     } catch (error) {
       write('outcome.json', {
         status: signal.aborted ? 'timeout' : 'error',
         error: String(error),
+        inputTokens,
+        outputTokens,
         durationMs: Date.now() - started,
       });
       setArtifact('partialTrace', events);

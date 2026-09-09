@@ -10,7 +10,7 @@ export const artifactRoot = path.resolve(
   process.env.AGENT_CLI_EVAL_ARTIFACTS ?? path.join(packageRoot, 'evals/.artifacts')
 );
 
-export function copyWorkspace(fixture: string) {
+export function copyWorkspace(fixture: string, linkDependencies = false) {
   const source = path.resolve(packageRoot, fixture);
   if (!source.startsWith(`${packageRoot}${path.sep}`) || !fs.statSync(source).isDirectory()) {
     throw new Error(`Invalid fixture: ${fixture}`);
@@ -20,8 +20,20 @@ export function copyWorkspace(fixture: string) {
     fs.cpSync(source, root, {
       recursive: true,
       dereference: true,
-      filter: (p) => path.basename(p) !== '.git',
+      filter: (p) =>
+        path.basename(p) !== '.git' &&
+        !(linkDependencies && p === path.join(source, 'node_modules')),
     });
+    if (linkDependencies) {
+      const dependencies = path.join(source, 'node_modules');
+      if (!fs.existsSync(path.join(dependencies, 'expo/package.json')))
+        throw new Error('Real fixture dependencies are missing; run bun install');
+      fs.symlinkSync(
+        dependencies,
+        path.join(root, 'node_modules'),
+        process.platform === 'win32' ? 'junction' : 'dir'
+      );
+    }
     return root;
   } catch (error) {
     fs.rmSync(root, { recursive: true, force: true });
