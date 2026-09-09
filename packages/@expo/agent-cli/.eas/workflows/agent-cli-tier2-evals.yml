@@ -1,75 +1,99 @@
-# Tier 2 evals for @expo/agent-cli (llp/0002 in packages/@expo/agent-cli): a frontier agent (Claude Code
-# headless) drives the eval scenarios for real. Advisory, never blocks merge — the eval
-# step reports its result through the PR comment instead of failing the job.
-#
-# Trigger: label a PR with "agent-cli-eval" (mirrors expo/skills' label-triggered evals),
-# or dispatch manually.
-#
-# Prerequisite: ANTHROPIC_API_KEY must exist in the EAS "production" environment.
+# @ref llp/0002-testing-and-evals.plan.md
+# Advisory policy is a branch-protection choice; this job preserves actual failures.
 name: agent-cli-tier2-evals
-
 on:
   pull_request_labeled:
-    labels:
-      - agent-cli-eval
+    labels: [agent-cli-eval]
   workflow_dispatch: {}
 
-# The EAS base directory is packages/@expo/agent-cli (where app.json + eas.json live), so a step's
-# default cwd is the package. These commands drive the bun workspace, which is the repo root — three
-# levels up. Setting it once here keeps every step's paths root-relative, as they were before the move.
-# `tools` pins Node and Bun: the runner's default Node is < 20, too old for the CLI family's `File`
-# usage, and this replaces a manual bun install.
+# The EAS base directory is packages/@expo/agent-cli.
+# Configs resolve evals explicitly; scripts run from the package directory.
 defaults:
   run:
-    working_directory: ../../..
+    working_directory: .
   tools:
     node: 24
     bun: 1.3.14
 
 jobs:
   tier2:
-    name: tier 2 agent evals
+    name: tier 2 long web outcome
     runs_on: linux-medium
     environment: production
+    env:
+      AGENT_CLI_TIER2: '1'
     outputs:
-      result: ${{ steps.evals.outputs.result }}
-      summary: ${{ steps.evals.outputs.summary }}
+      result: ${{ steps.report.outputs.result }}
+      summary: ${{ steps.report.outputs.summary }}
     steps:
       - uses: eas/checkout
-
-      - name: Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
-
-      - name: Build @expo/agent-cli
-        run: bun run --filter @expo/agent-cli build
-
-      - name: Install Claude Code
-        run: npm install --global @anthropic-ai/claude-code
-
-      - name: Run tier 2 evals
-        id: evals
-        # Report-only: capture the outcome for the PR comment, do not fail the job.
+      - name: Initialize evidence
+        id: paths
         run: |
+          mkdir -p evals/artifacts/tier2
+          printf '%s\n' '{"status":"error","reason":"Setup or test runner did not complete"}' > evals/artifacts/tier2/outcome.json
+          set-output artifacts "$PWD/evals/artifacts/tier2"
+      - name: Check credentials before installing tools
+        id: preflight
+        run: node evals/tier2/preflight.mjs --eas
+      - name: Install workspace dependencies
+        if: ${{ steps.preflight.outputs.enabled == 'true' }}
+        working_directory: ../../..
+        run: |
+          set -eo pipefail
+          bun install --ignore-scripts --frozen-lockfile 2>&1 | tee packages/@expo/agent-cli/evals/artifacts/tier2/workspace-install.log
+      - name: Build CLI under test
+        if: ${{ steps.preflight.outputs.enabled == 'true' }}
+        working_directory: ../../..
+        run: |
+          set -eo pipefail
+          bun run --filter @expo/agent-cli build 2>&1 | tee packages/@expo/agent-cli/evals/artifacts/tier2/cli-build.log
+      - name: Install pinned Tier2 tools
+        if: ${{ steps.preflight.outputs.enabled == 'true' }}
+        run: |
+          set -eo pipefail
+          npm install --global @anthropic-ai/claude-code@2.1.267 2>&1 | tee evals/artifacts/tier2/claude-install.log
+          tier2_tools=$(mktemp -d /tmp/agent-cli-tier2-tools.XXXXXX)
+          npm install --prefix "$tier2_tools" --no-audit --no-fund playwright@1.55.0 2>&1 | tee evals/artifacts/tier2/playwright-install.log
+          node "$tier2_tools/node_modules/playwright/cli.js" install --with-deps chromium 2>&1 | tee evals/artifacts/tier2/chromium-install.log
+          set-env TIER2_PLAYWRIGHT_ROOT "$tier2_tools"
+      - name: Run long Tier2 eval
+        if: ${{ steps.preflight.outputs.enabled == 'true' }}
+        id: evals
+        run: |
+          set -o pipefail
           set +e
-          node packages/@expo/agent-cli/evals/run.mjs --tier 2 | tee /tmp/tier2.log
+          bunx --no-install vitest run --config evals/tier2/vitest.config.mts 2>&1 | tee evals/artifacts/tier2/runner.log
           code=$?
-          set-output result "$([ "$code" -eq 0 ] && echo pass || echo fail)"
-          set-output summary "$(tail -n 20 /tmp/tier2.log | head -c 1500)"
-          exit 0
+          set-output code "$code"
+          exit "$code"
+      - name: Report outcome, errors, or skip
+        id: report
+        if: ${{ always() }}
+        env:
+          TIER2_RUN_CODE: ${{ steps.evals.outputs.code || steps.preflight.outputs.code }}
+        run: node evals/tier2/report.mjs "$TIER2_RUN_CODE" --eas
+      - name: Upload Tier2 evidence
+        uses: eas/upload_artifact
+        if: ${{ always() }}
+        with:
+          type: other
+          name: agent-cli-tier2-evidence
+          path: ${{ steps.paths.outputs.artifacts }}/**/*
 
   comment:
-    name: comment
+    name: Report Tier2 on PR
     after: [tier2]
+    if: ${{ github.event.pull_request.number }}
     type: github-comment
     params:
       payload: |
         <!-- agent-cli-tier2-evals -->
-        ## @expo/agent-cli tier 2 evals (Claude Code headless)
+        ## @expo/agent-cli Tier2: long web task
+        Eval result: **${{ after.tier2.outputs.result || after.tier2.status }}**
+        Job status (including setup and artifact upload): **${{ after.tier2.status }}**
+        ${{ after.tier2.outputs.summary || 'No outcome output was produced; inspect setup and workflow logs.' }}
 
-        Result: **${{ after.tier2.outputs.result }}**
-
-        ```
-        ${{ after.tier2.outputs.summary }}
-        ```
-
-        📎 [Full log](${{ workflow.url }}) — advisory only, never blocks merge (llp/0002).
+        Claude Code 2.1.267 · claude-sonnet-5 · max 40 turns / $5 / 15 minutes for the agent.
+        Independent checks cover the cart in Metro, the agent export, and a fresh export.
+        [Workflow and artifacts](${{ workflow.url }}) include the normalized Vitest report, raw stream, stderr, source diff, screenshots, and mechanical trace diagnostics.
