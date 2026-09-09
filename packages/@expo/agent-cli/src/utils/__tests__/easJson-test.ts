@@ -1,3 +1,5 @@
+import fs from 'fs';
+
 import { vol } from 'memfs';
 
 import { ensureSimulatorProfileSync, hasBuildProfileSync, readEasJsonSync } from '../easJson';
@@ -26,6 +28,35 @@ describe(hasBuildProfileSync, () => {
 });
 
 describe(ensureSimulatorProfileSync, () => {
+  it.each([
+    '{not json',
+    'null',
+    '[]',
+    '42',
+    '{"build":null}',
+    '{"build":[]}',
+    '{"build":"development"}',
+  ])('refuses to overwrite invalid configuration: %s', (contents) => {
+    vol.fromJSON({ [`${projectRoot}/eas.json`]: contents });
+
+    expect(() => ensureSimulatorProfileSync(projectRoot)).toThrow(/eas.json.*Fix/);
+    expect(vol.readFileSync(`${projectRoot}/eas.json`, 'utf8')).toBe(contents);
+  });
+
+  it('preserves the file when reading it fails', () => {
+    const contents = '{"build":{"production":{}}}';
+    vol.fromJSON({ [`${projectRoot}/eas.json`]: contents });
+    const read = vi.spyOn(fs, 'readFileSync').mockImplementationOnce(() => {
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    });
+    try {
+      expect(() => ensureSimulatorProfileSync(projectRoot)).toThrow(/eas.json.*permission denied/);
+      expect(vol.readFileSync(`${projectRoot}/eas.json`, 'utf8')).toBe(contents);
+    } finally {
+      read.mockRestore();
+    }
+  });
+
   it(`adds the profile and keeps every other key of the file`, () => {
     vol.fromJSON({
       [`${projectRoot}/eas.json`]: JSON.stringify({
