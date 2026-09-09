@@ -13,7 +13,7 @@ import { UNTRUSTED_OUTPUT_BEGIN } from '../untrusted';
 
 // The real error class and the real code are kept: the command branches on both.
 vi.mock('../cdpClient', async () => ({
-  ...await vi.importActual('../cdpClient'),
+  ...(await vi.importActual('../cdpClient')),
   CdpClient: vi.fn(),
 }));
 vi.mock('../runtimeErrorCollector', () => ({ CdpRuntimeErrorCollector: vi.fn() }));
@@ -34,13 +34,17 @@ function mockDevServer(targets: unknown[] | null) {
 
 function mockEvaluate(implementation: () => Promise<any>) {
   const evaluateAsync = vi.fn(implementation);
-  vi.mocked(CdpClient).mockImplementation(() => ({ evaluateAsync }) as any);
+  vi.mocked(CdpClient).mockImplementation(function () {
+    return { evaluateAsync } as any;
+  });
   return evaluateAsync;
 }
 
 function mockCollect(implementation: () => Promise<any>) {
   const collectAsync = vi.fn(implementation);
-  vi.mocked(CdpRuntimeErrorCollector).mockImplementation(() => ({ collectAsync }) as any);
+  vi.mocked(CdpRuntimeErrorCollector).mockImplementation(function () {
+    return { collectAsync } as any;
+  });
   return collectAsync;
 }
 
@@ -526,16 +530,15 @@ describe(`${runtimeErrorsAsync.name} on a runtime with no debugger`, () => {
   /** A collector that answers with nothing and says why nothing is all it can answer with. */
   function mockBlindCollect(records: any[] = []) {
     const collectAsync = vi.fn(async () => records);
-    vi.mocked(CdpRuntimeErrorCollector).mockImplementation(
-      () =>
-        ({
-          collectAsync,
-          capability: {
-            blind: true,
-            evidence: 'the runtime answered Runtime.evaluate with "method not found" (-32601)',
-          },
-        }) as any
-    );
+    vi.mocked(CdpRuntimeErrorCollector).mockImplementation(function () {
+      return {
+        collectAsync,
+        capability: {
+          blind: true,
+          evidence: 'the runtime answered Runtime.evaluate with "method not found" (-32601)',
+        },
+      } as any;
+    });
     return collectAsync;
   }
 
@@ -612,19 +615,18 @@ describe(`${runtimeErrorsAsync.name} on a runtime with no debugger`, () => {
      * with no platform prefix, which is what makes the log unscopeable (F105).
      */
     function mockBlindCollectWritingToLog() {
-      vi.mocked(CdpRuntimeErrorCollector).mockImplementation(
-        () =>
-          ({
-            collectAsync: vi.fn(async () => {
-              vol.appendFileSync(logFile, ' ERROR  [Error: W25 boom on ios]\n');
-              return [];
-            }),
-            capability: {
-              blind: true,
-              evidence: 'the runtime answered Runtime.evaluate with "method not found" (-32601)',
-            },
-          }) as any
-      );
+      vi.mocked(CdpRuntimeErrorCollector).mockImplementation(function () {
+        return {
+          collectAsync: vi.fn(async () => {
+            vol.appendFileSync(logFile, ' ERROR  [Error: W25 boom on ios]\n');
+            return [];
+          }),
+          capability: {
+            blind: true,
+            evidence: 'the runtime answered Runtime.evaluate with "method not found" (-32601)',
+          },
+        } as any;
+      });
     }
 
     it(`names the other platform whose app is on the same dev server`, async () => {
