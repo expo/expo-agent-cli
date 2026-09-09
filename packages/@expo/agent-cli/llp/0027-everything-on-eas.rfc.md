@@ -113,3 +113,7 @@ It is also a needs-human scenario of its own, `eas-project-unlinked` (`EAS_PROJE
   - Not yet run live: `dev --android --eas`, and the Expo Go form of the session start (`--expo-go`), which the `live-cloud` suite exercises on its own.
 
 Live check, 2026-09-09: a fresh SDK 57 app created with this CLI (`new <dir> --no-git --json`, dependencies installed) followed by `dev --ios --eas --json` stopped at the project-linkage preflight with exit 7. No Metro or EAS session was started. Separately, `start --tunnel` with `EXPO_UNSTABLE_TUNNEL_V2` unset advertised a `*.on.expo.app` URL; the server was stopped after checking it. [observed]
+
+### Smoke session ownership and cleanup
+
+The creation message identifies a new session. An overwrite warning naming a previous session is not a creation receipt and must never select the cleanup target. A session created before a failed readiness wait still belongs to the smoke run and is registered for cleanup. The start phase reports creation only; the environment summary reports the actual session cleanup result. Reused sessions remain running. [observed — regression tests, 2026-09-09]

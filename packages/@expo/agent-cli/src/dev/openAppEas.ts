@@ -177,7 +177,7 @@ export function readSessionId(output: string): string | null {
   // `(id: <id>)` with `--json`, and `(id: <id>, saved to .env.eas-simulator)` without it — the
   // form this CLI runs, which the first regex here did not read [observed — live, expo-ci,
   // 2026-09-08: "Opened the app on EAS Simulator session (id unknown)" beside the session's URL].
-  const created = /\(id:\s*([^\s,)]+)/.exec(output);
+  const created = /Simulator session created\s*\(id:\s*([^\s,)]+)/.exec(output);
   if (created) {
     return created[1]!;
   }
@@ -382,7 +382,7 @@ export async function ensureEasSessionAsync(
           ? ` — the session ${sessionId} was created before it failed and may be billing; "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`
           : ''
       }`,
-      { tunnelHost, openUrl, sessionId, sessionUrl }
+      { tunnelHost, openUrl, sessionId, sessionUrl, started: sessionId != null }
     );
   }
   return { ok: true, sessionId, started: true, tunnelHost, openUrl, sessionUrl, reason: null };

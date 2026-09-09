@@ -1158,7 +1158,7 @@ async function runPhasesAsync(
       'start-session',
       async () => {
         const result = await deps.ensureEasSession(devServerUrl);
-        if (result.ok && result.sessionId != null && result.started) {
+        if (result.sessionId != null && result.started) {
           cleanups.push({
             resource: 'session',
             target: result.sessionId,
@@ -1169,7 +1169,7 @@ async function runPhasesAsync(
           ? {
               status: 'ok' as const,
               reason: result.started
-                ? `started EAS Simulator session ${result.sessionId} for this run, and stopped it again afterwards`
+                ? `started EAS Simulator session ${result.sessionId} for this run`
                 : `EAS Simulator session ${result.sessionId} was already up`,
               value: result,
             }
