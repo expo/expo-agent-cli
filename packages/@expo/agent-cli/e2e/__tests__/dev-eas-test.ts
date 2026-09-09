@@ -18,6 +18,10 @@ import {
 } from '../stubEas';
 import {
   executeAgentCliAsync,
+  spawnAgentCli,
+  collectOutput,
+  waitForExitAsync,
+  killAsync,
   installStubFingerprintAsync,
   readStubExpoInvocations,
   setupFixtureAsync,
@@ -525,6 +529,44 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       await cleanUpAsync(projectRoot);
     }
   });
+
+  it('cleans up its EAS session when the dev server exits normally', async () => {
+    const projectRoot = await setupAsync('go-app');
+    await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas'], {
+      env: easRunEnv(projectRoot, 8589),
+    });
+    expect(easInvocationArgs(projectRoot)).toContainEqual([
+      'simulator:stop', '--id', 'sess-e2e-started', '--non-interactive',
+    ]);
+  });
+
+  it.skipIf(process.platform === 'win32').each(['ready', 'starting', 'reused', 'failed'] as const)(
+    'SIGINT cleans up an owned session (%s)', async (state) => {
+      const script = await fs.promises.readFile(path.join(__dirname, '../stubs/eas.js'), 'utf8');
+      const projectRoot = await setupAsync('go-app', { easScript: state === 'starting'
+        ? script.replace("const exitCode = Number(process.env.STUB_SIM_START_EXIT || 0);",
+            "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000); const exitCode = 0;")
+        : script });
+      const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas'], {
+        env: { ...easRunEnv(projectRoot, 8588), STUB_SIM_SESSIONS: state === 'reused' ? '1' : '0', STUB_SIM_START_EXIT: state === 'failed' ? '1' : '0' },
+      });
+      const output = collectOutput(child);
+      const exited = waitForExitAsync(child, output);
+      try {
+        expect(await waitForAsync(() => state === 'starting'
+          ? easInvocationArgs(projectRoot).some((args) => args[0] === 'simulator')
+          : output.stderr.includes(state === 'failed' ? 'The app was not opened on an EAS Simulator session' : 'Opened the app on EAS Simulator session'), 10000)).toBe(true);
+        child.kill('SIGINT');
+        await exited;
+        const stops = easInvocationArgs(projectRoot).filter((args) => args[0] === 'simulator:stop');
+        expect(stops).toEqual(state === 'reused' ? [] : [
+          ['simulator:stop', '--id', 'sess-e2e-started', '--non-interactive'],
+        ]);
+      } finally {
+        await killAsync(child);
+      }
+    }
+  );
 
   it('starts a session running Expo Go for a project Expo Go can run, and builds nothing', async () => {
     const projectRoot = await setupAsync('go-app');
