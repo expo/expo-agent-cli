@@ -39,8 +39,23 @@ export async function installStubEasAsync(
     script,
     names,
     logFile,
-  }: { script?: string; names?: ('npx' | 'bunx')[]; logFile?: string } = {}
+    linked = true,
+  }: { linked?: boolean; script?: string; names?: ('npx' | 'bunx')[]; logFile?: string } = {}
 ): Promise<{ binDir: string; scriptPath: string }> {
+  // A normal EAS fixture is linked; tests of first-run setup explicitly opt out.
+  const appFile = path.join(projectRoot, 'app.json');
+  if (linked && fs.existsSync(appFile)) {
+    const app = JSON.parse(await fs.promises.readFile(appFile, 'utf8'));
+    const config = app.expo ?? app;
+    config.extra = {
+      ...config.extra,
+      eas: {
+        ...config.extra?.eas,
+        projectId: config.extra?.eas?.projectId ?? 'f52a76f7-9fc7-4b59-becd-6d84e9f129d7',
+      },
+    };
+    await fs.promises.writeFile(appFile, JSON.stringify(app));
+  }
   const binDir = path.join(projectRoot, '.stub-bin');
   await fs.promises.mkdir(binDir, { recursive: true });
   const scriptPath = path.join(binDir, 'eas-stub.js');

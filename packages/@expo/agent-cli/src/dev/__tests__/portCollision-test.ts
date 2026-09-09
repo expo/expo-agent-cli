@@ -57,13 +57,18 @@ describe(findFreePortAsync, () => {
     expect(await isPortBindableAsync(port!)).toBe(true);
   });
 
-  it(`walks past a port that is taken`, async () => {
+  it(`does not offer a port that is taken`, async () => {
     const net = require('net') as typeof import('net');
     const server = net.createServer();
-    await new Promise<void>((resolve) => server.listen(49321, '127.0.0.1', () => resolve()));
+    // A fixed port can be reserved by Windows even when nothing is listening on it.
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
+    const port = (server.address() as import('net').AddressInfo).port;
 
     try {
-      expect(await findFreePortAsync(49321)).toBeGreaterThan(49321);
+      expect(await findFreePortAsync(port, { range: 1 })).toBeNull();
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

@@ -14,6 +14,7 @@ import {
 } from '../followups';
 import { Log } from '../log';
 import { classifySubprocessFailure, lastNonEmptyLine } from '../needsHuman/detect';
+import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { emitStartPlan } from '../plan/emit';
 import { event as planEvent } from '../plan/events';
@@ -69,6 +70,10 @@ const DEFAULT_METRO_PORT = 8081;
  * last step when every step succeeded.
  */
 export async function devAsync(projectRoot: string, options: DevOptions): Promise<number> {
+  if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
+    await assertEasProjectConfiguredAsync(projectRoot);
+  }
+
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
   // the child does the probe: this run's whole job is to start that child and report on it.
   if (options.detach) {
@@ -131,6 +136,10 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // EAS credits on that finding. A flag or the config is a person's own choice and runs.
   if (plan.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit) {
     throw implicitEasRouteError(plan, options.platform);
+  }
+
+  if (options.deviceBackend !== 'eas' && plan.buildLocation?.runsOn === 'eas') {
+    await assertEasProjectConfiguredAsync(projectRoot);
   }
 
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope

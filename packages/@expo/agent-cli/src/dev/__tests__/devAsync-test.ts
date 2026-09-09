@@ -16,6 +16,7 @@ import { devAsync } from '../devAsync';
 import { resolveDevOptions } from '../resolveOptions';
 
 vi.mock('../../log');
+vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
 vi.mock('../openApp', () => ({
   openAppOnDeviceAsync: vi.fn(),
   openAppFailureLine: vi.fn((platform: string, reason: string) => `${platform}: ${reason}`),
