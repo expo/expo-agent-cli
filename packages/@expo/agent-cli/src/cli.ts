@@ -20,6 +20,10 @@ import { PROGRAM_NAME, PROGRAM_PREFIX } from './programName';
 import { configureColor } from './utils/color';
 import { argvRequestsJson, setJsonRequested } from './utils/jsonMode';
 
+// Dogfood tunnel v2 throughout the process tree, including detached dev servers.
+// An explicit EXPO_UNSTABLE_TUNNEL_V2=0 keeps the previous tunnel implementation.
+process.env.EXPO_UNSTABLE_TUNNEL_V2 ??= '1';
+
 // Bridge the legacy `EXPO_DEBUG`/`DEBUG=expo:*` switches onto `2g`'s `LOG_DEBUG`, the same way
 // `@expo/cli` does, so the two CLIs share one debug switch. This must run before
 // `installEventLogger()` so the debug flag is honored when the session activates.
