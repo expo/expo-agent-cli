@@ -4,10 +4,11 @@
 // file fails for a reason that has nothing to do with the command under test. So the doubles get
 // their own tests: the stub-bin installer against an arbitrary bin name, and the stub dev server
 // against the two requests `@expo/agent-cli` uses to recognize a real one.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { readStubEasInvocations, STUB_EAS_SCRIPT } from '../stubEas';
 import { getTemporaryPath, installStubBinAsync, startStubDevServerAsync } from '../utils';
 
 /** Run one of the installed shims the way a command under test spawns a resolved bin. */
@@ -183,5 +184,113 @@ describe(startStubDevServerAsync, () => {
     await first.close();
     await second.close();
     await expect(fetch(`${first.url}/status`)).rejects.toThrow();
+  });
+});
+
+// The shared stub `eas` (`e2e/stubs/eas.js`), on the verbs whose shape another file relies on. Each
+// EAS-backed e2e asserts what `@expo/agent-cli` does *given* one of these answers; if the answer is
+// the wrong shape, that file fails for a reason that has nothing to do with the command under test.
+describe('the shared stub eas', () => {
+  let cwd: string;
+  beforeEach(async () => {
+    cwd = getTemporaryPath();
+    await fs.promises.mkdir(cwd, { recursive: true });
+  });
+
+  function eas(args: string[], env: Record<string, string> = {}) {
+    const result = spawnSync(process.execPath, [STUB_EAS_SCRIPT, ...args], {
+      cwd,
+      env: { ...process.env, ...env },
+      encoding: 'utf8',
+    });
+    return { code: result.status, stdout: result.stdout, stderr: result.stderr };
+  }
+
+  it('records every invocation with the cwd and the CI it was told', () => {
+    eas(['whoami'], { CI: '1' });
+    const [invocation, ...rest] = readStubEasInvocations(cwd);
+    expect(rest).toEqual([]);
+    expect(invocation).toMatchObject({ args: ['whoami'], ci: '1' });
+    // The cwd as the process saw it, which on macOS is the `/private` spelling of the temp dir.
+    expect(fs.realpathSync(invocation!.cwd)).toBe(fs.realpathSync(cwd));
+  });
+
+  it('filters build:list by platform, status, fingerprint and profile, the way the service does', () => {
+    const builds = [
+      { id: 'a', platform: 'IOS', status: 'FINISHED', fingerprintHash: 'f1', buildProfile: 'development-simulator' },
+      { id: 'b', platform: 'IOS', status: 'ERRORED', fingerprintHash: 'f1', buildProfile: 'development-simulator' },
+      { id: 'c', platform: 'ANDROID', status: 'FINISHED', fingerprintHash: 'f1', buildProfile: 'development-simulator' },
+      { id: 'd', platform: 'IOS', status: 'FINISHED', fingerprintHash: 'f2', buildProfile: 'development-simulator' },
+    ];
+    const env = { STUB_EAS_BUILDS: JSON.stringify(builds) };
+
+    const hit = eas(
+      ['build:list', '--platform', 'ios', '--status', 'finished', '--fingerprint-hash', 'f1', '--json'],
+      env
+    );
+    expect(hit.code).toBe(0);
+    expect(JSON.parse(hit.stdout).map((build: { id: string }) => build.id)).toEqual(['a']);
+
+    const miss = eas(['build:list', '--platform', 'ios', '--fingerprint-hash', 'f9', '--json'], env);
+    expect(JSON.parse(miss.stdout)).toEqual([]);
+
+    // A verbatim list wins over the filter, which is what the older `status` tests set.
+    const verbatim = eas(['build:list', '--json'], { ...env, STUB_EAS_BUILD_LIST: '[{"id":"z"}]' });
+    expect(JSON.parse(verbatim.stdout)).toEqual([{ id: 'z' }]);
+  });
+
+  it('prints the finished build as one JSON array under build --json, with its artifact', () => {
+    const result = eas(['build', '--platform', 'ios', '--profile', 'development-simulator', '--json']);
+    expect(result.code).toBe(0);
+    const [build] = JSON.parse(result.stdout);
+    expect(build).toMatchObject({
+      id: 'build-e2e',
+      status: 'FINISHED',
+      platform: 'IOS',
+      buildProfile: 'development-simulator',
+    });
+    expect(build.artifacts.applicationArchiveUrl).toMatch(/^https:\/\/expo\.dev\/artifacts\//);
+    // Progress stays off stdout, so the array is all a caller has to parse.
+    expect(result.stderr).toContain('Build finished');
+  });
+
+  it('writes the session dotenv on simulator:start, and only when --json is not passed', () => {
+    const plain = eas(['simulator:start', '--platform', 'ios', '--expo-go', '--non-interactive']);
+    expect(plain.code).toBe(0);
+    const dotenv = path.join(cwd, '.env.eas-simulator');
+    expect(fs.readFileSync(dotenv, 'utf8')).toContain('EAS_SIMULATOR_SESSION_ID=sess-e2e-started');
+    expect(plain.stderr).toContain('Simulator session created (id: sess-e2e-started)');
+
+    fs.rmSync(dotenv);
+    const json = eas(['simulator', '--platform', 'ios', '--build-id', 'build-e2e', '--json'], {
+      STUB_SIM_START_ID: 'sess-json',
+    });
+    expect(json.code).toBe(0);
+    expect(fs.existsSync(dotenv)).toBe(false);
+    expect(JSON.parse(json.stdout)).toMatchObject({ id: 'sess-json', type: 'agent-device' });
+  });
+
+  it('names the session it billed when the start never became ready', () => {
+    const result = eas(['simulator:start', '--platform', 'ios'], { STUB_SIM_START_EXIT: '1' });
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('(id: sess-e2e-started)');
+    expect(result.stderr).toContain('Timed out');
+  });
+
+  it('writes an eas.json with a simulator dev-client profile on build:configure', () => {
+    const result = eas(['build:configure', '-p', 'ios']);
+    expect(result.code).toBe(0);
+    const easJson = JSON.parse(fs.readFileSync(path.join(cwd, 'eas.json'), 'utf8'));
+    expect(easJson.build['development-simulator']).toEqual({
+      developmentClient: true,
+      distribution: 'internal',
+      ios: { simulator: true },
+    });
+  });
+
+  it('refuses a verb it does not know, so a command reaching a new one is a red test and not a pass', () => {
+    const result = eas(['update:configure']);
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('unhandled command update:configure');
   });
 });

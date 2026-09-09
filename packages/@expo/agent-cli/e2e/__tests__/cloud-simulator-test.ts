@@ -12,172 +12,30 @@
 // that is not the CLI) each produce their own exit code and their own sentence.
 
 import fs from 'node:fs';
-import path from 'node:path';
 
+import {
+  installStubEasAsync,
+  stubEasArgs as easInvocations,
+  writeCloudSessionFileAsync as writeSessionFileAsync,
+} from '../stubEas';
 import {
   executeAgentCliAsync,
   holdDevLockAsync,
-  installStubEasRunnerAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
   type ExecuteResult,
 } from '../utils';
 
-/** Where the stub `eas` records what it was asked to do, one JSON line per run. */
-const STUB_EAS_LOG_NAME = 'stub-eas-simulator-invocations.jsonl';
-
 /**
- * Stub `eas` bin for the simulator surface.
+ * Copy a fixture and put the shared stub `eas` on its `PATH`, behind a stub package runner.
  *
- * It answers the three questions the cloud backend asks — `simulator:list`,
- * `simulator:availability` and `simulator:exec` — and records every argv it was given, which is the
- * assertion this file is for. Steered per test with environment variables so one script covers
- * every path:
- *
- * - STUB_SIM_STATUS: the status of the listed session (default `IN_PROGRESS`)
- * - STUB_SIM_PLATFORM: the session's platform, as the raw enum (default `IOS`)
- * - STUB_SIM_TYPE: the session's controller type (default `agent-device`)
- * - STUB_SIM_SESSIONS: `0` for a project with nothing running
- * - STUB_SIM_GET_EXIT: exit code of `simulator:list`, for a CLI that refuses to answer
- * - STUB_SIM_STDERR: what it prints before a non-zero exit, so a test hands the wrapper the exact
- *   wording the real CLI uses
- * - STUB_SIM_AVAILABLE: `false` for an account without the feature
- * - STUB_SIM_EXEC_EXIT: exit code of `simulator:exec`, for a session that refuses the verb
- * - STUB_SIM_ALERT: the text `alert get` answers with. Unset means the controller's own empty
- *   answer — exit 1 and `Error (COMMAND_FAILED): alert not found`, which is what it prints on a
- *   device with nothing on screen [observed — `agent-device@latest alert get`, 2026-08-27]
- * - STUB_SIM_CRASH: `1` to behave like a wrapper that is not the EAS CLI at all — exit 101 with a
- *   Rust backtrace and nothing an `eas` run would ever print
+ * The stub is `e2e/stubs/eas.js`; the `STUB_SIM_*` variables the tests below set are documented at
+ * the top of it.
  */
-const STUB_EAS = `#!/usr/bin/env node
-'use strict';
-const fs = require('node:fs');
-const path = require('node:path');
-
-const args = process.argv.slice(2);
-fs.appendFileSync(
-  path.join(process.cwd(), ${JSON.stringify(STUB_EAS_LOG_NAME)}),
-  JSON.stringify({ args, cwd: process.cwd() }) + '\\n'
-);
-
-if (process.env.STUB_SIM_CRASH === '1') {
-  // What a shim, a stale link, or a binary from another project looks like: a crash with no Expo
-  // vocabulary anywhere in it (\`src/utils/wrapperCrash.ts\`).
-  process.stderr.write('thread \\'main\\' panicked at src/main.rs:12:9\\nStack backtrace:\\n');
-  process.exit(101);
-}
-
-if (args[0] === 'whoami') {
-  process.stdout.write('e2e-account\\n');
-  process.exit(0);
-}
-
-if (args[0] === 'simulator:availability') {
-  const available = process.env.STUB_SIM_AVAILABLE !== 'false';
-  process.stdout.write(
-    JSON.stringify({
-      available,
-      accountName: 'e2e-account',
-      ...(available ? {} : { waitlistUrl: 'https://expo.dev/services/simulators' }),
-    }) + '\\n'
-  );
-  process.exit(0);
-}
-
-if (args[0] === 'simulator:list') {
-  const exitCode = Number(process.env.STUB_SIM_GET_EXIT || 0);
-  if (exitCode !== 0) {
-    process.stderr.write((process.env.STUB_SIM_STDERR || 'Session not found') + '\\n');
-    process.exit(exitCode);
-  }
-  const sessions =
-    process.env.STUB_SIM_SESSIONS === '0'
-      ? []
-      : [
-          {
-            id: 'sess-e2e',
-            name: 'e2e session',
-            type: process.env.STUB_SIM_TYPE || 'agent-device',
-            status: process.env.STUB_SIM_STATUS || 'IN_PROGRESS',
-            platform: process.env.STUB_SIM_PLATFORM || 'IOS',
-            createdAt: '2026-08-26T10:00:00.000Z',
-          },
-        ];
-  process.stdout.write(JSON.stringify({ sessions, pageInfo: { hasNextPage: false } }) + '\\n');
-  process.exit(0);
-}
-
-if (args[0] === 'simulator:exec') {
-  const exitCode = Number(process.env.STUB_SIM_EXEC_EXIT || 0);
-  if (exitCode !== 0) {
-    process.stderr.write((process.env.STUB_SIM_STDERR || 'Remote daemon is unavailable') + '\\n');
-    process.exit(exitCode);
-  }
-  // What the real controller answers a \`close\`, verbatim, whatever id it is given
-  // [observed — live session 01a03d80, 2026-08-26]. It is the reason \`wasRunning\` is null on this
-  // backend, so the stub has to say it rather than something more convenient.
-  if (args.includes('close')) {
-    process.stdout.write(
-      JSON.stringify({ success: true, data: { session: 'default', message: 'Closed: default' } }) +
-        '\\n'
-    );
-    process.exit(0);
-  }
-  // The alert verbs. \`get\` on a device with nothing on screen is a **refusal**, verbatim
-  // [observed — \`agent-device@latest alert get\`, 2026-08-27], which is what makes it safe to ask
-  // speculatively: the read costs a non-zero exit rather than an action.
-  if (args.includes('alert')) {
-    if (args[args.length - 1] === 'get') {
-      if (!process.env.STUB_SIM_ALERT) {
-        process.stderr.write('Error (COMMAND_FAILED): alert not found\\n');
-        process.exit(1);
-      }
-      process.stdout.write(process.env.STUB_SIM_ALERT + '\\n');
-      process.exit(0);
-    }
-    process.stdout.write(
-      JSON.stringify({ success: true, data: { message: 'Accepted' } }) + '\\n'
-    );
-    process.exit(0);
-  }
-  process.stdout.write('opened\\n');
-  process.exit(0);
-}
-
-process.stderr.write('stub eas: unhandled command ' + args.join(' ') + '\\n');
-process.exit(1);
-`;
-
-/** Copy a fixture and put a stub package runner, answering as `eas-cli`, on its `PATH`. */
 async function setupAsync(fixtureName: string): Promise<string> {
   const projectRoot = await setupFixtureAsync(fixtureName);
-  const binDir = path.join(projectRoot, '.stub-bin');
-  await fs.promises.mkdir(binDir, { recursive: true });
-  const stubScript = path.join(binDir, 'eas-stub.js');
-  await fs.promises.writeFile(stubScript, STUB_EAS);
-  await installStubEasRunnerAsync(binDir, stubScript);
+  await installStubEasAsync(projectRoot);
   return await fs.promises.realpath(projectRoot);
-}
-
-/** Write the dotenv `eas-cli` manages, which is how a project names its session. */
-async function writeSessionFileAsync(projectRoot: string, sessionId: string): Promise<void> {
-  await fs.promises.writeFile(
-    path.join(projectRoot, '.env.eas-simulator'),
-    `# managed by eas-cli\nEAS_SIMULATOR_SESSION_ID=${sessionId}\nEAS_SIMULATOR_TOKEN=stub-token\n`
-  );
-}
-
-/** Every argv the stub `eas` was given, in the order it was given them. */
-function easInvocations(projectRoot: string): string[][] {
-  const logPath = path.join(projectRoot, STUB_EAS_LOG_NAME);
-  if (!fs.existsSync(logPath)) {
-    return [];
-  }
-  return fs
-    .readFileSync(logPath, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line).args);
 }
 
 /**

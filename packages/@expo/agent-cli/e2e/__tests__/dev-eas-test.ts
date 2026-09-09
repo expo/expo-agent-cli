@@ -12,54 +12,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  installStubEasAsync,
+  readStubEasInvocations,
+  stubEasArgs as easInvocationArgs,
+} from '../stubEas';
+import {
   executeAgentCliAsync,
-  installStubEasRunnerAsync,
   installStubFingerprintAsync,
   readStubExpoInvocations,
   setupFixtureAsync,
 } from '../utils';
 
-/** Name of the file the stub `eas` bin appends one JSON line to per invocation. */
-const STUB_EAS_LOG_NAME = 'stub-eas-invocations.jsonl';
-
 /** The record `src/plan/lastBuild.ts` writes, relative to the project root. */
 const LAST_BUILD_FILE = path.join('.expo', 'agent-cli-last-build.json');
-
-/**
- * An `eas` bin standing in for the EAS CLI on the cloud route, recording every invocation.
- *
- * - STUB_EAS_BUILD_EXIT: exit code `eas build` returns (default 0)
- * - STUB_EAS_BUILD_STDERR: what `eas build` writes to stderr before exiting, which is where the
- *   EAS CLI puts the auth refusal and its prompt stops
- * - STUB_EAS_CONFIGURE_EXIT: exit code `eas build:configure` returns (default 0)
- */
-const STUB_EAS = `#!/usr/bin/env node
-'use strict';
-const fs = require('node:fs');
-const path = require('node:path');
-const args = process.argv.slice(2);
-fs.appendFileSync(
-  path.join(process.cwd(), ${JSON.stringify(STUB_EAS_LOG_NAME)}),
-  JSON.stringify({ args, cwd: process.cwd(), ci: process.env.CI ?? null }) + '\\n'
-);
-if (args[0] === 'build:configure') {
-  process.stdout.write('eas.json written\\n');
-  process.exit(Number(process.env.STUB_EAS_CONFIGURE_EXIT || 0));
-}
-if (args[0] === 'build') {
-  if (process.env.STUB_EAS_BUILD_STDERR) {
-    process.stderr.write(process.env.STUB_EAS_BUILD_STDERR + '\\n');
-  }
-  process.stdout.write('Build finished\\n');
-  process.exit(Number(process.env.STUB_EAS_BUILD_EXIT || 0));
-}
-if (args[0] === 'whoami') {
-  process.stdout.write('e2e-user\\n');
-  process.exit(0);
-}
-process.stderr.write('stub eas: unexpected command ' + args[0] + '\\n');
-process.exit(1);
-`;
 
 /**
  * An `eas` that is not the EAS CLI: a wrapper that panics before it runs anything.
@@ -75,36 +40,21 @@ process.stderr.write('Stack backtrace:\\n   0: rust_begin_unwind\\n');
 process.exit(101);
 `;
 
-/** Copy a fixture and install every stub bin the cloud route may reach for. */
+/**
+ * Copy a fixture and install every stub bin the cloud route may reach for.
+ *
+ * The `eas` is the shared `e2e/stubs/eas.js` — the `STUB_EAS_*` variables the tests below set are
+ * documented at the top of it — behind a stub package runner. One place, because there is one rung:
+ * a `node_modules/.bin/eas` beside it would exercise nothing (`src/utils/easCli.ts`).
+ */
 async function setupAsync(
   fixtureName = 'dev-client-app',
-  { easScript = STUB_EAS }: { easScript?: string } = {}
+  { easScript }: { easScript?: string } = {}
 ): Promise<string> {
   const projectRoot = await setupFixtureAsync(fixtureName);
   await installStubFingerprintAsync(projectRoot);
-
-  const binDir = path.join(projectRoot, '.stub-bin');
-  await fs.promises.mkdir(binDir, { recursive: true });
-  const easStub = path.join(binDir, 'eas-stub.js');
-  await fs.promises.writeFile(easStub, easScript);
-  // One place, because there is one rung: a stub package runner on `PATH`. A
-  // `node_modules/.bin/eas` beside it would exercise nothing — no resolver reads one
-  // (`src/utils/easCli.ts`).
-  await installStubEasRunnerAsync(binDir, easStub);
+  await installStubEasAsync(projectRoot, { script: easScript });
   return projectRoot;
-}
-
-/** The arguments of every recorded stub `eas` invocation, in the order they happened. */
-function easInvocationArgs(projectRoot: string): string[][] {
-  const logPath = path.join(projectRoot, STUB_EAS_LOG_NAME);
-  if (!fs.existsSync(logPath)) {
-    return [];
-  }
-  return fs
-    .readFileSync(logPath, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => (JSON.parse(line) as { args: string[] }).args);
 }
 
 /** The arguments of every recorded stub `expo` invocation, in the order they happened. */
@@ -362,11 +312,8 @@ describe('@expo/agent-cli dev — the EAS route', () => {
 
     await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--json']);
 
-    const log = fs
-      .readFileSync(path.join(projectRoot, STUB_EAS_LOG_NAME), 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as { args: string[]; ci: string | null });
+    const log = readStubEasInvocations(projectRoot);
+    expect(log.length).toBeGreaterThan(0);
     expect(log.every((invocation) => invocation.ci === '1')).toBe(true);
   });
 });
