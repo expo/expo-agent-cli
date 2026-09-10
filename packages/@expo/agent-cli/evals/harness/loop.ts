@@ -34,6 +34,7 @@ export async function runLoop(options: {
     {
       role: 'system',
       content: `You complete tasks in the current Expo project using the run_cli tool.
+Questions about this project require inspecting its current state with the CLI before answering. Base your answer on observed results, not generic advice or assumptions.
 Call the CLI with argv (command and flags). Prefer one call at a time; read the results before deciding the next step.
 Use --help to discover flags, and prefer --json when available. Do not invent flags.
 Execute the requested work yourself. If a command fails, use its error and help to recover; do not merely tell the user which command to run.

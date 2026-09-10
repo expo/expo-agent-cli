@@ -60,6 +60,11 @@ it('exposes a captured bundler diagnostic and refuses to reload a broken bundle'
   let fixture: Awaited<ReturnType<typeof startRuntimeFixture>> | undefined;
   try {
     fixture = await startRuntimeFixture(root, 'bundler-error');
+    const unavailable = await exec(root, ['runtime:errors']);
+    expect(unavailable.exitCode).toBe(1);
+    expect(JSON.parse(unavailable.stdout).error.suggestedCommand).toBe(
+      'npx @expo/agent-cli dev:logs'
+    );
     const logs = await exec(root, ['dev:logs']);
     expect(logs.exitCode, logs.stderr).toBe(0);
     const report = JSON.parse(logs.stdout);

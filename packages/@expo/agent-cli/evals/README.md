@@ -2,7 +2,8 @@
 
 Tier 1 simulates calls from an agent: a short user prompt, a fixture project, real Ollama inference,
 and the built CLI as a subprocess. The model chooses commands and sees their actual output before
-its next turn. Expected results are assertions outside the agent context.
+its next turn. Expected results are assertions outside the agent context. The driver requires project-specific
+advice to be grounded in observed CLI results; it supplies no case-specific command or answer.
 
 We use [vitest-evals](https://github.com/getsentry/vitest-evals)' `describeEval` and `createHarness`
 directly. The local adapter owns only the Ollama loop, CLI execution, and temporary projects.

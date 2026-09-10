@@ -231,14 +231,16 @@ export async function runtimeErrorsAsync(
   try {
     errors = await collector.collectAsync();
   } catch (error: unknown) {
-    throw new CommandError(
+    const failure = new CommandError(
       'RUNTIME_ERRORS_FAILED',
       [
         `Could not read runtime errors from the app (dev server ${devServerUrl}).`,
         `Why: ${error instanceof Error ? error.message : String(error)}`,
-        `How: make sure the app is open and connected to the dev server, then run this command again. If the app was reloading, "${PROGRAM_PREFIX} runtime:reload" waits for it to come back and exits 0 only when it has.`,
+        `How: run "${PROGRAM_PREFIX} dev:logs" to check for bundling errors that can prevent the runtime from opening. If the app was reloading, "${PROGRAM_PREFIX} runtime:reload" waits for it to come back and exits 0 only when it has.`,
       ].join('\n')
     );
+    failure.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
+    throw failure;
   }
 
   errors = await symbolicateRuntimeErrorsAsync(errors, devServerUrl, context.projectRoot ?? null);

@@ -37,7 +37,8 @@ Vitest wrapper. The CLI package uses Vitest 4, the library's supported peer vers
 
 The migrated suite is `evals/tier1/*.eval.ts`, invoked by `test:evals`. It covers developer-style Expo Go compatibility, paired native-versus-JS impact decisions, refreshing an app, and diagnosing a bundling error. The original command-oriented cases remain opt-in under `evals/smoke/`.
 `test:eval-harness` verifies the adapter without a model. The model selects argv from the public
-CLI help; graders never provide the answer to the agent. A finished loop is distinct from a
+CLI help; graders never provide the answer to the agent. The driver requires observed project
+evidence before giving project-specific advice, without prescribing a command per case. A finished loop is distinct from a
 passed assertion. A missing model, timeout, or exhausted turn budget errors the test. Each run
 keeps complete command/model records and actual model identity for triage; no automatic retries.
 
