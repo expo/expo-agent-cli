@@ -3,5 +3,5 @@
     "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler",
     "strict": true, "noEmit": true, "skipLibCheck": true, "types": ["node"], "esModuleInterop": true
   },
-  "include": ["harness/**/*.ts", "tier1/**/*.ts", "vitest.config.ts"]
+  "include": ["harness/**/*.ts", "tier1/**/*.ts", "smoke/**/*.ts", "vitest.config.ts"]
 }

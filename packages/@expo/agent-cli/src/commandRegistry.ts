@@ -159,7 +159,7 @@ export const topLevelCommands: { [command: string]: TopLevelCommand } = {
     help: () => import('./start').then((i) => i.startHelp),
   },
   status: {
-    summary: 'Where the project is now, and what to run next',
+    summary: 'Check Expo Go support and whether to rebuild',
     load: () => import('./status').then((i) => i.agentCliStatus),
     help: () => import('./status').then((i) => i.statusHelp),
   },
@@ -650,7 +650,7 @@ export const helpSections: HelpSection[] = [
   {
     title: 'Understand the project',
     commands: ['status', 'doctor', ...actionNames('inspect')],
-    note: 'Nothing here runs the project.',
+    note: 'status compares native changes with the last build: JS-only changes can reload; native changes need a rebuild. Nothing here runs the project.',
   },
   { title: 'Debug a running app', commands: ['smoke', 'navigate', ...actionNames('runtime')] },
   { title: 'Create a project', commands: ['new'] },

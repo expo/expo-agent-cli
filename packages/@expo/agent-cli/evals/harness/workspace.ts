@@ -51,7 +51,9 @@ export function snapshot(root: string): Record<string, string> {
       const relative = path.relative(root, full).split(path.sep).join('/');
       if (entry.isSymbolicLink()) files[relative] = `link:${fs.readlinkSync(full)}`;
       else if (entry.isDirectory()) walk(full);
-      else files[relative] = createHash('sha256').update(fs.readFileSync(full)).digest('hex');
+      // Live dev-server locks can create Unix sockets. They are not project file contents.
+      else if (entry.isFile())
+        files[relative] = createHash('sha256').update(fs.readFileSync(full)).digest('hex');
     }
   }
   walk(root);

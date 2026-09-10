@@ -5,7 +5,7 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root,
   test: {
-    include: ['tier1/*.eval.ts'],
+    include: [process.env.AGENT_CLI_EVAL_SUITE === 'smoke' ? 'smoke/*.eval.ts' : 'tier1/*.eval.ts'],
     fileParallelism: false,
     maxWorkers: 1,
     retry: 0,
