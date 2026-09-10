@@ -3,11 +3,21 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { onTestFinished } from 'vitest';
-import { createHarness } from 'vitest-evals';
+import { createHarness, type JsonValue } from 'vitest-evals';
 import { runLoop, type CommandResult, type LoopEvent } from './loop';
 import { chat, identifyModel } from './ollama';
 import { runProcess } from './process';
 import { artifactRoot, cliBin, copyWorkspace, packageRoot, snapshot } from './workspace';
+
+export type FixtureContext = {
+  root: string;
+  artifacts: string;
+  env: NodeJS.ProcessEnv;
+};
+export type FixtureSession = {
+  close?: () => Promise<void>;
+  evidence?: () => JsonValue;
+};
 
 export type EvalInput = {
   id: string;
@@ -15,6 +25,7 @@ export type EvalInput = {
   fixture: string;
   linkDependencies?: boolean;
   maxTurns?: number;
+  setupProject?: (context: FixtureContext) => Promise<FixtureSession>;
 };
 export type EvalOutput = {
   root: string;
@@ -22,6 +33,8 @@ export type EvalOutput = {
   commands: CommandResult[];
   summary: string;
   turns: number;
+  cliEvents: Record<string, JsonValue>[];
+  fixtureEvidence: JsonValue;
 };
 
 export const cliHarness = createHarness<EvalInput, EvalOutput>({
@@ -36,16 +49,24 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
     fs.mkdirSync(artifactRoot, { recursive: true });
     const artifacts = fs.mkdtempSync(path.join(artifactRoot, `${input.id}-`));
     const events: LoopEvent[] = [];
-    const before = snapshot(root);
+    let before = snapshot(root);
+    let fixture: FixtureSession = {};
     const isolatedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-eval-home-'));
     const started = Date.now();
     const write = (name: string, value: unknown) =>
       fs.writeFileSync(path.join(artifacts, name), JSON.stringify(value, null, 2));
-    onTestFinished(() => {
-      fs.rmSync(isolatedHome, { recursive: true, force: true });
-      write('workspace.json', { before, after: snapshot(root) });
-      if (process.env.AGENT_CLI_EVAL_KEEP !== '1')
-        fs.rmSync(root, { recursive: true, force: true });
+    onTestFinished(async () => {
+      try {
+        await fixture.close?.();
+      } finally {
+        fs.rmSync(isolatedHome, { recursive: true, force: true });
+        try {
+          write('workspace.json', { before, after: snapshot(root) });
+        } finally {
+          if (process.env.AGENT_CLI_EVAL_KEEP !== '1')
+            fs.rmSync(root, { recursive: true, force: true });
+        }
+      }
     });
     setArtifact('artifactDirectory', artifacts);
     setArtifact('prompt', input.prompt);
@@ -64,10 +85,30 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
     };
     let inputTokens = 0;
     let outputTokens = 0;
+    const readEvents = (): Record<string, JsonValue>[] => {
+      if (!fs.existsSync(env.LOG_EVENTS)) return [];
+      return fs
+        .readFileSync(env.LOG_EVENTS, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+    };
     try {
+      fixture = (await input.setupProject?.({ root, artifacts, env })) ?? {};
+      before = snapshot(root);
+      // Human/setup work is not evidence of an agent completing the requested task.
+      fs.writeFileSync(env.LOG_EVENTS, '');
       if (process.env.AGENT_CLI_EVAL_DRY === '1') {
         return {
-          output: { root, before, commands: [], summary: '', turns: 0 },
+          output: {
+            root,
+            before,
+            commands: [],
+            summary: '',
+            turns: 0,
+            cliEvents: [],
+            fixtureEvidence: fixture.evidence?.() ?? null,
+          },
           events: [{ type: 'message', role: 'user', content: input.prompt }],
           artifacts: { dry: true },
         };
@@ -126,6 +167,7 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
           fs.appendFileSync(path.join(artifacts, 'trace.jsonl'), `${JSON.stringify(event)}\n`);
         },
       });
+      write('fixture-evidence.json', fixture.evidence?.() ?? null);
       write('outcome.json', {
         status: 'completed',
         ...outcome,
@@ -134,7 +176,13 @@ export const cliHarness = createHarness<EvalInput, EvalOutput>({
         outputTokens,
       });
       return {
-        output: { root, before, ...outcome },
+        output: {
+          root,
+          before,
+          ...outcome,
+          cliEvents: readEvents(),
+          fixtureEvidence: fixture.evidence?.() ?? null,
+        },
         events,
         usage: {
           inputTokens,
