@@ -11,7 +11,7 @@
 //   node evals/run.mjs --tier 0 --scenario <id>   Run one scenario
 //   bun run test:evals                           Run Tier 1 with Vitest and Ollama
 //                                                 via Ollama (OLLAMA_HOST, AGENT_CLI_EVAL_MODEL)
-//   node evals/run.mjs --tier 2                   Run the tier 2 scenarios with Claude Code
+//   bun run test:evals:tier2                     Run long Tier 2 tasks with Claude Code
 //                                                 headless (ANTHROPIC_API_KEY required)
 
 import { spawn } from 'node:child_process';
@@ -37,18 +37,12 @@ const DRIVING_AGENTS = {
 const GRADER_TYPES = ['exit-code', 'path-exists', 'jsonl-event', 'http-probe'];
 const DEFAULT_TIMEOUT_MS = 120_000;
 
-// Tier 2: a frontier agent (Claude Code headless) drives the scenario for real. Runs from the
-// label-triggered EAS workflow (.eas/workflows/agent-cli-tier2-evals.yml); needs ANTHROPIC_API_KEY.
-const TIER2_AGENT_BIN = process.env.AGENT_CLI_TIER2_AGENT ?? 'claude';
-const TIER2_MAX_TURNS = 12;
-const TIER2_TIMEOUT_MS = 600_000;
-
 const USAGE = `Run the @expo/agent-cli eval scenarios.
 
 Usage: node evals/run.mjs [options]
 
 Options:
-  --tier <0|2>       Run legacy JSON scenarios. Tier 1 uses bun run test:evals.
+  --tier <0>         Run deterministic JSON scenarios. Model evals use Vitest.
   --scenario <id>    Limit to one scenario. Can be repeated.
   --dry-run          Validate the scenarios and print the plan without executing anything.
   -h, --help         Usage info
@@ -475,101 +469,6 @@ function indent(text, prefix) {
     .join('\n');
 }
 
-function truncate(text, limit) {
-  return text.length > limit ? `${text.slice(0, limit)}\n[truncated]` : text;
-}
-
-/* -------------------------------------------------------------------------- */
-/* Tier 2 execution — frontier agent (Claude Code headless)                   */
-/* -------------------------------------------------------------------------- */
-
-/** Legacy Tier 2 command context, until the long-task Vitest suite replaces this runner. */
-const TIER2_COMMAND_SUMMARY =
-  'Available commands: status [--json] (--json adds the raw project probe), dev [--plan] (dev alone prints the plan and runs it), ' +
-  'start (expo start, no planning), skills:sync|skills:list|skills:show|skills:clean ' +
-  '(skills:sync takes --agent claude-code|cursor|codex|opencode|windsurf|gemini-cli), install <pkg..>. ' +
-  'These expo commands are forwarded to npx expo <command>: run, run:ios, run:android, prebuild, ' +
-  'config, export, export:web, export:embed, serve, customize, lint, login, logout, register, ' +
-  'whoami. Any other name is not a command and fails.';
-
-function checkTier2() {
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
-    return (
-      'Tier 2 needs Claude Code credentials: set ANTHROPIC_API_KEY (or CLAUDE_CODE_OAUTH_TOKEN). ' +
-      'In CI this comes from the EAS environment; locally, export it before running.'
-    );
-  }
-  return undefined;
-}
-
-async function runTier2Scenario(scenario) {
-  const fixtureDir = path.join(PACKAGE_ROOT, scenario.fixture);
-  if (!fs.existsSync(fixtureDir)) {
-    return { pass: false, reason: `fixture not found: ${scenario.fixture}` };
-  }
-
-  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), `agent-cli-eval2-${scenario.id}-`));
-  copyFixture(fixtureDir, workspace);
-
-  const prompt =
-    `You are working inside an Expo project (the current directory is the project root). ` +
-    `Complete this task: ${scenario.taskPrompt}\n\n` +
-    `Use the @expo/agent-cli CLI by running it with node, for example:\n` +
-    `  node ${CLI_BIN} skills --help\n` +
-    `${TIER2_COMMAND_SUMMARY} ` +
-    `Any command accepts --help; read the real flags from it rather than guessing. ` +
-    `When the task is complete, stop and summarize what you did in one sentence.`;
-
-  const startedAt = Date.now();
-  const result = await new Promise((resolve) => {
-    const child = spawn(
-      TIER2_AGENT_BIN,
-      ['-p', prompt, '--allowedTools', 'Bash', '--max-turns', String(TIER2_MAX_TURNS)],
-      {
-        cwd: workspace,
-        env: { ...process.env, CI: '1', ...(scenario.command?.env ?? {}) },
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: TIER2_TIMEOUT_MS,
-      }
-    );
-    let stdout = '';
-    let stderr = '';
-    child.stdout.on('data', (chunk) => (stdout += chunk));
-    child.stderr.on('data', (chunk) => (stderr += chunk));
-    child.on('close', (code, signal) => resolve({ exitCode: code ?? -1, signal, stdout, stderr }));
-    child.on('error', (error) =>
-      resolve({ exitCode: -1, signal: null, stdout, stderr: `${stderr}${error.message}` })
-    );
-  });
-
-  const elapsedSeconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-  console.log(
-    `    agent: ${TIER2_AGENT_BIN} headless, exit ${result.exitCode}, ${elapsedSeconds}s`
-  );
-  if (result.stdout.trim()) {
-    console.log(indent(truncate(result.stdout.trim(), 800), '    agent said: '));
-  }
-
-  const grades = [];
-  for (const grader of scenario.graders) {
-    const grade = await applyGrader(grader, { workspace, result });
-    grades.push({ grader, ...grade });
-    console.log(`    ${grade.pass ? 'PASS' : 'FAIL'} ${describeGrader(grader)} — ${grade.detail}`);
-  }
-
-  const pass = grades.every((grade) => grade.pass);
-  if (pass) {
-    fs.rmSync(workspace, { recursive: true, force: true });
-  } else {
-    console.log(`    workspace kept for triage: ${workspace}`);
-    if (result.stderr.trim()) {
-      console.log(indent(result.stderr.trim(), '    stderr: '));
-    }
-  }
-
-  return { pass, reason: pass ? undefined : 'one or more graders failed' };
-}
-
 /* -------------------------------------------------------------------------- */
 /* Main                                                                       */
 /* -------------------------------------------------------------------------- */
@@ -598,6 +497,11 @@ async function main() {
 
   if (options.tier === 1) {
     console.error('Tier 1 moved to Vitest: run bun run test:evals (or AGENT_CLI_EVAL_DRY=1 bun run test:evals for outcome checks without a model).');
+    return 1;
+  }
+
+  if (options.tier === 2) {
+    console.error('Tier 2 moved to Vitest: run AGENT_CLI_TIER2=1 bun run test:evals:tier2 with Claude credentials.');
     return 1;
   }
 
@@ -636,7 +540,7 @@ async function main() {
     scenarios = scenarios.filter((scenario) => options.scenarios.includes(scenario.id));
   }
 
-  const tiers = options.tier === undefined ? [0, 2] : [options.tier];
+  const tiers = options.tier === undefined ? [0] : [options.tier];
   const plan = tiers.map((tier) => ({
     tier,
     scenarios: scenarios.filter((scenario) => scenario.tiers.includes(tier)),
@@ -658,9 +562,6 @@ async function main() {
           console.log(`    grader:       ${describeGrader(grader)}`);
         }
       }
-      if (tier === 2 && tierScenarios.length) {
-        console.log(`  (tier 2 runs with ${TIER2_AGENT_BIN} headless; needs ANTHROPIC_API_KEY)`);
-      }
       console.log('');
     }
     return 0;
@@ -668,14 +569,6 @@ async function main() {
 
   const tier = options.tier;
   const selected = plan[0].scenarios;
-
-  if (tier === 2) {
-    const problem = checkTier2();
-    if (problem) {
-      console.error(problem);
-      return 1;
-    }
-  }
 
   if (!selected.length) {
     console.error(`No scenarios are declared for tier ${tier}.`);
@@ -695,8 +588,7 @@ async function main() {
   const failures = [];
   for (const scenario of selected) {
     console.log(`  ${scenario.id} — ${scenario.taskPrompt}`);
-    const outcome =
-      tier === 2 ? await runTier2Scenario(scenario) : await runTier0Scenario(scenario);
+    const outcome = await runTier0Scenario(scenario);
     if (!outcome.pass) {
       failures.push({ scenario, reason: outcome.reason });
       console.log(`  FAIL ${scenario.id}: ${outcome.reason}\n`);

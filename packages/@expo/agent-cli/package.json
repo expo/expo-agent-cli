@@ -47,7 +47,9 @@
     "test:live:bootstrap": "vitest run --config e2e-live/vitest.config.ts live-bootstrap",
     "prepublishOnly": "bun run clean && bun run build:prod",
     "test:eval-harness": "vitest run --config evals/harness/vitest.config.ts",
-    "test:evals": "vitest run --config evals/vitest.config.ts"
+    "test:evals": "vitest run --config evals/vitest.config.ts",
+    "test:evals:tier2": "vitest run --config evals/tier2/vitest.config.mts",
+    "test:eval-fixture": "node evals/tier2/verify-fixture.mjs"
   },
   "devDependencies": {
     "2g": "^0.4.3",

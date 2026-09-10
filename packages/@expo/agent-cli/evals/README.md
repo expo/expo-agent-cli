@@ -53,8 +53,8 @@ assertions passed; the Vitest result is the test verdict. Infrastructure failure
 command timeouts, and exhausted turn budgets throw instead of scoring an untouched workspace.
 Set `AGENT_CLI_EVAL_KEEP=1` to retain temporary projects locally. Failed traces survive cleanup.
 
-The JSON scenarios and `run.mjs` still serve Tier 0 and the previous Tier 2 entrypoint during
-the migration. The old `--tier 1` driver has been removed; it points callers to `test:evals`. Model evals are explicitly invoked; ordinary unit/e2e commands do not run models.
+The JSON scenarios and `run.mjs` serve deterministic Tier 0. The old model drivers have been
+removed; `--tier 1` and `--tier 2` point callers to the corresponding Vitest scripts. Model evals are explicitly invoked; ordinary unit/e2e commands do not run models.
 
 ## GitHub Actions
 
@@ -108,3 +108,49 @@ They are excluded from the default PR suite to keep its inference budget focused
 tasks. The previous five-case Qwen3 8B suite passed on GitHub CPU; timings for the new suite belong
 in its introducing PR. Native tool batches still run in order, with one result per call before the
 next model turn; invalid batches execute nothing.
+
+## Tier 2: long end-to-end task on EAS
+
+`test:evals:tier2` uses `describeEval` and a Claude Code harness. One long task starts from a locked,
+real Expo 57 coffee cart with a missing import and wrong quantity math. The agent must diagnose,
+repair, export, and run it using expo-agent-cli. Grading independently checks the cart in Metro,
+the agent's export, and a fresh export: $18.00 initially, $25.50 after adding Coffee, $28.50 after
+adding Tea. Source changes, preserved configuration/data, and actual CLI export/dev events are
+required. Agent success claims do not determine the outcome.
+
+Claude Code is pinned to 2.1.267, using `claude-sonnet-5`; Playwright is pinned to 1.55.0. Each agent
+run has a 40-turn, $5 CLI budget and a 15-minute deadline. Setup/checks have a 27-minute overall
+deadline within Vitest's 30-minute bound. These are limits, not measured cost or runtime.
+
+```sh
+# Install the pinned tools and Chromium; keep Playwright outside the app under test.
+npm install --global @anthropic-ai/claude-code@2.1.267
+npm install --prefix /tmp/agent-tier2-tools playwright@1.55.0
+node /tmp/agent-tier2-tools/node_modules/playwright/cli.js install chromium
+export TIER2_PLAYWRIGHT_ROOT=/tmp/agent-tier2-tools
+# Set ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN through your environment.
+AGENT_CLI_TIER2=1 bun run test:evals:tier2
+```
+
+The EAS workflow `agent-cli-tier2-evals.yml` runs by dispatch or the `agent-cli-eval` PR label.
+Its production environment needs a Claude credential. A missing credential produces an explicit
+**skipped** outcome before dependency/browser/tool installation; a skip is not coverage. Setup,
+runner and assertion failures retain their failing status. The workflow is advisory through merge
+policy, rather than hiding failures with an unconditional zero exit.
+
+`evals/artifacts/tier2/` contains the raw stream, CLI events, process logs/status, source diff,
+browser screenshots, independent outcomes and normalized Vitest report. A mechanical trace
+summary records model/tool usage, errors, turns and provider-reported cost. It is diagnostic,
+not a model judge. Each attempt has its own `runs/` directory. Workspaces remain in OS temp for
+triage; `run.json` records their paths. Delete them after investigation. Process control supports
+Linux/macOS; the scenario currently covers web only.
+
+The optional model-free fixture verifier proves the broken baseline and a reference repair in
+scratch copies; it never invokes Claude and is not counted as a passing model eval:
+
+```sh
+bun run test:eval-fixture -- --browser --agent-cli "$PWD/bin/cli.js"
+```
+
+Initial verification: 31 Tier 2 adapter tests and real local export/Metro/browser checks pass.
+Actual Claude-driven task completion remains unverified until a credential-backed run succeeds.
