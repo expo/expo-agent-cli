@@ -1,4 +1,4 @@
-// @ref llp/0028-installed-app-check.rfc.md §Reported by status
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
 // The `installed` section is the one part of `status` that reads a device, so the two things worth
 // pinning are that disabling lookup reads nothing, and that it never asks a phone unasked.
 import { checkInstalledAppAsync } from '../../installedApp/installedAppAsync';
@@ -21,6 +21,8 @@ beforeEach(() => {
         installedHash: 'h',
         currentHash: 'h',
         fingerprintSource: 'computed',
+        prebuildStatus: 'fresh',
+        prebuildChanges: [],
       },
     },
   });

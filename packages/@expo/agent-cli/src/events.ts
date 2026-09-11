@@ -246,7 +246,7 @@ declare module '2g' {
       /**
        * What the app installed on a device says: `up-to-date`, `rebuild-required`, `unknown`.
        *
-       * Null on a default run, which reads no device. @see llp/0028-installed-app-check.rfc.md
+       * Null on a default run, which reads no device. @see llp/0004-smart-start-and-project-state.rfc.md
        */
       installed: string | null;
       /**

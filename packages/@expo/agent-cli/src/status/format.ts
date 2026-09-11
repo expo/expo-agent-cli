@@ -46,7 +46,7 @@ export function formatStatusReport(report: StatusReport): string {
     // to do about it, and a reader scanning for the second should not have to parse the first.
     // Left out when nothing was classified — the freshness line has already said why.
     ...impactLines(report),
-    // @ref llp/0028-installed-app-check.rfc.md §Reported by status
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
     // What the device has. Below `freshness` because it answers the same
     // question from the other end: `freshness` is about the build this machine recorded making,
     // this is about the build that is actually installed, whoever made it.

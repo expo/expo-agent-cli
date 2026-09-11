@@ -1,4 +1,4 @@
-// @ref llp/0028-installed-app-check.rfc.md §Proof
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Proof
 //
 // The `installed` section of `status --explain`, across the process boundary: a stub `adb` serves a
 // fixture APK byte range by byte range, the way a device answers `exec-out dd`, and the stub
@@ -244,6 +244,44 @@ describe('npx @expo/agent-cli status --explain, installed section', () => {
       await server.close();
     }
   }, 60_000);
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §The prebuild marker
+  // The marker is this CLI's file, so the test plants it the way the writer writes it.
+  it('puts prebuild first when the app config moved since the marker', async () => {
+    fs.mkdirSync(path.join(projectRoot, 'android'), { recursive: true });
+    fs.mkdirSync(path.join(projectRoot, '.expo', 'prebuild'), { recursive: true });
+    fs.writeFileSync(
+      path.join(projectRoot, '.expo', 'prebuild', 'fingerprint-android.json'),
+      JSON.stringify({
+        version: 1,
+        platform: 'android',
+        hash: 'marker-hash',
+        fingerprintVersion: '0.20.0',
+        createdAt: '2026-09-09T00:00:00Z',
+        sources: [{ type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'old' }],
+      })
+    );
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['status', '--explain', '--json'],
+      {
+        env: { ...adb.env, STUB_FINGERPRINT_HASH_FROM_PROJECT: '1' },
+        reject: false,
+      }
+    );
+
+    expect(result.exitCode).toBe(0);
+    const android = JSON.parse(result.stdout).installed.platforms.find(
+      (entry: { platform: string }) => entry.platform === 'android'
+    );
+    expect(android).toMatchObject({
+      status: 'rebuild-required',
+      reason: 'prebuild-stale',
+      commands: ['npx @expo/agent-cli prebuild -p android', 'npx expo run:android'],
+      recommendation: expect.stringContaining('app.json changed after the native directories'),
+    });
+  });
 
   it('reports unknown when the app is not installed', async () => {
     const result = await executeAgentCliAsync(

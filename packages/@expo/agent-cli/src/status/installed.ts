@@ -1,4 +1,4 @@
-// @ref llp/0028-installed-app-check.rfc.md §Reported by status
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
 // The `installed` section: what the app on a device says, as opposed to what this machine recorded
 // building. The caller bounds the default check; --explain allows a longer read.
 

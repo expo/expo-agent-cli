@@ -733,7 +733,7 @@ Schema unit tests plus tier-0 e2e against a fixture app ([[0002-testing-and-eval
 
 ### Proof
 
-Unit, `src/installedApp/__tests__/`: the verdict table over every reason; the aggregate outcome; the Android reader over a stubbed `adb` (ranged read, pull fallback, not installed, no file); the simulator reader over both bundle paths; ranking across several devices.
+Unit, `src/installedApp/__tests__/`: the verdict table over every reason; the aggregate outcome; the Android reader over a stubbed `adb` (ranged read, pull fallback, not installed, no file); the simulator reader over both bundle paths; ranking across several devices; the `prebuild-stale` verdict, decided without waiting for the device. `src/project/__tests__/prebuildMarker-test.ts`: the staleness comparison (fresh, stale with named project sources, a dependency-only change, a version mismatch, no marker, no native directory), the reader over a planted marker file, the writer's own round trip, and one rejection per field of its schema. `src/utils/__tests__/zipEntry-test.ts`: both compression methods, the EOCD-in-comment case, the ZIP64 refusals, and the ranged sequence over partial buffers.
 
 `src/status/__tests__/installed-test.ts`: that disabled lookups read no device, that every platform this host can reach is asked, and the shape of the section.
 

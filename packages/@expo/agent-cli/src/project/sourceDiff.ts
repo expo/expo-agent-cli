@@ -1,4 +1,4 @@
-// @ref llp/0028-installed-app-check.rfc.md §What the answer is
+// @ref llp/0004-smart-start-and-project-state.rfc.md §What the answer is
 // Naming what moved between two fingerprints. Both the installed-app check and the prebuild marker
 // compare two source lists and have to say which input changed, so the identity, the naming and the
 // project/dependency split live here rather than in either caller.
@@ -51,7 +51,7 @@ function isDependencyPath(filePath: string): boolean {
 }
 
 function contentsName(id: string | undefined): string {
-  if (id === 'expoConfig') return 'the app config';
+  if (id === 'expoConfig') return 'app config';
   if (id?.startsWith('expoAutolinkingConfig:')) return 'Expo autolinking configuration';
   if (id?.startsWith('rncoreAutolinkingConfig')) return 'React Native autolinking configuration';
   if (id === 'packageJson:scripts') return 'package.json scripts';

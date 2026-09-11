@@ -537,6 +537,7 @@ One verdict per platform, reported as the `installed` section of `status`:
 | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------- |
 | `hash-match`                                                                                                                            | `up-to-date`       | none                                                              |
 | `hash-mismatch`                                                                                                                         | `rebuild-required` | `expo run:<platform>`                                             |
+| `prebuild-stale`                                                                                                                        | `rebuild-required` | `agent-cli prebuild -p <platform>`, then `expo run:<platform>`    |
 | `no-device`, `app-not-installed`, `no-embedded-fingerprint`, `no-response`, `app-id-unknown`, `fingerprint-unavailable`, `check-failed` | `unknown`          | as the recommendation says                                        |
 
 The section's `outcome` is the strongest per-platform verdict, `rebuild-required` before `unknown`
@@ -588,4 +589,19 @@ The cache of [[0023-fingerprint-caching]] applies, with its ten-minute bound and
 - A build made before `expo-constants` learned to embed the file, or with `EXPO_SKIP_FINGERPRINT_EMBED` set, is the same answer.
 - `expo run:ios --unstable-rebundle` removes the file rather than refreshing it, because no single fingerprint describes that binary.
 - `@expo/fingerprint` hashes an allowlist of asset paths. An asset a plugin reads that is not on that list moves nothing, so a rebuild the app needs for it is not reported.
+- The prebuild marker ([[0004-smart-start-and-project-state#The prebuild marker]]) is only written by prebuilds this CLI runs.
+
+### The prebuild marker
+
+A stale `android/` or `ios/` directory needs `prebuild` before the build. A plain rebuild would compile the old directories and embed the new hash, and the mismatch would vanish while the problem stayed.
+
+**This CLI records what prebuild generated, from the one place that knows it ran.** `expo prebuild` writes nothing, so the record is made by the `prebuild` passthrough here, after a run that exited 0. One file per platform at `.expo/prebuild/fingerprint-<platform>.json`, holding `{version: 1, platform, hash, sources, fingerprintVersion, createdAt}`. A file is believed only when the version is 1, the platform is the one being asked about, the hash is a string and the sources are an array.
+
+The cost is that a prebuild run as `npx expo prebuild`, outside this CLI, records nothing. That reads as `unknown`, which falls through to the plain rebuild advice — coarser, never wrong. Recording is best effort in every other way too: a hash that cannot be computed or a file that cannot be written leaves no marker and never fails the prebuild. Only a platform whose native directory exists after the run is recorded, so a marker never describes a directory that is not there.
+
+Reading rather than writing is the whole point. Only `expo prebuild` knows that it ran, and `dev` runs it as a subprocess, so the record exists either way — while a prebuild somebody ran by hand now counts too, which a marker of this CLI's own could never see.
+
+The check compares the sources whose `reasons` prebuild owns (`expoConfig`, `expoConfigPlugins`, `expoConfigExternalFile`, `expoCNGPatches`) against the marker. A difference is `prebuild-stale`, and the report names the project sources that moved. A project with a native directory and no marker is `unknown` for staleness and falls through to the plain rebuild advice; a project without the directory is `not-applicable`. A project whose `expo` predates the marker is the same `unknown`.
+
+The marker is advisory, like the last-build record: a missing or unreadable file costs a detail of the verdict, never the command.
 
