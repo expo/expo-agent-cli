@@ -19,6 +19,7 @@ function options(overrides: Partial<InstalledAppOptions> = {}): InstalledAppOpti
     device: null,
     appId: null,
     fingerprintCache: undefined,
+    timeoutMs: 15_000,
     ...overrides,
   };
 }
@@ -31,9 +32,11 @@ const fingerprint = async () => ({
 const readAppId = () => appId;
 const fresh = () => ({ status: 'fresh' as const, changes: [] });
 const readFingerprintVersion = () => '0.20.0';
+const readScheme = () => 'myapp';
 const deps = {
   generateFingerprint: fingerprint,
   readAppId,
+  readScheme,
   readNativeDirectoryStaleness: fresh,
   readFingerprintVersion,
 };
