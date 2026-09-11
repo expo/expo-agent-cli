@@ -8,6 +8,7 @@
 
 ### 🎉 New features
 
+- `status --explain` reports what the app installed on a device was built from. It reads the fingerprint a debug build embeds (`expo-constants`, SDK 55+) out of the app on an Android device or a booted iOS simulator, and compares it with the project's fingerprint for that platform. Right about a build somebody else made, which the freshness line cannot be. Android reads a few hundred KB of the APK through `adb` instead of pulling it. A default `status` reads no device. ([#28](https://github.com/expo/expo-agent-cli/pull/28) by [@vonovak](https://github.com/vonovak))
 - `dev` opens the app itself once its dev server is up, through the same device tools `smoke` and `navigate` use: it boots a simulator or an emulator when none is up, installs the Expo Go release the project's SDK ships when it is missing, and deep-links through `simctl`/`adb` — never AppleScript, so it works headless and needs no macOS Automation grant. The platform flag no longer reaches `expo start` at all. ([#7](https://github.com/expo/expo-agent-cli/pull/7) by [@kudo](https://github.com/kudo))
 - `dev --no-open` serves without opening the app, for a caller that opens it itself — `smoke` starts its dev server this way. ([#7](https://github.com/expo/expo-agent-cli/pull/7) by [@kudo](https://github.com/kudo))
 - Initial agent-cli work. ([#49654](https://github.com/expo/expo-agent-cli/pull/1) by [@kudo](https://github.com/kudo))

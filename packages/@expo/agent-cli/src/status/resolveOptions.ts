@@ -68,3 +68,43 @@ export function resolveBuildId(value: unknown, { explain }: { explain: boolean }
   }
   return buildId;
 }
+
+/**
+ * The simulator or device `--device` named.
+ *
+ * Needs `--explain`, because without it no device is read at all and the flag would state nothing.
+ *
+ * @throws {CommandError} `BAD_ARGS` for an empty value, or for `--device` without `--explain`.
+ */
+export function resolveDeviceFlag(
+  value: unknown,
+  { explain }: { explain: boolean }
+): string | null {
+  if (value == null) {
+    return null;
+  }
+  const device = typeof value === 'string' ? value.trim() : '';
+  if (!device) {
+    throw new CommandError(
+      'BAD_ARGS',
+      [
+        `--device needs a simulator name, a device name, a UDID or an adb serial.`,
+        `Why: it names which device the installed-app check reads, and an empty value names none.`,
+        `How: run "${PROGRAM_PREFIX} status --explain --device \\"iPhone 17 Pro\\"", or leave the flag out to read every device this machine has.`,
+      ].join('\n')
+    );
+  }
+  if (!explain) {
+    const error = new CommandError(
+      'BAD_ARGS',
+      [
+        `--device needs --explain.`,
+        `Why: the installed-app check reads a device, and --explain is what says this run may pay for that. A default report reads no device, so --device would narrow nothing.`,
+        `How: run "${PROGRAM_PREFIX} status --explain --device ${device}".`,
+      ].join('\n')
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} status --explain --device ${device}`;
+    throw error;
+  }
+  return device;
+}

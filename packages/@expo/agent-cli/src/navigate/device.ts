@@ -77,24 +77,30 @@ export interface DeviceProbe {
  * link for this project.
  */
 export function parseBootedIosSimulator(stdout: string): { udid: string; name: string } | null {
+  return parseBootedIosSimulators(stdout)[0] ?? null;
+}
+
+/** Every booted iOS simulator in `simctl list devices booted -j`, in the order `simctl` lists them. */
+export function parseBootedIosSimulators(stdout: string): { udid: string; name: string }[] {
   let parsed: { devices?: Record<string, { udid?: string; name?: string }[]> };
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    return null;
+    return [];
   }
 
+  const simulators: { udid: string; name: string }[] = [];
   for (const [runtime, devices] of Object.entries(parsed.devices ?? {})) {
     if (!runtime.includes('.iOS-') || !Array.isArray(devices)) {
       continue;
     }
     for (const device of devices) {
       if (device?.udid) {
-        return { udid: device.udid, name: device.name ?? '' };
+        simulators.push({ udid: device.udid, name: device.name ?? '' });
       }
     }
   }
-  return null;
+  return simulators;
 }
 
 /** One ready device, as `adb devices -l` describes it. */
