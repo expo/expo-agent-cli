@@ -16,6 +16,7 @@ export const statusHelp: CommandHelp = {
       `                          when no class could be established. Without it, always 0`,
     `--build <id>              Compare against an EAS build instead of the local record.\n` +
       `                          Needs --explain, because it asks the service`,
+    `--device <name|udid|serial>  Only the matching simulator or device. Needs --explain`,
     `--dev-server-url <url>    Dev server to probe (default: the project's own, then 8081-8085)`,
     `--no-followups            Leave the suggested follow-up commands out of the report`,
     `--no-fingerprint-cache    Hash the project again instead of revalidating the cached hash`,
@@ -47,6 +48,7 @@ export const statusHelp: CommandHelp = {
       'project',
       'expoGo',
       'freshness',
+      'installed',
       'builds',
       'devServer',
       'device',
@@ -68,6 +70,9 @@ export const statusHelp: CommandHelp = {
     `established · 1 the command itself was wrong.`,
     `The fingerprint is cached per platform and revalidated against the files that can move it.`,
     `It cannot see inside ios/ or android/, so entries expire after ten minutes.`,
+    `--explain adds the installed line: what the app on a device was built from, read out of the`,
+    `app itself (expo-constants embeds it in debug builds, SDK 55+). Right about a build somebody`,
+    `else made, which freshness cannot be. A release build embeds none and reads as unknown.`,
   ],
 };
 
@@ -80,6 +85,7 @@ export const agentCliStatus: Command = async (argv) => {
       '--explain': Boolean,
       '--assert': String,
       '--build': String,
+      '--device': String,
       '--dev-server-url': String,
       '--no-followups': Boolean,
       '--no-fingerprint-cache': Boolean,
@@ -99,7 +105,7 @@ export const agentCliStatus: Command = async (argv) => {
     require('../utils/findUp') as typeof import('../utils/findUp');
   const { resolveDevServerUrlFlag } =
     require('../runtime/devServer') as typeof import('../runtime/devServer');
-  const { resolveAssertClass, resolveBuildId } =
+  const { resolveAssertClass, resolveBuildId, resolveDeviceFlag } =
     require('./resolveOptions') as typeof import('./resolveOptions');
   const { printStatusAsync } = require('./statusAsync') as typeof import('./statusAsync');
 
@@ -109,6 +115,7 @@ export const agentCliStatus: Command = async (argv) => {
     // directory somebody happened to run it in.
     const assertClass = resolveAssertClass(args['--assert']);
     const buildId = resolveBuildId(args['--build'], { explain });
+    const device = resolveDeviceFlag(args['--device'], { explain });
 
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
     const explicitDevServerUrl =
@@ -119,6 +126,7 @@ export const agentCliStatus: Command = async (argv) => {
       explain,
       assert: assertClass,
       buildId,
+      device,
       followups: !args['--no-followups'],
       // Undefined rather than `true` when the flag is absent, so `AGENT_CLI_NO_FINGERPRINT_CACHE`
       // still decides: a flag that was not passed states nothing.
