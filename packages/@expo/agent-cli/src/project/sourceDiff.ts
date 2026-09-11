@@ -68,7 +68,7 @@ export function formatChangedSources(changes: SourceChange[], max: number = 3): 
 export function describeSource(source: FingerprintSource): Pick<SourceChange, 'source' | 'scope'> {
   if (source.type === 'contents') {
     return {
-      source: source.id === 'expoConfig' ? 'the app config' : (source.id ?? 'contents'),
+      source: source.id === 'expoConfig' ? 'app config' : (source.id ?? 'contents'),
       scope: 'project',
     };
   }

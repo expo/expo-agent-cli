@@ -4,7 +4,11 @@
 // nothing is interpreted, so the arguments, the output, the errors and the exit code all stay the
 // Expo CLI's. Which commands reach here is `forwardedCommands` in `src/commandRegistry.ts`, a fixed
 // list: a name in neither surface never gets this far, because it is not a command at all.
-
+//
+// One command records afterwards: a successful `prebuild` writes what it generated the native
+// directories from (llp/0028 §The prebuild marker). It is bookkeeping, not behaviour — the
+// arguments, the output, the errors and the exit code are still the Expo CLI's, and a failure to
+// record is silent. It lives here because this is the only place that knows a prebuild ran.
 
 import { authCommands } from '../commandRegistry';
 import { event } from '../events';
@@ -45,6 +49,11 @@ export function agentCliExpoPassthrough(command: string): Command {
       // `expo whoami` need no project, and the commands that do need one say so themselves.
       const projectRoot = findUpProjectRootOrCwd(process.cwd());
       process.exitCode = await runExpoAsync(projectRoot, [command, ...args]);
+      if (command === 'prebuild' && process.exitCode === 0) {
+        const { recordPrebuildMarkersAsync } =
+          require('../project/prebuildMarker') as typeof import('../project/prebuildMarker');
+        await recordPrebuildMarkersAsync(projectRoot, args);
+      }
     })().catch(logCmdError);
   };
 }

@@ -23,6 +23,7 @@ One verdict per platform, reported as the `installed` section of `status --expla
 | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------- |
 | `hash-match`                                                                                                                            | `up-to-date`       | none                                                              |
 | `hash-mismatch`                                                                                                                         | `rebuild-required` | `expo run:<platform>`                                             |
+| `prebuild-stale`                                                                                                                        | `rebuild-required` | `agent-cli prebuild -p <platform>`, then `expo run:<platform>`    |
 | `no-device`, `app-not-installed`, `no-embedded-fingerprint`, `no-response`, `app-id-unknown`, `fingerprint-unavailable`, `check-failed` | `unknown`          | as the recommendation says                                        |
 
 The section's `outcome` is the strongest per-platform verdict, `rebuild-required` before `unknown`
@@ -74,11 +75,26 @@ The cache of [[0023-fingerprint-caching]] applies, with its ten-minute bound and
 - A build made before `expo-constants` learned to embed the file, or with `EXPO_SKIP_FINGERPRINT_EMBED` set, is the same answer.
 - `expo run:ios --unstable-rebundle` removes the file rather than refreshing it, because no single fingerprint describes that binary.
 - `@expo/fingerprint` hashes an allowlist of asset paths. An asset a plugin reads that is not on that list moves nothing, so a rebuild the app needs for it is not reported.
+- The prebuild marker ([[#The prebuild marker]]) is only written by prebuilds this CLI runs.
+
+## The prebuild marker
+
+A stale `android/` or `ios/` directory needs `prebuild` before the build. A plain rebuild would compile the old directories and embed the new hash, and the mismatch would vanish while the problem stayed.
+
+**This CLI records what prebuild generated, from the one place that knows it ran.** `expo prebuild` writes nothing, so the record is made by the `prebuild` passthrough here, after a run that exited 0. One file per platform at `.expo/prebuild/fingerprint-<platform>.json`, holding `{version: 1, platform, hash, sources, fingerprintVersion, createdAt}`. A file is believed only when the version is 1, the platform is the one being asked about, the hash is a string and the sources are an array.
+
+The cost is that a prebuild run as `npx expo prebuild`, outside this CLI, records nothing. That reads as `unknown`, which falls through to the plain rebuild advice — coarser, never wrong. Recording is best effort in every other way too: a hash that cannot be computed or a file that cannot be written leaves no marker and never fails the prebuild. Only a platform whose native directory exists after the run is recorded, so a marker never describes a directory that is not there.
+
+Reading rather than writing is the whole point. Only `expo prebuild` knows that it ran, and `dev` runs it as a subprocess, so the record exists either way — while a prebuild somebody ran by hand now counts too, which a marker of this CLI's own could never see.
+
+The check compares the sources whose `reasons` prebuild owns (`expoConfig`, `expoConfigPlugins`, `expoConfigExternalFile`, `expoCNGPatches`) against the marker. A difference is `prebuild-stale`, and the report names the project sources that moved. A project with a native directory and no marker is `unknown` for staleness and falls through to the plain rebuild advice; a project without the directory is `not-applicable`. A project whose `expo` predates the marker is the same `unknown`.
+
+The marker is advisory, like the last-build record: a missing or unreadable file costs a detail of the verdict, never the command.
 
 ## Proof
 
-Unit, `src/installedApp/__tests__/`: the verdict table over every reason; the aggregate outcome; the Android reader over a stubbed `adb` (ranged read, pull fallback, not installed, no file); the simulator reader over both bundle paths; ranking across several devices.
+Unit, `src/installedApp/__tests__/`: the verdict table over every reason; the aggregate outcome; the Android reader over a stubbed `adb` (ranged read, pull fallback, not installed, no file); the simulator reader over both bundle paths; ranking across several devices; the `prebuild-stale` verdict, decided without waiting for the device. `src/project/__tests__/prebuildMarker-test.ts`: the staleness comparison (fresh, stale with named project sources, a dependency-only change, a version mismatch, no marker, no native directory), the reader over a planted marker file, the writer's own round trip, and one rejection per field of its schema. `src/utils/__tests__/zipEntry-test.ts`: both compression methods, the EOCD-in-comment case, the ZIP64 refusals, and the ranged sequence over partial buffers.
 
-`src/status/__tests__/installed-test.ts`: that no device is read without `--explain`, that every platform this host can reach is asked, and the shape of the section.
+`src/status/__tests__/installed-test.ts`: that no device is read without `--explain`, that no phone is named unless the caller named one, and the shape of the section.
 
 E2E, `e2e/__tests__/status-installed-test.ts`: a stub `adb` that serves a fixture APK byte range by byte range, with the stub `fingerprint` set to the embedded hash and then to another one; the `installed` section of `status --explain --json` in both cases, that a default `status` reads no device at all, and that `--device` without `--explain` is refused.
