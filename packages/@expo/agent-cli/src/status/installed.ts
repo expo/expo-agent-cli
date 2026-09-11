@@ -7,6 +7,7 @@ import {
   type PlatformCheck,
 } from '../installedApp/installedAppAsync';
 import { hostPlatforms, type InstalledAppPlatform } from '../installedApp/options';
+import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
 import type { InstalledPlatformStatus, InstalledStatus } from './types';
 
 export interface InstalledStatusOptions {
@@ -15,6 +16,7 @@ export interface InstalledStatusOptions {
   /** The simulator or device the caller named, and the consent for the physical-iPhone probe. */
   device?: string | null;
   fingerprintCache?: boolean;
+  timeoutMs?: number;
   /** Overrides the host platform detection, for tests. */
   hostPlatform?: string;
 }
@@ -39,6 +41,7 @@ export async function readInstalledStatusAsync(
     device: options.device ?? null,
     appId: null,
     fingerprintCache: options.fingerprintCache,
+    timeoutMs: options.timeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS,
   });
   return {
     outcome: report.outcome,

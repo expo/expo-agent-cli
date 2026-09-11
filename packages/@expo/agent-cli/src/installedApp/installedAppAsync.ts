@@ -11,12 +11,12 @@ import {
   type NativeDirectoryStaleness,
   type PrebuildSourceChange,
 } from '../project/prebuildMarker';
-import { readConfiguredAppId } from '../runtime/appId';
+import { readConfiguredAppId, readConfiguredScheme } from '../runtime/appId';
 import { CommandError } from '../utils/errors';
 import { readInstalledFingerprintAndroidAsync } from './android';
 import { debugEvent } from './events';
 import type { InstalledAppDevice, InstalledFingerprintResult } from './installedFingerprint';
-import { readInstalledFingerprintIosSimulatorAsync } from './iosSimulator';
+import { readInstalledFingerprintIosAsync } from './ios';
 import type { InstalledAppOptions, InstalledAppPlatform } from './options';
 
 export type CheckStatus = 'up-to-date' | 'rebuild-required' | 'unknown';
@@ -64,19 +64,36 @@ export type InstalledFingerprintReader = (input: {
   appId: string;
   device: string | null;
   expectedHash: Promise<string>;
+  /** The project's URL scheme, for the physical iOS device probe. */
+  scheme: string | null;
+  timeoutMs: number;
 }) => Promise<InstalledFingerprintResult>;
 
 export interface CheckDependencies {
   readInstalled?: InstalledFingerprintReader;
   generateFingerprint?: typeof generateFingerprintAsync;
   readAppId?: typeof readConfiguredAppId;
+  readScheme?: typeof readConfiguredScheme;
   readNativeDirectoryStaleness?: typeof getNativeDirectoryStaleness;
   readFingerprintVersion?: typeof resolveFingerprintCliVersion;
 }
 
-const defaultReader: InstalledFingerprintReader = ({ platform, appId, device, expectedHash }) =>
+const defaultReader: InstalledFingerprintReader = ({
+  platform,
+  appId,
+  device,
+  expectedHash,
+  scheme,
+  timeoutMs,
+}) =>
   platform === 'ios'
-    ? readInstalledFingerprintIosSimulatorAsync({ appId, device: device ?? undefined, expectedHash })
+    ? readInstalledFingerprintIosAsync({
+        appId,
+        device: device ?? undefined,
+        expectedHash,
+        scheme,
+        timeoutMs,
+      })
     : readInstalledFingerprintAndroidAsync({ appId, device: device ?? undefined, expectedHash });
 
 export async function checkInstalledAppAsync(
@@ -86,6 +103,7 @@ export async function checkInstalledAppAsync(
     readInstalled = defaultReader,
     generateFingerprint = generateFingerprintAsync,
     readAppId = readConfiguredAppId,
+    readScheme = readConfiguredScheme,
     readNativeDirectoryStaleness = getNativeDirectoryStaleness,
     readFingerprintVersion = resolveFingerprintCliVersion,
   }: CheckDependencies = {}
@@ -96,6 +114,7 @@ export async function checkInstalledAppAsync(
         readInstalled,
         generateFingerprint,
         readAppId,
+        readScheme,
         readNativeDirectoryStaleness,
         readFingerprintVersion,
       })
@@ -155,6 +174,8 @@ async function checkPlatformAsync(
     appId,
     device: options.device,
     expectedHash,
+    scheme: platform === 'ios' ? deps.readScheme(projectRoot) : null,
+    timeoutMs: options.timeoutMs,
   });
   installedPromise.catch(() => {});
 
