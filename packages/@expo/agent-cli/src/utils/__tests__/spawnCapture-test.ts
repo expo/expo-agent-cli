@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 
-import { spawnCaptureAsync } from '../spawnCapture';
+import { spawnCaptureAsync, spawnCaptureBufferAsync } from '../spawnCapture';
 
 interface FakeChild extends EventEmitter {
   stdout: EventEmitter;
@@ -66,5 +66,22 @@ describe(spawnCaptureAsync, () => {
     child.emit('close', null, 'SIGKILL');
 
     await expect(promise).resolves.toMatchObject({ exitCode: null });
+  });
+});
+
+describe(spawnCaptureBufferAsync, () => {
+  it(`keeps stdout as the bytes the tool wrote`, async () => {
+    const child = mockSpawn();
+    const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0xff, 0x00, 0xfe]);
+
+    const promise = spawnCaptureBufferAsync('adb', ['exec-out', 'dd']);
+    child.stdout.emit('data', bytes.subarray(0, 3));
+    child.stdout.emit('data', bytes.subarray(3));
+    child.emit('close', 0, null);
+
+    const result = await promise;
+    expect(Buffer.isBuffer(result.stdout)).toBe(true);
+    expect(result.stdout.equals(bytes)).toBe(true);
+    expect(result.exitCode).toBe(0);
   });
 });
