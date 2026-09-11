@@ -217,6 +217,24 @@ export function readConfiguredAppId(
     : readPrebuiltIosBundleIdentifier(projectRoot);
 }
 
+/**
+ * The project's URL scheme from its static app config: `expo.scheme`, a string or the first of an
+ * array. Null for a project that declares none or only evaluates one in `app.config.js`.
+ */
+export function readConfiguredScheme(projectRoot: string): string | null {
+  for (const fileName of STATIC_CONFIG_FILES) {
+    const config = readJsonFile(path.join(projectRoot, fileName));
+    if (config == null) {
+      continue;
+    }
+    const expo = (isRecord(config.expo) ? config.expo : config) as Record<string, unknown>;
+    const scheme = Array.isArray(expo.scheme) ? expo.scheme[0] : expo.scheme;
+    if (typeof scheme === 'string' && scheme.trim()) {
+      return scheme.trim();
+    }
+  }
+  return null;
+}
 
 function readJsonFile(filePath: string): Record<string, unknown> | null {
   try {
