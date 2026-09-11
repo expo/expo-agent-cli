@@ -58,6 +58,8 @@ actually on the device, whoever made it.
 
 **iOS simulator.** `xcrun simctl get_app_container <udid> <appId>` names the app bundle, and the file is read off the disk at one of two paths: `EXConstants.bundle/app.fingerprint` for static linking, `Frameworks/EXConstants.framework/EXConstants.bundle/app.fingerprint` for `use_frameworks!`.
 
+**iOS device.** `devicectl` exposes no app container. The check starts a one-shot HTTP server on the LAN, launches the app with a URL carrying a nonce and the callback address, and the app's dev-launcher responder posts the embedded fingerprint back (expo/expo #49494). A timeout (15 s by default) is `no-response`, never `up-to-date`. The probe launches the app, so a phone is only probed when `--device` names it. Booted simulators are always preferred. A phone with Developer Mode off is named and not probed. The trigger URL is host-free and carries reserved `__expo_fingerprint_*` query parameters, so it claims no route of the app's; a host would read as a destination and take a name out of the app's own namespace. The scheme is the static `expo.scheme` when there is one; `launch --payload-url` needs none, and the `openURL` fallback for a toolchain whose launch refuses a running app does.
+
 ## Which app
 
 The app id comes from the static app config (`ios.bundleIdentifier`, `android.package`), then from the prebuilt project (`android/app/build.gradle` `applicationId`, `ios/*.xcodeproj` `PRODUCT_BUNDLE_IDENTIFIER`), then from `--app-id`. Expo Go is never the target: it carries no project fingerprint. A project that names no id for a platform reports `app-id-unknown` for it and asks for the flag.
@@ -70,7 +72,6 @@ The cache of [[0023-fingerprint-caching]] applies, with its ten-minute bound and
 
 ## What this cannot see
 
-- A physical iOS device cannot be read at all yet: `devicectl` exposes no app container. Simulators and Android devices only.
 - A release build embeds nothing. Only debug builds carry the file, so a release build is `no-embedded-fingerprint`.
 - A build made before `expo-constants` learned to embed the file, or with `EXPO_SKIP_FINGERPRINT_EMBED` set, is the same answer.
 - `expo run:ios --unstable-rebundle` removes the file rather than refreshing it, because no single fingerprint describes that binary.
@@ -93,7 +94,7 @@ The marker is advisory, like the last-build record: a missing or unreadable file
 
 ## Proof
 
-Unit, `src/installedApp/__tests__/`: the verdict table over every reason; the aggregate outcome; the Android reader over a stubbed `adb` (ranged read, pull fallback, not installed, no file); the simulator reader over both bundle paths; ranking across several devices; the `prebuild-stale` verdict, decided without waiting for the device. `src/project/__tests__/prebuildMarker-test.ts`: the staleness comparison (fresh, stale with named project sources, a dependency-only change, a version mismatch, no marker, no native directory), the reader over a planted marker file, the writer's own round trip, and one rejection per field of its schema. `src/utils/__tests__/zipEntry-test.ts`: both compression methods, the EOCD-in-comment case, the ZIP64 refusals, and the ranged sequence over partial buffers.
+Unit, `src/installedApp/__tests__/`: the verdict table over every reason; the iOS router (simulators first, a phone only when named or alone, the hints); the device probe over an injected launch that posts back (match, mismatch, null fingerprint, not installed, the `openURL` fallback, no scheme, timeout, Developer Mode off, stop at the first match); the callback server over real loopback HTTP (nonce, body cap, timeout, close); `src/device/__tests__/devicectl-test.ts` over a trimmed `list devices` capture; the aggregate outcome; the Android reader over a stubbed `adb` (ranged read, pull fallback, not installed, no file); the simulator reader over both bundle paths; ranking across several devices; the `prebuild-stale` verdict, decided without waiting for the device. `src/project/__tests__/prebuildMarker-test.ts`: the staleness comparison (fresh, stale with named project sources, a dependency-only change, a version mismatch, no marker, no native directory), the reader over a planted marker file, the writer's own round trip, and one rejection per field of its schema. `src/utils/__tests__/zipEntry-test.ts`: both compression methods, the EOCD-in-comment case, the ZIP64 refusals, and the ranged sequence over partial buffers.
 
 `src/status/__tests__/installed-test.ts`: that no device is read without `--explain`, that no phone is named unless the caller named one, and the shape of the section.
 

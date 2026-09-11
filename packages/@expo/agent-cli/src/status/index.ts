@@ -16,7 +16,9 @@ export const statusHelp: CommandHelp = {
       `                          when no class could be established. Without it, always 0`,
     `--build <id>              Compare against an EAS build instead of the local record.\n` +
       `                          Needs --explain, because it asks the service`,
-    `--device <name|udid|serial>  Only the matching simulator or device. Needs --explain`,
+    `--device <name|udid|serial>  Only the matching simulator or device, and the consent to ask\n` +
+      `                          a physical iPhone, which is done by launching the app on it.\n` +
+      `                          Needs --explain`,
     `--dev-server-url <url>    Dev server to probe (default: the project's own, then 8081-8085)`,
     `--no-followups            Leave the suggested follow-up commands out of the report`,
     `--no-fingerprint-cache    Hash the project again instead of revalidating the cached hash`,
@@ -62,8 +64,9 @@ export const statusHelp: CommandHelp = {
     ],
   },
   notes: [
-    `Read-only, like git status. Nothing is started, built or changed; the only writes are this`,
-    `command's own caches under .expo. It exits 0 unless --assert turned it into a gate.`,
+    `Read-only, like git status; the only writes are this command's own caches under .expo. The`,
+    `one exception is --explain --device <phone>, which launches the app on that phone to ask it`,
+    `for its fingerprint. It exits 0 unless --assert turned it into a gate.`,
     `The impact line says what has changed since the last build this CLI made, and what that`,
     `costs: js-only, dev-client-compatible, or needs-native-build. It is free and always there.`,
     `--assert exit codes: 20 the change costs more than the class named · 22 no class could be`,
