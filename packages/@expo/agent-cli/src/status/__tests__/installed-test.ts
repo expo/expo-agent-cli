@@ -21,6 +21,8 @@ beforeEach(() => {
         installedHash: 'h',
         currentHash: 'h',
         fingerprintSource: 'computed',
+        prebuildStatus: 'fresh',
+        prebuildChanges: [],
       },
     },
   });
