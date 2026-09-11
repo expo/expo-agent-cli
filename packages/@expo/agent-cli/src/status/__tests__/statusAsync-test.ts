@@ -833,6 +833,7 @@ describe(printStatusAsync, () => {
       'project',
       'expoGo',
       'freshness',
+      'installed',
       'builds',
       'devServer',
       'device',
@@ -861,6 +862,7 @@ describe(printStatusAsync, () => {
       'expoGo',
       'followups',
       'freshness',
+      'installed',
       'next',
       'probe',
       'project',
@@ -885,6 +887,7 @@ describe(printStatusAsync, () => {
       'expoGo',
       'followups',
       'freshness',
+      'installed',
       'next',
       'probe',
       'project',
@@ -919,6 +922,7 @@ describe(printStatusAsync, () => {
       // The best of the URLs a device opens, so the stream carries the one an agent can act on.
       openUrl: 'exp://192.168.1.233:8081',
       localDevice: 'unknown',
+      installed: null,
       freshness: { ios: 'stale', android: 'stale' },
       // The section builder is mocked out here; its own suite covers what it answers.
       easBuilds: { ios: null, android: null },

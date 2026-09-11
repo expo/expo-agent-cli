@@ -70,6 +70,7 @@ function mockReport(overrides: Partial<StatusReport> = {}): StatusReport {
       ota: null,
     },
     // The default run: nothing cached and EAS not asked, which prints no line at all.
+    installed: null,
     builds: { askedEas: false, platforms: [] },
     devServer: {
       url: 'http://127.0.0.1:8081',
