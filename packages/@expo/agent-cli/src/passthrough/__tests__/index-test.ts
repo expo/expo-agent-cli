@@ -3,11 +3,13 @@ import path from 'path';
 
 import { agentCliExpoPassthrough } from '..';
 import { event } from '../../events';
+import { recordPrebuildMarkersAsync } from '../../project/prebuildMarker';
 import { runExpoAsync } from '../../utils/expoCli';
 
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn() }));
+vi.mock('../../project/prebuildMarker', () => ({ recordPrebuildMarkersAsync: vi.fn() }));
 
 // path.resolve so the expectation matches what findUpProjectRootOrCwd returns on every
 // platform (win32 resolves '/project' to '<drive>:\\project').
@@ -18,6 +20,7 @@ beforeEach(() => {
   vol.fromJSON({ 'package.json': JSON.stringify({ name: 'app' }) }, projectRoot);
   vi.spyOn(process, 'cwd').mockReturnValue(projectRoot);
   vi.mocked(runExpoAsync).mockResolvedValue(0);
+  vi.mocked(recordPrebuildMarkersAsync).mockResolvedValue([]);
   process.exitCode = undefined;
 });
 
@@ -54,6 +57,26 @@ describe(agentCliExpoPassthrough, () => {
       command: 'export',
       args: ['--platform', 'web'],
     });
+  });
+
+  it(`records what a successful prebuild generated`, async () => {
+    await agentCliExpoPassthrough('prebuild')(['--platform', 'ios']);
+
+    expect(recordPrebuildMarkersAsync).toHaveBeenCalledWith(projectRoot, ['--platform', 'ios']);
+  });
+
+  it(`records nothing when prebuild failed`, async () => {
+    vi.mocked(runExpoAsync).mockResolvedValue(1);
+
+    await agentCliExpoPassthrough('prebuild')([]);
+
+    expect(recordPrebuildMarkersAsync).not.toHaveBeenCalled();
+  });
+
+  it(`records nothing for any other forwarded command`, async () => {
+    await agentCliExpoPassthrough('export')([]);
+
+    expect(recordPrebuildMarkersAsync).not.toHaveBeenCalled();
   });
 
   it(`should run in the working directory when it is inside no project`, async () => {

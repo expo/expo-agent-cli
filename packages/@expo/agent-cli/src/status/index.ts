@@ -72,7 +72,8 @@ export const statusHelp: CommandHelp = {
     `It cannot see inside ios/ or android/, so entries expire after ten minutes.`,
     `--explain adds the installed line: what the app on a device was built from, read out of the`,
     `app itself (expo-constants embeds it in debug builds, SDK 55+). Right about a build somebody`,
-    `else made, which freshness cannot be. A release build embeds none and reads as unknown.`,
+    `else made, which freshness cannot be. A release build embeds none and reads as unknown, and a`,
+    `prebuild run as npx expo prebuild records no marker, so prebuild staleness reads unknown too.`,
   ],
 };
 

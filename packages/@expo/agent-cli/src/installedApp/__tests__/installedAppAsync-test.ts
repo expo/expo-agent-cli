@@ -29,9 +29,13 @@ const fingerprint = async () => ({
   source: 'computed' as const,
 });
 const readAppId = () => appId;
+const fresh = () => ({ status: 'fresh' as const, changes: [] });
+const readFingerprintVersion = () => '0.20.0';
 const deps = {
   generateFingerprint: fingerprint,
   readAppId,
+  readNativeDirectoryStaleness: fresh,
+  readFingerprintVersion,
 };
 const installed =
   (result: InstalledFingerprintResult): InstalledFingerprintReader =>
@@ -93,9 +97,72 @@ describe(checkInstalledAppAsync, () => {
       ...expected,
       currentHash: 'current-hash',
       fingerprintSource: 'computed',
+      prebuildStatus: 'fresh',
+      prebuildChanges: [],
     });
     // One platform was checked, so its status is the report's outcome.
     expect(report.outcome).toBe(expected.status);
+  });
+
+  // @ref llp/0028-installed-app-check.rfc.md §The prebuild marker
+  it(`reports prebuild-stale without waiting for the device, with prebuild first`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      // The device read starts in parallel and is never awaited for this verdict.
+      readInstalled: () => new Promise<never>(() => {}),
+      readNativeDirectoryStaleness: (root, platform, current) => {
+        expect([root, platform, current]).toEqual([
+          projectRoot,
+          'ios',
+          { sources: [], fingerprintVersion: '0.20.0' },
+        ]);
+        return {
+          status: 'stale',
+          changes: [
+            { source: 'app config', change: 'changed', scope: 'project' },
+            { source: 'node_modules/expo-camera/plugin', change: 'changed', scope: 'dependency' },
+          ],
+        };
+      },
+    });
+    expect(report.platforms.ios).toMatchObject({
+      status: 'rebuild-required',
+      reason: 'prebuild-stale',
+      commands: ['npx @expo/agent-cli prebuild -p ios', 'npx expo run:ios'],
+      recommendation:
+        'app config changed after the native directories were generated. Regenerate them, then rebuild.',
+      prebuildStatus: 'stale',
+      currentHash: 'current-hash',
+      device: null
+    });
+    expect(report.platforms.ios!.prebuildChanges).toHaveLength(2);
+    expect(report.outcome).toBe('rebuild-required');
+  });
+
+  it(`names no source when only dependencies moved the prebuild`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({ status: 'ok', hash: 'current-hash', appId, device }),
+      readNativeDirectoryStaleness: () => ({
+        status: 'stale',
+        changes: [{ source: 'node_modules/x/plugin', change: 'changed', scope: 'dependency' }],
+      }),
+    });
+    expect(report.platforms.ios!.recommendation).toBe(
+      'The native directories were generated from a different project state. Regenerate them, then rebuild.'
+    );
+  });
+
+  it(`carries the marker's status alongside the device verdict`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({ status: 'ok', hash: 'current-hash', appId, device }),
+      readNativeDirectoryStaleness: () => ({ status: 'not-applicable', changes: [] }),
+    });
+    expect(report.platforms.ios).toMatchObject({
+      reason: 'hash-match',
+      prebuildStatus: 'not-applicable',
+    });
   });
 
   it(`appends the reader's hint to the recommendation`, async () => {
@@ -200,6 +267,8 @@ describe(aggregateOutcome, () => {
     installedHash: null,
     currentHash: null,
     fingerprintSource: null,
+    prebuildStatus: 'unknown',
+    prebuildChanges: [],
   });
 
   it(`takes the strongest verdict: rebuild-required before unknown before up-to-date`, () => {
