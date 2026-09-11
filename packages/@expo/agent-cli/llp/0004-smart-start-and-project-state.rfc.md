@@ -584,7 +584,6 @@ The cache of [[0023-fingerprint-caching]] applies, with its ten-minute bound and
 
 ### What this cannot see
 
-- A physical iOS device cannot be read at all yet: `devicectl` exposes no app container. Simulators and Android devices only.
 - A release build embeds nothing. Only debug builds carry the file, so a release build is `no-embedded-fingerprint`.
 - A build made before `expo-constants` learned to embed the file, or with `EXPO_SKIP_FINGERPRINT_EMBED` set, is the same answer.
 - `expo run:ios --unstable-rebundle` removes the file rather than refreshing it, because no single fingerprint describes that binary.

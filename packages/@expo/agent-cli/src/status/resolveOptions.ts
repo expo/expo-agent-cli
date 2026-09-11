@@ -72,7 +72,10 @@ export function resolveBuildId(value: unknown, { explain }: { explain: boolean }
 /**
  * The simulator or device `--device` named.
  *
- * Needs `--explain` so an explicitly selected device gets the longer check budget.
+ * Two jobs, and the second is why it needs `--explain`: it narrows which device is read, and it is
+ * the consent to probe a physical iPhone. That probe *launches the app*, and `status` promises to
+ * start nothing, so it can only ever happen because somebody named a device and asked for the deep
+ * dive with its longer budget.
  *
  * @throws {CommandError} `BAD_ARGS` for an empty value, or for `--device` without `--explain`.
  */

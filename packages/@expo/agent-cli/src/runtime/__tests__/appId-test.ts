@@ -1,6 +1,6 @@
 import { vol } from 'memfs';
 
-import { EXPO_GO_APP_ID, readConfiguredAppId, resolveAppId } from '../appId';
+import { EXPO_GO_APP_ID, readConfiguredAppId, readConfiguredScheme, resolveAppId } from '../appId';
 
 const projectRoot = '/project';
 
@@ -393,5 +393,22 @@ describe('Debug bundle identifiers', () => {
       };
     ` });
     expect(readConfiguredAppId('/project', 'ios')).toBe('com.example.app.dev');
+  });
+});
+describe(readConfiguredScheme, () => {
+  it(`reads a string scheme, and the first of an array`, () => {
+    vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme: 'myapp' } }) });
+    expect(readConfiguredScheme(projectRoot)).toBe('myapp');
+    vol.fromJSON({
+      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme: ['first', 'second'] } }),
+    });
+    expect(readConfiguredScheme(projectRoot)).toBe('first');
+  });
+
+  it(`answers null when the static config names none`, () => {
+    vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { name: 'x' } }) });
+    expect(readConfiguredScheme(projectRoot)).toBeNull();
+    vol.fromJSON({ [`${projectRoot}/app.config.js`]: 'module.exports = {}' });
+    expect(readConfiguredScheme(projectRoot)).toBeNull();
   });
 });
