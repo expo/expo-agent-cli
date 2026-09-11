@@ -339,7 +339,11 @@ async function executePlanAsync(
     exitCode = result.exitCode;
     planEvent('start_plan_step_exit', { id: step.id, code: exitCode });
 
-    if (exitCode !== 0 && step.id === 'install' && appReachedDevice(`${result.stdout}\n${result.stderr}`)) {
+    if (
+      exitCode !== 0 &&
+      step.id === 'install' &&
+      appReachedDevice(`${result.stdout}\n${result.stderr}`)
+    ) {
       // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
       // The install step's job is the app on the device, and the output says it got there — so a
       // non-zero exit is about what `expo run:*` does *after* the install, which on a Mac without
