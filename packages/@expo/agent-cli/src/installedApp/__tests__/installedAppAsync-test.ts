@@ -239,6 +239,44 @@ describe(checkInstalledAppAsync, () => {
     );
   });
 
+  // `unknown` means a native directory exists but no usable marker describes it. Advising a bare
+  // rebuild there is not merely coarse: on a CNG project the rebuild compiles the old directories
+  // and embeds the new hash, so the mismatch disappears and the cause stays.
+  it(`advises prebuild first when the native directories cannot be vouched for`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device
+      }),
+      readNativeDirectoryStaleness: () => ({ status: 'unknown', changes: [] })
+    });
+
+    expect(report.platforms.ios).toMatchObject({ reason: 'hash-mismatch' });
+    expect(report.platforms.ios!.commands[0]).toBe('npx @expo/agent-cli prebuild -p ios');
+    expect(report.platforms.ios!.recommendation).toMatch(/cannot be told|could not be checked/i);
+  });
+
+  // No native directory: `run:` generates one, so a plain rebuild really is the whole story.
+  it(`keeps the plain rebuild advice when there is no native directory`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device
+      }),
+      readNativeDirectoryStaleness: () => ({ status: 'not-applicable', changes: [] })
+    });
+
+    expect(report.platforms.ios!.commands).toEqual(['npx expo run:ios']);
+  });
+
   it(`carries the marker's status alongside the device verdict`, async () => {
     const report = await checkInstalledAppAsync(projectRoot, options(), {
       ...deps,

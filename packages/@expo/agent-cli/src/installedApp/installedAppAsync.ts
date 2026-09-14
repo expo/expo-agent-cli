@@ -10,6 +10,7 @@ import {
   getNativeDirectoryStaleness,
   type NativeDirectoryStaleness,
   type PrebuildSourceChange,
+  type NativeDirectoryStalenessStatus,
 } from '../project/prebuildMarker';
 import { diffSources, formatChangedSources } from '../project/sourceDiff';
 import { readConfiguredAppId, readConfiguredScheme } from '../runtime/appId';
@@ -201,7 +202,14 @@ async function checkPlatformAsync(
     timeoutMs: options.timeoutMs,
   });
   const check = {
-    ...installedVerdict(installed, platform, fingerprint, options.device, currentFingerprintVersion),
+    ...installedVerdict(
+      installed,
+      platform,
+      fingerprint,
+      options.device,
+      currentFingerprintVersion,
+      staleness.status
+    ),
     ...prebuild,
   };
   return installed.hint
@@ -215,7 +223,8 @@ function installedVerdict(
   platform: InstalledAppPlatform,
   fingerprint: FingerprintResult,
   deviceFilter: string | null,
-  currentFingerprintVersion: string | null
+  currentFingerprintVersion: string | null,
+  prebuildStatus: NativeDirectoryStalenessStatus
 ): PlatformCheck {
   const current = {
     currentHash: fingerprint.hash,
@@ -284,14 +293,24 @@ function installedVerdict(
         installed.sources?.length && fingerprint.sources?.length
           ? formatChangedSources(diffSources(installed.sources, fingerprint.sources))
           : '';
+      // `unknown` means a native directory exists and no marker describes it, so whether it is
+      // current cannot be told. A plain rebuild there would compile the old directory and embed the
+      // new hash, clearing the mismatch while leaving the cause — so prebuild leads, and it also
+      // records the marker the next run needs. `not-applicable` has no directory to be stale.
+      const cannotVouchForNativeDirs = prebuildStatus === 'unknown';
+      const lead = moved
+        ? `${moved} changed since the installed app was built.`
+        : 'Native inputs changed since the installed app was built.';
       return verdict('hash-mismatch', {
         ...current,
         device: installed.device,
         installedHash: installed.hash,
-        recommendation: moved
-          ? `${moved} changed since the installed app was built. Rebuild the app.`
-          : 'Native inputs changed since the installed app was built. Rebuild the app.',
-        commands: rebuild,
+        recommendation: cannotVouchForNativeDirs
+          ? `${lead} Whether the native directories are current cannot be told, because no prebuild of this project was recorded — so regenerate them before rebuilding, or a rebuild may embed the new fingerprint without picking the change up.`
+          : `${lead} Rebuild the app.`,
+        commands: cannotVouchForNativeDirs
+          ? [`${PROGRAM_PREFIX} prebuild -p ${platform}`, ...rebuild]
+          : rebuild,
       });
     }
   }
