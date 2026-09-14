@@ -12,6 +12,7 @@ import {
   type PrebuildSourceChange,
   type NativeDirectoryStalenessStatus,
 } from '../project/prebuildMarker';
+import { readProjectNativeDirsAsync } from '../project/nativeCode';
 import { diffSources, formatChangedSources } from '../project/sourceDiff';
 import { readConfiguredAppId, readConfiguredScheme } from '../runtime/appId';
 import { CommandError } from '../utils/errors';
@@ -79,6 +80,12 @@ export interface CheckDependencies {
   readAppId?: typeof readConfiguredAppId;
   readScheme?: typeof readConfiguredScheme;
   readNativeDirectoryStaleness?: typeof getNativeDirectoryStaleness;
+  /**
+   * Which native directories are checked in, i.e. bare rather than CNG. `prebuild` rewrites
+   * `AppDelegate`, `Info.plist` and `build.gradle`, so it must never be advised for a directory
+   * the project owns by hand.
+   */
+  readCheckedInNativeDirs?: typeof readProjectNativeDirsAsync;
   readFingerprintVersion?: typeof resolveFingerprintCliVersion;
 }
 
@@ -109,6 +116,7 @@ export async function checkInstalledAppAsync(
     readAppId = readConfiguredAppId,
     readScheme = readConfiguredScheme,
     readNativeDirectoryStaleness = getNativeDirectoryStaleness,
+    readCheckedInNativeDirs = readProjectNativeDirsAsync,
     readFingerprintVersion = resolveFingerprintCliVersion,
   }: CheckDependencies = {}
 ): Promise<InstalledAppReport> {
@@ -120,6 +128,7 @@ export async function checkInstalledAppAsync(
         readAppId,
         readScheme,
         readNativeDirectoryStaleness,
+        readCheckedInNativeDirs,
         readFingerprintVersion,
       })
         .catch((error: unknown) => {
@@ -178,6 +187,9 @@ async function checkPlatformAsync(
     fingerprintVersion: currentFingerprintVersion,
   });
   const prebuild = { prebuildStatus: staleness.status, prebuildChanges: staleness.changes };
+  // A bare project owns its native directories (`project/impact.ts`: "Bare projects own their
+  // native directories, so CNG must not regenerate them"), so `prebuild` is never advised for one.
+  const ownsNativeDir = (await deps.readCheckedInNativeDirs(projectRoot))[platform];
   if (staleness.status === 'stale') {
     const named = formatPrebuildChanges(staleness.changes);
     return verdict('prebuild-stale', {
@@ -208,7 +220,8 @@ async function checkPlatformAsync(
       fingerprint,
       options.device,
       currentFingerprintVersion,
-      staleness.status
+      staleness.status,
+      ownsNativeDir
     ),
     ...prebuild,
   };
@@ -224,7 +237,8 @@ function installedVerdict(
   fingerprint: FingerprintResult,
   deviceFilter: string | null,
   currentFingerprintVersion: string | null,
-  prebuildStatus: NativeDirectoryStalenessStatus
+  prebuildStatus: NativeDirectoryStalenessStatus,
+  ownsNativeDir: boolean
 ): PlatformCheck {
   const current = {
     currentHash: fingerprint.hash,
@@ -283,7 +297,9 @@ function installedVerdict(
           device: installed.device,
           installedHash: installed.hash,
           recommendation: `The installed app was fingerprinted by @expo/fingerprint ${embeddedVersion} and this project uses ${currentFingerprintVersion}, so the two hashes cannot be compared. This says nothing about whether the app is stale: an unchanged project hashes differently across a version bump, so the installed app may well be current. Rebuild only if you need a definite answer.`,
-          commands: rebuild,
+          // No command: `commands` is what an agent runs, and the sentence above says not to. A
+          // routine `expo` upgrade reaches this, and a needless native rebuild is the cost.
+          commands: [],
         });
       }
       // The embedded fingerprint carries the sources behind its hash, so the sentence can name the
@@ -297,7 +313,9 @@ function installedVerdict(
       // current cannot be told. A plain rebuild there would compile the old directory and embed the
       // new hash, clearing the mismatch while leaving the cause — so prebuild leads, and it also
       // records the marker the next run needs. `not-applicable` has no directory to be stale.
-      const cannotVouchForNativeDirs = prebuildStatus === 'unknown';
+      // CNG only: a bare project's directories are the source of truth, so a rebuild is the whole
+      // story there and `prebuild` would overwrite hand-written native code.
+      const cannotVouchForNativeDirs = prebuildStatus === 'unknown' && !ownsNativeDir;
       const lead = moved
         ? `${moved} changed since the installed app was built.`
         : 'Native inputs changed since the installed app was built.';

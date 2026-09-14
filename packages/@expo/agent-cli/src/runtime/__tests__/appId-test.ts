@@ -388,4 +388,22 @@ describe(readConfiguredScheme, () => {
     vol.fromJSON({ [`${projectRoot}/app.config.js`]: 'module.exports = {}' });
     expect(readConfiguredScheme(projectRoot)).toBeNull();
   });
+
+  // The scheme is interpolated into the URL handed to `devicectl openURL`. A value carrying its
+  // own scheme and host would open a web page on the device and hand it the callback address and
+  // the one-time nonce that authenticates the response. Null is already a handled case.
+  it.each([
+    ['a URL rather than a scheme', 'https://attacker.example/x?'],
+    ['a scheme with a slash', 'my/app'],
+    ['a scheme starting with a digit', '1app'],
+    ['a scheme with a space', 'my app'],
+  ])(`answers null for %s`, (_description, scheme) => {
+    vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme } }) });
+    expect(readConfiguredScheme(projectRoot)).toBeNull();
+  });
+
+  it(`accepts the punctuation RFC 3986 allows`, () => {
+    vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme: 'my-app.x+1' } }) });
+    expect(readConfiguredScheme(projectRoot)).toBe('my-app.x+1');
+  });
 });
