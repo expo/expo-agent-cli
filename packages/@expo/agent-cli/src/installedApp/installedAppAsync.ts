@@ -4,6 +4,7 @@
 
 import { PROGRAM_PREFIX } from '../programName';
 import { generateFingerprintAsync, type FingerprintResult } from '../project/fingerprint';
+import { diffSources, formatChangedSources } from '../project/sourceDiff';
 import { readConfiguredAppId } from '../runtime/appId';
 import { CommandError } from '../utils/errors';
 import { readInstalledFingerprintAndroidAsync } from './android';
@@ -11,7 +12,7 @@ import { debugEvent } from './events';
 import type { InstalledAppDevice, InstalledFingerprintResult } from './installedFingerprint';
 import { readInstalledFingerprintIosSimulatorAsync } from './iosSimulator';
 import type { InstalledAppOptions, InstalledAppPlatform } from './options';
-import { diffSources, formatChangedSources } from './sourceDiff';
+
 
 export type CheckStatus = 'up-to-date' | 'rebuild-required' | 'unknown';
 
