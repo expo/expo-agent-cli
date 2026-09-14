@@ -114,6 +114,17 @@ describe(readInstalledFingerprintIosDeviceAsync, () => {
     });
   });
 
+  // The file readers treat an empty hash as "no fingerprint" (installedFingerprint.ts); the wire
+  // path has to agree, or the same build reports "rebuild required" instead.
+  it(`answers no-embedded-fingerprint for an empty fingerprint`, async () => {
+    await expect(
+      read([phone()], { launchAppWithPayloadUrlAsync: respondingLaunch('') })
+    ).resolves.toMatchObject({
+      status: 'no-embedded-fingerprint',
+      device: { identifier: 'UDID-A' }
+    });
+  });
+
   it(`answers no-response when nothing with the right nonce arrives in time`, async () => {
     await expect(
       read(

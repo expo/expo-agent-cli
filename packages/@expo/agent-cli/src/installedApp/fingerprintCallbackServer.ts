@@ -1,6 +1,7 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read
 // The one-shot HTTP server a physical iOS device posts its embedded fingerprint to.
 
+import crypto from 'crypto';
 import http from 'http';
 
 import { resolveLanHost } from '../followups/network';
@@ -19,7 +20,14 @@ export type FingerprintCallbackResult = {
 };
 
 /** A real response is a few dozen bytes. The port is open to the whole LAN. */
-const MAX_BODY_LENGTH = 4096;
+const MAX_BODY_BYTES = 4096;
+
+/** Constant time, because the nonce is the only thing authenticating the response. */
+function nonceMatches(received: string, expected: string): boolean {
+  const a = Buffer.from(received, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 export interface FingerprintCallbackServer {
   /** URL the app posts its response to, reachable from the LAN. */
@@ -76,18 +84,23 @@ export async function startFingerprintCallbackServerAsync({
       res.writeHead(404).end();
       return;
     }
-    let body = '';
-    req.on('data', (chunk) => {
-      body += chunk;
-      if (body.length > MAX_BODY_LENGTH) {
+    // Buffered rather than concatenated as a string: the cap is a byte budget, and a chunk can
+    // split a multi-byte character.
+    const chunks: Buffer[] = [];
+    let bodyBytes = 0;
+    req.on('data', (chunk: Buffer) => {
+      bodyBytes += chunk.length;
+      if (bodyBytes > MAX_BODY_BYTES) {
         res.writeHead(413).end();
         req.destroy();
+        return;
       }
+      chunks.push(chunk);
     });
     req.on('end', () => {
       let parsed: Record<string, unknown>;
       try {
-        parsed = JSON.parse(body);
+        parsed = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       } catch {
         res.writeHead(400).end();
         return;
@@ -101,7 +114,7 @@ export async function startFingerprintCallbackServerAsync({
         (fingerprint === null || typeof fingerprint === 'string') &&
         (fingerprintVersion === null || typeof fingerprintVersion === 'string');
       // A wrong or malformed request must not use up the one chance to hear from the app.
-      if (!valid || receivedNonce !== nonce) {
+      if (!valid || !nonceMatches(receivedNonce as string, nonce)) {
         res.writeHead(400).end();
         return;
       }

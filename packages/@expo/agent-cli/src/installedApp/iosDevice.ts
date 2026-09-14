@@ -136,7 +136,8 @@ async function probeDeviceAsync(
     if (!response) {
       return { status: 'no-response', appId, device };
     }
-    if (response.fingerprint === null) {
+    // Empty reads as absent, as it does in `parseEmbeddedFingerprint` for the file readers.
+    if (!response.fingerprint) {
       return { status: 'no-embedded-fingerprint', appId, device };
     }
     return {

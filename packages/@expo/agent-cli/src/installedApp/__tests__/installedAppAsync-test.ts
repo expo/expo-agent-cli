@@ -268,6 +268,9 @@ describe(checkInstalledAppAsync, () => {
       reason: 'fingerprint-version-mismatch',
       recommendation: expect.stringContaining('0.19.0'),
     });
+    // Not a staleness verdict: an unchanged project hashes differently across a version bump, so
+    // the wording must not read as "rebuild required".
+    expect(report.platforms.ios?.recommendation).toMatch(/may well be current/);
   });
 
   // A build made before the version was embedded, and a phone, both report null. That is "cannot

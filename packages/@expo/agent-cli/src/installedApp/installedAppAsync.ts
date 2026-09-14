@@ -253,17 +253,16 @@ function installedVerdict(
         recommendation: `The app on ${installed.device.name} did not report its fingerprint in time. Likely causes: the phone and this computer are not on the same network; the macOS firewall or the app's Local Network permission blocks the connection; the device screen is locked; the app is a release build or lacks expo-dev-client, so it can never respond. If the build predates this check, rebuild with npx expo run:ios --device.`,
       });
     case 'ok': {
-      // Two hashes from different `@expo/fingerprint` versions are not comparable: reason tags and
-      // hashing change between them, so an unchanged project hashes differently across an SDK
-      // upgrade. Only a known difference counts — a null version means "cannot tell", which is what
-      // a build made before the version was embedded reports, and what a phone reports today.
+      // Hashes from two `@expo/fingerprint` versions are usually identical, but reason tags and
+      // hashing do change between versions, and there is no way to tell which case this is. A null
+      // version still compares: that is what a build made before the version was embedded reports.
       const embeddedVersion = installed.fingerprintVersion;
       if (embeddedVersion && currentFingerprintVersion && embeddedVersion !== currentFingerprintVersion) {
         return verdict('fingerprint-version-mismatch', {
           ...current,
           device: installed.device,
           installedHash: installed.hash,
-          recommendation: `The installed app was fingerprinted by @expo/fingerprint ${embeddedVersion} and this project uses ${currentFingerprintVersion}, so the two hashes cannot be compared. Rebuild to settle it.`,
+          recommendation: `The installed app was fingerprinted by @expo/fingerprint ${embeddedVersion} and this project uses ${currentFingerprintVersion}, so the two hashes cannot be compared. This says nothing about whether the app is stale: an unchanged project hashes differently across a version bump, so the installed app may well be current. Rebuild only if you need a definite answer.`,
           commands: rebuild,
         });
       }

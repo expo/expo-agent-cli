@@ -111,3 +111,54 @@ export function resolveDeviceFlag(
   }
   return device;
 }
+
+/** Bounds on `--device-timeout`, in seconds. A phone that has not answered in five minutes is gone. */
+const MIN_DEVICE_TIMEOUT_SECONDS = 1;
+const MAX_DEVICE_TIMEOUT_SECONDS = 300;
+
+/**
+ * How long a physical iPhone gets to report its fingerprint, in milliseconds. Null uses the default.
+ *
+ * A cold launch of a dev client on an older phone can outrun the default, and the timeout reports
+ * `no-response`, which reads as a network or permission problem rather than as "it was slow".
+ *
+ * @throws {CommandError} `BAD_ARGS` for a non-positive or out-of-range value, or without `--explain`.
+ */
+export function resolveDeviceTimeoutFlag(
+  value: unknown,
+  { explain }: { explain: boolean }
+): number | null {
+  if (value == null) {
+    return null;
+  }
+  const raw = typeof value === 'string' ? value.trim() : '';
+  const seconds = Number(raw);
+  if (
+    !raw ||
+    !Number.isInteger(seconds) ||
+    seconds < MIN_DEVICE_TIMEOUT_SECONDS ||
+    seconds > MAX_DEVICE_TIMEOUT_SECONDS
+  ) {
+    throw new CommandError(
+      'BAD_ARGS',
+      [
+        `--device-timeout needs a whole number of seconds between ${MIN_DEVICE_TIMEOUT_SECONDS} and ${MAX_DEVICE_TIMEOUT_SECONDS}.`,
+        `Why: it is how long a physical iPhone gets to report its fingerprint, and a value outside that range is either no wait at all or longer than a device is ever going to take.`,
+        `How: run "${PROGRAM_PREFIX} status --explain --device \"Ada's iPhone\" --device-timeout 45".`,
+      ].join('\n')
+    );
+  }
+  if (!explain) {
+    const error = new CommandError(
+      'BAD_ARGS',
+      [
+        `--device-timeout needs --explain.`,
+        `Why: it bounds the physical-device probe, and a default report reads no device at all.`,
+        `How: run "${PROGRAM_PREFIX} status --explain --device-timeout ${seconds}".`,
+      ].join('\n')
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} status --explain --device-timeout ${seconds}`;
+    throw error;
+  }
+  return seconds * 1000;
+}

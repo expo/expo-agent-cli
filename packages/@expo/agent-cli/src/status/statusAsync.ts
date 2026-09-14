@@ -112,6 +112,8 @@ export interface StatusOptions {
   deviceProbeTimeoutMs?: number;
   /** Overrides the installed-app section budget, for tests. */
   installedReadTimeoutMs?: number;
+  /** --device-timeout: response time after delivering the phone trigger. */
+  installedTimeoutMs?: number | null;
   /**
    * The deep dive: `--explain`.
    *
@@ -386,7 +388,10 @@ export async function collectStatusReportAsync(
     // It runs alongside the optional EAS and OTA reads.
     attemptAsync(async () => {
       const timeoutMs = options.installedReadTimeoutMs ??
-        (options.explain ? INSTALLED_READ_TIMEOUT_MS : DEFAULT_INSTALLED_READ_TIMEOUT_MS);
+        (options.explain
+          ? INSTALLED_READ_TIMEOUT_MS +
+            (options.device ? 120_000 + (options.installedTimeoutMs ?? 15_000) : 0)
+          : DEFAULT_INSTALLED_READ_TIMEOUT_MS);
       const timeoutMessage = options.explain
         ? `Installed-app check timed out after ${timeoutMs}ms.`
         : `Check didn't finish within ${timeoutMs / 1000} seconds. Retry with "npx @expo/agent-cli status --explain" (15s timeout).`;
@@ -395,6 +400,7 @@ export async function collectStatusReportAsync(
         timeoutMessage,
         () => readInstalledStatusAsync(projectRoot, {
           lookUp: true,
+          timeoutMs: options.installedTimeoutMs ?? undefined,
           device: options.device,
           fingerprintCache: options.fingerprintCache,
         })
