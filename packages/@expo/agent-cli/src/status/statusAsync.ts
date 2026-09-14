@@ -37,6 +37,7 @@ import { discoverSkillsAsync } from '../skills/discovery';
 import type { DiscoveredSkill } from '../skills/types';
 import { buildAssertStatus } from './assert';
 import { readEasBuildsStatusAsync } from './easBuilds';
+import { readInstalledStatusAsync } from './installed';
 import { formatStatusReport } from './format';
 import {
   applyEasFreshness,
@@ -127,6 +128,15 @@ export interface StatusOptions {
    * it needs no local record, which is what makes it the answer for a build made in the cloud.
    */
   buildId?: string | null;
+  /**
+   * Only the simulator or device matching this name or identifier (`--device`).
+   *
+   * Also the consent for the physical-iPhone probe. That probe *launches the app*, and `status`
+   * promises to start nothing, so a phone is asked only when the caller named one here. Every
+   * other reader — a booted simulator's container, an APK over `adb` — is read-only, so those run
+   * under `--explain` on their own.
+   */
+  device?: string | null;
   /** Overrides {@link EAS_BUILD_LOOKUP_TIMEOUT_MS}, for tests. */
   buildLookupTimeoutMs?: number;
   /** Overrides {@link CHANGED_FILES_TIMEOUT_MS}, for tests. */
@@ -166,6 +176,8 @@ export async function printStatusAsync(projectRoot: string, options: StatusOptio
     tunnelUrl: report.devServer?.tunnelUrl ?? null,
     openUrl: report.devServer?.openUrls[0]?.url ?? null,
     localDevice: report.device?.state ?? 'unknown',
+    // Null on a default run, where no device was read at all.
+    installed: report.installed?.outcome ?? null,
     freshness: { ios: freshnessOf(report, 'ios'), android: freshnessOf(report, 'android') },
     easBuilds: { ios: easBuildOf(report, 'ios'), android: easBuildOf(report, 'android') },
     easBuildsAsked: report.builds?.askedEas ?? false,
@@ -224,6 +236,7 @@ export async function collectStatusReportAsync(
     project: null,
     expoGo: null,
     freshness: null,
+    installed: null,
     builds: null,
     devServer: null,
     device: null,
@@ -347,7 +360,7 @@ export async function collectStatusReportAsync(
   //
   // These two are independent of each other and both are the expensive half of `--explain`, so
   // they run together rather than one after the other.
-  const [builds, ota] = await Promise.all([
+  const [builds, ota, installed] = await Promise.all([
     attemptAsync(() =>
       readEasBuildsStatusAsync(projectRoot, {
         lookUp: !!options.explain,
@@ -360,7 +373,22 @@ export async function collectStatusReportAsync(
     options.explain && report.freshness
       ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!))
       : Promise.resolve(null),
+    // The third expensive answer, and the only one that reads a device. It joins this block rather
+    // than following it because it shares nothing with the other two.
+    attemptAsync(() =>
+      readInstalledStatusAsync(projectRoot, {
+        lookUp: !!options.explain,
+        device: options.device,
+        fingerprintCache: options.fingerprintCache,
+      })
+    ),
   ]);
+
+  if ('value' in installed) {
+    report.installed = installed.value;
+  } else {
+    errors.installed = installed.error;
+  }
 
   if ('value' in builds) {
     report.builds = builds.value;
