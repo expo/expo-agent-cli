@@ -146,16 +146,51 @@ export function readPrebuiltAndroidApplicationId(projectRoot: string): string | 
 }
 
 /**
+ * The `PRODUCT_BUNDLE_IDENTIFIER` of a **prebuilt** iOS project, from its `project.pbxproj`.
+ *
+ * The iOS counterpart of {@link readPrebuiltAndroidApplicationId}. `expo prebuild` writes the id
+ * into the Xcode project whether or not `ios.bundleIdentifier` was declared. The first target's
+ * value is taken, which is the app target in a project `prebuild` generated. A static read: no
+ * `xcodebuild`, no `app.config.js`.
+ */
+export function readPrebuiltIosBundleIdentifier(projectRoot: string): string | null {
+  const iosDir = path.join(projectRoot, 'ios');
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(iosDir);
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith('.xcodeproj')) {
+      continue;
+    }
+    let source: string;
+    try {
+      source = fs.readFileSync(path.join(iosDir, entry, 'project.pbxproj'), 'utf8');
+    } catch {
+      continue;
+    }
+    const found = /^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"?([^";]+)"?\s*;/m.exec(source)?.[1]?.trim();
+    if (found != null && isValidAppId(found)) {
+      return found;
+    }
+  }
+  return null;
+}
+
+/**
  * `ios.bundleIdentifier` or `android.package` from the project's static app config.
  *
  * A dynamic `app.config.js` is never evaluated, per the process boundary of llp/0001
  * constraint 5; such a project answers null and falls through to the Expo Go default, which
  * `--app-id` overrides.
  *
- * **Android has a second source**, and it is consulted when the config names none: the
- * `applicationId` a prebuild wrote into Gradle (@ref ./appId §readPrebuiltAndroidApplicationId).
- * The config comes first, because a project that declares `android.package` has said what it wants
- * and a prebuild older than that declaration would otherwise outrank it.
+ * **The prebuilt project is the second source**, consulted when the config names none: the
+ * `applicationId` a prebuild wrote into Gradle (@ref ./appId §readPrebuiltAndroidApplicationId),
+ * or the `PRODUCT_BUNDLE_IDENTIFIER` it wrote into the Xcode project. The config comes first,
+ * because a project that declares an id has said what it wants and a prebuild older than that
+ * declaration would otherwise outrank it.
  */
 export function readConfiguredAppId(
   projectRoot: string,
@@ -177,8 +212,11 @@ export function readConfiguredAppId(
       return isValidAppId(value.trim()) ? value.trim() : null;
     }
   }
-  return platform === 'android' ? readPrebuiltAndroidApplicationId(projectRoot) : null;
+  return platform === 'android'
+    ? readPrebuiltAndroidApplicationId(projectRoot)
+    : readPrebuiltIosBundleIdentifier(projectRoot);
 }
+
 
 function readJsonFile(filePath: string): Record<string, unknown> | null {
   try {
