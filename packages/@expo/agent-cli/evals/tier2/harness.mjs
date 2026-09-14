@@ -1,18 +1,27 @@
 // @ref llp/0002-testing-and-evals.plan.md; llp/0022-live-tier.plan.md
 import { randomUUID } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, writeFile, rm, access, readdir } from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import { createServer } from 'node:net';
-import { captureProcess, killGroup } from './process.mjs';
-import { summarizeTrace, normalizeTrace } from './trace.mjs';
-import { assessOutcome } from './outcome.mjs';
+
 import { checkCart, serveExport } from './browser.mjs';
-import { assertBrokenBaseline, isolatedEnvironment } from './fixture-tools.mjs';
 import { assertCliEvidence } from './cli-evidence.mjs';
-import { CLAUDE_VERSION, CLAUDE_MODEL, prerequisiteReason } from './settings.mjs';
+import { assertBrokenBaseline, isolatedEnvironment } from './fixture-tools.mjs';
+import { assessOutcome } from './outcome.mjs';
+import { captureProcess, killGroup } from './process.mjs';
+import { CLAUDE_MODEL, CLAUDE_VERSION, prerequisiteReason } from './settings.mjs';
+import { normalizeTrace, summarizeTrace } from './trace.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const cli = resolve(here, '../../bin/cli.js');
+const artifactRoot = resolve(here, '../.artifacts/tier2'); // Stable from any command cwd.
+const json = (path, value) => writeFile(path, JSON.stringify(value, null, 2) + '\n');
+const text = async (path) => readFile(path, 'utf8').catch(() => '');
+const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
+const paragraph = (...sentences) => sentences.join(' ');
 
 async function sourceSnapshot(workspace) {
   const files = ['App.js'];
@@ -21,7 +30,9 @@ async function sourceSnapshot(workspace) {
       await readFile(join(workspace, 'src', file));
       files.push(`src/${file}`);
     } catch (error) {
-      if (error.code !== 'EISDIR') throw error;
+      if (error.code !== 'EISDIR') {
+        throw error;
+      }
     }
   }
   return JSON.stringify(
@@ -30,13 +41,6 @@ async function sourceSnapshot(workspace) {
     )
   );
 }
-
-const here = dirname(fileURLToPath(import.meta.url));
-const cli = resolve(here, '../../bin/cli.js');
-const artifactRoot = resolve(here, '../artifacts/tier2'); // Stable from any command cwd.
-const json = (path, value) => writeFile(path, JSON.stringify(value, null, 2) + '\n');
-const text = async (path) => readFile(path, 'utf8').catch(() => '');
-const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 
 async function freePort() {
   const server = createServer();
@@ -66,8 +70,9 @@ export async function runTier2(input, signal) {
     'claude.stderr.log',
     'workspace.diff',
     'agent-cli.events.jsonl',
-  ])
+  ]) {
     await writeFile(join(artifacts, name), '');
+  }
   const skipReason = prerequisiteReason();
   if (skipReason) {
     const output = { status: 'skipped', reason: skipReason, checks: [] };
@@ -78,14 +83,14 @@ export async function runTier2(input, signal) {
   await persistOutcome({ status: 'error', reason: 'Run interrupted before completion' });
   const deadline = AbortSignal.any([...(signal ? [signal] : []), AbortSignal.timeout(27 * 60_000)]);
   let env;
-  let workspace,
-    browser,
-    baselineReady = false,
-    claudeProcess = null,
-    prompt = '';
-  const checks = [],
-    errors = [],
-    cleanups = [];
+  let workspace;
+  let browser;
+  let baselineReady = false;
+  let claudeProcess = null;
+  let prompt = '';
+  const checks = [];
+  const errors = [];
+  const cleanups = [];
   const startedAt = Date.now();
   const record = async (name, fn) => {
     try {
@@ -105,12 +110,15 @@ export async function runTier2(input, signal) {
       ...options,
     });
     await json(join(artifacts, `${name}.process.json`), result);
-    if (result.exitCode !== 0 || result.timedOut || result.spawnError || result.signal)
+    if (result.exitCode !== 0 || result.timedOut || result.spawnError || result.signal) {
       throw new Error(`${name} did not complete: ${JSON.stringify(result)}`);
+    }
     return result;
   };
   try {
-    if (input !== 'broken-web-cart') throw new Error(`Unknown scenario: ${input}`);
+    if (input !== 'broken-web-cart') {
+      throw new Error(`Unknown scenario: ${input}`);
+    }
     await access(resolve(here, '../../build/cli/index.js'));
     const runRoot = await mkdtemp(join(tmpdir(), 'agent-cli-tier2-'));
     workspace = join(runRoot, 'app');
@@ -130,20 +138,21 @@ export async function runTier2(input, signal) {
       startedAt: new Date(startedAt).toISOString(),
     });
     const version = await command('claude-version', 'claude', ['--version']);
-    if (
-      !(await text(join(artifacts, 'claude-version.stdout.log'))).startsWith(`${CLAUDE_VERSION} `)
-    )
+    const versionOutput = await text(join(artifacts, 'claude-version.stdout.log'));
+    if (!versionOutput.startsWith(`${CLAUDE_VERSION} `)) {
       throw new Error(
         `Install @anthropic-ai/claude-code@${CLAUDE_VERSION} (version process exited ${version.exitCode})`
       );
+    }
     // Browser is harness-only: a separate pinned tool install, never supplied by the agent's app.
     const require = createRequire(
       process.env.TIER2_PLAYWRIGHT_ROOT
         ? join(resolve(process.env.TIER2_PLAYWRIGHT_ROOT), 'package.json')
         : import.meta.url
     );
-    if (require('playwright/package.json').version !== '1.55.0')
+    if (require('playwright/package.json').version !== '1.55.0') {
       throw new Error('Tier2 requires playwright@1.55.0');
+    }
     browser = await require('playwright').chromium.launch({ headless: true });
     const cancelBrowser = () => {
       void browser.close().catch(() => {});
@@ -209,7 +218,28 @@ export async function runTier2(input, signal) {
       }
       throw new Error(`Port ${port} still answers after dev:stop`);
     });
-    prompt = `Repair this Expo web coffee cart in the current directory. Diagnose its build failure, fix the source, and preserve its UI and item data. The total must multiply each price by quantity: initially $18.00, then $25.50 after Add Coffee, then $28.50 after Add Tea. Keep the heading, controls, and cart-total testID.\nUse the built @expo/agent-cli with: ${quote(process.execPath)} ${quote(cli)} <command>. Read --help to discover flags. Run CLI commands one at a time. Use it to diagnose, export the repaired app for web to dist/, and use its dev command to start the web dev server on port ${port}. Leave that server running when you finish. Verify your work before stopping.\nOnly edit App.js and source files under src/ except src/items.json. Dependencies are installed; do not change manifests, item data, entrypoint, or configuration. Do not deploy, build native apps, use EAS, or change files outside this scratch project. Stop after completing the full task and summarize briefly.`;
+    prompt = [
+      paragraph(
+        'Repair this Expo web coffee cart in the current directory.',
+        'Diagnose its build failure, fix the source, and preserve its UI and item data.',
+        'The total must multiply each price by quantity: initially $18.00, then $25.50 after Add Coffee, then $28.50 after Add Tea.',
+        'Keep the heading, controls, and cart-total testID.'
+      ),
+      paragraph(
+        `Use the built @expo/agent-cli with: ${quote(process.execPath)} ${quote(cli)} <command>.`,
+        'Read --help to discover flags.',
+        'Run CLI commands one at a time.',
+        `Use it to diagnose, export the repaired app for web to dist/, and use its dev command to start the web dev server on port ${port}.`,
+        'Leave that server running when you finish.',
+        'Verify your work before stopping.'
+      ),
+      paragraph(
+        'Only edit App.js and source files under src/ except src/items.json.',
+        'Dependencies are installed; do not change manifests, item data, entrypoint, or configuration.',
+        'Do not deploy, build native apps, use EAS, or change files outside this scratch project.',
+        'Stop after completing the full task and summarize briefly.'
+      ),
+    ].join('\n');
     await writeFile(join(artifacts, 'prompt.txt'), prompt);
     const agentEnv = {
       ...env,
@@ -217,8 +247,11 @@ export async function runTier2(input, signal) {
       CLAUDE_CONFIG_DIR: join(home, '.claude'),
       LOG_EVENTS: join(artifacts, 'agent-cli.events.jsonl'),
     };
-    for (const key of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'])
-      if (process.env[key]) agentEnv[key] = process.env[key];
+    for (const key of ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN']) {
+      if (process.env[key]) {
+        agentEnv[key] = process.env[key];
+      }
+    }
     claudeProcess = await captureProcess(
       'claude',
       [
@@ -253,14 +286,17 @@ export async function runTier2(input, signal) {
     );
     await json(join(artifacts, 'claude.process.json'), claudeProcess);
     await record('source-changed', async () => {
-      if ((await sourceSnapshot(workspace)) === originalSources)
+      if ((await sourceSnapshot(workspace)) === originalSources) {
         throw new Error('No source changed');
+      }
       return 'App/source differs from broken baseline';
     });
     await record('fixture-contract', async () => {
-      for (const [file, contents] of before)
-        if ((await readFile(join(workspace, file), 'utf8')) !== contents)
+      for (const [file, contents] of before) {
+        if ((await readFile(join(workspace, file), 'utf8')) !== contents) {
           throw new Error(`${file} changed`);
+        }
+      }
       return 'Dependency lock, configuration, entrypoint and item data unchanged';
     });
     await record('agent-export', async () => {
@@ -275,8 +311,9 @@ export async function runTier2(input, signal) {
       const response = await fetch(`http://127.0.0.1:${port}/status`, {
         signal: AbortSignal.timeout(10_000),
       });
-      if (!response.ok || (await response.text()).trim() !== 'packager-status:running')
+      if (!response.ok || (await response.text()).trim() !== 'packager-status:running') {
         throw new Error('Metro /status did not confirm a running packager');
+      }
       return { port, status: response.status };
     });
     await record('metro-browser', () =>

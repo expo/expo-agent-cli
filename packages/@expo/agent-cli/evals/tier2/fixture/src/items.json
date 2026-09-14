@@ -1,1 +1,4 @@
-[{"id":"coffee","name":"Coffee","priceCents":750,"quantity":2},{"id":"tea","name":"Tea","priceCents":300,"quantity":1}]
+[
+  { "id": "coffee", "name": "Coffee", "priceCents": 750, "quantity": 2 },
+  { "id": "tea", "name": "Tea", "priceCents": 300, "quantity": 1 }
+]

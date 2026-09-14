@@ -20,9 +20,11 @@ export function isolatedEnvironment(home, parent = process.env) {
 
 /** @param {import('./process.mjs').ProcessResult} proc @param {string} log */
 export function assertBrokenBaseline(proc, log) {
+  // Metro colors its output; the escape byte is the point of this match.
+  // eslint-disable-next-line no-control-regex
   const plain = log.replace(/\x1b\[[0-9;]*m/g, '');
   const missingImport =
-    /Unable to resolve(?: module)?\s+["']?\.\/src\/total["']?\s+from\s+["']?(?:[^\r\n"']*[\/\\])?App\.js(?:["':\s]|$)/.test(
+    /Unable to resolve(?: module)?\s+["']?\.\/src\/total["']?\s+from\s+["']?(?:[^\r\n"']*[/\\])?App\.js(?:["':\s]|$)/.test(
       plain
     );
   if (
@@ -32,8 +34,9 @@ export function assertBrokenBaseline(proc, log) {
     proc.spawnError ||
     proc.signal ||
     !missingImport
-  )
+  ) {
     throw new Error(
       'Fixture did not fail for the intended unresolved ./src/total import in App.js; see baseline logs'
     );
+  }
 }

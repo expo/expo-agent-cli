@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+
 // Independent Tier2 entrypoint; scripts run from the CLI package cwd.
 export default defineConfig({
   root: fileURLToPath(new URL('..', import.meta.url)),
@@ -15,7 +16,7 @@ export default defineConfig({
     retry: 0,
     reporters: ['default', 'json'],
     outputFile: {
-      json: fileURLToPath(new URL('../artifacts/tier2/vitest-results.json', import.meta.url)),
+      json: fileURLToPath(new URL('../.artifacts/tier2/vitest-results.json', import.meta.url)),
     },
   },
 });

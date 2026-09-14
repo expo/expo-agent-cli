@@ -1,1 +1,10 @@
-{"expo":{"name":"Tier2 Cart","slug":"tier2-cart","web":{"bundler":"metro","output":"single"}}}
+{
+  "expo": {
+    "name": "Tier2 Cart",
+    "slug": "tier2-cart",
+    "web": {
+      "bundler": "metro",
+      "output": "single"
+    }
+  }
+}

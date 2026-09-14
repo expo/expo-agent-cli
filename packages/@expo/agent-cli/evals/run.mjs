@@ -503,7 +503,9 @@ async function main() {
   }
 
   if (options.tier === 2) {
-    console.error('Tier 2 moved to Vitest: run AGENT_CLI_TIER2=1 bun run test:evals:tier2 with Claude credentials.');
+    console.error(
+      'Tier 2 moved to Vitest: run AGENT_CLI_TIER2=1 bun run test:evals:tier2 with Claude credentials.'
+    );
     return 1;
   }
 

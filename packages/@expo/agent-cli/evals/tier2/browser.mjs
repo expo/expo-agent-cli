@@ -1,6 +1,6 @@
-import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { resolve, extname, sep } from 'node:path';
+import { createServer } from 'node:http';
+import { extname, resolve, sep } from 'node:path';
 
 export async function serveExport(directory) {
   const root = resolve(directory);
@@ -48,7 +48,9 @@ export async function checkCart(browser, url, screenshotPath) {
   page.setDefaultTimeout(60_000);
   try {
     const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90_000 });
-    if (response?.status() !== 200) throw new Error(`HTTP ${response?.status()} at ${url}`);
+    if (response?.status() !== 200) {
+      throw new Error(`HTTP ${response?.status()} at ${url}`);
+    }
     await page.getByRole('heading', { name: 'Coffee cart' }).waitFor();
     const total = page.getByTestId('cart-total');
     const assertTotal = async (expected) => {
@@ -56,14 +58,18 @@ export async function checkCart(browser, url, screenshotPath) {
         (value) => document.querySelector('[data-testid="cart-total"]')?.textContent === value,
         expected
       );
-      if ((await total.textContent()) !== expected) throw new Error(`Expected total ${expected}`);
+      if ((await total.textContent()) !== expected) {
+        throw new Error(`Expected total ${expected}`);
+      }
     };
     await assertTotal('$18.00');
     await page.getByRole('button', { name: 'Add Coffee', exact: true }).click();
     await assertTotal('$25.50');
     await page.getByRole('button', { name: 'Add Tea', exact: true }).click();
     await assertTotal('$28.50');
-    if (errors.length) throw new Error(`Browser page errors: ${errors.join('; ')}`);
+    if (errors.length) {
+      throw new Error(`Browser page errors: ${errors.join('; ')}`);
+    }
     return { url, totals: ['$18.00', '$25.50', '$28.50'], pageErrors: errors };
   } finally {
     try {

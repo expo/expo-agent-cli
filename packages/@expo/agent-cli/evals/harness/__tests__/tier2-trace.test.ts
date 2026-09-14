@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { summarizeTrace, normalizeTrace } from '../../tier2/trace.mjs';
+
+import { normalizeTrace, summarizeTrace } from '../../tier2/trace.mjs';
+
 const lines = (...events: unknown[]) => events.map((e) => JSON.stringify(e)).join('\n');
-describe('Claude stream-json diagnostics', () => {
-  it('counts tool calls/results without grading assistant claims', () => {
+
+describe(summarizeTrace, () => {
+  it('should count tool calls/results without grading assistant claims', () => {
     const result = summarizeTrace(
       lines(
         { type: 'system', subtype: 'init', model: 'pinned-model' },
@@ -30,7 +33,8 @@ describe('Claude stream-json diagnostics', () => {
     expect(result).not.toHaveProperty('pass');
     expect(result).not.toHaveProperty('status');
   });
-  it('deduplicates repeated tool blocks and tolerates unknown event types', () => {
+
+  it('should deduplicate repeated tool blocks and tolerate unknown event types', () => {
     const event = {
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 't', name: 'Read' }] },
@@ -39,12 +43,14 @@ describe('Claude stream-json diagnostics', () => {
     expect(s.tools).toEqual({ Read: 1 });
     expect(s.events.rate_limit_event).toBe(1);
   });
-  it('records malformed JSON and invalid events by line, including a truncated final line', () => {
-    const s = summarizeTrace('\nnot json\nnull\n42\n{}\n{"type":');
-    expect(s.malformedLines).toEqual([2, 3, 4, 5, 6]);
-    expect(s.terminal).toBeNull();
+
+  it('should handle CRLF and a complete last line without a newline', () => {
+    expect(
+      summarizeTrace(' {"type":"result","subtype":"success","is_error":false}\r\n').results
+    ).toHaveLength(1);
   });
-  it('retains all terminal events so a later success cannot hide an earlier error', () => {
+
+  it('should retain all terminal events so a later success cannot hide an earlier error', () => {
     const s = summarizeTrace(
       lines(
         { type: 'result', subtype: 'error_max_turns', is_error: true },
@@ -53,36 +59,45 @@ describe('Claude stream-json diagnostics', () => {
     );
     expect(s.results).toHaveLength(2);
   });
-  it('handles CRLF and a complete last line without a newline', () => {
-    expect(
-      summarizeTrace(' {"type":"result","subtype":"success","is_error":false}\r\n').results
-    ).toHaveLength(1);
+
+  it('should record malformed JSON and invalid events by line, including a truncated final line', () => {
+    const s = summarizeTrace('\nnot json\nnull\n42\n{}\n{"type":');
+    expect(s.malformedLines).toEqual([2, 3, 4, 5, 6]);
+    expect(s.terminal).toBeNull();
   });
 });
 
-it('retains normalized Claude calls, errors and the final answer for diagnostics', () => {
-  const raw = lines(
-    {
-      type: 'assistant',
-      message: {
-        content: [{ type: 'tool_use', id: 'bash1', name: 'Bash', input: { command: 'false' } }],
+describe(normalizeTrace, () => {
+  it('should retain normalized Claude calls, errors and the final answer for diagnostics', () => {
+    const raw = lines(
+      {
+        type: 'assistant',
+        message: {
+          content: [{ type: 'tool_use', id: 'bash1', name: 'Bash', input: { command: 'false' } }],
+        },
       },
-    },
-    {
-      type: 'user',
-      message: {
-        content: [{ type: 'tool_result', tool_use_id: 'bash1', content: 'exit 1', is_error: true }],
+      {
+        type: 'user',
+        message: {
+          content: [
+            { type: 'tool_result', tool_use_id: 'bash1', content: 'exit 1', is_error: true },
+          ],
+        },
       },
-    },
-    { type: 'assistant', message: { content: [{ type: 'text', text: 'Fixed it' }] } }
-  );
-  const events = normalizeTrace(raw, 'repair');
-  expect(events.filter((event) => event.type === 'tool_call')).toHaveLength(1);
-  expect(events).toContainEqual(
-    expect.objectContaining({
-      type: 'tool_result',
-      error: expect.objectContaining({ name: 'ToolError' }),
-    })
-  );
-  expect(events.at(-1)).toMatchObject({ type: 'message', role: 'assistant', content: 'Fixed it' });
+      { type: 'assistant', message: { content: [{ type: 'text', text: 'Fixed it' }] } }
+    );
+    const events = normalizeTrace(raw, 'repair');
+    expect(events.filter((event) => event.type === 'tool_call')).toHaveLength(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool_result',
+        error: expect.objectContaining({ name: 'ToolError' }),
+      })
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: 'message',
+      role: 'assistant',
+      content: 'Fixed it',
+    });
+  });
 });

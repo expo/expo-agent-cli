@@ -12,8 +12,9 @@ export function assertCliEvidence(raw, port) {
       } catch {
         throw new Error(`Malformed CLI event line ${index + 1}`);
       }
-      if (!event || typeof event._e !== 'string')
+      if (!event || typeof event._e !== 'string') {
         throw new Error(`Invalid CLI event line ${index + 1}`);
+      }
       return event;
     });
   const exports = events.filter(
@@ -26,10 +27,16 @@ export function assertCliEvidence(raw, port) {
   let pendingExport = false;
   let successfulExports = 0;
   for (const event of events) {
-    if (event._e === 'root:init' || event._e === 'cli:start_plan') pendingExport = false;
-    if (event._e === 'cli:expo_passthrough') pendingExport = exports.includes(event);
+    if (event._e === 'root:init' || event._e === 'cli:start_plan') {
+      pendingExport = false;
+    }
+    if (event._e === 'cli:expo_passthrough') {
+      pendingExport = exports.includes(event);
+    }
     if (event._e === 'cli:expo_exit' && pendingExport) {
-      if (event.code === 0 && !event.signal) successfulExports++;
+      if (event.code === 0 && !event.signal) {
+        successfulExports++;
+      }
       pendingExport = false;
     }
   }
@@ -53,10 +60,11 @@ export function assertCliEvidence(raw, port) {
           Number.isInteger(e.pid) &&
           e.pid > 0))
   );
-  if (!successfulExports || !plans.length || !starts.length || !servers.length)
+  if (!successfulExports || !plans.length || !starts.length || !servers.length) {
     throw new Error(
       'Missing agent-cli export invocation or executed web dev plan/server events; direct Expo, help and plan-only calls do not satisfy Tier2'
     );
+  }
   return {
     exportInvocations: exports.length,
     successfulExports,

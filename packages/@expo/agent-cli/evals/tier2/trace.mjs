@@ -3,7 +3,9 @@
  * malformedLines: number[], models: string[], results: Array<Record<string, any>>,
  * terminal: Record<string, any> | null}} TraceSummary
  */
-/** Claude stream-json diagnostics. No transcript-based outcome grading.
+
+/**
+ * Claude stream-json diagnostics. No transcript-based outcome grading.
  * @param {string} raw
  * @returns {TraceSummary}
  */
@@ -21,19 +23,24 @@ export function summarizeTrace(raw) {
   const seenTools = new Set();
   const seenResults = new Set();
   for (const [index, line] of raw.split('\n').entries()) {
-    if (!line.trim()) continue;
+    if (!line.trim()) {
+      continue;
+    }
     let event;
     try {
       event = JSON.parse(line);
-      if (!event || typeof event !== 'object' || typeof event.type !== 'string')
+      if (!event || typeof event !== 'object' || typeof event.type !== 'string') {
         throw new Error('invalid event');
+      }
     } catch {
       summary.malformedLines.push(index + 1);
       continue;
     }
     summary.events[event.type] = (summary.events[event.type] ?? 0) + 1;
     const model = event.model ?? event.message?.model;
-    if (typeof model === 'string' && !summary.models.includes(model)) summary.models.push(model);
+    if (typeof model === 'string' && !summary.models.includes(model)) {
+      summary.models.push(model);
+    }
     const content = event.message?.content;
     for (const block of Array.isArray(content) ? content : []) {
       if (block.type === 'tool_use' && typeof block.name === 'string' && !seenTools.has(block.id)) {
@@ -72,7 +79,8 @@ export function summarizeTrace(raw) {
   return summary;
 }
 
-/** Flat diagnostic events; no stream deltas (complete assistant messages are canonical).
+/**
+ * Flat diagnostic events; no stream deltas (complete assistant messages are canonical).
  * @param {string} raw
  * @param {string} prompt
  * @returns {Record<string, unknown>[]}
@@ -90,13 +98,19 @@ export function normalizeTrace(raw, prompt) {
     } catch {
       continue;
     }
-    if (!event || !['assistant', 'user'].includes(event.type)) continue;
+    if (!event || !['assistant', 'user'].includes(event.type)) {
+      continue;
+    }
     const message = event.message;
-    if (!Array.isArray(message?.content)) continue;
+    if (!Array.isArray(message?.content)) {
+      continue;
+    }
     for (const [i, block] of message.content.entries()) {
       if (block.type === 'text' && event.type === 'assistant') {
         const key = `${message.id ?? event.uuid}:${i}:${block.text}`;
-        if (seenMessages.has(key)) continue;
+        if (seenMessages.has(key)) {
+          continue;
+        }
         seenMessages.add(key);
         events.push({ type: 'message', role: 'assistant', content: block.text });
       } else if (

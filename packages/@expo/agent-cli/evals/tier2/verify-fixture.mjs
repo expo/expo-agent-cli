@@ -1,22 +1,23 @@
 // Free, explicit fixture verification. Never imports or invokes the Claude harness.
+import { randomUUID } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import { createServer } from 'node:net';
-import { randomUUID } from 'node:crypto';
-import { captureProcess } from './process.mjs';
-import { assertBrokenBaseline, isolatedEnvironment } from './fixture-tools.mjs';
+
 import { checkCart, serveExport } from './browser.mjs';
 import { assertCliEvidence } from './cli-evidence.mjs';
+import { assertBrokenBaseline, isolatedEnvironment } from './fixture-tools.mjs';
+import { captureProcess } from './process.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const artifacts = resolve(here, '../artifacts/tier2/fixture-check', randomUUID());
+const artifacts = resolve(here, '../.artifacts/tier2/fixture-check', randomUUID());
 await mkdir(artifacts, { recursive: true });
 const runRoot = await mkdtemp(join(tmpdir(), 'tier2-fixture-check-'));
-const workspace = join(runRoot, 'app'),
-  home = join(runRoot, 'home');
+const workspace = join(runRoot, 'app');
+const home = join(runRoot, 'home');
 await mkdir(home);
 await cp(join(here, 'fixture'), workspace, { recursive: true });
 const env = isolatedEnvironment(home);
@@ -37,6 +38,7 @@ const report = {
 const json = (name, value) =>
   writeFile(join(artifacts, name), JSON.stringify(value, null, 2) + '\n');
 const text = (path) => readFile(path, 'utf8');
+
 async function command(name, bin, args, childEnv = env) {
   const result = await captureProcess(bin, args, {
     cwd: workspace,
@@ -48,16 +50,22 @@ async function command(name, bin, args, childEnv = env) {
   await json(`${name}.process.json`, result);
   return result;
 }
+
 function requireSuccess(name, result) {
-  if (result.exitCode !== 0 || result.signal || result.timedOut || result.spawnError)
+  if (result.exitCode !== 0 || result.signal || result.timedOut || result.spawnError) {
     throw new Error(`${name} failed: ${JSON.stringify(result)}`);
+  }
 }
-let browser, metroAbort, metroResult;
+
+let browser;
+let metroAbort;
+let metroResult;
 try {
   const lockBefore = await text(join(workspace, 'package-lock.json'));
   requireSuccess('npm ci', await command('npm-ci', 'npm', ['ci', '--no-audit', '--no-fund']));
-  if ((await text(join(workspace, 'package-lock.json'))) !== lockBefore)
+  if ((await text(join(workspace, 'package-lock.json'))) !== lockBefore) {
     throw new Error('npm ci changed the lockfile');
+  }
   report.checks.push('clean npm ci; lock unchanged');
   const pkg = JSON.parse(await text(join(workspace, 'package.json')));
   await json(
@@ -96,8 +104,9 @@ try {
         ? join(resolve(process.env.TIER2_PLAYWRIGHT_ROOT), 'package.json')
         : import.meta.url
     );
-    if (require('playwright/package.json').version !== '1.55.0')
+    if (require('playwright/package.json').version !== '1.55.0') {
       throw new Error('Install playwright@1.55.0');
+    }
     browser = await require('playwright').chromium.launch({ headless: true });
     const server = await serveExport(join(workspace, 'dist'));
     const page = await browser.newPage();
@@ -105,8 +114,9 @@ try {
       await page.goto(server.url);
       await page.getByTestId('cart-total').waitFor();
       const total = await page.getByTestId('cart-total').textContent();
-      if (total !== '$10.50')
+      if (total !== '$10.50') {
         throw new Error(`Expected remaining arithmetic bug ($10.50), got ${total}`);
+      }
       await page.screenshot({ path: join(artifacts, 'import-only-arithmetic-bug.png') });
       report.checks.push(
         'browser confirms arithmetic remains broken after import-only repair ($10.50)'
@@ -188,10 +198,14 @@ try {
           ready = true;
           break;
         }
-      } catch {}
+      } catch {
+        /* not listening yet */
+      }
       await new Promise((accept) => setTimeout(accept, 250));
     }
-    if (!ready) throw new Error('Metro did not become ready');
+    if (!ready) {
+      throw new Error('Metro did not become ready');
+    }
     await checkCart(browser, `http://127.0.0.1:${port}`, join(artifacts, 'metro.png'));
     report.checks.push('real Metro status and browser totals/button checks pass');
     if (cli) {
@@ -211,8 +225,12 @@ try {
     }
   }
   metroAbort?.abort();
-  if (metroResult) await json('metro.process.json', await metroResult);
-  if (browser) await browser.close();
+  if (metroResult) {
+    await json('metro.process.json', await metroResult);
+  }
+  if (browser) {
+    await browser.close();
+  }
   await json('fixture-verification.json', report);
   console.log(JSON.stringify({ artifacts, ...report }, null, 2));
 }

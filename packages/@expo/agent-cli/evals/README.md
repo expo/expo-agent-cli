@@ -121,7 +121,7 @@ next model turn; invalid batches execute nothing.
 
 ## Tier 2: long end-to-end task on EAS
 
-`test:evals:tier2` uses `describeEval` and a Claude Code harness. One long task starts from a locked,
+`test:evals:tier2` runs one ordinary Vitest test through a Claude Code harness. One long task starts from a locked,
 real Expo 57 coffee cart with a missing import and wrong quantity math. The agent must diagnose,
 repair, export, and run it using expo-agent-cli. Grading independently checks the cart in Metro,
 the agent's export, and a fresh export: $18.00 initially, $25.50 after adding Coffee, $28.50 after
@@ -148,7 +148,7 @@ Its production environment needs a Claude credential. A missing credential produ
 runner and assertion failures retain their failing status. The workflow is advisory through merge
 policy, rather than hiding failures with an unconditional zero exit.
 
-`evals/artifacts/tier2/` contains the raw stream, CLI events, process logs/status, source diff,
+`evals/.artifacts/tier2/` contains the raw stream, CLI events, process logs/status, source diff,
 browser screenshots, independent outcomes and normalized Vitest report. A mechanical trace
 summary records model/tool usage, errors, turns and provider-reported cost. It is diagnostic,
 not a model judge. Each attempt has its own `runs/` directory. Workspaces remain in OS temp for
