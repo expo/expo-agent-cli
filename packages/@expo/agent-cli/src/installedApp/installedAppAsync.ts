@@ -4,6 +4,13 @@
 
 import { PROGRAM_PREFIX } from '../programName';
 import { generateFingerprintAsync, type FingerprintResult } from '../project/fingerprint';
+import { resolveFingerprintCliVersion } from '../project/fingerprintCache';
+import {
+  formatPrebuildChanges,
+  getNativeDirectoryStaleness,
+  type NativeDirectoryStaleness,
+  type PrebuildSourceChange,
+} from '../project/prebuildMarker';
 import { readConfiguredAppId } from '../runtime/appId';
 import { CommandError } from '../utils/errors';
 import { readInstalledFingerprintAndroidAsync } from './android';
@@ -17,9 +24,11 @@ export type CheckStatus = 'up-to-date' | 'rebuild-required' | 'unknown';
 export type CheckReason =
   | 'hash-match'
   | 'hash-mismatch'
+  | 'prebuild-stale'
   | 'no-device'
   | 'app-not-installed'
   | 'no-embedded-fingerprint'
+  | 'fingerprint-version-mismatch'
   | 'no-response'
   | 'app-id-unknown'
   | 'fingerprint-unavailable'
@@ -37,6 +46,10 @@ export interface PlatformCheck {
   currentHash: string | null;
   /** Where the project hash came from: `computed`, `cache`, or null when there is none. */
   fingerprintSource: 'computed' | 'cache' | null;
+  /** Whether the generated native directories match the project, from the prebuild marker. */
+  prebuildStatus: NativeDirectoryStaleness['status'];
+  /** The prebuild-relevant sources that moved. Empty unless `prebuildStatus` is `stale`. */
+  prebuildChanges: PrebuildSourceChange[];
 }
 
 /** What the apps installed on this machine's devices say about the project. */
@@ -58,6 +71,8 @@ export interface CheckDependencies {
   readInstalled?: InstalledFingerprintReader;
   generateFingerprint?: typeof generateFingerprintAsync;
   readAppId?: typeof readConfiguredAppId;
+  readNativeDirectoryStaleness?: typeof getNativeDirectoryStaleness;
+  readFingerprintVersion?: typeof resolveFingerprintCliVersion;
 }
 
 const defaultReader: InstalledFingerprintReader = ({ platform, appId, device, expectedHash }) =>
@@ -72,6 +87,8 @@ export async function checkInstalledAppAsync(
     readInstalled = defaultReader,
     generateFingerprint = generateFingerprintAsync,
     readAppId = readConfiguredAppId,
+    readNativeDirectoryStaleness = getNativeDirectoryStaleness,
+    readFingerprintVersion = resolveFingerprintCliVersion,
   }: CheckDependencies = {}
 ): Promise<InstalledAppReport> {
   const checks = await Promise.all(
@@ -80,6 +97,8 @@ export async function checkInstalledAppAsync(
         readInstalled,
         generateFingerprint,
         readAppId,
+        readNativeDirectoryStaleness,
+        readFingerprintVersion,
       })
         .catch((error: unknown) => {
           // Every platform this machine might reach is checked, so a missing device tool is one
@@ -147,8 +166,33 @@ async function checkPlatformAsync(
     });
   }
 
+  // Stale generated directories need `prebuild` before the build: a plain rebuild would compile
+  // the old directories and embed the new hash, and the mismatch would vanish while the problem
+  // stayed. No device is needed for this, so it is decided before the installed result.
+  const currentFingerprintVersion = deps.readFingerprintVersion(projectRoot);
+  const staleness = deps.readNativeDirectoryStaleness(projectRoot, platform, {
+    sources: fingerprint.sources,
+    fingerprintVersion: currentFingerprintVersion,
+  });
+  const prebuild = { prebuildStatus: staleness.status, prebuildChanges: staleness.changes };
+  if (staleness.status === 'stale') {
+    const named = formatPrebuildChanges(staleness.changes);
+    return verdict('prebuild-stale', {
+      currentHash: fingerprint.hash,
+      fingerprintSource: fingerprint.source ?? null,
+      ...prebuild,
+      recommendation: `${named ? `${named} changed after the native directories were generated` : 'The native directories were generated from a different project state'}. Regenerate them, then rebuild.`,
+      // Through this CLI, not `npx expo prebuild`: the marker is recorded by the passthrough here,
+      // so advising the bare command would leave the next run with nothing to compare against.
+      commands: [`${PROGRAM_PREFIX} prebuild -p ${platform}`, `npx expo run:${platform}`],
+    });
+  }
+
   const installed = await installedPromise;
-  const check = installedVerdict(installed, platform, fingerprint, options.device);
+  const check = {
+    ...installedVerdict(installed, platform, fingerprint, options.device, currentFingerprintVersion),
+    ...prebuild,
+  };
   return installed.hint
     ? { ...check, recommendation: `${check.recommendation} ${installed.hint}` }
     : check;
@@ -159,7 +203,8 @@ function installedVerdict(
   installed: InstalledFingerprintResult,
   platform: InstalledAppPlatform,
   fingerprint: FingerprintResult,
-  deviceFilter: string | null
+  deviceFilter: string | null,
+  currentFingerprintVersion: string | null
 ): PlatformCheck {
   const current = {
     currentHash: fingerprint.hash,
@@ -196,7 +241,21 @@ function installedVerdict(
         device: installed.device,
         recommendation: `The app on ${installed.device.name} did not report its fingerprint in time. Likely causes: the phone and this computer are not on the same network; the macOS firewall or the app's Local Network permission blocks the connection; the device screen is locked; the app is a release build or lacks expo-dev-client, so it can never respond. If the build predates this check, rebuild with npx expo run:ios --device.`,
       });
-    case 'ok':
+    case 'ok': {
+      // Two hashes from different `@expo/fingerprint` versions are not comparable: reason tags and
+      // hashing change between them, so an unchanged project hashes differently across an SDK
+      // upgrade. Only a known difference counts — a null version means "cannot tell", which is what
+      // a build made before the version was embedded reports, and what a phone reports today.
+      const embeddedVersion = installed.fingerprintVersion;
+      if (embeddedVersion && currentFingerprintVersion && embeddedVersion !== currentFingerprintVersion) {
+        return verdict('fingerprint-version-mismatch', {
+          ...current,
+          device: installed.device,
+          installedHash: installed.hash,
+          recommendation: `The installed app was fingerprinted by @expo/fingerprint ${embeddedVersion} and this project uses ${currentFingerprintVersion}, so the two hashes cannot be compared. Rebuild to settle it.`,
+          commands: rebuild,
+        });
+      }
       if (installed.hash === fingerprint.hash) {
         return verdict('hash-match', {
           ...current,
@@ -212,6 +271,7 @@ function installedVerdict(
         recommendation: 'Native inputs changed since the installed app was built. Rebuild the app.',
         commands: rebuild,
       });
+    }
   }
 }
 
@@ -224,7 +284,7 @@ function verdict(
   const status: CheckStatus =
     reason === 'hash-match'
       ? 'up-to-date'
-      : reason === 'hash-mismatch'
+      : reason === 'hash-mismatch' || reason === 'prebuild-stale'
         ? 'rebuild-required'
         : 'unknown';
   return {
@@ -235,6 +295,8 @@ function verdict(
     installedHash: null,
     currentHash: null,
     fingerprintSource: null,
+    prebuildStatus: 'unknown',
+    prebuildChanges: [],
     ...fields,
   };
 }
