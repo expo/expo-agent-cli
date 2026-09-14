@@ -1,5 +1,6 @@
 import {
   matchesDeviceFilter,
+  parseEmbeddedFingerprint,
   pickBestResult,
   rankInstalledResult,
   type InstalledFingerprintResult,
@@ -19,6 +20,44 @@ const noFile: InstalledFingerprintResult = { status: 'no-embedded-fingerprint', 
 const notInstalled: InstalledFingerprintResult = { status: 'app-not-installed', appId, device };
 const silent: InstalledFingerprintResult = { status: 'no-response', appId, device };
 const noDevice: InstalledFingerprintResult = { status: 'no-device' };
+
+describe(parseEmbeddedFingerprint, () => {
+  // The writer is `createFingerprintFile.js` in expo/expo (#49905). It embeds the sources beside
+  // the hash, and this reader takes only what it compares — new keys there must not break it.
+  it(`reads the hash and version, and ignores the sources the writer embeds`, () => {
+    const contents = JSON.stringify({
+      hash: 'abc123',
+      sources: [{ type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'aaa' }],
+      fingerprintVersion: '0.21.0',
+    });
+    expect(parseEmbeddedFingerprint(contents)).toEqual({
+      hash: 'abc123',
+      fingerprintVersion: '0.21.0',
+    });
+  });
+
+  it(`reads a missing or non-string version as null`, () => {
+    expect(parseEmbeddedFingerprint('{"hash":"abc"}')).toEqual({
+      hash: 'abc',
+      fingerprintVersion: null,
+    });
+    expect(parseEmbeddedFingerprint('{"hash":"abc","fingerprintVersion":7}')).toEqual({
+      hash: 'abc',
+      fingerprintVersion: null,
+    });
+  });
+
+  it.each([
+    ['malformed JSON', 'not json'],
+    ['a bare hash, the pre-#49905 format', 'abc123'],
+    ['no hash', '{"fingerprintVersion":"0.21.0"}'],
+    ['an empty hash', '{"hash":""}'],
+    ['a non-object', '[]'],
+    ['null', 'null'],
+  ])(`returns null for %s`, (_description, contents) => {
+    expect(parseEmbeddedFingerprint(contents)).toBeNull();
+  });
+});
 
 describe(rankInstalledResult, () => {
   it(`ranks a matching app above every other answer, and silence above nothing`, () => {
