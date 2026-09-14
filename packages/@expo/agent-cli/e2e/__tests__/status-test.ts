@@ -405,6 +405,7 @@ describe('@expo/agent-cli status', () => {
         'project',
         'expoGo',
         'freshness',
+        'installed',
         'builds',
         'devServer',
         'device',

@@ -5,6 +5,7 @@
 // Expo CLI's. Which commands reach here is `forwardedCommands` in `src/commandRegistry.ts`, a fixed
 // list: a name in neither surface never gets this far, because it is not a command at all.
 
+
 import { authCommands } from '../commandRegistry';
 import { event } from '../events';
 import type { Command } from '../types';

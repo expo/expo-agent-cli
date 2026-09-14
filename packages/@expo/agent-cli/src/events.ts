@@ -244,6 +244,12 @@ declare module '2g' {
       /** Whether this machine has a device to open the app on: `present`, `absent`, `unknown`. */
       localDevice: string;
       /**
+       * What the app installed on a device says: `up-to-date`, `rebuild-required`, `unknown`.
+       *
+       * Null on a default run, which reads no device. @see llp/0028-installed-app-check.rfc.md
+       */
+      installed: string | null;
+      /**
        * The freshest answer per platform, across both backends.
        *
        * A platform whose fingerprint matches a finished EAS build needs no native build, whatever

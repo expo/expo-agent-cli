@@ -4,7 +4,7 @@
 
 import { IMPACT_CLASS_ORDER } from '../../impact/types';
 import { CommandError } from '../../utils/errors';
-import { resolveAssertClass, resolveBuildId } from '../resolveOptions';
+import { resolveAssertClass, resolveBuildId, resolveDeviceFlag } from '../resolveOptions';
 
 describe(resolveAssertClass, () => {
   it(`should answer null when the flag was not given`, () => {
@@ -56,5 +56,23 @@ describe(resolveBuildId, () => {
 
   it(`should refuse an empty id rather than asking the service about nothing`, () => {
     expect(() => resolveBuildId('   ', { explain: true })).toThrow(/--build needs the id/);
+  });
+});
+
+describe(resolveDeviceFlag, () => {
+  it(`is null when the flag is absent`, () => {
+    expect(resolveDeviceFlag(undefined, { explain: false })).toBeNull();
+  });
+
+  it(`returns the trimmed name under --explain`, () => {
+    expect(resolveDeviceFlag('  iPhone 17 Pro  ', { explain: true })).toBe('iPhone 17 Pro');
+  });
+
+  it(`rejects an empty value`, () => {
+    expect(() => resolveDeviceFlag('   ', { explain: true })).toThrow(/needs a simulator name/);
+  });
+
+  it(`rejects --device without --explain, because a default report reads no device`, () => {
+    expect(() => resolveDeviceFlag('iPhone 17', { explain: false })).toThrow(/needs --explain/);
   });
 });
