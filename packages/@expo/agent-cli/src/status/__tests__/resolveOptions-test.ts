@@ -4,7 +4,12 @@
 
 import { IMPACT_CLASS_ORDER } from '../../impact/types';
 import { CommandError } from '../../utils/errors';
-import { resolveAssertClass, resolveBuildId, resolveDeviceFlag } from '../resolveOptions';
+import {
+  resolveAssertClass,
+  resolveBuildId,
+  resolveDeviceFlag,
+  resolveDeviceTimeoutFlag
+} from '../resolveOptions';
 
 describe(resolveAssertClass, () => {
   it(`should answer null when the flag was not given`, () => {
@@ -74,5 +79,30 @@ describe(resolveDeviceFlag, () => {
 
   it(`rejects --device without --explain, because a default report reads no device`, () => {
     expect(() => resolveDeviceFlag('iPhone 17', { explain: false })).toThrow(/needs --explain/);
+  });
+});
+
+describe(resolveDeviceTimeoutFlag, () => {
+  it(`is null when the flag is absent`, () => {
+    expect(resolveDeviceTimeoutFlag(undefined, { explain: true })).toBeNull();
+  });
+
+  it(`reads seconds and returns milliseconds`, () => {
+    expect(resolveDeviceTimeoutFlag('45', { explain: true })).toBe(45_000);
+  });
+
+  it.each([
+    ['zero', '0'],
+    ['negative', '-5'],
+    ['fractional', '1.5'],
+    ['words', 'soon'],
+    ['empty', '  '],
+    ['out of range', '9999']
+  ])(`rejects %s`, (_description, value) => {
+    expect(() => resolveDeviceTimeoutFlag(value, { explain: true })).toThrow(/--device-timeout/);
+  });
+
+  it(`needs --explain, like --device`, () => {
+    expect(() => resolveDeviceTimeoutFlag('45', { explain: false })).toThrow(/--explain/);
   });
 });

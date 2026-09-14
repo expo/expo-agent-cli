@@ -19,6 +19,7 @@ export const statusHelp: CommandHelp = {
     `--device <name|udid|serial>  Only the matching simulator or device, and the consent to ask\n` +
       `                          a physical iPhone, which is done by launching the app on it.\n` +
       `                          Needs --explain`,
+    `--device-timeout <secs>   Seconds a phone gets to answer (default: 15). Needs --explain`,
     `--dev-server-url <url>    Dev server to probe (default: the project's own, then 8081-8085)`,
     `--no-followups            Leave the suggested follow-up commands out of the report`,
     `--no-fingerprint-cache    Hash the project again instead of revalidating the cached hash`,
@@ -90,6 +91,7 @@ export const agentCliStatus: Command = async (argv) => {
       '--assert': String,
       '--build': String,
       '--device': String,
+      '--device-timeout': String,
       '--dev-server-url': String,
       '--no-followups': Boolean,
       '--no-fingerprint-cache': Boolean,
@@ -109,7 +111,7 @@ export const agentCliStatus: Command = async (argv) => {
     require('../utils/findUp') as typeof import('../utils/findUp');
   const { resolveDevServerUrlFlag } =
     require('../runtime/devServer') as typeof import('../runtime/devServer');
-  const { resolveAssertClass, resolveBuildId, resolveDeviceFlag } =
+  const { resolveAssertClass, resolveBuildId, resolveDeviceFlag, resolveDeviceTimeoutFlag } =
     require('./resolveOptions') as typeof import('./resolveOptions');
   const { printStatusAsync } = require('./statusAsync') as typeof import('./statusAsync');
 
@@ -120,6 +122,7 @@ export const agentCliStatus: Command = async (argv) => {
     const assertClass = resolveAssertClass(args['--assert']);
     const buildId = resolveBuildId(args['--build'], { explain });
     const device = resolveDeviceFlag(args['--device'], { explain });
+    const installedTimeoutMs = resolveDeviceTimeoutFlag(args['--device-timeout'], { explain });
 
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
     const explicitDevServerUrl =
@@ -131,6 +134,7 @@ export const agentCliStatus: Command = async (argv) => {
       assert: assertClass,
       buildId,
       device,
+      installedTimeoutMs,
       followups: !args['--no-followups'],
       // Undefined rather than `true` when the flag is absent, so `AGENT_CLI_NO_FINGERPRINT_CACHE`
       // still decides: a flag that was not passed states nothing.

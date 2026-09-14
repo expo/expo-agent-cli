@@ -103,6 +103,8 @@ export interface StatusOptions {
   devServerReadyTimeoutMs?: number;
   /** Overrides {@link DEVICE_PROBE_TIMEOUT_MS}, for tests. */
   deviceProbeTimeoutMs?: number;
+  /** `--device-timeout`: how long a physical iPhone gets to report its fingerprint. */
+  installedTimeoutMs?: number | null;
   /**
    * The deep dive: `--explain`.
    *
@@ -380,6 +382,7 @@ export async function collectStatusReportAsync(
         lookUp: !!options.explain,
         device: options.device,
         fingerprintCache: options.fingerprintCache,
+        timeoutMs: options.installedTimeoutMs ?? undefined,
       })
     ),
   ]);
