@@ -14,8 +14,5 @@
   "devDependencies": {
     "oxfmt": "^0.66.0",
     "oxlint": "^1.81.0"
-  },
-  "patchedDependencies": {
-    "@expo/agent-eval-vitest@0.0.1": "patches/@expo%2Fagent-eval-vitest@0.0.1.patch"
   }
 }

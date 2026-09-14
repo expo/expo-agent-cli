@@ -5,18 +5,12 @@ and the built CLI as a subprocess. The model chooses commands and sees their act
 its next turn. Expected results are assertions outside the agent context. The driver requires project-specific
 advice to be grounded in observed CLI results; it supplies no case-specific command or answer.
 
-We use the published `@expo/agent-eval-vitest@0.0.1` package. Each `.eval.ts` file keeps
+We use the published `@expo/agent-eval-vitest@0.0.2` package. Each `.eval.ts` file keeps
 its developer prompt, fixture selection, and named checks together. The kit runs the agent once,
 reports each check independently, and owns workspace cleanup and per-case `result.json` files.
 Our adapter retains native Ollama function calls, pinned inference settings, CLI subprocesses,
 and CLI-specific fixture evidence. The package's JSON-action Ollama runner is not used because
 it would change the model interaction being evaluated. No model judges are required.
-
-Version `0.0.1` needs the checked-in Bun patch for Vitest 4.1: its cleanup hook must
-receive the suite as the second argument (`afterAll(async ({}, suite) => ...)`). Without
-this patch, checks run but cleanup and result writing fail. Remove it after upgrading to a
-package release that supports that hook signature. Vitest 4.0.18 is not a suitable fallback
-for this repository's existing unit-test mocks.
 
 From this package:
 
