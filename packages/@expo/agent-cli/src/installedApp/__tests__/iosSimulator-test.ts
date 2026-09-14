@@ -71,6 +71,7 @@ describe(readInstalledFingerprintIosSimulatorAsync, () => {
         status: 'ok',
         hash: 'abc123',
         fingerprintVersion: '0.21.0',
+        sources: [],
         appId: APP_ID,
         device: { name: 'iPhone 17 Pro', identifier: 'UDID-1' },
       });
