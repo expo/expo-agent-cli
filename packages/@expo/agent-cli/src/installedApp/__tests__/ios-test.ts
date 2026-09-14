@@ -48,7 +48,7 @@ function fakeSimctl(simulators: { udid: string; name: string; hash: string | nul
     if (!simulator?.hash) {
       throw new Error('ENOENT');
     }
-    return simulator.hash;
+    return JSON.stringify({ hash: simulator.hash, fingerprintVersion: '0.21.0' });
   };
   return { spawnCaptureAsync, readFile };
 }
@@ -62,6 +62,7 @@ function phoneReader(result: InstalledFingerprintResult) {
 const phoneMatch: InstalledFingerprintResult = {
   status: 'ok',
   hash: 'current',
+  fingerprintVersion: '0.21.0',
   appId,
   device: { name: 'Ada’s iPhone', identifier: 'PHONE-A' },
 };
@@ -144,6 +145,7 @@ describe(readInstalledFingerprintIosAsync, () => {
     await expect(result).resolves.toMatchObject({
       status: 'ok',
       hash: 'old',
+      fingerprintVersion: '0.21.0',
       device: { identifier: 'SIM-2' },
     });
     expect(listPhones).not.toHaveBeenCalled();
