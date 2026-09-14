@@ -28,6 +28,7 @@ export type CheckReason =
   | 'no-device'
   | 'app-not-installed'
   | 'no-embedded-fingerprint'
+  | 'fingerprint-version-mismatch'
   | 'no-response'
   | 'app-id-unknown'
   | 'fingerprint-unavailable'
@@ -168,9 +169,10 @@ async function checkPlatformAsync(
   // Stale generated directories need `prebuild` before the build: a plain rebuild would compile
   // the old directories and embed the new hash, and the mismatch would vanish while the problem
   // stayed. No device is needed for this, so it is decided before the installed result.
+  const currentFingerprintVersion = deps.readFingerprintVersion(projectRoot);
   const staleness = deps.readNativeDirectoryStaleness(projectRoot, platform, {
     sources: fingerprint.sources,
-    fingerprintVersion: deps.readFingerprintVersion(projectRoot),
+    fingerprintVersion: currentFingerprintVersion,
   });
   const prebuild = { prebuildStatus: staleness.status, prebuildChanges: staleness.changes };
   if (staleness.status === 'stale') {
@@ -188,7 +190,7 @@ async function checkPlatformAsync(
 
   const installed = await installedPromise;
   const check = {
-    ...installedVerdict(installed, platform, fingerprint, options.device),
+    ...installedVerdict(installed, platform, fingerprint, options.device, currentFingerprintVersion),
     ...prebuild,
   };
   return installed.hint
@@ -201,7 +203,8 @@ function installedVerdict(
   installed: InstalledFingerprintResult,
   platform: InstalledAppPlatform,
   fingerprint: FingerprintResult,
-  deviceFilter: string | null
+  deviceFilter: string | null,
+  currentFingerprintVersion: string | null
 ): PlatformCheck {
   const current = {
     currentHash: fingerprint.hash,
@@ -238,7 +241,21 @@ function installedVerdict(
         device: installed.device,
         recommendation: `The app on ${installed.device.name} did not report its fingerprint in time. Likely causes: the phone and this computer are not on the same network; the macOS firewall or the app's Local Network permission blocks the connection; the device screen is locked; the app is a release build or lacks expo-dev-client, so it can never respond. If the build predates this check, rebuild with npx expo run:ios --device.`,
       });
-    case 'ok':
+    case 'ok': {
+      // Two hashes from different `@expo/fingerprint` versions are not comparable: reason tags and
+      // hashing change between them, so an unchanged project hashes differently across an SDK
+      // upgrade. Only a known difference counts — a null version means "cannot tell", which is what
+      // a build made before the version was embedded reports, and what a phone reports today.
+      const embeddedVersion = installed.fingerprintVersion;
+      if (embeddedVersion && currentFingerprintVersion && embeddedVersion !== currentFingerprintVersion) {
+        return verdict('fingerprint-version-mismatch', {
+          ...current,
+          device: installed.device,
+          installedHash: installed.hash,
+          recommendation: `The installed app was fingerprinted by @expo/fingerprint ${embeddedVersion} and this project uses ${currentFingerprintVersion}, so the two hashes cannot be compared. Rebuild to settle it.`,
+          commands: rebuild,
+        });
+      }
       if (installed.hash === fingerprint.hash) {
         return verdict('hash-match', {
           ...current,
@@ -254,6 +271,7 @@ function installedVerdict(
         recommendation: 'Native inputs changed since the installed app was built. Rebuild the app.',
         commands: rebuild,
       });
+    }
   }
 }
 

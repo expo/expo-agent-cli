@@ -142,7 +142,7 @@ describe(checkInstalledAppAsync, () => {
   it(`names no source when only dependencies moved the prebuild`, async () => {
     const report = await checkInstalledAppAsync(projectRoot, options(), {
       ...deps,
-      readInstalled: installed({ status: 'ok', hash: 'current-hash', appId, device }),
+      readInstalled: installed({ status: 'ok', hash: 'current-hash', fingerprintVersion: '0.20.0', appId, device }),
       readNativeDirectoryStaleness: () => ({
         status: 'stale',
         changes: [{ source: 'node_modules/x/plugin', change: 'changed', scope: 'dependency' }],
@@ -156,13 +156,49 @@ describe(checkInstalledAppAsync, () => {
   it(`carries the marker's status alongside the device verdict`, async () => {
     const report = await checkInstalledAppAsync(projectRoot, options(), {
       ...deps,
-      readInstalled: installed({ status: 'ok', hash: 'current-hash', appId, device }),
+      readInstalled: installed({ status: 'ok', hash: 'current-hash', fingerprintVersion: '0.20.0', appId, device }),
       readNativeDirectoryStaleness: () => ({ status: 'not-applicable', changes: [] }),
     });
     expect(report.platforms.ios).toMatchObject({
       reason: 'hash-match',
       prebuildStatus: 'not-applicable',
     });
+  });
+
+  it(`refuses to compare hashes from different fingerprint versions`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'current-hash',
+        fingerprintVersion: '0.19.0',
+        appId,
+        device,
+      }),
+    });
+
+    expect(report.platforms.ios).toMatchObject({
+      status: 'unknown',
+      reason: 'fingerprint-version-mismatch',
+      recommendation: expect.stringContaining('0.19.0'),
+    });
+  });
+
+  // A build made before the version was embedded, and a phone, both report null. That is "cannot
+  // tell", not "different" — the hash comparison still runs.
+  it(`still compares hashes when the app reports no version`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'current-hash',
+        fingerprintVersion: null,
+        appId,
+        device,
+      }),
+    });
+
+    expect(report.platforms.ios).toMatchObject({ reason: 'hash-match' });
   });
 
   it(`appends the reader's hint to the recommendation`, async () => {
