@@ -306,7 +306,7 @@ function installedVerdict(
         device: installed.device,
         installedHash: installed.hash,
         recommendation: cannotVouchForNativeDirs
-          ? `${lead} Whether the native directories are current cannot be told, because no prebuild of this project was recorded — so regenerate them before rebuilding, or a rebuild may embed the new fingerprint without picking the change up.`
+          ? `${lead} Regenerate the native directories first, or a rebuild may not pick the change up.`
           : `${lead} Rebuild the app.`,
         commands: cannotVouchForNativeDirs
           ? [`${PROGRAM_PREFIX} prebuild -p ${platform}`, ...rebuild]
