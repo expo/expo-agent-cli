@@ -28,7 +28,34 @@ describe(startFingerprintCallbackServerAsync, () => {
         JSON.stringify({ nonce: 'abc', fingerprint: 'hash-1' })
       );
       expect(response.status).toBe(200);
-      await expect(server.result).resolves.toEqual({ fingerprint: 'hash-1' });
+      await expect(server.result).resolves.toEqual({ fingerprint: 'hash-1', fingerprintVersion: null });
+    } finally {
+      server.close();
+    }
+  });
+
+  it(`resolves with the fingerprint version the responder posts`, async () => {
+    const server = await startFingerprintCallbackServerAsync({ nonce: 'abc', lanHost });
+    try {
+      await post(
+        loopbackUrl(server.callbackUrl),
+        JSON.stringify({ nonce: 'abc', fingerprint: 'hash-1', fingerprintVersion: '0.21.0' })
+      );
+      await expect(server.result).resolves.toEqual({
+        fingerprint: 'hash-1',
+        fingerprintVersion: '0.21.0',
+      });
+    } finally {
+      server.close();
+    }
+  });
+
+  // A responder built before the version was added sends no key at all.
+  it(`reads a missing fingerprint version as null`, async () => {
+    const server = await startFingerprintCallbackServerAsync({ nonce: 'abc', lanHost });
+    try {
+      await post(loopbackUrl(server.callbackUrl), JSON.stringify({ nonce: 'abc', fingerprint: 'h' }));
+      await expect(server.result).resolves.toEqual({ fingerprint: 'h', fingerprintVersion: null });
     } finally {
       server.close();
     }
@@ -41,7 +68,7 @@ describe(startFingerprintCallbackServerAsync, () => {
         loopbackUrl(server.callbackUrl),
         JSON.stringify({ nonce: 'abc', fingerprint: null })
       );
-      await expect(server.result).resolves.toEqual({ fingerprint: null });
+      await expect(server.result).resolves.toEqual({ fingerprint: null, fingerprintVersion: null });
     } finally {
       server.close();
     }
@@ -63,7 +90,7 @@ describe(startFingerprintCallbackServerAsync, () => {
       expect(
         (await post(url, JSON.stringify({ nonce: 'abc', fingerprint: 'hash-2' }))).status
       ).toBe(200);
-      await expect(server.result).resolves.toEqual({ fingerprint: 'hash-2' });
+      await expect(server.result).resolves.toEqual({ fingerprint: 'hash-2', fingerprintVersion: null });
     } finally {
       server.close();
     }
