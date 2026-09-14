@@ -1,8 +1,9 @@
 // @ref llp/0002-testing-and-evals.plan.md
 import fs from 'node:fs';
-import path from 'node:path';
 import os from 'node:os';
+import path from 'node:path';
 import { createAgentEval, type AgentRunner, type ProjectSetup } from '@expo/agent-eval-vitest';
+
 import { runLoop, type CommandResult, type LoopEvent, AgentAttemptError } from './loop';
 import { chat, identifyModel } from './ollama';
 import { runProcess } from './process';
@@ -13,15 +14,18 @@ export type FixtureContext = {
   artifacts: string;
   env: NodeJS.ProcessEnv;
 };
+
 export type FixtureSession = {
   close?: () => Promise<void>;
   evidence?: () => unknown;
 };
+
 export type EvalInput = {
   fixture: string;
   linkDependencies?: boolean;
   setupProject?: (context: FixtureContext) => Promise<FixtureSession>;
 };
+
 export type EvalOutput = {
   root: string;
   before: Record<string, string>;
@@ -31,11 +35,14 @@ export type EvalOutput = {
   cliEvents: Record<string, unknown>[];
   fixtureEvidence: unknown;
 };
+
 export type CliFixture = { output: () => EvalOutput };
+
 type Prepared = {
   env: NodeJS.ProcessEnv;
   output: EvalOutput;
 };
+
 const prepared = new Map<string, Prepared>();
 
 /** The kit owns the workspace and lifecycle; this adapter prepares CLI-specific context. */
@@ -58,7 +65,9 @@ export function setupProject(input: EvalInput): ProjectSetup<CliFixture> {
         LOG_EVENTS: path.join(artifacts, 'cli-events.jsonl'),
       };
       const session = await input.setupProject?.({ root, artifacts, env });
-      if (session?.close) onCleanup(session.close);
+      if (session?.close) {
+        onCleanup(session.close);
+      }
       const output: EvalOutput = {
         root,
         before: snapshot(root),
@@ -108,14 +117,18 @@ export function setupProject(input: EvalInput): ProjectSetup<CliFixture> {
 /** Preserve the native tool-call protocol and pinned inference settings used by Tier 1. */
 export const cliRunner: AgentRunner = async ({ prompt, root, artifactsDir, signal }) => {
   const state = prepared.get(root);
-  if (!state) throw new Error('CLI runner requires setupProject');
+  if (!state) {
+    throw new Error('CLI runner requires setupProject');
+  }
   const { env, output } = state;
   const events: LoopEvent[] = [];
   let inputTokens = 0;
   let outputTokens = 0;
   const identity = await identifyModel(signal);
   const help = await runProcess(process.execPath, [cliBin, '--help'], { cwd: root, env, signal });
-  if (help.exitCode !== 0 || help.timedOut) throw new Error('CLI help could not be loaded');
+  if (help.exitCode !== 0 || help.timedOut) {
+    throw new Error('CLI help could not be loaded');
+  }
   const metadata = {
     ...identity,
     node: process.version,
@@ -154,13 +167,17 @@ export const cliRunner: AgentRunner = async ({ prompt, root, artifactsDir, signa
           }),
         record: (event) => {
           events.push(event);
-          if (event.type === 'tool_result') output.commands.push(event.content);
+          if (event.type === 'tool_result') {
+            output.commands.push(event.content);
+          }
           fs.appendFileSync(path.join(artifactsDir, 'trace.jsonl'), `${JSON.stringify(event)}\n`);
         },
       })
     );
   } catch (cause) {
-    if (!(cause instanceof AgentAttemptError)) throw cause;
+    if (!(cause instanceof AgentAttemptError)) {
+      throw cause;
+    }
     endReason = cause.endReason;
     error = cause.message;
   }

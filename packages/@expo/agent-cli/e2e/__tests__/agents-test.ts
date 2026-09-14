@@ -48,7 +48,7 @@ describe('@expo/agent-cli agents:setup', () => {
     expect(result.all).toContain('--json');
   });
 
-  it('executes the project-only setup example from help without a terminal', async () => {
+  it('should execute the project-only setup example from help without a terminal', async () => {
     const help = await executeAgentCliAsync(projectRoot, ['agents:setup', '--help']);
     const example = help.stdout
       .split('\n')

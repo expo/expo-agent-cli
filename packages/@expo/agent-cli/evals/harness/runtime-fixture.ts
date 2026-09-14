@@ -2,6 +2,7 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Reloading the app
 import fs from 'node:fs';
 import path from 'node:path';
+
 import { holdDevLockAsync, startStubDevServerAsync, STUB_TRANSFORM_ERROR } from '../../e2e/utils';
 import { detachedLogPath } from '../../src/dev/logFile';
 import { readDevServerLockAsync } from '../../src/devLock';
@@ -12,23 +13,28 @@ import { readDevServerLockAsync } from '../../src/devLock';
  * The caller owns the workspace and must await close() in finally before removing it.
  */
 export async function startRuntimeFixture(root: string, mode: 'reload' | 'bundler-error') {
-  if (mode !== 'reload' && mode !== 'bundler-error')
+  if (mode !== 'reload' && mode !== 'bundler-error') {
     throw new Error('Unknown runtime fixture mode');
+  }
   root = fs.realpathSync(root);
-  if (await readDevServerLockAsync(root))
+  if (await readDevServerLockAsync(root)) {
     throw new Error('Runtime fixture requires an unlocked project');
+  }
   const startedAt = new Date().toISOString();
   const logFile = detachedLogPath(root);
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   // stdout/stderr text, just as detachAsync captures it; not JSONL. The error body was captured
   // from SDK 57 Metro by the e2e stub. A historical Bundled line must not count as a new reload.
+  const bundledLine = 'iOS Bundled 1200ms node_modules/expo-router/entry.js (1 module)';
+  const failedLine = [
+    'iOS Bundling failed 25ms node_modules/expo-router/entry.js (1 module)',
+    ` ERROR  ${STUB_TRANSFORM_ERROR.message}`,
+  ].join('\n');
   const initialLog = [
     `Starting project at ${root}`,
     'Starting Metro Bundler',
     'Logs for your project will appear below.',
-    mode === 'reload'
-      ? 'iOS Bundled 1200ms node_modules/expo-router/entry.js (1 module)'
-      : `iOS Bundling failed 25ms node_modules/expo-router/entry.js (1 module)\n ERROR  ${STUB_TRANSFORM_ERROR.message}`,
+    mode === 'reload' ? bundledLine : failedLine,
     '',
   ].join('\n');
   fs.writeFileSync(logFile, initialLog);

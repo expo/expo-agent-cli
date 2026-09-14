@@ -1,10 +1,13 @@
 // @ref llp/0002-testing-and-evals.plan.md
 import type { ProcessResult } from './process';
+
 export type Message = {
   role: 'system' | 'user' | 'assistant';
   content: string;
 };
+
 export type CommandResult = ProcessResult & { argv: string[] };
+
 export type LoopEvent =
   | { type: 'message'; role: 'user' | 'assistant'; content: string }
   | {
@@ -72,8 +75,9 @@ Suggested next commands are optional, not additional tasks. /no_think`,
       (action.run === undefined || (Array.isArray(action.run) && action.run.length === 0)) &&
       (action.runs === undefined || (Array.isArray(action.runs) && action.runs.length === 0))
     ) {
-      if (!commands.length)
+      if (!commands.length) {
         throw new AgentAttemptError('Agent finished without calling the CLI', 'failed');
+      }
       return {
         commands,
         summary: typeof action.summary === 'string' ? action.summary : '',
@@ -102,8 +106,9 @@ Suggested next commands are optional, not additional tasks. /no_think`,
       }
       continue;
     }
-    if (commands.length + calls.length > 12)
+    if (commands.length + calls.length > 12) {
       throw new AgentAttemptError('Agent exhausted its CLI call budget', 'budget-exhausted');
+    }
     for (const argv of calls as string[][]) {
       const id = `command-${commands.length + 1}`;
       options.record({
@@ -123,7 +128,9 @@ Suggested next commands are optional, not additional tasks. /no_think`,
         name: 'expo-agent-cli',
         content: result,
       });
-      if (result.timedOut) throw new AgentAttemptError('CLI command timed out', 'timeout');
+      if (result.timedOut) {
+        throw new AgentAttemptError('CLI command timed out', 'timeout');
+      }
       const clip = (text: string) =>
         text.length > 8000 ? `${text.slice(0, 8000)}\n[output truncated]` : text;
       messages.push({

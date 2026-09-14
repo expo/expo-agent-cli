@@ -1,6 +1,7 @@
 import { expect } from 'vitest';
 
 import { agentEval, setupProject } from '../harness/cli';
+import { jsonReports, projectFiles } from '../harness/results';
 import { snapshot } from '../harness/workspace';
 
 agentEval(
@@ -13,16 +14,7 @@ agentEval(
   (check) => {
     check('completes the requested CLI task', (_workspace, { fixture }) => {
       const output = fixture.output();
-      const reports = output.commands
-        .filter((call) => call.exitCode === 0)
-        .flatMap((call) => {
-          try {
-            return [JSON.parse(call.stdout)];
-          } catch {
-            return [];
-          }
-        });
-      expect(reports, 'agent obtained a real project report').toContainEqual(
+      expect(jsonReports(output), 'agent obtained a real project report').toContainEqual(
         expect.objectContaining({
           project: expect.objectContaining({
             isExpoApp: true,
@@ -37,8 +29,6 @@ agentEval(
         output.commands.every((call) => ['status', '--help', 'help'].includes(call.argv[0]!)),
         'only read-only calls were made'
       ).toBe(true);
-      const projectFiles = (files: Record<string, string>) =>
-        Object.fromEntries(Object.entries(files).filter(([name]) => !name.startsWith('.expo/')));
       expect(
         projectFiles(snapshot(output.root)),
         'project sources and configuration were preserved'

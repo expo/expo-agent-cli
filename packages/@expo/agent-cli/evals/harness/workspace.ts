@@ -26,8 +26,9 @@ export function copyWorkspace(fixture: string, linkDependencies = false, destina
     });
     if (linkDependencies) {
       const dependencies = path.join(source, 'node_modules');
-      if (!fs.existsSync(path.join(dependencies, 'expo/package.json')))
+      if (!fs.existsSync(path.join(dependencies, 'expo/package.json'))) {
         throw new Error('Real fixture dependencies are missing; run bun install');
+      }
       fs.symlinkSync(
         dependencies,
         path.join(root, 'node_modules'),
@@ -46,14 +47,19 @@ export function snapshot(root: string): Record<string, string> {
   const files: Record<string, string> = {};
   function walk(dir: string) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (['node_modules', '.git'].includes(entry.name)) continue;
+      if (['node_modules', '.git'].includes(entry.name)) {
+        continue;
+      }
       const full = path.join(dir, entry.name);
       const relative = path.relative(root, full).split(path.sep).join('/');
-      if (entry.isSymbolicLink()) files[relative] = `link:${fs.readlinkSync(full)}`;
-      else if (entry.isDirectory()) walk(full);
-      // Live dev-server locks can create Unix sockets. They are not project file contents.
-      else if (entry.isFile())
+      if (entry.isSymbolicLink()) {
+        files[relative] = `link:${fs.readlinkSync(full)}`;
+      } else if (entry.isDirectory()) {
+        walk(full);
+      } else if (entry.isFile()) {
+        // Live dev-server locks can create Unix sockets. They are not project file contents.
         files[relative] = createHash('sha256').update(fs.readFileSync(full)).digest('hex');
+      }
     }
   }
   walk(root);

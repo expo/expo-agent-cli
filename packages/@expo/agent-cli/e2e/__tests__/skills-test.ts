@@ -34,7 +34,7 @@ describe('@expo/agent-cli skills', () => {
     expect(result.all).toContain('--dry-run');
   });
 
-  it('can execute the agent-specific sync example printed by help', async () => {
+  it('should execute the agent-specific sync example printed by help', async () => {
     const help = await executeAgentCliAsync(projectRoot, ['skills:sync', '--help']);
     const example = help.stdout.match(/skills:sync --agent \S+ --json/)?.[0];
     expect(example).toBeDefined();

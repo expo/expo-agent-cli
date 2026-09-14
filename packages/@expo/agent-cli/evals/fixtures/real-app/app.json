@@ -1,1 +1,7 @@
-{"expo":{"name":"Agent Eval","slug":"agent-eval","version":"1.0.0"}}
+{
+  "expo": {
+    "name": "Agent Eval",
+    "slug": "agent-eval",
+    "version": "1.0.0"
+  }
+}

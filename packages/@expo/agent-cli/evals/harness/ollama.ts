@@ -12,7 +12,9 @@ async function request(route: string, signal: AbortSignal, body?: unknown) {
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  if (!response.ok) throw new Error(`Ollama ${route}: HTTP ${response.status}`);
+  if (!response.ok) {
+    throw new Error(`Ollama ${route}: HTTP ${response.status}`);
+  }
   return response.json();
 }
 
@@ -22,11 +24,14 @@ export async function identifyModel(signal: AbortSignal) {
     request('/api/version', signal),
   ]);
   const installed = tags.models?.find((entry: { name: string }) => entry.name === model);
-  if (!installed) throw new Error(`Ollama model ${model} is not installed`);
+  if (!installed) {
+    throw new Error(`Ollama model ${model} is not installed`);
+  }
   const expected =
     process.env.AGENT_CLI_EVAL_MODEL_DIGEST ?? (model === 'qwen3:8b' ? defaultDigest : undefined);
-  if (expected && installed.digest !== expected)
+  if (expected && installed.digest !== expected) {
     throw new Error(`Ollama model digest mismatch: ${installed.digest}, expected ${expected}`);
+  }
   return {
     model,
     digest: installed.digest as string,
@@ -98,13 +103,18 @@ export async function chat(
   const response = await request('/api/chat', signal, body);
   record(body, response);
   const calls = response.message?.tool_calls;
-  if (calls?.length > 12) throw new Error('Model requested too many CLI calls');
-  if (calls?.some((call: { function?: { name?: string } }) => call.function?.name !== 'run_cli'))
+  if (calls?.length > 12) {
+    throw new Error('Model requested too many CLI calls');
+  }
+  if (calls?.some((call: { function?: { name?: string } }) => call.function?.name !== 'run_cli')) {
     throw new Error('Unknown tool requested by Ollama');
-  if (response.done_reason === 'length')
+  }
+  if (response.done_reason === 'length') {
     throw new AgentAttemptError('Model exhausted its output token budget', 'budget-exhausted');
-  if (!calls?.length && !response.message?.content?.trim())
+  }
+  if (!calls?.length && !response.message?.content?.trim()) {
     throw new Error('Ollama returned no tool call or final answer');
+  }
   return {
     content: JSON.stringify(
       calls?.length

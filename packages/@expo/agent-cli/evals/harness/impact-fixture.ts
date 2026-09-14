@@ -2,6 +2,7 @@
 // @ref llp/0011-impact-and-freshness.rfc.md §The record has to hold the sources
 import fs from 'node:fs';
 import path from 'node:path';
+
 import { installStubFingerprintAsync } from '../../e2e/utils';
 import type { FixtureContext, FixtureSession } from './cli';
 import { runProcess } from './process';
@@ -17,7 +18,9 @@ export async function setupImpactFixture(
   context: FixtureContext,
   kind: 'native' | 'js'
 ): Promise<FixtureSession> {
-  if (kind !== 'native' && kind !== 'js') throw new Error('Unknown impact fixture kind');
+  if (kind !== 'native' && kind !== 'js') {
+    throw new Error('Unknown impact fixture kind');
+  }
   const { root, artifacts, env } = context;
   if (!(await installStubFingerprintAsync(root))) {
     throw new Error('Impact fixture requires a copy of e2e/fixtures/dev-client-fresh-app');

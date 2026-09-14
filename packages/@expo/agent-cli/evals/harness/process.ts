@@ -15,8 +15,9 @@ export function runProcess(
   args: string[],
   options: { cwd: string; env?: NodeJS.ProcessEnv; signal?: AbortSignal }
 ): Promise<ProcessResult> {
-  if (process.platform === 'win32')
+  if (process.platform === 'win32') {
     throw new Error('Agent eval subprocesses require POSIX process groups (Linux or macOS)');
+  }
   options.signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(bin, args, {
@@ -30,10 +31,15 @@ export function runProcess(
     let timedOut = false;
     let overflow = false;
     const kill = () => {
-      if (!child.pid) return;
+      if (!child.pid) {
+        return;
+      }
       try {
-        if (process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL');
-        else child.kill('SIGKILL');
+        if (process.platform !== 'win32') {
+          process.kill(-child.pid, 'SIGKILL');
+        } else {
+          child.kill('SIGKILL');
+        }
       } catch {
         /* already exited */
       }
@@ -47,18 +53,24 @@ export function runProcess(
     let stdoutBytes = 0;
     let stderrBytes = 0;
     const exceedsLimit = (bytes: number) => {
-      if (bytes <= 4 * 1024 * 1024) return false;
+      if (bytes <= 4 * 1024 * 1024) {
+        return false;
+      }
       overflow = true;
       kill();
       return true;
     };
     child.stdout.on('data', (chunk: Buffer) => {
       stdoutBytes += chunk.length;
-      if (!exceedsLimit(stdoutBytes)) stdout += stdoutDecoder.write(chunk);
+      if (!exceedsLimit(stdoutBytes)) {
+        stdout += stdoutDecoder.write(chunk);
+      }
     });
     child.stderr.on('data', (chunk: Buffer) => {
       stderrBytes += chunk.length;
-      if (!exceedsLimit(stderrBytes)) stderr += stderrDecoder.write(chunk);
+      if (!exceedsLimit(stderrBytes)) {
+        stderr += stderrDecoder.write(chunk);
+      }
     });
     child.stdout.on('end', () => {
       stdout += stdoutDecoder.end();
@@ -67,15 +79,20 @@ export function runProcess(
       stderr += stderrDecoder.end();
     });
     options.signal?.addEventListener('abort', abort, { once: true });
-    if (options.signal?.aborted) abort();
+    if (options.signal?.aborted) {
+      abort();
+    }
     child.once('error', (error) => {
       options.signal?.removeEventListener('abort', abort);
       reject(error);
     });
     child.once('close', (code) => {
       options.signal?.removeEventListener('abort', abort);
-      if (overflow) reject(new Error('Subprocess output exceeded 4 MiB'));
-      else resolve({ exitCode: code ?? -1, stdout, stderr, timedOut });
+      if (overflow) {
+        reject(new Error('Subprocess output exceeded 4 MiB'));
+      } else {
+        resolve({ exitCode: code ?? -1, stdout, stderr, timedOut });
+      }
     });
   });
 }

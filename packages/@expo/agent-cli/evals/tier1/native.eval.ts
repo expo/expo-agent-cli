@@ -1,8 +1,9 @@
 import { expect } from '@expo/agent-eval-vitest';
+
 import { agentEval, setupProject } from '../harness/cli';
+import { setupImpactFixture } from '../harness/impact-fixture';
 import { projectFiles } from '../harness/results';
 import { snapshot } from '../harness/workspace';
-import { setupImpactFixture } from '../harness/impact-fixture';
 
 agentEval(
   import.meta.url,
@@ -37,6 +38,7 @@ agentEval(
           )
       ).toBe(true);
     });
+
     check('preserves project sources and configuration', (workspace, { fixture }) => {
       expect(projectFiles(snapshot(workspace.root))).toEqual(projectFiles(fixture.output().before));
     });

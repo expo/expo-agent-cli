@@ -31,4 +31,5 @@
 
 ### 💡 Others
 
+- `status` now summarizes itself as the check for Expo Go support and rebuild needs, the help notes explain `dev --plan`, `status` impact, and non-interactive `agents:setup`, and a failed `runtime:errors` suggests `dev:logs` to find bundling errors. ([#57](https://github.com/expo/expo-agent-cli/pull/57) by [@kudo](https://github.com/kudo))
 - Every EAS command line this CLI prints — `Try:` lines, follow-ups, the needs-human `Ask the user` line, `How:` sentences — is now written with the runner this project would be run with: `npx --yes eas-cli@latest`, `npx --yes eas-cli` when the project pins the CLI, or `bunx eas-cli…` for a bun project. The old `npx eas …` spelling named a package that does not exist. ([#40](https://github.com/expo/expo-agent-cli/pull/40) by [@kudo](https://github.com/kudo))
