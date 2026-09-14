@@ -251,12 +251,29 @@ describe(checkInstalledAppAsync, () => {
     });
   });
 
-  it(`refuses to compare hashes from different fingerprint versions`, async () => {
+  // An equal hash is positive evidence whatever produced it: a version difference can only
+  // explain hashes that differ, never hashes that agree.
+  it(`still matches on an equal hash when the fingerprint versions differ`, async () => {
     const report = await checkInstalledAppAsync(projectRoot, options(), {
       ...deps,
       readInstalled: installed({
         status: 'ok',
         hash: 'current-hash',
+        fingerprintVersion: '0.19.0',
+        appId,
+        device
+      })
+    });
+
+    expect(report.platforms.ios).toMatchObject({ status: 'up-to-date', reason: 'hash-match' });
+  });
+
+  it(`refuses to compare hashes from different fingerprint versions`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
         fingerprintVersion: '0.19.0',
         appId,
         device,
