@@ -1,0 +1,13 @@
+diff --git a/build/index.js b/build/index.js
+index ea0c89743dcb303393a233b4ea373c261c026e6c..98444435af79c411eb02528c3bf8d345a7fb0a2c 100644
+--- a/build/index.js
++++ b/build/index.js
+@@ -393,7 +393,7 @@ function createAgentEval(input = {}) {
+       beforeAll(async () => {
+         run = await openCase(id, options, config);
+       }, config.timeoutMs + 2 * config.cleanupTimeoutMs + 5000);
+-      afterAll(async (currentSuite) => {
++      afterAll(async ({}, currentSuite) => {
+         if (run) {
+           const collectCheckResults = (tasks) => tasks.flatMap((task) => {
+             if (task.type === "suite") {
