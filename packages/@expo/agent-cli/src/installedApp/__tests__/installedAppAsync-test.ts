@@ -38,6 +38,7 @@ const deps = {
   readAppId,
   readScheme,
   readNativeDirectoryStaleness: fresh,
+  readCheckedInNativeDirs: async () => ({ ios: false, android: false }),
   readFingerprintVersion,
 };
 const installed =
@@ -260,6 +261,26 @@ describe(checkInstalledAppAsync, () => {
     expect(report.platforms.ios!.recommendation).toMatch(/Regenerate the native directories first/);
   });
 
+  // A bare project owns ios/ and android/. `prebuild` would rewrite AppDelegate, Info.plist and
+  // build.gradle, so it must never be advised there however little is known about the directories.
+  it(`never advises prebuild for a bare project, whose native directories are checked in`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device
+      }),
+      readNativeDirectoryStaleness: () => ({ status: 'unknown', changes: [] }),
+      readCheckedInNativeDirs: async () => ({ ios: true, android: true })
+    });
+
+    expect(report.platforms.ios!.commands).toEqual(['npx expo run:ios']);
+    expect(report.platforms.ios!.recommendation).not.toMatch(/Regenerate/);
+  });
+
   // No native directory: `run:` generates one, so a plain rebuild really is the whole story.
   it(`keeps the plain rebuild advice when there is no native directory`, async () => {
     const report = await checkInstalledAppAsync(projectRoot, options(), {
@@ -326,6 +347,8 @@ describe(checkInstalledAppAsync, () => {
     // Not a staleness verdict: an unchanged project hashes differently across a version bump, so
     // the wording must not read as "rebuild required".
     expect(report.platforms.ios?.recommendation).toMatch(/may well be current/);
+    // `commands` is what an agent runs; it must not contradict the sentence.
+    expect(report.platforms.ios!.commands).toEqual([]);
   });
 
   // A build made before the version was embedded, and a phone, both report null. That is "cannot
