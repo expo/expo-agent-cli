@@ -257,7 +257,7 @@ describe(checkInstalledAppAsync, () => {
 
     expect(report.platforms.ios).toMatchObject({ reason: 'hash-mismatch' });
     expect(report.platforms.ios!.commands[0]).toBe('npx @expo/agent-cli prebuild -p ios');
-    expect(report.platforms.ios!.recommendation).toMatch(/cannot be told|could not be checked/i);
+    expect(report.platforms.ios!.recommendation).toMatch(/Regenerate the native directories first/);
   });
 
   // No native directory: `run:` generates one, so a plain rebuild really is the whole story.
