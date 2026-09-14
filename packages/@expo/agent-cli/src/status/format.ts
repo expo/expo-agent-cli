@@ -16,6 +16,7 @@ import type {
   PlatformFreshness,
   ExpoGoStatus,
   FreshnessStatus,
+  InstalledStatus,
   LocalDeviceStatus,
   NextActionStatus,
   ProjectStatus,
@@ -45,6 +46,14 @@ export function formatStatusReport(report: StatusReport): string {
     // to do about it, and a reader scanning for the second should not have to parse the first.
     // Left out when nothing was classified — the freshness line has already said why.
     ...impactLines(report),
+    // @ref llp/0028-installed-app-check.rfc.md §Reported by status
+    // What the device has, under `--explain` only. Below `freshness` because it answers the same
+    // question from the other end: `freshness` is about the build this machine recorded making,
+    // this is about the build that is actually installed, whoever made it.
+    ...(report.installed
+      ? [row('installed', report.installed, installedLine, report, 'installed')]
+      : []),
+    ...installedDetailLines(report),
     // The per-source list and the OTA verdict, under `--explain` only.
     ...explainLines(report),
     // What a section could not do, even when it had something else to say.
@@ -338,6 +347,45 @@ function hasSkillsToReport(report: StatusReport): boolean {
 }
 
 /** One labelled line, or the note that explains why the section is missing. */
+/** One line: the strongest verdict, then each platform that answered. */
+function installedLine(installed: InstalledStatus): string {
+  if (!installed.platforms.length) {
+    return chalk.dim('no device to ask');
+  }
+  const facts = installed.platforms.map(
+    (entry) => `${entry.platform}: ${entry.status}${entry.deviceName ? ` (${entry.deviceName})` : ''}`
+  );
+  return `${verdictWord(installed.outcome)}${SEPARATOR}${chalk.dim(facts.join(SEPARATOR))}`;
+}
+
+function verdictWord(outcome: InstalledStatus['outcome']): string {
+  if (outcome === 'up-to-date') {
+    return chalk.green('up to date');
+  }
+  return outcome === 'rebuild-required' ? chalk.red('rebuild required') : chalk.yellow('unknown');
+}
+
+/**
+ * What to do about it, for the platforms that are not up to date.
+ *
+ * Indented under the line rather than folded into it, for the reason the impact line is separate:
+ * the verdict is a fact and this is the fix, and a reader scanning for one should not have to read
+ * the other.
+ */
+function installedDetailLines(report: StatusReport): string[] {
+  const lines: string[] = [];
+  for (const entry of report.installed?.platforms ?? []) {
+    if (entry.status === 'up-to-date') {
+      continue;
+    }
+    lines.push(`${' '.repeat(LABEL_WIDTH)}${chalk.dim(`${entry.platform}: ${entry.recommendation}`)}`);
+    for (const command of entry.commands) {
+      lines.push(`${' '.repeat(LABEL_WIDTH)}  ${chalk.cyan(command)}`);
+    }
+  }
+  return lines;
+}
+
 function row<Section>(
   label: string,
   section: Section | null,
