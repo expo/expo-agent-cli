@@ -111,6 +111,7 @@ describe(readInstalledFingerprintAndroidAsync, () => {
       status: 'ok',
       hash: EMBEDDED_HASH,
       fingerprintVersion: '0.20.0',
+      sources: [],
       appId: APP_ID,
       device: { name: 'Pixel_9', identifier: 'emulator-5554' },
     });

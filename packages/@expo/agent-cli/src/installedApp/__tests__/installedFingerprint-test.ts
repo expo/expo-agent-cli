@@ -22,9 +22,9 @@ const silent: InstalledFingerprintResult = { status: 'no-response', appId, devic
 const noDevice: InstalledFingerprintResult = { status: 'no-device' };
 
 describe(parseEmbeddedFingerprint, () => {
-  // The writer is `createFingerprintFile.js` in expo/expo (#49905). It embeds the sources beside
-  // the hash, and this reader takes only what it compares — new keys there must not break it.
-  it(`reads the hash and version, and ignores the sources the writer embeds`, () => {
+  // The writer is `createFingerprintFile.js` in expo/expo (#49905). The sources are kept: a
+  // mismatch names the input that moved rather than only reporting that something did.
+  it(`reads the hash, the version and the sources`, () => {
     const contents = JSON.stringify({
       hash: 'abc123',
       sources: [{ type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'aaa' }],
@@ -33,6 +33,7 @@ describe(parseEmbeddedFingerprint, () => {
     expect(parseEmbeddedFingerprint(contents)).toEqual({
       hash: 'abc123',
       fingerprintVersion: '0.21.0',
+      sources: [{ type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'aaa' }],
     });
   });
 
@@ -40,10 +41,12 @@ describe(parseEmbeddedFingerprint, () => {
     expect(parseEmbeddedFingerprint('{"hash":"abc"}')).toEqual({
       hash: 'abc',
       fingerprintVersion: null,
+      sources: [],
     });
     expect(parseEmbeddedFingerprint('{"hash":"abc","fingerprintVersion":7}')).toEqual({
       hash: 'abc',
       fingerprintVersion: null,
+      sources: [],
     });
   });
 

@@ -1,14 +1,22 @@
 // @ref llp/0028-installed-app-check.rfc.md §How the file is read
 // What reading the installed app answered, and how to pick one answer out of several devices.
 
+import type { FingerprintSource } from '../project/fingerprint';
+
 /** Name of the file the expo-constants build phase embeds in a debug build. */
 export const FINGERPRINT_FILE_NAME = 'app.fingerprint';
 
-/** What that file holds: the hash, and the `@expo/fingerprint` that produced it. */
+/** What that file holds: the hash, the sources behind it, and the `@expo/fingerprint` that produced it. */
 export interface EmbeddedFingerprint {
   hash: string;
   /** Null when the build could not read it. Then the two hashes cannot be told apart. */
   fingerprintVersion: string | null;
+  /**
+   * The sources the hash was computed from, so a mismatch can name the input that moved rather
+   * than only report that something did. Absent from a device that answered over the wire: they
+   * do not fit the response, so a caller has to treat "no sources" as "cannot name it".
+   */
+  sources?: FingerprintSource[];
 }
 
 /**
@@ -27,13 +35,14 @@ export function parseEmbeddedFingerprint(contents: string): EmbeddedFingerprint 
   if (typeof parsed !== 'object' || parsed === null) {
     return null;
   }
-  const { hash, fingerprintVersion } = parsed as Record<string, unknown>;
+  const { hash, fingerprintVersion, sources } = parsed as Record<string, unknown>;
   if (typeof hash !== 'string' || !hash) {
     return null;
   }
   return {
     hash,
     fingerprintVersion: typeof fingerprintVersion === 'string' ? fingerprintVersion : null,
+    sources: Array.isArray(sources) ? (sources as FingerprintSource[]) : [],
   };
 }
 
