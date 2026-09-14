@@ -139,7 +139,13 @@ async function probeDeviceAsync(
     if (response.fingerprint === null) {
       return { status: 'no-embedded-fingerprint', appId, device };
     }
-    return { status: 'ok', hash: response.fingerprint, appId, device };
+    return {
+      status: 'ok',
+      hash: response.fingerprint,
+      fingerprintVersion: response.fingerprintVersion,
+      appId,
+      device,
+    };
   } finally {
     server.close();
   }

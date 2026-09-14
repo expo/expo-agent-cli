@@ -28,6 +28,13 @@ export const NONCE_BODY_KEY = 'nonce';
 /** JSON key of the embedded fingerprint in the response body; null when none is embedded. */
 export const FINGERPRINT_BODY_KEY = 'fingerprint';
 
+/**
+ * Response body key carrying the `@expo/fingerprint` version that produced the hash.
+ *
+ * Null from a build that embedded no version. Hashes from different versions are not comparable.
+ */
+export const FINGERPRINT_VERSION_BODY_KEY = 'fingerprintVersion';
+
 /** Path of the callback endpoint the CLI listens on. */
 export const CALLBACK_PATH = '/fingerprint-callback';
 

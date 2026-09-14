@@ -22,7 +22,11 @@ const startServer: typeof startFingerprintCallbackServerAsync = (options) =>
   startFingerprintCallbackServerAsync({ ...options, lanHost: () => '192.168.1.50' });
 
 /** Post `fingerprint` back to the callback in `url`, the way the dev-launcher responder does. */
-async function respond(url: string, fingerprint: string | null, { badNonce = false } = {}) {
+async function respond(
+  url: string,
+  fingerprint: string | null,
+  { badNonce = false, fingerprintVersion = null as string | null } = {}
+) {
   const parsed = new URL(url);
   const nonce = badNonce ? 'wrong' : parsed.searchParams.get(NONCE_PARAM);
   const callback = new URL(parsed.searchParams.get(CALLBACK_PARAM)!);
@@ -30,11 +34,14 @@ async function respond(url: string, fingerprint: string | null, { badNonce = fal
   await fetch(callback, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ nonce, fingerprint }),
+    body: JSON.stringify({ nonce, fingerprint, fingerprintVersion }),
   });
 }
 
-function respondingLaunch(fingerprint: string | null, options?: { badNonce?: boolean }) {
+function respondingLaunch(
+  fingerprint: string | null,
+  options?: { badNonce?: boolean; fingerprintVersion?: string | null }
+) {
   return vi.fn(async (_udid: string, _bundleId: string, url: string) =>
     respond(url, fingerprint, options)
   );
@@ -57,11 +64,21 @@ function read(
 }
 
 describe(readInstalledFingerprintIosDeviceAsync, () => {
+  it(`reports the fingerprint version the app posts back`, async () => {
+    const launch = respondingLaunch('the-hash', { fingerprintVersion: '0.21.0' });
+    await expect(read([phone()], { launchAppWithPayloadUrlAsync: launch })).resolves.toMatchObject({
+      status: 'ok',
+      hash: 'the-hash',
+      fingerprintVersion: '0.21.0',
+    });
+  });
+
   it(`answers ok with the reported hash when the app responds`, async () => {
     const launch = respondingLaunch('the-hash');
     await expect(read([phone()], { launchAppWithPayloadUrlAsync: launch })).resolves.toMatchObject({
       status: 'ok',
       hash: 'the-hash',
+      fingerprintVersion: null,
       appId,
       device: { identifier: 'UDID-A', name: 'Ada’s iPhone' },
     });

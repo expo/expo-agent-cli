@@ -9,10 +9,14 @@ import {
   CALLBACK_PATH,
   DEFAULT_RESPONSE_TIMEOUT_MS,
   FINGERPRINT_BODY_KEY,
+  FINGERPRINT_VERSION_BODY_KEY,
   NONCE_BODY_KEY,
 } from './fingerprintCheckProtocol';
 
-export type FingerprintCallbackResult = { fingerprint: string | null };
+export type FingerprintCallbackResult = {
+  fingerprint: string | null;
+  fingerprintVersion: string | null;
+};
 
 /** A real response is a few dozen bytes. The port is open to the whole LAN. */
 const MAX_BODY_LENGTH = 4096;
@@ -90,9 +94,12 @@ export async function startFingerprintCallbackServerAsync({
       }
       const receivedNonce = parsed?.[NONCE_BODY_KEY];
       const fingerprint = parsed?.[FINGERPRINT_BODY_KEY];
+      // A responder built before the version was added sends no key at all, which reads as null.
+      const fingerprintVersion = parsed?.[FINGERPRINT_VERSION_BODY_KEY] ?? null;
       const valid =
         typeof receivedNonce === 'string' &&
-        (fingerprint === null || typeof fingerprint === 'string');
+        (fingerprint === null || typeof fingerprint === 'string') &&
+        (fingerprintVersion === null || typeof fingerprintVersion === 'string');
       // A wrong or malformed request must not use up the one chance to hear from the app.
       if (!valid || receivedNonce !== nonce) {
         res.writeHead(400).end();
@@ -101,7 +108,10 @@ export async function startFingerprintCallbackServerAsync({
       res
         .writeHead(200, { 'Content-Type': 'application/json' })
         .end(JSON.stringify({ status: 'ok' }));
-      settleOnce({ fingerprint: fingerprint as string | null });
+      settleOnce({
+        fingerprint: fingerprint as string | null,
+        fingerprintVersion: fingerprintVersion as string | null,
+      });
       close();
     });
   });
