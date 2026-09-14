@@ -11,6 +11,7 @@ import { debugEvent } from './events';
 import type { InstalledAppDevice, InstalledFingerprintResult } from './installedFingerprint';
 import { readInstalledFingerprintIosSimulatorAsync } from './iosSimulator';
 import type { InstalledAppOptions, InstalledAppPlatform } from './options';
+import { diffSources, formatChangedSources } from './sourceDiff';
 
 export type CheckStatus = 'up-to-date' | 'rebuild-required' | 'unknown';
 
@@ -205,11 +206,20 @@ function installedVerdict(
           recommendation: 'The installed app matches the project. A JS reload is enough.',
         });
       }
+      // The embedded fingerprint carries the sources behind its hash, so the sentence can name the
+      // input that moved. A device answering over the wire sends none, and a build that embedded
+      // none has none: both fall back to the generic wording rather than guessing.
+      const moved =
+        installed.sources?.length && fingerprint.sources?.length
+          ? formatChangedSources(diffSources(installed.sources, fingerprint.sources))
+          : '';
       return verdict('hash-mismatch', {
         ...current,
         device: installed.device,
         installedHash: installed.hash,
-        recommendation: 'Native inputs changed since the installed app was built. Rebuild the app.',
+        recommendation: moved
+          ? `${moved} changed since the installed app was built. Rebuild the app.`
+          : 'Native inputs changed since the installed app was built. Rebuild the app.',
         commands: rebuild,
       });
   }

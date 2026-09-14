@@ -98,6 +98,54 @@ describe(checkInstalledAppAsync, () => {
     expect(report.outcome).toBe(expected.status);
   });
 
+  // The embedded fingerprint carries the sources behind its hash, so a mismatch can say which
+  // input moved. Dependency sources are left out: they point at code the developer did not write.
+  it(`names the project source that moved when the installed app carries its sources`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      generateFingerprint: async () => ({
+        hash: 'current-hash',
+        sources: [
+          { type: 'contents', id: 'expoConfig', hash: 'cfg-new', reasons: ['expoConfig'] },
+          { type: 'file', filePath: '../../packages/expo', hash: 'dep-new', reasons: ['bareRn'] }
+        ],
+        source: 'computed' as const
+      }),
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
+        fingerprintVersion: '0.20.0',
+        sources: [
+          { type: 'contents', id: 'expoConfig', hash: 'cfg-old', reasons: ['expoConfig'] },
+          { type: 'file', filePath: '../../packages/expo', hash: 'dep-old', reasons: ['bareRn'] }
+        ],
+        appId,
+        device
+      })
+    });
+
+    expect(report.platforms.ios!.recommendation).toContain('the app config');
+    expect(report.platforms.ios!.recommendation).not.toContain('packages/expo');
+  });
+
+  // A phone answers over the wire and sends no sources, so the generic wording has to survive.
+  it(`falls back to the generic wording when the installed app reports no sources`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device
+      })
+    });
+
+    expect(report.platforms.ios!.recommendation).toBe(
+      'Native inputs changed since the installed app was built. Rebuild the app.'
+    );
+  });
+
   it(`appends the reader's hint to the recommendation`, async () => {
     const report = await checkInstalledAppAsync(projectRoot, options(), {
       readInstalled: installed({ status: 'no-device', hint: 'Pick one with --device.' }),
