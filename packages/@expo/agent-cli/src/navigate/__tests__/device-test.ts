@@ -5,6 +5,7 @@ import path from 'path';
 
 import {
   parseBootedIosSimulator,
+  parseBootedIosSimulators,
   parseFirstAndroidDevice,
   probeAndroidDeviceAsync,
   probeIosSimulatorAsync,
@@ -64,6 +65,13 @@ describe(parseBootedIosSimulator, () => {
 
   it(`should return null when nothing is booted`, () => {
     expect(parseBootedIosSimulator(JSON.stringify({ devices: {} }))).toBeNull();
+  });
+
+  it(`should list every booted iOS simulator, and no watch`, () => {
+    expect(parseBootedIosSimulators(BOOTED_SIMCTL_JSON)).toEqual([
+      { udid: 'IOS-1', name: 'iPhone 17' },
+      { udid: 'IOS-2', name: 'iPad' },
+    ]);
   });
 
   it(`should return null for output that is not simctl JSON`, () => {

@@ -24,7 +24,7 @@ describe(readZipEntry, () => {
       'assets/app.fingerprint',
       'test-fingerprint-hash-'.repeat(50),
     ],
-    ['a stored entry', 'fixture-stored.zip', 'assets/app.fingerprint', 'test-fingerprint-hash'],
+    ['a stored entry', 'fixture-stored.zip', 'assets/app.fingerprint', '{"hash":"test-fingerprint-hash","fingerprintVersion":"0.20.0"}'],
     ['a later entry in the central directory', 'fixture-stored.zip', 'stored.txt', 'stored content'],
   ])(`reads %s`, (_description, fixture, entryName, expected) => {
     const contents = readZipEntry(loadFixture(fixture), entryName);
@@ -44,7 +44,7 @@ describe(readZipEntry, () => {
     const zip = loadFixture('fixture-stored.zip');
     const comment = Buffer.concat([Buffer.from('PK\x05\x06', 'latin1'), Buffer.alloc(18, 0x41)]);
     const contents = readZipEntry(withArchiveComment(zip, comment), 'assets/app.fingerprint');
-    expect(contents?.toString('utf8')).toBe('test-fingerprint-hash');
+    expect(contents?.toString('utf8')).toBe('{"hash":"test-fingerprint-hash","fingerprintVersion":"0.20.0"}');
   });
 });
 
