@@ -735,7 +735,7 @@ Schema unit tests plus tier-0 e2e against a fixture app ([[0002-testing-and-eval
 
 ### Proof
 
-Unit, `src/installedApp/__tests__/`: the verdict table over every reason; the iOS router (simulators first, a phone only when named or alone, the hints); the device probe over an injected launch that posts back (match, mismatch, null fingerprint, not installed, the `openURL` fallback, no scheme, timeout, Developer Mode off, stop at the first match); the callback server over real loopback HTTP (nonce, body cap, timeout, close); `src/device/__tests__/devicectl-test.ts` over a trimmed `list devices` capture; the aggregate outcome; the Android reader over a stubbed `adb` (ranged read, pull fallback, not installed, no file); the simulator reader over both bundle paths; ranking across several devices; the `prebuild-stale` verdict, decided without waiting for the device. `src/project/__tests__/prebuildMarker-test.ts`: the staleness comparison (fresh, stale with named project sources, a dependency-only change, a version mismatch, no marker, no native directory), the reader over a planted marker file, the writer's own round trip, and one rejection per field of its schema. `src/utils/__tests__/zipEntry-test.ts`: both compression methods, the EOCD-in-comment case, the ZIP64 refusals, and the ranged sequence over partial buffers.
+Unit, `src/installedApp/__tests__/`: the verdict table over every reason; the iOS router (simulators first, a phone only when explicitly named, the hints); the device probe over an injected launch that posts back (match, mismatch, null fingerprint, not installed, the `openURL` fallback, no scheme, timeout, Developer Mode off, stop at the first match); the callback server over real loopback HTTP (nonce, body cap, timeout, close); `src/device/__tests__/devicectl-test.ts` over a trimmed `list devices` capture; the aggregate outcome; the Android reader over a stubbed `adb` (ranged read, pull fallback, not installed, no file); the simulator reader over both bundle paths; ranking across several devices; the `prebuild-stale` verdict, decided without waiting for the device. `src/project/__tests__/prebuildMarker-test.ts`: the staleness comparison (fresh, stale with named project sources, a dependency-only change, a version mismatch, no marker, no native directory), the reader over a planted marker file, the writer's own round trip, and one rejection per field of its schema. `src/utils/__tests__/zipEntry-test.ts`: both compression methods, the EOCD-in-comment case, the ZIP64 refusals, and the ranged sequence over partial buffers.
 
 `src/status/__tests__/installed-test.ts`: that disabled lookups read no device, that every platform this host can reach is asked, and the shape of the section.
 
@@ -749,3 +749,10 @@ shut-down simulator. The fingerprint path only reads booted simulators, so it us
 lookup before reading it. Neither path treats a fingerprint mismatch as an absent app.
 
 A `fingerprint-version-mismatch` reports `unknown` with no suggested command: hashes from different tool versions cannot establish staleness. An equal hash still establishes a match.
+
+The installed fingerprint readers extend the existing device-presence checks. Android shares
+`androidPackagePathsAsync` with `androidHasAppAsync`, which backs `hasAppOnDeviceAsync`.
+The boot-choice path still reads simulator bundles on disk because `simctl` cannot inspect a
+shut-down simulator. The fingerprint path only reads booted simulators and uses
+`get_app_container` to locate the resource bundle directly, avoiding a redundant presence lookup.
+Neither path treats a fingerprint mismatch as an absent app.

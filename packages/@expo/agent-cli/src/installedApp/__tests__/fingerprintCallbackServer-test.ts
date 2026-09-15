@@ -29,7 +29,7 @@ describe(startFingerprintCallbackServerAsync, () => {
       );
       expect(response.status).toBe(200);
       server.armTimeout();
-    await expect(server.result).resolves.toEqual({ fingerprint: 'hash-1', fingerprintVersion: null });
+      await expect(server.result).resolves.toEqual({ fingerprint: 'hash-1', fingerprintVersion: null });
     } finally {
       server.close();
     }
@@ -43,7 +43,7 @@ describe(startFingerprintCallbackServerAsync, () => {
         JSON.stringify({ nonce: 'abc', fingerprint: 'hash-1', fingerprintVersion: '0.21.0' })
       );
       server.armTimeout();
-    await expect(server.result).resolves.toEqual({
+      await expect(server.result).resolves.toEqual({
         fingerprint: 'hash-1',
         fingerprintVersion: '0.21.0',
       });
@@ -58,7 +58,7 @@ describe(startFingerprintCallbackServerAsync, () => {
     try {
       await post(loopbackUrl(server.callbackUrl), JSON.stringify({ nonce: 'abc', fingerprint: 'h' }));
       server.armTimeout();
-    await expect(server.result).resolves.toEqual({ fingerprint: 'h', fingerprintVersion: null });
+      await expect(server.result).resolves.toEqual({ fingerprint: 'h', fingerprintVersion: null });
     } finally {
       server.close();
     }
@@ -72,7 +72,7 @@ describe(startFingerprintCallbackServerAsync, () => {
         JSON.stringify({ nonce: 'abc', fingerprint: null })
       );
       server.armTimeout();
-    await expect(server.result).resolves.toEqual({ fingerprint: null, fingerprintVersion: null });
+      await expect(server.result).resolves.toEqual({ fingerprint: null, fingerprintVersion: null });
     } finally {
       server.close();
     }
@@ -95,7 +95,7 @@ describe(startFingerprintCallbackServerAsync, () => {
         (await post(url, JSON.stringify({ nonce: 'abc', fingerprint: 'hash-2' }))).status
       ).toBe(200);
       server.armTimeout();
-    await expect(server.result).resolves.toEqual({ fingerprint: 'hash-2', fingerprintVersion: null });
+      await expect(server.result).resolves.toEqual({ fingerprint: 'hash-2', fingerprintVersion: null });
     } finally {
       server.close();
     }
@@ -109,7 +109,7 @@ describe(startFingerprintCallbackServerAsync, () => {
     });
     try {
       server.armTimeout();
-    await expect(server.result).resolves.toBeNull();
+      await expect(server.result).resolves.toBeNull();
     } finally {
       server.close();
     }
@@ -131,7 +131,7 @@ describe(startFingerprintCallbackServerAsync, () => {
         expect(response.status).toBe(413);
       }
       server.armTimeout();
-    await expect(server.result).resolves.toBeNull();
+      await expect(server.result).resolves.toBeNull();
     } finally {
       server.close();
     }

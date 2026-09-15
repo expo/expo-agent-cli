@@ -1,4 +1,4 @@
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Proof
+// @ref llp/0005-runtime-loop-tools.rfc.md §Proof
 //
 // The `installed` section of `status --explain`, across the process boundary: a stub `adb` serves a
 // fixture APK byte range by byte range, the way a device answers `exec-out dd`, and the stub

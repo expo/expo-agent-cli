@@ -1,4 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §What the answer is
+// @ref llp/0004-smart-start-and-project-state.rfc.md §What the answer is
 // What the installed-app check needs to run. `status` owns the flags that fill this in; nothing
 // here parses argv, because the check is not a command of its own.
 

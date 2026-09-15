@@ -73,6 +73,19 @@ describe(readInstalledFingerprintIosDeviceAsync, () => {
       .resolves.toMatchObject({ status: 'ok', hash: 'the-hash' });
   });
 
+  it('keeps listening through a slow launch and openURL fallback', async () => {
+    await expect(read([phone()], {
+      launchAppWithPayloadUrlAsync: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        throw new Error('launch failed');
+      },
+      openUrlWithDevicectlAsync: async (_udid, url) => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        await respond(url, 'the-hash');
+      },
+    }, { timeoutMs: 30 })).resolves.toMatchObject({ status: 'ok', hash: 'the-hash' });
+  });
+
   it(`reports the fingerprint version the app posts back`, async () => {
     const launch = respondingLaunch('the-hash', { fingerprintVersion: '0.21.0' });
     await expect(read([phone()], { launchAppWithPayloadUrlAsync: launch })).resolves.toMatchObject({
