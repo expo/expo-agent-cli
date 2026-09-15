@@ -168,3 +168,18 @@ describe(buildExplainFollowUps, () => {
     expect(followups.length).toBeLessThanOrEqual(3);
   });
 });
+
+describe('the re-run rung of a --local read', () => {
+  it('names the build log again by platform, which is a command that runs', () => {
+    const followups = buildExplainFollowUps({
+      failure: null,
+      phase: null,
+      moreMayExist: true,
+      source: { kind: 'local', platform: 'android', path: '/app/.expo/dev/logs/build-android.log' },
+    });
+
+    expect(followups[0]!.command).toBe(
+      'npx @expo/agent-cli inspect:build-log --local --android --all --context 40'
+    );
+  });
+});

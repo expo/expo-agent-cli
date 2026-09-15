@@ -131,7 +131,8 @@ describe('the report', () => {
     // The property this command has to keep for a 100 MB Xcode log. `extract-test.ts` asserts the
     // same thing; it is repeated here because this is the path the command actually takes.
     const realFs = await vi.importActual<typeof import('fs')>('fs');
-    const fsApi = ((realFs as { default?: typeof import('fs') }).default ?? realFs) as typeof import('fs');
+    const fsApi = ((realFs as { default?: typeof import('fs') }).default ??
+      realFs) as typeof import('fs');
     const readFileSync = vi.spyOn(fsApi, 'readFileSync');
     await reportForAsync('xcodebuild-pods-out-of-sync.log');
     expect(readFileSync).not.toHaveBeenCalled();
@@ -232,5 +233,45 @@ describe('input that is not a log', () => {
     await expect(
       explainAsync({ ...BASE_OPTIONS, source: { kind: 'file', path: file }, json: true })
     ).resolves.toBeUndefined();
+  });
+});
+
+// @ref llp/0012-build-explain.rfc.md §What ships, and what is reserved
+describe('--local', () => {
+  it('reports the build log as the source, with its path', async () => {
+    const logPath = path.join(FIXTURES, 'xcodebuild-no-profile.log');
+    const read = await readLogFileAsync(logPath);
+
+    const report = buildExplainReport(read, {
+      ...BASE_OPTIONS,
+      source: { kind: 'local', platform: 'ios', path: logPath },
+      platform: 'ios',
+    });
+
+    expect(report.source).toMatchObject({ kind: 'local', path: logPath, platform: 'ios' });
+    expect(report.followups.map((followup) => followup.command)).toContainEqual(
+      expect.stringContaining('inspect:build-log --local --ios')
+    );
+  });
+
+  // Its own code: the path was this CLI's choice, so the recovery is the command that writes it.
+  it('exits 1 with NO_LOCAL_BUILD_LOG, naming dev, when the project has no build log', async () => {
+    const missing = path.join(
+      os.tmpdir(),
+      `agent-cli-no-build-log-${process.pid}`,
+      'build-android.log'
+    );
+
+    await expect(
+      explainAsync({
+        ...BASE_OPTIONS,
+        source: { kind: 'local', platform: 'android', path: missing },
+        platform: 'android',
+      })
+    ).rejects.toMatchObject({
+      code: 'NO_LOCAL_BUILD_LOG',
+      suggestedCommand: 'npx @expo/agent-cli dev --android',
+      message: expect.stringContaining('no android build log'),
+    });
   });
 });

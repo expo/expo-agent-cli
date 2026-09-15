@@ -4,6 +4,7 @@ import { dependsOnDevClientSync, reportFollowUps } from '../followups';
 import { autoSyncSkillsAsync } from '../skills/skillsAsync';
 import { CommandError } from '../utils/errors';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
+import { buildLogPath, buildStepPlatform } from '../dev/buildLog';
 import type { SubprocessOutput } from '../utils/subprocess';
 import { resolveStartFollowUpsAsync } from './followUps';
 import type { StartOptions } from './resolveOptions';
@@ -164,7 +165,16 @@ async function spawnDevServerAsync(
     return { exitCode: await runExpoAsync(projectRoot, args), stdout: '', stderr: '' };
   }
 
-  const { result } = await spawnExpoAsync(projectRoot, args, { output, ci: false });
+  // @ref llp/0012-build-explain.rfc.md §What ships, and what is reserved
+  // `expo run:*` builds, installs and serves in one subprocess, and its output is what
+  // `inspect:build-log --local` explains afterwards. Every byte goes to the platform's build log
+  // as it arrives (`src/dev/buildLog.ts`); a plain `expo start` builds nothing and writes none.
+  const buildPlatform = buildStepPlatform(args);
+  const { result } = await spawnExpoAsync(projectRoot, args, {
+    output,
+    ci: false,
+    ...(buildPlatform ? { logFile: buildLogPath(projectRoot, buildPlatform) } : null),
+  });
   if (result.spawnError) {
     throw new CommandError(
       'EXPO_CLI_NOT_FOUND',

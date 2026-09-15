@@ -113,6 +113,24 @@ describe('@expo/agent-cli dev', () => {
       expect(invocationArgs(projectRoot)).toEqual([['prebuild', '--platform', 'ios'], ['run:ios']]);
     });
 
+    // @ref llp/0012-build-explain.rfc.md §What ships, and what is reserved
+    // The build step's output is what `inspect:build-log --local --ios` explains afterwards, so a
+    // run with no terminal watching it writes every byte of it to the platform's build log.
+    it("writes the native build step's output to the platform's build log", async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local']);
+
+      expect(result.exitCode).toBe(0);
+      const buildLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'build-ios.log');
+      expect(fs.existsSync(buildLog)).toBe(true);
+      // The stub's own first line, which names the command it was run as.
+      expect(fs.readFileSync(buildLog, 'utf8')).toContain('"run:ios"');
+      // The prebuild step is not a build, and writes no android log either.
+      expect(
+        fs.existsSync(path.join(projectRoot, '.expo', 'dev', 'logs', 'build-android.log'))
+      ).toBe(false);
+    });
+
     // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol
     // `CI=1` makes the Expo CLI's prompts fail fast *and* turns Metro's file watcher off, and only
     // the first was ever wanted. A dev server with no watcher serves the code it read at start-up
@@ -305,9 +323,7 @@ describe('@expo/agent-cli dev', () => {
      * `--local` pins the backend: on a CI box with no Xcode the selector would route the rebuild
      * to EAS, and these tests are about *when* a build is planned, not where it runs.
      */
-    async function planAsync(
-      projectRoot: string
-    ): Promise<{ rule: string; steps: string[][] }> {
+    async function planAsync(projectRoot: string): Promise<{ rule: string; steps: string[][] }> {
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--plan', '--ios', '--local', '--json'],
@@ -632,13 +648,9 @@ describe('@expo/agent-cli dev', () => {
     it('is refused before anything runs, with the --json envelope', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['dev', '--json', '--bogus'],
-        {
-          reject: false,
-        }
-      );
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--json', '--bogus'], {
+        reject: false,
+      });
 
       expect(result.exitCode).toBe(1);
       const { error } = JSON.parse(result.stdout);
@@ -906,7 +918,10 @@ describe('@expo/agent-cli dev', () => {
      * `unknown` and the plan is the serve-only one (@ref src/device/appPresence). Written here
      * rather than into the committed fixture, which every other test in this file reads.
      */
-    async function setupInstallAsync(): Promise<{ projectRoot: string; env: Record<string, string> }> {
+    async function setupInstallAsync(): Promise<{
+      projectRoot: string;
+      env: Record<string, string>;
+    }> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
       const configPath = path.join(projectRoot, 'app.json');
       const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
