@@ -381,7 +381,7 @@ export async function collectStatusReportAsync(
       })
     ),
     options.explain && report.freshness
-      ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!))
+      ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!, options))
       : Promise.resolve(null),
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
     // `AGENT_CLI_NO_DEVICE` is the switch `dev` uses, so a stubbed harness never hits a real device.
@@ -613,11 +613,16 @@ function notComparedImpact(
  */
 async function resolveOtaSafetyAsync(
   projectRoot: string,
-  freshness: FreshnessStatus
+  freshness: FreshnessStatus,
+  options: StatusOptions
 ): Promise<OtaSafety> {
   const { resolveRuntimeVersionAsync, resolveOtaSafety } =
     require('../impact/runtimeVersion') as typeof import('../impact/runtimeVersion');
-  const runtimeVersion = await resolveRuntimeVersionAsync(projectRoot);
+  // The same flag that refuses the fingerprint record refuses the remembered `expo config` answer
+  // (llp/0023 §Every consumer can turn it off).
+  const runtimeVersion = await resolveRuntimeVersionAsync(projectRoot, {
+    cache: options.fingerprintCache,
+  });
   // The strongest answer across the platforms, the way `impact` folds them: one platform whose
   // native surface moved is enough to decide the question for an update published now.
   const changed = freshness.platforms.reduce<boolean | null>(
