@@ -111,6 +111,20 @@ export interface ExplainSource {
   droppedLines: number;
 }
 
+/**
+ * One line of the log that reads like an error, with the number a reader can jump to.
+ *
+ * Not a rule match: the rule table knows forty failures, and a log outside it used to leave the
+ * reader a raw tail. These are the lines the *tool* marked as errors — `error:`, `FAILED`,
+ * `fatal`, `✖` — inside the phase the report is about, so the meaningful part of four thousand
+ * lines is on the report whether or not a rule recognised it.
+ */
+export interface ErrorLine {
+  /** 1-based line number in the log as read, after truncation. */
+  line: number;
+  text: string;
+}
+
 /** The one JSON object `inspect:build-log --json` prints. */
 export interface ExplainReport {
   source: ExplainSource;
@@ -125,6 +139,11 @@ export interface ExplainReport {
   failure: Failure | null;
   /** Every other match, when `--all` was passed. Always `[]` without it. */
   otherFailures: Failure[];
+  /**
+   * The lines that read like errors in the phase the report is about — the failing phase, or the
+   * last one when nothing was located. Capped; empty when the phase printed none.
+   */
+  errorLines: ErrorLine[];
   /** The last lines of the log, always present, whether or not a failure was located. */
   logTail: string;
   followups: FollowUp[];
