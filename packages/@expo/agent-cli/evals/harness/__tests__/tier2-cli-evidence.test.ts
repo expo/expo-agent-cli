@@ -15,7 +15,7 @@ const events = [
   },
   { _e: 'cli:dev_lock_acquired', port, pid: 123 },
 ];
-const raw = (items: unknown[]) => items.map((x) => JSON.stringify(x)).join('\n');
+const raw = (items: unknown[]) => items.map((item) => JSON.stringify(item)).join('\n');
 
 describe(assertCliEvidence, () => {
   it('should require the wrapper export event, executing dev plan, and the assigned server port', () => {
@@ -31,7 +31,7 @@ describe(assertCliEvidence, () => {
       'cli:dev_lock_acquired',
     ]) {
       expect(() =>
-        assertCliEvidence(raw(events.filter((e) => e._e !== eventName)), port)
+        assertCliEvidence(raw(events.filter((event) => event._e !== eventName)), port)
       ).toThrow();
     }
   });
@@ -41,7 +41,7 @@ describe(assertCliEvidence, () => {
       assertCliEvidence(raw([{ _e: 'expo:export', command: 'export' }]), port)
     ).toThrow();
     const replace = (name: string, patch: object) =>
-      raw(events.map((e) => (e._e === name ? { ...e, ...patch } : e)));
+      raw(events.map((event) => (event._e === name ? { ...event, ...patch } : event)));
     expect(() =>
       assertCliEvidence(replace('cli:expo_passthrough', { args: ['--help'] }), port)
     ).toThrow();
@@ -59,7 +59,7 @@ describe(assertCliEvidence, () => {
     expect(() =>
       assertCliEvidence(
         raw([
-          ...events.map((e) => (e._e === 'cli:expo_exit' ? { ...e, code: 1 } : e)),
+          ...events.map((event) => (event._e === 'cli:expo_exit' ? { ...event, code: 1 } : event)),
           { _e: 'root:init' },
           { _e: 'cli:expo_exit', code: 0 },
         ]),

@@ -13,14 +13,14 @@ export async function serveExport(directory) {
         return;
       }
       const bytes = await readFile(file);
-      const mime = {
+      const mimeTypes = {
         '.html': 'text/html',
         '.js': 'application/javascript',
         '.css': 'text/css',
         '.json': 'application/json',
       };
       res
-        .writeHead(200, { 'Content-Type': mime[extname(file)] ?? 'application/octet-stream' })
+        .writeHead(200, { 'Content-Type': mimeTypes[extname(file)] ?? 'application/octet-stream' })
         .end(bytes);
     } catch {
       res.writeHead(404).end();

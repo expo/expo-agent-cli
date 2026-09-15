@@ -3,7 +3,9 @@ import { join } from 'node:path';
 /** @param {string} home @param {NodeJS.ProcessEnv} parent @returns {NodeJS.ProcessEnv} */
 export function isolatedEnvironment(home, parent = process.env) {
   const env = Object.fromEntries(
-    ['PATH', 'TMPDIR', 'LANG', 'SYSTEMROOT'].filter((k) => parent[k]).map((k) => [k, parent[k]])
+    ['PATH', 'TMPDIR', 'LANG', 'SYSTEMROOT']
+      .filter((key) => parent[key])
+      .map((key) => [key, parent[key]])
   );
   return {
     ...env,

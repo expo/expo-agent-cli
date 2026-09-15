@@ -17,12 +17,12 @@ export function assertCliEvidence(raw, port) {
       }
       return event;
     });
-  const exports = events.filter(
-    (e) =>
-      e._e === 'cli:expo_passthrough' &&
-      e.command === 'export' &&
-      Array.isArray(e.args) &&
-      !e.args.some((arg) => ['--help', '-h'].includes(arg))
+  const exportInvocations = events.filter(
+    (event) =>
+      event._e === 'cli:expo_passthrough' &&
+      event.command === 'export' &&
+      Array.isArray(event.args) &&
+      !event.args.some((arg) => ['--help', '-h'].includes(arg))
   );
   let pendingExport = false;
   let successfulExports = 0;
@@ -31,7 +31,7 @@ export function assertCliEvidence(raw, port) {
       pendingExport = false;
     }
     if (event._e === 'cli:expo_passthrough') {
-      pendingExport = exports.includes(event);
+      pendingExport = exportInvocations.includes(event);
     }
     if (event._e === 'cli:expo_exit' && pendingExport) {
       if (event.code === 0 && !event.signal) {
@@ -41,24 +41,24 @@ export function assertCliEvidence(raw, port) {
     }
   }
   const plans = events.filter(
-    (e) => e._e === 'cli:start_plan' && e.mode === 'smart' && e.target === 'web'
+    (event) => event._e === 'cli:start_plan' && event.mode === 'smart' && event.target === 'web'
   );
   const starts = events.filter(
-    (e) =>
-      e._e === 'cli:start_plan_step' &&
-      Array.isArray(e.argv) &&
-      e.argv[0] === 'expo' &&
-      e.argv[1] === 'start'
+    (event) =>
+      event._e === 'cli:start_plan_step' &&
+      Array.isArray(event.argv) &&
+      event.argv[0] === 'expo' &&
+      event.argv[1] === 'start'
   );
   const servers = events.filter(
-    (e) =>
-      e.port === port &&
-      ((e._e === 'cli:dev_lock_acquired' && Number.isInteger(e.pid) && e.pid > 0) ||
-        (e._e === 'cli:dev_detach' &&
-          e.alreadyRunning === false &&
-          e.ready !== false &&
-          Number.isInteger(e.pid) &&
-          e.pid > 0))
+    (event) =>
+      event.port === port &&
+      ((event._e === 'cli:dev_lock_acquired' && Number.isInteger(event.pid) && event.pid > 0) ||
+        (event._e === 'cli:dev_detach' &&
+          event.alreadyRunning === false &&
+          event.ready !== false &&
+          Number.isInteger(event.pid) &&
+          event.pid > 0))
   );
   if (!successfulExports || !plans.length || !starts.length || !servers.length) {
     throw new Error(
@@ -66,7 +66,7 @@ export function assertCliEvidence(raw, port) {
     );
   }
   return {
-    exportInvocations: exports.length,
+    exportInvocations: exportInvocations.length,
     successfulExports,
     webDevPlans: plans.length,
     startSteps: starts.length,

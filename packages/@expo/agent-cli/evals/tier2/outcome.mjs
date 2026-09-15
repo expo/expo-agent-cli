@@ -31,15 +31,20 @@ export function assessOutcome({ process: proc, trace, checks = [], errors = [] }
   ) {
     problems.push('Claude trace is incomplete or has a terminal error');
   }
-  const missing = REQUIRED_CHECKS.filter((name) => !checks.some((c) => c.name === name));
-  const failed = checks.filter((c) => c.ok !== true).map((c) => c.name);
-  const status = problems.length ? 'error' : missing.length || failed.length ? 'failed' : 'passed';
+  const missing = REQUIRED_CHECKS.filter((name) => !checks.some((check) => check.name === name));
+  const failed = checks.filter((check) => check.ok !== true).map((check) => check.name);
+  let status = 'passed';
+  if (problems.length) {
+    status = 'error';
+  } else if (missing.length || failed.length) {
+    status = 'failed';
+  }
   return {
     status,
     reason: [
       ...problems,
-      ...missing.map((n) => `missing check: ${n}`),
-      ...failed.map((n) => `failed check: ${n}`),
+      ...missing.map((name) => `missing check: ${name}`),
+      ...failed.map((name) => `failed check: ${name}`),
     ].join('; '),
     checks,
     errors: problems,

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { assessOutcome, REQUIRED_CHECKS, workflowReport } from '../../tier2/outcome.mjs';
 import { summarizeTrace } from '../../tier2/trace.mjs';
 
-const good = () => ({
+const passingInput = () => ({
   process: { exitCode: 0, signal: null, timedOut: false, spawnError: null, pid: 123 },
   trace: summarizeTrace('{"type":"result","subtype":"success","is_error":false}'),
   checks: REQUIRED_CHECKS.map((name) => ({ name, ok: true })),
@@ -12,7 +12,7 @@ const good = () => ({
 
 describe(assessOutcome, () => {
   it('should require every independent check plus normal process completion', () => {
-    expect(assessOutcome(good()).status).toBe('passed');
+    expect(assessOutcome(passingInput()).status).toBe('passed');
   });
 
   it.each([
@@ -22,7 +22,7 @@ describe(assessOutcome, () => {
     { timedOut: true },
     { spawnError: 'ENOENT' },
   ])('should not hide process failure behind green checks: %j', (patch) => {
-    const input = good();
+    const input = passingInput();
     Object.assign(input.process, patch);
     expect(assessOutcome(input).status).toBe('error');
   });
@@ -34,7 +34,7 @@ describe(assessOutcome, () => {
     '{"type":"result","subtype":"success","is_error":true}',
     '{"type":"result","subtype":"success"}',
   ])('should reject incomplete/error trace %s', (raw) => {
-    const input = good();
+    const input = passingInput();
     input.trace = summarizeTrace(raw);
     expect(assessOutcome(input).status).toBe('error');
   });
@@ -42,31 +42,31 @@ describe(assessOutcome, () => {
   it('should not let a model success replace missing or failing checks', () => {
     for (const checks of [
       [],
-      good().checks.slice(1),
-      good().checks.map((c, i) => (i ? c : { ...c, ok: false })),
+      passingInput().checks.slice(1),
+      passingInput().checks.map((check, index) => (index ? check : { ...check, ok: false })),
     ]) {
-      expect(assessOutcome({ ...good(), checks }).status).toBe('failed');
+      expect(assessOutcome({ ...passingInput(), checks }).status).toBe('failed');
     }
   });
 
   it('should not let a duplicate passing check mask a failed check', () => {
-    const input = good();
+    const input = passingInput();
     input.checks.push({ name: REQUIRED_CHECKS[0], ok: false });
     expect(assessOutcome(input).status).toBe('failed');
   });
 
   it('should fail when browser checks succeed but there is no agent-cli event evidence', () => {
-    const input = good();
-    input.checks = input.checks.filter((c) => c.name !== 'agent-cli-invocations');
+    const input = passingInput();
+    input.checks = input.checks.filter((check) => check.name !== 'agent-cli-invocations');
     expect(assessOutcome(input).status).toBe('failed');
   });
 
   it('should report cleanup/setup exceptions as errors', () => {
-    expect(assessOutcome({ ...good(), errors: ['cleanup failed'] }).status).toBe('error');
+    expect(assessOutcome({ ...passingInput(), errors: ['cleanup failed'] }).status).toBe('error');
   });
 
   it('should reject multiple terminal results', () => {
-    const input = good();
+    const input = passingInput();
     input.trace.results.push(input.trace.terminal!);
     expect(assessOutcome(input).status).toBe('error');
   });

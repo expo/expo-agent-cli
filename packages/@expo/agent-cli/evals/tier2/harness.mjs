@@ -18,8 +18,8 @@ import { normalizeTrace, summarizeTrace } from './trace.mjs';
 const here = dirname(fileURLToPath(import.meta.url));
 const cli = resolve(here, '../../bin/cli.js');
 const artifactRoot = resolve(here, '../.artifacts/tier2'); // Stable from any command cwd.
-const json = (path, value) => writeFile(path, JSON.stringify(value, null, 2) + '\n');
-const text = async (path) => readFile(path, 'utf8').catch(() => '');
+const writeJson = (path, value) => writeFile(path, JSON.stringify(value, null, 2) + '\n');
+const readTextOrEmpty = async (path) => readFile(path, 'utf8').catch(() => '');
 const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 const paragraph = (...sentences) => sentences.join(' ');
 
@@ -61,8 +61,11 @@ async function freePort() {
 export async function runTier2(input, signal) {
   const artifacts = join(artifactRoot, 'runs', randomUUID());
   const persistOutcome = async (output) => {
-    await json(join(artifacts, 'outcome.json'), output);
-    await json(join(artifactRoot, 'outcome.json'), { ...output, artifactDirectory: artifacts });
+    await writeJson(join(artifacts, 'outcome.json'), output);
+    await writeJson(join(artifactRoot, 'outcome.json'), {
+      ...output,
+      artifactDirectory: artifacts,
+    });
   };
   await mkdir(artifacts, { recursive: true });
   for (const name of [
@@ -77,7 +80,7 @@ export async function runTier2(input, signal) {
   if (skipReason) {
     const output = { status: 'skipped', reason: skipReason, checks: [] };
     await persistOutcome(output);
-    await json(join(artifacts, 'trace-summary.json'), summarizeTrace(''));
+    await writeJson(join(artifacts, 'trace-summary.json'), summarizeTrace(''));
     return { output };
   }
   await persistOutcome({ status: 'error', reason: 'Run interrupted before completion' });
@@ -98,7 +101,7 @@ export async function runTier2(input, signal) {
     } catch (error) {
       checks.push({ name, ok: false, detail: String(error) });
     }
-    await json(join(artifacts, 'checks.json'), checks);
+    await writeJson(join(artifacts, 'checks.json'), checks);
   };
   const command = async (name, bin, args, options = {}) => {
     const result = await captureProcess(bin, args, {
@@ -109,7 +112,7 @@ export async function runTier2(input, signal) {
       stderrPath: join(artifacts, `${name}.stderr.log`),
       ...options,
     });
-    await json(join(artifacts, `${name}.process.json`), result);
+    await writeJson(join(artifacts, `${name}.process.json`), result);
     if (result.exitCode !== 0 || result.timedOut || result.spawnError || result.signal) {
       throw new Error(`${name} did not complete: ${JSON.stringify(result)}`);
     }
@@ -130,7 +133,7 @@ export async function runTier2(input, signal) {
       join(workspace, '.gitignore'),
       'node_modules/\ndist/\nverification-dist/\n.expo/\n.claude/\n'
     );
-    await json(join(artifacts, 'run.json'), {
+    await writeJson(join(artifacts, 'run.json'), {
       workspace,
       home,
       model: CLAUDE_MODEL,
@@ -138,7 +141,7 @@ export async function runTier2(input, signal) {
       startedAt: new Date(startedAt).toISOString(),
     });
     const version = await command('claude-version', 'claude', ['--version']);
-    const versionOutput = await text(join(artifacts, 'claude-version.stdout.log'));
+    const versionOutput = await readTextOrEmpty(join(artifacts, 'claude-version.stdout.log'));
     if (!versionOutput.startsWith(`${CLAUDE_VERSION} `)) {
       throw new Error(
         `Install @anthropic-ai/claude-code@${CLAUDE_VERSION} (version process exited ${version.exitCode})`
@@ -180,10 +183,10 @@ export async function runTier2(input, signal) {
         stderrPath: join(artifacts, 'baseline.stderr.log'),
       }
     );
-    await json(join(artifacts, 'baseline.process.json'), baseline);
+    await writeJson(join(artifacts, 'baseline.process.json'), baseline);
     const baselineLog =
-      (await text(join(artifacts, 'baseline.stdout.log'))) +
-      (await text(join(artifacts, 'baseline.stderr.log')));
+      (await readTextOrEmpty(join(artifacts, 'baseline.stdout.log'))) +
+      (await readTextOrEmpty(join(artifacts, 'baseline.stderr.log')));
     assertBrokenBaseline(baseline, baselineLog);
     checks.push({
       name: 'broken-baseline',
@@ -199,7 +202,7 @@ export async function runTier2(input, signal) {
       'src/items.json',
       '.gitignore',
     ];
-    const before = new Map(
+    const immutableContents = new Map(
       await Promise.all(
         immutable.map(async (file) => [file, await readFile(join(workspace, file), 'utf8')])
       )
@@ -284,7 +287,7 @@ export async function runTier2(input, signal) {
         stderrPath: join(artifacts, 'claude.stderr.log'),
       }
     );
-    await json(join(artifacts, 'claude.process.json'), claudeProcess);
+    await writeJson(join(artifacts, 'claude.process.json'), claudeProcess);
     await record('source-changed', async () => {
       if ((await sourceSnapshot(workspace)) === originalSources) {
         throw new Error('No source changed');
@@ -292,7 +295,7 @@ export async function runTier2(input, signal) {
       return 'App/source differs from broken baseline';
     });
     await record('fixture-contract', async () => {
-      for (const [file, contents] of before) {
+      for (const [file, contents] of immutableContents) {
         if ((await readFile(join(workspace, file), 'utf8')) !== contents) {
           throw new Error(`${file} changed`);
         }
@@ -342,10 +345,10 @@ export async function runTier2(input, signal) {
     });
     await record('agent-cli-invocations', async () => {
       const evidence = assertCliEvidence(
-        await text(join(artifacts, 'agent-cli.events.jsonl')),
+        await readTextOrEmpty(join(artifacts, 'agent-cli.events.jsonl')),
         port
       );
-      await json(join(artifacts, 'cli-event-summary.json'), evidence);
+      await writeJson(join(artifacts, 'cli-event-summary.json'), evidence);
       return evidence;
     });
   } catch (error) {
@@ -383,14 +386,14 @@ export async function runTier2(input, signal) {
       }
     }
   }
-  const raw = await text(join(artifacts, 'claude.stream.jsonl'));
-  const trace = summarizeTrace(raw);
+  const rawStream = await readTextOrEmpty(join(artifacts, 'claude.stream.jsonl'));
+  const trace = summarizeTrace(rawStream);
   const output = {
     ...assessOutcome({ process: claudeProcess, trace, checks, errors }),
     elapsedMs: Date.now() - startedAt,
   };
-  await json(join(artifacts, 'trace-summary.json'), trace);
+  await writeJson(join(artifacts, 'trace-summary.json'), trace);
   await persistOutcome(output);
-  await json(join(artifacts, 'trace-events.json'), normalizeTrace(raw, prompt || input));
+  await writeJson(join(artifacts, 'trace-events.json'), normalizeTrace(rawStream, prompt || input));
   return { output };
 }

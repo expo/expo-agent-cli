@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { normalizeTrace, summarizeTrace } from '../../tier2/trace.mjs';
 
-const lines = (...events: unknown[]) => events.map((e) => JSON.stringify(e)).join('\n');
+const lines = (...events: unknown[]) => events.map((event) => JSON.stringify(event)).join('\n');
 
 describe(summarizeTrace, () => {
   it('should count tool calls/results without grading assistant claims', () => {
@@ -39,9 +39,9 @@ describe(summarizeTrace, () => {
       type: 'assistant',
       message: { content: [{ type: 'tool_use', id: 't', name: 'Read' }] },
     };
-    const s = summarizeTrace(lines(event, event, { type: 'rate_limit_event' }));
-    expect(s.tools).toEqual({ Read: 1 });
-    expect(s.events.rate_limit_event).toBe(1);
+    const summary = summarizeTrace(lines(event, event, { type: 'rate_limit_event' }));
+    expect(summary.tools).toEqual({ Read: 1 });
+    expect(summary.events.rate_limit_event).toBe(1);
   });
 
   it('should handle CRLF and a complete last line without a newline', () => {
@@ -51,19 +51,19 @@ describe(summarizeTrace, () => {
   });
 
   it('should retain all terminal events so a later success cannot hide an earlier error', () => {
-    const s = summarizeTrace(
+    const summary = summarizeTrace(
       lines(
         { type: 'result', subtype: 'error_max_turns', is_error: true },
         { type: 'result', subtype: 'success', is_error: false }
       )
     );
-    expect(s.results).toHaveLength(2);
+    expect(summary.results).toHaveLength(2);
   });
 
   it('should record malformed JSON and invalid events by line, including a truncated final line', () => {
-    const s = summarizeTrace('\nnot json\nnull\n42\n{}\n{"type":');
-    expect(s.malformedLines).toEqual([2, 3, 4, 5, 6]);
-    expect(s.terminal).toBeNull();
+    const summary = summarizeTrace('\nnot json\nnull\n42\n{}\n{"type":');
+    expect(summary.malformedLines).toEqual([2, 3, 4, 5, 6]);
+    expect(summary.terminal).toBeNull();
   });
 });
 

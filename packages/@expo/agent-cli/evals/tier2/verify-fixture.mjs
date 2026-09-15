@@ -35,9 +35,9 @@ const report = {
   checks: [],
   error: null,
 };
-const json = (name, value) =>
+const writeJson = (name, value) =>
   writeFile(join(artifacts, name), JSON.stringify(value, null, 2) + '\n');
-const text = (path) => readFile(path, 'utf8');
+const readText = (path) => readFile(path, 'utf8');
 
 async function command(name, bin, args, childEnv = env) {
   const result = await captureProcess(bin, args, {
@@ -47,7 +47,7 @@ async function command(name, bin, args, childEnv = env) {
     stdoutPath: join(artifacts, `${name}.stdout.log`),
     stderrPath: join(artifacts, `${name}.stderr.log`),
   });
-  await json(`${name}.process.json`, result);
+  await writeJson(`${name}.process.json`, result);
   return result;
 }
 
@@ -61,20 +61,20 @@ let browser;
 let metroAbort;
 let metroResult;
 try {
-  const lockBefore = await text(join(workspace, 'package-lock.json'));
+  const lockBefore = await readText(join(workspace, 'package-lock.json'));
   requireSuccess('npm ci', await command('npm-ci', 'npm', ['ci', '--no-audit', '--no-fund']));
-  if ((await text(join(workspace, 'package-lock.json'))) !== lockBefore) {
+  if ((await readText(join(workspace, 'package-lock.json'))) !== lockBefore) {
     throw new Error('npm ci changed the lockfile');
   }
   report.checks.push('clean npm ci; lock unchanged');
-  const pkg = JSON.parse(await text(join(workspace, 'package.json')));
-  await json(
+  const pkg = JSON.parse(await readText(join(workspace, 'package.json')));
+  await writeJson(
     'installed-versions.json',
     Object.fromEntries(
       await Promise.all(
         Object.keys(pkg.dependencies).map(async (name) => [
           name,
-          JSON.parse(await text(join(workspace, 'node_modules', name, 'package.json'))).version,
+          JSON.parse(await readText(join(workspace, 'node_modules', name, 'package.json'))).version,
         ])
       )
     )
@@ -84,13 +84,13 @@ try {
   const broken = await command('baseline', process.execPath, exportArgs);
   assertBrokenBaseline(
     broken,
-    (await text(join(artifacts, 'baseline.stdout.log'))) +
-      (await text(join(artifacts, 'baseline.stderr.log')))
+    (await readText(join(artifacts, 'baseline.stdout.log'))) +
+      (await readText(join(artifacts, 'baseline.stderr.log')))
   );
   report.checks.push('baseline fails only at the intended missing ./src/total import');
   await writeFile(
     join(workspace, 'App.js'),
-    (await text(join(workspace, 'App.js'))).replace("'./src/total'", "'./src/totals'")
+    (await readText(join(workspace, 'App.js'))).replace("'./src/total'", "'./src/totals'")
   );
   requireSuccess(
     'import-only repair export',
@@ -128,7 +128,7 @@ try {
   }
   await writeFile(
     join(workspace, 'src/totals.js'),
-    (await text(join(workspace, 'src/totals.js'))).replace(
+    (await readText(join(workspace, 'src/totals.js'))).replace(
       'sum + item.priceCents',
       'sum + item.priceCents * item.quantity'
     )
@@ -209,7 +209,10 @@ try {
     await checkCart(browser, `http://127.0.0.1:${port}`, join(artifacts, 'metro.png'));
     report.checks.push('real Metro status and browser totals/button checks pass');
     if (cli) {
-      await json('agent-cli-evidence.json', assertCliEvidence(await text(cliEvents), port));
+      await writeJson(
+        'agent-cli-evidence.json',
+        assertCliEvidence(await readText(cliEvents), port)
+      );
       report.checks.push('mechanical agent-cli export + executing dev + server events verified');
     }
   }
@@ -226,11 +229,11 @@ try {
   }
   metroAbort?.abort();
   if (metroResult) {
-    await json('metro.process.json', await metroResult);
+    await writeJson('metro.process.json', await metroResult);
   }
   if (browser) {
     await browser.close();
   }
-  await json('fixture-verification.json', report);
+  await writeJson('fixture-verification.json', report);
   console.log(JSON.stringify({ artifacts, ...report }, null, 2));
 }

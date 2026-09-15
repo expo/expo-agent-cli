@@ -36,20 +36,20 @@ export async function captureProcess(bin, args, { cwd, env, signal, stdoutPath, 
       pid: null,
     };
   }
-  const out = openSync(stdoutPath, 'w');
-  let err;
+  const stdoutFd = openSync(stdoutPath, 'w');
+  let stderrFd;
   try {
-    err = openSync(stderrPath, 'w');
+    stderrFd = openSync(stderrPath, 'w');
   } catch (error) {
-    closeSync(out);
+    closeSync(stdoutFd);
     throw error;
   }
   let child;
   try {
-    child = spawn(bin, args, { cwd, env, detached: true, stdio: ['ignore', out, err] });
+    child = spawn(bin, args, { cwd, env, detached: true, stdio: ['ignore', stdoutFd, stderrFd] });
   } finally {
-    closeSync(out);
-    closeSync(err);
+    closeSync(stdoutFd);
+    closeSync(stderrFd);
   }
   return new Promise((resolve) => {
     let timedOut = false;

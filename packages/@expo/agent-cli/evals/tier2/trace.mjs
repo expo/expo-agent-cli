@@ -69,8 +69,8 @@ export function summarizeTrace(raw) {
           'usage',
           'permission_denials',
         ]
-          .filter((k) => k in event)
-          .map((k) => [k, event[k]])
+          .filter((key) => key in event)
+          .map((key) => [key, event[key]])
       );
       summary.results.push(result);
       summary.terminal = result;
@@ -105,9 +105,9 @@ export function normalizeTrace(raw, prompt) {
     if (!Array.isArray(message?.content)) {
       continue;
     }
-    for (const [i, block] of message.content.entries()) {
+    for (const [index, block] of message.content.entries()) {
       if (block.type === 'text' && event.type === 'assistant') {
-        const key = `${message.id ?? event.uuid}:${i}:${block.text}`;
+        const key = `${message.id ?? event.uuid}:${index}:${block.text}`;
         if (seenMessages.has(key)) {
           continue;
         }
