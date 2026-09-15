@@ -731,7 +731,7 @@ Schema unit tests plus tier-0 e2e against a fixture app ([[0002-testing-and-eval
 
 **iOS simulator.** `xcrun simctl get_app_container <udid> <appId>` names the app bundle, and the file is read off the disk at one of two paths: `EXConstants.bundle/app.fingerprint` for static linking, `Frameworks/EXConstants.framework/EXConstants.bundle/app.fingerprint` for `use_frameworks!`.
 
-**iOS device.** `devicectl` exposes no app container. The check starts a one-shot HTTP server on the LAN, launches the app with a URL carrying a nonce and the callback address, and the app's dev-launcher responder posts the embedded fingerprint back (expo/expo #49494). A timeout (15 s by default) is `no-response`, never `up-to-date`. The probe launches the app, so a phone is only probed when `--device` names it. Booted simulators are always preferred. A phone with Developer Mode off is named and not probed. The trigger URL is host-free and carries reserved `__expo_fingerprint_*` query parameters, so it claims no route of the app's; a host would read as a destination and take a name out of the app's own namespace. The scheme is the static `expo.scheme` when there is one; `launch --payload-url` needs none, and the `openURL` fallback for a toolchain whose launch refuses a running app does.
+**iOS device.** `devicectl` exposes no app container. The check starts a one-shot HTTP server on the LAN, launches the app with a URL carrying a nonce and the callback address, and the app's dev-launcher responder posts the embedded fingerprint back (expo/expo #49494). A response timeout (15 s by default, armed after launch or the openURL fallback delivers the trigger) is `no-response`, never `up-to-date`. The probe launches the app, so a phone is only probed when `--device` names it. Booted simulators are always preferred. A phone with Developer Mode off is named and not probed. The trigger URL is host-free and carries reserved `__expo_fingerprint_*` query parameters, so it claims no route of the app's; a host would read as a destination and take a name out of the app's own namespace. The scheme is the static `expo.scheme` when there is one; `launch --payload-url` needs none, and the `openURL` fallback for a toolchain whose launch refuses a running app does.
 
 ### Proof
 
@@ -747,3 +747,5 @@ The boot-choice path still reads simulator bundles on disk because `simctl` cann
 shut-down simulator. The fingerprint path only reads booted simulators, so it uses
 `get_app_container` to locate the resource bundle directly rather than doing a second presence
 lookup before reading it. Neither path treats a fingerprint mismatch as an absent app.
+
+A `fingerprint-version-mismatch` reports `unknown` with no suggested command: hashes from different tool versions cannot establish staleness. An equal hash still establishes a match.

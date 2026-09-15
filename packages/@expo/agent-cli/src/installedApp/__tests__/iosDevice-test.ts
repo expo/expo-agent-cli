@@ -64,6 +64,15 @@ function read(
 }
 
 describe(readInstalledFingerprintIosDeviceAsync, () => {
+  it('gives the phone its response budget after a slow launch', async () => {
+    const launch = vi.fn(async (_udid: string, _bundleId: string, url: string) => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await respond(url, 'the-hash');
+    });
+    await expect(read([phone()], { launchAppWithPayloadUrlAsync: launch }, { timeoutMs: 30 }))
+      .resolves.toMatchObject({ status: 'ok', hash: 'the-hash' });
+  });
+
   it(`reports the fingerprint version the app posts back`, async () => {
     const launch = respondingLaunch('the-hash', { fingerprintVersion: '0.21.0' });
     await expect(read([phone()], { launchAppWithPayloadUrlAsync: launch })).resolves.toMatchObject({
@@ -244,7 +253,7 @@ describe(readInstalledFingerprintIosDeviceAsync, () => {
     const launch = vi.fn();
     await expect(
       read([phone({ reachable: false })], { launchAppWithPayloadUrlAsync: launch })
-    ).resolves.toEqual({ status: 'no-device' });
+    ).resolves.toMatchObject({ status: 'no-device', hint: expect.stringContaining('not reachable') });
     expect(launch).not.toHaveBeenCalled();
   });
 

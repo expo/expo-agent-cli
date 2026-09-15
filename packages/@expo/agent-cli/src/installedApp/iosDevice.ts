@@ -56,15 +56,21 @@ export async function readInstalledFingerprintIosDeviceAsync({
   timeoutMs,
   deps = {},
 }: IosDeviceReaderOptions): Promise<InstalledFingerprintResult> {
-  let candidates = devices.filter((device) => device.reachable);
+  let candidates = devices;
   if (deviceFilter) {
     candidates = candidates.filter((device) =>
       matchesDeviceFilter(deviceFilter, { name: device.name, identifier: device.udid })
     );
   }
-  const usable = candidates.filter((device) => device.developerModeEnabled);
+  const usable = candidates.filter((device) => device.reachable && device.developerModeEnabled);
   if (!usable.length) {
     const [blocked] = candidates;
+    if (blocked && !blocked.reachable) {
+      return {
+        status: 'no-device',
+        hint: `${blocked.name} is known to this Mac but is not reachable. Connect and unlock it, pair it with this Mac, and check its connection in Xcode before retrying.`,
+      };
+    }
     if (blocked) {
       return {
         status: 'no-device',
@@ -132,6 +138,7 @@ async function probeDeviceAsync(
       }
     }
 
+    server.armTimeout();
     const response = await server.result;
     if (!response) {
       return { status: 'no-response', appId, device };

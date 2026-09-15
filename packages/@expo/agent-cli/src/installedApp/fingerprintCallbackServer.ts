@@ -36,6 +36,8 @@ export interface FingerprintCallbackServer {
   result: Promise<FingerprintCallbackResult | null>;
   /** Stop listening and clear the timeout. Safe to call more than once. */
   close(): void;
+  /** Start the response budget after delivering the trigger. Idempotent. */
+  armTimeout(): void;
 }
 
 export interface FingerprintCallbackServerOptions {
@@ -146,9 +148,11 @@ export async function startFingerprintCallbackServerAsync({
     server.once('error', reject);
     server.listen({ port: 0, host: '0.0.0.0' }, resolve);
   });
-  timer = setTimeout(close, timeoutMs);
+  function armTimeout(): void {
+    if (!settled && !timer) timer = setTimeout(close, timeoutMs);
+  }
 
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : 0;
-  return { callbackUrl: `http://${host}:${port}${CALLBACK_PATH}`, result, close };
+  return { callbackUrl: `http://${host}:${port}${CALLBACK_PATH}`, result, close, armTimeout };
 }

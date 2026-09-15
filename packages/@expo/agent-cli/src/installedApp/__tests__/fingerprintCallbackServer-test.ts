@@ -28,7 +28,8 @@ describe(startFingerprintCallbackServerAsync, () => {
         JSON.stringify({ nonce: 'abc', fingerprint: 'hash-1' })
       );
       expect(response.status).toBe(200);
-      await expect(server.result).resolves.toEqual({ fingerprint: 'hash-1', fingerprintVersion: null });
+      server.armTimeout();
+    await expect(server.result).resolves.toEqual({ fingerprint: 'hash-1', fingerprintVersion: null });
     } finally {
       server.close();
     }
@@ -41,7 +42,8 @@ describe(startFingerprintCallbackServerAsync, () => {
         loopbackUrl(server.callbackUrl),
         JSON.stringify({ nonce: 'abc', fingerprint: 'hash-1', fingerprintVersion: '0.21.0' })
       );
-      await expect(server.result).resolves.toEqual({
+      server.armTimeout();
+    await expect(server.result).resolves.toEqual({
         fingerprint: 'hash-1',
         fingerprintVersion: '0.21.0',
       });
@@ -55,7 +57,8 @@ describe(startFingerprintCallbackServerAsync, () => {
     const server = await startFingerprintCallbackServerAsync({ nonce: 'abc', lanHost });
     try {
       await post(loopbackUrl(server.callbackUrl), JSON.stringify({ nonce: 'abc', fingerprint: 'h' }));
-      await expect(server.result).resolves.toEqual({ fingerprint: 'h', fingerprintVersion: null });
+      server.armTimeout();
+    await expect(server.result).resolves.toEqual({ fingerprint: 'h', fingerprintVersion: null });
     } finally {
       server.close();
     }
@@ -68,7 +71,8 @@ describe(startFingerprintCallbackServerAsync, () => {
         loopbackUrl(server.callbackUrl),
         JSON.stringify({ nonce: 'abc', fingerprint: null })
       );
-      await expect(server.result).resolves.toEqual({ fingerprint: null, fingerprintVersion: null });
+      server.armTimeout();
+    await expect(server.result).resolves.toEqual({ fingerprint: null, fingerprintVersion: null });
     } finally {
       server.close();
     }
@@ -90,7 +94,8 @@ describe(startFingerprintCallbackServerAsync, () => {
       expect(
         (await post(url, JSON.stringify({ nonce: 'abc', fingerprint: 'hash-2' }))).status
       ).toBe(200);
-      await expect(server.result).resolves.toEqual({ fingerprint: 'hash-2', fingerprintVersion: null });
+      server.armTimeout();
+    await expect(server.result).resolves.toEqual({ fingerprint: 'hash-2', fingerprintVersion: null });
     } finally {
       server.close();
     }
@@ -103,7 +108,8 @@ describe(startFingerprintCallbackServerAsync, () => {
       lanHost,
     });
     try {
-      await expect(server.result).resolves.toBeNull();
+      server.armTimeout();
+    await expect(server.result).resolves.toBeNull();
     } finally {
       server.close();
     }
@@ -124,7 +130,8 @@ describe(startFingerprintCallbackServerAsync, () => {
       if (response) {
         expect(response.status).toBe(413);
       }
-      await expect(server.result).resolves.toBeNull();
+      server.armTimeout();
+    await expect(server.result).resolves.toBeNull();
     } finally {
       server.close();
     }
@@ -145,6 +152,7 @@ describe(startFingerprintCallbackServerAsync, () => {
     server.close();
     server.close();
     await new Promise((resolve) => socket.once('close', resolve));
+    server.armTimeout();
     await expect(server.result).resolves.toBeNull();
 
     // The same port binds again, which `port: 0` on a second server would not prove.

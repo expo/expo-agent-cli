@@ -18,6 +18,9 @@
 
 ### 🐛 Bug fixes
 
+- Installed-app hash mismatches recommend prebuild before rebuilding CNG projects whose existing native directories have no usable marker. Bare projects still receive rebuild advice only. Fingerprint version mismatches remain unknown and suggest no automatic rebuild.
+- Physical iPhone checks allow the full response timeout after delivering the launch URL and explain unreachable devices.
+
 - `inspect:build-log` now locates a `bun install` dependency 404. EAS builds a bun-lockfile project with bun, whose error shape is nothing like npm's, so those failures were unlocatable before. ([#15](https://github.com/expo/expo-agent-cli/pull/15) by [@kudo](https://github.com/kudo))
 - Commands no longer suggest a bare `smoke`, which exits 1 now that the gate requires `--ios` or `--android`. Every next-action that named it — on `dev`, `dev:logs`, `typecheck`, the interact commands, `runtime:reload`, `runtime:eval`, `navigate`, and the `AGENTS.md` written into a project — names a platform, and a lint rule fails on any printed `smoke` that does not. ([#6](https://github.com/expo/expo-agent-cli/pull/6) by [@kudo](https://github.com/kudo))
 - The Expo Go check now compares native modules against a vendored autolink dump of Expo Go, and falls back to `bundledNativeModules.json` for an SDK this CLI has not recaptured. ([#3](https://github.com/expo/expo-agent-cli/pull/3) by [@kudo](https://github.com/kudo))
