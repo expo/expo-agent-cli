@@ -47,7 +47,7 @@ describe('the on-ramp', () => {
     expect(result.stdout).toContain('Exit codes');
     expect(result.stdout).toContain('--json');
     expect(result.stdout).toContain('Try:');
-    expect(result.stdout).toContain('npx @expo/agent-cli status --explain');
+    expect(result.stdout).toContain('npx @expo/agent-cli status --build <id>');
   });
 
   // A topic is a positional, so the wrong shapes are a colon, a bare verb, and the name this topic
