@@ -187,8 +187,10 @@ async function checkPlatformAsync(
     fingerprintVersion: currentFingerprintVersion,
   });
   const prebuild = { prebuildStatus: staleness.status, prebuildChanges: staleness.changes };
-  // A bare project owns its native directories (`project/impact.ts`: "Bare projects own their
-  // native directories, so CNG must not regenerate them"), so `prebuild` is never advised for one.
+  // Only where the marker cannot vouch for the directories: `prebuild` would rewrite native code a
+  // bare project owns by hand (`project/impact.ts`: "Bare projects own their native directories, so
+  // CNG must not regenerate them"). A *stale* marker is not that case — it says this CLI generated
+  // those directories, which outranks the gitignore heuristic this flag is read from.
   const ownsNativeDir = (await deps.readCheckedInNativeDirs(projectRoot))[platform];
   if (staleness.status === 'stale') {
     const named = formatPrebuildChanges(staleness.changes);

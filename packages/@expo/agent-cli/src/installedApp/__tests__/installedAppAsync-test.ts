@@ -226,6 +226,30 @@ describe(checkInstalledAppAsync, () => {
     expect(report.outcome).toBe('rebuild-required');
   });
 
+  // The marker says this CLI generated these directories, which outranks the gitignore heuristic
+  // behind `readCheckedInNativeDirs` — that reads "checked in" for any project without a
+  // `.gitignore` entry, including a freshly prebuilt one.
+  it(`still advises prebuild on a stale marker when the native dirs look checked in`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device,
+      }),
+      readNativeDirectoryStaleness: () => ({
+        status: 'stale',
+        changes: [{ source: 'app config', change: 'changed', scope: 'project' }],
+      }),
+      readCheckedInNativeDirs: async () => ({ ios: true, android: true }),
+    });
+
+    expect(report.platforms.ios!.reason).toBe('prebuild-stale');
+    expect(report.platforms.ios!.commands[0]).toBe('npx @expo/agent-cli prebuild -p ios');
+  });
+
   it(`names no source when only dependencies moved the prebuild`, async () => {
     const report = await checkInstalledAppAsync(projectRoot, options(), {
       ...deps,
