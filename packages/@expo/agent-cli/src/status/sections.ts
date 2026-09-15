@@ -19,6 +19,7 @@ import { decidesAgainstExpoGo } from '../project/expoGo';
 import type { FingerprintResult } from '../project/fingerprint';
 import type { ProjectState, StartPlan } from '../project/types';
 import type { DevServerProbe, DevServerSource } from '../runtime/devServer';
+import { formatAge } from '../utils/age';
 import type {
   BuildsStatus,
   DevServerStatus,
@@ -298,7 +299,12 @@ export function applyEasFreshness(freshness: FreshnessStatus, builds: BuildsStat
     }
     if (lookup.state === 'none') {
       entry.state = 'stale';
-      entry.detail = 'EAS has no finished build for this fingerprint';
+      // A remembered none says how old it is: a build may have finished since, and the age is the
+      // whole bound on that (`src/status/easBuilds.ts` §EAS_NONE_CACHE_TTL_MS).
+      entry.detail =
+        lookup.source === 'cache' && lookup.ageMs != null
+          ? `EAS had no finished build for this fingerprint ${formatAge(lookup.ageMs)} ago`
+          : 'EAS has no finished build for this fingerprint';
       continue;
     }
     entry.state = 'unknown';
