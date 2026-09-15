@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "bundle": "bun run --filter expo-agent-cli bundle",
-    "test": "bun test && bun run --filter @expo/agent-cli test"
+    "test": "bun test scripts packages/expo-agent-cli && bun run --filter @expo/agent-cli test"
   },
   "devDependencies": {
     "oxfmt": "^0.66.0",
