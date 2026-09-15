@@ -3,7 +3,8 @@
 // compare two source lists and have to say which input changed, so the identity, the naming and the
 // project/dependency split live here rather than in either caller.
 
-import type { FingerprintSource } from '../project/fingerprint';
+import { diffItemSource, type FingerprintSource } from './fingerprint';
+import { diffFingerprintSourcesLocally } from './localDiff';
 
 export interface SourceChange {
   /** A readable name of the source, such as `app config` or `plugins/withFoo.js`. */
@@ -13,48 +14,12 @@ export interface SourceChange {
   scope: 'project' | 'dependency';
 }
 
-/**
- * Index sources by a stable identity. `overrideHashKey` is part of the key when set: it exists to
- * keep a source identifiable when its path varies between environments.
- */
-export function toSourceHashMap(
-  sources: FingerprintSource[]
-): Map<string, { hash: string; source: FingerprintSource }> {
-  const map = new Map<string, { hash: string; source: FingerprintSource }>();
-  for (const source of sources) {
-    if (typeof source.hash !== 'string') {
-      continue;
-    }
-    const override = typeof source.overrideHashKey === 'string' ? source.overrideHashKey : null;
-    const key =
-      source.type === 'contents'
-        ? `contents:${source.id}`
-        : source.type === 'package'
-          ? `package:${override ?? source.name}`
-          : `${source.type}:${override ?? source.filePath}`;
-    map.set(key, { hash: source.hash, source });
-  }
-  return map;
-}
-
-/** What differs between two source lists, named. */
-export function diffSources(
-  before: FingerprintSource[],
-  after: FingerprintSource[]
-): SourceChange[] {
-  const a = toSourceHashMap(before);
-  const b = toSourceHashMap(after);
-  const changes: SourceChange[] = [];
-  for (const key of new Set([...a.keys(), ...b.keys()])) {
-    const was = a.get(key);
-    const now = b.get(key);
-    if (was?.hash === now?.hash) {
-      continue;
-    }
-    const change = !was ? 'added' : !now ? 'removed' : 'changed';
-    changes.push({ ...describeSource((now ?? was)!.source), change });
-  }
-  return changes;
+/** What differs between two source lists, using the same identity rule as status. */
+export function diffSources(before: FingerprintSource[], after: FingerprintSource[]): SourceChange[] {
+  return diffFingerprintSourcesLocally(before, after).map((item) => ({
+    ...describeSource(diffItemSource(item)),
+    change: item.op,
+  }));
 }
 
 /** The project sources of `changes`, as a phrase. Empty when only dependencies moved. */
@@ -68,8 +33,8 @@ export function formatChangedSources(changes: SourceChange[], max: number = 3): 
 export function describeSource(source: FingerprintSource): Pick<SourceChange, 'source' | 'scope'> {
   if (source.type === 'contents') {
     return {
-      source: source.id === 'expoConfig' ? 'the app config' : (source.id ?? 'contents'),
-      scope: 'project',
+      source: contentsName(source.id),
+      scope: source.id?.startsWith('package:') ? 'dependency' : 'project',
     };
   }
   if (source.type === 'package') {
@@ -83,4 +48,12 @@ export function describeSource(source: FingerprintSource): Pick<SourceChange, 's
 function isDependencyPath(filePath: string): boolean {
   const segments = filePath.split(/[\\/]/);
   return segments[0] === '..' || segments.includes('node_modules');
+}
+
+function contentsName(id: string | undefined): string {
+  if (id === 'expoConfig') return 'the app config';
+  if (id?.startsWith('expoAutolinkingConfig:')) return 'Expo autolinking configuration';
+  if (id?.startsWith('rncoreAutolinkingConfig')) return 'React Native autolinking configuration';
+  if (id === 'packageJson:scripts') return 'package.json scripts';
+  return id ?? 'contents';
 }

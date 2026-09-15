@@ -175,6 +175,17 @@ export function readPrebuiltIosBundleIdentifier(projectRoot: string): string | n
     } catch {
       continue;
     }
+    // Release can use a shorter id than Debug (com.app vs com.app.dev). Apply the
+    // extension-prefix rule only within Debug, never across build configurations.
+    const configurations = [...source.matchAll(
+      /\bisa\s*=\s*XCBuildConfiguration;([\s\S]*?)(?=\bisa\s*=|$)/g
+    )];
+    if (configurations.length) {
+      source = configurations
+        .filter((match) => /\bname\s*=\s*"?Debug"?\s*;/.test(match[1]!))
+        .map((match) => match[1]!)
+        .join('\n');
+    }
     const found = [
       ...source.matchAll(/^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"?([^";]+)"?\s*;/gm),
     ].map((match) => match[1]!.trim());

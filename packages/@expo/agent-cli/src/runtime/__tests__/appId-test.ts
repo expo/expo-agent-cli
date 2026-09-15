@@ -372,3 +372,26 @@ describe('the bundle identifier of a prebuilt iOS project', () => {
   });
 });
 
+
+
+describe('Debug bundle identifiers', () => {
+  it('does not mistake the Release prefix for the Debug application', () => {
+    vol.fromJSON({ '/project/ios/demo.xcodeproj/project.pbxproj': `
+      RELEASE = {
+        isa = XCBuildConfiguration;
+        buildSettings = {
+          PRODUCT_BUNDLE_IDENTIFIER = com.example.app;
+        };
+        name = Release;
+      };
+      DEBUG = {
+        isa = XCBuildConfiguration;
+        buildSettings = {
+          PRODUCT_BUNDLE_IDENTIFIER = com.example.app.dev;
+        };
+        name = Debug;
+      };
+    ` });
+    expect(readConfiguredAppId('/project', 'ios')).toBe('com.example.app.dev');
+  });
+});
