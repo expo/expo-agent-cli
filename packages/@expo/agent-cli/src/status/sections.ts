@@ -136,9 +136,7 @@ export function buildFreshnessStatus(
    * and get a freshness verdict measured against one build and explained by another. Nothing can
    * now say two different things about the same record.
    */
-  record: LastBuildRecord = {},
-  /** Whether the caller asked for the per-source list (`--explain`). */
-  { explain = false }: { explain?: boolean } = {}
+  record: LastBuildRecord = {}
 ): FreshnessStatus {
   const { hash, error } = state.fingerprint;
   // Backend × platform, in print order: this project's own record first, because it is the axis
@@ -151,8 +149,7 @@ export function buildFreshnessStatus(
       record[platform]?.hash ?? null,
       hash == null
         ? null
-        : classifyAgainstRecordedBuild(platform, record[platform] ?? null, state.fingerprint),
-      explain
+        : classifyAgainstRecordedBuild(platform, record[platform] ?? null, state.fingerprint)
     ),
     unaskedEasFreshness(platform),
   ]);
@@ -205,8 +202,7 @@ function platformFreshness(
   platform: NativePlatform,
   hash: string | null,
   recordedHash: string | null,
-  impact: RecordedImpact | null,
-  explain: boolean
+  impact: RecordedImpact | null
 ): PlatformFreshness {
   const headline = impact
     ? {
@@ -214,7 +210,7 @@ function platformFreshness(
         fingerprintChanged: impact.fingerprintChanged,
         reason: impact.reason,
         changedCount: impact.changedCount,
-        changedSources: explain ? impact.changedSources : null,
+        changedSources: impact.changedSources,
       }
     : null;
   const base = {
@@ -239,18 +235,18 @@ function platformFreshness(
 }
 
 /**
- * The EAS axis of a platform before anything has asked EAS.
+ * The EAS axis of a platform before the build lookup has answered.
  *
  * `unknown`, never `stale`: the whole finding is that "this machine has no record of a build" was
- * being reported as the answer to a question about EAS (K7). A default run does not pay for the
- * lookup, and saying so is cheaper and truer than either verdict.
+ * being reported as the answer to a question about EAS (K7). {@link applyEasFreshness} fills this
+ * in once the lookup has run; it is what a reader sees only when that section could not be read.
  */
 function unaskedEasFreshness(platform: NativePlatform): PlatformFreshness {
   return {
     platform,
     backend: 'eas',
     state: 'unknown',
-    detail: 'EAS was not asked — pass --explain',
+    detail: 'EAS was not asked',
     recordedHash: null,
     buildId: null,
     buildProfile: null,

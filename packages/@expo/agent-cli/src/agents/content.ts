@@ -54,9 +54,8 @@ export function generateAgentsMdBlock({
     '',
     'Most commands take `--json` for a machine-readable report.',
     '',
-    `- \`${PROGRAM_PREFIX} status\` — where the project is right now, and what would happen next`,
+    `- \`${PROGRAM_PREFIX} status\` — where the project is right now, and what would happen next: which sources changed since the last build, whether an update can ship over the air, and whether EAS already has a build for this fingerprint`,
     `- \`${PROGRAM_PREFIX} status --json\` — the same report as one object, with the raw project probe under \`probe\``,
-    `- \`${PROGRAM_PREFIX} status --explain\` — the deep dive: which sources changed, whether an update can ship over the air, and whether EAS already has a build for this fingerprint`,
     `- \`${PROGRAM_PREFIX} status --assert js-only\` — a gate on what a change costs: exit 20 when it costs more than the class named, 22 when nothing could be measured, 0 otherwise`,
     `- \`${devCommand(
       defaultSmokePlatform(state.nativeDirs)

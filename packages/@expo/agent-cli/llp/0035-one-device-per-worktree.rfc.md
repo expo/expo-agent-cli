@@ -71,7 +71,7 @@ The claimants of a device decide where its ownership record must live. A local d
    **Why.** A device that `dev` creates must have a cleanup path. Every reader must use the binding so it drives the same device that `dev` prepared.
 9. **`dev:stop` keeps the worktree's devices; `dev:stop --release` lets go of them now.**
    **Why.** The CLI's own restart follow-up is `dev:stop && dev --detach`, and a read-only emulator instance that is killed costs a cold boot and a reinstall on the next `dev`. The lease reclaims a stopped worktree's device within 60 min anyway (Decision 3), so a release on every stop buys little. The cost is RAM held for up to an hour after a stop; `--release` is for the agent that is done.
-10. **Decided, not open.** `start --ios` keeps Expo CLI's device choice, because `dev` is the verb that binds. `dev --no-open` still binds, and may create, a simulator the user never sees, because the build step must be pinned. Local devices come before an EAS session, because a session bills by the minute. `status` calls the network only under `--explain`.
+10. **Decided, not open.** `start --ios` keeps Expo CLI's device choice, because `dev` is the verb that binds. `dev --no-open` still binds, and may create, a simulator the user never sees, because the build step must be pinned. Local devices come before an EAS session, because a session bills by the minute. `status` calls the network on every run, since `--explain` was removed on 2026-09-15 ([[0011-impact-and-freshness]]).
 
 ## Invariant
 
@@ -480,7 +480,7 @@ Before the lock: `adb devices -l` and `emulator -list-avds`. Under the lock: `bu
 - The host guard is `adb` resolving on disk (`resolveAdb().fromPathOnly` false); `emulator` is found beside it, so a host with neither binds nothing and `dev --android` serves for a device elsewhere.
 - The `no-free-port` How line says to stop one of the listed instances by hand. The RFC names `dev:stop --release`, which §Device lifecycle adds; the suggested-command lint refuses a flag that does not exist yet, so §Device lifecycle swaps the line.
 - Android acquisition lets go of no live device: an own `spawned` binding whose pid is dead loses its file before any refusal, and a live one is reused. Reaping follows §Device lifecycle: after giving up the registry lock, a `finally` runs the reaped devices' actions before a refusal is thrown.
-- `status --explain --device <serial>` on Android lists through `adb devices -l` to filter and binds nothing (Contract 3); without `--device` the reader takes the bound serial and names it through `emu avd name` for display.
+- `status --device <serial>` on Android lists through `adb devices -l` to filter and binds nothing (Contract 3); without `--device` the reader takes the bound serial and names it through `emu avd name` for display.
 - `AppPresenceProbe` loses `installDevice` on both platforms: `withDevice` pins every `run` and `install` step to the bound device, so the probe answers presence only, and a `spawned` instance is `missing` without asking, like a `created` simulator.
 - The foreign-flag sweep (`src/lint/foreignFlags.ts`) reads the registry's `tools.<runner>([...])` calls, so `-read-only`, `-ports`, `-avd`, `-list-avds`, `-b` and `-j` are pinned where they are spelled.
 
