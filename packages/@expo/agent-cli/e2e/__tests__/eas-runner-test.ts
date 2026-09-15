@@ -215,11 +215,9 @@ describe('a machine with no eas-cli installed', () => {
   it('asks EAS about builds through npx --yes eas-cli@latest', async () => {
     const planted = await plantAsync({ runners: ['npx'] });
 
-    const result = await executeAgentCliAsync(
-      planted.projectRoot,
-      ['status', '--explain', '--json'],
-      { env: pathEnv(planted.binDir) }
-    );
+    const result = await executeAgentCliAsync(planted.projectRoot, ['status', '--json'], {
+      env: pathEnv(planted.binDir),
+    });
 
     expect(result.exitCode).toBe(0);
     const lookups = invocations(planted).filter((run) => run.args.includes('build:list'));
@@ -240,7 +238,7 @@ describe('a machine with no eas-cli installed', () => {
     }
   });
 
-  // F93 — @ref src/utils/runnerLock.ts. `status --explain` asks EAS about both platforms at once, so
+  // F93 — @ref src/utils/runnerLock.ts. `status` asks EAS about both platforms at once, so
   // both spawns want one scratch directory. Live, six runs against a fresh copy of one project: both
   // platforms poisoned 2/6, one platform poisoned 1/6, clean 3/6 [2026-08-27]. Here the collision is
   // not a coin toss — the stub runner holds the directory for 250 ms and refuses a second writer, the
@@ -249,11 +247,9 @@ describe('a machine with no eas-cli installed', () => {
     it('answers for both platforms, and quotes no progress line as EAS', async () => {
       const planted = await plantAsync({ runners: ['npx'], racing: true });
 
-      const result = await executeAgentCliAsync(
-        planted.projectRoot,
-        ['status', '--explain', '--json'],
-        { env: pathEnv(planted.binDir) }
-      );
+      const result = await executeAgentCliAsync(planted.projectRoot, ['status', '--json'], {
+        env: pathEnv(planted.binDir),
+      });
 
       expect(result.exitCode).toBe(0);
       const report = JSON.parse(result.stdout);
@@ -282,11 +278,9 @@ describe('a machine with no eas-cli installed', () => {
       // The scratch directory the stub keys on, created behind its back and never released.
       await fs.promises.mkdir(path.join(planted.projectRoot, 'runner-eas-cli@latest'));
 
-      const result = await executeAgentCliAsync(
-        planted.projectRoot,
-        ['status', '--explain', '--json'],
-        { env: pathEnv(planted.binDir) }
-      );
+      const result = await executeAgentCliAsync(planted.projectRoot, ['status', '--json'], {
+        env: pathEnv(planted.binDir),
+      });
 
       // Never fails the command: an unanswered section costs one line of the report (llp/0011).
       expect(result.exitCode).toBe(0);
@@ -302,7 +296,7 @@ describe('a machine with no eas-cli installed', () => {
   it("uses bunx in a project whose lockfile is bun's", async () => {
     const planted = await plantAsync({ runners: ['npx', 'bunx'], lockfile: 'bun.lock' });
 
-    await executeAgentCliAsync(planted.projectRoot, ['status', '--explain', '--json'], {
+    await executeAgentCliAsync(planted.projectRoot, ['status', '--json'], {
       env: pathEnv(planted.binDir),
     });
 
@@ -318,7 +312,7 @@ describe('a machine with no eas-cli installed', () => {
       lockfile: 'package-lock.json',
     });
 
-    await executeAgentCliAsync(planted.projectRoot, ['status', '--explain', '--json'], {
+    await executeAgentCliAsync(planted.projectRoot, ['status', '--json'], {
       env: pathEnv(planted.binDir),
     });
 
