@@ -721,6 +721,8 @@ describe(formatStatusReport, () => {
           outcome: 'up-to-date',
           platforms: [
             {
+              prebuildStatus: 'fresh',
+              prebuildChanges: [],
               platform: 'ios',
               status: 'up-to-date',
               reason: 'hash-match',

@@ -241,6 +241,18 @@ describe('recordPrebuildMarkersAsync', () => {
     );
   }
 
+  it('removes an old marker when its replacement cannot be computed', async () => {
+    nativeDirs('ios');
+    await recordPrebuildMarkersAsync(projectRoot, ['-p', 'ios'], {
+      generateFingerprint: fakeFingerprint('old'), clearMemo: vi.fn(),
+    });
+    expect(readPrebuildMarker(projectRoot, 'ios')).not.toBeNull();
+    await recordPrebuildMarkersAsync(projectRoot, ['-p', 'ios'], {
+      generateFingerprint: fakeFingerprint(null), clearMemo: vi.fn(),
+    });
+    expect(readPrebuildMarker(projectRoot, 'ios')).toBeNull();
+  });
+
   it(`records every platform that has a native directory`, async () => {
     nativeDirs('ios', 'android');
 

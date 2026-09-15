@@ -1,3 +1,4 @@
+import { recordPrebuildMarkersAsync } from '../../project/prebuildMarker';
 import { vol } from 'memfs';
 import os from 'os';
 
@@ -29,6 +30,7 @@ vi.mock('../../plan/lastBuild', () => ({
 vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
 vi.mock('../../project/fingerprint', () => ({ clearFingerprintMemo: vi.fn() }));
 vi.mock('../../project/fingerprintCache', () => ({ clearFingerprintCache: vi.fn() }));
+vi.mock('../../project/prebuildMarker', () => ({ recordPrebuildMarkersAsync: vi.fn(async () => []) }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../start/startAsync', () => ({ runDevServerAsync: vi.fn() }));
 // A person at a terminal by default, which is the path these tests were written for: the plan's
@@ -384,6 +386,7 @@ describe(devAsync, () => {
 
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
+      expect(recordPrebuildMarkersAsync).toHaveBeenCalledWith(projectRoot, ['--platform', 'ios']);
       expect(runExpoAsync).toHaveBeenCalledTimes(1);
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios'], {
@@ -405,6 +408,7 @@ describe(devAsync, () => {
 
       expect(runDevServerAsync).not.toHaveBeenCalled();
       expect(recordLastBuildFingerprint).not.toHaveBeenCalled();
+      expect(recordPrebuildMarkersAsync).not.toHaveBeenCalled();
     });
 
     it(`should record the fingerprint of a build that succeeded`, async () => {

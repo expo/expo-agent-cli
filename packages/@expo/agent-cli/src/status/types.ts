@@ -1,3 +1,4 @@
+import type { NativeDirectoryStaleness } from '../project/prebuildMarker';
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
 // The shape of the status report: one object with a section per question the command answers.
 // Pure data, so the human formatter and the `--json` output describe exactly the same facts.
@@ -467,6 +468,9 @@ export interface AssertStatus {
 
 /** One platform's answer from the device, as the report carries it. */
 export interface InstalledPlatformStatus {
+  /** Whether the native directory matches the inputs recorded at prebuild. */
+  prebuildStatus: NativeDirectoryStaleness['status'];
+  prebuildChanges: NativeDirectoryStaleness['changes'];
   platform: 'ios' | 'android';
   status: 'up-to-date' | 'rebuild-required' | 'unknown';
   reason: string;

@@ -64,5 +64,7 @@ function toPlatformStatus(
     deviceName: check.device?.name ?? null,
     installedHash: check.installedHash,
     currentHash: check.currentHash,
+    prebuildStatus: check.prebuildStatus,
+    prebuildChanges: check.prebuildChanges,
   };
 }

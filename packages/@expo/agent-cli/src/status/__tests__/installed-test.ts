@@ -97,6 +97,8 @@ describe(readInstalledStatusAsync, () => {
           deviceName: 'iPhone 17',
           installedHash: 'h',
           currentHash: 'h',
+          prebuildStatus: 'fresh',
+          prebuildChanges: [],
         },
       ],
     });

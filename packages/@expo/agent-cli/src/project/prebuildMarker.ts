@@ -2,8 +2,7 @@
 // What the generated native directories were made from, and whether they are stale now.
 //
 // This CLI owns the path and the schema, and both writes and reads it: `expo prebuild` records
-// nothing, so the write happens in the `prebuild` passthrough, the one place that knows a prebuild
-// ran. A prebuild run outside this CLI leaves no marker, which reads as `unknown` — coarser advice,
+// nothing, so the write happens in the `prebuild` passthrough and successful `dev` prebuild steps. A prebuild run outside this CLI leaves no marker, which reads as `unknown` — coarser advice,
 // never wrong.
 
 import fs from 'fs';
@@ -33,7 +32,7 @@ export const PREBUILD_RELEVANT_REASONS: readonly string[] = [
   'expoCNGPatches',
 ];
 
-/** What one platform's native directories were generated from, as `expo prebuild` wrote it. */
+/** What one platform's native directories were generated from, as recorded by this CLI. */
 export interface PrebuildMarkerEntry {
   hash: string;
   sources: FingerprintSource[] | null;
@@ -60,7 +59,7 @@ export interface NativeDirectoryStaleness {
   changes: PrebuildSourceChange[];
 }
 
-/** Where `expo prebuild` records what it generated one platform's native directory from. */
+/** Where this CLI records what it generated one platform's native directory from. */
 export function getPrebuildMarkerPath(projectRoot: string, platform: NativePlatform): string {
   return path.join(projectRoot, '.expo', 'prebuild', `fingerprint-${platform}.json`);
 }
@@ -68,8 +67,7 @@ export function getPrebuildMarkerPath(projectRoot: string, platform: NativePlatf
 /**
  * Read one platform's marker, or null when there is none to believe.
  *
- * The four rejected fields mirror the writer's own reader exactly, so the two tools agree on what
- * counts as a marker. Never throws: an unreadable marker is no marker.
+ * The rejected fields match this CLI's marker schema. Never throws: an unreadable marker is no marker.
  */
 export function readPrebuildMarker(
   projectRoot: string,
@@ -170,8 +168,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * Record what a successful `expo prebuild` generated the native directories from.
  *
- * Called from the `prebuild` passthrough, because that is the only moment anything here knows a
- * prebuild ran. Best effort throughout: a hash that cannot be computed, or a file that cannot be
+ * Called after successful passthrough and `dev` prebuild steps. Best effort throughout: a hash that cannot be computed, or a file that cannot be
  * written, leaves no marker, and no marker reads as `unknown` — never as fresh. A prebuild the
  * developer runs with `npx expo prebuild` instead of through this CLI records nothing, for the
  * same reason.
@@ -192,36 +189,29 @@ export async function recordPrebuildMarkersAsync(
   // that no longer exists.
   clearMemo(projectRoot);
 
-  const recorded: NativePlatform[] = [];
-  for (const platform of platformsToRecord(projectRoot, args)) {
-    const fingerprint = await generate(projectRoot, { platform, cache: false });
-    if (!fingerprint.hash || !fingerprint.sources) {
-      continue;
-    }
-    const entry = {
-      version: MARKER_VERSION,
-      platform,
-      hash: fingerprint.hash,
-      sources: fingerprint.sources,
-      fingerprintVersion: resolveFingerprintCliVersion(projectRoot),
-      createdAt: new Date().toISOString(),
-    };
+  const recorded = await Promise.all(platformsToRecord(projectRoot, args).map(async (platform) => {
     const filePath = getPrebuildMarkerPath(projectRoot, platform);
     try {
+      // A successful prebuild invalidates the old marker even if recording its replacement fails.
+      await fs.promises.rm(filePath, { force: true });
+      const fingerprint = await generate(projectRoot, { platform, cache: false });
+      if (!fingerprint.hash || !fingerprint.sources) return null;
+      const entry = {
+        version: MARKER_VERSION, platform, hash: fingerprint.hash, sources: fingerprint.sources,
+        fingerprintVersion: resolveFingerprintCliVersion(projectRoot),
+        createdAt: new Date().toISOString(),
+      };
       await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
       await fs.promises.writeFile(filePath, JSON.stringify(entry, null, 2));
-      recorded.push(platform);
+      return platform;
     } catch (error) {
-      // No marker is a valid state. Never fail a prebuild over bookkeeping — but say so under
-      // EXPO_DEBUG, because a read-only `.expo/` leaves every later check reporting `unknown`
-      // with nothing anywhere naming the cause.
       debugEvent('prebuild_marker_write_failed', {
-        platform,
-        error: debugEvent.error(error as Error),
+        platform, error: debugEvent.error(error as Error),
       });
+      return null;
     }
-  }
-  return recorded;
+  }));
+  return recorded.filter((platform): platform is NativePlatform => platform !== null);
 }
 
 /**
