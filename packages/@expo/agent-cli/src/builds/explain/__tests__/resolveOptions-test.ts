@@ -43,7 +43,7 @@ describe('the input source', () => {
 
   it('refuses two sources rather than picking one', () => {
     expect(() => resolveExplainOptions(['--file', 'a.log', '--stdin'], PIPED)).toThrow(
-      /Both --file and --stdin/
+      /--file a.log and --stdin were passed/
     );
   });
 });
@@ -172,5 +172,60 @@ describe('the rest of the flags', () => {
 
   it('reports an unknown flag rather than ignoring it', () => {
     expect(() => resolveExplainOptions(['--bogus'], PIPED)).toThrow(/--bogus/);
+  });
+});
+
+// @ref llp/0012-build-explain.rfc.md §What ships, and what is reserved
+describe('--local', () => {
+  const projectRoot = path.resolve('/app');
+  const IN_PROJECT = { ...TERMINAL, projectRoot: () => projectRoot };
+
+  it.each([
+    ['--ios', 'ios'],
+    ['--android', 'android'],
+  ] as const)('reads the last %s build dev ran in this project', (flag, platform) => {
+    expect(resolveExplainOptions(['--local', flag], IN_PROJECT)).toMatchObject({
+      source: {
+        kind: 'local',
+        platform,
+        path: path.join(projectRoot, '.expo', 'dev', 'logs', `build-${platform}.log`),
+      },
+      platform,
+    });
+  });
+
+  // Required, not defaulted: a project builds for two, and a default would explain a build the
+  // caller may not have meant.
+  it('needs a platform, and names both', () => {
+    try {
+      resolveExplainOptions(['--local'], IN_PROJECT);
+      throw new Error('expected a throw');
+    } catch (error: any) {
+      expect(error.code).toBe('BAD_ARGS');
+      expect(error.message).toContain('--local needs the platform');
+      expect(error.suggestedCommand).toBe('npx @expo/agent-cli inspect:build-log --local --ios');
+    }
+  });
+
+  it('is one source among three, refused beside another', () => {
+    expect(() =>
+      resolveExplainOptions(['--local', '--ios', '--file', 'a.log'], IN_PROJECT)
+    ).toThrow(/--file a.log and --local were passed/);
+    expect(() => resolveExplainOptions(['--stdin', '--local', '--ios'], IN_PROJECT)).toThrow(
+      /--stdin and --local were passed/
+    );
+  });
+
+  it('asks for the project only when it is the source', () => {
+    const projectRootResolver = vi.fn(() => projectRoot);
+    resolveExplainOptions(['--file', 'a.log'], { ...TERMINAL, projectRoot: projectRootResolver });
+    expect(projectRootResolver).not.toHaveBeenCalled();
+
+    resolveExplainOptions(['--local', '--ios'], { ...TERMINAL, projectRoot: projectRootResolver });
+    expect(projectRootResolver).toHaveBeenCalledTimes(1);
+  });
+
+  it('names --local among the ways to read a log when nothing was passed on a terminal', () => {
+    expect(() => resolveExplainOptions([], TERMINAL)).toThrow(/--local --ios/);
   });
 });
