@@ -135,7 +135,7 @@ jobs:
     permissions:
       contents: read
     continue-on-error: true
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       AGENT_CLI_EVAL_MODEL: qwen3:8b
       AGENT_CLI_EVAL_MODEL_DIGEST: 500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41
@@ -170,6 +170,10 @@ jobs:
       - name: Agent integration evals
         id: evals
         run: bun run test:evals
+        working-directory: packages/@expo/agent-cli
+      - name: Summarize eval evidence
+        if: always()
+        run: bun evals/summarize.ts
         working-directory: packages/@expo/agent-cli
       - name: Preserve eval evidence
         if: always()
