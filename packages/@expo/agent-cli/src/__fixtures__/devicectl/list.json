@@ -1,0 +1,31 @@
+{
+  "info": { "jsonVersion": 2, "outcome": "success" },
+  "result": {
+    "devices": [
+      {
+        "identifier": "A1A1AAA1-0011-1AA1-11A1-10A1111AA11A",
+        "connectionProperties": { "pairingState": "paired", "transportType": "localNetwork", "tunnelState": "connected" },
+        "deviceProperties": { "developerModeStatus": "enabled", "name": "Ada's iPhone", "osVersionNumber": "27.0" },
+        "hardwareProperties": { "platform": "iOS", "reality": "physical", "udid": "00001110-001111110110101A" }
+      },
+      {
+        "identifier": "B2B2BBB2-0022-2BB2-22B2-20B2222BB22B",
+        "connectionProperties": { "pairingState": "paired", "transportType": "wired", "tunnelState": "unavailable" },
+        "deviceProperties": { "developerModeStatus": "disabled", "name": "Test iPad", "osVersionNumber": "26.4" },
+        "hardwareProperties": { "platform": "iOS", "reality": "physical", "udid": "00002220-002222220220202B" }
+      },
+      {
+        "identifier": "C3C3CCC3-0033-3CC3-33C3-30C3333CC33C",
+        "connectionProperties": { "pairingState": "paired", "tunnelState": "connected" },
+        "deviceProperties": { "developerModeStatus": "enabled", "name": "Vision Pro" },
+        "hardwareProperties": { "platform": "xrOS", "reality": "physical", "udid": "00003330-003333330330303C" }
+      },
+      {
+        "identifier": "D4D4DDD4-0044-4DD4-44D4-40D4444DD44D",
+        "connectionProperties": { "pairingState": "paired", "tunnelState": "connected" },
+        "deviceProperties": { "developerModeStatus": "enabled", "name": "iPhone 17 Pro" },
+        "hardwareProperties": { "platform": "iOS", "reality": "simulated", "udid": "0A73225E-069F-4A97-A481-00E701EDC9AA" }
+      }
+    ]
+  }
+}
