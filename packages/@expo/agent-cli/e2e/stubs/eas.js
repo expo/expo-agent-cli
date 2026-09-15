@@ -46,6 +46,11 @@
 // - STUB_EAS_BUILD_LIST_EXIT / STUB_EAS_BUILD_LIST_STDOUT: a refusal, on the stream the real CLI
 //   uses (stdout for the explanation, one `Error:` line on stderr)
 //
+// `build:view <id>`
+// - STUB_EAS_BUILD_VIEW_PLATFORM: the platform of the build it describes (default `IOS`)
+// - STUB_EAS_BUILD_VIEW_LOG_FILES: a JSON array of URLs printed as `logFiles` (default none)
+// - STUB_EAS_BUILD_VIEW_EXIT: a refusal — a build nobody can see, or one that does not exist
+//
 // `simulator:availability`
 // - STUB_SIM_AVAILABLE: `false` for an account without the feature
 //
@@ -240,6 +245,32 @@ if (command === 'build:list') {
   process.exit(0);
 }
 
+// ---- Builds by id -------------------------------------------------------------------------------
+
+if (command === 'build:view') {
+  const exitCode = Number(process.env.STUB_EAS_BUILD_VIEW_EXIT || 0);
+  if (exitCode !== 0) {
+    exitWith(process.stderr, `    Error: Build with ID ${args[1]} does not exist.`, exitCode);
+  }
+  let logFiles = [];
+  try {
+    logFiles = JSON.parse(process.env.STUB_EAS_BUILD_VIEW_LOG_FILES || '[]');
+  } catch {
+    logFiles = [];
+  }
+  // The recorded shape [observed — eas-cli 22.4 `build:view --json`, 2026-08-26]: one build
+  // object, its `logFiles` the signed URLs of the log files EAS kept for it.
+  printJson({
+    id: args[1],
+    status: logFiles.length ? 'ERRORED' : 'FINISHED',
+    platform: process.env.STUB_EAS_BUILD_VIEW_PLATFORM || 'IOS',
+    buildProfile: 'simulator',
+    createdAt: '2026-08-19T17:37:12.674Z',
+    logFiles,
+  });
+  process.exit(0);
+}
+
 // ---- EAS Simulator ------------------------------------------------------------------------------
 
 /** The sessions this stub started under this cwd, newest first. */
@@ -356,11 +387,17 @@ if (command === 'simulator' || command === 'simulator:start') {
       platform: (valueOf('--platform') || 'ios').toUpperCase(),
       createdAt: new Date().toISOString(),
       // What the session was started with, so a test can read the app off the listing too.
-      app: has('--expo-go') ? 'expo-go' : valueOf('--build-id') ? `build:${valueOf('--build-id')}` : null,
+      app: has('--expo-go')
+        ? 'expo-go'
+        : valueOf('--build-id')
+          ? `build:${valueOf('--build-id')}`
+          : null,
     },
     ...rememberedSessions(),
   ]);
-  process.stderr.write(`Simulator session created (id: ${id}) https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/${id}\n`);
+  process.stderr.write(
+    `Simulator session created (id: ${id}) https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/${id}\n`
+  );
   if (json) {
     printJson({
       id,
@@ -374,7 +411,9 @@ if (command === 'simulator' || command === 'simulator:start') {
       },
     });
   } else {
-    process.stdout.write(`When you are done, stop the session with: eas simulator:stop --id ${id}\n`);
+    process.stdout.write(
+      `When you are done, stop the session with: eas simulator:stop --id ${id}\n`
+    );
   }
   process.exit(0);
 }
@@ -402,7 +441,11 @@ if (command === 'simulator:stop') {
 if (command === 'simulator:exec') {
   const exitCode = Number(process.env.STUB_SIM_EXEC_EXIT || 0);
   if (exitCode !== 0) {
-    exitWith(process.stderr, process.env.STUB_SIM_STDERR || 'Remote daemon is unavailable', exitCode);
+    exitWith(
+      process.stderr,
+      process.env.STUB_SIM_STDERR || 'Remote daemon is unavailable',
+      exitCode
+    );
   }
   // What the real controller answers a `close`, verbatim, whatever id it is given [observed — live
   // session 01a03d80, 2026-08-26]. It is the reason `wasRunning` is null on this backend, so the

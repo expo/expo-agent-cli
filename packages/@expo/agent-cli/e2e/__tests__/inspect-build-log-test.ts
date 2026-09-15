@@ -7,7 +7,12 @@
 // not be read is exit 1 with the `--json` error envelope.
 import { type ChildProcess, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import path from 'node:path';
+import zlib from 'node:zlib';
+
+import { installStubEasAsync, stubEasArgs } from '../stubEas';
 
 import {
   bin,
@@ -368,6 +373,289 @@ describe('@expo/agent-cli inspect:build-log --local', () => {
   });
 });
 
+// @ref llp/0012-build-explain.rfc.md §What ships, and what is reserved
+// `--eas` reads an EAS build's log the way eas-cli does not offer to: `build:list` names the last
+// errored build, `build:view` names its log files, and this CLI downloads them. The files here come
+// off a local server, plain or brotli-compressed the way EAS serves them.
+describe('@expo/agent-cli inspect:build-log --eas', () => {
+  const BUILD_ID = '2f1c9f0e-6b1e-4a3d-9c1a-0b6f1e2d3c4a';
+  let server: Server | null = null;
+
+  afterEach(async () => {
+    if (server) {
+      await new Promise<void>((resolve) => server!.close(() => resolve()));
+      server = null;
+    }
+  });
+
+  /** A server that answers `/plain`, `/br` (raw brotli bytes) and `/br-encoded` (with the header). */
+  async function serveLogAsync(log: string): Promise<string> {
+    const bytes = fs.readFileSync(fixture(log));
+    server = createServer((request, response) => {
+      if (request.url === '/plain') {
+        response.writeHead(200, { 'content-type': 'text/plain' }).end(bytes);
+      } else if (request.url === '/br') {
+        response
+          .writeHead(200, { 'content-type': 'application/octet-stream' })
+          .end(zlib.brotliCompressSync(bytes));
+      } else if (request.url === '/br-encoded') {
+        response
+          .writeHead(200, { 'content-type': 'text/plain', 'content-encoding': 'br' })
+          .end(zlib.brotliCompressSync(bytes));
+      } else if (request.url === '/empty') {
+        response.writeHead(200).end('');
+      } else {
+        response.writeHead(404).end();
+      }
+    });
+    await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
+    return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  }
+
+  /** A linked project with the stub `eas` pinned, so the resolver finds it without a network. */
+  async function setupWithEasAsync(): Promise<string> {
+    const projectRoot = await setupFixtureAsync('go-app');
+    await installStubEasAsync(projectRoot);
+    const manifestPath = path.join(projectRoot, 'package.json');
+    const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+    manifest.devDependencies = { ...manifest.devDependencies, 'eas-cli': '^22.0.0' };
+    await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+    return projectRoot;
+  }
+
+  /** What the stub `eas` was asked, as command words. */
+  function easWords(projectRoot: string): string[] {
+    return stubEasArgs(projectRoot).map((args) => args[0]!);
+  }
+
+  const ERRORED_IOS = JSON.stringify([{ id: BUILD_ID, status: 'ERRORED', platform: 'IOS' }]);
+
+  it('reads the last errored build of the platform, fetching its log files', async () => {
+    const projectRoot = await setupWithEasAsync();
+    const origin = await serveLogAsync('xcodebuild-no-profile.log');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--eas', '--ios', '--json'],
+      {
+        env: {
+          STUB_EAS_BUILDS: ERRORED_IOS,
+          STUB_EAS_BUILD_VIEW_LOG_FILES: JSON.stringify([`${origin}/plain`]),
+        },
+      }
+    );
+
+    expect(result.exitCode).toBe(0);
+    const report = JSON.parse(result.stdout);
+    expect(report.source).toMatchObject({
+      kind: 'eas',
+      path: null,
+      buildId: BUILD_ID,
+      logFiles: 1,
+      platform: 'ios',
+    });
+    expect(report.failure).not.toBeNull();
+    expect(easWords(projectRoot)).toEqual(['build:list', 'build:view']);
+    expect(stubEasArgs(projectRoot)[0]).toEqual([
+      'build:list',
+      '--platform',
+      'ios',
+      '--status',
+      'errored',
+      '--limit',
+      '1',
+      '--json',
+      '--non-interactive',
+    ]);
+    // The re-run names the build by id: "the last errored build" moves.
+    expect(
+      report.followups.map((followup: { command: string }) => followup.command)
+    ).toContainEqual(expect.stringContaining(`inspect:build-log --eas --ios ${BUILD_ID}`));
+  });
+
+  it('reads the build an id names without listing, --eas implied by the id', async () => {
+    const projectRoot = await setupWithEasAsync();
+    const origin = await serveLogAsync('npm-peer-conflict.log');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--android', BUILD_ID],
+      {
+        env: {
+          STUB_EAS_BUILD_VIEW_PLATFORM: 'ANDROID',
+          STUB_EAS_BUILD_VIEW_LOG_FILES: JSON.stringify([`${origin}/plain`]),
+        },
+      }
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain(`EAS build ${BUILD_ID}`);
+    expect(result.stdout).toContain('1 log file, fetched from EAS');
+    expect(easWords(projectRoot)).toEqual(['build:view']);
+  });
+
+  // EAS serves the files brotli-compressed. A body the response declares as such is decoded by
+  // the fetch; one stored compressed with no header arrives as bytes, and is decoded here rather
+  // than refused the way a `--file` of the same bytes is (llp/0012 §Is this a log at all).
+  it.each([['/br-encoded'], ['/br']])(
+    'decodes a log file served brotli-compressed at %s',
+    async (route) => {
+      const projectRoot = await setupWithEasAsync();
+      const origin = await serveLogAsync('xcodebuild-no-profile.log');
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['inspect:build-log', '--ios', BUILD_ID, '--json'],
+        {
+          env: { STUB_EAS_BUILD_VIEW_LOG_FILES: JSON.stringify([`${origin}${route}`]) },
+        }
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout).failure).not.toBeNull();
+    }
+  );
+
+  it('reads several log files as one log, in order', async () => {
+    const projectRoot = await setupWithEasAsync();
+    const origin = await serveLogAsync('xcodebuild-no-profile.log');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--ios', BUILD_ID, '--json'],
+      {
+        env: {
+          STUB_EAS_BUILD_VIEW_LOG_FILES: JSON.stringify([`${origin}/plain`, `${origin}/plain`]),
+        },
+      }
+    );
+
+    expect(result.exitCode).toBe(0);
+    const report = JSON.parse(result.stdout);
+    expect(report.source.logFiles).toBe(2);
+    expect(report.source.lines).toBe(
+      2 * fs.readFileSync(fixture('xcodebuild-no-profile.log'), 'utf8').trimEnd().split('\n').length
+    );
+  });
+
+  it('exits 1 when EAS has no errored build of the platform', async () => {
+    const projectRoot = await setupWithEasAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--eas', '--ios'],
+      {
+        env: { STUB_EAS_BUILDS: '[]' },
+        reject: false,
+      }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('no errored ios build');
+    expect(result.stderr).toContain('build:list --platform ios --status errored');
+  });
+
+  it('exits 1 when the build has no log files', async () => {
+    const projectRoot = await setupWithEasAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--ios', BUILD_ID],
+      {
+        reject: false,
+      }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(`EAS build ${BUILD_ID} has no log files`);
+  });
+
+  it('exits 1 naming the other platform when the build is not for the one asked', async () => {
+    const projectRoot = await setupWithEasAsync();
+    const origin = await serveLogAsync('npm-peer-conflict.log');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--ios', BUILD_ID],
+      {
+        env: {
+          STUB_EAS_BUILD_VIEW_PLATFORM: 'ANDROID',
+          STUB_EAS_BUILD_VIEW_LOG_FILES: JSON.stringify([`${origin}/plain`]),
+        },
+        reject: false,
+      }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(`is an android build`);
+    expect(result.stderr).toContain(`--eas --android ${BUILD_ID}`);
+  });
+
+  it('exits 1 when a log file cannot be downloaded', async () => {
+    const projectRoot = await setupWithEasAsync();
+    const origin = await serveLogAsync('npm-peer-conflict.log');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--ios', BUILD_ID],
+      {
+        env: { STUB_EAS_BUILD_VIEW_LOG_FILES: JSON.stringify([`${origin}/missing`]) },
+        reject: false,
+      }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('could not be read: HTTP 404');
+  });
+
+  // @ref llp/0027-everything-on-eas.rfc.md §What EAS said
+  it("carries an unlinked project's refusal in this CLI's words", async () => {
+    const projectRoot = await setupWithEasAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--eas', '--ios'],
+      {
+        env: {
+          STUB_EAS_BUILD_LIST_EXIT: '1',
+          STUB_EAS_BUILD_LIST_STDOUT:
+            'EAS project not configured. This command cannot configure it in non-interactive mode. Run one of the following, then re-run this command:\n- eas init --account acme --non-interactive',
+        },
+        reject: false,
+      }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('not linked to an EAS project');
+  });
+
+  it('needs a platform', async () => {
+    const projectRoot = await setupWithEasAsync();
+
+    const result = await executeAgentCliAsync(projectRoot, ['inspect:build-log', '--eas'], {
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('--eas needs the platform');
+  });
+
+  it('is refused beside --local, because a report is about one log', async () => {
+    const projectRoot = await setupWithEasAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--eas', '--local', '--ios'],
+      {
+        reject: false,
+      }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('--local and --eas were passed');
+  });
+});
+
 describe('when no report can be produced', () => {
   it('exits 1 with the --json error envelope for a file that is not there', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
@@ -399,7 +687,8 @@ describe('when no report can be produced', () => {
     });
   });
 
-  it('says what the reserved build-id argument needs, rather than dropping it', async () => {
+  // The bare build id is the EAS form, and it needs the platform like every EAS read does.
+  it('takes a build id as the EAS form, and asks for the platform it is missing', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const buildId = '2f1c9f0e-6b1e-4a3d-9c1a-0b6f1e2d3c4a';
 
@@ -408,10 +697,10 @@ describe('when no report can be produced', () => {
     });
 
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain("cannot fetch a build's logs yet");
-    // The two forms that do work, and the command that finds the log, in the lines a reader acts on.
-    expect(result.stderr).toContain('--file');
-    expect(result.stderr).toContain(`Try: npx --yes eas-cli@latest build:view ${buildId}`);
+    expect(result.stderr).toContain('--eas needs the platform');
+    expect(result.stderr).toContain(
+      `Try: npx @expo/agent-cli inspect:build-log --eas --ios ${buildId}`
+    );
   });
 
   // The platform is `--ios` / `--android`, the spelling `dev` and `smoke` take. `--platform` was
@@ -496,8 +785,9 @@ describe('the registry', () => {
     expect(result.exitCode).toBe(0);
     expect(result.stdout).toContain('--file <path>');
     expect(result.stdout).toContain('--stdin');
-    // The reserved form is documented where a caller looks before typing it.
-    expect(result.stdout).toContain('is reserved and does not work yet');
+    // The two sources that fetch a log for the caller, documented where a caller looks first.
+    expect(result.stdout).toContain('--local');
+    expect(result.stdout).toContain('--eas [<build-id>]');
   });
 });
 
