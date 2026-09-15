@@ -1,4 +1,4 @@
-// @ref llp/0028-installed-app-check.rfc.md §How the file is read
+// @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read
 // What reading the installed app answered, and how to pick one answer out of several devices.
 
 import type { FingerprintSource } from '../project/fingerprint';

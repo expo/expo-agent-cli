@@ -1,4 +1,4 @@
-// @ref llp/0028-installed-app-check.rfc.md §Proof
+// @ref llp/0005-runtime-loop-tools.rfc.md §Proof
 import type { SpawnCaptureResult } from '../../utils/spawnCapture';
 import {
   fingerprintCandidatePaths,

@@ -1,4 +1,4 @@
-// @ref llp/0028-installed-app-check.rfc.md §How the file is read
+// @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read
 // The fingerprint embedded in the app installed on an Android device or emulator.
 
 import fs from 'fs';

@@ -721,3 +721,27 @@ A port with no lock behind it is left running, exit 20. `--force` needs two inde
 
 Schema unit tests plus tier-0 e2e against a fixture app ([[0002-testing-and-evals]]). The e2e stub dev server speaks a real `/message` WebSocket with `version: 2`, `getpeers`, peer churn, and debugger targets that re-register under a new page id on a `v2` reload. Four modes: `v2`, `deaf`, `no-churn`, `none`. `reloadTargets` picks `reconnect`, `stale`, or `gone`. The route table is unit-tested against the conventions. E2e asserts that a bogus route reaches the device tool zero times. `dev:stop` signals a real process. `runtime:stop` asserts the exact argv handed to a stub `xcrun`. Live suites in [[0022-live-tier]] are the evidence for Android Expo Go, Android development build, iOS, and cloud.
 )
+
+<!-- installed-app-check -->
+## Installed-app fingerprint check
+
+## How the file is read
+
+**Android.** `adb shell pm path <appId>` names the APK on the device. The fingerprint is a zip entry inside it, so the command reads the zip's end-of-central-directory record, the central directory, and the one entry, through ranged `dd` reads over `adb exec-out`: a few hundred KB instead of a 100 MB pull. `src/utils/zipEntry.ts` is the parser. It supports stored and deflated entries and refuses ZIP64. When a device lacks `dd` or `stat`, the whole APK is pulled to a temporary directory and read there.
+
+**iOS simulator.** `xcrun simctl get_app_container <udid> <appId>` names the app bundle, and the file is read off the disk at one of two paths: `EXConstants.bundle/app.fingerprint` for static linking, `Frameworks/EXConstants.framework/EXConstants.bundle/app.fingerprint` for `use_frameworks!`.
+
+### Proof
+
+Unit, `src/installedApp/__tests__/`: the verdict table over every reason; the aggregate outcome; the Android reader over a stubbed `adb` (ranged read, pull fallback, not installed, no file); the simulator reader over both bundle paths; ranking across several devices.
+
+`src/status/__tests__/installed-test.ts`: that no device is read without `--explain`, that every platform this host can reach is asked, and the shape of the section.
+
+E2E, `e2e/__tests__/status-installed-test.ts`: a stub `adb` that serves a fixture APK byte range by byte range, with the stub `fingerprint` set to the embedded hash and then to another one; the `installed` section of `status --explain --json` in both cases, that a default `status` reads no device at all, and that `--device` without `--explain` is refused.
+
+The installed fingerprint readers extend the existing device-presence checks. Android shares
+`androidPackagePathsAsync` with `androidHasAppAsync`, which backs `hasAppOnDeviceAsync`.
+The boot-choice path still reads simulator bundles on disk because `simctl` cannot inspect a
+shut-down simulator. The fingerprint path only reads booted simulators, so it uses
+`get_app_container` to locate the resource bundle directly rather than doing a second presence
+lookup before reading it. Neither path treats a fingerprint mismatch as an absent app.
