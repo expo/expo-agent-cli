@@ -702,6 +702,44 @@ describe(formatStatusReport, () => {
     expect(line(report, 'dev server')).toContain('unavailable');
   });
 
+  // The installed section failing is exactly the F66 shape: a reason that reached `--json` and
+  // nothing else. It is a section like any other, so it says what it could not do.
+  it(`should note the installed section when the device could not be read`, () => {
+    const report = mockReport({
+      installed: null,
+      errors: { installed: 'adb is not runnable' },
+    });
+
+    expect(line(report, 'installed')).toContain('unavailable');
+    expect(line(report, 'installed')).toContain('adb is not runnable');
+  });
+
+  it(`should note an installed failure that still produced a verdict`, () => {
+    const rendered = report(
+      mockReport({
+        installed: {
+          outcome: 'up-to-date',
+          platforms: [
+            {
+              platform: 'ios',
+              status: 'up-to-date',
+              reason: 'hash-match',
+              recommendation: 'The installed app matches the project.',
+              commands: [],
+              deviceName: 'iPhone 17',
+              installedHash: 'abcdef01',
+              currentHash: 'abcdef01',
+            },
+          ],
+        },
+        errors: { installed: 'android: adb is not runnable' },
+      })
+    );
+
+    expect(rendered).toContain('installed note');
+    expect(rendered).toContain('android: adb is not runnable');
+  });
+
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
   describe('the skills line', () => {
     it(`is left out when there is no agent and no skill to report`, () => {
