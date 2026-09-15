@@ -50,7 +50,7 @@ agentEval(
 );
 ```
 
-Each named check is an independent Vitest test; the five developer tasks have fifteen checks.
+Each named check is an independent Vitest test; the six developer tasks have eighteen checks.
 Prefer structured command results and actual file contents over prose matching. Untouched fixtures
 must fail outcome checks: `AGENT_CLI_EVAL_DRY=1 bun run test:evals` intentionally fails those checks,
 while preservation checks may pass. The kit labels these attempts `dry-run`, not agent success.
@@ -69,7 +69,9 @@ removed; `--tier 1` and `--tier 2` point callers to the corresponding Vitest scr
 ## GitHub Actions
 
 Every relevant PR runs all Tier 1 cases, as do dispatch and the weekly diagnostic run. The job is
-advisory with a 15-minute ceiling; each failed test remains visible in the Vitest output and JSON.
+advisory with a 30-minute ceiling, enough for six four-minute cases plus the model pull. A step summary
+table lists each case with its status, turns, tokens, checks, and duration; each failed test also
+remains visible in the Vitest output and JSON.
 The workflow pins Ollama, verifies the model digest, and uploads JSON, raw inference, CLI events,
 and the server log even when a case fails. Repeated CI trials are separate attempts, not retries
 inside an eval.
@@ -82,15 +84,16 @@ source/config preservation and the observed CLI calls are checked independently.
 
 ## Developer task coverage
 
-| Developer prompt                                                                              | Fixture                                         | Required evidence                                                                        |
-| --------------------------------------------------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| “Can I use Expo Go for this project?”                                                         | Real, locked Expo 57 app                        | CLI compatibility event; project preserved                                               |
-| “I made some changes to this app. Is reloading enough, or do I need a new development build?” | Development app with a native dependency change | CLI compares fingerprint sources to the previous build and reports native rebuild needed |
-| Same prompt                                                                                   | Development app with only a screen edit         | CLI reports JS-only impact for both platforms                                            |
-| “The app still shows the old screen after my edit. Refresh it.”                               | Running dev-server protocol fixture             | Server independently observes a reload caused by the agent                               |
-| “After my last edit, the app shows a red error screen. Find out what went wrong.”             | Dev server with a captured Metro bundling error | Agent retrieves the diagnostic and source location                                       |
+| Developer prompt                                                                              | Fixture                                                     | Required evidence                                                                        |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| “Can I use Expo Go for this project?”                                                         | Real, locked Expo 57 app                                    | CLI compatibility event; project preserved                                               |
+| “I made some changes to this app. Is reloading enough, or do I need a new development build?” | Development app with a native dependency change             | CLI compares fingerprint sources to the previous build and reports native rebuild needed |
+| Same prompt                                                                                   | Development app with only a screen edit                     | CLI reports JS-only impact for both platforms                                            |
+| Same Expo Go prompt                                                                           | Real app that checked in its `ios` directory after prebuild | CLI reports the project as not Expo Go compatible; project preserved                     |
+| “The app still shows the old screen after my edit. Refresh it.”                               | Running dev-server protocol fixture                         | Server independently observes a reload caused by the agent                               |
+| “After my last edit, the app shows a red error screen. Find out what went wrong.”             | Dev server with a captured Metro bundling error             | Agent retrieves the diagnostic and source location                                       |
 
-The user prompts name no commands, flags, or JSON format. Native and JS-only cases use identical
+The user prompts name no commands, flags, or JSON format. Native and JS-only cases, and the two Expo Go cases, use identical
 prompts so project evidence determines the result. Fingerprint generation is a controlled external
 subprocess; the CLI computes impact itself. Runtime fixtures reproduce HTTP/WebSocket dev-server
 protocols and captured logs, with no Hermes execution or UI. Real device behavior belongs in Tier 2.

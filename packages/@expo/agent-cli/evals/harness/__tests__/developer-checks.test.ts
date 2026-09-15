@@ -7,19 +7,20 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { CliFixture, EvalInput, EvalOutput, FixtureSession } from '../cli';
 import { setupImpactFixture } from '../impact-fixture';
+import { addCheckedInNativeProject } from '../prebuilt-fixture';
 import { runProcess } from '../process';
 import { startRuntimeFixture } from '../runtime-fixture';
 import { cliBin, copyWorkspace, snapshot } from '../workspace';
 
-type DeveloperTask = 'expo-go' | 'native' | 'js' | 'reload' | 'bundler-error';
+type DeveloperTask = 'expo-go' | 'expo-go-prebuilt' | 'native' | 'js' | 'reload' | 'bundler-error';
 
 // Scan the case folder so a new *.eval.ts file is picked up without editing this test.
 const caseDirectory = fileURLToPath(new URL('../../tier1/', import.meta.url));
-const caseFiles = fs
+const caseNames = fs
   .readdirSync(caseDirectory)
   .filter((file) => file.endsWith('.eval.ts'))
+  .map((file) => path.basename(file, '.eval.ts'))
   .sort();
-const caseNames = caseFiles.map((file) => path.basename(file, '.eval.ts'));
 
 const { checks } = vi.hoisted(() => ({ checks: new Map<string, CheckFn<CliFixture>[]>() }));
 
@@ -68,6 +69,15 @@ const referenceCases: ReferenceCase[] = [
   {
     task: 'expo-go',
     input: { fixture: 'evals/fixtures/real-app', linkDependencies: true },
+    baseline: [['status']],
+  },
+  {
+    task: 'expo-go-prebuilt',
+    input: {
+      fixture: 'evals/fixtures/real-app',
+      linkDependencies: true,
+      setupProject: ({ root }) => addCheckedInNativeProject(root),
+    },
     baseline: [['status']],
   },
   ...(['native', 'js'] as const).map((task): ReferenceCase => ({

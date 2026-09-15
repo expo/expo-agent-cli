@@ -16,6 +16,7 @@
     "tier1/**/*.ts",
     "smoke/**/*.ts",
     "vitest.config.ts",
+    "summarize.ts",
     "tier2/*.mjs",
     "tier2/*.mts",
     "tier2/*.eval.ts"
