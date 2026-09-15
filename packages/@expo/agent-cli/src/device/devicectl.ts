@@ -68,7 +68,6 @@ export function parseDevicectlList(json: unknown): IosDevice[] {
 export async function listConnectedIosDevicesAsync({
   spawnCaptureAsync: spawnCapture = spawnCaptureAsync,
 }: DevicectlOptions = {}): Promise<IosDevice[]> {
-  await fs.promises.mkdir(os.tmpdir(), { recursive: true });
   const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-cli-devicectl-'));
   const outputPath = path.join(directory, 'devices.json');
   try {

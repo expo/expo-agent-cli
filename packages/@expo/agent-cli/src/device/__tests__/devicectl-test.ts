@@ -1,5 +1,6 @@
 // @ref llp/0028-installed-app-check.rfc.md §Proof
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import type { SpawnCaptureResult } from '../../utils/spawnCapture';
@@ -43,6 +44,10 @@ describe(parseDevicectlList, () => {
 });
 
 describe(listConnectedIosDevicesAsync, () => {
+  beforeEach(() => {
+    fs.mkdirSync(os.tmpdir(), { recursive: true });
+  });
+
   it(`writes the list through --json-output and reads it back`, async () => {
     const calls: string[][] = [];
     const devices = await listConnectedIosDevicesAsync({

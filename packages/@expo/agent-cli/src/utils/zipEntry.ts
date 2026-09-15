@@ -132,6 +132,10 @@ export function readLocalZipEntry(
   const dataStart = 30 + nameLength + extraLength;
   const data = local.subarray(dataStart, dataStart + compressedSize);
 
+  if (data.length !== compressedSize) {
+    throw new Error(`Zip entry data is truncated: got ${data.length} of ${compressedSize} bytes`);
+  }
+
   switch (compressionMethod) {
     case 0:
       return Buffer.from(data);

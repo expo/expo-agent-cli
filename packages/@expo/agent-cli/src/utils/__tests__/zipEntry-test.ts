@@ -114,3 +114,23 @@ describe('ranged reading', () => {
     );
   });
 });
+
+
+describe(readLocalZipEntry, () => {
+  it.each(['fixture-stored.zip', 'fixture-deflated.zip'])(
+    'rejects truncated entry data in %s', (fixture) => {
+      const zip = loadFixture(fixture);
+      const directory = parseEndOfCentralDirectory(zip);
+      const location = findCentralDirectoryEntry(
+        zip.subarray(directory.offset, directory.offset + directory.size),
+        directory.entryCount,
+        'assets/app.fingerprint'
+      )!;
+      const local = zip.subarray(location.localHeaderOffset);
+      const dataStart = 30 + local.readUInt16LE(26) + local.readUInt16LE(28);
+      expect(() => readLocalZipEntry(local.subarray(0, dataStart + 5), location)).toThrow(
+        'Zip entry data is truncated'
+      );
+    }
+  );
+});
