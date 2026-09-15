@@ -168,6 +168,25 @@ describe(checkInstalledAppAsync, () => {
     );
   });
 
+  // The marker settles this verdict on its own, and the device read has side effects: on a phone
+  // it launches the app. Starting one whose answer is thrown away launches the app for nothing.
+  it(`does not start the device read when the marker settles the verdict`, async () => {
+    let started = false;
+    await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: () => {
+        started = true;
+        return new Promise<never>(() => {});
+      },
+      readNativeDirectoryStaleness: () => ({
+        status: 'stale',
+        changes: [{ source: 'app config', change: 'changed', scope: 'project' }],
+      }),
+    });
+
+    expect(started).toBe(false);
+  });
+
   // @ref llp/0028-installed-app-check.rfc.md §The prebuild marker
   it(`reports prebuild-stale without waiting for the device, with prebuild first`, async () => {
     const report = await checkInstalledAppAsync(projectRoot, options(), {
