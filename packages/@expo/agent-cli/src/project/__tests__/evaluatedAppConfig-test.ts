@@ -149,8 +149,14 @@ describe(readEvaluatedAppConfigAsync, () => {
 
   it.each([
     ['unparsable JSON', '{ not json'],
-    ['another schema version', JSON.stringify({ version: 0, config: {}, computedAt: 'x', keyManifest: { files: {} } })],
-    ['a record with no config', JSON.stringify({ version: 1, computedAt: 'x', keyManifest: { files: {} } })],
+    [
+      'another schema version',
+      JSON.stringify({ version: 0, config: {}, computedAt: 'x', keyManifest: { files: {} } }),
+    ],
+    [
+      'a record with no config',
+      JSON.stringify({ version: 1, computedAt: 'x', keyManifest: { files: {} } }),
+    ],
     ['a record with no manifest', JSON.stringify({ version: 1, config: {}, computedAt: 'x' })],
   ])(`should evaluate again over %s rather than trusting it`, async (_name, contents) => {
     vol.fromJSON({ [recordPath]: contents });
