@@ -157,7 +157,7 @@ function resolvePlatform({
       'BAD_ARGS',
       [
         `--platform is not an option of this command any more; the platform is ${replacement}.`,
-        `Why: "${PROGRAM_PREFIX} dev" and "${PROGRAM_PREFIX} smoke" name a platform as --ios or --android, and one platform written two ways across one CLI is a flag to look up every time. The hint still does what it did: it narrows the rule table to the phases that platform has — pod install and xcodebuild for ios, gradle for android.`,
+        `Why: the dev and smoke commands name a platform as --ios or --android, and one platform written two ways across one CLI is a flag to look up every time. The hint still does what it did: it narrows the rule table to the phases that platform has — pod install and xcodebuild for ios, gradle for android.`,
         `How: pass ${replacement} instead, or leave it off and let the log decide.`,
       ].join('\n')
     );
