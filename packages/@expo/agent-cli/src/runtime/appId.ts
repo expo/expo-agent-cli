@@ -149,17 +149,13 @@ export function readPrebuiltAndroidApplicationId(projectRoot: string): string | 
  * The `PRODUCT_BUNDLE_IDENTIFIER` of a **prebuilt** iOS project, from its `project.pbxproj`.
  *
  * The iOS counterpart of {@link readPrebuiltAndroidApplicationId}. `expo prebuild` writes the id
- * into the Xcode project whether or not `ios.bundleIdentifier` was declared. The first target's
- * value is taken, which is the app target in a project `prebuild` generated. A static read: no
+ * into the Xcode project whether or not `ios.bundleIdentifier` was declared. A static read: no
  * `xcodebuild`, no `app.config.js`.
  *
- * TODO: the first match is not reliably the app target. `XCBuildConfiguration` objects are ordered
- * by their generated UUIDs, so a project with an app extension — a notification service, a widget,
- * one a config plugin added — has several `PRODUCT_BUNDLE_IDENTIFIER` entries in arbitrary order.
- * Picking the extension's makes the installed-app check answer `app-not-installed` for an app that
- * is installed, and misdirects every other caller of {@link readConfiguredAppId} (reload, stop,
- * navigate, smoke, app presence). Prefer the id that is a prefix of the others, or resolve the
- * first target's `buildConfigurationList` properly.
+ * `XCBuildConfiguration` objects are ordered by their generated UUIDs, so a project with an app
+ * extension — a notification service, a widget, one a config plugin added — has several
+ * `PRODUCT_BUNDLE_IDENTIFIER` entries in arbitrary order. {@link pickAppTargetId} picks the app
+ * target out of them rather than trusting the order.
  */
 export function readPrebuiltIosBundleIdentifier(projectRoot: string): string | null {
   const iosDir = path.join(projectRoot, 'ios');
@@ -179,12 +175,29 @@ export function readPrebuiltIosBundleIdentifier(projectRoot: string): string | n
     } catch {
       continue;
     }
-    const found = /^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"?([^";]+)"?\s*;/m.exec(source)?.[1]?.trim();
-    if (found != null && isValidAppId(found)) {
-      return found;
+    const found = [
+      ...source.matchAll(/^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"?([^";]+)"?\s*;/gm),
+    ].map((match) => match[1]!.trim());
+    const appTarget = pickAppTargetId(found.filter(isValidAppId));
+    if (appTarget != null) {
+      return appTarget;
     }
   }
   return null;
+}
+
+/**
+ * The app target's identifier among a project's `PRODUCT_BUNDLE_IDENTIFIER` values.
+ *
+ * `prebuild` names an extension `<app id>.<suffix>`, so the app target is the one every other
+ * identifier extends. Null when no single identifier dominates: two unrelated ids name no app
+ * target, and a wrong one misdirects every caller of {@link readConfiguredAppId}.
+ */
+function pickAppTargetId(ids: string[]): string | null {
+  const unique = [...new Set(ids)];
+  return (
+    unique.find((id) => unique.every((other) => other === id || other.startsWith(`${id}.`))) ?? null
+  );
 }
 
 /**
