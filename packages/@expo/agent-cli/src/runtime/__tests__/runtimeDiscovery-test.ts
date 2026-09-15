@@ -15,11 +15,11 @@ import { CdpRuntimeErrorCollector } from '../runtimeErrorCollector';
 
 vi.mock('../../log');
 vi.mock('../devServer', async () => ({
-  ...await vi.importActual('../devServer'),
+  ...(await vi.importActual('../devServer')),
   discoverDevServerAsync: vi.fn(),
 }));
 vi.mock('../cdpClient', async () => ({
-  ...await vi.importActual('../cdpClient'),
+  ...(await vi.importActual('../cdpClient')),
   CdpClient: vi.fn(),
 }));
 vi.mock('../runtimeErrorCollector', () => ({ CdpRuntimeErrorCollector: vi.fn() }));
@@ -73,9 +73,12 @@ function metroUrlOfClient(): string | undefined {
 }
 
 beforeEach(() => {
-  vi.mocked(CdpClient).mockImplementation(() => ({ evaluateAsync: async () => ({}) }) as any);
-  vi.mocked(CdpRuntimeErrorCollector)
-    .mockImplementation(() => ({ collectAsync: async () => [] }) as any);
+  vi.mocked(CdpClient).mockImplementation(function () {
+    return { evaluateAsync: async () => ({}) } as any;
+  });
+  vi.mocked(CdpRuntimeErrorCollector).mockImplementation(function () {
+    return { collectAsync: async () => [] } as any;
+  });
   mockDiscovered('http://127.0.0.1:8083');
 });
 
