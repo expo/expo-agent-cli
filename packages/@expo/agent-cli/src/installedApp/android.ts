@@ -33,7 +33,7 @@ const RANGE_BLOCK_SIZE = 65536;
 const ADB_TIMEOUT_MS = 30_000;
 
 export interface AndroidReaderOptions {
-  expectedHash: string | Promise<string>;
+  expectedHash: string;
   device?: string;
   appId: string;
   /** Injected for tests. */
@@ -47,8 +47,6 @@ export interface AndroidReaderOptions {
  * device wins. The file is a zip entry inside the APK, read through ranged `dd` reads over
  * `adb exec-out`, with a whole-APK pull as the fallback when the device lacks the tools.
  *
- * `expectedHash` may be a promise: the device read overlaps with the fingerprint computation, and
- * the hash is only awaited at comparison time.
  *
  * @throws the `adb` tool error when `adb` itself could not run.
  */
@@ -101,7 +99,7 @@ export async function readInstalledFingerprintAndroidAsync({
       lastError = error as Error;
       continue;
     }
-    const hash = await expectedHash;
+    const hash = expectedHash;
     if (result.status === 'ok' && result.hash === hash) {
       return result;
     }

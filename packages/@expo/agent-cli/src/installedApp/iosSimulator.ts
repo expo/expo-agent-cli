@@ -25,7 +25,7 @@ export interface IosSimulatorReaderDependencies {
 }
 
 export interface IosSimulatorReaderOptions extends IosSimulatorReaderDependencies {
-  expectedHash: string | Promise<string>;
+  expectedHash: string;
   device?: string;
   appId: string;
 }
@@ -83,7 +83,7 @@ export async function listBootedIosSimulatorsAsync({
 export async function readSimulatorsAsync(
   simulators: InstalledAppDevice[],
   appId: string,
-  expectedHash: string | Promise<string>,
+  expectedHash: string,
   {
     spawnCaptureAsync: spawnCapture = spawnCaptureAsync,
     readFile = (filePath) => fs.readFileSync(filePath, 'utf8'),
@@ -104,7 +104,7 @@ export async function readSimulatorsAsync(
   if (!results.length) {
     throw lastError;
   }
-  return pickBestResult(results, await expectedHash);
+  return pickBestResult(results, expectedHash);
 }
 
 /** Read the fingerprint out of the app on every booted iOS simulator, or the one `--device` names. */
