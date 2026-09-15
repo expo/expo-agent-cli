@@ -48,14 +48,14 @@ vi.mock('../easBuilds', () => ({
   readEasBuildsStatusAsync: vi.fn(async () => ({ askedEas: false, platforms: [] })),
 }));
 vi.mock('../../impact/fromRecord', async () => ({
-  ...(await vi.importActual('../../impact/fromRecord') as object),
+  ...((await vi.importActual('../../impact/fromRecord')) as object),
   refineWithChangedFilesAsync: vi.fn(async () => null),
 }));
 vi.mock('../../impact/compare', () => ({ compareWithEasBuildAsync: vi.fn() }));
 // Which platform the named build was made for. One EAS call, on the `--build` path only, and a
 // null from it means the comparison is attributed to no platform at all (S1).
 vi.mock('../../impact/buildCache', async () => ({
-  ...(await vi.importActual('../../impact/buildCache') as object),
+  ...((await vi.importActual('../../impact/buildCache')) as object),
   lookUpBuildPlatformAsync: vi.fn(async () => null),
 }));
 vi.mock('../../utils/easCli', () => ({
@@ -82,7 +82,7 @@ vi.mock('../../impact/runtimeVersion', () => ({
   })),
 }));
 vi.mock('../../skills/agents', async () => ({
-  ...await vi.importActual('../../skills/agents'),
+  ...(await vi.importActual('../../skills/agents')),
   getPersistedAgentIdsAsync: vi.fn(async () => null),
 }));
 
@@ -121,8 +121,11 @@ beforeEach(() => {
   vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'my-app' }) });
   mockState();
   vi.mocked(readLastBuildRecord).mockReturnValue({});
-  vi.mocked(readAuthPreflightAsync)
-    .mockResolvedValue({ loggedIn: true, user: 'alice', source: 'eas whoami' });
+  vi.mocked(readAuthPreflightAsync).mockResolvedValue({
+    loggedIn: true,
+    user: 'alice',
+    source: 'eas whoami',
+  });
   vi.mocked(discoverDevServerAsync).mockResolvedValue({
     reachable: true,
     targets: [{} as any],
@@ -468,7 +471,7 @@ describe(collectStatusReportAsync, () => {
     it(`should resolve the OTA verdict and refresh the EAS answer with --explain`, async () => {
       const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
 
-      expect(resolveRuntimeVersionAsync).toHaveBeenCalledWith(projectRoot);
+      expect(resolveRuntimeVersionAsync).toHaveBeenCalledWith(projectRoot, { cache: undefined });
       expect(report.freshness?.ota).toMatchObject({ safe: true });
       expect(readEasBuildsStatusAsync).toHaveBeenCalledWith(
         projectRoot,
@@ -513,8 +516,9 @@ describe(collectStatusReportAsync, () => {
   describe('the file-level refinement', () => {
     function unchanged() {
       mockState({ fingerprint: { hash: 'abcdef0123456789', sources: [] } });
-      vi.mocked(readLastBuildRecord)
-        .mockReturnValue({ ios: { hash: 'abcdef0123456789', sources: [] } });
+      vi.mocked(readLastBuildRecord).mockReturnValue({
+        ios: { hash: 'abcdef0123456789', sources: [] },
+      });
     }
 
     it(`should upgrade js-only to dev-client-compatible when a config file moved`, async () => {
@@ -566,8 +570,7 @@ describe(collectStatusReportAsync, () => {
   describe('--assert', () => {
     function decided(recordedHash: string) {
       mockState({ fingerprint: { hash: 'abcdef0123456789', sources: [] } });
-      vi.mocked(readLastBuildRecord)
-        .mockReturnValue({ ios: { hash: recordedHash, sources: [] } });
+      vi.mocked(readLastBuildRecord).mockReturnValue({ ios: { hash: recordedHash, sources: [] } });
     }
 
     it(`should report no assertion when none was made`, async () => {
@@ -733,8 +736,9 @@ describe(collectStatusReportAsync, () => {
     // The `fresh`/`stale` state is about the project's own record, and `--build` asks a different
     // question. One of them silently changing meaning would be worse than reporting both.
     it(`should leave the freshness states alone, because they answer another question`, async () => {
-      vi.mocked(readLastBuildRecord)
-        .mockReturnValue({ ios: { hash: 'abcdef0123456789', sources: null } });
+      vi.mocked(readLastBuildRecord).mockReturnValue({
+        ios: { hash: 'abcdef0123456789', sources: null },
+      });
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
@@ -1037,8 +1041,11 @@ describe(`${collectStatusReportAsync.name} and stale debugger targets`, () => {
       timedOut: false,
       waitedMs: 1,
     });
-    vi.mocked(probeTargetLivenessAsync)
-      .mockResolvedValue({ listed: 2, live: 1, stale: [{ id: 'stale' } as any] });
+    vi.mocked(probeTargetLivenessAsync).mockResolvedValue({
+      listed: 2,
+      live: 1,
+      stale: [{ id: 'stale' } as any],
+    });
 
     const report = await collectStatusReportAsync(projectRoot, options);
 
