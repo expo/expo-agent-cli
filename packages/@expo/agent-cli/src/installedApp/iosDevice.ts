@@ -27,7 +27,7 @@ export interface IosDeviceReaderDependencies {
 }
 
 export interface IosDeviceReaderOptions {
-  expectedHash: string | Promise<string>;
+  expectedHash: string;
   /** `--device`: only the phone matching this name or UDID. */
   device?: string;
   appId: string;
@@ -80,12 +80,12 @@ export async function readInstalledFingerprintIosDeviceAsync({
     // stderr, so a `--json` run keeps stdout for the one object.
     Log.warn(`Checking ${device.name}. This launches the app on the device.`);
     const result = await probeDeviceAsync(device, appId, scheme, timeoutMs, deps);
-    if (result.status === 'ok' && result.hash === (await expectedHash)) {
+    if (result.status === 'ok' && result.hash === expectedHash) {
       return result;
     }
     results.push(result);
   }
-  return pickBestResult(results, await expectedHash);
+  return pickBestResult(results, expectedHash);
 }
 
 async function probeDeviceAsync(
