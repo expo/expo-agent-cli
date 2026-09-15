@@ -80,6 +80,8 @@ type StatusReport = {
         changedSources: { op: string; path: string | null; kind: string }[] | null;
       } | null;
     }[];
+    /** How many files changed, by kind. Null when no file-level view was available (llp/0011). */
+    changedFiles: { total: number; native: number; js: number; config: number } | null;
     ota: {
       safe: boolean | null;
       runtimeVersion: {
@@ -1074,6 +1076,48 @@ process.stdout.write(JSON.stringify({
       expect(result.stdout).toContain('not safe to publish');
     });
 
+    // Eight rows, then a count: a headline with fifty rows attached is not a headline. Platforms
+    // whose lists agree print once — the probe hashes both together, so they usually do.
+    it('lists eight sources, counts the rest, and prints platforms that agree once', async () => {
+      const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
+      await fs.promises.writeFile(
+        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        JSON.stringify({
+          ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [] },
+          android: { hash: FIXTURE_FINGERPRINT_HASH, sources: [] },
+        })
+      );
+      const sources = Array.from({ length: 10 }, (_, index) => ({
+        ...NATIVE_MODULE,
+        filePath: `node_modules/native-module-${index}`,
+      }));
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        { env: { ...env, STUB_FP_SOURCES: JSON.stringify(sources) } }
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('ios, android: 10 sources');
+      expect(result.stdout).toContain('node_modules/native-module-7');
+      expect(result.stdout).not.toContain('node_modules/native-module-8');
+      expect(result.stdout).toContain('… and 2 more, in --json');
+      // Once, not once per platform.
+      expect(result.stdout.match(/added\s+node_modules\/native-module-0/g)).toHaveLength(1);
+    });
+
+    // The class contributes its single best next command to the follow-ups (llp/0009); the OTA
+    // verdict itself is in the report, not a rung.
+    it('carries the head of the class ladder in the follow-ups, beside the OTA verdict', async () => {
+      const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
+
+      const report = await reportInAsync(projectRoot, [], env);
+
+      expect(report.freshness!.ota).toMatchObject({ safe: false });
+      expect(report.followups.map((followup) => followup.id)).toContain('change-native-build');
+    });
+
     // @ref llp/0011-impact-and-freshness.rfc.md §A fingerprint change is not "OTA-unsafe"
     // A dynamic config has to be evaluated, and only the project's own Expo CLI may do that. The
     // answer is remembered under `.expo` and revalidated against the pinned files, so a loop of
@@ -1195,6 +1239,470 @@ process.stdout.write(JSON.stringify({
         });
         expect(report.project).not.toBeNull();
       });
+    });
+  });
+
+  // @ref llp/0011-impact-and-freshness.rfc.md §The three comparisons
+  // @ref llp/0021-honest-reports.rfc.md §The rules
+  //
+  // `--build <id>` replaces the base of the headline with one EAS build. The stub `eas` answers
+  // `fingerprint:compare` and `build:view`; the stub `fingerprint` diffs the two sides the way the
+  // real CLI does, because the diff is a local elaboration of the server's two hashes.
+  describe('status --build <id>', () => {
+    const BUILD_ID = '21d7d434-6495-4e74-b8c7-68ecd0dff489';
+    const NATIVE_MODULE = {
+      type: 'dir',
+      filePath: 'node_modules/react-native-mmkv',
+      reasons: ['rncoreAutolinkingIos'],
+      hash: 'aabb',
+    };
+    const APP_CONFIG = { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'cc' };
+
+    /** A `fingerprint` bin that also answers `fingerprint:diff`, which the comparison needs. */
+    const STUB_FINGERPRINT = `#!/usr/bin/env node
+'use strict';
+const fs = require('node:fs');
+const args = process.argv.slice(2);
+if (args[0] === 'fingerprint:diff') {
+  const base = JSON.parse(fs.readFileSync(args[1], 'utf8'));
+  const head = JSON.parse(fs.readFileSync(args[2], 'utf8'));
+  const key = (source) => source.filePath || source.id || JSON.stringify(source);
+  const before = new Map(base.sources.map((source) => [key(source), source]));
+  const after = new Map(head.sources.map((source) => [key(source), source]));
+  const items = [];
+  for (const [id, source] of after) {
+    if (!before.has(id)) {
+      items.push({ op: 'added', addedSource: source });
+    } else if (before.get(id).hash !== source.hash) {
+      items.push({ op: 'changed', beforeSource: before.get(id), afterSource: source });
+    }
+  }
+  for (const [id, source] of before) {
+    if (!after.has(id)) {
+      items.push({ op: 'removed', removedSource: source });
+    }
+  }
+  process.stdout.write(JSON.stringify(items, null, 2) + '\\n');
+  process.exit(0);
+}
+process.stdout.write(JSON.stringify({
+  hash: process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)},
+  sources: JSON.parse(process.env.STUB_FP_SOURCES || '[]'),
+}) + '\\n');
+`;
+
+    /** The payload `fingerprint:compare` prints: the build's fingerprint, then the working tree's. */
+    function comparePayload(buildSources: unknown[], headSources: unknown[]) {
+      return JSON.stringify({
+        fingerprint1: { hash: 'build-hash-1111', sources: buildSources },
+        fingerprint2: {
+          hash:
+            JSON.stringify(buildSources) === JSON.stringify(headSources)
+              ? 'build-hash-1111'
+              : 'head-hash-2222',
+          sources: headSources,
+        },
+      });
+    }
+
+    async function setupCompareAsync(): Promise<string> {
+      const projectRoot = await setupAsync('dev-client-fresh-app');
+      const binDir = path.join(projectRoot, '.stub-bin');
+      await fs.promises.mkdir(binDir, { recursive: true });
+      const stub = path.join(binDir, 'fingerprint-compare-stub.js');
+      await fs.promises.writeFile(stub, STUB_FINGERPRINT);
+      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
+        await installStubBinAsync(dir, 'fingerprint', stub);
+      }
+      await fs.promises.writeFile(
+        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        JSON.stringify({
+          ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
+          android: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
+        })
+      );
+      await installSharedStubEasAsync(projectRoot);
+      await pinEasCliAsync(projectRoot);
+      return projectRoot;
+    }
+
+    async function runBuildAsync(
+      projectRoot: string,
+      args: string[],
+      env: Record<string, string> = {}
+    ) {
+      return executeAgentCliAsync(
+        projectRoot,
+        [
+          'status',
+          '--build',
+          BUILD_ID,
+          ...args,
+          '--dev-server-url',
+          await getUnusedDevServerUrlAsync(),
+        ],
+        { env: { STUB_FP_SOURCES: JSON.stringify([APP_CONFIG]), ...env }, reject: false }
+      );
+    }
+
+    function easAxis(report: StatusReport, platform: 'ios' | 'android') {
+      return report.freshness!.platforms.find(
+        (entry) => entry.platform === platform && entry.backend === 'eas'
+      )!;
+    }
+
+    it("compares against the named build, on that build's platform only", async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const result = await runBuildAsync(projectRoot, ['--json'], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG]),
+      });
+
+      expect(result.exitCode).toBe(0);
+      const report: StatusReport = JSON.parse(result.stdout);
+      expect(report.freshness!.comparison).toEqual({
+        kind: 'eas-build',
+        label: `EAS build ${BUILD_ID}`,
+        buildId: BUILD_ID,
+        platform: 'ios',
+      });
+      expect(easAxis(report, 'ios')).toMatchObject({
+        state: 'fresh',
+        buildId: BUILD_ID,
+        detail: `matches EAS build ${BUILD_ID}`,
+        impact: { class: 'js-only', fingerprintChanged: false, changedCount: 0 },
+      });
+      // One build is one platform: the other axis says it was not compared, and names no class.
+      expect(easAxis(report, 'android')).toMatchObject({ state: 'unknown', buildId: null });
+      expect(easAxis(report, 'android').detail).toContain('not compared');
+      expect(easAxis(report, 'android').impact?.class).toBeNull();
+      // The local axis is untouched: this machine's own record still answers its own question.
+      expect(
+        report.freshness!.platforms.find(
+          (entry) => entry.platform === 'ios' && entry.backend === 'local'
+        )
+      ).toMatchObject({ state: 'fresh', buildId: null });
+      expect(report.errors).toEqual({});
+    });
+
+    it('reports what differs from the named build, and what that costs', async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const result = await runBuildAsync(projectRoot, ['--json'], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG, NATIVE_MODULE]),
+      });
+
+      expect(result.exitCode).toBe(0);
+      const report: StatusReport = JSON.parse(result.stdout);
+      expect(easAxis(report, 'ios')).toMatchObject({
+        state: 'stale',
+        detail: `differs from EAS build ${BUILD_ID}`,
+        impact: { class: 'needs-native-build', fingerprintChanged: true, changedCount: 1 },
+      });
+      expect(easAxis(report, 'ios').impact!.changedSources).toEqual([
+        expect.objectContaining({ op: 'added', path: 'node_modules/react-native-mmkv' }),
+      ]);
+    });
+
+    it('says which build the headline was measured against, for a human', async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const result = await runBuildAsync(projectRoot, [], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG, NATIVE_MODULE]),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(`vs EAS build ${BUILD_ID}`);
+      expect(result.stdout).toContain('ios (eas): needs-native-build');
+      expect(result.stdout).toContain(`differs from EAS build ${BUILD_ID}`);
+    });
+
+    // Under `--build` the gate is about the named build, so only the eas axis is judged
+    // (`src/status/assert.ts`): the local axis answers a question the caller did not ask.
+    it('judges the eas axis under --assert', async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const differs = await runBuildAsync(projectRoot, ['--assert', 'js-only'], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG, NATIVE_MODULE]),
+      });
+      expect(differs.exitCode).toBe(20);
+      expect(differs.stdout).toContain('the change costs needs-native-build');
+
+      const matches = await runBuildAsync(projectRoot, ['--assert', 'js-only'], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG]),
+      });
+      expect(matches.exitCode).toBe(0);
+    });
+
+    // S1: one build is one platform, and copying its verdict onto both said an iOS build could run
+    // android code. When EAS cannot say which platform, the comparison is attributed to none.
+    it('attributes the comparison to no platform when EAS cannot say which one the build is for', async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const result = await runBuildAsync(projectRoot, ['--json', '--assert', 'js-only'], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG]),
+        STUB_EAS_BUILD_VIEW_EXIT: '1',
+      });
+
+      // Nothing measured, so the gate does not pass on a guess.
+      expect(result.exitCode).toBe(22);
+      const report: StatusReport = JSON.parse(result.stdout);
+      expect(report.freshness!.comparison.platform).toBeNull();
+      for (const platform of ['ios', 'android'] as const) {
+        expect(easAxis(report, platform).detail).toContain('not compared');
+        expect(easAxis(report, platform).impact?.class).toBeNull();
+      }
+    });
+
+    // F66: a `--build` that failed used to print an ordinary report with the id nowhere on it.
+    it('keeps the report, echoes the build, and notes the failure when the comparison cannot run', async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const result = await runBuildAsync(projectRoot, [], { STUB_EAS_COMPARE_EXIT: '1' });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('freshness note');
+      expect(result.stdout).toContain(BUILD_ID);
+      expect(result.stdout).toContain('project     dev-client-fresh-app');
+
+      const json = await runBuildAsync(projectRoot, ['--json'], { STUB_EAS_COMPARE_EXIT: '1' });
+      const report: StatusReport = JSON.parse(json.stdout);
+      expect(report.freshness!.comparison).toMatchObject({ kind: 'eas-build', buildId: BUILD_ID });
+      expect(report.errors.freshness).toContain(BUILD_ID);
+    });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
+  // `status` is the one command that answers here rather than refusing: it is how a caller finds
+  // out it is in the wrong directory.
+  describe('a directory that is not an Expo app', () => {
+    async function setupNotAnAppAsync(): Promise<string> {
+      const projectRoot = await setupAsync('go-app');
+      const manifestPath = path.join(projectRoot, 'package.json');
+      const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+      delete manifest.dependencies.expo;
+      await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+      return projectRoot;
+    }
+
+    it('says so, points at creating an app rather than running one, and exits 0', async () => {
+      const projectRoot = await setupNotAnAppAsync();
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.project).toMatchObject({ isExpoApp: false });
+      expect(report.next).toMatchObject({
+        command: 'npx @expo/agent-cli new my-app',
+        steps: [],
+        buildLocation: null,
+      });
+      expect(report.next!.why).toContain('not an Expo app');
+    });
+
+    it('prints the fact second on the project line, where a reader cannot miss it', async () => {
+      const projectRoot = await setupNotAnAppAsync();
+
+      const result = await executeAgentCliAsync(projectRoot, [
+        'status',
+        '--dev-server-url',
+        await getUnusedDevServerUrlAsync(),
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toMatch(/project\s+go-app · not an Expo app/);
+      expect(result.stdout).toContain('npx @expo/agent-cli new my-app');
+    });
+  });
+
+  // @ref llp/0011-impact-and-freshness.rfc.md §When the fingerprint did not move
+  // The file-level view: read only when the fingerprint says the native surface did not move,
+  // which is the one case where it can change the answer.
+  describe('the changed files, when the fingerprint did not move', () => {
+    const APP_CONFIG = { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'cc' };
+    const STUB_FINGERPRINT = `#!/usr/bin/env node
+'use strict';
+process.stdout.write(JSON.stringify({
+  hash: process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)},
+  sources: JSON.parse(process.env.STUB_FP_SOURCES || '[]'),
+}) + '\\n');
+`;
+
+    /** A committed working tree whose fingerprint matches its recorded build. */
+    async function setupCommittedAsync(): Promise<string> {
+      const projectRoot = await setupAsync('dev-client-fresh-app');
+      const binDir = path.join(projectRoot, '.stub-bin');
+      await fs.promises.mkdir(binDir, { recursive: true });
+      const stub = path.join(binDir, 'fingerprint-files-stub.js');
+      await fs.promises.writeFile(stub, STUB_FINGERPRINT);
+      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
+        await installStubBinAsync(dir, 'fingerprint', stub);
+      }
+      await fs.promises.writeFile(
+        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        JSON.stringify({
+          ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
+          android: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
+        })
+      );
+      // What the test doubles write during a run is not the project's change.
+      await fs.promises.writeFile(
+        path.join(projectRoot, '.gitignore'),
+        ['node_modules/', '.expo/', '.stub-bin/', 'stub-*.jsonl', ''].join('\n')
+      );
+      await initGitRepoAsync(projectRoot);
+      git(projectRoot, ['add', '-A']);
+      git(projectRoot, [
+        '-c',
+        'user.name=e2e',
+        '-c',
+        'user.email=e2e@example.com',
+        'commit',
+        '-q',
+        '-m',
+        'init',
+      ]);
+      return projectRoot;
+    }
+
+    const env = { STUB_FP_SOURCES: JSON.stringify([APP_CONFIG]) };
+
+    it('says nothing about files when nothing in the tree changed', async () => {
+      const projectRoot = await setupCommittedAsync();
+
+      const report = await reportInAsync(projectRoot, [], env);
+
+      expect(report.freshness!.changedFiles).toEqual({ total: 0, native: 0, js: 0, config: 0 });
+      expect(
+        report.freshness!.platforms.find(
+          (entry) => entry.platform === 'ios' && entry.backend === 'local'
+        )!.impact
+      ).toMatchObject({ class: 'js-only', fingerprintChanged: false });
+    });
+
+    it('counts a JavaScript edit, and keeps the class at js-only', async () => {
+      const projectRoot = await setupCommittedAsync();
+      await fs.promises.writeFile(path.join(projectRoot, 'index.js'), '// edited\n');
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        { env }
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('ios, android: js-only');
+      expect(result.stdout).toMatch(/files\s+1 changed · 1 js · 0 config · 0 native/);
+    });
+
+    // A file the dev server read once at start-up needs Metro restarted: the installed app is still
+    // the right one, and only the bundler has to come back.
+    it('raises the class to dev-client-compatible for a file the dev server read at start-up', async () => {
+      const projectRoot = await setupCommittedAsync();
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'metro.config.js'),
+        "const { getDefaultConfig } = require('expo/metro-config');\nmodule.exports = getDefaultConfig(__dirname);\n"
+      );
+
+      const report = await reportInAsync(projectRoot, [], env);
+
+      // `metro.config.js` is a file the bundler reads, not the app config: it counts as JavaScript
+      // and still raises the class, because Metro has to come back for it.
+      expect(report.freshness!.changedFiles).toMatchObject({ total: 1, js: 1, config: 0 });
+      expect(
+        report.freshness!.platforms.find(
+          (entry) => entry.platform === 'ios' && entry.backend === 'local'
+        )!.impact
+      ).toMatchObject({ class: 'dev-client-compatible', fingerprintChanged: false });
+      expect(report.followups.map((followup) => followup.id)).toContain('change-restart-metro');
+    });
+  });
+
+  // @ref llp/0009-smart-followups.rfc.md §Examples per command
+  // The follow-ups reach a driving agent through `--json` and the event only; each rung fires on
+  // one fact of the report.
+  describe('the follow-ups', () => {
+    it('names runtime:errors when an app is connected to the dev server', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const devServer = await startDevServerDoubleAsync([CDP_TARGET]);
+      try {
+        const result = await executeAgentCliAsync(projectRoot, [
+          'status',
+          '--json',
+          '--dev-server-url',
+          devServer.url,
+        ]);
+
+        expect(result.exitCode).toBe(0);
+        const report: StatusReport = JSON.parse(result.stdout);
+        expect(report.followups).toContainEqual(
+          expect.objectContaining({
+            id: 'runtime-errors',
+            command: 'npx @expo/agent-cli runtime:errors',
+          })
+        );
+      } finally {
+        await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
+      }
+    });
+
+    it('names expo-dev-client for a project Expo Go cannot run and that has no dev client', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await addNativeModuleAsync(projectRoot, 'expo-observe');
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.expoGo?.compatible).toBe(false);
+      expect(report.project?.usesDevClient).toBe(false);
+      expect(report.followups).toContainEqual(
+        expect.objectContaining({
+          id: 'install-dev-client',
+          command: 'npx @expo/agent-cli install expo-dev-client',
+        })
+      );
+    });
+
+    it('names skills:sync when the project ships skills the selected agent has not linked', async () => {
+      const projectRoot = await setupAsync('skills-app');
+      await writeAgentSelectionAsync(projectRoot, ['claude-code']);
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.skills).toMatchObject({ agentIds: ['claude-code'], linked: 0 });
+      expect(report.skills!.discovered).toBeGreaterThan(0);
+      expect(report.followups).toContainEqual(
+        expect.objectContaining({ id: 'skills-sync', command: 'npx @expo/agent-cli skills:sync' })
+      );
+    });
+  });
+
+  describe('the dev server the project log names', () => {
+    // Step 2 of the discovery ladder: `expo start` logs a `metro:instantiate` event with its port
+    // into `.expo/dev/logs/start.log`, which is what finds a dev server no `@expo/agent-cli` wrapper
+    // holds a lock for. The port is only a candidate until it answers.
+    it('finds it with no URL given, and says the log named it', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const devServer = await startDevServerDoubleAsync([]);
+      try {
+        const port = new URL(devServer.url).port;
+        const logDir = path.join(projectRoot, '.expo', 'dev', 'logs');
+        await fs.promises.mkdir(logDir, { recursive: true });
+        await fs.promises.writeFile(
+          path.join(logDir, 'start.log'),
+          JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port: Number(port) }) + '\n'
+        );
+
+        const result = await executeAgentCliAsync(projectRoot, ['status', '--json']);
+
+        expect(result.exitCode).toBe(0);
+        const report: StatusReport = JSON.parse(result.stdout);
+        expect(report.devServer).toMatchObject({
+          running: true,
+          source: 'log',
+          url: devServer.url,
+        });
+      } finally {
+        await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
+      }
     });
   });
 
