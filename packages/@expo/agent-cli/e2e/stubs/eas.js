@@ -46,6 +46,15 @@
 // - STUB_EAS_BUILD_LIST_EXIT / STUB_EAS_BUILD_LIST_STDOUT: a refusal, on the stream the real CLI
 //   uses (stdout for the explanation, one `Error:` line on stderr)
 //
+// `fingerprint:compare --build-id <id>`
+// - STUB_EAS_COMPARE_JSON: the `{ fingerprint1, fingerprint2 }` payload to print verbatim (default:
+//   two equal, empty fingerprints — the build matches the working tree)
+// - STUB_EAS_COMPARE_EXIT: a refusal, with one `Error:` line on stderr
+//
+// `build:view <id>`
+// - STUB_EAS_BUILD_VIEW_PLATFORM: the platform of the build it describes (default `IOS`)
+// - STUB_EAS_BUILD_VIEW_EXIT: a refusal — a build nobody can see, or one that does not exist
+//
 // `simulator:availability`
 // - STUB_SIM_AVAILABLE: `false` for an account without the feature
 //
@@ -237,6 +246,42 @@ if (command === 'build:list') {
       (!profile || build.buildProfile === profile)
   );
   printJson(limit > 0 ? listed.slice(0, limit) : listed);
+  process.exit(0);
+}
+
+// ---- Fingerprints and builds by id --------------------------------------------------------------
+
+if (command === 'fingerprint:compare') {
+  const exitCode = Number(process.env.STUB_EAS_COMPARE_EXIT || 0);
+  if (exitCode !== 0) {
+    exitWith(process.stderr, '    Error: fingerprint:compare command failed.', exitCode);
+  }
+  // The recorded shape [observed — eas-cli `fingerprint:compare --build-id <id> --json`,
+  // 2026-08-26]: both whole fingerprints, `fingerprint1` the build's and `fingerprint2` the
+  // working directory's. No diff — the CLI leaves that to the caller.
+  exitWith(
+    process.stdout,
+    process.env.STUB_EAS_COMPARE_JSON ||
+      JSON.stringify({
+        fingerprint1: { hash: 'stub-build-hash', sources: [] },
+        fingerprint2: { hash: 'stub-build-hash', sources: [] },
+      }),
+    0
+  );
+}
+
+if (command === 'build:view') {
+  const exitCode = Number(process.env.STUB_EAS_BUILD_VIEW_EXIT || 0);
+  if (exitCode !== 0) {
+    exitWith(process.stderr, `    Error: Build with ID ${args[1]} does not exist.`, exitCode);
+  }
+  printJson({
+    id: args[1],
+    status: 'FINISHED',
+    platform: process.env.STUB_EAS_BUILD_VIEW_PLATFORM || 'IOS',
+    buildProfile: 'simulator',
+    createdAt: '2026-08-19T17:37:12.674Z',
+  });
   process.exit(0);
 }
 
