@@ -53,7 +53,7 @@ export type InstalledFingerprintReader = (input: {
   platform: InstalledAppPlatform;
   appId: string;
   device: string | null;
-  expectedHash: Promise<string>;
+  expectedHash: string;
 }) => Promise<InstalledFingerprintResult>;
 
 export interface CheckDependencies {
@@ -120,36 +120,24 @@ async function checkPlatformAsync(
     });
   }
 
-  // The device read starts while the hash is computed and only awaits it at comparison time. The
-  // no-op catches keep an early return on one side from surfacing the other's rejection as
-  // unhandled; the awaits below still report both.
-  const fingerprintPromise = deps.generateFingerprint(projectRoot, {
+  const fingerprint = await deps.generateFingerprint(projectRoot, {
     platform,
     cache: options.fingerprintCache,
   });
-  const expectedHash = fingerprintPromise.then((result) => {
-    if (!result.hash) {
-      throw new Error(result.error ?? 'no fingerprint');
-    }
-    return result.hash;
-  });
-  expectedHash.catch(() => {});
-  const installedPromise = deps.readInstalled({
-    platform,
-    appId,
-    device: options.device,
-    expectedHash,
-  });
-  installedPromise.catch(() => {});
-
-  const fingerprint = await fingerprintPromise;
   if (!fingerprint.hash) {
     return verdict('fingerprint-unavailable', {
       recommendation: `The project fingerprint could not be computed: ${fingerprint.error ?? 'no hash was returned'}.`,
     });
   }
 
-  const installed = await installedPromise;
+  // Read the device only once the verdict is known to need one. The read has side effects — on a
+  // phone it launches the app — so a read whose answer would be discarded must never start.
+  const installed = await deps.readInstalled({
+    platform,
+    appId,
+    device: options.device,
+    expectedHash: fingerprint.hash,
+  });
   const check = installedVerdict(installed, platform, fingerprint, options.device);
   return installed.hint
     ? { ...check, recommendation: `${check.recommendation} ${installed.hint}` }

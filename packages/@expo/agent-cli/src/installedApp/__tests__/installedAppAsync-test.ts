@@ -39,6 +39,22 @@ const installed =
     result;
 
 describe(checkInstalledAppAsync, () => {
+  // The device read has side effects — on a phone it launches the app — so a read whose answer
+  // would be discarded must never start.
+  it(`does not start the device read when the project fingerprint is unavailable`, async () => {
+    let started = false;
+    await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      generateFingerprint: async () => ({ hash: null, sources: null, error: 'fingerprint failed' }),
+      readInstalled: () => {
+        started = true;
+        return new Promise<never>(() => {});
+      },
+    });
+
+    expect(started).toBe(false);
+  });
+
   it.each<[string, InstalledFingerprintResult, Partial<PlatformCheck>]>([
     [
       'the installed hash matches',
