@@ -1,5 +1,4 @@
 // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
-// @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
 //
 // "Has anybody already built exactly this?" — the other half of the freshness question, and the
 // one a `stale` line could not answer. `impact` has asked it since 2026-08-24; `status` could not,
@@ -20,6 +19,10 @@
 // per-platform hashes — which makes the hash `status` already has a sound key for an answer about
 // a hash it does not have. A hit costs one `readFileSync` and is as true as the lookup that wrote
 // it. See the LLP section for the argument in full.
+//
+// A `none` is remembered too, for a short while (§A none is remembered for five minutes), and a
+// project whose static config says it is not linked to EAS is never asked at all: `eas build:list`
+// refuses an unlinked project, and this CLI can read that refusal off `app.json` for free.
 
 import fs from 'fs';
 import path from 'path';
@@ -27,9 +30,10 @@ import path from 'path';
 import { lookUpCachedBuildAsync, runnerDownloadNote } from '../impact/buildCache';
 import type { CachedBuild } from '../impact/types';
 import type { NativePlatform } from '../plan/types';
+import type { EasProjectLink } from '../project/appConfig';
 import { generateFingerprintAsync } from '../project/fingerprint';
 import { ensureDotExpoProjectDirectoryInitialized } from '../utils/dotExpo';
-import { mayDownloadEasCli, resolveEasCli, type EasCli } from '../utils/easCli';
+import { easCommandPrefix, mayDownloadEasCli, resolveEasCli, type EasCli } from '../utils/easCli';
 import type { AuthStatus, BuildsStatus, PlatformBuild } from './types';
 
 /** Platforms the section reports, in print order — the same two `freshness` reports. */
@@ -64,6 +68,23 @@ export const EAS_BUILD_LOOKUP_TIMEOUT_MS = 10_000;
  */
 export const EAS_BUILD_RUNNER_TIMEOUT_MS = 45_000;
 
+/**
+ * How long a `none` is believed before EAS is asked again.
+ *
+ * @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
+ * A `found` is exact for as long as the project hash it is keyed on stands: a build EAS has does not
+ * stop existing. A `none` is a fact about a *moment* — the build that answers it may be in the queue
+ * right now — so it used to be written nowhere, and every run of a linked project paid the network
+ * call again [decided — 2026-08-26]. An agent loop runs `status` many times per minute, and paying
+ * 1.3 s each time to be told "still none" is the cost this bound removes.
+ *
+ * Five minutes, and not the fingerprint cache's ten: what a stale `none` misdirects is a native
+ * build (`stale` on the EAS axis, when a download was the answer), and five minutes is less than
+ * the build the reader would otherwise start. `--no-fingerprint-cache` is the way out for a caller
+ * who cannot accept even that, and the report says how old the answer is.
+ */
+export const EAS_NONE_CACHE_TTL_MS = 5 * 60 * 1000;
+
 /** What was cached for one platform, and the working tree it was cached for. */
 interface CachedEntry {
   /**
@@ -76,7 +97,13 @@ interface CachedEntry {
   /** The per-platform hash that was actually asked about, reported so the answer can be checked. */
   fingerprintHash: string;
   checkedAt: string;
-  build: CachedBuild;
+  /**
+   * The build EAS had, or **null** when EAS answered that it has none.
+   *
+   * A null is bounded by {@link EAS_NONE_CACHE_TTL_MS} from `checkedAt`; a build is bounded by the
+   * project hash alone.
+   */
+  build: CachedBuild | null;
 }
 
 type EasBuildsRecord = Partial<Record<NativePlatform, CachedEntry>>;
@@ -97,12 +124,24 @@ export interface EasBuildsOptions {
   /** Overrides {@link EAS_BUILD_LOOKUP_TIMEOUT_MS}, for tests. */
   timeoutMs?: number;
   /**
-   * Whether the per-platform fingerprint below may come out of the project's `.expo` record.
+   * Whether the per-platform fingerprint below may come out of the project's `.expo` record — and
+   * whether this section's own record may answer at all.
    *
    * @see llp/0023-fingerprint-caching.rfc.md — this is the section that pays for *two* of the three
-   * fingerprints a `status --explain` used to compute, so it is the one the cache helps most.
+   * fingerprints a `status --explain` used to compute, so it is the one the cache helps most. A
+   * caller who refused that cache wants a measurement, so the remembered EAS answer is refused too:
+   * the flag is about what the caller will accept, not about which file the answer came out of.
    */
   fingerprintCache?: boolean;
+  /**
+   * Whether the project is linked to an EAS project, per its **static** app config.
+   *
+   * An unlinked project is answered without a network call: `eas build:list` refuses it with a
+   * sentence this CLI already rewrites (`classifyEasFailure`), and `app.json` says the same thing
+   * for free. A dynamic config cannot be read here, so it is asked as before — `projectId: null`
+   * with `dynamic: true` proves nothing. Null when the project could not be read at all.
+   */
+  easProject?: EasProjectLink | null;
 }
 
 /**
@@ -116,7 +155,8 @@ export async function readEasBuildsStatusAsync(
   projectRoot: string,
   options: EasBuildsOptions
 ): Promise<BuildsStatus> {
-  const record = readEasBuildsRecord(projectRoot);
+  // A refused cache is refused whole: the record is not read, so every platform is asked again.
+  const record = options.fingerprintCache === false ? {} : readEasBuildsRecord(projectRoot);
   // Once for the whole section rather than once per platform: the answer cannot differ between them,
   // and the two rungs it may take both touch the filesystem. It is also what lets the deadline below
   // say *why* a lookup ran out of time.
@@ -136,7 +176,15 @@ async function readPlatformAsync(
 ): Promise<PlatformBuild> {
   const cached = record[platform];
   if (cached && options.projectHash && cached.projectHash === options.projectHash) {
-    return found(platform, cached.fingerprintHash, cached.build, 'cache');
+    if (cached.build) {
+      return found(platform, cached.fingerprintHash, cached.build, 'cache', cached.checkedAt);
+    }
+    // A remembered `none`, believed only while it is young. Older than that it is not an answer,
+    // and the run falls through to asking — or to `unknown`, on a run that may not.
+    const age = ageOf(cached.checkedAt);
+    if (age != null && age <= EAS_NONE_CACHE_TTL_MS) {
+      return none(platform, cached.fingerprintHash, 'cache', cached.checkedAt, age);
+    }
   }
 
   if (!options.lookUp) {
@@ -153,6 +201,12 @@ async function readPlatformAsync(
       `this machine is not signed in to Expo (per ${options.auth.source ?? 'the auth check'}), so EAS has nothing to answer with`
     );
   }
+  if (options.easProject && !options.easProject.projectId && !options.easProject.dynamic) {
+    // The refusal `eas build:list` would print, read off the static config instead of paid for
+    // with a network call. Only when the config is static: a dynamic one may name the id from an
+    // environment variable this CLI does not evaluate, and "not seen" is not "not there".
+    return unknown(platform, null, unlinkedReason(projectRoot, options.easProject, options.auth));
+  }
 
   const deadline =
     options.timeoutMs ??
@@ -168,28 +222,45 @@ async function readPlatformAsync(
       `the lookup did not finish within ${deadline}ms${runnerDownloadNote(easCli)}`
     );
   }
+  const checkedAt = new Date().toISOString();
   if (outcome.build) {
     writeEasBuildsEntry(projectRoot, platform, {
       projectHash: options.projectHash,
       fingerprintHash: outcome.fingerprintHash,
       build: outcome.build,
+      checkedAt,
     });
-    return found(platform, outcome.fingerprintHash, outcome.build, 'eas');
+    return found(platform, outcome.fingerprintHash, outcome.build, 'eas', checkedAt);
   }
   if (outcome.reason) {
     return unknown(platform, outcome.fingerprintHash, outcome.reason);
   }
-  return {
-    platform,
-    state: 'none',
+  // EAS answered and has none. Remembered, so the next few minutes of `status` runs do not pay the
+  // same network call to be told the same thing (§EAS_NONE_CACHE_TTL_MS).
+  writeEasBuildsEntry(projectRoot, platform, {
+    projectHash: options.projectHash,
     fingerprintHash: outcome.fingerprintHash,
-    buildId: null,
-    createdAt: null,
-    buildProfile: null,
-    buildUrl: null,
-    source: 'eas',
-    reason: 'EAS has no finished build made from this fingerprint',
-  };
+    build: null,
+    checkedAt,
+  });
+  return none(platform, outcome.fingerprintHash, 'eas', checkedAt, null);
+}
+
+/**
+ * The sentence for a project whose static config names no EAS project.
+ *
+ * The same two `eas init` forms `assertEasProjectConfiguredAsync` names, because they are the fix;
+ * with the account filled in when the auth section knew it, the way `classifyEasFailure` fills in
+ * the one EAS listed (llp/0027 §What EAS said).
+ */
+function unlinkedReason(
+  projectRoot: string,
+  easProject: EasProjectLink,
+  auth: AuthStatus | null
+): string {
+  const config = easProject.source ?? 'its app config';
+  const account = auth?.user ?? '<account>';
+  return `this project is not linked to an EAS project — ${config} names no extra.eas.projectId, so EAS was not asked; link it once with "${easCommandPrefix(projectRoot)} init --account ${account} --non-interactive" (or --id <project-id> for one that exists)`;
 }
 
 /** One platform's network answer: the hash that was asked about, and what came back. */
@@ -240,7 +311,8 @@ function found(
   platform: NativePlatform,
   fingerprintHash: string | null,
   build: CachedBuild,
-  source: 'cache' | 'eas'
+  source: 'cache' | 'eas',
+  checkedAt: string
 ): PlatformBuild {
   return {
     platform,
@@ -251,7 +323,33 @@ function found(
     buildProfile: build.buildProfile,
     buildUrl: build.buildUrl,
     source,
+    checkedAt: checkedAt || null,
+    // A found build is exact for as long as its key stands, so its age is not a bound on anything
+    // and is not claimed.
+    ageMs: null,
     reason: null,
+  };
+}
+
+function none(
+  platform: NativePlatform,
+  fingerprintHash: string | null,
+  source: 'cache' | 'eas',
+  checkedAt: string,
+  ageMs: number | null
+): PlatformBuild {
+  return {
+    platform,
+    state: 'none',
+    fingerprintHash,
+    buildId: null,
+    createdAt: null,
+    buildProfile: null,
+    buildUrl: null,
+    source,
+    checkedAt,
+    ageMs,
+    reason: 'EAS has no finished build made from this fingerprint',
   };
 }
 
@@ -269,8 +367,16 @@ function unknown(
     buildProfile: null,
     buildUrl: null,
     source: null,
+    checkedAt: null,
+    ageMs: null,
     reason,
   };
+}
+
+/** How old a timestamp is, or null when it is not one this can subtract from now. */
+function ageOf(checkedAt: string): number | null {
+  const age = Date.now() - Date.parse(checkedAt);
+  return Number.isFinite(age) && age >= 0 ? age : null;
 }
 
 function getRecordPath(projectRoot: string): string {
@@ -278,7 +384,7 @@ function getRecordPath(projectRoot: string): string {
 }
 
 /**
- * Read the project's record of builds EAS was found to have.
+ * Read the project's record of what EAS was found to have.
  *
  * Never throws: a missing, corrupt or half-written record reads as nothing cached, which costs a
  * lookup rather than the command.
@@ -308,23 +414,39 @@ export function readEasBuildsRecord(projectRoot: string): EasBuildsRecord {
 /**
  * One platform's entry, or null when it cannot be trusted.
  *
- * An entry without both hashes and a build id is dropped rather than repaired: the whole value of
- * this cache is that a hit is *exact*, and an entry that cannot name what it was true for is not.
+ * An entry without both hashes is dropped rather than repaired: the whole value of this cache is
+ * that a hit is *exact*, and an entry that cannot name what it was true for is not. A build without
+ * an id is dropped for the same reason. A `none` (`build: null`) is dropped when it cannot say
+ * *when* it was true, because a none with no time is a none with no bound.
  */
 function parseEntry(value: unknown): CachedEntry | null {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) {
     return null;
   }
   const entry = value as Record<string, unknown>;
-  const build = entry.build;
   if (
     typeof entry.projectHash !== 'string' ||
     !entry.projectHash ||
     typeof entry.fingerprintHash !== 'string' ||
-    !entry.fingerprintHash ||
-    build == null ||
-    typeof build !== 'object'
+    !entry.fingerprintHash
   ) {
+    return null;
+  }
+  const checkedAt = typeof entry.checkedAt === 'string' ? entry.checkedAt : '';
+
+  const build = entry.build;
+  if (build === null) {
+    if (!checkedAt || !Number.isFinite(Date.parse(checkedAt))) {
+      return null;
+    }
+    return {
+      projectHash: entry.projectHash,
+      fingerprintHash: entry.fingerprintHash,
+      checkedAt,
+      build: null,
+    };
+  }
+  if (build == null || typeof build !== 'object') {
     return null;
   }
   const cachedBuild = build as Record<string, unknown>;
@@ -334,7 +456,7 @@ function parseEntry(value: unknown): CachedEntry | null {
   return {
     projectHash: entry.projectHash,
     fingerprintHash: entry.fingerprintHash,
-    checkedAt: typeof entry.checkedAt === 'string' ? entry.checkedAt : '',
+    checkedAt,
     build: {
       id: cachedBuild.id,
       status: readString(cachedBuild.status),
@@ -351,12 +473,14 @@ function readString(value: unknown): string | null {
 }
 
 /**
- * Record a build EAS was found to have, keeping the other platform's entry.
+ * Record what EAS answered for one platform, keeping the other platform's entry.
  *
- * **Only a hit is written.** A `none` goes out of date on the ordinary timeline of the workflow
- * this exists to serve — you start a build, it finishes fifteen minutes later, and a cached "there
- * is no build" would then be wrong every time it mattered. A hit only goes out of date when
- * somebody deletes a build, and the download command says so when they have.
+ * A **hit** is written against the project hash and believed for as long as that hash stands: a hit
+ * only goes out of date when somebody deletes a build, and the download command says so when they
+ * have. A **none** is written with the time it was true, and believed for
+ * {@link EAS_NONE_CACHE_TTL_MS} — it goes out of date on the ordinary timeline of the workflow this
+ * exists to serve (you start a build, it finishes fifteen minutes later), so it is not believed for
+ * long, and the report says how old it is.
  *
  * Best-effort, like every other `.expo` record: a project whose `.expo` cannot be written loses a
  * cache, not a report.
@@ -364,11 +488,16 @@ function readString(value: unknown): string | null {
 export function writeEasBuildsEntry(
   projectRoot: string,
   platform: NativePlatform,
-  entry: { projectHash: string | null; fingerprintHash: string | null; build: CachedBuild }
+  entry: {
+    projectHash: string | null;
+    fingerprintHash: string | null;
+    build: CachedBuild | null;
+    checkedAt?: string;
+  }
 ): void {
   // Nothing to key the entry on is nothing to cache: an entry that cannot say which working tree
   // it was true for could only ever be believed by guessing.
-  if (!entry.projectHash || !entry.fingerprintHash || !entry.build.id) {
+  if (!entry.projectHash || !entry.fingerprintHash || (entry.build && !entry.build.id)) {
     return;
   }
   try {
@@ -377,7 +506,7 @@ export function writeEasBuildsEntry(
       [platform]: {
         projectHash: entry.projectHash,
         fingerprintHash: entry.fingerprintHash,
-        checkedAt: new Date().toISOString(),
+        checkedAt: entry.checkedAt ?? new Date().toISOString(),
         build: entry.build,
       },
     };

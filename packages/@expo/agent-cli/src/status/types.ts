@@ -254,6 +254,21 @@ export interface PlatformBuild {
   buildUrl: string | null;
   /** `cache` for the project's own record, `eas` for a lookup. Null when nothing answered. */
   source: 'cache' | 'eas' | null;
+  /**
+   * When EAS was asked the question this entry answers. Null when nothing answered.
+   *
+   * For a `cache` answer, the time of the lookup that wrote the record, not of this run: a
+   * remembered answer must never read as a fresh one (llp/0021).
+   */
+  checkedAt: string | null;
+  /**
+   * How old a remembered `none` was when it was believed, in milliseconds. Null otherwise.
+   *
+   * The bound on what the record cannot see — a build that finished since — so it belongs in the
+   * report rather than in the reader's head. A `found` carries none: its key is the project hash,
+   * and a build EAS has does not stop existing with time.
+   */
+  ageMs: number | null;
   /** Why the state is not `found`. Null when it is. */
   reason: string | null;
 }
