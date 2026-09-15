@@ -80,7 +80,12 @@ type StatusReport = {
         literal: string | null;
         source: string | null;
         /** Set when the evaluated config came out of `.expo` rather than a subprocess (llp/0023). */
-        cache?: { computedAt: string; ageMs: number; revalidatedAgainst: number; keyKind: string } | null;
+        cache?: {
+          computedAt: string;
+          ageMs: number;
+          revalidatedAgainst: number;
+          keyKind: string;
+        } | null;
       };
       why: string;
     } | null;
@@ -975,7 +980,7 @@ process.stdout.write(JSON.stringify({
       } else {
         await fs.promises.writeFile(
           path.join(projectRoot, 'app.config.js'),
-          "module.exports = ({ config }) => ({ ...config, runtimeVersion: process.env.RUNTIME_VERSION });\n"
+          'module.exports = ({ config }) => ({ ...config, runtimeVersion: process.env.RUNTIME_VERSION });\n'
         );
       }
 
@@ -1135,7 +1140,11 @@ process.stdout.write(JSON.stringify({
         );
         await fs.promises.writeFile(
           env.STUB_EXPO_CONFIG_JSON!,
-          JSON.stringify({ name: 'fresh', slug: 'fresh', runtimeVersion: { policy: 'fingerprint' } })
+          JSON.stringify({
+            name: 'fresh',
+            slug: 'fresh',
+            runtimeVersion: { policy: 'fingerprint' },
+          })
         );
 
         const report = await reportInAsync(projectRoot, ['--explain'], env);
@@ -1151,7 +1160,11 @@ process.stdout.write(JSON.stringify({
         );
         await reportInAsync(projectRoot, ['--explain'], env);
 
-        const report = await reportInAsync(projectRoot, ['--explain', '--no-fingerprint-cache'], env);
+        const report = await reportInAsync(
+          projectRoot,
+          ['--explain', '--no-fingerprint-cache'],
+          env
+        );
 
         expect(configSpawns(projectRoot)).toHaveLength(2);
         expect(report.freshness!.ota!.runtimeVersion).toMatchObject({ cache: null });
