@@ -23,7 +23,8 @@ import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
 import { readLastBuildRecord, type LastBuildRecord } from '../plan/lastBuild';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
-import { readStaticEasProjectAsync, type EasProjectLink } from '../project/appConfig';
+import { readStaticEasProjectAsync } from '../project/appConfig';
+import { generateFingerprintAsync } from '../project/fingerprint';
 import { readProjectPackageJsonAsync } from '../project/nodeModules';
 import { probeProjectStateAsync } from '../project/probe';
 import type { ProjectState, StartPlan } from '../project/types';
@@ -118,18 +119,6 @@ export interface StatusOptions {
   /** `--device-timeout`: how long a phone gets to answer once the app was launched on it. */
   installedTimeoutMs?: number | null;
   /**
-   * The deep dive: `--explain`.
-   *
-   * Three things join the report, and only two of them cost anything — which is the whole design.
-   * The per-source change list is free (the headline diffs locally, so the list is a by-product)
-   * and is left out by default because a headline with fifty rows attached is not a headline. The
-   * OTA verdict spawns `expo config --json --type public`, and the EAS build lookup makes a
-   * network call; both are what a reader who typed `--explain` asked to pay for.
-   *
-   * @see llp/0004-smart-start-and-project-state.rfc.md §Status
-   */
-  explain?: boolean;
-  /**
    * Turn the report into a gate: exit `20` when the change costs more than this class (`--assert`).
    *
    * @see llp/0004-smart-start-and-project-state.rfc.md §Status
@@ -138,8 +127,8 @@ export interface StatusOptions {
   /**
    * Compare against a specific EAS build instead of the project's own record (`--build <id>`).
    *
-   * Requires `--explain`, because it fetches a fingerprint from the service. Server ground truth:
-   * it needs no local record, which is what makes it the answer for a build made in the cloud.
+   * Fetches a fingerprint from the service. Server ground truth: it needs no local record, which is
+   * what makes it the answer for a build made in the cloud.
    */
   buildId?: string | null;
   /**
@@ -154,13 +143,13 @@ export interface StatusOptions {
   /** Attach the state-aware next actions to the report, cleared by `--no-followups`. */
   followups?: boolean;
   /**
-   * Whether a fingerprint may be answered out of the project's own record (`--no-fingerprint-cache`
-   * clears it).
+   * Whether an answer may come out of the project's own records under `.expo` — the fingerprints,
+   * the remembered EAS answer, the evaluated app config (`--no-fingerprint-cache` clears it).
    *
    * @ref llp/0023-fingerprint-caching.rfc.md
-   * This is the flag that pays for the report's promptness: a default `status` computes one
-   * fingerprint and `--explain` computes three, at about a second each, and all three are the same
-   * three the previous run computed unless one of the pinned files moved. Undefined leaves the
+   * This is the flag that pays for the report's promptness: a `status` computes three fingerprints,
+   * at about a second each, and asks EAS about two of them, at about a second more — and all of it
+   * is what the previous run computed unless one of the pinned files moved. Undefined leaves the
    * decision to `AGENT_CLI_NO_FINGERPRINT_CACHE`.
    */
   fingerprintCache?: boolean;
@@ -232,6 +221,18 @@ export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions
 ): Promise<StatusReport> {
+  // One file read, before anything else: whether this project is linked to EAS decides whether the
+  // EAS build lookup below runs at all (`src/status/easBuilds.ts`), and so whether the two
+  // per-platform fingerprints it needs are worth starting **now**, beside the probe's own, rather
+  // than after it. Three `fingerprint:generate` runs at once cost the wall clock one; in sequence
+  // they cost two (llp/0023 §Layer 1). The lookup joins these through the in-process memo.
+  const easProject = await readStaticEasProjectAsync(projectRoot);
+  if (easProject.projectId || easProject.dynamic) {
+    for (const platform of ['ios', 'android'] as const) {
+      void generateFingerprintAsync(projectRoot, { platform, cache: options.fingerprintCache });
+    }
+  }
+
   const [project, devServer, device, skills, auth] = await Promise.all([
     attemptAsync(() => readProjectAsync(projectRoot, options)),
     attemptAsync(() => probeDevServerStatusAsync(projectRoot, options)),
@@ -293,15 +294,12 @@ export async function collectStatusReportAsync(
     // small report its contract promises (llp/0004 §Status).
     //
     // They are still *read*: the impact headline diffs them against the recorded build's, in
-    // process and for free (llp/0004 §Status). What
-    // reaches `--json` from that is the class, the count, and — only under `--explain` — the
-    // sources that actually moved, which is a handful rather than the whole surface.
+    // process and for free (llp/0004 §Status). What reaches `--json` from that is the class, the
+    // count, and the sources that actually moved, which is a handful rather than the whole surface.
     report.probe = { ...state, fingerprint: { ...state.fingerprint, sources: undefined } };
     report.project = buildProjectStatus(state, packageName);
     report.expoGo = buildExpoGoStatus(state);
-    report.freshness = buildFreshnessStatus(state, record, {
-      explain: !!options.explain,
-    });
+    report.freshness = buildFreshnessStatus(state, record);
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
     // The file-level refinement, and then — only when the caller named one — the comparison
     // against an EAS build, which replaces the headline's base. Both fold into the section that
@@ -364,23 +362,23 @@ export async function collectStatusReportAsync(
   // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
   // Last, and after the parallel block rather than in it, because it consumes two of its answers:
   // the project's fingerprint is the cache key, and the auth answer is what keeps a signed-out
-  // machine from being asked the same question twice. On a run without `--explain` this is one
-  // `readFileSync`, so the report is as instant as it was before the section existed.
+  // machine from being asked the same question twice. On a warm run this is one `readFileSync`
+  // (llp/0011 §What `status` remembers of the answer); on a cold one it is the network call, and
+  // the two per-platform fingerprints it needs were started at the top of this function.
   //
-  // These three are independent of each other and all are the expensive half of `--explain`, so
-  // they run together rather than one after the other.
+  // These three are independent of each other and all are the costly half of the report, so they
+  // run together rather than one after the other.
   const [builds, ota, installed] = await Promise.all([
     attemptAsync(() =>
       readEasBuildsStatusAsync(projectRoot, {
-        lookUp: !!options.explain,
         auth: report.auth,
         projectHash: report.freshness?.hash ?? null,
         timeoutMs: options.buildLookupTimeoutMs,
         fingerprintCache: options.fingerprintCache,
-        easProject: 'value' in project ? project.value.easProject : null,
+        easProject,
       })
     ),
-    options.explain && report.freshness
+    report.freshness
       ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!, options))
       : Promise.resolve(null),
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
@@ -608,8 +606,9 @@ function notComparedImpact(
  * @ref llp/0011-impact-and-freshness.rfc.md §A fingerprint change is not "OTA-unsafe"
  * Deliberately not derived from the impact class: a fingerprint change answers "does the native
  * binary differ", and OTA safety is a `runtimeVersion` question. The two coincide only under
- * `policy: "fingerprint"`. Resolving the policy spawns `expo config --json --type public`, which
- * is why this is on the `--explain` side of the line.
+ * `policy: "fingerprint"`. Resolving the policy reads a static config as a file and evaluates a
+ * dynamic one with `expo config --json --type public`, remembered under `.expo`
+ * (`src/impact/runtimeVersion.ts`).
  */
 async function resolveOtaSafetyAsync(
   projectRoot: string,
@@ -680,15 +679,12 @@ async function attemptPlanAsync(
 async function readProjectAsync(
   projectRoot: string,
   options: StatusOptions
-): Promise<{ state: ProjectState; packageName: string | null; easProject: EasProjectLink }> {
-  const [state, packageJson, easProject] = await Promise.all([
+): Promise<{ state: ProjectState; packageName: string | null }> {
+  const [state, packageJson] = await Promise.all([
     probeProjectStateAsync(projectRoot, { fingerprintCache: options.fingerprintCache }),
     readProjectPackageJsonAsync(projectRoot),
-    // One file read, for the EAS build lookup below: an unlinked project is answered without a
-    // network call (`src/status/easBuilds.ts`).
-    readStaticEasProjectAsync(projectRoot),
   ]);
-  return { state, packageName: packageJson?.name ?? null, easProject };
+  return { state, packageName: packageJson?.name ?? null };
 }
 
 /**

@@ -77,7 +77,7 @@ export interface FreshnessImpact {
   reason: string;
   /** How many fingerprint sources moved. Null when no diff was possible. */
   changedCount: number | null;
-  /** The per-source list. Present only under `--explain`; null otherwise. */
+  /** The per-source list. Null when no diff was possible — a record holding only a hash. */
   changedSources: ChangedSource[] | null;
 }
 
@@ -129,7 +129,7 @@ export interface PlatformFreshness {
 
 /** What the impact headline was measured against. */
 export interface FreshnessComparison {
-  /** `last-build` for the project's own record, `eas-build` for `--explain --build <id>`. */
+  /** `last-build` for the project's own record, `eas-build` for `--build <id>`. */
   kind: 'last-build' | 'eas-build';
   /** What a person would call the base: `last build recorded by @expo/agent-cli`, `EAS build <id>`. */
   label: string;
@@ -218,9 +218,9 @@ export interface FreshnessStatus {
   /**
    * Whether an update published now would reach installed builds that can run it.
    *
-   * Present only under `--explain`: the `runtimeVersion` policy is resolved with an
-   * `expo config --json --type public` subprocess, which is the kind of cost the default report
-   * does not pay. Null on every other run — "not asked", not "not safe".
+   * Null when the policy could not be resolved at all — "not established", not "not safe". A
+   * static config is read as a file; a dynamic one is evaluated with `expo config --json --type
+   * public` and the answer remembered under `.expo` (`src/impact/runtimeVersion.ts`).
    *
    * @see llp/0011-impact-and-freshness.rfc.md §A fingerprint change is not "OTA-unsafe"
    */
@@ -279,7 +279,12 @@ export interface PlatformBuild {
  * @see llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
  */
 export interface BuildsStatus {
-  /** Whether this run was allowed to call EAS. False on every run without `--explain`. */
+  /**
+   * Whether this run called EAS for at least one platform.
+   *
+   * False when every platform was answered from the record, or gated before the call — a signed-out
+   * machine, a project not linked to EAS, no fingerprint to ask about.
+   */
   askedEas: boolean;
   platforms: PlatformBuild[];
 }

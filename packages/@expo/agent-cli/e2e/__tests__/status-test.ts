@@ -47,6 +47,13 @@ type StatusReport = {
   freshness: {
     hash: string | null;
     error?: string;
+    /** What the impact headline was measured against: the project's record, or `--build <id>`. */
+    comparison: {
+      kind: 'last-build' | 'eas-build';
+      label: string;
+      buildId: string | null;
+      platform: 'ios' | 'android' | null;
+    };
     /** Where `hash` came from, per llp/0023 §The report says where the answer came from. */
     hashSource: {
       source: 'computed' | 'cache' | null;
@@ -859,7 +866,10 @@ process.stdout.write(JSON.stringify({ hash, sources }) + '\\n');
       });
       expect(iosImpact(report)!.reason).toContain('autolinked native modules changed');
       // The detail is the paid tier's; the headline carries the count and nothing else.
-      expect(iosImpact(report)!.changedSources).toBeNull();
+      // The per-source list rides along on every run; it is the diff the headline was read from.
+      expect(iosImpact(report)!.changedSources).toEqual([
+        expect.objectContaining({ op: 'added', kind: 'native-module' }),
+      ]);
       // No `expo config`, because the OTA verdict is the paid tier's too.
       expect(
         readStubExpoInvocations(projectRoot).some((invocation) => invocation.args[0] === 'config')
@@ -929,7 +939,7 @@ process.stdout.write(JSON.stringify({ hash, sources }) + '\\n');
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
-  describe('status --explain', () => {
+  describe('the change detail: sources, files, and the OTA verdict', () => {
     const NATIVE_MODULE = {
       type: 'dir',
       filePath: 'node_modules/react-native-mmkv',
@@ -1009,7 +1019,7 @@ process.stdout.write(JSON.stringify({
     it('carries the per-source list and the OTA verdict, and still exits 0', async () => {
       const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
 
-      const report = await reportInAsync(projectRoot, ['--explain'], env);
+      const report = await reportInAsync(projectRoot, [], env);
 
       const ios = report.freshness!.platforms.find(
         (platform) => platform.platform === 'ios' && platform.backend === 'local'
@@ -1033,18 +1043,18 @@ process.stdout.write(JSON.stringify({
     it('reports a fingerprint policy as safe even for a native change', async () => {
       const { projectRoot, env } = await setupExplainAsync({ policy: 'fingerprint' });
 
-      const report = await reportInAsync(projectRoot, ['--explain'], env);
+      const report = await reportInAsync(projectRoot, [], env);
 
       expect(report.freshness!.ota).toMatchObject({ safe: true });
     });
 
     // A static config is the config the app sees, so it is read as a file: spawning the Expo CLI
     // to be told what `app.json` says was a second spent on every run to learn nothing.
-    it('reads a static app.json as a file, spawning no expo config even under --explain', async () => {
+    it('reads a static app.json as a file, spawning no expo config', async () => {
       const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
 
       await reportInAsync(projectRoot, [], env);
-      await reportInAsync(projectRoot, ['--explain'], env);
+      await reportInAsync(projectRoot, [], env);
 
       expect(configSpawns(projectRoot)).toHaveLength(0);
     });
@@ -1053,12 +1063,13 @@ process.stdout.write(JSON.stringify({
       const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['status', '--explain', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
         { env }
       );
 
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('ios changed');
+      expect(result.stdout).toContain('changed');
+      expect(result.stdout).toContain('ios: 1 source');
       expect(result.stdout).toContain('node_modules/react-native-mmkv');
       expect(result.stdout).toContain('ota');
       expect(result.stdout).toContain('not safe to publish');
@@ -1069,16 +1080,13 @@ process.stdout.write(JSON.stringify({
     // answer is remembered under `.expo` and revalidated against the pinned files, so a loop of
     // `status` runs spawns it once (llp/0023).
     describe('a dynamic app.config.js', () => {
-      it('evaluates it with expo config, only under --explain', async () => {
+      it('evaluates it with expo config, once', async () => {
         const { projectRoot, env } = await setupExplainAsync(
           { policy: 'appVersion' },
           { config: 'dynamic' }
         );
 
-        await reportInAsync(projectRoot, [], env);
-        expect(configSpawns(projectRoot)).toHaveLength(0);
-
-        const report = await reportInAsync(projectRoot, ['--explain'], env);
+        const report = await reportInAsync(projectRoot, [], env);
         expect(configSpawns(projectRoot)).toHaveLength(1);
         expect(configSpawns(projectRoot)[0]!.args).toEqual([
           'config',
@@ -1101,9 +1109,9 @@ process.stdout.write(JSON.stringify({
           { policy: 'appVersion' },
           { config: 'dynamic' }
         );
-        await reportInAsync(projectRoot, ['--explain'], env);
+        await reportInAsync(projectRoot, [], env);
 
-        const report = await reportInAsync(projectRoot, ['--explain'], env);
+        const report = await reportInAsync(projectRoot, [], env);
 
         expect(configSpawns(projectRoot)).toHaveLength(1);
         expect(report.freshness!.ota).toMatchObject({
@@ -1120,7 +1128,7 @@ process.stdout.write(JSON.stringify({
 
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['status', '--explain', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+          ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
           { env }
         );
         expect(result.exitCode).toBe(0);
@@ -1132,7 +1140,7 @@ process.stdout.write(JSON.stringify({
           { policy: 'appVersion' },
           { config: 'dynamic' }
         );
-        await reportInAsync(projectRoot, ['--explain'], env);
+        await reportInAsync(projectRoot, [], env);
 
         await fs.promises.writeFile(
           path.join(projectRoot, 'app.config.js'),
@@ -1147,7 +1155,7 @@ process.stdout.write(JSON.stringify({
           })
         );
 
-        const report = await reportInAsync(projectRoot, ['--explain'], env);
+        const report = await reportInAsync(projectRoot, [], env);
 
         expect(configSpawns(projectRoot)).toHaveLength(2);
         expect(report.freshness!.ota).toMatchObject({ safe: true });
@@ -1158,19 +1166,15 @@ process.stdout.write(JSON.stringify({
           { policy: 'appVersion' },
           { config: 'dynamic' }
         );
-        await reportInAsync(projectRoot, ['--explain'], env);
+        await reportInAsync(projectRoot, [], env);
 
-        const report = await reportInAsync(
-          projectRoot,
-          ['--explain', '--no-fingerprint-cache'],
-          env
-        );
+        const report = await reportInAsync(projectRoot, ['--no-fingerprint-cache'], env);
 
         expect(configSpawns(projectRoot)).toHaveLength(2);
         expect(report.freshness!.ota!.runtimeVersion).toMatchObject({ cache: null });
       });
 
-      // Section isolation: `--explain` is three answers, and one that cannot be had costs one line.
+      // Section isolation: the report is three costly answers, and one that cannot be had costs one line.
       it('keeps every other fact when the config subprocess fails', async () => {
         const { projectRoot, env } = await setupExplainAsync(
           { policy: 'appVersion' },
@@ -1178,7 +1182,7 @@ process.stdout.write(JSON.stringify({
         );
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['status', '--json', '--explain', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+          ['status', '--json', '--dev-server-url', await getUnusedDevServerUrlAsync()],
           { env: { ...env, STUB_EXPO_EXIT_CODE: '1' } }
         );
 
@@ -1292,7 +1296,7 @@ process.stdout.write(JSON.stringify({
       expect(result.stdout).toContain('not verified');
     });
 
-    it('composes with --explain', async () => {
+    it('carries the OTA verdict beside the gate', async () => {
       const projectRoot = await setupAssertAsync(recordedWith([APP_CONFIG]));
       const payload = path.join(projectRoot, 'stub-expo-config.json');
       await fs.promises.writeFile(
@@ -1300,7 +1304,7 @@ process.stdout.write(JSON.stringify({
         JSON.stringify({ name: 'fresh', slug: 'fresh', runtimeVersion: { policy: 'appVersion' } })
       );
 
-      const result = await runAssertAsync(projectRoot, ['--assert', 'js-only', '--explain'], {
+      const result = await runAssertAsync(projectRoot, ['--assert', 'js-only'], {
         STUB_EXPO_CONFIG_JSON: payload,
         STUB_FINGERPRINT_HASH: 'ffff1111ffff1111ffff1111ffff1111ffff1111',
         STUB_FP_SOURCES: JSON.stringify([APP_CONFIG, NATIVE_MODULE]),
@@ -1352,23 +1356,48 @@ process.stdout.write(JSON.stringify({
       expect(result.all).toContain('not one of the classes');
     });
 
-    it('refuses --build without --explain, naming the line that works', async () => {
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+    // The flag that gated the per-source list, the OTA verdict and the EAS lookup is gone, with no
+    // alias — an unknown option, the way `--cloud` became one. Every run carries all three.
+    it('no longer takes --explain', async () => {
       const projectRoot = await setupAssertAsync(recordedWith([APP_CONFIG]));
 
-      const result = await runAssertAsync(projectRoot, ['--build', 'build-1']);
+      const result = await runAssertAsync(projectRoot, ['--explain']);
 
       expect(result.exitCode).toBe(1);
-      expect(result.all).toContain('--build needs --explain');
-      expect(result.all).toContain('npx @expo/agent-cli status --explain --build build-1');
+      expect(result.all).toContain('--explain');
+    });
+
+    // Naming a build is the ask: `--build` used to need `--explain` as the word for "you may spend
+    // a round trip". The comparison itself is a stub `eas` that does not answer `fingerprint:compare`,
+    // so what this pins is that the flag is taken on its own and the id is echoed (F66).
+    it('takes --build on its own, and echoes the build it was given', async () => {
+      const projectRoot = await setupAssertAsync(recordedWith([APP_CONFIG]));
+      await installSharedStubEasAsync(projectRoot);
+      await pinEasCliAsync(projectRoot);
+
+      const result = await executeAgentCliAsync(projectRoot, [
+        'status',
+        '--json',
+        '--build',
+        'build-1',
+        '--dev-server-url',
+        await getUnusedDevServerUrlAsync(),
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      const report: StatusReport = JSON.parse(result.stdout);
+      expect(report.freshness!.comparison).toMatchObject({ kind: 'eas-build', buildId: 'build-1' });
+      expect(result.all).not.toContain('--explain');
     });
   });
 
   // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
   //
-  // Three states, and one cost. The cost is the design: a default run must not spawn `eas
-  // build:list` at all, and a cached answer must not spawn it either. Both are pinned by counting
-  // what crossed the process boundary, because a section that quietly grew a network call would
-  // pass every assertion about its *answer*.
+  // Three states, and one cost. The cost is the design: a remembered answer must not spawn `eas
+  // build:list`, an unlinked project must not either, and a cold run of a linked project spawns it
+  // once per platform. All of it is pinned by counting what crossed the process boundary, because a
+  // section that quietly grew a network call would pass every assertion about its *answer*.
   describe('the EAS build lookup', () => {
     /** The per-platform hashes the stub prints, which is what an EAS build carries. */
     const IOS_HASH = 'aaaa1111bbbb2222cccc3333dddd4444eeee5555';
@@ -1435,22 +1464,19 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       return report.builds!.platforms.find((platform) => platform.platform === 'ios')!;
     }
 
-    it('reports both platforms as unknown by default, and never calls eas build:list', async () => {
+    it('asks EAS about both platforms on a plain run, and says it did', async () => {
       const projectRoot = await setupWithEasAsync();
 
       const report = await reportInAsync(projectRoot);
 
-      expect(report.builds?.askedEas).toBe(false);
-      expect(report.builds?.platforms.map((platform) => platform.state)).toEqual([
-        'unknown',
-        'unknown',
-      ]);
-      expect(iosOf(report).reason).toContain('--explain');
-      // The auth section still asks `whoami`; the lookup asks nothing. That is the whole promise.
-      expect(easCommands(projectRoot)).toEqual(['whoami']);
+      expect(report.builds?.askedEas).toBe(true);
+      expect(report.builds?.platforms.map((platform) => platform.state)).toEqual(['none', 'none']);
+      expect(easCommands(projectRoot).filter((command) => command === 'build:list')).toHaveLength(
+        2
+      );
     });
 
-    it('leaves the eas build line out of the human report of a default run', async () => {
+    it('prints the eas build line with the answer, even when it is none', async () => {
       const projectRoot = await setupWithEasAsync();
       const result = await executeAgentCliAsync(projectRoot, [
         'status',
@@ -1459,13 +1485,29 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       ]);
 
       expect(result.exitCode).toBe(0);
-      expect(result.stdout).not.toContain('eas build');
+      expect(result.stdout).toContain('eas build');
+      expect(result.stdout).toContain('ios: none');
     });
 
-    it('asks EAS about the per-platform fingerprint with --explain, and reports the hit', async () => {
+    // Every platform gated before the call, so nothing was asked and nothing is owed: the freshness
+    // rows carry the reason once, and a line of two `unknown`s would say it a second time.
+    it('leaves the eas build line out of the human report of an unlinked project', async () => {
+      const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
+      const result = await executeAgentCliAsync(projectRoot, [
+        'status',
+        '--dev-server-url',
+        await getUnusedDevServerUrlAsync(),
+      ]);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).not.toContain('eas build');
+      expect(result.stdout).toContain('not linked to an EAS project');
+    });
+
+    it('asks EAS about the per-platform fingerprint, and reports the hit', async () => {
       const projectRoot = await setupWithEasAsync();
 
-      const report = await reportInAsync(projectRoot, ['--explain'], {
+      const report = await reportInAsync(projectRoot, [], {
         STUB_EAS_BUILD_LIST: JSON.stringify([FINISHED_BUILD]),
       });
 
@@ -1493,7 +1535,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     it('reports a matching EAS build as fresh on the eas axis, and names it', async () => {
       const projectRoot = await setupWithEasAsync();
 
-      const report = await reportInAsync(projectRoot, ['--explain'], {
+      const report = await reportInAsync(projectRoot, [], {
         STUB_EAS_BUILD_LIST: JSON.stringify([FINISHED_BUILD]),
       });
 
@@ -1520,7 +1562,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     it('says on the eas axis when EAS was asked and has nothing', async () => {
       const projectRoot = await setupWithEasAsync();
 
-      const report = await reportInAsync(projectRoot, ['--explain'], {
+      const report = await reportInAsync(projectRoot, [], {
         STUB_EAS_BUILD_LIST: '[]',
       });
 
@@ -1533,7 +1575,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
     it('pins the argv of the lookup that crossed the process boundary', async () => {
       const projectRoot = await setupWithEasAsync();
-      await reportInAsync(projectRoot, ['--explain']);
+      await reportInAsync(projectRoot, []);
 
       const invocations = fs
         .readFileSync(path.join(projectRoot, STUB_EAS_LOG_NAME), 'utf8')
@@ -1560,7 +1602,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     // next run answers it for free. A cache that still spawned would be no cache at all.
     it('answers a second run from the cache, spawning no lookup at all', async () => {
       const projectRoot = await setupWithEasAsync();
-      await reportInAsync(projectRoot, ['--explain'], {
+      await reportInAsync(projectRoot, [], {
         STUB_EAS_BUILD_LIST: JSON.stringify([FINISHED_BUILD]),
       });
       await fs.promises.rm(path.join(projectRoot, STUB_EAS_LOG_NAME));
@@ -1573,7 +1615,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
     it('stops trusting the cached answer once the project fingerprint moves', async () => {
       const projectRoot = await setupWithEasAsync();
-      await reportInAsync(projectRoot, ['--explain'], {
+      await reportInAsync(projectRoot, [], {
         STUB_EAS_BUILD_LIST: JSON.stringify([FINISHED_BUILD]),
       });
 
@@ -1592,13 +1634,15 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
         STUB_FINGERPRINT_HASH: 'aaaabbbbccccddddeeeeffff0000111122223333',
       });
 
-      expect(iosOf(report).state).toBe('unknown');
+      // Asked again, rather than answered from a record keyed on a hash the project no longer has.
+      expect(iosOf(report)).toMatchObject({ state: 'none', source: 'eas' });
+      expect(easCommands(projectRoot)).toContain('build:list');
     });
 
     it('reports none when EAS answered and has no build for the fingerprint', async () => {
       const projectRoot = await setupWithEasAsync();
 
-      const report = await reportInAsync(projectRoot, ['--explain']);
+      const report = await reportInAsync(projectRoot, []);
 
       expect(iosOf(report)).toMatchObject({
         state: 'none',
@@ -1612,7 +1656,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       const projectRoot = await setupWithEasAsync();
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['status', '--json', '--explain', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        ['status', '--json', '--dev-server-url', await getUnusedDevServerUrlAsync()],
         {
           env: {
             STUB_EAS_BUILD_LIST_EXIT: '1',
@@ -1636,7 +1680,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     it('reports a signed-out machine as unknown without calling eas build:list', async () => {
       const projectRoot = await setupWithEasAsync();
 
-      const report = await reportInAsync(projectRoot, ['--explain'], { STUB_EAS_WHOAMI_EXIT: '1' });
+      const report = await reportInAsync(projectRoot, [], { STUB_EAS_WHOAMI_EXIT: '1' });
 
       expect(report.auth?.loggedIn).toBe(false);
       expect(iosOf(report)).toMatchObject({ state: 'unknown' });
@@ -1653,7 +1697,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       };
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['status', '--explain', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
         { env }
       );
 
@@ -1661,7 +1705,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       expect(result.stdout).toContain('eas build');
       expect(result.stdout).toContain(`npx --yes eas-cli build:download --build-id ${BUILD_ID}`);
 
-      const report = await reportInAsync(projectRoot, ['--explain'], env);
+      const report = await reportInAsync(projectRoot, [], env);
       expect(report.followups.map((followup) => followup.id)).toContain('cached-build');
     });
 
@@ -1671,10 +1715,10 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     // old the answer is — a remembered none must never read as a fresh one (llp/0021).
     it('remembers a none for a while, and says how old it is', async () => {
       const projectRoot = await setupWithEasAsync();
-      await reportInAsync(projectRoot, ['--explain']);
+      await reportInAsync(projectRoot, []);
       await fs.promises.rm(path.join(projectRoot, STUB_EAS_LOG_NAME));
 
-      const report = await reportInAsync(projectRoot, ['--explain']);
+      const report = await reportInAsync(projectRoot, []);
 
       expect(iosOf(report)).toMatchObject({ state: 'none', source: 'cache' });
       expect(iosOf(report).checkedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
@@ -1684,7 +1728,6 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
       const result = await executeAgentCliAsync(projectRoot, [
         'status',
-        '--explain',
         '--dev-server-url',
         await getUnusedDevServerUrlAsync(),
       ]);
@@ -1694,7 +1737,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
     it('asks EAS again once the remembered none is older than its bound', async () => {
       const projectRoot = await setupWithEasAsync();
-      await reportInAsync(projectRoot, ['--explain']);
+      await reportInAsync(projectRoot, []);
       await fs.promises.rm(path.join(projectRoot, STUB_EAS_LOG_NAME));
 
       // Age the record rather than wait: the bound is minutes, and the test is about the rule.
@@ -1706,7 +1749,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       }
       await fs.promises.writeFile(recordPath, JSON.stringify(record));
 
-      const report = await reportInAsync(projectRoot, ['--explain']);
+      const report = await reportInAsync(projectRoot, []);
 
       expect(iosOf(report)).toMatchObject({ state: 'none', source: 'eas' });
       expect(easCommands(projectRoot)).toContain('build:list');
@@ -1717,12 +1760,12 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     // caller who refused the fingerprint record is refused the remembered EAS answer too.
     it('asks EAS again under --no-fingerprint-cache, whatever the record remembers', async () => {
       const projectRoot = await setupWithEasAsync();
-      await reportInAsync(projectRoot, ['--explain'], {
+      await reportInAsync(projectRoot, [], {
         STUB_EAS_BUILD_LIST: JSON.stringify([FINISHED_BUILD]),
       });
       await fs.promises.rm(path.join(projectRoot, STUB_EAS_LOG_NAME));
 
-      const report = await reportInAsync(projectRoot, ['--explain', '--no-fingerprint-cache'], {
+      const report = await reportInAsync(projectRoot, ['--no-fingerprint-cache'], {
         STUB_EAS_BUILD_LIST: JSON.stringify([FINISHED_BUILD]),
       });
 
@@ -1736,7 +1779,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     it('skips the lookup for a project whose app.json names no EAS project, and names eas init', async () => {
       const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
 
-      const report = await reportInAsync(projectRoot, ['--explain']);
+      const report = await reportInAsync(projectRoot, []);
 
       expect(report.builds?.platforms.map((platform) => platform.state)).toEqual([
         'unknown',
@@ -1758,7 +1801,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
         'module.exports = ({ config }) => ({ ...config, extra: { eas: { projectId: process.env.EAS_PROJECT_ID } } });\n'
       );
 
-      const report = await reportInAsync(projectRoot, ['--explain']);
+      const report = await reportInAsync(projectRoot, []);
 
       expect(iosOf(report)).toMatchObject({ state: 'none', source: 'eas' });
       expect(easCommands(projectRoot)).toContain('build:list');
@@ -1789,12 +1832,12 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       expect(report.freshness?.hashSource.revalidatedAgainst).toBeNull();
     });
 
-    it('computes three under --explain: the project, then one per platform', async () => {
+    it('computes three fingerprints: the project, then one per platform', async () => {
       const projectRoot = await setupAsync('dev-client-fresh-app');
       // The per-platform pair is computed for the EAS lookup, which only runs for a linked project.
       await linkFixtureToEasAsync(projectRoot);
 
-      await reportInAsync(projectRoot, ['--explain']);
+      await reportInAsync(projectRoot, []);
 
       // The cost this wave is about. The project hash answers freshness; the EAS build lookup needs
       // a per-platform hash, because a build is made for one platform (`src/status/easBuilds.ts`).
@@ -1803,10 +1846,10 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
     it('spawns nothing on the next run and says the answer came from a record', async () => {
       const projectRoot = await setupAsync('dev-client-fresh-app');
-      await reportInAsync(projectRoot, ['--explain']);
+      await reportInAsync(projectRoot, []);
       clearStubFingerprintInvocations(projectRoot);
 
-      const report = await reportInAsync(projectRoot, ['--explain']);
+      const report = await reportInAsync(projectRoot, []);
 
       expect(spawns(projectRoot)).toEqual([]);
       expect(report.freshness?.hash).toBe(FIXTURE_FINGERPRINT_HASH);
@@ -1938,7 +1981,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       const projectRoot = await setupAsync('dev-client-fresh-app');
       await linkFixtureToEasAsync(projectRoot);
 
-      await reportInAsync(projectRoot, ['--explain']);
+      await reportInAsync(projectRoot, []);
 
       const record = JSON.parse(
         await fs.promises.readFile(
