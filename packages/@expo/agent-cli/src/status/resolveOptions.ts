@@ -33,14 +33,14 @@ export function resolveAssertClass(value: unknown): ImpactClass | null {
 /**
  * The EAS build `--build` names, or null.
  *
- * `--build` requires `--explain` and says so rather than quietly implying it. The flag makes a
- * network call to fetch a fingerprint EAS computed on its own servers, and `--explain` is the one
- * word in this command's surface that means "you may spend a subprocess and a round trip". A flag
- * that turned that on by itself would put the cost back where the design took it out of.
+ * The flag fetches the fingerprint EAS computed for that one build — a network call the default
+ * report does not make on its own — and it is made because the caller named the build. It used to
+ * require `--explain` as the word for "you may spend a round trip"; there is no such word now, and
+ * naming a build is the ask.
  *
- * @throws {CommandError} `BAD_ARGS` for an empty value, or for `--build` without `--explain`.
+ * @throws {CommandError} `BAD_ARGS` for an empty value.
  */
-export function resolveBuildId(value: unknown, { explain }: { explain: boolean }): string | null {
+export function resolveBuildId(value: unknown): string | null {
   if (value == null) {
     return null;
   }
@@ -51,21 +51,9 @@ export function resolveBuildId(value: unknown, { explain }: { explain: boolean }
       [
         `--build needs the id of an EAS build.`,
         `Why: it compares this working tree against the fingerprint EAS computed for one specific build, which is server ground truth and needs no local record.`,
-        `How: find the id with "${easCommandPrefix()} build:list --limit 5 --json --non-interactive", then pass it as "--explain --build <id>".`,
+        `How: find the id with "${easCommandPrefix()} build:list --limit 5 --json --non-interactive", then run "${PROGRAM_PREFIX} status --build <id>".`,
       ].join('\n')
     );
-  }
-  if (!explain) {
-    const error = new CommandError(
-      'BAD_ARGS',
-      [
-        `--build needs --explain.`,
-        `Why: comparing against an EAS build fetches a fingerprint from the service, and --explain is what says this run may make a network call. The default report is built from what is already on this machine, and a flag that spent a round trip without being asked would take that promise away.`,
-        `How: run "${PROGRAM_PREFIX} status --explain --build ${buildId}".`,
-      ].join('\n')
-    );
-    error.suggestedCommand = `${PROGRAM_PREFIX} status --explain --build ${buildId}`;
-    throw error;
   }
   return buildId;
 }

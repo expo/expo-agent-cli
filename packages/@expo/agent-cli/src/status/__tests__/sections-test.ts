@@ -177,7 +177,7 @@ describe(buildFreshnessStatus, () => {
 
     expect(axis(status, 'ios', 'eas')).toMatchObject({
       state: 'unknown',
-      detail: expect.stringContaining('--explain'),
+      detail: 'EAS was not asked',
       buildId: null,
       impact: null,
     });
