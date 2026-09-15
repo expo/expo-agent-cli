@@ -378,7 +378,13 @@ function installedDetailLines(report: StatusReport): string[] {
     if (entry.status === 'up-to-date') {
       continue;
     }
-    lines.push(`${' '.repeat(LABEL_WIDTH)}${chalk.dim(`${entry.platform}: ${entry.recommendation}`)}`);
+    // Split, because a recommendation can be a whole `CommandError` message: those are What/Why/How
+    // blocks, and pushing one string with newlines in it renders every line after the first at
+    // column zero, outside the report's label column.
+    const indent = ' '.repeat(LABEL_WIDTH);
+    const [first, ...rest] = `${entry.platform}: ${entry.recommendation}`.split('\n');
+    lines.push(`${indent}${chalk.dim(first ?? '')}`);
+    lines.push(...rest.map((line) => `${indent}${chalk.dim(line)}`));
     for (const command of entry.commands) {
       lines.push(`${' '.repeat(LABEL_WIDTH)}  ${chalk.cyan(command)}`);
     }
