@@ -298,3 +298,77 @@ describe('the application id of a prebuilt Android project', () => {
     expect(readConfiguredAppId('/project', 'android')).toBeNull();
   });
 });
+
+// @ref ../appId §readPrebuiltIosBundleIdentifier
+describe('the bundle identifier of a prebuilt iOS project', () => {
+  function pbxproj(body: string): void {
+    vol.fromJSON({
+      '/project/package.json': JSON.stringify({ name: 'demo' }),
+      '/project/ios/demo.xcodeproj/project.pbxproj': body,
+    });
+  }
+
+  it(`reads the PRODUCT_BUNDLE_IDENTIFIER a prebuild wrote`, () => {
+    pbxproj(
+      [
+        '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.tuft.pdfbuild;',
+        '\t\t\t\tPRODUCT_NAME = "$(TARGET_NAME)";',
+      ].join('\n')
+    );
+
+    expect(readConfiguredAppId('/project', 'ios')).toBe('com.tuft.pdfbuild');
+  });
+
+  it(`accepts a quoted value`, () => {
+    pbxproj('PRODUCT_BUNDLE_IDENTIFIER = "com.example.quoted";');
+
+    expect(readConfiguredAppId('/project', 'ios')).toBe('com.example.quoted');
+  });
+
+  it(`prefers the app config over an older prebuild`, () => {
+    vol.fromJSON({
+      '/project/package.json': JSON.stringify({ name: 'demo' }),
+      '/project/app.json': JSON.stringify({
+        expo: { ios: { bundleIdentifier: 'com.declared.one' } },
+      }),
+      '/project/ios/demo.xcodeproj/project.pbxproj': 'PRODUCT_BUNDLE_IDENTIFIER = com.stale.one;',
+    });
+
+    expect(readConfiguredAppId('/project', 'ios')).toBe('com.declared.one');
+  });
+
+  it(`answers null with no ios directory`, () => {
+    vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'demo' }) });
+
+    expect(readConfiguredAppId('/project', 'ios')).toBeNull();
+  });
+
+  // `XCBuildConfiguration` blocks are ordered by generated UUID, so an extension's identifier can
+  // come first. An extension is always `<app id>.<suffix>` in a generated project, so the id that
+  // is a prefix of the others is the app target whatever the order.
+  it(`prefers the app target over an extension that is listed first`, () => {
+    pbxproj(
+      [
+        '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.example.app.OneSignalNotificationServiceExtension;',
+        '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.example.app;',
+        '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.example.app.widget;',
+      ].join('\n')
+    );
+
+    expect(readConfiguredAppId('/project', 'ios')).toBe('com.example.app');
+  });
+
+  // Two unrelated identifiers name no app target. A wrong id is worse than none: it misdirects
+  // `reload`, `stop`, `navigate` and `smoke`, which all read this.
+  it(`answers null when no identifier is a prefix of the others`, () => {
+    pbxproj(
+      [
+        '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.example.one;',
+        '\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = com.example.two;',
+      ].join('\n')
+    );
+
+    expect(readConfiguredAppId('/project', 'ios')).toBeNull();
+  });
+});
+
