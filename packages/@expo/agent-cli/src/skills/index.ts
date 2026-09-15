@@ -24,7 +24,7 @@ export const skillsSyncHelp: CommandHelp = {
       gets: 'what would be linked; nothing is written',
     },
     {
-      run: `${PROGRAM_PREFIX} skills:sync --agent claude --json`,
+      run: `${PROGRAM_PREFIX} skills:sync --agent claude-code --json`,
       gets: 'the same for one agent, as one object',
     },
   ],

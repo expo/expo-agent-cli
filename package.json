@@ -4,7 +4,8 @@
   "workspaces": [
     "packages/*",
     "packages/@expo/*",
-    "apps/*"
+    "apps/*",
+    "packages/@expo/agent-cli/evals/fixtures/real-app"
   ],
   "scripts": {
     "bundle": "bun run --filter expo-agent-cli bundle",

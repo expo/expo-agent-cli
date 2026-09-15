@@ -520,6 +520,8 @@ describe(runtimeErrorsAsync, () => {
 
     expect(error.code).toBe('RUNTIME_ERRORS_FAILED');
     expect(error.message).toContain('No target found.');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev:logs');
+    expect(error.message).toContain('bundling errors');
   });
 });
 
