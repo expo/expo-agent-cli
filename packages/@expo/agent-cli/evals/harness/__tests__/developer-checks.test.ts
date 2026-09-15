@@ -1,35 +1,45 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createWorkspace, type CheckFn, type DefineChecks } from '@expo/agent-eval-vitest';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { CliFixture, EvalInput, EvalOutput, FixtureSession } from '../cli';
 import { setupImpactFixture } from '../impact-fixture';
 import { runProcess } from '../process';
 import { startRuntimeFixture } from '../runtime-fixture';
 import { cliBin, copyWorkspace, snapshot } from '../workspace';
-// Importing the colocated cases registers their checks through the mocked agentEval below.
-import '../../tier1/bundler-error.eval';
-import '../../tier1/expo-go.eval';
-import '../../tier1/js.eval';
-import '../../tier1/native.eval';
-import '../../tier1/reload.eval';
 
 type DeveloperTask = 'expo-go' | 'native' | 'js' | 'reload' | 'bundler-error';
 
+// Scan the case folder so a new *.eval.ts file is picked up without editing this test.
+const caseDirectory = fileURLToPath(new URL('../../tier1/', import.meta.url));
+const caseFiles = fs
+  .readdirSync(caseDirectory)
+  .filter((file) => file.endsWith('.eval.ts'))
+  .sort();
+const caseNames = caseFiles.map((file) => path.basename(file, '.eval.ts'));
+
 const { checks } = vi.hoisted(() => ({ checks: new Map<string, CheckFn<CliFixture>[]>() }));
 
-// Load the actual colocated checks without registering model-driven suites in this unit run.
+// Every case file calls agentEval when it loads. This stub records the checks by case name
+// instead of registering model-driven suites in this unit run.
 vi.mock('../cli', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../cli')>()),
   agentEval: (url: string, _options: unknown, define: DefineChecks<CliFixture>) => {
-    const name = new URL(url).pathname.split('/').at(-1)!.replace('.eval.ts', '');
+    const name = path.basename(fileURLToPath(url), '.eval.ts');
     const callbacks: CheckFn<CliFixture>[] = [];
     define((_name, fn) => callbacks.push(fn));
     checks.set(name, callbacks);
   },
 }));
+
+beforeAll(async () => {
+  for (const name of caseNames) {
+    await import(`../../tier1/${name}.eval.ts`);
+  }
+});
 
 function checkDeveloperTask(task: DeveloperTask, output: EvalOutput) {
   const callbacks = checks.get(task)!;
@@ -92,6 +102,12 @@ const labeledCases = referenceCases.map((referenceCase) => ({
 }));
 
 describe('Grading developer tasks with built CLI evidence', () => {
+  it('should have a reference case for every Tier 1 eval file', () => {
+    const referenceTasks = new Set(referenceCases.map((referenceCase) => referenceCase.task));
+    expect(caseNames).toEqual([...referenceTasks].sort());
+    expect([...checks.keys()].sort()).toEqual(caseNames);
+  });
+
   it.each(labeledCases)(
     'should grade $task through $label and reject a no-op',
     async ({ task, input, baseline }) => {
