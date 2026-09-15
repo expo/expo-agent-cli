@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { assertSubprocessDeadline, trackSubprocessDeadline } from './subprocessDeadline';
 
 import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
 import { acquireRunnerLockAsync, runnerSpawnKey, tryAcquireRunnerLock } from './runnerLock';
@@ -99,6 +100,7 @@ function spawnCaptureNowAsync(
   return new Promise<SpawnCaptureBufferResult>((resolve, reject) => {
     // A `fingerprint` resolved inside a project is a batch shim on Windows, which needs `cmd.exe`.
     const target = resolveSpawnTarget(command, args);
+    assertSubprocessDeadline();
     const child = spawn(target.command, target.args, {
       cwd: options.cwd,
       // The output is data for the caller, not something the user should read directly.
@@ -108,6 +110,8 @@ function spawnCaptureNowAsync(
       // child then holds these pipes open forever (`src/utils/processGroup.ts`).
       detached: USE_PROCESS_GROUP,
     });
+
+    trackSubprocessDeadline(child);
 
     // A lookup tool that hangs must not hang the command that asked. Only set when a caller
     // names a deadline: every other caller runs a tool that ends on its own.

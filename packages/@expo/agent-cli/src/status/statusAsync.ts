@@ -1,3 +1,4 @@
+import { withSubprocessDeadlineAsync } from '../utils/subprocessDeadline';
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
 // "Where is this project right now, and what would happen next" — one read-only pass over the
 // project state, the recorded builds, the dev server, and the linked skills.
@@ -383,13 +384,14 @@ export async function collectStatusReportAsync(
     attemptAsync(async () => {
       if (!options.explain) return null;
       const timeoutMs = options.installedReadTimeoutMs ?? INSTALLED_READ_TIMEOUT_MS;
-      const installed = await raceWithTimeoutAsync(
-        readInstalledStatusAsync(projectRoot, {
+      const installed = await withSubprocessDeadlineAsync(
+        timeoutMs,
+        `Installed-app check timed out after ${timeoutMs}ms.`,
+        () => readInstalledStatusAsync(projectRoot, {
           lookUp: true,
           device: options.device,
           fingerprintCache: options.fingerprintCache,
-        }),
-        timeoutMs
+        })
       );
       if (!installed) throw new Error(`Installed-app check timed out after ${timeoutMs}ms.`);
       return installed;
