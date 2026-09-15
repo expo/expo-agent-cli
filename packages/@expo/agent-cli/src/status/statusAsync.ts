@@ -22,6 +22,7 @@ import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
 import { readLastBuildRecord, type LastBuildRecord } from '../plan/lastBuild';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
+import { readStaticEasProjectAsync, type EasProjectLink } from '../project/appConfig';
 import { readProjectPackageJsonAsync } from '../project/nodeModules';
 import { probeProjectStateAsync } from '../project/probe';
 import type { ProjectState, StartPlan } from '../project/types';
@@ -355,6 +356,7 @@ export async function collectStatusReportAsync(
         projectHash: report.freshness?.hash ?? null,
         timeoutMs: options.buildLookupTimeoutMs,
         fingerprintCache: options.fingerprintCache,
+        easProject: 'value' in project ? project.value.easProject : null,
       })
     ),
     options.explain && report.freshness
@@ -627,12 +629,15 @@ async function attemptPlanAsync(
 async function readProjectAsync(
   projectRoot: string,
   options: StatusOptions
-): Promise<{ state: ProjectState; packageName: string | null }> {
-  const [state, packageJson] = await Promise.all([
+): Promise<{ state: ProjectState; packageName: string | null; easProject: EasProjectLink }> {
+  const [state, packageJson, easProject] = await Promise.all([
     probeProjectStateAsync(projectRoot, { fingerprintCache: options.fingerprintCache }),
     readProjectPackageJsonAsync(projectRoot),
+    // One file read, for the EAS build lookup below: an unlinked project is answered without a
+    // network call (`src/status/easBuilds.ts`).
+    readStaticEasProjectAsync(projectRoot),
   ]);
-  return { state, packageName: packageJson?.name ?? null };
+  return { state, packageName: packageJson?.name ?? null, easProject };
 }
 
 /**

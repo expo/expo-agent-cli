@@ -179,6 +179,8 @@ describe(buildStatusFollowUps, () => {
               buildProfile: 'simulator',
               buildUrl: 'https://expo.dev/artifacts/eas/abc.tar.gz',
               source: 'cache',
+              checkedAt: null,
+              ageMs: null,
               reason: null,
             },
           ],
