@@ -152,6 +152,14 @@ export function readPrebuiltAndroidApplicationId(projectRoot: string): string | 
  * into the Xcode project whether or not `ios.bundleIdentifier` was declared. The first target's
  * value is taken, which is the app target in a project `prebuild` generated. A static read: no
  * `xcodebuild`, no `app.config.js`.
+ *
+ * TODO: the first match is not reliably the app target. `XCBuildConfiguration` objects are ordered
+ * by their generated UUIDs, so a project with an app extension — a notification service, a widget,
+ * one a config plugin added — has several `PRODUCT_BUNDLE_IDENTIFIER` entries in arbitrary order.
+ * Picking the extension's makes the installed-app check answer `app-not-installed` for an app that
+ * is installed, and misdirects every other caller of {@link readConfiguredAppId} (reload, stop,
+ * navigate, smoke, app presence). Prefer the id that is a prefix of the others, or resolve the
+ * first target's `buildConfigurationList` properly.
  */
 export function readPrebuiltIosBundleIdentifier(projectRoot: string): string | null {
   const iosDir = path.join(projectRoot, 'ios');
