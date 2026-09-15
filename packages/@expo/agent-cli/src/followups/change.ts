@@ -80,8 +80,8 @@ export function buildChangeFollowUps({
         why: implicitEas
           ? `The native surface changed, so the installed app cannot run this code. This rebuilds it ${EAS_WHERE} — ${buildBackend!.because} — and runs the app on an EAS Simulator session, which uses EAS credits; without --eas the same command stops and says so.`
           : runsOnEas
-          ? `The native surface changed, so the installed app cannot run this code. This plans the rebuild ${EAS_WHERE} — ${buildBackend!.because} — and prints the plan before it starts anything.`
-          : `The native surface changed, so the installed app cannot run this code. This rebuilds it ${LOCAL_WHERE} — the fast route when this machine has ${localTool(platform)}, because the plan engine prebuilds and rebuilds only what has to be.`,
+            ? `The native surface changed, so the installed app cannot run this code. This plans the rebuild ${EAS_WHERE} — ${buildBackend!.because} — and prints the plan before it starts anything.`
+            : `The native surface changed, so the installed app cannot run this code. This rebuilds it ${LOCAL_WHERE} — the fast route when this machine has ${localTool(platform)}, because the plan engine prebuilds and rebuilds only what has to be.`,
       });
       followups.push({
         id: runsOnEas ? 'change-local-build' : 'change-eas-build',
@@ -112,7 +112,7 @@ export function buildChangeFollowUps({
   if (otaSafe === false) {
     followups.push({
       id: 'change-ota-unsafe',
-      command: `${PROGRAM_PREFIX} status --explain --json`,
+      command: `${PROGRAM_PREFIX} status --json`,
       why: 'An update published now would reach installed builds that cannot run it — read the "ota" section for the runtimeVersion policy that decides this, before running eas update.',
     });
   } else if (otaSafe === true && impactClass !== 'needs-native-build') {

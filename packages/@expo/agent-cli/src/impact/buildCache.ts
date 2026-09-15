@@ -29,7 +29,7 @@ import type { CachedBuild } from './types';
  * without it, run without being asked for. Twenty seconds of a command's time is a fair ceiling on a
  * nicety; a minute is not.
  *
- * The caller that *did* ask — `status --explain` — passes a wider budget of its own
+ * The caller that asks on every run — `status` — passes a wider budget of its own
  * (`EAS_BUILD_RUNNER_TIMEOUT_MS`, `src/status/easBuilds.ts`). Either way a run that expires says the
  * download was why, via {@link runnerDownloadNote}, and says that the next run is warm — so the cost
  * of guessing this too low is a re-run, never a wrong answer.
@@ -191,7 +191,7 @@ export function buildViewArgs(buildId: string): string[] {
 /**
  * Which platform an EAS build was made for, or null when nothing established it.
  *
- * The fact `status --explain --build <id>` was missing. A build is made for exactly one platform,
+ * The fact `status --build <id>` was missing. A build is made for exactly one platform,
  * and the comparison against it was being copied onto **both** — so an iOS
  * development-simulator build was reported as able to run android code [observed — live run,
  * 2026-08-26, S1].

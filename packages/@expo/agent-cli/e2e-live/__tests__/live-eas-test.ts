@@ -10,7 +10,7 @@
 //
 // The budget this suite spends:
 //
-//  - **Reads are free and repeated.** `whoami`, `status --explain`, `inspect:build-log`.
+//  - **Reads are free and repeated.** `whoami`, `status`, `inspect:build-log`.
 //  - **One write per run, and it is idempotent.** `deploy --web`. EAS Hosting gives each deploy its
 //    own preview URL, so re-running adds a deployment and changes nothing that existed.
 //  - **No native build.** The suite reads builds; it does not make them (that is the
@@ -45,13 +45,7 @@ import {
 
 const easCi = easCiGate();
 const easProject = easProjectGate();
-const gate = allOf(
-  builtBinGate(),
-  easCi.gate,
-  packageRunnerGate(),
-  networkGate(),
-  easProject.gate
-);
+const gate = allOf(builtBinGate(), easCi.gate, packageRunnerGate(), networkGate(), easProject.gate);
 
 describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
   const run = new LiveRun('live-eas');
@@ -81,7 +75,8 @@ describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
   it('reads a CI-owned app, and never a personal account', () => {
     // The safety that replaced the staging sandbox: the gate only resolved a source whose committed
     // owner is the CI account, so every EAS op below is pinned to it.
-    const owner = JSON.parse(fs.readFileSync(path.join(projectRoot, 'app.json'), 'utf8')).expo.owner;
+    const owner = JSON.parse(fs.readFileSync(path.join(projectRoot, 'app.json'), 'utf8')).expo
+      .owner;
     expect(owner).toBe('expo-ci');
   });
 
@@ -117,9 +112,9 @@ describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
 
   // --- the build read side ------------------------------------------------------------------------
 
-  it('status --explain asks EAS, and every row it comes back with keeps its contract', async () => {
-    const result = await runLiveEasAsync(run, readProjectRoot, ['status', '--explain', '--json'], {
-      label: 'status-explain',
+  it('status asks EAS, and every row it comes back with keeps its contract', async () => {
+    const result = await runLiveEasAsync(run, readProjectRoot, ['status', '--json'], {
+      label: 'status-eas',
     });
     // Never fails a command: every way of not getting an answer is an `unknown` with a reason, and
     // the section costs one line of the report rather than the exit code.
@@ -148,8 +143,8 @@ describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
   it('the lookup does find the real build this project was made from', async () => {
     // The claim the row in llp/0022-live-tier.plan.md was missing. One run and no retry: the retry that used to be here
     // was scaffolding for F93, and it went with the fix.
-    const result = await runLiveEasAsync(run, readProjectRoot, ['status', '--explain', '--json'], {
-      label: 'status-explain-found',
+    const result = await runLiveEasAsync(run, readProjectRoot, ['status', '--json'], {
+      label: 'status-eas-found',
     });
     expectExit(result, 0);
     const found = parseJson(result).builds.platforms.find((p: any) => p.state === 'found') ?? null;
@@ -165,7 +160,7 @@ describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
 
   // F93 — MAJOR, found by this suite on 2026-08-27, **fixed in wave 22**.
   //
-  // What it was: `status --explain` runs its two per-platform lookups concurrently (`Promise.all` in
+  // What it was: `status` runs its two per-platform lookups concurrently (`Promise.all` in
   // `src/status/easBuilds.ts` §readEasBuildsStatusAsync). In a project that does not pin `eas-cli` —
   // the common case, and the case wave 18 made the only rung — each lookup spawns
   // `bunx eas-cli@latest`, and both shared one per-spec scratch directory
@@ -197,8 +192,8 @@ describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
     // started milliseconds apart, which is the state F93 was found in.
     fs.rmSync(path.join(readProjectRoot, '.expo', 'agent-cli-eas-builds.json'), { force: true });
 
-    const result = await runLiveEasAsync(run, readProjectRoot, ['status', '--explain', '--json'], {
-      label: 'f93-status-explain',
+    const result = await runLiveEasAsync(run, readProjectRoot, ['status', '--json'], {
+      label: 'f93-status-eas',
     });
     expectExit(result, 0);
     const report = parseJson(result);
@@ -215,12 +210,12 @@ describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
     expect(report.builds.platforms.every((p: any) => p.state !== 'unknown')).toBe(true);
   });
 
-  it('status --explain --build against a build that does not exist says so, in text and in JSON', async () => {
+  it('status --build against a build that does not exist says so, in text and in JSON', async () => {
     const result = await runLiveEasAsync(
       run,
       readProjectRoot,
-      ['status', '--explain', '--build', 'not-a-real-build-id', '--json'],
-      { label: 'status-explain-build' }
+      ['status', '--build', 'not-a-real-build-id', '--json'],
+      { label: 'status-build' }
     );
     expectExit(result, 0);
     const report = parseJson(result);

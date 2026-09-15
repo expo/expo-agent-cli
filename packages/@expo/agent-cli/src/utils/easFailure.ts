@@ -2,7 +2,7 @@
 // @ref llp/0021-honest-reports.rfc.md §The rules
 // @ref llp/0027-everything-on-eas.rfc.md §What EAS said
 // Why an `eas` run stopped, read out of what it said. Written for `eas deploy`, and now read by
-// every place this CLI quotes the EAS CLI's refusal: the build lookup of `status --explain`, the
+// every place this CLI quotes the EAS CLI's refusal: the build lookup of `status`, the
 // session listing behind every `--eas` device command, and a failed `eas` step of `dev`.
 //
 // The upload used to be diagnosed from its *exit signature* alone: one `Why:` line, written once,

@@ -42,7 +42,7 @@ vi.mock('../../runtime/targetLiveness', () => ({
 // suite happens to run on.
 vi.mock('../../needsHuman/preflight', () => ({ readAuthPreflightAsync: vi.fn() }));
 vi.mock('../../skills/discovery', () => ({ discoverSkillsAsync: vi.fn(async () => []) }));
-// The two halves of `--explain` that cost something: one network call and one `expo config`. Both
+// The two halves of the report that cost something: one network call and one `expo config`. Both
 // are mocked here so these tests can assert *whether they were asked*, which is the design.
 vi.mock('../easBuilds', () => ({
   readEasBuildsStatusAsync: vi.fn(async () => ({ askedEas: false, platforms: [] })),
@@ -436,10 +436,11 @@ describe(collectStatusReportAsync, () => {
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
   //
-  // The design is a cost split, so these are tests about *what was spawned*. A default run must
-  // reach neither `expo config` nor the network; `--explain` reaches both.
-  describe('the cost split of --explain', () => {
-    it(`should classify the change without asking EAS or expo config`, async () => {
+  // There is no deeper mode: every run carries the per-source list, the OTA verdict and the EAS
+  // answer. What keeps that affordable is what the two costly halves remember (llp/0011, llp/0023),
+  // which their own suites cover; these pin that the report *asks* for them, and reads them.
+  describe('what every run carries', () => {
+    it(`should classify the change from the two source lists, in process`, async () => {
       // Both sides carry their sources, which is what makes the classification possible at all —
       // the probe computed the head's to get its hash, and the record holds the base's.
       mockState({ fingerprint: { hash: 'abcdef0123456789', sources: [] } });
@@ -450,49 +451,37 @@ describe(collectStatusReportAsync, () => {
       expect(report.freshness?.platforms[0]!.impact).toMatchObject({
         class: 'js-only',
         fingerprintChanged: true,
+        changedSources: [],
       });
-      expect(resolveRuntimeVersionAsync).not.toHaveBeenCalled();
-      expect(readEasBuildsStatusAsync).toHaveBeenCalledWith(
-        projectRoot,
-        expect.objectContaining({ lookUp: false })
-      );
     });
 
-    it(`should leave the per-source list out of the default report`, async () => {
-      mockState({ fingerprint: { hash: 'abcdef0123456789', sources: [] } });
-      vi.mocked(readLastBuildRecord).mockReturnValue({ ios: { hash: 'older', sources: [] } });
-
+    it(`should resolve the OTA verdict and ask about EAS builds on every run`, async () => {
       const report = await collectStatusReportAsync(projectRoot, options);
-
-      expect(report.freshness?.platforms[0]!.impact?.changedSources).toBeNull();
-      expect(report.freshness?.ota).toBeNull();
-    });
-
-    it(`should resolve the OTA verdict and refresh the EAS answer with --explain`, async () => {
-      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
 
       expect(resolveRuntimeVersionAsync).toHaveBeenCalledWith(projectRoot, { cache: undefined });
       expect(report.freshness?.ota).toMatchObject({ safe: true });
       expect(readEasBuildsStatusAsync).toHaveBeenCalledWith(
         projectRoot,
-        expect.objectContaining({ lookUp: true })
+        expect.objectContaining({ projectHash: 'abcdef0123456789' })
       );
     });
 
-    it(`should carry the per-source list with --explain`, async () => {
-      mockState({ fingerprint: { hash: 'abcdef0123456789', sources: [] } });
-      vi.mocked(readLastBuildRecord).mockReturnValue({ ios: { hash: 'older', sources: [] } });
+    // @ref llp/0023-fingerprint-caching.rfc.md §Every consumer can turn it off
+    it(`should hand a refused cache to the OTA read and the EAS lookup alike`, async () => {
+      await collectStatusReportAsync(projectRoot, { ...options, fingerprintCache: false });
 
-      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
-
-      expect(report.freshness?.platforms[0]!.impact?.changedSources).toEqual([]);
+      expect(resolveRuntimeVersionAsync).toHaveBeenCalledWith(projectRoot, { cache: false });
+      expect(readEasBuildsStatusAsync).toHaveBeenCalledWith(
+        projectRoot,
+        expect.objectContaining({ fingerprintCache: false })
+      );
     });
 
-    // Section isolation: `--explain` is three answers, and one of them failing costs one of them.
+    // Section isolation: three answers, and one of them failing costs one of them.
     it(`should note an OTA read it could not make, and keep every other fact`, async () => {
       vi.mocked(resolveRuntimeVersionAsync).mockRejectedValue(new Error('expo config failed'));
 
-      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+      const report = await collectStatusReportAsync(projectRoot, options);
 
       expect(report.errors.freshness).toBe('expo config failed');
       expect(report.freshness?.ota).toBeNull();
@@ -503,7 +492,7 @@ describe(collectStatusReportAsync, () => {
     it(`should not resolve an OTA verdict for a project it could not probe`, async () => {
       vi.mocked(probeProjectStateAsync).mockRejectedValue(new Error('project is unreadable'));
 
-      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+      const report = await collectStatusReportAsync(projectRoot, options);
 
       expect(resolveRuntimeVersionAsync).not.toHaveBeenCalled();
       expect(report.freshness).toBeNull();
@@ -590,8 +579,8 @@ describe(collectStatusReportAsync, () => {
       expect(report.assertion).toMatchObject({ ok: true, actual: 'js-only', exitCode: 0 });
     });
 
-    // With and without `--explain`, because the gate reads the headline and the headline is free.
-    it(`should work without --explain, which is what makes it cheap enough for CI`, async () => {
+    // The gate reads the headline, and the OTA verdict rides beside it rather than deciding it.
+    it(`should carry the OTA verdict beside the verdict of the gate`, async () => {
       decided('abcdef0123456789');
 
       const report = await collectStatusReportAsync(projectRoot, {
@@ -599,20 +588,6 @@ describe(collectStatusReportAsync, () => {
         assert: 'js-only',
       });
 
-      expect(resolveRuntimeVersionAsync).not.toHaveBeenCalled();
-      expect(report.assertion?.ok).toBe(true);
-    });
-
-    it(`should compose with --explain`, async () => {
-      decided('abcdef0123456789');
-
-      const report = await collectStatusReportAsync(projectRoot, {
-        ...options,
-        assert: 'js-only',
-        explain: true,
-      });
-
-      expect(resolveRuntimeVersionAsync).toHaveBeenCalled();
       expect(report.assertion?.ok).toBe(true);
       expect(report.freshness?.ota).not.toBeNull();
     });
@@ -660,7 +635,6 @@ describe(collectStatusReportAsync, () => {
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
       });
 
@@ -705,7 +679,6 @@ describe(collectStatusReportAsync, () => {
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
       });
 
@@ -724,7 +697,6 @@ describe(collectStatusReportAsync, () => {
     it(`should take the platform the caller named without asking EAS`, async () => {
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
         platform: 'android',
       });
@@ -742,7 +714,6 @@ describe(collectStatusReportAsync, () => {
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
       });
 
@@ -754,7 +725,6 @@ describe(collectStatusReportAsync, () => {
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
         assert: 'js-only',
       });
@@ -778,7 +748,6 @@ describe(collectStatusReportAsync, () => {
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
       });
 

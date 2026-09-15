@@ -245,8 +245,8 @@ the dev server's port answering nothing.
 Against the `expo-ci` CI account, reading the committed `apps/eas-example` in place. About 50 s.
 
 Reads, repeated freely: `whoami` (logged in as the account the run authenticates with),
-`status` agreeing with `whoami` about who is signed in, `status --explain` against the
-real seeded builds of the example, `status --explain --build` echoing the id it was given,
+`status` agreeing with `whoami` about who is signed in, `status` against the
+real seeded builds of the example, `status --build` echoing the id it was given,
 and `inspect:build-log` on a log EAS actually served. Plus `deploy --web` of the example.
 
 One write, idempotent: `deploy --web` of a five-dependency fixture. EAS Hosting gives
