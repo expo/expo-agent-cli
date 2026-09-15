@@ -15,6 +15,7 @@ import {
   generateFingerprintAsync,
   type FingerprintSource,
 } from './fingerprint';
+import { debugEvent } from './events';
 import { resolveFingerprintCliVersion } from './fingerprintCache';
 import { diffSources, type SourceChange } from './sourceDiff';
 
@@ -210,8 +211,14 @@ export async function recordPrebuildMarkersAsync(
       await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
       await fs.promises.writeFile(filePath, JSON.stringify(entry, null, 2));
       recorded.push(platform);
-    } catch {
-      // No marker is a valid state. Never fail a prebuild over bookkeeping.
+    } catch (error) {
+      // No marker is a valid state. Never fail a prebuild over bookkeeping — but say so under
+      // EXPO_DEBUG, because a read-only `.expo/` leaves every later check reporting `unknown`
+      // with nothing anywhere naming the cause.
+      debugEvent('prebuild_marker_write_failed', {
+        platform,
+        error: debugEvent.error(error as Error),
+      });
     }
   }
   return recorded;
