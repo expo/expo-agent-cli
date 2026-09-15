@@ -466,7 +466,7 @@ export const ANCHORS: Anchor[] = [
  *
  * @param line one line of the log, ANSI already stripped.
  * @param isPhaseAllowed a predicate that rules out the other platform's phases when the caller
- *   passed `--platform`. Its default lets every rule run, which is what a log with no hint gets.
+ *   passed `--ios` or `--android`. Its default lets every rule run, which is what a log with no hint gets.
  * @returns the rule and the match, so a caller can build the suggested command from the captures.
  */
 export function anchorFor(
