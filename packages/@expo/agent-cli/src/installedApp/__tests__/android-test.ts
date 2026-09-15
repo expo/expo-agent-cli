@@ -2,6 +2,7 @@
 // The Android reader over a fake `adb` that serves the stored fixture APK the way a device would:
 // `stat` answers its size and `exec-out dd` answers byte ranges of it.
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import type { AdbRawRunResult, AdbRunResult } from '../../device/adb';
@@ -100,6 +101,16 @@ function fakeAdb(devices: FakeDevice[]) {
 }
 
 describe(readInstalledFingerprintAndroidAsync, () => {
+  beforeEach(() => fs.mkdirSync(os.tmpdir(), { recursive: true }));
+
+  it('does not pull an APK whose ZIP bytes are invalid', async () => {
+    const fake = fakeAdb([{ serial: 'emulator-5554', apk: Buffer.from('not a ZIP') }]);
+    await expect(readInstalledFingerprintAndroidAsync({
+      expectedHash: EMBEDDED_HASH, appId: APP_ID, ...fake,
+    })).rejects.toThrow('end-of-central-directory');
+    expect(fake.calls.some((args) => args.includes('pull'))).toBe(false);
+  });
+
   it(`reads the embedded hash through ranged reads, never pulling the APK`, async () => {
     const fake = fakeAdb([{ serial: 'emulator-5554', apk: APK }]);
     const result = await readInstalledFingerprintAndroidAsync({

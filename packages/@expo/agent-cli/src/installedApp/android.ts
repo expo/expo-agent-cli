@@ -22,7 +22,7 @@ import {
   FINGERPRINT_FILE_NAME,
   parseEmbeddedFingerprint,
   matchesDeviceFilter,
-  rankInstalledResult,
+  pickBestResult,
   type InstalledAppDevice,
   type InstalledFingerprintResult,
 } from './installedFingerprint';
@@ -84,7 +84,7 @@ export async function readInstalledFingerprintAndroidAsync({
     return { status: 'no-device' };
   }
 
-  let best: InstalledFingerprintResult | null = null;
+  const results: InstalledFingerprintResult[] = [];
   let lastError: Error | null = null;
   for (const device of devices) {
     let result: InstalledFingerprintResult;
@@ -99,18 +99,15 @@ export async function readInstalledFingerprintAndroidAsync({
       lastError = error as Error;
       continue;
     }
-    const hash = expectedHash;
-    if (result.status === 'ok' && result.hash === hash) {
+    if (result.status === 'ok' && result.hash === expectedHash) {
       return result;
     }
-    if (!best || rankInstalledResult(result, hash) > rankInstalledResult(best, hash)) {
-      best = result;
-    }
+    results.push(result);
   }
-  if (!best) {
+  if (!results.length) {
     throw lastError ?? new Error('No readable Android device was found.');
   }
-  return best;
+  return pickBestResult(results, expectedHash);
 }
 
 type AdbRunners = {
@@ -136,22 +133,27 @@ async function readDeviceAsync(
     return { status: 'app-not-installed', appId, device };
   }
 
-  let hash: string | null;
+  let contents: string | null;
   try {
-    hash = await readFingerprintRangedAsync(device, apkPath, runners);
+    contents = await readFingerprintRangedAsync(device, apkPath, runners);
   } catch (error) {
+    if (!(error instanceof RangedReadError)) {
+      throw error;
+    }
     debugEvent('ranged_read_failed', {
       device: device.name,
       error: debugEvent.error(error as Error),
     });
-    hash = await readFingerprintByPullingAsync(device, apkPath, runners);
+    contents = await readFingerprintByPullingAsync(device, apkPath, runners);
   }
-  const embedded = hash ? parseEmbeddedFingerprint(hash) : null;
+  const embedded = contents ? parseEmbeddedFingerprint(contents) : null;
   if (!embedded) {
     return { status: 'no-embedded-fingerprint', appId, device };
   }
   return { status: 'ok', ...embedded, appId, device };
 }
+
+class RangedReadError extends Error {}
 
 /** The zip tail, the central directory, and the one entry: a few hundred KB of the APK. */
 async function readFingerprintRangedAsync(
@@ -165,7 +167,7 @@ async function readFingerprintRangedAsync(
   );
   const size = parseInt(sizeResult.stdout.trim(), 10);
   if (sizeResult.exitCode !== 0 || !Number.isFinite(size) || size <= 0) {
-    throw new Error(
+    throw new RangedReadError(
       `Could not determine the APK size (stat returned: ${sizeResult.stdout.trim()})`
     );
   }
@@ -224,12 +226,12 @@ async function readRangeAsync(
     { adb: runners.adb, timeoutMs: ADB_TIMEOUT_MS }
   );
   if (result.exitCode !== 0) {
-    throw new Error(
+    throw new RangedReadError(
       `Ranged read of ${filePath} failed: ${result.stderr.trim() || `exit code ${result.exitCode}`}`
     );
   }
   if (result.stdout.length < start + length) {
-    throw new Error(
+    throw new RangedReadError(
       `Short read from ${filePath}: expected ${length} bytes at offset ${offset}, got ${result.stdout.length - start}`
     );
   }
@@ -241,7 +243,6 @@ async function readFingerprintByPullingAsync(
   apkPath: string,
   runners: AdbRunners
 ): Promise<string | null> {
-  await fs.promises.mkdir(os.tmpdir(), { recursive: true });
   const temporaryDir = await fs.promises.mkdtemp(
     path.join(os.tmpdir(), 'agent-cli-installed-app-')
   );
