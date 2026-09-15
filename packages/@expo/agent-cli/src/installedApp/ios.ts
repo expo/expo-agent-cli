@@ -12,7 +12,7 @@ import {
 import { matchesDeviceFilter, type InstalledFingerprintResult } from './installedFingerprint';
 
 export interface IosReaderOptions {
-  expectedHash: string | Promise<string>;
+  expectedHash: string;
   device?: string;
   appId: string;
   scheme: string | null;
@@ -74,7 +74,7 @@ export async function readInstalledFingerprintIosAsync({
   }
 
   const result = await readSimulatorsAsync(simulators, appId, expectedHash, deps);
-  const answered = result.status === 'ok' && result.hash === (await expectedHash);
+  const answered = result.status === 'ok' && result.hash === expectedHash;
   if (!answered && !deviceFilter) {
     const [phone] = (await listPhonesOnce()).filter((device) => device.reachable);
     if (phone) {
