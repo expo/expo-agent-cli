@@ -2,8 +2,8 @@
 // What the generated native directories were made from, and whether they are stale now.
 //
 // This CLI owns the path and the schema, and both writes and reads it: `expo prebuild` records
-// nothing, so the write happens in the `prebuild` passthrough and successful `dev` prebuild steps. A prebuild run outside this CLI leaves no marker, which reads as `unknown` — coarser advice,
-// never wrong.
+// nothing, so the write happens in the `prebuild` passthrough and successful `dev` prebuild steps. A prebuild run outside this CLI cannot refresh this record; consumers treat a missing marker
+// as unknown and decide what advice is safe for the project.
 
 import fs from 'fs';
 import path from 'path';
@@ -101,7 +101,7 @@ export function readPrebuildMarker(
  * Staleness of a platform's generated native directory, from the marker.
  *
  * `not-applicable` when the project has no native directory. `unknown` when nothing recorded what
- * generated it, which falls through to the plain rebuild advice.
+ * generated it; the installed-app verdict decides whether regeneration is needed.
  */
 export function getNativeDirectoryStaleness(
   projectRoot: string,
