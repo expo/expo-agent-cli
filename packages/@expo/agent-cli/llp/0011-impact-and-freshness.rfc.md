@@ -101,6 +101,16 @@ The lookup answers in three states: `{ state: 'found', build }`, `{ state: 'none
 
 `--platform ios` does not isolate the iOS app config. An Android-only edit can move the iOS hash. The whole-project hash still dominates, so an unchanged project hash still implies unchanged per-platform hashes.
 
+### What `status` remembers of the answer
+
+`.expo/agent-cli-eas-builds.json`, one entry per platform, keyed on the whole-project hash (`src/status/easBuilds.ts`). The key is the hash `status` computes anyway, and it dominates the per-platform hash the lookup asked about, so a matching key proves the answer still holds.
+
+A **`found`** is believed for as long as the key stands. A build EAS has does not stop existing with time; it only goes out of date when somebody deletes it, and the download command says so when they have.
+
+A **`none`** was written nowhere until 2026-09-15. The argument was the timeline of the workflow: you start a build, it finishes fifteen minutes later, and a remembered "there is none" is wrong exactly then. The cost was that every run of a linked project paid the network call — 1.1–1.3 s — to be told the same thing, and an agent loop runs `status` many times per minute. So a `none` is remembered with the time it was true and believed for `EAS_NONE_CACHE_TTL_MS`, five minutes [decided — Kudo, 2026-09-15]. Shorter than the fingerprint cache's ten, because what a stale `none` misdirects is a native build, and five minutes is less than the build the reader would otherwise start. The report carries `source: 'cache'`, `checkedAt` and `ageMs`, prints the age (`none (as of 2m ago)`), and `--no-fingerprint-cache` refuses the record whole ([[0023-fingerprint-caching]] §Every consumer can turn it off). A `none` that does not say when it was true is dropped on read: a none with no time is a none with no bound.
+
+**An unlinked project is never asked.** `eas build:list` refuses a project with no `extra.eas.projectId`, with a sentence this CLI already rewrites (`classifyEasFailure`, [[0027-everything-on-eas]] §What EAS said). The static app config says the same thing for free, so `status` reads `app.json`/`app.config.json` first (`readStaticEasProjectAsync`) and answers `unknown` with the `eas init` form, naming the account the auth section knew. Only when the config is static: a dynamic `app.config.js` may fill the id in from an environment variable this CLI does not evaluate, so for it "not seen" is not "not there" and EAS is asked as before.
+
 ## A fingerprint change is not "OTA-unsafe"
 
 This section is the normative one. `ota.safe` comes from the resolved `runtimeVersion` policy, and never from the class.
