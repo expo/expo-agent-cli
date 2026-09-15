@@ -597,7 +597,9 @@ async function main() {
   }
 
   if (options.tier === 1) {
-    console.error('Tier 1 moved to Vitest: run bun run test:evals (or AGENT_CLI_EVAL_DRY=1 bun run test:evals for outcome checks without a model).');
+    console.error(
+      'Tier 1 moved to Vitest: run bun run test:evals (or AGENT_CLI_EVAL_DRY=1 bun run test:evals for outcome checks without a model).'
+    );
     return 1;
   }
 

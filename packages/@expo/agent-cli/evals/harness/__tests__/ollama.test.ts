@@ -44,7 +44,7 @@ describe(nativeMessages, () => {
         { function: { name: 'run_cli', arguments: { argv: ['skills:list'] } } },
       ],
     });
-    expect(messages.slice(1).map((m) => m.role)).toEqual(['tool', 'tool', 'user']);
+    expect(messages.slice(1).map((message) => message.role)).toEqual(['tool', 'tool', 'user']);
   });
 
   it('should keep malformed-action correction as user feedback when no tool ran', () => {

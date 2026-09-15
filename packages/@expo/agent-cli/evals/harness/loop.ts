@@ -32,6 +32,12 @@ export class AgentAttemptError extends Error {
   }
 }
 
+const MAX_TURNS = 6;
+const MAX_CLI_CALLS = 12;
+const MAX_FEEDBACK_CHARS = 8000;
+const INVALID_ARGUMENTS_FEEDBACK =
+  'Invalid run_cli arguments. No commands ran. Call run_cli with a nonempty argv array of strings.';
+
 /** Only the model chooses argv. The adapter supplies the public help, not scenario answers. */
 export async function runLoop(options: {
   prompt: string;
@@ -59,7 +65,7 @@ Suggested next commands are optional, not additional tasks. /no_think`,
   ];
   options.record({ type: 'message', role: 'user', content: options.prompt });
   const commands: CommandResult[] = [];
-  for (let turn = 0; turn < (options.maxTurns ?? 6); turn++) {
+  for (let turn = 0; turn < (options.maxTurns ?? MAX_TURNS); turn++) {
     options.signal.throwIfAborted();
     const content = await options.chat([...messages]);
     messages.push({ role: 'assistant', content });
@@ -70,11 +76,8 @@ Suggested next commands are optional, not additional tasks. /no_think`,
     } catch {
       /* let the agent correct its syntax */
     }
-    if (
-      action?.done === true &&
-      (action.run === undefined || (Array.isArray(action.run) && action.run.length === 0)) &&
-      (action.runs === undefined || (Array.isArray(action.runs) && action.runs.length === 0))
-    ) {
+    const isDone = action?.done === true && hasNoCalls(action.run) && hasNoCalls(action.runs);
+    if (isDone) {
       if (!commands.length) {
         throw new AgentAttemptError('Agent finished without calling the CLI', 'failed');
       }
@@ -85,28 +88,16 @@ Suggested next commands are optional, not additional tasks. /no_think`,
       };
     }
     const calls: unknown[] = Array.isArray(action?.runs) ? action.runs : [action?.run];
-    if (
-      !action ||
-      (action.done !== undefined && action.done !== false) ||
-      !calls.length ||
-      !calls.every(
-        (call) =>
-          Array.isArray(call) &&
-          call.length &&
-          call.every((part) => typeof part === 'string' && !part.includes('\0'))
-      )
-    ) {
+    const stillWorking = action && (action.done === undefined || action.done === false);
+    const isValidBatch = stillWorking && calls.length > 0 && calls.every(isArgv);
+    if (!isValidBatch) {
       // Reject the batch atomically and answer each invocation, preserving native tool history.
       for (let index = 0; index < Math.max(1, calls.length); index++) {
-        messages.push({
-          role: 'user',
-          content:
-            'Invalid run_cli arguments. No commands ran. Call run_cli with a nonempty argv array of strings.',
-        });
+        messages.push({ role: 'user', content: INVALID_ARGUMENTS_FEEDBACK });
       }
       continue;
     }
-    if (commands.length + calls.length > 12) {
+    if (commands.length + calls.length > MAX_CLI_CALLS) {
       throw new AgentAttemptError('Agent exhausted its CLI call budget', 'budget-exhausted');
     }
     for (const argv of calls as string[][]) {
@@ -131,8 +122,6 @@ Suggested next commands are optional, not additional tasks. /no_think`,
       if (result.timedOut) {
         throw new AgentAttemptError('CLI command timed out', 'timeout');
       }
-      const clip = (text: string) =>
-        text.length > 8000 ? `${text.slice(0, 8000)}\n[output truncated]` : text;
       messages.push({
         role: 'user',
         content: JSON.stringify({
@@ -147,6 +136,27 @@ Suggested next commands are optional, not additional tasks. /no_think`,
     'Agent exhausted its turn budget without completing the task',
     'budget-exhausted'
   );
+}
+
+/** A finished action may omit `run`/`runs` or leave them empty. */
+function hasNoCalls(value: unknown): boolean {
+  return value === undefined || (Array.isArray(value) && value.length === 0);
+}
+
+/** One CLI invocation: a nonempty argv made of plain strings. */
+function isArgv(call: unknown): call is string[] {
+  return (
+    Array.isArray(call) &&
+    call.length > 0 &&
+    call.every((part) => typeof part === 'string' && !part.includes('\0'))
+  );
+}
+
+/** Keep one command's output from crowding the model context. */
+function clip(text: string): string {
+  return text.length > MAX_FEEDBACK_CHARS
+    ? `${text.slice(0, MAX_FEEDBACK_CHARS)}\n[output truncated]`
+    : text;
 }
 
 /** Preserve every JSON field while avoiding pretty-print whitespace in model context. */

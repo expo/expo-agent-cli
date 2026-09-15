@@ -32,7 +32,7 @@
     "build:prod": "ncc build ./src/cli.ts -o build/cli/ --minify --no-cache --no-source-map-register",
     "clean": "expo-module clean",
     "lint": "oxlint --config oxlint.config.mjs .",
-    "format": "expo-module format",
+    "format": "oxfmt",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.tests.json && tsc -p e2e/tsconfig.json && tsc -p e2e-live/tsconfig.json && tsc -p evals/tsconfig.json",
     "test": "vitest run",
     "test:e2e": "vitest run --config e2e/vitest.config.ts",
@@ -52,6 +52,7 @@
   "devDependencies": {
     "2g": "^0.4.3",
     "@clack/prompts": "1.7.0",
+    "@expo/agent-eval-vitest": "0.0.2",
     "@types/getenv": "^1.0.0",
     "@types/node": "^22.14.0",
     "@types/ws": "^8.5.4",
@@ -65,7 +66,6 @@
     "memfs": "^3.2.0",
     "typescript": "~6.0.3",
     "vitest": "^4.1.11",
-    "ws": "^8.12.1",
-    "@expo/agent-eval-vitest": "0.0.2"
+    "ws": "^8.12.1"
   }
 }

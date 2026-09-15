@@ -70,9 +70,9 @@ describe(setupImpactFixture, () => {
         expect(result.exitCode, result.stdout + result.stderr).toBe(0);
         const report = JSON.parse(result.stdout);
         const local = report.freshness.platforms.filter(
-          (p: { backend: string }) => p.backend === 'local'
+          (entry: { backend: string }) => entry.backend === 'local'
         );
-        expect(local.map((p: { platform: string }) => p.platform).sort()).toEqual([
+        expect(local.map((entry: { platform: string }) => entry.platform).sort()).toEqual([
           'android',
           'ios',
         ]);

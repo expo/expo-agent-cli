@@ -20,9 +20,9 @@ export function copyWorkspace(fixture: string, linkDependencies = false, destina
     fs.cpSync(source, root, {
       recursive: true,
       dereference: true,
-      filter: (p) =>
-        path.basename(p) !== '.git' &&
-        !(linkDependencies && p === path.join(source, 'node_modules')),
+      filter: (entryPath) =>
+        path.basename(entryPath) !== '.git' &&
+        !(linkDependencies && entryPath === path.join(source, 'node_modules')),
     });
     if (linkDependencies) {
       const dependencies = path.join(source, 'node_modules');

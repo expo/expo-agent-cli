@@ -5,6 +5,8 @@ const host = process.env.OLLAMA_HOST ?? 'http://127.0.0.1:11434';
 // The digest, not just the mutable tag, identifies the weights used by the default CI driver.
 export const defaultDigest = '500a1f067a9f782620b40bee6f7b0c89e17ae61f686b92c24933e4ca4b2b8b41';
 
+type NativeToolCall = { function: { name?: string; arguments?: { argv?: unknown } } };
+
 async function request(route: string, signal: AbortSignal, body?: unknown) {
   const response = await fetch(new URL(route, host), {
     method: body ? 'POST' : 'GET',
@@ -102,32 +104,31 @@ export async function chat(
   };
   const response = await request('/api/chat', signal, body);
   record(body, response);
-  const calls = response.message?.tool_calls;
-  if (calls?.length > 12) {
+  const calls: NativeToolCall[] = response.message?.tool_calls ?? [];
+  if (calls.length > 12) {
     throw new Error('Model requested too many CLI calls');
   }
-  if (calls?.some((call: { function?: { name?: string } }) => call.function?.name !== 'run_cli')) {
+  if (calls.some((call) => call.function?.name !== 'run_cli')) {
     throw new Error('Unknown tool requested by Ollama');
   }
   if (response.done_reason === 'length') {
     throw new AgentAttemptError('Model exhausted its output token budget', 'budget-exhausted');
   }
-  if (!calls?.length && !response.message?.content?.trim()) {
+  if (!calls.length && !response.message?.content?.trim()) {
     throw new Error('Ollama returned no tool call or final answer');
   }
+  // The loop speaks one JSON action per turn: a single run, a batch of runs, or done.
+  const argvs = calls.map((call) => call.function.arguments?.argv ?? null);
+  let action: Record<string, unknown>;
+  if (argvs.length === 0) {
+    action = { done: true, summary: response.message.content };
+  } else if (argvs.length === 1) {
+    action = { run: argvs[0] };
+  } else {
+    action = { runs: argvs };
+  }
   return {
-    content: JSON.stringify(
-      calls?.length
-        ? calls.length === 1
-          ? { run: calls[0].function.arguments?.argv ?? null }
-          : {
-              runs: calls.map(
-                (call: { function: { arguments?: { argv?: unknown } } }) =>
-                  call.function.arguments?.argv ?? null
-              ),
-            }
-        : { done: true, summary: response.message.content }
-    ),
+    content: JSON.stringify(action),
     request: body,
     response,
     usage: {

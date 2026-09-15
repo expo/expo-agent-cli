@@ -34,16 +34,20 @@ limit per CLI call. There are no automatic retries or pass@k masking.
 import { expect } from '@expo/agent-eval-vitest';
 import { agentEval, setupProject } from '../harness/cli';
 
-agentEval(import.meta.url, {
-  prompt: 'Can I use Expo Go for this project?',
-  projectSetup: setupProject({ fixture: 'evals/fixtures/real-app', linkDependencies: true }),
-}, (check) => {
-  check('inspects this project’s Expo Go compatibility', (_workspace, { fixture }) => {
-    expect(fixture.output().cliEvents).toContainEqual(
-      expect.objectContaining({ _e: 'cli:status', expoGoCompatible: true })
-    );
-  });
-});
+agentEval(
+  import.meta.url,
+  {
+    prompt: 'Can I use Expo Go for this project?',
+    projectSetup: setupProject({ fixture: 'evals/fixtures/real-app', linkDependencies: true }),
+  },
+  (check) => {
+    check('inspects this project’s Expo Go compatibility', (_workspace, { fixture }) => {
+      expect(fixture.output().cliEvents).toContainEqual(
+        expect.objectContaining({ _e: 'cli:status', expoGoCompatible: true })
+      );
+    });
+  }
+);
 ```
 
 Each named check is an independent Vitest test; the five developer tasks have fifteen checks.
@@ -78,13 +82,13 @@ source/config preservation and the observed CLI calls are checked independently.
 
 ## Developer task coverage
 
-| Developer prompt | Fixture | Required evidence |
-| --- | --- | --- |
-| “Can I use Expo Go for this project?” | Real, locked Expo 57 app | CLI compatibility event; project preserved |
+| Developer prompt                                                                              | Fixture                                         | Required evidence                                                                        |
+| --------------------------------------------------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| “Can I use Expo Go for this project?”                                                         | Real, locked Expo 57 app                        | CLI compatibility event; project preserved                                               |
 | “I made some changes to this app. Is reloading enough, or do I need a new development build?” | Development app with a native dependency change | CLI compares fingerprint sources to the previous build and reports native rebuild needed |
-| Same prompt | Development app with only a screen edit | CLI reports JS-only impact for both platforms |
-| “The app still shows the old screen after my edit. Refresh it.” | Running dev-server protocol fixture | Server independently observes a reload caused by the agent |
-| “After my last edit, the app shows a red error screen. Find out what went wrong.” | Dev server with a captured Metro bundling error | Agent retrieves the diagnostic and source location |
+| Same prompt                                                                                   | Development app with only a screen edit         | CLI reports JS-only impact for both platforms                                            |
+| “The app still shows the old screen after my edit. Refresh it.”                               | Running dev-server protocol fixture             | Server independently observes a reload caused by the agent                               |
+| “After my last edit, the app shows a red error screen. Find out what went wrong.”             | Dev server with a captured Metro bundling error | Agent retrieves the diagnostic and source location                                       |
 
 The user prompts name no commands, flags, or JSON format. Native and JS-only cases use identical
 prompts so project evidence determines the result. Fingerprint generation is a controlled external
