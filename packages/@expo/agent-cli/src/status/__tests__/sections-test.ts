@@ -264,6 +264,8 @@ describe(applyEasFreshness, () => {
       buildProfile: 'simulator',
       buildUrl: 'https://expo.dev/artifacts/eas/x.tar.gz',
       source: 'eas',
+      checkedAt: null,
+      ageMs: null,
       reason: null,
       ...overrides,
     };
@@ -295,6 +297,33 @@ describe(applyEasFreshness, () => {
     expect(
       status.platforms.find((one) => one.platform === 'ios' && one.backend === 'eas')
     ).toMatchObject({ state: 'stale', detail: expect.stringContaining('no finished build') });
+  });
+
+  // A remembered none says how old it is: a build may have finished since, and the age is the
+  // whole bound on that (llp/0021).
+  it(`should say how old a remembered none is`, () => {
+    const status = buildFreshnessStatus(mockState(), {});
+
+    applyEasFreshness(status, {
+      askedEas: true,
+      platforms: [
+        easBuild({
+          state: 'none',
+          buildId: null,
+          buildProfile: null,
+          source: 'cache',
+          checkedAt: '2026-08-27T10:00:00.000Z',
+          ageMs: 2 * 60 * 1000,
+        }),
+      ],
+    });
+
+    expect(
+      status.platforms.find((one) => one.platform === 'ios' && one.backend === 'eas')
+    ).toMatchObject({
+      state: 'stale',
+      detail: 'EAS had no finished build for this fingerprint 2m ago',
+    });
   });
 
   it(`should keep the reason of a lookup that could not answer`, () => {
@@ -347,6 +376,8 @@ describe(effectivePlatformFreshness, () => {
           buildProfile: 'simulator',
           buildUrl: null,
           source: 'eas',
+          checkedAt: null,
+          ageMs: null,
           reason: null,
         },
       ],
@@ -511,7 +542,12 @@ describe(buildNextActionStatus, () => {
   it(`should report the fresh rule when the recorded build matches`, () => {
     const state = mockState({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } });
 
-    const next = buildNextActionStatus(state, { ios: { hash: 'abcdef0123456789', sources: null } }, 'ios', null);
+    const next = buildNextActionStatus(
+      state,
+      { ios: { hash: 'abcdef0123456789', sources: null } },
+      'ios',
+      null
+    );
 
     expect(next.rule).toBe('dev-client-fresh');
     expect(next.steps).toHaveLength(1);

@@ -303,7 +303,7 @@ Sections:
 - EAS build. Whether EAS already has a finished build made from this exact fingerprint,
   per platform, as `found`, `none` or `unknown`. The cached answer is read always. The
   network call happens only under `--explain`. See [[0011-impact-and-freshness]] for the
-  lookup, the cache key, and why a miss is never written.
+  lookup, the cache key, and how long a `none` is believed.
 - Dev server. Running or not, and how many CDP targets are connected. The discovery
   order is §Discovery ladder. `hostType` and `tunnelUrl` ride along in `--json`. Only a
   tunnel is worth a word in the text, because `127.0.0.1:8081` already says "this

@@ -26,6 +26,7 @@ import {
   installStubFingerprintAsync,
   readStubExpoInvocations,
   readStubFingerprintInvocations,
+  linkFixtureToEasAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
   writeAgentSelectionAsync,
@@ -100,6 +101,9 @@ type StatusReport = {
       buildProfile: string | null;
       buildUrl: string | null;
       source: 'cache' | 'eas' | null;
+      /** When EAS was asked, and how old a remembered `none` is (llp/0011 §The build-cache lookup). */
+      checkedAt: string | null;
+      ageMs: number | null;
       reason: string | null;
     }[];
   } | null;
@@ -1253,7 +1257,11 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 `;
 
     /** Copy the fixture and install both stubs over the ones `setupAsync` put there. */
-    async function setupWithEasAsync(fixture = 'dev-client-fresh-app'): Promise<string> {
+    async function setupWithEasAsync(
+      fixture = 'dev-client-fresh-app',
+      /** Whether `app.json` names an EAS project. The lookup only runs for one that does. */
+      { linked = true }: { linked?: boolean } = {}
+    ): Promise<string> {
       const projectRoot = await setupAsync(fixture);
       const binDir = path.join(projectRoot, '.stub-bin');
       await fs.promises.mkdir(binDir, { recursive: true });
@@ -1266,7 +1274,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       // The shared stub `eas` (`e2e/stubs/eas.js`; the `STUB_EAS_*` variables below are documented
       // there), behind one runner because there is one rung; and the pin, so the EAS CLI is what
       // answers `whoami`.
-      await installSharedStubEasAsync(projectRoot);
+      await installSharedStubEasAsync(projectRoot, { linked });
       await pinEasCliAsync(projectRoot);
       return projectRoot;
     }
@@ -1507,6 +1515,105 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       const report = await reportInAsync(projectRoot, ['--explain'], env);
       expect(report.followups.map((followup) => followup.id)).toContain('cached-build');
     });
+
+    // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
+    // A `none` used to be written nowhere, so every run of a linked project paid the network call
+    // to be told the same thing. It is remembered now, for a bounded while, and the report says how
+    // old the answer is — a remembered none must never read as a fresh one (llp/0021).
+    it('remembers a none for a while, and says how old it is', async () => {
+      const projectRoot = await setupWithEasAsync();
+      await reportInAsync(projectRoot, ['--explain']);
+      await fs.promises.rm(path.join(projectRoot, STUB_EAS_LOG_NAME));
+
+      const report = await reportInAsync(projectRoot, ['--explain']);
+
+      expect(iosOf(report)).toMatchObject({ state: 'none', source: 'cache' });
+      expect(iosOf(report).checkedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(iosOf(report).ageMs).toBeGreaterThanOrEqual(0);
+      // The auth section still asks `whoami`; the lookup asks nothing.
+      expect(easCommands(projectRoot)).toEqual(['whoami']);
+
+      const result = await executeAgentCliAsync(projectRoot, [
+        'status',
+        '--explain',
+        '--dev-server-url',
+        await getUnusedDevServerUrlAsync(),
+      ]);
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toMatch(/none \(as of \d+[smh]/);
+    });
+
+    it('asks EAS again once the remembered none is older than its bound', async () => {
+      const projectRoot = await setupWithEasAsync();
+      await reportInAsync(projectRoot, ['--explain']);
+      await fs.promises.rm(path.join(projectRoot, STUB_EAS_LOG_NAME));
+
+      // Age the record rather than wait: the bound is minutes, and the test is about the rule.
+      const recordPath = path.join(projectRoot, '.expo', 'agent-cli-eas-builds.json');
+      const record = JSON.parse(await fs.promises.readFile(recordPath, 'utf8'));
+      const old = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      for (const platform of Object.keys(record)) {
+        record[platform].checkedAt = old;
+      }
+      await fs.promises.writeFile(recordPath, JSON.stringify(record));
+
+      const report = await reportInAsync(projectRoot, ['--explain']);
+
+      expect(iosOf(report)).toMatchObject({ state: 'none', source: 'eas' });
+      expect(easCommands(projectRoot)).toContain('build:list');
+    });
+
+    // @ref llp/0023-fingerprint-caching.rfc.md §Every consumer can turn it off
+    // The flag is about what the caller will accept, not which file the answer came out of: a
+    // caller who refused the fingerprint record is refused the remembered EAS answer too.
+    it('asks EAS again under --no-fingerprint-cache, whatever the record remembers', async () => {
+      const projectRoot = await setupWithEasAsync();
+      await reportInAsync(projectRoot, ['--explain'], {
+        STUB_EAS_BUILD_LIST: JSON.stringify([FINISHED_BUILD]),
+      });
+      await fs.promises.rm(path.join(projectRoot, STUB_EAS_LOG_NAME));
+
+      const report = await reportInAsync(projectRoot, ['--explain', '--no-fingerprint-cache'], {
+        STUB_EAS_BUILD_LIST: JSON.stringify([FINISHED_BUILD]),
+      });
+
+      expect(iosOf(report)).toMatchObject({ state: 'found', source: 'eas' });
+      expect(easCommands(projectRoot)).toContain('build:list');
+    });
+
+    // The refusal `eas build:list` prints for an unlinked project, read off `app.json` for free
+    // instead of paid for with a network call. The fix it names is the one `eas init` form the
+    // account is known for (llp/0027 §Check the EAS project before starting the environment).
+    it('skips the lookup for a project whose app.json names no EAS project, and names eas init', async () => {
+      const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
+
+      const report = await reportInAsync(projectRoot, ['--explain']);
+
+      expect(report.builds?.platforms.map((platform) => platform.state)).toEqual([
+        'unknown',
+        'unknown',
+      ]);
+      expect(iosOf(report).reason).toContain('not linked to an EAS project');
+      expect(iosOf(report).reason).toContain('app.json names no extra.eas.projectId');
+      expect(iosOf(report).reason).toContain('eas-cli init --account e2e-user --non-interactive');
+      expect(easCommands(projectRoot)).toEqual(['whoami']);
+      expect(report.errors).toEqual({});
+    });
+
+    // A dynamic config may fill the id in from the environment, and this CLI does not evaluate it
+    // (llp/0001 §Constraints item 5) — so "not seen" is not "not there", and EAS is asked.
+    it('asks EAS when the config is dynamic and the static one names no project', async () => {
+      const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'app.config.js'),
+        'module.exports = ({ config }) => ({ ...config, extra: { eas: { projectId: process.env.EAS_PROJECT_ID } } });\n'
+      );
+
+      const report = await reportInAsync(projectRoot, ['--explain']);
+
+      expect(iosOf(report)).toMatchObject({ state: 'none', source: 'eas' });
+      expect(easCommands(projectRoot)).toContain('build:list');
+    });
   });
 
   // @ref llp/0023-fingerprint-caching.rfc.md
@@ -1535,6 +1642,8 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
     it('computes three under --explain: the project, then one per platform', async () => {
       const projectRoot = await setupAsync('dev-client-fresh-app');
+      // The per-platform pair is computed for the EAS lookup, which only runs for a linked project.
+      await linkFixtureToEasAsync(projectRoot);
 
       await reportInAsync(projectRoot, ['--explain']);
 
@@ -1678,6 +1787,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
     it('writes the record under .expo, keyed per platform', async () => {
       const projectRoot = await setupAsync('dev-client-fresh-app');
+      await linkFixtureToEasAsync(projectRoot);
 
       await reportInAsync(projectRoot, ['--explain']);
 
@@ -2197,13 +2307,16 @@ describe('status on a machine that cannot build', () => {
   // elsewhere. A broken `xcode-select` makes a Mac the machine that cannot build; on the other
   // runners the default is Android and the runner's own Android SDK decides, so this case says
   // nothing there [observed — tier0-linux and tier0-windows, 2026-09-09].
-  it.skipIf(process.platform !== 'darwin')('offers dev --eas as the next step, and says why in the plan', async () => {
-    const projectRoot = await setupAsync('dev-client-app');
-    await breakXcodeSelectAsync(projectRoot);
+  it.skipIf(process.platform !== 'darwin')(
+    'offers dev --eas as the next step, and says why in the plan',
+    async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      await breakXcodeSelectAsync(projectRoot);
 
-    const report = await reportInAsync(projectRoot);
+      const report = await reportInAsync(projectRoot);
 
-    expect(report.next!.command).toBe('npx @expo/agent-cli dev --ios --eas');
-    expect(report.next!.steps.map((step) => step.argv[0])).toContain('eas');
-  });
+      expect(report.next!.command).toBe('npx @expo/agent-cli dev --ios --eas');
+      expect(report.next!.steps.map((step) => step.argv[0])).toContain('eas');
+    }
+  );
 });
