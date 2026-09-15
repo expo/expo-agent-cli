@@ -16,7 +16,8 @@ export const statusHelp: CommandHelp = {
       `                          when no class could be established. Without it, always 0`,
     `--build <id>              Compare against an EAS build instead of the local record.\n` +
       `                          Needs --explain, because it asks the service`,
-    `--device <name|udid|serial>  Only the matching simulator or device. Needs --explain`,
+    `--device <name>           Only the matching simulator, emulator or device, by name,\n` +
+      `                          UDID or adb serial. Needs --explain`,
     `--dev-server-url <url>    Dev server to probe (default: the project's own, then 8081-8085)`,
     `--no-followups            Leave the suggested follow-up commands out of the report`,
     `--no-fingerprint-cache    Hash the project again instead of revalidating the cached hash`,

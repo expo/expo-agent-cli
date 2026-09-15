@@ -90,6 +90,9 @@ export const DEV_SERVER_READY_PROBE_TIMEOUT_MS = 400;
  */
 export const DEVICE_PROBE_TIMEOUT_MS = 2500;
 
+/** Budget for fingerprint generation and installed-app reads under --explain. */
+export const INSTALLED_READ_TIMEOUT_MS = 15_000;
+
 export interface StatusOptions {
   /** Explicit --dev-server-url; null lets the probe scan the ports `expo start` uses. */
   devServerUrl: string | null;
@@ -103,6 +106,8 @@ export interface StatusOptions {
   devServerReadyTimeoutMs?: number;
   /** Overrides {@link DEVICE_PROBE_TIMEOUT_MS}, for tests. */
   deviceProbeTimeoutMs?: number;
+  /** Overrides the installed-app section budget, for tests. */
+  installedReadTimeoutMs?: number;
   /**
    * The deep dive: `--explain`.
    *
@@ -375,13 +380,20 @@ export async function collectStatusReportAsync(
       : Promise.resolve(null),
     // The third expensive answer, and the only one that reads a device. It joins this block rather
     // than following it because it shares nothing with the other two.
-    attemptAsync(() =>
-      readInstalledStatusAsync(projectRoot, {
-        lookUp: !!options.explain,
-        device: options.device,
-        fingerprintCache: options.fingerprintCache,
-      })
-    ),
+    attemptAsync(async () => {
+      if (!options.explain) return null;
+      const timeoutMs = options.installedReadTimeoutMs ?? INSTALLED_READ_TIMEOUT_MS;
+      const installed = await raceWithTimeoutAsync(
+        readInstalledStatusAsync(projectRoot, {
+          lookUp: true,
+          device: options.device,
+          fingerprintCache: options.fingerprintCache,
+        }),
+        timeoutMs
+      );
+      if (!installed) throw new Error(`Installed-app check timed out after ${timeoutMs}ms.`);
+      return installed;
+    }),
   ]);
 
   if ('value' in installed) {

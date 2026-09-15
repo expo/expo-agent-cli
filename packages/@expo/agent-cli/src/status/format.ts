@@ -348,7 +348,6 @@ function hasSkillsToReport(report: StatusReport): boolean {
   return !!report.skills.agentIds?.length || report.skills.discovered > 0;
 }
 
-/** One labelled line, or the note that explains why the section is missing. */
 /** One line: the strongest verdict, then each platform that answered. */
 function installedLine(installed: InstalledStatus): string {
   if (!installed.platforms.length) {
@@ -394,6 +393,7 @@ function installedDetailLines(report: StatusReport): string[] {
   return lines;
 }
 
+/** One labelled line, or the note that explains why the section is missing. */
 function row<Section>(
   label: string,
   section: Section | null,

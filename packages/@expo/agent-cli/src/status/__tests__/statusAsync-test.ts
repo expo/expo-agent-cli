@@ -20,9 +20,11 @@ import { discoverSkillsAsync } from '../../skills/discovery';
 import type { DiscoveredSkill } from '../../skills/types';
 import { readEasBuildsStatusAsync } from '../easBuilds';
 import { formatStatusReport } from '../format';
+import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
 import type { StatusReport } from '../types';
 
+vi.mock('../installed', () => ({ readInstalledStatusAsync: vi.fn(async () => null) }));
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
@@ -1047,4 +1049,15 @@ describe(`${collectStatusReportAsync.name} and stale debugger targets`, () => {
     expect(report.devServer).toMatchObject({ appsConnected: 1, appsListed: 2, appsStale: 1 });
     expect(formatStatusReport(report)).toContain('1 stale target still listed');
   });
+});
+
+
+it('bounds an installed-app read and preserves the rest of the report', async () => {
+  vi.mocked(readInstalledStatusAsync).mockImplementationOnce(() => new Promise(() => {}));
+  const report = await collectStatusReportAsync(projectRoot, {
+    ...options, explain: true, installedReadTimeoutMs: 10,
+  });
+  expect(report.installed).toBeNull();
+  expect(report.errors.installed).toBe('Installed-app check timed out after 10ms.');
+  expect(report.project).not.toBeNull();
 });

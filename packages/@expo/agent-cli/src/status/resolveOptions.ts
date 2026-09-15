@@ -100,10 +100,10 @@ export function resolveDeviceFlag(
       [
         `--device needs --explain.`,
         `Why: the installed-app check reads a device, and --explain is what says this run may pay for that. A default report reads no device, so --device would narrow nothing.`,
-        `How: run "${PROGRAM_PREFIX} status --explain --device ${device}".`,
+        `How: run "${PROGRAM_PREFIX} status --explain --device "${device.replace(/["\\$`]/g, '\\$&')}"".`,
       ].join('\n')
     );
-    error.suggestedCommand = `${PROGRAM_PREFIX} status --explain --device ${device}`;
+    error.suggestedCommand = `${PROGRAM_PREFIX} status --explain --device "${device.replace(/["\\$`]/g, '\\$&')}"`;
     throw error;
   }
   return device;

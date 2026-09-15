@@ -511,13 +511,6 @@ export interface StatusReport {
   expoGo: ExpoGoStatus | null;
   freshness: FreshnessStatus | null;
   /**
-   * Whether EAS already has a finished build of what is on disk right now.
-   *
-   * The other half of the freshness question. `freshness` answers "does the app **this machine**
-   * built still match", and a `stale` there used to mean a rebuild; this answers "has anybody
-   * already built exactly this", where the answer is a download instead.
-   */
-  /**
    * What the app **installed on a device** says, rather than what this machine recorded building.
    *
    * The third leg of the freshness question. `freshness` answers "does the app this machine built
@@ -526,6 +519,13 @@ export interface StatusReport {
    * every answer costs a device read.
    */
   installed: InstalledStatus | null;
+  /**
+   * Whether EAS already has a finished build of what is on disk right now.
+   *
+   * The other half of the freshness question. `freshness` answers "does the app **this machine**
+   * built still match", and a `stale` there used to mean a rebuild; this answers "has anybody
+   * already built exactly this", where the answer is a download instead.
+   */
   builds: BuildsStatus | null;
   devServer: DevServerStatus | null;
   /**
