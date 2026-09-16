@@ -1106,6 +1106,8 @@ describe('the eas build line', () => {
     buildProfile: 'simulator',
     buildUrl: 'https://expo.dev/artifacts/eas/abc.tar.gz',
     source: 'cache' as const,
+    checkedAt: null,
+    ageMs: null,
     reason: null,
   };
   const notAskedAndroid = {
@@ -1117,6 +1119,8 @@ describe('the eas build line', () => {
     buildProfile: null,
     buildUrl: null,
     source: null,
+    checkedAt: null,
+    ageMs: null,
     reason: 'EAS was not asked — pass --explain',
   };
 
@@ -1153,6 +1157,31 @@ describe('the eas build line', () => {
     );
 
     expect(rendered).toContain('ios: none');
+  });
+
+  // A remembered none is not a fresh one, and the age is what a reader weighs it by.
+  it(`prints how old a remembered none is`, () => {
+    const rendered = line(
+      mockReport({
+        builds: {
+          askedEas: false,
+          platforms: [
+            {
+              ...notAskedAndroid,
+              platform: 'ios',
+              state: 'none',
+              reason: null,
+              source: 'cache',
+              checkedAt: '2026-08-27T10:00:00.000Z',
+              ageMs: 90_000,
+            },
+          ],
+        },
+      }),
+      'eas build'
+    );
+
+    expect(rendered).toContain('ios: none (as of 1m ago)');
   });
 
   it(`prints the reason of an unknown, and never rounds it down to none`, () => {

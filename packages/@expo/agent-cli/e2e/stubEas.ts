@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { installStubEasRunnerAsync } from './utils';
+import { installStubEasRunnerAsync, linkFixtureToEasAsync } from './utils';
 
 /** Where the stub `eas` records what it was asked to do, one JSON line per run, under the cwd. */
 export const STUB_EAS_LOG_NAME = 'stub-eas-invocations.jsonl';
@@ -43,18 +43,8 @@ export async function installStubEasAsync(
   }: { linked?: boolean; script?: string; names?: ('npx' | 'bunx')[]; logFile?: string } = {}
 ): Promise<{ binDir: string; scriptPath: string }> {
   // A normal EAS fixture is linked; tests of first-run setup explicitly opt out.
-  const appFile = path.join(projectRoot, 'app.json');
-  if (linked && fs.existsSync(appFile)) {
-    const app = JSON.parse(await fs.promises.readFile(appFile, 'utf8'));
-    const config = app.expo ?? app;
-    config.extra = {
-      ...config.extra,
-      eas: {
-        ...config.extra?.eas,
-        projectId: config.extra?.eas?.projectId ?? 'f52a76f7-9fc7-4b59-becd-6d84e9f129d7',
-      },
-    };
-    await fs.promises.writeFile(appFile, JSON.stringify(app));
+  if (linked && fs.existsSync(path.join(projectRoot, 'app.json'))) {
+    await linkFixtureToEasAsync(projectRoot);
   }
   const binDir = path.join(projectRoot, '.stub-bin');
   await fs.promises.mkdir(binDir, { recursive: true });
