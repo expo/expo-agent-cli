@@ -154,24 +154,33 @@ describe('npx @expo/agent-cli status --explain, installed section', () => {
     expect(result.stdout).toContain('npx expo run:android');
   });
 
-  it('reads no device without --explain', async () => {
+  it('checks the installed app without --explain', async () => {
     const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
       env: { ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
     });
 
     expect(result.exitCode).toBe(0);
     const report = JSON.parse(result.stdout);
-    // The key is always present; the value says nothing was asked.
-    expect(report).toHaveProperty('installed', null);
-    expect(adb.calls().some((args) => args.includes('exec-out'))).toBe(false);
+    expect(report.installed.outcome).toBe('up-to-date');
+    expect(adb.calls().some((args) => args.includes('exec-out'))).toBe(true);
   });
 
-  it('exits after a hanging adb read, preserving the other sections and stopping the reader', async () => {
+  it.each([
+    { explain: false, json: true },
+    { explain: false, json: false },
+    { explain: true, json: true },
+  ])('stops a hanging adb read (explain=$explain, json=$json)', async ({ explain, json }) => {
     const pidPath = path.join(projectRoot, '.hanging-adb-pid');
     const server = await startStubDevServerAsync({ projectRoot });
     const child = spawnAgentCli(
       projectRoot,
-      ['status', '--explain', '--json', '--dev-server-url', server.url],
+      [
+        'status',
+        ...(explain ? ['--explain'] : []),
+        ...(json ? ['--json'] : []),
+        '--dev-server-url',
+        server.url,
+      ],
       { env: { ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH, STUB_ADB_HANG_READ: pidPath } }
     );
     const output = collectOutput(child);
@@ -182,16 +191,27 @@ describe('npx @expo/agent-cli status --explain, installed section', () => {
       const result = await Promise.race([
         exited,
         new Promise<never>((_, reject) => {
-          watchdog = setTimeout(() => reject(new Error('status did not exit within 45s')), 45_000);
+          watchdog = setTimeout(
+            () => reject(new Error('status did not exit within its budget')),
+            explain ? 45_000 : 10_000
+          );
         }),
       ]);
       expect(result.exitCode).toBe(0);
-      const report = JSON.parse(result.stdout);
-      expect(report.installed).toBeNull();
-      expect(report.errors.installed).toBe('Installed-app check timed out after 15000ms.');
-      expect(report.project).toMatchObject({ isExpoApp: true, usesDevClient: true });
-      expect(report.devServer).toMatchObject({ running: true, ready: true, url: server.url });
-      expect(report.skills).not.toBeNull();
+      if (json) {
+        const report = JSON.parse(result.stdout);
+        expect(report.installed).toBeNull();
+        expect(report.errors.installed).toBe(explain
+          ? 'Installed-app check timed out after 15000ms.'
+          : 'Not checked within 2000ms. Run npx @expo/agent-cli status --explain for a longer check.');
+        expect(report.project).toMatchObject({ isExpoApp: true, usesDevClient: true });
+        expect(report.devServer).toMatchObject({ running: true, ready: true, url: server.url });
+        expect(report.skills).not.toBeNull();
+      } else {
+        expect(result.stdout).toContain('installed');
+        expect(result.stdout).toContain('Not checked within 2000ms');
+        expect(result.stdout).toContain('npx @expo/agent-cli status --explain for a longer check.');
+      }
       expect(fs.existsSync(pidPath)).toBe(true);
       const pid = Number(fs.readFileSync(pidPath, 'utf8'));
       expect(
@@ -256,7 +276,7 @@ describe('npx @expo/agent-cli status --device', () => {
   });
 
   // The probe launches the app on a phone, so naming one is the consent for that, and a default
-  // report reads no device at all — which is why the flag is refused without --explain.
+  // report uses a short budget; selecting a device requires --explain and its longer budget.
   it.each([
     ['--device without --explain', ['--device', 'iPhone 17'], /--device needs --explain/],
     ['an empty --device', ['--explain', '--device', '  '], /needs a simulator name/],

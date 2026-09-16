@@ -515,8 +515,8 @@ export interface StatusReport {
    *
    * The third leg of the freshness question. `freshness` answers "does the app this machine built
    * still match" and `builds` answers "has anybody already built this"; this one asks the device,
-   * so it is right about a build somebody else made. Only filled in under `--explain`, because
-   * every answer costs a device read.
+   * so it is right about a build somebody else made. Attempted by default with a short deadline;
+   * null on failure or timeout, with the reason in errors.installed.
    */
   installed: InstalledStatus | null;
   /**

@@ -735,9 +735,9 @@ Schema unit tests plus tier-0 e2e against a fixture app ([[0002-testing-and-eval
 
 Unit, `src/installedApp/__tests__/`: the verdict table over every reason; the aggregate outcome; the Android reader over a stubbed `adb` (ranged read, pull fallback, not installed, no file); the simulator reader over both bundle paths; ranking across several devices.
 
-`src/status/__tests__/installed-test.ts`: that no device is read without `--explain`, that every platform this host can reach is asked, and the shape of the section.
+`src/status/__tests__/installed-test.ts`: that disabled lookups read no device, that every platform this host can reach is asked, and the shape of the section.
 
-E2E, `e2e/__tests__/status-installed-test.ts`: a stub `adb` that serves a fixture APK byte range by byte range, with the stub `fingerprint` set to the embedded hash and then to another one; the `installed` section of `status --explain --json` in both cases, that a default `status` reads no device at all, and that `--device` without `--explain` is refused.
+E2E, `e2e/__tests__/status-installed-test.ts`: a stub `adb` that serves a fixture APK byte range by byte range, with the stub `fingerprint` set to the embedded hash and then to another one; the `installed` section of `status --explain --json` in both cases, that default status checks the app, and a hanging reader is stopped with a --explain hint after the short deadline, and that `--device` without `--explain` is refused.
 
 The installed fingerprint readers extend the existing device-presence checks. Android shares
 `androidPackagePathsAsync` with `androidHasAppAsync`, which backs `hasAppOnDeviceAsync`.

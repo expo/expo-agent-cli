@@ -1061,3 +1061,18 @@ it('bounds an installed-app read and preserves the rest of the report', async ()
   expect(report.errors.installed).toBe('Installed-app check timed out after 10ms.');
   expect(report.project).not.toBeNull();
 });
+
+it('checks installed apps by default and suggests --explain when the brief deadline expires', async () => {
+  vi.mocked(readInstalledStatusAsync).mockImplementationOnce(() => new Promise(() => {}));
+  const report = await collectStatusReportAsync(projectRoot, {
+    ...options, installedReadTimeoutMs: 10,
+  });
+  expect(readInstalledStatusAsync).toHaveBeenCalledWith(projectRoot, expect.objectContaining({
+    lookUp: true,
+  }));
+  expect(report.installed).toBeNull();
+  expect(report.errors.installed).toBe(
+    'Not checked within 10ms. Run npx @expo/agent-cli status --explain for a longer check.'
+  );
+  expect(report.project).not.toBeNull();
+});

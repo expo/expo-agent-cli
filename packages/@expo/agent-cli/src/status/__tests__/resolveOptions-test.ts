@@ -72,7 +72,7 @@ describe(resolveDeviceFlag, () => {
     expect(() => resolveDeviceFlag('   ', { explain: true })).toThrow(/needs a simulator name/);
   });
 
-  it(`rejects --device without --explain, because a default report reads no device`, () => {
+  it(`rejects --device without --explain, so selected devices get the longer budget`, () => {
     expect(() => resolveDeviceFlag('iPhone 17', { explain: false })).toThrow(/needs --explain/);
   });
 });

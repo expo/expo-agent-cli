@@ -91,7 +91,10 @@ export const DEV_SERVER_READY_PROBE_TIMEOUT_MS = 400;
  */
 export const DEVICE_PROBE_TIMEOUT_MS = 2500;
 
-/** Budget for fingerprint generation and installed-app reads under --explain. */
+/** Default budget for fingerprint generation and installed-app reads. */
+export const DEFAULT_INSTALLED_READ_TIMEOUT_MS = 2000;
+
+/** Longer budget explicitly requested with --explain. */
 export const INSTALLED_READ_TIMEOUT_MS = 15_000;
 
 export interface StatusOptions {
@@ -182,7 +185,7 @@ export async function printStatusAsync(projectRoot: string, options: StatusOptio
     tunnelUrl: report.devServer?.tunnelUrl ?? null,
     openUrl: report.devServer?.openUrls[0]?.url ?? null,
     localDevice: report.device?.state ?? 'unknown',
-    // Null on a default run, where no device was read at all.
+    // Null when the installed check failed or exceeded its deadline.
     installed: report.installed?.outcome ?? null,
     freshness: { ios: freshnessOf(report, 'ios'), android: freshnessOf(report, 'android') },
     easBuilds: { ios: easBuildOf(report, 'ios'), android: easBuildOf(report, 'android') },
@@ -379,21 +382,23 @@ export async function collectStatusReportAsync(
     options.explain && report.freshness
       ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!))
       : Promise.resolve(null),
-    // The third expensive answer, and the only one that reads a device. It joins this block rather
-    // than following it because it shares nothing with the other two.
+    // The installed check also runs in the brief report, with a short deadline.
+    // It runs alongside the optional EAS and OTA reads.
     attemptAsync(async () => {
-      if (!options.explain) return null;
-      const timeoutMs = options.installedReadTimeoutMs ?? INSTALLED_READ_TIMEOUT_MS;
+      const timeoutMs = options.installedReadTimeoutMs ??
+        (options.explain ? INSTALLED_READ_TIMEOUT_MS : DEFAULT_INSTALLED_READ_TIMEOUT_MS);
+      const timeoutMessage = options.explain
+        ? `Installed-app check timed out after ${timeoutMs}ms.`
+        : `Not checked within ${timeoutMs}ms. Run npx @expo/agent-cli status --explain for a longer check.`;
       const installed = await withSubprocessDeadlineAsync(
         timeoutMs,
-        `Installed-app check timed out after ${timeoutMs}ms.`,
+        timeoutMessage,
         () => readInstalledStatusAsync(projectRoot, {
           lookUp: true,
           device: options.device,
           fingerprintCache: options.fingerprintCache,
         })
       );
-      if (!installed) throw new Error(`Installed-app check timed out after ${timeoutMs}ms.`);
       return installed;
     }),
   ]);

@@ -1,6 +1,6 @@
 // @ref llp/0028-installed-app-check.rfc.md §Reported by status
 // The `installed` section is the one part of `status` that reads a device, so the two things worth
-// pinning are that it reads none without `--explain`, and that it never asks a phone unasked.
+// pinning are that disabling lookup reads nothing, and that it never asks a phone unasked.
 import { checkInstalledAppAsync } from '../../installedApp/installedAppAsync';
 import { readInstalledStatusAsync } from '../installed';
 
@@ -29,7 +29,7 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe(readInstalledStatusAsync, () => {
-  it(`reads no device without --explain`, async () => {
+  it(`reads no device when lookup is disabled`, async () => {
     await expect(
       readInstalledStatusAsync(projectRoot, { lookUp: false })
     ).resolves.toBeNull();

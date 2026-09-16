@@ -1,6 +1,6 @@
 // @ref llp/0028-installed-app-check.rfc.md §Reported by status
 // The `installed` section: what the app on a device says, as opposed to what this machine recorded
-// building. Only ever asked under `--explain`, because every answer costs a device read.
+// building. The caller bounds the default check; --explain allows a longer read.
 
 import {
   checkInstalledAppAsync,
@@ -10,7 +10,7 @@ import { hostPlatforms, type InstalledAppPlatform } from '../installedApp/option
 import type { InstalledPlatformStatus, InstalledStatus } from './types';
 
 export interface InstalledStatusOptions {
-  /** False outside `--explain`, which is the whole cost control. */
+  /** Whether to perform the lookup. Status enables it for both brief and detailed reports. */
   lookUp: boolean;
   /** The simulator or device the caller named, and the consent for the physical-iPhone probe. */
   device?: string | null;
@@ -22,7 +22,7 @@ export interface InstalledStatusOptions {
 /**
  * Ask every device this machine can reach what it has installed.
  *
- * Null without `--explain`, so a default `status` reads no device at all. Never throws: a platform
+ * Null when lookup is disabled. Never throws: a platform
  * whose device tool is missing answers `no-device`, which is a row in the report rather than an
  * error.
  */

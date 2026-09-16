@@ -531,7 +531,7 @@ The check lives in this CLI, as a section of `status`. What stays in the expo re
 
 ### What the answer is
 
-One verdict per platform, reported as the `installed` section of `status --explain`:
+One verdict per platform, reported as the `installed` section of `status`:
 
 | Reason                                                                                                                                  | Status             | `commands`                                                        |
 | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | ----------------------------------------------------------------- |
@@ -553,13 +553,19 @@ document.
 
 ### Reported by status
 
-Under `--explain` only. Every answer costs a device read, and the default report is built from what
-is already on this machine — the same line that keeps the EAS lookup and the OTA verdict out of it.
+The installed check runs by default with a 2-second deadline covering fingerprint generation and
+device reads. `--explain` gives it 15 seconds. When the default deadline expires, cancel the
+subprocesses and report `installed: null` with an `errors.installed` message directing the caller to
+`npx @expo/agent-cli status --explain` for a longer check. The text report shows the same hint.
+This deadline bounds the installed section, not the other sections of status.
+[confirmed, 2026-09-16] Cached checks on BareExpo took roughly 0.5 seconds for Android and iOS
+together; uncached fingerprint generation can exceed the long deadline. EAS and OTA remain
+opt-in under `--explain`.
 
 `status` promises to start nothing, and the physical-iPhone probe *launches the app*. So that probe
 happens only when `--device <phone>` names one: naming the phone is the consent. Every other reader
 — a booted simulator's container, an APK over `adb` — changes nothing on the device, so those run
-under `--explain` on their own.
+by default under the short deadline.
 
 The section sits below `freshness`, because the two answer the same question from opposite ends.
 `freshness` is about the build this machine recorded making; `installed` is about the build that is

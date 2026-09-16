@@ -47,11 +47,10 @@ export function formatStatusReport(report: StatusReport): string {
     // Left out when nothing was classified — the freshness line has already said why.
     ...impactLines(report),
     // @ref llp/0028-installed-app-check.rfc.md §Reported by status
-    // What the device has, under `--explain` only. Below `freshness` because it answers the same
+    // What the device has. Below `freshness` because it answers the same
     // question from the other end: `freshness` is about the build this machine recorded making,
     // this is about the build that is actually installed, whoever made it.
-    // An error with no value still prints: a default `status` reads no device and has neither, so
-    // the row stays off the report until there is something to say.
+    // An expired deadline still prints the error, including the longer-check hint.
     ...(report.installed || report.errors.installed
       ? [row('installed', report.installed, installedLine, report, 'installed')]
       : []),

@@ -72,7 +72,7 @@ export function resolveBuildId(value: unknown, { explain }: { explain: boolean }
 /**
  * The simulator or device `--device` named.
  *
- * Needs `--explain`, because without it no device is read at all and the flag would state nothing.
+ * Needs `--explain` so an explicitly selected device gets the longer check budget.
  *
  * @throws {CommandError} `BAD_ARGS` for an empty value, or for `--device` without `--explain`.
  */
@@ -99,7 +99,7 @@ export function resolveDeviceFlag(
       'BAD_ARGS',
       [
         `--device needs --explain.`,
-        `Why: the installed-app check reads a device, and --explain is what says this run may pay for that. A default report reads no device, so --device would narrow nothing.`,
+        `Why: selecting a device requires the longer check budget enabled by --explain; the default check has a 2-second budget.`,
         `How: run "${PROGRAM_PREFIX} status --explain --device "${device.replace(/["\\$`]/g, '\\$&')}"".`,
       ].join('\n')
     );

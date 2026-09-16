@@ -11,7 +11,7 @@ export const statusHelp: CommandHelp = {
     `--json                    Print the whole report as JSON, raw project probe included`,
     `--explain                 The deep dive: which sources changed, whether an update can\n` +
       `                          ship over the air, and a fresh answer from EAS about builds\n` +
-      `                          for this fingerprint. Slower than the default report`,
+      `                          for this fingerprint. Gives the installed check 15s instead of 2s`,
     `--assert <class>          Exit 20 when the change costs more than this class, and 22\n` +
       `                          when no class could be established. Without it, always 0`,
     `--build <id>              Compare against an EAS build instead of the local record.\n` +
@@ -71,9 +71,10 @@ export const statusHelp: CommandHelp = {
     `established · 1 the command itself was wrong.`,
     `The fingerprint is cached per platform and revalidated against the files that can move it.`,
     `It cannot see inside ios/ or android/, so entries expire after ten minutes.`,
-    `--explain adds the installed line: what the app on a device was built from, read out of the`,
+    `The installed line checks what the app on a device was built from, read out of the`,
     `app itself (expo-constants embeds it in debug builds, SDK 55+). Right about a build somebody`,
     `else made, which freshness cannot be. A release build embeds none and reads as unknown.`,
+    `The installed check has a 2s budget; run --explain for a longer check when it times out.`,
   ],
 };
 
