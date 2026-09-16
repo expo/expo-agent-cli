@@ -287,6 +287,12 @@ What the suite still may not assert: `attached` as a requirement. `navigate --cl
 asserts the link was opened. There is no `runtime:eval --cloud` test, because the flag
 does not exist.
 
+The route-reload case pins `--method device` to isolate it from the preceding reload's
+reconnect. It does not wait for a non-empty debugger-target list: a cloud app can run
+without registering one. The preceding case continues to cover the automatic ladder,
+and the route case still requires a proved reload and the requested deep link. [observed,
+2026-09-16; replaces the debugger-only settle precondition that timed out on Android]
+
 Cleanup ends the expensive thing first. The session is stopped unconditionally, with
 `--id` so that only this run's is touched.
 

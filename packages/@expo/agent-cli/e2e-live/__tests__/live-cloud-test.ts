@@ -187,44 +187,6 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   }
 
   /**
-   * Wait until the cloud app is settled on the dev server: at least one debugger target listed, and
-   * the same set of target ids across two polls five seconds apart.
-   *
-   * The reload ladder's dev-server rung watches the command socket for a drop-and-reconnect, and a
-   * relaunch from the *previous* test that is still landing produces exactly that signature: the
-   * broadcast is declared acted-on for an app that never reloaded, the run never climbs, and the
-   * verification honestly reports 22 three minutes later [observed — 2026-09-06, iOS Expo Go over
-   * the ws-tunnel: `reload --route` right after `reload`, churn `reconnected: 1` from the earlier
-   * relaunch, then no new target for 180s]. The same race, and the same fix, as `live-android`'s
-   * settle before its own second reload.
-   */
-  async function waitForCloudAppSettledAsync(label: string): Promise<boolean> {
-    let previous = '';
-    let stable = false;
-    await waitForAsync(
-      async () => {
-        const listed = await execAsync('curl', ['-sS', '-m', '10', `http://127.0.0.1:${port}/json/list`], {
-          timeoutMs: 30_000,
-        });
-        let ids: string[] = [];
-        try {
-          ids = (JSON.parse(listed.stdout) as { id?: string }[]).map((t) => t.id ?? '').sort();
-        } catch {
-          return false;
-        }
-        const now = ids.join(',');
-        stable = ids.length > 0 && now === previous;
-        previous = now;
-        run.writeArtifact(`settle-${label}.txt`, `targets: ${now || '(none)'} stable: ${stable}`);
-        return stable;
-      },
-      120_000,
-      5_000
-    );
-    return stable;
-  }
-
-  /**
    * The environment every command in this suite runs with. Proxy mode advertises the caller's
    * origin; tunnel mode opts `expo start --tunnel` into v2. One env for the whole run, because the
    * command that reads it (the dev server start) and the commands that merely inherit it are not
@@ -714,21 +676,34 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
 
   // Expo Go only: the route reload needs the `/lab` screen, which the scaffold has and the minimal
   // dev-build app (`apps/eas-example`, root route only) does not.
-  onExpoGo('runtime:reload --eas --route puts the app on the route it names', async () => {
-    // The reload above may have relaunched the app, and a broadcast into that landing is mistaken
-    // for its own answer — see waitForCloudAppSettledAsync, which this wait exists for.
-    expect(await waitForCloudAppSettledAsync('before-reload-route')).toBe(true);
-
+  onExpoGo('should reload the cloud app onto the named route with --method device', async () => {
+    // The previous reload may still be reconnecting, which can look like a new broadcast's
+    // peer churn. Relaunch explicitly for this route test; the test above covers the auto ladder.
+    // Waiting for stable debugger targets cannot isolate it: a running cloud app may list none.
     const result = await runLiveEasAsync(
       run,
       projectRoot,
-      ['runtime:reload', '--eas', '--route', LAB_ROUTE, '--timeout', RELOAD_TIMEOUT, '--json'],
+      [
+        'runtime:reload',
+        '--eas',
+        '--method',
+        'device',
+        '--route',
+        LAB_ROUTE,
+        '--timeout',
+        RELOAD_TIMEOUT,
+        '--json',
+      ],
       { label: 'reload-cloud-route', env: suiteEnv() }
     );
     expectExit(result, 0);
     const report = parseJson(result);
     expect(report.reloaded).toBe(true);
     expect(report.route).toBe(LAB_ROUTE);
+    expect(report.method).toBe('device');
+    expect(report.attempts.map((attempt: { method: string }) => attempt.method)).toEqual([
+      'device',
+    ]);
     expect(report.routeCheck.ok).toBe(true);
     // The link that was opened, on the public origin. A flag that names a target *is* the target
     // (llp/0021), so a route reload that opened the root would be a wrong report, not a slow one.
