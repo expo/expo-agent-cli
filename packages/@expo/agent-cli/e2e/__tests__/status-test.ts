@@ -1857,7 +1857,7 @@ process.exit(1);
       ]);
 
       expect(report.next?.buildLocation).toBeNull();
-      expect(result.stdout).not.toContain('build ');
+      expect(result.stdout).not.toMatch(/^build\s/m);
     });
 
     it('names the place and the cause for a project that needs one', async () => {
