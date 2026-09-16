@@ -123,6 +123,9 @@ const SESSION_START_MS = 600_000;
 /** What `--timeout` is set to on a cloud reload, spelled the way that option parses. */
 const RELOAD_TIMEOUT = '180s';
 
+/** Allow a slow cloud reconnect without changing the automatic reload path under test. */
+const APP_SETTLE_TIMEOUT_MS = 300_000;
+
 /** The route the lab screen lives at, for the reload that names one. */
 const LAB_ROUTE = '/lab';
 
@@ -184,6 +187,83 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       `$ eas ${args.join(' ')}\nexit ${result.exitCode}\n\n${result.stdout}\n${result.stderr}`
     );
     return result;
+  }
+
+  /**
+   * Wait until the cloud app is settled on the dev server: at least one debugger target listed, and
+   * the same set of target ids across two polls five seconds apart.
+   *
+   * The reload ladder's dev-server rung watches the command socket for a drop-and-reconnect, and a
+   * relaunch from the *previous* test that is still landing produces exactly that signature: the
+   * broadcast is declared acted-on for an app that never reloaded, the run never climbs, and the
+   * verification honestly reports 22 three minutes later [observed — 2026-09-06, iOS Expo Go over
+   * the ws-tunnel: `reload --route` right after `reload`, churn `reconnected: 1` from the earlier
+   * relaunch, then no new target for 180s]. The same race, and the same fix, as `live-android`'s
+   * settle before its own second reload.
+   */
+  async function waitForCloudAppSettledAsync(label: string): Promise<void> {
+    let previous = '';
+    const startedAt = Date.now();
+    const observations: {
+      elapsedMs: number;
+      targets: string[] | null;
+      error: string | null;
+      stable: boolean;
+    }[] = [];
+    let artifact = '';
+    const settled = await waitForAsync(
+      async () => {
+        let ids: string[] | null = null;
+        let error: string | null = null;
+        try {
+          const listed = await execAsync(
+            'curl',
+            ['-fsS', '-m', '10', `http://127.0.0.1:${port}/json/list`],
+            {
+              timeoutMs: 30_000,
+            }
+          );
+          if (listed.exitCode !== 0) {
+            throw new Error(`curl exited ${listed.exitCode}: ${listed.stderr.trim()}`);
+          }
+          const targets: unknown = JSON.parse(listed.stdout);
+          if (
+            !Array.isArray(targets) ||
+            targets.some((target) => typeof target?.id !== 'string' || !target.id)
+          ) {
+            throw new Error(
+              'The debugger target response was not an array of non-empty target ids.'
+            );
+          }
+          ids = targets.map((target) => target.id as string).sort();
+        } catch (cause) {
+          error = cause instanceof Error ? cause.message : String(cause);
+        }
+        const now = ids?.join(',') ?? '';
+        const stable = !!now && now === previous;
+        // A failed or empty poll breaks consecutiveness; it is not a stable app connection.
+        previous = now;
+        observations.push({ elapsedMs: Date.now() - startedAt, targets: ids, error, stable });
+        artifact = run.writeArtifact(
+          `settle-${label}.json`,
+          JSON.stringify(
+            {
+              timeoutMs: APP_SETTLE_TIMEOUT_MS,
+              observations,
+            },
+            null,
+            2
+          )
+        );
+        return stable;
+      },
+      APP_SETTLE_TIMEOUT_MS,
+      5_000
+    );
+    expect(
+      settled,
+      `Cloud app did not settle within ${APP_SETTLE_TIMEOUT_MS}ms. Poll history: ${artifact}\n${JSON.stringify(observations, null, 2)}`
+    ).toBe(true);
   }
 
   /**
@@ -676,34 +756,21 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
 
   // Expo Go only: the route reload needs the `/lab` screen, which the scaffold has and the minimal
   // dev-build app (`apps/eas-example`, root route only) does not.
-  onExpoGo('should reload the cloud app onto the named route with --method device', async () => {
-    // The previous reload may still be reconnecting, which can look like a new broadcast's
-    // peer churn. Relaunch explicitly for this route test; the test above covers the auto ladder.
-    // Waiting for stable debugger targets cannot isolate it: a running cloud app may list none.
+  onExpoGo('runtime:reload --eas --route puts the app on the route it names', async () => {
+    // The reload above may have relaunched the app, and a broadcast into that landing is mistaken
+    // for its own answer — see waitForCloudAppSettledAsync, which this wait exists for.
+    await waitForCloudAppSettledAsync('before-reload-route');
+
     const result = await runLiveEasAsync(
       run,
       projectRoot,
-      [
-        'runtime:reload',
-        '--eas',
-        '--method',
-        'device',
-        '--route',
-        LAB_ROUTE,
-        '--timeout',
-        RELOAD_TIMEOUT,
-        '--json',
-      ],
+      ['runtime:reload', '--eas', '--route', LAB_ROUTE, '--timeout', RELOAD_TIMEOUT, '--json'],
       { label: 'reload-cloud-route', env: suiteEnv() }
     );
     expectExit(result, 0);
     const report = parseJson(result);
     expect(report.reloaded).toBe(true);
     expect(report.route).toBe(LAB_ROUTE);
-    expect(report.method).toBe('device');
-    expect(report.attempts.map((attempt: { method: string }) => attempt.method)).toEqual([
-      'device',
-    ]);
     expect(report.routeCheck.ok).toBe(true);
     // The link that was opened, on the public origin. A flag that names a target *is* the target
     // (llp/0021), so a route reload that opened the root would be a wrong report, not a slow one.

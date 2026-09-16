@@ -287,11 +287,13 @@ What the suite still may not assert: `attached` as a requirement. `navigate --cl
 asserts the link was opened. There is no `runtime:eval --cloud` test, because the flag
 does not exist.
 
-The route-reload case pins `--method device` to isolate it from the preceding reload's
-reconnect. It does not wait for a non-empty debugger-target list: a cloud app can run
-without registering one. The preceding case continues to cover the automatic ladder,
-and the route case still requires a proved reload and the requested deep link. [observed,
-2026-09-16; replaces the debugger-only settle precondition that timed out on Android]
+The automatic route-reload case waits up to five minutes for two consecutive, non-empty
+debugger-target polls with the same ids. Each poll is retained in a JSON artifact, including
+empty responses and probe errors, and a timeout prints the history as well as the artifact path.
+This extends the previous two-minute budget without replacing automatic reload with a
+forced device relaunch. It is a timeout mitigation, not proof that the intermittent Android
+failure is resolved: a local Android experiment settled in ten seconds, and a permanently
+empty target list will still fail. [observed, 2026-09-16]
 
 Cleanup ends the expensive thing first. The session is stopped unconditionally, with
 `--id` so that only this run's is touched.
