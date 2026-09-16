@@ -1072,7 +1072,7 @@ it('checks installed apps by default and suggests --explain when the brief deadl
   }));
   expect(report.installed).toBeNull();
   expect(report.errors.installed).toBe(
-    'Not checked within 10ms. Run "npx @expo/agent-cli status --explain" for a longer check.'
+    'Not checked within 10ms. Retry with "npx @expo/agent-cli status --explain" (15s timeout).'
   );
   expect(report.project).not.toBeNull();
 });
