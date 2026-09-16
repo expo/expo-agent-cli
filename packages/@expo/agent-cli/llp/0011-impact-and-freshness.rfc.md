@@ -12,7 +12,7 @@
 
 This answers the question an agent asks after every edit: do I need to build again? And the one it should ask before every release: can this be shipped over the air? Those are two questions about two different systems. A tool answering both must never derive one from the other.
 
-There is no `@expo/agent-cli impact` command. The classifier is the engine under `status`. The status UI, the `--explain` / `--assert` flags, and the exit codes of the gate live in [[0004-smart-start-and-project-state]].
+There is no `@expo/agent-cli impact` command. The classifier is the engine under `status`. The status UI, the `--assert` / `--build` flags, and the exit codes of the gate live in [[0004-smart-start-and-project-state]]. `--explain`, which gated the per-source list, the OTA verdict and the EAS lookup, was removed on 2026-09-15: every run carries all three, and what keeps that affordable is what is remembered under `.expo` (§What `status` remembers of the answer, §A fingerprint change is not "OTA-unsafe", [[0023-fingerprint-caching]]).
 
 ## Two things called impact
 

@@ -93,9 +93,9 @@ ${stepLines(oneTimeSetup, null)}
     ${color.muted('instead of searching for one. Under --json all three are also in the object.')}
 
   ${color.heading('When you need an answer about EAS')}
-    ${color.command(`${PROGRAM_PREFIX} status --explain`)} asks the service: which sources changed, whether an
-    update published now would reach the installed builds, and whether EAS already has a
-    build for this exact fingerprint. It is slower than status, and it is the one that asks.
+    ${color.command(`${PROGRAM_PREFIX} status`)} already asked: which sources changed, whether an update
+    published now would reach the installed builds, and whether EAS already has a build for
+    this exact fingerprint. ${color.command(`${PROGRAM_PREFIX} status --build <id>`)} compares against one build.
 
   ${color.heading('Where the rest is')}
     ${color.command(`${PROGRAM_PREFIX} -h`)}                every command, grouped by the job it does

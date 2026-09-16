@@ -18,7 +18,7 @@ The first release is the commands a first user should try. Everything else lives
 | ------------------------------------------------ | --------------------------------------------------------------------------- |
 | `new`                                            | headless creation                                                           |
 | `install` / `add`                                | `expo install` plus skill sync and impact                                   |
-| `status` (`--explain` / `--assert` / `--build`)  | the cheap read-only brief                                                   |
+| `status` (`--assert` / `--build`)                | the read-only brief, whole on every run                                     |
 | `typecheck`                                      | the gate no other command is                                                |
 | `doctor` / `doctor:check`                        | expo-doctor, normalized                                                     |
 | `dev` / `dev:stop` / `dev:logs`                  | the plan engine, plus `--detach`, `--port`, `--wait-ready`                  |

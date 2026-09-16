@@ -312,9 +312,12 @@ Sections:
   line (`js-only`, `dev-client-compatible`, or `needs-native-build`). See
   [[0011-impact-and-freshness]].
 - EAS build. Whether EAS already has a finished build made from this exact fingerprint,
-  per platform, as `found`, `none` or `unknown`. The cached answer is read always. The
-  network call happens only under `--explain`. See [[0011-impact-and-freshness]] for the
-  lookup, the cache key, and how long a `none` is believed.
+  per platform, as `found`, `none` or `unknown`. The remembered answer is read first, and
+  EAS is asked for what it does not cover — on every run, since 2026-09-15; `--explain`
+  used to gate the call and is gone [decided — Kudo, 2026-09-15: "not friendly to use"].
+  A project whose static config is not linked to EAS is never asked. See
+  [[0011-impact-and-freshness]] for the lookup, the cache key, and how long a `none` is
+  believed.
 - Dev server. Running or not, and how many CDP targets are connected. The discovery
   order is §Discovery ladder. `hostType` and `tunnelUrl` ride along in `--json`. Only a
   tunnel is worth a word in the text, because `127.0.0.1:8081` already says "this
