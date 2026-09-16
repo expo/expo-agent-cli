@@ -23,6 +23,21 @@ describe(buildCreateExpoArgs, () => {
   it(`should pass the directory as typed, so create-expo names the app from it`, () => {
     expect(buildCreateExpoArgs('apps/my-app', { install: true })).toEqual(['apps/my-app', '--yes']);
   });
+
+  it.each([
+    { template: 'blank-typescript', flag: '--template', value: 'blank-typescript' },
+    { template: 'default@sdk-55', flag: '--template', value: 'default@sdk-55' },
+    { template: './local template.tgz', flag: '--template', value: './local template.tgz' },
+    { example: 'with-router', flag: '--example', value: 'with-router' },
+  ])('should forward $flag $value with headless options', ({ flag, value, ...options }) => {
+    expect(buildCreateExpoArgs('my-app', { install: false, ...options })).toEqual([
+      'my-app',
+      '--yes',
+      '--no-install',
+      flag,
+      value,
+    ]);
+  });
 });
 
 describe(resolveCreateExpoCli, () => {

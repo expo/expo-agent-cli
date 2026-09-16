@@ -12,6 +12,10 @@ export interface NewOptions {
   directory: string;
   /** Display name to write into `app.json`, or undefined to keep the one from the directory. */
   name?: string;
+  /** Template package, version, URL, or archive to pass to `create-expo`. */
+  template?: string;
+  /** Example from expo/examples to pass to `create-expo`. */
+  example?: string;
   /** Let `create-expo` install the dependencies, cleared by `--no-install`. */
   install: boolean;
   /** Initialize a git repository when the new project is not in one, cleared by `--no-git`. */
@@ -24,6 +28,10 @@ export interface NewOptions {
 
 const NEW_ARGS = {
   '--name': String,
+  '--template': String,
+  '-t': '--template',
+  '--example': String,
+  '-e': '--example',
   '--json': Boolean,
   '--no-install': Boolean,
   '--no-git': Boolean,
@@ -43,8 +51,8 @@ function badArgs(message: string, suggestedCommand = USAGE_COMMAND): CommandErro
 /**
  * Resolve the arguments of `@expo/agent-cli new <directory>`.
  *
- * @throws {CommandError} `BAD_ARGS` for a missing or repeated directory, an empty `--name`, an
- * unknown flag, or an unusable value.
+ * @throws {CommandError} `BAD_ARGS` for a missing or repeated directory, conflicting scaffold
+ * selections, an unknown flag, or an unusable value.
  */
 export function resolveNewOptions(argv: string[]): NewOptions {
   let args;
@@ -76,9 +84,24 @@ export function resolveNewOptions(argv: string[]): NewOptions {
     );
   }
 
+  const template = args['--template'] as string | undefined;
+  const example = args['--example'] as string | undefined;
+  for (const flag of ['--template', '--example'] as const) {
+    if (args[flag] != null && !String(args[flag]).trim()) {
+      throw badArgs(
+        `${flag} was empty. Pass an explicit value so project creation can run without prompting.`
+      );
+    }
+  }
+  if (template != null && example != null) {
+    throw badArgs('Choose either --template or --example, not both.');
+  }
+
   return {
     directory: positional[0]!,
     name,
+    template,
+    example,
     install: !args['--no-install'],
     git: !args['--no-git'],
     json: !!args['--json'],
