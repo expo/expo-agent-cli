@@ -62,11 +62,7 @@ export function run(
   });
 }
 
-function spawnRunner(
-  runner: Runner,
-  io: RunIo,
-  onMissing?: () => boolean
-): void {
+function spawnRunner(runner: Runner, io: RunIo, onMissing?: () => boolean): void {
   const command =
     io.platform === 'win32' && !/\.(cmd|bat|exe)$/i.test(runner.command)
       ? `${runner.command}.cmd`

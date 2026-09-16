@@ -56,7 +56,7 @@ engine cannot disagree.
 
 ### A current build is not an installed app
 
-A fingerprint that matches the recorded build proves the *build* is current. It says nothing about
+A fingerprint that matches the recorded build proves the _build_ is current. It says nothing about
 where that build is. `dev` read the match as "there is nothing to do but serve", so a project whose
 build was recorded on this machine and then wiped with the simulator — or never installed at all,
 because the build was made by EAS — got a dev server and no app to answer it. The plan was right
@@ -135,7 +135,7 @@ already on disk.
 falls on — a config plugin "writes different native code", an `eas.json` edit "moves the
 fingerprint without changing generated native code, so a cloud build is enough and prebuild is not
 needed". `KIND_NEEDS_PREBUILD` is that prose as a table, `sourceNeedsPrebuild` is the one
-row that needs the diff's *operation* as well, and the decision table reads them. Two places
+row that needs the diff's _operation_ as well, and the decision table reads them. Two places
 deciding this separately is exactly how they would come to disagree.
 
 The comparison is `classifyAgainstRecordedBuild`, in process: it diffs the `sources` on the
@@ -144,11 +144,11 @@ is what makes it affordable on the path `dev` takes every time.
 
 **A module entering or leaving `node_modules` is on the cheap side, and the operation is what says so** [asked — Kudo, 2026-09-07]. The first cut of the table put every `native-module` change on the prebuild side, so `npx expo install expo-observe` — a package that ships no config plugin — cost a prebuild that regenerated an identical `ios/`. That is the same minute the `eas.json` row exists to save, on the change a project makes far more often.
 
-What `prebuild` writes comes from three things: the template, the app config, and the config plugins the app config applies. A new dependency is none of them. A package that *does* need generated code ships a config plugin and is named in the app config to apply it, and both of those move sources of their own — `config-plugin` and `app-config`, which have always been on the prebuild side. So this row can be honest without any other row becoming less careful.
+What `prebuild` writes comes from three things: the template, the app config, and the config plugins the app config applies. A new dependency is none of them. A package that _does_ need generated code ships a config plugin and is named in the app config to apply it, and both of those move sources of their own — `config-plugin` and `app-config`, which have always been on the prebuild side. So this row can be honest without any other row becoming less careful.
 
 The linking still happens, later and dynamically, which is the other half of why the prebuild is not owed. `expo run:ios` runs `pod install` when the dependency list has moved [reference — `@expo/cli` 57.0.22, `runIosAsync` → `maybePromptToSyncPodsAsync` → `hasPackageJsonDependencyListChangedAsync`; `install` defaults to true]. The generated `settings.gradle` calls `expoAutolinking.useExpoModules()` and `autolinkLibrariesFromCommand(...)`, both resolved at Gradle **configure** time [reference — `expo-template-bare-minimum`, `android/settings.gradle`]. Neither reads a file the prebuild would have rewritten. And a project whose gitignored `ios/` is simply absent is prebuilt by `expo run:*` itself, so the cheap row cannot leave a run with no native project to build.
 
-**The SDK itself is the exception, by name** [asked — Kudo, 2026-09-07]. `expo prebuild` generates the native project from `expo-template-bare-minimum` at the version the installed `expo` selects, so that one package is the dependency whose own movement changes prebuild's *output* rather than only its inputs. It is planned as a prebuild whatever the operation was (`src/impact/classify.ts` §TEMPLATE_PACKAGES). `react-native` is deliberately not in that set: its version is pinned by the template rather than the other way round. The rule is belt and braces rather than a hole being closed — an upgrade moves the package's contents, which is a `changed` operation, and a hash that moved with nothing to explain it is undecided, which prebuilds too — but it means the guarantee no longer depends on how the fingerprint happens to represent the upgrade.
+**The SDK itself is the exception, by name** [asked — Kudo, 2026-09-07]. `expo prebuild` generates the native project from `expo-template-bare-minimum` at the version the installed `expo` selects, so that one package is the dependency whose own movement changes prebuild's _output_ rather than only its inputs. It is planned as a prebuild whatever the operation was (`src/impact/classify.ts` §TEMPLATE_PACKAGES). `react-native` is deliberately not in that set: its version is pinned by the template rather than the other way round. The rule is belt and braces rather than a hole being closed — an upgrade moves the package's contents, which is a `changed` operation, and a hash that moved with nothing to explain it is undecided, which prebuilds too — but it means the guarantee no longer depends on how the fingerprint happens to represent the upgrade.
 
 **`changed` is the operation this does not skip, and that is the SDK upgrade.** Bumping Expo moves every autolinked module's contents at once, and the prebuild template travels with the SDK — so the project it would generate really is a different one. Telling the two apart by the operation rather than by the kind is what makes the cheap answer available without giving up the expensive one (`src/impact/classify.ts` §sourceNeedsPrebuild).
 
@@ -179,8 +179,8 @@ bare React Native app" flow.
 | Command                                                 | In a directory that is not an Expo app                                        |
 | ------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | `dev`, `start`, `smoke`, `navigate`, `deploy`, `doctor` | stop with `NOT_EXPO_APP`, exit 1, before planning or spawning                 |
-| `skills:sync` / `:list` / `:show`       | stop the same way. they read what the installed Expo packages ship            |
-| `agents:setup`                                           | offers confirmed user-home plugin/skills installation; skips project phases |
+| `skills:sync` / `:list` / `:show`                       | stop the same way. they read what the installed Expo packages ship            |
+| `agents:setup`                                          | offers confirmed user-home plugin/skills installation; skips project phases   |
 | `status`                                                | reports. `project.isExpoApp: false`. a `next` that says so. does not refuse   |
 | `typecheck`                                             | unchanged. `checked: false`, "no TypeScript", exit 0                          |
 | `install`, `new`                                        | unchanged. these are the two ways out of this state, and they are never gated |

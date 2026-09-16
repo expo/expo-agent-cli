@@ -859,7 +859,9 @@ describe('@expo/agent-cli dev:stop --eas', () => {
     const projectRoot = await setupAsync('go-app');
     await writeSessionFileAsync(projectRoot, 'sess-e2e');
 
-    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], { reject: false });
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+      reject: false,
+    });
 
     expect(JSON.parse(result.stdout).session).toBeUndefined();
     expect(easInvocations(projectRoot)).toEqual([]);
@@ -884,6 +886,8 @@ describe('an --eas command on a project EAS does not know', () => {
     const envelope = JSON.parse(result.stdout);
     expect(envelope.error.message).toContain('not linked to an EAS project');
     expect(envelope.error.message).not.toMatch(/re-run this command:\s*\./);
-    expect(envelope.error.suggestedCommand).toBe('npx --yes eas-cli@latest init --account e2e-user --non-interactive');
+    expect(envelope.error.suggestedCommand).toBe(
+      'npx --yes eas-cli@latest init --account e2e-user --non-interactive'
+    );
   });
 });

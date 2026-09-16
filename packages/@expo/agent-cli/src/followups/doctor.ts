@@ -23,7 +23,18 @@ import { capFollowUps, type FollowUp } from './types';
  * command and `"expo.install.exclude"` is a package.json key, and only the first word tells them
  * apart [both observed in one real run of expo-doctor 1.20.1].
  */
-const COMMAND_TOOLS = ['npx', 'bunx', 'npm', 'yarn', 'pnpm', 'bun', 'expo', 'eas', 'pod', 'watchman'];
+const COMMAND_TOOLS = [
+  'npx',
+  'bunx',
+  'npm',
+  'yarn',
+  'pnpm',
+  'bun',
+  'expo',
+  'eas',
+  'pod',
+  'watchman',
+];
 
 /** Quoted spans of advice text, in the three ways expo-doctor writes them. */
 const QUOTED = /`([^`]+)`|'([^']+)'|"([^"]+)"/g;
@@ -60,7 +71,9 @@ function preferAgentCli(action: string): string {
     return `${PROGRAM_PREFIX} ${expo[1]}${expo[2]}`;
   }
   // Login shares the Expo session. EAS-specific auth flags are not interchangeable.
-  const auth = /^(?:(?:npx|bunx)\s+)?(?:eas|eas-cli(?:@latest)?)\s+(login|logout|whoami)$/.exec(action);
+  const auth = /^(?:(?:npx|bunx)\s+)?(?:eas|eas-cli(?:@latest)?)\s+(login|logout|whoami)$/.exec(
+    action
+  );
   return auth ? `${PROGRAM_PREFIX} ${auth[1]}` : action;
 }
 

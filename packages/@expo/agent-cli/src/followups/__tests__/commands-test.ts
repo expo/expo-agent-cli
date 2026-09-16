@@ -190,7 +190,9 @@ describe(buildStatusFollowUps, () => {
       const followups = buildStatusFollowUps(withBuild('stale'));
 
       expect(ids(followups)).toEqual(['cached-build']);
-      expect(followups[0]!.command).toBe(`npx --yes eas-cli@latest build:download --build-id ${BUILD_ID}`);
+      expect(followups[0]!.command).toBe(
+        `npx --yes eas-cli@latest build:download --build-id ${BUILD_ID}`
+      );
     });
 
     it(`should offer nothing when the installed build already matches`, () => {

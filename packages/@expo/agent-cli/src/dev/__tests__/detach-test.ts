@@ -58,24 +58,11 @@ describe(buildDetachSpawn, () => {
       '--no-agent-skills',
     ]);
 
-    expect(args).toEqual([
-      '/bin/cli.js',
-      'dev',
-      '--port',
-      '8195',
-      '--ios',
-      '--no-agent-skills',
-    ]);
+    expect(args).toEqual(['/bin/cli.js', 'dev', '--port', '8195', '--ios', '--no-agent-skills']);
   });
 
   it(`is what resolveDevOptions hands it`, () => {
-    const options = resolveDevOptions([
-      '--ios',
-      '--detach',
-      '--wait-ready',
-      '--port',
-      '8195',
-    ]);
+    const options = resolveDevOptions(['--ios', '--detach', '--wait-ready', '--port', '8195']);
 
     expect(options.detach).toBe(true);
     expect(options.waitReady).toBe(true);

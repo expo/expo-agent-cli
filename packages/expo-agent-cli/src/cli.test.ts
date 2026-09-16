@@ -23,10 +23,12 @@ describe('canonicalSpec', () => {
 
 describe('resolveRunner', () => {
   it('should run bunx with an explicit package and bin under bun', () => {
-    expect(resolveRunner({ userAgent: 'bun/1.2.0 npm/? bunx/1.2.0' }, '2.0.0', ['status'])).toEqual({
-      command: 'bunx',
-      args: ['--package', '@expo/agent-cli@<=2.0.0', 'expo-agent-cli', 'status'],
-    });
+    expect(resolveRunner({ userAgent: 'bun/1.2.0 npm/? bunx/1.2.0' }, '2.0.0', ['status'])).toEqual(
+      {
+        command: 'bunx',
+        args: ['--package', '@expo/agent-cli@<=2.0.0', 'expo-agent-cli', 'status'],
+      }
+    );
   });
 
   it('should run pnpm dlx with an explicit package and bin under pnpm', () => {
@@ -104,9 +106,9 @@ describe('resolveRunner', () => {
   });
 
   it('should ignore bun mentioned later in an npm user agent', () => {
-    expect(
-      resolveRunner({ userAgent: 'npm/10.0.0 node/v22.0.0 bun/false' }, '1.0.0', [])
-    ).toEqual(resolveNpxRunner('1.0.0', []));
+    expect(resolveRunner({ userAgent: 'npm/10.0.0 node/v22.0.0 bun/false' }, '1.0.0', [])).toEqual(
+      resolveNpxRunner('1.0.0', [])
+    );
   });
 });
 

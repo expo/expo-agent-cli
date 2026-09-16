@@ -9,6 +9,8 @@
   ],
   "scripts": {
     "bundle": "bun run --filter expo-agent-cli bundle",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
     "test": "bun test scripts packages/expo-agent-cli && bun run --filter @expo/agent-cli test"
   },
   "devDependencies": {

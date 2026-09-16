@@ -54,7 +54,6 @@ export function classifySubprocessFailure(failure: SubprocessFailure): NeedsHuma
     return null;
   }
 
-
   for (const scenario of needsHumanScenarios) {
     if (!scenario.tools.includes(failure.tool)) {
       continue;

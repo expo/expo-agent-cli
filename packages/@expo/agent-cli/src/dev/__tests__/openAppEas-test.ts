@@ -75,7 +75,8 @@ beforeEach(() => {
   mockConnectUrls();
   mockNoSession();
   vi.mocked(spawnCaptureAsync).mockResolvedValue({
-    stdout: 'Simulator session created (id: 11111111-2222-3333-4444-555555555555) https://expo.dev/accounts/e2e/projects/app/simulator-sessions/11111111-2222-3333-4444-555555555555\n',
+    stdout:
+      'Simulator session created (id: 11111111-2222-3333-4444-555555555555) https://expo.dev/accounts/e2e/projects/app/simulator-sessions/11111111-2222-3333-4444-555555555555\n',
     stderr: '',
     exitCode: 0,
     spawnError: null,
@@ -157,7 +158,11 @@ describe(readSessionId, () => {
   });
   it('ignores an older session named by an overwrite warning', () => {
     const warning = 'Overwriting previous simulator session (id: sess-old).';
-    expect(readSessionId(`${warning}\nSimulator session created (id: sess-new, saved to .env.eas-simulator)`)).toBe('sess-new');
+    expect(
+      readSessionId(
+        `${warning}\nSimulator session created (id: sess-new, saved to .env.eas-simulator)`
+      )
+    ).toBe('sess-new');
     expect(readSessionId(warning)).toBeNull();
   });
   it(`falls back to the id in the session page's URL`, () => {
@@ -176,7 +181,9 @@ describe(readSessionId, () => {
 describe(readSessionUrl, () => {
   it(`finds the session page`, () => {
     expect(
-      readSessionUrl('created (id: a) https://expo.dev/accounts/e/projects/p/simulator-sessions/a\n')
+      readSessionUrl(
+        'created (id: a) https://expo.dev/accounts/e/projects/p/simulator-sessions/a\n'
+      )
     ).toBe('https://expo.dev/accounts/e/projects/p/simulator-sessions/a');
   });
 });
@@ -275,7 +282,9 @@ describe(openAppOnEasAsync, () => {
     });
 
     expect(report.opened).toBe(false);
-    expect(report.reason).toContain('npx --yes eas-cli@latest build --platform ios --profile development-simulator');
+    expect(report.reason).toContain(
+      'npx --yes eas-cli@latest build --platform ios --profile development-simulator'
+    );
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
 
@@ -285,7 +294,10 @@ describe(openAppOnEasAsync, () => {
       sessionId: 'sess-up',
       platform: 'ios',
     } as any);
-    vi.mocked(openRouteAsync).mockResolvedValue({ exitCode: 0, command: 'eas simulator:exec' } as any);
+    vi.mocked(openRouteAsync).mockResolvedValue({
+      exitCode: 0,
+      command: 'eas simulator:exec',
+    } as any);
 
     const report = await openAppOnEasAsync(projectRoot, {
       platform: 'ios',
@@ -391,32 +403,66 @@ describe('the session half on its own', () => {
 
   it('describes smoke cleanup without asking the caller to stop its session', async () => {
     await ensureEasSessionAsync(projectRoot, {
-      platform: 'ios', expoGo: true, devServerUrl: DEV_SERVER, buildId: null,
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
       cleanupAfterRun: true,
     });
-    const messages = vi.mocked(Log.progress).mock.calls.map(([message]) => message).join('\n');
+    const messages = vi
+      .mocked(Log.progress)
+      .mock.calls.map(([message]) => message)
+      .join('\n');
     expect(messages).toContain('This run will stop the session afterwards');
     expect(messages).not.toContain('bills until');
   });
 
   it(`ends a session by id and never bare`, () => {
-    expect(buildSessionStopArgs('sess-1')).toEqual(['simulator:stop', '--id', 'sess-1', '--non-interactive']);
+    expect(buildSessionStopArgs('sess-1')).toEqual([
+      'simulator:stop',
+      '--id',
+      'sess-1',
+      '--non-interactive',
+    ]);
   });
 
   it(`reports a stop that took, and quotes one that did not`, async () => {
-    vi.mocked(spawnCaptureAsync).mockResolvedValue({ stdout: 'stopped', stderr: '', exitCode: 0, spawnError: null } as any);
-    await expect(stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI)).resolves.toEqual({ ok: true, reason: null });
-    expect(vi.mocked(spawnCaptureAsync).mock.calls[0]![1]).toEqual(['--yes', 'eas-cli', ...buildSessionStopArgs('sess-1')]);
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: 'stopped',
+      stderr: '',
+      exitCode: 0,
+      spawnError: null,
+    } as any);
+    await expect(stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI)).resolves.toEqual({
+      ok: true,
+      reason: null,
+    });
+    expect(vi.mocked(spawnCaptureAsync).mock.calls[0]![1]).toEqual([
+      '--yes',
+      'eas-cli',
+      ...buildSessionStopArgs('sess-1'),
+    ]);
 
-    vi.mocked(spawnCaptureAsync).mockResolvedValue({ stdout: '', stderr: 'Session not found', exitCode: 1, spawnError: null } as any);
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: '',
+      stderr: 'Session not found',
+      exitCode: 1,
+      spawnError: null,
+    } as any);
     const failed = await stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI);
     expect(failed.ok).toBe(false);
     expect(failed.reason).toContain('Session not found');
-    await expect(stopEasSessionAsync(projectRoot, 'sess-1', null)).resolves.toMatchObject({ ok: false });
+    await expect(stopEasSessionAsync(projectRoot, 'sess-1', null)).resolves.toMatchObject({
+      ok: false,
+    });
   });
 
   it(`names the session it reused, with the URL it would open, and starts nothing`, async () => {
-    vi.mocked(probeCloudSessionAsync).mockResolvedValue({ state: 'active', sessionId: 'sess-up', platform: 'ios' } as any);
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+      state: 'active',
+      sessionId: 'sess-up',
+      platform: 'ios',
+    } as any);
     const report = await ensureEasSessionAsync(projectRoot, {
       platform: 'ios',
       expoGo: true,

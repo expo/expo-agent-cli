@@ -101,7 +101,15 @@
   var threw = null;
   try {
     handlerFiber.memoizedProps[HANDLER]({
-      nativeEvent: { locationX: 0, locationY: 0, pageX: 0, pageY: 0, timestamp: Date.now(), touches: [], changedTouches: [] },
+      nativeEvent: {
+        locationX: 0,
+        locationY: 0,
+        pageX: 0,
+        pageY: 0,
+        timestamp: Date.now(),
+        touches: [],
+        changedTouches: [],
+      },
       target: null,
       currentTarget: null,
       preventDefault: function () {},
@@ -109,7 +117,10 @@
       persist: function () {},
     });
   } catch (err) {
-    threw = { text: String(err), stack: err && err.stack ? String(err.stack).split('\n').slice(0, 6).join('\n') : null };
+    threw = {
+      text: String(err),
+      stack: err && err.stack ? String(err.stack).split('\n').slice(0, 6).join('\n') : null,
+    };
   }
 
   return {

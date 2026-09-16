@@ -119,8 +119,11 @@ describe(probeProjectStateAsync, () => {
   });
 
   it(`should report a fingerprint error instead of throwing`, async () => {
-    vi.mocked(generateFingerprintAsync)
-      .mockResolvedValue({ hash: null, sources: null, error: 'fingerprint CLI not found' });
+    vi.mocked(generateFingerprintAsync).mockResolvedValue({
+      hash: null,
+      sources: null,
+      error: 'fingerprint CLI not found',
+    });
     writeProject({ expo: '54.0.0' });
 
     await expect(probeProjectStateAsync(projectRoot)).resolves.toMatchObject({

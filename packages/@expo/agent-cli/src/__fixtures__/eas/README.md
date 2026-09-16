@@ -15,21 +15,21 @@ or created.
 
 - Google Cloud Storage signed URLs keep their path and lose their query string
   (`?<signed-query-trimmed>`). The signature is a 15-minute credential, so keeping it would commit
-  an expired secret and a kilobyte of noise for no gain — the *shape* is the path.
+  an expired secret and a kilobyte of noise for no gain — the _shape_ is the path.
 - `gitCommitMessage` keeps its first line, and `fingerprint*.sources` keep their first three
   entries. Both are unbounded in the real payload (the recorded compare was 1.1 MB) and neither
   parser reads more than the shape of one entry.
 
 Nothing else is altered: keys, casing, ordering and null-ness are as the CLI printed them.
 
-| File | Command | What it pins |
-| --- | --- | --- |
-| `build-view.json` | `eas build:view <id> --json` | `status` is `SCREAMING_SNAKE` (`FINISHED`), `platform` is `IOS`/`ANDROID`. See `src/builds/status.ts`. |
-| `build-list.json` | `eas build:list --platform ios --fingerprint-hash <hash> --status finished --limit 1 --json --non-interactive` | The build-cache lookup's exact argv, and that `id`/`status`/`platform`/`buildProfile`/`createdAt`/`artifacts.buildUrl` all exist. See `src/impact/buildCache.ts`. |
-| `build-list-unconfigured.json` | the same command, in a project with no EAS link | The whole outcome (`exitCode`, `stdout`, `stderr`): the CLI exits **1** and puts its whole explanation on **stdout**, leaving only `Error: build:list command failed.` on stderr. That is why `describeLookupFailure` reads stdout first. Recorded against the unlinked `notesapp`. |
-| `fingerprint-compare.json` | `eas fingerprint:compare --build-id <id> --json --non-interactive` | `{ fingerprint1, fingerprint2 }`, each `{ hash, sources }` — **two whole fingerprints, not a diff**. `fingerprint1` is the build, `fingerprint2` is the working tree. See `src/impact/compare.ts`. |
-| `whoami.txt` | `eas whoami` | The account name is the **first** line; the email, and an `Accounts:` list when the actor belongs to more than their personal account, follow it. See `src/needsHuman/preflight.ts`. |
-| `simulator-availability.json` | `eas simulator:availability --json --non-interactive` | `{ available, accountName }`. The one `simulator:*` payload that can be recorded without starting a session. See `src/device/cloudSimulator.ts`. |
+| File                           | Command                                                                                                        | What it pins                                                                                                                                                                                                                                                                        |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build-view.json`              | `eas build:view <id> --json`                                                                                   | `status` is `SCREAMING_SNAKE` (`FINISHED`), `platform` is `IOS`/`ANDROID`. See `src/builds/status.ts`.                                                                                                                                                                              |
+| `build-list.json`              | `eas build:list --platform ios --fingerprint-hash <hash> --status finished --limit 1 --json --non-interactive` | The build-cache lookup's exact argv, and that `id`/`status`/`platform`/`buildProfile`/`createdAt`/`artifacts.buildUrl` all exist. See `src/impact/buildCache.ts`.                                                                                                                   |
+| `build-list-unconfigured.json` | the same command, in a project with no EAS link                                                                | The whole outcome (`exitCode`, `stdout`, `stderr`): the CLI exits **1** and puts its whole explanation on **stdout**, leaving only `Error: build:list command failed.` on stderr. That is why `describeLookupFailure` reads stdout first. Recorded against the unlinked `notesapp`. |
+| `fingerprint-compare.json`     | `eas fingerprint:compare --build-id <id> --json --non-interactive`                                             | `{ fingerprint1, fingerprint2 }`, each `{ hash, sources }` — **two whole fingerprints, not a diff**. `fingerprint1` is the build, `fingerprint2` is the working tree. See `src/impact/compare.ts`.                                                                                  |
+| `whoami.txt`                   | `eas whoami`                                                                                                   | The account name is the **first** line; the email, and an `Accounts:` list when the actor belongs to more than their personal account, follow it. See `src/needsHuman/preflight.ts`.                                                                                                |
+| `simulator-availability.json`  | `eas simulator:availability --json --non-interactive`                                                          | `{ available, accountName }`. The one `simulator:*` payload that can be recorded without starting a session. See `src/device/cloudSimulator.ts`.                                                                                                                                    |
 
 ## The non-terminal statuses
 
@@ -41,11 +41,11 @@ Captured 2026-09-06 with `eas-cli/23.2.0 darwin-arm64 node-v26.5.0`, signed in a
 against `@expo-ci/expo-agent-cli` (project `a39c0791-951a-425d-8364-03c69b849a9f`) — the same
 account and project the live tier runs against. Same trimming rules.
 
-| File | Command | What it pins |
-| --- | --- | --- |
-| `build-view-new.json` | `eas build:view <id> --json` on the first poll after an Android build was submitted | `NEW` is the spelling, and it looks exactly like `IN_QUEUE`: `logFiles` is `[]`, `artifacts` is `{}` |
-| `build-view-in-queue.json` | the same, on a queued iOS simulator build | `IN_QUEUE` is the spelling, `logFiles` is `[]` and `artifacts` is `{}` before the build starts |
-| `build-view-in-progress.json` | the same, on a running Android build | `IN_PROGRESS` is the spelling, and `logFiles` is **populated while the build is still running** — a log is fetchable before there is a result |
+| File                          | Command                                                                             | What it pins                                                                                                                                  |
+| ----------------------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build-view-new.json`         | `eas build:view <id> --json` on the first poll after an Android build was submitted | `NEW` is the spelling, and it looks exactly like `IN_QUEUE`: `logFiles` is `[]`, `artifacts` is `{}`                                          |
+| `build-view-in-queue.json`    | the same, on a queued iOS simulator build                                           | `IN_QUEUE` is the spelling, `logFiles` is `[]` and `artifacts` is `{}` before the build starts                                                |
+| `build-view-in-progress.json` | the same, on a running Android build                                                | `IN_PROGRESS` is the spelling, and `logFiles` is **populated while the build is still running** — a log is fetchable before there is a result |
 
 Two facts these settle, both of which `src/builds/parseView.ts` rests on:
 
@@ -65,8 +65,9 @@ Two facts these settle, both of which `src/builds/parseView.ts` rests on:
 unrecognized status as non-terminal, so neither can hang a wait.
 
 ## What could not be recorded, and why
+
 - **Every other `simulator:*` payload.** `simulator:get`, `simulator:exec` and `simulator:stop` all
-  need a live session, and starting one is a mutating, billable call. Their *argv* is confirmed
+  need a live session, and starting one is a mutating, billable call. Their _argv_ is confirmed
   against `--help` on 22.4.0 (llp/0005 §Cloud simulator); their JSON stays `[inferred]`.
 - **`eas whoami` under `EXPO_TOKEN`.** The first line becomes
   `<name> (authenticated using EXPO_TOKEN)` [observed — `eas-cli/build/commands/account/view.js`,
@@ -85,11 +86,11 @@ Captured 2026-08-26 with `eas-cli/22.4.0`, from the `expo-ci` account and the
 a credential: the daemon URL and token live in `.env.eas-simulator` and are deliberately not
 recorded.
 
-| File | Command |
-| --- | --- |
-| `simulator-list-empty.json` | `eas simulator:list --status in-progress --limit 25 --json`, with nothing running |
-| `simulator-list-in-progress.json` | the same command while the session was up |
-| `simulator-list-stopped.json` | `eas simulator:list --limit 5 --json` after `simulator:stop` |
+| File                              | Command                                                                           |
+| --------------------------------- | --------------------------------------------------------------------------------- |
+| `simulator-list-empty.json`       | `eas simulator:list --status in-progress --limit 25 --json`, with nothing running |
+| `simulator-list-in-progress.json` | the same command while the session was up                                         |
+| `simulator-list-stopped.json`     | `eas simulator:list --limit 5 --json` after `simulator:stop`                      |
 
 ### The Android half
 

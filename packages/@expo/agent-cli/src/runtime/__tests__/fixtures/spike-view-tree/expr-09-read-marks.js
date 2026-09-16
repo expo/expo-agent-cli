@@ -11,7 +11,12 @@
       var f = stack.pop();
       if (!f) continue;
       var p = f.memoizedProps;
-      if (p && typeof p === 'object' && p.testID === 'spike-marks' && typeof p.children === 'string') {
+      if (
+        p &&
+        typeof p === 'object' &&
+        p.testID === 'spike-marks' &&
+        typeof p.children === 'string'
+      ) {
         found.push(p.children);
       }
       if (f.sibling) stack.push(f.sibling);

@@ -356,11 +356,17 @@ if (command === 'simulator' || command === 'simulator:start') {
       platform: (valueOf('--platform') || 'ios').toUpperCase(),
       createdAt: new Date().toISOString(),
       // What the session was started with, so a test can read the app off the listing too.
-      app: has('--expo-go') ? 'expo-go' : valueOf('--build-id') ? `build:${valueOf('--build-id')}` : null,
+      app: has('--expo-go')
+        ? 'expo-go'
+        : valueOf('--build-id')
+          ? `build:${valueOf('--build-id')}`
+          : null,
     },
     ...rememberedSessions(),
   ]);
-  process.stderr.write(`Simulator session created (id: ${id}) https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/${id}\n`);
+  process.stderr.write(
+    `Simulator session created (id: ${id}) https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/${id}\n`
+  );
   if (json) {
     printJson({
       id,
@@ -374,7 +380,9 @@ if (command === 'simulator' || command === 'simulator:start') {
       },
     });
   } else {
-    process.stdout.write(`When you are done, stop the session with: eas simulator:stop --id ${id}\n`);
+    process.stdout.write(
+      `When you are done, stop the session with: eas simulator:stop --id ${id}\n`
+    );
   }
   process.exit(0);
 }
@@ -402,7 +410,11 @@ if (command === 'simulator:stop') {
 if (command === 'simulator:exec') {
   const exitCode = Number(process.env.STUB_SIM_EXEC_EXIT || 0);
   if (exitCode !== 0) {
-    exitWith(process.stderr, process.env.STUB_SIM_STDERR || 'Remote daemon is unavailable', exitCode);
+    exitWith(
+      process.stderr,
+      process.env.STUB_SIM_STDERR || 'Remote daemon is unavailable',
+      exitCode
+    );
   }
   // What the real controller answers a `close`, verbatim, whatever id it is given [observed — live
   // session 01a03d80, 2026-08-26]. It is the reason `wasRunning` is null on this backend, so the

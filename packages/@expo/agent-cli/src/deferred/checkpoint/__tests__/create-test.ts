@@ -19,7 +19,7 @@ vi.mock('../events', () => ({
   debugEvent: Object.assign(vi.fn(), { error: vi.fn((error) => error) }),
 }));
 vi.mock('../git', async () => ({
-  ...await vi.importActual('../git'),
+  ...(await vi.importActual('../git')),
   resolveWorkTreeAsync: vi.fn(),
   writeSnapshotTreeAsync: vi.fn(),
   commitSnapshotTreeAsync: vi.fn(),
@@ -99,8 +99,9 @@ describe(createCheckpointAsync, () => {
   });
 
   it(`should report a failing git command as a skip instead of throwing`, async () => {
-    vi.mocked(writeSnapshotTreeAsync)
-      .mockRejectedValue(new GitError(['add', '-A', '.'], 'fatal: index lock exists', 128));
+    vi.mocked(writeSnapshotTreeAsync).mockRejectedValue(
+      new GitError(['add', '-A', '.'], 'fatal: index lock exists', 128)
+    );
 
     const result = await createCheckpointAsync(projectRoot, { label: '@expo/agent-cli install' });
 
@@ -146,8 +147,9 @@ describe(printCheckpointAsync, () => {
   });
 
   it(`should fail when the snapshot could not be written`, async () => {
-    vi.mocked(writeSnapshotTreeAsync)
-      .mockRejectedValue(new GitError(['write-tree'], 'fatal: broken', 128));
+    vi.mocked(writeSnapshotTreeAsync).mockRejectedValue(
+      new GitError(['write-tree'], 'fatal: broken', 128)
+    );
 
     await expect(printCheckpointAsync(projectRoot, {})).rejects.toMatchObject({
       code: 'CHECKPOINT_FAILED',

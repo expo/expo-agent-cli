@@ -26,7 +26,7 @@ vi.mock('../../impact/buildCache', async () => ({
 }));
 vi.mock('../../project/fingerprint', () => ({ generateFingerprintAsync: vi.fn() }));
 vi.mock('../../utils/easCli', async () => ({
-  ...await vi.importActual('../../utils/easCli'),
+  ...(await vi.importActual('../../utils/easCli')),
   resolveEasCli: vi.fn(),
 }));
 
@@ -241,8 +241,10 @@ describe(readEasBuildsStatusAsync, () => {
   });
 
   it(`should pass the lookup's own reason through as the unknown`, async () => {
-    vi.mocked(lookUpCachedBuildAsync)
-      .mockResolvedValue({ state: 'unknown', reason: 'EAS project not configured.' });
+    vi.mocked(lookUpCachedBuildAsync).mockResolvedValue({
+      state: 'unknown',
+      reason: 'EAS project not configured.',
+    });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
       lookUp: true,
@@ -259,8 +261,11 @@ describe(readEasBuildsStatusAsync, () => {
   });
 
   it(`should answer unknown, and ask nobody, when the platform cannot be fingerprinted`, async () => {
-    vi.mocked(generateFingerprintAsync)
-      .mockResolvedValue({ hash: null, sources: null, error: 'no fingerprint CLI' });
+    vi.mocked(generateFingerprintAsync).mockResolvedValue({
+      hash: null,
+      sources: null,
+      error: 'no fingerprint CLI',
+    });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
       lookUp: true,

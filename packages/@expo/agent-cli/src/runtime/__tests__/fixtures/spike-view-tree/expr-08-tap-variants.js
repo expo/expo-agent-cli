@@ -30,7 +30,15 @@
   }
   function makeEvent() {
     return {
-      nativeEvent: { locationX: 0, locationY: 0, pageX: 0, pageY: 0, timestamp: Date.now(), touches: [], changedTouches: [] },
+      nativeEvent: {
+        locationX: 0,
+        locationY: 0,
+        pageX: 0,
+        pageY: 0,
+        timestamp: Date.now(),
+        touches: [],
+        changedTouches: [],
+      },
       target: null,
       currentTarget: null,
       preventDefault: function () {},
@@ -70,7 +78,12 @@
       }
     }
     if (groupRoots.length !== 1) {
-      out.push({ testID: TARGET, ok: false, reason: 'ambiguous-or-missing', matched: groupRoots.length });
+      out.push({
+        testID: TARGET,
+        ok: false,
+        reason: 'ambiguous-or-missing',
+        matched: groupRoots.length,
+      });
       continue;
     }
 
@@ -91,12 +104,23 @@
     for (var i = 0; i < group.length; i++) {
       var props = group[i].f.memoizedProps;
       if (props && typeof props.onPress === 'function') {
-        carriers.push({ component: nameOf(group[i].f), depthInGroup: group[i].d, tag: group[i].f.tag });
+        carriers.push({
+          component: nameOf(group[i].f),
+          depthInGroup: group[i].d,
+          tag: group[i].f.tag,
+        });
         if (!handlerFiber) handlerFiber = group[i].f;
       }
     }
     if (!handlerFiber) {
-      out.push({ testID: TARGET, ok: false, reason: 'no-handler', group: group.map(function (x) { return nameOf(x.f); }) });
+      out.push({
+        testID: TARGET,
+        ok: false,
+        reason: 'no-handler',
+        group: group.map(function (x) {
+          return nameOf(x.f);
+        }),
+      });
       continue;
     }
 
@@ -104,12 +128,17 @@
     try {
       handlerFiber.memoizedProps.onPress(makeEvent());
     } catch (err) {
-      threw = { text: String(err), stack: err && err.stack ? String(err.stack).split('\n').slice(0, 4).join('\n') : null };
+      threw = {
+        text: String(err),
+        stack: err && err.stack ? String(err.stack).split('\n').slice(0, 4).join('\n') : null,
+      };
     }
     out.push({
       testID: TARGET,
       ok: threw == null,
-      group: group.map(function (x) { return nameOf(x.f); }),
+      group: group.map(function (x) {
+        return nameOf(x.f);
+      }),
       onPressCarriers: carriers,
       calledOn: nameOf(handlerFiber),
       calledOnTag: handlerFiber.tag,

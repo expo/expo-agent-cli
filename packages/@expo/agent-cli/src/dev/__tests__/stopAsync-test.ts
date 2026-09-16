@@ -269,8 +269,9 @@ describe(devStopAsync, () => {
   // F60. The one destructive verb in the surface acted on a port the caller did not name.
   describe('--port names the target, and the lock does not overrule it', () => {
     beforeEach(() => {
-      vi.mocked(readDevServerLockAsync)
-        .mockResolvedValue(lock({ port: 8190, url: 'http://127.0.0.1:8190', pid: 4242 }) as never);
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(
+        lock({ port: 8190, url: 'http://127.0.0.1:8190', pid: 4242 }) as never
+      );
       livePids.add(4242);
     });
 
@@ -494,7 +495,8 @@ describe(looksLikeDevServerProcess, () => {
 
 // @ref llp/0027-everything-on-eas.rfc.md §dev:stop
 describe('dev:stop --eas', () => {
-  const cloud = () => require('../../device/cloudSimulator') as typeof import('../../device/cloudSimulator');
+  const cloud = () =>
+    require('../../device/cloudSimulator') as typeof import('../../device/cloudSimulator');
   const eas = () => require('../openAppEas') as typeof import('../openAppEas');
 
   beforeEach(() => {
@@ -541,7 +543,8 @@ describe('dev:stop --eas', () => {
     } as any);
     vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({
       ok: false,
-      reason: '"npx --yes eas-cli@latest simulator:stop --id sess-1 --non-interactive" exited 1: refused',
+      reason:
+        '"npx --yes eas-cli@latest simulator:stop --id sess-1 --non-interactive" exited 1: refused',
     });
 
     const code = await devStopAsync(projectRoot, options({ eas: true }));

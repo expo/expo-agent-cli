@@ -82,8 +82,11 @@ describe('syncSkillsAsync', () => {
       agents: [claudeAgent, cursorAgent, codexCliAgent],
       source: 'cache',
     });
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: ['x'], pruned: [], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({
+      created: ['x'],
+      pruned: [],
+      skipped: [],
+    });
 
     await syncSkillsAsync('/root', { agents: [], dryRun: false });
 
@@ -101,8 +104,7 @@ describe('syncSkillsAsync', () => {
       agents: [claudeAgent],
       source: 'detected',
     });
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
 
     await syncSkillsAsync('/root', { agents: [], dryRun: false });
 
@@ -115,8 +117,7 @@ describe('syncSkillsAsync', () => {
       agents: [cursorAgent],
       source: 'flags',
     });
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
 
     await syncSkillsAsync('/root', { agents: ['cursor'], dryRun: false });
 
@@ -129,8 +130,7 @@ describe('syncSkillsAsync', () => {
       agents: [claudeAgent],
       source: 'cache',
     });
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
 
     await syncSkillsAsync('/root', { agents: [], dryRun: false });
 
@@ -144,8 +144,11 @@ describe('syncSkillsAsync', () => {
       source: 'cache',
     });
     vi.mocked(getAllAgents).mockReturnValueOnce([claudeAgent, cursorAgent]);
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: ['x'], pruned: [], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({
+      created: ['x'],
+      pruned: [],
+      skipped: [],
+    });
 
     await syncSkillsAsync('/root', { agents: [], dryRun: false });
 
@@ -162,8 +165,11 @@ describe('syncSkillsAsync', () => {
       agents: [claudeAgent],
       source: 'flags',
     });
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: ['x'], pruned: [], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({
+      created: ['x'],
+      pruned: [],
+      skipped: [],
+    });
 
     await syncSkillsAsync('/root', { agents: [], dryRun: true });
 
@@ -190,8 +196,11 @@ describe('syncSkillsAsync', () => {
       agents: [claudeAgent],
       source: 'cache',
     });
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: [], pruned: ['stale'], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({
+      created: [],
+      pruned: ['stale'],
+      skipped: [],
+    });
 
     await syncSkillsAsync('/root', { agents: [], dryRun: false });
 
@@ -228,10 +237,15 @@ describe('syncSkillsAsync', () => {
     /** A sync that linked one skill of one package for one agent. */
     function mockSuccessfulSync() {
       vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([testSkill]);
-      vi.mocked(resolveAgentsAsync)
-        .mockResolvedValueOnce({ agents: [claudeAgent], source: 'cache' });
-      vi.mocked(syncSkillLinksAsync)
-        .mockResolvedValueOnce({ created: ['x'], pruned: [], skipped: [] });
+      vi.mocked(resolveAgentsAsync).mockResolvedValueOnce({
+        agents: [claudeAgent],
+        source: 'cache',
+      });
+      vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({
+        created: ['x'],
+        pruned: [],
+        skipped: [],
+      });
     }
 
     it('should offer the skill list', async () => {
@@ -246,8 +260,10 @@ describe('syncSkillsAsync', () => {
     it('should note that a detected agent loads the linked skills by itself', async () => {
       mockSuccessfulSync();
       // `mockReturnValueOnce`, because `clearMocks` resets calls but keeps implementations.
-      vi.mocked(getAgentTelemetryContext)
-        .mockReturnValueOnce({ id: 'claude-code', sessionId: undefined });
+      vi.mocked(getAgentTelemetryContext).mockReturnValueOnce({
+        id: 'claude-code',
+        sessionId: undefined,
+      });
 
       await syncSkillsAsync('/root', { agents: [], dryRun: false });
 
@@ -306,8 +322,9 @@ describe('listSkillsAsync with json output', () => {
 
   it('should print machine readable skill metadata', async () => {
     vol.fromJSON({ '/root/.claude/skills/my-skill/SKILL.md': '# my-skill' });
-    vi.mocked(discoverSkillsAsync)
-      .mockResolvedValueOnce([{ ...testSkill, title: 'My skill', description: 'Does things' }]);
+    vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([
+      { ...testSkill, title: 'My skill', description: 'Does things' },
+    ]);
     vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(['claude-code']);
     vi.mocked(getAllAgents).mockReturnValueOnce([claudeAgent]);
 
@@ -352,7 +369,8 @@ describe('showSkillsAsync', () => {
 
     await showSkillsAsync('/root', '@acme/tool');
 
-    const output = vi.mocked(Log.log)
+    const output = vi
+      .mocked(Log.log)
       .mock.calls.map((call) => call[0])
       .join('\n');
     expect(output).toContain('Body');
@@ -373,7 +391,8 @@ describe('showSkillsAsync', () => {
 
     await showSkillsAsync('/root', '@acme/tool', 'second-skill');
 
-    const output = vi.mocked(Log.log)
+    const output = vi
+      .mocked(Log.log)
       .mock.calls.map((call) => call[0])
       .join('\n');
     expect(output).toContain('Second body');
@@ -505,10 +524,12 @@ describe('skills --json reports', () => {
 
   it('should say that a dry run wrote nothing', async () => {
     vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([testSkill]);
-    vi.mocked(resolveAgentsAsync)
-      .mockResolvedValueOnce({ agents: [claudeAgent], source: 'cache' });
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: ['a'], pruned: [], skipped: [] });
+    vi.mocked(resolveAgentsAsync).mockResolvedValueOnce({ agents: [claudeAgent], source: 'cache' });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({
+      created: ['a'],
+      pruned: [],
+      skipped: [],
+    });
 
     await syncSkillsAsync('/root', { agents: [], dryRun: true, json: true });
 
@@ -560,7 +581,11 @@ describe('autoSyncSkillsAsync', () => {
     vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(null);
     vi.mocked(detectInstalledAgentsAsync).mockResolvedValueOnce([cursorAgent]);
     vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([testSkill]);
-    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({ created: ['x'], pruned: [], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({
+      created: ['x'],
+      pruned: [],
+      skipped: [],
+    });
 
     await autoSyncSkillsAsync('/root', { packages: ['@acme/tool'] });
 
@@ -607,8 +632,11 @@ describe('autoSyncSkillsAsync', () => {
     vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(['claude-code']);
     vi.mocked(getAllAgents).mockReturnValueOnce([claudeAgent, cursorAgent, codexCliAgent]);
     vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([testSkill]);
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: ['x'], pruned: [], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({
+      created: ['x'],
+      pruned: [],
+      skipped: [],
+    });
 
     await autoSyncSkillsAsync('/root');
 
@@ -627,8 +655,7 @@ describe('autoSyncSkillsAsync', () => {
     vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(['claude-code']);
     vi.mocked(getAllAgents).mockReturnValueOnce([claudeAgent]);
     vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([testSkill, otherSkill]);
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
 
     await autoSyncSkillsAsync('/root', { packages: ['@acme/tool'] });
 
@@ -641,8 +668,7 @@ describe('autoSyncSkillsAsync', () => {
     vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(['claude-code']);
     vi.mocked(getAllAgents).mockReturnValueOnce([claudeAgent]);
     vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([testSkill]);
-    vi.mocked(syncSkillLinksAsync)
-      .mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
 
     await autoSyncSkillsAsync('/root', { packages: ['@acme/tool@~1.2.0'] });
 
@@ -674,8 +700,10 @@ describe('printSkillsForAgentAsync', () => {
   });
 
   it('should print skill contents of the installed packages', async () => {
-    vi.mocked(getAgentTelemetryContext)
-      .mockReturnValueOnce({ id: 'claude-code', sessionId: undefined });
+    vi.mocked(getAgentTelemetryContext).mockReturnValueOnce({
+      id: 'claude-code',
+      sessionId: undefined,
+    });
     vol.fromJSON({ '/root/node_modules/@acme/tool/skills/my-skill/SKILL.md': '# Skill body' });
     const otherSkill: DiscoveredSkill = {
       name: 'other-skill',
@@ -695,8 +723,10 @@ describe('printSkillsForAgentAsync', () => {
   });
 
   it('should print nothing when the installed packages ship no skills', async () => {
-    vi.mocked(getAgentTelemetryContext)
-      .mockReturnValueOnce({ id: 'claude-code', sessionId: undefined });
+    vi.mocked(getAgentTelemetryContext).mockReturnValueOnce({
+      id: 'claude-code',
+      sessionId: undefined,
+    });
     vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([testSkill]);
 
     await printSkillsForAgentAsync('/root', { packages: ['uuid'] });
@@ -705,8 +735,10 @@ describe('printSkillsForAgentAsync', () => {
   });
 
   it('should warn instead of throwing when the discovery fails', async () => {
-    vi.mocked(getAgentTelemetryContext)
-      .mockReturnValueOnce({ id: 'claude-code', sessionId: undefined });
+    vi.mocked(getAgentTelemetryContext).mockReturnValueOnce({
+      id: 'claude-code',
+      sessionId: undefined,
+    });
     vi.mocked(discoverSkillsAsync).mockRejectedValueOnce(new Error('boom'));
 
     await expect(

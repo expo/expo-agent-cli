@@ -12,13 +12,7 @@
         {
           "calledOn": "TouchableOpacity",
           "calledOnTag": 0,
-          "group": [
-            "TouchableOpacity",
-            "TouchableOpacity",
-            "Animated(View)",
-            "View",
-            "RCTView"
-          ],
+          "group": ["TouchableOpacity", "TouchableOpacity", "Animated(View)", "View", "RCTView"],
           "ok": true,
           "onPressCarriers": [
             {

@@ -29,14 +29,14 @@ so adding one is a visible diff.
 
 ## The matrix
 
-| Fixture                | Native state                | Expo Go      | Purpose                                                             |
-| ---------------------- | --------------------------- | ------------ | ------------------------------------------------------------------- |
-| `skills-app`           | CNG                         | compatible   | Skill discovery, linking, and the `expo` subprocess boundary         |
-| `go-app`               | CNG                         | compatible   | The `expo-go` and `web` rules; the only fixture with `react-native-web` |
-| `dev-client-app`       | CNG                         | incompatible | Unbundled native module plus `expo-dev-client`; the `dev-client-stale` rule |
+| Fixture                | Native state                | Expo Go      | Purpose                                                                              |
+| ---------------------- | --------------------------- | ------------ | ------------------------------------------------------------------------------------ |
+| `skills-app`           | CNG                         | compatible   | Skill discovery, linking, and the `expo` subprocess boundary                         |
+| `go-app`               | CNG                         | compatible   | The `expo-go` and `web` rules; the only fixture with `react-native-web`              |
+| `dev-client-app`       | CNG                         | incompatible | Unbundled native module plus `expo-dev-client`; the `dev-client-stale` rule          |
 | `dev-client-fresh-app` | CNG                         | incompatible | A working fingerprint CLI and a matching recorded build; the `dev-client-fresh` rule |
-| `bare-app`             | committed `ios/`+`android/` | incompatible | Custom native code; the `bare-stale` rule                            |
-| `broken-app`           | CNG                         | n/a          | A dependency listed in `package.json` but absent from `node_modules` |
+| `bare-app`             | committed `ios/`+`android/` | incompatible | Custom native code; the `bare-stale` rule                                            |
+| `broken-app`           | CNG                         | n/a          | A dependency listed in `package.json` but absent from `node_modules`                 |
 
 The `bare-fresh` rule has no fixture of its own. It needs both a recorded build and checked-in
 native directories, so `plan-test.ts` copies `dev-client-fresh-app` and adds the native
@@ -99,7 +99,7 @@ sets it is answered out of `.expo/agent-cli-fingerprint.json` with the old hash.
 hash to move has to change something the pinned set covers as well, `app.json` being the smallest,
 which is also how a real project moves its hash.
 
-**And it has to change that file's *length*.** The cache pins each file by size and modification
+**And it has to change that file's _length_.** The cache pins each file by size and modification
 time, and both an in-memory filesystem and a fast disk can write twice inside one millisecond — so a
 rewrite of the same length moves neither half of the key, and a test that relies on it passes or
 fails by luck. Two flaky tests were found this way. Adding a field to `app.json` is the usual fix.

@@ -27,7 +27,8 @@ function mockPlatform(value: typeof process.platform) {
 
 /** Answer the one `eas --version` probe the PATH candidate gets. */
 function mockProbe(result: Partial<subprocess.SubprocessResult>) {
-  return vi.spyOn(subprocess, 'spawnSubprocessAsync')
+  return vi
+    .spyOn(subprocess, 'spawnSubprocessAsync')
     .mockResolvedValue({ exitCode: 0, stdout: '', stderr: '', ...result });
 }
 

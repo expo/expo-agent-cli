@@ -51,7 +51,7 @@ A session installs a build by id. A finished simulator build of this exact finge
 
 Found, the plan is `dev-client-fresh` (or `bare-fresh`) resting on `plan.easBuild`, with one step — the tunnelled dev server — and a reason naming the build. Not found, or not askable (no fingerprint tool, no runner, a refusal), the plan builds, which is the plan it always was. The lookup is skipped for a project that has yet to install `expo-dev-client`: that install moves the fingerprint, so a build found now is a build of a project about to change.
 
-The last-build record is not consulted on the EAS device, and neither is the app-presence probe of [[0004-smart-start-and-project-state]] §A current build is not an installed app: the first answers "does the app on a *local* device match", and the second asks a local device. A session started with `--build-id` has the app by construction.
+The last-build record is not consulted on the EAS device, and neither is the app-presence probe of [[0004-smart-start-and-project-state]] §A current build is not an installed app: the first answers "does the app on a _local_ device match", and the second asks a local device. A session started with `--build-id` has the app by construction.
 
 ## The open is a session
 

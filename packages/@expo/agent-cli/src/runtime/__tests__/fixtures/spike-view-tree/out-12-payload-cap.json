@@ -5,7 +5,17 @@
   "runs": [
     { "requestedChars": 1000000, "cdpResponseBytes": 1000156, "roundTripMs": 25, "refused": false },
     { "requestedChars": 4000000, "cdpResponseBytes": 4000156, "roundTripMs": 87, "refused": false },
-    { "requestedChars": 16000000, "cdpResponseBytes": 16000158, "roundTripMs": 261, "refused": false },
-    { "requestedChars": 64000000, "cdpResponseBytes": 64000158, "roundTripMs": 1081, "refused": false }
+    {
+      "requestedChars": 16000000,
+      "cdpResponseBytes": 16000158,
+      "roundTripMs": 261,
+      "refused": false
+    },
+    {
+      "requestedChars": 64000000,
+      "cdpResponseBytes": 64000158,
+      "roundTripMs": 1081,
+      "refused": false
+    }
   ]
 }

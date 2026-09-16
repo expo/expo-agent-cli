@@ -994,7 +994,8 @@ export function cloudSessionUnknownError(probe: CloudSessionProbe): CommandError
         : `How: run "${easCommandPrefix()} simulator:list --status in-progress" to see what the CLI says, and check that the "eas" being run is the EAS CLI. Then run this command again, or open the URL elsewhere with "${PROGRAM_PREFIX} navigate <route> --print-url".`,
     ].join('\n')
   );
-  error.suggestedCommand = cause?.command ?? `${easCommandPrefix()} simulator:list --status in-progress`;
+  error.suggestedCommand =
+    cause?.command ?? `${easCommandPrefix()} simulator:list --status in-progress`;
 
   // The same layer-3 hand-off a device verb does. A signed-out account stops the *question* about
   // the session exactly as it stops the answer, and both are a login rather than a broken CLI.

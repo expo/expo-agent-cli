@@ -44,7 +44,8 @@ export default function LabScreen() {
           testID="disabled-btn"
           disabled
           style={styles.btn}
-          onPress={() => setCount((c) => c + 100)}>
+          onPress={() => setCount((c) => c + 100)}
+        >
           <Text style={styles.btnText}>Disabled</Text>
         </Pressable>
 

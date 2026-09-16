@@ -41,7 +41,9 @@
     hookPresent: true,
     hookKeys: hookKeys.sort(),
     hasGetFiberRoots: typeof hook.getFiberRoots === 'function',
-    renderersType: hook.renderers ? String(hook.renderers.constructor && hook.renderers.constructor.name) : null,
+    renderersType: hook.renderers
+      ? String(hook.renderers.constructor && hook.renderers.constructor.name)
+      : null,
     rendererCount: hook.renderers ? hook.renderers.size : null,
     renderers: renderers,
     reactNativeVersion: g.__fbBatchedBridgeConfig ? 'bridge-config-present' : 'bridgeless',

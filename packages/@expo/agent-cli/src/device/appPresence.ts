@@ -154,7 +154,6 @@ async function askDeviceAsync(
   }
   return {
     presence: 'missing',
-    installDevice:
-      platform === 'ios' ? device.deviceId : await androidDeviceName(device.deviceId),
+    installDevice: platform === 'ios' ? device.deviceId : await androidDeviceName(device.deviceId),
   };
 }

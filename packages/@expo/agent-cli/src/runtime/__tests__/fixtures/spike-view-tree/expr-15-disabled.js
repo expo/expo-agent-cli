@@ -9,14 +9,19 @@
     var t = f.elementType != null ? f.elementType : f.type;
     if (typeof t === 'string') return t;
     if (typeof t === 'function') return t.displayName || t.name || 'Anonymous';
-    if (t && typeof t === 'object') { if (t.displayName) return t.displayName; var i = t.render || t.type; if (typeof i === 'function') return i.displayName || i.name || 'Anonymous'; }
+    if (t && typeof t === 'object') {
+      if (t.displayName) return t.displayName;
+      var i = t.render || t.type;
+      if (typeof i === 'function') return i.displayName || i.name || 'Anonymous';
+    }
     return 'Unknown';
   }
   var out = [];
   hook.getFiberRoots(1).forEach(function (root) {
     var stack = [root.current];
     while (stack.length) {
-      var f = stack.pop(); if (!f) continue;
+      var f = stack.pop();
+      if (!f) continue;
       var p = f.memoizedProps;
       if (p && typeof p === 'object' && (p.testID === 'disabled-btn' || p.testID === 'add-note')) {
         out.push({

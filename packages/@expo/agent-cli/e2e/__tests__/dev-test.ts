@@ -305,9 +305,7 @@ describe('@expo/agent-cli dev', () => {
      * `--local` pins the backend: on a CI box with no Xcode the selector would route the rebuild
      * to EAS, and these tests are about *when* a build is planned, not where it runs.
      */
-    async function planAsync(
-      projectRoot: string
-    ): Promise<{ rule: string; steps: string[][] }> {
+    async function planAsync(projectRoot: string): Promise<{ rule: string; steps: string[][] }> {
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--plan', '--ios', '--local', '--json'],
@@ -632,13 +630,9 @@ describe('@expo/agent-cli dev', () => {
     it('is refused before anything runs, with the --json envelope', async () => {
       const projectRoot = await setupAsync('go-app');
 
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['dev', '--json', '--bogus'],
-        {
-          reject: false,
-        }
-      );
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--json', '--bogus'], {
+        reject: false,
+      });
 
       expect(result.exitCode).toBe(1);
       const { error } = JSON.parse(result.stdout);
@@ -906,7 +900,10 @@ describe('@expo/agent-cli dev', () => {
      * `unknown` and the plan is the serve-only one (@ref src/device/appPresence). Written here
      * rather than into the committed fixture, which every other test in this file reads.
      */
-    async function setupInstallAsync(): Promise<{ projectRoot: string; env: Record<string, string> }> {
+    async function setupInstallAsync(): Promise<{
+      projectRoot: string;
+      env: Record<string, string>;
+    }> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
       const configPath = path.join(projectRoot, 'app.json');
       const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));

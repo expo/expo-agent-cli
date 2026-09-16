@@ -29,7 +29,10 @@ const MEDIAN_WEIGHT = WEIGHT_VALUES[Math.floor(WEIGHT_VALUES.length / 2)] ?? 10_
 class DurationBalancedSequencer extends BaseSequencer {
   async shard(specs: TestSpecification[]): Promise<TestSpecification[]> {
     const { index, count } = this.ctx.config.shard!;
-    const bins = Array.from({ length: count }, () => ({ load: 0, specs: [] as TestSpecification[] }));
+    const bins = Array.from({ length: count }, () => ({
+      load: 0,
+      specs: [] as TestSpecification[],
+    }));
     const weighted = specs
       .map((spec) => ({ spec, weight: WEIGHTS[path.basename(spec.moduleId)] ?? MEDIAN_WEIGHT }))
       .sort((a, b) => b.weight - a.weight);

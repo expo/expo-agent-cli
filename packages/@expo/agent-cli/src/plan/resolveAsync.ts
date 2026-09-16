@@ -46,7 +46,10 @@ export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
   /** `process.platform`. Injected so the selection can be exercised for other hosts. */
   hostPlatform?: NodeJS.Platform;
   /** Injected for tests, so the device question is answerable without a device. */
-  probeAppPresence?: (projectRoot: string, platform: 'ios' | 'android') => Promise<AppPresenceProbe>;
+  probeAppPresence?: (
+    projectRoot: string,
+    platform: 'ios' | 'android'
+  ) => Promise<AppPresenceProbe>;
   /**
    * Injected for tests: whether EAS has a finished simulator build of this fingerprint.
    *

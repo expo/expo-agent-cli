@@ -14,7 +14,6 @@ vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../checkAsync', () => ({ runTypeCheckAsync: vi.fn() }));
 
-
 const projectRoot = '/project';
 
 function reports(overrides: Partial<TypeCheckReport> = {}): void {

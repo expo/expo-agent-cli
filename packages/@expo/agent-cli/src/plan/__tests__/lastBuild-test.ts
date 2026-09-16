@@ -180,5 +180,4 @@ describe(readLastBuildRecord, () => {
 
     expect(readLastBuildRecord(projectRoot)).toEqual({});
   });
-
 });

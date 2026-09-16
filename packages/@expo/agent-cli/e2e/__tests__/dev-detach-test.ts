@@ -207,18 +207,14 @@ describe('@expo/agent-cli dev --detach', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['dev', '--ios', '--detach'],
-        {
-          env: {
-            ...stubExpoEnv(projectRoot),
-            STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
-            STUB_EXPO_PORT_BUSY: '8180',
-          },
-          reject: false,
-        }
-      );
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach'], {
+        env: {
+          ...stubExpoEnv(projectRoot),
+          STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+          STUB_EXPO_PORT_BUSY: '8180',
+        },
+        reject: false,
+      });
 
       expect(result.stdout).toContain('8180 was busy');
     } finally {

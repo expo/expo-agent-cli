@@ -139,16 +139,7 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
     const started = await runLiveAsync(
       run,
       projectRoot,
-      [
-        'dev',
-        '--ios',
-        '--no-open',
-        '--detach',
-        '--wait-ready',
-        '--port',
-        String(PORT),
-        '--json',
-      ],
+      ['dev', '--ios', '--no-open', '--detach', '--wait-ready', '--port', String(PORT), '--json'],
       { label: 'dev-detach' }
     );
     expectExit(

@@ -5,25 +5,19 @@
       {
         "type": "file",
         "filePath": "../../packages/@expo/config-plugins/build/android/AllowBackup.js",
-        "reasons": [
-          "expoConfigPlugins"
-        ],
+        "reasons": ["expoConfigPlugins"],
         "hash": "079398dd802c2554a0ec63b70b765dd1fe673024"
       },
       {
         "type": "file",
         "filePath": "../../packages/@expo/config-plugins/build/android/BuildProperties.js",
-        "reasons": [
-          "expoConfigPlugins"
-        ],
+        "reasons": ["expoConfigPlugins"],
         "hash": "16c1174987724898c55cc16f974e325461edc273"
       },
       {
         "type": "file",
         "filePath": "../../packages/@expo/config-plugins/build/android/codeMod.js",
-        "reasons": [
-          "expoConfigPlugins"
-        ],
+        "reasons": ["expoConfigPlugins"],
         "hash": "a02df5fac65e7b03cbc27c36d149894bbc51c900"
       }
     ]
@@ -34,9 +28,7 @@
       {
         "type": "file",
         "filePath": "../../packages/@expo/config-plugins/build/android/AllowBackup.js",
-        "reasons": [
-          "expoConfigPlugins"
-        ],
+        "reasons": ["expoConfigPlugins"],
         "hash": "079398dd802c2554a0ec63b70b765dd1fe673024",
         "debugInfo": {
           "path": "../../packages/@expo/config-plugins/build/android/AllowBackup.js",
@@ -46,9 +38,7 @@
       {
         "type": "file",
         "filePath": "../../packages/@expo/config-plugins/build/android/BuildProperties.js",
-        "reasons": [
-          "expoConfigPlugins"
-        ],
+        "reasons": ["expoConfigPlugins"],
         "hash": "16c1174987724898c55cc16f974e325461edc273",
         "debugInfo": {
           "path": "../../packages/@expo/config-plugins/build/android/BuildProperties.js",
@@ -58,9 +48,7 @@
       {
         "type": "file",
         "filePath": "../../packages/@expo/config-plugins/build/android/codeMod.js",
-        "reasons": [
-          "expoConfigPlugins"
-        ],
+        "reasons": ["expoConfigPlugins"],
         "hash": "a02df5fac65e7b03cbc27c36d149894bbc51c900",
         "debugInfo": {
           "path": "../../packages/@expo/config-plugins/build/android/codeMod.js",

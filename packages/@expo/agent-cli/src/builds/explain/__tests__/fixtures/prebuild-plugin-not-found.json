@@ -15,7 +15,5 @@
     "confidence": "high",
     "suggestedCommand": "npx @expo/agent-cli install expo-nonexistent-plugin-xyz"
   },
-  "otherSignatures": [
-    "2:prebuild.plugin-not-found"
-  ]
+  "otherSignatures": ["2:prebuild.plugin-not-found"]
 }

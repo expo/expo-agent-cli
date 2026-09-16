@@ -361,9 +361,11 @@ export async function ensureEasSessionAsync(
   Log.progress(
     `Starting an EAS Simulator session (${platform}) with ${
       options.expoGo ? 'the Expo Go this SDK ships' : `build ${options.buildId}`
-    } — a few minutes, nothing is stuck. ${options.cleanupAfterRun
-      ? 'This run will stop the session afterwards.'
-      : `The session bills until "${PROGRAM_PREFIX} dev:stop --eas".`}`
+    } — a few minutes, nothing is stuck. ${
+      options.cleanupAfterRun
+        ? 'This run will stop the session afterwards.'
+        : `The session bills until "${PROGRAM_PREFIX} dev:stop --eas".`
+    }`
   );
   const result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
     cwd: projectRoot,
@@ -412,7 +414,10 @@ export async function stopEasSessionAsync(
     timeoutMs: EAS_SESSION_STOP_TIMEOUT_MS,
   });
   if (result.spawnError) {
-    return { ok: false, reason: `"${easCliLabel(easCli)} ${args[0]}" could not be run (${result.spawnError})` };
+    return {
+      ok: false,
+      reason: `"${easCliLabel(easCli)} ${args[0]}" could not be run (${result.spawnError})`,
+    };
   }
   if (result.exitCode !== 0) {
     return {
@@ -448,7 +453,9 @@ export async function openAppOnEasAsync(
   }
 
   // A session that was already up gets the deep link the way `navigate --eas` sends it.
-  Log.progress(`Opening the app on EAS Simulator session ${session.sessionId}, which is already up.`);
+  Log.progress(
+    `Opening the app on EAS Simulator session ${session.sessionId}, which is already up.`
+  );
   if (!stillWanted()) {
     return { ...base, opened: false, reason: 'the dev server stopped before the app was opened' };
   }
@@ -514,5 +521,10 @@ export function openAppOnEasFailureLine(platform: NativePlatform, reason: string
 }
 
 function firstLine(text: string): string {
-  return text.split('\n').find((line) => line.trim())?.trim() ?? '';
+  return (
+    text
+      .split('\n')
+      .find((line) => line.trim())
+      ?.trim() ?? ''
+  );
 }

@@ -12,5 +12,8 @@ Monorepo for Expo's agent CLI.
 ```sh
 bun install
 bun test
+bun run format
 bun run --filter @expo/agent-cli build
 ```
+
+`oxfmt` formats the whole repo from `.oxfmtrc.json`. CI fails on `bun run format:check`.

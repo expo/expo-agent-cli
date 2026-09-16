@@ -36,7 +36,12 @@ function createIo(
   argv: string[],
   commands: Record<string, CommandResult>,
   files: Record<string, string> = { [agentCliPackageJsonPath]: packageJsonAt('1.0.0') }
-): PublishIo & { logs: string[]; errors: string[]; writes: Record<string, string>; runs: string[] } {
+): PublishIo & {
+  logs: string[];
+  errors: string[];
+  writes: Record<string, string>;
+  runs: string[];
+} {
   const logs: string[] = [];
   const errors: string[] = [];
   const writes: Record<string, string> = {};
@@ -184,15 +189,19 @@ describe('publish', () => {
   });
 
   it('should bump the patch version when version is omitted for expo-agent-cli', () => {
-    const io = createIo(['--package', 'expo-agent-cli'], {
-      'npm view expo-agent-cli@1.0.1 version': fail('404 Not Found'),
-      'git rev-parse --abbrev-ref HEAD': ok('main\n'),
-      'git status --porcelain': ok(''),
-      'git add packages/expo-agent-cli/package.json': ok(),
-      'git commit -m Publish expo-agent-cli@1.0.1': ok(),
-      'git push': ok(),
-      [ghDispatch('latest', 'expo-agent-cli')]: ok(),
-    }, { [aliasPackageJsonPath]: packageJsonAt('1.0.0', 'expo-agent-cli') });
+    const io = createIo(
+      ['--package', 'expo-agent-cli'],
+      {
+        'npm view expo-agent-cli@1.0.1 version': fail('404 Not Found'),
+        'git rev-parse --abbrev-ref HEAD': ok('main\n'),
+        'git status --porcelain': ok(''),
+        'git add packages/expo-agent-cli/package.json': ok(),
+        'git commit -m Publish expo-agent-cli@1.0.1': ok(),
+        'git push': ok(),
+        [ghDispatch('latest', 'expo-agent-cli')]: ok(),
+      },
+      { [aliasPackageJsonPath]: packageJsonAt('1.0.0', 'expo-agent-cli') }
+    );
 
     publish(io);
 
@@ -215,12 +224,16 @@ describe('publish', () => {
   });
 
   it('should dispatch without rewriting when package.json already matches', () => {
-    const io = createIo(['2.0.0', '--tag', 'next'], {
-      'npm view @expo/agent-cli@2.0.0 version': fail('404 Not Found'),
-      'git rev-parse --abbrev-ref HEAD': ok('main\n'),
-      'git status --porcelain': ok(''),
-      [ghDispatch('next', '@expo/agent-cli')]: ok(),
-    }, { [agentCliPackageJsonPath]: packageJsonAt('2.0.0') });
+    const io = createIo(
+      ['2.0.0', '--tag', 'next'],
+      {
+        'npm view @expo/agent-cli@2.0.0 version': fail('404 Not Found'),
+        'git rev-parse --abbrev-ref HEAD': ok('main\n'),
+        'git status --porcelain': ok(''),
+        [ghDispatch('next', '@expo/agent-cli')]: ok(),
+      },
+      { [agentCliPackageJsonPath]: packageJsonAt('2.0.0') }
+    );
 
     publish(io);
 

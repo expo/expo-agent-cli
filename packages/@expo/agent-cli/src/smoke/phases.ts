@@ -1185,11 +1185,16 @@ async function runPhasesAsync(
       environment.device = session.started ? 'booted' : 'reused';
     } else {
       environment.device = 'failed';
-      skipRest('app', 'no EAS Simulator session was reached, so there was nothing to open the app on and nothing to read');
+      skipRest(
+        'app',
+        'no EAS Simulator session was reached, so there was nothing to open the app on and nothing to read'
+      );
       return done('failed', {
         ...base,
         bundle,
-        screenshot: noScreenshot('no EAS Simulator session was reached, so nothing was photographed'),
+        screenshot: noScreenshot(
+          'no EAS Simulator session was reached, so nothing was photographed'
+        ),
       });
     }
   }

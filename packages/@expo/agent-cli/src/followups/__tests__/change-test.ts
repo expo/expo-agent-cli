@@ -42,7 +42,9 @@ describe(buildChangeFollowUps, () => {
 
       expect(ids(followups).slice(0, 2)).toEqual(['change-native-build', 'change-eas-build']);
       expect(followups[0]!.command).toBe('npx @expo/agent-cli dev --ios');
-      expect(followups[1]!.command).toBe('npx --yes eas-cli@latest build --platform ios --profile development');
+      expect(followups[1]!.command).toBe(
+        'npx --yes eas-cli@latest build --platform ios --profile development'
+      );
     });
 
     // @ref llp/0015-backend-selection-and-config.rfc.md §The follow-ups of a chosen backend
@@ -86,7 +88,9 @@ describe(buildChangeFollowUps, () => {
       const [local, cloud] = buildChangeFollowUps(input({ platform: 'android' }));
 
       expect(local!.why).toContain('this machine has the Android SDK');
-      expect(cloud!.command).toBe('npx --yes eas-cli@latest build --platform android --profile development');
+      expect(cloud!.command).toBe(
+        'npx --yes eas-cli@latest build --platform android --profile development'
+      );
     });
 
     // `dev` requires a platform, so the command states the host's when the report named none —

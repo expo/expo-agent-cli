@@ -15,7 +15,5 @@
     "confidence": "high",
     "suggestedCommand": "npx --yes eas-cli@latest credentials --platform ios"
   },
-  "otherSignatures": [
-    "12:ios.build-failed"
-  ]
+  "otherSignatures": ["12:ios.build-failed"]
 }

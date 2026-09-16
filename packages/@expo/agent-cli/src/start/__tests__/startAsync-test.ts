@@ -41,8 +41,9 @@ function printed(): string {
 
 /** Pin this host's LAN address, so the real-device follow-up does not depend on the machine. */
 function mockLanAddress(address: string) {
-  vi.spyOn(os, 'networkInterfaces')
-    .mockReturnValue({ en0: [{ address, family: 'IPv4', internal: false }] } as any);
+  vi.spyOn(os, 'networkInterfaces').mockReturnValue({
+    en0: [{ address, family: 'IPv4', internal: false }],
+  } as any);
 }
 
 /** Keep `expo start` "running" until the returned callback ends it. */

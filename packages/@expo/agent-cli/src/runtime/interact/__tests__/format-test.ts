@@ -571,7 +571,13 @@ describe(explainBundleRefusal, () => {
 
   it(`names android when the bundle it checked was android`, () => {
     const failure = explainBundleRefusal(
-      broken({ ok: null, error: null, checked: false, reason: 'the bundler did not finish', platform: 'android' }),
+      broken({
+        ok: null,
+        error: null,
+        checked: false,
+        reason: 'the bundler did not finish',
+        platform: 'android',
+      }),
       { what: 'nothing was tapped', rerun: 'npx @expo/agent-cli runtime:tap inc-btn' }
     );
 

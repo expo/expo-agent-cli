@@ -24,7 +24,8 @@ const recordedWhoami = (await vi.importActual<typeof import('fs')>('fs')).readFi
 
 /** Answer the one `eas whoami` run of a preflight. */
 function mockWhoami(result: Partial<subprocess.SubprocessResult>) {
-  return vi.spyOn(subprocess, 'spawnSubprocessAsync')
+  return vi
+    .spyOn(subprocess, 'spawnSubprocessAsync')
     .mockResolvedValue({ exitCode: 0, stdout: '', stderr: '', ...result });
 }
 
@@ -220,7 +221,8 @@ describe(readAuthPreflightAsync, () => {
     }) {
       withPinnedEasCli({ [`${projectRoot}/node_modules/.bin/expo`]: '#!/bin/sh' });
       return (
-        vi.spyOn(subprocess, 'spawnSubprocessAsync')
+        vi
+          .spyOn(subprocess, 'spawnSubprocessAsync')
           // Which CLI is being asked is in the *argv* now, not in the command: the EAS side is the
           // runner plus the package spec, and the Expo side is still the project's own bin.
           .mockImplementation(

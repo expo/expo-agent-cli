@@ -7,10 +7,10 @@ point of recording both: `--pretty` is a compiler option as well as a flag, so a
 it on in its `tsconfig.json`, and a parser that only knew the terse form would report "no errors"
 for a project whose compiler printed the other one — the one answer a gate must never give.
 
-| File              | Command                            |
-| ----------------- | ---------------------------------- |
-| `tsc-terse.txt`   | `tsc --noEmit --pretty false`      |
-| `tsc-pretty.txt`  | `tsc --noEmit --pretty true`       |
+| File             | Command                       |
+| ---------------- | ----------------------------- |
+| `tsc-terse.txt`  | `tsc --noEmit --pretty false` |
+| `tsc-pretty.txt` | `tsc --noEmit --pretty true`  |
 
 **Provenance** [observed]: recorded on 2026-08-23 from the friction run 3 notes app
 (`friction/run3/notesapp`, Expo SDK 57, TypeScript from `expo/tsconfig.base`), with two errors

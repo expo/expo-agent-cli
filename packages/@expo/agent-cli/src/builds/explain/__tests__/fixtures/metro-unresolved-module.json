@@ -21,7 +21,5 @@
     "confidence": "high",
     "suggestedCommand": null
   },
-  "otherSignatures": [
-    "5:bundle.failed"
-  ]
+  "otherSignatures": ["5:bundle.failed"]
 }

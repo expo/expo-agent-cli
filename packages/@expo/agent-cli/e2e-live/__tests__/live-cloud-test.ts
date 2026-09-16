@@ -412,10 +412,15 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // with this answer for Expo Go; a dev build's route link carries no host, so there the launcher
     // URL in `status` is what names the origin.
     if (CLOUD_MODE === 'expo-go') {
-      const printed = await runLiveEasAsync(run, projectRoot, ['navigate', '/', '--print-url', '--json'], {
-        label: 'print-url',
-        env: suiteEnv(),
-      });
+      const printed = await runLiveEasAsync(
+        run,
+        projectRoot,
+        ['navigate', '/', '--print-url', '--json'],
+        {
+          label: 'print-url',
+          env: suiteEnv(),
+        }
+      );
       expectExit(printed, 0);
       const printedReport = parseJson(printed);
       const advertisedHost = String(printedReport.url).match(/^exp:\/\/([^/]+)/)?.[1] ?? '';
@@ -823,10 +828,15 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // fact under test. A run that lands there is tried once more; a mismatch opens nothing, so the
     // retry bills no session.
     const attempt = () =>
-      runLiveEasAsync(run, projectRoot, ['navigate', '/', '--eas', `--${OTHER_PLATFORM}`, '--json'], {
-        label: 'navigate-cloud-mismatch',
-        env: suiteEnv(),
-      });
+      runLiveEasAsync(
+        run,
+        projectRoot,
+        ['navigate', '/', '--eas', `--${OTHER_PLATFORM}`, '--json'],
+        {
+          label: 'navigate-cloud-mismatch',
+          env: suiteEnv(),
+        }
+      );
     let result = await attempt();
     let report = parseJson(result);
     if (report?.error?.code === 'CLOUD_SIMULATOR_SESSION_UNKNOWN') {

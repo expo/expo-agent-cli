@@ -280,7 +280,9 @@ describe(buildStartPlanFollowUps, () => {
       );
 
       expect(ids(followups)).toEqual(['eas-build-instead', 'dev', 'build-freshness']);
-      expect(followups[0]!.command).toBe('npx --yes eas-cli@latest build --platform ios --profile development');
+      expect(followups[0]!.command).toBe(
+        'npx --yes eas-cli@latest build --platform ios --profile development'
+      );
       // The bare tool name, because the sentence has already said where: "this machine has no
       // Xcode on this machine" is what the requirement string produces when it is dropped in.
       expect(followups[0]!.why).toContain('this machine does not have Xcode');
@@ -450,8 +452,12 @@ describe(`${buildStartFollowUps.name} — a tunnelled run, and a machine with no
   // dropped on a machine with no device, it is aimed at the device this project does have.
   it('offers agent-cli to stop both the dev server and EAS session', () => {
     const followups = buildStartFollowUps({ ...base, onEas: true });
-    expect(followups.find((item) => item.id === 'stop-session')?.command).toBe('npx @expo/agent-cli dev:stop --eas');
-    expect(followups.find((item) => item.id === 'stop-session')?.why).not.toContain('keeps running');
+    expect(followups.find((item) => item.id === 'stop-session')?.command).toBe(
+      'npx @expo/agent-cli dev:stop --eas'
+    );
+    expect(followups.find((item) => item.id === 'stop-session')?.why).not.toContain(
+      'keeps running'
+    );
   });
 
   it(`aims the deep-link rung at the cloud session when this machine has no device`, () => {

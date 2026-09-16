@@ -97,7 +97,10 @@ if (!expoRoot) {
 }
 
 const goRoot = path.join(expoRoot, 'apps/expo-go');
-const autolinkingBin = path.join(expoRoot, 'packages/expo-modules-autolinking/bin/expo-modules-autolinking.js');
+const autolinkingBin = path.join(
+  expoRoot,
+  'packages/expo-modules-autolinking/bin/expo-modules-autolinking.js'
+);
 if (!fs.existsSync(autolinkingBin)) {
   fail(`No expo-modules-autolinking bin at ${autolinkingBin}`);
 }
@@ -113,7 +116,16 @@ if (!sdk) {
 
 const iosExpo = runJson(
   autolinkingBin,
-  ['resolve', '--json', '--platform', 'apple', '--project-root', goRoot, '--exclude', ...IOS_EXPO_EXCLUDE],
+  [
+    'resolve',
+    '--json',
+    '--platform',
+    'apple',
+    '--project-root',
+    goRoot,
+    '--exclude',
+    ...IOS_EXPO_EXCLUDE,
+  ],
   goRoot
 );
 if (!iosExpo.ok) {

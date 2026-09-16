@@ -15,8 +15,5 @@
     "confidence": "high",
     "suggestedCommand": "npx --yes eas-cli@latest credentials --platform ios"
   },
-  "otherSignatures": [
-    "8:ios.export.failed",
-    "10:ios.fastlane.failed"
-  ]
+  "otherSignatures": ["8:ios.export.failed", "10:ios.fastlane.failed"]
 }

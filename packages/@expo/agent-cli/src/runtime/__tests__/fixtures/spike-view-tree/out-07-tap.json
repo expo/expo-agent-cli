@@ -8,11 +8,7 @@
     "description": "Object",
     "type": "object",
     "value": {
-      "groupComponents": [
-        "Pressable",
-        "View",
-        "RCTView"
-      ],
+      "groupComponents": ["Pressable", "View", "RCTView"],
       "groupSize": 3,
       "handler": "onPress",
       "handlerOn": "Pressable",

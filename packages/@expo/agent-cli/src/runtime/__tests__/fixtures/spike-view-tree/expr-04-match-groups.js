@@ -115,5 +115,10 @@
     byId[groups[k].testID] = (byId[groups[k].testID] || 0) + 1;
   }
 
-  return { fibersWithTestID: all.length, elementCount: groups.length, countByTestID: byId, groups: groups };
+  return {
+    fibersWithTestID: all.length,
+    elementCount: groups.length,
+    countByTestID: byId,
+    groups: groups,
+  };
 })();
