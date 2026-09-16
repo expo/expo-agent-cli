@@ -407,7 +407,7 @@ function row<Section>(
 function unavailableLine(report: StatusReport, name: StatusSectionName): string {
   const error = report.errors[name];
   // Keep the installed-check retry command complete and ready to copy.
-  if (name === 'installed' && error) {
+  if (name === 'installed' && error?.startsWith("Check didn't finish")) {
     return chalk.yellow(error);
   }
   return chalk.yellow(error ? `unavailable: ${summarize(error)}` : 'unavailable');
