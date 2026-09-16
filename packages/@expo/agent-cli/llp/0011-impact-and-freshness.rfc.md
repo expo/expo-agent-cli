@@ -134,7 +134,9 @@ Three decisions:
 - A policy this CLI has never heard of is `null`, and is reported verbatim.
 - `why` is always a sentence, whatever the verdict.
 
-Resolving the policy uses `expo config --json --type public`, a subprocess that evaluates a dynamic `app.config.js` with its environment. A static-config read is the fallback when the subprocess fails, and `source: null` when neither answered. The Expo CLI writes its own structured event lines to stdout ahead of the answer, so the parse is "last JSON line wins", the same rule `parseFingerprint` uses.
+Resolving the policy reads the config the app itself sees. A **static** `app.json` / `app.config.json` is read as a file: for it that _is_ the public config, and spawning the CLI to be told what the file says was about a second on every `status`, spent to learn nothing [observed — 2026-09-15]. A **dynamic** `app.config.js` / `.ts` is evaluated by `expo config --json --type public`, the one way to run project code outside this CLI ([[0001-agentic-cli-on-expo-cli]] §Constraints item 5). The static file beside it is the fallback when the subprocess fails, and `source: null` when neither answered. The Expo CLI writes its own structured event lines to stdout ahead of the answer, so the parse is "last JSON line wins", the same rule `parseFingerprint` uses.
+
+The evaluated config is remembered (`src/project/evaluatedAppConfig.ts`, `.expo/agent-cli-app-config.json`) and revalidated against the same pinned-file manifest the fingerprint record uses ([[0023-fingerprint-caching]] §What a cached hash is revalidated against), under the same ten-minute expiry, because the gaps are the same: a dynamic config can read `process.env`, the date, or a file no sentinel names, and none of that moves a stamp. The report says when the answer came out of the record — `runtimeVersion.cache` with `computedAt`, `ageMs`, `revalidatedAgainst` and `keyKind`; `(expo config --type public, cached 2m ago)` in the text — and `--no-fingerprint-cache` refuses it ([[0021-honest-reports]]).
 
 ## Precision limits
 
