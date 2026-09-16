@@ -1815,7 +1815,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       const projectRoot = await setupAsync('dev-client-app');
       const file = path.join(projectRoot, 'package.json');
       const packageJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
-      packageJson.expo = { ...packageJson.expo, agentCli: { buildBackend: 'eas' } };
+      packageJson.expo = { ...packageJson.expo, 'agent-cli': { buildBackend: 'eas' } };
       await fs.promises.writeFile(file, JSON.stringify(packageJson, null, 2));
 
       const report = await reportInAsync(projectRoot);
@@ -1831,7 +1831,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       ]);
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain('build ');
-      expect(result.stdout).toContain('"expo.agentCli" in package.json');
+      expect(result.stdout).toContain('"expo.agent-cli" in package.json');
     });
 
     // `status` exits 0 by contract, and a preference file it cannot read must not change that:
@@ -1840,7 +1840,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       const projectRoot = await setupAsync('dev-client-app');
       const file = path.join(projectRoot, 'package.json');
       const packageJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
-      packageJson.expo = { ...packageJson.expo, agentCli: { buildBackend: 'cloud' } };
+      packageJson.expo = { ...packageJson.expo, 'agent-cli': { buildBackend: 'cloud' } };
       await fs.promises.writeFile(file, JSON.stringify(packageJson, null, 2));
 
       const report = await reportInAsync(projectRoot);

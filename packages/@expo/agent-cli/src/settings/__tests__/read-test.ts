@@ -1,5 +1,5 @@
 // @ref llp/0015-backend-selection-and-config.rfc.md §Where the config lives
-// The one read: `package.json` › `expo` › `@expo/agent-cli`, and what happens when it is not there.
+// The one read: `package.json` › `expo` › `agent-cli`, and what happens when it is not there.
 import { vol } from 'memfs';
 import path from 'path';
 
@@ -46,7 +46,7 @@ describe('a project that configures nothing', () => {
 
 describe('a project that configures something', () => {
   it(`reads it, and says where it came from`, () => {
-    writePackageJson({ name: 'app', expo: { agentCli: { buildBackend: 'eas' } } });
+    writePackageJson({ name: 'app', expo: { 'agent-cli': { buildBackend: 'eas' } } });
     const loaded = readAgentCliSettings(projectRoot);
     expect(loaded.settings.buildBackend).toBe('eas');
     expect(loaded.file).toBe(path.join(projectRoot, 'package.json'));
@@ -59,15 +59,30 @@ describe('a project that configures something', () => {
       expo: {
         install: { exclude: ['react-native'] },
         doctor: { reactNativeDirectoryCheck: { enabled: false } },
-        agentCli: { target: 'dev-build' },
+        'agent-cli': { target: 'dev-build' },
       },
     });
     expect(readAgentCliSettings(projectRoot).settings.target).toBe('dev-build');
   });
 
   it(`refuses an invalid value, naming the location`, () => {
-    writePackageJson({ name: 'app', expo: { agentCli: { buildBackend: 'cloud' } } });
-    expect(() => readAgentCliSettings(projectRoot)).toThrow(/"expo.agentCli" in package.json/);
+    writePackageJson({ name: 'app', expo: { 'agent-cli': { buildBackend: 'cloud' } } });
+    expect(() => readAgentCliSettings(projectRoot)).toThrow(/"expo.agent-cli" in package.json/);
+  });
+});
+
+describe('a project still on the old key', () => {
+  it(`should refuse an "agentCli" key rather than read it as configuring nothing`, () => {
+    writePackageJson({ name: 'app', expo: { agentCli: { buildBackend: 'eas' } } });
+    expect(() => readAgentCliSettings(projectRoot)).toThrow(/names "expo.agentCli"/);
+  });
+
+  it(`should ignore it once the new key is there too`, () => {
+    writePackageJson({
+      name: 'app',
+      expo: { agentCli: { buildBackend: 'local' }, 'agent-cli': { buildBackend: 'eas' } },
+    });
+    expect(readAgentCliSettings(projectRoot).settings.buildBackend).toBe('eas');
   });
 });
 
@@ -80,12 +95,12 @@ describe('a package.json that cannot be parsed', () => {
 
 describe('caching', () => {
   it(`reads the file once per project per process`, () => {
-    writePackageJson({ name: 'app', expo: { agentCli: { buildBackend: 'eas' } } });
+    writePackageJson({ name: 'app', expo: { 'agent-cli': { buildBackend: 'eas' } } });
     expect(readAgentCliSettings(projectRoot).settings.buildBackend).toBe('eas');
 
     // Edited behind the CLI's back: nothing changes a project's preferences mid-command, so the
     // second read is the first one's answer.
-    writePackageJson({ name: 'app', expo: { agentCli: { buildBackend: 'local' } } });
+    writePackageJson({ name: 'app', expo: { 'agent-cli': { buildBackend: 'local' } } });
     expect(readAgentCliSettings(projectRoot).settings.buildBackend).toBe('eas');
 
     resetSettingsCache();

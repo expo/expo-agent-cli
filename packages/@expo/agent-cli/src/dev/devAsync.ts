@@ -212,7 +212,7 @@ function implicitEasRouteError(plan: StartPlan, platform: PlanPlatform): Command
     'EAS_ROUTE_NOT_CHOSEN',
     [
       `This machine cannot build for ${platform}, and nothing asked for the build to run on EAS — so nothing ran.`,
-      `Why: ${location.selection?.because ?? `this machine has no ${localTool(location.platform)}.`} A build on EAS and an EAS Simulator session use EAS credits, and this CLI spends them only when asked: with --eas on the command line, or "buildBackend": "eas" under expo.agentCli in package.json.`,
+      `Why: ${location.selection?.because ?? `this machine has no ${localTool(location.platform)}.`} A build on EAS and an EAS Simulator session use EAS credits, and this CLI spends them only when asked: with --eas on the command line, or "buildBackend": "eas" under expo.agent-cli in package.json.`,
       `How: run "${PROGRAM_PREFIX} dev --${platform} --eas" to build on EAS and run the app on an EAS Simulator session, or install ${localRequirement(location.platform)} and run "${PROGRAM_PREFIX} dev --${platform} --local" to build here. "${PROGRAM_PREFIX} dev --${platform} --plan" shows the steps either way.`,
     ].join('\n')
   );

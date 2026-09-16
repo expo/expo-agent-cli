@@ -53,11 +53,11 @@ export interface LoadedSettings {
   /**
    * The file the config was read from, or `null` when no project file named one.
    *
-   * Absolute, so an error can be opened. A project with no `@expo/agent-cli` key loads
+   * Absolute, so an error can be opened. A project with no `agent-cli` key loads
    * {@link EMPTY_SETTINGS} from `null`, which is not an error: saying nothing is the default.
    */
   file: string | null;
-  /** Where in that file, e.g. `expo.agentCli`, for an error that has to name the key. */
+  /** Where in that file, e.g. `expo.agent-cli`, for an error that has to name the key. */
   keyPath: string | null;
 }
 

@@ -40,7 +40,7 @@ const KEY_HELP: Record<string, string> = {
  * version knows.
  *
  * @param raw The value found at {@link where}, `undefined` when the key is absent.
- * @param where How to name the location in an error, e.g. `"expo.agentCli" in package.json`.
+ * @param where How to name the location in an error, e.g. `"expo.agent-cli" in package.json`.
  * @throws {CommandError} `BAD_AGENT_CLI_CONFIG` with what / why / how.
  */
 export function parseAgentCliSettings(raw: unknown, where: string): AgentCliSettings {

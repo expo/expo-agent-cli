@@ -3,7 +3,7 @@
 import { parseAgentCliSettings, settingsAreEmpty, settingsBuildBackend } from '../parse';
 import { EMPTY_SETTINGS } from '../types';
 
-const WHERE = '"expo.agentCli" in package.json';
+const WHERE = '"expo.agent-cli" in package.json';
 
 function parse(raw: unknown) {
   return parseAgentCliSettings(raw, WHERE);
@@ -61,7 +61,7 @@ describe('resolving the backend for one platform', () => {
 
 describe('what the config refuses', () => {
   it(`refuses a value that is not an object, and names the location`, () => {
-    expect(() => parse('eas')).toThrow(/"expo.agentCli" in package.json is "eas"/);
+    expect(() => parse('eas')).toThrow(/"expo.agent-cli" in package.json is "eas"/);
     expect(() => parse(['eas'])).toThrow(/is an array, and it has to be an object/);
   });
 
@@ -120,7 +120,7 @@ describe('what the config refuses', () => {
       parse({ buildBackend: 'cloud' });
     } catch (error: any) {
       const [what, why, how] = String(error.message).split('\n');
-      expect(what).toContain('"expo.agentCli" in package.json');
+      expect(what).toContain('"expo.agent-cli" in package.json');
       expect(why).toMatch(/^Why: /);
       expect(how).toMatch(/^How: /);
     }

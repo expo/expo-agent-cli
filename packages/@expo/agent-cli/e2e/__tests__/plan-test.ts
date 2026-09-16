@@ -75,7 +75,7 @@ async function setupAsync(fixtureName: string): Promise<string> {
 async function writeAgentCliConfigAsync(projectRoot: string, config: unknown): Promise<void> {
   const file = path.join(projectRoot, 'package.json');
   const packageJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
-  packageJson.expo = { ...packageJson.expo, agentCli: config };
+  packageJson.expo = { ...packageJson.expo, 'agent-cli': config };
   await fs.promises.writeFile(file, JSON.stringify(packageJson, null, 2));
 }
 
@@ -430,7 +430,7 @@ describe('@expo/agent-cli dev --plan', () => {
       await breakXcodeSelectAsync(projectRoot);
       const file = path.join(projectRoot, 'package.json');
       const manifest = JSON.parse(await fs.promises.readFile(file, 'utf8'));
-      manifest.expo = { ...manifest.expo, agentCli: { buildBackend: 'eas' } };
+      manifest.expo = { ...manifest.expo, 'agent-cli': { buildBackend: 'eas' } };
       await fs.promises.writeFile(file, JSON.stringify(manifest, null, 2));
 
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--json', '--ios']);
@@ -595,7 +595,7 @@ describe('@expo/agent-cli dev --plan', () => {
       const plan: StartPlan = JSON.parse(result.stdout);
 
       expect(plan.buildLocation).toMatchObject({ runsOn: 'eas', selection: { source: 'config' } });
-      expect(plan.buildLocation!.selection!.why).toContain('"expo.agentCli" in package.json');
+      expect(plan.buildLocation!.selection!.why).toContain('"expo.agent-cli" in package.json');
       expect(plan.steps.map((step) => step.argv[0])).toContain('eas');
     });
 
@@ -653,7 +653,7 @@ describe('@expo/agent-cli dev --plan', () => {
       });
 
       expect(result.exitCode).not.toBe(0);
-      expect(result.all).toContain('"expo.agentCli" in package.json');
+      expect(result.all).toContain('"expo.agent-cli" in package.json');
       expect(result.all).toContain('"local", "eas"');
     });
 
