@@ -416,7 +416,8 @@ describe(checkExpoGoCompatibilityAsync, () => {
       ...expoPackage({}),
       [`${projectRoot}/node_modules/js-sdk/package.json`]: '{"name":"js-sdk"}',
       [`${projectRoot}/node_modules/js-sdk/index.js`]: '',
-      [`${projectRoot}/node_modules/react-native-mmkv/package.json`]: '{"name":"react-native-mmkv"}',
+      [`${projectRoot}/node_modules/react-native-mmkv/package.json`]:
+        '{"name":"react-native-mmkv"}',
       [`${projectRoot}/node_modules/react-native-mmkv/android/build.gradle`]: '',
     });
     vi.mocked(requireAutolinking).mockReturnValueOnce({
@@ -450,6 +451,61 @@ describe(checkExpoGoCompatibilityAsync, () => {
       }),
     ]);
   });
+
+  // SDK 58.0.0-preview.2: expo -> @expo/log-box and expo-modules-core -> expo-modules-jsi.
+  // Both ship native files but neither is in expo/bundledNativeModules.json.
+  it.each([false, true])(
+    `should classify the SDK 58 runtime while rejecting an unsupported transitive module (present: %s)`,
+    async (withUnsupportedModule) => {
+      const sdkVersion = '58.0.0-preview.2';
+      const versions: Record<string, string> = {
+        expo: sdkVersion,
+        '@expo/log-box': '58.0.2',
+        'expo-modules-core': '58.0.2',
+        'expo-modules-jsi': '58.0.2',
+        ...(withUnsupportedModule ? { 'react-native-mmkv': '3.0.0' } : {}),
+      };
+      vol.fromJSON({
+        ...projectPackage({ expo: sdkVersion }),
+        ...expoPackage({ 'expo-modules-core': '~58.0.2' }, sdkVersion),
+        [`${projectRoot}/node_modules/@expo/log-box/ios/LogBox.swift`]: '',
+        [`${projectRoot}/node_modules/@expo/log-box/android/build.gradle`]: '',
+        [`${projectRoot}/node_modules/@expo/log-box/ExpoLogBox.podspec`]: '',
+        ...Object.fromEntries(
+          Object.entries(versions).flatMap(([name, version]) => [
+            [`${projectRoot}/node_modules/${name}/package.json`, JSON.stringify({ name, version })],
+            [
+              `${projectRoot}/node_modules/${name}/${name === 'react-native-mmkv' ? 'ios/Mmkv.mm' : 'expo-module.config.json'}`,
+              '{}',
+            ],
+          ])
+        ),
+      });
+      vi.mocked(requireAutolinking).mockReturnValueOnce({
+        makeCachedDependenciesLinker: () => ({
+          scanDependenciesRecursively: async () =>
+            Object.fromEntries(
+              Object.entries(versions).map(([name, version]) => [
+                name,
+                { name, version, path: `${projectRoot}/node_modules/${name}` },
+              ])
+            ),
+        }),
+      });
+
+      await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
+        compatible: !withUnsupportedModule,
+        reasons: withUnsupportedModule
+          ? [
+              expect.objectContaining({
+                kind: 'unbundled-native-module',
+                packageName: 'react-native-mmkv',
+              }),
+            ]
+          : [],
+      });
+    }
+  );
 
   it(`should report every reason it finds`, async () => {
     vol.fromJSON({

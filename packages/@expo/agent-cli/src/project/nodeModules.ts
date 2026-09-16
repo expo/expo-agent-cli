@@ -13,7 +13,7 @@ export interface ProjectPackageJson {
   devDependencies?: Record<string, string>;
 }
 
-/** File holding the modules bundled in the Expo Go app, shipped by the `expo` package. */
+/** SDK package version catalog shipped by `expo`; not a complete Expo Go runtime inventory. */
 const BUNDLED_NATIVE_MODULES_FILE = 'bundledNativeModules.json';
 
 /** Strip the version range from a package spec, e.g. `@expo/ui@~1.2.0` -> `@expo/ui`. */
@@ -149,9 +149,9 @@ export async function readSdkVersionAsync(projectRoot: string): Promise<string |
 }
 
 /**
- * The modules bundled in the Expo Go app of the project's SDK, mapped to their supported
- * version range. Read from the installed `expo` package, so the answer always matches the SDK
- * the project runs.
+ * The project's SDK package version catalog. It includes packages that need a development
+ * build and omits some internal runtime modules; Expo Go membership is decided in expoGoModules.
+ * Read from the installed `expo` package so the version ranges match the project's SDK.
  *
  * @returns the map, or `null` when the `expo` package is not installed or ships no map.
  */
