@@ -37,7 +37,7 @@ export const skillsSyncHelp: CommandHelp = {
   notes: [
     `"${PROGRAM_PREFIX} skills" runs this action. Only symlinks this CLI created are managed, so a`,
     `file of your own with the same name is reported as skipped rather than replaced.`,
-    `--agent saves the selection for automatic sync during install/start/dev. Detection alone does not.`,
+    `--agent saves the selection for install/start/dev; without a saved selection, agents are detected.`,
     `An existing AGENTS.md package-skill index is refreshed after sync; --dry-run leaves it unchanged.`,
   ],
 };

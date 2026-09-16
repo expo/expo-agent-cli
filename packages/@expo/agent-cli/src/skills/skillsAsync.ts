@@ -282,10 +282,9 @@ export async function cleanSkillsAsync(
 }
 
 /**
- * Best-effort skill sync for `@expo/agent-cli install`, `@expo/agent-cli start` and `@expo/agent-cli dev`. Runs only for the
- * agents cached in `.expo/agent-skill-links.json` by `agents:setup` or `skills:sync --agent`, so it
- * stays off until the user selects agents once. Detection alone does not opt in. Never prompts
- * and never throws.
+ * Best-effort skill sync for install, start, and dev. Uses a saved agent selection when present,
+ * otherwise detects agents from project and home markers without persisting that detection.
+ * Never prompts and never throws.
  * With `packages` (the specs that were just installed), only the skills of those
  * packages are linked and nothing is pruned. Without it, a full sync runs.
  */
@@ -294,8 +293,7 @@ export async function autoSyncSkillsAsync(
   options: { packages?: string[]; silent?: boolean } = {}
 ): Promise<void> {
   try {
-    const persistedIds = await getPersistedAgentIdsAsync(projectRoot);
-    const agents = getAllAgents().filter((agent) => persistedIds?.includes(agent.id));
+    const agents = await getConfiguredAgentsAsync(projectRoot);
     if (!agents.length) {
       debugEvent('auto_sync_skipped', { reason: 'no-agents' });
       return;

@@ -5,7 +5,7 @@
 **Systems:** `src/skills/`; SDK packages in `packages/`
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-20
-**Revised:** 2026-09-08
+**Revised:** 2026-09-16
 **Related:** [[0001-agentic-cli-on-expo-cli]]
 
 ## Summary
@@ -24,17 +24,15 @@ The code lives in this package, not in `@expo/cli`. Four proof-of-concept PRs ag
 
 Commands: `skills:sync`, `skills:list`, `skills:show`, `skills:clean`. Bare `skills` syncs (the group's default action).
 
-Automatic sync calls the shared linker directly and requires a saved selection in `.expo/agent-skill-links.json`, written by project setup or explicit `skills:sync --agent` flags. Detection during a plain sync does not persist a selection. Explicit sync still prunes stale links for detected agents when the last package skill disappears. [observed]
+Automatic sync calls the shared linker directly, using a saved selection in `.expo/agent-skill-links.json` when present and project/home marker detection otherwise. A fresh `new` → `install expo-sqlite` flow must link the package's skills for detected agents without requiring setup first. Detection is recomputed each run and never persisted; project setup or explicit `skills:sync --agent` flags save the selection. An explicitly empty saved selection remains empty. Explicit sync still prunes stale links for detected agents when the last package skill disappears. [observed; fresh-project failure reported by Kudo, 2026-09-16]
 
 Successful named-package installs sync only those packages without pruning; bare installs and full fixes sync the whole graph. Start and dev schedule full sync three seconds after spawning a dev-server step, cancelled on an early exit. A new detached dev child inherits that hook; reusing an existing server does not rerun it. Smoke syncs only indirectly when it bootstraps that child, with no completion guarantee. Check/plan modes, direct Expo passthrough commands, and project creation do not sync. Automatic sync is best-effort and respects `--no-agent-skills` on install/start/dev. [observed]
 
-## No published module ships a skill yet
+## Published package skills
 
-Ten packages were checked for `skills/*/SKILL.md`. None ships one. So `skills:list` in a real project answers `{"skills": []}`, `skills:sync` links nothing, and `skills:show <pkg>` can only refuse.
+The initial implementation shipped before its producers: ten packages checked at that time had no `skills/*/SKILL.md`. That is no longer the current state. A fresh `default@sdk-58` app installs `expo-sqlite@58.0.3`, which contains `skills/expo-sqlite/SKILL.md` and a `references/` directory. The published CLI discovers and prints that skill during install, but its former saved-selection gate prevented linking in a fresh project. [observed, 2026-09-16]
 
-That is a consequence of shipping the consumer first, not a defect. The producing half (a module carrying its own skill) has not shipped anywhere. The consuming half is complete: a `SKILL.md` written into a scratch `node_modules` is discovered through real autolinking, linked as a relative symlink, listed, printed, pruned, and cleaned.
-
-Shipping the consumer before the producer is a decision.
+Packages that ship no skills still produce an empty discovery result. Skills are discovered through autolinking, linked as relative directory symlinks, listed, printed, pruned, and cleaned.
 
 ## Skipped, not silent
 
