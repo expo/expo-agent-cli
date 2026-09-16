@@ -90,9 +90,33 @@ describe(isExpoGoNativeModule, () => {
     ).toBe(false);
   });
 
+  it.each(['58.0.0-preview.2', '99.0.0'])(
+    `should recognize internal runtime modules omitted from the SDK %s catalog`,
+    (sdkVersion) => {
+      const options = { sdkVersion, bundledNativeModules: { 'expo-modules-core': '~58.0.2' } };
+      expect(isExpoGoNativeModule('@expo/log-box', options)).toBe(true);
+      expect(isExpoGoNativeModule('expo-modules-jsi', options)).toBe(true);
+      expect(isExpoGoNativeModule('@expo/unsupported-native-module', options)).toBe(false);
+      expect(isExpoGoNativeModule('expo-unsupported-native-module', options)).toBe(false);
+      expect(isExpoGoNativeModule('react-native-mmkv', options)).toBe(false);
+    }
+  );
+
+  it.each(['54.0.0', null])(
+    `should not assume internal runtime modules exist in SDK %s`,
+    (sdkVersion) => {
+      const options = { sdkVersion, bundledNativeModules: {} };
+      expect(isExpoGoNativeModule('@expo/log-box', options)).toBe(false);
+      expect(isExpoGoNativeModule('expo-modules-jsi', options)).toBe(false);
+    }
+  );
+
   it(`should treat expo-splash-screen as compatible on both paths`, () => {
     expect(
-      isExpoGoNativeModule('expo-splash-screen', { sdkVersion: dumpSdk, bundledNativeModules: null })
+      isExpoGoNativeModule('expo-splash-screen', {
+        sdkVersion: dumpSdk,
+        bundledNativeModules: null,
+      })
     ).toBe(true);
     expect(
       isExpoGoNativeModule('expo-splash-screen', {

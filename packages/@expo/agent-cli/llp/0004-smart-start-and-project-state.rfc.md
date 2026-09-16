@@ -268,6 +268,17 @@ modules are compared against a vendored autolink dump of `apps/expo-go`
 this CLI has not recaptured falls back to that project's
 `expo/bundledNativeModules.json`, so a new Expo release does not wait on an agent-cli
 update. Config plugins still use the catalog (optimistic for `expo-build-properties`).
+The fallback also recognizes `@expo/log-box` and `expo-modules-jsi` on SDK 57 and
+newer: both are internal runtime modules absent from the version catalog, present
+in the SDK 57 dump, and verified in SDK 58.0.0-preview.2 [observed, 2026-09-16].
+At that release's [source commit](https://github.com/expo/expo/tree/313e67f5c9dfb16f9deca74a271cd1d4f33a6f82),
+Expo Go's iOS and Android autolinking search paths include `packages/` without
+excluding `@expo/log-box`; `expo-modules-core` depends on `expo-modules-jsi`, links
+`ExpoModulesJSI` in its podspec, and includes `libexpo-modules-jsi.so` on Android.
+Installed package metadata confirms both dependency edges and the catalog omissions.
+These exact-name exceptions supplement only uncaptured SDKs; a captured dump still
+decides membership. They do not imply that every Expo package or transitive dependency
+is compatible. The fallback catalog remains optimistic for packages it does list.
 `custom-native-code` is a native directory that git does not ignore (bare), not
 merely one that exists: `expo prebuild` writes `ios/` and `android/` that the
 template gitignore covers, and those are still CNG. Local packages under

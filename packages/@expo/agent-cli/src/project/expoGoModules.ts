@@ -31,6 +31,14 @@ const ALSO_COMPATIBLE = new Set(DUMP.alsoCompatible);
 const RUNTIME_PACKAGES = new Set(['expo', 'react-native']);
 
 /**
+ * Internal runtime modules omitted from bundledNativeModules.json. Both are in the SDK 57
+ * dump and the SDK 58 runtime: expo depends on @expo/log-box, and expo-modules-core links
+ * expo-modules-jsi. Only supplement the fallback; captured SDK dumps stay authoritative.
+ */
+const INTERNAL_RUNTIME_MODULES = new Set(['@expo/log-box', 'expo-modules-jsi']);
+const INTERNAL_RUNTIME_MODULES_MIN_SDK = 57;
+
+/**
  * Packages whose native-looking files are build tooling, not something the app links.
  * `expo-modules-autolinking` ships `android/` for its Gradle plugin.
  */
@@ -62,8 +70,8 @@ export function dumpCoversSdk(sdkVersion: string | null | undefined): boolean {
  *
  * Prefer the captured dump (O(1) Set). When this CLI has no dump for the SDK — a new release
  * we have not recaptured yet — fall back to the installed `expo` package's
- * `bundledNativeModules.json`. That catalog is over-inclusive, and it is available the day
- * the SDK ships.
+ * `bundledNativeModules.json`. That version catalog is over-inclusive and omits some internal
+ * runtime modules, so supplement it with the known internals on SDKs that include them.
  *
  * `alsoCompatible` applies on both paths: those packages are missing from Go's autolink
  * output on purpose and still run there. Runtime and tooling packages are never a reason:
@@ -87,6 +95,13 @@ export function isExpoGoNativeModule(
   const dumpSet = dumped ? MODULES_BY_SDK.get(dumped) : undefined;
   if (dumpSet) {
     return dumpSet.has(packageName);
+  }
+  if (
+    dumped != null &&
+    Number(dumped) >= INTERNAL_RUNTIME_MODULES_MIN_SDK &&
+    INTERNAL_RUNTIME_MODULES.has(packageName)
+  ) {
+    return true;
   }
   return options.bundledNativeModules?.[packageName] != null;
 }
