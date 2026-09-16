@@ -223,17 +223,17 @@ describe(resolveRuntimeVersionAsync, () => {
     });
   });
 
-  // A project with no app config at all is evaluated: the Expo CLI derives one from `package.json`,
-  // and only it can say what.
-  it(`should evaluate a project with no app config file`, async () => {
+  // A project with no app config at all has no runtimeVersion to find, and is often not an Expo
+  // app: spawning `expo config` there is `npx expo` fetching a package to say so.
+  it(`should spawn nothing for a project with no app config file`, async () => {
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{"name":"app"}' });
-    mockExpoConfig({ name: 'app' });
 
-    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toMatchObject({
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
       policy: null,
       literal: null,
-      source: 'expo config --type public',
+      source: null,
     });
+    expect(spawnExpoAsync).not.toHaveBeenCalled();
   });
 });
 

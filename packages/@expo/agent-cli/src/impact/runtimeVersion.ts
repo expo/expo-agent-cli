@@ -43,6 +43,12 @@ export async function resolveRuntimeVersionAsync(
   if (staticConfig.source && !staticConfig.dynamic) {
     return readRuntimeVersion(staticConfig.config?.runtimeVersion, staticConfig.source);
   }
+  // No app config at all is a project with no runtimeVersion, and often no Expo: a plain
+  // `package.json` reaches here through `status`, whose `expo config` would be `npx expo` fetching
+  // a package to answer a question nothing asked [observed — tier0 Windows, 300 s hang, 2026-09-16].
+  if (!staticConfig.source && !staticConfig.dynamic) {
+    return { policy: null, literal: null, source: null };
+  }
 
   const evaluated = await readEvaluatedAppConfigAsync(projectRoot, { cache });
   if (evaluated) {
