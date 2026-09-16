@@ -82,9 +82,7 @@
           "accessibilityRole": "link",
           "component": "Text",
           "depth": 134,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 0,
@@ -307,9 +305,7 @@
           "accessibilityRole": null,
           "component": "Link",
           "depth": 135,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 0,
@@ -321,9 +317,7 @@
           "accessibilityRole": null,
           "component": "ExpoLink",
           "depth": 136,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 0,
@@ -335,9 +329,7 @@
           "accessibilityRole": null,
           "component": "ExpoLinkImpl",
           "depth": 139,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 0,
@@ -349,9 +341,7 @@
           "accessibilityRole": null,
           "component": "BaseExpoRouterLink",
           "depth": 140,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 0,
@@ -363,9 +353,7 @@
           "accessibilityRole": "link",
           "component": "RNSlotHOC",
           "depth": 141,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 11,
@@ -377,9 +365,7 @@
           "accessibilityRole": "link",
           "component": "Slot.Slot",
           "depth": 142,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 11,
@@ -391,9 +377,7 @@
           "accessibilityRole": "link",
           "component": "Pressable",
           "depth": 143,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 15,
@@ -448,9 +432,7 @@
           "accessibilityRole": null,
           "component": "Pressable",
           "depth": 138,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 15,
@@ -481,9 +463,7 @@
           "accessibilityRole": null,
           "component": "Pressable",
           "depth": 138,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 15,
@@ -514,9 +494,7 @@
           "accessibilityRole": null,
           "component": "Pressable",
           "depth": 138,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 15,
@@ -547,9 +525,7 @@
           "accessibilityRole": null,
           "component": "Pressable",
           "depth": 138,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 15,
@@ -580,9 +556,7 @@
           "accessibilityRole": null,
           "component": "Pressable",
           "depth": 138,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 15,
@@ -632,9 +606,7 @@
           "accessibilityRole": null,
           "component": "TextInput",
           "depth": 128,
-          "handlers": [
-            "onChangeText"
-          ],
+          "handlers": ["onChangeText"],
           "host": false,
           "interactive": true,
           "tag": 0,
@@ -646,9 +618,7 @@
           "accessibilityRole": null,
           "component": "InternalTextInput",
           "depth": 129,
-          "handlers": [
-            "onChangeText"
-          ],
+          "handlers": ["onChangeText"],
           "host": false,
           "interactive": true,
           "tag": 0,
@@ -660,9 +630,7 @@
           "accessibilityRole": null,
           "component": "RCTSinglelineTextInputView",
           "depth": 131,
-          "handlers": [
-            "onChangeText"
-          ],
+          "handlers": ["onChangeText"],
           "host": true,
           "interactive": true,
           "tag": 5,
@@ -674,9 +642,7 @@
           "accessibilityRole": null,
           "component": "Pressable",
           "depth": 128,
-          "handlers": [
-            "onPress"
-          ],
+          "handlers": ["onPress"],
           "host": false,
           "interactive": true,
           "tag": 15,
@@ -840,10 +806,7 @@
         "ctor": "Object",
         "forComponent": "RCTView",
         "hasMeasure": false,
-        "keys": [
-          "canonical",
-          "node"
-        ],
+        "keys": ["canonical", "node"],
         "publicInstanceCtor": "ReactNativeElement"
       },
       "supported": true,

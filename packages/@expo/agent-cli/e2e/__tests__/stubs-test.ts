@@ -217,21 +217,57 @@ describe('the shared stub eas', () => {
 
   it('filters build:list by platform, status, fingerprint and profile, the way the service does', () => {
     const builds = [
-      { id: 'a', platform: 'IOS', status: 'FINISHED', fingerprintHash: 'f1', buildProfile: 'development-simulator' },
-      { id: 'b', platform: 'IOS', status: 'ERRORED', fingerprintHash: 'f1', buildProfile: 'development-simulator' },
-      { id: 'c', platform: 'ANDROID', status: 'FINISHED', fingerprintHash: 'f1', buildProfile: 'development-simulator' },
-      { id: 'd', platform: 'IOS', status: 'FINISHED', fingerprintHash: 'f2', buildProfile: 'development-simulator' },
+      {
+        id: 'a',
+        platform: 'IOS',
+        status: 'FINISHED',
+        fingerprintHash: 'f1',
+        buildProfile: 'development-simulator',
+      },
+      {
+        id: 'b',
+        platform: 'IOS',
+        status: 'ERRORED',
+        fingerprintHash: 'f1',
+        buildProfile: 'development-simulator',
+      },
+      {
+        id: 'c',
+        platform: 'ANDROID',
+        status: 'FINISHED',
+        fingerprintHash: 'f1',
+        buildProfile: 'development-simulator',
+      },
+      {
+        id: 'd',
+        platform: 'IOS',
+        status: 'FINISHED',
+        fingerprintHash: 'f2',
+        buildProfile: 'development-simulator',
+      },
     ];
     const env = { STUB_EAS_BUILDS: JSON.stringify(builds) };
 
     const hit = eas(
-      ['build:list', '--platform', 'ios', '--status', 'finished', '--fingerprint-hash', 'f1', '--json'],
+      [
+        'build:list',
+        '--platform',
+        'ios',
+        '--status',
+        'finished',
+        '--fingerprint-hash',
+        'f1',
+        '--json',
+      ],
       env
     );
     expect(hit.code).toBe(0);
     expect(JSON.parse(hit.stdout).map((build: { id: string }) => build.id)).toEqual(['a']);
 
-    const miss = eas(['build:list', '--platform', 'ios', '--fingerprint-hash', 'f9', '--json'], env);
+    const miss = eas(
+      ['build:list', '--platform', 'ios', '--fingerprint-hash', 'f9', '--json'],
+      env
+    );
     expect(JSON.parse(miss.stdout)).toEqual([]);
 
     // A verbatim list wins over the filter, which is what the older `status` tests set.
@@ -240,7 +276,14 @@ describe('the shared stub eas', () => {
   });
 
   it('prints the finished build as one JSON array under build --json, with its artifact', () => {
-    const result = eas(['build', '--platform', 'ios', '--profile', 'development-simulator', '--json']);
+    const result = eas([
+      'build',
+      '--platform',
+      'ios',
+      '--profile',
+      'development-simulator',
+      '--json',
+    ]);
     expect(result.code).toBe(0);
     const [build] = JSON.parse(result.stdout);
     expect(build).toMatchObject({
@@ -281,7 +324,10 @@ describe('the shared stub eas', () => {
     const result = eas(['build:configure', '-p', 'ios']);
     expect(result.code).toBe(0);
     const easJson = JSON.parse(fs.readFileSync(path.join(cwd, 'eas.json'), 'utf8'));
-    expect(easJson.build.development).toEqual({ developmentClient: true, distribution: 'internal' });
+    expect(easJson.build.development).toEqual({
+      developmentClient: true,
+      distribution: 'internal',
+    });
     // The simulator profile is `dev --eas`'s to add (`src/utils/easJson.ts`); a stub that wrote it
     // would hide that write from every e2e.
     expect(easJson.build['development-simulator']).toBeUndefined();

@@ -448,7 +448,11 @@ describe(decideStartPlan, () => {
       const state = createDevClientState({
         fingerprint: {
           hash: 'head',
-          sources: [appConfig('a'), nativeModule('expo-router', 'r1'), nativeModule('expo-observe', 'o1')],
+          sources: [
+            appConfig('a'),
+            nativeModule('expo-router', 'r1'),
+            nativeModule('expo-observe', 'o1'),
+          ],
         },
       });
       const plan = decideStartPlan(state, {
@@ -647,7 +651,10 @@ describe(decideStartPlan, () => {
       const state = createDevClientState({
         fingerprint: { hash: null, error: 'fingerprint exited with code 1' },
       });
-      const plan = decideStartPlan(state, { platform: 'ios', lastBuild: recorded('ios', 'any-hash') });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recorded('ios', 'any-hash'),
+      });
 
       expect(plan.rule).toBe('dev-client-stale');
       expect(plan.reasons).toContain('Fingerprint error: fingerprint exited with code 1');
@@ -658,7 +665,10 @@ describe(decideStartPlan, () => {
 
     it(`should build when the fingerprint is missing without an error`, () => {
       const state = createDevClientState({ fingerprint: { hash: null } });
-      const plan = decideStartPlan(state, { platform: 'ios', lastBuild: recorded('ios', 'any-hash') });
+      const plan = decideStartPlan(state, {
+        platform: 'ios',
+        lastBuild: recorded('ios', 'any-hash'),
+      });
 
       expect(plan.rule).toBe('dev-client-stale');
       expect(plan.reasons.join('\n')).toMatch(/fingerprint is unavailable/i);
@@ -916,7 +926,9 @@ describe(decideStartPlan, () => {
         buildBackend: backend('eas'),
       });
 
-      expect(plan.steps[0]!.reason).toContain('npx --yes eas-cli@latest build:run --platform ios --latest');
+      expect(plan.steps[0]!.reason).toContain(
+        'npx --yes eas-cli@latest build:run --platform ios --latest'
+      );
       expect(plan.steps[1]!.reason).toContain('serves nothing until the artifact is installed');
     });
 
@@ -1085,7 +1097,11 @@ describe(decideStartPlan, () => {
 // pinned here on its own: the build profile, the reason the dev-server step gives for what opens
 // where, and the row that rests on a build EAS already has.
 describe('the EAS device', () => {
-  const eas = { platform: 'ios' as const, requestedPlatform: 'ios' as const, deviceBackend: 'eas' as const };
+  const eas = {
+    platform: 'ios' as const,
+    requestedPlatform: 'ios' as const,
+    deviceBackend: 'eas' as const,
+  };
 
   it(`builds with the simulator dev-client profile, never the device one`, () => {
     const plan = decideStartPlan(createDevClientState(), { ...eas, buildBackend: backend('eas') });
@@ -1169,7 +1185,9 @@ describe('the EAS device', () => {
 
     expect(plan.rule).toBe('expo-go');
     expect(argvOf(plan.steps)).toEqual([['expo', 'start', '--go']]);
-    expect(plan.steps[0]!.reason).toContain('EAS Simulator session (iOS) running the Expo Go this SDK ships');
+    expect(plan.steps[0]!.reason).toContain(
+      'EAS Simulator session (iOS) running the Expo Go this SDK ships'
+    );
     expect(plan.steps[0]!.reason).toContain('npx @expo/agent-cli dev:stop --eas');
   });
 
@@ -1206,7 +1224,11 @@ describe('the EAS device', () => {
   it(`rests on a found build for a bare project too`, () => {
     const plan = decideStartPlan(
       createDevClientState({ nativeDirs: { ios: true, android: false } }),
-      { ...eas, buildBackend: backend('eas'), easBuild: { id: 'b', profile: 'development-simulator' } }
+      {
+        ...eas,
+        buildBackend: backend('eas'),
+        easBuild: { id: 'b', profile: 'development-simulator' },
+      }
     );
 
     expect(plan.rule).toBe('bare-fresh');
@@ -1214,17 +1236,21 @@ describe('the EAS device', () => {
   });
 
   it(`still installs expo-dev-client and builds when the project has not got it, found build or not`, () => {
-    const plan = decideStartPlan(
-      createState({ expoGo: { compatible: false, reasons: [] } }),
-      { ...eas, buildBackend: backend('eas'), easBuild: { id: 'b', profile: 'development-simulator' } }
-    );
+    const plan = decideStartPlan(createState({ expoGo: { compatible: false, reasons: [] } }), {
+      ...eas,
+      buildBackend: backend('eas'),
+      easBuild: { id: 'b', profile: 'development-simulator' },
+    });
 
     expect(plan.rule).toBe('needs-dev-client');
     expect(plan.steps.map((step) => step.id)).toEqual(['install-dev-client', 'eas-build', 'start']);
   });
 
   it(`leaves a plan with no --eas exactly as it was`, () => {
-    const local = decideStartPlan(createDevClientState(), { platform: 'ios', requestedPlatform: 'ios' });
+    const local = decideStartPlan(createDevClientState(), {
+      platform: 'ios',
+      requestedPlatform: 'ios',
+    });
     expect(local.easBuild).toBeUndefined();
     expect('easBuild' in local).toBe(false);
   });

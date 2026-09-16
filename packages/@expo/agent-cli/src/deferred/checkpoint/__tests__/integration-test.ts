@@ -12,7 +12,7 @@ vi.mock('../events', () => ({
   debugEvent: Object.assign(vi.fn(), { error: vi.fn((error) => error) }),
 }));
 vi.mock('../create', async () => ({
-  ...await vi.importActual('../create'),
+  ...(await vi.importActual('../create')),
   createCheckpointAsync: vi.fn(),
 }));
 

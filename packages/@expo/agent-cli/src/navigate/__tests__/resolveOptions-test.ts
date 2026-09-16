@@ -130,8 +130,6 @@ describe('resolveNavigateOptions and the cloud backend', () => {
   });
 
   it(`refuses --eas with --print-url, which asks for no device at all`, () => {
-    expect(() => resolveNavigateOptions(['/', '--eas', '--print-url'])).toThrow(
-      /opposite things/
-    );
+    expect(() => resolveNavigateOptions(['/', '--eas', '--print-url'])).toThrow(/opposite things/);
   });
 });

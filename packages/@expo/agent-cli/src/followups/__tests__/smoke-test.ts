@@ -395,9 +395,7 @@ describe(`${buildSmokeFollowUps.name} after a build that failed`, () => {
   // And it still offers the foreground run, second: watching it fail is the right next step when
   // the log does not say enough.
   it(`still offers to watch the build in the foreground`, () => {
-    expect(commands(failedBuild)).toContain(
-      'npx @expo/agent-cli dev --ios --detach --wait-ready'
-    );
+    expect(commands(failedBuild)).toContain('npx @expo/agent-cli dev --ios --detach --wait-ready');
   });
 
   // A start that failed without building keeps what it had: there is no long build to avoid, so

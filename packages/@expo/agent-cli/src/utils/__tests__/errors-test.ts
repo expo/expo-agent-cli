@@ -319,7 +319,8 @@ describe(handleUncaughtException, () => {
   it('prints the message and the stack on stderr', () => {
     handleUncaughtException(undiciCrash());
 
-    const printed = vi.mocked(logError)
+    const printed = vi
+      .mocked(logError)
       .mock.calls.map((call) => call.join(' '))
       .join('\n');
     expect(printed).toContain('setTypeOfService EINVAL');
@@ -363,7 +364,8 @@ describe(handleUncaughtException, () => {
     // Said out loud on stderr, where the crash report already is: an agent that expected an envelope
     // has to be told why there is none, rather than left to notice.
     expect(
-      vi.mocked(logError)
+      vi
+        .mocked(logError)
         .mock.calls.map((call) => call.join(' '))
         .join('\n')
     ).toContain('not added to stdout');
@@ -375,7 +377,8 @@ describe(handleUncaughtException, () => {
 
     expect(exitSpy).toHaveBeenCalledWith(EXIT_ERROR);
     expect(
-      vi.mocked(logError)
+      vi
+        .mocked(logError)
         .mock.calls.map((call) => call.join(' '))
         .join('\n')
     ).toContain('a string nobody expected');
@@ -392,7 +395,8 @@ describe(handleUncaughtException, () => {
 
     expect(execSyncCalls).toEqual(['watchman shutdown-server', 'watchman watch-del-all']);
     expect(
-      vi.mocked(warn)
+      vi
+        .mocked(warn)
         .mock.calls.map(([line]) => line)
         .join('\n')
     ).toContain('Watchman');

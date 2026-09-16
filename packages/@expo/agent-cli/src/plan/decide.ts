@@ -354,8 +354,8 @@ function startDevClientStep(reason: string, options: DecideStartPlanOptions = {}
       : opensOn
         ? `Starts the dev server; the development build is then opened on ${plainDeviceNoun(opensOn)}, booting one when none is up. ${reason}`
         : options.open === false
-        ? `Starts the dev server for the existing development build. --no-open: nothing is opened, so open the app yourself — "${PROGRAM_NAME} navigate /" does. ${reason}`
-        : `Starts the dev server for the existing development build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android. ${reason}`
+          ? `Starts the dev server for the existing development build. --no-open: nothing is opened, so open the app yourself — "${PROGRAM_NAME} navigate /" does. ${reason}`
+          : `Starts the dev server for the existing development build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android. ${reason}`
   );
 }
 
@@ -728,7 +728,7 @@ function describeFreshness(
     return {
       fresh: false,
       summary,
-      reasons: [summary, ...impact.changedSources.length ? [impact.reason] : []],
+      reasons: [summary, ...(impact.changedSources.length ? [impact.reason] : [])],
       needsPrebuild: impact.needsPrebuild,
     };
   }

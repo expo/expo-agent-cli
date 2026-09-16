@@ -159,7 +159,12 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
       return { ok: true, deviceId: 'SIM-BOOTED', backend: 'local-ios' as const, reason: null };
     },
     // A session that was already up, by default: the `--eas` cases override it.
-    ensureEasSession: async () => ({ ok: true, sessionId: 'sess-up', started: false, reason: null }),
+    ensureEasSession: async () => ({
+      ok: true,
+      sessionId: 'sess-up',
+      started: false,
+      reason: null,
+    }),
     stopEasSession: async (sessionId) => ({ ok: true, target: sessionId, reason: null }),
     // Nothing to install by default: the device this run settled on already has the app.
     installNeededOnDevice: async () => false,
@@ -2904,10 +2909,19 @@ describe('the start-session phase, on --eas', () => {
     });
 
   it(`records a session this run started, and ends it again afterwards`, async () => {
-    const stopEasSession = vi.fn(async (sessionId: string) => ({ ok: true, target: sessionId, reason: null }));
+    const stopEasSession = vi.fn(async (sessionId: string) => ({
+      ok: true,
+      target: sessionId,
+      reason: null,
+    }));
     const run = await runSmokePhasesAsync(
       cloudDeps({
-        ensureEasSession: async () => ({ ok: true, sessionId: 'sess-new', started: true, reason: null }),
+        ensureEasSession: async () => ({
+          ok: true,
+          sessionId: 'sess-new',
+          started: true,
+          reason: null,
+        }),
         stopEasSession,
       }),
       options({ bootstrap: true, cloud: 'required' })
@@ -2922,44 +2936,90 @@ describe('the start-session phase, on --eas', () => {
   });
 
   it('cleans up a created session even when readiness fails', async () => {
-    const stopEasSession = vi.fn(async (sessionId: string) => ({ ok: true, target: sessionId, reason: null }));
-    const run = await runSmokePhasesAsync(cloudDeps({
-      ensureEasSession: async () => ({ ok: false, sessionId: 'sess-billed', started: true, reason: 'readiness timed out' }),
-      stopEasSession,
-    }), options({ bootstrap: true, cloud: 'required' }));
+    const stopEasSession = vi.fn(async (sessionId: string) => ({
+      ok: true,
+      target: sessionId,
+      reason: null,
+    }));
+    const run = await runSmokePhasesAsync(
+      cloudDeps({
+        ensureEasSession: async () => ({
+          ok: false,
+          sessionId: 'sess-billed',
+          started: true,
+          reason: 'readiness timed out',
+        }),
+        stopEasSession,
+      }),
+      options({ bootstrap: true, cloud: 'required' })
+    );
     expect(run.outcome).toBe('failed');
     expect(stopEasSession).toHaveBeenCalledWith('sess-billed');
-    expect(run.environment.cleanup).toContainEqual(expect.objectContaining({ resource: 'session', target: 'sess-billed', ok: true }));
+    expect(run.environment.cleanup).toContainEqual(
+      expect.objectContaining({ resource: 'session', target: 'sess-billed', ok: true })
+    );
   });
 
   it('does not claim a session stopped when cleanup fails', async () => {
-    const run = await runSmokePhasesAsync(cloudDeps({
-      ensureEasSession: async () => ({ ok: true, sessionId: 'sess-new', started: true, reason: null }),
-      stopEasSession: async () => ({ ok: false, target: 'sess-new', reason: 'offline' }),
-    }), options({ bootstrap: true, cloud: 'required' }));
-    expect(run.phases.find((phase) => phase.id === 'start-session')?.reason).not.toContain('stopped');
-    expect(run.environment.cleanup).toContainEqual(expect.objectContaining({ resource: 'session', ok: false }));
+    const run = await runSmokePhasesAsync(
+      cloudDeps({
+        ensureEasSession: async () => ({
+          ok: true,
+          sessionId: 'sess-new',
+          started: true,
+          reason: null,
+        }),
+        stopEasSession: async () => ({ ok: false, target: 'sess-new', reason: 'offline' }),
+      }),
+      options({ bootstrap: true, cloud: 'required' })
+    );
+    expect(run.phases.find((phase) => phase.id === 'start-session')?.reason).not.toContain(
+      'stopped'
+    );
+    expect(run.environment.cleanup).toContainEqual(
+      expect.objectContaining({ resource: 'session', ok: false })
+    );
   });
 
-  it.each([true, false])('reloads an attached EAS app only when the session was reused (started: %s)', async (started) => {
-    const reloadApp = vi.fn(async () => ({ ok: true, verifiedBy: 'fresh-debugger-target' as const,
-      knownTargetIds: ['old'], freshTargets: 1, commandSocketReconnected: false, bundleServed: false, reason: null }));
-    const openRoute = vi.fn(async (route: string) => opened({ route, deviceId: 'sess-up', deviceBackend: 'cloud' }));
-    const run = await runSmokePhasesAsync(cloudDeps({
-      ensureEasSession: async () => ({ ok: true, sessionId: 'sess-up', started, reason: null }),
-      openRoute,
-      reloadApp,
-    }), options({ bootstrap: true, cloud: 'required' }));
-    expect(openRoute).toHaveBeenCalledTimes(started ? 1 : 0);
-    expect(reloadApp).toHaveBeenCalledTimes(started ? 0 : 1);
-    expect(statusOf(run, 'reload')).toBe(started ? 'skipped' : 'ok');
-  });
+  it.each([true, false])(
+    'reloads an attached EAS app only when the session was reused (started: %s)',
+    async (started) => {
+      const reloadApp = vi.fn(async () => ({
+        ok: true,
+        verifiedBy: 'fresh-debugger-target' as const,
+        knownTargetIds: ['old'],
+        freshTargets: 1,
+        commandSocketReconnected: false,
+        bundleServed: false,
+        reason: null,
+      }));
+      const openRoute = vi.fn(async (route: string) =>
+        opened({ route, deviceId: 'sess-up', deviceBackend: 'cloud' })
+      );
+      const run = await runSmokePhasesAsync(
+        cloudDeps({
+          ensureEasSession: async () => ({ ok: true, sessionId: 'sess-up', started, reason: null }),
+          openRoute,
+          reloadApp,
+        }),
+        options({ bootstrap: true, cloud: 'required' })
+      );
+      expect(openRoute).toHaveBeenCalledTimes(started ? 1 : 0);
+      expect(reloadApp).toHaveBeenCalledTimes(started ? 0 : 1);
+      expect(statusOf(run, 'reload')).toBe(started ? 'skipped' : 'ok');
+    }
+  );
 
   it(`records a session that was already up, and leaves it running`, async () => {
     const stopEasSession = vi.fn();
     const run = await runSmokePhasesAsync(
       cloudDeps({
-        ensureEasSession: async () => ({ ok: true, sessionId: 'sess-up', started: false, reason: null }),
+        ensureEasSession: async () => ({
+          ok: true,
+          sessionId: 'sess-up',
+          started: false,
+          reason: null,
+        }),
         stopEasSession,
       }),
       options({ bootstrap: true, cloud: 'required' })

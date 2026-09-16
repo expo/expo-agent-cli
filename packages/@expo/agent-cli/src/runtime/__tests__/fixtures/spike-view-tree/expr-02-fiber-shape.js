@@ -21,7 +21,8 @@
   function describeType(t) {
     if (t == null) return { kind: 'null' };
     if (typeof t === 'string') return { kind: 'string', value: t };
-    if (typeof t === 'function') return { kind: 'function', name: t.name || null, displayName: t.displayName || null };
+    if (typeof t === 'function')
+      return { kind: 'function', name: t.name || null, displayName: t.displayName || null };
     if (typeof t === 'object') {
       var objKeys = [];
       for (var ok in t) objKeys.push(ok);

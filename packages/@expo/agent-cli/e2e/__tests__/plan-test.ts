@@ -436,9 +436,14 @@ describe('@expo/agent-cli dev --plan', () => {
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--json', '--ios']);
       const plan: StartPlan = JSON.parse(result.stdout);
 
-      expect(plan.buildLocation).toMatchObject({ runsOn: 'eas', selection: { source: 'config', implicit: false } });
+      expect(plan.buildLocation).toMatchObject({
+        runsOn: 'eas',
+        selection: { source: 'config', implicit: false },
+      });
       expect(plan.reasons.join('\n')).not.toContain('does not take that route on its own');
-      expect(plan.followups.map((followup) => followup.command)).toContain('npx @expo/agent-cli dev --ios');
+      expect(plan.followups.map((followup) => followup.command)).toContain(
+        'npx @expo/agent-cli dev --ios'
+      );
     });
 
     it('says which host fact chose the EAS route, before anything runs', async () => {
@@ -505,7 +510,9 @@ describe('@expo/agent-cli dev --plan', () => {
         status: 'missing',
         selection: { source: 'flag' },
       });
-      expect(plan.followups[0]!.command).toBe('npx --yes eas-cli@latest build --platform ios --profile development');
+      expect(plan.followups[0]!.command).toBe(
+        'npx --yes eas-cli@latest build --platform ios --profile development'
+      );
     });
 
     it('honours --eas on a machine that could build here', async () => {

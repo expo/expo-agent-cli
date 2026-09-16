@@ -75,7 +75,9 @@ describe('anchorFor', () => {
   it('hands back the match, so a caller can build the command from its groups', () => {
     const found = anchorFor('Unable to resolve module expo-camera from /app/src/index.tsx:');
     expect(found?.anchor.signature).toBe('bundle.unresolved-module');
-    expect(found?.anchor.suggestedCommand?.(found.match)).toBe('npx @expo/agent-cli install expo-camera');
+    expect(found?.anchor.suggestedCommand?.(found.match)).toBe(
+      'npx @expo/agent-cli install expo-camera'
+    );
   });
 
   it('suggests nothing for a relative import, which no install fixes', () => {
@@ -105,7 +107,9 @@ describe('anchorFor', () => {
     );
 
     const deep = anchorFor("Error: Cannot find module 'expo-router/entry/index.js'");
-    expect(deep?.anchor.suggestedCommand?.(deep.match)).toBe('npx @expo/agent-cli install expo-router');
+    expect(deep?.anchor.suggestedCommand?.(deep.match)).toBe(
+      'npx @expo/agent-cli install expo-router'
+    );
   });
 
   it('reads both npm error prefixes, because both are still in logs', () => {

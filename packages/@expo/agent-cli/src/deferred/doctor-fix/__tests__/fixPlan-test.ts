@@ -19,7 +19,7 @@ const findExecutableOnPath = vi.mocked(findExecutableOnPathFn);
 vi.mock('fs');
 vi.mock('fs/promises');
 vi.mock('os', async () => ({
-  ...await vi.importActual('os'),
+  ...(await vi.importActual('os')),
   tmpdir: () => '/tmp/T',
   homedir: () => '/home/dev',
 }));
@@ -27,7 +27,6 @@ vi.mock('../../checkpoint/git', () => ({ dirtyTrackedPathsAsync: vi.fn(async () 
 vi.mock('../../utils/subprocess', () => ({
   findExecutableOnPath: vi.fn(() => '/bin/watchman'),
 }));
-
 
 const PROJECT = '/home/dev/app';
 const FILE_MAP = `/tmp/T/${metroFileMapPrefixes(PROJECT)[0]}deadbeef`;

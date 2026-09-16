@@ -107,7 +107,10 @@ describe(extractCommandMentions, () => {
 describe(extractSuggestions, () => {
   it(`takes the whole suggestion, whichever CLI it names`, () => {
     expect(
-      extractSuggestions('src/example.ts', `error.suggestedCommand = 'npx --yes eas-cli@latest login';`)
+      extractSuggestions(
+        'src/example.ts',
+        `error.suggestedCommand = 'npx --yes eas-cli@latest login';`
+      )
     ).toEqual([
       {
         file: 'src/example.ts',

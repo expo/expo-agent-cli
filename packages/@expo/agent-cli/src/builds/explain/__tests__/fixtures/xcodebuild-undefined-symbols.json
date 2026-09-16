@@ -15,8 +15,5 @@
     "confidence": "high",
     "suggestedCommand": "npx pod-install --non-interactive"
   },
-  "otherSignatures": [
-    "14:ios.build-failed",
-    "17:ios.build-failed"
-  ]
+  "otherSignatures": ["14:ios.build-failed", "17:ios.build-failed"]
 }

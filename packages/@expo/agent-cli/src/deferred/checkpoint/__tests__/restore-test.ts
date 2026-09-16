@@ -22,7 +22,7 @@ vi.mock('../events', () => ({
   debugEvent: Object.assign(vi.fn(), { error: vi.fn((error) => error) }),
 }));
 vi.mock('../git', async () => ({
-  ...await vi.importActual('../git'),
+  ...(await vi.importActual('../git')),
   resolveWorkTreeAsync: vi.fn(),
   writeSnapshotTreeAsync: vi.fn(),
   objectExistsAsync: vi.fn(),
@@ -143,8 +143,9 @@ describe(undoAsync, () => {
 
   it(`should report a failing restore as a command error`, async () => {
     seedCheckpoints([record()]);
-    vi.mocked(restoreTreeAsync)
-      .mockRejectedValue(new GitError(['checkout-index', '-a', '-f'], 'fatal: broken', 128));
+    vi.mocked(restoreTreeAsync).mockRejectedValue(
+      new GitError(['checkout-index', '-a', '-f'], 'fatal: broken', 128)
+    );
 
     await expect(undoAsync(projectRoot, {})).rejects.toMatchObject({
       code: 'UNDO_FAILED',

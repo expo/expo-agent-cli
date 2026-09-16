@@ -14,7 +14,6 @@ vi.mock('../errors', async () => {
   return { ...actual, logCmdError: vi.fn() };
 });
 
-
 const HELP_SCHEMA = { '--help': Boolean, '--id': String, '-h': '--help' };
 
 describe(strayArgumentError, () => {

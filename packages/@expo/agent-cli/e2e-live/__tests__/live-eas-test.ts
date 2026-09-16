@@ -45,13 +45,7 @@ import {
 
 const easCi = easCiGate();
 const easProject = easProjectGate();
-const gate = allOf(
-  builtBinGate(),
-  easCi.gate,
-  packageRunnerGate(),
-  networkGate(),
-  easProject.gate
-);
+const gate = allOf(builtBinGate(), easCi.gate, packageRunnerGate(), networkGate(), easProject.gate);
 
 describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
   const run = new LiveRun('live-eas');
@@ -81,7 +75,8 @@ describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
   it('reads a CI-owned app, and never a personal account', () => {
     // The safety that replaced the staging sandbox: the gate only resolved a source whose committed
     // owner is the CI account, so every EAS op below is pinned to it.
-    const owner = JSON.parse(fs.readFileSync(path.join(projectRoot, 'app.json'), 'utf8')).expo.owner;
+    const owner = JSON.parse(fs.readFileSync(path.join(projectRoot, 'app.json'), 'utf8')).expo
+      .owner;
     expect(owner).toBe('expo-ci');
   });
 

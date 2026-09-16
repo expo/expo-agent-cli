@@ -15,7 +15,5 @@
     "confidence": "high",
     "suggestedCommand": "npx @expo/agent-cli install --fix"
   },
-  "otherSignatures": [
-    "1:deps.install-failed"
-  ]
+  "otherSignatures": ["1:deps.install-failed"]
 }

@@ -305,7 +305,8 @@ describe('a log too big to hold', () => {
 
   it('never reads a log file into memory whole', async () => {
     const realFs = await vi.importActual<typeof import('fs')>('fs');
-    const fsApi = ((realFs as { default?: typeof import('fs') }).default ?? realFs) as typeof import('fs');
+    const fsApi = ((realFs as { default?: typeof import('fs') }).default ??
+      realFs) as typeof import('fs');
     const readFileSync = vi.spyOn(fsApi, 'readFileSync');
     const readFile = vi.spyOn(fsApi.promises, 'readFile');
 

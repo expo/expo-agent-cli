@@ -15,7 +15,8 @@ function mockPlatform(value: typeof process.platform) {
 
 /** Answer the one subprocess run of a launch. */
 function mockRun(result: Partial<subprocess.SubprocessResult>) {
-  return vi.spyOn(subprocess, 'spawnSubprocessAsync')
+  return vi
+    .spyOn(subprocess, 'spawnSubprocessAsync')
     .mockResolvedValue({ exitCode: 0, stdout: '', stderr: '', ...result });
 }
 

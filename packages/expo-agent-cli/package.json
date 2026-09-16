@@ -15,7 +15,6 @@
     "url": "git+https://github.com/expo/expo-agent-cli.git",
     "directory": "packages/expo-agent-cli"
   },
-  "type": "module",
   "bin": {
     "expo-agent-cli": "bin/cli.js"
   },
@@ -24,6 +23,7 @@
     "LICENSE",
     "README.md"
   ],
+  "type": "module",
   "publishConfig": {
     "access": "public"
   },

@@ -17,7 +17,7 @@ import { devWaitAsync } from '../waitAsync';
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../runtime/devServer', async () => ({
-  ...await vi.importActual('../../runtime/devServer'),
+  ...(await vi.importActual('../../runtime/devServer')),
   discoverDevServerAsync: vi.fn(),
 }));
 vi.mock('../../runtime/waitReady', () => ({
@@ -25,7 +25,7 @@ vi.mock('../../runtime/waitReady', () => ({
   waitForAppConnectionAsync: vi.fn(),
 }));
 vi.mock('../../runtime/bundleCheck', async () => ({
-  ...await vi.importActual('../../runtime/bundleCheck'),
+  ...(await vi.importActual('../../runtime/bundleCheck')),
   checkEntryBundleAsync: vi.fn(),
 }));
 
@@ -189,8 +189,11 @@ describe(devWaitAsync, () => {
   describe('--require-app', () => {
     it(`should wait for an app on what is left of the budget`, async () => {
       mockDiscovery(0);
-      vi.mocked(waitForAppConnectionAsync)
-        .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 100 });
+      vi.mocked(waitForAppConnectionAsync).mockResolvedValue({
+        appsConnected: 1,
+        timedOut: false,
+        waitedMs: 100,
+      });
 
       expect(await devWaitAsync(projectRoot, options({ requireApp: true }))).toBe(EXIT_OK);
       // The budget is the command's, not a second one of the same size.
@@ -200,8 +203,11 @@ describe(devWaitAsync, () => {
 
     it(`should exit 22 when no app ever attaches`, async () => {
       mockDiscovery(0);
-      vi.mocked(waitForAppConnectionAsync)
-        .mockResolvedValue({ appsConnected: 0, timedOut: true, waitedMs: 5000 });
+      vi.mocked(waitForAppConnectionAsync).mockResolvedValue({
+        appsConnected: 0,
+        timedOut: true,
+        waitedMs: 5000,
+      });
 
       expect(await devWaitAsync(projectRoot, options({ requireApp: true }))).toBe(
         EXIT_OUTCOME_TIMEOUT
@@ -282,7 +288,8 @@ describe(devWaitAsync, () => {
 
       await devWaitAsync(projectRoot, options({ bundleCheck: true }));
 
-      const printed = vi.mocked(Log.log)
+      const printed = vi
+        .mocked(Log.log)
         .mock.calls.map(([line]) => line)
         .join('\n');
       expect(printed).toContain('does not compile');
@@ -472,7 +479,8 @@ describe(devWaitAsync, () => {
   it(`should print labelled lines when --json was not asked for`, async () => {
     await devWaitAsync(projectRoot, options());
 
-    const printed = vi.mocked(Log.log)
+    const printed = vi
+      .mocked(Log.log)
       .mock.calls.map(([line]) => line)
       .join('\n');
     expect(printed).toContain('dev server');

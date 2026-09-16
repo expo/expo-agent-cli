@@ -74,7 +74,10 @@ describe(classifySubprocessFailure, () => {
   it('falls back to the generic EAS scenario for a prompt it cannot name', () => {
     expect(
       classifySubprocessFailure(
-        failure({ stderr: SAMPLES.easNonInteractive, invocation: 'npx --yes eas-cli@latest deploy' })
+        failure({
+          stderr: SAMPLES.easNonInteractive,
+          invocation: 'npx --yes eas-cli@latest deploy',
+        })
       )
     ).toMatchObject({ scenario: 'eas-prompt', command: 'npx --yes eas-cli@latest deploy' });
   });
@@ -227,7 +230,8 @@ describe('an unlinked project is not a prompt', () => {
         invocation: 'npx --yes eas-cli@latest build --platform ios',
         exitCode: 1,
         stdout: '',
-        stderr: 'Either log in with "eas login" or set the EXPO_TOKEN environment variable to authenticate.\n',
+        stderr:
+          'Either log in with "eas login" or set the EXPO_TOKEN environment variable to authenticate.\n',
       })?.scenario
     ).toBe('eas-login');
   });

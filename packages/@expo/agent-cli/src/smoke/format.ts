@@ -182,7 +182,11 @@ function stoppedSuffix(run: SmokeRun, resource: SmokeResource): string {
 
 /** The word a person uses for one of the two things a run can bring. */
 function cleanupName(resource: SmokeResource): string {
-  return resource === 'dev-server' ? 'dev server' : resource === 'session' ? 'EAS Simulator session' : 'device';
+  return resource === 'dev-server'
+    ? 'dev server'
+    : resource === 'session'
+      ? 'EAS Simulator session'
+      : 'device';
 }
 
 /** The verdict, in the word an agent reads and a colour a person does. */

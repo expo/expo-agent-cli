@@ -202,8 +202,14 @@ describe(probeAppPresenceAsync, () => {
   // The property that makes this safe to call on the hot path: a probe is not allowed to be the
   // thing that fails `dev`.
   it.each([
-    ['the device probe throws', { probeDeviceAsync: () => Promise.reject(new Error('simctl exploded')) }],
-    ['the app lookup throws', { hasAppOnDevice: () => Promise.reject(new Error('no such simulator')) }],
+    [
+      'the device probe throws',
+      { probeDeviceAsync: () => Promise.reject(new Error('simctl exploded')) },
+    ],
+    [
+      'the app lookup throws',
+      { hasAppOnDevice: () => Promise.reject(new Error('no such simulator')) },
+    ],
     [
       'reading the app id throws',
       {

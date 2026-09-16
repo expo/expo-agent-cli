@@ -36,7 +36,14 @@
     return 'Unknown';
   }
 
-  var HANDLER_PROPS = ['onPress', 'onLongPress', 'onPressIn', 'onChangeText', 'onSubmitEditing', 'onValueChange'];
+  var HANDLER_PROPS = [
+    'onPress',
+    'onLongPress',
+    'onPressIn',
+    'onChangeText',
+    'onSubmitEditing',
+    'onValueChange',
+  ];
 
   var tagCensus = {};
   var totalFibers = 0;

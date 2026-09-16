@@ -316,12 +316,27 @@ describe(formatSmokeResult, () => {
     });
 
     it.each([true, false])('reports the EAS session cleanup result (%s)', (ok) => {
-      const printed = formatSmokeResult(run({
-        deviceId: 'sess-new', deviceBackend: 'cloud',
-        environment: { devServer: 'reused', device: 'booted', deviceChoice: null,
-          cleanup: [{ resource: 'session', target: 'sess-new', ok, reason: ok ? null : 'offline', ms: 10 }],
-        },
-      }), options());
+      const printed = formatSmokeResult(
+        run({
+          deviceId: 'sess-new',
+          deviceBackend: 'cloud',
+          environment: {
+            devServer: 'reused',
+            device: 'booted',
+            deviceChoice: null,
+            cleanup: [
+              {
+                resource: 'session',
+                target: 'sess-new',
+                ok,
+                reason: ok ? null : 'offline',
+                ms: 10,
+              },
+            ],
+          },
+        }),
+        options()
+      );
       expect(printed).toContain(ok ? 'stopped again' : 'NOT stopped');
       expect(printed).not.toContain('still running');
     });

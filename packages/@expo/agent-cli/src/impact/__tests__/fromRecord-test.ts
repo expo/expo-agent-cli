@@ -45,9 +45,9 @@ describe(classifyAgainstRecordedBuild, () => {
     // different things about ios and android.
     expect(classifyAgainstRecordedBuild('android', record, head)).not.toBe(first);
     // And per input, so a second record with the same hashes never reads the first's answer.
-    expect(
-      classifyAgainstRecordedBuild('ios', recorded('base', [appConfig('a')]), head)
-    ).not.toBe(first);
+    expect(classifyAgainstRecordedBuild('ios', recorded('base', [appConfig('a')]), head)).not.toBe(
+      first
+    );
   });
 
   it(`should classify an added autolinked module as needing a native build`, () => {
@@ -137,7 +137,12 @@ describe(classifyAgainstRecordedBuild, () => {
         hash: 'head',
         sources: [
           ...before,
-          { type: 'dir', reasons: ['expoAutolinkingIos'], hash: 'e1', ...label } as FingerprintSource,
+          {
+            type: 'dir',
+            reasons: ['expoAutolinkingIos'],
+            hash: 'e1',
+            ...label,
+          } as FingerprintSource,
         ],
       });
       expect(impact.needsPrebuild, JSON.stringify(label)).toBe(true);
@@ -271,8 +276,11 @@ describe(refineWithChangedFilesAsync, () => {
   });
 
   it(`should call a config the dev server read once at start-up dev-client-compatible`, async () => {
-    vi.mocked(listChangedFilesAsync)
-      .mockResolvedValue({ files: ['metro.config.js', 'app/index.tsx'], gap: null, detail: null });
+    vi.mocked(listChangedFilesAsync).mockResolvedValue({
+      files: ['metro.config.js', 'app/index.tsx'],
+      gap: null,
+      detail: null,
+    });
 
     const refinement = await refineWithChangedFilesAsync(projectRoot);
 
@@ -285,8 +293,11 @@ describe(refineWithChangedFilesAsync, () => {
   });
 
   it(`should keep js-only when every changed file is inside the bundle`, async () => {
-    vi.mocked(listChangedFilesAsync)
-      .mockResolvedValue({ files: ['app/index.tsx'], gap: null, detail: null });
+    vi.mocked(listChangedFilesAsync).mockResolvedValue({
+      files: ['app/index.tsx'],
+      gap: null,
+      detail: null,
+    });
 
     await expect(refineWithChangedFilesAsync(projectRoot)).resolves.toMatchObject({
       class: 'js-only',

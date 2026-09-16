@@ -22,7 +22,6 @@ vi.mock('os', async (importOriginal) => {
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 vi.mock('../../utils/subprocess', () => ({ findExecutableOnPath: vi.fn(() => null) }));
 
-
 /** The default Android SDK location on a Mac, which is where this machine's SDK actually is. */
 const MAC_SDK = '/home/dev/Library/Android/sdk';
 

@@ -15,7 +15,5 @@
     "confidence": "medium",
     "suggestedCommand": null
   },
-  "otherSignatures": [
-    "9:ios.swift.compile-error"
-  ]
+  "otherSignatures": ["9:ios.swift.compile-error"]
 }

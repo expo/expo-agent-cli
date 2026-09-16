@@ -670,22 +670,32 @@ export function iosDevClientProjectGate(): {
     dependencies =
       JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))?.dependencies ?? {};
   } catch (error: any) {
-    return { gate: missing(`${root} has no readable app.json/package.json: ${error.message}`), project: null };
+    return {
+      gate: missing(`${root} has no readable app.json/package.json: ${error.message}`),
+      project: null,
+    };
   }
   if (!dependencies['expo-dev-client']) {
     return {
-      gate: missing(`${root} does not depend on expo-dev-client, so nothing there is a development build`),
+      gate: missing(
+        `${root} does not depend on expo-dev-client, so nothing there is a development build`
+      ),
       project: null,
     };
   }
   const scheme: string | null = config?.scheme ?? null;
   const iosBundleId: string | null = config?.ios?.bundleIdentifier ?? null;
   if (!scheme) {
-    return { gate: missing(`${root}'s app.json names no expo.scheme, so its build has no URL to open`), project: null };
+    return {
+      gate: missing(`${root}'s app.json names no expo.scheme, so its build has no URL to open`),
+      project: null,
+    };
   }
   if (!iosBundleId) {
     return {
-      gate: missing(`${root}'s app.json names no ios.bundleIdentifier — without it the deep link raises a dialog nothing answers`),
+      gate: missing(
+        `${root}'s app.json names no ios.bundleIdentifier — without it the deep link raises a dialog nothing answers`
+      ),
       project: null,
     };
   }
@@ -700,7 +710,10 @@ export function iosDevClientProjectGate(): {
  * names ios — the same two facts {@link androidDevBuildGate} needs, so `@expo/agent-cli dev` serves the
  * installed app instead of planning a fifteen-minute Xcode build.
  */
-export function iosDevBuildGate(project: DevClientProject | null, simulator: Simulator | null): Gate {
+export function iosDevBuildGate(
+  project: DevClientProject | null,
+  simulator: Simulator | null
+): Gate {
   if (!project) {
     return missing('no iOS development-build project was resolved, so nothing could be looked for');
   }
@@ -771,8 +784,9 @@ export function easCiGate(): { gate: Gate; user: string | null } {
   }
   let user: string | null = null;
   try {
-    user = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.expo', 'state.json'), 'utf8'))?.auth
-      ?.username ?? null;
+    user =
+      JSON.parse(fs.readFileSync(path.join(os.homedir(), '.expo', 'state.json'), 'utf8'))?.auth
+        ?.username ?? null;
   } catch {
     user = null;
   }
@@ -803,7 +817,15 @@ export function assertEasEnabled(what: string): void {
 }
 
 /** The committed example app the EAS suites read builds from. Relative to the repo root. */
-export const EAS_EXAMPLE_APP = path.resolve(__dirname, '..', '..', '..', '..', 'apps', 'eas-example');
+export const EAS_EXAMPLE_APP = path.resolve(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  '..',
+  'apps',
+  'eas-example'
+);
 
 /**
  * An EAS-linked app to read builds from, owned by the CI account.
@@ -861,8 +883,7 @@ export function livecheckLink(): LivecheckLink {
   return {
     owner: process.env.AGENT_CLI_LIVE_EAS_OWNER ?? EAS_CI_ACCOUNT,
     slug: 'expo-agent-cli',
-    projectId:
-      process.env.AGENT_CLI_LIVE_EAS_PROJECT_ID ?? 'a39c0791-951a-425d-8364-03c69b849a9f',
+    projectId: process.env.AGENT_CLI_LIVE_EAS_PROJECT_ID ?? 'a39c0791-951a-425d-8364-03c69b849a9f',
   };
 }
 
@@ -952,5 +973,3 @@ export function cloudOptInGate(): Gate {
         'AGENT_CLI_LIVE_CLOUD=1 is not set — an EAS Simulator session bills from start to stop, so this suite never runs without being asked for by name'
       );
 }
-
-

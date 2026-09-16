@@ -31,11 +31,11 @@ re-generated to confirm it hashes to the pre-capture value again.
 
 ## What was measured
 
-| | sources | bytes of `{sources, hash}` |
-| --- | --- | --- |
-| `--platform ios` | 59 | 25,526 |
-| `--platform android` | 59 | 30,378 |
-| both platforms | 79 | 43,072 |
+|                      | sources | bytes of `{sources, hash}` |
+| -------------------- | ------- | -------------------------- |
+| `--platform ios`     | 59      | 25,526                     |
+| `--platform android` | 59      | 30,378                     |
+| both platforms       | 79      | 43,072                     |
 
 This is the measurement behind the decision to store the whole fingerprint in
 `.expo/agent-cli-last-build.json` rather than gzip it or store a subset — see llp/0011

@@ -2197,13 +2197,16 @@ describe('status on a machine that cannot build', () => {
   // elsewhere. A broken `xcode-select` makes a Mac the machine that cannot build; on the other
   // runners the default is Android and the runner's own Android SDK decides, so this case says
   // nothing there [observed — tier0-linux and tier0-windows, 2026-09-09].
-  it.skipIf(process.platform !== 'darwin')('offers dev --eas as the next step, and says why in the plan', async () => {
-    const projectRoot = await setupAsync('dev-client-app');
-    await breakXcodeSelectAsync(projectRoot);
+  it.skipIf(process.platform !== 'darwin')(
+    'offers dev --eas as the next step, and says why in the plan',
+    async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      await breakXcodeSelectAsync(projectRoot);
 
-    const report = await reportInAsync(projectRoot);
+      const report = await reportInAsync(projectRoot);
 
-    expect(report.next!.command).toBe('npx @expo/agent-cli dev --ios --eas');
-    expect(report.next!.steps.map((step) => step.argv[0])).toContain('eas');
-  });
+      expect(report.next!.command).toBe('npx @expo/agent-cli dev --ios --eas');
+      expect(report.next!.steps.map((step) => step.argv[0])).toContain('eas');
+    }
+  );
 });

@@ -26,7 +26,7 @@ import realDiff from './fixtures/notesapp-ios-diff.json';
 vi.mock('../../utils/subprocess', () => ({ spawnSubprocessAsync: vi.fn() }));
 vi.mock('../../plan/lastBuild', () => ({ readLastBuildRecord: vi.fn(() => ({})) }));
 vi.mock('../../project/fingerprint', async () => ({
-  ...(await vi.importActual('../../project/fingerprint') as object),
+  ...((await vi.importActual('../../project/fingerprint')) as object),
   generateFingerprintAsync: vi.fn(),
   diffFingerprintsAsync: vi.fn(),
 }));
@@ -46,8 +46,12 @@ const easCli = {
 const spawned = (args: string[]) => [...easCli.prefixArgs, ...args];
 
 function mockSpawn(result: Partial<Awaited<ReturnType<typeof spawnSubprocessAsync>>>) {
-  vi.mocked(spawnSubprocessAsync)
-    .mockResolvedValue({ exitCode: 0, stdout: '', stderr: '', ...result });
+  vi.mocked(spawnSubprocessAsync).mockResolvedValue({
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+    ...result,
+  });
 }
 
 const source = { type: 'dir', filePath: 'node_modules/x', reasons: ['expoAutolinkingIos'] };
@@ -85,8 +89,11 @@ describe(compareWithLastBuildAsync, () => {
   });
 
   it(`should report the fingerprint failure as an error, not as unchanged`, async () => {
-    vi.mocked(generateFingerprintAsync)
-      .mockResolvedValue({ hash: null, sources: null, error: 'no fingerprint CLI' });
+    vi.mocked(generateFingerprintAsync).mockResolvedValue({
+      hash: null,
+      sources: null,
+      error: 'no fingerprint CLI',
+    });
 
     const result = await compareWithLastBuildAsync(projectRoot, 'ios');
 
@@ -217,8 +224,9 @@ describe(compareWithEasBuildAsync, () => {
   // the diff is this CLI's to produce — from the sources that came with them.
   it(`should diff the two fingerprints the recorded payload carries`, async () => {
     mockSpawn({ stdout: JSON.stringify(recordedCompare) });
-    vi.mocked(diffFingerprintsAsync)
-      .mockResolvedValue({ items: realDiff as FingerprintDiffItem[] });
+    vi.mocked(diffFingerprintsAsync).mockResolvedValue({
+      items: realDiff as FingerprintDiffItem[],
+    });
 
     const result = await compareWithEasBuildAsync(easCli, projectRoot, 'build-1');
 
@@ -238,8 +246,10 @@ describe(compareWithEasBuildAsync, () => {
   // elaboration must not lose the answer.
   it(`should still answer "whether" when the local diff fails`, async () => {
     mockSpawn({ stdout: JSON.stringify(recordedCompare) });
-    vi.mocked(diffFingerprintsAsync)
-      .mockResolvedValue({ items: null, error: 'no fingerprint CLI' });
+    vi.mocked(diffFingerprintsAsync).mockResolvedValue({
+      items: null,
+      error: 'no fingerprint CLI',
+    });
 
     const result = await compareWithEasBuildAsync(easCli, projectRoot, 'build-1');
 
@@ -479,7 +489,9 @@ describe(lookUpCachedBuildAsync, () => {
     // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — in this CLI's words, with the fix,
     // rather than the first line of that explanation with the `eas init` forms cut off.
     expect((outcome as { reason: string }).reason).toContain('not linked to an EAS project');
-    expect((outcome as { reason: string }).reason).toContain('npx --yes eas-cli@latest init --account');
+    expect((outcome as { reason: string }).reason).toContain(
+      'npx --yes eas-cli@latest init --account'
+    );
   });
 
   // @ref src/utils/wrapperCrash.ts — the binary under the name `eas` may be a wrapper, a shim or a

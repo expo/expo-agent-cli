@@ -21,7 +21,5 @@
     "confidence": "high",
     "suggestedCommand": "npx @expo/agent-cli typecheck"
   },
-  "otherSignatures": [
-    "5:bundle.failed"
-  ]
+  "otherSignatures": ["5:bundle.failed"]
 }

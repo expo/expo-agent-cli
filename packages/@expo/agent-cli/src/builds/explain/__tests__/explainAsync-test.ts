@@ -131,7 +131,8 @@ describe('the report', () => {
     // The property this command has to keep for a 100 MB Xcode log. `extract-test.ts` asserts the
     // same thing; it is repeated here because this is the path the command actually takes.
     const realFs = await vi.importActual<typeof import('fs')>('fs');
-    const fsApi = ((realFs as { default?: typeof import('fs') }).default ?? realFs) as typeof import('fs');
+    const fsApi = ((realFs as { default?: typeof import('fs') }).default ??
+      realFs) as typeof import('fs');
     const readFileSync = vi.spyOn(fsApi, 'readFileSync');
     await reportForAsync('xcodebuild-pods-out-of-sync.log');
     expect(readFileSync).not.toHaveBeenCalled();

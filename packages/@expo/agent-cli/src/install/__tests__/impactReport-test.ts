@@ -26,11 +26,10 @@ function output(): string {
 
 describe(reportInstallImpactAsync, () => {
   it(`should classify the installed packages and print one line each`, async () => {
-    vi.mocked(classifyInstallImpactAsync)
-      .mockResolvedValue([
-        report(),
-        report({ packageName: 'zod', impact: 'js-only', action: 'reload', reasons: ['no native'] }),
-      ]);
+    vi.mocked(classifyInstallImpactAsync).mockResolvedValue([
+      report(),
+      report({ packageName: 'zod', impact: 'js-only', action: 'reload', reasons: ['no native'] }),
+    ]);
 
     await reportInstallImpactAsync(projectRoot, ['expo-camera', 'zod']);
 
@@ -41,13 +40,12 @@ describe(reportInstallImpactAsync, () => {
   });
 
   it(`should explain the action of every classification`, async () => {
-    vi.mocked(classifyInstallImpactAsync)
-      .mockResolvedValue([
-        report({ packageName: 'a', action: 'prebuild-and-build' }),
-        report({ packageName: 'b', action: 'native-sync' }),
-        report({ packageName: 'c', action: 'reload' }),
-        report({ packageName: 'd', action: 'none' }),
-      ]);
+    vi.mocked(classifyInstallImpactAsync).mockResolvedValue([
+      report({ packageName: 'a', action: 'prebuild-and-build' }),
+      report({ packageName: 'b', action: 'native-sync' }),
+      report({ packageName: 'c', action: 'reload' }),
+      report({ packageName: 'd', action: 'none' }),
+    ]);
 
     await reportInstallImpactAsync(projectRoot, ['a', 'b', 'c', 'd']);
 
@@ -59,8 +57,9 @@ describe(reportInstallImpactAsync, () => {
   });
 
   it(`should print the reasons of a classification`, async () => {
-    vi.mocked(classifyInstallImpactAsync)
-      .mockResolvedValue([report({ reasons: ['ships an ios/ directory'] })]);
+    vi.mocked(classifyInstallImpactAsync).mockResolvedValue([
+      report({ reasons: ['ships an ios/ directory'] }),
+    ]);
 
     await reportInstallImpactAsync(projectRoot, ['expo-camera']);
 
@@ -76,8 +75,7 @@ describe(reportInstallImpactAsync, () => {
   });
 
   it(`should warn but never throw when the classification fails`, async () => {
-    vi.mocked(classifyInstallImpactAsync)
-      .mockRejectedValue(new Error('node_modules disappeared'));
+    vi.mocked(classifyInstallImpactAsync).mockRejectedValue(new Error('node_modules disappeared'));
 
     await expect(reportInstallImpactAsync(projectRoot, ['expo-camera'])).resolves.toEqual([]);
     expect(Log.warn).toHaveBeenCalled();

@@ -21,9 +21,7 @@ validates it against the shape below, and runs the ones that belong to the reque
     "env": { "CI": "1" }, //   optional extra environment variables
     "timeoutMs": 60000, //   optional, defaults to 120000
   },
-  "graders": [
-    /* see below */
-  ], // required, non-empty
+  "graders": [/* see below */], // required, non-empty
 }
 ```
 

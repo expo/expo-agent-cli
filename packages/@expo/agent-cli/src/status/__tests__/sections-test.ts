@@ -511,7 +511,12 @@ describe(buildNextActionStatus, () => {
   it(`should report the fresh rule when the recorded build matches`, () => {
     const state = mockState({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } });
 
-    const next = buildNextActionStatus(state, { ios: { hash: 'abcdef0123456789', sources: null } }, 'ios', null);
+    const next = buildNextActionStatus(
+      state,
+      { ios: { hash: 'abcdef0123456789', sources: null } },
+      'ios',
+      null
+    );
 
     expect(next.rule).toBe('dev-client-fresh');
     expect(next.steps).toHaveLength(1);

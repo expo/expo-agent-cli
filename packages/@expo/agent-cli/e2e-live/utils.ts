@@ -622,4 +622,3 @@ export async function downloadBuildLogAsync(
   fs.writeFileSync(decodedPath, zlib.brotliDecompressSync(raw));
   return { rawPath, decodedPath };
 }
-

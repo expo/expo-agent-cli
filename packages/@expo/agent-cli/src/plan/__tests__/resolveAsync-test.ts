@@ -19,16 +19,14 @@ vi.mock('../../toolchain', async () => {
 const projectRoot = '/project';
 
 function stubToolchain(status: ToolchainStatus, { impossible = false } = {}): void {
-  vi.mocked(detectToolchainAsync).mockImplementation(
-    async (platform): Promise<ToolchainProbe> => ({
-      platform,
-      status,
-      detail: `The ${platform} toolchain is ${status}, for this test.`,
-      requirement: `the ${platform} toolchain on this machine`,
-      caveats: [],
-      impossible,
-    })
-  );
+  vi.mocked(detectToolchainAsync).mockImplementation(async (platform): Promise<ToolchainProbe> => ({
+    platform,
+    status,
+    detail: `The ${platform} toolchain is ${status}, for this test.`,
+    requirement: `the ${platform} toolchain on this machine`,
+    caveats: [],
+    impossible,
+  }));
 }
 
 /** A managed project that needs a development build, so every plan of it contains a build. */
@@ -357,7 +355,9 @@ describe('detection', () => {
 
 describe('the project config', () => {
   it(`moves a build to EAS on a machine that could do it here`, async () => {
-    writeProject({ 'package.json': { name: 'app', expo: { 'agent-cli': { buildBackend: 'eas' } } } });
+    writeProject({
+      'package.json': { name: 'app', expo: { 'agent-cli': { buildBackend: 'eas' } } },
+    });
     const plan = await resolveStartPlanAsync(projectRoot, devClientState(), { platform: 'ios' });
 
     expect(plan.buildLocation).toMatchObject({ runsOn: 'eas', selection: { source: 'config' } });
@@ -367,7 +367,9 @@ describe('the project config', () => {
   });
 
   it(`asks this machine nothing when it already said "the cloud"`, async () => {
-    writeProject({ 'package.json': { name: 'app', expo: { 'agent-cli': { buildBackend: 'eas' } } } });
+    writeProject({
+      'package.json': { name: 'app', expo: { 'agent-cli': { buildBackend: 'eas' } } },
+    });
     await resolveStartPlanAsync(projectRoot, devClientState(), { platform: 'ios' });
 
     // Two subprocesses that cannot change the answer are two subprocesses not spawned.
@@ -392,7 +394,9 @@ describe('the project config', () => {
   });
 
   it(`plans a development build for a project Expo Go could run`, async () => {
-    writeProject({ 'package.json': { name: 'app', expo: { 'agent-cli': { target: 'dev-build' } } } });
+    writeProject({
+      'package.json': { name: 'app', expo: { 'agent-cli': { target: 'dev-build' } } },
+    });
     const plan = await resolveStartPlanAsync(projectRoot, expoGoState(), { platform: 'ios' });
 
     expect(plan.rule).toBe('needs-dev-client');
@@ -414,7 +418,9 @@ describe('the project config', () => {
 
 describe('a flag on the command line', () => {
   it(`beats a config that says the opposite`, async () => {
-    writeProject({ 'package.json': { name: 'app', expo: { 'agent-cli': { buildBackend: 'eas' } } } });
+    writeProject({
+      'package.json': { name: 'app', expo: { 'agent-cli': { buildBackend: 'eas' } } },
+    });
     const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
       platform: 'ios',
       requestedBackend: 'local',
@@ -466,7 +472,9 @@ describe('the EAS device', () => {
   };
 
   it(`asks EAS for a finished simulator build of this fingerprint, and rests on it when there is one`, async () => {
-    writeProject({ 'eas.json': { build: { 'development-simulator': { ios: { simulator: true } } } } });
+    writeProject({
+      'eas.json': { build: { 'development-simulator': { ios: { simulator: true } } } },
+    });
     const lookUpEasBuild = vi.fn(async () => ({ id: 'build-9', profile: 'development-simulator' }));
 
     const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {

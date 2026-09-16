@@ -61,7 +61,8 @@ beforeEach(() => {
   // directory, which would leave every link broken. Store an absolute target so the volume behaves
   // like a real file system, and assert the relative target through the spy instead.
   const symlinkAsync = fs.promises.symlink;
-  symlinkSpy = vi.spyOn(fs.promises, 'symlink')
+  symlinkSpy = vi
+    .spyOn(fs.promises, 'symlink')
     .mockImplementation((target, linkPath, type) =>
       symlinkAsync(path.resolve(path.dirname(linkPath as string), target as string), linkPath, type)
     );

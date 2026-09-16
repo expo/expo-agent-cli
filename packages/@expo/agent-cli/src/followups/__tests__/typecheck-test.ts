@@ -26,7 +26,11 @@ describe(buildTypeCheckFollowUps, () => {
   // "Nothing was checked" must not read as "everything passed", and the follow-up is where the
   // difference is stated in a command rather than in a field.
   it(`should say that a run which checked nothing proves nothing`, () => {
-    const followups = buildTypeCheckFollowUps({ checked: false, errorCount: 0, platform: 'android' });
+    const followups = buildTypeCheckFollowUps({
+      checked: false,
+      errorCount: 0,
+      platform: 'android',
+    });
 
     expect(ids(followups)).toEqual(['typecheck-not-run']);
     expect(followups[0]!.why).toContain('proves nothing');

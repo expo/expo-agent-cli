@@ -12,7 +12,7 @@ import { runtimeNetworkAsync } from '../runtimeNetworkAsync';
 
 // The real error class and the real flag reader are kept: the command branches on both.
 vi.mock('../networkCollector', async () => ({
-  ...await vi.importActual('../networkCollector'),
+  ...(await vi.importActual('../networkCollector')),
   CdpNetworkCollector: vi.fn(),
 }));
 

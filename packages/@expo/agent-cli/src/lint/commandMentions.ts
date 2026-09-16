@@ -334,7 +334,7 @@ function mentionsIn(scanned: string): {
     args: string[];
     dynamic: boolean;
   }[] = [];
-  for (let at = scanned.indexOf(MENTION_PREFIX); at >= 0; ) {
+  for (let at = scanned.indexOf(MENTION_PREFIX); at >= 0;) {
     const end = endOfMention(scanned, at);
     const text = printable(scanned.slice(at, end).replace(TRAILING_PUNCTUATION, ''));
     const words = text.slice(MENTION_PREFIX.length).trim().split(/\s+/).filter(Boolean);

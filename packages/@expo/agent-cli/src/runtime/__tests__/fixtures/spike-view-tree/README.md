@@ -11,14 +11,14 @@ source — `var` throughout is deliberate.
 
 ## Provenance
 
-| | |
-|---|---|
-| Captured | 2026-08-24 |
-| App | `friction/run3/notesapp` — Expo SDK 57.0.15, `expo-router` 57.0.15, React 19.2.3, React Native 0.86.2, `react-native-gesture-handler` 2.32.0 |
-| Runtime | Expo Go, iOS 26.5 simulator `C159CF99-9B06-4D2F-BFDC-010A107E2FBC` (iPhone 17 Pro), Hermes, Fabric, bridgeless |
-| Renderer | `react-native-renderer` 19.2.3, `bundleType: 1` (development), one renderer, one fiber root |
-| Dev server | `@expo/agent-cli start --go --port 8230`, `http://127.0.0.1:8230` |
-| Transport | `Runtime.evaluate` over the Metro inspector proxy, `returnByValue: true`, same-origin `Origin` header (`src/runtime/cdpClient.ts`) |
+|            |                                                                                                                                              |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Captured   | 2026-08-24                                                                                                                                   |
+| App        | `friction/run3/notesapp` — Expo SDK 57.0.15, `expo-router` 57.0.15, React 19.2.3, React Native 0.86.2, `react-native-gesture-handler` 2.32.0 |
+| Runtime    | Expo Go, iOS 26.5 simulator `C159CF99-9B06-4D2F-BFDC-010A107E2FBC` (iPhone 17 Pro), Hermes, Fabric, bridgeless                               |
+| Renderer   | `react-native-renderer` 19.2.3, `bundleType: 1` (development), one renderer, one fiber root                                                  |
+| Dev server | `@expo/agent-cli start --go --port 8230`, `http://127.0.0.1:8230`                                                                            |
+| Transport  | `Runtime.evaluate` over the Metro inspector proxy, `returnByValue: true`, same-origin `Origin` header (`src/runtime/cdpClient.ts`)           |
 
 `out-*.json` records `exprBytes` (the expression sent), `cdpResponseBytes` (the whole CDP frame
 that came back) and `roundTripMs` (send to answer, one socket already open), alongside the
@@ -26,23 +26,23 @@ runtime's own `result`.
 
 ## What each pair proves
 
-| Expression | Output | Question |
-|---|---|---|
-| `expr-01-devtools-hook.js` | `out-01-devtools-hook.json` | Is `__REACT_DEVTOOLS_GLOBAL_HOOK__` there, and does `getFiberRoots(1)` answer? |
-| `expr-02-fiber-shape.js` | `out-02-fiber-shape.json` | What a fiber looks like on this runtime: tags, `elementType`, Fabric `stateNode` |
-| `expr-03-tree-walk.js` | `out-03-tree-walk.json` | The full walk and its census, on the notes screen as the app ships |
-| `expr-04-match-groups.js` | `out-04-match-groups.json` | How many *elements* carry a testID, versus how many fibers |
-| `expr-05-type.js` | `out-05-type.json` | Calling `onChangeText` on a `TextInput` fiber |
-| `expr-06-read-state.js` | `out-06a-…-before.json`, `out-06b-…-after-type.json`, `out-06c-…-after-tap.json` | Reading the effect of a call back over the same connection |
-| `expr-07-tap.js` | `out-07-tap.json` | Calling `onPress` found from a testID (`Pressable`) |
-| `expr-08-tap-variants.js` | `out-08-tap-variants.json` | The same for `TouchableOpacity` and two react-native-gesture-handler components |
-| `expr-09-read-marks.js` | `out-09-read-marks.json` | Which of those three handlers actually ran |
-| `expr-10-tap-template.js` | `out-10-tap-link.json` | The tap as a command would build it, on an `expo-router` `Link` |
-| `expr-11` — none | `out-11-tree-walk-300rows.json` | `expr-03` again, with 300 extra list rows rendered |
-| `expr-12-payload-cap.js` | `out-12-payload-cap.json` | How large a value this connection will carry |
-| `expr-13-offscreen.js` | `out-13-offscreen.json` | Whether React itself knows which screen is on screen |
-| `expr-14-screen-focus.js` | `out-14-screen-focus.json` | Where the "which screen is on screen" answer actually lives |
-| `expr-15-disabled.js` | `out-15-disabled.json` | Whether `disabled` takes `onPress` off a `Pressable`'s props |
+| Expression                 | Output                                                                           | Question                                                                         |
+| -------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `expr-01-devtools-hook.js` | `out-01-devtools-hook.json`                                                      | Is `__REACT_DEVTOOLS_GLOBAL_HOOK__` there, and does `getFiberRoots(1)` answer?   |
+| `expr-02-fiber-shape.js`   | `out-02-fiber-shape.json`                                                        | What a fiber looks like on this runtime: tags, `elementType`, Fabric `stateNode` |
+| `expr-03-tree-walk.js`     | `out-03-tree-walk.json`                                                          | The full walk and its census, on the notes screen as the app ships               |
+| `expr-04-match-groups.js`  | `out-04-match-groups.json`                                                       | How many _elements_ carry a testID, versus how many fibers                       |
+| `expr-05-type.js`          | `out-05-type.json`                                                               | Calling `onChangeText` on a `TextInput` fiber                                    |
+| `expr-06-read-state.js`    | `out-06a-…-before.json`, `out-06b-…-after-type.json`, `out-06c-…-after-tap.json` | Reading the effect of a call back over the same connection                       |
+| `expr-07-tap.js`           | `out-07-tap.json`                                                                | Calling `onPress` found from a testID (`Pressable`)                              |
+| `expr-08-tap-variants.js`  | `out-08-tap-variants.json`                                                       | The same for `TouchableOpacity` and two react-native-gesture-handler components  |
+| `expr-09-read-marks.js`    | `out-09-read-marks.json`                                                         | Which of those three handlers actually ran                                       |
+| `expr-10-tap-template.js`  | `out-10-tap-link.json`                                                           | The tap as a command would build it, on an `expo-router` `Link`                  |
+| `expr-11` — none           | `out-11-tree-walk-300rows.json`                                                  | `expr-03` again, with 300 extra list rows rendered                               |
+| `expr-12-payload-cap.js`   | `out-12-payload-cap.json`                                                        | How large a value this connection will carry                                     |
+| `expr-13-offscreen.js`     | `out-13-offscreen.json`                                                          | Whether React itself knows which screen is on screen                             |
+| `expr-14-screen-focus.js`  | `out-14-screen-focus.json`                                                       | Where the "which screen is on screen" answer actually lives                      |
+| `expr-15-disabled.js`      | `out-15-disabled.json`                                                           | Whether `disabled` takes `onPress` off a `Pressable`'s props                     |
 
 ## Two files are templates
 

@@ -415,14 +415,23 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
   /** The recorded `eas` invocations, once one starting with `verb` has been recorded. */
   async function easInvocationsAfterAsync(projectRoot: string, verb: string): Promise<string[][]> {
-    await waitForAsync(() => easInvocationArgs(projectRoot).some((args) => args[0] === verb), 15_000);
+    await waitForAsync(
+      () => easInvocationArgs(projectRoot).some((args) => args[0] === verb),
+      15_000
+    );
     return easInvocationArgs(projectRoot);
   }
 
   it('plans the simulator profile, the tunnel, and says the profile is added first', async () => {
     const projectRoot = await setupAsync();
 
-    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--plan', '--json']);
+    const result = await executeAgentCliAsync(projectRoot, [
+      'dev',
+      '--ios',
+      '--eas',
+      '--plan',
+      '--json',
+    ]);
 
     expect(result.exitCode).toBe(0);
     const plan = JSON.parse(result.stdout);
@@ -450,11 +459,17 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     expect(web.exitCode).toBe(1);
     expect(JSON.parse(web.stdout).error.message).toContain('--eas and --web');
 
-    const lan = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--lan', '--json'], {
-      reject: false,
-    });
+    const lan = await executeAgentCliAsync(
+      projectRoot,
+      ['dev', '--ios', '--eas', '--lan', '--json'],
+      {
+        reject: false,
+      }
+    );
     expect(lan.exitCode).toBe(1);
-    expect(JSON.parse(lan.stdout).error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --eas');
+    expect(JSON.parse(lan.stdout).error.suggestedCommand).toBe(
+      'npx @expo/agent-cli dev --ios --eas'
+    );
     expect(easInvocationArgs(projectRoot)).toEqual([]);
     expect(expoInvocationArgs(projectRoot)).toEqual([]);
   });
@@ -473,7 +488,9 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
       // The write this CLI does itself, right before `build`: the file did not exist, and no
       // `build:configure` ran — the profile this build needs is the whole of what is written.
-      const easJson = JSON.parse(await fs.promises.readFile(path.join(projectRoot, 'eas.json'), 'utf8'));
+      const easJson = JSON.parse(
+        await fs.promises.readFile(path.join(projectRoot, 'eas.json'), 'utf8')
+      );
       expect(easJson.build.development).toBeUndefined();
       expect(easJson.build['development-simulator']).toEqual({
         developmentClient: true,
@@ -536,32 +553,57 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       env: easRunEnv(projectRoot, 8589),
     });
     expect(easInvocationArgs(projectRoot)).toContainEqual([
-      'simulator:stop', '--id', 'sess-e2e-started', '--non-interactive',
+      'simulator:stop',
+      '--id',
+      'sess-e2e-started',
+      '--non-interactive',
     ]);
   });
 
   it.skipIf(process.platform === 'win32').each(['ready', 'starting', 'reused', 'failed'] as const)(
-    'SIGINT cleans up an owned session (%s)', async (state) => {
+    'SIGINT cleans up an owned session (%s)',
+    async (state) => {
       const script = await fs.promises.readFile(path.join(__dirname, '../stubs/eas.js'), 'utf8');
-      const projectRoot = await setupAsync('go-app', { easScript: state === 'starting'
-        ? script.replace("const exitCode = Number(process.env.STUB_SIM_START_EXIT || 0);",
-            "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000); const exitCode = 0;")
-        : script });
+      const projectRoot = await setupAsync('go-app', {
+        easScript:
+          state === 'starting'
+            ? script.replace(
+                'const exitCode = Number(process.env.STUB_SIM_START_EXIT || 0);',
+                'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000); const exitCode = 0;'
+              )
+            : script,
+      });
       const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas'], {
-        env: { ...easRunEnv(projectRoot, 8588), STUB_SIM_SESSIONS: state === 'reused' ? '1' : '0', STUB_SIM_START_EXIT: state === 'failed' ? '1' : '0' },
+        env: {
+          ...easRunEnv(projectRoot, 8588),
+          STUB_SIM_SESSIONS: state === 'reused' ? '1' : '0',
+          STUB_SIM_START_EXIT: state === 'failed' ? '1' : '0',
+        },
       });
       const output = collectOutput(child);
       const exited = waitForExitAsync(child, output);
       try {
-        expect(await waitForAsync(() => state === 'starting'
-          ? easInvocationArgs(projectRoot).some((args) => args[0] === 'simulator')
-          : output.stderr.includes(state === 'failed' ? 'The app was not opened on an EAS Simulator session' : 'Opened the app on EAS Simulator session'), 10000)).toBe(true);
+        expect(
+          await waitForAsync(
+            () =>
+              state === 'starting'
+                ? easInvocationArgs(projectRoot).some((args) => args[0] === 'simulator')
+                : output.stderr.includes(
+                    state === 'failed'
+                      ? 'The app was not opened on an EAS Simulator session'
+                      : 'Opened the app on EAS Simulator session'
+                  ),
+            10000
+          )
+        ).toBe(true);
         child.kill('SIGINT');
         await exited;
         const stops = easInvocationArgs(projectRoot).filter((args) => args[0] === 'simulator:stop');
-        expect(stops).toEqual(state === 'reused' ? [] : [
-          ['simulator:stop', '--id', 'sess-e2e-started', '--non-interactive'],
-        ]);
+        expect(stops).toEqual(
+          state === 'reused'
+            ? []
+            : [['simulator:stop', '--id', 'sess-e2e-started', '--non-interactive']]
+        );
       } finally {
         await killAsync(child);
       }
@@ -616,22 +658,26 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     const projectRoot = await setupAsync('dev-client-fresh-app');
     const hash = 'feedfacefeedfacefeedfacefeedfacefeedface';
 
-    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--plan', '--json'], {
-      env: {
-        // A fingerprint that no longer matches the recorded local build, so the plan would build…
-        STUB_FINGERPRINT_HASH: hash,
-        // …except that EAS has a finished simulator build of exactly it.
-        STUB_EAS_BUILDS: JSON.stringify([
-          {
-            id: 'build-reuse',
-            platform: 'IOS',
-            status: 'FINISHED',
-            fingerprintHash: hash,
-            buildProfile: 'development-simulator',
-          },
-        ]),
-      },
-    });
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['dev', '--ios', '--eas', '--plan', '--json'],
+      {
+        env: {
+          // A fingerprint that no longer matches the recorded local build, so the plan would build…
+          STUB_FINGERPRINT_HASH: hash,
+          // …except that EAS has a finished simulator build of exactly it.
+          STUB_EAS_BUILDS: JSON.stringify([
+            {
+              id: 'build-reuse',
+              platform: 'IOS',
+              status: 'FINISHED',
+              fingerprintHash: hash,
+              buildProfile: 'development-simulator',
+            },
+          ]),
+        },
+      }
+    );
 
     expect(result.exitCode).toBe(0);
     const plan = JSON.parse(result.stdout);
@@ -664,20 +710,24 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
   it('builds when EAS has a finished build of another fingerprint only', async () => {
     const projectRoot = await setupAsync('dev-client-fresh-app');
 
-    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas', '--plan', '--json'], {
-      env: {
-        STUB_FINGERPRINT_HASH: 'feedfacefeedfacefeedfacefeedfacefeedface',
-        STUB_EAS_BUILDS: JSON.stringify([
-          {
-            id: 'build-old',
-            platform: 'IOS',
-            status: 'FINISHED',
-            fingerprintHash: 'other',
-            buildProfile: 'development-simulator',
-          },
-        ]),
-      },
-    });
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['dev', '--ios', '--eas', '--plan', '--json'],
+      {
+        env: {
+          STUB_FINGERPRINT_HASH: 'feedfacefeedfacefeedfacefeedfacefeedface',
+          STUB_EAS_BUILDS: JSON.stringify([
+            {
+              id: 'build-old',
+              platform: 'IOS',
+              status: 'FINISHED',
+              fingerprintHash: 'other',
+              buildProfile: 'development-simulator',
+            },
+          ]),
+        },
+      }
+    );
 
     const plan = JSON.parse(result.stdout);
     expect(plan.easBuild).toBeUndefined();
@@ -715,7 +765,9 @@ describe('@expo/agent-cli dev --eas on a project EAS does not know', () => {
     expect(report.error.message).toContain('not linked to an EAS project');
     expect(report.error.message).not.toContain('needed an answer');
     // The fix, not the command that just failed.
-    expect(report.error.suggestedCommand).toBe('npx --yes eas-cli@latest init --account e2e-user --non-interactive');
+    expect(report.error.suggestedCommand).toBe(
+      'npx --yes eas-cli@latest init --account e2e-user --non-interactive'
+    );
     expect(expoInvocationArgs(projectRoot)).toEqual([['config', '--json']]);
   });
 });

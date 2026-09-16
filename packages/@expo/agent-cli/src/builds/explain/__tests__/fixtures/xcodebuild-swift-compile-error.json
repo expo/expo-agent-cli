@@ -15,9 +15,5 @@
     "confidence": "high",
     "suggestedCommand": null
   },
-  "otherSignatures": [
-    "15:ios.swift.compile-error",
-    "23:ios.build-failed",
-    "26:ios.build-failed"
-  ]
+  "otherSignatures": ["15:ios.swift.compile-error", "23:ios.build-failed", "26:ios.build-failed"]
 }

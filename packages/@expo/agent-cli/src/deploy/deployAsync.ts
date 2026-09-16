@@ -263,7 +263,13 @@ async function deployWebAsync(
     // Read once and used twice: the diagnosis and the handoff are the same conclusion about the same
     // output, and a handoff that names something else is F143.
     const cause = classifyEasFailure(outputText);
-    throw handoffOr(easDeployFailed(upload, output, cause), deployed, 'eas', deployCommand(), cause);
+    throw handoffOr(
+      easDeployFailed(upload, output, cause),
+      deployed,
+      'eas',
+      deployCommand(),
+      cause
+    );
   }
 
   const url = parseDeploymentUrl(outputText);

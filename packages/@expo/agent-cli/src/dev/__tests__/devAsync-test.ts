@@ -524,7 +524,9 @@ describe(devAsync, () => {
 
     it(`should reuse a development build recorded for the current fingerprint`, async () => {
       mockStaleDevClientState();
-      vi.mocked(readLastBuildRecord).mockReturnValue({ ios: { hash: fingerprintHash, sources: null } });
+      vi.mocked(readLastBuildRecord).mockReturnValue({
+        ios: { hash: fingerprintHash, sources: null },
+      });
 
       await devAsync(projectRoot, resolveDevOptions(['--ios']));
 
@@ -629,7 +631,9 @@ describe(devAsync, () => {
     });
 
     it(`should offer a tunnel for a development build, which needs no exp:// URL`, async () => {
-      vi.mocked(readLastBuildRecord).mockReturnValue({ ios: { hash: fingerprintHash, sources: null } });
+      vi.mocked(readLastBuildRecord).mockReturnValue({
+        ios: { hash: fingerprintHash, sources: null },
+      });
       mockStaleDevClientState();
 
       await devAsync(projectRoot, resolveDevOptions(['--ios']));

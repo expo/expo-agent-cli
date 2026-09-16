@@ -46,7 +46,9 @@ describe(classifyEasFailure, () => {
   it(`should name the non-interactive form of the fix`, () => {
     const cause = classifyEasFailure(UNLINKED_OUTPUT);
 
-    expect(cause?.command).toBe('npx --yes eas-cli@latest init --account <account-name> --non-interactive');
+    expect(cause?.command).toBe(
+      'npx --yes eas-cli@latest init --account <account-name> --non-interactive'
+    );
     // Both forms in the How:, because linking an existing project and creating a new one are
     // different intentions and only the caller knows which one they have.
     expect(cause?.how).toContain('--id <project-id> --non-interactive');
@@ -55,9 +57,7 @@ describe(classifyEasFailure, () => {
 
   // The accounts are the one value this CLI cannot invent, and the tool printed them.
   it(`should quote the accounts the EAS CLI listed`, () => {
-    expect(classifyEasFailure(UNLINKED_OUTPUT)?.how).toContain(
-      'alice, expo, expo-services, bob'
-    );
+    expect(classifyEasFailure(UNLINKED_OUTPUT)?.how).toContain('alice, expo, expo-services, bob');
   });
 
   // With one account there is no choice to make, so the line has no hole in it and an agent can run
@@ -103,6 +103,8 @@ describe('the one-line summary', () => {
   });
 
   it(`names the login for a signed-out machine`, () => {
-    expect(classifyEasFailure('You are not logged in')?.summary).toContain('npx @expo/agent-cli login');
+    expect(classifyEasFailure('You are not logged in')?.summary).toContain(
+      'npx @expo/agent-cli login'
+    );
   });
 });

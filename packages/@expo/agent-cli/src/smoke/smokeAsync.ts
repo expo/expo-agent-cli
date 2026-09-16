@@ -96,11 +96,7 @@ const TARGET_SETTLE_POLL_MS = 500;
  *
  * @ref llp/0026-dev-owns-the-open.rfc.md
  */
-export const START_DEV_SERVER_ARGV: readonly string[] = [
-  '--detach',
-  '--wait-ready',
-  '--no-open',
-];
+export const START_DEV_SERVER_ARGV: readonly string[] = ['--detach', '--wait-ready', '--no-open'];
 
 /**
  * The port `--start` asks the dev server for, out of the dev server this run was pointed at.
@@ -466,12 +462,15 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
     // with the app named. A development build needs a finished simulator build of this fingerprint
     // on EAS; the gate never compiles one — `dev --eas` does, and is named.
     ensureEasSession: async (devServerUrl) => {
-      const { ensureEasSessionAsync } = require('../dev/openAppEas') as typeof import('../dev/openAppEas');
+      const { ensureEasSessionAsync } =
+        require('../dev/openAppEas') as typeof import('../dev/openAppEas');
       const { lookUpEasSimulatorBuildAsync } =
         require('../plan/easBuildLookup') as typeof import('../plan/easBuildLookup');
       const target = await targetAsync();
       const expoGo = target.installWithKind === 'expo-go';
-      const build = expoGo ? null : await lookUpEasSimulatorBuildAsync(projectRoot, options.platform);
+      const build = expoGo
+        ? null
+        : await lookUpEasSimulatorBuildAsync(projectRoot, options.platform);
       if (!expoGo && build == null) {
         // Asked before the session, so a session is never started for an app it cannot have.
         const probe = await probeCloudSessionAsync({
@@ -504,7 +503,8 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       };
     },
     stopEasSession: async (sessionId) => {
-      const { stopEasSessionAsync } = require('../dev/openAppEas') as typeof import('../dev/openAppEas');
+      const { stopEasSessionAsync } =
+        require('../dev/openAppEas') as typeof import('../dev/openAppEas');
       const result = await stopEasSessionAsync(projectRoot, sessionId);
       return { ok: result.ok, target: sessionId, reason: result.reason };
     },

@@ -52,7 +52,8 @@
           depth: e.d,
           host: name,
           activityState: p && typeof p === 'object' ? p.activityState : undefined,
-          style: p && typeof p === 'object' && p.style ? JSON.stringify(p.style).slice(0, 120) : null,
+          style:
+            p && typeof p === 'object' && p.style ? JSON.stringify(p.style).slice(0, 120) : null,
         });
       }
 
@@ -61,5 +62,10 @@
     }
   });
 
-  return { offscreenCount: offscreen.length, offscreen: offscreen, screens: screens, hostTagNames: hostTagNames };
+  return {
+    offscreenCount: offscreen.length,
+    offscreen: offscreen,
+    screens: screens,
+    hostTagNames: hostTagNames,
+  };
 })();

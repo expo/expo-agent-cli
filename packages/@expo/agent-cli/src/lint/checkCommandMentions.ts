@@ -89,7 +89,12 @@ export interface ProblemSubject {
 export interface MentionProblem {
   subject: ProblemSubject;
   /** Which rule, as a stable id an assertion can name. */
-  rule: 'unknown-command' | 'unknown-option' | 'missing-required-option' | 'stray-argument' | 'placeholder';
+  rule:
+    | 'unknown-command'
+    | 'unknown-option'
+    | 'missing-required-option'
+    | 'stray-argument'
+    | 'placeholder';
   /** What is wrong, in one sentence. */
   why: string;
   /** What to do about it, in one sentence. */

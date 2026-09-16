@@ -85,22 +85,24 @@ export async function writeManagedBlockAsync(
 
 /** Keep template examples consistent with the managed commands, including Bun runners. */
 function rewriteExpoCommands(contents: string): string {
-  return contents
-    .replace(
-      /(?<![\w@/.-])((?:npx|bunx)(?:[ \t]+(?:--yes|-y|--bun))*[ \t]+)(?:expo([ \t]+[a-z][\w:-]*)|expo-doctor(?:@latest)?)(?![\w@./-])/g,
-      (match, runner: string, command: string | undefined) =>
-        command && !EXPO_COMMANDS.has(command.trim())
-          ? match
-          : `${runner}@expo/agent-cli${command ?? ' doctor'}`
-    )
-    // Bare examples start a line or a quoted command; do not rewrite part of another runner.
-    .replace(
-      /(^[ \t]*|[`'"])(?:expo([ \t]+[a-z][\w:-]*)|expo-doctor(?:@latest)?)(?![\w@./-])/gm,
-      (match, prefix: string, command: string | undefined) =>
-        command && !EXPO_COMMANDS.has(command.trim())
-          ? match
-          : `${prefix}${PROGRAM_PREFIX}${command ?? ' doctor'}`
-    );
+  return (
+    contents
+      .replace(
+        /(?<![\w@/.-])((?:npx|bunx)(?:[ \t]+(?:--yes|-y|--bun))*[ \t]+)(?:expo([ \t]+[a-z][\w:-]*)|expo-doctor(?:@latest)?)(?![\w@./-])/g,
+        (match, runner: string, command: string | undefined) =>
+          command && !EXPO_COMMANDS.has(command.trim())
+            ? match
+            : `${runner}@expo/agent-cli${command ?? ' doctor'}`
+      )
+      // Bare examples start a line or a quoted command; do not rewrite part of another runner.
+      .replace(
+        /(^[ \t]*|[`'"])(?:expo([ \t]+[a-z][\w:-]*)|expo-doctor(?:@latest)?)(?![\w@./-])/gm,
+        (match, prefix: string, command: string | undefined) =>
+          command && !EXPO_COMMANDS.has(command.trim())
+            ? match
+            : `${prefix}${PROGRAM_PREFIX}${command ?? ' doctor'}`
+      )
+  );
 }
 
 /** Only the conventional AGENTS.md → root CLAUDE.md alias is writable through a symlink. */

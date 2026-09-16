@@ -144,7 +144,9 @@ describe(formatStartPlan, () => {
       });
 
       expect(output).toContain('Not found: xcode-select is not on PATH.');
-      expect(output).toContain('Instead: npx --yes eas-cli@latest build --platform ios --profile development');
+      expect(output).toContain(
+        'Instead: npx --yes eas-cli@latest build --platform ios --profile development'
+      );
     });
 
     it(`should not call an unprobeable machine a machine without the toolchain`, () => {
@@ -216,7 +218,9 @@ describe('the Build line of a plan whose backend was chosen', () => {
 
     expect(line).toContain('Chosen because --local was passed.');
     expect(line).toContain('Not found: xcode-select is not on PATH.');
-    expect(line).toContain('Instead: npx --yes eas-cli@latest build --platform ios --profile development');
+    expect(line).toContain(
+      'Instead: npx --yes eas-cli@latest build --platform ios --profile development'
+    );
   });
 
   it(`names the cloud and what it needs`, () => {
