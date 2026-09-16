@@ -9,7 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { executeAgentCliAsync, getTemporaryPath, installStubBinAsync } from '../utils';
+import { executeAgentCliAsync, fixturesDir, getTemporaryPath, installStubBinAsync } from '../utils';
 
 /** The shape `new --json` prints, per `src/new/newAsync.ts`. */
 type NewProjectReport = {
@@ -155,6 +155,79 @@ function isInsideGitRepo(dir: string): boolean {
 }
 
 describe('@expo/agent-cli new', () => {
+  it('should link newly installed skills after creating an app without agent setup', async () => {
+    const workDir = await setupWorkDirAsync();
+    const homeDir = path.join(workDir, 'home');
+    await fs.promises.mkdir(path.join(homeDir, '.codex'), { recursive: true });
+    const env = { HOME: homeDir, USERPROFILE: homeDir };
+
+    const created = await executeAgentCliAsync(
+      workDir,
+      ['new', '-t', 'default@sdk-58', 'sdk58', '--json'],
+      { env }
+    );
+    const projectRoot = JSON.parse(created.stdout).projectRoot as string;
+    expect(JSON.parse(created.stdout)).toMatchObject({ created: true, errors: [] });
+    const cache = path.join(projectRoot, '.expo/agent-skill-links.json');
+    const link = path.join(projectRoot, '.agents/skills/usage');
+    const source = path.join(projectRoot, 'node_modules/fake-module-with-skills');
+    expect(fs.existsSync(cache)).toBe(false);
+    expect(fs.existsSync(link)).toBe(false);
+    expect(fs.existsSync(source)).toBe(false);
+    expect(fs.existsSync(path.join(projectRoot, '.codex'))).toBe(false);
+
+    // Keep the install across a real process boundary: the package appears only when Expo runs.
+    const fixtureModules = path.join(fixturesDir, 'skills-app/node_modules');
+    const expoDir = path.join(projectRoot, 'node_modules/expo');
+    await fs.promises.cp(path.join(fixtureModules, 'expo'), expoDir, { recursive: true });
+    const installStub = path.join(expoDir, 'bin/cli');
+    await fs.promises.writeFile(
+      installStub,
+      `
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+assert.deepEqual(process.argv.slice(2), ['install', 'fake-module-with-skills']);
+const root = process.cwd();
+const target = path.join(root, 'node_modules/fake-module-with-skills');
+fs.cpSync(process.env.STUB_SKILL_PACKAGE, target, { recursive: true });
+const references = path.join(target, 'skills/usage/references');
+fs.mkdirSync(references);
+fs.writeFileSync(path.join(references, 'guide.md'), '# Package reference');
+const manifestPath = path.join(root, 'package.json');
+const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+manifest.dependencies['fake-module-with-skills'] = '1.0.0';
+fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+`
+    );
+    await installStubBinAsync(path.join(projectRoot, 'node_modules/.bin'), 'expo', installStub);
+
+    const installed = await executeAgentCliAsync(
+      projectRoot,
+      ['install', 'fake-module-with-skills', '--json'],
+      { env: { ...env, STUB_SKILL_PACKAGE: path.join(fixtureModules, 'fake-module-with-skills') } }
+    );
+
+    expect(JSON.parse(installed.stdout)).toMatchObject({
+      installed: true,
+      skillPackages: ['fake-module-with-skills'],
+    });
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    const realpath = fs.realpathSync.native ?? fs.realpathSync;
+    expect(realpath(link)).toBe(realpath(path.join(source, 'skills/usage')));
+    expect(fs.readFileSync(path.join(link, 'SKILL.md'), 'utf8')).toContain('Body of usage skill.');
+    expect(fs.readFileSync(path.join(link, 'references/guide.md'), 'utf8')).toBe(
+      '# Package reference'
+    );
+    expect(fs.readFileSync(path.join(projectRoot, '.gitignore'), 'utf8')).toContain(
+      '.agents/skills/usage'
+    );
+    const instructions = fs.readFileSync(path.join(projectRoot, 'AGENTS.md'), 'utf8');
+    expect(instructions).toContain('| fake-module-with-skills | usage |');
+    expect(instructions).toContain('(.agents/skills/usage/SKILL.md)');
+    expect(fs.existsSync(cache)).toBe(false);
+  });
+
   it.each([
     ['--template', '--template', 'blank-typescript'],
     ['-t', '--template', 'default@sdk-55'],

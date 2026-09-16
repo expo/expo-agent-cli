@@ -147,8 +147,33 @@ describe('@expo/agent-cli install', () => {
     expect(fs.existsSync(skillLink)).toBe(true);
   });
 
-  it('does not sync without a cached agent selection', async () => {
-    await executeAgentCliAsync(projectRoot, ['install', 'fake-module-with-skills']);
+  it('should link package skills for a detected agent without prior setup', async () => {
+    await fs.promises.mkdir(path.join(projectRoot, '.claude'), { recursive: true });
+    const cache = path.join(projectRoot, '.expo/agent-skill-links.json');
+    expect(fs.existsSync(cache)).toBe(false);
+
+    const result = await executeAgentCliAsync(projectRoot, [
+      'install',
+      'fake-module-with-skills',
+      '--json',
+    ]);
+
+    expect(JSON.parse(result.stdout).installed).toBe(true);
+    expect(fs.lstatSync(skillLink).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(skillLink, 'SKILL.md'), 'utf8')).toContain(
+      'Body of usage skill.'
+    );
+    expect(fs.existsSync(cache)).toBe(false);
+  });
+
+  it('should honor the skill opt-out even when an agent is detected', async () => {
+    await fs.promises.mkdir(path.join(projectRoot, '.claude'), { recursive: true });
+
+    await executeAgentCliAsync(projectRoot, [
+      'install',
+      'fake-module-with-skills',
+      '--no-agent-skills',
+    ]);
 
     expect(fs.existsSync(skillLink)).toBe(false);
   });

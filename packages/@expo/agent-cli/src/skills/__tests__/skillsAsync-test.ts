@@ -70,6 +70,7 @@ function printed(): string {
 beforeEach(() => {
   // The sync refreshes the gitignore block for every known agent directory.
   vi.mocked(getAllAgents).mockReturnValue([claudeAgent, cursorAgent, codexCliAgent]);
+  vi.mocked(detectInstalledAgentsAsync).mockResolvedValue([]);
 });
 
 describe('syncSkillsAsync', () => {
@@ -197,6 +198,29 @@ describe('syncSkillsAsync', () => {
     expect(syncSkillLinksAsync).toHaveBeenCalledWith('/root', [], ['.claude/skills'], {
       dryRun: false,
     });
+  });
+
+  it('should prune stale links for detected agents when the last skill disappears', async () => {
+    vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([]);
+    vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(null);
+    vi.mocked(detectInstalledAgentsAsync).mockResolvedValueOnce([claudeAgent]);
+    vi.mocked(resolveAgentsAsync).mockResolvedValueOnce({
+      agents: [claudeAgent],
+      source: 'detected',
+    });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({
+      created: [],
+      pruned: ['.claude/skills/stale'],
+      skipped: [],
+    });
+
+    await syncSkillsAsync('/root', { agents: [], dryRun: false, json: true });
+
+    expect(syncSkillLinksAsync).toHaveBeenCalledWith('/root', [], ['.claude/skills'], {
+      dryRun: false,
+    });
+    expect(JSON.parse(printed()).removed).toEqual(['.claude/skills/stale']);
+    expect(persistAgentSelectionAsync).not.toHaveBeenCalled();
   });
 
   // @ref llp/0009-smart-followups.rfc.md §Examples per command — `skills:sync`.
@@ -523,7 +547,7 @@ describe('cleanSkillsAsync', () => {
 });
 
 describe('autoSyncSkillsAsync', () => {
-  it('should do nothing when no agent selection is cached', async () => {
+  it('should do nothing when no agents are cached or detected', async () => {
     vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(null);
 
     await autoSyncSkillsAsync('/root');
@@ -532,13 +556,51 @@ describe('autoSyncSkillsAsync', () => {
     expect(syncSkillLinksAsync).not.toHaveBeenCalled();
   });
 
-  it('should not sync when no selection is cached even if agents are detected', async () => {
+  it('should link installed package skills for detected agents without saving a selection', async () => {
     vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(null);
     vi.mocked(detectInstalledAgentsAsync).mockResolvedValueOnce([cursorAgent]);
+    vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([testSkill]);
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({ created: ['x'], pruned: [], skipped: [] });
+
+    await autoSyncSkillsAsync('/root', { packages: ['@acme/tool'] });
+
+    expect(syncSkillLinksAsync).toHaveBeenCalledWith('/root', [testSkill], ['.agents/skills'], {
+      prune: false,
+    });
+    expect(persistAgentSelectionAsync).not.toHaveBeenCalled();
+  });
+
+  it('should honor an explicitly empty selection without detecting agents', async () => {
+    vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce([]);
 
     await autoSyncSkillsAsync('/root');
 
-    expect(syncSkillLinksAsync).not.toHaveBeenCalled();
+    expect(detectInstalledAgentsAsync).not.toHaveBeenCalled();
+    expect(discoverSkillsAsync).not.toHaveBeenCalled();
+  });
+
+  it('should handle detected agents when installed packages ship no skills', async () => {
+    vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(null);
+    vi.mocked(detectInstalledAgentsAsync).mockResolvedValueOnce([cursorAgent]);
+    vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([]);
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({ created: [], pruned: [], skipped: [] });
+
+    await autoSyncSkillsAsync('/root', { packages: ['uuid'] });
+
+    expect(syncSkillLinksAsync).toHaveBeenCalledWith('/root', [], ['.agents/skills'], {
+      prune: false,
+    });
+    expect(updateGitIgnoreAsync).not.toHaveBeenCalled();
+  });
+
+  it('should warn instead of failing when agent detection fails', async () => {
+    vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(null);
+    vi.mocked(detectInstalledAgentsAsync).mockRejectedValueOnce(new Error('detection failed'));
+
+    await expect(autoSyncSkillsAsync('/root')).resolves.toBeUndefined();
+
+    expect(Log.warn).toHaveBeenCalledWith('Skipping agent skills auto-sync: detection failed');
+    expect(discoverSkillsAsync).not.toHaveBeenCalled();
   });
 
   it('should sync without prompting for the cached agents', async () => {
@@ -551,6 +613,7 @@ describe('autoSyncSkillsAsync', () => {
     await autoSyncSkillsAsync('/root');
 
     expect(resolveAgentsAsync).not.toHaveBeenCalled();
+    expect(detectInstalledAgentsAsync).not.toHaveBeenCalled();
     expect(syncSkillLinksAsync).toHaveBeenCalledWith('/root', [testSkill], ['.claude/skills'], {});
   });
 

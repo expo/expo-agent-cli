@@ -13,6 +13,29 @@ describe('@expo/agent-cli skills', () => {
     projectRoot = await setupFixtureAsync('skills-app');
   });
 
+  it('should prune the last missing skill after syncing for a detected agent', async () => {
+    await fs.promises.mkdir(path.join(projectRoot, '.claude'), { recursive: true });
+    await executeAgentCliAsync(projectRoot, ['skills:sync', '--json']);
+    const link = path.join(projectRoot, CLAUDE_SKILLS_DIR, 'usage');
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+    const cache = path.join(projectRoot, '.expo/agent-skill-links.json');
+    expect(fs.existsSync(cache)).toBe(false);
+
+    await fs.promises.rm(path.join(projectRoot, 'node_modules/fake-module-with-skills/skills'), {
+      recursive: true,
+    });
+
+    const dryRun = await executeAgentCliAsync(projectRoot, ['skills:sync', '--dry-run', '--json']);
+    expect(JSON.parse(dryRun.stdout).removed).toContain(path.join(CLAUDE_SKILLS_DIR, 'usage'));
+    expect(fs.lstatSync(link).isSymbolicLink()).toBe(true);
+
+    const result = await executeAgentCliAsync(projectRoot, ['skills:sync', '--json']);
+    expect(JSON.parse(result.stdout).removed).toContain(path.join(CLAUDE_SKILLS_DIR, 'usage'));
+    expect(() => fs.lstatSync(link)).toThrow();
+    expect(readProjectFile(projectRoot, '.gitignore')).not.toContain('.claude/skills/usage');
+    expect(fs.existsSync(cache)).toBe(false);
+  });
+
   it('lists the actions of the group with `skills --help`, then the default action’s options', async () => {
     const result = await executeAgentCliAsync(projectRoot, ['skills', '--help']);
 
