@@ -89,6 +89,26 @@ The managed block points agents to `expo-overview`, when available in their skil
 
 After setup creates the index, `skills:sync`, automatic skill sync during install/start/dev, and `skills:clean` refresh only its marked section. Other instructions and project facts stay unchanged. Dry runs never refresh it, and these commands do not create instruction files or add an index to a file that setup has not opted in. Rerunning setup upgrades an older managed block to include the index.
 
+### Package skill synchronization
+
+Package skills follow `skills/<name>/SKILL.md` inside installed dependencies. Discovery walks the dependency graph through Expo autolinking. Sync creates relative directory symlinks (junctions on Windows) in the selected agents' directories: `.claude/skills`, `.agents/skills`, or `.grok/skills`. It updates the generated `.gitignore` entries and any existing package-skill index. These commands call the shared linking implementation directly; they do not spawn a `skills:sync` subprocess.
+
+Automatic sync requires a saved agent selection in `.expo/agent-skill-links.json`. Successful project `agents:setup` with package skills enabled saves this selection, as does `skills:sync --agent codex` (repeat `--agent` for other agents). A plain `skills:sync` can detect agents and link their skills for that run, but detection alone does not save a selection or enable later automatic sync. A dry run does not save one either.
+
+| Entry point                                            | When package skills sync                                                                                                                                                       |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `install <packages>` / `add <packages>`                | After a successful install, link skills from the named packages; do not prune unrelated links.                                                                                 |
+| Bare `install` / `install --fix` without package names | After success, full sync, including pruning stale managed links.                                                                                                               |
+| `start` / foreground `dev`                             | Full sync scheduled three seconds after spawning a dev-server step, including `run:ios`/`run:android` steps selected by `dev`. Cancelled if the server exits before the delay. |
+| `dev --detach`                                         | The new child runs the same `dev` sync; reusing an existing server does not trigger another sync.                                                                              |
+| `smoke`                                                | Only indirectly, when bootstrapping a new detached dev server. Reusing a server or `--no-start` does not trigger sync. Smoke does not wait for skill sync to finish.           |
+| `agents:setup`                                         | Explicit full sync for the selected agents when a project is available and package skills are enabled.                                                                         |
+| `skills` / `skills:sync`                               | Explicit full sync using flags, saved selection, or detection; stale links are pruned even when no skills remain.                                                              |
+
+`install --check`, failed installs, and `dev --plan` do not sync. `--no-agent-skills` disables the hook on install/start/dev. Direct passthrough commands such as `run:ios`, `run:android`, and `prebuild`, plain `expo` commands, and package-manager installs do not run this hook. `new` writes project instructions but does not configure or link package skills. `status`, `skills:list`, and `skills:show` inspect skills without linking them; `skills:clean` removes managed links.
+
+Install also prints the named packages' skill contents when a driving agent is detected, independently of whether a selection was saved. `--no-skill-context`, `--no-agent-skills`, and JSON mode suppress that text; JSON reports package names under `skillPackages`, not skill contents or proof that links were created. No package skills means nothing new to link. Automatic sync failures are best-effort and do not fail a successful install or dev server; explicit sync reports errors. Linking makes skill files available on disk; whether an already-running agent notices them depends on that agent.
+
 ## Config
 
 Flags beat `package.json`. `package.json` beats detection. Unknown keys are errors.

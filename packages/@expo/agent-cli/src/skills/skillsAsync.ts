@@ -50,7 +50,8 @@ export async function syncSkillsAsync(projectRoot: string, options: SkillsOption
   if (
     !skills.length &&
     !options.agents.length &&
-    (await getPersistedAgentIdsAsync(projectRoot)) == null
+    (await getPersistedAgentIdsAsync(projectRoot)) == null &&
+    !(await detectInstalledAgentsAsync(projectRoot)).length
   ) {
     if (!options.dryRun && options.updateAgentsMd !== false) {
       await refreshSkillIndexAsync(projectRoot, skills, uniqueSkillsDirs(getAllAgents()));
@@ -282,8 +283,9 @@ export async function cleanSkillsAsync(
 
 /**
  * Best-effort skill sync for `@expo/agent-cli install`, `@expo/agent-cli start` and `@expo/agent-cli dev`. Runs only for the
- * agents cached in `.expo/agent-skill-links.json` by a previous `npx @expo/agent-cli skills` run, so it
- * stays off until the user selects agents once. Never prompts and never throws.
+ * agents cached in `.expo/agent-skill-links.json` by `agents:setup` or `skills:sync --agent`, so it
+ * stays off until the user selects agents once. Detection alone does not opt in. Never prompts
+ * and never throws.
  * With `packages` (the specs that were just installed), only the skills of those
  * packages are linked and nothing is pruned. Without it, a full sync runs.
  */

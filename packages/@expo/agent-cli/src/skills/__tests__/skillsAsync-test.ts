@@ -70,6 +70,7 @@ function printed(): string {
 beforeEach(() => {
   // The sync refreshes the gitignore block for every known agent directory.
   vi.mocked(getAllAgents).mockReturnValue([claudeAgent, cursorAgent, codexCliAgent]);
+  vi.mocked(detectInstalledAgentsAsync).mockResolvedValue([]);
 });
 
 describe('syncSkillsAsync', () => {
@@ -197,6 +198,29 @@ describe('syncSkillsAsync', () => {
     expect(syncSkillLinksAsync).toHaveBeenCalledWith('/root', [], ['.claude/skills'], {
       dryRun: false,
     });
+  });
+
+  it('should prune stale links for detected agents when the last skill disappears', async () => {
+    vi.mocked(discoverSkillsAsync).mockResolvedValueOnce([]);
+    vi.mocked(getPersistedAgentIdsAsync).mockResolvedValueOnce(null);
+    vi.mocked(detectInstalledAgentsAsync).mockResolvedValueOnce([claudeAgent]);
+    vi.mocked(resolveAgentsAsync).mockResolvedValueOnce({
+      agents: [claudeAgent],
+      source: 'detected',
+    });
+    vi.mocked(syncSkillLinksAsync).mockResolvedValueOnce({
+      created: [],
+      pruned: ['.claude/skills/stale'],
+      skipped: [],
+    });
+
+    await syncSkillsAsync('/root', { agents: [], dryRun: false, json: true });
+
+    expect(syncSkillLinksAsync).toHaveBeenCalledWith('/root', [], ['.claude/skills'], {
+      dryRun: false,
+    });
+    expect(JSON.parse(printed()).removed).toEqual(['.claude/skills/stale']);
+    expect(persistAgentSelectionAsync).not.toHaveBeenCalled();
   });
 
   // @ref llp/0009-smart-followups.rfc.md §Examples per command — `skills:sync`.

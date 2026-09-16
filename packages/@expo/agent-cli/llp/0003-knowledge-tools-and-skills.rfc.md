@@ -24,6 +24,10 @@ The code lives in this package, not in `@expo/cli`. Four proof-of-concept PRs ag
 
 Commands: `skills:sync`, `skills:list`, `skills:show`, `skills:clean`. Bare `skills` syncs (the group's default action).
 
+Automatic sync calls the shared linker directly and requires a saved selection in `.expo/agent-skill-links.json`, written by project setup or explicit `skills:sync --agent` flags. Detection during a plain sync does not persist a selection. Explicit sync still prunes stale links for detected agents when the last package skill disappears. [observed]
+
+Successful named-package installs sync only those packages without pruning; bare installs and full fixes sync the whole graph. Start and dev schedule full sync three seconds after spawning a dev-server step, cancelled on an early exit. A new detached dev child inherits that hook; reusing an existing server does not rerun it. Smoke syncs only indirectly when it bootstraps that child, with no completion guarantee. Check/plan modes, direct Expo passthrough commands, and project creation do not sync. Automatic sync is best-effort and respects `--no-agent-skills` on install/start/dev. [observed]
+
 ## No published module ships a skill yet
 
 Ten packages were checked for `skills/*/SKILL.md`. None ships one. So `skills:list` in a real project answers `{"skills": []}`, `skills:sync` links nothing, and `skills:show <pkg>` can only refuse.
