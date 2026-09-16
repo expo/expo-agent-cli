@@ -17,15 +17,25 @@ export interface ExplainFollowUpInput {
    *
    * A follow-up is the next thing to *run* ([[0009-smart-followups]]), and
    * `npx @expo/agent-cli inspect:build-log --all` with no source would be read from a terminal's stdin and
-   * fail with `BAD_ARGS`. The `--file` form is re-runnable; a piped one is not, because the
-   * bytes are gone — so a stdin run gets the rung with the pipe spelled back out.
+   * fail with `BAD_ARGS`. The `--file` and `--local` forms are re-runnable; a piped one is not,
+   * because the bytes are gone — so a stdin run gets the rung with the pipe spelled back out.
    */
-  source: { kind: 'file'; path: string } | { kind: 'stdin' };
+  source:
+    | { kind: 'file'; path: string }
+    | { kind: 'stdin' }
+    | { kind: 'local'; platform: 'ios' | 'android'; path: string };
 }
 
 /** How to spell this run's log on a command line, for a rung the caller can paste. */
 function sourceArgs(source: ExplainFollowUpInput['source']): string {
-  return source.kind === 'file' ? `--file ${source.path}` : '--stdin';
+  switch (source.kind) {
+    case 'file':
+      return `--file ${source.path}`;
+    case 'local':
+      return `--local --${source.platform}`;
+    case 'stdin':
+      return '--stdin';
+  }
 }
 
 /**

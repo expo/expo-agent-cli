@@ -113,6 +113,24 @@ describe('@expo/agent-cli dev', () => {
       expect(invocationArgs(projectRoot)).toEqual([['prebuild', '--platform', 'ios'], ['run:ios']]);
     });
 
+    // @ref llp/0012-build-explain.rfc.md §What ships, and what is reserved
+    // The build step's output is what `inspect:build-log --local --ios` explains afterwards, so a
+    // run with no terminal watching it writes every byte of it to the platform's build log.
+    it("writes the native build step's output to the platform's build log", async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local']);
+
+      expect(result.exitCode).toBe(0);
+      const buildLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'build-ios.log');
+      expect(fs.existsSync(buildLog)).toBe(true);
+      // The stub's own first line, which names the command it was run as.
+      expect(fs.readFileSync(buildLog, 'utf8')).toContain('"run:ios"');
+      // The prebuild step is not a build, and writes no android log either.
+      expect(
+        fs.existsSync(path.join(projectRoot, '.expo', 'dev', 'logs', 'build-android.log'))
+      ).toBe(false);
+    });
+
     // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol
     // `CI=1` makes the Expo CLI's prompts fail fast *and* turns Metro's file watcher off, and only
     // the first was ever wanted. A dev server with no watcher serves the code it read at start-up

@@ -11,18 +11,20 @@
 
 import { printCommandHelp } from '../help/format';
 import type { CommandHelp } from '../help/types';
-import { PROGRAM_PREFIX } from '../programName';
+import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
 import { easCommandPrefix } from '../utils/easCli';
 
 export const inspectBuildLogHelp: CommandHelp = {
   command: 'inspect:build-log',
-  usage: `${PROGRAM_PREFIX} inspect:build-log --file <path> | --stdin`,
+  usage: `${PROGRAM_PREFIX} inspect:build-log --file <path> | --stdin | --local --ios|--android`,
   options: [
     `--file <path>          Read the log from this file`,
     `--stdin                Read the log from stdin. Implied when stdin is not a terminal`,
-    `--ios | --android      Narrow the rules to one platform's phases`,
+    `--local                Read the log of the last native build ${PROGRAM_NAME} dev ran here,\n` +
+      `                       for the platform named. Needs --ios or --android`,
+    `--ios | --android      Which platform: the log to read under --local, a hint otherwise`,
     `--context <n[:m]>      Lines of context around the match. Default: 8 before, 20 after`,
     `--all                  Report every match, not only the failing phase's first`,
     `--json                 Print the report as JSON`,
@@ -33,6 +35,10 @@ export const inspectBuildLogHelp: CommandHelp = {
     {
       run: `${PROGRAM_PREFIX} inspect:build-log --file ~/Downloads/xcodebuild.log`,
       gets: 'the failing phase, the line it failed on, and the lines around it',
+    },
+    {
+      run: `${PROGRAM_PREFIX} inspect:build-log --local --ios`,
+      gets: `what failed in the last iOS build ${PROGRAM_NAME} dev ran in this project`,
     },
     {
       run: `${PROGRAM_PREFIX} inspect:build-log --stdin --json`,
@@ -54,6 +60,9 @@ export const inspectBuildLogHelp: CommandHelp = {
     `and a test. Every answer carries the line it came from.`,
     `Exit codes: 0 a report was produced, "no error located" included · 1 no report could be`,
     `produced · 22 what arrived is not text, most often a log still brotli-compressed.`,
+    `${PROGRAM_NAME} dev writes the output of each native build it runs to .expo/dev/logs/build-<platform>.log`,
+    `when no terminal is watching it, which is what --local reads. A build watched on a terminal`,
+    `writes none: pipe its output in instead.`,
     `"${PROGRAM_PREFIX} inspect:build-log <build-id>" is reserved and does not work yet: eas-cli has no`,
     `build:logs, so an EAS build's log has to be saved and passed with --file. Run`,
     `"${easCommandPrefix()} build:view" for where those files are.`,
@@ -86,6 +95,8 @@ export const agentCliInspectBuildLog: Command = async (argv) => {
 
   // Load modules after the help prompt so `npx @expo/agent-cli inspect:build-log -h` shows as fast as possible.
   const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
+  const { findUpProjectRootOrAssert } =
+    require('../utils/findUp') as typeof import('../utils/findUp');
   const { resolveExplainOptions } =
     require('./explain/resolveOptions') as typeof import('./explain/resolveOptions');
   const { explainAsync } =
@@ -95,6 +106,8 @@ export const agentCliInspectBuildLog: Command = async (argv) => {
     const options = resolveExplainOptions(argv ?? [], {
       stdinIsTTY: !!process.stdin.isTTY,
       cwd: process.cwd(),
+      // Asked only under `--local`: a saved or piped log explains from anywhere.
+      projectRoot: () => findUpProjectRootOrAssert(process.cwd()),
     });
     await explainAsync(options);
   })().catch(logCmdError);
