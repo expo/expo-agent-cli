@@ -603,4 +603,3 @@ The marker is this CLI's own file, written and read here. A prebuild outside thi
 The check compares the sources whose `reasons` prebuild owns (`expoConfig`, `expoConfigPlugins`, `expoConfigExternalFile`, `expoCNGPatches`) against the marker. A difference is `prebuild-stale`, and the report names the project sources that moved. A project with a native directory and no marker is `unknown` for staleness and follows that CNG/bare distinction on hash mismatch; a project without the directory is `not-applicable`. A project whose `expo` predates the marker is the same `unknown`.
 
 The marker is advisory, like the last-build record: a missing or unreadable file costs a detail of the verdict, never the command.
-

@@ -380,4 +380,3 @@ export function aggregateOutcome(checks: PlatformCheck[]): CheckStatus {
   }
   return 'up-to-date';
 }
-
