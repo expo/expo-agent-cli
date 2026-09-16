@@ -7,11 +7,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { killProcessTree } from '../../src/utils/processGroup';
 import {
+  collectOutput,
   executeAgentCliAsync,
   installStubBinAsync,
   installStubFingerprintAsync,
   setupFixtureAsync,
+  spawnAgentCli,
+  startStubDevServerAsync,
+  waitForAsync,
+  waitForExitAsync,
 } from '../utils';
 
 const APK_FIXTURE = path.resolve(__dirname, '../../src/__fixtures__/zip/fixture-stored.zip');
@@ -51,6 +57,11 @@ async function installStubAdbAsync(projectRoot: string): Promise<{
       `  process.exit(0);`,
       `}`,
       `if (args.includes('stat')) { process.stdout.write(apk.length + '\\n'); process.exit(0); }`,
+      `if (args[2] === 'exec-out' && process.env.STUB_ADB_HANG_READ) {`,
+      `  fs.writeFileSync(process.env.STUB_ADB_HANG_READ, String(process.pid));`,
+      `  setInterval(() => {}, 1000);`,
+      `  return;`,
+      `}`,
       `if (args[2] === 'exec-out') {`,
       `  const command = args[3];`,
       `  const skip = Number(/skip=(\\d+)/.exec(command)[1]);`,
@@ -154,6 +165,65 @@ describe('npx @expo/agent-cli status --explain, installed section', () => {
     expect(report).toHaveProperty('installed', null);
     expect(adb.calls().some((args) => args.includes('exec-out'))).toBe(false);
   });
+
+  it('exits after a hanging adb read, preserving the other sections and stopping the reader', async () => {
+    const pidPath = path.join(projectRoot, '.hanging-adb-pid');
+    const server = await startStubDevServerAsync({ projectRoot });
+    const child = spawnAgentCli(
+      projectRoot,
+      ['status', '--explain', '--json', '--dev-server-url', server.url],
+      { env: { ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH, STUB_ADB_HANG_READ: pidPath } }
+    );
+    const output = collectOutput(child);
+    const exited = waitForExitAsync(child, output);
+    let watchdog: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // Allow cold Windows startup, but do not let a leaked subprocess hang the suite.
+      const result = await Promise.race([
+        exited,
+        new Promise<never>((_, reject) => {
+          watchdog = setTimeout(() => reject(new Error('status did not exit within 45s')), 45_000);
+        }),
+      ]);
+      expect(result.exitCode).toBe(0);
+      const report = JSON.parse(result.stdout);
+      expect(report.installed).toBeNull();
+      expect(report.errors.installed).toBe('Installed-app check timed out after 15000ms.');
+      expect(report.project).toMatchObject({ isExpoApp: true, usesDevClient: true });
+      expect(report.devServer).toMatchObject({ running: true, ready: true, url: server.url });
+      expect(report.skills).not.toBeNull();
+      expect(fs.existsSync(pidPath)).toBe(true);
+      const pid = Number(fs.readFileSync(pidPath, 'utf8'));
+      expect(
+        await waitForAsync(() => {
+          try {
+            process.kill(pid, 0);
+            return false;
+          } catch (error) {
+            return (error as NodeJS.ErrnoException).code === 'ESRCH';
+          }
+        }, 5000)
+      ).toBe(true);
+      expect(adb.calls().filter((args) => args[2] === 'exec-out')).toHaveLength(1);
+      expect(adb.calls().some((args) => args.includes('pull'))).toBe(false);
+    } finally {
+      clearTimeout(watchdog);
+      // The adb reader owns a separate process group, so cleanup must stop it too
+      // if the cancellation being tested regresses.
+      if (fs.existsSync(pidPath)) {
+        try {
+          process.kill(Number(fs.readFileSync(pidPath, 'utf8')), 'SIGKILL');
+        } catch {
+          // Already stopped by the deadline.
+        }
+      }
+      if (child.exitCode === null && child.signalCode === null) {
+        killProcessTree(child, 'SIGKILL');
+      }
+      await exited;
+      await server.close();
+    }
+  }, 60_000);
 
   it('reports unknown when the app is not installed', async () => {
     const result = await executeAgentCliAsync(
