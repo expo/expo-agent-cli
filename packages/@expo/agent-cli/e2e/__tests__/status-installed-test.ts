@@ -203,13 +203,13 @@ describe('npx @expo/agent-cli status --explain, installed section', () => {
         expect(report.installed).toBeNull();
         expect(report.errors.installed).toBe(explain
           ? 'Installed-app check timed out after 15000ms.'
-          : 'Not checked within 2000ms. Retry with "npx @expo/agent-cli status --explain" (15s timeout).');
+          : 'Check didn\'t finish within 2 seconds. Retry with "npx @expo/agent-cli status --explain" (15s timeout).');
         expect(report.project).toMatchObject({ isExpoApp: true, usesDevClient: true });
         expect(report.devServer).toMatchObject({ running: true, ready: true, url: server.url });
         expect(report.skills).not.toBeNull();
       } else {
         expect(result.stdout).toContain('installed');
-        expect(result.stdout).toContain('Not checked within 2000ms');
+        expect(result.stdout).toContain('Check didn\'t finish within 2 seconds');
         expect(result.stdout).toContain('"npx @expo/agent-cli status --explain" (15s timeout).');
       }
       expect(fs.existsSync(pidPath)).toBe(true);
