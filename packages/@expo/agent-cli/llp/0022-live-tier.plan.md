@@ -287,8 +287,26 @@ What the suite still may not assert: `attached` as a requirement. `navigate --cl
 asserts the link was opened. There is no `runtime:eval --cloud` test, because the flag
 does not exist.
 
+The automatic route-reload case waits up to five minutes for two consecutive, non-empty
+debugger-target polls with the same ids. Each poll is retained in a JSON artifact, including
+empty responses and probe errors, and a timeout prints the history as well as the artifact path.
+This extends the previous two-minute budget without replacing automatic reload with a
+forced device relaunch. It is a timeout mitigation, not proof that the intermittent Android
+failure is resolved: a local Android experiment settled in ten seconds, and a permanently
+empty target list will still fail. [observed, 2026-09-16]
+
 Cleanup ends the expensive thing first. The session is stopped unconditionally, with
 `--id` so that only this run's is touched.
+
+Session startup gets at most two attempts, including when the ten-minute subprocess
+deadline kills `eas simulator` while it is waiting for readiness. Previously only a
+returned nonzero exit was retried; the Android development-build job on PR #81 instead
+threw on that deadline and skipped every test. A replacement is created only when the
+first session id is known and its stop command succeeds. Unknown sessions, spawn errors,
+output-buffer errors, failed cleanup, and a second failed start still fail the suite.
+The last known session remains available to final cleanup. The retry and cleanup ordering
+are covered by hermetic harness tests that run alongside `live-cloud` without creating
+sessions. [observed and implemented, 2026-09-16]
 
 ## Coverage matrix
 

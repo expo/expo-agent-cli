@@ -67,6 +67,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { startCloudSessionAsync } from '../cloudSession';
+
 import {
   allOf,
   builtBinGate,
@@ -123,6 +125,9 @@ const SESSION_START_MS = 600_000;
 /** What `--timeout` is set to on a cloud reload, spelled the way that option parses. */
 const RELOAD_TIMEOUT = '180s';
 
+/** Allow a slow cloud reconnect without changing the automatic reload path under test. */
+const APP_SETTLE_TIMEOUT_MS = 300_000;
+
 /** The route the lab screen lives at, for the reload that names one. */
 const LAB_ROUTE = '/lab';
 
@@ -152,15 +157,6 @@ const CLOUD_BUILD_ID = process.env.AGENT_CLI_LIVE_CLOUD_BUILD_ID ?? '';
 /** The dev-build app's URL scheme, declared in `apps/eas-example/app.json`. */
 const EAS_EXAMPLE_SCHEME = 'easexample';
 const onExpoGo = CLOUD_MODE === 'expo-go' ? it : it.skip;
-
-/** The `id` of an `eas simulator --json` payload, or null when the output is not that object. */
-function jsonSessionId(stdout: string): string | null {
-  try {
-    return JSON.parse(stdout)?.id ?? null;
-  } catch {
-    return null;
-  }
-}
 
 describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-ci', () => {
   const run = new LiveRun('live-cloud');
@@ -198,30 +194,69 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
    * relaunch, then no new target for 180s]. The same race, and the same fix, as `live-android`'s
    * settle before its own second reload.
    */
-  async function waitForCloudAppSettledAsync(label: string): Promise<boolean> {
+  async function waitForCloudAppSettledAsync(label: string): Promise<void> {
     let previous = '';
-    let stable = false;
-    await waitForAsync(
+    const startedAt = Date.now();
+    const observations: {
+      elapsedMs: number;
+      targets: string[] | null;
+      error: string | null;
+      stable: boolean;
+    }[] = [];
+    let artifact = '';
+    const settled = await waitForAsync(
       async () => {
-        const listed = await execAsync('curl', ['-sS', '-m', '10', `http://127.0.0.1:${port}/json/list`], {
-          timeoutMs: 30_000,
-        });
-        let ids: string[] = [];
+        let ids: string[] | null = null;
+        let error: string | null = null;
         try {
-          ids = (JSON.parse(listed.stdout) as { id?: string }[]).map((t) => t.id ?? '').sort();
-        } catch {
-          return false;
+          const listed = await execAsync(
+            'curl',
+            ['-fsS', '-m', '10', `http://127.0.0.1:${port}/json/list`],
+            {
+              timeoutMs: 30_000,
+            }
+          );
+          if (listed.exitCode !== 0) {
+            throw new Error(`curl exited ${listed.exitCode}: ${listed.stderr.trim()}`);
+          }
+          const targets: unknown = JSON.parse(listed.stdout);
+          if (
+            !Array.isArray(targets) ||
+            targets.some((target) => typeof target?.id !== 'string' || !target.id)
+          ) {
+            throw new Error(
+              'The debugger target response was not an array of non-empty target ids.'
+            );
+          }
+          ids = targets.map((target) => target.id as string).sort();
+        } catch (cause) {
+          error = cause instanceof Error ? cause.message : String(cause);
         }
-        const now = ids.join(',');
-        stable = ids.length > 0 && now === previous;
+        const now = ids?.join(',') ?? '';
+        const stable = !!now && now === previous;
+        // A failed or empty poll breaks consecutiveness; it is not a stable app connection.
         previous = now;
-        run.writeArtifact(`settle-${label}.txt`, `targets: ${now || '(none)'} stable: ${stable}`);
+        observations.push({ elapsedMs: Date.now() - startedAt, targets: ids, error, stable });
+        artifact = run.writeArtifact(
+          `settle-${label}.json`,
+          JSON.stringify(
+            {
+              timeoutMs: APP_SETTLE_TIMEOUT_MS,
+              observations,
+            },
+            null,
+            2
+          )
+        );
         return stable;
       },
-      120_000,
+      APP_SETTLE_TIMEOUT_MS,
       5_000
     );
-    return stable;
+    expect(
+      settled,
+      `Cloud app did not settle within ${APP_SETTLE_TIMEOUT_MS}ms. Poll history: ${artifact}\n${JSON.stringify(observations, null, 2)}`
+    ).toBe(true);
   }
 
   /**
@@ -475,9 +510,6 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // readiness wait hangs the full timeout, which `execAsync` reports by killing the process and
     // rejecting, so the id has to be pulled from the error too, not only the resolved result. The
     // `simulator:stop` cleanup can only stop what it can name; a bare stop does not reach it.
-    const findSessionId = (stdout: string, stderr: string): string | null =>
-      jsonSessionId(stdout) ?? `${stdout}\n${stderr}`.match(/id: ([0-9a-f-]{36})/i)?.[1] ?? null;
-
     // In dev-build mode the session installs and runs a real dev client, named by its build id — the
     // AGENT_CLI_LIVE_CLOUD_BUILD_ID override, or the newest finished development build for this platform.
     // Its launch URL is the dev-launcher form (`<scheme>://expo-development-client/?url=<origin>`), which
@@ -532,39 +564,22 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // its first was fine, on an account with nothing else in progress]. The missed session is
     // stopped before the retry, so whatever slot it holds is returned; a second miss is reported
     // the way a single one always was.
-    let started: Awaited<ReturnType<typeof easAsync>> | null = null;
-    for (let attempt = 1; attempt <= 2 && !started; attempt += 1) {
-      const label = attempt === 1 ? 'simulator-start' : 'simulator-start-retry';
-      let result: Awaited<ReturnType<typeof easAsync>>;
-      try {
-        result = await easAsync(label, startArgs, SESSION_START_MS);
-      } catch (error: any) {
-        sessionId = findSessionId(String(error?.stdout ?? ''), String(error?.stderr ?? ''));
-        if (sessionId) {
+    const started = await startCloudSessionAsync({
+      start: (attempt) =>
+        easAsync(
+          attempt === 1 ? 'simulator-start' : 'simulator-start-retry',
+          startArgs,
+          SESSION_START_MS
+        ),
+      stop: (id) =>
+        easAsync('simulator-stop-after-miss', ['simulator:stop', '--id', id, '--non-interactive']),
+      onSession: (id) => {
+        sessionId = id;
+        if (id) {
           run.spend.cloudSessions += 1;
         }
-        throw error;
-      }
-      sessionId = findSessionId(result.stdout, result.stderr);
-      if (sessionId) {
-        run.spend.cloudSessions += 1;
-      }
-      if (result.exitCode === 0) {
-        started = result;
-      } else if (attempt === 2) {
-        throw new Error(
-          `eas simulator failed (exit ${result.exitCode}): ${result.stderr.slice(-2000)}`
-        );
-      } else {
-        if (sessionId) {
-          await easAsync('simulator-stop-after-miss', ['simulator:stop', '--id', sessionId]);
-          sessionId = null;
-        }
-      }
-    }
-    if (!started) {
-      throw new Error('eas simulator never produced a start result (harness, not a finding)');
-    }
+      },
+    });
     if (!sessionId) {
       throw new Error(
         `eas simulator --json printed no session id: ${started.stdout.slice(0, 500)}`
@@ -652,6 +667,16 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       ['runtime:reload', '--eas', '--timeout', RELOAD_TIMEOUT, '--json'],
       { label: 'reload-cloud', env: suiteEnv() }
     );
+    if (result.exitCode !== 0) {
+      // EAS does not upload these artifacts, so a path alone hides the cause of a CI failure.
+      console.error(result.all);
+      const devLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
+      if (fs.existsSync(devLog)) {
+        console.error(
+          `Dev server log (last 12000 characters):\n${fs.readFileSync(devLog, 'utf8').slice(-12_000)}`
+        );
+      }
+    }
     expectExit(result, 0);
     const report = parseJson(result);
 
@@ -717,7 +742,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
   onExpoGo('runtime:reload --eas --route puts the app on the route it names', async () => {
     // The reload above may have relaunched the app, and a broadcast into that landing is mistaken
     // for its own answer — see waitForCloudAppSettledAsync, which this wait exists for.
-    expect(await waitForCloudAppSettledAsync('before-reload-route')).toBe(true);
+    await waitForCloudAppSettledAsync('before-reload-route');
 
     const result = await runLiveEasAsync(
       run,
