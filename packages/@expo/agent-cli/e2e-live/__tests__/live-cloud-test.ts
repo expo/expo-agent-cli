@@ -67,6 +67,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { startCloudSessionAsync } from '../cloudSession';
+
 import {
   allOf,
   builtBinGate,
@@ -155,15 +157,6 @@ const CLOUD_BUILD_ID = process.env.AGENT_CLI_LIVE_CLOUD_BUILD_ID ?? '';
 /** The dev-build app's URL scheme, declared in `apps/eas-example/app.json`. */
 const EAS_EXAMPLE_SCHEME = 'easexample';
 const onExpoGo = CLOUD_MODE === 'expo-go' ? it : it.skip;
-
-/** The `id` of an `eas simulator --json` payload, or null when the output is not that object. */
-function jsonSessionId(stdout: string): string | null {
-  try {
-    return JSON.parse(stdout)?.id ?? null;
-  } catch {
-    return null;
-  }
-}
 
 describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-ci', () => {
   const run = new LiveRun('live-cloud');
@@ -517,9 +510,6 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // readiness wait hangs the full timeout, which `execAsync` reports by killing the process and
     // rejecting, so the id has to be pulled from the error too, not only the resolved result. The
     // `simulator:stop` cleanup can only stop what it can name; a bare stop does not reach it.
-    const findSessionId = (stdout: string, stderr: string): string | null =>
-      jsonSessionId(stdout) ?? `${stdout}\n${stderr}`.match(/id: ([0-9a-f-]{36})/i)?.[1] ?? null;
-
     // In dev-build mode the session installs and runs a real dev client, named by its build id — the
     // AGENT_CLI_LIVE_CLOUD_BUILD_ID override, or the newest finished development build for this platform.
     // Its launch URL is the dev-launcher form (`<scheme>://expo-development-client/?url=<origin>`), which
@@ -574,39 +564,22 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // its first was fine, on an account with nothing else in progress]. The missed session is
     // stopped before the retry, so whatever slot it holds is returned; a second miss is reported
     // the way a single one always was.
-    let started: Awaited<ReturnType<typeof easAsync>> | null = null;
-    for (let attempt = 1; attempt <= 2 && !started; attempt += 1) {
-      const label = attempt === 1 ? 'simulator-start' : 'simulator-start-retry';
-      let result: Awaited<ReturnType<typeof easAsync>>;
-      try {
-        result = await easAsync(label, startArgs, SESSION_START_MS);
-      } catch (error: any) {
-        sessionId = findSessionId(String(error?.stdout ?? ''), String(error?.stderr ?? ''));
-        if (sessionId) {
+    const started = await startCloudSessionAsync({
+      start: (attempt) =>
+        easAsync(
+          attempt === 1 ? 'simulator-start' : 'simulator-start-retry',
+          startArgs,
+          SESSION_START_MS
+        ),
+      stop: (id) =>
+        easAsync('simulator-stop-after-miss', ['simulator:stop', '--id', id, '--non-interactive']),
+      onSession: (id) => {
+        sessionId = id;
+        if (id) {
           run.spend.cloudSessions += 1;
         }
-        throw error;
-      }
-      sessionId = findSessionId(result.stdout, result.stderr);
-      if (sessionId) {
-        run.spend.cloudSessions += 1;
-      }
-      if (result.exitCode === 0) {
-        started = result;
-      } else if (attempt === 2) {
-        throw new Error(
-          `eas simulator failed (exit ${result.exitCode}): ${result.stderr.slice(-2000)}`
-        );
-      } else {
-        if (sessionId) {
-          await easAsync('simulator-stop-after-miss', ['simulator:stop', '--id', sessionId]);
-          sessionId = null;
-        }
-      }
-    }
-    if (!started) {
-      throw new Error('eas simulator never produced a start result (harness, not a finding)');
-    }
+      },
+    });
     if (!sessionId) {
       throw new Error(
         `eas simulator --json printed no session id: ${started.stdout.slice(0, 500)}`

@@ -298,6 +298,16 @@ empty target list will still fail. [observed, 2026-09-16]
 Cleanup ends the expensive thing first. The session is stopped unconditionally, with
 `--id` so that only this run's is touched.
 
+Session startup gets at most two attempts, including when the ten-minute subprocess
+deadline kills `eas simulator` while it is waiting for readiness. Previously only a
+returned nonzero exit was retried; the Android development-build job on PR #81 instead
+threw on that deadline and skipped every test. A replacement is created only when the
+first session id is known and its stop command succeeds. Unknown sessions, spawn errors,
+output-buffer errors, failed cleanup, and a second failed start still fail the suite.
+The last known session remains available to final cleanup. The retry and cleanup ordering
+are covered by hermetic harness tests that run alongside `live-cloud` without creating
+sessions. [observed and implemented, 2026-09-16]
+
 ## Coverage matrix
 
 Cell vocabulary:
