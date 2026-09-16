@@ -41,7 +41,9 @@ The diagnosis is the EAS CLI's own `EAS project not configured` sentence. That s
 
 ## new
 
-`@expo/agent-cli new <dir> [--name] [--no-install] [--no-git] [--json]` runs `create-expo --yes` as a subprocess, does a git init when appropriate, and offers follow-ups into the new project. Zero-TTY is asserted in e2e.
+`@expo/agent-cli new <dir> [--name] [--template <template> | --example <example>] [--no-install] [--no-git] [--json]` runs `create-expo --yes` as a subprocess, does a git init when appropriate, and offers follow-ups into the new project. Zero-TTY is asserted in e2e.
+
+`--template` (`-t`) and `--example` (`-e`) forward their values unchanged to `create-expo`. Both require an explicit, non-empty value to preserve headless creation, and cannot be combined. Template and example availability is resolved by the scaffolder. [observed, 2026-09-16]
 
 After successful scaffolding, `new` writes the same project-root `AGENTS.md` instructions as `agents:setup`, including migration of all wrapped and registered passthrough Expo command examples and `expo-doctor`, as described in [[0006-agent-native-cli-surface]] §Shared instruction files. This also runs with `--no-install`, where unavailable installed-package facts remain unknown. It does not run agent installers or interactive setup. [confirmed, Kudo, 2026-09-08; expanded command migration, 2026-09-09]
 

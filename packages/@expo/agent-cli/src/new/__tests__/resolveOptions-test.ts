@@ -5,6 +5,8 @@ describe(resolveNewOptions, () => {
     expect(resolveNewOptions(['my-app'])).toEqual({
       directory: 'my-app',
       name: undefined,
+      template: undefined,
+      example: undefined,
       install: true,
       git: true,
       json: false,
@@ -26,6 +28,8 @@ describe(resolveNewOptions, () => {
     ).toEqual({
       directory: 'apps/my-app',
       name: 'My App',
+      template: undefined,
+      example: undefined,
       install: false,
       git: false,
       json: true,
@@ -48,7 +52,40 @@ describe(resolveNewOptions, () => {
     expect(() => resolveNewOptions(['my-app', '--name', '  '])).toThrow(/--name/);
   });
 
+  it.each([
+    ['--template', 'template', 'blank-typescript'],
+    ['-t', 'template', 'default@sdk-55'],
+    ['--example', 'example', 'with-router'],
+    ['-e', 'example', 'with-router'],
+  ])('should resolve %s as %s', (flag, option, value) => {
+    expect(resolveNewOptions([flag, value, 'my-app'])).toMatchObject({
+      directory: 'my-app',
+      [option]: value,
+    });
+  });
+
+  it.each(['--template', '--example'])('should resolve an inline %s value', (flag) => {
+    expect(resolveNewOptions(['my-app', `${flag}=custom-starter`])).toMatchObject({
+      [flag.slice(2)]: 'custom-starter',
+    });
+  });
+
+  it.each(['--template', '-t', '--example', '-e'])(
+    'should reject a missing or empty %s value',
+    (flag) => {
+      for (const value of [[], [''], ['  '], ['--no-install']]) {
+        expect(() => resolveNewOptions(['my-app', flag, ...value])).toThrow();
+      }
+    }
+  );
+
+  it('should reject selecting both a template and an example', () => {
+    expect(() => resolveNewOptions(['my-app', '-t', 'blank', '-e', 'with-router'])).toThrow(
+      /--template.*--example/
+    );
+  });
+
   it(`should throw for an unknown flag`, () => {
-    expect(() => resolveNewOptions(['my-app', '--template'])).toThrow(/--template/);
+    expect(() => resolveNewOptions(['my-app', '--unknown'])).toThrow(/--unknown/);
   });
 });

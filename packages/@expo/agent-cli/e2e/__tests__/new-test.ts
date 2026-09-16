@@ -155,6 +155,46 @@ function isInsideGitRepo(dir: string): boolean {
 }
 
 describe('@expo/agent-cli new', () => {
+  it.each([
+    ['--template', '--template', 'blank-typescript'],
+    ['-t', '--template', 'default@sdk-55'],
+    ['--example', '--example', 'with-router'],
+    ['-e', '--example', 'with-router'],
+  ])('should forward %s to create-expo as %s', async (flag, forwardedFlag, value) => {
+    const workDir = await setupWorkDirAsync();
+    const result = await executeAgentCliAsync(workDir, [
+      'new',
+      'my-app',
+      flag,
+      value,
+      '--no-install',
+      '--no-git',
+      '--json',
+    ]);
+
+    expect(readStubInvocations(workDir)).toEqual([
+      {
+        args: ['my-app', '--yes', '--no-install', forwardedFlag, value],
+        cwd: workDir,
+        isTTY: false,
+      },
+    ]);
+    expect(JSON.parse(result.stdout)).toMatchObject({ created: true, installed: false });
+  });
+
+  it.each([['--template'], ['-e', ''], ['--template', 'blank', '--example', 'with-router']])(
+    'should reject invalid scaffold selection %j before spawning',
+    async (...flags) => {
+      const workDir = await setupWorkDirAsync();
+      const result = await executeAgentCliAsync(workDir, ['new', 'my-app', ...flags], {
+        reject: false,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(readStubInvocations(workDir)).toEqual([]);
+    }
+  );
+
   it(`should create a project through create-expo and say what to do next`, async () => {
     const workDir = await setupWorkDirAsync();
 

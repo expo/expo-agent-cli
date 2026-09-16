@@ -8,21 +8,27 @@ export const newHelp: CommandHelp = {
   command: 'new',
   usage: `${PROGRAM_PREFIX} new <directory>`,
   options: [
-    `--name <name>   Display name of the app, written into app.json`,
-    `--no-install    Skip installing the dependencies`,
-    `--no-git        Skip initializing a git repository`,
-    `--json          Print the result as JSON`,
-    `--no-followups  Skip the "Suggested next:" section of suggested follow-up commands`,
-    `-h, --help      Usage info`,
+    `--name <name>               Display name of the app, written into app.json`,
+    `-t, --template <template>   Template to pass to create-expo`,
+    `-e, --example <example>     Example from expo/examples to pass to create-expo`,
+    `--no-install                Skip installing the dependencies`,
+    `--no-git                    Skip initializing a git repository`,
+    `--json                      Print the result as JSON`,
+    `--no-followups              Skip the "Suggested next:" section of suggested follow-up commands`,
+    `-h, --help                  Usage info`,
   ],
   examples: [
     {
-      run: `${PROGRAM_PREFIX} new my-app`,
-      gets: 'a project in ./my-app, dependencies installed, git initialized',
+      run: `${PROGRAM_PREFIX} new my-app --template blank-typescript`,
+      gets: 'a project using the blank TypeScript template',
     },
     {
-      run: `${PROGRAM_PREFIX} new my-app --name "My App"`,
-      gets: 'the same, with a display name set',
+      run: `${PROGRAM_PREFIX} new my-app --example with-router`,
+      gets: 'a project using the with-router example',
+    },
+    {
+      run: `${PROGRAM_PREFIX} new my-app`,
+      gets: 'a project in ./my-app, dependencies installed, git initialized',
     },
     {
       run: `${PROGRAM_PREFIX} new my-app --json --no-install`,
@@ -38,6 +44,7 @@ export const newHelp: CommandHelp = {
   notes: [
     `Runs create-expo in a subprocess with every prompt answered, so it works with no TTY`,
     `attached — the shape an agent runs it in.`,
+    `--template and --example require a value and cannot be combined.`,
   ],
 };
 

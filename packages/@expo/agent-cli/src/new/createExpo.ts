@@ -4,6 +4,7 @@
 
 import { resolvePackageRunner } from '../utils/packageRunner';
 import { findExecutableOnPath } from '../utils/subprocess';
+import type { NewOptions } from './resolveOptions';
 
 /** The `create-expo` invocation to spawn. */
 export interface CreateExpoCli {
@@ -43,11 +44,17 @@ export function resolveCreateExpoCli({ pathEnv }: { pathEnv?: string } = {}): Cr
  */
 export function buildCreateExpoArgs(
   directory: string,
-  { install }: { install: boolean }
+  { install, template, example }: Pick<NewOptions, 'install' | 'template' | 'example'>
 ): string[] {
   const args = [directory, '--yes'];
   if (!install) {
     args.push('--no-install');
+  }
+  if (template != null) {
+    args.push('--template', template);
+  }
+  if (example != null) {
+    args.push('--example', example);
   }
   return args;
 }

@@ -131,11 +131,16 @@ describe('the flags this CLI writes onto a command line', () => {
     //
     // `-q  src/project/nativeCode.ts` is `git check-ignore -q`, which tells a gitignored prebuild
     // directory from one that was `git add -f`'d. Git, not an Expo CLI.
+    //
+    // `--template` and `--example` in `src/new/createExpo.ts` were verified outside this repo
+    // [observed — live, 2026-09-16: `npx --yes create-expo@latest <dir> --yes --no-install`
+    // with `--template blank-typescript` and `--example with-router` both scaffolded and exited 0].
     expect(sweep.foreignFlags.map(({ flag, file }) => `${flag}  ${file}`).sort())
       .toMatchInlineSnapshot(`
         [
           "--detach  src/smoke/smokeAsync.ts",
           "--device  src/device/installDevBuild.ts",
+          "--example  src/new/createExpo.ts",
           "--help  src/cli.ts",
           "--is-inside-work-tree  src/new/git.ts",
           "--json  src/config/introspectAsync.ts",
@@ -155,6 +160,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--preset  src/project/fingerprint.ts",
           "--pretty  src/typecheck/checkAsync.ts",
           "--project  src/deploy/launchCli.ts",
+          "--template  src/new/createExpo.ts",
           "--type  src/config/introspectAsync.ts",
           "--type  src/impact/runtimeVersion.ts",
           "--verbose  src/doctor/checkAsync.ts",
