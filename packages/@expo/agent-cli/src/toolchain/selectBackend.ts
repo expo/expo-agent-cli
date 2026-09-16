@@ -109,7 +109,7 @@ export function selectBuildBackend({
     return choice(
       configured,
       'config',
-      `the ${PROGRAM_NAME} config asks for it — "expo.agentCli" in package.json.${anyway}`,
+      `the ${PROGRAM_NAME} config asks for it — "expo.agent-cli" in package.json.${anyway}`,
       configured === 'local' && impossible
     );
   }

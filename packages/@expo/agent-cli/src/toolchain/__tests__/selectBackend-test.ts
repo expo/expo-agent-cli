@@ -212,7 +212,7 @@ describe('what the reason says', () => {
       probe: probeOf('ios', 'present'),
     });
     expect(choice.why).toContain('the @expo/agent-cli config asks for it');
-    expect(choice.why).toContain('"expo.agentCli" in package.json');
+    expect(choice.why).toContain('"expo.agent-cli" in package.json');
   });
 
   it(`labels a flag-driven choice as the command line's`, () => {

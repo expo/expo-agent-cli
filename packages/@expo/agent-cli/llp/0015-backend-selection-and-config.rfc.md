@@ -13,7 +13,7 @@
 Two decisions this CLI was making badly, and one place to record what a developer wants.
 
 1. Where a build runs is part of the plan, not a footnote under it. On a host that cannot build for the target platform at all, a plan nobody should approve used to print as though they should. The selection now happens while the plan is decided, so a machine with no Xcode gets `eas build` in the steps.
-2. The developer may disagree, and there has to be somewhere to say so. One config, four keys, in `package.json` under `expo.agentCli`.
+2. The developer may disagree, and there has to be somewhere to say so. One config, four keys, in `package.json` under `expo.agent-cli`.
 
 [[0004-smart-start-and-project-state]]'s old claim that the plan "does not act" on where a build runs is superseded. What that document forbids is a swap of steps between the moment a plan is printed and the moment it runs. Selection happens strictly earlier than that.
 
@@ -136,18 +136,20 @@ No new flag names. `--go` and `--dev-client` are `expo start`'s own, already acc
 
 ## Where the config lives
 
-`package.json` › `expo` › `agentCli`. [confirmed, 2026-08-26]
+`package.json` › `expo` › `agent-cli`. [confirmed, 2026-08-26]
+
+The key was `agentCli` until 2026-09-16. It is spelled like the package now, and like the `expo.install` and `expo.doctor` keys beside it, which read as the tool they configure. An `expo.agentCli` still in a `package.json` is an error naming the new key, not settings quietly read as absent — the silent drop §Validation exists to prevent. [confirmed, Kudo, 2026-09-16]
 
 `app.json` as a top-level `@expo/agent-cli` key is broken by design. `@expo/config`'s `reduceExpoObject` discards every top-level key when an `expo` object is present. `app.json` under `expo.extra` changes the fingerprint. A tooling preference would mark every existing development build stale. `agent-cli.config.js` was rejected for now: this config is four scalars, and `status` promises to be instant.
 
-`package.json` › `expo.agentCli` is where this repository already keeps tooling configuration (`expo.install.exclude`, `expo.doctor`, `expo.autolinking`). It is static JSON. Nothing here moves a hash or ships into the app. `package.json`'s `expo` key is not merged into the `ExpoConfig`.
+`package.json` › `expo.agent-cli` is where this repository already keeps tooling configuration (`expo.install.exclude`, `expo.doctor`, `expo.autolinking`). It is static JSON. Nothing here moves a hash or ships into the app. `package.json`'s `expo` key is not merged into the `ExpoConfig`.
 
 The module is `src/settings/` rather than `src/config/`, because `src/config/` is `@expo/agent-cli inspect:config-plugins`.
 
 ```json
 {
   "expo": {
-    "agentCli": {
+    "agent-cli": {
       "target": "expo-go" | "dev-build",
       "buildBackend": "local" | "eas",
       "ios": { "buildBackend": "local" | "eas" },

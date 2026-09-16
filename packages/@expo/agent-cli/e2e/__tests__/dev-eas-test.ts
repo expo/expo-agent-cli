@@ -78,7 +78,7 @@ function readLastBuildRecord(projectRoot: string): Record<string, string> | null
 async function writeAgentCliConfigAsync(projectRoot: string, config: unknown): Promise<void> {
   const file = path.join(projectRoot, 'package.json');
   const packageJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
-  packageJson.expo = { ...packageJson.expo, agentCli: config };
+  packageJson.expo = { ...packageJson.expo, 'agent-cli': config };
   await fs.promises.writeFile(file, JSON.stringify(packageJson, null, 2));
 }
 

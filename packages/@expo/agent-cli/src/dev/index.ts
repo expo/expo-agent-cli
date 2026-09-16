@@ -71,7 +71,7 @@ export const devRunHelp: CommandHelp = {
     `A cloud build (eas build) runs on EAS and needs an Expo account; when this machine cannot build,`,
     `the plan is the cloud one and says why. --eas also puts the app on EAS: a tunnelled dev server,`,
     `a development-simulator build when needed, and an EAS Simulator session (bills until stopped).`,
-    `The project can choose, in package.json under expo.agentCli: buildBackend (local or eas,`,
+    `The project can choose, in package.json under expo.agent-cli: buildBackend (local or eas,`,
     `optionally per platform) and target (expo-go or dev-build). A flag beats the config.`,
     `The options of expo start are accepted and passed on. For expo start with nothing decided`,
     `for you, run "${PROGRAM_PREFIX} start" instead.`,

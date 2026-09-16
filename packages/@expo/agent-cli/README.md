@@ -116,7 +116,7 @@ Flags beat `package.json`. `package.json` beats detection. Unknown keys are erro
 ```json
 {
   "expo": {
-    "agentCli": {
+    "agent-cli": {
       "target": "dev-build",
       "buildBackend": "eas",
       "android": { "buildBackend": "local" }

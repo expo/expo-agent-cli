@@ -6,6 +6,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { PROGRAM_NAME } from '../programName';
 import { CommandError } from '../utils/errors';
 import { parseAgentCliSettings } from './parse';
 import { NO_SETTINGS, type LoadedSettings } from './types';
@@ -13,7 +14,7 @@ import { NO_SETTINGS, type LoadedSettings } from './types';
 /**
  * Where the config lives.
  *
- * `package.json` › `expo` › `@expo/agent-cli`, which is where this repository already keeps every other
+ * `package.json` › `expo` › `agent-cli`, which is where this repository already keeps every other
  * piece of *tooling* configuration: `expo.install.exclude` (the Expo CLI's installer),
  * `expo.doctor` (expo-doctor) and `expo.autolinking` (expo-modules-autolinking) are all read from
  * exactly here [observed — `packages/@expo/cli/src/install/checkPackages.ts`,
@@ -23,8 +24,14 @@ import { NO_SETTINGS, type LoadedSettings } from './types';
  */
 export const CONFIG_FILE_NAME = 'package.json';
 
+/** The key inside `package.json` › `expo`. */
+const CONFIG_KEY = 'agent-cli';
+
+/** The key this config used before it was renamed, refused rather than read. */
+const LEGACY_CONFIG_KEY = 'agentCli';
+
 /** The key path inside that file, as a reader would type it. */
-export const CONFIG_KEY_PATH = 'expo.agentCli';
+export const CONFIG_KEY_PATH = `expo.${CONFIG_KEY}`;
 
 /** How an error names the location. */
 export const CONFIG_LOCATION = `"${CONFIG_KEY_PATH}" in ${CONFIG_FILE_NAME}`;
@@ -86,8 +93,20 @@ function load(projectRoot: string): LoadedSettings {
   }
 
   const expo = (packageJson as any)?.expo;
-  const raw = expo == null ? undefined : (expo as any)?.agentCli;
+  const raw = expo == null ? undefined : (expo as any)?.[CONFIG_KEY];
   if (raw == null) {
+    if (expo != null && (expo as any)?.[LEGACY_CONFIG_KEY] != null) {
+      // Refused rather than skipped, for the reason an unknown key is: preferences written down to
+      // change a plan, read as though nobody wrote them, are a wrong plan approved as a right one.
+      throw new CommandError(
+        'BAD_AGENT_CLI_CONFIG',
+        [
+          `${file} names "expo.${LEGACY_CONFIG_KEY}", which this version of ${PROGRAM_NAME} does not read.`,
+          `Why: the key is ${CONFIG_LOCATION} now, and settings read as absent would leave you approving a plan you did not ask for.`,
+          `How: rename the key to "${CONFIG_KEY}". Nothing inside it changed.`,
+        ].join('\n')
+      );
+    }
     return NO_SETTINGS;
   }
 

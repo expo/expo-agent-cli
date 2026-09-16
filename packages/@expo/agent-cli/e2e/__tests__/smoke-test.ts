@@ -586,7 +586,7 @@ describe('@expo/agent-cli smoke', () => {
       // sentence it prints first.
       const file = path.join(projectRoot, 'package.json');
       const manifest = JSON.parse(await fs.promises.readFile(file, 'utf8'));
-      manifest.expo = { ...manifest.expo, agentCli: { buildBackend: 'eas' } };
+      manifest.expo = { ...manifest.expo, 'agent-cli': { buildBackend: 'eas' } };
       await fs.promises.writeFile(file, JSON.stringify(manifest, null, 2));
 
       const result = await executeAgentCliAsync(
