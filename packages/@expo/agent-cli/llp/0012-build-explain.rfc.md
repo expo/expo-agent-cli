@@ -19,13 +19,11 @@ Two properties are the whole design:
 
 ## What ships, and what is reserved
 
-Three input sources ship: `--file <path>`, `--stdin`, and `--local --ios|--android` [added — Kudo, 2026-09-15]. The `<build-id>` form, which would read the log of an EAS build by its id, does not. eas-cli has no `build:logs` command ([[0010-agent-conventions]] §Upstream asks).
+Four input sources ship: `--file <path>`, `--stdin`, `--local --ios|--android`, and `--eas --ios|--android [<build-id>]` [added — Kudo, 2026-09-15]. eas-cli has no `build:logs` command ([[0010-agent-conventions]] §Upstream asks), and `--eas` does not wait for one: `eas build:view <id> --json` names the build's log files as signed URLs under `logFiles`, and `src/builds/explain/easLog.ts` fetches them — the id given, or the last errored build of the platform from `eas build:list --status errored --limit 1` — decodes what arrived brotli-compressed, and hands the text to the same reader a pipe goes through. The platform is required, as under `--local`, and checked against the build's own when an id names one. `source.kind` is `'eas'`, `source.buildId` the build, `source.logFiles` how many files were read. The bare `<build-id>` positional is the EAS form, no longer reserved: `BUILD_ID_UNSUPPORTED` is gone.
 
 `--local` reads the log of the last native build `@expo/agent-cli dev` ran here for one platform. `dev`'s `expo run:*` step writes every byte it printed, in arrival order, to `.expo/dev/logs/build-<platform>.log` (`src/dev/buildLog.ts`, `SubprocessOptions.logFile`), truncated per build — whenever its output passes through this process, which is every run without a terminal watching it, a detached run included. An interactive run hands the terminal to the tool and writes none; `--local` then says so and names the two ways to get a log. The platform is required, not defaulted: a project builds for two, and a default would explain a build the caller may not have meant. `source.kind` is `'local'` and `source.path` is the file.
 
-The positional argument is reserved and reported rather than rejected as a stray. `@expo/agent-cli inspect:build-log <build-id>` is the command an agent will reach for. It has a code of its own, `BUILD_ID_UNSUPPORTED`. The message says the CLI cannot fetch a build's log, why, and the two spellings that work today. `Try: npx eas build:view <id>` prints where the log files are. Fetching by id is not in v1. See [[0017-deferred-commands]].
-
-`source.kind` is `'file' | 'stdin' | 'local'`. There is no `build` key.
+`source.kind` is `'file' | 'stdin' | 'local' | 'eas'`. There is no `build` key; the build is `source.buildId`.
 
 Local logs are most of the value. `npx expo run:ios 2>&1 | npx @expo/agent-cli inspect:build-log --json` is the loop an agent driving a local build actually has.
 
