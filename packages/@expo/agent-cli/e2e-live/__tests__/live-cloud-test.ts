@@ -694,6 +694,16 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       ['runtime:reload', '--eas', '--timeout', RELOAD_TIMEOUT, '--json'],
       { label: 'reload-cloud', env: suiteEnv() }
     );
+    if (result.exitCode !== 0) {
+      // EAS does not upload these artifacts, so a path alone hides the cause of a CI failure.
+      console.error(result.all);
+      const devLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
+      if (fs.existsSync(devLog)) {
+        console.error(
+          `Dev server log (last 12000 characters):\n${fs.readFileSync(devLog, 'utf8').slice(-12_000)}`
+        );
+      }
+    }
     expectExit(result, 0);
     const report = parseJson(result);
 
