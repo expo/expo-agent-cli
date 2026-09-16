@@ -22,7 +22,7 @@ export const inspectBuildLogHelp: CommandHelp = {
   options: [
     `--file <path>          Read the log from this file`,
     `--stdin                Read the log from stdin. Implied when stdin is not a terminal`,
-    `--platform ios|android Narrow the rules to one platform's phases`,
+    `--ios | --android      Narrow the rules to one platform's phases`,
     `--context <n[:m]>      Lines of context around the match. Default: 8 before, 20 after`,
     `--all                  Report every match, not only the failing phase's first`,
     `--json                 Print the report as JSON`,
