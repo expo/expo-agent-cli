@@ -389,7 +389,7 @@ export async function collectStatusReportAsync(
         (options.explain ? INSTALLED_READ_TIMEOUT_MS : DEFAULT_INSTALLED_READ_TIMEOUT_MS);
       const timeoutMessage = options.explain
         ? `Installed-app check timed out after ${timeoutMs}ms.`
-        : `Not checked within ${timeoutMs}ms. Run npx @expo/agent-cli status --explain for a longer check.`;
+        : `Not checked within ${timeoutMs}ms. Run "npx @expo/agent-cli status --explain" for a longer check.`;
       const installed = await withSubprocessDeadlineAsync(
         timeoutMs,
         timeoutMessage,

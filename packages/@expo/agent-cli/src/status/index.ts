@@ -74,7 +74,6 @@ export const statusHelp: CommandHelp = {
     `The installed line checks what the app on a device was built from, read out of the`,
     `app itself (expo-constants embeds it in debug builds, SDK 55+). Right about a build somebody`,
     `else made, which freshness cannot be. A release build embeds none and reads as unknown.`,
-    `The installed check has a 2s budget; run --explain for a longer check when it times out.`,
   ],
 };
 
