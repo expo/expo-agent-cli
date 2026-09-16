@@ -145,7 +145,7 @@ export interface StatusOptions {
    * Also the consent for the physical-iPhone probe. That probe *launches the app*, and `status`
    * promises to start nothing, so a phone is asked only when the caller named one here. Every
    * other reader — a booted simulator's container, an APK over `adb` — is read-only, so those run
-   * under `--explain` on their own.
+   * by default under the short deadline.
    */
   device?: string | null;
   /** Overrides {@link EAS_BUILD_LOOKUP_TIMEOUT_MS}, for tests. */

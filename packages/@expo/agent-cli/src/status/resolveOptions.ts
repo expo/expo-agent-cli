@@ -153,7 +153,7 @@ export function resolveDeviceTimeoutFlag(
       'BAD_ARGS',
       [
         `--device-timeout needs --explain.`,
-        `Why: it bounds the physical-device probe, and a default report reads no device at all.`,
+        `Why: it bounds the physical-device probe, which requires --explain and an explicitly named phone.`,
         `How: run "${PROGRAM_PREFIX} status --explain --device "Ada's iPhone" --device-timeout ${seconds}".`,
       ].join('\n')
     );
