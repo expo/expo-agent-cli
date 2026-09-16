@@ -13,6 +13,7 @@ import {
   executeAgentCliAsync,
   installStubBinAsync,
   installStubFingerprintAsync,
+  readStubExpoInvocations,
   setupFixtureAsync,
   spawnAgentCli,
   startStubDevServerAsync,
@@ -246,41 +247,70 @@ describe('npx @expo/agent-cli status --explain, installed section', () => {
   }, 60_000);
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §The prebuild marker
-  // The marker is this CLI's file, so the test plants it the way the writer writes it.
-  it('puts prebuild first when the app config moved since the marker', async () => {
-    fs.mkdirSync(path.join(projectRoot, 'android'), { recursive: true });
-    fs.mkdirSync(path.join(projectRoot, '.expo', 'prebuild'), { recursive: true });
-    fs.writeFileSync(
-      path.join(projectRoot, '.expo', 'prebuild', 'fingerprint-android.json'),
-      JSON.stringify({
-        version: 1,
-        platform: 'android',
-        hash: 'marker-hash',
-        fingerprintVersion: '0.20.0',
-        createdAt: '2026-09-09T00:00:00Z',
-        sources: [{ type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'old' }],
-      })
-    );
+  it('records the dev prebuild marker and reports it fresh, then stale after a config edit', async () => {
+    const markerPath = path.join(projectRoot, '.expo', 'prebuild', 'fingerprint-android.json');
+    const env = {
+      ...adb.env,
+      STUB_FINGERPRINT_HASH_FROM_PROJECT: '1',
+      STUB_EXPO_PREBUILD_NATIVE_DIRS: '1',
+    };
+    expect(fs.existsSync(markerPath)).toBe(false);
+    expect(fs.existsSync(path.join(projectRoot, 'android'))).toBe(false);
 
-    const result = await executeAgentCliAsync(
-      projectRoot,
-      ['status', '--explain', '--json'],
-      {
-        env: { ...adb.env, STUB_FINGERPRINT_HASH_FROM_PROJECT: '1' },
-        reject: false,
-      }
+    const built = await executeAgentCliAsync(projectRoot, ['dev', '--android', '--local'], { env });
+    expect(built.exitCode).toBe(0);
+    const commands = readStubExpoInvocations(projectRoot).map(({ args }) => args);
+    expect(commands).toContainEqual(['prebuild', '--platform', 'android']);
+    expect(commands.findIndex((args) => args[0] === 'prebuild')).toBeLessThan(
+      commands.findIndex((args) => args[0] === 'run:android')
     );
+    expect(fs.existsSync(path.join(projectRoot, 'android'))).toBe(true);
+    const markerContents = fs.readFileSync(markerPath, 'utf8');
+    expect(JSON.parse(markerContents)).toMatchObject({
+      version: 1,
+      platform: 'android',
+      hash: expect.any(String),
+      fingerprintVersion: '0.20.0',
+      sources: expect.arrayContaining([
+        expect.objectContaining({ filePath: 'app.json', reasons: ['expoConfig'] }),
+      ]),
+    });
+    // A platform-specific prebuild must not stamp another platform.
+    expect(
+      fs.existsSync(path.join(projectRoot, '.expo', 'prebuild', 'fingerprint-ios.json'))
+    ).toBe(false);
 
-    expect(result.exitCode).toBe(0);
-    const android = JSON.parse(result.stdout).installed.platforms.find(
-      (entry: { platform: string }) => entry.platform === 'android'
-    );
-    expect(android).toMatchObject({
+    const readAndroidStatus = async () => {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--explain', '--json'],
+        { env }
+      );
+      expect(result.exitCode).toBe(0);
+      return JSON.parse(result.stdout).installed.platforms.find(
+        (entry: { platform: string }) => entry.platform === 'android'
+      );
+    };
+    expect(await readAndroidStatus()).toMatchObject({
+      prebuildStatus: 'fresh',
+      prebuildChanges: [],
+    });
+
+    const configPath = path.join(projectRoot, 'app.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config.expo.name = 'Changed after prebuild';
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+    expect(await readAndroidStatus()).toMatchObject({
+      prebuildStatus: 'stale',
+      prebuildChanges: expect.arrayContaining([expect.objectContaining({ source: 'app.json' })]),
       status: 'rebuild-required',
       reason: 'prebuild-stale',
       commands: ['npx @expo/agent-cli prebuild -p android', 'npx expo run:android'],
       recommendation: expect.stringContaining('app.json changed after the native directories'),
     });
+    // Status only reads: it must not silently refresh away the stale marker.
+    expect(fs.readFileSync(markerPath, 'utf8')).toBe(markerContents);
   });
 
   it('reports unknown when the app is not installed', async () => {
