@@ -146,16 +146,83 @@ export function readPrebuiltAndroidApplicationId(projectRoot: string): string | 
 }
 
 /**
+ * The `PRODUCT_BUNDLE_IDENTIFIER` of a **prebuilt** iOS project, from its `project.pbxproj`.
+ *
+ * The iOS counterpart of {@link readPrebuiltAndroidApplicationId}. `expo prebuild` writes the id
+ * into the Xcode project whether or not `ios.bundleIdentifier` was declared. A static read: no
+ * `xcodebuild`, no `app.config.js`.
+ *
+ * `XCBuildConfiguration` objects are ordered by their generated UUIDs, so a project with an app
+ * extension — a notification service, a widget, one a config plugin added — has several
+ * `PRODUCT_BUNDLE_IDENTIFIER` entries in arbitrary order. {@link pickAppTargetId} picks the app
+ * target out of them rather than trusting the order.
+ */
+export function readPrebuiltIosBundleIdentifier(projectRoot: string): string | null {
+  const iosDir = path.join(projectRoot, 'ios');
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(iosDir);
+  } catch {
+    return null;
+  }
+  for (const entry of entries) {
+    if (!entry.endsWith('.xcodeproj')) {
+      continue;
+    }
+    let source: string;
+    try {
+      source = fs.readFileSync(path.join(iosDir, entry, 'project.pbxproj'), 'utf8');
+    } catch {
+      continue;
+    }
+    // Release can use a shorter id than Debug (com.app vs com.app.dev). Apply the
+    // extension-prefix rule only within Debug, never across build configurations.
+    const configurations = [...source.matchAll(
+      /\bisa\s*=\s*XCBuildConfiguration;([\s\S]*?)(?=\bisa\s*=|$)/g
+    )];
+    if (configurations.length) {
+      source = configurations
+        .filter((match) => /\bname\s*=\s*"?Debug"?\s*;/.test(match[1]!))
+        .map((match) => match[1]!)
+        .join('\n');
+    }
+    const found = [
+      ...source.matchAll(/^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"?([^";]+)"?\s*;/gm),
+    ].map((match) => match[1]!.trim());
+    const appTarget = pickAppTargetId(found.filter(isValidAppId));
+    if (appTarget != null) {
+      return appTarget;
+    }
+  }
+  return null;
+}
+
+/**
+ * The app target's identifier among a project's `PRODUCT_BUNDLE_IDENTIFIER` values.
+ *
+ * `prebuild` names an extension `<app id>.<suffix>`, so the app target is the one every other
+ * identifier extends. Null when no single identifier dominates: two unrelated ids name no app
+ * target, and a wrong one misdirects every caller of {@link readConfiguredAppId}.
+ */
+function pickAppTargetId(ids: string[]): string | null {
+  const unique = [...new Set(ids)];
+  return (
+    unique.find((id) => unique.every((other) => other === id || other.startsWith(`${id}.`))) ?? null
+  );
+}
+
+/**
  * `ios.bundleIdentifier` or `android.package` from the project's static app config.
  *
  * A dynamic `app.config.js` is never evaluated, per the process boundary of llp/0001
  * constraint 5; such a project answers null and falls through to the Expo Go default, which
  * `--app-id` overrides.
  *
- * **Android has a second source**, and it is consulted when the config names none: the
- * `applicationId` a prebuild wrote into Gradle (@ref ./appId §readPrebuiltAndroidApplicationId).
- * The config comes first, because a project that declares `android.package` has said what it wants
- * and a prebuild older than that declaration would otherwise outrank it.
+ * **The prebuilt project is the second source**, consulted when the config names none: the
+ * `applicationId` a prebuild wrote into Gradle (@ref ./appId §readPrebuiltAndroidApplicationId),
+ * or the `PRODUCT_BUNDLE_IDENTIFIER` it wrote into the Xcode project. The config comes first,
+ * because a project that declares an id has said what it wants and a prebuild older than that
+ * declaration would otherwise outrank it.
  */
 export function readConfiguredAppId(
   projectRoot: string,
@@ -177,8 +244,11 @@ export function readConfiguredAppId(
       return isValidAppId(value.trim()) ? value.trim() : null;
     }
   }
-  return platform === 'android' ? readPrebuiltAndroidApplicationId(projectRoot) : null;
+  return platform === 'android'
+    ? readPrebuiltAndroidApplicationId(projectRoot)
+    : readPrebuiltIosBundleIdentifier(projectRoot);
 }
+
 
 function readJsonFile(filePath: string): Record<string, unknown> | null {
   try {
