@@ -73,6 +73,23 @@ describe(lockAddressFor, () => {
     expect(lockAddressFor(path.join(deep, 'other'), posix).address).not.toBe(address);
   });
 
+  it(`skips a temporary directory that is itself too deep for the kernel's path limit`, () => {
+    // A long TMPDIR (a sandboxed or per-run temporary directory) makes the fallback just as
+    // unbindable as the in-project path: `listen` fails with EINVAL. /tmp always fits.
+    const deep = path.resolve(path.sep, ...Array.from({ length: 20 }, (_, index) => `dir${index}`));
+    const longTmp = path.resolve(path.sep, ...Array.from({ length: 12 }, (_, index) => `tmp-segment-${index}`));
+    vi.spyOn(os, 'tmpdir').mockReturnValue(longTmp);
+    const { kind, address } = lockAddressFor(deep, posix);
+
+    expect(kind).toBe('unix');
+    expect(address.length).toBeLessThanOrEqual(100);
+    expect(path.normalize(path.dirname(address))).toBe(path.normalize('/tmp'));
+    expect(path.basename(address)).toMatch(
+      new RegExp(`^${DEV_LOCK_PIPE_PREFIX}[0-9a-f]{16}\\.sock$`)
+    );
+    expect(lockAddressFor(deep, posix).address).toBe(address);
+  });
+
   it(`keeps the socket in the project when the path fits`, () => {
     const projectRoot = path.resolve(path.sep, 'a', 'project');
     const { address } = lockAddressFor(projectRoot, posix);
