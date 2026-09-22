@@ -528,3 +528,104 @@ The decision table is pure logic over probed state, so it is exhaustively unit-t
 with no model and no device (tier 0 in [[0002-testing-and-evals]]). Probe and execution
 paths get e2e coverage against fixtures, via subprocess and JSONL assertions. The
 not-an-Expo-app grid is `e2e/__tests__/project-shapes-test.ts`.
+
+<!-- installed-app-check -->
+
+## Installed-app fingerprint check
+
+### Purpose
+
+`status` answers "do I need to build again" from a record this CLI wrote after a build it ran
+([[0011-impact-and-freshness]]). The record says what the last build was made from. It does not say
+what is on the device. A build from EAS, a build from Xcode, a simulator that was wiped, a phone that
+holds last week's build: the record is silent about all of them, and `dev` treats "unrecorded" as
+stale.
+
+The check asks the device instead. A debug build on SDK 58 or later carries the fingerprint it was
+built from (the `expo-constants` build phase writes it; expo/expo#49905). The check reads that file
+out of the installed app ([[0005-runtime-loop-tools]] §Installed-app fingerprint check), computes the
+project fingerprint for the same platform, and compares the two hashes. The answer is about this
+project and this device, whoever made the build.
+
+The check lives in this CLI. What stays in the expo repository is the producer side only: the
+build-time embed (expo/expo#49905) and the dev-launcher responder (expo/expo#49494). `@expo/cli` is
+untouched. The fingerprint comes from the project's own `fingerprint` CLI as a subprocess, and every
+device tool is spawned ([[0001-agentic-cli-on-expo-cli]] §Constraints).
+
+### What the answer is
+
+One verdict per platform:
+
+| Reason                                                                                                                                                       | Status             | `commands`                 |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ | -------------------------- |
+| `hash-match`                                                                                                                                                 | `up-to-date`       | none                       |
+| `hash-mismatch`                                                                                                                                              | `rebuild-required` | `expo run:<platform>`      |
+| `fingerprint-version-mismatch`                                                                                                                               | `unknown`          | none                       |
+| `embed-unsupported`, `no-device`, `app-not-installed`, `no-embedded-fingerprint`, `no-response`, `app-id-unknown`, `fingerprint-unavailable`, `check-failed` | `unknown`          | as the recommendation says |
+
+An equal hash is a match whatever produced it. Two hashes that differ are only comparable when the
+same `@expo/fingerprint` version produced both: reason tags and hashing change between versions, so
+an unchanged project hashes differently across a version bump. Two known, different versions with
+differing hashes are `fingerprint-version-mismatch`, and that verdict suggests no command — an agent
+runs what `commands` says, and a needless native rebuild after every `expo` upgrade is the cost of
+getting this wrong. A build that embedded no version still compares: "cannot tell" is not
+"different".
+
+A `hash-mismatch` names the project sources that moved, when the installed file carries its sources.
+Dependency sources are left out of the sentence: they point at code the developer did not write.
+
+The report's `outcome` is the strongest per-platform verdict, `rebuild-required` before `unknown`
+before `up-to-date`. A platform that had no reachable device does not count while another platform
+produced one: a Mac with an Android emulator and no simulator answers for Android.
+
+Several devices are ranked, so a stale one cannot hide a matching install on another: a matching
+app, then any app with a hash, then an app without one, then a definite "not installed", then
+silence. The device is read last, once the verdict is known to need it.
+
+### Which app
+
+The app id comes from the static app config (`ios.bundleIdentifier`, `android.package`); on Android
+also from the `applicationId` a prebuild wrote into `build.gradle`, which `navigate` already reads.
+Nothing is read out of an Xcode project: build variants and extension targets make that a guess, and
+a wrong id is worse than none. Expo Go is never the target: it carries no project fingerprint. A
+project that names no id for a platform reports `app-id-unknown` for it.
+
+### Which fingerprint
+
+`generateFingerprintAsync(projectRoot, { platform })`, the same wrapper `status` and `dev` use, so
+the two answers cannot disagree about the project. The embed side computes
+`createProjectHashAsync(projectRoot, { platforms: [platform], silent: true })`; the `fingerprint`
+CLI's `fingerprint:generate --platform <p>` resolves the same defaults, and both load the project's
+`.env` files before evaluating a dynamic config. A hash that matched at build time matches here.
+
+The cache of [[0023-fingerprint-caching]] applies, with its ten-minute bound and its blindness to
+`ios/` and `android/`. `--no-fingerprint-cache` turns it off for one run, and the report says which
+source answered.
+
+### What this cannot see
+
+- **An app built with `expo-constants` before 58.0.5.** That is the first release whose build phase
+  embeds the file, so no build of an older project carries it, and no rebuild would add it. The
+  check reads the installed `expo-constants` version and answers `embed-unsupported` before
+  hashing the project or touching a device. `unknown`, with no command: the only fix is the SDK
+  upgrade, and that is not this check's to suggest.
+- A release build embeds nothing. Only debug builds carry the file, so a release build is
+  `no-embedded-fingerprint`.
+- A build made before `expo-constants` learned to embed the file, or with
+  `EXPO_SKIP_FINGERPRINT_EMBED` set, is the same answer.
+- `expo run:ios --unstable-rebundle` removes the file rather than refreshing it, because no single
+  fingerprint describes that binary.
+- `@expo/fingerprint` hashes an allowlist of asset paths. An asset a plugin reads that is not on that
+  list moves nothing, so a rebuild the app needs for it is not reported.
+- A stale generated `ios/` or `android/` directory. A plain rebuild would compile the old directory
+  and embed the new hash, and the mismatch would vanish while the problem stayed. Telling the two
+  apart needs a record of what the last prebuild generated from, which nothing writes yet.
+
+### Proof
+
+`src/installedApp/__tests__/installedAppAsync-test.ts`: the verdict table over every reason, the
+old-SDK gate (no hash, no device read, no command), the version rule in all three shapes (equal hashes across versions, differing hashes across versions, a
+build with no version), the named source on a mismatch, that the device is not read when the project
+cannot be hashed, that a caller-supplied app id wins, that one platform's failure keeps the other's
+verdict, and the aggregate outcome. `src/project/__tests__/sourceDiff-test.ts`: the identity rule,
+dependency paths on both path separators, the readable names, and the truncation.
