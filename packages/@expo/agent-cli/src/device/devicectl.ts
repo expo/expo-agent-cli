@@ -1,3 +1,4 @@
+// @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read
 // Physical Apple devices through `xcrun devicectl`: which ones are connected, launch an app with a
 // payload URL, open a URL. Only what the iOS device reader of the installed-app check needs.
 

@@ -723,3 +723,44 @@ A port with no lock behind it is left running, exit 20. `--force` needs two inde
 
 Schema unit tests plus tier-0 e2e against a fixture app ([[0002-testing-and-evals]]). The e2e stub dev server speaks a real `/message` WebSocket with `version: 2`, `getpeers`, peer churn, and debugger targets that re-register under a new page id on a `v2` reload. Four modes: `v2`, `deaf`, `no-churn`, `none`. `reloadTargets` picks `reconnect`, `stale`, or `gone`. The route table is unit-tested against the conventions. E2e asserts that a bogus route reaches the device tool zero times. `dev:stop` signals a real process. `runtime:stop` asserts the exact argv handed to a stub `xcrun`. Live suites in [[0022-live-tier]] are the evidence for Android Expo Go, Android development build, iOS, and cloud.
 )
+
+<!-- installed-app-check -->
+
+## Installed-app fingerprint check
+
+A debug build carries the fingerprint it was built from, in a file `expo-constants` writes at build
+time (expo/expo#49905): `assets/app.fingerprint` inside an APK, `EXConstants.bundle/app.fingerprint`
+inside an app bundle. The readers in `src/installedApp/` get that file off a device and parse it.
+They report what a device holds; deciding what it means is [[0004-smart-start-and-project-state]]
+§Installed-app fingerprint check.
+
+### How the file is read
+
+**Android.** `adb shell pm path <appId>` names the APK. The file is a zip entry inside it, so the
+reader fetches the end-of-central-directory record, the central directory and the one entry through
+ranged `dd` reads over `adb exec-out`: a few hundred KB instead of a 100 MB pull. `src/utils/zipEntry.ts`
+parses stored and deflated entries and refuses ZIP64. When the device lacks `dd` or `stat`, the whole
+APK is pulled to a temporary directory and read there. A zip the parser cannot read is an error, not
+a reason to pull.
+
+**iOS simulator.** `xcrun simctl get_app_container <udid> <appId>` names the app bundle, and the file
+is read off disk at one of two paths: `EXConstants.bundle/app.fingerprint` for static linking,
+`Frameworks/EXConstants.framework/EXConstants.bundle/app.fingerprint` for `use_frameworks!`. Only
+booted simulators are read; `simctl` cannot look inside a shut-down one.
+
+**Several devices.** Each device answers on its own, and the most informative answer wins: a
+matching app, then any app with a hash, then an app without one, then a definite "not installed",
+then silence. One device that cannot be read does not hide the others.
+
+The file's shape is `{hash, fingerprintVersion, sources}`. Anything else — absent, empty, the
+pre-JSON bare hash — reads as "no embedded fingerprint", never as an error.
+
+### Proof
+
+Unit, `src/installedApp/__tests__/`: the parser over valid, malformed, versionless and legacy input;
+the Android reader over a stubbed `adb` (ranged read, the pull fallback after a transport failure,
+no pull for an unreadable zip, not installed, no file); the simulator reader over both bundle paths;
+ranking across several devices. `src/device/__tests__/devicectl-test.ts` over a trimmed
+`list devices` capture. `src/utils/__tests__/zipEntry-test.ts`: both compression methods, a
+truncated entry, the EOCD-in-comment case, the ZIP64 refusals, and the ranged sequence over partial
+buffers.
