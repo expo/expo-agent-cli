@@ -56,6 +56,9 @@ Each fixture ships its own copy of these, because a fixture must stand alone onc
   contents of the file `STUB_EXPO_CONFIG_JSON` names and exits, the way the real CLI prints one JSON
   object there and nothing else — with the stub's own `stub_expo_start` line still above it, so the
   "last JSON line wins" parse of `inspect:config-plugins` is tested against a stream that has two.
+- `node_modules/expo-constants/package.json` — `dev-client-fresh-app` only: its version (58.0.5) is
+  what tells the installed-app check that this SDK embeds `app.fingerprint`. A test that wants an
+  older SDK lowers it in its copy.
 - `node_modules/expo/internal/unstable-autolinking-exports.js` — resolves the direct dependencies
   listed in `package.json`, reporting unresolved ones as `undefined` like the real linker does.
   Skill discovery needs it. The Expo Go check walks the same graph when it can, and falls back

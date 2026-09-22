@@ -20,9 +20,11 @@ import { discoverSkillsAsync } from '../../skills/discovery';
 import type { DiscoveredSkill } from '../../skills/types';
 import { readEasBuildsStatusAsync } from '../easBuilds';
 import { formatStatusReport } from '../format';
+import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
 import type { StatusReport } from '../types';
 
+vi.mock('../installed', () => ({ readInstalledStatusAsync: vi.fn(async () => null) }));
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
@@ -839,6 +841,7 @@ describe(printStatusAsync, () => {
       'project',
       'expoGo',
       'freshness',
+      'installed',
       'builds',
       'devServer',
       'device',
@@ -867,6 +870,7 @@ describe(printStatusAsync, () => {
       'expoGo',
       'followups',
       'freshness',
+      'installed',
       'next',
       'probe',
       'project',
@@ -891,6 +895,7 @@ describe(printStatusAsync, () => {
       'expoGo',
       'followups',
       'freshness',
+      'installed',
       'next',
       'probe',
       'project',
@@ -925,6 +930,7 @@ describe(printStatusAsync, () => {
       // The best of the URLs a device opens, so the stream carries the one an agent can act on.
       openUrl: 'exp://192.168.1.233:8081',
       localDevice: 'unknown',
+      installed: null,
       freshness: { ios: 'stale', android: 'stale' },
       // The section builder is mocked out here; its own suite covers what it answers.
       easBuilds: { ios: null, android: null },
@@ -1051,5 +1057,63 @@ describe(`${collectStatusReportAsync.name} and stale debugger targets`, () => {
 
     expect(report.devServer).toMatchObject({ appsConnected: 1, appsListed: 2, appsStale: 1 });
     expect(formatStatusReport(report)).toContain('1 stale target still listed');
+  });
+});
+
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
+describe(`${collectStatusReportAsync.name} and the installed section`, () => {
+  const installed = {
+    outcome: 'up-to-date' as const,
+    platforms: [],
+  };
+
+  beforeEach(() => {
+    vi.mocked(readInstalledStatusAsync).mockResolvedValue(installed);
+  });
+
+  it(`reads the device under --explain, and not on a default run`, async () => {
+    const brief = await collectStatusReportAsync(projectRoot, options);
+    expect(readInstalledStatusAsync).not.toHaveBeenCalled();
+    expect(brief.installed).toBeNull();
+
+    const deep = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+    expect(readInstalledStatusAsync).toHaveBeenCalledWith(
+      projectRoot,
+      expect.objectContaining({ device: null })
+    );
+    expect(deep.installed).toEqual(installed);
+  });
+
+  it(`hands the named device through`, async () => {
+    await collectStatusReportAsync(projectRoot, { ...options, explain: true, device: 'Pixel_9' });
+    expect(readInstalledStatusAsync).toHaveBeenCalledWith(
+      projectRoot,
+      expect.objectContaining({ device: 'Pixel_9' })
+    );
+  });
+
+  // The tier-0 harness has no device this could be true about (llp/0002 §Tier 0).
+  it(`reads no device when AGENT_CLI_NO_DEVICE is set`, async () => {
+    vi.stubEnv('AGENT_CLI_NO_DEVICE', '1');
+    try {
+      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+      expect(readInstalledStatusAsync).not.toHaveBeenCalled();
+      expect(report.installed).toBeNull();
+      expect(report.errors.installed).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it(`bounds the read and keeps the rest of the report when it runs out of time`, async () => {
+    vi.mocked(readInstalledStatusAsync).mockImplementationOnce(() => new Promise(() => {}));
+    const report = await collectStatusReportAsync(projectRoot, {
+      ...options,
+      explain: true,
+      installedReadTimeoutMs: 10,
+    });
+    expect(report.installed).toBeNull();
+    expect(report.errors.installed).toBe('The installed-app check did not finish within 0.01s.');
+    expect(report.project).not.toBeNull();
   });
 });

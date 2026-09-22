@@ -37,6 +37,7 @@ function mockReport(overrides: Partial<StatusReport> = {}): StatusReport {
     },
     expoGo: { compatible: true, reasonCount: 0 },
     freshness: null,
+    installed: null,
     builds: null,
     devServer: {
       url: 'http://127.0.0.1:8081',
