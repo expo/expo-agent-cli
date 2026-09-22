@@ -465,11 +465,34 @@ export interface AssertStatus {
   reason: string;
 }
 
+/** One platform's answer from the device, as the report carries it. */
+export interface InstalledPlatformStatus {
+  platform: 'ios' | 'android';
+  status: 'up-to-date' | 'rebuild-required' | 'unknown';
+  reason: string;
+  /** What the reader saw, and what to do next. */
+  recommendation: string;
+  /** The commands that bring the app up to date, in order. Empty when nothing has to run. */
+  commands: string[];
+  /** Name of the simulator or device that answered, or null when none did. */
+  deviceName: string | null;
+  installedHash: string | null;
+  currentHash: string | null;
+}
+
+/** What the apps installed on this machine's devices say about the project. */
+export interface InstalledStatus {
+  /** The strongest verdict across the platforms that answered. */
+  outcome: 'up-to-date' | 'rebuild-required' | 'unknown';
+  platforms: InstalledPlatformStatus[];
+}
+
 /** Sections of the report, in the order they print. */
 export type StatusSectionName =
   | 'project'
   | 'expoGo'
   | 'freshness'
+  | 'installed'
   | 'builds'
   | 'devServer'
   | 'device'
@@ -487,6 +510,15 @@ export interface StatusReport {
   project: ProjectStatus | null;
   expoGo: ExpoGoStatus | null;
   freshness: FreshnessStatus | null;
+  /**
+   * What the app **installed on a device** says, rather than what this machine recorded building.
+   *
+   * The third leg of the freshness question. `freshness` answers "does the app this machine built
+   * still match" and `builds` answers "has anybody already built this"; this one asks the device,
+   * so it is right about a build somebody else made. Under `--explain` only. Null otherwise, and
+   * null with the reason in `errors.installed` when the check failed or ran out of time.
+   */
+  installed: InstalledStatus | null;
   /**
    * Whether EAS already has a finished build of what is on disk right now.
    *

@@ -35,9 +35,11 @@ import { waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { getAllAgents, getPersistedAgentIdsAsync } from '../skills/agents';
 import { discoverSkillsAsync } from '../skills/discovery';
 import type { DiscoveredSkill } from '../skills/types';
+import { withSubprocessDeadlineAsync } from '../utils/subprocessDeadline';
 import { buildAssertStatus } from './assert';
 import { readEasBuildsStatusAsync } from './easBuilds';
 import { formatStatusReport } from './format';
+import { readInstalledStatusAsync } from './installed';
 import {
   applyEasFreshness,
   applyOpenUrls,
@@ -89,6 +91,13 @@ export const DEV_SERVER_READY_PROBE_TIMEOUT_MS = 400;
  */
 export const DEVICE_PROBE_TIMEOUT_MS = 2500;
 
+/**
+ * How long the `installed` section gets, for the per-platform fingerprint and every device read
+ * together. One deadline over the chain, because a hung `adb` on one device would otherwise stall
+ * `status --explain` for as long as each tool's own timeout allows.
+ */
+export const INSTALLED_READ_TIMEOUT_MS = 15_000;
+
 export interface StatusOptions {
   /** Explicit --dev-server-url; null lets the probe scan the ports `expo start` uses. */
   devServerUrl: string | null;
@@ -102,6 +111,8 @@ export interface StatusOptions {
   devServerReadyTimeoutMs?: number;
   /** Overrides {@link DEVICE_PROBE_TIMEOUT_MS}, for tests. */
   deviceProbeTimeoutMs?: number;
+  /** Overrides {@link INSTALLED_READ_TIMEOUT_MS}, for tests. */
+  installedReadTimeoutMs?: number;
   /**
    * The deep dive: `--explain`.
    *
@@ -127,6 +138,8 @@ export interface StatusOptions {
    * it needs no local record, which is what makes it the answer for a build made in the cloud.
    */
   buildId?: string | null;
+  /** `--device`: only the simulator, emulator or device with this name or identifier. */
+  device?: string | null;
   /** Overrides {@link EAS_BUILD_LOOKUP_TIMEOUT_MS}, for tests. */
   buildLookupTimeoutMs?: number;
   /** Overrides {@link CHANGED_FILES_TIMEOUT_MS}, for tests. */
@@ -166,6 +179,7 @@ export async function printStatusAsync(projectRoot: string, options: StatusOptio
     tunnelUrl: report.devServer?.tunnelUrl ?? null,
     openUrl: report.devServer?.openUrls[0]?.url ?? null,
     localDevice: report.device?.state ?? 'unknown',
+    installed: report.installed?.outcome ?? null,
     freshness: { ios: freshnessOf(report, 'ios'), android: freshnessOf(report, 'android') },
     easBuilds: { ios: easBuildOf(report, 'ios'), android: easBuildOf(report, 'android') },
     easBuildsAsked: report.builds?.askedEas ?? false,
@@ -224,6 +238,7 @@ export async function collectStatusReportAsync(
     project: null,
     expoGo: null,
     freshness: null,
+    installed: null,
     builds: null,
     devServer: null,
     device: null,
@@ -345,9 +360,9 @@ export async function collectStatusReportAsync(
   // machine from being asked the same question twice. On a run without `--explain` this is one
   // `readFileSync`, so the report is as instant as it was before the section existed.
   //
-  // These two are independent of each other and both are the expensive half of `--explain`, so
+  // These three are independent of each other and all are the expensive half of `--explain`, so
   // they run together rather than one after the other.
-  const [builds, ota] = await Promise.all([
+  const [builds, ota, installed] = await Promise.all([
     attemptAsync(() =>
       readEasBuildsStatusAsync(projectRoot, {
         lookUp: !!options.explain,
@@ -360,7 +375,30 @@ export async function collectStatusReportAsync(
     options.explain && report.freshness
       ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!))
       : Promise.resolve(null),
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
+    // Under `--explain` only, like the two above: every answer costs a device read. Not at all in
+    // a harness that turned devices off (llp/0002 §Tier 0), which is the same switch `dev` obeys.
+    options.explain && process.env.AGENT_CLI_NO_DEVICE !== '1'
+      ? attemptAsync(() => {
+          const timeoutMs = options.installedReadTimeoutMs ?? INSTALLED_READ_TIMEOUT_MS;
+          return withSubprocessDeadlineAsync(
+            timeoutMs,
+            `The installed-app check did not finish within ${timeoutMs / 1000}s.`,
+            () =>
+              readInstalledStatusAsync(projectRoot, {
+                device: options.device ?? null,
+                fingerprintCache: options.fingerprintCache,
+              })
+          );
+        })
+      : Promise.resolve(null),
   ]);
+
+  if (installed && 'value' in installed) {
+    report.installed = installed.value;
+  } else if (installed) {
+    errors.installed = installed.error;
+  }
 
   if ('value' in builds) {
     report.builds = builds.value;
