@@ -7,6 +7,7 @@ import type { LocalDeviceState } from '../device/localDevice';
 import type { ChangedFiles, ChangedSource, ImpactClass, OtaSafety } from '../impact/types';
 import type { ConnectUrl } from '../navigate/connectUrl';
 import type { NativePlatform } from '../plan/types';
+import type { NativeDirectoryStaleness } from '../project/prebuildMarker';
 import type { PlanStep, ProjectState, ProjectTarget } from '../project/types';
 import type { DevServerSource } from '../runtime/devServer';
 import type { PlanBuildLocation } from '../toolchain/types';
@@ -467,6 +468,9 @@ export interface AssertStatus {
 
 /** One platform's answer from the device, as the report carries it. */
 export interface InstalledPlatformStatus {
+  /** Whether the native directory matches the inputs recorded at prebuild. */
+  prebuildStatus: NativeDirectoryStaleness['status'];
+  prebuildChanges: NativeDirectoryStaleness['changes'];
   platform: 'ios' | 'android';
   status: 'up-to-date' | 'rebuild-required' | 'unknown';
   reason: string;

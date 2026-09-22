@@ -7,6 +7,8 @@ declare module '2g' {
     /** A computed fingerprint was not cached, because the project moved while it was computed. */
     'project:fingerprint_cache_skipped': { reason: string };
     'project:fingerprint_cache_write_failed': { error: SerializedError };
+    /** Marker recording is advisory; failures never fail a successful prebuild. */
+    'project:prebuild_marker_write_failed': { platform: string; error: SerializedError };
   }
 }
 

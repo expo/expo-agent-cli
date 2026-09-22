@@ -73,8 +73,8 @@ export const statusHelp: CommandHelp = {
     `The fingerprint is cached per platform and revalidated against the files that can move it.`,
     `It cannot see inside ios/ or android/, so entries expire after ten minutes.`,
     `The installed line (--explain) compares the project with what the app on a device was built`,
-    `from, read out of the app itself: expo-constants embeds it in debug builds from SDK 58. Right`,
-    `about a build somebody else made, which freshness cannot be. A release build embeds none.`,
+    `from, read out of the app itself (expo-constants embeds it in debug builds from SDK 58), and`,
+    `says when ios/ or android/ predate the app config, from the marker this CLI's prebuild writes.`,
   ],
 };
 

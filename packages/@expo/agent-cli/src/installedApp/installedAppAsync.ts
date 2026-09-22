@@ -5,6 +5,12 @@
 import { PROGRAM_PREFIX } from '../programName';
 import { generateFingerprintAsync, type FingerprintResult } from '../project/fingerprint';
 import { resolveFingerprintCliVersion } from '../project/fingerprintCache';
+import { readProjectNativeDirsAsync } from '../project/nativeCode';
+import {
+  getNativeDirectoryStaleness,
+  type NativeDirectoryStaleness,
+  type PrebuildSourceChange,
+} from '../project/prebuildMarker';
 import { diffSources, formatChangedSources } from '../project/sourceDiff';
 import { readConfiguredAppId } from '../runtime/appId';
 import { CommandError } from '../utils/errors';
@@ -20,6 +26,7 @@ export type CheckStatus = 'up-to-date' | 'rebuild-required' | 'unknown';
 export type CheckReason =
   | 'hash-match'
   | 'hash-mismatch'
+  | 'prebuild-stale'
   | 'fingerprint-version-mismatch'
   | 'embed-unsupported'
   | 'no-device'
@@ -42,6 +49,10 @@ export interface PlatformCheck {
   currentHash: string | null;
   /** Where the project hash came from: `computed`, `cache`, or null when there is none. */
   fingerprintSource: 'computed' | 'cache' | null;
+  /** Whether the generated native directory matches the project, from the prebuild marker. */
+  prebuildStatus: NativeDirectoryStaleness['status'];
+  /** The prebuild-relevant sources that moved. Empty unless `prebuildStatus` is `stale`. */
+  prebuildChanges: PrebuildSourceChange[];
 }
 
 /** What the apps installed on this machine's devices say about the project. */
@@ -65,6 +76,13 @@ export interface CheckDependencies {
   readAppId?: typeof readConfiguredAppId;
   readFingerprintVersion?: typeof resolveFingerprintCliVersion;
   readEmbedSupport?: typeof readFingerprintEmbedSupport;
+  readNativeDirectoryStaleness?: typeof getNativeDirectoryStaleness;
+  /**
+   * Which native directories are checked in, i.e. bare rather than CNG. `prebuild` rewrites
+   * `AppDelegate`, `Info.plist` and `build.gradle`, so it must never be advised for a directory
+   * the project owns by hand.
+   */
+  readCheckedInNativeDirs?: typeof readProjectNativeDirsAsync;
 }
 
 const defaultReader: InstalledFingerprintReader = ({ platform, appId, device, expectedHash }) =>
@@ -85,6 +103,8 @@ export async function checkInstalledAppAsync(
     readAppId = readConfiguredAppId,
     readFingerprintVersion = resolveFingerprintCliVersion,
     readEmbedSupport = readFingerprintEmbedSupport,
+    readNativeDirectoryStaleness = getNativeDirectoryStaleness,
+    readCheckedInNativeDirs = readProjectNativeDirsAsync,
   }: CheckDependencies = {}
 ): Promise<InstalledAppReport> {
   const deps = {
@@ -93,6 +113,8 @@ export async function checkInstalledAppAsync(
     readAppId,
     readFingerprintVersion,
     readEmbedSupport,
+    readNativeDirectoryStaleness,
+    readCheckedInNativeDirs,
   };
   const checks = await Promise.all(
     options.platforms.map((platform) =>
@@ -154,6 +176,26 @@ async function checkPlatformAsync(
     });
   }
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §The prebuild marker
+  // No device is needed for this, so it is decided first.
+  const fingerprintVersion = deps.readFingerprintVersion(projectRoot);
+  const staleness = deps.readNativeDirectoryStaleness(projectRoot, platform, {
+    sources: fingerprint.sources,
+    fingerprintVersion,
+  });
+  const prebuild = { prebuildStatus: staleness.status, prebuildChanges: staleness.changes };
+  if (staleness.status === 'stale') {
+    const named = formatChangedSources(staleness.changes);
+    return verdict('prebuild-stale', {
+      currentHash: fingerprint.hash,
+      fingerprintSource: fingerprint.source ?? null,
+      ...prebuild,
+      recommendation: `${named ? `${named} changed after the native directories were generated` : 'The native directories were generated from a different project state'}. Regenerate them, then rebuild.`,
+      // This CLI's `prebuild`, not `npx expo prebuild`: only this one records the marker.
+      commands: [`${PROGRAM_PREFIX} prebuild -p ${platform}`, `npx expo run:${platform}`],
+    });
+  }
+
   // The device is read last, once the verdict is known to need it: a read has a cost, and on a
   // phone it has a side effect.
   const installed = await deps.readInstalled({
@@ -162,12 +204,21 @@ async function checkPlatformAsync(
     device: options.device,
     expectedHash: fingerprint.hash,
   });
-  const check = installedVerdict(installed, {
-    platform,
-    fingerprint,
-    deviceFilter: options.device,
-    fingerprintVersion: deps.readFingerprintVersion(projectRoot),
-  });
+  const check = {
+    ...installedVerdict(installed, {
+      platform,
+      fingerprint,
+      deviceFilter: options.device,
+      fingerprintVersion,
+      // Only an *unrecorded* directory of a CNG project gets `prebuild` first. A bare project owns
+      // its directories by hand, and a stale marker was handled above: the marker says this CLI
+      // generated the directories, which outranks the gitignore heuristic behind this flag.
+      unvouchedNativeDir:
+        staleness.status === 'unknown' &&
+        !(await deps.readCheckedInNativeDirs(projectRoot))[platform],
+    }),
+    ...prebuild,
+  };
   return installed.hint
     ? { ...check, recommendation: `${check.recommendation} ${installed.hint}` }
     : check;
@@ -182,6 +233,8 @@ function installedVerdict(
     deviceFilter: string | null;
     /** The `@expo/fingerprint` version the project hashes with, or null when it cannot be read. */
     fingerprintVersion: string | null;
+    /** A generated native directory exists and no marker says what it was generated from. */
+    unvouchedNativeDir: boolean;
   }
 ): PlatformCheck {
   const { platform, fingerprint, deviceFilter } = project;
@@ -249,12 +302,17 @@ function installedVerdict(
         installed.sources?.length && fingerprint.sources?.length
           ? formatChangedSources(diffSources(installed.sources, fingerprint.sources))
           : '';
+      const lead = moved
+        ? `${moved} changed since the installed app was built.`
+        : 'Native inputs changed since the installed app was built.';
       return verdict('hash-mismatch', {
         ...found,
-        recommendation: moved
-          ? `${moved} changed since the installed app was built. Rebuild the app.`
-          : 'Native inputs changed since the installed app was built. Rebuild the app.',
-        commands: rebuild,
+        recommendation: project.unvouchedNativeDir
+          ? `${lead} Regenerate the native directories first, or a rebuild may not pick the change up.`
+          : `${lead} Rebuild the app.`,
+        commands: project.unvouchedNativeDir
+          ? [`${PROGRAM_PREFIX} prebuild -p ${platform}`, ...rebuild]
+          : rebuild,
       });
     }
   }
@@ -268,7 +326,7 @@ function verdict(
   const status: CheckStatus =
     reason === 'hash-match'
       ? 'up-to-date'
-      : reason === 'hash-mismatch'
+      : reason === 'hash-mismatch' || reason === 'prebuild-stale'
         ? 'rebuild-required'
         : 'unknown';
   return {
@@ -279,6 +337,8 @@ function verdict(
     installedHash: null,
     currentHash: null,
     fingerprintSource: null,
+    prebuildStatus: 'unknown',
+    prebuildChanges: [],
     ...fields,
   };
 }

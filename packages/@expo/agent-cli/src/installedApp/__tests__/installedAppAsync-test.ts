@@ -29,11 +29,14 @@ const fingerprint = async () => ({
   source: 'computed' as const,
 });
 const readAppId = () => appId;
+const fresh = () => ({ status: 'fresh' as const, changes: [] });
 const deps = {
   generateFingerprint: fingerprint,
   readAppId,
   readFingerprintVersion: () => '0.20.0',
   readEmbedSupport: () => ({ supported: true, version: '58.0.5' }),
+  readNativeDirectoryStaleness: fresh,
+  readCheckedInNativeDirs: async () => ({ ios: false, android: false }),
 };
 const installed =
   (result: InstalledFingerprintResult): InstalledFingerprintReader =>
@@ -192,6 +195,179 @@ describe(checkInstalledAppAsync, () => {
     expect(report.platforms.ios!.recommendation).toBe(
       'Native inputs changed since the installed app was built. Rebuild the app.'
     );
+  });
+
+  // The marker settles this verdict on its own, and the device read has side effects: on a phone
+  // it launches the app. Starting one whose answer is thrown away launches the app for nothing.
+  it(`does not start the device read when the marker settles the verdict`, async () => {
+    let started = false;
+    await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: () => {
+        started = true;
+        return new Promise<never>(() => {});
+      },
+      readNativeDirectoryStaleness: () => ({
+        status: 'stale',
+        changes: [{ source: 'app config', change: 'changed', scope: 'project' }],
+      }),
+    });
+
+    expect(started).toBe(false);
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §The prebuild marker
+  it(`reports prebuild-stale without waiting for the device, with prebuild first`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: () => new Promise<never>(() => {}),
+      readNativeDirectoryStaleness: (root, platform, current) => {
+        expect([root, platform, current]).toEqual([
+          projectRoot,
+          'ios',
+          { sources: [], fingerprintVersion: '0.20.0' },
+        ]);
+        return {
+          status: 'stale',
+          changes: [
+            { source: 'app config', change: 'changed', scope: 'project' },
+            { source: 'node_modules/expo-camera/plugin', change: 'changed', scope: 'dependency' },
+          ],
+        };
+      },
+    });
+    expect(report.platforms.ios).toMatchObject({
+      status: 'rebuild-required',
+      reason: 'prebuild-stale',
+      commands: ['npx @expo/agent-cli prebuild -p ios', 'npx expo run:ios'],
+      recommendation:
+        'app config changed after the native directories were generated. Regenerate them, then rebuild.',
+      prebuildStatus: 'stale',
+      currentHash: 'current-hash',
+      device: null,
+    });
+    expect(report.platforms.ios!.prebuildChanges).toHaveLength(2);
+    expect(report.outcome).toBe('rebuild-required');
+  });
+
+  // The marker says this CLI generated these directories, which outranks the gitignore heuristic
+  // behind `readCheckedInNativeDirs` — that reads "checked in" for any project without a
+  // `.gitignore` entry, including a freshly prebuilt one.
+  it(`still advises prebuild on a stale marker when the native dirs look checked in`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device,
+      }),
+      readNativeDirectoryStaleness: () => ({
+        status: 'stale',
+        changes: [{ source: 'app config', change: 'changed', scope: 'project' }],
+      }),
+      readCheckedInNativeDirs: async () => ({ ios: true, android: true }),
+    });
+
+    expect(report.platforms.ios!.reason).toBe('prebuild-stale');
+    expect(report.platforms.ios!.commands[0]).toBe('npx @expo/agent-cli prebuild -p ios');
+  });
+
+  it(`names no source when only dependencies moved the prebuild`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'current-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device,
+      }),
+      readNativeDirectoryStaleness: () => ({
+        status: 'stale',
+        changes: [{ source: 'node_modules/x/plugin', change: 'changed', scope: 'dependency' }],
+      }),
+    });
+    expect(report.platforms.ios!.recommendation).toBe(
+      'The native directories were generated from a different project state. Regenerate them, then rebuild.'
+    );
+  });
+
+  // `unknown` means a native directory exists but no usable marker describes it. Advising a bare
+  // rebuild there is not merely coarse: on a CNG project the rebuild compiles the old directories
+  // and embeds the new hash, so the mismatch disappears and the cause stays.
+  it(`advises prebuild first when the native directories cannot be vouched for`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device,
+      }),
+      readNativeDirectoryStaleness: () => ({ status: 'unknown', changes: [] }),
+    });
+
+    expect(report.platforms.ios).toMatchObject({ reason: 'hash-mismatch' });
+    expect(report.platforms.ios!.commands[0]).toBe('npx @expo/agent-cli prebuild -p ios');
+    expect(report.platforms.ios!.recommendation).toMatch(/Regenerate the native directories first/);
+  });
+
+  // A bare project owns ios/ and android/. `prebuild` would rewrite AppDelegate, Info.plist and
+  // build.gradle, so it must never be advised there however little is known about the directories.
+  it(`never advises prebuild for a bare project, whose native directories are checked in`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device,
+      }),
+      readNativeDirectoryStaleness: () => ({ status: 'unknown', changes: [] }),
+      readCheckedInNativeDirs: async () => ({ ios: true, android: true }),
+    });
+
+    expect(report.platforms.ios!.commands).toEqual(['npx expo run:ios']);
+    expect(report.platforms.ios!.recommendation).not.toMatch(/Regenerate/);
+  });
+
+  // No native directory: `run:` generates one, so a plain rebuild really is the whole story.
+  it(`keeps the plain rebuild advice when there is no native directory`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'old-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device,
+      }),
+      readNativeDirectoryStaleness: () => ({ status: 'not-applicable', changes: [] }),
+    });
+
+    expect(report.platforms.ios!.commands).toEqual(['npx expo run:ios']);
+  });
+
+  it(`carries the marker's status alongside the device verdict`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'current-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device,
+      }),
+      readNativeDirectoryStaleness: () => ({ status: 'not-applicable', changes: [] }),
+    });
+    expect(report.platforms.ios).toMatchObject({
+      reason: 'hash-match',
+      prebuildStatus: 'not-applicable',
+    });
   });
 
   // An equal hash is positive evidence whatever produced it: a version difference can only
@@ -371,6 +547,8 @@ describe(aggregateOutcome, () => {
     installedHash: null,
     currentHash: null,
     fingerprintSource: null,
+    prebuildStatus: 'not-applicable',
+    prebuildChanges: [],
   });
 
   it(`takes the strongest verdict: rebuild-required before unknown before up-to-date`, () => {

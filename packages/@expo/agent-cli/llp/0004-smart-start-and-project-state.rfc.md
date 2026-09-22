@@ -556,12 +556,13 @@ device tool is spawned ([[0001-agentic-cli-on-expo-cli]] §Constraints).
 
 One verdict per platform:
 
-| Reason                                                                                                                                                       | Status             | `commands`                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ | -------------------------- |
-| `hash-match`                                                                                                                                                 | `up-to-date`       | none                       |
-| `hash-mismatch`                                                                                                                                              | `rebuild-required` | `expo run:<platform>`      |
-| `fingerprint-version-mismatch`                                                                                                                               | `unknown`          | none                       |
-| `embed-unsupported`, `no-device`, `app-not-installed`, `no-embedded-fingerprint`, `no-response`, `app-id-unknown`, `fingerprint-unavailable`, `check-failed` | `unknown`          | as the recommendation says |
+| Reason                                                                                                                                                       | Status             | `commands`                                                                                   |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ | -------------------------------------------------------------------------------------------- |
+| `hash-match`                                                                                                                                                 | `up-to-date`       | none                                                                                         |
+| `hash-mismatch`                                                                                                                                              | `rebuild-required` | `expo run:<platform>`, after this CLI's `prebuild` when a CNG native directory has no marker |
+| `prebuild-stale`                                                                                                                                             | `rebuild-required` | this CLI's `prebuild -p <platform>`, then `expo run:<platform>`                              |
+| `fingerprint-version-mismatch`                                                                                                                               | `unknown`          | none                                                                                         |
+| `embed-unsupported`, `no-device`, `app-not-installed`, `no-embedded-fingerprint`, `no-response`, `app-id-unknown`, `fingerprint-unavailable`, `check-failed` | `unknown`          | as the recommendation says                                                                   |
 
 An equal hash is a match whatever produced it. Two hashes that differ are only comparable when the
 same `@expo/fingerprint` version produced both: reason tags and hashing change between versions, so
@@ -644,9 +645,40 @@ source answered.
   fingerprint describes that binary.
 - `@expo/fingerprint` hashes an allowlist of asset paths. An asset a plugin reads that is not on that
   list moves nothing, so a rebuild the app needs for it is not reported.
-- A stale generated `ios/` or `android/` directory. A plain rebuild would compile the old directory
-  and embed the new hash, and the mismatch would vanish while the problem stayed. Telling the two
-  apart needs a record of what the last prebuild generated from, which nothing writes yet.
+- A stale generated `ios/` or `android/` directory, unless this CLI's `prebuild` generated it: the
+  marker below is the only record of what a prebuild generated from.
+
+### The prebuild marker
+
+A stale `android/` or `ios/` directory needs `prebuild` before the build. A plain rebuild would
+compile the old directories and embed the new hash, and the mismatch would vanish while the problem
+stayed. Telling that apart from a stale build needs a record of what the last prebuild generated
+from, and `expo prebuild` writes none.
+
+**This CLI records it, from the two places that know a prebuild ran:** the `prebuild` passthrough
+and the `dev` plan, after a prebuild that exited 0. One file per platform at
+`.expo/prebuild/fingerprint-<platform>.json`, holding `{version: 1, platform, hash, sources,
+fingerprintVersion, createdAt}`. Only a platform whose native directory exists after the run is
+recorded, so a marker never describes a directory that is not there. Recording is best effort: a
+hash that cannot be computed or a file that cannot be written leaves no marker and never fails the
+prebuild.
+
+The check compares the sources whose `reasons` prebuild owns — `expoConfig`, `expoConfigPlugins`,
+`expoConfigExternalFile`, `expoCNGPatches` — against the marker, before any device is read. A
+difference is `prebuild-stale`, with this CLI's `prebuild` first in `commands`: the bare
+`npx expo prebuild` would leave the next check with nothing to compare against. A marker from
+another `@expo/fingerprint` version compares nothing and reads as `unknown`.
+
+**No marker is `unknown`, and `unknown` is not "fine".** A CNG project whose `ios/` or `android/`
+exists with no marker gets `prebuild` before the rebuild on a `hash-mismatch`: regenerating is never
+wrong there, and it records the marker the next check needs. A bare project owns its native
+directories by hand, so `prebuild` is never advised for it however little is known. A project with
+no native directory is `not-applicable`; `expo run:<platform>` generates one.
+
+The cost is that a prebuild run as `npx expo prebuild`, outside this CLI, records nothing. That is
+the price of `@expo/cli` carrying none of this (expo/expo#49905 review), and the marker is
+advisory like the last-build record: a missing or unreadable file costs a detail of the verdict,
+never the command.
 
 ### Proof
 
@@ -656,6 +688,17 @@ build with no version), the named source on a mismatch, that the device is not r
 cannot be hashed, that a caller-supplied app id wins, that one platform's failure keeps the other's
 verdict, and the aggregate outcome. `src/project/__tests__/sourceDiff-test.ts`: the identity rule,
 dependency paths on both path separators, the readable names, and the truncation.
+The marker, `src/project/__tests__/prebuildMarker-test.ts`: the staleness comparison (fresh, stale
+with named project sources, a dependency-only change, a version mismatch, no marker, no native
+directory), one rejection per schema field, and the writer's round trip through its reader.
+`installedAppAsync-test.ts`: `prebuild-stale` decided without starting the device read, `prebuild`
+first for an unvouched CNG directory and never for a bare one, and the marker's status carried
+beside the device verdict. `src/passthrough/__tests__/index-test.ts` and
+`src/dev/__tests__/devAsync-test.ts`: only a successful `prebuild` records. E2E,
+`status-installed-test.ts`: the passthrough writes the marker for the platform it generated and not
+for a failed run; a `dev` prebuild writes it, `status --explain` reads it fresh, and a config edit
+turns it `prebuild-stale` without `status` touching the file.
+
 `src/status/__tests__/installed-test.ts`: which platforms this host asks, and the section's shape.
 `src/status/__tests__/statusAsync-test.ts`: that the device is read under `--explain` and not on a
 default run, that `AGENT_CLI_NO_DEVICE` reads none, and that the deadline costs the section and

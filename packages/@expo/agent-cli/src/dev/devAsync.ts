@@ -26,6 +26,7 @@ import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
 import { clearFingerprintMemo } from '../project/fingerprint';
 import { clearFingerprintCache } from '../project/fingerprintCache';
+import { recordPrebuildMarkersAsync } from '../project/prebuildMarker';
 import { probeProjectStateAsync } from '../project/probe';
 import type { PlanStep, ProjectState, StartPlan } from '../project/types';
 import { resolveStartFollowUpsAsync } from '../start/followUps';
@@ -532,6 +533,9 @@ async function executePlanAsync(
     // the record here catches it now, for the one prebuild this CLI runs itself.
     clearFingerprintMemo(projectRoot);
     clearFingerprintCache(projectRoot);
+    if (args[0] === 'prebuild') {
+      await recordPrebuildMarkersAsync(projectRoot, args.slice(1));
+    }
   }
 
   return { exitCode, devServer, failure: null };

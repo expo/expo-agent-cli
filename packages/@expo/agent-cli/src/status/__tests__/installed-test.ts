@@ -21,6 +21,8 @@ beforeEach(() => {
         installedHash: 'h',
         currentHash: 'h',
         fingerprintSource: 'computed',
+        prebuildStatus: 'fresh',
+        prebuildChanges: [],
       },
     },
   });
@@ -79,6 +81,8 @@ describe(readInstalledStatusAsync, () => {
           deviceName: 'iPhone 17',
           installedHash: 'h',
           currentHash: 'h',
+          prebuildStatus: 'fresh',
+          prebuildChanges: [],
         },
       ],
     });
