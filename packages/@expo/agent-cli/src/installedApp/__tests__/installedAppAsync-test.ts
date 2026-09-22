@@ -19,6 +19,7 @@ function options(overrides: Partial<InstalledAppOptions> = {}): InstalledAppOpti
     device: null,
     appId: null,
     fingerprintCache: undefined,
+    timeoutMs: 15_000,
     ...overrides,
   };
 }

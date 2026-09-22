@@ -8,8 +8,11 @@ import path from 'path';
 
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 
-/** How long `devicectl` gets to answer. Listing devices takes it over a second. */
+/** How long one `devicectl` call gets. Listing devices alone takes it over a second. */
 const DEVICECTL_TIMEOUT_MS = 60_000;
+
+/** The most a launch can take: the launch itself, then the `openURL` fallback. */
+export const PHONE_LAUNCH_TIMEOUT_MS = 2 * DEVICECTL_TIMEOUT_MS;
 
 /** One connected physical iOS device, with the two facts that decide whether it can be probed. */
 export interface IosDevice {

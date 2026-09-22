@@ -12,11 +12,13 @@ import path from 'path';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
 import { readCloudSessionIdSync } from '../device/cloudSimulator';
 import { probeLocalDeviceAsync } from '../device/localDevice';
+import { PHONE_LAUNCH_TIMEOUT_MS } from '../device/devicectl';
 import { event } from '../events';
 import { exitWithCodeAsync } from '../exitCodes';
 import { buildStatusFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import { refineWithChangedFilesAsync } from '../impact/fromRecord';
 import type { ImpactClass, OtaSafety } from '../impact/types';
+import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
 import * as Log from '../log';
 import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
@@ -113,6 +115,8 @@ export interface StatusOptions {
   deviceProbeTimeoutMs?: number;
   /** Overrides {@link INSTALLED_READ_TIMEOUT_MS}, for tests. */
   installedReadTimeoutMs?: number;
+  /** `--device-timeout`: how long a phone gets to answer once the app was launched on it. */
+  installedTimeoutMs?: number | null;
   /**
    * The deep dive: `--explain`.
    *
@@ -138,7 +142,10 @@ export interface StatusOptions {
    * it needs no local record, which is what makes it the answer for a build made in the cloud.
    */
   buildId?: string | null;
-  /** `--device`: only the simulator, emulator or device with this name or identifier. */
+  /**
+   * `--device`: only the simulator, emulator or device with this name or identifier. Naming a
+   * physical iPhone is the consent to launch the app on it, which `status` never does unasked.
+   */
   device?: string | null;
   /** Overrides {@link EAS_BUILD_LOOKUP_TIMEOUT_MS}, for tests. */
   buildLookupTimeoutMs?: number;
@@ -380,7 +387,13 @@ export async function collectStatusReportAsync(
     // a harness that turned devices off (llp/0002 §Tier 0), which is the same switch `dev` obeys.
     options.explain && process.env.AGENT_CLI_NO_DEVICE !== '1'
       ? attemptAsync(() => {
-          const timeoutMs = options.installedReadTimeoutMs ?? INSTALLED_READ_TIMEOUT_MS;
+          const phoneTimeoutMs = options.installedTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
+          // A named device may be a phone, and a phone is launched on and then waited for: the
+          // section gets the launch's own budget and the phone's answer time on top.
+          const timeoutMs =
+            options.installedReadTimeoutMs ??
+            INSTALLED_READ_TIMEOUT_MS +
+              (options.device ? PHONE_LAUNCH_TIMEOUT_MS + phoneTimeoutMs : 0);
           return withSubprocessDeadlineAsync(
             timeoutMs,
             `The installed-app check did not finish within ${timeoutMs / 1000}s.`,
@@ -388,6 +401,7 @@ export async function collectStatusReportAsync(
               readInstalledStatusAsync(projectRoot, {
                 device: options.device ?? null,
                 fingerprintCache: options.fingerprintCache,
+                timeoutMs: phoneTimeoutMs,
               })
           );
         })

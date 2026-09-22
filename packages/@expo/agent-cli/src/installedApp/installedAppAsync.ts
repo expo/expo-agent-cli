@@ -6,12 +6,12 @@ import { PROGRAM_PREFIX } from '../programName';
 import { generateFingerprintAsync, type FingerprintResult } from '../project/fingerprint';
 import { resolveFingerprintCliVersion } from '../project/fingerprintCache';
 import { diffSources, formatChangedSources } from '../project/sourceDiff';
-import { readConfiguredAppId } from '../runtime/appId';
+import { readConfiguredAppId, readConfiguredScheme } from '../runtime/appId';
 import { CommandError } from '../utils/errors';
 import { readInstalledFingerprintAndroidAsync } from './android';
 import { debugEvent } from './events';
 import type { InstalledAppDevice, InstalledFingerprintResult } from './installedFingerprint';
-import { readInstalledFingerprintIosSimulatorAsync } from './iosSimulator';
+import { readInstalledFingerprintIosAsync } from './ios';
 import type { InstalledAppOptions, InstalledAppPlatform } from './options';
 
 export type CheckStatus = 'up-to-date' | 'rebuild-required' | 'unknown';
@@ -55,23 +55,24 @@ export type InstalledFingerprintReader = (input: {
   appId: string;
   device: string | null;
   expectedHash: string;
+  /** The project's URL scheme, for the physical iOS device probe. */
+  scheme: string | null;
+  /** How long a physical iOS device gets to answer. */
+  timeoutMs: number;
 }) => Promise<InstalledFingerprintResult>;
 
 export interface CheckDependencies {
   readInstalled?: InstalledFingerprintReader;
   generateFingerprint?: typeof generateFingerprintAsync;
   readAppId?: typeof readConfiguredAppId;
+  readScheme?: typeof readConfiguredScheme;
   readFingerprintVersion?: typeof resolveFingerprintCliVersion;
 }
 
-const defaultReader: InstalledFingerprintReader = ({ platform, appId, device, expectedHash }) =>
+const defaultReader: InstalledFingerprintReader = ({ platform, device, ...input }) =>
   platform === 'ios'
-    ? readInstalledFingerprintIosSimulatorAsync({
-        appId,
-        device: device ?? undefined,
-        expectedHash,
-      })
-    : readInstalledFingerprintAndroidAsync({ appId, device: device ?? undefined, expectedHash });
+    ? readInstalledFingerprintIosAsync({ ...input, device: device ?? undefined })
+    : readInstalledFingerprintAndroidAsync({ ...input, device: device ?? undefined });
 
 export async function checkInstalledAppAsync(
   projectRoot: string,
@@ -80,10 +81,17 @@ export async function checkInstalledAppAsync(
     readInstalled = defaultReader,
     generateFingerprint = generateFingerprintAsync,
     readAppId = readConfiguredAppId,
+    readScheme = readConfiguredScheme,
     readFingerprintVersion = resolveFingerprintCliVersion,
   }: CheckDependencies = {}
 ): Promise<InstalledAppReport> {
-  const deps = { readInstalled, generateFingerprint, readAppId, readFingerprintVersion };
+  const deps = {
+    readInstalled,
+    generateFingerprint,
+    readAppId,
+    readScheme,
+    readFingerprintVersion,
+  };
   const checks = await Promise.all(
     options.platforms.map((platform) =>
       checkPlatformAsync(projectRoot, platform, options, deps).catch((error: unknown) => {
@@ -131,12 +139,14 @@ async function checkPlatformAsync(
   }
 
   // The device is read last, once the verdict is known to need it: a read has a cost, and on a
-  // phone it has a side effect.
+  // phone it launches the app.
   const installed = await deps.readInstalled({
     platform,
     appId,
     device: options.device,
     expectedHash: fingerprint.hash,
+    scheme: platform === 'ios' ? deps.readScheme(projectRoot) : null,
+    timeoutMs: options.timeoutMs,
   });
   const check = installedVerdict(installed, {
     platform,

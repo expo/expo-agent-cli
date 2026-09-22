@@ -26,6 +26,10 @@ const EMBEDDED_HASH = 'test-fingerprint-hash';
 const ANDROID_APP_ID = 'com.example.installedapp';
 const IOS_APP_ID = 'com.example.installedapp';
 const SIMULATOR_UDID = 'E2E-SIM-0001';
+const DEVICECTL_FIXTURE = path.resolve(__dirname, '../../src/__fixtures__/devicectl/list.json');
+/** The reachable phone in that fixture, with Developer Mode on. */
+const PHONE_NAME = "Ada's iPhone";
+const PHONE_UDID = '00001110-001111110110101A';
 
 /** The `adb` calls only the installed section makes; the `device` section lists devices on its own. */
 function installedReads(calls: string[][]): string[][] {
@@ -115,14 +119,20 @@ async function installStubAdbAsync(
 }
 
 /**
- * A stub `xcrun`. On macOS the iOS reader asks `simctl` for booted simulators, and a test must not
- * meet the ones this Mac happens to have. Without `booted`, none are; with it, one whose app
- * container holds the given fingerprint at the static-linking path. `.stub-bin` is first on the
- * `PATH` of every run (@ref ../utils §stubExpoEnv), which is where `xcrun` is looked up.
+ * A stub `xcrun`. On macOS the iOS reader asks `simctl` for booted simulators and `devicectl` for
+ * phones, and a test must not meet the ones this Mac happens to have. Without `booted`, no
+ * simulator is; with it, one whose app container holds the given fingerprint at the static-linking
+ * path. Without `phone`, `devicectl` lists none; with it, the phones of the `devicectl` fixture,
+ * and a `launch` answers the way the dev-launcher responder does: it posts the fingerprint to the
+ * callback URL carried by the payload URL. `.stub-bin` is first on the `PATH` of every run
+ * (@ref ../utils §stubExpoEnv), which is where `xcrun` is looked up.
  */
 async function installStubXcrunAsync(
   projectRoot: string,
-  { booted }: { booted?: { fingerprint: string } } = {}
+  {
+    booted,
+    phone,
+  }: { booted?: { fingerprint: string }; phone?: { fingerprint: string | null } } = {}
 ): Promise<{ calls: StubCalls }> {
   const recordPath = path.join(projectRoot, '.xcrun-calls.jsonl');
   const container = path.join(projectRoot, '.stub-simulator', 'installedapp.app');
@@ -148,9 +158,23 @@ async function installStubXcrunAsync(
       `const fs = require('fs');`,
       `const args = process.argv.slice(2);`,
       `fs.appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify(args) + '\\n');`,
-      `if (args[1] === 'list') {`,
+      `if (args[0] === 'simctl' && args[1] === 'list') {`,
       `  process.stdout.write(JSON.stringify({ devices: ${JSON.stringify(devices)} }));`,
       `  process.exit(0);`,
+      `}`,
+      `if (args[0] === 'devicectl' && args[1] === 'list') {`,
+      `  const phones = ${phone ? `fs.readFileSync(${JSON.stringify(DEVICECTL_FIXTURE)}, 'utf8')` : `'{"result":{"devices":[]}}'`};`,
+      `  fs.writeFileSync(args[args.indexOf('--json-output') + 1], phones);`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args[0] === 'devicectl' && args[2] === 'process' && args[3] === 'launch') {`,
+      `  const url = new URL(args[args.indexOf('--payload-url') + 1]);`,
+      `  const callback = url.searchParams.get('__expo_fingerprint_callback');`,
+      `  const body = JSON.stringify({ nonce: url.searchParams.get('__expo_fingerprint_nonce'), fingerprint: ${JSON.stringify(phone?.fingerprint ?? null)}, fingerprintVersion: '0.20.0' });`,
+      `  const request = require('http').request(callback, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (response) => { response.resume(); response.on('end', () => process.exit(0)); });`,
+      `  request.on('error', (error) => { process.stderr.write(String(error)); process.exit(1); });`,
+      `  request.end(body);`,
+      `  return;`,
       `}`,
       `if (args[1] === 'get_app_container') {`,
       `  process.stdout.write(${JSON.stringify(container)} + '\\n');`,
@@ -169,6 +193,7 @@ async function setAppIdsAsync(projectRoot: string): Promise<void> {
   const appJson = JSON.parse(await fs.promises.readFile(appJsonPath, 'utf8'));
   appJson.expo.android = { package: ANDROID_APP_ID };
   appJson.expo.ios = { bundleIdentifier: IOS_APP_ID };
+  appJson.expo.scheme = 'installedapp';
   await fs.promises.writeFile(appJsonPath, JSON.stringify(appJson, null, 2));
 }
 
@@ -412,6 +437,78 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
       expect(adb.calls().some((args) => args.includes('pm'))).toBe(false);
     });
   });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read — iOS device
+  describe.skipIf(process.platform !== 'darwin')('with a connected iPhone', () => {
+    it('names the phone and leaves it alone when --device did not name it', async () => {
+      const xcrun = await installStubXcrunAsync(projectRoot, {
+        phone: { fingerprint: EMBEDDED_HASH },
+      });
+      const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+        env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
+      });
+
+      const report: Report = JSON.parse(result.stdout);
+      expect(platformRow(report, 'ios')).toMatchObject({
+        reason: 'no-device',
+        recommendation: expect.stringContaining(
+          `A physical iOS device is connected (${PHONE_NAME})`
+        ),
+      });
+      expect(xcrun.calls().some((args) => args[3] === 'launch')).toBe(false);
+    });
+
+    it('launches the app on the named phone and reads what it posts back', async () => {
+      const xcrun = await installStubXcrunAsync(projectRoot, {
+        phone: { fingerprint: EMBEDDED_HASH },
+      });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--explain', '--json', '--device', PHONE_NAME, '--device-timeout', '30'],
+        { env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH } }
+      );
+
+      const report: Report = JSON.parse(result.stdout);
+      expect(report.installed?.outcome).toBe('up-to-date');
+      expect(platformRow(report, 'ios')).toMatchObject({
+        reason: 'hash-match',
+        deviceName: PHONE_NAME,
+        installedHash: EMBEDDED_HASH,
+      });
+      // The launch is said on stderr, so a `--json` run keeps stdout for the one object.
+      expect(result.stderr).toContain(
+        `Checking ${PHONE_NAME}. This launches the app on the device.`
+      );
+      const launch = xcrun.calls().find((args) => args[3] === 'launch');
+      expect(launch).toEqual([
+        'devicectl',
+        'device',
+        'process',
+        'launch',
+        '--payload-url',
+        expect.stringMatching(/^installedapp:\/\/\?__expo_fingerprint_check=1&/),
+        '--device',
+        PHONE_UDID,
+        IOS_APP_ID,
+      ]);
+    });
+
+    it('reads a phone whose build embeds no fingerprint as unknown', async () => {
+      await installStubXcrunAsync(projectRoot, { phone: { fingerprint: null } });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--explain', '--json', '--device', PHONE_NAME],
+        { env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH } }
+      );
+
+      const report: Report = JSON.parse(result.stdout);
+      expect(platformRow(report, 'ios')).toMatchObject({
+        status: 'unknown',
+        reason: 'no-embedded-fingerprint',
+        deviceName: PHONE_NAME,
+      });
+    });
+  });
 });
 
 describe('@expo/agent-cli status --device', () => {
@@ -424,6 +521,16 @@ describe('@expo/agent-cli status --device', () => {
   it.each([
     ['--device without --explain', ['--device', 'iPhone 17'], /--device needs --explain/],
     ['an empty --device', ['--explain', '--device', '  '], /needs a simulator name/],
+    [
+      '--device-timeout without --explain',
+      ['--device-timeout', '45'],
+      /--device-timeout needs --explain/,
+    ],
+    [
+      'a --device-timeout out of range',
+      ['--explain', '--device-timeout', '0'],
+      /whole number of seconds/,
+    ],
   ])('exits 1 on %s, with the JSON envelope', async (_case, args, message) => {
     const result = await executeAgentCliAsync(projectRoot, ['status', '--json', ...args], {
       reject: false,

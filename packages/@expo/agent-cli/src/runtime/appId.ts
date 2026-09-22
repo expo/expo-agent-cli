@@ -36,6 +36,14 @@ const STATIC_CONFIG_FILES = ['app.json', 'app.config.json'];
  */
 const APP_ID = /^[A-Za-z0-9._-]{1,255}$/;
 
+/**
+ * RFC 3986 scheme grammar. `app.json` belongs to a project that may have been cloned, and the
+ * scheme is interpolated into a URL handed to `devicectl openURL`: a value like
+ * `https://attacker.example/x?` would open a web page on the device and hand it the callback
+ * address and the one-time nonce that authenticates the fingerprint response.
+ */
+const URL_SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*$/;
+
 /** Whether this is an application id at all, rather than something wearing the field. */
 export function isValidAppId(value: string): boolean {
   return APP_ID.test(value);
@@ -247,6 +255,26 @@ export function readConfiguredAppId(
   return platform === 'android'
     ? readPrebuiltAndroidApplicationId(projectRoot)
     : readPrebuiltIosBundleIdentifier(projectRoot);
+}
+
+/**
+ * The project's URL scheme from its static app config: `expo.scheme`, a string or the first of an
+ * array. Null for a project that declares none, only evaluates one in `app.config.js`, or declares
+ * one that is not a scheme. A caller treats null as "no scheme", which is a handled case.
+ */
+export function readConfiguredScheme(projectRoot: string): string | null {
+  for (const fileName of STATIC_CONFIG_FILES) {
+    const config = readJsonFile(path.join(projectRoot, fileName));
+    if (config == null) {
+      continue;
+    }
+    const expo = (isRecord(config.expo) ? config.expo : config) as Record<string, unknown>;
+    const scheme = Array.isArray(expo.scheme) ? expo.scheme[0] : expo.scheme;
+    if (typeof scheme === 'string' && URL_SCHEME.test(scheme.trim())) {
+      return scheme.trim();
+    }
+  }
+  return null;
 }
 
 function readJsonFile(filePath: string): Record<string, unknown> | null {

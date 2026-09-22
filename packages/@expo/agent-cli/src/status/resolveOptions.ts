@@ -107,3 +107,53 @@ export function resolveDeviceFlag(
   }
   return device;
 }
+
+/** Bounds on `--device-timeout`, in seconds. A phone that has not answered in five minutes is gone. */
+const MIN_DEVICE_TIMEOUT_SECONDS = 1;
+const MAX_DEVICE_TIMEOUT_SECONDS = 300;
+
+/**
+ * How long a physical iPhone gets to report its fingerprint, in milliseconds. Null uses the default.
+ *
+ * A cold launch of a dev client on an older phone can outrun the default, and the timeout reports
+ * `no-response`, which reads as a network or permission problem rather than as "it was slow".
+ *
+ * @throws {CommandError} `BAD_ARGS` for a value outside the range, or without `--explain`.
+ */
+export function resolveDeviceTimeoutFlag(
+  value: unknown,
+  { explain }: { explain: boolean }
+): number | null {
+  if (value == null) {
+    return null;
+  }
+  const raw = typeof value === 'string' ? value.trim() : '';
+  const seconds = Number(raw);
+  if (
+    !raw ||
+    !Number.isInteger(seconds) ||
+    seconds < MIN_DEVICE_TIMEOUT_SECONDS ||
+    seconds > MAX_DEVICE_TIMEOUT_SECONDS
+  ) {
+    throw new CommandError(
+      'BAD_ARGS',
+      [
+        `--device-timeout needs a whole number of seconds between ${MIN_DEVICE_TIMEOUT_SECONDS} and ${MAX_DEVICE_TIMEOUT_SECONDS}.`,
+        `Why: it is how long a physical iPhone gets to report its fingerprint once the app was launched on it.`,
+        `How: run "${PROGRAM_PREFIX} status --explain --device <phone> --device-timeout 45".`,
+      ].join('\n')
+    );
+  }
+  if (!explain) {
+    // No "Try:" line: the phone's name is the one thing this CLI cannot fill in for the reader.
+    throw new CommandError(
+      'BAD_ARGS',
+      [
+        `--device-timeout needs --explain.`,
+        `Why: it bounds the physical-iPhone probe, which is part of the deep dive and only runs for a phone --device names.`,
+        `How: run "${PROGRAM_PREFIX} status --explain --device <phone> --device-timeout ${seconds}".`,
+      ].join('\n')
+    );
+  }
+  return seconds * 1000;
+}
