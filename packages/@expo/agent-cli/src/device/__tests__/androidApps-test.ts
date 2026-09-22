@@ -9,7 +9,11 @@
 // [emulator-5554, Android 36, 2026-09-03], because a stub of my own imagining would prove that the
 // code agrees with me rather than with `adb`.
 
-import { androidHasAppAsync, readInstalledExpoGoVersionAndroidAsync } from '../androidApps';
+import {
+  androidHasAppAsync,
+  androidPackagePathsAsync,
+  readInstalledExpoGoVersionAndroidAsync,
+} from '../androidApps';
 
 /** One `adb` run's result, with the fields these two functions read. */
 function ran(
@@ -26,6 +30,46 @@ function ran(
 }
 
 const EXPO_GO = 'host.exp.exponent';
+
+describe(androidPackagePathsAsync, () => {
+  it(`lists base.apk and the splits, in pm's order`, async () => {
+    const paths = await androidPackagePathsAsync('emulator-5554', 'com.example.app', {
+      runAdbAsync: async () =>
+        ran({
+          stdout: [
+            'package:/data/app/~~abc==/com.example.app-def==/base.apk',
+            'package:/data/app/~~abc==/com.example.app-def==/split_config.arm64_v8a.apk',
+            '',
+          ].join('\n'),
+        }),
+    });
+
+    expect(paths).toEqual([
+      '/data/app/~~abc==/com.example.app-def==/base.apk',
+      '/data/app/~~abc==/com.example.app-def==/split_config.arm64_v8a.apk',
+    ]);
+  });
+
+  it(`answers an empty list for a package the device has not got`, async () => {
+    expect(
+      await androidPackagePathsAsync('emulator-5554', 'com.example.app', {
+        runAdbAsync: async () => ran({ exitCode: 1 }),
+      })
+    ).toEqual([]);
+  });
+
+  it.each([
+    ['adb is not on this machine', ran({ notRunnable: true, exitCode: null })],
+    ['the device is offline', ran({ exitCode: 255, stderr: 'error: device offline' })],
+    ['pm answered something unreadable', ran({ exitCode: 0, stdout: 'wat' })],
+  ])(`answers null rather than an empty list when %s`, async (_case, result) => {
+    expect(
+      await androidPackagePathsAsync('emulator-5554', 'com.example.app', {
+        runAdbAsync: async () => result,
+      })
+    ).toBeNull();
+  });
+});
 
 describe(androidHasAppAsync, () => {
   it(`asks pm for the app's path, on the device the caller named`, async () => {
