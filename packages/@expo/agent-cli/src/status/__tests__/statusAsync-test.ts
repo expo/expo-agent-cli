@@ -473,7 +473,7 @@ describe(collectStatusReportAsync, () => {
     it(`should resolve the OTA verdict and refresh the EAS answer with --explain`, async () => {
       const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
 
-      expect(resolveRuntimeVersionAsync).toHaveBeenCalledWith(projectRoot);
+      expect(resolveRuntimeVersionAsync).toHaveBeenCalledWith(projectRoot, { cache: undefined });
       expect(report.freshness?.ota).toMatchObject({ safe: true });
       expect(readEasBuildsStatusAsync).toHaveBeenCalledWith(
         projectRoot,
