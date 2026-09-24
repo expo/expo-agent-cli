@@ -61,12 +61,9 @@ export function resolveBuildId(value: unknown): string | null {
 /**
  * The simulator, emulator or device `--device` named, for the `installed` section.
  *
- * @throws {CommandError} `BAD_ARGS` for an empty value, or for `--device` without `--explain`.
+ * @throws {CommandError} `BAD_ARGS` for an empty value.
  */
-export function resolveDeviceFlag(
-  value: unknown,
-  { explain }: { explain: boolean }
-): string | null {
+export function resolveDeviceFlag(value: unknown): string | null {
   if (value == null) {
     return null;
   }
@@ -77,21 +74,9 @@ export function resolveDeviceFlag(
       [
         `--device needs a simulator name, a device name, a UDID or an adb serial.`,
         `Why: it names which device the installed-app check reads, and an empty value names none.`,
-        `How: run "${PROGRAM_PREFIX} status --explain --device <name>", or leave the flag out to read every device this machine has.`,
+        `How: run "${PROGRAM_PREFIX} status --device <name>", or leave the flag out to read every device this machine has.`,
       ].join('\n')
     );
-  }
-  if (!explain) {
-    const error = new CommandError(
-      'BAD_ARGS',
-      [
-        `--device needs --explain.`,
-        `Why: it narrows the installed-app check, which is part of the deep dive. The default report reads no device.`,
-        `How: run ${PROGRAM_PREFIX} status --explain --device "${device}".`,
-      ].join('\n')
-    );
-    error.suggestedCommand = `${PROGRAM_PREFIX} status --explain --device "${device}"`;
-    throw error;
   }
   return device;
 }
@@ -106,12 +91,9 @@ const MAX_DEVICE_TIMEOUT_SECONDS = 300;
  * A cold launch of a dev client on an older phone can outrun the default, and the timeout reports
  * `no-response`, which reads as a network or permission problem rather than as "it was slow".
  *
- * @throws {CommandError} `BAD_ARGS` for a value outside the range, or without `--explain`.
+ * @throws {CommandError} `BAD_ARGS` for a value outside the range.
  */
-export function resolveDeviceTimeoutFlag(
-  value: unknown,
-  { explain }: { explain: boolean }
-): number | null {
+export function resolveDeviceTimeoutFlag(value: unknown): number | null {
   if (value == null) {
     return null;
   }
@@ -128,18 +110,7 @@ export function resolveDeviceTimeoutFlag(
       [
         `--device-timeout needs a whole number of seconds between ${MIN_DEVICE_TIMEOUT_SECONDS} and ${MAX_DEVICE_TIMEOUT_SECONDS}.`,
         `Why: it is how long a physical iPhone gets to report its fingerprint once the app was launched on it.`,
-        `How: run "${PROGRAM_PREFIX} status --explain --device <phone> --device-timeout 45".`,
-      ].join('\n')
-    );
-  }
-  if (!explain) {
-    // No "Try:" line: the phone's name is the one thing this CLI cannot fill in for the reader.
-    throw new CommandError(
-      'BAD_ARGS',
-      [
-        `--device-timeout needs --explain.`,
-        `Why: it bounds the physical-iPhone probe, which is part of the deep dive and only runs for a phone --device names.`,
-        `How: run "${PROGRAM_PREFIX} status --explain --device <phone> --device-timeout ${seconds}".`,
+        `How: run "${PROGRAM_PREFIX} status --device <phone> --device-timeout 45".`,
       ].join('\n')
     );
   }

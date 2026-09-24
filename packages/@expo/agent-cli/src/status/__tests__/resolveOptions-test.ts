@@ -59,29 +59,26 @@ describe(resolveBuildId, () => {
 
 describe(resolveDeviceFlag, () => {
   it(`is null when the flag is absent`, () => {
-    expect(resolveDeviceFlag(undefined, { explain: false })).toBeNull();
+    expect(resolveDeviceFlag(undefined)).toBeNull();
   });
 
-  it(`returns the trimmed name under --explain`, () => {
-    expect(resolveDeviceFlag('  iPhone 17 Pro  ', { explain: true })).toBe('iPhone 17 Pro');
+  // The flag stands on its own: it used to need `--explain`, and there is no such word now.
+  it(`returns the trimmed name`, () => {
+    expect(resolveDeviceFlag('  iPhone 17 Pro  ')).toBe('iPhone 17 Pro');
   });
 
   it(`rejects an empty value`, () => {
-    expect(() => resolveDeviceFlag('   ', { explain: true })).toThrow(/needs a simulator name/);
-  });
-
-  it(`rejects --device without --explain, which is where the installed section lives`, () => {
-    expect(() => resolveDeviceFlag('iPhone 17', { explain: false })).toThrow(/needs --explain/);
+    expect(() => resolveDeviceFlag('   ')).toThrow(/needs a simulator name/);
   });
 });
 
 describe(resolveDeviceTimeoutFlag, () => {
   it(`is null when the flag is absent`, () => {
-    expect(resolveDeviceTimeoutFlag(undefined, { explain: true })).toBeNull();
+    expect(resolveDeviceTimeoutFlag(undefined)).toBeNull();
   });
 
   it(`reads seconds and returns milliseconds`, () => {
-    expect(resolveDeviceTimeoutFlag('45', { explain: true })).toBe(45_000);
+    expect(resolveDeviceTimeoutFlag('45')).toBe(45_000);
   });
 
   it.each([
@@ -92,10 +89,6 @@ describe(resolveDeviceTimeoutFlag, () => {
     ['empty', '  '],
     ['out of range', '9999'],
   ])(`rejects %s`, (_description, value) => {
-    expect(() => resolveDeviceTimeoutFlag(value, { explain: true })).toThrow(/--device-timeout/);
-  });
-
-  it(`needs --explain, like --device`, () => {
-    expect(() => resolveDeviceTimeoutFlag('45', { explain: false })).toThrow(/--explain/);
+    expect(() => resolveDeviceTimeoutFlag(value)).toThrow(/--device-timeout/);
   });
 });
