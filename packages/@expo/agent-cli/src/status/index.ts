@@ -64,7 +64,7 @@ export const statusHelp: CommandHelp = {
   },
   notes: [
     `Read-only, like git status; the only writes are this command's own caches under .expo. The`,
-    `one exception is --explain --device <phone>, which launches the app on that phone to ask it`,
+    `one exception is --device <phone>, which launches the app on that phone to ask it`,
     `for its fingerprint. It exits 0 unless --assert turned it into a gate.`,
     `The impact line says what has changed since the last build this CLI made, and what that`,
     `costs: js-only, dev-client-compatible, or needs-native-build. The sources that moved, whether`,

@@ -1040,21 +1040,17 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
     vi.mocked(readInstalledStatusAsync).mockResolvedValue(installed);
   });
 
-  it(`reads the device under --explain, and not on a default run`, async () => {
-    const brief = await collectStatusReportAsync(projectRoot, options);
-    expect(readInstalledStatusAsync).not.toHaveBeenCalled();
-    expect(brief.installed).toBeNull();
-
-    const deep = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+  it(`reads the device on a plain run, with no device named`, async () => {
+    const report = await collectStatusReportAsync(projectRoot, options);
     expect(readInstalledStatusAsync).toHaveBeenCalledWith(
       projectRoot,
       expect.objectContaining({ device: null })
     );
-    expect(deep.installed).toEqual(installed);
+    expect(report.installed).toEqual(installed);
   });
 
   it(`hands the named device through`, async () => {
-    await collectStatusReportAsync(projectRoot, { ...options, explain: true, device: 'Pixel_9' });
+    await collectStatusReportAsync(projectRoot, { ...options, device: 'Pixel_9' });
     expect(readInstalledStatusAsync).toHaveBeenCalledWith(
       projectRoot,
       expect.objectContaining({ device: 'Pixel_9' })
@@ -1065,7 +1061,7 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
   it(`reads no device when AGENT_CLI_NO_DEVICE is set`, async () => {
     vi.stubEnv('AGENT_CLI_NO_DEVICE', '1');
     try {
-      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+      const report = await collectStatusReportAsync(projectRoot, options);
       expect(readInstalledStatusAsync).not.toHaveBeenCalled();
       expect(report.installed).toBeNull();
       expect(report.errors.installed).toBeUndefined();
@@ -1075,7 +1071,7 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
   });
 
   it(`hands a phone the default answer time, or the one --device-timeout named`, async () => {
-    await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+    await collectStatusReportAsync(projectRoot, options);
     expect(readInstalledStatusAsync).toHaveBeenLastCalledWith(
       projectRoot,
       expect.objectContaining({ timeoutMs: 15_000 })
@@ -1083,7 +1079,6 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
 
     await collectStatusReportAsync(projectRoot, {
       ...options,
-      explain: true,
       device: "Ada's iPhone",
       installedTimeoutMs: 45_000,
     });
@@ -1097,7 +1092,6 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
     vi.mocked(readInstalledStatusAsync).mockImplementationOnce(() => new Promise(() => {}));
     const report = await collectStatusReportAsync(projectRoot, {
       ...options,
-      explain: true,
       installedReadTimeoutMs: 10,
     });
     expect(report.installed).toBeNull();

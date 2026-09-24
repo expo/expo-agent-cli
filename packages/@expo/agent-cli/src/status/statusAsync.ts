@@ -97,7 +97,7 @@ export const DEVICE_PROBE_TIMEOUT_MS = 2500;
 /**
  * How long the `installed` section gets, for the per-platform fingerprint and every device read
  * together. One deadline over the chain, because a hung `adb` on one device would otherwise stall
- * `status --explain` for as long as each tool's own timeout allows.
+ * `status` for as long as each tool's own timeout allows.
  */
 export const INSTALLED_READ_TIMEOUT_MS = 15_000;
 
@@ -383,7 +383,7 @@ export async function collectStatusReportAsync(
       : Promise.resolve(null),
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
     // `AGENT_CLI_NO_DEVICE` is the switch `dev` uses, so a stubbed harness never hits a real device.
-    options.explain && process.env.AGENT_CLI_NO_DEVICE !== '1'
+    process.env.AGENT_CLI_NO_DEVICE !== '1'
       ? attemptAsync(() => {
           const phoneTimeoutMs = options.installedTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
           // Sized for file reads. A phone probe extends it from inside, once it really launches.
