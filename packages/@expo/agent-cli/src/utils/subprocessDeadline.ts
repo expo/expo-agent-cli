@@ -7,7 +7,13 @@ import type { ChildProcess } from 'child_process';
 
 import { killProcessTree } from './processGroup';
 
-type Deadline = { expired: boolean; children: Set<ChildProcess>; error: Error };
+type Deadline = {
+  expired: boolean;
+  children: Set<ChildProcess>;
+  error: Error;
+  timer?: ReturnType<typeof setTimeout>;
+  expire: () => void;
+};
 
 const deadlines = new AsyncLocalStorage<Deadline>();
 
@@ -20,23 +26,43 @@ export async function withSubprocessDeadlineAsync<T>(
   message: string,
   work: () => Promise<T>
 ): Promise<T> {
-  const scope: Deadline = { expired: false, children: new Set(), error: new Error(message) };
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  const scope: Deadline = {
+    expired: false,
+    children: new Set(),
+    error: new Error(message),
+    expire: () => {},
+  };
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
+    scope.expire = () => {
       scope.expired = true;
       for (const child of scope.children) {
         killProcessTree(child, 'SIGKILL');
       }
       reject(scope.error);
-    }, timeoutMs);
-    timer.unref?.();
+    };
+    scope.timer = setTimeout(scope.expire, timeoutMs);
+    scope.timer.unref?.();
   });
   try {
     return await Promise.race([deadlines.run(scope, work), timeout]);
   } finally {
-    clearTimeout(timer);
+    clearTimeout(scope.timer);
   }
+}
+
+/**
+ * Give the enclosing deadline `ms` more from now. For a step whose cost the caller could not
+ * know when it sized the budget — launching an app on a phone and waiting for its answer. A no-op
+ * outside a deadline, or once it has expired.
+ */
+export function extendSubprocessDeadline(ms: number): void {
+  const scope = deadlines.getStore();
+  if (!scope || scope.expired) {
+    return;
+  }
+  clearTimeout(scope.timer);
+  scope.timer = setTimeout(scope.expire, ms);
+  scope.timer.unref?.();
 }
 
 /** Called before a spawn: an expired read must not start its fallback. Throws when it has. */

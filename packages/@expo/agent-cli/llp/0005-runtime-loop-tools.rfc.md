@@ -748,6 +748,23 @@ is read off disk at one of two paths: `EXConstants.bundle/app.fingerprint` for s
 `Frameworks/EXConstants.framework/EXConstants.bundle/app.fingerprint` for `use_frameworks!`. Only
 booted simulators are read; `simctl` cannot look inside a shut-down one.
 
+**iOS device.** `devicectl` exposes no app container, so the app has to answer for itself. The
+reader starts a one-shot HTTP server on the LAN, launches the app through `devicectl device process
+launch --payload-url` with a URL carrying a one-time nonce and the callback address, and the
+dev-launcher responder in the app posts the embedded fingerprint back (expo/expo#49494). The URL is
+host-free and carries reserved `__expo_fingerprint_*` query parameters, so it claims no route of the
+app's: a host would read as a destination and take a name out of the app's own namespace. A
+toolchain whose `launch` refuses a running app falls back to `openURL`, which routes by the
+project's static `expo.scheme`; a project without one has no fallback. The nonce is compared in
+constant time, the body is capped at 4 KB, and the server closes as soon as it has an answer. The
+response clock starts once the trigger was delivered, so a slow launch does not eat the phone's
+time; a timeout is `no-response`, never `up-to-date`.
+
+**Which iOS device.** Booted simulators first. A phone is probed only when `--device` names it:
+the probe launches the app, and naming the phone is the consent. A phone that is connected but not
+named is mentioned in a hint. A phone that is unreachable, or has Developer Mode off, is named with
+what to do about it and not probed.
+
 **Several devices.** Each device answers on its own, and the most informative answer wins: a
 matching app, then any app with a hash, then an app without one, then a definite "not installed",
 then silence. One device that cannot be read does not hide the others.
@@ -770,3 +787,17 @@ the Android reader against a stub `adb` that serves the fixture APK byte range b
 one-argument `exec-out dd`, the bytes back through a pipe, the pull when `stat` is missing) and the
 simulator reader against a stub `xcrun` that prints a container path holding a real file. The
 stubs live in `e2e/__tests__/installedAppStubs.ts` for the `status` e2e to reuse.
+
+The phone path, `src/installedApp/__tests__/`: the router (simulators first, a phone only when
+named, the hints for an unnamed, unreachable or Developer-Mode-off phone); the probe over an
+injected launch that posts back (match, mismatch, null and empty fingerprint, not installed, the
+locked phone, the `openURL` fallback, no scheme, timeout, stop at the first match); the callback
+server over real loopback HTTP (nonce, body cap, the clock armed after launch, close, the version
+key). `src/runtime/__tests__/appId-test.ts`: the scheme read, and the refusal of anything that is
+not a scheme. E2E on every CI host, `e2e/__tests__/installed-readers-test.ts`: the probe and the
+router against a stub `xcrun` whose `devicectl` lists the fixture phones and whose `launch` returns
+at once and posts to the callback URL it was handed from a detached child, across a real socket —
+the launch argv, the phone named in a hint and left alone, the named phone launched on and read, a
+build with no fingerprint, and a phone that answers after its time reading `no-response`. E2E on
+the macOS runner, `status-installed-test.ts`: the same through `status --explain --device`, plus
+the `--device-timeout` refusals.

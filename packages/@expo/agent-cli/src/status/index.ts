@@ -18,7 +18,9 @@ export const statusHelp: CommandHelp = {
     `--build <id>              Compare against an EAS build instead of the local record.\n` +
       `                          Needs --explain, because it asks the service`,
     `--device <name>           Read the installed app on this simulator, emulator or device\n` +
-      `                          only, by name, UDID or adb serial. Needs --explain`,
+      `                          only, by name, UDID or adb serial. For a physical iPhone this\n` +
+      `                          is the consent to launch the app on it. Needs --explain`,
+    `--device-timeout <secs>   Seconds a phone gets to answer (default: 15). Needs --explain`,
     `--dev-server-url <url>    Dev server to probe (default: the project's own, then 8081-8085)`,
     `--no-followups            Leave the suggested follow-up commands out of the report`,
     `--no-fingerprint-cache    Hash the project again instead of revalidating the cached hash`,
@@ -64,8 +66,9 @@ export const statusHelp: CommandHelp = {
     ],
   },
   notes: [
-    `Read-only, like git status. Nothing is started, built or changed; the only writes are this`,
-    `command's own caches under .expo. It exits 0 unless --assert turned it into a gate.`,
+    `Read-only, like git status; the only writes are this command's own caches under .expo. The`,
+    `one exception is --explain --device <phone>, which launches the app on that phone to ask it`,
+    `for its fingerprint. It exits 0 unless --assert turned it into a gate.`,
     `The impact line says what has changed since the last build this CLI made, and what that`,
     `costs: js-only, dev-client-compatible, or needs-native-build. It is free and always there.`,
     `--assert exit codes: 20 the change costs more than the class named · 22 no class could be`,
@@ -88,6 +91,7 @@ export const agentCliStatus: Command = async (argv) => {
       '--assert': String,
       '--build': String,
       '--device': String,
+      '--device-timeout': String,
       '--dev-server-url': String,
       '--no-followups': Boolean,
       '--no-fingerprint-cache': Boolean,
@@ -107,7 +111,7 @@ export const agentCliStatus: Command = async (argv) => {
     require('../utils/findUp') as typeof import('../utils/findUp');
   const { resolveDevServerUrlFlag } =
     require('../runtime/devServer') as typeof import('../runtime/devServer');
-  const { resolveAssertClass, resolveBuildId, resolveDeviceFlag } =
+  const { resolveAssertClass, resolveBuildId, resolveDeviceFlag, resolveDeviceTimeoutFlag } =
     require('./resolveOptions') as typeof import('./resolveOptions');
   const { printStatusAsync } = require('./statusAsync') as typeof import('./statusAsync');
 
@@ -118,6 +122,7 @@ export const agentCliStatus: Command = async (argv) => {
     const assertClass = resolveAssertClass(args['--assert']);
     const buildId = resolveBuildId(args['--build'], { explain });
     const device = resolveDeviceFlag(args['--device'], { explain });
+    const installedTimeoutMs = resolveDeviceTimeoutFlag(args['--device-timeout'], { explain });
 
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
     const explicitDevServerUrl =
@@ -129,6 +134,7 @@ export const agentCliStatus: Command = async (argv) => {
       assert: assertClass,
       buildId,
       device,
+      installedTimeoutMs,
       followups: !args['--no-followups'],
       // Undefined rather than `true` when the flag is absent, so `AGENT_CLI_NO_FINGERPRINT_CACHE`
       // still decides: a flag that was not passed states nothing.

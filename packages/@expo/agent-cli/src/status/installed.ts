@@ -1,14 +1,20 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
 // This only shapes the answer; `status` decides when the check runs.
 
+import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
 import { checkInstalledAppAsync, type PlatformCheck } from '../installedApp/installedAppAsync';
 import { hostPlatforms, type InstalledAppPlatform } from '../installedApp/options';
 import type { InstalledPlatformStatus, InstalledStatus } from './types';
 
 export interface InstalledStatusOptions {
-  /** `--device`: only the simulator, emulator or device with this name or identifier. */
+  /**
+   * `--device`: only the simulator, emulator or device with this name or identifier. Naming a
+   * physical iPhone is the consent to launch the app on it.
+   */
   device: string | null;
   fingerprintCache?: boolean;
+  /** `--device-timeout`: how long a phone gets to answer once the app was launched. */
+  timeoutMs?: number;
   /** Overrides the host platform detection, for tests. */
   hostPlatform?: string;
 }
@@ -29,6 +35,7 @@ export async function readInstalledStatusAsync(
     device: options.device,
     appId: null,
     fingerprintCache: options.fingerprintCache,
+    timeoutMs: options.timeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS,
   });
   return {
     outcome: report.outcome,
