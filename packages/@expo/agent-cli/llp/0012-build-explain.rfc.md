@@ -71,7 +71,7 @@ Last marker decides the phase, because a build stops where it fails, and every m
 - `medium`: a `cause` matched, but no phase anchor claimed the region around it.
 - `low`: only a `summary` matched. The signature names the tool that stopped and nothing about why, and `logTail` is where the answer is.
 
-`--platform ios|android` narrows the table by ruling out the other platform's phases. With no hint every rule runs, because a wrong guess is worse than a wide one.
+`--ios` / `--android` narrows the table by ruling out the other platform's phases — the spelling `dev` and `smoke` take, since 2026-09-15; `--platform ios|android` was this command's own and is retired, answered with the replacement rather than as a stray flag. With no hint every rule runs, because a wrong guess is worse than a wide one.
 
 ## Exit codes
 
