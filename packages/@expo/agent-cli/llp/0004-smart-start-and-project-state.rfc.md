@@ -617,15 +617,18 @@ source answered.
   fingerprint describes that binary.
 - `@expo/fingerprint` hashes an allowlist of asset paths. An asset a plugin reads that is not on that
   list moves nothing, so a rebuild the app needs for it is not reported.
-- A stale generated `ios/` or `android/` directory. A plain rebuild would compile the old directory
-  and embed the new hash, and the mismatch would vanish while the problem stayed. Telling the two
-  apart needs a record of what the last prebuild generated from, which nothing writes yet.
+- A stale generated `ios/` or `android/` directory. On a CNG project the fingerprint hashes the
+  inputs, not the generated code, and `expo run:<platform>` only prebuilds when the directory is
+  missing — so a build made outside this CLI after a config change compiles stale native code and
+  still matches. `dev` cannot do that: its plan prebuilds when the app config or a plugin moved.
+  A `hash-match` on a generated directory with no last-build record therefore says so and names
+  `prebuild`; recording what a prebuild generated from was considered and dropped (#60).
 
 ### Proof
 
 `src/installedApp/__tests__/installedAppAsync-test.ts`: the verdict table over every reason, the
 old-SDK gate (no hash, no device read, no command), the version rule in all three shapes (equal hashes across versions, differing hashes across versions, a
 build with no version), the named source on a mismatch, that the device is not read when the project
-cannot be hashed, that a caller-supplied app id wins, that one platform's failure keeps the other's
+cannot be hashed, that a caller-supplied app id wins, the prebuild warning on a match over an unrecorded generated directory, that one platform's failure keeps the other's
 verdict, and the aggregate outcome. `src/project/__tests__/sourceDiff-test.ts`: the identity rule,
 dependency paths on both path separators, the readable names, and the truncation.

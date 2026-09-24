@@ -2,9 +2,14 @@
 // Compare the fingerprint embedded in the installed app with the project's, per platform, and turn
 // the comparison into one verdict per platform. Reported by `status`; not a command of its own.
 
+import fs from 'fs';
+import path from 'path';
+
+import { readLastBuildRecord } from '../plan/lastBuild';
 import { PROGRAM_PREFIX } from '../programName';
 import { generateFingerprintAsync, type FingerprintResult } from '../project/fingerprint';
 import { resolveFingerprintCliVersion } from '../project/fingerprintCache';
+import { readProjectNativeDirsAsync } from '../project/nativeCode';
 import { diffSources, formatChangedSources } from '../project/sourceDiff';
 import { readConfiguredAppId } from '../runtime/appId';
 import { CommandError } from '../utils/errors';
@@ -65,6 +70,24 @@ export interface CheckDependencies {
   readAppId?: typeof readConfiguredAppId;
   readFingerprintVersion?: typeof resolveFingerprintCliVersion;
   readEmbedSupport?: typeof readFingerprintEmbedSupport;
+  readUnrecordedGeneratedDir?: typeof hasUnrecordedGeneratedDirAsync;
+}
+
+/**
+ * Whether a platform's native directory is generated (not checked in) and no build of it was
+ * recorded by this CLI. `dev` prebuilds when the app config or a plugin moved; a build made outside
+ * it may have compiled a stale directory, and the fingerprint cannot tell, because on a CNG project
+ * it hashes the inputs rather than the generated code.
+ */
+async function hasUnrecordedGeneratedDirAsync(
+  projectRoot: string,
+  platform: InstalledAppPlatform
+): Promise<boolean> {
+  if (!fs.existsSync(path.join(projectRoot, platform))) {
+    return false;
+  }
+  const checkedIn = (await readProjectNativeDirsAsync(projectRoot))[platform];
+  return !checkedIn && readLastBuildRecord(projectRoot)[platform] == null;
 }
 
 const defaultReader: InstalledFingerprintReader = ({ platform, appId, device, expectedHash }) =>
@@ -85,6 +108,7 @@ export async function checkInstalledAppAsync(
     readAppId = readConfiguredAppId,
     readFingerprintVersion = resolveFingerprintCliVersion,
     readEmbedSupport = readFingerprintEmbedSupport,
+    readUnrecordedGeneratedDir = hasUnrecordedGeneratedDirAsync,
   }: CheckDependencies = {}
 ): Promise<InstalledAppReport> {
   const deps = {
@@ -93,6 +117,7 @@ export async function checkInstalledAppAsync(
     readAppId,
     readFingerprintVersion,
     readEmbedSupport,
+    readUnrecordedGeneratedDir,
   };
   const checks = await Promise.all(
     options.platforms.map((platform) =>
@@ -162,11 +187,14 @@ async function checkPlatformAsync(
     device: options.device,
     expectedHash: fingerprint.hash,
   });
+  const matched = installed.status === 'ok' && installed.hash === fingerprint.hash;
   const check = installedVerdict(installed, {
     platform,
     fingerprint,
     deviceFilter: options.device,
     fingerprintVersion: deps.readFingerprintVersion(projectRoot),
+    unrecordedGeneratedDir:
+      matched && (await deps.readUnrecordedGeneratedDir(projectRoot, platform)),
   });
   return installed.hint
     ? { ...check, recommendation: `${check.recommendation} ${installed.hint}` }
@@ -182,6 +210,8 @@ function installedVerdict(
     deviceFilter: string | null;
     /** The `@expo/fingerprint` version the project hashes with, or null when it cannot be read. */
     fingerprintVersion: string | null;
+    /** A generated native directory this CLI never built: see {@link hasUnrecordedGeneratedDirAsync}. */
+    unrecordedGeneratedDir: boolean;
   }
 ): PlatformCheck {
   const { platform, fingerprint, deviceFilter } = project;
@@ -226,7 +256,9 @@ function installedVerdict(
       if (installed.hash === fingerprint.hash) {
         return verdict('hash-match', {
           ...found,
-          recommendation: 'The installed app matches the project. A JS reload is enough.',
+          recommendation: project.unrecordedGeneratedDir
+            ? `The installed app matches the project. It was not built by this CLI: if the app config or a config plugin changed since the last prebuild, run "${PROGRAM_PREFIX} prebuild -p ${platform}" before trusting it. Otherwise a JS reload is enough.`
+            : 'The installed app matches the project. A JS reload is enough.',
         });
       }
       // Two `@expo/fingerprint` versions can hash the same project differently, so differing

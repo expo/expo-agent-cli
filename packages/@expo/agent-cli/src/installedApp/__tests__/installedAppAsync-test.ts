@@ -34,6 +34,7 @@ const deps = {
   readAppId,
   readFingerprintVersion: () => '0.20.0',
   readEmbedSupport: () => ({ supported: true, version: '58.0.5' }),
+  readUnrecordedGeneratedDir: async () => false,
 };
 const installed =
   (result: InstalledFingerprintResult): InstalledFingerprintReader =>
@@ -192,6 +193,30 @@ describe(checkInstalledAppAsync, () => {
     expect(report.platforms.ios!.recommendation).toBe(
       'Native inputs changed since the installed app was built. Rebuild the app.'
     );
+  });
+
+  // A CNG project's fingerprint hashes the inputs, not the generated directory, so a build made
+  // outside `dev` after a config change compiles stale native code and still matches. The verdict
+  // stays a match; the sentence says what to check.
+  it(`warns on a match when a generated native directory was never built by this CLI`, async () => {
+    const report = await checkInstalledAppAsync(projectRoot, options(), {
+      ...deps,
+      readInstalled: installed({
+        status: 'ok',
+        hash: 'current-hash',
+        fingerprintVersion: '0.20.0',
+        appId,
+        device,
+      }),
+      readUnrecordedGeneratedDir: async () => true,
+    });
+
+    expect(report.platforms.ios).toMatchObject({
+      status: 'up-to-date',
+      reason: 'hash-match',
+      recommendation: expect.stringContaining('npx @expo/agent-cli prebuild -p ios'),
+      commands: [],
+    });
   });
 
   // An equal hash is positive evidence whatever produced it: a version difference can only
