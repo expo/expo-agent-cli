@@ -9,21 +9,18 @@ export const statusHelp: CommandHelp = {
   usage: `${PROGRAM_PREFIX} status`,
   options: [
     `--json                    Print the whole report as JSON, raw project probe included`,
-    `--explain                 The deep dive: which sources changed, whether an update can\n` +
-      `                          ship over the air, a fresh answer from EAS about builds for\n` +
-      `                          this fingerprint, and what the app on a device was built from.\n` +
-      `                          Slower than the default report`,
     `--assert <class>          Exit 20 when the change costs more than this class, and 22\n` +
       `                          when no class could be established. Without it, always 0`,
-    `--build <id>              Compare against an EAS build instead of the local record.\n` +
-      `                          Needs --explain, because it asks the service`,
+    `--build <id>              Compare against an EAS build instead of the last build this CLI\n` +
+      `                          recorded. Asks EAS for that build's fingerprint`,
     `--device <name>           Read the installed app on this simulator, emulator or device\n` +
       `                          only, by name, UDID or adb serial. For a physical iPhone this\n` +
-      `                          is the consent to launch the app on it. Needs --explain`,
-    `--device-timeout <secs>   Seconds a phone gets to answer (default: 15). Needs --explain`,
+      `                          is the consent to launch the app on it`,
+    `--device-timeout <secs>   Seconds a phone gets to answer (default: 15)`,
     `--dev-server-url <url>    Dev server to probe (default: the project's own, then 8081-8085)`,
     `--no-followups            Leave the suggested follow-up commands out of the report`,
-    `--no-fingerprint-cache    Hash the project again instead of revalidating the cached hash`,
+    `--no-fingerprint-cache    Ask everything again — hash the project, evaluate the app config,\n` +
+      `                          ask EAS — instead of trusting the records under .expo`,
     `-h, --help                Usage info`,
   ],
   examples: [
@@ -36,12 +33,12 @@ export const statusHelp: CommandHelp = {
       gets: 'the same as one object, with the raw project probe under probe',
     },
     {
-      run: `${PROGRAM_PREFIX} status --explain`,
-      gets: 'the sources that changed, the OTA verdict, what EAS has built, and what the device holds',
-    },
-    {
       run: `${PROGRAM_PREFIX} status --assert js-only`,
       gets: 'exit 20 when the change needs more than a reload; a gate for a script',
+    },
+    {
+      run: `${PROGRAM_PREFIX} status --build <id>`,
+      gets: 'this working tree against the fingerprint EAS computed for one build',
     },
   ],
   next: ['dev', 'smoke', 'doctor'],
@@ -66,18 +63,18 @@ export const statusHelp: CommandHelp = {
     ],
   },
   notes: [
-    `Read-only, like git status; the only writes are this command's own caches under .expo. The`,
-    `one exception is --explain --device <phone>, which launches the app on that phone to ask it`,
-    `for its fingerprint. It exits 0 unless --assert turned it into a gate.`,
-    `The impact line says what has changed since the last build this CLI made, and what that`,
-    `costs: js-only, dev-client-compatible, or needs-native-build. It is free and always there.`,
-    `--assert exit codes: 20 the change costs more than the class named · 22 no class could be`,
-    `established · 1 the command itself was wrong.`,
-    `The fingerprint is cached per platform and revalidated against the files that can move it.`,
-    `It cannot see inside ios/ or android/, so entries expire after ten minutes.`,
-    `The installed line (--explain) compares the project with what the app on a device was built`,
-    `from, read out of the app itself: expo-constants embeds it in debug builds from SDK 58. Right`,
-    `about a build somebody else made, which freshness cannot be. A release build embeds none.`,
+    `Read-only, like git status; the only writes are its caches under .expo. The one exception is`,
+    `--device <phone>, which launches the app on that phone to ask it for its fingerprint. Exits 0`,
+    `unless --assert turned it into a gate: 20 the change costs more than the class named · 22 no`,
+    `class could be established · 1 the command itself was wrong.`,
+    `Every run carries the impact of the change since the last build this CLI made (js-only,`,
+    `dev-client-compatible, needs-native-build), the sources that moved, whether an update can ship`,
+    `over the air, whether EAS already has a finished build of this fingerprint, and what the app`,
+    `on a device was built from (expo-constants embeds it in debug builds from SDK 58).`,
+    `What a run learns is remembered under .expo and revalidated against the files that can move`,
+    `it — fingerprints and an evaluated app.config.js for ten minutes, an EAS "none" for five, a`,
+    `finished EAS build until the fingerprint changes — and says so, with its age. Nothing looks`,
+    `inside ios/ or android/, so the expiry is what covers a native edit.`,
   ],
 };
 
@@ -87,7 +84,6 @@ export const agentCliStatus: Command = async (argv) => {
       // Types
       '--help': Boolean,
       '--json': Boolean,
-      '--explain': Boolean,
       '--assert': String,
       '--build': String,
       '--device': String,
@@ -116,13 +112,12 @@ export const agentCliStatus: Command = async (argv) => {
   const { printStatusAsync } = require('./statusAsync') as typeof import('./statusAsync');
 
   return (async () => {
-    const explain = !!args['--explain'];
     // Resolved before the project is found, so a bad flag fails on the flag rather than on the
     // directory somebody happened to run it in.
     const assertClass = resolveAssertClass(args['--assert']);
-    const buildId = resolveBuildId(args['--build'], { explain });
-    const device = resolveDeviceFlag(args['--device'], { explain });
-    const installedTimeoutMs = resolveDeviceTimeoutFlag(args['--device-timeout'], { explain });
+    const buildId = resolveBuildId(args['--build']);
+    const device = resolveDeviceFlag(args['--device']);
+    const installedTimeoutMs = resolveDeviceTimeoutFlag(args['--device-timeout']);
 
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
     const explicitDevServerUrl =
@@ -130,7 +125,6 @@ export const agentCliStatus: Command = async (argv) => {
     await printStatusAsync(projectRoot, {
       devServerUrl: explicitDevServerUrl,
       json: !!args['--json'],
-      explain,
       assert: assertClass,
       buildId,
       device,

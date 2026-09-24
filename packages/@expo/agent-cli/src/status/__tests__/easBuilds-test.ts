@@ -72,26 +72,22 @@ beforeEach(() => {
 });
 
 describe(readEasBuildsStatusAsync, () => {
-  it(`should answer unknown for both platforms without --explain, and spawn nothing`, async () => {
+  it(`should ask EAS about both platforms when nothing is remembered, and say it did`, async () => {
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: false,
       auth: signedIn,
       projectHash: PROJECT_HASH,
     });
 
-    expect(status.askedEas).toBe(false);
-    expect(status.platforms.map((platform) => platform.state)).toEqual(['unknown', 'unknown']);
-    expect(iosOf(status.platforms).reason).toContain('--explain');
-    expect(generateFingerprintAsync).not.toHaveBeenCalled();
-    expect(lookUpCachedBuildAsync).not.toHaveBeenCalled();
+    expect(status.askedEas).toBe(true);
+    expect(status.platforms.map((platform) => platform.state)).toEqual(['none', 'none']);
+    expect(lookUpCachedBuildAsync).toHaveBeenCalledTimes(2);
   });
 
   // The whole point of keying the cache on the hash `status` already has: a hit is exact and free.
-  it(`should answer found from the cache without --explain, and still spawn nothing`, async () => {
+  it(`should answer found from the record, asking EAS nothing about that platform`, async () => {
     writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: false,
       auth: signedIn,
       projectHash: PROJECT_HASH,
     });
@@ -104,40 +100,65 @@ describe(readEasBuildsStatusAsync, () => {
       createdAt: BUILD.createdAt,
       fingerprintHash: IOS_HASH,
     });
-    expect(generateFingerprintAsync).not.toHaveBeenCalled();
-    expect(lookUpCachedBuildAsync).not.toHaveBeenCalled();
+    // Android has no entry and is asked; iOS, which has one, is not.
+    expect(generateFingerprintAsync).not.toHaveBeenCalledWith(
+      projectRoot,
+      expect.objectContaining({ platform: 'ios' })
+    );
+    expect(lookUpCachedBuildAsync).toHaveBeenCalledTimes(1);
   });
 
-  it(`should ignore a cached answer taken under a different project fingerprint`, async () => {
-    writeCache({ projectHash: 'some-older-hash', fingerprintHash: IOS_HASH, build: BUILD });
+  it(`should say EAS was not asked when every platform was answered from the record`, async () => {
+    vol.fromJSON({
+      [recordFile]: JSON.stringify({
+        ios: { projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD },
+        android: {
+          projectHash: PROJECT_HASH,
+          fingerprintHash: 'android-hash',
+          build: { ...BUILD, id: 'android-build', platform: 'ANDROID' },
+        },
+      }),
+    });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: false,
       auth: signedIn,
       projectHash: PROJECT_HASH,
     });
 
-    expect(iosOf(status.platforms).state).toBe('unknown');
+    expect(status.askedEas).toBe(false);
+    expect(lookUpCachedBuildAsync).not.toHaveBeenCalled();
   });
 
-  it(`should ignore the cache entirely when this project has no fingerprint of its own`, async () => {
-    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
+  it(`should ask again over a remembered answer taken under a different project fingerprint`, async () => {
+    writeCache({ projectHash: 'some-older-hash', fingerprintHash: IOS_HASH, build: BUILD });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: false,
+      auth: signedIn,
+      projectHash: PROJECT_HASH,
+    });
+
+    expect(iosOf(status.platforms)).toMatchObject({ state: 'none', source: 'eas' });
+  });
+
+  it(`should ask, and remember nothing, when this project has no fingerprint of its own`, async () => {
+    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
+    vi.mocked(lookUpCachedBuildAsync).mockResolvedValue({ state: 'found', build: BUILD });
+
+    const status = await readEasBuildsStatusAsync(projectRoot, {
       auth: signedIn,
       projectHash: null,
     });
 
-    // Nothing establishes that the entry belongs to what is on disk now, so it is not an answer.
-    expect(iosOf(status.platforms).state).toBe('unknown');
+    // Nothing establishes that the entry belongs to what is on disk now, so it is not an answer —
+    // and nothing can key a new one, so the answer EAS gave is reported and not written.
+    expect(iosOf(status.platforms)).toMatchObject({ state: 'found', source: 'eas' });
+    expect(readEasBuildsRecord(projectRoot).ios?.projectHash).toBe(PROJECT_HASH);
   });
 
   // The auth section already answered this. A second probe would spend a second to be told the
   // same thing, which is exactly the cost this design exists to avoid.
-  it(`should not ask EAS on a signed-out machine, even with --explain`, async () => {
+  it(`should not ask EAS on a signed-out machine`, async () => {
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: { loggedIn: false, user: null, source: 'eas whoami' },
       projectHash: PROJECT_HASH,
     });
@@ -149,7 +170,6 @@ describe(readEasBuildsStatusAsync, () => {
 
   it(`should ask EAS when the auth answer is itself unknown`, async () => {
     await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: { loggedIn: null, user: null, source: null },
       projectHash: PROJECT_HASH,
     });
@@ -159,12 +179,11 @@ describe(readEasBuildsStatusAsync, () => {
 
   // The reason the lookup needs a fingerprint run of its own: the hash `status` has covers both
   // @ref llp/0023-fingerprint-caching.rfc.md §Every consumer can turn it off
-  // This section pays for two of the three fingerprints a `status --explain` computes, so a caller
+  // This section pays for two of the three fingerprints a `status` computes, so a caller
   // who refused the cache has to be refused it here too — or the flag would only apply to a third
   // of the cost it is about.
   it(`should pass a refused cache through to both platforms`, async () => {
     await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
       fingerprintCache: false,
@@ -183,7 +202,6 @@ describe(readEasBuildsStatusAsync, () => {
   // platforms, and an EAS build carries a per-platform one.
   it(`should look the per-platform fingerprint up, not the project one`, async () => {
     await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
     });
@@ -211,7 +229,6 @@ describe(readEasBuildsStatusAsync, () => {
     vi.mocked(lookUpCachedBuildAsync).mockResolvedValue({ state: 'found', build: BUILD });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
     });
@@ -233,7 +250,6 @@ describe(readEasBuildsStatusAsync, () => {
   // it is written with the time it was true, and believed for a bounded while.
   it(`should record a none with the time it was true`, async () => {
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
     });
@@ -257,7 +273,6 @@ describe(readEasBuildsStatusAsync, () => {
     writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: null, checkedAt });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
     });
@@ -284,46 +299,17 @@ describe(readEasBuildsStatusAsync, () => {
     );
   });
 
-  // The cache is read always, so a default run gets the remembered none too — the one answer a
-  // run that may not ask EAS could not otherwise have.
-  it(`should answer a remembered none on a run that may not ask EAS`, async () => {
-    const checkedAt = new Date(Date.now() - 60_000).toISOString();
-    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: null, checkedAt });
-
-    const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: false,
-      auth: signedIn,
-      projectHash: PROJECT_HASH,
-    });
-
-    expect(iosOf(status.platforms)).toMatchObject({ state: 'none', source: 'cache' });
-  });
-
   it(`should ask EAS again once a remembered none is older than its bound`, async () => {
     const checkedAt = new Date(Date.now() - EAS_NONE_CACHE_TTL_MS - 1000).toISOString();
     writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: null, checkedAt });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
     });
 
     expect(iosOf(status.platforms)).toMatchObject({ state: 'none', source: 'eas' });
     expect(lookUpCachedBuildAsync).toHaveBeenCalled();
-  });
-
-  it(`should answer unknown, not the stale none, on a run that may not ask EAS`, async () => {
-    const checkedAt = new Date(Date.now() - EAS_NONE_CACHE_TTL_MS - 1000).toISOString();
-    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: null, checkedAt });
-
-    const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: false,
-      auth: signedIn,
-      projectHash: PROJECT_HASH,
-    });
-
-    expect(iosOf(status.platforms).state).toBe('unknown');
   });
 
   // @ref llp/0023-fingerprint-caching.rfc.md §Every consumer can turn it off
@@ -333,7 +319,6 @@ describe(readEasBuildsStatusAsync, () => {
     writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
       fingerprintCache: false,
@@ -347,7 +332,6 @@ describe(readEasBuildsStatusAsync, () => {
   // free. The sentence names the fix, with the account the auth section knew.
   it(`should answer unknown, and ask nobody, for a project whose static config names no EAS project`, async () => {
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
       easProject: { projectId: null, source: 'app.json', dynamic: false },
@@ -365,7 +349,6 @@ describe(readEasBuildsStatusAsync, () => {
     writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
       easProject: { projectId: null, source: 'app.json', dynamic: false },
@@ -385,7 +368,6 @@ describe(readEasBuildsStatusAsync, () => {
     ['no app config at all beside a dynamic one', { projectId: null, source: null, dynamic: true }],
   ])(`should ask EAS for %s`, async (_name, easProject) => {
     await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
       easProject,
@@ -401,7 +383,6 @@ describe(readEasBuildsStatusAsync, () => {
     });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
     });
@@ -422,7 +403,6 @@ describe(readEasBuildsStatusAsync, () => {
     });
 
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
     });
@@ -442,7 +422,6 @@ describe(readEasBuildsStatusAsync, () => {
       vi.mocked(generateFingerprintAsync).mockReturnValue(new Promise(() => {}));
 
       const pending = readEasBuildsStatusAsync(projectRoot, {
-        lookUp: true,
         auth: signedIn,
         projectHash: PROJECT_HASH,
         timeoutMs: 5000,

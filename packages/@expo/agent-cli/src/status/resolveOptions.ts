@@ -33,14 +33,14 @@ export function resolveAssertClass(value: unknown): ImpactClass | null {
 /**
  * The EAS build `--build` names, or null.
  *
- * `--build` requires `--explain` and says so rather than quietly implying it. The flag makes a
- * network call to fetch a fingerprint EAS computed on its own servers, and `--explain` is the one
- * word in this command's surface that means "you may spend a subprocess and a round trip". A flag
- * that turned that on by itself would put the cost back where the design took it out of.
+ * The flag fetches the fingerprint EAS computed for that one build — a network call the default
+ * report does not make on its own — and it is made because the caller named the build. It used to
+ * require `--explain` as the word for "you may spend a round trip"; there is no such word now, and
+ * naming a build is the ask.
  *
- * @throws {CommandError} `BAD_ARGS` for an empty value, or for `--build` without `--explain`.
+ * @throws {CommandError} `BAD_ARGS` for an empty value.
  */
-export function resolveBuildId(value: unknown, { explain }: { explain: boolean }): string | null {
+export function resolveBuildId(value: unknown): string | null {
   if (value == null) {
     return null;
   }
@@ -51,21 +51,9 @@ export function resolveBuildId(value: unknown, { explain }: { explain: boolean }
       [
         `--build needs the id of an EAS build.`,
         `Why: it compares this working tree against the fingerprint EAS computed for one specific build, which is server ground truth and needs no local record.`,
-        `How: find the id with "${easCommandPrefix()} build:list --limit 5 --json --non-interactive", then pass it as "--explain --build <id>".`,
+        `How: find the id with "${easCommandPrefix()} build:list --limit 5 --json --non-interactive", then run "${PROGRAM_PREFIX} status --build <id>".`,
       ].join('\n')
     );
-  }
-  if (!explain) {
-    const error = new CommandError(
-      'BAD_ARGS',
-      [
-        `--build needs --explain.`,
-        `Why: comparing against an EAS build fetches a fingerprint from the service, and --explain is what says this run may make a network call. The default report is built from what is already on this machine, and a flag that spent a round trip without being asked would take that promise away.`,
-        `How: run "${PROGRAM_PREFIX} status --explain --build ${buildId}".`,
-      ].join('\n')
-    );
-    error.suggestedCommand = `${PROGRAM_PREFIX} status --explain --build ${buildId}`;
-    throw error;
   }
   return buildId;
 }
@@ -73,12 +61,9 @@ export function resolveBuildId(value: unknown, { explain }: { explain: boolean }
 /**
  * The simulator, emulator or device `--device` named, for the `installed` section.
  *
- * @throws {CommandError} `BAD_ARGS` for an empty value, or for `--device` without `--explain`.
+ * @throws {CommandError} `BAD_ARGS` for an empty value.
  */
-export function resolveDeviceFlag(
-  value: unknown,
-  { explain }: { explain: boolean }
-): string | null {
+export function resolveDeviceFlag(value: unknown): string | null {
   if (value == null) {
     return null;
   }
@@ -89,21 +74,9 @@ export function resolveDeviceFlag(
       [
         `--device needs a simulator name, a device name, a UDID or an adb serial.`,
         `Why: it names which device the installed-app check reads, and an empty value names none.`,
-        `How: run "${PROGRAM_PREFIX} status --explain --device <name>", or leave the flag out to read every device this machine has.`,
+        `How: run "${PROGRAM_PREFIX} status --device <name>", or leave the flag out to read every device this machine has.`,
       ].join('\n')
     );
-  }
-  if (!explain) {
-    const error = new CommandError(
-      'BAD_ARGS',
-      [
-        `--device needs --explain.`,
-        `Why: it narrows the installed-app check, which is part of the deep dive. The default report reads no device.`,
-        `How: run ${PROGRAM_PREFIX} status --explain --device "${device}".`,
-      ].join('\n')
-    );
-    error.suggestedCommand = `${PROGRAM_PREFIX} status --explain --device "${device}"`;
-    throw error;
   }
   return device;
 }
@@ -118,12 +91,9 @@ const MAX_DEVICE_TIMEOUT_SECONDS = 300;
  * A cold launch of a dev client on an older phone can outrun the default, and the timeout reports
  * `no-response`, which reads as a network or permission problem rather than as "it was slow".
  *
- * @throws {CommandError} `BAD_ARGS` for a value outside the range, or without `--explain`.
+ * @throws {CommandError} `BAD_ARGS` for a value outside the range.
  */
-export function resolveDeviceTimeoutFlag(
-  value: unknown,
-  { explain }: { explain: boolean }
-): number | null {
+export function resolveDeviceTimeoutFlag(value: unknown): number | null {
   if (value == null) {
     return null;
   }
@@ -140,18 +110,7 @@ export function resolveDeviceTimeoutFlag(
       [
         `--device-timeout needs a whole number of seconds between ${MIN_DEVICE_TIMEOUT_SECONDS} and ${MAX_DEVICE_TIMEOUT_SECONDS}.`,
         `Why: it is how long a physical iPhone gets to report its fingerprint once the app was launched on it.`,
-        `How: run "${PROGRAM_PREFIX} status --explain --device <phone> --device-timeout 45".`,
-      ].join('\n')
-    );
-  }
-  if (!explain) {
-    // No "Try:" line: the phone's name is the one thing this CLI cannot fill in for the reader.
-    throw new CommandError(
-      'BAD_ARGS',
-      [
-        `--device-timeout needs --explain.`,
-        `Why: it bounds the physical-iPhone probe, which is part of the deep dive and only runs for a phone --device names.`,
-        `How: run "${PROGRAM_PREFIX} status --explain --device <phone> --device-timeout ${seconds}".`,
+        `How: run "${PROGRAM_PREFIX} status --device <phone> --device-timeout 45".`,
       ].join('\n')
     );
   }

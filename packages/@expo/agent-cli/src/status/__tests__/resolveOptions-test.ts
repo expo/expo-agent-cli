@@ -35,60 +35,50 @@ describe(resolveAssertClass, () => {
 
 describe(resolveBuildId, () => {
   it(`should answer null when the flag was not given`, () => {
-    expect(resolveBuildId(undefined, { explain: false })).toBeNull();
+    expect(resolveBuildId(undefined)).toBeNull();
   });
 
-  it(`should accept an id under --explain, trimmed`, () => {
-    expect(resolveBuildId('  build-1  ', { explain: true })).toBe('build-1');
+  // Naming a build is the ask: the flag used to require `--explain` as the word for "you may spend
+  // a round trip", and there is no such word now.
+  it(`should accept an id on its own, trimmed`, () => {
+    expect(resolveBuildId('  build-1  ')).toBe('build-1');
   });
 
-  // The flag makes a network call, and `--explain` is the one word in this surface that means
-  // "you may spend one". A `--build` that implied it would put the cost back where the design
-  // took it out of.
-  it(`should refuse --build without --explain, and suggest the line that works`, () => {
+  it(`should refuse an empty id rather than asking the service about nothing`, () => {
     try {
-      resolveBuildId('build-1', { explain: false });
+      resolveBuildId('   ');
       throw new Error('should have thrown');
     } catch (error) {
       const commandError = error as CommandError;
       expect(commandError).toBeInstanceOf(CommandError);
-      expect(commandError.message).toContain('--build needs --explain');
-      expect(commandError.suggestedCommand).toBe(
-        'npx @expo/agent-cli status --explain --build build-1'
-      );
+      expect(commandError.message).toContain('--build needs the id');
+      expect(commandError.message).toContain('npx @expo/agent-cli status --build <id>');
     }
-  });
-
-  it(`should refuse an empty id rather than asking the service about nothing`, () => {
-    expect(() => resolveBuildId('   ', { explain: true })).toThrow(/--build needs the id/);
   });
 });
 
 describe(resolveDeviceFlag, () => {
   it(`is null when the flag is absent`, () => {
-    expect(resolveDeviceFlag(undefined, { explain: false })).toBeNull();
+    expect(resolveDeviceFlag(undefined)).toBeNull();
   });
 
-  it(`returns the trimmed name under --explain`, () => {
-    expect(resolveDeviceFlag('  iPhone 17 Pro  ', { explain: true })).toBe('iPhone 17 Pro');
+  // The flag stands on its own: it used to need `--explain`, and there is no such word now.
+  it(`returns the trimmed name`, () => {
+    expect(resolveDeviceFlag('  iPhone 17 Pro  ')).toBe('iPhone 17 Pro');
   });
 
   it(`rejects an empty value`, () => {
-    expect(() => resolveDeviceFlag('   ', { explain: true })).toThrow(/needs a simulator name/);
-  });
-
-  it(`rejects --device without --explain, which is where the installed section lives`, () => {
-    expect(() => resolveDeviceFlag('iPhone 17', { explain: false })).toThrow(/needs --explain/);
+    expect(() => resolveDeviceFlag('   ')).toThrow(/needs a simulator name/);
   });
 });
 
 describe(resolveDeviceTimeoutFlag, () => {
   it(`is null when the flag is absent`, () => {
-    expect(resolveDeviceTimeoutFlag(undefined, { explain: true })).toBeNull();
+    expect(resolveDeviceTimeoutFlag(undefined)).toBeNull();
   });
 
   it(`reads seconds and returns milliseconds`, () => {
-    expect(resolveDeviceTimeoutFlag('45', { explain: true })).toBe(45_000);
+    expect(resolveDeviceTimeoutFlag('45')).toBe(45_000);
   });
 
   it.each([
@@ -99,10 +89,6 @@ describe(resolveDeviceTimeoutFlag, () => {
     ['empty', '  '],
     ['out of range', '9999'],
   ])(`rejects %s`, (_description, value) => {
-    expect(() => resolveDeviceTimeoutFlag(value, { explain: true })).toThrow(/--device-timeout/);
-  });
-
-  it(`needs --explain, like --device`, () => {
-    expect(() => resolveDeviceTimeoutFlag('45', { explain: false })).toThrow(/--explain/);
+    expect(() => resolveDeviceTimeoutFlag(value)).toThrow(/--device-timeout/);
   });
 });

@@ -312,9 +312,12 @@ Sections:
   line (`js-only`, `dev-client-compatible`, or `needs-native-build`). See
   [[0011-impact-and-freshness]].
 - EAS build. Whether EAS already has a finished build made from this exact fingerprint,
-  per platform, as `found`, `none` or `unknown`. The cached answer is read always. The
-  network call happens only under `--explain`. See [[0011-impact-and-freshness]] for the
-  lookup, the cache key, and how long a `none` is believed.
+  per platform, as `found`, `none` or `unknown`. The remembered answer is read first, and
+  EAS is asked for what it does not cover — on every run, since 2026-09-15; `--explain`
+  used to gate the call and is gone [decided — Kudo, 2026-09-15: "not friendly to use"].
+  A project whose static config is not linked to EAS is never asked. See
+  [[0011-impact-and-freshness]] for the lookup, the cache key, and how long a `none` is
+  believed.
 - Dev server. Running or not, and how many CDP targets are connected. The discovery
   order is §Discovery ladder. `hostType` and `tunnelUrl` ride along in `--json`. Only a
   tunnel is worth a word in the text, because `127.0.0.1:8081` already says "this
@@ -589,12 +592,7 @@ as the section's `outcome` and the commands that fix a stale one. It sits below 
 the two answer the same question from opposite ends: `freshness` is about the build this machine
 recorded making, `installed` is about the build that is on the device, whoever made it.
 
-**Under `--explain` only.** Every answer costs a device read and a per-platform fingerprint, and the
-default report is built from what is already on this machine — the same line that keeps the EAS
-lookup and the OTA verdict out of it. `--device <name>` narrows the read to one simulator, emulator
-or device, and needs `--explain` for the same reason. `AGENT_CLI_NO_DEVICE` turns the section off
-the way it turns off `dev`'s open ([[0002-testing-and-evals]] §Tier 0): a stubbed harness has no
-device this could be true about.
+**On every run** [since 2026-09-15, when `--explain` went — Kudo: "not friendly to use"]. Every answer costs a device read and a per-platform fingerprint; the read is bounded by the deadline below, and a machine with no device answers `no-device` at the cost of the two tool spawns. A physical phone is never launched unless `--device <name>` names it — the flag is the consent, and it stands on its own now. `AGENT_CLI_NO_DEVICE` turns the section off the way it turns off `dev`'s open ([[0002-testing-and-evals]] §Tier 0): a stubbed harness has no device this could be true about.
 
 **Naming the phone is the consent.** `status` promises to start nothing, and the physical-iPhone
 probe launches the app ([[0005-runtime-loop-tools]] §Installed-app fingerprint check). So a phone is
@@ -671,16 +669,15 @@ cannot be hashed, that a caller-supplied app id wins, the prebuild warning on a 
 verdict, and the aggregate outcome. `src/project/__tests__/sourceDiff-test.ts`: the identity rule,
 dependency paths on both path separators, the readable names, and the truncation.
 `src/status/__tests__/installed-test.ts`: which platforms this host asks, and the section's shape.
-`src/status/__tests__/statusAsync-test.ts`: that the device is read under `--explain` and not on a
-default run, that `AGENT_CLI_NO_DEVICE` reads none, and that the deadline costs the section and
+`src/status/__tests__/statusAsync-test.ts`: that the device is read on a plain run, that `AGENT_CLI_NO_DEVICE` reads none, and that the deadline costs the section and
 nothing else. `e2e/__tests__/status-installed-test.ts`, across the process boundary: a stub `adb`
 that serves a fixture APK byte range by byte range, with the stub `fingerprint` set to the embedded
-hash and then to another one; the `installed` section of `status --explain --json` in both cases and
+hash and then to another one; the `installed` section of `status --json` in both cases and
 for an app that is not installed, with both hashes and the command in JSON on a mismatch; an app whose
 file is not the JSON `expo-constants` writes (`no-embedded-fingerprint`, rebuild suggested); two
 `@expo/fingerprint` versions (`fingerprint-version-mismatch`, no command); the prebuild warning on a
 match over a generated `android/` this CLI never built, and its absence with the recorded build; the
 whole-APK pull when the device cannot serve ranges; that a
-default `status` and a harness run read no device; that a hung `adb` is killed at the deadline with
+harness run reads no device; that a hung `adb` is killed at the deadline with
 no fallback started; on macOS, a stub `xcrun` serving a booted simulator's app container, alone and
-narrowed by `--device`; and that `--device` without `--explain` is refused.
+narrowed by `--device`.

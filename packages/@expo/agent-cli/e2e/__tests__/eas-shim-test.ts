@@ -135,10 +135,10 @@ describe('a binary under the name `eas` that was never the EAS CLI', () => {
   // The build lookup never fails a command — every failure is an `unknown` with a reason attached —
   // and the reason is printed as what EAS answered. A panic quoted there is a sentence about this
   // account's builds that no Expo service ever said.
-  it('is left alone by the EAS build lookup of status --explain, which uses the runner', async () => {
+  it('is left alone by the EAS build lookup of status, which uses the runner', async () => {
     const projectRoot = await setupWithBrokenEasAsync();
 
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json']);
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--json']);
 
     expect(result.exitCode).toBe(0);
     // The point: the wrapper was never given the chance to say anything.
@@ -155,12 +155,11 @@ describe('a binary under the name `eas` that was never the EAS CLI', () => {
 
   // The other EAS-backed read of `status`: `--build <id>` compares the working tree against the
   // fingerprint the service computed for one build.
-  it('is left alone by status --explain --build', async () => {
+  it('is left alone by status --build', async () => {
     const projectRoot = await setupWithBrokenEasAsync();
 
     const result = await executeAgentCliAsync(projectRoot, [
       'status',
-      '--explain',
       '--build',
       BUILD_ID,
       '--json',
@@ -178,7 +177,7 @@ describe('a binary under the name `eas` that was never the EAS CLI', () => {
       runnerScript: STUB_EAS_WRAPPER_CRASH,
     });
 
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json']);
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--json']);
 
     expect(result.exitCode).toBe(0);
     const report = JSON.parse(result.stdout);
