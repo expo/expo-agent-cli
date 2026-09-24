@@ -1,6 +1,6 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
 //
-// The `installed` section of `status --explain`, across the process boundary. A stub `adb` serves a
+// The `installed` section of `status`, across the process boundary. A stub `adb` serves a
 // fixture APK byte range by byte range, the way a device answers `exec-out dd`, and the stub
 // `fingerprint` names the project's hash. The two agree, then they do not, then the app is not
 // installed. `status` reports all three and still exits 0, because only `--assert` gates it.
@@ -67,7 +67,7 @@ function platformRow(report: Report, platform: string) {
   return report.installed?.platforms.find((entry) => entry.platform === platform);
 }
 
-describe('@expo/agent-cli status --explain, the installed section', () => {
+describe('@expo/agent-cli status, the installed section', () => {
   let projectRoot: string;
   let adb: Awaited<ReturnType<typeof installStubAdbAsync>>;
 
@@ -80,7 +80,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
   });
 
   it('reports up to date when the embedded hash is the project hash, reading the APK in ranges', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
       env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
     });
 
@@ -108,7 +108,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
   });
 
   it('prints the rebuild command under the installed line when the hashes differ', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain'], {
+    const result = await executeAgentCliAsync(projectRoot, ['status'], {
       env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: 'something-else' },
     });
 
@@ -121,7 +121,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §What the answer is
   it('carries both hashes and the rebuild command in JSON when they differ', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
       env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: 'something-else' },
     });
 
@@ -140,7 +140,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
   // A build whose file is not the JSON `expo-constants` writes: a release build, a build from
   // before the embed, or a rebundled one. The reader answers "no fingerprint", never an error.
   it('reports unknown with a rebuild when the installed app embeds no readable fingerprint', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
       env: {
         ...WITH_DEVICES,
         ...adb.env,
@@ -172,7 +172,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     fs.writeFileSync(manifestPath, JSON.stringify({ ...manifest, version: '0.21.0' }));
 
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
       env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: 'something-else' },
     });
 
@@ -198,7 +198,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
 
     it('warns to prebuild on a match when this CLI never built it', async () => {
       fs.rmSync(path.join(projectRoot, '.expo', 'agent-cli-last-build.json'));
-      const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
         env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
       });
 
@@ -212,7 +212,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
     });
 
     it('keeps the plain match when the last build was recorded here', async () => {
-      const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
         env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
       });
 
@@ -224,7 +224,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
   });
 
   it('reports unknown when the app is not installed', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
       env: {
         ...WITH_DEVICES,
         ...adb.env,
@@ -245,7 +245,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read
   it('pulls the APK when the device cannot serve ranges, and reads the same answer', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
       env: {
         ...WITH_DEVICES,
         ...adb.env,
@@ -265,7 +265,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
   it('says the app cannot be checked on an SDK that embeds no fingerprint, and reads no device', async () => {
     const manifestPath = path.join(projectRoot, 'node_modules', 'expo-constants', 'package.json');
     fs.writeFileSync(manifestPath, JSON.stringify({ name: 'expo-constants', version: '57.0.19' }));
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
       env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
     });
 
@@ -283,7 +283,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
   it('reads only the device --device names, by name', async () => {
     const result = await executeAgentCliAsync(
       projectRoot,
-      ['status', '--explain', '--json', '--device', EMULATOR_NAME],
+      ['status', '--json', '--device', EMULATOR_NAME],
       { env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH } }
     );
 
@@ -297,7 +297,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
   it('answers no-device when --device names nothing this machine has, and reads no app', async () => {
     const result = await executeAgentCliAsync(
       projectRoot,
-      ['status', '--explain', '--json', '--device', 'Nobody'],
+      ['status', '--json', '--device', 'Nobody'],
       { env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH } }
     );
 
@@ -310,21 +310,10 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
     expect(installedReads(adb.calls())).toEqual([]);
   });
 
-  it('reads no device without --explain', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
-      env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
-    });
-
-    const report: Report = JSON.parse(result.stdout);
-    expect(report.installed).toBeNull();
-    expect(report.errors.installed).toBeUndefined();
-    expect(installedReads(adb.calls())).toEqual([]);
-  });
-
-  // The harness default, which every other status e2e runs under: a `--explain` on a developer's
+  // The harness default, which every other status e2e runs under: a plain `status` on a developer's
   // Mac must not read that Mac's devices (llp/0002 §Tier 0).
   it('reads no device when the harness turned devices off', async () => {
-    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
       env: { ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
     });
 
@@ -336,18 +325,14 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
   it('stops a hanging adb read at the section deadline and keeps the rest of the report', async () => {
     const pidPath = path.join(projectRoot, '.hanging-adb-pid');
     const server = await startStubDevServerAsync({ projectRoot });
-    const child = spawnAgentCli(
-      projectRoot,
-      ['status', '--explain', '--json', '--dev-server-url', server.url],
-      {
-        env: {
-          ...WITH_DEVICES,
-          ...adb.env,
-          STUB_FINGERPRINT_HASH: EMBEDDED_HASH,
-          STUB_ADB_HANG_READ: pidPath,
-        },
-      }
-    );
+    const child = spawnAgentCli(projectRoot, ['status', '--json', '--dev-server-url', server.url], {
+      env: {
+        ...WITH_DEVICES,
+        ...adb.env,
+        STUB_FINGERPRINT_HASH: EMBEDDED_HASH,
+        STUB_ADB_HANG_READ: pidPath,
+      },
+    });
     const output = collectOutput(child);
     const exited = waitForExitAsync(child, output);
     let watchdog: ReturnType<typeof setTimeout> | undefined;
@@ -410,7 +395,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
       const xcrun = await installStubXcrunAsync(projectRoot, {
         booted: { fingerprint: EMBEDDED_HASH },
       });
-      const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
         env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
       });
 
@@ -435,7 +420,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
       });
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['status', '--explain', '--json', '--device', SIMULATOR_NAME],
+        ['status', '--json', '--device', SIMULATOR_NAME],
         { env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH } }
       );
 
@@ -455,7 +440,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
       const xcrun = await installStubXcrunAsync(projectRoot, {
         phone: { fingerprint: EMBEDDED_HASH },
       });
-      const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+      const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
         env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
       });
 
@@ -475,7 +460,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
       });
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['status', '--explain', '--json', '--device', PHONE_NAME, '--device-timeout', '30'],
+        ['status', '--json', '--device', PHONE_NAME, '--device-timeout', '30'],
         { env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH } }
       );
 
@@ -508,7 +493,7 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
       await installStubXcrunAsync(projectRoot, { phone: { fingerprint: null } });
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['status', '--explain', '--json', '--device', PHONE_NAME],
+        ['status', '--json', '--device', PHONE_NAME],
         { env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH } }
       );
 
@@ -530,18 +515,8 @@ describe('@expo/agent-cli status --device', () => {
   });
 
   it.each([
-    ['--device without --explain', ['--device', 'iPhone 17'], /--device needs --explain/],
-    ['an empty --device', ['--explain', '--device', '  '], /needs a simulator name/],
-    [
-      '--device-timeout without --explain',
-      ['--device-timeout', '45'],
-      /--device-timeout needs --explain/,
-    ],
-    [
-      'a --device-timeout out of range',
-      ['--explain', '--device-timeout', '0'],
-      /whole number of seconds/,
-    ],
+    ['an empty --device', ['--device', '  '], /needs a simulator name/],
+    ['a --device-timeout out of range', ['--device-timeout', '0'], /whole number of seconds/],
   ])('exits 1 on %s, with the JSON envelope', async (_case, args, message) => {
     const result = await executeAgentCliAsync(projectRoot, ['status', '--json', ...args], {
       reject: false,
