@@ -7,12 +7,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { listConnectedIosDevicesAsync } from '../../src/device/devicectl';
 import { readInstalledFingerprintAndroidAsync } from '../../src/installedApp/android';
+import { readInstalledFingerprintIosAsync } from '../../src/installedApp/ios';
+import { readInstalledFingerprintIosDeviceAsync } from '../../src/installedApp/iosDevice';
 import { readInstalledFingerprintIosSimulatorAsync } from '../../src/installedApp/iosSimulator';
 import { getTemporaryPath, pathEnvVars } from '../utils';
 import {
   EMBEDDED_HASH,
   EMULATOR_NAME,
+  PHONE_NAME,
+  PHONE_UDID,
   SIMULATOR_NAME,
   SIMULATOR_UDID,
   installStubAdbAsync,
@@ -132,5 +137,116 @@ describe('the simulator reader over a stub xcrun', () => {
     await expect(
       readInstalledFingerprintIosSimulatorAsync({ appId: APP_ID, expectedHash: EMBEDDED_HASH })
     ).resolves.toEqual({ status: 'no-device' });
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read — iOS device
+// The phone probe over a real socket: the stub `devicectl` receives the launch, reads the callback
+// URL and nonce out of the payload URL, and POSTs the way the dev-launcher responder does.
+describe('the phone probe over a stub devicectl', () => {
+  let root: string;
+  let restore: () => void;
+
+  beforeEach(async () => {
+    root = getTemporaryPath();
+    await fs.promises.mkdir(root, { recursive: true });
+  });
+  afterEach(() => restore());
+
+  async function stubPhoneAsync(phone: { fingerprint: string | null; postDelayMs?: number }) {
+    const xcrun = await installStubXcrunAsync(root, { phone });
+    restore = withEnv(
+      pathEnvVars(`${xcrun.binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`)
+    );
+    return xcrun;
+  }
+
+  it('lists the phones, launches the named one with the trigger URL, and reads what it posts back', async () => {
+    const xcrun = await stubPhoneAsync({ fingerprint: EMBEDDED_HASH });
+    const devices = await listConnectedIosDevicesAsync();
+    expect(devices.map((device) => device.name)).toContain(PHONE_NAME);
+
+    const result = await readInstalledFingerprintIosDeviceAsync({
+      appId: APP_ID,
+      expectedHash: EMBEDDED_HASH,
+      device: PHONE_NAME,
+      devices,
+      scheme: 'installedapp',
+      timeoutMs: 15_000,
+    });
+
+    expect(result).toMatchObject({
+      status: 'ok',
+      hash: EMBEDDED_HASH,
+      fingerprintVersion: '0.20.0',
+      device: { name: PHONE_NAME, identifier: PHONE_UDID },
+    });
+    const launch = xcrun.calls().find((args) => args[3] === 'launch');
+    expect(launch).toEqual([
+      'devicectl',
+      'device',
+      'process',
+      'launch',
+      '--payload-url',
+      expect.stringMatching(/^installedapp:\/\/\?__expo_fingerprint_check=1&/),
+      '--device',
+      PHONE_UDID,
+      APP_ID,
+    ]);
+  });
+
+  it('reads a phone whose build embeds no fingerprint as no-embedded-fingerprint', async () => {
+    await stubPhoneAsync({ fingerprint: null });
+    const result = await readInstalledFingerprintIosDeviceAsync({
+      appId: APP_ID,
+      expectedHash: EMBEDDED_HASH,
+      device: PHONE_NAME,
+      devices: await listConnectedIosDevicesAsync(),
+      scheme: 'installedapp',
+      timeoutMs: 15_000,
+    });
+    expect(result).toMatchObject({
+      status: 'no-embedded-fingerprint',
+      device: { name: PHONE_NAME },
+    });
+  });
+
+  // The answer clock starts once the launch returned, and `--device-timeout` is that clock.
+  it('answers no-response when the phone posts back after its time', async () => {
+    await stubPhoneAsync({ fingerprint: EMBEDDED_HASH, postDelayMs: 3000 });
+    const result = await readInstalledFingerprintIosDeviceAsync({
+      appId: APP_ID,
+      expectedHash: EMBEDDED_HASH,
+      device: PHONE_NAME,
+      devices: await listConnectedIosDevicesAsync(),
+      scheme: 'installedapp',
+      timeoutMs: 500,
+    });
+    expect(result).toMatchObject({ status: 'no-response', device: { name: PHONE_NAME } });
+  });
+
+  // The router: no simulator is booted, a phone is connected, and nothing named it.
+  it('names a connected phone in a hint and leaves it alone until --device names it', async () => {
+    const xcrun = await stubPhoneAsync({ fingerprint: EMBEDDED_HASH });
+    const unnamed = await readInstalledFingerprintIosAsync({
+      appId: APP_ID,
+      expectedHash: EMBEDDED_HASH,
+      scheme: 'installedapp',
+      timeoutMs: 15_000,
+    });
+    expect(unnamed).toMatchObject({
+      status: 'no-device',
+      hint: expect.stringContaining(`A physical iOS device is connected (${PHONE_NAME})`),
+    });
+    expect(xcrun.calls().some((args) => args[3] === 'launch')).toBe(false);
+
+    const named = await readInstalledFingerprintIosAsync({
+      appId: APP_ID,
+      expectedHash: EMBEDDED_HASH,
+      device: PHONE_NAME,
+      scheme: 'installedapp',
+      timeoutMs: 15_000,
+    });
+    expect(named).toMatchObject({ status: 'ok', hash: EMBEDDED_HASH });
   });
 });

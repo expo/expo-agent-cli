@@ -109,14 +109,18 @@ export async function installStubAdbAsync(
  * container holds `booted.fingerprint` at the static-linking path; otherwise none. `devicectl list`
  * answers with the fixture phones when `phone` is given; a `launch` then answers the way the
  * dev-launcher responder does, posting `phone.fingerprint` to the callback URL carried by the
- * payload URL.
+ * payload URL — after `phone.postDelayMs`, for a launch that is slow to answer.
  */
 export async function installStubXcrunAsync(
   root: string,
   {
     booted,
     phone,
-  }: { booted?: { fingerprint: string }; phone?: { fingerprint: string | null } } = {}
+  }: {
+    booted?: { fingerprint: string };
+    /** `postDelayMs` holds the POST back, the way a slow cold launch does. */
+    phone?: { fingerprint: string | null; postDelayMs?: number };
+  } = {}
 ): Promise<{ binDir: string; calls: StubCalls }> {
   const recordPath = path.join(root, '.xcrun-calls.jsonl');
   const container = path.join(root, '.stub-simulator', 'installedapp.app');
@@ -157,13 +161,14 @@ export async function installStubXcrunAsync(
       `  process.exit(0);`,
       `}`,
       `if (args[0] === 'devicectl' && args[2] === 'process' && args[3] === 'launch') {`,
+      // The real `launch` returns once the app is up; the app answers on its own time. So the POST
+      // is made by a detached child, and this process exits at once.
       `  const url = new URL(args[args.indexOf('--payload-url') + 1]);`,
       `  const callback = url.searchParams.get('__expo_fingerprint_callback');`,
       `  const body = JSON.stringify({ nonce: url.searchParams.get('__expo_fingerprint_nonce'), fingerprint: ${JSON.stringify(phone?.fingerprint ?? null)}, fingerprintVersion: '0.20.0' });`,
-      `  const request = require('http').request(callback, { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (response) => { response.resume(); response.on('end', () => process.exit(0)); });`,
-      `  request.on('error', (error) => { process.stderr.write(String(error)); process.exit(1); });`,
-      `  request.end(body);`,
-      `  return;`,
+      `  const post = "setTimeout(() => { const r = require('http').request(process.argv[1], { method: 'POST', headers: { 'Content-Type': 'application/json' } }, (res) => { res.resume(); res.on('end', () => process.exit(0)); }); r.on('error', () => process.exit(1)); r.end(process.argv[2]); }, Number(process.argv[3]));";`,
+      `  require('child_process').spawn(process.execPath, ['-e', post, callback, body, String(${phone?.postDelayMs ?? 0})], { detached: true, stdio: 'ignore' }).unref();`,
+      `  process.exit(0);`,
       `}`,
       `process.stderr.write('stub xcrun: unexpected ' + args.join(' ') + '\\n');`,
       `process.exit(2);`,

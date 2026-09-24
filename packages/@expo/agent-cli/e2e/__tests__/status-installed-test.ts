@@ -21,6 +21,8 @@ import {
 import {
   EMBEDDED_HASH,
   EMULATOR_NAME,
+  PHONE_NAME,
+  PHONE_UDID,
   SIMULATOR_NAME,
   SIMULATOR_UDID,
   installStubAdbAsync,
@@ -48,6 +50,7 @@ async function setAppIdsAsync(projectRoot: string): Promise<void> {
   const appJson = JSON.parse(await fs.promises.readFile(appJsonPath, 'utf8'));
   appJson.expo.android = { package: ANDROID_APP_ID };
   appJson.expo.ios = { bundleIdentifier: IOS_APP_ID };
+  appJson.expo.scheme = 'installedapp';
   await fs.promises.writeFile(appJsonPath, JSON.stringify(appJson, null, 2));
 }
 
@@ -340,6 +343,78 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
       expect(adb.calls().some((args) => args.includes('pm'))).toBe(false);
     });
   });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read — iOS device
+  describe.skipIf(process.platform !== 'darwin')('with a connected iPhone', () => {
+    it('names the phone and leaves it alone when --device did not name it', async () => {
+      const xcrun = await installStubXcrunAsync(projectRoot, {
+        phone: { fingerprint: EMBEDDED_HASH },
+      });
+      const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+        env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
+      });
+
+      const report: Report = JSON.parse(result.stdout);
+      expect(platformRow(report, 'ios')).toMatchObject({
+        reason: 'no-device',
+        recommendation: expect.stringContaining(
+          `A physical iOS device is connected (${PHONE_NAME})`
+        ),
+      });
+      expect(xcrun.calls().some((args) => args[3] === 'launch')).toBe(false);
+    });
+
+    it('launches the app on the named phone and reads what it posts back', async () => {
+      const xcrun = await installStubXcrunAsync(projectRoot, {
+        phone: { fingerprint: EMBEDDED_HASH },
+      });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--explain', '--json', '--device', PHONE_NAME, '--device-timeout', '30'],
+        { env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH } }
+      );
+
+      const report: Report = JSON.parse(result.stdout);
+      expect(report.installed?.outcome).toBe('up-to-date');
+      expect(platformRow(report, 'ios')).toMatchObject({
+        reason: 'hash-match',
+        deviceName: PHONE_NAME,
+        installedHash: EMBEDDED_HASH,
+      });
+      // The launch is said on stderr, so a `--json` run keeps stdout for the one object.
+      expect(result.stderr).toContain(
+        `Checking ${PHONE_NAME}. This launches the app on the device.`
+      );
+      const launch = xcrun.calls().find((args) => args[3] === 'launch');
+      expect(launch).toEqual([
+        'devicectl',
+        'device',
+        'process',
+        'launch',
+        '--payload-url',
+        expect.stringMatching(/^installedapp:\/\/\?__expo_fingerprint_check=1&/),
+        '--device',
+        PHONE_UDID,
+        IOS_APP_ID,
+      ]);
+    });
+
+    it('reads a phone whose build embeds no fingerprint as unknown', async () => {
+      await installStubXcrunAsync(projectRoot, { phone: { fingerprint: null } });
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--explain', '--json', '--device', PHONE_NAME],
+        { env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH } }
+      );
+
+      const report: Report = JSON.parse(result.stdout);
+      expect(platformRow(report, 'ios')).toMatchObject({
+        status: 'unknown',
+        reason: 'no-embedded-fingerprint',
+        deviceName: PHONE_NAME,
+      });
+    });
+  });
 });
 
 describe('@expo/agent-cli status --device', () => {
@@ -352,6 +427,16 @@ describe('@expo/agent-cli status --device', () => {
   it.each([
     ['--device without --explain', ['--device', 'iPhone 17'], /--device needs --explain/],
     ['an empty --device', ['--explain', '--device', '  '], /needs a simulator name/],
+    [
+      '--device-timeout without --explain',
+      ['--device-timeout', '45'],
+      /--device-timeout needs --explain/,
+    ],
+    [
+      'a --device-timeout out of range',
+      ['--explain', '--device-timeout', '0'],
+      /whole number of seconds/,
+    ],
   ])('exits 1 on %s, with the JSON envelope', async (_case, args, message) => {
     const result = await executeAgentCliAsync(projectRoot, ['status', '--json', ...args], {
       reject: false,

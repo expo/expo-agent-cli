@@ -17,6 +17,7 @@ import { exitWithCodeAsync } from '../exitCodes';
 import { buildStatusFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import { refineWithChangedFilesAsync } from '../impact/fromRecord';
 import type { ImpactClass, OtaSafety } from '../impact/types';
+import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
 import * as Log from '../log';
 import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
@@ -113,6 +114,8 @@ export interface StatusOptions {
   deviceProbeTimeoutMs?: number;
   /** Overrides {@link INSTALLED_READ_TIMEOUT_MS}, for tests. */
   installedReadTimeoutMs?: number;
+  /** `--device-timeout`: how long a phone gets to answer once the app was launched on it. */
+  installedTimeoutMs?: number | null;
   /**
    * The deep dive: `--explain`.
    *
@@ -138,7 +141,10 @@ export interface StatusOptions {
    * it needs no local record, which is what makes it the answer for a build made in the cloud.
    */
   buildId?: string | null;
-  /** `--device`: only the simulator, emulator or device with this name or identifier. */
+  /**
+   * `--device`: only the simulator, emulator or device with this name or identifier. Naming a
+   * physical iPhone is the consent to launch the app on it, which `status` never does unasked.
+   */
   device?: string | null;
   /** Overrides {@link EAS_BUILD_LOOKUP_TIMEOUT_MS}, for tests. */
   buildLookupTimeoutMs?: number;
@@ -379,6 +385,8 @@ export async function collectStatusReportAsync(
     // `AGENT_CLI_NO_DEVICE` is the switch `dev` uses, so a stubbed harness never hits a real device.
     options.explain && process.env.AGENT_CLI_NO_DEVICE !== '1'
       ? attemptAsync(() => {
+          const phoneTimeoutMs = options.installedTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
+          // Sized for file reads. A phone probe extends it from inside, once it really launches.
           const timeoutMs = options.installedReadTimeoutMs ?? INSTALLED_READ_TIMEOUT_MS;
           return withSubprocessDeadlineAsync(
             timeoutMs,
@@ -387,6 +395,7 @@ export async function collectStatusReportAsync(
               readInstalledStatusAsync(projectRoot, {
                 device: options.device ?? null,
                 fingerprintCache: options.fingerprintCache,
+                timeoutMs: phoneTimeoutMs,
               })
           );
         })

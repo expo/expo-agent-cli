@@ -1,6 +1,6 @@
 import { vol } from 'memfs';
 
-import { EXPO_GO_APP_ID, readConfiguredAppId, resolveAppId } from '../appId';
+import { EXPO_GO_APP_ID, readConfiguredAppId, readConfiguredScheme, resolveAppId } from '../appId';
 
 const projectRoot = '/project';
 
@@ -296,5 +296,43 @@ describe('the application id of a prebuilt Android project', () => {
     vol.reset();
     vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'demo' }) });
     expect(readConfiguredAppId('/project', 'android')).toBeNull();
+  });
+});
+
+describe(readConfiguredScheme, () => {
+  it(`reads a string scheme, and the first of an array`, () => {
+    vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme: 'myapp' } }) });
+    expect(readConfiguredScheme(projectRoot)).toBe('myapp');
+    vol.fromJSON({
+      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme: ['first', 'second'] } }),
+    });
+    expect(readConfiguredScheme(projectRoot)).toBe('first');
+  });
+
+  it(`answers null when the static config names none`, () => {
+    vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { name: 'x' } }) });
+    expect(readConfiguredScheme(projectRoot)).toBeNull();
+    vol.fromJSON({ [`${projectRoot}/app.config.js`]: 'module.exports = {}' });
+    expect(readConfiguredScheme(projectRoot)).toBeNull();
+  });
+
+  // The scheme is interpolated into the URL handed to `devicectl openURL`. A value carrying its
+  // own scheme and host would open a web page on the device and hand it the callback address and
+  // the one-time nonce that authenticates the response. Null is already a handled case.
+  it.each([
+    ['a URL rather than a scheme', 'https://attacker.example/x?'],
+    ['a scheme with a slash', 'my/app'],
+    ['a scheme starting with a digit', '1app'],
+    ['a scheme with a space', 'my app'],
+  ])(`answers null for %s`, (_description, scheme) => {
+    vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme } }) });
+    expect(readConfiguredScheme(projectRoot)).toBeNull();
+  });
+
+  it(`accepts the punctuation RFC 3986 allows`, () => {
+    vol.fromJSON({
+      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme: 'my-app.x+1' } }),
+    });
+    expect(readConfiguredScheme(projectRoot)).toBe('my-app.x+1');
   });
 });

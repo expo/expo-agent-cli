@@ -1105,6 +1105,25 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
     }
   });
 
+  it(`hands a phone the default answer time, or the one --device-timeout named`, async () => {
+    await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+    expect(readInstalledStatusAsync).toHaveBeenLastCalledWith(
+      projectRoot,
+      expect.objectContaining({ timeoutMs: 15_000 })
+    );
+
+    await collectStatusReportAsync(projectRoot, {
+      ...options,
+      explain: true,
+      device: "Ada's iPhone",
+      installedTimeoutMs: 45_000,
+    });
+    expect(readInstalledStatusAsync).toHaveBeenLastCalledWith(
+      projectRoot,
+      expect.objectContaining({ device: "Ada's iPhone", timeoutMs: 45_000 })
+    );
+  });
+
   it(`bounds the read and keeps the rest of the report when it runs out of time`, async () => {
     vi.mocked(readInstalledStatusAsync).mockImplementationOnce(() => new Promise(() => {}));
     const report = await collectStatusReportAsync(projectRoot, {

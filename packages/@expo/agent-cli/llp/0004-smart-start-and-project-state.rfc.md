@@ -596,6 +596,13 @@ or device, and needs `--explain` for the same reason. `AGENT_CLI_NO_DEVICE` turn
 the way it turns off `dev`'s open ([[0002-testing-and-evals]] §Tier 0): a stubbed harness has no
 device this could be true about.
 
+**Naming the phone is the consent.** `status` promises to start nothing, and the physical-iPhone
+probe launches the app ([[0005-runtime-loop-tools]] §Installed-app fingerprint check). So a phone is
+asked only when `--device <name>` names it, and the launch is announced on stderr. `--device-timeout
+<secs>` bounds how long the phone gets to answer once the app was launched, 15 s by default. A probe that
+really launches extends the section's deadline by the launch budget and that answer time, from
+inside the read; a `--device` that names an emulator or a simulator pays nothing extra.
+
 **One deadline over the whole read.** A device read is a chain of tools, and each has a fallback, so
 a per-call timeout would let an expired read start its fallback and wait again. The section runs
 under `withSubprocessDeadlineAsync` (`src/utils/subprocessDeadline.ts`): 15 seconds for the
@@ -642,6 +649,10 @@ source answered.
   `EXPO_SKIP_FINGERPRINT_EMBED` set, is the same answer.
 - `expo run:ios --unstable-rebundle` removes the file rather than refreshing it, because no single
   fingerprint describes that binary.
+- A phone answers only when its build carries the dev-launcher responder and it can reach this
+  machine over the LAN. A release build, an older `expo-dev-client`, a firewall or a different
+  network all read as `no-response`, which is `unknown`. The responder sends the hash and its
+  fingerprint version, not the sources, so a mismatch on a phone cannot name the input that moved.
 - `@expo/fingerprint` hashes an allowlist of asset paths. An asset a plugin reads that is not on that
   list moves nothing, so a rebuild the app needs for it is not reported.
 - A stale generated `ios/` or `android/` directory. On a CNG project the fingerprint hashes the
