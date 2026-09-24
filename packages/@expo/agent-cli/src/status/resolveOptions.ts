@@ -69,3 +69,41 @@ export function resolveBuildId(value: unknown, { explain }: { explain: boolean }
   }
   return buildId;
 }
+
+/**
+ * The simulator, emulator or device `--device` named, for the `installed` section.
+ *
+ * @throws {CommandError} `BAD_ARGS` for an empty value, or for `--device` without `--explain`.
+ */
+export function resolveDeviceFlag(
+  value: unknown,
+  { explain }: { explain: boolean }
+): string | null {
+  if (value == null) {
+    return null;
+  }
+  const device = typeof value === 'string' ? value.trim() : '';
+  if (!device) {
+    throw new CommandError(
+      'BAD_ARGS',
+      [
+        `--device needs a simulator name, a device name, a UDID or an adb serial.`,
+        `Why: it names which device the installed-app check reads, and an empty value names none.`,
+        `How: run "${PROGRAM_PREFIX} status --explain --device <name>", or leave the flag out to read every device this machine has.`,
+      ].join('\n')
+    );
+  }
+  if (!explain) {
+    const error = new CommandError(
+      'BAD_ARGS',
+      [
+        `--device needs --explain.`,
+        `Why: it narrows the installed-app check, which is part of the deep dive. The default report reads no device.`,
+        `How: run ${PROGRAM_PREFIX} status --explain --device "${device}".`,
+      ].join('\n')
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} status --explain --device "${device}"`;
+    throw error;
+  }
+  return device;
+}

@@ -408,6 +408,7 @@ describe('@expo/agent-cli status', () => {
         'project',
         'expoGo',
         'freshness',
+        'installed',
         'builds',
         'devServer',
         'device',
@@ -1799,7 +1800,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       ]);
 
       expect(report.next?.buildLocation).toBeNull();
-      expect(result.stdout).not.toContain('build ');
+      expect(result.stdout).not.toMatch(/^build\s/m);
     });
 
     it('names the place and the cause for a project that needs one', async () => {

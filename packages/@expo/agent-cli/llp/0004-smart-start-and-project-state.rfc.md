@@ -582,6 +582,33 @@ Several devices are ranked, so a stale one cannot hide a matching install on ano
 app, then any app with a hash, then an app without one, then a definite "not installed", then
 silence. The device is read last, once the verdict is known to need it.
 
+### Reported by status
+
+The verdict is the `installed` section of `status`, one row per platform, with the strongest verdict
+as the section's `outcome` and the commands that fix a stale one. It sits below `freshness`, because
+the two answer the same question from opposite ends: `freshness` is about the build this machine
+recorded making, `installed` is about the build that is on the device, whoever made it.
+
+**Under `--explain` only.** Every answer costs a device read and a per-platform fingerprint, and the
+default report is built from what is already on this machine — the same line that keeps the EAS
+lookup and the OTA verdict out of it. `--device <name>` narrows the read to one simulator, emulator
+or device, and needs `--explain` for the same reason. `AGENT_CLI_NO_DEVICE` turns the section off
+the way it turns off `dev`'s open ([[0002-testing-and-evals]] §Tier 0): a stubbed harness has no
+device this could be true about.
+
+**One deadline over the whole read.** A device read is a chain of tools, and each has a fallback, so
+a per-call timeout would let an expired read start its fallback and wait again. The section runs
+under `withSubprocessDeadlineAsync` (`src/utils/subprocessDeadline.ts`): 15 seconds for the
+fingerprint and every device read together, carried by `AsyncLocalStorage` so the spawn helpers
+register their children without the caller threading anything through. When it expires, every
+subprocess under it is killed, no further one starts, and the section reports the timeout in
+`errors.installed` while the rest of the report stands.
+
+**This is a report, not a gate.** `status` exits `0` unless `--assert` turned it into one, and
+`--assert` is about impact class, not about this. A caller that wants to branch reads
+`installed.outcome` out of `--json`. If a gate turns out to be needed, extending `--assert` is the
+shape to reach for, and it is a decision for a later revision of this document.
+
 ### Which app
 
 The app id comes from the static app config (`ios.bundleIdentifier`, `android.package`); on Android
@@ -632,3 +659,13 @@ build with no version), the named source on a mismatch, that the device is not r
 cannot be hashed, that a caller-supplied app id wins, the prebuild warning on a match over an unrecorded generated directory, that one platform's failure keeps the other's
 verdict, and the aggregate outcome. `src/project/__tests__/sourceDiff-test.ts`: the identity rule,
 dependency paths on both path separators, the readable names, and the truncation.
+`src/status/__tests__/installed-test.ts`: which platforms this host asks, and the section's shape.
+`src/status/__tests__/statusAsync-test.ts`: that the device is read under `--explain` and not on a
+default run, that `AGENT_CLI_NO_DEVICE` reads none, and that the deadline costs the section and
+nothing else. `e2e/__tests__/status-installed-test.ts`, across the process boundary: a stub `adb`
+that serves a fixture APK byte range by byte range, with the stub `fingerprint` set to the embedded
+hash and then to another one; the `installed` section of `status --explain --json` in both cases and
+for an app that is not installed; the whole-APK pull when the device cannot serve ranges; that a
+default `status` and a harness run read no device; that a hung `adb` is killed at the deadline with
+no fallback started; on macOS, a stub `xcrun` serving a booted simulator's app container, alone and
+narrowed by `--device`; and that `--device` without `--explain` is refused.

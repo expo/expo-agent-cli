@@ -10,12 +10,15 @@ export const statusHelp: CommandHelp = {
   options: [
     `--json                    Print the whole report as JSON, raw project probe included`,
     `--explain                 The deep dive: which sources changed, whether an update can\n` +
-      `                          ship over the air, and a fresh answer from EAS about builds\n` +
-      `                          for this fingerprint. Slower than the default report`,
+      `                          ship over the air, a fresh answer from EAS about builds for\n` +
+      `                          this fingerprint, and what the app on a device was built from.\n` +
+      `                          Slower than the default report`,
     `--assert <class>          Exit 20 when the change costs more than this class, and 22\n` +
       `                          when no class could be established. Without it, always 0`,
     `--build <id>              Compare against an EAS build instead of the local record.\n` +
       `                          Needs --explain, because it asks the service`,
+    `--device <name>           Read the installed app on this simulator, emulator or device\n` +
+      `                          only, by name, UDID or adb serial. Needs --explain`,
     `--dev-server-url <url>    Dev server to probe (default: the project's own, then 8081-8085)`,
     `--no-followups            Leave the suggested follow-up commands out of the report`,
     `--no-fingerprint-cache    Hash the project again instead of revalidating the cached hash`,
@@ -32,7 +35,7 @@ export const statusHelp: CommandHelp = {
     },
     {
       run: `${PROGRAM_PREFIX} status --explain`,
-      gets: 'the sources that changed, the OTA verdict, and what EAS already has built',
+      gets: 'the sources that changed, the OTA verdict, what EAS has built, and what the device holds',
     },
     {
       run: `${PROGRAM_PREFIX} status --assert js-only`,
@@ -47,6 +50,7 @@ export const statusHelp: CommandHelp = {
       'project',
       'expoGo',
       'freshness',
+      'installed',
       'builds',
       'devServer',
       'device',
@@ -68,6 +72,9 @@ export const statusHelp: CommandHelp = {
     `established · 1 the command itself was wrong.`,
     `The fingerprint is cached per platform and revalidated against the files that can move it.`,
     `It cannot see inside ios/ or android/, so entries expire after ten minutes.`,
+    `The installed line (--explain) compares the project with what the app on a device was built`,
+    `from, read out of the app itself: expo-constants embeds it in debug builds from SDK 58. Right`,
+    `about a build somebody else made, which freshness cannot be. A release build embeds none.`,
   ],
 };
 
@@ -80,6 +87,7 @@ export const agentCliStatus: Command = async (argv) => {
       '--explain': Boolean,
       '--assert': String,
       '--build': String,
+      '--device': String,
       '--dev-server-url': String,
       '--no-followups': Boolean,
       '--no-fingerprint-cache': Boolean,
@@ -99,7 +107,7 @@ export const agentCliStatus: Command = async (argv) => {
     require('../utils/findUp') as typeof import('../utils/findUp');
   const { resolveDevServerUrlFlag } =
     require('../runtime/devServer') as typeof import('../runtime/devServer');
-  const { resolveAssertClass, resolveBuildId } =
+  const { resolveAssertClass, resolveBuildId, resolveDeviceFlag } =
     require('./resolveOptions') as typeof import('./resolveOptions');
   const { printStatusAsync } = require('./statusAsync') as typeof import('./statusAsync');
 
@@ -109,6 +117,7 @@ export const agentCliStatus: Command = async (argv) => {
     // directory somebody happened to run it in.
     const assertClass = resolveAssertClass(args['--assert']);
     const buildId = resolveBuildId(args['--build'], { explain });
+    const device = resolveDeviceFlag(args['--device'], { explain });
 
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
     const explicitDevServerUrl =
@@ -119,6 +128,7 @@ export const agentCliStatus: Command = async (argv) => {
       explain,
       assert: assertClass,
       buildId,
+      device,
       followups: !args['--no-followups'],
       // Undefined rather than `true` when the flag is absent, so `AGENT_CLI_NO_FINGERPRINT_CACHE`
       // still decides: a flag that was not passed states nothing.
