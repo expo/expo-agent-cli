@@ -57,6 +57,7 @@
     "@expo/agent-eval-vitest": "0.0.2",
     "@types/getenv": "^1.0.0",
     "@types/node": "^22.14.0",
+    "@types/semver": "^7.8.0",
     "@types/ws": "^8.5.4",
     "@vercel/ncc": "^0.38.3",
     "agent-cli-detector": "0.1.6",
@@ -66,6 +67,7 @@
     "expo-module-scripts": "^56.0.3",
     "getenv": "^2.0.0",
     "memfs": "^3.2.0",
+    "semver": "^7.8.5",
     "typescript": "~6.0.3",
     "vitest": "^4.1.11",
     "ws": "^8.12.1"
