@@ -1162,3 +1162,25 @@ export async function breakXcodeSelectAsync(projectRoot: string): Promise<void> 
   );
   await installStubBinAsync(binDir, 'xcode-select', stubScript);
 }
+
+/**
+ * Link a copied fixture to an EAS project, the way `eas init` does: `extra.eas.projectId` in `app.json`.
+ *
+ * No fixture is linked as committed, and `status` reads that link off the static config before it
+ * asks EAS anything (`src/status/easBuilds.ts`): an unlinked project is answered without a network
+ * call. A test whose subject is the *lookup* has to be a project the lookup would run for.
+ */
+export async function linkFixtureToEasAsync(
+  projectRoot: string,
+  projectId = 'f52a76f7-9fc7-4b59-becd-6d84e9f129d7'
+): Promise<void> {
+  const configPath = path.join(projectRoot, 'app.json');
+  const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+  const expo = config.expo ?? config;
+  // An id already there wins: a fixture that ships one is a fixture about that one.
+  expo.extra = {
+    ...expo.extra,
+    eas: { ...expo.extra?.eas, projectId: expo.extra?.eas?.projectId ?? projectId },
+  };
+  await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2) + '\n');
+}
