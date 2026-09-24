@@ -676,7 +676,11 @@ default run, that `AGENT_CLI_NO_DEVICE` reads none, and that the deadline costs 
 nothing else. `e2e/__tests__/status-installed-test.ts`, across the process boundary: a stub `adb`
 that serves a fixture APK byte range by byte range, with the stub `fingerprint` set to the embedded
 hash and then to another one; the `installed` section of `status --explain --json` in both cases and
-for an app that is not installed; the whole-APK pull when the device cannot serve ranges; that a
+for an app that is not installed, with both hashes and the command in JSON on a mismatch; an app whose
+file is not the JSON `expo-constants` writes (`no-embedded-fingerprint`, rebuild suggested); two
+`@expo/fingerprint` versions (`fingerprint-version-mismatch`, no command); the prebuild warning on a
+match over a generated `android/` this CLI never built, and its absence with the recorded build; the
+whole-APK pull when the device cannot serve ranges; that a
 default `status` and a harness run read no device; that a hung `adb` is killed at the deadline with
 no fallback started; on macOS, a stub `xcrun` serving a booted simulator's app container, alone and
 narrowed by `--device`; and that `--device` without `--explain` is refused.

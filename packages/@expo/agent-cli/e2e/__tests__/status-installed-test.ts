@@ -21,6 +21,7 @@ import {
 import {
   EMBEDDED_HASH,
   EMULATOR_NAME,
+  LEGACY_APK_FIXTURE,
   PHONE_NAME,
   PHONE_UDID,
   SIMULATOR_NAME,
@@ -116,6 +117,110 @@ describe('@expo/agent-cli status --explain, the installed section', () => {
     expect(result.stdout).toMatch(/^installed\s+rebuild required/m);
     expect(result.stdout).toContain(`android: rebuild-required (${EMULATOR_NAME})`);
     expect(result.stdout).toContain('npx expo run:android');
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §What the answer is
+  it('carries both hashes and the rebuild command in JSON when they differ', async () => {
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+      env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: 'something-else' },
+    });
+
+    const report: Report = JSON.parse(result.stdout);
+    expect(report.installed?.outcome).toBe('rebuild-required');
+    expect(platformRow(report, 'android')).toMatchObject({
+      status: 'rebuild-required',
+      reason: 'hash-mismatch',
+      installedHash: EMBEDDED_HASH,
+      currentHash: 'something-else',
+      commands: ['npx expo run:android'],
+      recommendation: expect.stringContaining('Rebuild the app'),
+    });
+  });
+
+  // A build whose file is not the JSON `expo-constants` writes: a release build, a build from
+  // before the embed, or a rebundled one. The reader answers "no fingerprint", never an error.
+  it('reports unknown with a rebuild when the installed app embeds no readable fingerprint', async () => {
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+      env: {
+        ...WITH_DEVICES,
+        ...adb.env,
+        STUB_FINGERPRINT_HASH: EMBEDDED_HASH,
+        STUB_ADB_APK_FIXTURE: LEGACY_APK_FIXTURE,
+      },
+    });
+
+    const report: Report = JSON.parse(result.stdout);
+    expect(report.installed?.outcome).toBe('unknown');
+    expect(platformRow(report, 'android')).toMatchObject({
+      status: 'unknown',
+      reason: 'no-embedded-fingerprint',
+      commands: ['npx expo run:android'],
+      recommendation: expect.stringContaining('release build'),
+    });
+  });
+
+  // The embedded file names `@expo/fingerprint` 0.20.0; the project's copy is bumped, so the two
+  // hashes differ for a reason that is not the project. No command: an agent must not rebuild for it.
+  it('refuses to compare hashes from two fingerprint versions, and suggests no command', async () => {
+    const manifestPath = path.join(
+      projectRoot,
+      'node_modules',
+      '@expo',
+      'fingerprint',
+      'package.json'
+    );
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    fs.writeFileSync(manifestPath, JSON.stringify({ ...manifest, version: '0.21.0' }));
+
+    const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+      env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: 'something-else' },
+    });
+
+    const report: Report = JSON.parse(result.stdout);
+    expect(report.installed?.outcome).toBe('unknown');
+    expect(platformRow(report, 'android')).toMatchObject({
+      status: 'unknown',
+      reason: 'fingerprint-version-mismatch',
+      commands: [],
+      recommendation: expect.stringContaining('0.21.0'),
+    });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §What this cannot see
+  // A CNG project's fingerprint hashes the inputs, not the generated directory, so a match over an
+  // `android/` this CLI never built says to prebuild before trusting it. With the recorded build it
+  // says nothing of the kind.
+  describe('a generated native directory', () => {
+    beforeEach(() => {
+      fs.mkdirSync(path.join(projectRoot, 'android'), { recursive: true });
+      fs.appendFileSync(path.join(projectRoot, '.gitignore'), '\nandroid/\n');
+    });
+
+    it('warns to prebuild on a match when this CLI never built it', async () => {
+      fs.rmSync(path.join(projectRoot, '.expo', 'agent-cli-last-build.json'));
+      const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+        env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
+      });
+
+      const report: Report = JSON.parse(result.stdout);
+      expect(platformRow(report, 'android')).toMatchObject({
+        status: 'up-to-date',
+        reason: 'hash-match',
+        commands: [],
+        recommendation: expect.stringContaining('npx @expo/agent-cli prebuild -p android'),
+      });
+    });
+
+    it('keeps the plain match when the last build was recorded here', async () => {
+      const result = await executeAgentCliAsync(projectRoot, ['status', '--explain', '--json'], {
+        env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
+      });
+
+      const report: Report = JSON.parse(result.stdout);
+      expect(platformRow(report, 'android')?.recommendation).toBe(
+        'The installed app matches the project. A JS reload is enough.'
+      );
+    });
   });
 
   it('reports unknown when the app is not installed', async () => {

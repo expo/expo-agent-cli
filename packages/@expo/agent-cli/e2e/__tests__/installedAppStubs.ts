@@ -10,6 +10,11 @@ import path from 'node:path';
 import { installStubBinAsync } from '../utils';
 
 export const APK_FIXTURE = path.resolve(__dirname, '../../src/__fixtures__/zip/fixture-stored.zip');
+/** An archive whose `app.fingerprint` is not the JSON `expo-constants` writes: a pre-JSON build. */
+export const LEGACY_APK_FIXTURE = path.resolve(
+  __dirname,
+  '../../src/__fixtures__/zip/fixture-deflated.zip'
+);
 export const DEVICECTL_FIXTURE = path.resolve(
   __dirname,
   '../../src/__fixtures__/devicectl/list.json'
@@ -41,7 +46,8 @@ function readCalls(recordPath: string): string[][] {
  * A stub `adb` with one emulator that has `appId` installed, unless `STUB_ADB_INSTALLED=0`.
  *
  * `exec-out` receives the `dd` command as one argument, the way a device shell would, and the stub
- * slices the fixture APK on `skip=` and `count=`. `STUB_ADB_NO_DD=1` fails `stat`, the way a device
+ * slices the fixture APK on `skip=` and `count=`. `STUB_ADB_APK_FIXTURE=<path>` serves another
+ * archive, e.g. one whose `app.fingerprint` is not the JSON `expo-constants` writes. `STUB_ADB_NO_DD=1` fails `stat`, the way a device
  * without the tools does, and `pull` then copies the fixture to the path asked for.
  * `STUB_ADB_HANG_READ=<file>` makes `exec-out` write its pid there and never exit.
  *
@@ -61,7 +67,7 @@ export async function installStubAdbAsync(
       `const fs = require('fs');`,
       `const args = process.argv.slice(2);`,
       `fs.appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify(args) + '\\n');`,
-      `const apk = fs.readFileSync(${JSON.stringify(APK_FIXTURE)});`,
+      `const apk = fs.readFileSync(process.env.STUB_ADB_APK_FIXTURE || ${JSON.stringify(APK_FIXTURE)});`,
       `const installed = process.env.STUB_ADB_INSTALLED !== '0';`,
       `if (args[0] === 'devices') {`,
       `  process.stdout.write('List of devices attached\\n${EMULATOR_SERIAL}\\tdevice model:sdk_gphone64_arm64\\n');`,
