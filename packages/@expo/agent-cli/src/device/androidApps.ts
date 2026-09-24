@@ -37,21 +37,20 @@ export interface AndroidAppOptions {
 }
 
 /**
- * Whether one Android device has one app.
+ * The APK paths of one app on one Android device: `base.apk` first, then any splits.
  *
  * **Three answers, not two.** `null` is "this could not be looked up" — no `adb` on the machine, a
- * device that has gone away, a `pm` that answered something unreadable — and it is separate from
- * `false` for the same reason `simulatorDiskExistsAsync` exists on the iOS side: the caller that
- * acts on `false` downloads a few hundred megabytes, and a failed lookup is not a licence to do
- * that (@ref ./installedApps §simulatorDiskExistsAsync).
+ * device that has gone away, a `pm` that answered something unreadable. An empty list is a package
+ * the device has not got. The caller that acts on the empty list downloads a few hundred megabytes,
+ * and a failed lookup is not a licence to do that (@ref ./installedApps §simulatorDiskExistsAsync).
  *
  * Never throws.
  */
-export async function androidHasAppAsync(
+export async function androidPackagePathsAsync(
   serial: string,
   appId: string,
   { adb, runAdbAsync: run = runAdbAsync }: AndroidAppOptions = {}
-): Promise<boolean | null> {
+): Promise<string[] | null> {
   const result = await run(['-s', serial, 'shell', 'pm', 'path', appId], {
     adb,
     timeoutMs: PM_TIMEOUT_MS,
@@ -60,16 +59,35 @@ export async function androidHasAppAsync(
     return null;
   }
   // @ref ./androidApps — `pm path` is the one of the two whose exit code means something: `0` with
-  // a `package:` line for an app that is there, `1` for one that is not.
-  if (result.exitCode === 0 && /^package:/m.test(result.stdout)) {
-    return true;
-  }
+  // `package:` lines for an app that is there, `1` for one that is not.
   if (result.exitCode === 1) {
-    return false;
+    return [];
   }
-  // Anything else — a device that is offline, a shell that could not run, a code nothing here
-  // predicted — is a lookup that did not happen rather than an app that is not there.
-  return null;
+  if (result.exitCode !== 0) {
+    return null;
+  }
+  const paths = result.stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('package:'))
+    .map((line) => line.slice('package:'.length));
+  // Exit 0 with no `package:` line is a device that answered something this cannot read, not an
+  // app that is not there.
+  return paths.length ? paths : null;
+}
+
+/**
+ * Whether one Android device has one app, or `null` when nothing could be looked up.
+ *
+ * @see androidPackagePathsAsync for the three answers and why there are three.
+ */
+export async function androidHasAppAsync(
+  serial: string,
+  appId: string,
+  options: AndroidAppOptions = {}
+): Promise<boolean | null> {
+  const paths = await androidPackagePathsAsync(serial, appId, options);
+  return paths == null ? null : paths.length > 0;
 }
 
 /**
