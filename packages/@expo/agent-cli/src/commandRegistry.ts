@@ -124,6 +124,11 @@ export const topLevelCommands: { [command: string]: TopLevelCommand } = {
     load: () => import('./deploy').then((i) => i.agentCliDeploy),
     help: () => import('./deploy').then((i) => i.deployHelp),
   },
+  feedback: {
+    summary: 'Send feedback to the Expo team',
+    load: () => import('./feedback').then((i) => i.agentCliFeedback),
+    help: () => import('./feedback').then((i) => i.feedbackHelp),
+  },
   // The on-ramp, as a command rather than only as a flag. An agent that has been handed this CLI
   // and nothing else types the word it knows — `help` — and the answer has to be the loop, not a
   // suggestion to read something else (llp/0024 §The on-ramp).
@@ -661,6 +666,7 @@ export const helpSections: HelpSection[] = [
     note: 'agents:setup --yes --agent <agent> --json runs without prompting; --no-plugins skips plugin installation.',
   },
   { title: 'Learn', commands: ['help'] },
+  { title: 'Feedback', commands: ['feedback'] },
   {
     title: 'Account',
     commands: authCommands,
