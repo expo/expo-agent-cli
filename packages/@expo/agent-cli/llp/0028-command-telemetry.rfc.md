@@ -1,0 +1,74 @@
+# 0028: Command telemetry
+
+**Type:** RFC
+**Status:** Draft
+**Systems:** `src/telemetry/`; `src/cli.ts`; package build scripts
+**Date:** 2026-09-29
+**Related:** [[0001-agentic-cli-on-expo-cli]], [[0006-agent-native-cli-surface]], [[0010-agent-conventions]]
+
+## Destination and schema
+
+[confirmed, user, 2026-09-29] Use the Expo CLI/EAS CLI observability pipeline with a distinct CLI
+name and minimal command latency. Both repositories send RudderStack-compatible events to
+`https://cdp.expo.dev/v1/batch`. Expo CLI's `expo unified` source selects the production write key
+`24TKR7CQAaGgIrLTgu3Fp4OdOkI`, or `24TKICqYKilXM480mA7ktgVDdea` for staging/local. These public
+ingestion identifiers are the same values shipped by Expo CLI. BigQuery routing belongs to that
+service; this package does not connect to BigQuery directly. [observed in sibling repositories]
+
+The agent CLI sends one `track` event named `action` for each registered command invocation:
+`properties.action = "expo-agent-cli <canonical command>"`, `context.app.name = "expo/agent-cli"`,
+and HTTP user agent `expo-agent-cli/<version>`. Aliases and space-form groups resolve before
+recording. Help, version, bare group listings, and unrecognized command names are excluded.
+Invocation measures usage, not completion or success.
+
+Context follows Expo's fields: app/system versions, architecture, CI, a new invocation session ID,
+`context.agent = { id, sessionId }`, and `context.sandbox_provider`. Undetected agent/sandbox fields
+are omitted. The pinned detector versions use only environment checks by default, so the worker
+inherits the invoking environment and performs detection there. The existing agent helper caches
+detection and tolerates failure. [observed in agent-cli-detector 0.1.7 and sandbox-cli-detector 0.2.0]
+
+## Process boundary and latency
+
+The launcher hands only the canonical command, version, and timestamp to a separately bundled Node
+worker as one JSON argument. It uses ignored stdio, `detached: true`, and `unref()`. No telemetry
+network request, detector call, settings read, or flush happens in the command process. The small
+spawn cost is paid once. Passing a small record directly avoids a temporary queue file.
+
+Unlike Expo's short-command exit queue, the handoff occurs at invocation. This covers long-running
+commands and explicit exits without signal hooks or changes to existing shutdown behavior. The
+worker owns identity lookup and the HTTP request, with a three-second deadline and no retries.
+Failures are silent and cannot change the command's output or exit status. Delivery is best effort;
+a machine shutdown or unavailable service may lose the event.
+
+Both development and production builds emit `build/cli/index.js` and `build/telemetry/index.js`.
+Both are included by the existing published `build` directory. The worker never imports the CLI
+entry point, so it cannot recursively emit command events.
+
+## Identity and opt-out
+
+Reuse a UUID and hashed cached user ID from Expo's `state.json` when available. Honor Expo's
+staging/local home and shell-only `__UNSAFE_EXPO_HOME_DIRECTORY` override. Do not query authentication
+services for telemetry. When `EXPO_TOKEN` is set, do not attribute a cached interactive user's ID.
+The worker never modifies the shared authentication file. Without an existing Expo UUID it persists
+an agent CLI anonymous UUID separately, with atomic exclusive publication and owner-only
+permissions. A read-only home or filesystem without hard-link support falls back to a per-run
+anonymous ID.
+
+`EXPO_NO_TELEMETRY` and `EXPO_OFFLINE` disable telemetry before the spawn and are rechecked by the
+worker. The payload is an explicit command schema, not a subscriber to `2g` events: local events can
+contain raw arguments, paths, typed values, and command output. None belongs in remote telemetry.
+
+## Validation
+
+Unit tests exercise opt-outs, spawn failures, ingestion shape, detector failures, identities, and
+timeouts. Subprocess tests use the built CLI and worker with a fetch interception shim, checking
+command naming, unchanged output/exit behavior, no raw arguments, and parent exit while delivery is
+still pending. Tests disable production telemetry by default. No live ingestion is necessary to
+validate the client contract; downstream warehouse delivery requires service-side verification.
+
+Local production-bundle measurement on 2026-09-29: 16 alternating enabled/disabled pairs after three
+warmups, using `runtime:eval --json` with intercepted, pending telemetry requests. Median parent
+duration was 84.97 ms enabled and 84.48 ms disabled; median paired overhead was 1.51 ms. Every parent
+exited before delivery settled, with identical output and exit status. These are indicative local
+measurements under concurrent test activity, not a cross-platform latency guarantee. The package
+dry run included the independently bundled worker. No event was sent to production for validation.

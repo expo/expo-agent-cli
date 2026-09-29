@@ -433,7 +433,7 @@ async function runTier0Scenario(scenario) {
   const command = scenario.command;
   const result = await runCli(command.argv, {
     cwd: workspace,
-    env: { ...process.env, CI: '1', ...(command.env ?? {}) },
+    env: { ...process.env, CI: '1', EXPO_NO_TELEMETRY: '1', ...(command.env ?? {}) },
     timeoutMs: command.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
 

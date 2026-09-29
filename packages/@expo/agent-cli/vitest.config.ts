@@ -62,6 +62,7 @@ export default defineConfig({
     // `bun run` sets these, and `renderForInvoker` would rewrite every `npx @expo/agent-cli`
     // suggestion to `bunx`. Unit tests pin the written `npx` form unless they set a Bun agent.
     env: {
+      EXPO_NO_TELEMETRY: '1',
       npm_config_user_agent: '',
       npm_execpath: '',
       NO_COLOR: '',

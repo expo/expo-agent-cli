@@ -4,5 +4,9 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   root: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'),
-  test: { include: ['harness/__tests__/*.test.ts'], testTimeout: 10000 },
+  test: {
+    include: ['harness/__tests__/*.test.ts'],
+    testTimeout: 10000,
+    env: { EXPO_NO_TELEMETRY: '1' },
+  },
 });
