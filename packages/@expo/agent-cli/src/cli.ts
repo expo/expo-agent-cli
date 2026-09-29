@@ -99,6 +99,21 @@ installEventLogger({
   version,
 });
 
+// Only registry-owned names enter remote telemetry. Raw arguments and local JSONL events
+// can contain project data and credentials; they are not a telemetry payload.
+if (
+  !args['--version'] &&
+  !args['--help'] &&
+  resolution != null &&
+  (resolution.kind === 'command' || resolution.kind === 'passthrough')
+) {
+  const name = resolution.kind === 'command' ? resolution.name : resolution.command;
+  if (name !== 'help') {
+    const { recordCommand } = require('./telemetry') as typeof import('./telemetry');
+    recordCommand(name, version);
+  }
+}
+
 if (args['--version']) {
   console.log(version);
   process.exit(EXIT_OK);

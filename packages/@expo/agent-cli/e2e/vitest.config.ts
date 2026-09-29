@@ -62,6 +62,7 @@ export default defineConfig({
       sequencer: DurationBalancedSequencer,
     },
     env: {
+      EXPO_NO_TELEMETRY: '1',
       npm_config_user_agent: '',
       npm_execpath: '',
     },
