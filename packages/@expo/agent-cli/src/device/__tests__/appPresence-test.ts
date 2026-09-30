@@ -7,7 +7,6 @@
 
 import type { NavigateDevice } from '../../navigate/device';
 import { probeAppPresenceAsync } from '../appPresence';
-import type { LocalDeviceProbe } from '../localDevice';
 
 const APP_ID = 'com.example.app';
 const projectRoot = '/project';
@@ -20,13 +19,12 @@ function androidDevice(deviceId = 'emulator-5554'): NavigateDevice {
   return { backend: 'local-android', platform: 'android', deviceId };
 }
 
-function probeOf(devices: NavigateDevice[]): () => Promise<LocalDeviceProbe> {
-  return async () => ({
-    state: devices.length ? 'present' : 'absent',
-    device: devices[0] ?? null,
-    devices,
-    reason: devices.length ? null : 'no device',
-  });
+/** The device this worktree claims, per platform. */
+function probeOf(devices: NavigateDevice[]) {
+  return async (_projectRoot: string, platform: string) => {
+    const device = devices.find((candidate) => candidate.platform === platform);
+    return device ? { deviceId: device.deviceId, backend: device.backend as 'local-ios' } : null;
+  };
 }
 
 /** The defaults every row overrides one of: an iOS simulator that has the app. */

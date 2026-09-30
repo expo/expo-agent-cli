@@ -1,3 +1,4 @@
+// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Installed-app fingerprint check
 // Compare the fingerprint embedded in the installed app with the project's, per platform, and turn
 // the comparison into one verdict per platform. Reported by `status`; not a command of its own.
@@ -58,6 +59,8 @@ export interface InstalledAppReport {
 
 /** Reads a fingerprint off a device. Injected by the tests; the platform readers are the defaults. */
 export type InstalledFingerprintReader = (input: {
+  /** The worktree whose claimed device is read when {@link device} is null. */
+  projectRoot: string;
   platform: InstalledAppPlatform;
   appId: string;
   device: string | null;
@@ -185,6 +188,7 @@ async function checkPlatformAsync(
   // The device is read last, once the verdict is known to need it: a read has a cost, and on a
   // phone it launches the app.
   const installed = await deps.readInstalled({
+    projectRoot,
     platform,
     appId,
     device: options.device,

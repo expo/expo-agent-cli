@@ -10,13 +10,17 @@ import { CommandError } from '../../utils/errors';
 import { probeLocalDeviceAsync, readLocalDeviceProbe, resetLocalDeviceCache } from '../localDevice';
 
 /** A probe that ran and found something. */
-const found: DeviceProbe = {
-  device: { backend: 'local-ios', platform: 'ios', deviceId: 'UDID-1', name: 'iPhone 17' },
-};
+const simulator = {
+  backend: 'local-ios',
+  platform: 'ios',
+  deviceId: 'UDID-1',
+  name: 'iPhone 17',
+} as const;
+const found: DeviceProbe = { devices: [simulator] };
 
 /** A probe that ran and found nothing. */
 const none: DeviceProbe = {
-  device: null,
+  devices: [],
   reason: 'no booted iOS simulator was found',
 };
 
@@ -27,27 +31,26 @@ const none: DeviceProbe = {
  * to avoid reporting a missing SDK as a missing device (`src/device/adb.ts`, friction run 6's F49).
  */
 const unrunnable: DeviceProbe = {
-  device: null,
+  devices: [],
   reason: 'could not run "adb": spawn adb ENOENT',
   toolError: new CommandError('ADB_NOT_RUNNABLE', 'adb could not be run'),
 };
 
 /** An attached Android emulator, as the second probe reports it. */
-const foundAndroid: DeviceProbe = {
-  device: {
-    backend: 'local-android',
-    platform: 'android',
-    deviceId: 'emulator-5554',
-    name: 'sdk_gphone64_arm64',
-  },
-};
+const emulator = {
+  backend: 'local-android',
+  platform: 'android',
+  deviceId: 'emulator-5554',
+  name: 'sdk_gphone64_arm64',
+} as const;
+const foundAndroid: DeviceProbe = { devices: [emulator] };
 
 describe(readLocalDeviceProbe, () => {
   it(`reports the device when one platform found one`, () => {
     expect(readLocalDeviceProbe([found, none])).toEqual({
       state: 'present',
-      device: found.device,
-      devices: [found.device],
+      device: simulator,
+      devices: [simulator],
       reason: null,
     });
   });
@@ -64,8 +67,8 @@ describe(readLocalDeviceProbe, () => {
     const probe = readLocalDeviceProbe([found, foundAndroid]);
 
     expect(probe.state).toBe('present');
-    expect(probe.device).toEqual(found.device);
-    expect(probe.devices).toEqual([found.device, foundAndroid.device]);
+    expect(probe.device).toEqual(simulator);
+    expect(probe.devices).toEqual([simulator, emulator]);
   });
 
   it(`reports an empty device list when nothing was found (F106)`, () => {

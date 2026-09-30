@@ -1,4 +1,5 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
 // Whether this project's development build is already on the device the run would open it on.
 //
 // The gap this closes: a fingerprint that matches the recorded build proves the *build* is current
@@ -19,7 +20,7 @@ import type { NativePlatform } from '../plan/types';
 import { readConfiguredAppId } from '../runtime/appId';
 import { hasAppOnDeviceAsync } from './hasApp';
 import { androidDeviceNameAsync } from './installDevBuild';
-import { probeLocalDeviceAsync, type LocalDeviceProbe } from './localDevice';
+import { resolveClaimedDeviceAsync, type LocalDeviceBackend } from './claimedDevice';
 
 /** Whether the development build is on the device, as far as this machine can be asked. */
 export type AppPresence =
@@ -66,8 +67,11 @@ export const APP_PRESENCE_BUDGET_MS = 8000;
 const UNPROBED: AppPresenceProbe = { presence: 'unknown', installDevice: null };
 
 export interface ProbeAppPresenceOptions {
-  /** Injected for tests. Defaults to the process-cached probe every other caller shares. */
-  probeDeviceAsync?: () => Promise<LocalDeviceProbe>;
+  /** Injected for tests. Defaults to the booted device this worktree claims on the platform. */
+  probeDeviceAsync?: (
+    projectRoot: string,
+    platform: NativePlatform
+  ) => Promise<{ deviceId: string; backend: LocalDeviceBackend } | null>;
   /** Injected for tests. */
   readAppId?: typeof readConfiguredAppId;
   /** Injected for tests. */
@@ -81,8 +85,8 @@ export interface ProbeAppPresenceOptions {
 /**
  * Whether the development build of this project is installed on a device this machine has.
  *
- * The device is the one the run would open the app on: the first the local probe found for this
- * platform, which is the same choice `navigate` and `smoke` make. A machine with no device for the
+ * The device is the one the run would open the app on: the booted device this worktree claims on
+ * the platform, which is the device `navigate` and `smoke` use. A machine with no device for the
  * platform answers `unknown` rather than `missing` — nothing was asked, and `expo start` boots one
  * itself, so a plan is in no position to claim the app is not on a device that does not exist yet.
  *
@@ -122,7 +126,7 @@ async function askDeviceAsync(
   projectRoot: string,
   platform: NativePlatform,
   {
-    probeDeviceAsync = probeLocalDeviceAsync,
+    probeDeviceAsync = claimedBootedDeviceAsync,
     readAppId = readConfiguredAppId,
     hasAppOnDevice = hasAppOnDeviceAsync,
     androidDeviceName = androidDeviceNameAsync,
@@ -136,8 +140,7 @@ async function askDeviceAsync(
     return UNPROBED;
   }
 
-  const probe = await probeDeviceAsync();
-  const device = probe.devices.find((candidate) => candidate.platform === platform);
+  const device = await probeDeviceAsync(projectRoot, platform);
   if (device == null) {
     return UNPROBED;
   }
@@ -156,4 +159,12 @@ async function askDeviceAsync(
     presence: 'missing',
     installDevice: platform === 'ios' ? device.deviceId : await androidDeviceName(device.deviceId),
   };
+}
+
+async function claimedBootedDeviceAsync(
+  projectRoot: string,
+  platform: NativePlatform
+): Promise<{ deviceId: string; backend: LocalDeviceBackend } | null> {
+  const claimed = await resolveClaimedDeviceAsync({ platform, projectRoot, allowBoot: false });
+  return claimed.ok ? { deviceId: claimed.id, backend: claimed.backend } : null;
 }

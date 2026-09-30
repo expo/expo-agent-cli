@@ -538,7 +538,11 @@ async function listEmulatorsAsync({
     if (!isEmulator && !explicit && !mine.some((claim) => claim.id === deviceId)) {
       continue;
     }
-    const name = isEmulator ? await androidDeviceNameAsync(deviceId, { run: runWith(adb) }) : null;
+    // The AVD name picks an idle AVD to boot and matches `--device`; a read needs neither.
+    const name =
+      isEmulator && (allowBoot || explicit)
+        ? await androidDeviceNameAsync(deviceId, { run: runWith(adb) })
+        : null;
     if (name) {
       runningAvds.push(name);
     }
