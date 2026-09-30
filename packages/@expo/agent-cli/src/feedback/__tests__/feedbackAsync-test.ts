@@ -4,10 +4,10 @@ import { homedir } from 'os';
 import path from 'path';
 
 import packageJson from '../../../package.json';
+import { getExpoHomeDirectory } from '../../utils/expoHome';
 import {
   createFeedbackMetadataAsync,
   getAuthHeaders,
-  getExpoHomeDirectory,
   getProjectMetadata,
   resolveFeedbackAsync,
   resolveFeedbackId,
