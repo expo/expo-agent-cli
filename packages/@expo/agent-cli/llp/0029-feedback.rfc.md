@@ -40,10 +40,14 @@ The command also follows the agent CLI help and error conventions and offers `--
 feedback. Opt-out prints the existing instruction to respect the user's choice, and JSON mode
 returns `{ "sent": false, "feedbackId": null }`. The launcher suppresses command telemetry for a
 feedback invocation with `DO_NOT_TRACK=1`, so its earlier telemetry hook cannot bypass this contract.
+The send boundary rechecks opt-out and reports whether feedback was sent, so an opt-out loaded by
+project config also returns `sent: false` and does not print a success message. Network failures and
+timeouts use `FEEDBACK_ERROR`, including the shared JSON error envelope, without retrying.
 
 ## Validation
 
 Unit tests pin metadata, validation, prompting, session IDs, authentication priority, request
 shape, endpoint selection, opt-out, timeout, and server errors. Subprocess tests run the published
 bundle against a local HTTP capture server, covering submission, continuation, JSON output,
-validation, and opt-out. No production feedback is needed for these checks.
+validation, opt-out loaded by project config, connection failures, and timeouts. No production
+feedback is needed for these checks.

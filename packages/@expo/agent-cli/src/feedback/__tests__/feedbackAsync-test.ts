@@ -351,11 +351,13 @@ describe('feedback submission', () => {
     vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutSignal);
     const metadata = await createFeedbackMetadataAsync(PROJECT_ROOT, 'mcp', 'expo-mcp');
 
-    await sendFeedbackAsync({
-      feedback: VALID_FEEDBACK,
-      metadata,
-      session: { sessionSecret: 'session-secret' },
-    });
+    await expect(
+      sendFeedbackAsync({
+        feedback: VALID_FEEDBACK,
+        metadata,
+        session: { sessionSecret: 'session-secret' },
+      })
+    ).resolves.toBe(true);
 
     expect(fetchMock).toHaveBeenCalledExactlyOnceWith(
       'http://127.0.0.1:3000/v2/feedback/cli-send',
@@ -409,7 +411,7 @@ describe('feedback submission', () => {
       vi.stubEnv(name, '1');
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      await sendFeedbackAsync({ feedback: VALID_FEEDBACK, metadata });
+      await expect(sendFeedbackAsync({ feedback: VALID_FEEDBACK, metadata })).resolves.toBe(false);
 
       expect(fetchMock).not.toHaveBeenCalled();
       expect(consoleErrorSpy).toHaveBeenCalledWith(TELEMETRY_DISABLED_MESSAGE);
@@ -446,16 +448,22 @@ describe('feedback submission', () => {
     }
   );
 
-  it('propagates a network timeout without retrying', async () => {
-    const timeout = new DOMException('The operation timed out', 'TimeoutError');
-    fetchMock.mockRejectedValueOnce(timeout);
+  it.each([
+    new TypeError('fetch failed'),
+    new DOMException('The operation timed out', 'TimeoutError'),
+  ])('reports a transport failure through the command error envelope: $name', async (error) => {
+    fetchMock.mockRejectedValueOnce(error);
 
     await expect(
       sendFeedbackAsync({
         feedback: VALID_FEEDBACK,
         metadata: await createFeedbackMetadataAsync(PROJECT_ROOT),
       })
-    ).rejects.toBe(timeout);
+    ).rejects.toMatchObject({
+      code: 'FEEDBACK_ERROR',
+      message: `Failed to send feedback: ${error.message}`,
+      suggestedCommand: expect.stringContaining(' feedback --help'),
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

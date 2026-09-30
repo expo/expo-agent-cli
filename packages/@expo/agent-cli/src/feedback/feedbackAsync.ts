@@ -289,29 +289,37 @@ export async function sendFeedbackAsync({
   session,
 }: CliFeedbackRequest & {
   session?: UserSession | null;
-}): Promise<void> {
+}): Promise<boolean> {
   validateFeedback(feedback);
   if (isTelemetryDisabled()) {
     console.error(TELEMETRY_DISABLED_MESSAGE);
-    return;
+    return false;
   }
 
   const request: CliFeedbackRequest = { feedback, metadata };
-  const response = await fetch(new URL('/v2/feedback/cli-send', getExpoApiBaseUrl()).toString(), {
-    method: 'POST',
-    signal: AbortSignal.timeout(FEEDBACK_TIMEOUT_MS),
-    headers: {
-      'Content-Type': 'application/json',
-      ...getAuthHeaders(session),
-      'User-Agent': `${CLI_NAME}/${getPackageVersion()}`,
-    },
-    body: JSON.stringify(request),
-  });
+  let response: Response;
+  try {
+    response = await fetch(new URL('/v2/feedback/cli-send', getExpoApiBaseUrl()).toString(), {
+      method: 'POST',
+      signal: AbortSignal.timeout(FEEDBACK_TIMEOUT_MS),
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(session),
+        'User-Agent': `${CLI_NAME}/${getPackageVersion()}`,
+      },
+      body: JSON.stringify(request),
+    });
+  } catch (error) {
+    throw new FeedbackError(
+      `Failed to send feedback: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
 
   if (!response.ok) {
     const message = await getErrorMessageAsync(response);
     throw new FeedbackError(message);
   }
+  return true;
 }
 
 export function getAuthHeaders(session = getSession()): Record<string, string> {
