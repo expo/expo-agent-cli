@@ -41,13 +41,21 @@ spawn cost is paid once. Passing a small record directly avoids a temporary queu
 
 Unlike Expo's short-command exit queue, the handoff occurs at invocation. This covers long-running
 commands and explicit exits without signal hooks or changes to existing shutdown behavior. The
-worker owns identity lookup and the HTTP request, with a three-second deadline and no retries.
+worker owns identity lookup and the HTTP request. Like Expo CLI's `FetchClient`, it makes up to
+three attempts, retrying immediately only when fetch rejects. All attempts reuse the serialized
+payload, including its message ID, and share one three-second deadline. HTTP error responses are
+not retried, matching Expo CLI. Once the deadline expires, no further attempt starts.
 Failures are silent and cannot change the command's output or exit status. Delivery is best effort;
 a machine shutdown or unavailable service may lose the event.
 
 Both development and production builds emit `build/cli/index.js` and `build/telemetry/index.js`.
 Both are included by the existing published `build` directory. The worker never imports the CLI
 entry point, so it cannot recursively emit command events.
+
+Expo CLI emits its worker through its TypeScript build. This package bundles the worker with a
+second ncc invocation. ncc's automatic asset builds use a transpilation mode that removes
+`rootDir`, which fails with TypeScript 6 error TS5011. Keep the explicit worker build until that
+compatibility issue is resolved. [observed, 2026-09-30]
 
 ## Identity and opt-out
 
@@ -65,11 +73,12 @@ contain raw arguments, paths, typed values, and command output. None belongs in 
 
 ## Validation
 
-Unit tests exercise opt-outs, spawn failures, ingestion shape, detector failures, identities, and
-timeouts. Subprocess tests use the built CLI and worker with a fetch interception shim, checking
-command naming, unchanged output/exit behavior, no raw arguments, and parent exit while delivery is
-still pending. Tests disable production telemetry by default. No live ingestion is necessary to
+Unit tests exercise opt-outs, spawn failures, ingestion shape, detector failures, identities,
+retries, and a shared deadline. Subprocess tests use the built CLI and worker with a fetch
+interception shim, checking command naming, unchanged output/exit behavior, no raw arguments, and
+parent exit while delivery is still pending. Tests disable production telemetry by default. No live ingestion is necessary to
 validate the client contract; downstream warehouse delivery requires service-side verification.
+[confirmed, user, 2026-09-30] Three command events from the PR build reached BigQuery.
 
 Local production-bundle measurement on 2026-09-29: 16 alternating enabled/disabled pairs after three
 warmups, using `runtime:eval --json` with intercepted, pending telemetry requests. Median parent

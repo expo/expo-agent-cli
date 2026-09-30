@@ -62,8 +62,12 @@ const isWorker = (file) => typeof file === 'string' &&
 const record = (type, pid = process.pid) =>
   fs.appendFileSync(eventsFile, JSON.stringify({ type, pid }) + '\n');
 
+// Block network access even if worker discovery breaks after a packaging change.
+globalThis.fetch = async () => { throw new Error('Unexpected external request in telemetry test'); };
+
 if (isWorker(process.argv[1])) {
   process.on('exit', () => record('exit'));
+  let attempts = 0;
   globalThis.fetch = (url, options = {}) => {
     fs.appendFileSync(requestsFile, JSON.stringify({
       url: String(url),
@@ -72,6 +76,9 @@ if (isWorker(process.argv[1])) {
       body: JSON.parse(options.body),
     }) + '\n');
     record('request');
+    if (++attempts <= Number(process.env.TELEMETRY_TEST_FAILURES || 0)) {
+      return Promise.reject(new TypeError('fetch failed'));
+    }
     return new Promise((resolve, reject) => {
       let timer;
       const finish = (aborted) => {
@@ -119,6 +126,7 @@ if (isWorker(process.argv[1])) {
 
   const readEvents = () => readLines<WorkerEvent>(eventsFile);
   const readRequests = () => readLines<TelemetryRequest>(requestsFile);
+  const releaseRequest = () => fs.promises.writeFile(gateFile, '');
   return {
     projectRoot,
     env: {
@@ -130,6 +138,7 @@ if (isWorker(process.argv[1])) {
       EXPO_STAGING: '0',
       EXPO_LOCAL: '0',
       EXPO_TOKEN: undefined,
+      TELEMETRY_TEST_FAILURES: '0',
       CODEX_THREAD_ID: 'telemetry-e2e-agent-session',
       E2B_SANDBOX: 'true',
       // These sandboxes precede E2B in the detector's list.
@@ -142,13 +151,14 @@ if (isWorker(process.argv[1])) {
     } satisfies Record<string, string | undefined>,
     readEvents,
     readRequests,
+    releaseRequest,
     readUpstreamEnvironment: () => readLines<Record<string, string>>(upstreamFile),
     async waitForRequest() {
       expect(await waitForAsync(() => readRequests().length > 0, 10_000)).toBe(true);
       return readRequests()[0]!;
     },
     async close() {
-      await fs.promises.writeFile(gateFile, '');
+      await releaseRequest();
       const workers = readEvents().filter((event) => event.type === 'spawn');
       const exited = await waitForAsync(
         () =>
@@ -224,6 +234,36 @@ describe('@expo/agent-cli telemetry', () => {
       },
     });
     expect(request.body.batch[0]!.properties).toEqual({ action: 'expo-agent-cli runtime:eval' });
+  });
+
+  it('retries the same event twice in the worker without waiting in the command process', async () => {
+    const args = ['runtime:eval', '--json'];
+    const baseline = await executeAgentCliAsync(telemetry.projectRoot, args, {
+      env: { ...telemetry.env, EXPO_NO_TELEMETRY: '1' },
+      reject: false,
+    });
+    const result = await executeAgentCliAsync(telemetry.projectRoot, args, {
+      env: { ...telemetry.env, TELEMETRY_TEST_FAILURES: '2' },
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(baseline.exitCode);
+    expect(result.stdout).toBe(baseline.stdout);
+    expect(result.stderr).toBe(baseline.stderr);
+    expect(await waitForAsync(() => telemetry.readRequests().length === 3, 10_000)).toBe(true);
+    const requests = telemetry.readRequests();
+    expect(requests).toEqual([requests[0], requests[0], requests[0]]);
+    expect(telemetry.readEvents().filter((event) => event.type === 'spawn')).toHaveLength(1);
+    expect(telemetry.readEvents().map((event) => event.type)).not.toContain('settled');
+    expect(telemetry.readEvents().map((event) => event.type)).not.toContain('exit');
+    await telemetry.releaseRequest();
+    expect(
+      await waitForAsync(
+        () => telemetry.readEvents().some((event) => event.type === 'exit'),
+        10_000
+      )
+    ).toBe(true);
+    expect(telemetry.readEvents().filter((event) => event.type === 'settled')).toHaveLength(1);
   });
 
   it('records a forwarded command without collecting arguments or changing its output', async () => {

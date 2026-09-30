@@ -11,7 +11,7 @@ import type { CommandTelemetry } from './types';
 
 export const TELEMETRY_TIMEOUT_MS = 3_000;
 
-/** Runs only in the detached worker. Delivery is best effort, with no retries. */
+/** Runs only in the detached worker. Retries share one best-effort delivery deadline. */
 export async function sendCommandTelemetryAsync(data: CommandTelemetry): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -28,7 +28,7 @@ export async function sendCommandTelemetryAsync(data: CommandTelemetry): Promise
         : '24TKR7CQAaGgIrLTgu3Fp4OdOkI';
     const sentAt = new Date().toISOString();
 
-    const response = await fetch('https://cdp.expo.dev/v1/batch', {
+    const options: RequestInit = {
       method: 'POST',
       signal: controller.signal,
       headers: {
@@ -61,9 +61,18 @@ export async function sendCommandTelemetryAsync(data: CommandTelemetry): Promise
           },
         ],
       }),
-    });
-    // No response data is used. Release the connection even if a server streams its body.
-    await response.body?.cancel();
+    };
+    for (let attempt = 0; attempt < 3 && !controller.signal.aborted; attempt++) {
+      let response: Response;
+      try {
+        response = await fetch('https://cdp.expo.dev/v1/batch', options);
+      } catch {
+        continue;
+      }
+      // A resolved HTTP response is not retried, even if releasing its body fails.
+      await response.body?.cancel();
+      return;
+    }
   } catch {
     // Telemetry must never print errors or affect a command's output or exit status.
   } finally {

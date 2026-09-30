@@ -127,9 +127,42 @@ it('does not lose the event when sandbox detection throws', async () => {
   expect(fetchMock.mock.calls[0]![1]!.body).not.toContain('detector failure');
 });
 
-it('suppresses network failures and never retries', async () => {
+it('retries rejected fetches with the same request and event identity', async () => {
+  fetchMock
+    .mockRejectedValueOnce(new Error('first network failure'))
+    .mockRejectedValueOnce(new Error('second network failure'));
+
+  await expect(sendCommandTelemetryAsync(data)).resolves.toBeUndefined();
+
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(getTelemetryIdentityAsync).toHaveBeenCalledTimes(1);
+  const [url, options] = fetchMock.mock.calls[0]!;
+  for (const [retryUrl, retryOptions] of fetchMock.mock.calls.slice(1)) {
+    expect(retryUrl).toBe(url);
+    expect(retryOptions).toBe(options);
+  }
+});
+
+it('suppresses network failures after three attempts', async () => {
   fetchMock.mockRejectedValue(new Error('network failure'));
   await expect(sendCommandTelemetryAsync(data)).resolves.toBeUndefined();
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
+it.each([400, 429, 503])('does not retry an HTTP %s response', async (status) => {
+  fetchMock.mockResolvedValue(new Response(null, { status }));
+  await expect(sendCommandTelemetryAsync(data)).resolves.toBeUndefined();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('does not resend an accepted request when releasing its response body fails', async () => {
+  const response = new Response('unused');
+  const cancel = vi.spyOn(response.body!, 'cancel').mockRejectedValue(new Error('cancel failed'));
+  fetchMock.mockResolvedValue(response);
+
+  await expect(sendCommandTelemetryAsync(data)).resolves.toBeUndefined();
+
+  expect(cancel).toHaveBeenCalledTimes(1);
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
@@ -146,4 +179,48 @@ it('aborts a stalled request within the deadline without retrying', async () => 
   await expect(sending).resolves.toBeUndefined();
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(fetchMock.mock.calls[0]![1]!.signal!.aborted).toBe(true);
+});
+
+it('shares the original deadline with a retry instead of starting another timeout', async () => {
+  vi.useFakeTimers();
+  fetchMock
+    .mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error('network failure')), 1_000);
+        })
+    )
+    .mockImplementationOnce(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          options!.signal!.addEventListener('abort', () => reject(new Error('aborted')));
+        })
+    );
+
+  const sending = sendCommandTelemetryAsync(data);
+  await vi.advanceTimersByTimeAsync(TELEMETRY_TIMEOUT_MS - 1);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  const firstSignal = fetchMock.mock.calls[0]![1]!.signal!;
+  expect(fetchMock.mock.calls[1]![1]!.signal).toBe(firstSignal);
+  expect(firstSignal.aborted).toBe(false);
+
+  await vi.advanceTimersByTimeAsync(1);
+  await expect(sending).resolves.toBeUndefined();
+  expect(firstSignal.aborted).toBe(true);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('does not start a request after identity lookup uses the deadline', async () => {
+  vi.useFakeTimers();
+  vi.mocked(getTelemetryIdentityAsync).mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve({ anonymousId: 'anonymous' }), TELEMETRY_TIMEOUT_MS);
+      })
+  );
+
+  const sending = sendCommandTelemetryAsync(data);
+  await vi.advanceTimersByTimeAsync(TELEMETRY_TIMEOUT_MS);
+  await expect(sending).resolves.toBeUndefined();
+  expect(fetchMock).not.toHaveBeenCalled();
 });
