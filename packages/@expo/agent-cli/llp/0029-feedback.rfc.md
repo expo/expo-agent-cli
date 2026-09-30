@@ -19,8 +19,10 @@ no separate download of `submit-expo-feedback`.
 local-only `EXPO_FEEDBACK_API_BASE_URL` override retain the original precedence. `EXPO_TOKEN`
 takes precedence over a cached `expo-session` secret; neither credential enters the body.
 Environment flags use Expo's boolean parsing, so `0` and `false` disable staging/local mode.
-Session lookup honors `__UNSAFE_EXPO_HOME_DIRECTORY` before selecting the staging, local, or
-production Expo home.
+Session lookup uses `src/utils/expoHome.ts`, shared with telemetry and auth session notices. It
+honors `__UNSAFE_EXPO_HOME_DIRECTORY` before selecting the staging, local, or production Expo home.
+Environment flags use the shared `src/utils/env.ts` accessors. The API URL helper stays local to
+feedback, the only command that calls this endpoint directly.
 
 [confirmed, user, 2026-09-30] `metadata.cli.name` is `agent-cli`, and the User-Agent is
 `agent-cli/<version>`. The version comes from the installed agent CLI. The receiving service's
