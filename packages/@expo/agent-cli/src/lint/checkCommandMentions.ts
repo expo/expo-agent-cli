@@ -72,6 +72,10 @@ export const ALLOWED_PLACEHOLDER_COMMANDS: readonly {
     command: `${PROGRAM_PREFIX} inspect:build-log --file <path>`,
     why: "eas-cli has no `build:logs` (llp/0010 §Upstream asks), so nothing here can download the log this reads — the path exists only once a person has saved it, and the follow-up's own `why` says so.",
   },
+  {
+    command: `${PROGRAM_PREFIX} docs:search <query>`,
+    why: 'The query is what the reader wants to learn, which a sync cannot know (llp/0030 §Commands).',
+  },
 ];
 
 /** Where a problem is, what the string says, and what it is used as. */

@@ -49,6 +49,7 @@ Design documents: `llp/0001-agentic-cli-on-expo-cli.rfc.md` and its child LLPs i
 | `agents:setup`                                                 | Set up Expo agents in a project or user home                                |
 | `feedback`                                                     | Send feedback to the Expo team, with agent and project context              |
 | `skills:sync` / `skills:list` / `skills:show` / `skills:clean` | Discover and link skills shipped by installed modules                       |
+| `docs:sync` / `docs:search`                                    | The Expo docs for the project's SDK as local Markdown files to grep         |
 
 Grouped commands use `group:action`, the way `eas-cli` does. The space form is the same command: `skills list` is `skills:list`. Bare `skills` syncs, bare `doctor` checks, bare `dev` runs the plan.
 

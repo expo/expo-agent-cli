@@ -81,6 +81,8 @@ describe('the option lists the sweep checks against', () => {
         "dev:logs",
         "dev:run",
         "dev:stop",
+        "docs:search",
+        "docs:sync",
         "doctor:check",
         "feedback",
         "help",

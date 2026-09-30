@@ -877,7 +877,7 @@ describe(suggestCommandNames, () => {
     // The action name on its own resolves now — `stop` is an alias of `dev:stop` — so this row
     // matters only for near-misses; the alias joins the list it used to be the question for.
     ['stop', ['dev:stop', 'runtime:stop', 'stop']],
-    ['sync', ['skills:sync']],
+    ['sync', ['docs:sync', 'skills:sync']],
     ['setup', ['agents:setup']],
     ['config-plugins', ['inspect:config-plugins']],
     ['build-log', ['inspect:build-log']],
