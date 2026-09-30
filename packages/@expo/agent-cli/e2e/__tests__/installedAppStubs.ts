@@ -1,3 +1,4 @@
+// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
 // @ref llp/0005-runtime-loop-tools.rfc.md §Installed-app fingerprint check
 //
 // Stub device tools for the installed-app check, shared by the reader e2e and the `status` e2e.
@@ -116,14 +117,20 @@ export async function installStubAdbAsync(
  * answers with the fixture phones when `phone` is given; a `launch` then answers the way the
  * dev-launcher responder does, posting `phone.fingerprint` to the callback URL carried by the
  * payload URL — after `phone.postDelayMs`, for a launch that is slow to answer.
+ *
+ * `simulators` replaces the listing with these devices, all shut down until `simctl boot` boots
+ * one, which the stub remembers, as a real `simctl` does. `bootstatus`, `openurl` and `shutdown`
+ * then answer 0. For the device claims (llp/0028), whose inventory is `simctl list devices -j`.
  */
 export async function installStubXcrunAsync(
   root: string,
   {
     booted,
     phone,
+    simulators,
   }: {
     booted?: { fingerprint: string };
+    simulators?: { udid: string; name: string }[];
     /** `postDelayMs` holds the POST back, the way a slow cold launch does. */
     phone?: { fingerprint: string | null; postDelayMs?: number };
   } = {}
@@ -146,6 +153,25 @@ export async function installStubXcrunAsync(
     : {};
   const binDir = path.join(root, '.stub-bin');
   const scriptPath = path.join(binDir, 'xcrun-stub.js');
+  const bootedPath = path.join(root, '.xcrun-booted.json');
+  const bootable = simulators
+    ? [
+        `const bootedPath = ${JSON.stringify(bootedPath)};`,
+        `const booted = () => { try { return JSON.parse(fs.readFileSync(bootedPath, 'utf8')); } catch { return []; } };`,
+        `if (args[0] === 'simctl' && args[1] === 'boot') {`,
+        `  fs.writeFileSync(bootedPath, JSON.stringify([...booted(), args[2]]));`,
+        `  process.exit(0);`,
+        `}`,
+        `if (args[0] === 'simctl' && ['bootstatus', 'openurl', 'shutdown'].includes(args[1])) { process.exit(0); }`,
+        `if (args[0] === 'simctl' && args[1] === 'list') {`,
+        `  const up = booted();`,
+        `  const all = ${JSON.stringify(simulators)}.map((d) => ({ ...d, isAvailable: true, state: up.includes(d.udid) ? 'Booted' : 'Shutdown' }));`,
+        `  const listed = args.includes('booted') ? all.filter((d) => d.state === 'Booted') : all;`,
+        `  process.stdout.write(JSON.stringify({ devices: { 'com.apple.CoreSimulator.SimRuntime.iOS-26-0': listed } }));`,
+        `  process.exit(0);`,
+        `}`,
+      ]
+    : [];
   await fs.promises.mkdir(binDir, { recursive: true });
   await fs.promises.writeFile(
     scriptPath,
@@ -153,6 +179,7 @@ export async function installStubXcrunAsync(
       `const fs = require('fs');`,
       `const args = process.argv.slice(2);`,
       `fs.appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify(args) + '\\n');`,
+      ...bootable,
       `if (args[0] === 'simctl' && args[1] === 'list') {`,
       `  process.stdout.write(JSON.stringify({ devices: ${JSON.stringify(devices)} }));`,
       `  process.exit(0);`,
