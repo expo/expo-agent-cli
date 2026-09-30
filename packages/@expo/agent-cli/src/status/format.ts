@@ -582,7 +582,12 @@ function formatAge(ms: number): string {
 
 function devServerLine(devServer: DevServerStatus): string {
   if (!devServer.running) {
-    return `${chalk.dim('not running')} (${devServer.url})`;
+    const foreign = devServer.foreignServers?.length
+      ? `; another project's dev server answered on ${devServer.foreignServers
+          .map((server) => `port ${server.port} (${server.projectRoot})`)
+          .join(', ')}`
+      : '';
+    return `${chalk.dim('not running')} (${devServer.url}${foreign})`;
   }
   const apps = pluralize(devServer.appsConnected, 'app', 'apps');
   const facts = [
