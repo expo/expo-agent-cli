@@ -190,6 +190,22 @@ export const commandGroups: { [group: string]: CommandGroup } = {
       },
     },
   },
+  // @ref llp/0030-local-docs.rfc.md §Commands — no default action: bare `docs` lists the two.
+  docs: {
+    summary: 'The Expo docs as local Markdown files, for the SDK in use',
+    actions: {
+      sync: {
+        summary: 'Download the Expo docs as .md files to grep',
+        load: () => import('./docs').then((i) => i.agentCliDocsSync),
+        help: () => import('./docs').then((i) => i.docsSyncHelp),
+      },
+      search: {
+        summary: 'Search the local Expo docs, with file and line',
+        load: () => import('./docs').then((i) => i.agentCliDocsSearch),
+        help: () => import('./docs').then((i) => i.docsSearchHelp),
+      },
+    },
+  },
   // Read-only questions about a project that is not running. The two actions were `inspect:build-log`
   // and `inspect:config-plugins`, under two groups named after other CLIs' verbs; one group named after
   // what the caller is doing holds them and every read-only answer that follows.
@@ -665,7 +681,7 @@ export const helpSections: HelpSection[] = [
     commands: [...actionNames('agents'), ...actionNames('skills')],
     note: 'agents:setup --yes --agent <agent> --json runs without prompting; --no-plugins skips plugin installation.',
   },
-  { title: 'Learn', commands: ['help'] },
+  { title: 'Learn', commands: ['help', ...actionNames('docs')] },
   { title: 'Feedback', commands: ['feedback'] },
   {
     title: 'Account',
