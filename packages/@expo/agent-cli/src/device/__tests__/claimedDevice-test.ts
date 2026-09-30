@@ -501,6 +501,28 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
     ).toMatchObject({ ok: true, id: 'emulator-5556', choice: '--device named it' });
   });
 
+  it(`ignores a dead worktree's claim on an emulator that never came up`, async () => {
+    process.env.EXPO_AGENT_MAX_DEVICES = '1';
+    const { tools } = fakeAndroid();
+    writeClaim({
+      backend: 'local-android',
+      platform: 'android',
+      id: 'emulator-5554',
+      projectRoot: OTHER,
+      pid: 1,
+      claimedAt: LONG_AGO,
+      touchedAt: LONG_AGO,
+      created: false,
+    });
+
+    expect(
+      await resolveClaimedDeviceAsync({ platform: 'android', projectRoot: HERE, allowBoot: true })
+    ).toMatchObject({ ok: true, id: 'emulator-5554', booted: true });
+    expect(tools.callsWith('-avd ')).toEqual([
+      'emulator -avd Pixel_8 -ports 5554,5555 -no-snapshot-save',
+    ]);
+  });
+
   it(`never starts an emulator another worktree is starting on the same port`, async () => {
     fakeAndroid();
     otherClaim('emulator-5554', 'local-android');
