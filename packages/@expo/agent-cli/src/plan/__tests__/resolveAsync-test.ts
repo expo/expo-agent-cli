@@ -276,6 +276,31 @@ describe('detection', () => {
     expect(plan.buildLocation).toMatchObject({ runsOn: 'local' });
   });
 
+  // @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+  it(`pins a local build to the device this worktree claims`, async () => {
+    writeProject();
+    const claimRunDevice = vi.fn(async () => 'SIM-CLAIMED');
+    const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
+      platform: 'ios',
+      claimRunDevice,
+    });
+
+    expect(argvOf(plan)).toEqual([
+      ['expo', 'prebuild', '--platform', 'ios'],
+      ['expo', 'run:ios', '--device', 'SIM-CLAIMED'],
+    ]);
+    expect(claimRunDevice).toHaveBeenCalledWith('ios');
+  });
+
+  it(`claims no device for a build that runs on EAS`, async () => {
+    writeProject({ 'eas.json': { build: {} } });
+    stubToolchain('missing');
+    const claimRunDevice = vi.fn(async () => 'SIM-CLAIMED');
+    await resolveStartPlanAsync(projectRoot, devClientState(), { platform: 'ios', claimRunDevice });
+
+    expect(claimRunDevice).not.toHaveBeenCalled();
+  });
+
   it(`builds on EAS when this machine does not`, async () => {
     writeProject({ 'eas.json': { build: {} } });
     stubToolchain('missing');

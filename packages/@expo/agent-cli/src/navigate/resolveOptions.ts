@@ -20,8 +20,14 @@ export interface NavigateOptions {
    * to 8081 here, which sent the device into whichever project happened to hold that port.
    */
   devServerUrl: string | null;
-  /** Platform to open the link on. Undefined means "whichever device is booted". */
+  /** Platform to open the link on. Undefined means "whichever device this worktree has up". */
   platform?: NavigatePlatform;
+  /**
+   * `--device`: the simulator, emulator or device to open on, by UDID, serial or name, or null.
+   *
+   * @ref llp/0028-one-device-per-agent.rfc.md §Explicit device — claimed for this worktree.
+   */
+  device: string | null;
   /** URL scheme, which wins over the scheme read from the project config. */
   scheme?: string;
   /** Application id of the target app, for the Android intent and the Expo Go check. */
@@ -89,6 +95,7 @@ const NAVIGATE_ARGS = {
   // a session is iOS or Android too, and `--eas --ios` is a meaningful thing to type.
   '--eas': Boolean,
   '--dev-server-url': String,
+  '--device': String,
   '--app-id': String,
   '--print-url': Boolean,
   '--attach-timeout': String,
@@ -142,6 +149,28 @@ export function resolveNavigateOptions(argv: string[]): NavigateOptions {
     );
   }
 
+  const device = args['--device'] == null ? null : String(args['--device']).trim();
+  if (device === '') {
+    throw new CommandError(
+      'BAD_ARGS',
+      [
+        `--device needs a simulator name, a device name, a UDID or an adb serial.`,
+        `Why: it names the device to open the link on, and an empty value names none.`,
+        `How: run "${PROGRAM_PREFIX} navigate <route> --device <name>", or leave the flag out to use the device this worktree claims.`,
+      ].join('\n')
+    );
+  }
+  if (device != null && (args['--eas'] || args['--print-url'])) {
+    throw new CommandError(
+      'BAD_ARGS',
+      [
+        `--device and ${args['--eas'] ? '--eas' : '--print-url'} ask for opposite things, so this run has no rule for what to do.`,
+        `Why: --device names a simulator, emulator or device on this machine, and ${args['--eas'] ? '--eas names an EAS Simulator session' : '--print-url opens nothing'}.`,
+        `How: pass one of the two.`,
+      ].join('\n')
+    );
+  }
+
   if (args['--attach-timeout'] != null && args['--no-wait-attach']) {
     throw new CommandError(
       'BAD_ARGS',
@@ -163,6 +192,7 @@ export function resolveNavigateOptions(argv: string[]): NavigateOptions {
     devServerUrl:
       args['--dev-server-url'] == null ? null : resolveDevServerUrlFlag(args['--dev-server-url']),
     platform: args['--ios'] ? 'ios' : args['--android'] ? 'android' : undefined,
+    device,
     scheme: args['--scheme'] ? String(args['--scheme']) : undefined,
     appId: args['--app-id'] ? String(args['--app-id']) : undefined,
     printUrl: !!args['--print-url'],

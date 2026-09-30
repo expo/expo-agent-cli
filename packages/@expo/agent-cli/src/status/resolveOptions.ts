@@ -89,7 +89,7 @@ export function resolveDeviceFlag(
       [
         `--device needs a simulator name, a device name, a UDID or an adb serial.`,
         `Why: it names which device the installed-app check reads, and an empty value names none.`,
-        `How: run "${PROGRAM_PREFIX} status --explain --device <name>", or leave the flag out to read every device this machine has.`,
+        `How: run "${PROGRAM_PREFIX} status --explain --device <name>", or leave the flag out to read the device this worktree claims.`,
       ].join('\n')
     );
   }

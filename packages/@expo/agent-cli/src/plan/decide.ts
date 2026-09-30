@@ -135,7 +135,10 @@ export function decideStartPlan(
   const buildSteps = (reason: string, prebuild: boolean): PlanStep[] =>
     backend?.runsOn === 'eas'
       ? easRouteSteps(platform, reason, options)
-      : [...(prebuild ? [prebuildStep(platform)] : []), runStep(platform, reason)];
+      : [
+          ...(prebuild ? [prebuildStep(platform)] : []),
+          runStep(platform, reason, options.runDevice ?? null),
+        ];
   const location = () =>
     backend?.runsOn === 'eas'
       ? easBuildLocation(platform, backend)
@@ -431,10 +434,16 @@ function installStep(platform: NativePlatform, device: string | null): PlanStep 
   );
 }
 
-function runStep(platform: NativePlatform, reason: string): PlanStep {
+/**
+ * Build, install and serve on the device this worktree claims.
+ *
+ * @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim — `--device`, so the Expo
+ * CLI does not pick the first booted device, which may be another worktree's.
+ */
+function runStep(platform: NativePlatform, reason: string, device: string | null): PlanStep {
   return step(
     'run',
-    ['expo', `run:${platform}`],
+    ['expo', `run:${platform}`, ...(device != null ? ['--device', device] : [])],
     'many-minutes',
     `Builds the ${platform} app ${LOCAL_WHERE} (a local build, which needs ${localRequirement(platform)}), installs it, and starts the dev server. ${reason}`,
     'local'

@@ -21,6 +21,7 @@ describe(resolveDevOptions, () => {
       detachArgv: expect.any(Array),
       // Read and not forwarded: `dev` sets `--port` on every step that serves.
       port: 8082,
+      device: null,
     });
   });
 
@@ -42,6 +43,7 @@ describe(resolveDevOptions, () => {
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       port: null,
+      device: null,
     });
   });
 
@@ -67,6 +69,7 @@ describe(resolveDevOptions, () => {
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       port: 8082,
+      device: null,
     });
   });
 
@@ -205,6 +208,7 @@ describe(resolveDevOptions, () => {
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       port: null,
+      device: null,
     });
   });
 
@@ -230,6 +234,7 @@ describe(resolveDevOptions, () => {
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       port: null,
+      device: null,
     });
   });
 
@@ -332,5 +337,22 @@ describe('--eas puts the device on EAS', () => {
     const options = resolveDevOptions(['--ios', '--eas', '--detach']);
     expect(options.detachArgv).toEqual(['--ios', '--eas', '--detach']);
     expect(options.expoArgs).toEqual(['--tunnel']);
+  });
+});
+
+// @ref llp/0028-one-device-per-agent.rfc.md §Explicit device
+describe('--device', () => {
+  it(`is read, and never forwarded to expo start`, () => {
+    const options = resolveDevOptions(['--ios', '--device', 'iPhone 17 Pro', '--port', '8082']);
+    expect(options.device).toBe('iPhone 17 Pro');
+    expect(options.expoArgs).toEqual([]);
+    expect(options.port).toBe(8082);
+    expect(resolveDevOptions(['--ios', '--device=SIM-1']).device).toBe('SIM-1');
+  });
+
+  it(`is refused empty, and beside --eas or --web`, () => {
+    expect(() => resolveDevOptions(['--ios', '--device'])).toThrow(/--device needs/);
+    expect(() => resolveDevOptions(['--ios', '--eas', '--device', 'X'])).toThrow(/--eas/);
+    expect(() => resolveDevOptions(['--web', '--device', 'X'])).toThrow(/--web/);
   });
 });

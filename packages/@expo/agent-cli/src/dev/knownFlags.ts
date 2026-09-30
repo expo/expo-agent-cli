@@ -40,6 +40,7 @@ export const DEV_OWN_FLAGS: readonly string[] = [
   '--json',
   '--detach',
   '--wait-ready',
+  '--device',
   '--help',
   '-h',
 ];

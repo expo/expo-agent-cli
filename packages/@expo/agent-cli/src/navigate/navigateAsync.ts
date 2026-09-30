@@ -192,6 +192,7 @@ export async function navigateAsync(
   const opened = await openRouteAsync(projectRoot, {
     route,
     platform,
+    device: options.device,
     scheme,
     appId,
     devServerUrl: options.devServerUrl,

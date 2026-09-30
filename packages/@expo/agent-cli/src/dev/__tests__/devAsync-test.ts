@@ -2,6 +2,7 @@ import { vol } from 'memfs';
 import os from 'os';
 import path from 'path';
 
+import { resolveClaimedDeviceAsync } from '../../device/claimedDevice';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
@@ -33,6 +34,16 @@ vi.mock('../portCollision', async (importOriginal) => {
     findFreePortAsync: vi.fn(actual.findFreePortAsync),
   };
 });
+vi.mock('../../device/claimedDevice', () => ({
+  resolveClaimedDeviceAsync: vi.fn(async () => ({
+    ok: false,
+    kind: 'no-device',
+    reason: 'no booted iOS simulator was found',
+    error: new Error('none'),
+    deviceId: null,
+    name: null,
+  })),
+}));
 vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
 vi.mock('../openApp', () => ({
   openAppOnDeviceAsync: vi.fn(),
@@ -233,6 +244,33 @@ describe(devAsync, () => {
           output: 'inherit',
           onDevServer: expect.any(Function),
         }
+      );
+    });
+
+    // @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+    it(`should pin the build to the device this worktree claims`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(resolveClaimedDeviceAsync).mockResolvedValueOnce({
+        ok: true,
+        backend: 'local-ios',
+        id: 'SIM-CLAIMED',
+        name: 'iPhone 17',
+        claim: {} as any,
+        booted: true,
+        choice: 'it is the free simulator this machine last used',
+        hasApp: null,
+        adb: null,
+      });
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(resolveClaimedDeviceAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ platform: 'ios', projectRoot, allowBoot: true })
+      );
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['run:ios', '--device', 'SIM-CLAIMED', '--port', '8081'],
+        expect.anything()
       );
     });
 
