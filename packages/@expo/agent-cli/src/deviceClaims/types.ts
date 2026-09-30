@@ -37,7 +37,11 @@ export type Allocation<C extends DeviceCandidate> =
   | { kind: 'take'; candidate: C; claim: DeviceClaim }
   | { kind: 'boot'; candidate: C; claim: DeviceClaim }
   | { kind: 'created'; candidate: C; claim: DeviceClaim }
-  | { kind: 'exhausted'; holders: { id: string; projectRoot: string }[] };
+  | { kind: 'exhausted'; holders: { id: string; projectRoot: string }[] }
+  /** Step 0: the named device matches devices, and another live worktree holds each of them. */
+  | { kind: 'claimed'; holders: { id: string; projectRoot: string }[] }
+  /** Step 0: the name matches no device of the inventory. */
+  | { kind: 'not-found' };
 
 /**
  * What {@link Allocation} is before any IO: step 5 can only say that a device must be created,
