@@ -292,6 +292,8 @@ export async function bootDeviceAsync(
       choice: null,
     };
   }
+  const app = appLabel ?? appId;
+  const noun = platform === 'ios' ? 'simulator' : 'emulator';
   return {
     ok: true,
     deviceId: resolved.id,
@@ -300,7 +302,12 @@ export async function bootDeviceAsync(
     reason: null,
     refused: false,
     installNeeded: appId != null && resolved.hasApp === false,
-    choice: resolved.choice,
+    choice:
+      !resolved.booted || resolved.hasApp == null
+        ? resolved.choice
+        : resolved.hasApp
+          ? `it has ${app} installed`
+          : `no free ${noun} has ${app}, so this one was booted to install it onto`,
   };
 }
 
