@@ -55,6 +55,7 @@ export const devStopHelp: CommandHelp = {
       'reason',
       'detail',
       'session',
+      'devices',
       'waitedMs',
       'followups',
     ],

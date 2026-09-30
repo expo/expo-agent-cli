@@ -159,6 +159,7 @@ describe('@expo/agent-cli dev:stop', () => {
 
     expect(Object.keys(JSON.parse(result.stdout)).sort()).toEqual([
       'detail',
+      'devices',
       'followups',
       // Which of --force's two proofs a refusal failed on, null otherwise (F48-1).
       'forceRefusedBy',

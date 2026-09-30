@@ -1,3 +1,7 @@
+import { vol } from 'memfs';
+
+import { shutdownDeviceAsync } from '../../device/bootDevice';
+import { readClaims, writeClaim, type DeviceClaim } from '../../deviceClaims';
 import { readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
@@ -5,6 +9,13 @@ import type { DevStopOptions } from '../resolveStopOptions';
 import { devStopAsync, looksLikeDevServerProcess } from '../stopAsync';
 import type { MockInstance } from 'vitest';
 
+vi.mock('../../device/bootDevice', () => ({
+  shutdownDeviceAsync: vi.fn(async () => ({ ok: true, reason: null })),
+}));
+vi.mock('../../deviceClaims/events', () => ({
+  event: vi.fn(),
+  debugEvent: Object.assign(vi.fn(), { error: vi.fn((error) => error) }),
+}));
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
 }));
@@ -150,6 +161,7 @@ describe(devStopAsync, () => {
 
     expect(Object.keys(JSON.parse(printed())).sort()).toEqual([
       'detail',
+      'devices',
       'followups',
       'forceRefusedBy',
       'forced',
@@ -557,5 +569,46 @@ describe('dev:stop --eas', () => {
     await devStopAsync(projectRoot, options());
     expect(cloud().probeCloudSessionAsync).not.toHaveBeenCalled();
     expect(JSON.parse(printed()).session).toBeUndefined();
+  });
+});
+
+// @ref llp/0028-one-device-per-agent.rfc.md §Release and cleanup
+describe(`${devStopAsync.name} and the device claims`, () => {
+  function claim(id: string, overrides: Partial<DeviceClaim> = {}): void {
+    const now = new Date().toISOString();
+    writeClaim({
+      backend: 'local-ios',
+      platform: 'ios',
+      id,
+      projectRoot,
+      pid: 1,
+      claimedAt: now,
+      touchedAt: now,
+      created: false,
+      ...overrides,
+    });
+  }
+
+  beforeEach(() => {
+    vol.mkdirSync(projectRoot, { recursive: true });
+    vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
+    mockPort({ answering: false });
+  });
+  afterEach(() => vol.reset());
+
+  it(`releases every claim of this worktree, and shuts down only the device it created`, async () => {
+    claim('SIM-FOUND');
+    claim('SIM-MADE', { created: true });
+    claim('SIM-OTHER', { projectRoot: '/other' });
+
+    await devStopAsync(projectRoot, options());
+
+    expect(readClaims().map(({ id }) => id)).toEqual(['SIM-OTHER']);
+    expect(shutdownDeviceAsync).toHaveBeenCalledTimes(1);
+    expect(shutdownDeviceAsync).toHaveBeenCalledWith('SIM-MADE', 'local-ios');
+    expect(JSON.parse(printed()).devices).toEqual([
+      { id: 'SIM-FOUND', backend: 'local-ios', shutDown: false, reason: null },
+      { id: 'SIM-MADE', backend: 'local-ios', shutDown: true, reason: null },
+    ]);
   });
 });
