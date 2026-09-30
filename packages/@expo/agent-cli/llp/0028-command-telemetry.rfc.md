@@ -60,7 +60,8 @@ compatibility issue is resolved. [observed, 2026-09-30]
 ## Identity and opt-out
 
 Reuse a UUID and hashed cached user ID from Expo's `state.json` when available. Honor Expo's
-staging/local home and shell-only `__UNSAFE_EXPO_HOME_DIRECTORY` override. Do not query authentication
+staging/local home and shell-only `__UNSAFE_EXPO_HOME_DIRECTORY` override through
+`src/utils/expoHome.ts`, shared with auth session notices. Do not query authentication
 services for telemetry. When `EXPO_TOKEN` is set, do not attribute a cached interactive user's ID.
 The worker never modifies the shared authentication file. Without an existing Expo UUID it persists
 an agent CLI anonymous UUID separately, with atomic exclusive publication and owner-only

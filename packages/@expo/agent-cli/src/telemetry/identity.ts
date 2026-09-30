@@ -1,9 +1,9 @@
 // @ref llp/0028-command-telemetry.rfc.md
-import { boolish } from 'getenv';
 import { createHash, randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import { homedir } from 'node:os';
 import path from 'node:path';
+
+import { getExpoHomeDirectory } from '../utils/expoHome';
 
 type TelemetryIdentity = { anonymousId: string; userHash?: string };
 
@@ -33,20 +33,6 @@ export async function getTelemetryIdentityAsync(): Promise<TelemetryIdentity> {
     anonymousId: await getOwnAnonymousIdAsync(home),
     ...(userHash ? { userHash } : {}),
   };
-}
-
-function getExpoHomeDirectory(): string {
-  return (
-    process.env.__UNSAFE_EXPO_HOME_DIRECTORY ||
-    path.join(
-      homedir(),
-      boolish('EXPO_STAGING', false)
-        ? '.expo-staging'
-        : boolish('EXPO_LOCAL', false)
-          ? '.expo-local'
-          : '.expo'
-    )
-  );
 }
 
 async function getOwnAnonymousIdAsync(home: string): Promise<string> {

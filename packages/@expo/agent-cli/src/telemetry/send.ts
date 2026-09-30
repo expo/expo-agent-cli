@@ -1,11 +1,11 @@
 // @ref llp/0028-command-telemetry.rfc.md
 import * as ciInfo from 'ci-info';
-import { boolish } from 'getenv';
 import { randomUUID } from 'node:crypto';
 import * as os from 'node:os';
 import { detectSandbox } from 'sandbox-cli-detector';
 
 import { getAgentTelemetryContext } from '../utils/agent';
+import { env } from '../utils/env';
 import { getTelemetryIdentityAsync } from './identity';
 import type { CommandTelemetry } from './types';
 
@@ -15,7 +15,7 @@ export const TELEMETRY_TIMEOUT_MS = 3_000;
 export async function sendCommandTelemetryAsync(data: CommandTelemetry): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    if (boolish('EXPO_NO_TELEMETRY', false) || boolish('EXPO_OFFLINE', false)) return;
+    if (env.EXPO_NO_TELEMETRY || env.EXPO_OFFLINE) return;
 
     const controller = new AbortController();
     timer = setTimeout(() => controller.abort(), TELEMETRY_TIMEOUT_MS);
@@ -23,7 +23,7 @@ export async function sendCommandTelemetryAsync(data: CommandTelemetry): Promise
     const agent = getAgentTelemetryContext();
     const sandboxProvider = getSandboxProvider();
     const target =
-      boolish('EXPO_STAGING', false) || boolish('EXPO_LOCAL', false)
+      env.EXPO_STAGING || env.EXPO_LOCAL
         ? '24TKICqYKilXM480mA7ktgVDdea'
         : '24TKR7CQAaGgIrLTgu3Fp4OdOkI';
     const sentAt = new Date().toISOString();

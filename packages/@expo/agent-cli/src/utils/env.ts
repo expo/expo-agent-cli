@@ -23,6 +23,21 @@ class Env {
     return boolish('EXPO_NO_TELEMETRY', false);
   }
 
+  /** Disable network requests */
+  get EXPO_OFFLINE() {
+    return boolish('EXPO_OFFLINE', false);
+  }
+
+  /** Use Expo's staging services and settings */
+  get EXPO_STAGING() {
+    return boolish('EXPO_STAGING', false);
+  }
+
+  /** Use locally running Expo services and settings */
+  get EXPO_LOCAL() {
+    return boolish('EXPO_LOCAL', false);
+  }
+
   /**
    * Do not print or emit the follow-up suggestions commands attach to their output.
    * `--no-followups` does the same for one run.

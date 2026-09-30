@@ -1,4 +1,4 @@
-import { boolish } from 'getenv';
+import { env } from '../utils/env';
 
 import type { CommandTelemetry } from './types';
 
@@ -10,7 +10,7 @@ import type { CommandTelemetry } from './types';
  */
 export function recordCommand(command: string, version: string): void {
   try {
-    if (boolish('EXPO_NO_TELEMETRY', false) || boolish('EXPO_OFFLINE', false)) {
+    if (env.EXPO_NO_TELEMETRY || env.EXPO_OFFLINE) {
       return;
     }
 
