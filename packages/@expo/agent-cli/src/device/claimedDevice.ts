@@ -11,6 +11,7 @@ import {
   readClaims,
   releaseClaim,
   touchClaim,
+  type ClassifiedClaim,
   type DeviceCandidate,
   type DeviceClaim,
   type DevicePlatform,
@@ -113,6 +114,8 @@ interface LocalCandidate extends DeviceCandidate {
 interface Inventory {
   candidates: LocalCandidate[];
   adb: AdbResolution | null;
+  /** Android with allowBoot: how many AVDs this machine has. Null when nobody listed them. */
+  avdCount: number | null;
 }
 
 type InventoryResult = { ok: true; inventory: Inventory } | DeviceRefusal;
@@ -159,8 +162,9 @@ export async function resolveClaimedDeviceAsync(
   const projectRoot = canonicalizeExistingPath(options.projectRoot);
 
   const seen: { inventory: Inventory | null } = { inventory: null };
-  const listDevices = async (): Promise<LocalCandidate[]> => {
+  const listDevices = async (claims: ClassifiedClaim[]): Promise<LocalCandidate[]> => {
     const listed = await listInventoryAsync(platform, {
+      claims,
       projectRoot,
       appId: options.appId ?? null,
       explicit: explicit != null,
@@ -357,11 +361,13 @@ function exhaustedRefusal(
   if (holders.length === 0) {
     return refusal(
       'no-device',
-      allowBoot
-        ? platform === 'ios'
+      !allowBoot
+        ? noBootedReason(platform, inventory)
+        : platform === 'ios'
           ? 'this machine has no iOS simulator to boot. Install an iOS runtime in Xcode Settings > Components'
-          : 'this machine has no Android virtual device to start. Create one in Android Studio Device Manager'
-        : noBootedReason(platform, inventory)
+          : inventory?.avdCount
+            ? 'no emulator console port in 5554-5584 is free to start an Android virtual device on'
+            : 'this machine has no Android virtual device to start. Create one in Android Studio Device Manager'
     );
   }
   const error = devicesAllClaimedError(platform, holders);
@@ -414,6 +420,7 @@ function explicitClaimedRefusal(
 }
 
 interface InventoryOptions {
+  claims: ClassifiedClaim[];
   projectRoot: string;
   appId: string | null;
   /** `--device` is matched against this inventory, so physical devices and idle AVDs are in it. */
@@ -464,7 +471,7 @@ async function listSimulatorsAsync(appId: string | null): Promise<InventoryResul
       hasApp: appId != null && (await simulatorHasAppAsync(entry.udid, appId).catch(() => false)),
     }))
   );
-  return { ok: true, inventory: { candidates, adb: null } };
+  return { ok: true, inventory: { candidates, adb: null, avdCount: null } };
 }
 
 /**
@@ -474,6 +481,7 @@ async function listSimulatorsAsync(appId: string | null): Promise<InventoryResul
  * worktree claimed it with `--device`, or when `--device` is being matched now.
  */
 async function listEmulatorsAsync({
+  claims: allClaims,
   projectRoot,
   explicit,
   allowBoot,
@@ -495,8 +503,12 @@ async function listEmulatorsAsync({
     );
   }
 
-  const claims = readClaims().filter((claim) => claim.backend === 'local-android');
+  const claims = allClaims.filter((claim) => claim.backend === 'local-android');
   const mine = claims.filter((claim) => claim.projectRoot === projectRoot);
+  // A dead worktree's claim holds nothing: the allocation removes it, and its port is free.
+  const liveOthers = claims.filter(
+    (claim) => claim.projectRoot !== projectRoot && claim.liveness === 'live'
+  );
   const candidates: LocalCandidate[] = [];
   const runningAvds: string[] = [];
   for (const { deviceId, model } of parseAndroidDevices(listed.stdout)) {
@@ -515,9 +527,7 @@ async function listEmulatorsAsync({
     candidates.push({ id: deviceId, name: name ?? model ?? deviceId, state: 'booted' });
   }
   const running = new Set(candidates.map(({ id }) => id));
-  const othersStarting = claims.filter(
-    (claim) => claim.projectRoot !== projectRoot && !running.has(claim.id)
-  ).length;
+  const othersStarting = liveOthers.filter((claim) => !running.has(claim.id)).length;
 
   const avds = allowBoot ? await listAvdsAsync(adb) : [];
   // A claim has no AVD name, so an emulator another worktree is still starting may run any AVD.
@@ -548,10 +558,10 @@ async function listEmulatorsAsync({
     }
   }
   if (!allowBoot) {
-    return { ok: true, inventory: { candidates, adb } };
+    return { ok: true, inventory: { candidates, adb, avdCount: null } };
   }
 
-  const taken = new Set(claims.map((claim) => emulatorPort(claim.id)));
+  const taken = new Set([...mine, ...liveOthers].map((claim) => emulatorPort(claim.id)));
   const freePortAsync = () =>
     findFreeEmulatorPortAsync({
       skip: (port) => taken.has(port) || candidates.some(({ id }) => id === emulatorSerial(port)),
@@ -569,7 +579,7 @@ async function listEmulatorsAsync({
       }
       candidates.push(candidate);
     }
-    return { ok: true, inventory: { candidates, adb } };
+    return { ok: true, inventory: { candidates, adb, avdCount: avds.length } };
   }
 
   const holdsOne = candidates.some(({ state }) => state === 'shutdown');
@@ -580,7 +590,7 @@ async function listEmulatorsAsync({
       candidates.push(candidate);
     }
   }
-  return { ok: true, inventory: { candidates, adb } };
+  return { ok: true, inventory: { candidates, adb, avdCount: avds.length } };
 }
 
 function runWith(adb: AdbResolution): typeof runAdbAsync {
