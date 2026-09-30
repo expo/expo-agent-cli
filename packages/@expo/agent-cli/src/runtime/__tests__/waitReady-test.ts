@@ -8,12 +8,12 @@ import { vol } from 'memfs';
 import type { AddressInfo } from 'net';
 
 import {
-  matchProjectRoot,
   PACKAGER_STATUS_READY,
   waitForAppConnectionAsync,
   waitForBundlerReadyAsync,
   waitForFreshAppConnectionAsync,
 } from '../waitReady';
+import { matchProjectRoot } from '../devServer';
 
 type StatusHandler = (request: { url: string }) => {
   status?: number;
