@@ -1,4 +1,5 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+// @ref llp/0028-one-device-per-agent.rfc.md §Android boot
 // Boot a local device, and shut one down again.
 //
 // The device probes next door (`src/navigate/device.ts`) answer "is there one", which is all every
@@ -13,8 +14,8 @@
 //
 // Three live facts are pinned here rather than rediscovered, and each of them cost somebody a run:
 //
-//  1. **`-ports 5554,5555` on the emulator.** Without it the emulator binds ephemeral ports and
-//     `adb devices` never lists it at all — not "offline", *absent* [observed — friction run 6,
+//  1. **`-ports <console>,<adb>` on the emulator.** Without it the emulator binds ephemeral ports
+//     and `adb devices` never lists it at all — not "offline", *absent* [observed — friction run 6,
 //     F62, and again on 2026-08-27]. So the serial is known before the boot rather than after.
 //  2. **`sys.boot_completed`, not `adb devices`.** `adb` reports the serial as `offline` for the
 //     first seconds and then `device`, and Android itself is up later still. An `adb shell` before
@@ -26,15 +27,13 @@
 
 import { spawn } from 'child_process';
 import fs from 'fs';
+import net from 'net';
 import path from 'path';
 
 import type { DeviceBackend } from '../navigate/device';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { resolveAdb, runAdbAsync, type AdbResolution } from './adb';
 import { simulatorHasAppAsync } from './installedApps';
-
-/** The serial an emulator started with `-ports 5554,5555` is always listed under. */
-export const EMULATOR_SERIAL = 'emulator-5554';
 
 /**
  * How long a boot may take, per platform, before it is called a failure.
@@ -300,7 +299,7 @@ export async function bootDeviceAsync(
   platform: 'ios' | 'android',
   options: BootDeviceOptions
 ): Promise<BootDeviceResult> {
-  return platform === 'ios' ? await bootSimulatorAsync(options) : await bootEmulatorAsync(options);
+  return platform === 'ios' ? await bootSimulatorAsync(options) : await bootFirstAvdAsync(options);
 }
 
 /** Shut down a device this process booted. Never rejects. */
@@ -500,14 +499,42 @@ async function bootSimulatorAsync({
   };
 }
 
-/** The Android half: pick an AVD, spawn the emulator detached, and poll `sys.boot_completed`. */
-async function bootEmulatorAsync({
+/** The Android half: pick an AVD, then {@link bootEmulatorAsync} it on the first free port. */
+async function bootFirstAvdAsync({
   timeoutMs,
   onBooting,
   now = Date.now,
   adb: given,
 }: BootDeviceOptions): Promise<BootDeviceResult> {
-  const none = (reason: string): BootDeviceResult => ({
+  const adb = given ?? resolveAdb();
+  const emulator = resolveEmulator(adb);
+  const listed = await spawnCaptureAsync(emulator, ['-list-avds'], { timeoutMs: 60_000 });
+  if (listed.spawnError) {
+    return noDevice(
+      `could not run "${emulator}", so no emulator could be started: ${listed.spawnError.message}. Install the Android SDK's emulator package, or set ANDROID_HOME`
+    );
+  }
+  const avd = parseAvds(listed.stdout)[0];
+  if (avd == null) {
+    return noDevice(
+      `this machine has no Android virtual device to start. Create one in Android Studio's Device Manager, then run this command again`
+    );
+  }
+  const port = await findFreeEmulatorPortAsync();
+  if (port == null) {
+    return noDevice(
+      `every emulator console port from ${EMULATOR_PORT_FIRST} to ${EMULATOR_PORT_LAST} is taken, so no emulator could be started`
+    );
+  }
+  onBooting?.({ deviceId: emulatorSerial(port), backend: 'local-android' });
+  return await bootEmulatorAsync(
+    { avd, port, readOnly: false },
+    { timeoutMs, now, adb, choice: 'it is the only Android virtual device this machine has' }
+  );
+}
+
+function noDevice(reason: string): BootDeviceResult {
+  return {
     ok: false,
     deviceId: null,
     backend: null,
@@ -515,31 +542,99 @@ async function bootEmulatorAsync({
     reason,
     refused: false,
     choice: null,
+  };
+}
+
+/**
+ * The console ports an emulator may take. The adb server scans only 5555-5585 for the adb port,
+ * which is the console port + 1, so an emulator outside this range is never listed.
+ */
+export const EMULATOR_PORT_FIRST = 5554;
+export const EMULATOR_PORT_LAST = 5584;
+
+export function emulatorSerial(port: number): string {
+  return `emulator-${port}`;
+}
+
+/** The console port of an `emulator-<port>` serial, or null for any other serial. */
+export function emulatorPort(serial: string): number | null {
+  const match = /^emulator-(\d+)$/.exec(serial);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * The first even console port whose adb port (console + 1) is free too.
+ *
+ * A bind test rather than `adb devices`: an emulator that is still starting holds its ports before
+ * adb lists it.
+ */
+export async function findFreeEmulatorPortAsync({
+  isFree = isPortBindableAsync,
+  skip = () => false,
+}: {
+  isFree?: (port: number) => Promise<boolean>;
+  skip?: (port: number) => boolean;
+} = {}): Promise<number | null> {
+  for (let port = EMULATOR_PORT_FIRST; port <= EMULATOR_PORT_LAST; port += 2) {
+    if (!skip(port) && (await isFree(port)) && (await isFree(port + 1))) {
+      return port;
+    }
+  }
+  return null;
+}
+
+function isPortBindableAsync(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.listen({ port, host: '127.0.0.1', exclusive: true }, () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+/** One emulator to start: the AVD, its console port, and whether another instance runs the AVD. */
+export interface EmulatorBoot {
+  avd: string;
+  port: number;
+  /** `-read-only`, which lets a second instance run an AVD that is already running. */
+  readOnly: boolean;
+}
+
+/**
+ * Spawn the emulator detached on its own ports, and poll `sys.boot_completed` on its serial.
+ *
+ * @ref llp/0028-one-device-per-agent.rfc.md §Android boot
+ */
+export async function bootEmulatorAsync(
+  { avd, port, readOnly }: EmulatorBoot,
+  {
+    timeoutMs,
+    now = Date.now,
+    adb = resolveAdb(),
+    choice = null,
+  }: { timeoutMs: number; now?: () => number; adb?: AdbResolution; choice?: string | null }
+): Promise<BootDeviceResult> {
+  const serial = emulatorSerial(port);
+  const emulator = resolveEmulator(adb);
+  const result = (ok: boolean, reason: string | null): BootDeviceResult => ({
+    ok,
+    deviceId: serial,
+    backend: 'local-android',
+    name: avd,
+    reason,
+    refused: false,
+    choice,
   });
 
-  const adb = given ?? resolveAdb();
-  const emulator = resolveEmulator(adb);
-  const listed = await spawnCaptureAsync(emulator, ['-list-avds'], { timeoutMs: 60_000 });
-  if (listed.spawnError) {
-    return none(
-      `could not run "${emulator}", so no emulator could be started: ${listed.spawnError.message}. Install the Android SDK's emulator package, or set ANDROID_HOME`
-    );
+  const args = ['-avd', avd, '-ports', `${port},${port + 1}`, '-no-snapshot-save'];
+  if (readOnly) {
+    args.push('-read-only');
   }
-  const avd = parseAvds(listed.stdout)[0];
-  if (avd == null) {
-    return none(
-      `this machine has no Android virtual device to start. Create one in Android Studio's Device Manager, then run this command again`
-    );
-  }
-
-  // @ref ./bootDevice — `-ports 5554,5555`, without which `adb` never lists the emulator at all.
-  // The serial is therefore known before the boot, which is what lets the cleanup be registered
-  // here rather than after a wait that may never finish.
-  onBooting?.({ deviceId: EMULATOR_SERIAL, backend: 'local-android' });
 
   let spawnFailure: string | null = null;
   try {
-    const child = spawn(emulator, ['-avd', avd, '-ports', '5554,5555', '-no-snapshot-save'], {
+    const child = spawn(emulator, args, {
       detached: true,
       // The emulator's own output is not this run's report, and a pipe nobody reads fills up and
       // blocks it. It logs to the Android SDK's own files either way.
@@ -550,7 +645,8 @@ async function bootEmulatorAsync({
     });
     child.unref();
   } catch (error: unknown) {
-    return none(
+    return result(
+      false,
       `"${emulator} -avd ${avd}" could not be started: ${error instanceof Error ? error.message : String(error)}`
     );
   }
@@ -558,41 +654,20 @@ async function bootEmulatorAsync({
   const deadline = now() + timeoutMs;
   for (;;) {
     if (spawnFailure != null) {
-      return {
-        ok: false,
-        deviceId: EMULATOR_SERIAL,
-        backend: 'local-android',
-        name: avd,
-        reason: `"${emulator} -avd ${avd}" could not be started: ${spawnFailure}`,
-        refused: false,
-        choice: 'it is the only Android virtual device this machine has',
-      };
+      return result(false, `"${emulator} -avd ${avd}" could not be started: ${spawnFailure}`);
     }
-    const probe = await runAdbAsync(
-      ['-s', EMULATOR_SERIAL, 'shell', 'getprop', 'sys.boot_completed'],
-      { adb, timeoutMs: 30_000 }
-    );
+    const probe = await runAdbAsync(['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], {
+      adb,
+      timeoutMs: 30_000,
+    });
     if (probe.exitCode === 0 && probe.stdout.trim() === '1') {
-      return {
-        ok: true,
-        deviceId: EMULATOR_SERIAL,
-        backend: 'local-android',
-        name: avd,
-        reason: null,
-        refused: false,
-        choice: 'it is the only Android virtual device this machine has',
-      };
+      return result(true, null);
     }
     if (now() >= deadline) {
-      return {
-        ok: false,
-        deviceId: EMULATOR_SERIAL,
-        backend: 'local-android',
-        name: avd,
-        reason: `the emulator ${avd} did not finish booting within ${timeoutMs}ms — "${adb.bin} -s ${EMULATOR_SERIAL} shell getprop sys.boot_completed" never answered 1`,
-        refused: false,
-        choice: 'it is the only Android virtual device this machine has',
-      };
+      return result(
+        false,
+        `the emulator ${avd} did not finish booting within ${timeoutMs}ms — "${adb.bin} -s ${serial} shell getprop sys.boot_completed" never answered 1`
+      );
     }
     await new Promise((resolve) => setTimeout(resolve, BOOT_POLL_MS));
   }
