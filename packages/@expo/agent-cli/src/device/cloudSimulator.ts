@@ -1408,6 +1408,7 @@ export function bindEasSession(
     claimedAt: now,
     touchedAt: now,
     created,
+    booted: false,
   };
   try {
     writeClaim(claim);

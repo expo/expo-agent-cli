@@ -332,7 +332,7 @@ async function resolveWithInventoryAsync(
       backend,
       id: candidate.id,
       name: candidate.name,
-      claim: touchClaim(claim) ?? claim,
+      claim: touchClaim(claim, new Date(), booted ? { booted: true } : {}) ?? claim,
       booted,
       choice,
       hasApp: candidate.hasApp ?? null,

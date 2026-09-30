@@ -166,6 +166,7 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
           claimedAt: now.toISOString(),
           touchedAt: now.toISOString(),
           created: true,
+          booted: true,
         };
         writeClaim(claim);
         return { kind: 'created', candidate, claim };

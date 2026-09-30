@@ -48,7 +48,8 @@ One store: a machine-wide registry with one JSON file per claimed device, at `~/
   "pid": 1234,
   "claimedAt": "…",
   "touchedAt": "…",
-  "created": true
+  "created": true,
+  "booted": true
 }
 ```
 
@@ -56,6 +57,7 @@ One store: a machine-wide registry with one JSON file per claimed device, at `~/
 - `projectRoot` is resolved through symlinks, as the dev-server lock is.
 - `pid` is the process that wrote the claim, for a report that names the owner. It is not used for liveness: the operating system reuses PIDs.
 - `touchedAt` is refreshed by every verb that gets a usable device from the claim, and never by a verb that cannot use it (a read of a shut-down simulator). The refresh is a compare-and-swap on `projectRoot` and `claimedAt`, so it never overwrites a claim that replaced this one.
+- `booted: true` means this CLI booted the device or created it, so `dev:stop` may shut it down.
 - `created: true` means this CLI created the device. Only such devices are ever deleted. A simulator whose name starts with `agent-cli ` (the name this CLI gives at creation) is `created: true` whenever it is claimed, because `dev:stop` deletes the claim and a crash between `simctl create` and the claim write leaves none.
 - One file per device, so two agents never write the same file. A claim is created with `O_EXCL` (`wx`).
 
@@ -121,8 +123,9 @@ For a local device, `--device` is step 0 of the allocation, under the same regis
 
 ## Release and cleanup
 
-- `dev:stop` releases the claims of its worktree.
-- A local device is shut down only if the claim has `created: true`, or if this run booted it (the current `smoke` rule). An EAS session is stopped by id, as `dev:stop --eas` does today.
+- `dev:stop` releases the local claims of its worktree only when the dev server stopped or none was running. While the dev server still runs, the claims stay and the report says why.
+- A local device is shut down only if the claim has `created: true` or `booted: true`. `booted` is set when this CLI boots the simulator or spawns the emulator, because `dev:stop` runs in a later process than the boot. The shutdown and the claim's release run under one registry lock, so no other worktree takes a device that is still up.
+- `dev:stop --eas` stops every EAS session the worktree claims, by id (one per platform). A plain `dev:stop` keeps the `eas` claims and reports each session as still running, with the reason ([[0021-honest-reports]]).
 - A created local device is deleted when its claim has been stale for 1 hour. The next `bindDeviceAsync` does this cleanup, because there is no daemon.
 - The CLI never shuts down or deletes a local device that it did not boot or create.
 

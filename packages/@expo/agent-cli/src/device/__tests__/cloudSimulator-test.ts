@@ -74,6 +74,7 @@ function claimSession(
     claimedAt: '2026-09-30T10:00:00.000Z',
     touchedAt,
     created: true,
+    booted: false,
   });
 }
 

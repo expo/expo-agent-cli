@@ -27,6 +27,7 @@ function claim(
     claimedAt: '2026-09-30T10:00:00.000Z',
     touchedAt: '2026-09-30T10:00:00.000Z',
     created: false,
+    booted: false,
     liveness,
   };
 }
@@ -268,6 +269,7 @@ describe('chooseDevice — the claim it writes', () => {
         claimedAt: NOW.toISOString(),
         touchedAt: NOW.toISOString(),
         created: false,
+        booted: false,
       },
     });
   });
