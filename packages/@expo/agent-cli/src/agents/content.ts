@@ -79,6 +79,15 @@ export function generateAgentsMdBlock({
       defaultSmokePlatform(state.nativeDirs)
     )}\` — the whole gate in one command: the dev server bundles, the app is up, and nothing threw`,
     '',
+    // @ref llp/0028-local-docs.rfc.md §How an agent finds the files — no absolute path: this file
+    // is committed, and home directories differ per machine.
+    '## Expo docs',
+    '',
+    'The full Expo docs for this project’s SDK can be local Markdown files.',
+    `- \`${PROGRAM_PREFIX} docs:sync\` downloads them and prints two directories: all docs, and this SDK’s API reference. Grep those directories.`,
+    `- \`${PROGRAM_PREFIX} docs:search <query>\` returns ranked pages with file paths and line numbers.`,
+    'Prefer the local docs over web fetches of docs.expo.dev.',
+    '',
     '## Expo skills',
     '',
     'For Expo or EAS work, start with the `expo-overview` skill when it is available in your agent’s skill list. It routes your goal to the relevant Expo or EAS skill. Then read any matching package skills listed below for guidance specific to the installed packages.',
