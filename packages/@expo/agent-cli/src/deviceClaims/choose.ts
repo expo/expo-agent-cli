@@ -25,6 +25,11 @@ export interface ChooseDeviceInput<C extends DeviceCandidate> {
   pid: number;
   /** Step 0: `--device`. Replaces steps 1 to 5 when present. */
   explicit?: string;
+  /**
+   * Whether this CLI created the candidate, known from the device itself. A created device keeps
+   * `created` even after its claim was released, so it can still expire.
+   */
+  isCreated?: (candidate: C) => boolean;
   /** Whether a candidate answers to {@link explicit}. By id when absent. */
   matches?: (candidate: C, query: string) => boolean;
 }
@@ -40,6 +45,7 @@ export function chooseDevice<C extends DeviceCandidate>({
   now,
   pid,
   explicit,
+  isCreated,
   matches = (candidate, query) => candidate.id === query,
 }: ChooseDeviceInput<C>): DeviceChoice<C> {
   const mine = claims.filter(
@@ -57,9 +63,11 @@ export function chooseDevice<C extends DeviceCandidate>({
     claimedAt: now.toISOString(),
     touchedAt: now.toISOString(),
     // The device changes hands with its stale claim, and with it the right to delete it later.
-    created: claims.some(
-      (claim) => claim.backend === backend && claim.id === candidate.id && claim.created
-    ),
+    created:
+      (isCreated?.(candidate) ?? false) ||
+      claims.some(
+        (claim) => claim.backend === backend && claim.id === candidate.id && claim.created
+      ),
   });
 
   if (explicit != null) {
