@@ -122,6 +122,7 @@ function fakeAdb(devices: FakeDevice[]) {
           error: new CommandError('NO_DEVICE', 'none'),
           deviceId: null,
           name: null,
+          holders: [],
         };
   };
 

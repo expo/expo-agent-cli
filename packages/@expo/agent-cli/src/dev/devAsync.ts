@@ -1171,7 +1171,8 @@ function resolveStepArgs(step: PlanStep, options: DevOptions, isLast: boolean): 
 /**
  * Claims this worktree's device for the plan's `expo run:*` steps and names it for `--device`.
  *
- * A run boots the device; `--plan` only takes one that is up. No device to claim pins nothing.
+ * A run boots the device; `--plan` only takes one that is up. No device to claim pins nothing,
+ * but booted devices that other worktrees hold stop the run with `DEVICES_ALL_CLAIMED`.
  * Absent for the EAS device and for a harness that must not touch this machine's devices
  * (`AGENT_CLI_NO_DEVICE`).
  */
@@ -1196,8 +1197,9 @@ function runDeviceClaimer(
       allowBoot: options.mode === 'run',
     });
     if (!claimed.ok) {
-      // Nothing to claim or boot here: the Expo CLI is left to find or create one, as before.
-      if (claimed.kind === 'no-device') {
+      // An unpinned `expo run:*` takes the first booted device, so it may run unpinned only when
+      // no booted device is another worktree's: then the Expo CLI finds or creates one, as before.
+      if (claimed.kind === 'no-device' && claimed.holders.length === 0) {
         return null;
       }
       throw claimed.error;

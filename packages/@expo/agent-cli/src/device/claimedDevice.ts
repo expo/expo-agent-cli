@@ -82,6 +82,11 @@ export interface DeviceRefusal {
   /** The device a failed boot was about. */
   deviceId: string | null;
   name: string | null;
+  /**
+   * `no-device` only: booted devices exist, and other live worktrees hold every one of them. A
+   * caller that would fall back to "the first booted device" must refuse instead.
+   */
+  holders: { id: string; projectRoot: string }[];
 }
 
 export type ClaimedDeviceResult = ClaimedDevice | DeviceRefusal;
@@ -154,15 +159,68 @@ export function deviceCapacity(
   return Math.max(1, Math.min(Math.floor(cpus / 4), Math.floor(totalRamGb / 8)));
 }
 
+interface Seen {
+  inventory: Inventory | null;
+  claims: ClassifiedClaim[];
+}
+
 export async function resolveClaimedDeviceAsync(
   options: ResolveClaimedDeviceOptions
 ): Promise<ClaimedDeviceResult> {
+  const projectRoot = canonicalizeExistingPath(options.projectRoot);
+  const seen: Seen = { inventory: null, claims: [] };
+  const result = await resolveWithInventoryAsync(options, projectRoot, seen);
+  if (result.ok || result.kind !== 'no-device') {
+    return result;
+  }
+  const holders = holdersOfEveryBooted(BACKEND[options.platform], projectRoot, seen);
+  if (holders.length === 0) {
+    return result;
+  }
+  const error = devicesAllClaimedError(
+    options.platform,
+    holders,
+    `Every booted ${NOUN[options.platform]} is claimed by another worktree.`
+  );
+  return { ...result, holders, error };
+}
+
+/** The live claims of other worktrees on the booted devices, when they cover every booted one. */
+function holdersOfEveryBooted(
+  backend: LocalDeviceBackend,
+  projectRoot: string,
+  { inventory, claims }: Seen
+): { id: string; projectRoot: string }[] {
+  const holders: { id: string; projectRoot: string }[] = [];
+  for (const candidate of inventory?.candidates ?? []) {
+    if (candidate.state !== 'booted') {
+      continue;
+    }
+    const holder = claims.find(
+      (claim) =>
+        claim.backend === backend &&
+        claim.id === candidate.id &&
+        claim.liveness === 'live' &&
+        claim.projectRoot !== projectRoot
+    );
+    if (holder == null) {
+      return [];
+    }
+    holders.push({ id: holder.id, projectRoot: holder.projectRoot });
+  }
+  return holders;
+}
+
+async function resolveWithInventoryAsync(
+  options: ResolveClaimedDeviceOptions,
+  projectRoot: string,
+  seen: Seen
+): Promise<ClaimedDeviceResult> {
   const { platform, explicit, allowBoot } = options;
   const backend = BACKEND[platform];
-  const projectRoot = canonicalizeExistingPath(options.projectRoot);
 
-  const seen: { inventory: Inventory | null } = { inventory: null };
   const listDevices = async (claims: ClassifiedClaim[]): Promise<LocalCandidate[]> => {
+    seen.claims = claims;
     const listed = await listInventoryAsync(platform, {
       claims,
       projectRoot,
@@ -339,6 +397,7 @@ function refusal(kind: DeviceRefusalKind, reason: string, error?: CommandError):
     error: error ?? new CommandError('NO_DEVICE', `${capitalize(reason)}.`),
     deviceId: null,
     name: null,
+    holders: [],
   };
 }
 

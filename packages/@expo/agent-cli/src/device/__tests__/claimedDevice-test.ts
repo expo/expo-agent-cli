@@ -233,6 +233,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
       ok: false,
       kind: 'no-device',
       reason: 'no booted iOS simulator was found',
+      holders: [],
     });
     expect(tools.callsWith('simctl boot ')).toEqual([]);
     expect(readClaims()).toEqual([]);
@@ -248,7 +249,10 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
       await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: false })
     ).toMatchObject({
       ok: false,
+      kind: 'no-device',
       reason: 'every booted iOS simulator is claimed by another worktree',
+      holders: [{ id: 'SIM-A', projectRoot: OTHER }],
+      error: { code: 'DEVICES_ALL_CLAIMED' },
     });
   });
 
