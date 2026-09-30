@@ -113,9 +113,8 @@ if (
   (resolution.kind === 'command' || resolution.kind === 'passthrough')
 ) {
   const name = resolution.kind === 'command' ? resolution.name : resolution.command;
-  // Feedback's existing DO_NOT_TRACK contract prevents all network requests, including
-  // the command telemetry that would otherwise be recorded before its opt-out check.
-  if (name !== 'help' && !(name === 'feedback' && process.env.DO_NOT_TRACK === '1')) {
+  // Feedback records its event after loading project config, which can enable an opt-out.
+  if (name !== 'help' && name !== 'feedback') {
     const { recordCommand } = require('./telemetry') as typeof import('./telemetry');
     recordCommand(name, version);
   }

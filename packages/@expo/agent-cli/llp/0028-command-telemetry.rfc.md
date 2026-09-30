@@ -48,6 +48,10 @@ not retried, matching Expo CLI. Once the deadline expires, no further attempt st
 Failures are silent and cannot change the command's output or exit status. Delivery is best effort;
 a machine shutdown or unavailable service may lose the event.
 
+Feedback defers its command event until after validating input and loading project config. It
+checks its opt-outs again before recording, so a setting enabled by project config prevents both
+the feedback submission and command telemetry. See [[0029-feedback]].
+
 Both development and production builds emit `build/cli/index.js` and `build/telemetry/index.js`.
 Both are included by the existing published `build` directory. The worker never imports the CLI
 entry point, so it cannot recursively emit command events.

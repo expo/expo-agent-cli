@@ -2,6 +2,7 @@
 import { printCommandHelp } from '../help/format';
 import type { CommandHelp } from '../help/types';
 import { PROGRAM_PREFIX } from '../programName';
+import { recordCommand } from '../telemetry';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
 
@@ -77,7 +78,7 @@ export const agentCliFeedback: Command = async (argv) => {
       '-c': '--category',
       '-s': '--subject',
     },
-    { argv, command: 'feedback', positionalArgs: 'own', permissive: true }
+    { argv, command: 'feedback', positionalArgs: 'own', permissive: false }
   );
 
   if (args['--help']) {
@@ -143,6 +144,12 @@ export const agentCliFeedback: Command = async (argv) => {
   console.error(
     'Submitting feedback with detected agent, sandbox, environment, and project metadata. Authenticated submissions are associated with your Expo account.'
   );
+  // Project config can enable an opt-out while metadata is collected. Defer command telemetry
+  // until that config has run, and apply the same opt-out policy as feedback submission.
+  if (!isTelemetryDisabled()) {
+    const { version } = require('../../package.json') as { version: string };
+    recordCommand('feedback', version);
+  }
   const sent = await sendFeedbackAsync({ feedback, metadata, session });
 
   if (args['--json']) {
