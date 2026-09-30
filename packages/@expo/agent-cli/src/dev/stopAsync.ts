@@ -1,5 +1,6 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
+// @ref llp/0028-one-device-per-agent.rfc.md §Release and cleanup
 // Stop this project's dev server.
 //
 // The friction this replaces is a shell incantation an agent has to compose and get right:
@@ -29,6 +30,8 @@
 
 import chalk from 'chalk';
 
+import { shutdownDeviceAsync } from '../device/bootDevice';
+import { releaseProjectClaims, type DeviceBackend } from '../deviceClaims';
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import { event as cliEvent } from '../events';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../exitCodes';
@@ -105,6 +108,13 @@ export interface DevStopResultJson {
    */
   session?: { id: string | null; stopped: boolean; reason: string | null } | null;
   /**
+   * The devices this worktree had claimed, all given up now, and which of them were shut down.
+   *
+   * @ref llp/0028-one-device-per-agent.rfc.md §Release and cleanup
+   * Only a device this CLI created is shut down; any other is left running for whoever uses it.
+   */
+  devices: ReleasedDevice[];
+  /**
    * Whether a lock answered for **the target**: this CLI's dev server or a stranger's.
    *
    * False when this project holds a lock for a different port than `--port` named, because that
@@ -149,6 +159,14 @@ export interface DevStopResultJson {
   /** How long the whole stop took, in milliseconds. */
   waitedMs: number;
   followups: FollowUp[];
+}
+
+export interface ReleasedDevice {
+  id: string;
+  backend: DeviceBackend;
+  shutDown: boolean;
+  /** Why a device that was to be shut down is still up. Null otherwise. */
+  reason: string | null;
 }
 
 export interface DevStopReportOptions {
@@ -210,6 +228,7 @@ export async function devStopAsync(
   if (options.eas) {
     report.session = await stopProjectEasSessionAsync(projectRoot);
   }
+  report.devices = await releaseDevicesAsync(projectRoot);
   report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
 
   event('stop_done', {
@@ -245,6 +264,25 @@ export async function devStopAsync(
     reportFollowUps('dev:stop', report.followups, { json: options.json });
   }
   return exitCode;
+}
+
+/**
+ * Give up every device claim of this worktree, and shut down the local devices this CLI created.
+ *
+ * Every backend, so another worktree can take the device at once. An EAS session is only released
+ * here; ending it is `--eas`'s act above.
+ */
+async function releaseDevicesAsync(projectRoot: string): Promise<ReleasedDevice[]> {
+  const released = releaseProjectClaims(projectRoot);
+  return await Promise.all(
+    released.map(async ({ id, backend, created }): Promise<ReleasedDevice> => {
+      if (!created || backend === 'eas') {
+        return { id, backend, shutDown: false, reason: null };
+      }
+      const shutdown = await shutdownDeviceAsync(id, backend);
+      return { id, backend, shutDown: shutdown.ok, reason: shutdown.reason };
+    })
+  );
 }
 
 /**
@@ -297,6 +335,7 @@ async function stopLockedDevServerAsync(
     reason: null,
     detail: null,
     waitedMs: 0,
+    devices: [],
     followups: [],
   };
 
@@ -362,6 +401,7 @@ async function stopUnlockedDevServerAsync(
     reason: 'not-running',
     detail: 'no dev-server lock answered for this project, and nothing was listening for it',
     waitedMs: Date.now() - startedAt,
+    devices: [],
     followups: [],
   };
 
@@ -635,6 +675,16 @@ function printHumanReport(report: DevStopResultJson): void {
               ? chalk.dim(' · stopped')
               : chalk.red(` · still running — ${report.session.reason ?? 'no reason given'}`)
           }`
+    );
+  }
+  if (report.devices.length) {
+    lines.push(
+      chalk`{bold Devices} ${report.devices
+        .map(
+          (device) =>
+            `${device.id}${chalk.dim(device.shutDown ? ' · released, shut down' : ' · released')}`
+        )
+        .join(', ')}`
     );
   }
   if (report.pid != null) {
