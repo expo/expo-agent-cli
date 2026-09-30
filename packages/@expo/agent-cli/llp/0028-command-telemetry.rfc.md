@@ -21,6 +21,11 @@ and HTTP user agent `expo-agent-cli/<version>`. Aliases and space-form groups re
 recording. Help, version, bare group listings, and unrecognized command names are excluded.
 Invocation measures usage, not completion or success.
 
+Internal CLI relaunches do not count as another invocation. The detached dev-server child carries
+`__EXPO_AGENT_CLI_INTERNAL_INVOCATION=1`; the launcher consumes it before running the command.
+This also covers the dev server started by `smoke --start`, while preserving upstream Expo's own
+telemetry settings.
+
 Context follows Expo's fields: app/system versions, architecture, CI, a new invocation session ID,
 `context.agent = { id, sessionId }`, and `context.sandbox_provider`. Undetected agent/sandbox fields
 are omitted. The pinned detector versions use only environment checks by default, so the worker

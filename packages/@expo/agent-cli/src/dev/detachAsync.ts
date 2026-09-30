@@ -214,7 +214,8 @@ export async function devDetachAsync(
     // Both streams into the log. `ignore` on stdin, because a detached process has no terminal to
     // read one from, and an inherited stdin would keep this shell attached to it.
     stdio: ['ignore', fd, fd],
-    env: process.env,
+    // The parent command owns usage telemetry; this child only continues its work.
+    env: { ...process.env, __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1' },
   });
   // The child owns the file now; a descriptor left open here would keep the parent alive.
   fs.closeSync(fd);

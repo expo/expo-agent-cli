@@ -42,6 +42,7 @@ async function setupTelemetryAsync() {
   const preload = path.join(directory, 'capture.cjs');
   const requestsFile = path.join(directory, 'requests.jsonl');
   const eventsFile = path.join(directory, 'workers.jsonl');
+  const upstreamFile = path.join(directory, 'upstream.jsonl');
   const gateFile = path.join(directory, 'release');
   await fs.promises.mkdir(home, { recursive: true });
   await fs.promises.writeFile(
@@ -89,6 +90,13 @@ if (isWorker(process.argv[1])) {
     });
   };
 } else {
+  if (process.argv[1]?.replaceAll('\\', '/').endsWith('/node_modules/expo/bin/cli')) {
+    fs.appendFileSync(${JSON.stringify(upstreamFile)}, JSON.stringify({
+      noTelemetry: process.env.EXPO_NO_TELEMETRY,
+      offline: process.env.EXPO_OFFLINE,
+      internal: process.env.__EXPO_AGENT_CLI_INTERNAL_INVOCATION,
+    }) + '\n');
+  }
   const spawn = childProcess.spawn;
   childProcess.spawn = function (command, args, options) {
     const child = spawn.apply(this, arguments);
@@ -134,6 +142,7 @@ if (isWorker(process.argv[1])) {
     } satisfies Record<string, string | undefined>,
     readEvents,
     readRequests,
+    readUpstreamEnvironment: () => readLines<Record<string, string>>(upstreamFile),
     async waitForRequest() {
       expect(await waitForAsync(() => readRequests().length > 0, 10_000)).toBe(true);
       return readRequests()[0]!;
@@ -239,11 +248,41 @@ describe('@expo/agent-cli telemetry', () => {
           return event;
         });
     expect(readOutputEvents(result.stdout)).toEqual(readOutputEvents(baseline.stdout));
-    expect(result.stderr).toBe(baseline.stderr);
+    // Windows batch shims emit DEP0190 with the current Node PID, even with telemetry disabled.
+    const normalizeWarningPid = (stderr: string) =>
+      stderr.replace(/^\(node:\d+\)(?= \[DEP0190\] DeprecationWarning:)/gm, '(node:PID)');
+    expect(normalizeWarningPid(result.stderr)).toBe(normalizeWarningPid(baseline.stderr));
     expect(request.body.batch[0]!.properties).toEqual({ action: 'expo-agent-cli prebuild' });
     expect(JSON.stringify(request)).not.toContain('private-template-secret');
     expect(JSON.stringify(request)).not.toContain('--template');
     expect(telemetry.readRequests()).toHaveLength(1);
+  });
+
+  it('records one invocation when dev relaunches itself in the background', async () => {
+    try {
+      const result = await executeAgentCliAsync(
+        telemetry.projectRoot,
+        ['dev', '--web', '--no-open', '--detach', '--json'],
+        {
+          env: {
+            ...telemetry.env,
+            STUB_EXPO_DELAY_MS: '20000',
+            STUB_EXPO_DEV_SERVER_PORT: '8396',
+          },
+        }
+      );
+      expect(JSON.parse(result.stdout)).toMatchObject({ alreadyRunning: false, ready: null });
+      const request = await telemetry.waitForRequest();
+      expect(request.body.batch[0]!.properties).toEqual({ action: 'expo-agent-cli dev:run' });
+      expect(telemetry.readEvents().filter((event) => event.type === 'spawn')).toHaveLength(1);
+      // The internal marker is consumed by our child; Expo keeps its own telemetry settings.
+      expect(telemetry.readUpstreamEnvironment()).toEqual([{ noTelemetry: '0', offline: '0' }]);
+    } finally {
+      await executeAgentCliAsync(telemetry.projectRoot, ['dev:stop', '--json'], {
+        env: { ...telemetry.env, EXPO_NO_TELEMETRY: '1' },
+        reject: false,
+      });
+    }
   });
 
   it.each([

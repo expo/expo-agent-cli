@@ -101,7 +101,12 @@ installEventLogger({
 
 // Only registry-owned names enter remote telemetry. Raw arguments and local JSONL events
 // can contain project data and credentials; they are not a telemetry payload.
+// Detached dev servers re-enter this launcher for an invocation already recorded by their parent.
+// Consume the marker here so it does not affect commands started by the upstream Expo process.
+const isInternalInvocation = process.env.__EXPO_AGENT_CLI_INTERNAL_INVOCATION === '1';
+delete process.env.__EXPO_AGENT_CLI_INTERNAL_INVOCATION;
 if (
+  !isInternalInvocation &&
   !args['--version'] &&
   !args['--help'] &&
   resolution != null &&
