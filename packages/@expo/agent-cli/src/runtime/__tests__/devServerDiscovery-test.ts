@@ -1,3 +1,6 @@
+import { vol } from 'memfs';
+import path from 'node:path';
+
 import { discoverDevServerAsync } from '../devServer';
 
 const target = { webSocketDebuggerUrl: 'ws://x' } as any;
@@ -180,5 +183,104 @@ describe('readLastLoggedDevServerPort via discovery', () => {
     mockFetchByPort({ '8083': [target] });
     const result = await discoverDevServerAsync(undefined, { projectRoot, timeoutMs: 50 });
     expect(result.devServerUrl).toBe('http://127.0.0.1:8083');
+  });
+});
+
+describe('discoverDevServerAsync — project root of a scanned server', () => {
+  // @ref llp/0028-one-device-per-agent.rfc.md §Discovery
+  const projectRoot = path.resolve('/work/app');
+  const link = path.resolve('/work/link-to-app');
+  const spaced = path.join(projectRoot, 'my app');
+  beforeEach(() => {
+    vol.reset();
+    vol.fromJSON({ [path.join(spaced, 'package.json')]: '{}' });
+    vol.symlinkSync(projectRoot, link);
+  });
+
+  /** Answer /json/list and /status per port; an undefined `root` sends no header. */
+  function mockServers(servers: { [port: string]: { root?: string } }) {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      const server = servers[url.port];
+      if (server === undefined) {
+        throw new Error('ECONNREFUSED');
+      }
+      if (url.pathname === '/status') {
+        const headers = new Headers();
+        if (server.root !== undefined) {
+          headers.set('X-React-Native-Project-Root', server.root);
+        }
+        return new Response('packager-status:running', { headers });
+      }
+      return { ok: true, json: async () => [target] } as Response;
+    });
+  }
+
+  it(`accepts a server whose header names this project`, async () => {
+    mockServers({ '8081': { root: encodeURI(projectRoot) } });
+    expect(await discoverDevServerAsync(undefined, { projectRoot })).toMatchObject({
+      reachable: true,
+      devServerUrl: 'http://127.0.0.1:8081',
+      projectRootVerified: true,
+    });
+  });
+
+  it(`skips a foreign server on 8081 and takes the matching one on 8082`, async () => {
+    mockServers({ '8081': { root: '/somewhere/else' }, '8082': { root: projectRoot } });
+    const result = await discoverDevServerAsync(undefined, { projectRoot });
+    expect(result).toMatchObject({
+      reachable: true,
+      devServerUrl: 'http://127.0.0.1:8082',
+      source: 'scan',
+      projectRootVerified: true,
+    });
+    expect(result.foreignServers).toBeUndefined();
+  });
+
+  it(`reports the foreign servers when none matches`, async () => {
+    mockServers({ '8081': { root: '/a/one' }, '8083': { root: '/b/two' } });
+    const result = await discoverDevServerAsync(undefined, { projectRoot });
+    expect(result).toMatchObject({
+      reachable: false,
+      foreignServers: [
+        { url: 'http://127.0.0.1:8081', port: 8081, projectRoot: '/a/one' },
+        { url: 'http://127.0.0.1:8083', port: 8083, projectRoot: '/b/two' },
+      ],
+    });
+    expect(result.reason).toContain('8081 (/a/one)');
+    expect(result.reason).toContain('8083 (/b/two)');
+  });
+
+  it(`accepts a server that sends no header, and says it is unverified`, async () => {
+    mockServers({ '8082': {} });
+    expect(await discoverDevServerAsync(undefined, { projectRoot })).toMatchObject({
+      reachable: true,
+      devServerUrl: 'http://127.0.0.1:8082',
+      projectRootVerified: false,
+    });
+  });
+
+  it(`decodes a URI-encoded project root with spaces`, async () => {
+    expect(encodeURI(spaced)).toContain('%20');
+    mockServers({ '8081': { root: encodeURI(spaced) } });
+    expect(await discoverDevServerAsync(undefined, { projectRoot: spaced })).toMatchObject({
+      reachable: true,
+      projectRootVerified: true,
+    });
+  });
+
+  it(`matches a project root reached through a symlink`, async () => {
+    mockServers({ '8081': { root: encodeURI(link) } });
+    expect(await discoverDevServerAsync(undefined, { projectRoot })).toMatchObject({
+      reachable: true,
+      projectRootVerified: true,
+    });
+  });
+
+  it(`trusts an explicit URL without reading its project root`, async () => {
+    mockServers({ '9999': { root: '/somewhere/else' } });
+    const result = await discoverDevServerAsync('http://127.0.0.1:9999', { projectRoot });
+    expect(result).toMatchObject({ reachable: true, source: 'flag' });
+    expect(result.projectRootVerified).toBeUndefined();
   });
 });

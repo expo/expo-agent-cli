@@ -8,6 +8,7 @@
 
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../devLock';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
+import { canonicalizeExistingPath } from '../utils/dir';
 import { CommandError } from '../utils/errors';
 import type { CdpTarget } from './cdpClient';
 
@@ -124,6 +125,44 @@ export function howToNameTheDevServer(explicit: boolean): string {
     : `Pass --dev-server-url, or --port for one on this machine, to reach a dev server on another host or port.`;
 }
 
+/** Header the dev server names the project root it serves in, URI-encoded. */
+export const PROJECT_ROOT_HEADER = 'x-react-native-project-root';
+
+/** The header value, URI-decoded, or null when the dev server sent none. */
+export function decodeProjectRoot(value: string | null): string | null {
+  if (value == null) {
+    return null;
+  }
+  try {
+    return decodeURI(value);
+  } catch {
+    // A value that is not a valid encoding is still the answer the dev server gave.
+    return value;
+  }
+}
+
+/**
+ * Whether the dev server's project root and this project's are the same directory.
+ *
+ * Both sides are resolved through the filesystem when they exist, because a temporary directory is
+ * commonly reached through a symlink (`/var` -> `/private/var` on macOS) and two spellings of one
+ * directory must not read as two projects. Windows path comparison is case-insensitive.
+ */
+export function matchProjectRoot(
+  reported: string | null,
+  projectRoot?: string | null
+): boolean | null {
+  if (reported == null || projectRoot == null) {
+    return null;
+  }
+  return canonicalPath(reported) === canonicalPath(projectRoot);
+}
+
+function canonicalPath(value: string): string {
+  const resolved = canonicalizeExistingPath(value);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
 /** Ports `discoverDevServerAsync` scans when no explicit URL was given: Metro's default and
  * the ports `expo start` walks to when 8081 is taken. */
 export const DEV_SERVER_SCAN_PORTS = [8081, 8082, 8083, 8084, 8085];
@@ -160,6 +199,21 @@ export interface DevServerDiscovery extends DevServerProbe {
    * guessed at.
    */
   discovered: boolean;
+  /**
+   * Whether the scan proved the server serves this project, per the project-root header of its
+   * `GET /status`. `true`: the header matched. `false`: the server sent none (an older dev
+   * server), so it is accepted unproved. Absent when nothing was compared: a named URL, the lock,
+   * the log, or no `projectRoot` to compare with.
+   */
+  projectRootVerified?: boolean;
+}
+
+/** A dev server the scan reached that serves another project. */
+export interface ForeignDevServer {
+  url: string;
+  port: number;
+  /** The project root the server named, decoded. */
+  projectRoot: string;
 }
 
 /** The two ways of describing one discovery step, so the sources and the flag stay in step. */
@@ -169,14 +223,17 @@ function foundBy(source: DevServerSource): { source: DevServerSource; discovered
 
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder — the five steps, what
 // each one proves, and why none may be skipped on the strength of a faster one.
+// @ref llp/0028-one-device-per-agent.rfc.md §Discovery
 /**
  * Probe for a dev server. An explicit URL is probed alone (the user named it, so no guessing);
  * without one, 8081 is tried first and, only when it does not answer, the next few ports
  * `expo start` falls back to are scanned in parallel with a short timeout each.
  *
- * Caveat (documented, accepted): the scan cannot prove the server belongs to *this* project —
- * on a machine running two Metros, the first answering port wins. `--dev-server-url` is the
- * precise spelling.
+ * A server found by the port scan must prove it is this project's: when `projectRoot` is given, the
+ * `X-React-Native-Project-Root` header of its `GET /status` is compared with it. A mismatch is a
+ * foreign server and the scan goes on; when nothing else matches, the result is unreachable and
+ * names the foreign servers in {@link DevServerProbe.foreignServers}. A server that sends no header
+ * is accepted with `projectRootVerified: false`. The explicit URL and the lock are trusted.
  *
  * @param signal the caller's own deadline, for a caller that has one. An **explicit** URL gets no
  *   timeout from this function on purpose — a dev server on another host or behind a tunnel may
@@ -265,25 +322,105 @@ export async function discoverDevServerAsync(
     }
   }
 
+  /** Judge a server the scan reached: accepted (with how well it is proved), or foreign. */
+  const judgeAsync = async (url: string): Promise<Judgement> => {
+    if (projectRoot == null) {
+      return { foreign: null, verified: undefined };
+    }
+    const reported = await readReportedProjectRootAsync(url, timeoutMs, signal);
+    if (reported == null) {
+      return { foreign: null, verified: false };
+    }
+    return matchProjectRoot(reported, projectRoot)
+      ? { foreign: null, verified: true }
+      : { foreign: { url, port: Number(new URL(url).port), projectRoot: reported } };
+  };
+  const foreignServers: ForeignDevServer[] = [];
+
   const defaultProbe = await withTimeout(DEFAULT_DEV_SERVER_URL);
   if (defaultProbe.reachable) {
-    return { ...defaultProbe, devServerUrl: DEFAULT_DEV_SERVER_URL, ...foundBy('default') };
+    const judged = await judgeAsync(DEFAULT_DEV_SERVER_URL);
+    if (judged.foreign == null) {
+      return {
+        ...defaultProbe,
+        devServerUrl: DEFAULT_DEV_SERVER_URL,
+        ...foundBy('default'),
+        ...verifiedField(judged),
+      };
+    }
+    foreignServers.push(judged.foreign);
   }
 
   const candidates = DEV_SERVER_SCAN_PORTS.slice(1).map((port) => `http://127.0.0.1:${port}`);
   const probes = await Promise.all(
-    candidates.map(async (url) => ({ url, probe: await withTimeout(url) }))
+    candidates.map(async (url) => {
+      const probe = await withTimeout(url);
+      return { url, probe, judged: probe.reachable ? await judgeAsync(url) : null };
+    })
   );
-  const hit =
-    probes.find(({ probe }) => probe.reachable && probe.targets.length > 0) ??
-    probes.find(({ probe }) => probe.reachable);
+  for (const { judged } of probes) {
+    if (judged?.foreign) {
+      foreignServers.push(judged.foreign);
+    }
+  }
+  const accepted = probes.filter(({ probe, judged }) => probe.reachable && judged?.foreign == null);
+  const hit = accepted.find(({ probe }) => probe.targets.length > 0) ?? accepted.find(() => true);
   if (hit) {
-    return { ...hit.probe, devServerUrl: hit.url, ...foundBy('scan') };
+    return {
+      ...hit.probe,
+      devServerUrl: hit.url,
+      ...foundBy('scan'),
+      ...verifiedField(hit.judged!),
+    };
+  }
+
+  if (foreignServers.length > 0) {
+    const named = foreignServers.map((s) => `${s.port} (${s.projectRoot})`).join(', ');
+    return {
+      reachable: false,
+      targets: [],
+      reason: `a dev server answered on port ${named}, but it serves another project, not ${projectRoot}`,
+      foreignServers,
+      devServerUrl: DEFAULT_DEV_SERVER_URL,
+      ...foundBy('default'),
+    };
   }
 
   // Nothing answered anywhere. The default URL is reported so the caller has a dev server to name
   // in its error, and `default` is the step that produced it.
   return { ...defaultProbe, devServerUrl: DEFAULT_DEV_SERVER_URL, ...foundBy('default') };
+}
+
+type Judgement =
+  | { foreign: null; verified: boolean | undefined }
+  | { foreign: ForeignDevServer; verified?: undefined };
+
+function verifiedField(judged: Judgement): { projectRootVerified?: boolean } {
+  return judged.verified === undefined ? {} : { projectRootVerified: judged.verified };
+}
+
+/**
+ * The project root a dev server names in the headers of `GET /status`, decoded, or null when it
+ * names none or does not answer in time. `/status` only finishes once the bundler does, but the
+ * headers are flushed first, so the request is abandoned as soon as they arrive.
+ */
+async function readReportedProjectRootAsync(
+  url: string,
+  timeoutMs: number,
+  signal?: AbortSignal
+): Promise<string | null> {
+  const budget = AbortSignal.timeout(timeoutMs);
+  try {
+    const response = await fetch(`${url}/status`, {
+      signal: signal == null ? budget : AbortSignal.any([signal, budget]),
+      headers: { connection: 'close' },
+    });
+    const reported = decodeProjectRoot(response.headers.get(PROJECT_ROOT_HEADER));
+    await response.body?.cancel();
+    return reported;
+  } catch {
+    return null;
+  }
 }
 
 export interface DevServerProbe {
@@ -293,6 +430,11 @@ export interface DevServerProbe {
   targets: CdpTarget[];
   /** Why the dev server could not be reached, for the error message. */
   reason?: string;
+  /**
+   * Dev servers the port scan reached that serve another project. Set only when that is all it
+   * found, so "no dev server" is never said of a machine where another project's server answered.
+   */
+  foreignServers?: ForeignDevServer[];
 }
 
 /**
