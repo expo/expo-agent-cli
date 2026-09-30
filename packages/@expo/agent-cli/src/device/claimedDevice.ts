@@ -55,6 +55,8 @@ export interface ClaimedDevice {
   booted: boolean;
   /** Why this device, as one clause for a report. */
   choice: string;
+  /** Whether the device has {@link ResolveClaimedDeviceOptions.appId}. Null when nobody asked. */
+  hasApp: boolean | null;
   /** Android only: the adb every later call on this device uses. */
   adb: AdbResolution | null;
 }
@@ -70,6 +72,8 @@ export type DeviceRefusalKind =
   | 'not-found'
   /** `--device` named a device another live worktree holds. */
   | 'claimed'
+  /** {@link ResolveClaimedDeviceOptions.requireApp}, and the device to boot has not got the app. */
+  | 'no-app'
   | 'boot-failed';
 
 export interface DeviceRefusal {
@@ -94,6 +98,8 @@ export interface ResolveClaimedDeviceOptions {
   allowBoot: boolean;
   /** Devices with this app installed rank first among the shut-down ones. */
   appId?: string | null;
+  /** Decline to boot a device that has not got {@link appId}. */
+  requireApp?: boolean;
   timeoutMs?: number;
   /** Told the device before it boots, so a boot that hangs is still one the caller holds. */
   onBooting?: (device: { deviceId: string; backend: LocalDeviceBackend }) => void;
@@ -252,6 +258,7 @@ export async function resolveClaimedDeviceAsync(
     claim: touchClaim(claim) ?? claim,
     booted,
     choice,
+    hasApp: candidate.hasApp ?? null,
     adb,
   });
 
@@ -267,6 +274,18 @@ export async function resolveClaimedDeviceAsync(
       fresh
         ? noBootedReason(platform, seen.inventory)
         : `the ${NOUN[platform]} this worktree claimed (${candidate.name}) is not booted`
+    );
+  }
+
+  // A boot that cannot open the app costs a minute and answers nothing (llp/0005 §The device that
+  // can open the app), so it is declined before it starts.
+  if (options.requireApp && candidate.hasApp === false) {
+    if (fresh) {
+      releaseClaim(claim);
+    }
+    return refusal(
+      'no-app',
+      `no free ${NOUN[platform]} has ${options.appId} installed, so booting one would open nothing`
     );
   }
 

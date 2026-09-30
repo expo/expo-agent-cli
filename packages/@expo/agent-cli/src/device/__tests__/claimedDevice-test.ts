@@ -4,7 +4,10 @@ import path from 'path';
 
 import { readClaims, writeClaim } from '../../deviceClaims';
 import { newestIosRuntime, resolveClaimedDeviceAsync } from '../claimedDevice';
+import { simulatorHasAppAsync } from '../installedApps';
 import { adbDevices, fakeDeviceTools, simctlDevices } from './fakeDeviceTools';
+
+vi.mock('../installedApps', () => ({ simulatorHasAppAsync: vi.fn(async () => false) }));
 
 vi.mock('../../deviceClaims/events', () => ({
   event: vi.fn(),
@@ -307,6 +310,43 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     expect(result).toMatchObject({ ok: false, kind: 'no-tool' });
     expect(!result.ok && result.error.code).toBe('XCRUN_NOT_RUNNABLE');
     expect(!result.ok && result.error.message).toContain('--eas');
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app. A dev-client
+  // project booted a fresh simulator and the deep link came back `115` — no handler — after a
+  // 12.4 s boot for a device that could never have opened it.
+  it(`boots the free simulator that has the app before the one used more recently`, async () => {
+    vi.mocked(simulatorHasAppAsync).mockImplementation(async (udid) => udid === 'SIM-B');
+    fakeSimulators();
+    expect(
+      await resolveClaimedDeviceAsync({
+        platform: 'ios',
+        projectRoot: HERE,
+        allowBoot: true,
+        appId: 'com.example.app',
+      })
+    ).toMatchObject({
+      ok: true,
+      id: 'SIM-B',
+      hasApp: true,
+      choice: 'it has com.example.app installed',
+    });
+  });
+
+  it(`with requireApp, declines to boot a simulator without the app, and keeps no claim`, async () => {
+    vi.mocked(simulatorHasAppAsync).mockResolvedValue(false);
+    const { tools } = fakeSimulators();
+    expect(
+      await resolveClaimedDeviceAsync({
+        platform: 'ios',
+        projectRoot: HERE,
+        allowBoot: true,
+        appId: 'com.example.app',
+        requireApp: true,
+      })
+    ).toMatchObject({ ok: false, kind: 'no-app' });
+    expect(tools.callsWith('simctl boot ')).toEqual([]);
+    expect(readClaims()).toEqual([]);
   });
 });
 
