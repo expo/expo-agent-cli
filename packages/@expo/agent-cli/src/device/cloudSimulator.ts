@@ -32,9 +32,12 @@ import path from 'path';
 
 import { classifySubprocessFailure } from '../needsHuman/detect';
 import { needsHumanErrorFrom } from '../needsHuman/error';
+import { readClaims, releaseClaim, touchClaim, writeClaim } from '../deviceClaims';
+import type { DeviceClaim } from '../deviceClaims';
 import { PROGRAM_PREFIX } from '../programName';
 import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/easCli';
 import { classifyEasFailure } from '../utils/easFailure';
+import { canonicalizeExistingPath } from '../utils/dir';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import {
@@ -472,46 +475,65 @@ export function isDrivableSession(session: CloudSessionInfo): boolean {
 
 /** What a listing of live sessions amounts to for one run. */
 export interface CloudSessionSelection {
-  /** The session to drive, or null when none of them is one this CLI can use. */
+  /** The session to drive, or null when none of them is this worktree's and drivable. */
   selected: CloudSessionInfo | null;
+  /** Why `selected` is this worktree's: its claim in the registry, or the dotenv it was started from. */
+  source: 'claim' | 'dotenv' | null;
   /** The live sessions this CLI could drive, in the order the rule ranked them. */
   candidates: CloudSessionInfo[];
   /** Live sessions dropped for having a controller this CLI does not speak to. */
   wrongType: CloudSessionInfo[];
+  /** Drivable live sessions that are not this worktree's. Reported, never used. */
+  unclaimed: CloudSessionInfo[];
 }
 
 /**
  * Pick the session to drive, deterministically.
  *
+ * @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+ *
  * Pure and total, because "which session did it use" must not depend on the order the service
- * returned or on the second the command was run (llp/0005 §Cloud simulator). The rule, in order:
+ * returned or on the second the command was run (llp/0005 §Cloud simulator). Only a session this
+ * worktree bound can be selected, and the rule ranks two of them in order:
  *
  * 1. only `agent-device` sessions are candidates at all;
- * 2. the one `.env.eas-simulator` names, when it is among them — the file is a bad existence proof
- *    and a good preference, because it is the session this project started;
- * 3. the platform the caller asked for;
- * 4. the most recently created, `id` ascending as the final tiebreaker so two sessions created in
- *    the same millisecond still order the same way on every run.
+ * 2. the one the worktree's registry claim names;
+ * 3. the one `.env.eas-simulator` names, which `eas simulator` wrote when this worktree started it.
  *
- * A session on the *other* platform is still returned when it is all there is: the caller compares
- * and raises `cloudPlatformMismatchError`, which says a session exists and is not the one asked
- * for — an answer that "no session" would have hidden.
+ * "The newest session on the platform" is not a rule: it is a session another worktree or a CI job
+ * may be driving. A live session that is neither is returned in `unclaimed`, so the caller can say
+ * that it exists. The remaining order (platform, newest, `id` ascending) only makes `candidates`
+ * and `unclaimed` stable between runs.
+ *
+ * A bound session on the *other* platform is still selected: the caller compares and raises
+ * `cloudPlatformMismatchError`, which says a session exists and is not the one asked for.
  */
 export function selectCloudSession(
   sessions: CloudSessionInfo[],
   {
-    preferredId = null,
+    claimedId = null,
+    dotenvId = null,
     platform = null,
-  }: { preferredId?: string | null; platform?: CloudPlatform | null } = {}
+  }: {
+    claimedId?: string | null;
+    dotenvId?: string | null;
+    platform?: CloudPlatform | null;
+  } = {}
 ): CloudSessionSelection {
   const live = sessions.filter((session) => isActiveSessionStatus(session.status));
   const candidates = live.filter(isDrivableSession);
   const wrongType = live.filter((session) => !isDrivableSession(session));
 
+  const boundRank = (session: CloudSessionInfo) =>
+    session.id != null && session.id === claimedId
+      ? 2
+      : session.id != null && session.id === dotenvId
+        ? 1
+        : 0;
   const ranked = [...candidates].sort((a, b) => {
-    const preferred = rank(b.id === preferredId) - rank(a.id === preferredId);
-    if (preferred !== 0) {
-      return preferred;
+    const bound = boundRank(b) - boundRank(a);
+    if (bound !== 0) {
+      return bound;
     }
     const wanted = rank(b.platform === platform) - rank(a.platform === platform);
     if (wanted !== 0) {
@@ -521,7 +543,15 @@ export function selectCloudSession(
     return newest !== 0 ? newest : (a.id ?? '').localeCompare(b.id ?? '');
   });
 
-  return { selected: ranked[0] ?? null, candidates: ranked, wrongType };
+  const first = ranked[0];
+  const source = first ? ([null, 'dotenv', 'claim'] as const)[boundRank(first)]! : null;
+  return {
+    selected: source ? first! : null,
+    source,
+    candidates: ranked,
+    wrongType,
+    unclaimed: ranked.filter((session) => boundRank(session) === 0),
+  };
 }
 
 function rank(value: boolean): number {
@@ -586,6 +616,11 @@ export interface CloudSessionProbe {
    * unhelpful, and the reader is one `simulator:start` away from a device this CLI can drive.
    */
   otherSessionCount: number;
+  /**
+   * How many drivable live sessions are not this worktree's: neither its claim nor its dotenv names
+   * them. They are never used, and a report names them so "no session" is not read as "nothing runs".
+   */
+  unclaimedSessionCount: number;
   /** Why the state is what it is, for a failure that has to explain itself. Null when `active`. */
   reason: string | null;
   /** Whether the account has EAS Simulator at all, when it was worth asking. Null when it was not. */
@@ -685,8 +720,8 @@ export async function probeCloudSessionAsync({
     );
   }
 
-  // The file is read before the listing and used after it: it names the session this project
-  // started, which is the tiebreaker when the account has several up at once.
+  // The file is read before the listing and used after it: it names the session this worktree
+  // started with `eas simulator`, which is adopted when no claim names a live one.
   const preferredId = readCloudSessionIdSync(projectRoot);
 
   const result = await runEasAsync(cli, buildSessionListArgs(), { projectRoot, timeoutMs });
@@ -730,11 +765,31 @@ export async function probeCloudSessionAsync({
     );
   }
 
-  const { selected, candidates, wrongType } = selectCloudSession(sessions, {
-    preferredId,
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  const ownClaims = ownEasClaims(projectRoot, platform);
+  const liveIds = new Set(
+    sessions.filter((session) => isActiveSessionStatus(session.status)).map((session) => session.id)
+  );
+  const claimedId = ownClaims.find((claim) => liveIds.has(claim.id))?.id ?? null;
+  // The listing was read, so a claim whose session is not in it is a session that ended.
+  const endedClaim = ownClaims.find((claim) => !liveIds.has(claim.id));
+  for (const claim of ownClaims) {
+    if (!liveIds.has(claim.id)) {
+      releaseClaim(claim);
+    }
+  }
+
+  const { selected, source, candidates, wrongType, unclaimed } = selectCloudSession(sessions, {
+    claimedId,
+    dotenvId: preferredId,
     platform,
   });
   if (selected?.id != null) {
+    bindEasSession(projectRoot, {
+      id: selected.id,
+      platform: selected.platform ?? (source === 'claim' ? platform : null),
+      created: false,
+    });
     return {
       state: 'active',
       sessionId: selected.id,
@@ -743,6 +798,7 @@ export async function probeCloudSessionAsync({
       sessionName: selected.name,
       candidateCount: candidates.length,
       otherSessionCount: wrongType.length,
+      unclaimedSessionCount: unclaimed.length,
       available: true,
       waitlistUrl: null,
       failure: null,
@@ -755,7 +811,9 @@ export async function probeCloudSessionAsync({
     projectRoot,
     timeoutMs,
     preferredId,
+    endedClaim,
     wrongType,
+    unclaimed,
   });
 }
 
@@ -772,13 +830,17 @@ async function noUsableSessionAsync({
   projectRoot,
   timeoutMs,
   preferredId,
+  endedClaim,
   wrongType,
+  unclaimed,
 }: {
   cli: EasCli;
   projectRoot: string;
   timeoutMs: number;
   preferredId: string | null;
+  endedClaim: DeviceClaim | undefined;
   wrongType: CloudSessionInfo[];
+  unclaimed: CloudSessionInfo[];
 }): Promise<CloudSessionProbe> {
   const availability = await runEasAsync(cli, buildAvailabilityArgs(), { projectRoot, timeoutMs });
   // A check that stopped because nobody is signed in has established nothing about the account's
@@ -800,6 +862,7 @@ async function noUsableSessionAsync({
     sessionName: null,
     candidateCount: 0,
     otherSessionCount: wrongType.length,
+    unclaimedSessionCount: unclaimed.length,
     available,
     waitlistUrl: waitlistUrl ?? (available === false ? CLOUD_SIMULATOR_WAITLIST_URL : null),
     failure: null,
@@ -812,6 +875,22 @@ async function noUsableSessionAsync({
       sessionId: null,
       reason:
         'EAS Simulator is not enabled on this account, so no session can be started for this project',
+    };
+  }
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // A live session that this worktree did not start is not "no session" either, and it is not a
+  // device: another worktree, another machine or a CI job may be driving it.
+  if (unclaimed.length > 0) {
+    const ids = unclaimed.map((session) => session.id).join(', ');
+    return {
+      ...base,
+      state: 'none',
+      sessionId: null,
+      reason: `${unclaimed.length} running EAS Simulator session${
+        unclaimed.length === 1 ? '' : 's'
+      } (${ids}) ${unclaimed.length === 1 ? 'exists' : 'exist'} and ${
+        unclaimed.length === 1 ? 'is' : 'are'
+      } not this worktree's, so ${unclaimed.length === 1 ? 'it was' : 'none was'} not used; a session this worktree starts is bound to it`,
     };
   }
   // A live session of a type this CLI cannot drive is not "no session". Naming the types is what
@@ -832,6 +911,14 @@ async function noUsableSessionAsync({
   // The dotenv names a session the service did not list as running. The file outlives the session,
   // so this is the common shape of a stale one — and saying so is what stops the id in it from
   // reading as an answer.
+  if (endedClaim != null) {
+    return {
+      ...base,
+      state: 'inactive',
+      sessionId: endedClaim.id,
+      reason: `this worktree's claim names session ${endedClaim.id}, and the service does not list it among the running sessions, so that session has ended`,
+    };
+  }
   if (preferredId != null) {
     return {
       ...base,
@@ -1235,6 +1322,53 @@ export function easCliMissingError(): CommandError {
   return error;
 }
 
+/** The `eas` claims this worktree holds, newest use first. */
+function ownEasClaims(projectRoot: string, platform: CloudPlatform | null): DeviceClaim[] {
+  const root = canonicalizeExistingPath(projectRoot);
+  return readClaims()
+    .filter(
+      (claim) =>
+        claim.backend === 'eas' &&
+        claim.projectRoot === root &&
+        (platform == null || claim.platform === platform)
+    )
+    .sort((a, b) => b.touchedAt.localeCompare(a.touchedAt));
+}
+
+/**
+ * Bind an EAS session to this worktree: write its `eas` claim, or refresh the one already there.
+ * Never throws, because a registry that cannot be written costs the binding and not the run. A
+ * session another worktree claimed stays that worktree's.
+ *
+ * @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+ */
+export function bindEasSession(
+  projectRoot: string,
+  { id, platform, created }: { id: string; platform: CloudPlatform | null; created: boolean }
+): void {
+  if (platform == null) {
+    return;
+  }
+  const now = new Date().toISOString();
+  const claim: DeviceClaim = {
+    backend: 'eas',
+    platform,
+    id,
+    projectRoot: canonicalizeExistingPath(projectRoot),
+    pid: process.pid,
+    claimedAt: now,
+    touchedAt: now,
+    created,
+  };
+  try {
+    writeClaim(claim);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      touchClaim(claim);
+    }
+  }
+}
+
 function unknownSession(sessionId: string | null, reason: string): CloudSessionProbe {
   return {
     state: 'unknown',
@@ -1244,6 +1378,7 @@ function unknownSession(sessionId: string | null, reason: string): CloudSessionP
     sessionName: null,
     candidateCount: 0,
     otherSessionCount: 0,
+    unclaimedSessionCount: 0,
     available: null,
     waitlistUrl: null,
     failure: null,

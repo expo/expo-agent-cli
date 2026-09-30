@@ -9,12 +9,18 @@
 // Nothing here reaches EAS. The `eas` on `PATH` is a stub bin that records every invocation, the
 // same way the fixtures' `expo` bin does.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import {
   installStubEasAsync,
+  isolateExpoHome,
+  readDeviceClaims,
   readStubEasInvocations,
+  resetStubEasInvocations,
+  seedStubSessions,
   stubEasArgs as easInvocationArgs,
+  writeCloudSessionFileAsync,
 } from '../stubEas';
 import {
   executeAgentCliAsync,
@@ -28,6 +34,8 @@ import {
   stubExpoEnv,
   waitForAsync,
 } from '../utils';
+
+isolateExpoHome();
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
 const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
@@ -607,6 +615,9 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
               )
             : script,
       });
+      if (state === 'reused') {
+        await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
+      }
       const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas'], {
         env: {
           ...easRunEnv(projectRoot, 8588),
@@ -673,6 +684,8 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
   it('reuses the session this project already has, and opens the app on it instead of starting one', async () => {
     const projectRoot = await setupAsync('go-app');
+    // Named by the dotenv `eas simulator` wrote here, so it is this worktree's: adopted and claimed.
+    await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
 
     try {
       const result = await executeAgentCliAsync(
@@ -695,8 +708,83 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       const open = invocations.find((args) => args[0] === 'simulator:exec')!;
       expect(open.slice(0, 4)).toEqual(['simulator:exec', 'npx', 'agent-device@latest', 'open']);
       expect(open[4]).toMatch(new RegExp(`^exp://${TUNNEL_HOST.replace(/\./g, '\\.')}/--/\\??$`));
+      expect(readDeviceClaims()).toMatchObject([
+        { backend: 'eas', id: 'sess-e2e', projectRoot: fs.realpathSync(projectRoot) },
+      ]);
     } finally {
       await cleanUpAsync(projectRoot);
+    }
+  });
+
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  it('binds each project to the session it started, and never takes the one another agent started', async () => {
+    const store = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-eas-service-'));
+    seedStubSessions(store, [{ id: 'sess-foreign' }]);
+    const a = await setupAsync('go-app');
+    const b = await setupAsync('go-app');
+    const runEnv = (projectRoot: string, port: number, startId: string) => ({
+      ...easRunEnv(projectRoot, port),
+      STUB_SIM_SESSIONS: '0',
+      STUB_SIM_STORE: store,
+      STUB_SIM_START_ID: startId,
+    });
+    const dev = (projectRoot: string, port: number, startId: string) =>
+      executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
+        { env: runEnv(projectRoot, port, startId) }
+      );
+    const claimedIds = () =>
+      readDeviceClaims()
+        .map((claim) => claim.id)
+        .sort();
+
+    try {
+      await dev(a, 8541, 'sess-a');
+      await easInvocationsAfterAsync(a, 'simulator');
+      await waitForAsync(() => claimedIds().includes('sess-a'), 15_000);
+      await dev(b, 8542, 'sess-b');
+      await easInvocationsAfterAsync(b, 'simulator');
+      await waitForAsync(() => claimedIds().includes('sess-b'), 15_000);
+
+      // Each project started a session of its own, though a session was up for both of them.
+      for (const projectRoot of [a, b]) {
+        expect(easInvocationArgs(projectRoot).map((args) => args[0])).not.toContain(
+          'simulator:exec'
+        );
+      }
+      expect(readDeviceClaims()).toMatchObject([
+        { id: 'sess-a', backend: 'eas', projectRoot: fs.realpathSync(a) },
+        { id: 'sess-b', backend: 'eas', projectRoot: fs.realpathSync(b) },
+      ]);
+
+      // A second verb in the same project finds its own session and starts nothing. `dev:stop`
+      // would end the session this project started, so the dev server stays up until the end.
+      resetStubEasInvocations(a);
+      const navigated = await executeAgentCliAsync(
+        a,
+        ['navigate', '/notes', '--eas', '--scheme', 'myapp', '--no-wait-attach', '--json'],
+        { env: runEnv(a, 8541, 'sess-a-again') }
+      );
+      expect(JSON.parse(navigated.stdout)).toMatchObject({ deviceId: 'sess-a' });
+      const second = easInvocationArgs(a).map((args) => args[0]);
+      expect(second).toContain('simulator:exec');
+      expect(second).not.toContain('simulator');
+      expect(claimedIds()).toEqual(['sess-a', 'sess-b']);
+
+      // `dev:stop --eas` ends the claimed session by id, and nobody else's.
+      resetStubEasInvocations(a);
+      await executeAgentCliAsync(a, ['dev:stop', '--eas', '--json'], {
+        env: runEnv(a, 8541, 'sess-a-again'),
+      });
+      const stops = easInvocationArgs(a).filter((args) => args[0] === 'simulator:stop');
+      expect(stops).toContainEqual(['simulator:stop', '--id', 'sess-a', '--non-interactive']);
+      expect(stops.every((args) => args[2] === 'sess-a')).toBe(true);
+      expect(claimedIds()).toEqual(['sess-b']);
+    } finally {
+      await cleanUpAsync(a);
+      await cleanUpAsync(b);
+      fs.rmSync(store, { recursive: true, force: true });
     }
   });
 

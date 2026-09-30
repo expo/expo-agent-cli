@@ -12,11 +12,16 @@
 // that is not the CLI) each produce their own exit code and their own sentence.
 
 import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   installStubEasAsync,
+  isolateExpoHome,
+  readDeviceClaims,
+  seedStubSessions,
   stubEasArgs as easInvocations,
   writeCloudSessionFileAsync as writeSessionFileAsync,
+  writeEasClaimFile,
 } from '../stubEas';
 import {
   executeAgentCliAsync,
@@ -25,6 +30,8 @@ import {
   startStubDevServerAsync,
   type ExecuteResult,
 } from '../utils';
+
+isolateExpoHome();
 
 /**
  * Copy a fixture and put the shared stub `eas` on its `PATH`, behind a stub package runner.
@@ -140,18 +147,17 @@ describe('@expo/agent-cli navigate --eas', () => {
     ]);
   });
 
-  // The dotenv is no longer the gate: a session somebody else started — by MCP, or in another
-  // terminal — is this project's session, and the service is what says so.
-  it(`finds a session the service lists even with no dotenv on disk`, async () => {
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // A listed session that nothing bound to this project is another agent's. It is reported in the
+  // refusal and never used.
+  it(`does not use a listed session that this project never bound, and says it exists`, async () => {
     const projectRoot = await setupAsync('go-app');
 
     const result = await navigateCloud(projectRoot);
 
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      deviceBackend: 'cloud',
-      deviceId: 'sess-e2e',
-    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('sess-e2e');
+    expect(result.stderr).toContain("not this worktree's");
   });
 
   // A running `serve-sim` session has no agent-device daemon in it. Saying "no session" would send
@@ -843,6 +849,40 @@ describe('@expo/agent-cli dev:stop --eas', () => {
       'sess-e2e',
       '--non-interactive',
     ]);
+  });
+
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  it(`ends the session its claim names, and leaves the newer one of somebody else running`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    const store = path.join(projectRoot, 'service');
+    seedStubSessions(store, [{ id: 'sess-mine' }, { id: 'sess-foreign' }]);
+    writeEasClaimFile(projectRoot, { id: 'sess-mine' });
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+      reject: false,
+      env: { STUB_SIM_SESSIONS: '0', STUB_SIM_STORE: store },
+    });
+
+    expect(JSON.parse(result.stdout).session).toEqual({
+      id: 'sess-mine',
+      stopped: true,
+      reason: null,
+    });
+    const stops = easInvocations(projectRoot).filter((argv) => argv[0] === 'simulator:stop');
+    expect(stops).toEqual([['simulator:stop', '--id', 'sess-mine', '--non-interactive']]);
+    expect(readDeviceClaims()).toEqual([]);
+  });
+
+  it(`stops nothing for a session that nobody bound to this project`, async () => {
+    const projectRoot = await setupAsync('go-app');
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+      reject: false,
+      // The stub's default session, `sess-e2e`: listed, in progress, and this project's by no record.
+    });
+
+    expect(JSON.parse(result.stdout).session).toEqual({ id: null, stopped: false, reason: null });
+    expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:stop')).toBe(false);
   });
 
   it(`answers a project with no session, and stops nothing`, async () => {

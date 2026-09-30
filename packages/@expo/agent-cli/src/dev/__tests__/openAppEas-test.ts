@@ -1,4 +1,6 @@
 // @ref llp/0027-everything-on-eas.rfc.md §The open is a session
+import { readClaims, writeClaim } from '../../deviceClaims';
+import { vol } from 'memfs';
 import * as Log from '../../log';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
@@ -85,6 +87,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.resetAllMocks();
+  vol.reset();
 });
 
 describe(buildSessionStartArgs, () => {
@@ -256,6 +259,26 @@ describe(openAppOnEasAsync, () => {
       }),
     ]);
     expect(options).toMatchObject({ cwd: projectRoot });
+  });
+
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  it(`binds the session it started to this worktree with an eas claim`, async () => {
+    await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+
+    expect(readClaims()).toMatchObject([
+      {
+        backend: 'eas',
+        platform: 'ios',
+        id: '11111111-2222-3333-4444-555555555555',
+        projectRoot,
+        created: true,
+      },
+    ]);
   });
 
   it(`starts a session with the build id and the dev-launcher URL for a development build`, async () => {
@@ -442,6 +465,7 @@ describe(openAppOnEasAsync, () => {
     expect(report.started).toBe(true);
     expect(report.reason).toContain('exited 1');
     expect(report.reason).toContain('npx --yes eas-cli@latest simulator:stop --id sess-billed');
+    expect(readClaims()).toMatchObject([{ id: 'sess-billed', projectRoot }]);
   });
 
   it(`says when no eas can be run at all`, async () => {
@@ -483,6 +507,37 @@ describe('the session half on its own', () => {
       'sess-1',
       '--non-interactive',
     ]);
+  });
+
+  it(`releases the claim of a session it stopped, and keeps it when the stop failed`, async () => {
+    const claim = {
+      backend: 'eas' as const,
+      platform: 'ios' as const,
+      id: 'sess-1',
+      projectRoot,
+      pid: 1,
+      claimedAt: '2026-09-30T10:00:00.000Z',
+      touchedAt: '2026-09-30T10:00:00.000Z',
+      created: true,
+    };
+    writeClaim(claim);
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: '',
+      stderr: 'Session not found',
+      exitCode: 1,
+      spawnError: null,
+    } as any);
+    await stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI);
+    expect(readClaims()).toHaveLength(1);
+
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: 'stopped',
+      stderr: '',
+      exitCode: 0,
+      spawnError: null,
+    } as any);
+    await stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI);
+    expect(readClaims()).toEqual([]);
   });
 
   it(`reports a stop that took, and quotes one that did not`, async () => {

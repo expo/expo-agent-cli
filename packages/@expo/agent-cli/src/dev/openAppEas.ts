@@ -23,15 +23,18 @@
 import path from 'path';
 
 import {
+  bindEasSession,
   probeCloudSessionAsync,
   CLOUD_SESSION_TIMEOUT_MS,
   type CloudPlatform,
 } from '../device/cloudSimulator';
+import { readClaims, releaseClaim } from '../deviceClaims';
 import * as Log from '../log';
 import { openRouteAsync, resolveRouteUrlAsync } from '../navigate/openRoute';
 import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
+import { canonicalizeExistingPath } from '../utils/dir';
 import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/easCli';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { parseCachedBuild } from '../impact/buildCache';
@@ -237,7 +240,7 @@ export async function findLatestSimulatorBuildIdAsync(
 /**
  * Make sure this project has an EAS Simulator session on `platform` with the app on it.
  *
- * Reuses the session in progress on that platform when there is one, and otherwise starts one with
+ * Reuses the session this worktree has bound on that platform when there is one, and otherwise starts one with
  * the app and the tunnelled launch URL on its command line. Never throws.
  */
 export async function ensureEasSessionAsync(
@@ -260,7 +263,7 @@ export async function ensureEasSessionAsync(
     ...partial,
   });
 
-  // 1. A session this project already has, on this platform, is the device: reuse it. Asked before
+  // 1. A session this worktree already bound (claim or dotenv), on this platform, is the device: reuse it. Asked before
   //    the tunnel, because a session that is up needs no URL from here — `openRouteAsync` builds
   //    the deep link it is sent — and a gate whose dev server carries no tunnel yet must not wait
   //    two minutes to learn that the session it is about to drive was there all along. The deep
@@ -375,6 +378,16 @@ export async function ensureEasSessionAsync(
   const output = `${result.stdout}\n${result.stderr}`;
   const sessionId = readSessionId(output);
   const sessionUrl = readSessionUrl(output);
+  if (sessionId) {
+    // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+    // Also when the start failed after the session was created: that session is this worktree's and
+    // may be billing, so `dev:stop --eas` has to find it.
+    bindEasSession(projectRoot, {
+      id: sessionId,
+      platform: platform as CloudPlatform,
+      created: true,
+    });
+  }
   if (result.spawnError) {
     return failed(`"${easCliLabel(easCli)} ${args[0]}" could not be run (${result.spawnError})`, {
       tunnelHost,
@@ -427,6 +440,12 @@ export async function stopEasSessionAsync(
         firstLine(result.stderr) || firstLine(result.stdout) || 'it printed nothing'
       }`,
     };
+  }
+  const root = canonicalizeExistingPath(projectRoot);
+  for (const claim of readClaims()) {
+    if (claim.backend === 'eas' && claim.id === sessionId && claim.projectRoot === root) {
+      releaseClaim(claim);
+    }
   }
   return { ok: true, reason: null };
 }
