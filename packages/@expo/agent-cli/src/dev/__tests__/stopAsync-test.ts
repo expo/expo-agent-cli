@@ -4,6 +4,7 @@ import { shutdownDeviceAsync } from '../../device/bootDevice';
 import { readClaims, writeClaim, type DeviceClaim } from '../../deviceClaims';
 import { readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
+import { canonicalizeExistingPath } from '../../utils/dir';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
 import { devStopAsync, looksLikeDevServerProcess } from '../stopAsync';
@@ -580,7 +581,7 @@ describe(`${devStopAsync.name} and the device claims`, () => {
       backend: 'local-ios',
       platform: 'ios',
       id,
-      projectRoot,
+      projectRoot: canonicalizeExistingPath(projectRoot),
       pid: 1,
       claimedAt: now,
       touchedAt: now,

@@ -12,6 +12,7 @@ import path from 'node:path';
 
 import type { DeviceClaim } from '../../src/deviceClaims';
 import {
+  canonicalRoot,
   executeAgentCliAsync,
   getTemporaryPath,
   pathEnvVars,
@@ -84,39 +85,43 @@ describe('device claims across two worktrees', () => {
     });
     const run = readStubExpoInvocations(projectRoot).find(({ args }) => args[0] === 'run:ios');
     return {
-      projectRoot: fs.realpathSync(projectRoot),
+      projectRoot: canonicalRoot(projectRoot),
       runDevice: run?.args[run.args.indexOf('--device') + 1],
     };
   }
 
-  it('gives each worktree its own simulator, and dev:stop gives it back', async () => {
-    const first = await devAsync();
-    const second = await devAsync();
+  // Off macOS the toolchain probe settles iOS as impossible, so the plan never runs `expo run:ios`.
+  it.skipIf(process.platform !== 'darwin')(
+    'gives each worktree its own simulator, and dev:stop gives it back',
+    async () => {
+      const first = await devAsync();
+      const second = await devAsync();
 
-    const byRoot = new Map(claims().map((claim) => [claim.projectRoot, claim.id]));
-    expect(byRoot.get(first.projectRoot)).toBe(first.runDevice);
-    expect(byRoot.get(second.projectRoot)).toBe(second.runDevice);
-    expect(first.runDevice).toBeDefined();
-    expect(first.runDevice).not.toBe(second.runDevice);
-    expect(
-      readXcrun()
-        .filter((args) => args[0] === 'simctl' && args[1] === 'boot')
-        .map((args) => args[2])
-        .sort()
-    ).toEqual(SIMULATORS.map(({ udid }) => udid).sort());
+      const byRoot = new Map(claims().map((claim) => [claim.projectRoot, claim.id]));
+      expect(byRoot.get(first.projectRoot)).toBe(first.runDevice);
+      expect(byRoot.get(second.projectRoot)).toBe(second.runDevice);
+      expect(first.runDevice).toBeDefined();
+      expect(first.runDevice).not.toBe(second.runDevice);
+      expect(
+        readXcrun()
+          .filter((args) => args[0] === 'simctl' && args[1] === 'boot')
+          .map((args) => args[2])
+          .sort()
+      ).toEqual(SIMULATORS.map(({ udid }) => udid).sort());
 
-    const stopped = await executeAgentCliAsync(projects[0]!, ['dev:stop', '--json'], {
-      env: envFor(projects[0]!),
-    });
-    // This CLI booted the simulator, so the stop shuts it down before it gives the claim back.
-    expect(JSON.parse(stopped.stdout).devices).toEqual([
-      { id: first.runDevice, backend: 'local-ios', released: true, shutDown: true, reason: null },
-    ]);
-    expect(readXcrun().filter((args) => args[0] === 'simctl' && args[1] === 'shutdown')).toEqual([
-      ['simctl', 'shutdown', first.runDevice],
-    ]);
-    expect(claims().map(({ projectRoot }) => projectRoot)).toEqual([second.projectRoot]);
-  });
+      const stopped = await executeAgentCliAsync(projects[0]!, ['dev:stop', '--json'], {
+        env: envFor(projects[0]!),
+      });
+      // This CLI booted the simulator, so the stop shuts it down before it gives the claim back.
+      expect(JSON.parse(stopped.stdout).devices).toEqual([
+        { id: first.runDevice, backend: 'local-ios', released: true, shutDown: true, reason: null },
+      ]);
+      expect(readXcrun().filter((args) => args[0] === 'simctl' && args[1] === 'shutdown')).toEqual([
+        ['simctl', 'shutdown', first.runDevice],
+      ]);
+      expect(claims().map(({ projectRoot }) => projectRoot)).toEqual([second.projectRoot]);
+    }
+  );
 
   // @ref llp/0021-honest-reports.rfc.md — a session left running is named, not dropped.
   it('keeps an EAS session claim that a plain dev:stop did not stop, and says it still runs', async () => {
@@ -129,7 +134,7 @@ describe('device claims across two worktrees', () => {
       backend: 'eas',
       platform: 'android',
       id: 'e2e-session-1',
-      projectRoot: fs.realpathSync(projectRoot),
+      projectRoot: canonicalRoot(projectRoot),
       pid: 1,
       claimedAt: now,
       touchedAt: now,
