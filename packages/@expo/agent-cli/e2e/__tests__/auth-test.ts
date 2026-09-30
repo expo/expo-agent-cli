@@ -123,6 +123,9 @@ function readInvocations(dir: string): StubInvocation[] {
 function isolatedEnv(dir: string): Record<string, string> {
   return {
     AUTH_LOG_DIR: dir,
+    // These cases name the default session file, so they opt out of the harness's own Expo home
+    // (@ref ../utils §spawnAgentCli); none of them touches a device claim.
+    __UNSAFE_EXPO_HOME_DIRECTORY: '',
     ...pathEnvVars(
       [path.join(dir, 'path-bin'), path.dirname(process.execPath), '/usr/bin', '/bin'].join(
         path.delimiter
