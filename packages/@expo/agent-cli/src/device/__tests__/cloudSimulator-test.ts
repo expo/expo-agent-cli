@@ -19,6 +19,8 @@ import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
+import { readClaims, writeClaim } from '../../deviceClaims';
+import type { DeviceClaim } from '../../deviceClaims';
 import recordedAvailability from '../../__fixtures__/eas/simulator-availability.json';
 import { isNeedsHumanError } from '../../utils/errors';
 import {
@@ -53,6 +55,23 @@ import {
   type CloudSessionInfo,
   type CloudSessionProbe,
 } from '../cloudSimulator';
+
+/** An `eas` claim of `/project`, as an earlier start from this worktree left it. */
+function claimSession(
+  id: string,
+  { platform = 'ios', projectRoot = '/project' }: Partial<DeviceClaim> = {}
+): void {
+  writeClaim({
+    backend: 'eas',
+    platform,
+    id,
+    projectRoot,
+    pid: 1,
+    claimedAt: '2026-09-30T10:00:00.000Z',
+    touchedAt: '2026-09-30T10:00:00.000Z',
+    created: true,
+  });
+}
 
 /**
  * The runner every `eas` invocation goes through, planted where the resolver will look.
@@ -179,7 +198,10 @@ describe('the payloads the service really sent', () => {
         createdAt: '2026-08-26T09:56:35.286Z',
       },
     ]);
-    expect(selectCloudSession(sessions!).selected?.id).toBe('01a03d80-0556-7d22-98df-f415d9392b98');
+    expect(
+      selectCloudSession(sessions!, { dotenvId: '01a03d80-0556-7d22-98df-f415d9392b98' }).selected
+        ?.id
+    ).toBe('01a03d80-0556-7d22-98df-f415d9392b98');
   });
 
   // `[]` and not null: the service answered, and what it answered is "nothing is running". The two
@@ -207,7 +229,8 @@ describe('the payloads the service really sent', () => {
     const [live] = parseSessionListJson(recorded('simulator-list-in-progress.json'))!;
     const older = { ...live!, id: 'older', createdAt: '2026-08-26T08:00:00.000Z' };
 
-    expect(selectCloudSession([older, live!]).selected?.id).toBe(live!.id);
+    expect(selectCloudSession([older, live!], { dotenvId: live!.id }).unclaimed).toEqual([older]);
+    expect(selectCloudSession([older, live!]).candidates[0]).toBe(live);
   });
 });
 
@@ -475,8 +498,35 @@ describe(selectCloudSession, () => {
     )
   )![0]!;
 
-  it(`picks the only live session there is`, () => {
-    expect(selectCloudSession([ios]).selected?.id).toBe('ios-1');
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  it(`selects the session the claim names, over a newer one and over the dotenv`, () => {
+    const selection = selectCloudSession([ios, android], { claimedId: 'ios-1', dotenvId: 'and-1' });
+
+    expect(selection).toMatchObject({ source: 'claim' });
+    expect(selection.selected?.id).toBe('ios-1');
+  });
+
+  it(`adopts the session the dotenv names when no claim names a live one`, () => {
+    const selection = selectCloudSession([ios, android], { dotenvId: 'ios-1' });
+
+    expect(selection).toMatchObject({ source: 'dotenv' });
+    expect(selection.selected?.id).toBe('ios-1');
+  });
+
+  // The rule this RFC removes: the newest session on the platform may be another worktree's.
+  it(`does not select the newest session when nothing bound it, and reports it`, () => {
+    const selection = selectCloudSession([ios, android], { platform: 'android' });
+
+    expect(selection.selected).toBeNull();
+    expect(selection.source).toBeNull();
+    expect(selection.unclaimed.map((session) => session.id)).toEqual(['and-1', 'ios-1']);
+  });
+
+  it(`reports a session that is not the bound one as unclaimed beside the selection`, () => {
+    const selection = selectCloudSession([ios, android], { claimedId: 'ios-1' });
+
+    expect(selection.selected?.id).toBe('ios-1');
+    expect(selection.unclaimed.map((session) => session.id)).toEqual(['and-1']);
   });
 
   // Only `agent-device` answers `simulator:exec npx agent-device`. A `serve-sim` session is a
@@ -493,33 +543,33 @@ describe(selectCloudSession, () => {
     expect(selectCloudSession([{ ...ios, status: 'STOPPED' }]).selected).toBeNull();
   });
 
-  // The dotenv is a bad existence proof and a good preference: it names the session this project
-  // started, so it wins over one that is newer and somebody else's.
-  it(`prefers the session the dotenv names, over a newer one`, () => {
-    expect(selectCloudSession([ios, android], { preferredId: 'ios-1' }).selected?.id).toBe('ios-1');
+  it(`orders the unclaimed sessions by the platform asked for`, () => {
+    expect(selectCloudSession([ios, android], { platform: 'ios' }).unclaimed[0]?.id).toBe('ios-1');
+    expect(selectCloudSession([ios, android], { platform: 'android' }).unclaimed[0]?.id).toBe(
+      'and-1'
+    );
   });
 
-  it(`prefers the platform the caller asked for, when the dotenv names neither`, () => {
-    expect(selectCloudSession([ios, android], { platform: 'ios' }).selected?.id).toBe('ios-1');
-    expect(selectCloudSession([ios, android], { platform: 'android' }).selected?.id).toBe('and-1');
+  // A bound session on the other platform still comes back: the caller raises the mismatch, which
+  // says a session exists and is not the one asked for. "No session" would have hidden it.
+  it(`still selects a bound session of the other platform`, () => {
+    expect(
+      selectCloudSession([android], { claimedId: 'and-1', platform: 'ios' }).selected?.id
+    ).toBe('and-1');
   });
 
-  // A session on the other platform still comes back: the caller raises the mismatch, which says a
-  // session exists and is not the one asked for. "No session" would have hidden it.
-  it(`still answers with the other platform's session when it is all there is`, () => {
-    expect(selectCloudSession([android], { platform: 'ios' }).selected?.id).toBe('and-1');
-  });
+  it(`never counts a session of another controller as unclaimed`, () => {
+    const serveSim: CloudSessionInfo = { ...ios, id: 'srv-1', type: 'serve-sim' };
 
-  it(`falls back to the most recently created`, () => {
-    expect(selectCloudSession([ios, android]).selected?.id).toBe('and-1');
+    expect(selectCloudSession([serveSim]).unclaimed).toEqual([]);
   });
 
   // Determinism is the point: the same listing in any order must pick the same session, or "which
   // device did it use" becomes a thing a reader has to guess at.
   it(`picks the same session whatever order the service returned`, () => {
     const same = { ...ios, id: 'ios-2' };
-    expect(selectCloudSession([ios, same]).selected?.id).toBe('ios-1');
-    expect(selectCloudSession([same, ios]).selected?.id).toBe('ios-1');
+    expect(selectCloudSession([ios, same]).unclaimed[0]?.id).toBe('ios-1');
+    expect(selectCloudSession([same, ios]).unclaimed[0]?.id).toBe('ios-1');
   });
 });
 
@@ -617,24 +667,91 @@ describe(readCloudSessionIdSync, () => {
 describe(probeCloudSessionAsync, () => {
   afterEach(() => vol.reset());
 
-  // Discovery is the listing, and the dotenv is not a gate: a project with no file at all still
-  // finds a session started by MCP or by another terminal.
-  it(`is active for a session the service lists, with no dotenv at all`, async () => {
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // A listed session that nothing bound to this worktree is never the device. It is reported, and
+  // the caller starts a session of its own.
+  it(`does not use a session it never bound, and reports it`, async () => {
     project();
-    mockEas({ stdout: listJson(sessionRow()) });
+    let call = 0;
+    spawned = [];
+    vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
+      spawned.push({ command, args });
+      const answer = call++ === 0 ? listJson(sessionRow()) : '{"available": true}';
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => {
+        child.stdout.emit('data', answer);
+        child.emit('close', 0, null);
+      });
+      return child as any;
+    }) as any);
 
-    const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+    expect(probe).toMatchObject({ state: 'none', sessionId: null, unclaimedSessionCount: 1 });
+    expect(probe.reason).toContain('sess-1');
+    expect(probe.reason).toContain("not this worktree's");
+    expect(readClaims()).toEqual([]);
+  });
+
+  it(`selects the session this worktree's claim names, and refreshes the claim`, async () => {
+    project();
+    claimSession('sess-2');
+    mockEas({
+      stdout: listJson(
+        sessionRow({ id: 'sess-1', createdAt: '2026-08-26T12:00:00.000Z' }),
+        sessionRow({ id: 'sess-2', createdAt: '2026-08-26T09:00:00.000Z' })
+      ),
+    });
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
 
     expect(probe).toMatchObject({
       state: 'active',
-      sessionId: 'sess-1',
-      platform: 'ios',
-      sessionName: 'Checkout flow screenshots',
-      candidateCount: 1,
-      reason: null,
+      sessionId: 'sess-2',
+      candidateCount: 2,
+      unclaimedSessionCount: 1,
     });
-    expect(spawned).toHaveLength(1);
-    expect(spawned[0]!.args).toEqual(easArgv(buildSessionListArgs()));
+    const [claim] = readClaims();
+    expect(claim).toMatchObject({ id: 'sess-2', projectRoot: '/project', created: true });
+    expect(claim!.touchedAt).not.toBe('2026-09-30T10:00:00.000Z');
+  });
+
+  it(`ignores the claim of another worktree`, async () => {
+    project();
+    claimSession('sess-1', { projectRoot: '/other' });
+    mockEas({ stdout: listJson(sessionRow()) });
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+    expect(probe.state).toBe('none');
+    expect(readClaims()).toHaveLength(1);
+  });
+
+  it(`adopts the session the dotenv names by writing a claim for it`, async () => {
+    project({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=sess-1\n' });
+    mockEas({ stdout: listJson(sessionRow()) });
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+    expect(probe).toMatchObject({ state: 'active', sessionId: 'sess-1' });
+    expect(readClaims()).toMatchObject([
+      { backend: 'eas', platform: 'ios', id: 'sess-1', projectRoot: '/project' },
+    ]);
+  });
+
+  it(`releases a claim whose session the service no longer lists`, async () => {
+    project();
+    claimSession('sess-gone');
+    mockEas({ stdout: listJson() });
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+    expect(probe).toMatchObject({ state: 'inactive', sessionId: 'sess-gone' });
+    expect(probe.reason).toContain('has ended');
+    expect(readClaims()).toEqual([]);
   });
 
   it(`picks the session the dotenv names when the service lists several`, async () => {
@@ -651,7 +768,7 @@ describe(probeCloudSessionAsync, () => {
     expect(probe).toMatchObject({ state: 'active', sessionId: 'sess-2', candidateCount: 2 });
   });
 
-  it(`prefers a session on the platform the caller asked for`, async () => {
+  it(`uses the claim of the platform the caller asked for`, async () => {
     project();
     mockEas({
       stdout: listJson(
@@ -659,6 +776,9 @@ describe(probeCloudSessionAsync, () => {
         sessionRow({ id: 'and-1', platform: 'ANDROID' })
       ),
     });
+
+    claimSession('and-1', { platform: 'android' });
+    claimSession('ios-1', { platform: 'ios' });
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'android' });
 
@@ -870,6 +990,7 @@ describe(cloudSessionUnavailableError, () => {
     sessionName: null,
     candidateCount: 0,
     otherSessionCount: 0,
+    unclaimedSessionCount: 0,
     available: null,
     waitlistUrl: null,
     failure: null,
@@ -1038,6 +1159,7 @@ describe(`${cloudSessionUnknownError.name} and the signed-out account`, () => {
     sessionName: null,
     candidateCount: 0,
     otherSessionCount: 0,
+    unclaimedSessionCount: 0,
     available: null,
     waitlistUrl: null,
     reason: 'the EAS CLI would not answer',

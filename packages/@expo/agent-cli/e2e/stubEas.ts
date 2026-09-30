@@ -7,6 +7,7 @@
 // The script is **copied** into the project's `.stub-bin` rather than referenced in place, so a
 // test that needs a one-off answer can overwrite the copy without touching the shared file.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { installStubEasRunnerAsync } from './utils';
@@ -109,5 +110,95 @@ export async function writeCloudSessionFileAsync(
   await fs.promises.writeFile(
     path.join(projectRoot, '.env.eas-simulator'),
     `# managed by eas-cli\nAGENT_DEVICE_DAEMON_BASE_URL=https://stub-daemon.example\nAGENT_DEVICE_DAEMON_AUTH_TOKEN=stub-token\nEAS_SIMULATOR_SESSION_ID=${sessionId}\n`
+  );
+}
+
+/**
+ * Point the device-claim registry of every CLI this file spawns at a directory of its own.
+ *
+ * Without it, each `dev --eas` of an e2e run writes an `eas` claim into the real `~/.expo` of the
+ * machine. Call it once at the top of a file. Each test gets an empty registry.
+ *
+ * @ref llp/0028-one-device-per-agent.rfc.md §The registry
+ */
+export function isolateExpoHome(): void {
+  let home: string | null = null;
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-expo-home-'));
+    process.env.__UNSAFE_EXPO_HOME_DIRECTORY = home;
+  });
+  afterEach(() => {
+    delete process.env.__UNSAFE_EXPO_HOME_DIRECTORY;
+    if (home) {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+}
+
+/** One claim file of the isolated registry, as the CLI wrote it. */
+export interface StubDeviceClaim {
+  backend: string;
+  platform: string;
+  id: string;
+  projectRoot: string;
+  created: boolean;
+}
+
+function claimsDirectory(): string {
+  return path.join(process.env.__UNSAFE_EXPO_HOME_DIRECTORY!, 'agent-cli', 'devices');
+}
+
+/** Every claim in the isolated registry, in file-name order. */
+export function readDeviceClaims(): StubDeviceClaim[] {
+  if (!fs.existsSync(claimsDirectory())) {
+    return [];
+  }
+  return fs
+    .readdirSync(claimsDirectory())
+    .filter((name) => name.endsWith('.json'))
+    .sort()
+    .map((name) => JSON.parse(fs.readFileSync(path.join(claimsDirectory(), name), 'utf8')));
+}
+
+/** Write the `eas` claim that a start from `projectRoot` would have left, without running one. */
+export function writeEasClaimFile(
+  projectRoot: string,
+  { id, platform = 'ios' }: { id: string; platform?: 'ios' | 'android' }
+): void {
+  const now = new Date().toISOString();
+  fs.mkdirSync(claimsDirectory(), { recursive: true });
+  fs.writeFileSync(
+    path.join(claimsDirectory(), `eas-${encodeURIComponent(id)}.json`),
+    JSON.stringify({
+      backend: 'eas',
+      platform,
+      id,
+      projectRoot: fs.realpathSync(projectRoot),
+      pid: process.pid,
+      claimedAt: now,
+      touchedAt: now,
+      created: true,
+    })
+  );
+}
+
+/** Seed the service the stub `eas` answers for (STUB_SIM_STORE) with sessions nobody here started. */
+export function seedStubSessions(
+  storeDir: string,
+  sessions: { id: string; platform?: string; status?: string }[]
+): void {
+  fs.mkdirSync(storeDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(storeDir, 'stub-eas-sessions.json'),
+    JSON.stringify(
+      sessions.map(({ id, platform = 'IOS', status = 'IN_PROGRESS' }) => ({
+        id,
+        name: 'someone else',
+        type: 'agent-device',
+        status,
+        platform,
+        createdAt: '2026-09-30T12:00:00.000Z',
+      }))
+    )
   );
 }
