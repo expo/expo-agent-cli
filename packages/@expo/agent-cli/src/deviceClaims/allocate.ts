@@ -30,8 +30,11 @@ export interface AllocateDeviceOptions<C extends DeviceCandidate> {
   projectRoot: string;
   platform: DevicePlatform;
   backend: DeviceBackend;
-  /** Every device this backend has for the platform, booted or not. */
-  listDevices: () => Promise<C[]>;
+  /**
+   * Every device this backend has for the platform, booted or not. Handed the classified claims,
+   * so an inventory that depends on claims counts only the live ones of other worktrees.
+   */
+  listDevices: (claims: ClassifiedClaim[]) => Promise<C[]>;
   /** Called under the registry lock, so the capacity it was counted against still holds. */
   createDevice?: () => Promise<C>;
   /** Deletes a device this CLI created whose claim expired. Absent: expired devices are kept. */
@@ -70,13 +73,13 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
 
   return await withRegistryLockAsync(async () => {
     pruneUnreadableClaims(now.getTime());
-    const inventory = await listDevices();
     const claims: ClassifiedClaim[] = await Promise.all(
       readClaims().map(async (claim) => ({
         ...claim,
         liveness: await classifyClaimAsync(claim, { now, probeLock }),
       }))
     );
+    const inventory = await listDevices(claims);
     const choice = chooseDevice({
       projectRoot,
       platform,
