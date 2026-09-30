@@ -1,6 +1,9 @@
+// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
 // @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read
 // What reading the installed app answered, and how to pick one answer out of several devices.
 
+import type { AdbResolution } from '../device/adb';
+import { resolveClaimedDeviceAsync } from '../device/claimedDevice';
 import type { FingerprintSource } from '../project/fingerprint';
 
 /** Name of the file the expo-constants build phase embeds in a debug build. */
@@ -99,6 +102,27 @@ export function pickBestResult(
     }
   }
   return best;
+}
+
+/**
+ * The device this worktree claims on the platform, as the one device a reader reads without
+ * `--device`. Never boots one: `status` starts nothing it was not asked to start.
+ *
+ * @throws the tool error when `simctl` or `adb` could not run.
+ */
+export async function claimedReadableDeviceAsync(
+  platform: 'ios' | 'android',
+  projectRoot: string,
+  resolve: typeof resolveClaimedDeviceAsync = resolveClaimedDeviceAsync
+): Promise<{ device: InstalledAppDevice; adb: AdbResolution | null } | null> {
+  const claimed = await resolve({ platform, projectRoot, allowBoot: false });
+  if (claimed.ok) {
+    return { device: { identifier: claimed.id, name: claimed.name }, adb: claimed.adb };
+  }
+  if (claimed.kind === 'no-tool') {
+    throw claimed.error;
+  }
+  return null;
 }
 
 /** Case-insensitive match of `--device` against a device's name or identifier. */

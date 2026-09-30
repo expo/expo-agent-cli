@@ -1,3 +1,4 @@
+// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
 // @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read
 // The fingerprint embedded in the app installed on an Android device or emulator.
 
@@ -5,7 +6,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { adbNotRunnableError, runAdbAsync, runAdbRawAsync } from '../device/adb';
+import { adbNotRunnableError, resolveAdb, runAdbAsync, runAdbRawAsync } from '../device/adb';
+import type { resolveClaimedDeviceAsync } from '../device/claimedDevice';
 import { androidPackagePathsAsync } from '../device/androidApps';
 import { androidDeviceNameAsync } from '../device/installDevBuild';
 import { parseAndroidDevices } from '../navigate/device';
@@ -19,6 +21,7 @@ import {
 } from '../utils/zipEntry';
 import { debugEvent } from './events';
 import {
+  claimedReadableDeviceAsync,
   FINGERPRINT_FILE_NAME,
   parseEmbeddedFingerprint,
   matchesDeviceFilter,
@@ -33,6 +36,8 @@ const RANGE_BLOCK_SIZE = 65536;
 const ADB_TIMEOUT_MS = 30_000;
 
 export interface AndroidReaderOptions {
+  /** The worktree whose claimed device is read when `--device` names none. */
+  projectRoot: string;
   expectedHash: string;
   device?: string;
   appId: string;
@@ -40,23 +45,40 @@ export interface AndroidReaderOptions {
   runAdbAsync?: typeof runAdbAsync;
   runAdbRawAsync?: typeof runAdbRawAsync;
   androidDeviceNameAsync?: typeof androidDeviceNameAsync;
+  resolveClaimedDeviceAsync?: typeof resolveClaimedDeviceAsync;
 }
 
 /**
- * Read the fingerprint out of the app on every authorized Android device. The most informative
- * device wins. The file is a zip entry inside the APK, read through ranged `dd` reads over
+ * Read the fingerprint out of the app on the device this worktree claims, or on every authorized
+ * device `--device` matches, where the most informative device wins. The file is a zip entry inside the APK, read through ranged `dd` reads over
  * `adb exec-out`, with a whole-APK pull as the fallback when the device lacks the tools.
  *
  * @throws the `adb` tool error when `adb` itself could not run.
  */
 export async function readInstalledFingerprintAndroidAsync({
+  projectRoot,
   expectedHash,
   device: deviceFilter,
   appId,
   runAdbAsync: run = runAdbAsync,
   runAdbRawAsync: runRaw = runAdbRawAsync,
   androidDeviceNameAsync: deviceName = androidDeviceNameAsync,
+  resolveClaimedDeviceAsync: resolveClaimed,
 }: AndroidReaderOptions): Promise<InstalledFingerprintResult> {
+  if (!deviceFilter) {
+    const claimed = await claimedReadableDeviceAsync('android', projectRoot, resolveClaimed);
+    if (!claimed) {
+      return { status: 'no-device' };
+    }
+    const { adb, device } = claimed;
+    const name = (await deviceName(device.identifier, { run })) ?? device.name;
+    return await readDeviceAsync({ ...device, name }, appId, {
+      run,
+      runRaw,
+      adb: adb ?? resolveAdb(),
+    });
+  }
+
   const listed = await run(['devices', '-l'], { timeoutMs: ADB_TIMEOUT_MS });
   if (listed.notRunnable) {
     throw adbNotRunnableError(
@@ -76,9 +98,7 @@ export async function readInstalledFingerprintAndroidAsync({
       name: (await deviceName(deviceId, { run })) ?? model ?? deviceId,
     }))
   );
-  if (deviceFilter) {
-    devices = devices.filter((device) => matchesDeviceFilter(deviceFilter, device));
-  }
+  devices = devices.filter((device) => matchesDeviceFilter(deviceFilter, device));
   if (!devices.length) {
     return { status: 'no-device' };
   }
