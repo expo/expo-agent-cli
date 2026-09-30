@@ -23,6 +23,7 @@ import {
   writeCloudSessionFileAsync,
 } from '../stubEas';
 import {
+  canonicalRoot,
   executeAgentCliAsync,
   spawnAgentCli,
   collectOutput,
@@ -663,7 +664,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       expect(open.slice(0, 4)).toEqual(['simulator:exec', 'npx', 'agent-device@latest', 'open']);
       expect(open[4]).toMatch(new RegExp(`^exp://${TUNNEL_HOST.replace(/\./g, '\\.')}/--/\\??$`));
       expect(readDeviceClaims()).toMatchObject([
-        { backend: 'eas', id: 'sess-e2e', projectRoot: fs.realpathSync(projectRoot) },
+        { backend: 'eas', id: 'sess-e2e', projectRoot: canonicalRoot(projectRoot) },
       ]);
     } finally {
       await cleanUpAsync(projectRoot);
@@ -708,8 +709,8 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         );
       }
       expect(readDeviceClaims()).toMatchObject([
-        { id: 'sess-a', backend: 'eas', projectRoot: fs.realpathSync(a) },
-        { id: 'sess-b', backend: 'eas', projectRoot: fs.realpathSync(b) },
+        { id: 'sess-a', backend: 'eas', projectRoot: canonicalRoot(a) },
+        { id: 'sess-b', backend: 'eas', projectRoot: canonicalRoot(b) },
       ]);
 
       // A second verb in the same project finds its own session and starts nothing. `dev:stop`

@@ -10,6 +10,7 @@ import net from 'node:net';
 import path from 'node:path';
 
 import {
+  canonicalRoot,
   executeAgentCliAsync,
   holdDevLockAsync,
   installStubBinAsync,
@@ -169,7 +170,7 @@ describe('@expo/agent-cli dev:stop', () => {
           backend: 'local-ios',
           platform: 'ios',
           id: SIMULATOR_UDID,
-          projectRoot: fs.realpathSync(projectRoot),
+          projectRoot: canonicalRoot(projectRoot),
           pid: 1,
           claimedAt: now,
           touchedAt: now,

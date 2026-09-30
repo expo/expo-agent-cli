@@ -5,6 +5,7 @@ import * as Log from '../../log';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { resolveEasCli } from '../../utils/easCli';
+import { canonicalizeExistingPath } from '../../utils/dir';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import {
@@ -36,6 +37,8 @@ vi.mock('../../utils/easCli', async () => {
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 
 const projectRoot = '/project/my-app';
+// The root a claim carries: on Windows the CLI resolves the literal to `C:\project\my-app`.
+const claimRoot = canonicalizeExistingPath(projectRoot);
 const DEV_SERVER = 'http://127.0.0.1:8081';
 const EAS_CLI = {
   command: '/usr/bin/npx',
@@ -275,7 +278,7 @@ describe(openAppOnEasAsync, () => {
         backend: 'eas',
         platform: 'ios',
         id: '11111111-2222-3333-4444-555555555555',
-        projectRoot,
+        projectRoot: claimRoot,
         created: true,
         booted: false,
       },
@@ -407,7 +410,7 @@ describe(openAppOnEasAsync, () => {
     expect(report.started).toBe(true);
     expect(report.reason).toContain('exited 1');
     expect(report.reason).toContain('npx --yes eas-cli@latest simulator:stop --id sess-billed');
-    expect(readClaims()).toMatchObject([{ id: 'sess-billed', projectRoot }]);
+    expect(readClaims()).toMatchObject([{ id: 'sess-billed', projectRoot: claimRoot }]);
   });
 
   it(`says when no eas can be run at all`, async () => {
@@ -456,7 +459,7 @@ describe('the session half on its own', () => {
       backend: 'eas' as const,
       platform: 'ios' as const,
       id: 'sess-1',
-      projectRoot,
+      projectRoot: claimRoot,
       pid: 1,
       claimedAt: '2026-09-30T10:00:00.000Z',
       touchedAt: '2026-09-30T10:00:00.000Z',
