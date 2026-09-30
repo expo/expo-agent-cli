@@ -31,6 +31,8 @@ const EXPO_GO_APP_ID: Record<NativePlatform, string> = {
 
 export interface OpenAppOptions {
   platform: NativePlatform;
+  /** `--device`: the device to claim and open on, by UDID, serial or name. */
+  device?: string | null;
   /** Whether the plan aims at Expo Go, which is the one app this module may install. */
   expoGo: boolean;
   /** Where the dev server this run started listens. */
@@ -89,6 +91,7 @@ export async function openAppOnDeviceAsync(
   const resolved = await resolveClaimedDeviceAsync({
     platform,
     projectRoot,
+    explicit: options.device ?? null,
     allowBoot: true,
     appId: options.expoGo ? EXPO_GO_APP_ID[platform] : null,
     onBooting: () => {
@@ -158,6 +161,7 @@ export async function openAppOnDeviceAsync(
     const result = await openRouteAsync(projectRoot, {
       route: '/',
       platform,
+      device: deviceId,
       devServerUrl: options.devServerUrl,
       devServerUrlSource: 'discovered',
       routeCheck: false,

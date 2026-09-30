@@ -19,7 +19,7 @@
 import type { NativePlatform } from '../plan/types';
 import { readConfiguredAppId } from '../runtime/appId';
 import { hasAppOnDeviceAsync } from './hasApp';
-import { androidDeviceNameAsync } from './installDevBuild';
+import { expoRunDeviceArgumentAsync } from './installDevBuild';
 import { resolveClaimedDeviceAsync, type LocalDeviceBackend } from './claimedDevice';
 
 /** Whether the development build is on the device, as far as this machine can be asked. */
@@ -38,13 +38,13 @@ export interface AppPresenceProbe {
    * What `expo run:<platform> --device` calls the device that answered, or null.
    *
    * Set only for `missing`, which is the one answer that plans an install — the plan pins the
-   * install to the device that was actually checked, so a machine with two devices cannot install
-   * on one and keep serving nothing to the other. iOS takes the UDID as-is; Android takes a *name*,
-   * which `androidDeviceNameAsync` resolves from the serial (@ref ./installDevBuild). A device the
-   * platform cannot name stays null, and the install runs unpinned — the Expo CLI then picks the
-   * attached device itself, which on a one-device machine is the same device.
+   * install to the device that was actually checked, the one this worktree claims
+   * (@ref ./installDevBuild §expoRunDeviceArgumentAsync). A device the platform cannot name stays
+   * null, and the install runs unpinned.
    */
   installDevice: string | null;
+  /** Why no `--device` value is safe for this device, when that is why {@link installDevice} is null. */
+  installRefusal?: string;
 }
 
 /**
@@ -77,7 +77,7 @@ export interface ProbeAppPresenceOptions {
   /** Injected for tests. */
   hasAppOnDevice?: typeof hasAppOnDeviceAsync;
   /** Injected for tests. */
-  androidDeviceName?: typeof androidDeviceNameAsync;
+  runDeviceArgument?: typeof expoRunDeviceArgumentAsync;
   /** Overrides {@link APP_PRESENCE_BUDGET_MS}, for tests. */
   budgetMs?: number;
 }
@@ -129,7 +129,7 @@ async function askDeviceAsync(
     probeDeviceAsync = claimedBootedDeviceAsync,
     readAppId = readConfiguredAppId,
     hasAppOnDevice = hasAppOnDeviceAsync,
-    androidDeviceName = androidDeviceNameAsync,
+    runDeviceArgument = expoRunDeviceArgumentAsync,
   }: ProbeAppPresenceOptions
 ): Promise<AppPresenceProbe> {
   // The app id first, because it is a file read and the device probe is two subprocesses. A
@@ -155,10 +155,10 @@ async function askDeviceAsync(
   if (installed) {
     return { presence: 'present', installDevice: null };
   }
-  return {
-    presence: 'missing',
-    installDevice: platform === 'ios' ? device.deviceId : await androidDeviceName(device.deviceId),
-  };
+  const argument = await runDeviceArgument(projectRoot, platform, device.deviceId);
+  return argument.ok
+    ? { presence: 'missing', installDevice: argument.value }
+    : { presence: 'missing', installDevice: null, installRefusal: argument.reason };
 }
 
 async function claimedBootedDeviceAsync(

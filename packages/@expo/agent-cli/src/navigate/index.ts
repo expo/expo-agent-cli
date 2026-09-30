@@ -9,8 +9,10 @@ export const navigateHelp: CommandHelp = {
   usage: `${PROGRAM_PREFIX} navigate <route>`,
   options: [
     `--scheme <scheme>       URL scheme of the app, instead of the one in app.json`,
-    `--ios                   Open the link on the booted iOS simulator`,
-    `--android               Open the link on the attached Android device`,
+    `--ios                   Open the link on this worktree's iOS simulator`,
+    `--android               Open the link on this worktree's Android device or emulator`,
+    `--device <name>         The simulator, emulator or device to open on, by name, UDID or\n` +
+      `                        adb serial. Claimed for this worktree`,
     `--eas                   Open the link on this project's EAS Simulator session`,
     `--app-id <id>           Application id of the target app`,
     `--dev-server-url <url>  Dev server to read (default: the project's own, then 8081)`,
