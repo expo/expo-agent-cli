@@ -34,6 +34,10 @@ ships. Displayed help and continuation commands use `PROGRAM_PREFIX` and the `fe
 Project metadata uses the same public `@expo/config` and `@expo/package-manager` APIs as the
 original, including skipping config plugins, installed-package version lookup, and graceful
 fallback when project configuration fails. No `@expo/cli` internals are imported.
+Package lookup and tolerant JSON reads use `src/project/nodeModules.ts`, including hoisted
+dependencies. JSON output shares `src/utils/stdout.ts` with agent setup to redirect console and
+direct stdout writes during config evaluation. Final results use the CLI logger so the crash
+handler can preserve an already printed JSON result.
 
 ## Command behavior
 

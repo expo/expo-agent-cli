@@ -1,12 +1,14 @@
 // @ref llp/0029-feedback.rfc.md
 import { printCommandHelp } from '../help/format';
 import type { CommandHelp } from '../help/types';
+import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import { recordCommand } from '../telemetry';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
+import { withStdoutRedirectedAsync } from '../utils/stdout';
 
-import type { CliFeedbackMetadata } from './types';
+const { version } = require('../../package.json') as { version: string };
 
 export const feedbackHelp: CommandHelp = {
   command: 'feedback',
@@ -85,7 +87,7 @@ export const agentCliFeedback: Command = async (argv) => {
     printCommandHelp(feedbackHelp);
   }
   if (args['--version']) {
-    console.log(require('../../package.json').version);
+    Log.log(version);
     return;
   }
 
@@ -101,7 +103,7 @@ export const agentCliFeedback: Command = async (argv) => {
   if (isTelemetryDisabled()) {
     console.error(TELEMETRY_DISABLED_MESSAGE);
     if (args['--json']) {
-      console.log(JSON.stringify({ sent: false, feedbackId: null }));
+      Log.log(JSON.stringify({ sent: false, feedbackId: null }));
     }
     return;
   }
@@ -118,23 +120,12 @@ export const agentCliFeedback: Command = async (argv) => {
     args['--message']
   );
   const session = getSession();
-  // Evaluating app.config.js can print through console or write directly to stdout.
-  // Keep that diagnostic output off the JSON result, restoring stdout even on failure.
-  const originalWrite = process.stdout.write;
-  let metadata: CliFeedbackMetadata;
-  try {
-    if (args['--json']) {
-      process.stdout.write = process.stderr.write.bind(process.stderr);
-    }
-    metadata = await createFeedbackMetadataAsync(
-      process.cwd(),
-      category,
-      args['--subject'],
-      args['--resume']
-    );
-  } finally {
-    process.stdout.write = originalWrite;
-  }
+  const collectMetadataAsync = () =>
+    createFeedbackMetadataAsync(process.cwd(), category, args['--subject'], args['--resume']);
+  // Project config can print diagnostics. JSON mode keeps them on stderr.
+  const metadata = await (args['--json']
+    ? withStdoutRedirectedAsync(collectMetadataAsync)
+    : collectMetadataAsync());
   if (args['--resume'] !== undefined && metadata.feedbackId !== args['--resume']) {
     console.warn(
       `The provided feedback ID is invalid, so a new one was generated: ${metadata.feedbackId}`
@@ -147,16 +138,15 @@ export const agentCliFeedback: Command = async (argv) => {
   // Project config can enable an opt-out while metadata is collected. Defer command telemetry
   // until that config has run, and apply the same opt-out policy as feedback submission.
   if (!isTelemetryDisabled()) {
-    const { version } = require('../../package.json') as { version: string };
     recordCommand('feedback', version);
   }
   const sent = await sendFeedbackAsync({ feedback, metadata, session });
 
   if (args['--json']) {
-    console.log(JSON.stringify({ sent, feedbackId: sent ? metadata.feedbackId : null }));
+    Log.log(JSON.stringify({ sent, feedbackId: sent ? metadata.feedbackId : null }));
   } else if (sent) {
-    console.log('Thanks for the feedback!');
-    console.log(
+    Log.log('Thanks for the feedback!');
+    Log.log(
       `To continue the feedback session use:\n${PROGRAM_PREFIX} feedback --resume ${metadata.feedbackId} --message "<message>"`
     );
   }

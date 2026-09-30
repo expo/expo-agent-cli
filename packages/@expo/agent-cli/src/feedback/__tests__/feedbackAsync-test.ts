@@ -246,6 +246,49 @@ describe('project and environment metadata', () => {
     });
   });
 
+  it('finds package versions hoisted above the project without loading package code', () => {
+    const workspace = path.resolve('/workspace');
+    const projectRoot = path.join(workspace, 'apps', 'mobile');
+    writeJson(path.join(projectRoot, 'package.json'), {
+      dependencies: { expo: '^56.0.4' },
+    });
+    writeJson(path.join(projectRoot, 'app.json'), {
+      expo: { name: 'Mobile', slug: 'mobile', sdkVersion: '56.0.0' },
+    });
+    writeJson(path.join(workspace, 'node_modules/expo/package.json'), {
+      name: 'expo',
+      version: '56.0.12',
+      exports: {},
+      main: 'index.js',
+    });
+    writeFileSync(
+      path.join(workspace, 'node_modules/expo/index.js'),
+      'throw new Error("Package code must not run to read a version");'
+    );
+
+    expect(getProjectMetadata(projectRoot)).toMatchObject({ expoPackageVersion: '56.0.12' });
+  });
+
+  it.each(['{invalid-json', 'null', '{"version":42}'])(
+    'falls back to the declared version when the installed manifest is invalid: %s',
+    (manifest) => {
+      writeJson(path.join(PROJECT_ROOT, 'package.json'), {
+        dependencies: { expo: '^56.0.4', 'expo-router': '~56.0.0' },
+      });
+      writeJson(path.join(PROJECT_ROOT, 'app.json'), {
+        expo: { name: 'App', slug: 'app', sdkVersion: '56.0.0' },
+      });
+      const routerRoot = path.join(PROJECT_ROOT, 'node_modules/expo-router');
+      mkdirSync(routerRoot, { recursive: true });
+      writeFileSync(path.join(routerRoot, 'package.json'), manifest);
+
+      expect(getProjectMetadata(PROJECT_ROOT)).toMatchObject({
+        expoPackageVersion: '^56.0.4',
+        expoRouterPackageVersion: '~56.0.0',
+      });
+    }
+  );
+
   it('keeps the Expo project marker when its config cannot be read', () => {
     writeFileSync(path.join(PROJECT_ROOT, 'app.json'), '{invalid-json');
 
