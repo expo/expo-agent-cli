@@ -233,7 +233,7 @@ describe(bootEmulatorAsync, () => {
   });
 
   it(`fails at once, with the exit code, when the emulator exits before it boots`, async () => {
-    fakeDeviceTools((command, args) => (command === 'emulator' ? { exitCode: 1 } : {}));
+    fakeDeviceTools((command) => (command === 'emulator' ? { exitCode: 1 } : {}));
     const started = Date.now();
 
     const result = await bootEmulatorAsync(

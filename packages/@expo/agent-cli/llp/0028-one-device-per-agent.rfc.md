@@ -104,7 +104,7 @@ The dotenv rung is skipped when the registry holds a live `eas` claim of another
 
 ## Explicit device
 
-`--device <udid|serial|name|session-id>` on `dev` and `navigate` (`status` has the flag already) skips allocation and writes the claim, so other agents skip that device. This is also the way to bind an EAS session that another tool started.
+`--device <udid|serial|name|session-id>` on `dev` and `navigate` (`status` has the flag already) skips allocation steps 1 to 5 and writes the claim, so other agents skip that device. This is also the way to bind an EAS session that another tool started.
 
 For a local device, `--device` is step 0 of the allocation, under the same registry lock. Devices that another live worktree holds are dropped before the name is matched, because two emulators of one AVD share a name. The worktree's other claims on the platform are released only after the named device is claimed and usable, so a `--device` that fails keeps the device that works.
 
