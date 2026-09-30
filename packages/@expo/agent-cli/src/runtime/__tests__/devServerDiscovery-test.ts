@@ -13,6 +13,9 @@ function mockFetchByPort(answers: { [port: string]: any[] | 'refuse' }) {
     if (answer === 'refuse' || answer === undefined) {
       throw new Error('ECONNREFUSED');
     }
+    if (url.pathname === '/status') {
+      return new Response('packager-status:running');
+    }
     return { ok: true, json: async () => answer } as Response;
   });
 }
@@ -171,8 +174,8 @@ describe('readLastLoggedDevServerPort via discovery', () => {
       source: 'log',
       discovered: true,
     });
-    // The logged port answered, so neither 8081 nor the scan ports were touched.
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    // The logged port answered and sent no header, so neither 8081 nor the scan ports were touched.
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
   });
 
   it(`falls back to the scan when the logged port is stale`, async () => {
@@ -282,5 +285,84 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     const result = await discoverDevServerAsync('http://127.0.0.1:9999', { projectRoot });
     expect(result).toMatchObject({ reachable: true, source: 'flag' });
     expect(result.projectRootVerified).toBeUndefined();
+  });
+
+  it(`does not accept a server whose /status times out, and says so`, async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      if (url.port !== '8082') {
+        throw new Error('ECONNREFUSED');
+      }
+      if (url.pathname === '/status') {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')));
+        });
+      }
+      return { ok: true, json: async () => [target] } as Response;
+    });
+    const result = await discoverDevServerAsync(undefined, { projectRoot, timeoutMs: 20 });
+    expect(result).toMatchObject({ reachable: false, source: 'default' });
+    expect(result.reason).toContain('port 8082');
+    expect(result.reason).toContain('/status did not answer');
+    const statusCalls = vi
+      .mocked(fetch)
+      .mock.calls.filter(([input]) => String(input) === 'http://127.0.0.1:8082/status');
+    expect(statusCalls).toHaveLength(2);
+  });
+
+  it(`accepts a server whose /status fails once and then answers`, async () => {
+    let statusCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = new URL(String(input));
+      if (url.port !== '8082') {
+        throw new Error('ECONNREFUSED');
+      }
+      if (url.pathname === '/status') {
+        if (++statusCalls === 1) {
+          throw new Error('socket hang up');
+        }
+        return new Response('', { headers: { 'X-React-Native-Project-Root': projectRoot } });
+      }
+      return { ok: true, json: async () => [target] } as Response;
+    });
+    expect(await discoverDevServerAsync(undefined, { projectRoot })).toMatchObject({
+      reachable: true,
+      devServerUrl: 'http://127.0.0.1:8082',
+      projectRootVerified: true,
+    });
+  });
+
+  it(`judges the port start.log names, and goes on scanning when it is foreign`, async () => {
+    vol.fromJSON({
+      [path.join(projectRoot, '.expo/dev/logs/start.log')]: JSON.stringify({
+        _e: 'metro:instantiate',
+        port: 8090,
+      }),
+    });
+    mockServers({ '8090': { root: '/somewhere/else' }, '8083': { root: projectRoot } });
+    const result = await discoverDevServerAsync(undefined, { projectRoot });
+    expect(result).toMatchObject({
+      reachable: true,
+      devServerUrl: 'http://127.0.0.1:8083',
+      source: 'scan',
+      projectRootVerified: true,
+    });
+  });
+
+  it(`reports a foreign logged port when nothing else matches`, async () => {
+    vol.fromJSON({
+      [path.join(projectRoot, '.expo/dev/logs/start.log')]: JSON.stringify({
+        _e: 'metro:instantiate',
+        port: 8090,
+      }),
+    });
+    mockServers({ '8090': { root: '/somewhere/else' } });
+    const result = await discoverDevServerAsync(undefined, { projectRoot });
+    expect(result).toMatchObject({
+      reachable: false,
+      foreignServers: [
+        { url: 'http://127.0.0.1:8090', port: 8090, projectRoot: '/somewhere/else' },
+      ],
+    });
   });
 });
