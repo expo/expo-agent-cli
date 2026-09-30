@@ -1,5 +1,5 @@
 // @ref llp/0029-feedback.rfc.md
-// Keep the request and metadata contract aligned with submit-expo-feedback.
+// Ports submit-expo-feedback's request and metadata fields.
 import { getConfig, getConfigFilePaths } from '@expo/config';
 import { resolvePackageManager } from '@expo/package-manager';
 import { detectAgent } from 'agent-cli-detector';
@@ -26,8 +26,8 @@ import {
   type CliFeedbackTelemetryMetadata,
 } from './types';
 
-// The receiving service validates this literal; keep it even under the agent CLI.
-const CLI_NAME = 'submit-expo-feedback';
+// The receiving service's CLI name allowlist must include this identifier.
+const CLI_NAME = 'agent-cli';
 const FEEDBACK_TIMEOUT_MS = 15_000;
 const GENERATED_FEEDBACK_ID_BYTES = 6;
 const MIN_FEEDBACK_ID_LENGTH = 6;

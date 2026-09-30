@@ -251,7 +251,7 @@ describe('project and environment metadata', () => {
     expect(getProjectMetadata(PROJECT_ROOT)).toEqual({ isExpoProject: true });
   });
 
-  it('preserves the server metadata schema and uses the agent-cli version', async () => {
+  it('uses the agent-cli identity and version in the server metadata schema', async () => {
     const metadata = await createFeedbackMetadataAsync(
       PROJECT_ROOT,
       'docs',
@@ -263,7 +263,7 @@ describe('project and environment metadata', () => {
       category: 'docs',
       subject: 'https://docs.expo.dev/router/introduction/',
       feedbackId: 'session_ABC-123',
-      cli: { name: 'submit-expo-feedback', version: packageJson.version },
+      cli: { name: 'agent-cli', version: packageJson.version },
       agentEnvironment: {
         detected: true,
         agent: { id: 'codex', name: 'Codex', sessionId: 'test-session' },
@@ -373,7 +373,7 @@ describe('feedback submission', () => {
         signal: timeoutSignal,
         headers: {
           'Content-Type': 'application/json',
-          'User-Agent': `submit-expo-feedback/${packageJson.version}`,
+          'User-Agent': `agent-cli/${packageJson.version}`,
           'expo-session': 'session-secret',
         },
         body: JSON.stringify({ feedback: VALID_FEEDBACK, metadata }),

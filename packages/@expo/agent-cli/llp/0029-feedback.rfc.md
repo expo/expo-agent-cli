@@ -19,10 +19,12 @@ no separate download of `submit-expo-feedback`.
 local-only `EXPO_FEEDBACK_API_BASE_URL` override retain the original precedence. `EXPO_TOKEN`
 takes precedence over a cached `expo-session` secret; neither credential enters the body.
 
-[observed] The receiving service's `CliFeedbackSchemas.ts` validates `metadata.cli.name` as the
-literal `submit-expo-feedback`. Keep that value and the original User-Agent name for compatibility;
-the version comes from the installed agent CLI. Displayed help and continuation commands use
-`PROGRAM_PREFIX` and the new `feedback` command.
+[confirmed, user, 2026-09-30] `metadata.cli.name` is `agent-cli`, and the User-Agent is
+`agent-cli/<version>`. The version comes from the installed agent CLI. The receiving service's
+`CliFeedbackSchemas.ts` must accept the new name alongside `submit-expo-feedback`, which remains
+valid for the standalone package. Both the new CLI name and the `agent-cli` category require
+[Universe #31713](https://github.com/expo/universe/pull/31713) to be deployed before this client
+ships. Displayed help and continuation commands use `PROGRAM_PREFIX` and the `feedback` command.
 
 Project metadata uses the same public `@expo/config` and `@expo/package-manager` APIs as the
 original, including skipping config plugins, installed-package version lookup, and graceful
@@ -37,8 +39,7 @@ The command also follows the agent CLI help and error conventions and offers `--
 `sent` and `feedbackId` on success or opt-out. Failures use the shared error envelope and exit 1.
 
 The `agent-cli` category identifies feedback about this CLI, with the full command as its subject.
-Help retains the original category-specific subject guidance. The API's category allowlist must
-include `agent-cli` before this category can be used in production.
+Help retains the original category-specific subject guidance.
 
 `DO_NOT_TRACK=1` or `EXPO_NO_TELEMETRY=1` exits successfully before collecting metadata or sending
 feedback. Opt-out prints the existing instruction to respect the user's choice, and JSON mode

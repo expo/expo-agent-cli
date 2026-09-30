@@ -171,7 +171,7 @@ describe('@expo/agent-cli feedback', () => {
       headers: {
         'content-type': 'application/json',
         authorization: 'Bearer fixture-token',
-        'user-agent': `submit-expo-feedback/${version}`,
+        'user-agent': `agent-cli/${version}`,
       },
       body: {
         feedback: MESSAGE,
@@ -179,8 +179,7 @@ describe('@expo/agent-cli feedback', () => {
           category: 'docs',
           feedbackId: SESSION_ID,
           subject: 'https://docs.expo.dev/router/introduction/',
-          // The existing server validates this name as a literal.
-          cli: { name: 'submit-expo-feedback', version },
+          cli: { name: 'agent-cli', version },
           agentEnvironment: { detected: expect.any(Boolean) },
           sandboxEnvironment: { detected: expect.any(Boolean) },
           device: { arch: process.arch, platform: process.platform },
