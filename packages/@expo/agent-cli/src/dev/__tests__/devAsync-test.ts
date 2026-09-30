@@ -25,6 +25,7 @@ vi.mock('../../device/claimedDevice', () => ({
     error: new Error('none'),
     deviceId: null,
     name: null,
+    holders: [],
   })),
 }));
 vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
@@ -241,6 +242,32 @@ describe(devAsync, () => {
         expect.anything()
       );
     });
+
+    it.each([
+      ['a run', ['--ios']],
+      ['--plan', ['--plan', '--ios']],
+    ])(
+      `should refuse %s rather than leave the build unpinned when every booted simulator is another worktree's`,
+      async (_what, argv) => {
+        mockStaleDevClientState();
+        const error = Object.assign(new Error('Every booted iOS simulator is claimed'), {
+          code: 'DEVICES_ALL_CLAIMED',
+        });
+        vi.mocked(resolveClaimedDeviceAsync).mockResolvedValueOnce({
+          ok: false,
+          kind: 'no-device',
+          reason: 'every booted iOS simulator is claimed by another worktree',
+          error: error as any,
+          deviceId: null,
+          name: null,
+          holders: [{ id: 'SIM-A', projectRoot: '/work/other' }],
+        });
+
+        await expect(devAsync(projectRoot, resolveDevOptions(argv))).rejects.toBe(error);
+
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+      }
+    );
 
     it(`should run every step of a plan that builds`, async () => {
       mockStaleDevClientState();

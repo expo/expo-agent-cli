@@ -106,6 +106,7 @@ function read(
               error: new CommandError('NO_DEVICE', 'none'),
               deviceId: null,
               name: null,
+              holders: [],
             },
       listConnectedIosDevicesAsync: listPhones,
       readInstalledFingerprintIosDeviceAsync: readPhones,
