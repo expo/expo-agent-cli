@@ -23,6 +23,10 @@ export interface ChooseDeviceInput<C extends DeviceCandidate> {
   /** Stamped on the claim a take or a boot writes. */
   now: Date;
   pid: number;
+  /** Step 0: `--device`. Replaces steps 1 to 5 when present. */
+  explicit?: string;
+  /** Whether a candidate answers to {@link explicit}. By id when absent. */
+  matches?: (candidate: C, query: string) => boolean;
 }
 
 export function chooseDevice<C extends DeviceCandidate>({
@@ -35,12 +39,67 @@ export function chooseDevice<C extends DeviceCandidate>({
   rank,
   now,
   pid,
+  explicit,
+  matches = (candidate, query) => candidate.id === query,
 }: ChooseDeviceInput<C>): DeviceChoice<C> {
   const mine = claims.filter(
     (claim) =>
       claim.backend === backend && claim.platform === platform && claim.projectRoot === projectRoot
   );
   const exists = (claim: DeviceClaim) => inventory.some((candidate) => candidate.id === claim.id);
+
+  const claimFor = (candidate: C): DeviceClaim => ({
+    backend,
+    platform,
+    id: candidate.id,
+    projectRoot,
+    pid,
+    claimedAt: now.toISOString(),
+    touchedAt: now.toISOString(),
+    // The device changes hands with its stale claim, and with it the right to delete it later.
+    created: claims.some(
+      (claim) => claim.backend === backend && claim.id === candidate.id && claim.created
+    ),
+  });
+
+  if (explicit != null) {
+    const holder = (candidate: C) =>
+      claims.find(
+        (claim) =>
+          claim.backend === backend &&
+          claim.id === candidate.id &&
+          claim.liveness === 'live' &&
+          claim.projectRoot !== projectRoot
+      );
+    const matching = inventory.filter((candidate) => matches(candidate, explicit));
+    // Filtered before the pick: two emulators of one AVD share a name, and one may be another's.
+    const free = matching.filter((candidate) => holder(candidate) == null);
+    const named =
+      free.find(({ id }) => id === explicit) ??
+      free.find(({ state }) => state === 'booted') ??
+      free[0];
+    if (named == null) {
+      return matching.length === 0
+        ? { kind: 'not-found' }
+        : {
+            kind: 'claimed',
+            holders: matching.map((candidate) => ({
+              id: candidate.id,
+              projectRoot: holder(candidate)!.projectRoot,
+            })),
+          };
+    }
+    const held = mine.find((claim) => claim.id === named.id);
+    if (held) {
+      const { liveness, ...claim } = held;
+      return { kind: 'reuse', claim, liveness };
+    }
+    return {
+      kind: named.state === 'booted' ? 'take' : 'boot',
+      candidate: named,
+      claim: claimFor(named),
+    };
+  }
 
   // Steps 1 and 2. A live claim whose device is gone is not reused either: every verb would fail
   // on it, and for EAS the RFC reuses the bound session only while it is listed.
@@ -60,20 +119,6 @@ export function chooseDevice<C extends DeviceCandidate>({
     const free = inventory.filter(
       (candidate) => !liveHere.some((claim) => claim.id === candidate.id)
     );
-    const claimFor = (candidate: C): DeviceClaim => ({
-      backend,
-      platform,
-      id: candidate.id,
-      projectRoot,
-      pid,
-      claimedAt: now.toISOString(),
-      touchedAt: now.toISOString(),
-      // The device changes hands with its stale claim, and with it the right to delete it later.
-      created: claims.some(
-        (claim) => claim.backend === backend && claim.id === candidate.id && claim.created
-      ),
-    });
-
     const booted = free.find((candidate) => candidate.state === 'booted');
     if (booted) {
       return { kind: 'take', candidate: booted, claim: claimFor(booted) };

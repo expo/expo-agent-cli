@@ -287,6 +287,24 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     expect(readClaims().map(({ id }) => id)).toEqual(['SIM-B']);
   });
 
+  it(`keeps the worktree's booted simulator when a read names a shut-down one`, async () => {
+    fakeSimulators([
+      { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },
+      { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
+    ]);
+    await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: false });
+
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'ios',
+      projectRoot: HERE,
+      explicit: 'SIM-B',
+      allowBoot: false,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'no-device' });
+    expect(readClaims().map(({ id }) => id)).toEqual(['SIM-A']);
+  });
+
   it(`refuses a --device another live worktree holds`, async () => {
     fakeSimulators();
     otherClaim('SIM-A');
@@ -465,6 +483,22 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
     expect(
       await resolveClaimedDeviceAsync({ platform: 'android', projectRoot: HERE, allowBoot: false })
     ).toMatchObject({ ok: true, id: 'R58M123ABC', choice: 'this worktree claimed it already' });
+  });
+
+  it(`takes the free instance --device names when another worktree runs the same AVD`, async () => {
+    const { running } = fakeAndroid();
+    running.set('emulator-5554', 'Pixel_8');
+    running.set('emulator-5556', 'Pixel_8');
+    otherClaim('emulator-5554', 'local-android');
+
+    expect(
+      await resolveClaimedDeviceAsync({
+        platform: 'android',
+        projectRoot: HERE,
+        explicit: 'Pixel_8',
+        allowBoot: false,
+      })
+    ).toMatchObject({ ok: true, id: 'emulator-5556', choice: '--device named it' });
   });
 
   it(`never starts an emulator another worktree is starting on the same port`, async () => {

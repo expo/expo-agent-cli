@@ -40,12 +40,14 @@ function choose({
   capacity = 4,
   backend = 'local-ios',
   rank,
+  explicit,
 }: {
   claims?: ClassifiedClaim[];
   inventory?: DeviceCandidate[];
   capacity?: number;
   backend?: DeviceBackend;
   rank?: (left: DeviceCandidate, right: DeviceCandidate) => number;
+  explicit?: string;
 }) {
   return chooseDevice({
     projectRoot: HERE,
@@ -55,6 +57,9 @@ function choose({
     inventory,
     capacity,
     rank,
+    explicit,
+    matches: (candidate, query) =>
+      candidate.id === query || (candidate as DeviceCandidate & { name?: string }).name === query,
     now: NOW,
     pid: 42,
   });
@@ -71,7 +76,10 @@ function summarize(choice: DeviceChoice<DeviceCandidate>) {
     case 'create':
       return { kind: choice.kind };
     case 'exhausted':
+    case 'claimed':
       return { kind: choice.kind, holders: choice.holders };
+    case 'not-found':
+      return { kind: choice.kind };
   }
 }
 
@@ -267,5 +275,59 @@ describe('chooseDevice — the claim it writes', () => {
     const choice = choose({ claims: [stale], inventory: [booted('B')] });
 
     expect(choice).toMatchObject({ kind: 'take', claim: { projectRoot: HERE, created: true } });
+  });
+});
+
+describe('step 0: a device the caller named', () => {
+  const named = (id: string, name: string, state: 'booted' | 'shutdown') =>
+    ({ id, name, state }) as DeviceCandidate;
+
+  it(`takes the named device even when an earlier step would pick another`, () => {
+    expect(
+      choose({
+        claims: [claim('A', HERE, 'live')],
+        inventory: [booted('A'), shutdown('B')],
+        explicit: 'B',
+      })
+    ).toMatchObject({
+      kind: 'boot',
+      candidate: { id: 'B' },
+      claim: { id: 'B', projectRoot: HERE },
+    });
+  });
+
+  it(`reuses this worktree's claim on the named device`, () => {
+    expect(
+      choose({ claims: [claim('A', HERE, 'stale')], inventory: [booted('A')], explicit: 'A' })
+    ).toMatchObject({ kind: 'reuse', claim: { id: 'A' }, liveness: 'stale' });
+  });
+
+  it(`skips an instance another live worktree holds when two share the name`, () => {
+    expect(
+      choose({
+        claims: [claim('emulator-5554', OTHER, 'live')],
+        inventory: [
+          named('emulator-5554', 'Pixel_8', 'booted'),
+          named('emulator-5556', 'Pixel_8', 'booted'),
+        ],
+        explicit: 'Pixel_8',
+      })
+    ).toMatchObject({ kind: 'take', candidate: { id: 'emulator-5556' } });
+  });
+
+  it(`names the holder when every match is another live worktree's`, () => {
+    expect(
+      choose({ claims: [claim('A', OTHER, 'live')], inventory: [booted('A')], explicit: 'A' })
+    ).toEqual({ kind: 'claimed', holders: [{ id: 'A', projectRoot: OTHER }] });
+  });
+
+  it(`takes over the named device from a stale claim`, () => {
+    expect(
+      choose({ claims: [claim('A', OTHER, 'stale')], inventory: [booted('A')], explicit: 'A' })
+    ).toMatchObject({ kind: 'take', claim: { id: 'A', projectRoot: HERE } });
+  });
+
+  it(`says nothing matched`, () => {
+    expect(choose({ inventory: [booted('A')], explicit: 'Z' })).toEqual({ kind: 'not-found' });
   });
 });
