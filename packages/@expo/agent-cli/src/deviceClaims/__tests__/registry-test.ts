@@ -152,6 +152,49 @@ describe('touchClaim', () => {
     expect(touchClaim(claim(), new Date())).toBeNull();
     expect(readClaims()).toEqual([]);
   });
+
+  it(`does not touch the worktree's newer claim on the same device`, () => {
+    const newer = claim({ claimedAt: '2026-09-30T10:30:00.000Z' });
+    writeClaim(newer);
+
+    expect(touchClaim(claim(), new Date())).toBeNull();
+    expect(readClaims()).toEqual([newer]);
+  });
+
+  it(`reports no touch when another worktree took the claim over as it wrote`, () => {
+    writeClaim(claim());
+    const rename = fs.renameSync;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      rename(from, to);
+      vol.writeFileSync(
+        claimFilePath('local-ios', 'UDID-1'),
+        JSON.stringify(claim({ projectRoot: '/work/other', claimedAt: '2026-09-30T11:00:00.000Z' }))
+      );
+    });
+
+    try {
+      expect(touchClaim(claim(), new Date())).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it(`reports no touch, and never throws, when the file system refuses`, () => {
+    writeClaim(claim());
+    const spy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    });
+
+    try {
+      expect(touchClaim(claim(), new Date())).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(debugEvent).toHaveBeenCalledWith(
+      'device_claim_touch_failed',
+      expect.objectContaining({ id: 'UDID-1' })
+    );
+  });
 });
 
 describe('releaseClaim', () => {

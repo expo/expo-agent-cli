@@ -78,21 +78,40 @@ export function writeClaim(claim: DeviceClaim): void {
  * Refresh `touchedAt` of a claim this worktree still holds.
  *
  * Runs outside the registry lock, because every verb calls it. The replace is a rename, so a
- * reader never sees half a file, which it would read as no claim at all.
+ * reader never sees half a file, which it would read as no claim at all. It is a compare-and-swap:
+ * the file must name this claim (its worktree and its `claimedAt`) before the rename and after it.
  *
- * @returns the touched claim, or null when the claim was released or another worktree holds it.
+ * @returns the touched claim, or null when the claim was released, another claim replaced it, or
+ * the file system refused. Never throws.
  */
 export function touchClaim(claim: DeviceClaim, now: Date = new Date()): DeviceClaim | null {
   const file = claimFilePath(claim.backend, claim.id);
-  const current = readClaimFile(file);
-  if (current?.projectRoot !== claim.projectRoot) {
+  try {
+    const current = readClaimFile(file);
+    if (current == null || !isSameClaim(current, claim)) {
+      return null;
+    }
+    const touched = { ...current, touchedAt: now.toISOString() };
+    const temporary = path.join(
+      path.dirname(file),
+      `.${path.basename(file)}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
+    );
+    fs.writeFileSync(temporary, serialize(touched));
+    fs.renameSync(temporary, file);
+    const after = readClaimFile(file);
+    return after != null && isSameClaim(after, claim) ? touched : null;
+  } catch (error: unknown) {
+    debugEvent('device_claim_touch_failed', {
+      backend: claim.backend,
+      id: claim.id,
+      reason: (error as Error).message,
+    });
     return null;
   }
-  const touched = { ...current, touchedAt: now.toISOString() };
-  const temporary = path.join(path.dirname(file), `.${path.basename(file)}.${process.pid}.tmp`);
-  fs.writeFileSync(temporary, serialize(touched));
-  fs.renameSync(temporary, file);
-  return touched;
+}
+
+function isSameClaim(left: DeviceClaim, right: DeviceClaim): boolean {
+  return left.projectRoot === right.projectRoot && left.claimedAt === right.claimedAt;
 }
 
 /**
