@@ -304,7 +304,7 @@ describe(bootEmulatorAsync, () => {
       { timeoutMs: 1_000, adb }
     );
     expect(result).toMatchObject({ ok: true, deviceId: 'emulator-5558', name: 'Pixel_8' });
-    expect(tools.callsWith('-avd')).toEqual([
+    expect(tools.callsWith('-avd ')).toEqual([
       'emulator -avd Pixel_8 -ports 5558,5559 -no-snapshot-save',
     ]);
     expect(tools.callsWith('getprop')).toEqual([
@@ -320,7 +320,7 @@ describe(bootEmulatorAsync, () => {
       { avd: 'Pixel_8', port: 5556, readOnly: true },
       { timeoutMs: 1_000, adb }
     );
-    expect(tools.callsWith('-avd')).toEqual([
+    expect(tools.callsWith('-avd ')).toEqual([
       'emulator -avd Pixel_8 -ports 5556,5557 -no-snapshot-save -read-only',
     ]);
   });
