@@ -54,6 +54,7 @@ function mockRefused(
     error: new CommandError('X', message),
     deviceId: null,
     name: null,
+    holders: [],
   });
 }
 

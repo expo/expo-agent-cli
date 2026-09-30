@@ -12,12 +12,13 @@ import type { DevicePlatform } from './types';
  */
 export function devicesAllClaimedError(
   platform: DevicePlatform,
-  holders: { id: string; projectRoot: string }[]
+  holders: { id: string; projectRoot: string }[],
+  summary = `Every ${platform} device is claimed by another worktree, and no new one fits.`
 ): CommandError {
   const error = new CommandError(
     'DEVICES_ALL_CLAIMED',
     [
-      `Every ${platform} device is claimed by another worktree, and no new one fits.`,
+      summary,
       ...holders.map(({ id, projectRoot }) => `  ${id}: ${projectRoot}`),
       `How: name a device with --device <id>, raise EXPO_AGENT_MAX_DEVICES, or run dev:stop in a worktree above.`,
     ].join('\n')
