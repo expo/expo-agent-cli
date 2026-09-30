@@ -486,7 +486,7 @@ export function devLockAddress(projectRoot: string): string {
   // Must match `canonicalizeExistingPath` in `src/utils/dir.ts`: Node's JS `realpathSync` does
   // not expand Windows 8.3 names, and the CLI's native realpath does. A test that hashed the
   // short form never found the lock the CLI published.
-  const canonical = canonicalLockRoot(projectRoot);
+  const canonical = canonicalRoot(projectRoot);
   const digest = crypto
     .createHash('sha1')
     .update(canonical.toLowerCase())
@@ -503,7 +503,8 @@ export function devLockAddress(projectRoot: string): string {
     : path.join(os.tmpdir(), `agent-cli-dev-server-${digest}.sock`);
 }
 
-function canonicalLockRoot(projectRoot: string): string {
+/** The project root as the CLI records it: the native realpath, so the long form on Windows. */
+export function canonicalRoot(projectRoot: string): string {
   const resolved = path.resolve(projectRoot);
   try {
     const native = fs.realpathSync.native;

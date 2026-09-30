@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { installStubEasRunnerAsync } from './utils';
+import { canonicalRoot, installStubEasRunnerAsync } from './utils';
 
 /** Where the stub `eas` records what it was asked to do, one JSON line per run, under the cwd. */
 export const STUB_EAS_LOG_NAME = 'stub-eas-invocations.jsonl';
@@ -173,7 +173,7 @@ export function writeEasClaimFile(
       backend: 'eas',
       platform,
       id,
-      projectRoot: fs.realpathSync(projectRoot),
+      projectRoot: canonicalRoot(projectRoot),
       pid: process.pid,
       claimedAt: now,
       touchedAt: now,

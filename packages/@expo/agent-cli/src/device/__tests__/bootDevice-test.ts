@@ -214,6 +214,7 @@ describe(emulatorPort, () => {
 
 describe(bootEmulatorAsync, () => {
   const adb = { bin: 'adb', source: 'PATH' as const, searched: [], fromPathOnly: true };
+  const emulator = process.platform === 'win32' ? 'emulator.exe' : 'emulator';
 
   it(`starts the AVD on the ports it was given, and waits on that serial`, async () => {
     const tools = fakeDeviceTools((_command, args) =>
@@ -225,7 +226,7 @@ describe(bootEmulatorAsync, () => {
     );
     expect(result).toMatchObject({ ok: true, deviceId: 'emulator-5558', name: 'Pixel_8' });
     expect(tools.callsWith('-avd ')).toEqual([
-      'emulator -avd Pixel_8 -ports 5558,5559 -no-snapshot-save',
+      `${emulator} -avd Pixel_8 -ports 5558,5559 -no-snapshot-save`,
     ]);
     expect(tools.callsWith('getprop')).toEqual([
       'adb -s emulator-5558 shell getprop sys.boot_completed',
@@ -233,7 +234,7 @@ describe(bootEmulatorAsync, () => {
   });
 
   it(`fails at once, with the exit code, when the emulator exits before it boots`, async () => {
-    fakeDeviceTools((command) => (command === 'emulator' ? { exitCode: 1 } : {}));
+    fakeDeviceTools((command) => (command === emulator ? { exitCode: 1 } : {}));
     const started = Date.now();
 
     const result = await bootEmulatorAsync(
@@ -249,7 +250,7 @@ describe(bootEmulatorAsync, () => {
   it(`keeps waiting when the emulator launcher exits 0`, async () => {
     let probes = 0;
     fakeDeviceTools((command, args) => {
-      if (command === 'emulator') {
+      if (command === emulator) {
         return { exitCode: 0 };
       }
       if (args.includes('sys.boot_completed')) {
@@ -277,7 +278,7 @@ describe(bootEmulatorAsync, () => {
       { timeoutMs: 1_000, adb }
     );
     expect(tools.callsWith('-avd ')).toEqual([
-      'emulator -avd Pixel_8 -ports 5556,5557 -no-snapshot-save -read-only',
+      `${emulator} -avd Pixel_8 -ports 5556,5557 -no-snapshot-save -read-only`,
     ]);
   });
 });
