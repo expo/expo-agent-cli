@@ -6,6 +6,7 @@ import { detectAgent } from 'agent-cli-detector';
 import * as ciInfo from 'ci-info';
 import { randomBytes } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
+import { boolish } from 'getenv';
 import { homedir } from 'os';
 import path from 'path';
 import prompts from 'prompts';
@@ -368,20 +369,24 @@ export function getSession(): UserSession | null {
 }
 
 export function getExpoHomeDirectory(): string {
-  if (process.env.EXPO_STAGING) {
+  // The command reads its session before evaluating project config.
+  const unsafeHome = process.env.__UNSAFE_EXPO_HOME_DIRECTORY;
+  if (unsafeHome) {
+    return unsafeHome;
+  } else if (boolish('EXPO_STAGING', false)) {
     return path.join(homedir(), '.expo-staging');
-  } else if (process.env.EXPO_LOCAL) {
+  } else if (boolish('EXPO_LOCAL', false)) {
     return path.join(homedir(), '.expo-local');
   }
   return path.join(homedir(), '.expo');
 }
 
 function getExpoApiBaseUrl(): string {
-  if (process.env.EXPO_LOCAL && process.env.EXPO_FEEDBACK_API_BASE_URL) {
+  if (boolish('EXPO_LOCAL', false) && process.env.EXPO_FEEDBACK_API_BASE_URL) {
     return process.env.EXPO_FEEDBACK_API_BASE_URL;
-  } else if (process.env.EXPO_STAGING) {
+  } else if (boolish('EXPO_STAGING', false)) {
     return 'https://staging-api.expo.dev';
-  } else if (process.env.EXPO_LOCAL) {
+  } else if (boolish('EXPO_LOCAL', false)) {
     return 'http://127.0.0.1:3000';
   }
   return 'https://api.expo.dev';
@@ -424,7 +429,7 @@ function getFeedbackValidationError(feedback: string): string | null {
 }
 
 export function isTelemetryDisabled(): boolean {
-  return process.env.DO_NOT_TRACK === '1' || process.env.EXPO_NO_TELEMETRY === '1';
+  return boolish('DO_NOT_TRACK', false) || boolish('EXPO_NO_TELEMETRY', false);
 }
 
 export function resolveFeedbackId(value?: string): string {

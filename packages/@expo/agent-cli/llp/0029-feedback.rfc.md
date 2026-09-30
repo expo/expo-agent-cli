@@ -18,6 +18,9 @@ no separate download of `submit-expo-feedback`.
 `{ feedback, metadata }`, a 15-second timeout, and no retry. Staging/local selection and the
 local-only `EXPO_FEEDBACK_API_BASE_URL` override retain the original precedence. `EXPO_TOKEN`
 takes precedence over a cached `expo-session` secret; neither credential enters the body.
+Environment flags use Expo's boolean parsing, so `0` and `false` disable staging/local mode.
+Session lookup honors `__UNSAFE_EXPO_HOME_DIRECTORY` before selecting the staging, local, or
+production Expo home.
 
 [confirmed, user, 2026-09-30] `metadata.cli.name` is `agent-cli`, and the User-Agent is
 `agent-cli/<version>`. The version comes from the installed agent CLI. The receiving service's
@@ -33,7 +36,8 @@ fallback when project configuration fails. No `@expo/cli` internals are imported
 ## Command behavior
 
 The command retains `--message`/`-m`, `--category`/`-c`, `--subject`/`-s`, and `--resume`. Positional
-feedback remains accepted with the original deprecation warning. Messages are trimmed and must
+feedback remains accepted with the original deprecation warning. Unknown options are rejected
+instead of becoming part of the positional message. Messages are trimmed and must
 contain 40–5,000 characters. A terminal can prompt for missing input; non-interactive runs fail.
 The command also follows the agent CLI help and error conventions and offers `--json` with exactly
 `sent` and `feedbackId` on success or opt-out. Failures use the shared error envelope and exit 1.
@@ -41,12 +45,13 @@ The command also follows the agent CLI help and error conventions and offers `--
 The `agent-cli` category identifies feedback about this CLI, with the full command as its subject.
 Help retains the original category-specific subject guidance.
 
-`DO_NOT_TRACK=1` or `EXPO_NO_TELEMETRY=1` exits successfully before collecting metadata or sending
-feedback. Opt-out prints the existing instruction to respect the user's choice, and JSON mode
-returns `{ "sent": false, "feedbackId": null }`. The launcher suppresses command telemetry for a
-feedback invocation with `DO_NOT_TRACK=1`, so its earlier telemetry hook cannot bypass this contract.
-The send boundary rechecks opt-out and reports whether feedback was sent, so an opt-out loaded by
-project config also returns `sent: false` and does not print a success message. Network failures and
+`DO_NOT_TRACK` or `EXPO_NO_TELEMETRY` set to `1` or `true` exits successfully before collecting
+metadata or sending feedback. `0` and `false` leave feedback enabled. Opt-out prints the existing
+instruction to respect the user's choice, and JSON mode returns `{ "sent": false, "feedbackId": null }`.
+The launcher defers feedback's command event to the feedback handler, which checks opt-out after
+project config loads. A config-driven opt-out therefore prevents both network requests. The send
+boundary also rechecks opt-out and reports whether feedback was sent, so an opt-out returns
+`sent: false` and does not print a success message. Network failures and
 timeouts use `FEEDBACK_ERROR`, including the shared JSON error envelope, without retrying.
 
 ## Validation

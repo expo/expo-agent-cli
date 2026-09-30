@@ -64,6 +64,7 @@ beforeEach(() => {
     'EXPO_STAGING',
     'EXPO_FEEDBACK_API_BASE_URL',
     'EXPO_TOKEN',
+    '__UNSAFE_EXPO_HOME_DIRECTORY',
   ]) {
     vi.stubEnv(name, undefined);
   }
@@ -289,23 +290,24 @@ describe('project and environment metadata', () => {
     });
   });
 
-  it.each(['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'])(
-    'collects only feedback context when %s=1',
-    async (name) => {
-      vi.stubEnv(name, '1');
+  it.each(
+    ['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'].flatMap((name) =>
+      ['1', 'true', 'TRUE'].map((value) => ({ name, value }))
+    )
+  )('collects only feedback context when $name=$value', async ({ name, value }) => {
+    vi.stubEnv(name, value);
 
-      await expect(
-        createFeedbackMetadataAsync(PROJECT_ROOT, 'skills', 'expo-router', 'session_ABC-123')
-      ).resolves.toEqual({
-        category: 'skills',
-        subject: 'expo-router',
-        feedbackId: 'session_ABC-123',
-      });
-      expect(detectAgent).not.toHaveBeenCalled();
-      expect(detectSandbox).not.toHaveBeenCalled();
-      expect(fetchMock).not.toHaveBeenCalled();
-    }
-  );
+    await expect(
+      createFeedbackMetadataAsync(PROJECT_ROOT, 'skills', 'expo-router', 'session_ABC-123')
+    ).resolves.toEqual({
+      category: 'skills',
+      subject: 'expo-router',
+      feedbackId: 'session_ABC-123',
+    });
+    expect(detectAgent).not.toHaveBeenCalled();
+    expect(detectSandbox).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('feedback authentication', () => {
@@ -341,6 +343,40 @@ describe('feedback authentication', () => {
     vi.stubEnv('EXPO_LOCAL', '1');
     vi.stubEnv('EXPO_STAGING', '1');
     expect(getExpoHomeDirectory()).toBe(path.join(homedir(), '.expo-staging'));
+  });
+
+  it.each([
+    ['EXPO_LOCAL', '0'],
+    ['EXPO_LOCAL', 'false'],
+    ['EXPO_STAGING', '0'],
+    ['EXPO_STAGING', 'false'],
+  ])('uses production credentials when %s=%s', (name, value) => {
+    vi.stubEnv(name, value);
+    const expoHome = path.join(homedir(), '.expo');
+    writeJson(path.join(expoHome, 'state.json'), { auth: { sessionSecret: 'production-session' } });
+
+    expect(getExpoHomeDirectory()).toBe(expoHome);
+    expect(getAuthHeaders()).toEqual({ 'expo-session': 'production-session' });
+  });
+
+  it('reads credentials from the Expo home override before staging or local homes', () => {
+    const expoHome = path.resolve('/custom-expo-home');
+    vi.stubEnv('__UNSAFE_EXPO_HOME_DIRECTORY', expoHome);
+    vi.stubEnv('EXPO_STAGING', 'true');
+    vi.stubEnv('EXPO_LOCAL', 'true');
+    writeJson(path.join(expoHome, 'state.json'), { auth: { sessionSecret: 'override-session' } });
+    writeJson(path.join(homedir(), '.expo-staging', 'state.json'), {
+      auth: { sessionSecret: 'staging-session' },
+    });
+
+    expect(getExpoHomeDirectory()).toBe(expoHome);
+    expect(getAuthHeaders()).toEqual({ 'expo-session': 'override-session' });
+  });
+
+  it('ignores an empty Expo home override', () => {
+    vi.stubEnv('__UNSAFE_EXPO_HOME_DIRECTORY', '');
+    vi.stubEnv('EXPO_LOCAL', 'true');
+    expect(getExpoHomeDirectory()).toBe(path.join(homedir(), '.expo-local'));
   });
 
   it('supports anonymous feedback when session state is missing or malformed', () => {
@@ -388,6 +424,11 @@ describe('feedback submission', () => {
     ['1', undefined, 'http://127.0.0.1:43210', 'http://127.0.0.1:43210'],
     ['1', '1', undefined, 'https://staging-api.expo.dev'],
     ['1', '1', 'http://127.0.0.1:43210', 'http://127.0.0.1:43210'],
+    ['0', 'false', 'http://127.0.0.1:43210', 'https://api.expo.dev'],
+    ['false', '0', 'http://127.0.0.1:43210', 'https://api.expo.dev'],
+    ['1', 'false', undefined, 'http://127.0.0.1:3000'],
+    ['0', 'true', 'http://127.0.0.1:43210', 'https://staging-api.expo.dev'],
+    ['true', '0', 'http://127.0.0.1:43210', 'http://127.0.0.1:43210'],
   ])('routes local=%s staging=%s override=%s to %s', async (local, staging, override, endpoint) => {
     vi.stubEnv('EXPO_LOCAL', local);
     vi.stubEnv('EXPO_STAGING', staging);
@@ -411,19 +452,30 @@ describe('feedback submission', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it.each(['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'])(
-    'does not send when %s is enabled after metadata was collected',
-    async (name) => {
-      const metadata = await createFeedbackMetadataAsync(PROJECT_ROOT);
-      vi.stubEnv(name, '1');
-      const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it.each(
+    ['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'].flatMap((name) =>
+      ['1', 'true', 'TRUE'].map((value) => ({ name, value }))
+    )
+  )('does not send when $name=$value after metadata was collected', async ({ name, value }) => {
+    const metadata = await createFeedbackMetadataAsync(PROJECT_ROOT);
+    vi.stubEnv(name, value);
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      await expect(sendFeedbackAsync({ feedback: VALID_FEEDBACK, metadata })).resolves.toBe(false);
+    await expect(sendFeedbackAsync({ feedback: VALID_FEEDBACK, metadata })).resolves.toBe(false);
 
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(consoleErrorSpy).toHaveBeenCalledWith(TELEMETRY_DISABLED_MESSAGE);
-    }
-  );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(TELEMETRY_DISABLED_MESSAGE);
+  });
+
+  it.each(['0', 'false', 'FALSE'])('still sends when both opt-out flags are %s', async (value) => {
+    vi.stubEnv('DO_NOT_TRACK', value);
+    vi.stubEnv('EXPO_NO_TELEMETRY', value);
+    const metadata = await createFeedbackMetadataAsync(PROJECT_ROOT);
+
+    expect(metadata).toHaveProperty('cli.name', 'agent-cli');
+    await expect(sendFeedbackAsync({ feedback: VALID_FEEDBACK, metadata })).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 
   it('reports the API error message on a failed submission', async () => {
     fetchMock.mockResolvedValueOnce(

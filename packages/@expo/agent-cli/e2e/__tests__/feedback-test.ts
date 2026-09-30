@@ -24,7 +24,7 @@ async function setupFeedbackAsync() {
   const projectRoot = await setupFixtureAsync('go-app');
   const directory = path.dirname(projectRoot);
   const home = path.join(directory, 'home');
-  const expoHome = path.join(home, '.expo-local');
+  const expoHome = path.join(directory, 'custom Expo home');
   const stateFile = path.join(expoHome, 'state.json');
   await fs.promises.mkdir(expoHome, { recursive: true });
   await fs.promises.writeFile(
@@ -99,6 +99,14 @@ globalThis.fetch = (url, options) => {
     stateFile,
     requests,
     telemetryWasSpawned: () => fs.existsSync(telemetrySpawns),
+    readTelemetrySpawns: (): string[][] =>
+      fs.existsSync(telemetrySpawns)
+        ? fs
+            .readFileSync(telemetrySpawns, 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line))
+        : [],
     env: {
       HOME: home,
       USERPROFILE: home,
@@ -207,7 +215,7 @@ describe('@expo/agent-cli feedback', () => {
     expect(result.all).not.toContain('npx submit-expo-feedback');
   });
 
-  it('supports aliases, session authentication, and one JSON result', async () => {
+  it('supports aliases, a session in a custom Expo home, and one JSON result', async () => {
     const result = await executeAgentCliAsync(
       feedback.projectRoot,
       [
@@ -309,6 +317,7 @@ module.exports = ({ config }) => ({ ...config, name: 'Dynamic config app' });
       message: 'either --message or a positional argument, not both',
     },
     { args: ['-m', MESSAGE, '-c', 'website'], message: 'Invalid feedback category "website".' },
+    { args: ['--catgory', 'docs', MESSAGE], message: '--catgory' },
   ])('rejects invalid input without submitting: $message', async ({ args, message }) => {
     const result = await executeAgentCliAsync(
       feedback.projectRoot,
@@ -344,21 +353,23 @@ module.exports = ({ config }) => ({ ...config, name: 'Dynamic config app' });
     expect(feedback.requests).toHaveLength(1);
   });
 
-  it.each(['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'])(
-    'honors %s before validating or submitting',
-    async (name) => {
-      const result = await executeAgentCliAsync(feedback.projectRoot, ['feedback', '--json'], {
-        env: { ...feedback.env, EXPO_OFFLINE: '0', [name]: '1' },
-      });
+  it.each([
+    ['DO_NOT_TRACK', '1'],
+    ['DO_NOT_TRACK', 'true'],
+    ['EXPO_NO_TELEMETRY', '1'],
+    ['EXPO_NO_TELEMETRY', 'true'],
+  ])('honors %s=%s before validating or submitting', async (name, value) => {
+    const result = await executeAgentCliAsync(feedback.projectRoot, ['feedback', '--json'], {
+      env: { ...feedback.env, EXPO_OFFLINE: '0', [name]: value },
+    });
 
-      expect(result.exitCode).toBe(0);
-      expect(JSON.parse(result.stdout)).toEqual({ sent: false, feedbackId: null });
-      expect(result.stderr).toContain('Feedback was not sent because telemetry is off.');
-      expect(result.stderr).toContain('Do not enable telemetry or ask the user to enable it.');
-      expect(feedback.requests).toEqual([]);
-      expect(feedback.telemetryWasSpawned()).toBe(false);
-    }
-  );
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ sent: false, feedbackId: null });
+    expect(result.stderr).toContain('Feedback was not sent because telemetry is off.');
+    expect(result.stderr).toContain('Do not enable telemetry or ask the user to enable it.');
+    expect(feedback.requests).toEqual([]);
+    expect(feedback.telemetryWasSpawned()).toBe(false);
+  });
 
   it.each(['disconnect', 'timeout'] as const)(
     'prints the JSON error envelope for a transport failure: %s',
@@ -386,17 +397,22 @@ module.exports = ({ config }) => ({ ...config, name: 'Dynamic config app' });
     }
   );
 
-  it.each(['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'])(
-    'reports an opt-out when project config enables %s',
-    async (name) => {
+  it.each([
+    ['DO_NOT_TRACK', '1'],
+    ['DO_NOT_TRACK', 'true'],
+    ['EXPO_NO_TELEMETRY', '1'],
+    ['EXPO_NO_TELEMETRY', 'true'],
+  ])(
+    'prevents feedback and command telemetry when project config sets %s=%s',
+    async (name, value) => {
       await fs.promises.writeFile(
         path.join(feedback.projectRoot, 'app.config.js'),
-        `process.env.${name} = '1';\nmodule.exports = ({ config }) => config;\n`
+        `process.env.${name} = '${value}';\nmodule.exports = ({ config }) => config;\n`
       );
       const result = await executeAgentCliAsync(
         feedback.projectRoot,
         ['feedback', '-m', MESSAGE, '--json'],
-        { env: feedback.env }
+        { env: { ...feedback.env, EXPO_OFFLINE: '0' } }
       );
 
       expect(result.exitCode).toBe(0);
@@ -404,8 +420,31 @@ module.exports = ({ config }) => ({ ...config, name: 'Dynamic config app' });
       expect(result.stderr).toContain('Feedback was not sent because telemetry is off.');
       expect(result.all).not.toContain('Thanks for the feedback!');
       expect(feedback.requests).toEqual([]);
+      expect(feedback.telemetryWasSpawned()).toBe(false);
     }
   );
+
+  it('records one command event when feedback remains enabled after loading config', async () => {
+    const result = await executeAgentCliAsync(
+      feedback.projectRoot,
+      ['feedback', '-m', MESSAGE, '--json'],
+      {
+        env: {
+          ...feedback.env,
+          EXPO_OFFLINE: '0',
+          EXPO_NO_TELEMETRY: 'false',
+          DO_NOT_TRACK: 'false',
+        },
+      }
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toHaveProperty('sent', true);
+    expect(feedback.requests).toHaveLength(1);
+    const spawns = feedback.readTelemetrySpawns();
+    expect(spawns).toHaveLength(1);
+    expect(JSON.parse(spawns[0]![1]!)).toMatchObject({ command: 'feedback', version });
+  });
 
   it('offers help without submitting, including when telemetry is off', async () => {
     const result = await executeAgentCliAsync(feedback.projectRoot, ['feedback', '--help'], {
