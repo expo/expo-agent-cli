@@ -7,18 +7,14 @@ import os from 'os';
 
 import {
   allocateDeviceAsync,
-  classifyClaimAsync,
   devicesAllClaimedError,
   readClaims,
   releaseClaim,
   touchClaim,
-  withRegistryLockAsync,
-  writeClaim,
   type DeviceCandidate,
   type DeviceClaim,
   type DevicePlatform,
 } from '../deviceClaims';
-import { removeClaimFile } from '../deviceClaims/registry';
 import { parseAndroidDevices } from '../navigate/device';
 import { canonicalizeExistingPath } from '../utils/dir';
 import { CommandError } from '../utils/errors';
@@ -179,64 +175,62 @@ export async function resolveClaimedDeviceAsync(
 
   let picked: { candidate: LocalCandidate; claim: DeviceClaim; fresh: boolean; choice: string };
   try {
-    if (explicit) {
-      const result = await claimExplicitAsync(platform, projectRoot, explicit, await listDevices());
-      if (!result.ok) {
-        return result;
+    const allocation = await allocateDeviceAsync<LocalCandidate>({
+      projectRoot,
+      platform,
+      backend,
+      listDevices,
+      createDevice: allowBoot && platform === 'ios' && !explicit ? createSimulatorAsync : undefined,
+      deleteDevice: platform === 'ios' ? deleteSimulatorAsync : undefined,
+      capacity: deviceCapacity(platform),
+      rank: rankCandidates,
+      explicit: explicit ?? undefined,
+      matches: (candidate, query) => candidate.id === query || candidate.name === query,
+    });
+    switch (allocation.kind) {
+      case 'reuse': {
+        const candidate = seen.inventory!.candidates.find(({ id }) => id === allocation.claim.id)!;
+        picked = {
+          candidate,
+          claim: allocation.claim,
+          fresh: false,
+          choice: explicit ? '--device named it' : 'this worktree claimed it already',
+        };
+        break;
       }
-      picked = result;
-    } else {
-      const allocation = await allocateDeviceAsync<LocalCandidate>({
-        projectRoot,
-        platform,
-        backend,
-        listDevices,
-        createDevice: allowBoot && platform === 'ios' ? createSimulatorAsync : undefined,
-        deleteDevice: platform === 'ios' ? deleteSimulatorAsync : undefined,
-        capacity: deviceCapacity(platform),
-        rank: rankCandidates,
-      });
-      switch (allocation.kind) {
-        case 'reuse': {
-          const candidate = seen.inventory!.candidates.find(
-            ({ id }) => id === allocation.claim.id
-          )!;
-          picked = {
-            candidate,
-            claim: allocation.claim,
-            fresh: false,
-            choice: 'this worktree claimed it already',
-          };
-          break;
-        }
-        case 'take':
-          picked = {
-            ...allocation,
-            fresh: true,
-            choice: 'it was up and no other worktree claimed it',
-          };
-          break;
-        case 'boot':
-          picked = {
-            ...allocation,
-            fresh: true,
-            choice: allocation.candidate.hasApp
+      case 'take':
+        picked = {
+          ...allocation,
+          fresh: true,
+          choice: explicit ? '--device named it' : 'it was up and no other worktree claimed it',
+        };
+        break;
+      case 'boot':
+        picked = {
+          ...allocation,
+          fresh: true,
+          choice: explicit
+            ? '--device named it'
+            : allocation.candidate.hasApp
               ? `it has ${options.appId} installed`
               : platform === 'ios'
                 ? 'it is the free simulator this machine last used'
                 : 'no other worktree claimed this emulator',
-          };
-          break;
-        case 'created':
-          picked = {
-            ...allocation,
-            fresh: true,
-            choice: 'every simulator was claimed, so this one was created for this worktree',
-          };
-          break;
-        case 'exhausted':
-          return exhaustedRefusal(platform, allocation.holders, seen.inventory, allowBoot);
-      }
+        };
+        break;
+      case 'created':
+        picked = {
+          ...allocation,
+          fresh: true,
+          choice: 'every simulator was claimed, so this one was created for this worktree',
+        };
+        break;
+      case 'exhausted':
+        return exhaustedRefusal(platform, allocation.holders, seen.inventory, allowBoot);
+      case 'claimed':
+        return explicitClaimedRefusal(explicit!, allocation.holders);
+      case 'not-found':
+        return explicitNotFoundRefusal(platform, explicit!, seen.inventory);
     }
   } catch (error: unknown) {
     if (error instanceof InventoryRefusal) {
@@ -250,17 +244,32 @@ export async function resolveClaimedDeviceAsync(
 
   const { candidate, claim, fresh, choice } = picked;
   const adb = seen.inventory?.adb ?? null;
-  const device = (booted: boolean): ClaimedDevice => ({
-    ok: true,
-    backend,
-    id: candidate.id,
-    name: candidate.name,
-    claim: touchClaim(claim) ?? claim,
-    booted,
-    choice,
-    hasApp: candidate.hasApp ?? null,
-    adb,
-  });
+  const device = (booted: boolean): ClaimedDevice => {
+    if (explicit) {
+      // One device per platform per worktree: the named device replaces the one held before, but
+      // only once it proved usable, so a failed `--device` keeps the device that works.
+      for (const other of readClaims()) {
+        if (
+          other.backend === backend &&
+          other.projectRoot === projectRoot &&
+          other.id !== candidate.id
+        ) {
+          releaseClaim(other);
+        }
+      }
+    }
+    return {
+      ok: true,
+      backend,
+      id: candidate.id,
+      name: candidate.name,
+      claim: touchClaim(claim) ?? claim,
+      booted,
+      choice,
+      hasApp: candidate.hasApp ?? null,
+      adb,
+    };
+  };
 
   if (candidate.state === 'booted') {
     return device(false);
@@ -367,84 +376,41 @@ function rankCandidates(left: LocalCandidate, right: LocalCandidate): number {
   return left.simulator && right.simulator ? compareSimulators(left.simulator, right.simulator) : 0;
 }
 
-async function claimExplicitAsync(
+function explicitNotFoundRefusal(
   platform: DevicePlatform,
-  projectRoot: string,
   explicit: string,
-  candidates: LocalCandidate[]
-): Promise<
-  | { ok: true; candidate: LocalCandidate; claim: DeviceClaim; fresh: boolean; choice: string }
-  | DeviceRefusal
-> {
-  const backend = BACKEND[platform];
-  const matches = candidates.filter(({ id, name }) => id === explicit || name === explicit);
-  const candidate =
-    matches.find(({ id }) => id === explicit) ??
-    matches.find(({ state }) => state === 'booted') ??
-    matches[0];
-  if (candidate == null) {
-    const known = candidates.map(({ id, name }) => `${name} (${id})`).join(', ') || 'none';
-    const error = new CommandError(
-      'DEVICE_NOT_FOUND',
-      [
-        `--device "${explicit}" names no ${NOUN[platform]} on this machine.`,
-        `Why: it matches no UDID, serial or name. Known: ${known}.`,
-        `How: pass one of the names or ids above, or drop --device to use the device this worktree claimed.`,
-      ].join('\n')
-    );
-    return refusal(
-      'not-found',
-      `--device "${explicit}" names no ${NOUN[platform]} on this machine`,
-      error
-    );
-  }
+  inventory: Inventory | null
+): DeviceRefusal {
+  const known = inventory?.candidates.map(({ id, name }) => `${name} (${id})`).join(', ') || 'none';
+  const error = new CommandError(
+    'DEVICE_NOT_FOUND',
+    [
+      `--device "${explicit}" names no ${NOUN[platform]} on this machine.`,
+      `Why: it matches no UDID, serial or name. Known: ${known}.`,
+      `How: pass one of the names or ids above, or drop --device to use the device this worktree claimed.`,
+    ].join('\n')
+  );
+  return refusal(
+    'not-found',
+    `--device "${explicit}" names no ${NOUN[platform]} on this machine`,
+    error
+  );
+}
 
-  return await withRegistryLockAsync(async () => {
-    const claims = readClaims().filter((claim) => claim.backend === backend);
-    const existing = claims.find((claim) => claim.id === candidate.id);
-    if (existing && existing.projectRoot !== projectRoot) {
-      if ((await classifyClaimAsync(existing)) === 'live') {
-        const error = new CommandError(
-          'DEVICE_CLAIMED',
-          [
-            `--device "${explicit}" is claimed by another worktree: ${existing.projectRoot}.`,
-            `How: run dev:stop in that worktree, or name another device.`,
-          ].join('\n')
-        );
-        error.data = { id: candidate.id, projectRoot: existing.projectRoot };
-        return refusal('claimed', `${candidate.name} is claimed by ${existing.projectRoot}`, error);
-      }
-      removeClaimFile(existing);
-    }
-    // One device per platform per worktree: naming another gives up the one held before.
-    for (const claim of claims) {
-      if (claim.projectRoot === projectRoot && claim.id !== candidate.id) {
-        releaseClaim(claim);
-      }
-    }
-    if (existing?.projectRoot === projectRoot) {
-      return {
-        ok: true as const,
-        candidate,
-        claim: existing,
-        fresh: false,
-        choice: '--device named it',
-      };
-    }
-    const now = new Date().toISOString();
-    const claim: DeviceClaim = {
-      backend,
-      platform,
-      id: candidate.id,
-      projectRoot,
-      pid: process.pid,
-      claimedAt: now,
-      touchedAt: now,
-      created: existing?.created ?? false,
-    };
-    writeClaim(claim);
-    return { ok: true as const, candidate, claim, fresh: true, choice: '--device named it' };
-  });
+function explicitClaimedRefusal(
+  explicit: string,
+  holders: { id: string; projectRoot: string }[]
+): DeviceRefusal {
+  const roots = [...new Set(holders.map(({ projectRoot }) => projectRoot))].join(', ');
+  const error = new CommandError(
+    'DEVICE_CLAIMED',
+    [
+      `--device "${explicit}" is claimed by another worktree: ${roots}.`,
+      `How: run dev:stop in that worktree, or name another device.`,
+    ].join('\n')
+  );
+  error.data = { id: holders[0]!.id, projectRoot: holders[0]!.projectRoot, holders };
+  return refusal('claimed', `${explicit} is claimed by ${roots}`, error);
 }
 
 interface InventoryOptions {

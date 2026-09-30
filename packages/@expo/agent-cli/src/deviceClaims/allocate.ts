@@ -38,6 +38,9 @@ export interface AllocateDeviceOptions<C extends DeviceCandidate> {
   deleteDevice?: (claim: DeviceClaim) => Promise<void>;
   capacity: number;
   rank?: (left: C, right: C) => number;
+  /** Step 0: `--device`. The caller releases its other claims once this device proves usable. */
+  explicit?: string;
+  matches?: (candidate: C, query: string) => boolean;
   now?: Date;
   probeLock?: (projectRoot: string) => Promise<unknown>;
 }
@@ -58,6 +61,8 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
   deleteDevice,
   capacity,
   rank,
+  explicit,
+  matches,
   now = new Date(),
   probeLock,
 }: AllocateDeviceOptions<C>): Promise<Allocation<C>> {
@@ -82,6 +87,8 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
       rank,
       now,
       pid: process.pid,
+      explicit,
+      matches,
     });
 
     const chosenId =
@@ -126,6 +133,8 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
     switch (choice.kind) {
       case 'reuse':
       case 'exhausted':
+      case 'claimed':
+      case 'not-found':
         return choice;
 
       case 'take':
