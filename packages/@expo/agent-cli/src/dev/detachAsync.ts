@@ -311,12 +311,15 @@ export async function devDetachAsync(
   // [observed — friction run 7, F61; live run S4]. `ready: true` is only ever printed for a
   // process that is alive and a `/status` that still answers, here, now.
   // @ref llp/0021-honest-reports.rfc.md §The rules
+  // The probe can outlast the child. Read its state and log only after that await, so a handoff
+  // written while the probe was pending outranks the probe's generic "not answering" result.
+  const statusAnswering = ready === true ? await isBundlerAnsweringAsync(lock.url) : null;
   const phase = readChildPhaseSync(projectRoot);
   let verdict = readChildVerdictSync(projectRoot);
   let failure = resolveDetachFailure({
     exited: childIsGone(),
     verdict,
-    statusAnswering: ready === true ? await isBundlerAnsweringAsync(lock.url) : null,
+    statusAnswering,
   });
 
   // …and "here, now" was still not enough for one shape of run. @ref
@@ -341,6 +344,12 @@ export async function devDetachAsync(
   }
 
   if (failure) {
+    // Both the final probe and the grace window can observe an exit before the handoff is
+    // readable. Give either path the same bounded wait, once, and prefer the child's own verdict.
+    if (verdict?.scenario == null && childIsGone()) {
+      verdict = await waitForChildVerdictAsync(projectRoot);
+      failure = verdict?.scenario != null ? 'needs-human' : 'child-exited';
+    }
     throw detachFailureError(failure, {
       projectRoot,
       lock,
@@ -457,11 +466,12 @@ async function watchOpenPlatformGraceAsync(
     await new Promise((resolve) =>
       setTimeout(resolve, Math.min(OPEN_PLATFORM_POLL_MS, deadline - Date.now()))
     );
+    const statusAnswering = watchStatus ? await isBundlerAnsweringAsync(url) : null;
     verdict = readChildVerdictSync(projectRoot);
     const seen = resolveDetachFailure({
       exited: hasExited(),
       verdict,
-      statusAnswering: watchStatus ? await isBundlerAnsweringAsync(url) : null,
+      statusAnswering,
     });
     if (seen === 'needs-human') {
       return { failure: seen, verdict };
@@ -469,21 +479,6 @@ async function watchOpenPlatformGraceAsync(
     failure ??= seen;
   }
 
-  // A child can be gone before its verdict is readable: the handoff block is written by the dying
-  // process, and on a slow filesystem it lands after the exit is already visible [observed —
-  // windows-2022 CI, 2026-09-05: exit seen inside the grace, verdict written after its budget].
-  // The child has exited, so this extra wait costs a dead run a moment and a healthy run nothing —
-  // and without it the caller gets "the process exited" for a stop that has a named scenario and
-  // an "Ask the user" line a beat behind it.
-  if (failure === 'child-exited' && verdict?.scenario == null) {
-    verdict = await waitForChildVerdictAsync(projectRoot);
-    if (verdict != null) {
-      return {
-        failure: resolveDetachFailure({ exited: true, verdict, statusAnswering: null }),
-        verdict,
-      };
-    }
-  }
   return { failure, verdict };
 }
 
