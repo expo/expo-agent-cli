@@ -18,6 +18,7 @@ export const devRunHelp: CommandHelp = {
     `--eas, --local      Where it all runs: on EAS (build, EAS Simulator session, tunnel) or here`,
     `--go, --dev-client  Which app to run the project in, when both would work`,
     `--no-open           Skip opening the app on a device; open it yourself with navigate`,
+    `--device <name>     Device to use, by name, UDID or adb serial; claimed for this worktree`,
     `--no-agent-skills   Skip linking agent skills from installed packages`,
     `--no-followups      Skip the "Suggested next:" section of suggested follow-up commands`,
     `--no-fingerprint-cache   Hash the project again rather than revalidating the cached hash`,

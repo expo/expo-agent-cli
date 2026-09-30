@@ -17,6 +17,18 @@ import { selectRunTarget } from './runTarget';
 import type { DecideStartPlanOptions, NativePlatform, PlanEasBuild } from './types';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { hasBuildProfileSync } from '../utils/easJson';
+import { CommandError } from '../utils/errors';
+
+/** The install step would have no `--device` value that is safe (llp/0028). */
+export function runDeviceRefusedError(platform: NativePlatform, reason: string): CommandError {
+  return new CommandError(
+    'RUN_DEVICE_AMBIGUOUS',
+    [
+      `The ${platform} app cannot be installed on this worktree's device with "expo run:${platform} --device".`,
+      `Why: ${reason}.`,
+    ].join('\n')
+  );
+}
 
 /**
  * Whether this plan assumes an app that is already on a device, without having asked one.
@@ -60,6 +72,14 @@ export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
   hasSimulatorProfile?: (projectRoot: string) => boolean;
   /** Whether the per-platform fingerprint the EAS lookup needs may come from the `.expo` record. */
   fingerprintCache?: boolean;
+  /**
+   * Claim this worktree's device for a plan that builds here, and answer what
+   * `expo run:<platform> --device` calls it. Null leaves the build unpinned.
+   *
+   * @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+   * @throws {CommandError} when the device cannot be claimed or named safely.
+   */
+  claimRunDevice?: (platform: NativePlatform) => Promise<string | null>;
 }
 
 /**
@@ -96,6 +116,7 @@ export async function resolveStartPlanAsync(
       lookUpEasSimulatorBuildAsync(root, platform, { fingerprintCache: options.fingerprintCache }),
     hasSimulatorProfile = (root) => hasBuildProfileSync(root, EAS_SIMULATOR_PROFILE),
     fingerprintCache: _fingerprintCache,
+    claimRunDevice,
     ...planOptions
   } = options;
 
@@ -139,7 +160,10 @@ export async function resolveStartPlanAsync(
     if ((requestedBackend ?? settingsBuildBackend(settings, opensOn)) === 'eas') {
       return draft;
     }
-    const { presence, installDevice } = await probeAppPresence(projectRoot, opensOn);
+    const { presence, installDevice, installRefusal } = await probeAppPresence(
+      projectRoot,
+      opensOn
+    );
     if (presence === 'missing') {
       // The install needs the local toolchain even when nothing compiles — `expo run:ios` runs
       // through Xcode either way — so a machine without it keeps the serve-only plan rather than
@@ -148,6 +172,9 @@ export async function resolveStartPlanAsync(
       const toolchain = await detectToolchainAsync(opensOn);
       if (toolchain.status !== 'present') {
         return draft;
+      }
+      if (installRefusal) {
+        throw runDeviceRefusedError(opensOn, installRefusal);
       }
     }
     // Run again rather than patch the draft: the table is the one place a rule and its steps are
@@ -183,10 +210,14 @@ export async function resolveStartPlanAsync(
   const easBuild =
     onEas && draft.rule !== 'needs-dev-client' ? await lookUpEasBuild(projectRoot, platform) : null;
 
+  const runDevice =
+    buildBackend.runsOn === 'local' && claimRunDevice ? await claimRunDevice(platform) : null;
+
   const plan = decideStartPlan(state, {
     ...planOptions,
     runTarget,
     buildBackend,
+    runDevice,
     easJson: buildBackend.runsOn === 'eas' ? easJsonExistsSync(projectRoot) : undefined,
     ...(onEas ? { easBuild, easSimulatorProfile: hasSimulatorProfile(projectRoot) } : {}),
   });

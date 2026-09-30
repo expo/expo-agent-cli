@@ -1,4 +1,5 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Plan contract
+// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
 // What `@expo/agent-cli dev` does: probe the project, decide what must run, emit the plan, then
 // (unless `--plan` stopped us) run its steps as subprocesses. The plain `expo start` wrapper is
 // `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
@@ -85,6 +86,11 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   const state = await probeProjectStateAsync(projectRoot, {
     fingerprintCache: options.fingerprintCache,
   });
+  const claimRunDevice = runDeviceClaimer(projectRoot, options);
+  // A device the caller named is claimed first, so the presence probe below asks that device.
+  if (options.device && claimRunDevice && options.platform !== 'web') {
+    await claimRunDevice(options.platform);
+  }
   // @ref llp/0015-backend-selection-and-config.rfc.md §The selection
   // One call that folds in everything outside the project: the developer's config, the flags they
   // typed, this host and the toolchain probe. The backend is chosen **here**, before the plan is
@@ -104,6 +110,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     // the build profile, adds the tunnel, and lets the resolver ask EAS for a build it already has.
     deviceBackend: options.deviceBackend,
     fingerprintCache: options.fingerprintCache,
+    claimRunDevice,
   });
 
   // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run
@@ -970,6 +977,48 @@ function resolveStepArgs(step: PlanStep, options: DevOptions, isLast: boolean): 
 }
 
 /**
+ * Claims this worktree's device for the plan's `expo run:*` steps and names it for `--device`.
+ *
+ * A run boots the device; `--plan` only takes one that is up. No device to claim pins nothing.
+ * Absent for the EAS device and for a harness that must not touch this machine's devices
+ * (`AGENT_CLI_NO_DEVICE`).
+ */
+function runDeviceClaimer(
+  projectRoot: string,
+  options: DevOptions
+): ((platform: NativePlatform) => Promise<string | null>) | undefined {
+  if (options.deviceBackend === 'eas' || process.env.AGENT_CLI_NO_DEVICE === '1') {
+    return undefined;
+  }
+  return async (platform) => {
+    const { resolveClaimedDeviceAsync } =
+      require('../device/claimedDevice') as typeof import('../device/claimedDevice');
+    const { expoRunDeviceArgumentAsync } =
+      require('../device/installDevBuild') as typeof import('../device/installDevBuild');
+    const { runDeviceRefusedError } =
+      require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
+    const claimed = await resolveClaimedDeviceAsync({
+      platform,
+      projectRoot,
+      explicit: options.device,
+      allowBoot: options.mode === 'run',
+    });
+    if (!claimed.ok) {
+      // Nothing to claim or boot here: the Expo CLI is left to find or create one, as before.
+      if (claimed.kind === 'no-device') {
+        return null;
+      }
+      throw claimed.error;
+    }
+    const argument = await expoRunDeviceArgumentAsync(projectRoot, platform, claimed.id);
+    if (!argument.ok) {
+      throw runDeviceRefusedError(platform, argument.reason);
+    }
+    return argument.value;
+  };
+}
+
+/**
  * Whether this run opens the app itself once the dev server is up.
  *
  * @ref llp/0026-dev-owns-the-open.rfc.md
@@ -1018,6 +1067,7 @@ async function openAppForRunAsync(
   try {
     const report = await openAppOnDeviceAsync(projectRoot, {
       platform,
+      device: options.device,
       expoGo: plan.target === 'expo-go',
       devServerUrl,
       stillWanted,

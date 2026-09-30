@@ -8,6 +8,7 @@ describe(resolveNavigateOptions, () => {
       route: '/profile/42',
       devServerUrl: null,
       platform: undefined,
+      device: null,
       scheme: undefined,
       appId: undefined,
       printUrl: false,
@@ -38,6 +39,7 @@ describe(resolveNavigateOptions, () => {
       route: '/profile/42',
       devServerUrl: 'http://192.168.1.10:8081',
       platform: 'android',
+      device: null,
       scheme: 'demoapp',
       appId: 'com.example.demo',
       printUrl: true,
@@ -47,6 +49,13 @@ describe(resolveNavigateOptions, () => {
       routeCheck: false,
       attachTimeoutMs: DEFAULT_ATTACH_TIMEOUT_MS,
     });
+  });
+
+  // @ref llp/0028-one-device-per-agent.rfc.md §Explicit device
+  it(`should read --device, and refuse it beside --eas`, () => {
+    expect(resolveNavigateOptions(['/', '--device', 'iPhone 17 Pro']).device).toBe('iPhone 17 Pro');
+    expect(() => resolveNavigateOptions(['/', '--device', 'X', '--eas'])).toThrow(/--eas/);
+    expect(() => resolveNavigateOptions(['/', '--device', ' '])).toThrow(/--device needs/);
   });
 
   it(`should read the json flag`, () => {

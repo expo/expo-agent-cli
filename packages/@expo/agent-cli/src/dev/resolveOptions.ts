@@ -116,6 +116,13 @@ export interface DevOptions {
    */
   port: number | null;
   /**
+   * The simulator, emulator or device `--device` named, by UDID, serial or name, or null.
+   *
+   * @ref llp/0028-one-device-per-agent.rfc.md §Explicit device
+   * It skips the allocation and is still claimed for this worktree, so no other worktree takes it.
+   */
+  device: string | null;
+  /**
    * Run the dev server in a process of its own and give the terminal back (`--detach`).
    *
    * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization
@@ -169,6 +176,7 @@ export function resolveDevOptions(argv: string[]): DevOptions {
   const buildBackend = resolveBuildBackend(argv, example);
   const runTarget = resolveRunTarget(argv, example);
   const port = resolvePort(argv, example);
+  const { device, rest } = resolveDevice(argv, example);
   const open = !argv.includes('--no-open');
   const deviceBackend: DeviceBackend = buildBackend === 'eas' ? 'eas' : 'local';
   if (deviceBackend === 'eas') {
@@ -184,7 +192,7 @@ export function resolveDevOptions(argv: string[]): DevOptions {
     // osascript that dies without an Automation grant. `--web` stays: serving the web bundle is
     // `expo start`'s own job.
     expoArgs: [
-      ...argv.filter((arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !isNativePlatformFlag(arg)),
+      ...rest.filter((arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !isNativePlatformFlag(arg)),
       // @ref llp/0027-everything-on-eas.rfc.md §The dev server is tunnelled
       // Implied, never asked for: an EAS Simulator session is a machine in a datacenter, and
       // `exp://127.0.0.1:8081` names *its* loopback. A caller who typed `--tunnel` already has it.
@@ -200,6 +208,7 @@ export function resolveDevOptions(argv: string[]): DevOptions {
     fingerprintCache: !argv.includes('--no-fingerprint-cache'),
     open,
     port,
+    device,
     detach,
     waitReady,
     detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
@@ -358,6 +367,59 @@ function detachWithPlan(example: string): CommandError {
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} dev --${example} --plan`;
   return error;
+}
+
+/**
+ * The device `--device` named, and the command line without it, which is never forwarded: it
+ * names this worktree's device, and `expo start` has no such option.
+ *
+ * @throws {CommandError} `BAD_ARGS` for an empty value, for `--web`, or with `--eas`.
+ */
+function resolveDevice(argv: string[], example: string): { device: string | null; rest: string[] } {
+  const separator = argv.indexOf('--');
+  const own = separator >= 0 ? argv.slice(0, separator) : argv;
+  let device: string | null = null;
+  let named = false;
+  const dropped = new Set<number>();
+  for (const [index, arg] of own.entries()) {
+    if (arg === '--device') {
+      named = true;
+      device = own[index + 1]?.trim() ?? '';
+      dropped.add(index).add(index + 1);
+    } else if (arg.startsWith('--device=')) {
+      named = true;
+      device = arg.slice('--device='.length).trim();
+      dropped.add(index);
+    }
+  }
+  const rest = argv.filter((_arg, index) => !dropped.has(index));
+  if (!named) {
+    return { device: null, rest };
+  }
+  if (!device || device.startsWith('-')) {
+    const error = new CommandError(
+      'BAD_ARGS',
+      [
+        `--device needs a simulator name, a device name, a UDID or an adb serial.`,
+        `Why: it names the device this worktree claims, and an empty value names none.`,
+        `How: run "${PROGRAM_PREFIX} dev --${example} --device <name>", or leave the flag out to use the device this worktree already claims, or a free one.`,
+      ].join('\n')
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} dev --${example}`;
+    throw error;
+  }
+  if (example === 'web' || argv.includes('--eas')) {
+    const error = new CommandError(
+      'BAD_ARGS',
+      [
+        `--device names a simulator, emulator or device on this machine, and ${example === 'web' ? '--web opens a browser' : '--eas runs the app on an EAS Simulator session'}.`,
+        `How: drop --device, or run "${PROGRAM_PREFIX} dev --ios --device "${device}"" for a device here.`,
+      ].join('\n')
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} dev --ios --device "${device}"`;
+    throw error;
+  }
+  return { device, rest };
 }
 
 /**

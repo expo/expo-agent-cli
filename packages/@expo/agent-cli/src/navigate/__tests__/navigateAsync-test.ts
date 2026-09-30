@@ -129,6 +129,7 @@ function options(overrides: Partial<NavigateOptions> = {}): NavigateOptions {
   return {
     route: '/profile/42',
     devServerUrl: 'http://127.0.0.1:8081',
+    device: null,
     printUrl: false,
     cloud: 'fallback',
     json: false,
