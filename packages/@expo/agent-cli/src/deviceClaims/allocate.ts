@@ -7,6 +7,7 @@ import { chooseDevice } from './choose';
 import { debugEvent, event } from './events';
 import { classifyClaimAsync } from './liveness';
 import {
+  pruneUnreadableClaims,
   readClaims,
   releaseClaim,
   removeClaimFile,
@@ -63,6 +64,7 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
   const projectRoot = canonicalizeExistingPath(givenRoot);
 
   return await withRegistryLockAsync(async () => {
+    pruneUnreadableClaims(now.getTime());
     const inventory = await listDevices();
     const claims: ClassifiedClaim[] = await Promise.all(
       readClaims().map(async (claim) => ({
