@@ -232,6 +232,42 @@ describe(bootEmulatorAsync, () => {
     ]);
   });
 
+  it(`fails at once, with the exit code, when the emulator exits before it boots`, async () => {
+    fakeDeviceTools((command, args) => (command === 'emulator' ? { exitCode: 1 } : {}));
+    const started = Date.now();
+
+    const result = await bootEmulatorAsync(
+      { avd: 'Pixel_8', port: 5556, readOnly: true },
+      { timeoutMs: 600_000, adb }
+    );
+
+    expect(result).toMatchObject({ ok: false, deviceId: 'emulator-5556' });
+    expect(result.reason).toContain('exited with code 1');
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it(`keeps waiting when the emulator launcher exits 0`, async () => {
+    let probes = 0;
+    fakeDeviceTools((command, args) => {
+      if (command === 'emulator') {
+        return { exitCode: 0 };
+      }
+      if (args.includes('sys.boot_completed')) {
+        probes += 1;
+        return { stdout: '1\n' };
+      }
+      return {};
+    });
+
+    const result = await bootEmulatorAsync(
+      { avd: 'Pixel_8', port: 5556, readOnly: false },
+      { timeoutMs: 1_000, adb }
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    expect(probes).toBe(1);
+  });
+
   it(`starts a second instance of a running AVD read-only`, async () => {
     const tools = fakeDeviceTools((_command, args) =>
       args.includes('sys.boot_completed') ? { stdout: '1\n' } : {}
