@@ -26,6 +26,14 @@ import {
 
 const APP_ID = 'com.example.installedapp';
 
+/**
+ * The device-claim registry of this test, so a reader never reads or writes the developer's
+ * claims (llp/0028 §The registry).
+ */
+function claimRegistryEnv(root: string): Record<string, string> {
+  return { __UNSAFE_EXPO_HOME_DIRECTORY: path.join(root, '.expo-home') };
+}
+
 /** The readers resolve their tools from this process's environment, so the stubs go there. */
 function withEnv(overrides: Record<string, string | undefined>): () => void {
   const previous = new Map(Object.keys(overrides).map((key) => [key, process.env[key]]));
@@ -56,12 +64,13 @@ describe('the Android reader over a stub adb', () => {
     root = getTemporaryPath();
     await fs.promises.mkdir(root, { recursive: true });
     adb = await installStubAdbAsync(root, APP_ID);
-    restore = withEnv({ ...adb.env, STUB_ADB_NO_DD: undefined });
+    restore = withEnv({ ...adb.env, STUB_ADB_NO_DD: undefined, ...claimRegistryEnv(root) });
   });
   afterEach(() => restore());
 
   it('reads the fingerprint through ranged dd reads, each spelled as one exec-out argument', async () => {
     const result = await readInstalledFingerprintAndroidAsync({
+      projectRoot: root,
       appId: APP_ID,
       expectedHash: EMBEDDED_HASH,
     });
@@ -86,6 +95,7 @@ describe('the Android reader over a stub adb', () => {
   it('pulls the whole APK when the device cannot serve ranges', async () => {
     process.env.STUB_ADB_NO_DD = '1';
     const result = await readInstalledFingerprintAndroidAsync({
+      projectRoot: root,
       appId: APP_ID,
       expectedHash: EMBEDDED_HASH,
     });
@@ -155,9 +165,12 @@ describe('the phone probe over a stub devicectl', () => {
 
   async function stubPhoneAsync(phone: { fingerprint: string | null; postDelayMs?: number }) {
     const xcrun = await installStubXcrunAsync(root, { phone });
-    restore = withEnv(
-      pathEnvVars(`${xcrun.binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`)
-    );
+    restore = withEnv({
+      ...pathEnvVars(
+        `${xcrun.binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`
+      ),
+      ...claimRegistryEnv(root),
+    });
     return xcrun;
   }
 
@@ -229,6 +242,7 @@ describe('the phone probe over a stub devicectl', () => {
   it('names a connected phone in a hint and leaves it alone until --device names it', async () => {
     const xcrun = await stubPhoneAsync({ fingerprint: EMBEDDED_HASH });
     const unnamed = await readInstalledFingerprintIosAsync({
+      projectRoot: root,
       appId: APP_ID,
       expectedHash: EMBEDDED_HASH,
       scheme: 'installedapp',
@@ -241,6 +255,7 @@ describe('the phone probe over a stub devicectl', () => {
     expect(xcrun.calls().some((args) => args[3] === 'launch')).toBe(false);
 
     const named = await readInstalledFingerprintIosAsync({
+      projectRoot: root,
       appId: APP_ID,
       expectedHash: EMBEDDED_HASH,
       device: PHONE_NAME,

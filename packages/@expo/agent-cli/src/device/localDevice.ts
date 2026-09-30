@@ -115,9 +115,7 @@ async function defaultProbesAsync(): Promise<DeviceProbe[]> {
  * round where nothing ran is `unknown`.
  */
 export function readLocalDeviceProbe(probes: DeviceProbe[]): LocalDeviceProbe {
-  const devices = probes
-    .map((probe) => probe.device)
-    .filter((device): device is NavigateDevice => device != null);
+  const devices: NavigateDevice[] = probes.flatMap((probe) => probe.devices);
   if (devices.length > 0) {
     return { state: 'present', device: devices[0]!, devices, reason: null };
   }

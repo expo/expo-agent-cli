@@ -4,9 +4,7 @@ import { vol } from 'memfs';
 import path from 'path';
 
 import {
-  parseBootedIosSimulator,
   parseBootedIosSimulators,
-  parseFirstAndroidDevice,
   probeAndroidDeviceAsync,
   probeIosSimulatorAsync,
   resolveDeviceAsync,
@@ -49,24 +47,18 @@ const BOOTED_SIMCTL_JSON = JSON.stringify({
   },
 });
 
+/** The worktree the local rungs claim a device for. */
+const LOCAL = { projectRoot: '/project' };
+
 const ADB_DEVICES = ['List of devices attached', 'ZZZZ\tunauthorized', 'emulator-5554\tdevice', ''];
 
 afterEach(() => {
   mockPlatform(realPlatform);
+  // The device claims live on memfs; each row starts with no worktree holding a device.
+  vol.reset();
 });
 
-describe(parseBootedIosSimulator, () => {
-  it(`should pick the first booted iOS simulator and skip other runtimes`, () => {
-    expect(parseBootedIosSimulator(BOOTED_SIMCTL_JSON)).toEqual({
-      udid: 'IOS-1',
-      name: 'iPhone 17',
-    });
-  });
-
-  it(`should return null when nothing is booted`, () => {
-    expect(parseBootedIosSimulator(JSON.stringify({ devices: {} }))).toBeNull();
-  });
-
+describe(parseBootedIosSimulators, () => {
   it(`should list every booted iOS simulator, and no watch`, () => {
     expect(parseBootedIosSimulators(BOOTED_SIMCTL_JSON)).toEqual([
       { udid: 'IOS-1', name: 'iPhone 17' },
@@ -74,28 +66,21 @@ describe(parseBootedIosSimulator, () => {
     ]);
   });
 
-  it(`should return null for output that is not simctl JSON`, () => {
-    expect(parseBootedIosSimulator('not json')).toBeNull();
-    expect(parseBootedIosSimulator('')).toBeNull();
-  });
-});
-
-describe(parseFirstAndroidDevice, () => {
-  it(`should pick the first device that is ready and skip the others`, () => {
-    expect(parseFirstAndroidDevice(ADB_DEVICES.join('\n'))).toBe('emulator-5554');
-  });
-
-  it(`should return null when no device is attached`, () => {
-    expect(parseFirstAndroidDevice('List of devices attached\n\n')).toBeNull();
+  it(`should return none for output that is not simctl JSON`, () => {
+    expect(parseBootedIosSimulators('not json')).toEqual([]);
+    expect(parseBootedIosSimulators('')).toEqual([]);
   });
 });
 
 describe(probeIosSimulatorAsync, () => {
-  it(`should return the booted simulator`, async () => {
+  it(`should return every booted simulator`, async () => {
     mockSpawnQueue([{ stdout: BOOTED_SIMCTL_JSON }]);
 
     await expect(probeIosSimulatorAsync()).resolves.toEqual({
-      device: { backend: 'local-ios', platform: 'ios', deviceId: 'IOS-1', name: 'iPhone 17' },
+      devices: [
+        { backend: 'local-ios', platform: 'ios', deviceId: 'IOS-1', name: 'iPhone 17' },
+        { backend: 'local-ios', platform: 'ios', deviceId: 'IOS-2', name: 'iPad' },
+      ],
     });
     expect(spawn).toHaveBeenCalledWith(
       'xcrun',
@@ -109,27 +94,27 @@ describe(probeIosSimulatorAsync, () => {
 
     const probe = await probeIosSimulatorAsync();
 
-    expect(probe.device).toBeNull();
+    expect(probe.devices).toEqual([]);
     expect(probe.reason).toMatch(/booted/i);
   });
 
   it(`should report a failing simctl call`, async () => {
     mockSpawnQueue([{ stdout: '', exitCode: 1 }]);
 
-    expect((await probeIosSimulatorAsync()).device).toBeNull();
+    expect((await probeIosSimulatorAsync()).devices).toEqual([]);
   });
 });
 
 describe(probeAndroidDeviceAsync, () => {
-  it(`should return the first attached device`, async () => {
+  it(`should return every ready attached device`, async () => {
     mockSpawnQueue([{ stdout: ADB_DEVICES.join('\n') }]);
 
     const probe = await probeAndroidDeviceAsync();
 
-    expect(probe.device).toMatchObject({ platform: 'android', deviceId: 'emulator-5554' });
+    expect(probe.devices).toMatchObject([{ platform: 'android', deviceId: 'emulator-5554' }]);
     // The resolution travels with the device, so every later `adb` call spawns the same binary
     // (`src/device/adb.ts`, F49).
-    expect(probe.device?.adb?.bin).toBeTruthy();
+    expect(probe.devices[0]?.adb?.bin).toBeTruthy();
     // The long listing, because its `model:` field is what ties a debugger target back to this
     // device (`src/runtime/targetPlatform.ts`).
     expect(spawn).toHaveBeenCalledWith(
@@ -153,7 +138,7 @@ describe(probeAndroidDeviceAsync, () => {
 
     const probe = await probeAndroidDeviceAsync();
 
-    expect(probe.device).toBeNull();
+    expect(probe.devices).toEqual([]);
     expect(probe.toolError?.code).toBe('ADB_NOT_RUNNABLE');
     // The headline a reader gets must not send them to boot a device they already have (F49).
     expect(probe.reason).not.toMatch(/no android device/i);
@@ -164,16 +149,25 @@ describe(probeAndroidDeviceAsync, () => {
 
     const probe = await probeAndroidDeviceAsync();
 
-    expect(probe.device).toBeNull();
+    expect(probe.devices).toEqual([]);
     expect(probe.reason).toMatch(/no android/i);
   });
 });
 
 describe(resolveDeviceAsync, () => {
+  // @ref llp/0028-one-device-per-agent.rfc.md §Explicit device
+  it(`should use the simulator --device names, and claim it`, async () => {
+    mockSpawnQueue([{ stdout: BOOTED_SIMCTL_JSON }]);
+
+    await expect(resolveDeviceAsync('ios', { ...LOCAL, device: 'iPad' })).resolves.toMatchObject({
+      deviceId: 'IOS-2',
+    });
+  });
+
   it(`should use the booted iOS simulator when --ios is given`, async () => {
     mockSpawnQueue([{ stdout: BOOTED_SIMCTL_JSON }]);
 
-    await expect(resolveDeviceAsync('ios')).resolves.toEqual({
+    await expect(resolveDeviceAsync('ios', LOCAL)).resolves.toEqual({
       backend: 'local-ios',
       platform: 'ios',
       deviceId: 'IOS-1',
@@ -190,7 +184,7 @@ describe(resolveDeviceAsync, () => {
       { stdout: 'List of devices attached\n' },
     ]);
 
-    await resolveDeviceAsync().catch(() => {});
+    await resolveDeviceAsync(undefined, LOCAL).catch(() => {});
 
     // Two probes and nothing else: no `eas` was started to find out about a session.
     expect(spawn).toHaveBeenCalledTimes(2);
@@ -199,7 +193,7 @@ describe(resolveDeviceAsync, () => {
   it(`should explain how to boot a simulator when --ios finds none`, async () => {
     mockSpawnQueue([{ stdout: JSON.stringify({ devices: {} }) }]);
 
-    const error = await resolveDeviceAsync('ios').catch((e) => e);
+    const error = await resolveDeviceAsync('ios', LOCAL).catch((e) => e);
 
     expect(error.code).toBe('NO_IOS_DEVICE');
     expect(error.message).toContain('npx @expo/agent-cli dev --ios --detach');
@@ -208,7 +202,7 @@ describe(resolveDeviceAsync, () => {
   it(`should explain how to start an emulator when --android finds none`, async () => {
     mockSpawnQueue([{ stdout: 'List of devices attached\n' }]);
 
-    const error = await resolveDeviceAsync('android').catch((e) => e);
+    const error = await resolveDeviceAsync('android', LOCAL).catch((e) => e);
 
     expect(error.code).toBe('NO_ANDROID_DEVICE');
     expect(error.message).toContain('adb devices');
@@ -218,7 +212,7 @@ describe(resolveDeviceAsync, () => {
     mockPlatform('darwin');
     mockSpawnQueue([{ stdout: BOOTED_SIMCTL_JSON }]);
 
-    await expect(resolveDeviceAsync()).resolves.toMatchObject({ platform: 'ios' });
+    await expect(resolveDeviceAsync(undefined, LOCAL)).resolves.toMatchObject({ platform: 'ios' });
   });
 
   it(`should fall back to Android on macOS when no simulator is booted`, async () => {
@@ -228,7 +222,7 @@ describe(resolveDeviceAsync, () => {
       { stdout: ADB_DEVICES.join('\n') },
     ]);
 
-    await expect(resolveDeviceAsync()).resolves.toMatchObject({
+    await expect(resolveDeviceAsync(undefined, LOCAL)).resolves.toMatchObject({
       platform: 'android',
       deviceId: 'emulator-5554',
     });
@@ -238,8 +232,10 @@ describe(resolveDeviceAsync, () => {
     mockPlatform('linux');
     mockSpawnQueue([{ stdout: ADB_DEVICES.join('\n') }]);
 
-    await expect(resolveDeviceAsync()).resolves.toMatchObject({ platform: 'android' });
-    expect(spawn).toHaveBeenCalledTimes(1);
+    await expect(resolveDeviceAsync(undefined, LOCAL)).resolves.toMatchObject({
+      platform: 'android',
+    });
+    expect(vi.mocked(spawn).mock.calls.map(([command]) => command)).not.toContain('xcrun');
   });
 
   it(`should name both platforms when nothing is booted`, async () => {
@@ -249,7 +245,7 @@ describe(resolveDeviceAsync, () => {
       { stdout: 'List of devices attached\n' },
     ]);
 
-    const error = await resolveDeviceAsync().catch((e) => e);
+    const error = await resolveDeviceAsync(undefined, LOCAL).catch((e) => e);
 
     expect(error.code).toBe('NO_DEVICE');
     expect(error.message).toContain('--ios');
