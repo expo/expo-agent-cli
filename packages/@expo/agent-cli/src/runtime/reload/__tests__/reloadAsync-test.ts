@@ -119,7 +119,10 @@ function mockDevServer(
           ok: false,
           status: 500,
           statusText: 'Internal Server Error',
-          headers: { get: () => 'application/json' },
+          headers: {
+            get: (name: string) =>
+              name.toLowerCase() === 'content-type' ? 'application/json' : null,
+          },
           text: async () => JSON.stringify(TRANSFORM_ERROR),
         };
       }
@@ -133,7 +136,9 @@ function mockDevServer(
     return {
       ok: true,
       status: 200,
-      headers: { get: () => 'application/json' },
+      headers: {
+        get: (name: string) => (name.toLowerCase() === 'content-type' ? 'application/json' : null),
+      },
       json: async () => ({ launchAsset: { url: `${manifestOrigin}/entry.bundle?dev=true` } }),
     };
   }) as unknown as typeof fetch;
