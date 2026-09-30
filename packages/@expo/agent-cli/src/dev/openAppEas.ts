@@ -240,8 +240,8 @@ export async function findLatestSimulatorBuildIdAsync(
 /**
  * Make sure this project has an EAS Simulator session on `platform` with the app on it.
  *
- * Reuses the session this worktree has bound on that platform when there is one, and otherwise starts one with
- * the app and the tunnelled launch URL on its command line. Never throws.
+ * Reuses the session this worktree has bound on that platform when there is one, and otherwise
+ * starts one with the app and the tunnelled launch URL on its command line. Never throws.
  */
 export async function ensureEasSessionAsync(
   projectRoot: string,
@@ -263,7 +263,8 @@ export async function ensureEasSessionAsync(
     ...partial,
   });
 
-  // 1. A session this worktree already bound (claim or dotenv), on this platform, is the device: reuse it. Asked before
+  // 1. A session this worktree already bound (claim or dotenv), on this platform, is the device:
+  //    reuse it. Asked before
   //    the tunnel, because a session that is up needs no URL from here — `openRouteAsync` builds
   //    the deep link it is sent — and a gate whose dev server carries no tunnel yet must not wait
   //    two minutes to learn that the session it is about to drive was there all along.

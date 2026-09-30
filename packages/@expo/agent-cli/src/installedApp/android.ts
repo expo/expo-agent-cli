@@ -50,8 +50,9 @@ export interface AndroidReaderOptions {
 
 /**
  * Read the fingerprint out of the app on the device this worktree claims, or on every authorized
- * device `--device` matches, where the most informative device wins. The file is a zip entry inside the APK, read through ranged `dd` reads over
- * `adb exec-out`, with a whole-APK pull as the fallback when the device lacks the tools.
+ * device `--device` matches, where the most informative device wins. The file is a zip entry inside
+ * the APK, read through ranged `dd` reads over `adb exec-out`, with a whole-APK pull as the
+ * fallback when the device lacks the tools.
  *
  * @throws the `adb` tool error when `adb` itself could not run.
  */
