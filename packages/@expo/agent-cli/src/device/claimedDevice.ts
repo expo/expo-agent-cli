@@ -130,6 +130,9 @@ const BACKEND: Record<DevicePlatform, LocalDeviceBackend> = {
   android: 'local-android',
 };
 
+/** Every simulator `createSimulatorAsync` makes is named this plus a number. */
+const CREATED_SIMULATOR_PREFIX = 'agent-cli ';
+
 const NOUN: Record<DevicePlatform, string> = {
   ios: 'iOS simulator',
   android: 'Android emulator',
@@ -248,6 +251,10 @@ async function resolveWithInventoryAsync(
       rank: rankCandidates,
       explicit: explicit ?? undefined,
       matches: (candidate, query) => candidate.id === query || candidate.name === query,
+      // The name outlives the claim: `dev:stop` deletes the claim, and a crash between
+      // `simctl create` and the claim write leaves none.
+      isCreated: (candidate) =>
+        candidate.simulator != null && candidate.name.startsWith(CREATED_SIMULATOR_PREFIX),
     });
     switch (allocation.kind) {
       case 'reuse': {
@@ -682,10 +689,10 @@ async function createSimulatorAsync(): Promise<LocalCandidate> {
   });
   const taken = parseSimulators(devices.stdout).map(({ name }) => name);
   let index = 1;
-  while (taken.includes(`agent-cli ${index}`)) {
+  while (taken.includes(`${CREATED_SIMULATOR_PREFIX}${index}`)) {
     index += 1;
   }
-  const name = `agent-cli ${index}`;
+  const name = `${CREATED_SIMULATOR_PREFIX}${index}`;
   const created = await spawnCaptureAsync(
     'xcrun',
     ['simctl', 'create', name, runtime.deviceType, runtime.identifier],

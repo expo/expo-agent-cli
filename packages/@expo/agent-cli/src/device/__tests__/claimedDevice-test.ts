@@ -349,6 +349,19 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     ]);
   });
 
+  it(`marks a simulator this CLI created as created when it claims it again without a claim`, async () => {
+    fakeSimulators([{ udid: 'SIM-NEW', name: 'agent-cli 1', state: 'Shutdown' }]);
+
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: true,
+    });
+
+    expect(result).toMatchObject({ ok: true, id: 'SIM-NEW', claim: { created: true } });
+    expect(readClaims()).toMatchObject([{ id: 'SIM-NEW', created: true }]);
+  });
+
   it(`stops with DEVICES_ALL_CLAIMED at capacity, naming the holder`, async () => {
     process.env.EXPO_AGENT_MAX_DEVICES = '1';
     const { tools } = fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
