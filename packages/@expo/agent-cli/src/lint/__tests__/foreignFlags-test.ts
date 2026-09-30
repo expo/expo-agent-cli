@@ -97,6 +97,11 @@ describe('the flags this CLI writes onto a command line', () => {
     // pinned here for the first time. All seven run in the live tier, on every emulator boot and
     // every Expo Go install.
     //
+    // `-read-only  src/device/bootDevice.ts` starts a second instance of an AVD that another
+    // worktree's emulator runs (llp/0028 §Android boot) [observed — 2026-09-30, Android emulator
+    // 37.1.11.0: `emulator -help` lists `-read-only` as "allow running multiple instances of
+    // emulators on the same AVD", beside `-ports <consoleport>,<adbport>`].
+    //
     // The two `src/device/installDevBuild.ts` rows are `expo run:<platform>`'s, and they are what
     // makes `smoke` install a development build instead of naming `dev` and stopping
     // (llp/0005 §The gate installs the app, whichever app it is). Run as the rule requires
@@ -191,6 +196,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "-ports  src/device/bootDevice.ts",
           "-q  src/project/nativeCode.ts",
           "-r  src/device/installExpoGo.ts",
+          "-read-only  src/device/bootDevice.ts",
           "-s  src/device/installExpoGo.ts",
           "-s  src/device/screenshot.ts",
           "-s  src/navigate/adbReverse.ts",

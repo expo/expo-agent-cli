@@ -7,13 +7,17 @@
 import path from 'path';
 
 import {
-  EMULATOR_SERIAL,
+  bootEmulatorAsync,
+  emulatorPort,
+  emulatorSerial,
+  findFreeEmulatorPortAsync,
   parseAvds,
   parseSimulators,
   pickSimulator,
   resolveEmulator,
   type SimulatorEntry,
 } from '../bootDevice';
+import { fakeDeviceTools } from './fakeDeviceTools';
 
 /** A `simctl list devices -j` payload, in the shape the real tool prints. */
 function listing(devices: Record<string, unknown[]>): string {
@@ -261,12 +265,63 @@ describe(resolveEmulator, () => {
   });
 });
 
-// @ref src/device/bootDevice.ts — friction run 6, F62. An emulator started without
-// `-ports 5554,5555` binds ephemeral ports and `adb devices` never lists it *at all*. The serial
-// is therefore knowable before the boot, which is the only reason the cleanup can be registered
-// before the device is touched.
-describe('the serial an emulator this CLI starts is always on', () => {
-  it(`is the one the -ports argument pins`, () => {
-    expect(EMULATOR_SERIAL).toBe('emulator-5554');
+// @ref llp/0028-one-device-per-agent.rfc.md §Android boot
+describe(findFreeEmulatorPortAsync, () => {
+  it(`takes the first even port whose adb port is free too`, async () => {
+    const taken = new Set([5554, 5557]);
+    expect(await findFreeEmulatorPortAsync({ isFree: async (port) => !taken.has(port) })).toBe(
+      5558
+    );
+  });
+
+  it(`skips the ports the caller names`, async () => {
+    expect(
+      await findFreeEmulatorPortAsync({ isFree: async () => true, skip: (port) => port === 5554 })
+    ).toBe(5556);
+  });
+
+  it(`answers null when all sixteen are taken`, async () => {
+    expect(await findFreeEmulatorPortAsync({ isFree: async () => false })).toBeNull();
+  });
+});
+
+describe(emulatorPort, () => {
+  it(`reads the console port out of an emulator serial, and nothing else`, () => {
+    expect(emulatorPort(emulatorSerial(5560))).toBe(5560);
+    expect(emulatorPort('R58M123ABC')).toBeNull();
+  });
+});
+
+describe(bootEmulatorAsync, () => {
+  const adb = { bin: 'adb', source: 'PATH' as const, searched: [], fromPathOnly: true };
+
+  it(`starts the AVD on the ports it was given, and waits on that serial`, async () => {
+    const tools = fakeDeviceTools((_command, args) =>
+      args.includes('sys.boot_completed') ? { stdout: '1\n' } : {}
+    );
+    const result = await bootEmulatorAsync(
+      { avd: 'Pixel_8', port: 5558, readOnly: false },
+      { timeoutMs: 1_000, adb }
+    );
+    expect(result).toMatchObject({ ok: true, deviceId: 'emulator-5558', name: 'Pixel_8' });
+    expect(tools.callsWith('-avd')).toEqual([
+      'emulator -avd Pixel_8 -ports 5558,5559 -no-snapshot-save',
+    ]);
+    expect(tools.callsWith('getprop')).toEqual([
+      'adb -s emulator-5558 shell getprop sys.boot_completed',
+    ]);
+  });
+
+  it(`starts a second instance of a running AVD read-only`, async () => {
+    const tools = fakeDeviceTools((_command, args) =>
+      args.includes('sys.boot_completed') ? { stdout: '1\n' } : {}
+    );
+    await bootEmulatorAsync(
+      { avd: 'Pixel_8', port: 5556, readOnly: true },
+      { timeoutMs: 1_000, adb }
+    );
+    expect(tools.callsWith('-avd')).toEqual([
+      'emulator -avd Pixel_8 -ports 5556,5557 -no-snapshot-save -read-only',
+    ]);
   });
 });
