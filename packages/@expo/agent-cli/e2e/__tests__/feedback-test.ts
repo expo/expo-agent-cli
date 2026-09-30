@@ -124,6 +124,19 @@ globalThis.fetch = (url, options) => {
       status = code;
       responseBody = body;
     },
+    async crashAfterResult() {
+      await fs.promises.appendFile(
+        preload,
+        `const log = console.log;
+console.log = function (message) {
+  log.apply(this, arguments);
+  if (typeof message === 'string' && message.startsWith('{"sent":')) {
+    process.nextTick(() => { throw new Error('Feedback fixture failed after printing'); });
+  }
+};
+`
+      );
+    },
     async failTransportWith(failure: 'disconnect' | 'timeout') {
       transportFailure = failure;
       if (failure === 'timeout') {
@@ -243,6 +256,22 @@ describe('@expo/agent-cli feedback', () => {
       sent: true,
       feedbackId: request.body.metadata.feedbackId,
     });
+  });
+
+  it('preserves one JSON result when a late error reaches the shared crash handler', async () => {
+    await feedback.crashAfterResult();
+    const result = await executeAgentCliAsync(
+      feedback.projectRoot,
+      ['feedback', '-m', MESSAGE, '--json'],
+      { env: feedback.env, reject: false }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual({
+      sent: true,
+      feedbackId: feedback.requests[0]!.body.metadata.feedbackId,
+    });
+    expect(result.stderr).toContain('Feedback fixture failed after printing');
   });
 
   it('keeps dynamic config output off stdout in JSON mode', async () => {

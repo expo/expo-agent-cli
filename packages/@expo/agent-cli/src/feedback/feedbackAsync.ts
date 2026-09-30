@@ -5,13 +5,13 @@ import { resolvePackageManager } from '@expo/package-manager';
 import { detectAgent } from 'agent-cli-detector';
 import * as ciInfo from 'ci-info';
 import { randomBytes } from 'crypto';
-import { existsSync, readFileSync } from 'fs';
 import { boolish } from 'getenv';
 import path from 'path';
 import prompts from 'prompts';
 import { detectSandbox } from 'sandbox-cli-detector';
 
 import { PROGRAM_PREFIX } from '../programName';
+import { readJsonFileSync, resolvePackageRootSync } from '../project/nodeModules';
 import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { getExpoHomeDirectory } from '../utils/expoHome';
@@ -35,6 +35,7 @@ const GENERATED_FEEDBACK_ID_BYTES = 6;
 const MIN_FEEDBACK_ID_LENGTH = 6;
 const MAX_FEEDBACK_ID_LENGTH = 64;
 const FEEDBACK_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+const { version } = require('../../package.json') as { version: string };
 export const TELEMETRY_DISABLED_MESSAGE =
   'Feedback was not sent because telemetry is off. The user has indicated that they do not want to send feedback. Do not enable telemetry or ask the user to enable it.';
 
@@ -43,7 +44,6 @@ type UserSession = {
 };
 
 type PackageJson = {
-  name?: unknown;
   dependencies?: Record<string, unknown>;
   devDependencies?: Record<string, unknown>;
 };
@@ -148,7 +148,7 @@ export async function createFeedbackMetadataAsync(
     ...context,
     cli: {
       name: CLI_NAME,
-      version: getPackageVersion(),
+      version,
     },
     agentEnvironment: getAgentEnvironment(),
     sandboxEnvironment: getSandboxEnvironment(),
@@ -193,7 +193,7 @@ function getSandboxEnvironment(): CliFeedbackTelemetryMetadata['sandboxEnvironme
 }
 
 export function getProjectMetadata(projectRoot: string): CliFeedbackProjectMetadata {
-  const pkg = getPackageJson(projectRoot);
+  const pkg = readJsonFileSync<PackageJson>(path.join(projectRoot, 'package.json'));
   const paths = getConfigFilePaths(projectRoot);
 
   if (!hasExpoProjectConfig(paths, pkg)) {
@@ -251,37 +251,15 @@ function getDependencyVersion(
   return typeof version === 'string' ? version : undefined;
 }
 
-function getPackageJson(projectRoot: string): PackageJson | null {
-  try {
-    return JSON.parse(readFileSync(path.join(projectRoot, 'package.json'), 'utf8')) as PackageJson;
-  } catch {
-    return null;
-  }
-}
-
 function getInstalledPackageVersion(projectRoot: string, packageName: string): string | undefined {
   try {
-    const packageJsonPath = getResolvedPackageJsonPath(projectRoot, packageName);
-    const pkg = JSON.parse(readFileSync(packageJsonPath, 'utf8')) as { version?: unknown };
-    return typeof pkg.version === 'string' ? pkg.version : undefined;
+    const packageRoot = resolvePackageRootSync(projectRoot, packageName);
+    const pkg = packageRoot
+      ? readJsonFileSync<{ version?: unknown }>(path.join(packageRoot, 'package.json'))
+      : null;
+    return typeof pkg?.version === 'string' ? pkg.version : undefined;
   } catch {
     return undefined;
-  }
-}
-
-function getResolvedPackageJsonPath(projectRoot: string, packageName: string): string {
-  let currentPath = projectRoot;
-  while (true) {
-    const packageJsonPath = path.join(currentPath, 'node_modules', packageName, 'package.json');
-    if (existsSync(packageJsonPath)) {
-      return packageJsonPath;
-    }
-
-    const parentPath = path.dirname(currentPath);
-    if (parentPath === currentPath) {
-      throw new Error(`Could not resolve ${packageName}/package.json from ${projectRoot}`);
-    }
-    currentPath = parentPath;
   }
 }
 
@@ -307,7 +285,7 @@ export async function sendFeedbackAsync({
       headers: {
         'Content-Type': 'application/json',
         ...getAuthHeaders(session),
-        'User-Agent': `${CLI_NAME}/${getPackageVersion()}`,
+        'User-Agent': `${CLI_NAME}/${version}`,
       },
       body: JSON.stringify(request),
     });
@@ -355,18 +333,8 @@ async function getErrorMessageAsync(response: Response): Promise<string> {
 
 export function getSession(): UserSession | null {
   const statePath = path.join(getExpoHomeDirectory(), 'state.json');
-  if (!existsSync(statePath)) {
-    return null;
-  }
-
-  try {
-    const contents = JSON.parse(readFileSync(statePath, 'utf8')) as {
-      auth?: UserSession | null;
-    };
-    return contents.auth ?? null;
-  } catch {
-    return null;
-  }
+  const contents = readJsonFileSync<{ auth?: UserSession | null }>(statePath);
+  return contents?.auth ?? null;
 }
 
 function getExpoApiBaseUrl(): string {
@@ -431,14 +399,6 @@ export function resolveFeedbackId(value?: string): string {
   }
 
   return value;
-}
-
-function getPackageVersion(): string {
-  try {
-    return require('../../package.json')?.version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
 }
 
 class FeedbackError extends CommandError {
