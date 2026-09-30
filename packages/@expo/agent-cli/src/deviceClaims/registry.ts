@@ -2,6 +2,7 @@
 // The machine-wide registry: one JSON file per claimed device, and one lock for the decisions
 // that read several of them.
 
+import { randomBytes } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
@@ -15,6 +16,11 @@ export const REGISTRY_LOCK_STALE_MS = 60_000;
 
 /** A live holder keeps the lock's mtime fresh, so a slow device creation never looks stale. */
 const LOCK_HEARTBEAT_MS = 10_000;
+
+/** A claim file this old that does not parse is a crash mid-write, not a write in flight. */
+const UNREADABLE_CLAIM_MS = 60_000;
+
+const LOCK_OWNER_FILE = 'owner';
 
 const LOCK_RETRY_MIN_MS = 10;
 const LOCK_RETRY_MAX_MS = 250;
@@ -114,6 +120,48 @@ export function releaseProjectClaims(projectRoot: string): DeviceClaim[] {
   return readClaims().filter((claim) => claim.projectRoot === canonical && releaseClaim(claim));
 }
 
+/**
+ * Remove every claim file that does not parse and is older than a minute. Only for a caller that
+ * holds the registry lock.
+ *
+ * `writeClaim` is not atomic, so a crash mid-write leaves such a file, and its `wx` would keep
+ * the device unclaimable forever.
+ */
+export function pruneUnreadableClaims(now: number = Date.now()): void {
+  const directory = deviceRegistryDirectory();
+  let names: string[];
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (name.startsWith('.') || !name.endsWith('.json')) {
+      continue;
+    }
+    const file = path.join(directory, name);
+    try {
+      const ageMs = now - fs.statSync(file).mtimeMs;
+      if (ageMs <= UNREADABLE_CLAIM_MS || parsesAsJson(fs.readFileSync(file, 'utf8'))) {
+        continue;
+      }
+      fs.rmSync(file, { force: true });
+      event('device_claim_unreadable_removed', { file, ageMs });
+    } catch {
+      // Gone already, or unreadable for a reason a later run can report.
+    }
+  }
+}
+
+function parsesAsJson(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Remove a claim file whatever it names. Only for a caller that holds the registry lock. */
 export function removeClaimFile(claim: DeviceClaim): void {
   fs.rmSync(claimFilePath(claim.backend, claim.id), { force: true });
@@ -123,32 +171,50 @@ export function removeClaimFile(claim: DeviceClaim): void {
  * Run `fn` while this process holds the registry lock.
  *
  * `mkdir` is the lock because it is atomic on every platform and fails when the directory exists.
+ * The holder writes a token into it, so a holder whose stale lock was taken over never removes the
+ * lock of the holder after it.
  */
 export async function withRegistryLockAsync<T>(
   fn: () => Promise<T>,
   { now = Date.now }: { now?: () => number } = {}
 ): Promise<T> {
   const lock = path.join(deviceRegistryDirectory(), '.lock');
+  const owner = path.join(lock, LOCK_OWNER_FILE);
+  const token = `${process.pid}-${randomBytes(8).toString('hex')}`;
   fs.mkdirSync(path.dirname(lock), { recursive: true });
 
   let delay = LOCK_RETRY_MIN_MS;
   while (!tryMkdir(lock)) {
-    const ageMs = lockAgeMs(lock, now());
-    if (ageMs != null && ageMs > REGISTRY_LOCK_STALE_MS) {
-      fs.rmSync(lock, { recursive: true, force: true });
-      event('device_registry_lock_stale_removed', { lock, ageMs });
+    if (takeOverStaleLock(lock, now())) {
       continue;
     }
     await new Promise((resolve) => setTimeout(resolve, delay));
     delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
   }
+  fs.writeFileSync(owner, token);
 
+  let lost = false;
+  const loseLock = (reason: string) => {
+    if (!lost) {
+      lost = true;
+      debugEvent('device_registry_lock_lost', { lock, reason });
+    }
+  };
   const heartbeat = setInterval(() => {
+    if (lost) {
+      return;
+    }
     try {
+      if (fs.readFileSync(owner, 'utf8') !== token) {
+        loseLock('another holder took the lock over');
+        return;
+      }
       const seconds = now() / 1000;
       fs.utimesSync(lock, seconds, seconds);
-    } catch {
-      // The lock is gone; the finally below has nothing left to remove either.
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        loseLock('the lock was removed');
+      }
     }
   }, LOCK_HEARTBEAT_MS);
   heartbeat.unref();
@@ -157,7 +223,74 @@ export async function withRegistryLockAsync<T>(
     return await fn();
   } finally {
     clearInterval(heartbeat);
-    fs.rmSync(lock, { recursive: true, force: true });
+    if (readLockOwner(owner) === token) {
+      fs.rmSync(lock, { recursive: true, force: true });
+    }
+  }
+}
+
+function readLockOwner(owner: string): string | null {
+  try {
+    return fs.readFileSync(owner, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+function lockAgeMs(directory: string, now: number): number | null {
+  try {
+    return now - fs.statSync(directory).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove the lock when it is older than the limit, so its holder is taken as dead.
+ *
+ * Only the waiter that holds the takeover guard may judge and remove the lock. Without it, a
+ * waiter that saw the stale lock late would remove the fresh lock a faster waiter made in its
+ * place. The lock is renamed aside before it is removed, so it vanishes in one step.
+ *
+ * @returns true when the caller may try `mkdir` again at once.
+ */
+function takeOverStaleLock(lock: string, now: number): boolean {
+  const lockAge = lockAgeMs(lock, now);
+  if (lockAge == null) {
+    return true;
+  }
+  if (lockAge <= REGISTRY_LOCK_STALE_MS) {
+    return false;
+  }
+  const guard = `${lock}.takeover`;
+  if (!tryMkdir(guard)) {
+    // A guard is held for one stat and one rename; one this old has a dead holder.
+    const guardAge = lockAgeMs(guard, now);
+    if (guardAge != null && guardAge > REGISTRY_LOCK_STALE_MS) {
+      fs.rmSync(guard, { recursive: true, force: true });
+      return true;
+    }
+    return false;
+  }
+  try {
+    const ageMs = lockAgeMs(lock, now);
+    if (ageMs == null || ageMs <= REGISTRY_LOCK_STALE_MS) {
+      return true;
+    }
+    const aside = `${lock}.stale-${process.pid}-${randomBytes(4).toString('hex')}`;
+    try {
+      fs.renameSync(lock, aside);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return true;
+      }
+      throw error;
+    }
+    fs.rmSync(aside, { recursive: true, force: true });
+    event('device_registry_lock_stale_removed', { lock, ageMs });
+    return true;
+  } finally {
+    fs.rmSync(guard, { recursive: true, force: true });
   }
 }
 
@@ -170,15 +303,6 @@ function tryMkdir(directory: string): boolean {
       return false;
     }
     throw error;
-  }
-}
-
-/** Null when the lock vanished between the failed `mkdir` and this read: try again at once. */
-function lockAgeMs(lock: string, now: number): number | null {
-  try {
-    return now - fs.statSync(lock).mtimeMs;
-  } catch {
-    return null;
   }
 }
 

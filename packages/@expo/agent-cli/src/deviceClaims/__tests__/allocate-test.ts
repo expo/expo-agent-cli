@@ -265,6 +265,19 @@ describe('allocateDeviceAsync', () => {
     ).toEqual(['A', 'OLD']);
   });
 
+  it(`takes a device whose claim file a crash left half written`, async () => {
+    const file = claimFilePath('local-ios', 'A');
+    vol.mkdirSync(path.dirname(file), { recursive: true });
+    vol.writeFileSync(file, '{"backend":"local-ios","plat');
+    const written = (NOW.getTime() - 61_000) / 1000;
+    vol.utimesSync(file, written, written);
+
+    const allocation = await allocate(HERE, { inventory: [booted('A')] });
+
+    expect(allocation).toMatchObject({ kind: 'take', candidate: { id: 'A' } });
+    expect(readClaims()).toMatchObject([{ id: 'A', projectRoot: HERE }]);
+  });
+
   it(`leaves the registry unlocked`, async () => {
     await allocate(HERE, { inventory: [booted('A')] });
 

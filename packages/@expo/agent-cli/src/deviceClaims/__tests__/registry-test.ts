@@ -1,4 +1,5 @@
 // @ref llp/0028-one-device-per-agent.rfc.md §The registry
+import fs from 'fs';
 import { vol } from 'memfs';
 import path from 'path';
 
@@ -7,6 +8,7 @@ import {
   claimFilePath,
   deviceRegistryDirectory,
   readClaims,
+  pruneUnreadableClaims,
   REGISTRY_LOCK_STALE_MS,
   releaseClaim,
   releaseProjectClaims,
@@ -251,5 +253,178 @@ describe('withRegistryLockAsync', () => {
       'device_registry_lock_stale_removed',
       expect.objectContaining({ lock: lockDir })
     );
+  });
+
+  it(`leaves a stale lock to the waiter that holds the takeover guard`, async () => {
+    vol.mkdirSync(lockDir, { recursive: true });
+    const old = (Date.now() - REGISTRY_LOCK_STALE_MS - 1000) / 1000;
+    vol.utimesSync(lockDir, old, old);
+    vol.mkdirSync(`${lockDir}.takeover`);
+    let foreignLockKept = false;
+    setTimeout(() => {
+      // The other waiter removes the stale lock, takes the lock and lets go of the guard.
+      vol.rmSync(lockDir, { recursive: true });
+      vol.mkdirSync(lockDir);
+      vol.writeFileSync(path.join(lockDir, 'owner'), 'other-holder');
+      vol.rmdirSync(`${lockDir}.takeover`);
+    }, 30);
+    setTimeout(() => {
+      foreignLockKept = String(vol.readFileSync(path.join(lockDir, 'owner'))) === 'other-holder';
+      vol.rmSync(lockDir, { recursive: true });
+    }, 120);
+
+    let ownerSeenInside: string | null = null;
+    await withRegistryLockAsync(async () => {
+      ownerSeenInside = String(vol.readFileSync(path.join(lockDir, 'owner')));
+    });
+
+    expect(foreignLockKept).toBe(true);
+    expect(ownerSeenInside).toMatch(new RegExp(`^${process.pid}-`));
+  });
+
+  it(`removes a takeover guard whose holder died`, async () => {
+    const old = (Date.now() - REGISTRY_LOCK_STALE_MS - 1000) / 1000;
+    for (const directory of [lockDir, `${lockDir}.takeover`]) {
+      vol.mkdirSync(directory, { recursive: true });
+      vol.utimesSync(directory, old, old);
+    }
+
+    expect(await withRegistryLockAsync(async () => 'taken')).toBe('taken');
+    expect(vol.existsSync(`${lockDir}.takeover`)).toBe(false);
+  });
+
+  it(`leaves the lock of a new holder in place when its own lock was taken over`, async () => {
+    await withRegistryLockAsync(async () => {
+      fs.renameSync(lockDir, `${lockDir}.stale-taker`);
+      vol.mkdirSync(lockDir);
+      vol.writeFileSync(path.join(lockDir, 'owner'), 'taker');
+    });
+
+    expect(String(vol.readFileSync(path.join(lockDir, 'owner')))).toBe('taker');
+  });
+
+  it(`notices on the heartbeat that its lock is gone`, async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      await withRegistryLockAsync(async () => {
+        vol.rmSync(lockDir, { recursive: true });
+        vi.advanceTimersByTime(10_000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(debugEvent).toHaveBeenCalledWith(
+      'device_registry_lock_lost',
+      expect.objectContaining({ lock: lockDir })
+    );
+  });
+
+  it(`notices on the heartbeat that another holder took its lock over`, async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      await withRegistryLockAsync(async () => {
+        vol.writeFileSync(path.join(lockDir, 'owner'), 'taker');
+        vi.advanceTimersByTime(10_000);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(debugEvent).toHaveBeenCalledWith(
+      'device_registry_lock_lost',
+      expect.objectContaining({ lock: lockDir })
+    );
+    expect(String(vol.readFileSync(path.join(lockDir, 'owner')))).toBe('taker');
+  });
+});
+
+describe('withRegistryLockAsync across processes', () => {
+  it(`admits one process at a time when several take over the same stale lock`, async () => {
+    const fsReal = await vi.importActual<typeof import('fs')>('node:fs');
+    const osReal = await vi.importActual<typeof import('os')>('node:os');
+    const { spawn, spawnSync } =
+      await vi.importActual<typeof import('child_process')>('node:child_process');
+    if (spawnSync('bun', ['--version']).status !== 0) {
+      return;
+    }
+    const home = fsReal.mkdtempSync(path.join(osReal.tmpdir(), 'agent-cli-lock-race-'));
+    try {
+      const lock = path.join(home, 'agent-cli', 'devices', '.lock');
+      fsReal.mkdirSync(lock, { recursive: true });
+      const old = (Date.now() - REGISTRY_LOCK_STALE_MS - 1000) / 1000;
+      fsReal.utimesSync(lock, old, old);
+      const log = path.join(home, 'log');
+      const startAt = String(Date.now() + 1500);
+      const script = path.join(__dirname, 'fixtures', 'lockRace.ts');
+
+      const exits = await Promise.all(
+        Array.from(
+          { length: 6 },
+          () =>
+            new Promise<number | null>((resolve) => {
+              const child = spawn('bun', [script, log, startAt], {
+                env: { ...process.env, __UNSAFE_EXPO_HOME_DIRECTORY: home },
+                stdio: 'inherit',
+              });
+              child.on('exit', resolve);
+            })
+        )
+      );
+
+      expect(exits).toEqual([0, 0, 0, 0, 0, 0]);
+      const lines = fsReal.readFileSync(log, 'utf8').trim().split('\n');
+      expect(lines).toHaveLength(12);
+      for (let index = 0; index < lines.length; index += 2) {
+        const [enter, pid] = lines[index]!.split(' ');
+        expect(enter).toBe('in');
+        expect(lines[index + 1]).toBe(`out ${pid}`);
+      }
+    } finally {
+      fsReal.rmSync(home, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+describe('pruneUnreadableClaims', () => {
+  const NOW = Date.now();
+
+  function writeRaw(name: string, text: string, ageMs: number): string {
+    vol.mkdirSync(REGISTRY, { recursive: true });
+    const file = path.join(REGISTRY, name);
+    vol.writeFileSync(file, text);
+    const seconds = (NOW - ageMs) / 1000;
+    vol.utimesSync(file, seconds, seconds);
+    return file;
+  }
+
+  it(`removes a claim file that does not parse once it is older than a minute`, () => {
+    const file = writeRaw('local-ios-UDID-9.json', '{"backend":', 61_000);
+
+    pruneUnreadableClaims(NOW);
+
+    expect(vol.existsSync(file)).toBe(false);
+    expect(event).toHaveBeenCalledWith(
+      'device_claim_unreadable_removed',
+      expect.objectContaining({ file })
+    );
+  });
+
+  it(`keeps a claim file that does not parse yet, because it may be half written`, () => {
+    const file = writeRaw('local-ios-UDID-9.json', '{"backend":', 5_000);
+
+    pruneUnreadableClaims(NOW);
+
+    expect(vol.existsSync(file)).toBe(true);
+  });
+
+  it(`keeps a claim file that parses, whatever its shape and age`, () => {
+    const file = writeRaw('local-ios-UDID-9.json', '{"backend":"local-ios"}', 3_600_000);
+    writeClaim(claim());
+
+    pruneUnreadableClaims(NOW);
+
+    expect(vol.existsSync(file)).toBe(true);
+    expect(readClaims()).toEqual([claim()]);
   });
 });
