@@ -518,6 +518,7 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
     bootDevice: async (register) => {
       const target = await targetAsync();
       const result = await bootDeviceAsync(options.platform, {
+        projectRoot,
         timeoutMs: BOOT_DEVICE_TIMEOUT_MS[options.platform],
         onBooting: register,
         appId: target.appId,

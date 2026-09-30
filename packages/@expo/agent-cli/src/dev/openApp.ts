@@ -1,4 +1,5 @@
 // @ref llp/0026-dev-owns-the-open.rfc.md
+// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
 // What `dev` does once its dev server is up: get the app onto a device and open it, through the
 // same tools `navigate` and `smoke` use — `simctl` and `adb`, never AppleScript.
 //
@@ -9,13 +10,12 @@
 
 import { spawn } from 'child_process';
 
-import { bootDeviceAsync, BOOT_DEVICE_TIMEOUT_MS } from '../device/bootDevice';
+import { resolveClaimedDeviceAsync } from '../device/claimedDevice';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
 import { installExpoGoAsync } from '../device/installExpoGo';
 import { simulatorHasAppAsync } from '../device/installedApps';
 import { androidHasAppAsync } from '../device/androidApps';
 import * as Log from '../log';
-import { probeAndroidDeviceAsync, probeIosSimulatorAsync } from '../navigate/device';
 import { openRouteAsync } from '../navigate/openRoute';
 import { EXPO_GO_APP_IDS } from '../navigate/target';
 import type { NativePlatform } from '../plan/types';
@@ -59,8 +59,9 @@ export interface OpenAppReport {
 }
 
 /**
- * Boot a device if none is up, put Expo Go on it if the plan needs one, and open the app on the
- * dev server — the deep-link door, which works headless and needs no macOS Automation grant.
+ * Claim this worktree's device and boot it if it is down, put Expo Go on it if the plan needs one,
+ * and open the app on the dev server — the deep-link door, which works headless and needs no macOS
+ * Automation grant.
  *
  * Narrates each act on stderr as it starts, because a simulator boot and an Expo Go download are
  * both waits a caller would otherwise read as a hang.
@@ -80,32 +81,30 @@ export async function openAppOnDeviceAsync(
     ...partial,
   });
 
-  // A device: the one that is up, or one this run boots.
-  const probe =
-    platform === 'ios' ? await probeIosSimulatorAsync() : await probeAndroidDeviceAsync();
-  let deviceId = probe.device?.deviceId ?? null;
-  let booted = false;
-  if (deviceId == null) {
-    if (probe.toolError) {
-      return stopped(firstLine(probe.toolError.message));
-    }
-    if (!stillWanted()) {
-      return stopped('the dev server stopped before a device was booted');
-    }
-    Log.progress(`No ${deviceNoun(platform)} is up — booting one.`);
-    event('open_app_boot', { platform });
-    const boot = await bootDeviceAsync(platform, {
-      timeoutMs: BOOT_DEVICE_TIMEOUT_MS[platform],
-      mayInstall: options.expoGo,
-      appId: options.expoGo ? EXPO_GO_APP_ID[platform] : null,
-      appLabel: options.expoGo ? 'Expo Go' : null,
-    });
-    if (!boot.ok || boot.deviceId == null) {
-      return stopped(boot.reason ?? 'no device could be booted');
-    }
-    deviceId = boot.deviceId;
-    booted = true;
+  // The device this worktree claims: the one it holds already, a free one that is up, or one this
+  // run boots (llp/0028 §Every verb uses the claim).
+  if (!stillWanted()) {
+    return stopped('the dev server stopped before a device was claimed');
   }
+  const resolved = await resolveClaimedDeviceAsync({
+    platform,
+    projectRoot,
+    allowBoot: true,
+    appId: options.expoGo ? EXPO_GO_APP_ID[platform] : null,
+    onBooting: () => {
+      Log.progress(`No ${deviceNoun(platform)} of this worktree is up — booting one.`);
+      event('open_app_boot', { platform });
+    },
+  });
+  if (!resolved.ok) {
+    return stopped(
+      resolved.kind === 'no-device' || resolved.kind === 'boot-failed'
+        ? resolved.reason
+        : firstLine(resolved.error.message)
+    );
+  }
+  const deviceId = resolved.id;
+  const booted = resolved.booted;
 
   // The window, for a person: `open -a Simulator` is LaunchServices and needs no Automation
   // grant, unlike the osascript check the Expo CLI runs. Fire and forget — a headless simulator

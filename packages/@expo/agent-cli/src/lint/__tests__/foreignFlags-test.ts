@@ -77,8 +77,9 @@ describe('the flags this CLI writes onto a command line', () => {
     // `PATH` to prove it was the EAS CLI, and the single rung deleted both the candidate and the
     // question (llp/0015 §Resolving the EAS CLI).
     //
-    // The two `src/device/bootDevice.ts` rows are the platform device tools rather than a member of
-    // the Expo family, and they were run as the rule requires [observed — live, 2026-08-30, macOS
+    // The `-j` and `-list-avds` rows, now in `src/device/claimedDevice.ts` (llp/0028), are the
+    // platform device tools rather than a member of the Expo family, and they were run as the rule
+    // requires [observed — live, 2026-08-30, macOS
     // 26 with Xcode: `xcrun simctl list devices -j` printed the runtime table and exited 0, and
     // `~/Library/Android/sdk/emulator/emulator -list-avds` printed `tuft-pixel` and exited 0].
     //
@@ -188,13 +189,11 @@ describe('the flags this CLI writes onto a command line', () => {
           "-d  src/device/installExpoGo.ts",
           "-extract  src/device/expoGoVersion.ts",
           "-extract  src/device/installedApps.ts",
-          "-j  src/device/bootDevice.ts",
           "-j  src/device/claimedDevice.ts",
           "-j  src/device/claimedDevice.ts",
           "-j  src/device/claimedDevice.ts",
           "-j  src/navigate/device.ts",
           "-j  src/runtime/targetPlatform.ts",
-          "-list-avds  src/device/bootDevice.ts",
           "-list-avds  src/device/claimedDevice.ts",
           "-nP  src/dev/portListener.ts",
           "-no-snapshot-save  src/device/bootDevice.ts",
