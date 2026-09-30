@@ -190,16 +190,20 @@ export function resolveRegisterCli(
  * `__UNSAFE_EXPO_HOME_DIRECTORY` wins, then `EXPO_STAGING`, then `EXPO_LOCAL`.
  */
 export function sessionFilePath(env: NodeJS.ProcessEnv = process.env): string {
+  return path.join(expoHomeDirectory(env), 'state.json');
+}
+
+/** The `~/.expo` the CLI family reads, under the rules of {@link sessionFilePath}. */
+export function expoHomeDirectory(env: NodeJS.ProcessEnv = process.env): string {
   const home = os.homedir();
   const unsafeHome = env.__UNSAFE_EXPO_HOME_DIRECTORY;
-  const directory = unsafeHome
+  return unsafeHome
     ? unsafeHome
     : isTruthy(env.EXPO_STAGING)
       ? path.join(home, '.expo-staging')
       : isTruthy(env.EXPO_LOCAL)
         ? path.join(home, '.expo-local')
         : path.join(home, '.expo');
-  return path.join(directory, 'state.json');
 }
 
 /** How the Expo family reads a boolean environment variable [`boolish`, @expo/cli]. */
