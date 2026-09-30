@@ -41,6 +41,7 @@ function choose({
   backend = 'local-ios',
   rank,
   explicit,
+  isCreated,
 }: {
   claims?: ClassifiedClaim[];
   inventory?: DeviceCandidate[];
@@ -48,6 +49,7 @@ function choose({
   backend?: DeviceBackend;
   rank?: (left: DeviceCandidate, right: DeviceCandidate) => number;
   explicit?: string;
+  isCreated?: (candidate: DeviceCandidate) => boolean;
 }) {
   return chooseDevice({
     projectRoot: HERE,
@@ -58,6 +60,7 @@ function choose({
     capacity,
     rank,
     explicit,
+    isCreated,
     matches: (candidate, query) =>
       candidate.id === query || (candidate as DeviceCandidate & { name?: string }).name === query,
     now: NOW,
@@ -275,6 +278,12 @@ describe('chooseDevice — the claim it writes', () => {
     const choice = choose({ claims: [stale], inventory: [booted('B')] });
 
     expect(choice).toMatchObject({ kind: 'take', claim: { projectRoot: HERE, created: true } });
+  });
+
+  it(`marks a device the caller knows this CLI created, with no claim to carry it over`, () => {
+    const choice = choose({ inventory: [shutdown('B')], isCreated: ({ id }) => id === 'B' });
+
+    expect(choice).toMatchObject({ kind: 'boot', claim: { id: 'B', created: true } });
   });
 });
 

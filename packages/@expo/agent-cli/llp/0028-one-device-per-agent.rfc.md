@@ -56,7 +56,7 @@ One store: a machine-wide registry with one JSON file per claimed device, at `~/
 - `projectRoot` is resolved through symlinks, as the dev-server lock is.
 - `pid` is the process that wrote the claim, for a report that names the owner. It is not used for liveness: the operating system reuses PIDs.
 - `touchedAt` is refreshed by every verb that gets a usable device from the claim, and never by a verb that cannot use it (a read of a shut-down simulator). The refresh is a compare-and-swap on `projectRoot` and `claimedAt`, so it never overwrites a claim that replaced this one.
-- `created: true` means this CLI created the device. Only such devices are ever deleted.
+- `created: true` means this CLI created the device. Only such devices are ever deleted. A simulator whose name starts with `agent-cli ` (the name this CLI gives at creation) is `created: true` whenever it is claimed, because `dev:stop` deletes the claim and a crash between `simctl create` and the claim write leaves none.
 - One file per device, so two agents never write the same file. A claim is created with `O_EXCL` (`wx`).
 
 **Liveness.** A claim is live while the dev-server lock of its `projectRoot` answers, or while `touchedAt` is younger than a grace period (10 minutes). A record alone is not proof ([[0004-smart-start-and-project-state]]: liveness through a socket, not a state file), so the socket is the primary check. The grace period covers a worktree whose `dev` has stopped but whose agent still runs `navigate` or screenshots. A claim that fails both checks is stale.

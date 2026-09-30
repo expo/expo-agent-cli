@@ -44,6 +44,7 @@ export interface AllocateDeviceOptions<C extends DeviceCandidate> {
   /** Step 0: `--device`. The caller releases its other claims once this device proves usable. */
   explicit?: string;
   matches?: (candidate: C, query: string) => boolean;
+  isCreated?: (candidate: C) => boolean;
   now?: Date;
   probeLock?: (projectRoot: string) => Promise<unknown>;
 }
@@ -66,6 +67,7 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
   rank,
   explicit,
   matches,
+  isCreated,
   now = new Date(),
   probeLock,
 }: AllocateDeviceOptions<C>): Promise<Allocation<C>> {
@@ -92,6 +94,7 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
       pid: process.pid,
       explicit,
       matches,
+      isCreated,
     });
 
     const chosenId =
