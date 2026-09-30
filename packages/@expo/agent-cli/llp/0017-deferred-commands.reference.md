@@ -156,7 +156,7 @@ No code on the shelf. Do not design these in the living LLPs.
 - OAuth device-code grant and scoped agent sessions on www. v1 auth is `EXPO_TOKEN` and the existing login CLIs.
 - `expo agent` as a subcommand alias in `@expo/cli`.
 - An embedded-loop agent (Shape 2). Shape 1 is the product.
-- Version-pinned docs lookup, API diff, example transplant, dependency explainer, SDK upgrade workflow, module authoring.
+- API diff, example transplant, dependency explainer, SDK upgrade workflow, module authoring. Version-pinned docs lookup is no longer here: it is `docs:sync` and `docs:search` ([[0030-local-docs]]).
 - Performance probe and a cross-platform screenshot sweep.
 - An `@expo/agent-cli mcp` server, and MCP tool-impact permission metadata.
 - Ambient and long-running modes: copilot watch, EAS build babysitter, PR bot, maintenance agent.
