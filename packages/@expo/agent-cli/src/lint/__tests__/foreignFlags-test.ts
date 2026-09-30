@@ -102,6 +102,11 @@ describe('the flags this CLI writes onto a command line', () => {
     // 37.1.11.0: `emulator -help` lists `-read-only` as "allow running multiple instances of
     // emulators on the same AVD", beside `-ports <consoleport>,<adbport>`].
     //
+    // The `src/device/claimedDevice.ts` rows are the device inventory of llp/0028: `simctl list
+    // devices -j`, `simctl list runtimes -j` and `emulator -list-avds` [observed — 2026-09-30,
+    // Xcode 27: `xcrun simctl list runtimes -j` printed six iOS runtimes, each with its
+    // `supportedDeviceTypes`, and exited 0].
+    //
     // The two `src/device/installDevBuild.ts` rows are `expo run:<platform>`'s, and they are what
     // makes `smoke` install a development build instead of naming `dev` and stopping
     // (llp/0005 §The gate installs the app, whichever app it is). Run as the rule requires
@@ -184,9 +189,13 @@ describe('the flags this CLI writes onto a command line', () => {
           "-extract  src/device/expoGoVersion.ts",
           "-extract  src/device/installedApps.ts",
           "-j  src/device/bootDevice.ts",
+          "-j  src/device/claimedDevice.ts",
+          "-j  src/device/claimedDevice.ts",
+          "-j  src/device/claimedDevice.ts",
           "-j  src/navigate/device.ts",
           "-j  src/runtime/targetPlatform.ts",
           "-list-avds  src/device/bootDevice.ts",
+          "-list-avds  src/device/claimedDevice.ts",
           "-nP  src/dev/portListener.ts",
           "-no-snapshot-save  src/device/bootDevice.ts",
           "-o  src/device/expoGoVersion.ts",

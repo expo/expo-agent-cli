@@ -255,21 +255,23 @@ export function pickSimulator(
   if (usable.length === 0) {
     return null;
   }
-  const ranked = [...usable].sort((left, right) => {
-    const byLastBooted = right.lastBootedAt - left.lastBootedAt;
-    if (byLastBooted !== 0) {
-      return byLastBooted;
-    }
-    const byVersion = compareVersions(right.version, left.version);
-    if (byVersion !== 0) {
-      return byVersion;
-    }
-    return Number(right.name.startsWith('iPhone')) - Number(left.name.startsWith('iPhone'));
-  });
-  return ranked[0] ?? null;
+  return [...usable].sort(compareSimulators)[0] ?? null;
 }
 
-function compareVersions(left: number[], right: number[]): number {
+/** The last-used simulator first, then the newest runtime, then an iPhone before anything else. */
+export function compareSimulators(left: SimulatorEntry, right: SimulatorEntry): number {
+  const byLastBooted = right.lastBootedAt - left.lastBootedAt;
+  if (byLastBooted !== 0) {
+    return byLastBooted;
+  }
+  const byVersion = compareVersions(right.version, left.version);
+  if (byVersion !== 0) {
+    return byVersion;
+  }
+  return Number(right.name.startsWith('iPhone')) - Number(left.name.startsWith('iPhone'));
+}
+
+export function compareVersions(left: number[], right: number[]): number {
   for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
     const difference = (left[index] ?? 0) - (right[index] ?? 0);
     if (difference !== 0) {
@@ -299,7 +301,9 @@ export async function bootDeviceAsync(
   platform: 'ios' | 'android',
   options: BootDeviceOptions
 ): Promise<BootDeviceResult> {
-  return platform === 'ios' ? await bootSimulatorAsync(options) : await bootFirstAvdAsync(options);
+  return platform === 'ios'
+    ? await pickAndBootSimulatorAsync(options)
+    : await bootFirstAvdAsync(options);
 }
 
 /** Shut down a device this process booted. Never rejects. */
@@ -354,8 +358,8 @@ export async function shutdownDeviceAsync(
   };
 }
 
-/** The iOS half: pick a simulator, boot it, and wait for `bootstatus` to say it is up. */
-async function bootSimulatorAsync({
+/** The iOS half: pick a simulator, then {@link bootSimulatorAsync} it. */
+async function pickAndBootSimulatorAsync({
   timeoutMs,
   onBooting,
   now = Date.now,
@@ -451,52 +455,60 @@ async function bootSimulatorAsync({
 
   // Before the boot, so the caller is holding it from here on (@ref ./bootDevice §onBooting).
   onBooting?.({ deviceId: chosen.udid, backend: 'local-ios' });
+  const result = await bootSimulatorAsync(chosen, { timeoutMs: left(), choice });
+  return result.ok ? { ...result, installNeeded } : result;
+}
 
-  const booted = await spawnCaptureAsync('xcrun', ['simctl', 'boot', chosen.udid], {
+/**
+ * Boot one simulator, and wait for `bootstatus` to say it is up.
+ *
+ * @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+ */
+export async function bootSimulatorAsync(
+  { udid, name }: { udid: string; name: string },
+  {
+    timeoutMs,
+    now = Date.now,
+    choice = null,
+  }: { timeoutMs: number; now?: () => number; choice?: string | null }
+): Promise<BootDeviceResult> {
+  const deadline = now() + timeoutMs;
+  const left = () => Math.max(1_000, deadline - now());
+  const result = (ok: boolean, reason: string | null): BootDeviceResult => ({
+    ok,
+    deviceId: udid,
+    backend: 'local-ios',
+    name,
+    reason,
+    refused: false,
+    choice,
+  });
+
+  const booted = await spawnCaptureAsync('xcrun', ['simctl', 'boot', udid], {
     timeoutMs: left(),
   });
   // "Unable to boot device in current state: Booted" is the race this run is happy to lose: the
   // device is up, which is the whole request.
   if (booted.exitCode !== 0 && !/current state: Booted/i.test(booted.stderr)) {
-    return {
-      ok: false,
-      deviceId: chosen.udid,
-      backend: 'local-ios',
-      name: chosen.name,
-      reason: `"xcrun simctl boot ${chosen.udid}" exited ${booted.exitCode}: ${firstLine(booted.stderr) || 'no output'}`,
-      refused: false,
-      choice,
-    };
+    return result(
+      false,
+      `"xcrun simctl boot ${udid}" exited ${booted.exitCode}: ${firstLine(booted.stderr) || 'no output'}`
+    );
   }
 
   // `bootstatus` blocks until the device has finished booting, which is a different moment from
   // the boot command returning: `simctl boot` returns as soon as the boot has *started*, and an
   // `openurl` before springboard is up is refused.
-  const status = await spawnCaptureAsync('xcrun', ['simctl', 'bootstatus', chosen.udid], {
+  const status = await spawnCaptureAsync('xcrun', ['simctl', 'bootstatus', udid], {
     timeoutMs: left(),
   });
   if (status.exitCode !== 0) {
-    return {
-      ok: false,
-      deviceId: chosen.udid,
-      backend: 'local-ios',
-      name: chosen.name,
-      reason: `${chosen.name} (${chosen.udid}) was asked to boot and "xcrun simctl bootstatus" did not report it up within ${timeoutMs}ms`,
-      refused: false,
-      choice,
-    };
+    return result(
+      false,
+      `${name} (${udid}) was asked to boot and "xcrun simctl bootstatus" did not report it up within ${timeoutMs}ms`
+    );
   }
-
-  return {
-    ok: true,
-    deviceId: chosen.udid,
-    backend: 'local-ios',
-    name: chosen.name,
-    reason: null,
-    refused: false,
-    installNeeded,
-    choice,
-  };
+  return result(true, null);
 }
 
 /** The Android half: pick an AVD, then {@link bootEmulatorAsync} it on the first free port. */
