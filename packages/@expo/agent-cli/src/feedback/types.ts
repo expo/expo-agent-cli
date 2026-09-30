@@ -56,7 +56,7 @@ export type CliFeedbackProjectMetadata =
 
 export type CliFeedbackTelemetryMetadata = {
   cli: {
-    name: 'submit-expo-feedback';
+    name: 'agent-cli';
     version: string;
   };
   agentEnvironment: CliFeedbackAgentEnvironment;
