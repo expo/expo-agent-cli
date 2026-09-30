@@ -54,6 +54,8 @@ export function chooseDevice<C extends DeviceCandidate>({
   );
   const exists = (claim: DeviceClaim) => inventory.some((candidate) => candidate.id === claim.id);
 
+  const replaced = (candidate: C) =>
+    claims.filter((claim) => claim.backend === backend && claim.id === candidate.id);
   const claimFor = (candidate: C): DeviceClaim => ({
     backend,
     platform,
@@ -62,12 +64,11 @@ export function chooseDevice<C extends DeviceCandidate>({
     pid,
     claimedAt: now.toISOString(),
     touchedAt: now.toISOString(),
-    // The device changes hands with its stale claim, and with it the right to delete it later.
+    // The device changes hands with its stale claim, and with it the right to delete it or shut
+    // it down later.
     created:
-      (isCreated?.(candidate) ?? false) ||
-      claims.some(
-        (claim) => claim.backend === backend && claim.id === candidate.id && claim.created
-      ),
+      (isCreated?.(candidate) ?? false) || replaced(candidate).some((claim) => claim.created),
+    booted: replaced(candidate).some((claim) => claim.booted),
   });
 
   if (explicit != null) {

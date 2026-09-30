@@ -108,9 +108,50 @@ describe('device claims across two worktrees', () => {
     const stopped = await executeAgentCliAsync(projects[0]!, ['dev:stop', '--json'], {
       env: envFor(projects[0]!),
     });
+    // This CLI booted the simulator, so the stop shuts it down before it gives the claim back.
     expect(JSON.parse(stopped.stdout).devices).toEqual([
-      { id: first.runDevice, backend: 'local-ios', shutDown: false, reason: null },
+      { id: first.runDevice, backend: 'local-ios', released: true, shutDown: true, reason: null },
+    ]);
+    expect(readXcrun().filter((args) => args[0] === 'simctl' && args[1] === 'shutdown')).toEqual([
+      ['simctl', 'shutdown', first.runDevice],
     ]);
     expect(claims().map(({ projectRoot }) => projectRoot)).toEqual([second.projectRoot]);
+  });
+
+  // @ref llp/0021-honest-reports.rfc.md — a session left running is named, not dropped.
+  it('keeps an EAS session claim that a plain dev:stop did not stop, and says it still runs', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    projects.push(projectRoot);
+    const directory = path.join(expoHome, 'agent-cli', 'devices');
+    await fs.promises.mkdir(directory, { recursive: true });
+    const now = new Date().toISOString();
+    const claim: DeviceClaim = {
+      backend: 'eas',
+      platform: 'android',
+      id: 'e2e-session-1',
+      projectRoot: fs.realpathSync(projectRoot),
+      pid: 1,
+      claimedAt: now,
+      touchedAt: now,
+      created: true,
+      booted: false,
+    };
+    fs.writeFileSync(path.join(directory, 'eas-e2e-session-1.json'), JSON.stringify(claim));
+
+    const stopped = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+      env: envFor(projectRoot),
+    });
+
+    expect(stopped.exitCode).toBe(0);
+    expect(JSON.parse(stopped.stdout).devices).toEqual([
+      {
+        id: 'e2e-session-1',
+        backend: 'eas',
+        released: false,
+        shutDown: false,
+        reason: expect.stringContaining('dev:stop --eas'),
+      },
+    ]);
+    expect(claims()).toEqual([claim]);
   });
 });

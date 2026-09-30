@@ -11,7 +11,7 @@ import {
   pruneUnreadableClaims,
   REGISTRY_LOCK_STALE_MS,
   releaseClaim,
-  releaseProjectClaims,
+  releaseProjectClaimsAsync,
   touchClaim,
   withRegistryLockAsync,
   writeClaim,
@@ -40,6 +40,7 @@ function claim(overrides: Partial<DeviceClaim> = {}): DeviceClaim {
     claimedAt: '2026-09-30T10:00:00.000Z',
     touchedAt: '2026-09-30T10:00:00.000Z',
     created: false,
+    booted: false,
     ...overrides,
   };
 }
@@ -123,6 +124,14 @@ describe('writeClaim and readClaims', () => {
     );
   });
 
+  it(`reads a claim written before "booted" existed as one this CLI did not boot`, () => {
+    vol.mkdirSync(REGISTRY, { recursive: true });
+    const { booted: _booted, ...older } = claim();
+    vol.writeFileSync(claimFilePath('local-ios', 'UDID-1'), JSON.stringify(older));
+
+    expect(readClaims()).toEqual([claim({ booted: false })]);
+  });
+
   it(`ignores what is not a claim file: the lock, and a touch in flight`, () => {
     writeClaim(claim());
     vol.mkdirSync(path.join(REGISTRY, '.lock'));
@@ -139,6 +148,14 @@ describe('touchClaim', () => {
 
     expect(touchClaim(claim(), now)).toEqual(claim({ touchedAt: now.toISOString() }));
     expect(readClaims()).toEqual([claim({ touchedAt: now.toISOString() })]);
+  });
+
+  it(`records a boot with the touch`, () => {
+    writeClaim(claim());
+    const now = new Date('2026-09-30T11:00:00.000Z');
+
+    expect(touchClaim(claim(), now, { booted: true })).toMatchObject({ booted: true });
+    expect(readClaims()).toEqual([claim({ touchedAt: now.toISOString(), booted: true })]);
   });
 
   it(`does not touch a claim that another worktree took over`, () => {
@@ -217,8 +234,8 @@ describe('releaseClaim', () => {
   });
 });
 
-describe('releaseProjectClaims', () => {
-  it(`releases every claim of the worktree and returns them, and no other`, () => {
+describe('releaseProjectClaimsAsync', () => {
+  it(`settles every claim of the worktree under the lock, and releases the ones it says to`, async () => {
     vol.mkdirSync('/work/here', { recursive: true });
     const ios = claim({ projectRoot: path.resolve('/work/here') });
     const android = claim({
@@ -231,9 +248,22 @@ describe('releaseProjectClaims', () => {
     for (const each of [ios, android, foreign]) {
       writeClaim(each);
     }
+    const locked: boolean[] = [];
 
-    expect(releaseProjectClaims('/work/here')).toEqual(expect.arrayContaining([ios, android]));
-    expect(readClaims()).toEqual([foreign]);
+    const settled = await releaseProjectClaimsAsync('/work/here', async (each) => {
+      locked.push(vol.existsSync(path.join(REGISTRY, '.lock')));
+      return { release: each.backend === 'local-ios' };
+    });
+
+    expect(settled).toEqual(
+      expect.arrayContaining([
+        { claim: ios, release: true },
+        { claim: android, release: false },
+      ])
+    );
+    expect(locked).toEqual([true, true]);
+    expect(readClaims()).toEqual(expect.arrayContaining([android, foreign]));
+    expect(readClaims()).toHaveLength(2);
   });
 });
 

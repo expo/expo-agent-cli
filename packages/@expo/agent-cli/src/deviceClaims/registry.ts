@@ -84,14 +84,18 @@ export function writeClaim(claim: DeviceClaim): void {
  * @returns the touched claim, or null when the claim was released, another claim replaced it, or
  * the file system refused. Never throws.
  */
-export function touchClaim(claim: DeviceClaim, now: Date = new Date()): DeviceClaim | null {
+export function touchClaim(
+  claim: DeviceClaim,
+  now: Date = new Date(),
+  patch: Pick<Partial<DeviceClaim>, 'booted'> = {}
+): DeviceClaim | null {
   const file = claimFilePath(claim.backend, claim.id);
   try {
     const current = readClaimFile(file);
     if (current == null || !isSameClaim(current, claim)) {
       return null;
     }
-    const touched = { ...current, touchedAt: now.toISOString() };
+    const touched = { ...current, ...patch, touchedAt: now.toISOString() };
     const temporary = path.join(
       path.dirname(file),
       `.${path.basename(file)}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
@@ -133,10 +137,29 @@ export function releaseClaim(claim: DeviceClaim): boolean {
   return true;
 }
 
-/** Give up every claim of a worktree, as `dev:stop` does. The caller shuts down what it may. */
-export function releaseProjectClaims(projectRoot: string): DeviceClaim[] {
+/**
+ * Settle every claim of a worktree under the registry lock, as `dev:stop` does.
+ *
+ * `settle` runs first for each claim, and may shut the device down; the claim is released after it
+ * when it answers `release: true`. The lock spans both, so no other worktree can take a device
+ * that is still up between its shutdown and its release.
+ */
+export async function releaseProjectClaimsAsync<R extends { release: boolean }>(
+  projectRoot: string,
+  settle: (claim: DeviceClaim) => Promise<R>
+): Promise<(R & { claim: DeviceClaim })[]> {
   const canonical = canonicalizeExistingPath(projectRoot);
-  return readClaims().filter((claim) => claim.projectRoot === canonical && releaseClaim(claim));
+  return await withRegistryLockAsync(async () => {
+    const settled: (R & { claim: DeviceClaim })[] = [];
+    for (const claim of readClaims().filter((each) => each.projectRoot === canonical)) {
+      const outcome = await settle(claim);
+      if (outcome.release) {
+        releaseClaim(claim);
+      }
+      settled.push({ ...outcome, claim });
+    }
+    return settled;
+  });
 }
 
 /**
@@ -359,7 +382,7 @@ function parseClaim(value: unknown): DeviceClaim | null {
   if (value == null || typeof value !== 'object') {
     return null;
   }
-  const { backend, platform, id, projectRoot, pid, claimedAt, touchedAt, created } =
+  const { backend, platform, id, projectRoot, pid, claimedAt, touchedAt, created, booted } =
     value as Record<string, unknown>;
   if (
     (backend !== 'local-ios' && backend !== 'local-android' && backend !== 'eas') ||
@@ -370,9 +393,21 @@ function parseClaim(value: unknown): DeviceClaim | null {
     typeof claimedAt !== 'string' ||
     typeof touchedAt !== 'string' ||
     Number.isNaN(Date.parse(touchedAt)) ||
-    typeof created !== 'boolean'
+    typeof created !== 'boolean' ||
+    (booted !== undefined && typeof booted !== 'boolean')
   ) {
     return null;
   }
-  return { backend, platform, id, projectRoot, pid, claimedAt, touchedAt, created };
+  // A claim written before `booted` existed says nothing about a boot, so it claims none.
+  return {
+    backend,
+    platform,
+    id,
+    projectRoot,
+    pid,
+    claimedAt,
+    touchedAt,
+    created,
+    booted: booted ?? false,
+  };
 }

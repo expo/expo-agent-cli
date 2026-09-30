@@ -585,6 +585,7 @@ describe(`${devStopAsync.name} and the device claims`, () => {
       claimedAt: now,
       touchedAt: now,
       created: false,
+      booted: false,
       ...overrides,
     });
   }
@@ -596,19 +597,113 @@ describe(`${devStopAsync.name} and the device claims`, () => {
   });
   afterEach(() => vol.reset());
 
-  it(`releases every claim of this worktree, and shuts down only the device it created`, async () => {
+  it(`releases every claim of this worktree, and shuts down only a device it booted or created`, async () => {
     claim('SIM-FOUND');
-    claim('SIM-MADE', { created: true });
+    claim('SIM-MADE', { created: true, booted: true });
+    claim('SIM-BOOTED', { booted: true });
     claim('SIM-OTHER', { projectRoot: '/other' });
 
     await devStopAsync(projectRoot, options());
 
     expect(readClaims().map(({ id }) => id)).toEqual(['SIM-OTHER']);
-    expect(shutdownDeviceAsync).toHaveBeenCalledTimes(1);
-    expect(shutdownDeviceAsync).toHaveBeenCalledWith('SIM-MADE', 'local-ios');
+    expect(
+      vi
+        .mocked(shutdownDeviceAsync)
+        .mock.calls.map(([id]) => id)
+        .sort()
+    ).toEqual(['SIM-BOOTED', 'SIM-MADE']);
+    expect(JSON.parse(printed()).devices).toEqual(
+      expect.arrayContaining([
+        { id: 'SIM-FOUND', backend: 'local-ios', released: true, shutDown: false, reason: null },
+        { id: 'SIM-MADE', backend: 'local-ios', released: true, shutDown: true, reason: null },
+        { id: 'SIM-BOOTED', backend: 'local-ios', released: true, shutDown: true, reason: null },
+      ])
+    );
+  });
+
+  it(`shuts a device down while its claim still holds it, so no worktree takes it in between`, async () => {
+    claim('SIM-BOOTED', { booted: true });
+    let claimedDuringShutdown: string[] = [];
+    vi.mocked(shutdownDeviceAsync).mockImplementationOnce(async () => {
+      claimedDuringShutdown = readClaims().map(({ id }) => id);
+      return { ok: true, reason: null };
+    });
+
+    await devStopAsync(projectRoot, options());
+
+    expect(claimedDuringShutdown).toEqual(['SIM-BOOTED']);
+    expect(readClaims()).toEqual([]);
+  });
+
+  it(`keeps the claims, and says so, when the dev server is still running`, async () => {
+    claim('SIM-BOOTED', { booted: true });
+    vi.mocked(readDevServerLockAsync).mockResolvedValue(lock() as never);
+    livePids.add(4242);
+    signalKills = false;
+
+    await expect(devStopAsync(projectRoot, options({ timeoutMs: 200 }))).resolves.toBe(
+      EXIT_OUTCOME_FAILED
+    );
+
+    expect(readClaims().map(({ id }) => id)).toEqual(['SIM-BOOTED']);
+    expect(shutdownDeviceAsync).not.toHaveBeenCalled();
     expect(JSON.parse(printed()).devices).toEqual([
-      { id: 'SIM-FOUND', backend: 'local-ios', shutDown: false, reason: null },
-      { id: 'SIM-MADE', backend: 'local-ios', shutDown: true, reason: null },
+      {
+        id: 'SIM-BOOTED',
+        backend: 'local-ios',
+        released: false,
+        shutDown: false,
+        reason: expect.stringContaining('dev server is still running'),
+      },
     ]);
+  });
+
+  it(`keeps an EAS session it did not stop, and reports it as still running`, async () => {
+    claim('sess-1', { backend: 'eas' });
+
+    await devStopAsync(projectRoot, options());
+
+    expect(readClaims().map(({ id }) => id)).toEqual(['sess-1']);
+    expect(JSON.parse(printed()).devices).toEqual([
+      {
+        id: 'sess-1',
+        backend: 'eas',
+        released: false,
+        shutDown: false,
+        reason: expect.stringContaining('dev:stop --eas'),
+      },
+    ]);
+  });
+
+  it(`with --eas, stops every EAS session this worktree claimed, by id`, async () => {
+    const cloud =
+      require('../../device/cloudSimulator') as typeof import('../../device/cloudSimulator');
+    const eas = require('../openAppEas') as typeof import('../openAppEas');
+    claim('sess-ios', { backend: 'eas', platform: 'ios' });
+    claim('sess-android', { backend: 'eas', platform: 'android' });
+    vi.spyOn(cloud, 'probeCloudSessionAsync').mockResolvedValue({
+      state: 'active',
+      sessionId: 'sess-ios',
+      platform: 'ios',
+    } as any);
+    vi.spyOn(eas, 'stopEasSessionAsync').mockResolvedValue({ ok: true, reason: null });
+
+    const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+    expect(code).toBe(EXIT_OK);
+    expect(
+      vi
+        .mocked(eas.stopEasSessionAsync)
+        .mock.calls.map(([, id]) => id)
+        .sort()
+    ).toEqual(['sess-android', 'sess-ios']);
+    expect(readClaims()).toEqual([]);
+    const report = JSON.parse(printed());
+    expect(report.sessions).toEqual(
+      expect.arrayContaining([
+        { id: 'sess-ios', stopped: true, reason: null },
+        { id: 'sess-android', stopped: true, reason: null },
+      ])
+    );
   });
 });

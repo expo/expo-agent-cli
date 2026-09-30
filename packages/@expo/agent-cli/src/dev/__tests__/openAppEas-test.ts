@@ -277,6 +277,7 @@ describe(openAppOnEasAsync, () => {
         id: '11111111-2222-3333-4444-555555555555',
         projectRoot,
         created: true,
+        booted: false,
       },
     ]);
   });
@@ -460,6 +461,7 @@ describe('the session half on its own', () => {
       claimedAt: '2026-09-30T10:00:00.000Z',
       touchedAt: '2026-09-30T10:00:00.000Z',
       created: true,
+      booted: false,
     };
     writeClaim(claim);
     vi.mocked(spawnCaptureAsync).mockResolvedValue({

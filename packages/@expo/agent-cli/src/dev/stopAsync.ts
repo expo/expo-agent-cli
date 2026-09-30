@@ -31,7 +31,12 @@
 import chalk from 'chalk';
 
 import { shutdownDeviceAsync } from '../device/bootDevice';
-import { releaseProjectClaims, type DeviceBackend } from '../deviceClaims';
+import {
+  readClaims,
+  releaseProjectClaimsAsync,
+  type DeviceBackend,
+  type DeviceClaim,
+} from '../deviceClaims';
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import { event as cliEvent } from '../events';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../exitCodes';
@@ -40,6 +45,7 @@ import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import { devCommand, hostPlatform } from '../smoke/suggest';
 import { PACKAGER_STATUS_READY } from '../runtime/waitReady';
+import { canonicalizeExistingPath } from '../utils/dir';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { windowsTaskkillCommand } from '../utils/windowsShim';
 import { debugEvent, event } from './events';
@@ -108,10 +114,17 @@ export interface DevStopResultJson {
    */
   session?: { id: string | null; stopped: boolean; reason: string | null } | null;
   /**
-   * The devices this worktree had claimed, all given up now, and which of them were shut down.
+   * Every EAS Simulator session `--eas` stopped by id: the one above, and every other session this
+   * worktree claimed (one per platform). Absent when `--eas` was not passed.
+   */
+  sessions?: { id: string; stopped: boolean; reason: string | null }[];
+  /**
+   * The devices this worktree had claimed, which of them were given up, and which were shut down.
    *
    * @ref llp/0028-one-device-per-agent.rfc.md §Release and cleanup
-   * Only a device this CLI created is shut down; any other is left running for whoever uses it.
+   * Only a device this CLI booted or created is shut down; any other is left running for whoever
+   * uses it. A claim is kept while this worktree's dev server still runs, and an EAS session is
+   * kept until `--eas` stops it; `reason` says which.
    */
   devices: ReleasedDevice[];
   /**
@@ -164,8 +177,11 @@ export interface DevStopResultJson {
 export interface ReleasedDevice {
   id: string;
   backend: DeviceBackend;
+  /** The claim was given up, so another worktree may take the device. */
+  released: boolean;
+  /** The device was shut down, or the EAS session was stopped. */
   shutDown: boolean;
-  /** Why a device that was to be shut down is still up. Null otherwise. */
+  /** Why a claim was kept, or why a device that was to be shut down is still up. Null otherwise. */
   reason: string | null;
 }
 
@@ -227,8 +243,14 @@ export async function devStopAsync(
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
   if (options.eas) {
     report.session = await stopProjectEasSessionAsync(projectRoot);
+    report.sessions = await stopClaimedEasSessionsAsync(projectRoot, report.session);
   }
-  report.devices = await releaseDevicesAsync(projectRoot);
+  // A lock that answered and did not go is this worktree's dev server, still using its devices.
+  const devServerRunning = lock != null && !(lockOwnsTarget && report.stopped);
+  report.devices = await releaseDevicesAsync(projectRoot, {
+    devServerRunning,
+    sessions: report.sessions ?? [],
+  });
   report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
 
   event('stop_done', {
@@ -246,7 +268,9 @@ export async function devStopAsync(
 
   const devServerOk = report.stopped || report.reason === 'not-running';
   // A session that was asked to stop and did not is a thing still running — and billing.
-  const sessionOk = report.session == null || report.session.stopped || report.session.id == null;
+  const sessionOk =
+    (report.session == null || report.session.stopped || report.session.id == null) &&
+    (report.sessions ?? []).every((session) => session.stopped);
   const exitCode = devServerOk && sessionOk ? EXIT_OK : EXIT_OUTCOME_FAILED;
   onReport?.(report);
 
@@ -267,22 +291,84 @@ export async function devStopAsync(
 }
 
 /**
- * Give up every device claim of this worktree, and shut down the local devices this CLI created.
+ * Give up the device claims of this worktree, shutting down first each local device this CLI
+ * booted or created.
  *
- * Every backend, so another worktree can take the device at once. An EAS session is only released
- * here; ending it is `--eas`'s act above.
+ * A local claim is kept while the dev server still runs, because the device is still in use. An
+ * EAS claim is released only for a session `--eas` stopped: a session left running still bills,
+ * and releasing its claim would leave nothing on this machine that knows it is this worktree's.
  */
-async function releaseDevicesAsync(projectRoot: string): Promise<ReleasedDevice[]> {
-  const released = releaseProjectClaims(projectRoot);
-  return await Promise.all(
-    released.map(async ({ id, backend, created }): Promise<ReleasedDevice> => {
-      if (!created || backend === 'eas') {
-        return { id, backend, shutDown: false, reason: null };
+async function releaseDevicesAsync(
+  projectRoot: string,
+  {
+    devServerRunning,
+    sessions,
+  }: {
+    devServerRunning: boolean;
+    sessions: NonNullable<DevStopResultJson['sessions']>;
+  }
+): Promise<ReleasedDevice[]> {
+  const settled = await releaseProjectClaimsAsync(
+    projectRoot,
+    async ({ id, backend, booted, created }: DeviceClaim) => {
+      if (backend === 'eas') {
+        const session = sessions.find((each) => each.id === id);
+        return session?.stopped
+          ? { release: true, shutDown: true, reason: null }
+          : {
+              release: false,
+              shutDown: false,
+              reason:
+                session?.reason ??
+                `EAS Simulator session ${id} is still running, and billing. Run "${PROGRAM_PREFIX} dev:stop --eas" to end it`,
+            };
+      }
+      if (devServerRunning) {
+        return {
+          release: false,
+          shutDown: false,
+          reason: "this worktree's dev server is still running, so its device stays claimed",
+        };
+      }
+      if (!booted && !created) {
+        return { release: true, shutDown: false, reason: null };
       }
       const shutdown = await shutdownDeviceAsync(id, backend);
-      return { id, backend, shutDown: shutdown.ok, reason: shutdown.reason };
-    })
+      return { release: true, shutDown: shutdown.ok, reason: shutdown.reason };
+    }
   );
+  return settled.map(({ claim, release, shutDown, reason }) => ({
+    id: claim.id,
+    backend: claim.backend,
+    released: release,
+    shutDown,
+    reason,
+  }));
+}
+
+/**
+ * Stop by id every other EAS session this worktree claimed: one per platform, where the probe
+ * above picks one.
+ */
+async function stopClaimedEasSessionsAsync(
+  projectRoot: string,
+  primary: NonNullable<DevStopResultJson['session']>
+): Promise<NonNullable<DevStopResultJson['sessions']>> {
+  const { stopEasSessionAsync } = require('./openAppEas') as typeof import('./openAppEas');
+  const root = canonicalizeExistingPath(projectRoot);
+  const sessions: NonNullable<DevStopResultJson['sessions']> =
+    primary.id != null
+      ? [{ id: primary.id, stopped: primary.stopped, reason: primary.reason }]
+      : [];
+  for (const claim of readClaims()) {
+    if (claim.backend !== 'eas' || claim.projectRoot !== root || claim.id === primary.id) {
+      continue;
+    }
+    const result = await stopEasSessionAsync(projectRoot, claim.id);
+    debugEvent('stop_session', { sessionId: claim.id, ok: result.ok });
+    sessions.push({ id: claim.id, stopped: result.ok, reason: result.reason });
+  }
+  return sessions;
 }
 
 /**
@@ -680,9 +766,10 @@ function printHumanReport(report: DevStopResultJson): void {
   if (report.devices.length) {
     lines.push(
       chalk`{bold Devices} ${report.devices
-        .map(
-          (device) =>
-            `${device.id}${chalk.dim(device.shutDown ? ' · released, shut down' : ' · released')}`
+        .map((device) =>
+          device.released
+            ? `${device.id}${chalk.dim(device.shutDown ? ' · released, shut down' : ' · released')}`
+            : `${device.id}${chalk.yellow(` · still claimed — ${device.reason ?? 'no reason given'}`)}`
         )
         .join(', ')}`
     );

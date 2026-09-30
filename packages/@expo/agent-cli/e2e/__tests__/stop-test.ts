@@ -152,6 +152,76 @@ describe('@expo/agent-cli dev:stop', () => {
     }
   });
 
+  // @ref llp/0028-one-device-per-agent.rfc.md §Release and cleanup
+  // Windows stops with taskkill /F, which no handler can refuse.
+  it.skipIf(process.platform === 'win32')(
+    'keeps the device claims while the dev server it could not stop still runs',
+    async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const expoHome = path.join(path.dirname(projectRoot), 'expo-home');
+      const directory = path.join(expoHome, 'agent-cli', 'devices');
+      await fs.promises.mkdir(directory, { recursive: true });
+      const now = new Date().toISOString();
+      const claimFile = path.join(directory, `local-ios-${SIMULATOR_UDID}.json`);
+      fs.writeFileSync(
+        claimFile,
+        JSON.stringify({
+          backend: 'local-ios',
+          platform: 'ios',
+          id: SIMULATOR_UDID,
+          projectRoot: fs.realpathSync(projectRoot),
+          pid: 1,
+          claimedAt: now,
+          touchedAt: now,
+          created: false,
+          booted: true,
+        })
+      );
+      const { spawn } = require('node:child_process') as typeof import('node:child_process');
+      const stubborn = spawn(
+        process.execPath,
+        ['-e', `process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);`],
+        { stdio: 'ignore' }
+      );
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      const releaseLock = await holdDevLockAsync(projectRoot, {
+        url: 'http://127.0.0.1:59998',
+        port: 59998,
+        pid: stubborn.pid!,
+        startedAt: now,
+        projectRoot,
+      });
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev:stop', '--json', '--timeout', '500'],
+          {
+            env: { ...stubExpoEnv(projectRoot), __UNSAFE_EXPO_HOME_DIRECTORY: expoHome },
+            reject: false,
+          }
+        );
+
+        expect(result.exitCode).toBe(20);
+        const report = JSON.parse(result.stdout);
+        expect(report).toMatchObject({ stopped: false, reason: 'still-running' });
+        expect(report.devices).toEqual([
+          {
+            id: SIMULATOR_UDID,
+            backend: 'local-ios',
+            released: false,
+            shutDown: false,
+            reason: expect.stringContaining('dev server is still running'),
+          },
+        ]);
+        expect(fs.existsSync(claimFile)).toBe(true);
+      } finally {
+        releaseLock();
+        stubborn.kill('SIGKILL');
+      }
+    }
+  );
+
   it('prints one JSON object with a stable set of keys', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
