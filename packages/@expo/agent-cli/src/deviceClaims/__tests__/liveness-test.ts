@@ -24,6 +24,7 @@ function claim(projectRoot: string, touchedAt: string): DeviceClaim {
     claimedAt: LONG_AGO,
     touchedAt,
     created: false,
+    booted: false,
   };
 }
 

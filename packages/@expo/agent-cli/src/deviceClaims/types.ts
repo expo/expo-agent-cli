@@ -20,6 +20,11 @@ export interface DeviceClaim {
   touchedAt: string;
   /** This CLI created the device. Only such devices may be deleted. */
   created: boolean;
+  /**
+   * This CLI booted the device (a simulator boot or an emulator spawn), or created it. `dev:stop`
+   * runs later, in another process, so the claim is what remembers it may shut the device down.
+   */
+  booted: boolean;
 }
 
 export type ClaimLiveness = 'live' | 'stale';

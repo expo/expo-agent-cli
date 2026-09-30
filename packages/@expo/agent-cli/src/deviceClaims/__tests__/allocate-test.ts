@@ -77,6 +77,7 @@ function staleClaim(overrides: Partial<DeviceClaim>): DeviceClaim {
     claimedAt: LONG_AGO,
     touchedAt: LONG_AGO,
     created: false,
+    booted: false,
     ...overrides,
   };
 }

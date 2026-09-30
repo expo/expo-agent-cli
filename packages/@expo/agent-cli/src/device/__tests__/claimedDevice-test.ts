@@ -110,6 +110,7 @@ function ownClaim(id: string, at: string) {
     claimedAt: at,
     touchedAt: at,
     created: false,
+    booted: false,
   };
 }
 
@@ -124,6 +125,7 @@ function otherClaim(id: string, backend: 'local-ios' | 'local-android' = 'local-
     claimedAt: now,
     touchedAt: now,
     created: false,
+    booted: false,
   });
 }
 
@@ -148,6 +150,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
       'xcrun simctl boot SIM-A',
       'xcrun simctl boot SIM-B',
     ]);
+    expect(readClaims().map(({ booted }) => booted)).toEqual([true, true]);
     expect(
       readClaims()
         .map(({ id, projectRoot }) => [id, projectRoot])
@@ -219,6 +222,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     expect(
       await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: false })
     ).toMatchObject({ ok: true, id: 'SIM-B', booted: false });
+    expect(readClaims().find(({ id }) => id === 'SIM-B')).toMatchObject({ booted: false });
   });
 
   it(`with allowBoot false, boots nothing, claims nothing, and says no simulator is booted`, async () => {
@@ -530,6 +534,7 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
       claimedAt: LONG_AGO,
       touchedAt: LONG_AGO,
       created: false,
+      booted: false,
     });
 
     expect(
