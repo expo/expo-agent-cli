@@ -4,6 +4,7 @@ export const CLI_FEEDBACK_CATEGORIES = [
   'skills',
   'expo-cli',
   'eas-cli',
+  'agent-cli',
   'mcp',
   'docs',
   'evals',

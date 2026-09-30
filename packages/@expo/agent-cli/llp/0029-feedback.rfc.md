@@ -36,6 +36,10 @@ contain 40–5,000 characters. A terminal can prompt for missing input; non-inte
 The command also follows the agent CLI help and error conventions and offers `--json` with exactly
 `sent` and `feedbackId` on success or opt-out. Failures use the shared error envelope and exit 1.
 
+The `agent-cli` category identifies feedback about this CLI, with the full command as its subject.
+Help retains the original category-specific subject guidance. The API's category allowlist must
+include `agent-cli` before this category can be used in production.
+
 `DO_NOT_TRACK=1` or `EXPO_NO_TELEMETRY=1` exits successfully before collecting metadata or sending
 feedback. Opt-out prints the existing instruction to respect the user's choice, and JSON mode
 returns `{ "sent": false, "feedbackId": null }`. The launcher suppresses command telemetry for a

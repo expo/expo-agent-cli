@@ -98,9 +98,12 @@ describe('feedback session ID', () => {
 });
 
 describe('feedback message resolution', () => {
-  it('trims the explicit message and normalizes the category', async () => {
-    await expect(resolveFeedbackAsync([], ' DOCS ', `  ${VALID_FEEDBACK}  `)).resolves.toEqual({
-      category: 'docs',
+  it.each([
+    [' DOCS ', 'docs'],
+    [' AGENT-CLI ', 'agent-cli'],
+  ])('trims the explicit message and normalizes category %s', async (input, category) => {
+    await expect(resolveFeedbackAsync([], input, `  ${VALID_FEEDBACK}  `)).resolves.toEqual({
+      category,
       feedback: VALID_FEEDBACK,
     });
   });
@@ -145,15 +148,19 @@ describe('feedback message resolution', () => {
 
   it('prompts for a category and message in an interactive terminal', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
-    mockPrompts.mockResolvedValueOnce({ category: 'docs', feedback: `  ${VALID_FEEDBACK}  ` });
+    mockPrompts.mockResolvedValueOnce({ category: 'agent-cli', feedback: `  ${VALID_FEEDBACK}  ` });
 
     await expect(resolveFeedbackAsync([])).resolves.toEqual({
-      category: 'docs',
+      category: 'agent-cli',
       feedback: VALID_FEEDBACK,
     });
     expect(mockPrompts).toHaveBeenCalledWith(
       expect.arrayContaining([
-        expect.objectContaining({ name: 'category', type: 'select' }),
+        expect.objectContaining({
+          name: 'category',
+          type: 'select',
+          choices: expect.arrayContaining([{ title: 'agent-cli', value: 'agent-cli' }]),
+        }),
         expect.objectContaining({ name: 'feedback', type: 'text' }),
       ]),
       expect.any(Object)

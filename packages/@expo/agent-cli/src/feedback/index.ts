@@ -5,7 +5,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
 
-import { CLI_FEEDBACK_CATEGORIES, type CliFeedbackMetadata } from './types';
+import type { CliFeedbackMetadata } from './types';
 
 export const feedbackHelp: CommandHelp = {
   command: 'feedback',
@@ -29,6 +29,10 @@ export const feedbackHelp: CommandHelp = {
       gets: 'sends feedback about the expo-router skill',
     },
     {
+      run: `${PROGRAM_PREFIX} feedback -c agent-cli -s "${PROGRAM_PREFIX} status" -m "Please explain which project changes require a new development build."`,
+      gets: 'sends feedback about the agent CLI status command',
+    },
+    {
       run: `${PROGRAM_PREFIX} feedback --resume abc123 --message "The issue also happens after restarting the development server." --json`,
       gets: 'continues the same feedback session and prints its ID as JSON',
     },
@@ -40,11 +44,18 @@ export const feedbackHelp: CommandHelp = {
     keys: ['sent', 'feedbackId'],
   },
   notes: [
-    `Categories: ${CLI_FEEDBACK_CATEGORIES.join(', ')}.`,
-    'Without a message, prompts in a terminal; CI and non-interactive runs require one.',
-    'Positional messages remain supported with a deprecation warning.',
-    'Includes agent, sandbox, environment, and Expo project metadata.',
-    'Authenticated submissions are associated with your Expo account.',
+    'Choose --subject by category:',
+    '  skills: exact skill name, such as expo-router.',
+    '  docs: full Expo documentation URL.',
+    '  mcp: exact MCP tool name.',
+    '  expo-cli: full Expo CLI command, such as npx expo install.',
+    '  eas-cli: full EAS CLI command, such as eas build.',
+    `  agent-cli: full agent CLI command, such as ${PROGRAM_PREFIX} status.`,
+    '  evals: Expo package, command, or capability the task involves.',
+    '  simulator: EAS Simulator feature or workflow.',
+    '  unknown: Expo product, package, feature, or topic, or leave it empty.',
+    'Only a terminal can prompt for missing messages. Positional messages work but are deprecated.',
+    'Includes agent, sandbox, environment, and project metadata; links your Expo account when signed in.',
     'DO_NOT_TRACK=1 or EXPO_NO_TELEMETRY=1 prevents feedback submission.',
     'Exit codes: 0 sent or opted out · 1 invalid input or submission failed.',
   ],

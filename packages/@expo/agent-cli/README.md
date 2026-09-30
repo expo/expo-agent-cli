@@ -66,7 +66,7 @@ npx --yes @expo/agent-cli feedback --resume abc123 --message "The issue also hap
 
 Messages must contain 40–5,000 characters. `--message`/`-m`, `--category`/`-c`, `--subject`/`-s`, and `--resume` retain the standalone CLI's behavior. Positional messages are still accepted with a deprecation warning. Without a message, the command prompts in an interactive terminal; agents and CI should pass `--message`. `--json` prints `{ "sent": true, "feedbackId": "…" }` after a successful submission.
 
-Categories are `skills`, `expo-cli`, `eas-cli`, `mcp`, `docs`, `evals`, `simulator`, and `unknown` (the default). The subject identifies the exact skill, documentation URL, MCP tool, CLI command, package, simulator workflow, or other topic involved.
+Categories are `skills`, `expo-cli`, `eas-cli`, `agent-cli`, `mcp`, `docs`, `evals`, `simulator`, and `unknown` (the default). For `agent-cli`, use the full command as the subject, such as `npx @expo/agent-cli status`. Other subjects identify the exact skill, documentation URL, MCP tool, CLI command, package, simulator workflow, or topic involved.
 
 Feedback uses the same Expo endpoint and request format as `submit-expo-feedback`, including agent, sandbox, environment, and Expo project metadata. It uses `EXPO_TOKEN` or the saved Expo session when available; authenticated feedback is associated with that account. `DO_NOT_TRACK=1` or `EXPO_NO_TELEMETRY=1` skips submission and metadata collection (`--json` reports `{ "sent": false, "feedbackId": null }`).
 
