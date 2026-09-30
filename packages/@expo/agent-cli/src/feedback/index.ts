@@ -132,11 +132,11 @@ export const agentCliFeedback: Command = async (argv) => {
   console.error(
     'Submitting feedback with detected agent, sandbox, environment, and project metadata. Authenticated submissions are associated with your Expo account.'
   );
-  await sendFeedbackAsync({ feedback, metadata, session });
+  const sent = await sendFeedbackAsync({ feedback, metadata, session });
 
   if (args['--json']) {
-    console.log(JSON.stringify({ sent: true, feedbackId: metadata.feedbackId }));
-  } else {
+    console.log(JSON.stringify({ sent, feedbackId: sent ? metadata.feedbackId : null }));
+  } else if (sent) {
     console.log('Thanks for the feedback!');
     console.log(
       `To continue the feedback session use:\n${PROGRAM_PREFIX} feedback --resume ${metadata.feedbackId} --message "<message>"`

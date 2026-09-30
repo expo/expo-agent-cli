@@ -35,6 +35,7 @@ async function setupFeedbackAsync() {
   const requests: FeedbackRequest[] = [];
   let status = 200;
   let responseBody = '{}';
+  let transportFailure: 'disconnect' | 'timeout' | undefined;
   const server = createServer((request, response) => {
     let body = '';
     request.setEncoding('utf8');
@@ -46,6 +47,13 @@ async function setupFeedbackAsync() {
         headers: request.headers,
         body: JSON.parse(body),
       });
+      if (transportFailure === 'disconnect') {
+        request.socket.destroy();
+        return;
+      }
+      if (transportFailure === 'timeout') {
+        return;
+      }
       response.writeHead(status, { 'Content-Type': 'application/json' });
       response.end(responseBody);
     });
@@ -107,6 +115,16 @@ globalThis.fetch = (url, options) => {
     respondWith(code: number, body: string) {
       status = code;
       responseBody = body;
+    },
+    async failTransportWith(failure: 'disconnect' | 'timeout') {
+      transportFailure = failure;
+      if (failure === 'timeout') {
+        // Exercise a real aborted fetch without waiting for the production 15-second deadline.
+        await fs.promises.appendFile(
+          preload,
+          'const timeout = AbortSignal.timeout;\nAbortSignal.timeout = () => timeout(1_000);\n'
+        );
+      }
     },
     async close() {
       server.closeAllConnections();
@@ -328,6 +346,53 @@ module.exports = ({ config }) => ({ ...config, name: 'Dynamic config app' });
       expect(result.stderr).toContain('Do not enable telemetry or ask the user to enable it.');
       expect(feedback.requests).toEqual([]);
       expect(feedback.telemetryWasSpawned()).toBe(false);
+    }
+  );
+
+  it.each(['disconnect', 'timeout'] as const)(
+    'prints the JSON error envelope for a transport failure: %s',
+    async (failure) => {
+      await feedback.failTransportWith(failure);
+      const result = await executeAgentCliAsync(
+        feedback.projectRoot,
+        ['feedback', '-m', MESSAGE, '--json'],
+        { env: feedback.env, reject: false }
+      );
+
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.stdout)).toEqual({
+        error: {
+          code: 'FEEDBACK_ERROR',
+          message: expect.stringContaining('Failed to send feedback:'),
+          suggestedCommand: expect.stringContaining(' feedback --help'),
+          needsHuman: null,
+          data: null,
+        },
+      });
+      expect(result.stderr).toContain('Failed to send feedback:');
+      expect(result.all).not.toContain('Thanks for the feedback!');
+      expect(feedback.requests).toHaveLength(1);
+    }
+  );
+
+  it.each(['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'])(
+    'reports an opt-out when project config enables %s',
+    async (name) => {
+      await fs.promises.writeFile(
+        path.join(feedback.projectRoot, 'app.config.js'),
+        `process.env.${name} = '1';\nmodule.exports = ({ config }) => config;\n`
+      );
+      const result = await executeAgentCliAsync(
+        feedback.projectRoot,
+        ['feedback', '-m', MESSAGE, '--json'],
+        { env: feedback.env }
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({ sent: false, feedbackId: null });
+      expect(result.stderr).toContain('Feedback was not sent because telemetry is off.');
+      expect(result.all).not.toContain('Thanks for the feedback!');
+      expect(feedback.requests).toEqual([]);
     }
   );
 
