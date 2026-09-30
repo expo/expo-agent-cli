@@ -328,16 +328,20 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
-  // The rung asks the service rather than the filesystem now, so a project with no dotenv still
-  // finds a session somebody else started — and a project with nothing running still says so.
-  it(`asks the service even when the project has no dotenv`, async () => {
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // The rung asks the service, and only a session this worktree bound is a device: a session
+  // somebody else started is listed and not used.
+  it(`does not take a session that this project never bound`, async () => {
     mockPlatform('linux');
     cloudProject(null);
     mockSpawnQueue([{ stdout: 'List of devices attached\n' }, { stdout: liveSession }]);
 
-    await expect(
-      resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot: '/project' })
-    ).resolves.toMatchObject({ backend: 'cloud', deviceId: 'sess-1' });
+    const error = await resolveDeviceAsync(undefined, {
+      cloud: 'fallback',
+      projectRoot: '/project',
+    }).catch((e) => e);
+
+    expect(error.code).toBe('NO_DEVICE');
   });
 
   it(`still reports no device when the service lists nothing`, async () => {
