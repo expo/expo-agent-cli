@@ -94,6 +94,8 @@ All four verbs that resolve a session go through `probeCloudSessionAsync` → `s
 
 The CLI never picks an in-progress session that this worktree did not start or bind. "The newest session on the platform" is removed as a selection rule. A session that is listed but not bound is reported, as `selectCloudSession` reports `wrongType` sessions today, so the agent knows that it exists.
 
+The dotenv rung is skipped when the registry holds a live `eas` claim of another project root on that session (a copied `.env.eas-simulator`), the probe reports the session as not this worktree's and names the holder, and a claim write that loses to another worktree is a refusal, not a bind.
+
 **Cross-machine protection.** When each worktree uses only its own bound session, two agents with this CLI cannot take the same session, on one machine or on many. Other clients are not covered: an older CLI version, MCP, or a human with `eas simulator` can still take a session. Full protection needs an owner mark on the server (§Open questions).
 
 **Stale sessions.** A session outlives its worktree when the agent crashes, and it keeps using account minutes. `dev:stop --eas` already stops the session by id. A session whose worktree is gone needs a cleanup rule on the server or an expiry (§Open questions).

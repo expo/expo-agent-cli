@@ -160,6 +160,23 @@ describe('@expo/agent-cli navigate --eas', () => {
     expect(result.stderr).toContain("not this worktree's");
   });
 
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // `.env.eas-simulator` is copied between worktrees with the files around it. The copy names a
+  // session that another worktree holds, so it is not this one's to drive.
+  it(`does not use the session a dotenv names when another project holds a live claim on it`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    const holder = await setupAsync('go-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    writeEasClaimFile(holder, { id: 'sess-e2e' });
+
+    const result = await navigateCloud(projectRoot);
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain(`sess-e2e is held by the worktree at ${holder}`);
+    expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:exec')).toBe(false);
+    expect(readDeviceClaims().map((claim) => claim.projectRoot)).toEqual([holder]);
+  });
+
   // A running `serve-sim` session has no agent-device daemon in it. Saying "no session" would send
   // a reader to start a second billed one next to the one they are already paying for.
   it(`names the type when the only live session is one it cannot drive`, async () => {

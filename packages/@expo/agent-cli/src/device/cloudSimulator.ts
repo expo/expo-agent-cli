@@ -32,7 +32,13 @@ import path from 'path';
 
 import { classifySubprocessFailure } from '../needsHuman/detect';
 import { needsHumanErrorFrom } from '../needsHuman/error';
-import { readClaims, releaseClaim, touchClaim, writeClaim } from '../deviceClaims';
+import {
+  classifyClaimAsync,
+  readClaims,
+  releaseClaim,
+  touchClaim,
+  writeClaim,
+} from '../deviceClaims';
 import type { DeviceClaim } from '../deviceClaims';
 import { PROGRAM_PREFIX } from '../programName';
 import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/easCli';
@@ -779,17 +785,28 @@ export async function probeCloudSessionAsync({
     }
   }
 
-  const { selected, source, candidates, wrongType, unclaimed } = selectCloudSession(sessions, {
+  // The dotenv is a claim by another tool, and it is copied between worktrees with the files around
+  // it. A live claim of another worktree on the same session outranks it.
+  const heldBy = await liveForeignHolderAsync(projectRoot, preferredId);
+  const selection = selectCloudSession(sessions, {
     claimedId,
-    dotenvId: preferredId,
+    dotenvId: heldBy == null ? preferredId : null,
     platform,
   });
-  if (selected?.id != null) {
+  const { selected, source, candidates, wrongType } = selection;
+  let { unclaimed } = selection;
+  const bound =
+    selected?.id != null &&
     bindEasSession(projectRoot, {
       id: selected.id,
       platform: selected.platform ?? (source === 'claim' ? platform : null),
       created: false,
     });
+  if (selected != null && !bound) {
+    // Another worktree claimed the session between the read above and the write.
+    unclaimed = [...unclaimed, selected];
+  }
+  if (selected?.id != null && bound) {
     return {
       state: 'active',
       sessionId: selected.id,
@@ -814,6 +831,7 @@ export async function probeCloudSessionAsync({
     endedClaim,
     wrongType,
     unclaimed,
+    heldBy: heldBy == null || preferredId == null ? null : { id: preferredId, projectRoot: heldBy },
   });
 }
 
@@ -833,6 +851,7 @@ async function noUsableSessionAsync({
   endedClaim,
   wrongType,
   unclaimed,
+  heldBy,
 }: {
   cli: EasCli;
   projectRoot: string;
@@ -841,6 +860,7 @@ async function noUsableSessionAsync({
   endedClaim: DeviceClaim | undefined;
   wrongType: CloudSessionInfo[];
   unclaimed: CloudSessionInfo[];
+  heldBy: { id: string; projectRoot: string } | null;
 }): Promise<CloudSessionProbe> {
   const availability = await runEasAsync(cli, buildAvailabilityArgs(), { projectRoot, timeoutMs });
   // A check that stopped because nobody is signed in has established nothing about the account's
@@ -890,7 +910,9 @@ async function noUsableSessionAsync({
         unclaimed.length === 1 ? '' : 's'
       } (${ids}) ${unclaimed.length === 1 ? 'exists' : 'exist'} and ${
         unclaimed.length === 1 ? 'is' : 'are'
-      } not this worktree's, so ${unclaimed.length === 1 ? 'it was' : 'none was'} not used; a session this worktree starts is bound to it`,
+      } not this worktree's, so ${unclaimed.length === 1 ? 'it was' : 'none was'} not used${
+        heldBy ? ` (${heldBy.id} is held by the worktree at ${heldBy.projectRoot})` : ''
+      }; a session this worktree starts is bound to it`,
     };
   }
   // A live session of a type this CLI cannot drive is not "no session". Naming the types is what
@@ -1336,18 +1358,45 @@ function ownEasClaims(projectRoot: string, platform: CloudPlatform | null): Devi
 }
 
 /**
+ * The project root of another worktree whose live `eas` claim names `sessionId`, or null.
+ * Never throws: an unreadable registry holds no claim.
+ */
+async function liveForeignHolderAsync(
+  projectRoot: string,
+  sessionId: string | null
+): Promise<string | null> {
+  if (sessionId == null) {
+    return null;
+  }
+  const root = canonicalizeExistingPath(projectRoot);
+  for (const claim of readClaims()) {
+    if (
+      claim.backend === 'eas' &&
+      claim.id === sessionId &&
+      claim.projectRoot !== root &&
+      (await classifyClaimAsync(claim)) === 'live'
+    ) {
+      return claim.projectRoot;
+    }
+  }
+  return null;
+}
+
+/**
  * Bind an EAS session to this worktree: write its `eas` claim, or refresh the one already there.
- * Never throws, because a registry that cannot be written costs the binding and not the run. A
- * session another worktree claimed stays that worktree's.
+ * A registry that cannot be written costs the binding and not the run. A session another worktree
+ * claimed stays that worktree's.
+ *
+ * @returns false when another worktree holds the session, so the caller must not drive it.
  *
  * @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
  */
 export function bindEasSession(
   projectRoot: string,
   { id, platform, created }: { id: string; platform: CloudPlatform | null; created: boolean }
-): void {
+): boolean {
   if (platform == null) {
-    return;
+    return true;
   }
   const now = new Date().toISOString();
   const claim: DeviceClaim = {
@@ -1364,9 +1413,10 @@ export function bindEasSession(
     writeClaim(claim);
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      touchClaim(claim);
+      return touchClaim(claim) != null;
     }
   }
+  return true;
 }
 
 function unknownSession(sessionId: string | null, reason: string): CloudSessionProbe {

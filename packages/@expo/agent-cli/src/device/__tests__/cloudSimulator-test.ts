@@ -59,7 +59,11 @@ import {
 /** An `eas` claim of `/project`, as an earlier start from this worktree left it. */
 function claimSession(
   id: string,
-  { platform = 'ios', projectRoot = '/project' }: Partial<DeviceClaim> = {}
+  {
+    platform = 'ios',
+    projectRoot = '/project',
+    touchedAt = '2026-09-30T10:00:00.000Z',
+  }: Partial<DeviceClaim> = {}
 ): void {
   writeClaim({
     backend: 'eas',
@@ -68,7 +72,7 @@ function claimSession(
     projectRoot,
     pid: 1,
     claimedAt: '2026-09-30T10:00:00.000Z',
-    touchedAt: '2026-09-30T10:00:00.000Z',
+    touchedAt,
     created: true,
   });
 }
@@ -745,6 +749,54 @@ describe(probeCloudSessionAsync, () => {
     expect(readClaims()).toMatchObject([
       { backend: 'eas', platform: 'ios', id: 'sess-1', projectRoot: '/project' },
     ]);
+  });
+
+  it(`does not adopt the session a dotenv names when another worktree holds a live claim on it`, async () => {
+    project({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=sess-1\n' });
+    claimSession('sess-1', { projectRoot: '/other', touchedAt: new Date().toISOString() });
+    let call = 0;
+    vi.mocked(spawn).mockImplementation((() => {
+      const answer = call++ === 0 ? listJson(sessionRow()) : '{"available": true}';
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => {
+        child.stdout.emit('data', answer);
+        child.emit('close', 0, null);
+      });
+      return child as any;
+    }) as any);
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+    expect(probe).toMatchObject({ state: 'none', sessionId: null, unclaimedSessionCount: 1 });
+    expect(probe.reason).toContain('sess-1 is held by the worktree at /other');
+    expect(readClaims()).toMatchObject([{ id: 'sess-1', projectRoot: '/other' }]);
+  });
+
+  it(`refuses a session that another worktree's claim still names`, async () => {
+    // The claim is stale, so the pre-check lets it through and the claim write is what refuses.
+    project({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=sess-1\n' });
+    claimSession('sess-1', { projectRoot: '/other' });
+    let call = 0;
+    vi.mocked(spawn).mockImplementation((() => {
+      const answer = call++ === 0 ? listJson(sessionRow()) : '{"available": true}';
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => {
+        child.stdout.emit('data', answer);
+        child.emit('close', 0, null);
+      });
+      return child as any;
+    }) as any);
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+    expect(probe.state).not.toBe('active');
+    expect(probe.sessionId).toBeNull();
   });
 
   it(`releases a claim whose session the service no longer lists`, async () => {
