@@ -49,6 +49,7 @@ export function fakeDeviceTools(handler: ToolHandler): FakeTools {
       if (answer.stderr) {
         child.stderr.emit('data', Buffer.from(answer.stderr));
       }
+      child.emit('exit', answer.exitCode ?? 0, null);
       child.emit('close', answer.exitCode ?? 0, null);
     });
     return child as any;

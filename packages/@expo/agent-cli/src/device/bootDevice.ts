@@ -503,6 +503,11 @@ export async function bootEmulatorAsync(
   }
 
   let spawnFailure: string | null = null;
+  let exitFailure: string | null = null;
+  let wake = () => {};
+  const failed = new Promise<void>((resolve) => {
+    wake = resolve;
+  });
   try {
     const child = spawn(emulator, args, {
       detached: true,
@@ -512,6 +517,16 @@ export async function bootEmulatorAsync(
     });
     child.on('error', (error: Error) => {
       spawnFailure = error.message;
+      wake();
+    });
+    // An AVD already in use, or a `-read-only` the AVD refuses, exits at once. Without this the
+    // failure surfaces minutes later as a boot timeout. Exit 0 is left to the poll: a launcher may
+    // hand off to the emulator process and exit cleanly.
+    child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+      if (code !== 0) {
+        exitFailure = code != null ? `exited with code ${code}` : `was killed by ${signal}`;
+        wake();
+      }
     });
     child.unref();
   } catch (error: unknown) {
@@ -533,13 +548,21 @@ export async function bootEmulatorAsync(
     if (probe.exitCode === 0 && probe.stdout.trim() === '1') {
       return result(true, null);
     }
+    if (exitFailure != null) {
+      return result(
+        false,
+        `"${emulator} -avd ${avd}" ${exitFailure} before ${serial} booted${
+          readOnly ? ' (it was started -read-only, beside a running instance of the AVD)' : ''
+        }`
+      );
+    }
     if (now() >= deadline) {
       return result(
         false,
         `the emulator ${avd} did not finish booting within ${timeoutMs}ms — "${adb.bin} -s ${serial} shell getprop sys.boot_completed" never answered 1`
       );
     }
-    await new Promise((resolve) => setTimeout(resolve, BOOT_POLL_MS));
+    await Promise.race([new Promise((resolve) => setTimeout(resolve, BOOT_POLL_MS)), failed]);
   }
 }
 
