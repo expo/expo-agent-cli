@@ -211,14 +211,26 @@ describe('@expo/agent-cli feedback', () => {
   it('supports aliases, session authentication, and one JSON result', async () => {
     const result = await executeAgentCliAsync(
       feedback.projectRoot,
-      ['feedback', '-m', MESSAGE, '-c', 'skills', '-s', 'expo-router', '--json'],
+      [
+        'feedback',
+        '-m',
+        MESSAGE,
+        '-c',
+        ' AGENT-CLI ',
+        '-s',
+        'npx @expo/agent-cli status',
+        '--json',
+      ],
       { env: feedback.env }
     );
 
     const request = feedback.requests[0]!;
     expect(request.headers['expo-session']).toBe('fixture-session-secret');
     expect(request.headers.authorization).toBeUndefined();
-    expect(request.body.metadata).toMatchObject({ category: 'skills', subject: 'expo-router' });
+    expect(request.body.metadata).toMatchObject({
+      category: 'agent-cli',
+      subject: 'npx @expo/agent-cli status',
+    });
     expect(request.body.metadata.feedbackId).toMatch(/^[a-f0-9]{12}$/);
     expect(JSON.parse(result.stdout)).toEqual({
       sent: true,
@@ -406,6 +418,9 @@ module.exports = ({ config }) => ({ ...config, name: 'Dynamic config app' });
     for (const option of ['--message', '--category', '--subject', '--resume', '--json']) {
       expect(result.stdout).toContain(option);
     }
+    expect(result.stdout).toContain('agent-cli: full agent CLI command');
+    expect(result.stdout).toContain('skills: exact skill name');
+    expect(result.stdout).toContain('simulator: EAS Simulator feature or workflow');
     expect(result.stderr).not.toContain('Feedback was not sent');
     expect(feedback.requests).toEqual([]);
   });
