@@ -98,6 +98,21 @@ function runtime(identifier: string, version: string) {
   };
 }
 
+const LONG_AGO = new Date(Date.now() - 3 * 60 * 60_000).toISOString();
+
+function ownClaim(id: string, at: string) {
+  return {
+    backend: 'local-ios' as const,
+    platform: 'ios' as const,
+    id,
+    projectRoot: HERE,
+    pid: 1,
+    claimedAt: at,
+    touchedAt: at,
+    created: false,
+  };
+}
+
 function otherClaim(id: string, backend: 'local-ios' | 'local-android' = 'local-ios') {
   const now = new Date().toISOString();
   writeClaim({
@@ -165,6 +180,34 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     });
     expect(first.ok && again.ok && again.id === first.id).toBe(true);
     expect(tools.callsWith('simctl boot ')).toHaveLength(1);
+  });
+
+  it(`touches the worktree's claim when it hands the simulator out`, async () => {
+    fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
+    writeClaim(ownClaim('SIM-A', LONG_AGO));
+
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: false,
+    });
+
+    expect(result).toMatchObject({ ok: true, id: 'SIM-A' });
+    expect(Date.parse(readClaims()[0]!.touchedAt)).toBeGreaterThan(Date.parse(LONG_AGO));
+  });
+
+  it(`does not re-arm a stale claim on a shut-down simulator that a read cannot use`, async () => {
+    fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' }]);
+    writeClaim(ownClaim('SIM-A', LONG_AGO));
+
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: false,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'no-device' });
+    expect(readClaims()).toMatchObject([{ id: 'SIM-A', touchedAt: LONG_AGO }]);
   });
 
   it(`never takes a booted simulator another worktree claimed`, async () => {

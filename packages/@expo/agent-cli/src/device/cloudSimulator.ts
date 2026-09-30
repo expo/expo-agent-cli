@@ -1413,7 +1413,10 @@ export function bindEasSession(
     writeClaim(claim);
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      return touchClaim(claim) != null;
+      const existing = readClaims().find(
+        (each) => each.backend === 'eas' && each.id === id && each.projectRoot === claim.projectRoot
+      );
+      return existing != null && touchClaim(existing) != null;
     }
   }
   return true;

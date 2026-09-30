@@ -33,6 +33,8 @@ declare module '2g' {
     'cli:device_claim_unreadable_removed': { file: string; ageMs: number };
     /** A created device whose claim expired could not be deleted. Its claim stays for a retry. */
     'cli:device_delete_failed': { backend: DeviceBackend; id: string; error: SerializedError };
+    /** A claim's `touchedAt` could not be refreshed. The verb goes on; the claim ages as before. */
+    'cli:device_claim_touch_failed': { backend: DeviceBackend; id: string; reason: string };
     /** A file in the registry is not a claim. It is ignored, so it holds no device. */
     'cli:device_claim_unreadable': { file: string; reason: string };
   }
