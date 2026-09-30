@@ -395,7 +395,10 @@ export function buildDevServerStatus(
     ...readiness,
     ...reachFields,
   };
-  return probe.reason ? { ...status, reason: probe.reason } : status;
+  const withReason = probe.reason ? { ...status, reason: probe.reason } : status;
+  return probe.foreignServers
+    ? { ...withReason, foreignServers: probe.foreignServers }
+    : withReason;
 }
 
 /**
