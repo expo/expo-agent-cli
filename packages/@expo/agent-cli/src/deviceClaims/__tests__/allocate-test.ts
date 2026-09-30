@@ -112,7 +112,7 @@ describe('allocateDeviceAsync', () => {
     expect(new Set(ids)).toEqual(new Set(['A', 'B']));
   });
 
-  it(`reuses the device of the same worktree, and touches its claim`, async () => {
+  it(`reuses the device of the same worktree, and leaves the touch to a caller that can use it`, async () => {
     const inventory = [booted('A'), booted('B')];
     await allocate(HERE, { inventory });
     const later = new Date(NOW.getTime() + 60_000);
@@ -122,8 +122,9 @@ describe('allocateDeviceAsync', () => {
     expect(again).toMatchObject({
       kind: 'reuse',
       liveness: 'live',
-      claim: { id: 'A', touchedAt: later.toISOString() },
+      claim: { id: 'A', touchedAt: NOW.toISOString() },
     });
+    expect(readClaims()).toMatchObject([{ touchedAt: NOW.toISOString() }]);
     expect(readClaims()).toHaveLength(1);
   });
 

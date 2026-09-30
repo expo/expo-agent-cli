@@ -55,7 +55,7 @@ One store: a machine-wide registry with one JSON file per claimed device, at `~/
 - `backend` is `local-ios`, `local-android` or `eas`. `platform` is `ios` or `android`; an `eas` claim needs both.
 - `projectRoot` is resolved through symlinks, as the dev-server lock is.
 - `pid` is the process that wrote the claim, for a report that names the owner. It is not used for liveness: the operating system reuses PIDs.
-- `touchedAt` is refreshed by every verb that uses the device.
+- `touchedAt` is refreshed by every verb that gets a usable device from the claim, and never by a verb that cannot use it (a read of a shut-down simulator). The refresh is a compare-and-swap on `projectRoot` and `claimedAt`, so it never overwrites a claim that replaced this one.
 - `created: true` means this CLI created the device. Only such devices are ever deleted.
 - One file per device, so two agents never write the same file. A claim is created with `O_EXCL` (`wx`).
 

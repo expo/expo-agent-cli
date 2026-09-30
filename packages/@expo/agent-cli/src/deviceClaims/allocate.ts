@@ -11,7 +11,6 @@ import {
   readClaims,
   releaseClaim,
   removeClaimFile,
-  touchClaim,
   withRegistryLockAsync,
   writeClaim,
 } from './registry';
@@ -48,6 +47,7 @@ export interface AllocateDeviceOptions<C extends DeviceCandidate> {
  *
  * Never boots: a boot takes a minute, and the lock would hold every other worktree for it. The
  * claim is written first, so no other worktree takes the device while the caller boots it.
+ * Never touches a reused claim: only a caller that hands out a usable device may re-arm it.
  */
 export async function allocateDeviceAsync<C extends DeviceCandidate>({
   projectRoot: givenRoot,
@@ -125,7 +125,8 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
 
     switch (choice.kind) {
       case 'reuse':
-        return { ...choice, claim: touchClaim(choice.claim, now) ?? choice.claim };
+      case 'exhausted':
+        return choice;
 
       case 'take':
       case 'boot': {
@@ -154,9 +155,6 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
         writeClaim(claim);
         return { kind: 'created', candidate, claim };
       }
-
-      case 'exhausted':
-        return choice;
     }
   });
 }
