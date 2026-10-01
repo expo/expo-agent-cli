@@ -25,9 +25,7 @@ import {
 } from './cache';
 import { selectSdkVersion, type SdkSelection } from './version';
 
-// Temporary host until the docs build publishes the bundles at https://docs.expo.dev/static/agents.
-export const DEFAULT_DOCS_BUNDLE_URL =
-  'https://github.com/vonovak/expo-video-tests/releases/download/docs-bundle-poc';
+export const DEFAULT_DOCS_BUNDLE_URL = 'https://docs.expo.dev/static/agents';
 
 export function docsBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return (env.AGENT_CLI_DOCS_URL || DEFAULT_DOCS_BUNDLE_URL).replace(/\/+$/, '');
@@ -78,13 +76,17 @@ type FetchInit = RequestInit & { cache?: 'no-store' };
 async function fetchBytesAsync(
   url: string,
   fetchImpl: typeof fetch,
-  init?: FetchInit
+  init?: FetchInit,
+  notFound?: () => CommandError
 ): Promise<Uint8Array> {
   let response: Response;
   try {
     response = await fetchImpl(url, init as RequestInit);
   } catch (error: any) {
     throw fetchFailed(url, error.cause?.message ?? error.message);
+  }
+  if (response.status === 404 && notFound) {
+    throw notFound();
   }
   if (!response.ok) {
     throw fetchFailed(url, `HTTP ${response.status}`);
@@ -97,7 +99,16 @@ export async function fetchDocsIndexAsync(
   fetchImpl: typeof fetch = fetch
 ): Promise<DocsIndex> {
   const url = `${baseUrl}/index.json`;
-  const bytes = await fetchBytesAsync(url, fetchImpl, { cache: 'no-store' });
+  const bytes = await fetchBytesAsync(
+    url,
+    fetchImpl,
+    { cache: 'no-store' },
+    () =>
+      new CommandError(
+        'DOCS_UNAVAILABLE',
+        `${baseUrl} publishes no docs bundles yet (${url} is HTTP 404). Set AGENT_CLI_DOCS_URL to a host that serves them.`
+      )
+  );
   let json: unknown;
   try {
     json = JSON.parse(Buffer.from(bytes).toString('utf8'));
