@@ -113,7 +113,8 @@ if (
   (resolution.kind === 'command' || resolution.kind === 'passthrough')
 ) {
   const name = resolution.kind === 'command' ? resolution.name : resolution.command;
-  if (name !== 'help') {
+  // Feedback records its event after loading project config, which can enable an opt-out.
+  if (name !== 'help' && name !== 'feedback') {
     const { recordCommand } = require('./telemetry') as typeof import('./telemetry');
     recordCommand(name, version);
   }
