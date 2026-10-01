@@ -22,6 +22,7 @@ import path from 'path';
 import { readClaims, writeClaim } from '../../deviceClaims';
 import type { DeviceClaim } from '../../deviceClaims';
 import recordedAvailability from '../../__fixtures__/eas/simulator-availability.json';
+import { canonicalizeExistingPath } from '../../utils/dir';
 import { isNeedsHumanError } from '../../utils/errors';
 import {
   ACTIVE_SESSION_STATUS,
@@ -56,6 +57,10 @@ import {
   type CloudSessionProbe,
 } from '../cloudSimulator';
 
+/** The roots as the CLI canonicalizes them, which on Windows is not the POSIX spelling. */
+const PROJECT = canonicalizeExistingPath('/project');
+const OTHER = canonicalizeExistingPath('/other');
+
 /** An `eas` claim of `/project`, as an earlier start from this worktree left it. */
 function claimSession(
   id: string,
@@ -69,7 +74,7 @@ function claimSession(
     backend: 'eas',
     platform,
     id,
-    projectRoot,
+    projectRoot: canonicalizeExistingPath(projectRoot),
     pid: 1,
     claimedAt: '2026-09-30T10:00:00.000Z',
     touchedAt,
@@ -725,7 +730,7 @@ describe(probeCloudSessionAsync, () => {
       unclaimedSessionCount: 1,
     });
     const [claim] = readClaims();
-    expect(claim).toMatchObject({ id: 'sess-2', projectRoot: '/project', created: true });
+    expect(claim).toMatchObject({ id: 'sess-2', projectRoot: PROJECT, created: true });
     expect(claim!.touchedAt).not.toBe('2026-09-30T10:00:00.000Z');
   });
 
@@ -748,7 +753,7 @@ describe(probeCloudSessionAsync, () => {
 
     expect(probe).toMatchObject({ state: 'active', sessionId: 'sess-1' });
     expect(readClaims()).toMatchObject([
-      { backend: 'eas', platform: 'ios', id: 'sess-1', projectRoot: '/project' },
+      { backend: 'eas', platform: 'ios', id: 'sess-1', projectRoot: PROJECT },
     ]);
   });
 
@@ -772,8 +777,8 @@ describe(probeCloudSessionAsync, () => {
     const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
 
     expect(probe).toMatchObject({ state: 'none', sessionId: null, unclaimedSessionCount: 1 });
-    expect(probe.reason).toContain('sess-1 is held by the worktree at /other');
-    expect(readClaims()).toMatchObject([{ id: 'sess-1', projectRoot: '/other' }]);
+    expect(probe.reason).toContain(`sess-1 is held by the worktree at ${OTHER}`);
+    expect(readClaims()).toMatchObject([{ id: 'sess-1', projectRoot: OTHER }]);
   });
 
   it(`refuses a session that another worktree's claim still names`, async () => {
