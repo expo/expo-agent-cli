@@ -24,6 +24,9 @@ function mockFetchByPort(answers: { [port: string]: any[] }) {
     if (answer === undefined) {
       throw new Error('ECONNREFUSED');
     }
+    if (url.pathname === '/status') {
+      return new Response('packager-status:running');
+    }
     return { ok: true, json: async () => answer } as Response;
   });
 }

@@ -81,8 +81,10 @@ import { easCommandPrefix } from '../utils/easCli';
 export interface OpenRouteOptions {
   /** Route as the caller wrote it. */
   route: string;
-  /** Platform to open on, or undefined for whichever device is booted. */
+  /** Platform to open on, or undefined for whichever device this worktree has up. */
   platform?: NavigatePlatform;
+  /** `--device`, claimed for this worktree (llp/0028 §Explicit device). */
+  device?: string | null;
   /** URL scheme, instead of the one read from the project's config. */
   scheme?: string;
   /** Application id, for scoping the Android intent. */
@@ -462,6 +464,7 @@ export async function openRouteAsync(
     devServerRunning: resolved.devServerReachable,
     cloud: options.cloud,
     projectRoot,
+    device: options.device,
   });
 
   // @ref src/device/cloudSimulator.ts §cloudNeedsTunnelError — refused before anything is opened.

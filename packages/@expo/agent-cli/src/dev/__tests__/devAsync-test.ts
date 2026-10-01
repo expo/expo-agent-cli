@@ -1,6 +1,7 @@
 import { vol } from 'memfs';
 import os from 'os';
 
+import { resolveClaimedDeviceAsync } from '../../device/claimedDevice';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
@@ -16,6 +17,17 @@ import { devAsync } from '../devAsync';
 import { resolveDevOptions } from '../resolveOptions';
 
 vi.mock('../../log');
+vi.mock('../../device/claimedDevice', () => ({
+  resolveClaimedDeviceAsync: vi.fn(async () => ({
+    ok: false,
+    kind: 'no-device',
+    reason: 'no booted iOS simulator was found',
+    error: new Error('none'),
+    deviceId: null,
+    name: null,
+    holders: [],
+  })),
+}));
 vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
 vi.mock('../openApp', () => ({
   openAppOnDeviceAsync: vi.fn(),
@@ -203,6 +215,59 @@ describe(devAsync, () => {
         onDevServer: expect.any(Function),
       });
     });
+
+    // @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+    it(`should pin the build to the device this worktree claims`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(resolveClaimedDeviceAsync).mockResolvedValueOnce({
+        ok: true,
+        backend: 'local-ios',
+        id: 'SIM-CLAIMED',
+        name: 'iPhone 17',
+        claim: {} as any,
+        booted: true,
+        choice: 'it is the free simulator this machine last used',
+        hasApp: null,
+        adb: null,
+      });
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(resolveClaimedDeviceAsync).toHaveBeenCalledWith(
+        expect.objectContaining({ platform: 'ios', projectRoot, allowBoot: true })
+      );
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['run:ios', '--device', 'SIM-CLAIMED'],
+        expect.anything()
+      );
+    });
+
+    it.each([
+      ['a run', ['--ios']],
+      ['--plan', ['--plan', '--ios']],
+    ])(
+      `should refuse %s rather than leave the build unpinned when every booted simulator is another worktree's`,
+      async (_what, argv) => {
+        mockStaleDevClientState();
+        const error = Object.assign(new Error('Every booted iOS simulator is claimed'), {
+          code: 'DEVICES_ALL_CLAIMED',
+        });
+        vi.mocked(resolveClaimedDeviceAsync).mockResolvedValueOnce({
+          ok: false,
+          kind: 'no-device',
+          reason: 'every booted iOS simulator is claimed by another worktree',
+          error: error as any,
+          deviceId: null,
+          name: null,
+          holders: [{ id: 'SIM-A', projectRoot: '/work/other' }],
+        });
+
+        await expect(devAsync(projectRoot, resolveDevOptions(argv))).rejects.toBe(error);
+
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+      }
+    );
 
     it(`should run every step of a plan that builds`, async () => {
       mockStaleDevClientState();

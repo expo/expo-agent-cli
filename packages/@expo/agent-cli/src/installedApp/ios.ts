@@ -1,7 +1,9 @@
+// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
 // @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read
-// Which iOS device answers: booted simulators first, a physical device only when `--device` names
-// it. Reading a simulator is a file read; reading a phone launches the app on it.
+// Which iOS device answers: the simulator this worktree claims first, a physical device only when
+// `--device` names it. Reading a simulator is a file read; reading a phone launches the app on it.
 
+import type { resolveClaimedDeviceAsync } from '../device/claimedDevice';
 import { listConnectedIosDevicesAsync, type IosDevice } from '../device/devicectl';
 import { readInstalledFingerprintIosDeviceAsync } from './iosDevice';
 import {
@@ -9,9 +11,15 @@ import {
   readSimulatorsAsync,
   type IosSimulatorReaderDependencies,
 } from './iosSimulator';
-import { matchesDeviceFilter, type InstalledFingerprintResult } from './installedFingerprint';
+import {
+  claimedReadableDeviceAsync,
+  matchesDeviceFilter,
+  type InstalledFingerprintResult,
+} from './installedFingerprint';
 
 export interface IosReaderOptions {
+  /** The worktree whose claimed simulator is read when `--device` names none. */
+  projectRoot: string;
   expectedHash: string;
   device?: string;
   appId: string;
@@ -19,6 +27,7 @@ export interface IosReaderOptions {
   timeoutMs?: number;
   /** Injected for tests. */
   deps?: IosSimulatorReaderDependencies & {
+    resolveClaimedDeviceAsync?: typeof resolveClaimedDeviceAsync;
     listConnectedIosDevicesAsync?: typeof listConnectedIosDevicesAsync;
     readInstalledFingerprintIosDeviceAsync?: typeof readInstalledFingerprintIosDeviceAsync;
   };
@@ -30,6 +39,7 @@ export interface IosReaderOptions {
  * on it and `status` starts nothing it was not asked to start. Naming the phone is the consent.
  */
 export async function readInstalledFingerprintIosAsync({
+  projectRoot,
   expectedHash,
   device: deviceFilter,
   appId,
@@ -41,7 +51,12 @@ export async function readInstalledFingerprintIosAsync({
     listConnectedIosDevicesAsync: listPhones = listConnectedIosDevicesAsync,
     readInstalledFingerprintIosDeviceAsync: readPhones = readInstalledFingerprintIosDeviceAsync,
   } = deps;
-  let simulators = await listBootedIosSimulatorsAsync(deps);
+  // `--device` is a filter over every booted simulator; without it, the claimed one is read.
+  let simulators = deviceFilter
+    ? await listBootedIosSimulatorsAsync(deps)
+    : await claimedReadableDeviceAsync('ios', projectRoot, deps.resolveClaimedDeviceAsync).then(
+        (claimed) => (claimed ? [claimed.device] : [])
+      );
 
   // Enumerating phones costs `devicectl` over a second, so it happens at most once and only
   // when a simulator cannot answer.

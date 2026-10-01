@@ -1,20 +1,20 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
+// @ref llp/0028-one-device-per-agent.rfc.md §Android boot
 // Boot a local device, and shut one down again.
 //
-// The device probes next door (`src/navigate/device.ts`) answer "is there one", which is all every
-// command before this needed: a run that found none reported that and stopped. `smoke` now brings
-// its own, so somebody has to answer "make one", and this is the module that does — through the
-// same platform tools as subprocesses, with no simulator or emulator library linked in.
+// Which device boots is not decided here: it is the device this worktree claims
+// (`./claimedDevice.ts`, llp/0028). This module holds the boot mechanics, through the same platform
+// tools as subprocesses, with no simulator or emulator library linked in.
 //
 // **Only what this module started is ever shut down.** Nothing here decides that; the caller does
-// (`src/smoke/phases.ts`). What this module guarantees is the other half of it: `bootAsync` reports
+// (`src/smoke/phases.ts`). What this module guarantees is the other half of it: `bootDeviceAsync` reports
 // the id it booted before it waits for anything, so a boot that hangs is still a device its caller
 // knows it is holding.
 //
 // Three live facts are pinned here rather than rediscovered, and each of them cost somebody a run:
 //
-//  1. **`-ports 5554,5555` on the emulator.** Without it the emulator binds ephemeral ports and
-//     `adb devices` never lists it at all — not "offline", *absent* [observed — friction run 6,
+//  1. **`-ports <console>,<adb>` on the emulator.** Without it the emulator binds ephemeral ports
+//     and `adb devices` never lists it at all — not "offline", *absent* [observed — friction run 6,
 //     F62, and again on 2026-08-27]. So the serial is known before the boot rather than after.
 //  2. **`sys.boot_completed`, not `adb devices`.** `adb` reports the serial as `offline` for the
 //     first seconds and then `device`, and Android itself is up later still. An `adb shell` before
@@ -26,15 +26,12 @@
 
 import { spawn } from 'child_process';
 import fs from 'fs';
+import net from 'net';
 import path from 'path';
 
 import type { DeviceBackend } from '../navigate/device';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { resolveAdb, runAdbAsync, type AdbResolution } from './adb';
-import { simulatorHasAppAsync } from './installedApps';
-
-/** The serial an emulator started with `-ports 5554,5555` is always listed under. */
-export const EMULATOR_SERIAL = 'emulator-5554';
 
 /**
  * How long a boot may take, per platform, before it is called a failure.
@@ -94,6 +91,8 @@ export interface ShutdownDeviceResult {
 }
 
 export interface BootDeviceOptions {
+  /** The worktree the device is claimed for (llp/0028 §The registry). */
+  projectRoot: string;
   /** How long the boot may take before it is called a failure. */
   timeoutMs: number;
   /**
@@ -103,34 +102,22 @@ export interface BootDeviceOptions {
    * a device somebody is responsible for shutting down.
    */
   onBooting?: (device: { deviceId: string; backend: DeviceBackend }) => void;
-  /** The clock, so a test can drive the wait without one. */
-  now?: () => number;
-  /** Injected for the tests: the emulator this host would spawn. */
-  adb?: AdbResolution;
   /**
    * The application the caller is about to open, when it knows.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app
-   * Given, the boot only ever chooses a device that **has this app installed**, and declines
-   * rather than booting one that could not open it. Absent, the choice is the ordering that was
-   * here before — which is right for a caller that has no particular app in mind, and was wrong
-   * for `smoke`, whose whole next phase is opening one.
+   * Given, a free device that **has this app installed** ranks first, and without
+   * {@link mayInstall} the boot declines rather than booting one that could not open it.
    */
   appId?: string | null;
   /** What the app is called in a sentence, for the refusal. Defaults to {@link appId}. */
   appLabel?: string | null;
   /** The command that puts the app on a device, named by the refusal when there is one. */
   installWith?: string | null;
-  /** Injected for the tests: which apps a simulator has. */
-  hasAppAsync?: (udid: string, appId: string) => Promise<boolean>;
   /**
-   * The caller can put {@link appId} on a device itself, so a machine with none is not a refusal.
+   * The caller can put {@link appId} on a device itself, so a device without it is not a refusal.
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
-   * Without this, "no simulator has the app" ends the run — which is right for a caller that can
-   * only open what is already there. A caller that can *install* needs the opposite: a booted
-   * device to install onto. So the app filter is dropped rather than the boot refused, and
-   * {@link BootDeviceResult.installNeeded} tells the caller it has an install to do.
    */
   mayInstall?: boolean;
 }
@@ -212,65 +199,31 @@ export function parseSimulators(stdout: string): SimulatorEntry[] {
 }
 
 /**
- * Choose the simulator to boot.
+ * The order in which free shut-down simulators are booted (llp/0028 §The registry, step 4).
  *
- * **The one this developer last used**, and that is the whole rule rather than a tie-break. Apps
- * are installed per device: a simulator nobody has ever booted has no Expo Go on it and no
- * development build either, so a run that picked "the newest iPhone on the newest runtime" would,
- * on a machine with eleven simulators and one in use, spend a minute booting a device that could
- * never have answered the `app` phase. `lastBootedAt` is `simctl`'s own record of which one that
- * is [observed — 2026-08-30, a machine listing five iPhones and five iPads, one of them the
- * `iPhone 17 Pro` every live run of this package has used].
+ * **The one this developer last used** first. Apps are installed per device: a simulator nobody
+ * has ever booted has no Expo Go on it and no development build either, so a run that picked "the
+ * newest iPhone on the newest runtime" would, on a machine with eleven simulators and one in use,
+ * spend a minute booting a device that could never have answered the `app` phase. `lastBootedAt`
+ * is `simctl`'s own record of which one that is [observed — 2026-08-30, a machine listing five
+ * iPhones and five iPads].
  *
  * The two rules under it are for a machine where nothing has ever been booted, which is a fresh
- * Xcode install: the newest iOS runtime, and an iPhone on it. An iPad is taken only when there is
- * no iPhone at all, because a run on some device is worth much more than a run on none.
- *
- * A simulator that is already `Booted` wins outright — the caller only reaches this when its probe
- * found none, so one here is a race, and joining it is better than booting a second.
- *
- * **`hasApp` outranks all of it**, and that is the correction the proxy above needed
- * (llp/0005 §The device that can open the app). "Most recently used" is a guess at "has the apps
- * on it"; the app itself is the fact. A dev-client project booted a fresh simulator on that guess
- * and the deep link came back `115` — no handler for the scheme — after a 12.4 s boot for a device
- * that could never have opened it [observed, 2026-08-30]. When no device
- * has the app this answers **null**, because a boot that cannot open the app is worse than no boot:
- * it costs the minute and answers nothing.
- *
- * `hasApp` absent is "nobody asked", which is not "the answer is no": a caller that does not know
- * which app it is about gets the ordering that was here before.
+ * Xcode install: the newest iOS runtime, and an iPhone on it.
  */
-export function pickSimulator(
-  simulators: SimulatorEntry[],
-  { hasApp }: { hasApp?: (simulator: SimulatorEntry) => boolean } = {}
-): SimulatorEntry | null {
-  const available = simulators.filter((simulator) => simulator.isAvailable);
-  if (available.length === 0) {
-    return null;
+export function compareSimulators(left: SimulatorEntry, right: SimulatorEntry): number {
+  const byLastBooted = right.lastBootedAt - left.lastBootedAt;
+  if (byLastBooted !== 0) {
+    return byLastBooted;
   }
-  const alreadyUp = available.find((simulator) => simulator.state === 'Booted');
-  if (alreadyUp) {
-    return alreadyUp;
+  const byVersion = compareVersions(right.version, left.version);
+  if (byVersion !== 0) {
+    return byVersion;
   }
-  const usable = hasApp == null ? available : available.filter(hasApp);
-  if (usable.length === 0) {
-    return null;
-  }
-  const ranked = [...usable].sort((left, right) => {
-    const byLastBooted = right.lastBootedAt - left.lastBootedAt;
-    if (byLastBooted !== 0) {
-      return byLastBooted;
-    }
-    const byVersion = compareVersions(right.version, left.version);
-    if (byVersion !== 0) {
-      return byVersion;
-    }
-    return Number(right.name.startsWith('iPhone')) - Number(left.name.startsWith('iPhone'));
-  });
-  return ranked[0] ?? null;
+  return Number(right.name.startsWith('iPhone')) - Number(left.name.startsWith('iPhone'));
 }
 
-function compareVersions(left: number[], right: number[]): number {
+export function compareVersions(left: number[], right: number[]): number {
   for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
     const difference = (left[index] ?? 0) - (right[index] ?? 0);
     if (difference !== 0) {
@@ -292,15 +245,70 @@ export function parseAvds(stdout: string): string[] {
 }
 
 /**
- * Boot a device for this platform, and wait until it will answer.
+ * Boot the device this worktree claims for the platform, and wait until it will answer.
+ *
+ * The choice is the claim's (`./claimedDevice.ts`); this only maps it onto the result `smoke`
+ * reports. A device that is already up is returned without a boot.
  *
  * @returns what came up, or why nothing did. Never rejects.
  */
 export async function bootDeviceAsync(
   platform: 'ios' | 'android',
-  options: BootDeviceOptions
+  {
+    projectRoot,
+    timeoutMs,
+    onBooting,
+    appId = null,
+    appLabel = null,
+    installWith = null,
+    mayInstall = false,
+  }: BootDeviceOptions
 ): Promise<BootDeviceResult> {
-  return platform === 'ios' ? await bootSimulatorAsync(options) : await bootEmulatorAsync(options);
+  const { resolveClaimedDeviceAsync } =
+    require('./claimedDevice') as typeof import('./claimedDevice');
+  const resolved = await resolveClaimedDeviceAsync({
+    platform,
+    projectRoot,
+    allowBoot: true,
+    appId,
+    requireApp: appId != null && !mayInstall,
+    timeoutMs,
+    onBooting,
+  });
+  if (!resolved.ok) {
+    const refused = resolved.kind === 'no-app';
+    return {
+      ok: false,
+      deviceId: resolved.deviceId,
+      backend:
+        resolved.deviceId == null ? null : platform === 'ios' ? 'local-ios' : 'local-android',
+      name: resolved.name,
+      reason: refused
+        ? `no free ${platform === 'ios' ? 'iOS simulator' : 'Android emulator'} has ${appLabel ?? appId} installed, so booting one would open nothing${
+            installWith ? `. Run "${installWith}" once to put the app on a device` : ''
+          }`
+        : resolved.reason,
+      refused,
+      choice: null,
+    };
+  }
+  const app = appLabel ?? appId;
+  const noun = platform === 'ios' ? 'simulator' : 'emulator';
+  return {
+    ok: true,
+    deviceId: resolved.id,
+    backend: resolved.backend,
+    name: resolved.name,
+    reason: null,
+    refused: false,
+    installNeeded: appId != null && resolved.hasApp === false,
+    choice:
+      !resolved.booted || resolved.hasApp == null
+        ? resolved.choice
+        : resolved.hasApp
+          ? `it has ${app} installed`
+          : `no free ${noun} has ${app}, so this one was booted to install it onto`,
+  };
 }
 
 /** Shut down a device this process booted. Never rejects. */
@@ -355,191 +363,153 @@ export async function shutdownDeviceAsync(
   };
 }
 
-/** The iOS half: pick a simulator, boot it, and wait for `bootstatus` to say it is up. */
-async function bootSimulatorAsync({
-  timeoutMs,
-  onBooting,
-  now = Date.now,
-  appId = null,
-  appLabel = null,
-  installWith = null,
-  mayInstall = false,
-  hasAppAsync = (udid, id) => simulatorHasAppAsync(udid, id),
-}: BootDeviceOptions): Promise<BootDeviceResult> {
-  const none = (reason: string, refused = false): BootDeviceResult => ({
-    ok: false,
-    deviceId: null,
-    backend: null,
-    name: null,
-    reason,
-    refused,
-    choice: null,
-  });
-  const app = appLabel ?? appId;
-
+/**
+ * Boot one simulator, and wait for `bootstatus` to say it is up.
+ *
+ * @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+ */
+export async function bootSimulatorAsync(
+  { udid, name }: { udid: string; name: string },
+  {
+    timeoutMs,
+    now = Date.now,
+    choice = null,
+  }: { timeoutMs: number; now?: () => number; choice?: string | null }
+): Promise<BootDeviceResult> {
   const deadline = now() + timeoutMs;
   const left = () => Math.max(1_000, deadline - now());
-
-  const listed = await spawnCaptureAsync('xcrun', ['simctl', 'list', 'devices', '-j'], {
-    timeoutMs: Math.min(60_000, left()),
+  const result = (ok: boolean, reason: string | null): BootDeviceResult => ({
+    ok,
+    deviceId: udid,
+    backend: 'local-ios',
+    name,
+    reason,
+    refused: false,
+    choice,
   });
-  if (listed.spawnError) {
-    return none(
-      `could not run "xcrun simctl", so no simulator could be booted: ${listed.spawnError.message}. Install Xcode and its command line tools, which provide it`
-    );
-  }
-  if (listed.exitCode !== 0) {
-    return none(
-      `"xcrun simctl list devices" exited ${listed.exitCode}: ${firstLine(listed.stderr) || 'no output'}`
-    );
-  }
 
-  const simulators = parseSimulators(listed.stdout);
-  if (simulators.filter((entry) => entry.isAvailable).length === 0) {
-    return none(
-      `this machine has no iOS simulator to boot. Install an iOS runtime in Xcode's Settings › Components, then run this command again`
-    );
-  }
-
-  // @ref ./bootDevice §pickSimulator. Asked **before** anything is booted, which is the whole
-  // point: the answer decides between a minute well spent and a minute spent on a device that
-  // could never have opened the app.
-  const withApp =
-    appId == null
-      ? null
-      : new Set(
-          (
-            await Promise.all(
-              simulators.map(async (entry) =>
-                (await hasAppAsync(entry.udid, appId)) ? entry.udid : null
-              )
-            )
-          ).filter((udid): udid is string => udid != null)
-        );
-
-  const simulator = pickSimulator(
-    simulators,
-    withApp == null ? {} : { hasApp: (entry) => withApp.has(entry.udid) }
-  );
-  // @ref ./bootDevice §mayInstall. A caller that can put the app there needs the opposite of a
-  // refusal: a booted device to install onto. So the app filter is dropped and the ordering that
-  // was here before it decides — and the caller is told it has an install to do.
-  const forInstall = simulator == null && mayInstall ? pickSimulator(simulators) : null;
-  if (simulator == null && forInstall == null) {
-    // Nothing was booted, and that is the answer rather than a failure to boot: no simulator on
-    // this machine has the app, so every one of them would have refused the deep link.
-    return none(
-      [
-        `no iOS simulator has ${app} installed, so booting one would open nothing`,
-        `— ${simulators.length} ${simulators.length === 1 ? 'simulator was' : 'simulators were'} looked at`,
-        installWith ? `. Run "${installWith}" once to put the app on a simulator` : '',
-      ].join(''),
-      true
-    );
-  }
-
-  // From here on there is one device, whichever branch produced it.
-  const chosen = simulator ?? forInstall!;
-  const installNeeded = simulator == null;
-  const choice =
-    chosen.state === 'Booted'
-      ? 'it was already booted'
-      : installNeeded
-        ? `no simulator has ${app}, so this one was booted to install it onto`
-        : withApp == null
-          ? 'it is the simulator this machine last used'
-          : `it has ${app} installed`;
-
-  // Before the boot, so the caller is holding it from here on (@ref ./bootDevice §onBooting).
-  onBooting?.({ deviceId: chosen.udid, backend: 'local-ios' });
-
-  const booted = await spawnCaptureAsync('xcrun', ['simctl', 'boot', chosen.udid], {
+  const booted = await spawnCaptureAsync('xcrun', ['simctl', 'boot', udid], {
     timeoutMs: left(),
   });
   // "Unable to boot device in current state: Booted" is the race this run is happy to lose: the
   // device is up, which is the whole request.
   if (booted.exitCode !== 0 && !/current state: Booted/i.test(booted.stderr)) {
-    return {
-      ok: false,
-      deviceId: chosen.udid,
-      backend: 'local-ios',
-      name: chosen.name,
-      reason: `"xcrun simctl boot ${chosen.udid}" exited ${booted.exitCode}: ${firstLine(booted.stderr) || 'no output'}`,
-      refused: false,
-      choice,
-    };
+    return result(
+      false,
+      `"xcrun simctl boot ${udid}" exited ${booted.exitCode}: ${firstLine(booted.stderr) || 'no output'}`
+    );
   }
 
   // `bootstatus` blocks until the device has finished booting, which is a different moment from
   // the boot command returning: `simctl boot` returns as soon as the boot has *started*, and an
   // `openurl` before springboard is up is refused.
-  const status = await spawnCaptureAsync('xcrun', ['simctl', 'bootstatus', chosen.udid], {
+  const status = await spawnCaptureAsync('xcrun', ['simctl', 'bootstatus', udid], {
     timeoutMs: left(),
   });
   if (status.exitCode !== 0) {
-    return {
-      ok: false,
-      deviceId: chosen.udid,
-      backend: 'local-ios',
-      name: chosen.name,
-      reason: `${chosen.name} (${chosen.udid}) was asked to boot and "xcrun simctl bootstatus" did not report it up within ${timeoutMs}ms`,
-      refused: false,
-      choice,
-    };
+    return result(
+      false,
+      `${name} (${udid}) was asked to boot and "xcrun simctl bootstatus" did not report it up within ${timeoutMs}ms`
+    );
   }
-
-  return {
-    ok: true,
-    deviceId: chosen.udid,
-    backend: 'local-ios',
-    name: chosen.name,
-    reason: null,
-    refused: false,
-    installNeeded,
-    choice,
-  };
+  return result(true, null);
 }
 
-/** The Android half: pick an AVD, spawn the emulator detached, and poll `sys.boot_completed`. */
-async function bootEmulatorAsync({
-  timeoutMs,
-  onBooting,
-  now = Date.now,
-  adb: given,
-}: BootDeviceOptions): Promise<BootDeviceResult> {
-  const none = (reason: string): BootDeviceResult => ({
-    ok: false,
-    deviceId: null,
-    backend: null,
-    name: null,
+/**
+ * The console ports an emulator may take. The adb server scans only 5555-5585 for the adb port,
+ * which is the console port + 1, so an emulator outside this range is never listed.
+ */
+export const EMULATOR_PORT_FIRST = 5554;
+export const EMULATOR_PORT_LAST = 5584;
+
+export function emulatorSerial(port: number): string {
+  return `emulator-${port}`;
+}
+
+/** The console port of an `emulator-<port>` serial, or null for any other serial. */
+export function emulatorPort(serial: string): number | null {
+  const match = /^emulator-(\d+)$/.exec(serial);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * The first even console port whose adb port (console + 1) is free too.
+ *
+ * A bind test rather than `adb devices`: an emulator that is still starting holds its ports before
+ * adb lists it.
+ */
+export async function findFreeEmulatorPortAsync({
+  isFree = isPortBindableAsync,
+  skip = () => false,
+}: {
+  isFree?: (port: number) => Promise<boolean>;
+  skip?: (port: number) => boolean;
+} = {}): Promise<number | null> {
+  for (let port = EMULATOR_PORT_FIRST; port <= EMULATOR_PORT_LAST; port += 2) {
+    if (!skip(port) && (await isFree(port)) && (await isFree(port + 1))) {
+      return port;
+    }
+  }
+  return null;
+}
+
+function isPortBindableAsync(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const server = net.createServer();
+    server.once('error', () => resolve(false));
+    server.listen({ port, host: '127.0.0.1', exclusive: true }, () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+/** One emulator to start: the AVD, its console port, and whether another instance runs the AVD. */
+export interface EmulatorBoot {
+  avd: string;
+  port: number;
+  /** `-read-only`, which lets a second instance run an AVD that is already running. */
+  readOnly: boolean;
+}
+
+/**
+ * Spawn the emulator detached on its own ports, and poll `sys.boot_completed` on its serial.
+ *
+ * @ref llp/0028-one-device-per-agent.rfc.md §Android boot
+ */
+export async function bootEmulatorAsync(
+  { avd, port, readOnly }: EmulatorBoot,
+  {
+    timeoutMs,
+    now = Date.now,
+    adb = resolveAdb(),
+    choice = null,
+  }: { timeoutMs: number; now?: () => number; adb?: AdbResolution; choice?: string | null }
+): Promise<BootDeviceResult> {
+  const serial = emulatorSerial(port);
+  const emulator = resolveEmulator(adb);
+  const result = (ok: boolean, reason: string | null): BootDeviceResult => ({
+    ok,
+    deviceId: serial,
+    backend: 'local-android',
+    name: avd,
     reason,
     refused: false,
-    choice: null,
+    choice,
   });
 
-  const adb = given ?? resolveAdb();
-  const emulator = resolveEmulator(adb);
-  const listed = await spawnCaptureAsync(emulator, ['-list-avds'], { timeoutMs: 60_000 });
-  if (listed.spawnError) {
-    return none(
-      `could not run "${emulator}", so no emulator could be started: ${listed.spawnError.message}. Install the Android SDK's emulator package, or set ANDROID_HOME`
-    );
+  const args = ['-avd', avd, '-ports', `${port},${port + 1}`, '-no-snapshot-save'];
+  if (readOnly) {
+    args.push('-read-only');
   }
-  const avd = parseAvds(listed.stdout)[0];
-  if (avd == null) {
-    return none(
-      `this machine has no Android virtual device to start. Create one in Android Studio's Device Manager, then run this command again`
-    );
-  }
-
-  // @ref ./bootDevice — `-ports 5554,5555`, without which `adb` never lists the emulator at all.
-  // The serial is therefore known before the boot, which is what lets the cleanup be registered
-  // here rather than after a wait that may never finish.
-  onBooting?.({ deviceId: EMULATOR_SERIAL, backend: 'local-android' });
 
   let spawnFailure: string | null = null;
+  let exitFailure: string | null = null;
+  let wake = () => {};
+  const failed = new Promise<void>((resolve) => {
+    wake = resolve;
+  });
   try {
-    const child = spawn(emulator, ['-avd', avd, '-ports', '5554,5555', '-no-snapshot-save'], {
+    const child = spawn(emulator, args, {
       detached: true,
       // The emulator's own output is not this run's report, and a pipe nobody reads fills up and
       // blocks it. It logs to the Android SDK's own files either way.
@@ -547,10 +517,21 @@ async function bootEmulatorAsync({
     });
     child.on('error', (error: Error) => {
       spawnFailure = error.message;
+      wake();
+    });
+    // An AVD already in use, or a `-read-only` the AVD refuses, exits at once. Without this the
+    // failure surfaces minutes later as a boot timeout. Exit 0 is left to the poll: a launcher may
+    // hand off to the emulator process and exit cleanly.
+    child.on('exit', (code: number | null, signal: NodeJS.Signals | null) => {
+      if (code !== 0) {
+        exitFailure = code != null ? `exited with code ${code}` : `was killed by ${signal}`;
+        wake();
+      }
     });
     child.unref();
   } catch (error: unknown) {
-    return none(
+    return result(
+      false,
       `"${emulator} -avd ${avd}" could not be started: ${error instanceof Error ? error.message : String(error)}`
     );
   }
@@ -558,43 +539,30 @@ async function bootEmulatorAsync({
   const deadline = now() + timeoutMs;
   for (;;) {
     if (spawnFailure != null) {
-      return {
-        ok: false,
-        deviceId: EMULATOR_SERIAL,
-        backend: 'local-android',
-        name: avd,
-        reason: `"${emulator} -avd ${avd}" could not be started: ${spawnFailure}`,
-        refused: false,
-        choice: 'it is the only Android virtual device this machine has',
-      };
+      return result(false, `"${emulator} -avd ${avd}" could not be started: ${spawnFailure}`);
     }
-    const probe = await runAdbAsync(
-      ['-s', EMULATOR_SERIAL, 'shell', 'getprop', 'sys.boot_completed'],
-      { adb, timeoutMs: 30_000 }
-    );
+    const probe = await runAdbAsync(['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], {
+      adb,
+      timeoutMs: 30_000,
+    });
     if (probe.exitCode === 0 && probe.stdout.trim() === '1') {
-      return {
-        ok: true,
-        deviceId: EMULATOR_SERIAL,
-        backend: 'local-android',
-        name: avd,
-        reason: null,
-        refused: false,
-        choice: 'it is the only Android virtual device this machine has',
-      };
+      return result(true, null);
+    }
+    if (exitFailure != null) {
+      return result(
+        false,
+        `"${emulator} -avd ${avd}" ${exitFailure} before ${serial} booted${
+          readOnly ? ' (it was started -read-only, beside a running instance of the AVD)' : ''
+        }`
+      );
     }
     if (now() >= deadline) {
-      return {
-        ok: false,
-        deviceId: EMULATOR_SERIAL,
-        backend: 'local-android',
-        name: avd,
-        reason: `the emulator ${avd} did not finish booting within ${timeoutMs}ms — "${adb.bin} -s ${EMULATOR_SERIAL} shell getprop sys.boot_completed" never answered 1`,
-        refused: false,
-        choice: 'it is the only Android virtual device this machine has',
-      };
+      return result(
+        false,
+        `the emulator ${avd} did not finish booting within ${timeoutMs}ms — "${adb.bin} -s ${serial} shell getprop sys.boot_completed" never answered 1`
+      );
     }
-    await new Promise((resolve) => setTimeout(resolve, BOOT_POLL_MS));
+    await Promise.race([new Promise((resolve) => setTimeout(resolve, BOOT_POLL_MS)), failed]);
   }
 }
 

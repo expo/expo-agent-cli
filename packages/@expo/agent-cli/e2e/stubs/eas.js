@@ -55,13 +55,16 @@
 // - STUB_SIM_ID / STUB_SIM_STATUS / STUB_SIM_PLATFORM / STUB_SIM_TYPE: the one listed session
 //   (defaults `sess-e2e`, `IN_PROGRESS`, `IOS`, `agent-device`)
 // - STUB_SIM_GET_EXIT / STUB_SIM_STDERR: a refusal, with the real CLI's wording on stderr
+// - STUB_SIM_STORE: a directory that holds the remembered sessions (below) instead of the cwd, so
+//   two projects share one service: a session one of them started is listed to the other, which
+//   did not start it (@ref llp/0028-one-device-per-agent.rfc.md §EAS backend)
 //
 // `simulator` / `simulator:start`
 // - STUB_SIM_START_EXIT / STUB_SIM_START_STDERR: a session that never became ready
 // - STUB_SIM_START_ID: the id of the session it creates (default `sess-e2e-started`). Without
 //   `--json` it writes `.env.eas-simulator`, the way the real command does; with `--json` it does
 //   not, and prints the object the real command prints instead. A started session is
-//   **remembered** in `stub-eas-sessions.json` under the cwd: `simulator:list` lists it as in
+//   **remembered** in `stub-eas-sessions.json` under the cwd (or STUB_SIM_STORE): `simulator:list` lists it as in
 //   progress until `simulator:stop --id <id>` marks it stopped — the service's own memory, so a
 //   run that starts a session and then looks for it finds it
 //
@@ -242,17 +245,19 @@ if (command === 'build:list') {
 
 // ---- EAS Simulator ------------------------------------------------------------------------------
 
-/** The sessions this stub started under this cwd, newest first. */
+const sessionsPath = path.join(process.env.STUB_SIM_STORE || cwd, SESSIONS_NAME);
+
+/** The sessions this stub started under this cwd (or STUB_SIM_STORE), newest first. */
 function rememberedSessions() {
   try {
-    return JSON.parse(fs.readFileSync(path.join(cwd, SESSIONS_NAME), 'utf8'));
+    return JSON.parse(fs.readFileSync(sessionsPath, 'utf8'));
   } catch {
     return [];
   }
 }
 
 function writeRememberedSessions(sessions) {
-  fs.writeFileSync(path.join(cwd, SESSIONS_NAME), JSON.stringify(sessions));
+  fs.writeFileSync(sessionsPath, JSON.stringify(sessions));
 }
 
 /** The session the environment describes, which `simulator:list` and `simulator:get` answer with. */

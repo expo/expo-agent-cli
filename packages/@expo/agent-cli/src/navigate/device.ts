@@ -1,8 +1,9 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
-// Device discovery for deep-link navigation. Three backends, and the first two are the first booted
-// iOS simulator and the first attached Android device, read from the platform tools as subprocesses
-// so no simulator or emulator library is linked into the CLI.
+// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// Device discovery for deep-link navigation. Three backends, and the first two are the iOS
+// simulator and the Android device this worktree claims (`src/device/claimedDevice.ts`), read from
+// the platform tools as subprocesses so no simulator or emulator library is linked into the CLI.
 //
 // The third is not on this machine at all: an EAS Simulator session, driven through `eas
 // simulator:*` (`src/device/cloudSimulator.ts`). It is opt-in per caller rather than always
@@ -13,6 +14,7 @@
 // served.
 
 import { adbNotRunnableError, runAdbAsync, type AdbResolution } from '../device/adb';
+import { resolveClaimedDeviceAsync } from '../device/claimedDevice';
 import {
   cloudSessionStartCommand,
   cloudPlatformUnknownError,
@@ -56,9 +58,10 @@ export interface NavigateDevice {
   model?: string;
 }
 
+/** What this machine has booted, for a report. No verb takes its device from here. */
 export interface DeviceProbe {
-  device: NavigateDevice | null;
-  /** Why no device was found, for the error message. */
+  devices: NavigateDevice[];
+  /** Why no device was found, for the report. */
   reason?: string;
   /**
    * The device tool itself could not be run, so nothing was asked about devices.
@@ -68,16 +71,6 @@ export interface DeviceProbe {
    * Reporting the first for the second is friction run 6's F49.
    */
   toolError?: CommandError;
-}
-
-/**
- * Read the first booted iOS simulator out of `simctl list devices booted -j`.
- *
- * Only iOS runtimes are considered: a booted watchOS or tvOS simulator cannot open an app deep
- * link for this project.
- */
-export function parseBootedIosSimulator(stdout: string): { udid: string; name: string } | null {
-  return parseBootedIosSimulators(stdout)[0] ?? null;
 }
 
 /** Every booted iOS simulator in `simctl list devices booted -j`, in the order `simctl` lists them. */
@@ -137,12 +130,7 @@ export function parseAndroidDevices(stdout: string): AndroidDeviceLine[] {
   return devices;
 }
 
-/** Read the first ready device out of `adb devices`. */
-export function parseFirstAndroidDevice(stdout: string): string | null {
-  return parseAndroidDevices(stdout)[0]?.deviceId ?? null;
-}
-
-/** Look for a booted iOS simulator. Never throws: no simulator is an answer. */
+/** Every booted iOS simulator. Never throws: no simulator is an answer. */
 export async function probeIosSimulatorAsync(): Promise<DeviceProbe> {
   const { stdout, stderr, exitCode, spawnError } = await spawnCaptureAsync('xcrun', [
     'simctl',
@@ -154,7 +142,7 @@ export async function probeIosSimulatorAsync(): Promise<DeviceProbe> {
 
   if (spawnError) {
     return {
-      device: null,
+      devices: [],
       reason: `could not run "xcrun simctl": ${spawnError.message}`,
       // The same distinction the Android probe draws (F49): a tool that could not be started has
       // said nothing about this machine's devices, and a caller that turns "no device" into a
@@ -171,29 +159,24 @@ export async function probeIosSimulatorAsync(): Promise<DeviceProbe> {
   }
   if (exitCode !== 0) {
     return {
-      device: null,
+      devices: [],
       reason: `"xcrun simctl list devices booted" failed: ${stderr.trim() || `exit code ${exitCode}`}`,
     };
   }
 
-  const simulator = parseBootedIosSimulator(stdout);
-  if (!simulator) {
-    return { device: null, reason: 'no booted iOS simulator was found' };
-  }
-
-  debugEvent('device_resolved', { platform: 'ios', deviceId: simulator.udid });
-  return {
-    device: {
-      backend: 'local-ios',
-      platform: 'ios',
-      deviceId: simulator.udid,
-      name: simulator.name || undefined,
-    },
-  };
+  const devices = parseBootedIosSimulators(stdout).map(({ udid, name }): NavigateDevice => ({
+    backend: 'local-ios',
+    platform: 'ios',
+    deviceId: udid,
+    name: name || undefined,
+  }));
+  return devices.length
+    ? { devices }
+    : { devices: [], reason: 'no booted iOS simulator was found' };
 }
 
 /**
- * Look for an attached Android device or emulator. Never throws: no device is an answer.
+ * Every attached Android device and emulator. Never throws: no device is an answer.
  *
  * An `adb` that could not be started is **not** folded into that answer. It comes back as
  * {@link DeviceProbe.toolError}, so the caller reports a missing SDK as a missing SDK — the
@@ -208,33 +191,70 @@ export async function probeAndroidDeviceAsync(): Promise<DeviceProbe> {
 
   if (notRunnable) {
     return {
-      device: null,
+      devices: [],
       reason: `"adb" could not be run (${spawnError?.message ?? 'no reason given'}), so no device was looked for`,
       toolError: adbNotRunnableError(adb, spawnError?.message ?? 'the process did not start'),
     };
   }
   if (exitCode !== 0) {
     return {
-      device: null,
+      devices: [],
       reason: `"${adb.bin} devices -l" failed: ${stderr.trim() || `exit code ${exitCode}`}`,
     };
   }
 
-  const device = parseAndroidDevices(stdout)[0];
-  if (!device) {
-    return { device: null, reason: 'no Android device or emulator is attached' };
-  }
+  const devices = parseAndroidDevices(stdout).map(({ deviceId, model }): NavigateDevice => ({
+    backend: 'local-android',
+    platform: 'android',
+    deviceId,
+    adb,
+    model: model ?? undefined,
+  }));
+  return devices.length
+    ? { devices }
+    : { devices: [], reason: 'no Android device or emulator is attached' };
+}
 
-  debugEvent('device_resolved', { platform: 'android', deviceId: device.deviceId });
-  return {
-    device: {
-      backend: 'local-android',
-      platform: 'android',
-      deviceId: device.deviceId,
-      adb,
-      model: device.model ?? undefined,
-    },
-  };
+/**
+ * The device this worktree claims on the platform, when it is booted. Never boots one.
+ *
+ * `--device` and a registry that has no device to give are failures of their own, raised as they
+ * are: "boot a simulator" is no answer to either.
+ */
+async function claimedLocalDeviceAsync(
+  platform: NavigatePlatform,
+  context: ResolveDeviceContext,
+  { fallsThrough = false }: { fallsThrough?: boolean } = {}
+): Promise<{ device: NavigateDevice | null; reason: string; toolError?: CommandError }> {
+  const claimed = await resolveClaimedDeviceAsync({
+    platform,
+    projectRoot: context.projectRoot,
+    explicit: context.device ?? null,
+    allowBoot: false,
+  });
+  if (claimed.ok) {
+    debugEvent('device_resolved', { platform, deviceId: claimed.id });
+    return {
+      device: {
+        backend: claimed.backend,
+        platform,
+        deviceId: claimed.id,
+        name: claimed.name,
+        ...(claimed.adb ? { adb: claimed.adb } : {}),
+      },
+      reason: '',
+    };
+  }
+  if (claimed.kind === 'no-tool') {
+    return { device: null, reason: claimed.reason, toolError: claimed.error };
+  }
+  if (fallsThrough && (claimed.kind === 'not-found' || claimed.kind === 'exhausted')) {
+    return { device: null, reason: claimed.reason };
+  }
+  if (claimed.kind === 'exhausted' || claimed.kind === 'not-found' || claimed.kind === 'claimed') {
+    throw claimed.error;
+  }
+  return { device: null, reason: claimed.reason };
 }
 
 /**
@@ -296,15 +316,15 @@ export async function probeCloudDeviceAsync(
  * @throws {CommandError} when the requested platform, or no backend at all, has a device.
  */
 export async function resolveDeviceAsync(
-  platform?: NavigatePlatform,
-  context: ResolveDeviceContext = {}
+  platform: NavigatePlatform | undefined,
+  context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
   if (context.cloud === 'required') {
     return await resolveCloudDeviceAsync(platform, context);
   }
 
   if (platform === 'ios') {
-    const probe = await probeIosSimulatorAsync();
+    const probe = await claimedLocalDeviceAsync('ios', context);
     if (probe.device) {
       return probe.device;
     }
@@ -328,7 +348,7 @@ export async function resolveDeviceAsync(
   }
 
   if (platform === 'android') {
-    const probe = await probeAndroidDeviceAsync();
+    const probe = await claimedLocalDeviceAsync('android', context);
     if (probe.device) {
       return probe.device;
     }
@@ -353,12 +373,15 @@ export async function resolveDeviceAsync(
     );
   }
 
-  const iosProbe = process.platform === 'darwin' ? await probeIosSimulatorAsync() : null;
+  const iosProbe =
+    process.platform === 'darwin'
+      ? await claimedLocalDeviceAsync('ios', context, { fallsThrough: true })
+      : null;
   if (iosProbe?.device) {
     return iosProbe.device;
   }
 
-  const androidProbe = await probeAndroidDeviceAsync();
+  const androidProbe = await claimedLocalDeviceAsync('android', context);
   if (androidProbe.device) {
     return androidProbe.device;
   }
@@ -417,8 +440,10 @@ export interface ResolveDeviceContext {
   devServerRunning?: boolean;
   /** Whether the cloud backend is on this run's ladder. Defaults to `off`. */
   cloud?: CloudPreference;
-  /** The project whose session is looked for. Required for anything but `off`. */
-  projectRoot?: string;
+  /** The worktree whose claimed device, or EAS session, is looked for. */
+  projectRoot: string;
+  /** `--device`: a UDID, serial or name, claimed for this worktree (llp/0028 §Explicit device). */
+  device?: string | null;
 }
 
 /**

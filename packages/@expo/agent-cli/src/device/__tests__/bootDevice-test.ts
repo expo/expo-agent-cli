@@ -1,19 +1,22 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
-// The two choices this module makes before it touches anything: which simulator to boot, and which
-// AVD to start. Both are pure functions of a tool's output, and both can be wrong in a way that
-// costs a minute of a real run and then fails against the device it picked — so they are pinned
-// here, with no Xcode and no Android SDK involved.
+// @ref llp/0028-one-device-per-agent.rfc.md §Android boot
+// The parsers and the order the claim ranks simulators in, and the emulator boot argv. Pinned here
+// with no Xcode and no Android SDK involved.
 
 import path from 'path';
 
 import {
-  EMULATOR_SERIAL,
+  bootEmulatorAsync,
+  emulatorPort,
+  emulatorSerial,
+  findFreeEmulatorPortAsync,
   parseAvds,
   parseSimulators,
-  pickSimulator,
+  compareSimulators,
   resolveEmulator,
   type SimulatorEntry,
 } from '../bootDevice';
+import { fakeDeviceTools } from './fakeDeviceTools';
 
 /** A `simctl list devices -j` payload, in the shape the real tool prints. */
 function listing(devices: Record<string, unknown[]>): string {
@@ -104,114 +107,35 @@ describe(parseSimulators, () => {
   });
 });
 
-describe(pickSimulator, () => {
+describe(compareSimulators, () => {
+  const first = (simulators: SimulatorEntry[]) => [...simulators].sort(compareSimulators)[0]?.udid;
+
   // The rule, and it is about **installed apps** rather than about recency. Expo Go and a
   // development build both live on one device, so a simulator nobody has booted is a device the
   // `app` phase could never have answered against — and this machine lists ten of them beside the
   // one in use.
-  it(`takes the simulator this developer last used, over a newer one nobody has`, () => {
-    const picked = pickSimulator([
-      simulator({ udid: 'FRESH', name: 'iPhone 17 Pro Max', version: [26, 5], lastBootedAt: 0 }),
-      simulator({
-        udid: 'IN-USE',
-        name: 'iPhone 17 Pro',
-        version: [26, 5],
-        lastBootedAt: Date.parse('2026-08-26T04:50:48Z'),
-      }),
-    ]);
-
-    expect(picked?.udid).toBe('IN-USE');
+  it(`puts the simulator this developer last used before a newer one nobody has`, () => {
+    expect(
+      first([
+        simulator({ udid: 'FRESH', name: 'iPhone 17 Pro Max', version: [26, 5], lastBootedAt: 0 }),
+        simulator({
+          udid: 'IN-USE',
+          name: 'iPhone 17 Pro',
+          version: [26, 5],
+          lastBootedAt: Date.parse('2026-08-26T04:50:48Z'),
+        }),
+      ])
+    ).toBe('IN-USE');
   });
 
-  it(`takes an iPhone on the newest runtime`, () => {
-    const picked = pickSimulator([
-      simulator({ udid: 'OLD-PHONE', name: 'iPhone 15', version: [18, 0] }),
-      simulator({ udid: 'NEW-PAD', name: 'iPad Pro 13-inch', version: [26, 5] }),
-      simulator({ udid: 'NEW-PHONE', name: 'iPhone 17 Pro', version: [26, 5] }),
-    ]);
-
-    expect(picked?.udid).toBe('NEW-PHONE');
-  });
-
-  // A run on some device is worth much more than a run on none, so an iPad is taken when that is
-  // all this machine has.
-  it(`takes whatever there is when there is no iPhone`, () => {
-    expect(pickSimulator([simulator({ udid: 'PAD', name: 'iPad Pro 13-inch' })])?.udid).toBe('PAD');
-  });
-
-  // The caller only reaches this after its own probe found nothing booted, so a `Booted` device
-  // here is a race — and joining it is both faster and less disruptive than booting a second one.
-  it(`joins a simulator that is already booted, whatever its runtime`, () => {
-    const picked = pickSimulator([
-      simulator({ udid: 'NEW', name: 'iPhone 17 Pro', version: [26, 5] }),
-      simulator({ udid: 'UP', name: 'iPhone 15', version: [18, 0], state: 'Booted' }),
-    ]);
-
-    expect(picked?.udid).toBe('UP');
-  });
-
-  it(`takes no device whose runtime is gone, and none at all when there is none`, () => {
-    expect(pickSimulator([simulator({ isAvailable: false })])).toBeNull();
-    expect(pickSimulator([])).toBeNull();
-  });
-});
-
-// @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app.
-//
-// The rule above chose the simulator most recently used, which is a *proxy* for "the one with the
-// apps on it". A live run found where the proxy breaks: a dev-client project booted a fresh
-// simulator and the deep link came back `115` — no handler — after a 12.4 s boot for a device that
-// could never have opened it. So the app itself is the rule now, and `lastBootedAt` is what breaks
-// the tie among the devices that have it.
-describe(`${pickSimulator.name} when the app decides`, () => {
-  const fresh = simulator({ udid: 'FRESH', name: 'iPhone 17', lastBootedAt: 0 });
-  const used = simulator({
-    udid: 'USED',
-    name: 'iPhone 17 Pro',
-    lastBootedAt: Date.parse('2026-08-30T08:00:00Z'),
-  });
-  const older = simulator({
-    udid: 'OLDER',
-    name: 'iPhone Air',
-    lastBootedAt: Date.parse('2026-08-20T08:00:00Z'),
-  });
-
-  it(`takes the device that has the app over the one used more recently`, () => {
-    const picked = pickSimulator([fresh, used, older], {
-      hasApp: (entry) => entry.udid === 'OLDER',
-    });
-
-    expect(picked?.udid).toBe('OLDER');
-  });
-
-  it(`breaks a tie between devices that have it the way it always did`, () => {
-    const picked = pickSimulator([fresh, used, older], {
-      hasApp: (entry) => entry.udid !== 'FRESH',
-    });
-
-    expect(picked?.udid).toBe('USED');
-  });
-
-  // The whole point: a boot that could not have opened the app is worse than no boot, because it
-  // costs the minute *and* answers nothing.
-  it(`takes nothing when no device has the app`, () => {
-    expect(pickSimulator([fresh, used, older], { hasApp: () => false })).toBeNull();
-  });
-
-  // A booted device still wins outright, and still without asking about the app: the caller only
-  // reaches this when its own probe found none, so one here is a race worth joining.
-  it(`still joins a simulator that is already booted`, () => {
-    const up = simulator({ udid: 'UP', state: 'Booted', lastBootedAt: 0 });
-
-    expect(pickSimulator([used, up], { hasApp: (entry) => entry.udid === 'USED' })?.udid).toBe(
-      'UP'
-    );
-  });
-
-  // No question asked is not the same as answered no. A caller that does not know which app it is
-  // about gets the rule that was there before this one.
-  it(`falls back to the most recently used when nothing asks about an app`, () => {
-    expect(pickSimulator([fresh, used, older])?.udid).toBe('USED');
+  it(`puts an iPhone on the newest runtime first`, () => {
+    expect(
+      first([
+        simulator({ udid: 'OLD-PHONE', name: 'iPhone 15', version: [18, 0] }),
+        simulator({ udid: 'NEW-PAD', name: 'iPad Pro 13-inch', version: [26, 5] }),
+        simulator({ udid: 'NEW-PHONE', name: 'iPhone 17 Pro', version: [26, 5] }),
+      ])
+    ).toBe('NEW-PHONE');
   });
 });
 
@@ -261,12 +185,100 @@ describe(resolveEmulator, () => {
   });
 });
 
-// @ref src/device/bootDevice.ts — friction run 6, F62. An emulator started without
-// `-ports 5554,5555` binds ephemeral ports and `adb devices` never lists it *at all*. The serial
-// is therefore knowable before the boot, which is the only reason the cleanup can be registered
-// before the device is touched.
-describe('the serial an emulator this CLI starts is always on', () => {
-  it(`is the one the -ports argument pins`, () => {
-    expect(EMULATOR_SERIAL).toBe('emulator-5554');
+// @ref llp/0028-one-device-per-agent.rfc.md §Android boot
+describe(findFreeEmulatorPortAsync, () => {
+  it(`takes the first even port whose adb port is free too`, async () => {
+    const taken = new Set([5554, 5557]);
+    expect(await findFreeEmulatorPortAsync({ isFree: async (port) => !taken.has(port) })).toBe(
+      5558
+    );
+  });
+
+  it(`skips the ports the caller names`, async () => {
+    expect(
+      await findFreeEmulatorPortAsync({ isFree: async () => true, skip: (port) => port === 5554 })
+    ).toBe(5556);
+  });
+
+  it(`answers null when all sixteen are taken`, async () => {
+    expect(await findFreeEmulatorPortAsync({ isFree: async () => false })).toBeNull();
+  });
+});
+
+describe(emulatorPort, () => {
+  it(`reads the console port out of an emulator serial, and nothing else`, () => {
+    expect(emulatorPort(emulatorSerial(5560))).toBe(5560);
+    expect(emulatorPort('R58M123ABC')).toBeNull();
+  });
+});
+
+describe(bootEmulatorAsync, () => {
+  const adb = { bin: 'adb', source: 'PATH' as const, searched: [], fromPathOnly: true };
+  const emulator = process.platform === 'win32' ? 'emulator.exe' : 'emulator';
+
+  it(`starts the AVD on the ports it was given, and waits on that serial`, async () => {
+    const tools = fakeDeviceTools((_command, args) =>
+      args.includes('sys.boot_completed') ? { stdout: '1\n' } : {}
+    );
+    const result = await bootEmulatorAsync(
+      { avd: 'Pixel_8', port: 5558, readOnly: false },
+      { timeoutMs: 1_000, adb }
+    );
+    expect(result).toMatchObject({ ok: true, deviceId: 'emulator-5558', name: 'Pixel_8' });
+    expect(tools.callsWith('-avd ')).toEqual([
+      `${emulator} -avd Pixel_8 -ports 5558,5559 -no-snapshot-save`,
+    ]);
+    expect(tools.callsWith('getprop')).toEqual([
+      'adb -s emulator-5558 shell getprop sys.boot_completed',
+    ]);
+  });
+
+  it(`fails at once, with the exit code, when the emulator exits before it boots`, async () => {
+    fakeDeviceTools((command) => (command === emulator ? { exitCode: 1 } : {}));
+    const started = Date.now();
+
+    const result = await bootEmulatorAsync(
+      { avd: 'Pixel_8', port: 5556, readOnly: true },
+      { timeoutMs: 600_000, adb }
+    );
+
+    expect(result).toMatchObject({ ok: false, deviceId: 'emulator-5556' });
+    expect(result.reason).toContain('exited with code 1');
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it(`keeps waiting when the emulator launcher exits 0`, async () => {
+    let probes = 0;
+    fakeDeviceTools((command, args) => {
+      if (command === emulator) {
+        return { exitCode: 0 };
+      }
+      if (args.includes('sys.boot_completed')) {
+        probes += 1;
+        return { stdout: '1\n' };
+      }
+      return {};
+    });
+
+    const result = await bootEmulatorAsync(
+      { avd: 'Pixel_8', port: 5556, readOnly: false },
+      { timeoutMs: 1_000, adb }
+    );
+
+    expect(result).toMatchObject({ ok: true });
+    expect(probes).toBe(1);
+  });
+
+  it(`starts a second instance of a running AVD read-only`, async () => {
+    const tools = fakeDeviceTools((_command, args) =>
+      args.includes('sys.boot_completed') ? { stdout: '1\n' } : {}
+    );
+    await bootEmulatorAsync(
+      { avd: 'Pixel_8', port: 5556, readOnly: true },
+      { timeoutMs: 1_000, adb }
+    );
+    expect(tools.callsWith('-avd ')).toEqual([
+      `${emulator} -avd Pixel_8 -ports 5556,5557 -no-snapshot-save -read-only`,
+    ]);
   });
 });

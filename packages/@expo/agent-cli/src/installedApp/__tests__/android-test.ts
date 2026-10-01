@@ -6,6 +6,9 @@ import os from 'os';
 import path from 'path';
 
 import type { AdbRawRunResult, AdbRunResult } from '../../device/adb';
+import type { ClaimedDeviceResult } from '../../device/claimedDevice';
+import type { DeviceClaim } from '../../deviceClaims';
+import { CommandError } from '../../utils/errors';
 import { readInstalledFingerprintAndroidAsync } from '../android';
 
 const realFs = await vi.importActual<typeof import('fs')>('node:fs');
@@ -97,7 +100,40 @@ function fakeAdb(devices: FakeDevice[]) {
     };
   };
 
-  return { calls, runAdbAsync, runAdbRawAsync, androidDeviceNameAsync: async () => null };
+  // The worktree claims the first device, as the registry would give it.
+  const resolveClaimedDeviceAsync = async (): Promise<ClaimedDeviceResult> => {
+    const [first] = devices;
+    return first
+      ? {
+          ok: true,
+          backend: 'local-android',
+          id: first.serial,
+          name: 'Pixel_9',
+          claim: {} as DeviceClaim,
+          booted: false,
+          choice: 'this worktree claimed it already',
+          hasApp: null,
+          adb,
+        }
+      : {
+          ok: false,
+          kind: 'no-device',
+          reason: 'no Android device or emulator is attached',
+          error: new CommandError('NO_DEVICE', 'none'),
+          deviceId: null,
+          name: null,
+          holders: [],
+        };
+  };
+
+  return {
+    calls,
+    projectRoot: '/project',
+    runAdbAsync,
+    runAdbRawAsync,
+    androidDeviceNameAsync: async () => null,
+    resolveClaimedDeviceAsync,
+  };
 }
 
 describe(readInstalledFingerprintAndroidAsync, () => {
@@ -176,13 +212,33 @@ describe(readInstalledFingerprintAndroidAsync, () => {
     ).resolves.toMatchObject({ status: 'no-embedded-fingerprint' });
   });
 
-  it(`skips an unreachable device and answers from the one that could be read`, async () => {
+  // @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+  it(`reads only the device this worktree claims, and lists no other`, async () => {
+    const fake = fakeAdb([
+      { serial: 'emulator-5554', apk: null },
+      { serial: 'emulator-5556', apk: APK },
+    ]);
+    await expect(
+      readInstalledFingerprintAndroidAsync({ expectedHash: EMBEDDED_HASH, appId: APP_ID, ...fake })
+    ).resolves.toMatchObject({
+      status: 'app-not-installed',
+      device: { identifier: 'emulator-5554' },
+    });
+    expect(fake.calls.some((args) => args.includes('emulator-5556'))).toBe(false);
+  });
+
+  it(`skips an unreachable device --device matches and answers from one that could be read`, async () => {
     const fake = fakeAdb([
       { serial: 'R58M1', apk: APK, offline: true },
       { serial: 'emulator-5554', apk: APK },
     ]);
     await expect(
-      readInstalledFingerprintAndroidAsync({ expectedHash: EMBEDDED_HASH, appId: APP_ID, ...fake })
+      readInstalledFingerprintAndroidAsync({
+        expectedHash: EMBEDDED_HASH,
+        appId: APP_ID,
+        device: 'Pixel_9',
+        ...fake,
+      })
     ).resolves.toMatchObject({ status: 'ok', device: { identifier: 'emulator-5554' } });
   });
 
@@ -218,8 +274,10 @@ describe(readInstalledFingerprintAndroidAsync, () => {
   it(`throws the adb tool error when adb cannot run`, async () => {
     await expect(
       readInstalledFingerprintAndroidAsync({
+        projectRoot: '/project',
         expectedHash: 'x',
         appId: APP_ID,
+        device: 'emulator-5554',
         runAdbAsync: async () => ({
           stdout: '',
           stderr: '',

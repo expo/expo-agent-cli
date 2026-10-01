@@ -354,6 +354,10 @@ export function spawnAgentCli(
       // This tier doubles the dev server, never a device (llp/0002 §Tier 0): without this, a
       // `dev` run on a developer's Mac would boot a real simulator against a stub dev server.
       AGENT_CLI_NO_DEVICE: '1',
+      // The device-claim registry lives under the Expo home (llp/0028 §The registry). Unless the
+      // test chose a home, one per project directory, so a run never reads or writes the
+      // developer's claims, and parallel tests never claim each other's stub devices.
+      __UNSAFE_EXPO_HOME_DIRECTORY: processEnv.__UNSAFE_EXPO_HOME_DIRECTORY ?? `${cwd}.expo-home`,
       ...stubExpoEnv(cwd),
       ...env,
     },
@@ -478,7 +482,7 @@ export function devLockAddress(projectRoot: string): string {
   // Must match `canonicalizeExistingPath` in `src/utils/dir.ts`: Node's JS `realpathSync` does
   // not expand Windows 8.3 names, and the CLI's native realpath does. A test that hashed the
   // short form never found the lock the CLI published.
-  const canonical = canonicalLockRoot(projectRoot);
+  const canonical = canonicalRoot(projectRoot);
   const digest = crypto
     .createHash('sha1')
     .update(canonical.toLowerCase())
@@ -495,7 +499,8 @@ export function devLockAddress(projectRoot: string): string {
     : path.join(os.tmpdir(), `agent-cli-dev-server-${digest}.sock`);
 }
 
-function canonicalLockRoot(projectRoot: string): string {
+/** The project root as the CLI records it: the native realpath, so the long form on Windows. */
+export function canonicalRoot(projectRoot: string): string {
   const resolved = path.resolve(projectRoot);
   try {
     const native = fs.realpathSync.native;

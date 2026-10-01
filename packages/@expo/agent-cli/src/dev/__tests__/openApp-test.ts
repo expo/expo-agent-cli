@@ -1,23 +1,15 @@
-import { bootDeviceAsync } from '../../device/bootDevice';
+import { resolveClaimedDeviceAsync } from '../../device/claimedDevice';
 import { checkExpoGoVersionAsync } from '../../device/expoGoVersion';
 import { installExpoGoAsync } from '../../device/installExpoGo';
 import { simulatorHasAppAsync } from '../../device/installedApps';
 import { androidHasAppAsync } from '../../device/androidApps';
-import { probeAndroidDeviceAsync, probeIosSimulatorAsync } from '../../navigate/device';
 import { openRouteAsync } from '../../navigate/openRoute';
 import { CommandError } from '../../utils/errors';
 import { openAppOnDeviceAsync } from '../openApp';
 
 vi.mock('../../log');
 vi.mock('../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
-vi.mock('../../navigate/device', () => ({
-  probeIosSimulatorAsync: vi.fn(),
-  probeAndroidDeviceAsync: vi.fn(),
-}));
-vi.mock('../../device/bootDevice', () => ({
-  bootDeviceAsync: vi.fn(),
-  BOOT_DEVICE_TIMEOUT_MS: { ios: 1, android: 1 },
-}));
+vi.mock('../../device/claimedDevice', () => ({ resolveClaimedDeviceAsync: vi.fn() }));
 vi.mock('../../device/expoGoVersion', () => ({ checkExpoGoVersionAsync: vi.fn() }));
 vi.mock('../../device/installExpoGo', () => ({ installExpoGoAsync: vi.fn() }));
 vi.mock('../../device/installedApps', () => ({ simulatorHasAppAsync: vi.fn() }));
@@ -28,10 +20,42 @@ vi.mock('../../project/nodeModules', () => ({ readSdkVersionAsync: vi.fn(async (
 const projectRoot = '/project';
 const DEV_SERVER = 'http://127.0.0.1:8081';
 
+function mockClaimed({
+  id = 'UDID-1',
+  booted = false,
+  backend = 'local-ios' as 'local-ios' | 'local-android',
+} = {}) {
+  vi.mocked(resolveClaimedDeviceAsync).mockResolvedValue({
+    ok: true,
+    backend,
+    id,
+    name: 'iPhone',
+    claim: {} as any,
+    booted,
+    choice: 'this worktree claimed it already',
+    hasApp: null,
+    adb: null,
+  });
+}
+
 function mockBootedSimulator(udid = 'UDID-1') {
-  vi.mocked(probeIosSimulatorAsync).mockResolvedValue({
-    device: { backend: 'local-ios', platform: 'ios', deviceId: udid },
-  } as any);
+  mockClaimed({ id: udid });
+}
+
+function mockRefused(
+  kind: 'no-device' | 'no-tool' | 'boot-failed',
+  reason: string,
+  message = reason
+) {
+  vi.mocked(resolveClaimedDeviceAsync).mockResolvedValue({
+    ok: false,
+    kind,
+    reason,
+    error: new CommandError('X', message),
+    deviceId: null,
+    name: null,
+    holders: [],
+  });
 }
 
 function mockOpenOk() {
@@ -58,7 +82,7 @@ afterEach(() => {
 });
 
 describe(openAppOnDeviceAsync, () => {
-  it(`opens on the simulator that is already booted, and boots nothing`, async () => {
+  it(`opens on the simulator this worktree claims`, async () => {
     mockBootedSimulator();
 
     const report = await openAppOnDeviceAsync(projectRoot, {
@@ -68,7 +92,9 @@ describe(openAppOnDeviceAsync, () => {
     });
 
     expect(report).toMatchObject({ opened: true, deviceId: 'UDID-1', booted: false, reason: null });
-    expect(bootDeviceAsync).not.toHaveBeenCalled();
+    expect(resolveClaimedDeviceAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ platform: 'ios', projectRoot, allowBoot: true })
+    );
     expect(openRouteAsync).toHaveBeenCalledWith(
       projectRoot,
       expect.objectContaining({
@@ -80,20 +106,8 @@ describe(openAppOnDeviceAsync, () => {
     );
   });
 
-  it(`boots a device when none is up`, async () => {
-    vi.mocked(probeIosSimulatorAsync).mockResolvedValue({
-      device: null,
-      reason: 'none booted',
-    } as any);
-    vi.mocked(bootDeviceAsync).mockResolvedValue({
-      ok: true,
-      deviceId: 'UDID-2',
-      backend: 'local-ios',
-      name: 'iPhone',
-      reason: null,
-      refused: false,
-      choice: 'first available',
-    });
+  it(`reports the boot when the claimed device had to be booted`, async () => {
+    mockClaimed({ id: 'UDID-2', booted: true });
 
     const report = await openAppOnDeviceAsync(projectRoot, {
       platform: 'ios',
@@ -104,20 +118,8 @@ describe(openAppOnDeviceAsync, () => {
     expect(report).toMatchObject({ opened: true, deviceId: 'UDID-2', booted: true });
   });
 
-  it(`stops with the boot's own reason when no device comes up`, async () => {
-    vi.mocked(probeIosSimulatorAsync).mockResolvedValue({
-      device: null,
-      reason: 'none booted',
-    } as any);
-    vi.mocked(bootDeviceAsync).mockResolvedValue({
-      ok: false,
-      deviceId: null,
-      backend: null,
-      name: null,
-      reason: 'no simulator runtime is installed',
-      refused: false,
-      choice: null,
-    });
+  it(`stops with the claim's own reason when no device comes up`, async () => {
+    mockRefused('boot-failed', 'no simulator runtime is installed');
 
     const report = await openAppOnDeviceAsync(projectRoot, {
       platform: 'ios',
@@ -129,15 +131,12 @@ describe(openAppOnDeviceAsync, () => {
     expect(openRouteAsync).not.toHaveBeenCalled();
   });
 
-  it(`stops on a missing device tool without booting anything`, async () => {
-    vi.mocked(probeIosSimulatorAsync).mockResolvedValue({
-      device: null,
-      reason: 'could not run "xcrun simctl"',
-      toolError: new CommandError(
-        'XCRUN_NOT_RUNNABLE',
-        'Could not run "xcrun simctl".\nWhy: not found.'
-      ),
-    } as any);
+  it(`stops on a missing device tool with the tool's headline`, async () => {
+    mockRefused(
+      'no-tool',
+      'could not run "xcrun simctl"',
+      'Could not run "xcrun simctl".\nWhy: not found.'
+    );
 
     const report = await openAppOnDeviceAsync(projectRoot, {
       platform: 'ios',
@@ -146,8 +145,7 @@ describe(openAppOnDeviceAsync, () => {
     });
 
     expect(report.opened).toBe(false);
-    expect(report.reason).toContain('xcrun simctl');
-    expect(bootDeviceAsync).not.toHaveBeenCalled();
+    expect(report.reason).toBe('Could not run "xcrun simctl".');
   });
 
   it(`installs Expo Go when the device has not got it`, async () => {
@@ -193,9 +191,7 @@ describe(openAppOnDeviceAsync, () => {
   });
 
   it(`asks adb on Android, through the same door`, async () => {
-    vi.mocked(probeAndroidDeviceAsync).mockResolvedValue({
-      device: { backend: 'local-android', platform: 'android', deviceId: 'emulator-5554' },
-    } as any);
+    mockClaimed({ id: 'emulator-5554', backend: 'local-android' });
     vi.mocked(androidHasAppAsync).mockResolvedValue(true);
     vi.mocked(checkExpoGoVersionAsync).mockResolvedValue({ verdict: 'match' } as any);
 

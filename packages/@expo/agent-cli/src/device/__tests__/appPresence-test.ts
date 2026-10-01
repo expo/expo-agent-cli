@@ -7,7 +7,6 @@
 
 import type { NavigateDevice } from '../../navigate/device';
 import { probeAppPresenceAsync } from '../appPresence';
-import type { LocalDeviceProbe } from '../localDevice';
 
 const APP_ID = 'com.example.app';
 const projectRoot = '/project';
@@ -20,13 +19,12 @@ function androidDevice(deviceId = 'emulator-5554'): NavigateDevice {
   return { backend: 'local-android', platform: 'android', deviceId };
 }
 
-function probeOf(devices: NavigateDevice[]): () => Promise<LocalDeviceProbe> {
-  return async () => ({
-    state: devices.length ? 'present' : 'absent',
-    device: devices[0] ?? null,
-    devices,
-    reason: devices.length ? null : 'no device',
-  });
+/** The device this worktree claims, per platform. */
+function probeOf(devices: NavigateDevice[]) {
+  return async (_projectRoot: string, platform: string) => {
+    const device = devices.find((candidate) => candidate.platform === platform);
+    return device ? { deviceId: device.deviceId, backend: device.backend as 'local-ios' } : null;
+  };
 }
 
 /** The defaults every row overrides one of: an iOS simulator that has the app. */
@@ -35,7 +33,10 @@ function deps(overrides: Parameters<typeof probeAppPresenceAsync>[2] = {}) {
     readAppId: () => APP_ID,
     probeDeviceAsync: probeOf([iosDevice()]),
     hasAppOnDevice: async () => true,
-    androidDeviceName: async () => 'tuft-pixel',
+    runDeviceArgument: async (_root: string, platform: string, deviceId: string) => ({
+      ok: true as const,
+      value: platform === 'ios' ? deviceId : 'tuft-pixel',
+    }),
     ...overrides,
   };
 }
@@ -85,11 +86,30 @@ describe(probeAppPresenceAsync, () => {
       deps({
         probeDeviceAsync: probeOf([androidDevice()]),
         hasAppOnDevice: async () => false,
-        androidDeviceName: async () => null,
+        runDeviceArgument: async () => ({ ok: true as const, value: null }),
       })
     );
 
     expect(probe).toEqual({ presence: 'missing', installDevice: null });
+  });
+
+  // @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+  it(`should carry the reason when no --device value is safe for the device`, async () => {
+    const probe = await probeAppPresenceAsync(
+      projectRoot,
+      'android',
+      deps({
+        probeDeviceAsync: probeOf([androidDevice()]),
+        hasAppOnDevice: async () => false,
+        runDeviceArgument: async () => ({ ok: false as const, reason: 'two emulators share it' }),
+      })
+    );
+
+    expect(probe).toEqual({
+      presence: 'missing',
+      installDevice: null,
+      installRefusal: 'two emulators share it',
+    });
   });
 
   it(`should ask about the id the project config names`, async () => {

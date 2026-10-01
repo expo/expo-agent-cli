@@ -1,8 +1,11 @@
 // @ref llp/0027-everything-on-eas.rfc.md §The open is a session
+import { readClaims, writeClaim } from '../../deviceClaims';
+import { vol } from 'memfs';
 import * as Log from '../../log';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { resolveEasCli } from '../../utils/easCli';
+import { canonicalizeExistingPath } from '../../utils/dir';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import {
@@ -34,6 +37,8 @@ vi.mock('../../utils/easCli', async () => {
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 
 const projectRoot = '/project/my-app';
+// The root a claim carries: on Windows the CLI resolves the literal to `C:\project\my-app`.
+const claimRoot = canonicalizeExistingPath(projectRoot);
 const DEV_SERVER = 'http://127.0.0.1:8081';
 const EAS_CLI = {
   command: '/usr/bin/npx',
@@ -85,6 +90,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.resetAllMocks();
+  vol.reset();
 });
 
 describe(buildSessionStartArgs, () => {
@@ -258,6 +264,27 @@ describe(openAppOnEasAsync, () => {
     expect(options).toMatchObject({ cwd: projectRoot });
   });
 
+  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  it(`binds the session it started to this worktree with an eas claim`, async () => {
+    await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+
+    expect(readClaims()).toMatchObject([
+      {
+        backend: 'eas',
+        platform: 'ios',
+        id: '11111111-2222-3333-4444-555555555555',
+        projectRoot: claimRoot,
+        created: true,
+        booted: false,
+      },
+    ]);
+  });
+
   it(`starts a session with the build id and the dev-launcher URL for a development build`, async () => {
     await openAppOnEasAsync(projectRoot, {
       platform: 'ios',
@@ -383,6 +410,7 @@ describe(openAppOnEasAsync, () => {
     expect(report.started).toBe(true);
     expect(report.reason).toContain('exited 1');
     expect(report.reason).toContain('npx --yes eas-cli@latest simulator:stop --id sess-billed');
+    expect(readClaims()).toMatchObject([{ id: 'sess-billed', projectRoot: claimRoot }]);
   });
 
   it(`says when no eas can be run at all`, async () => {
@@ -424,6 +452,38 @@ describe('the session half on its own', () => {
       'sess-1',
       '--non-interactive',
     ]);
+  });
+
+  it(`releases the claim of a session it stopped, and keeps it when the stop failed`, async () => {
+    const claim = {
+      backend: 'eas' as const,
+      platform: 'ios' as const,
+      id: 'sess-1',
+      projectRoot: claimRoot,
+      pid: 1,
+      claimedAt: '2026-09-30T10:00:00.000Z',
+      touchedAt: '2026-09-30T10:00:00.000Z',
+      created: true,
+      booted: false,
+    };
+    writeClaim(claim);
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: '',
+      stderr: 'Session not found',
+      exitCode: 1,
+      spawnError: null,
+    } as any);
+    await stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI);
+    expect(readClaims()).toHaveLength(1);
+
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: 'stopped',
+      stderr: '',
+      exitCode: 0,
+      spawnError: null,
+    } as any);
+    await stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI);
+    expect(readClaims()).toEqual([]);
   });
 
   it(`reports a stop that took, and quotes one that did not`, async () => {

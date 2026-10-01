@@ -9,7 +9,11 @@
 // already builds what is missing and installs it, and two flags are what make it usable from
 // inside a run that is already under way.
 
-import { androidDeviceNameAsync, installDevBuildAsync } from '../installDevBuild';
+import {
+  androidDeviceNameAsync,
+  expoRunDeviceArgumentAsync,
+  installDevBuildAsync,
+} from '../installDevBuild';
 
 /** One `adb` run's result, with the fields the name reader looks at. */
 function ranAdb(over: Partial<{ stdout: string; exitCode: number | null; notRunnable: boolean }>) {
@@ -199,5 +203,51 @@ describe(androidDeviceNameAsync, () => {
     });
 
     expect(name).toBeNull();
+  });
+});
+
+// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+describe(expoRunDeviceArgumentAsync, () => {
+  /** Running emulators, and the AVD each one runs. */
+  function adbWith(avds: Record<string, string>) {
+    return async (args: string[]) =>
+      args[0] === 'devices'
+        ? ranAdb({
+            stdout: [
+              'List of devices attached',
+              ...Object.keys(avds).map((serial) => `${serial}\tdevice`),
+              '',
+            ].join('\n'),
+          })
+        : ranAdb({ stdout: `${avds[args[1]!]}\nOK\n` });
+  }
+
+  it(`passes the serial to an Expo CLI of 58 or newer, which matches it first`, async () => {
+    expect(
+      await expoRunDeviceArgumentAsync('/project', 'android', 'emulator-5556', {
+        run: adbWith({ 'emulator-5554': 'Pixel_8', 'emulator-5556': 'Pixel_8' }),
+        readCliMajor: async () => 58,
+      })
+    ).toEqual({ ok: true, value: 'emulator-5556' });
+  });
+
+  it(`passes the AVD name to an Expo CLI of 57, which matches only names`, async () => {
+    expect(
+      await expoRunDeviceArgumentAsync('/project', 'android', 'emulator-5556', {
+        run: adbWith({ 'emulator-5554': 'Pixel_7', 'emulator-5556': 'Pixel_8' }),
+        readCliMajor: async () => 57,
+      })
+    ).toEqual({ ok: true, value: 'Pixel_8' });
+  });
+
+  it(`refuses on 57 when another running emulator has the same AVD name`, async () => {
+    const argument = await expoRunDeviceArgumentAsync('/project', 'android', 'emulator-5556', {
+      run: adbWith({ 'emulator-5554': 'Pixel_8', 'emulator-5556': 'Pixel_8' }),
+      readCliMajor: async () => 57,
+    });
+
+    expect(argument.ok).toBe(false);
+    expect(!argument.ok && argument.reason).toContain('emulator-5554');
+    expect(!argument.ok && argument.reason).toContain('@expo/cli 58');
   });
 });
