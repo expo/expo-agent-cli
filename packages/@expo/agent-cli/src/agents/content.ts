@@ -86,6 +86,7 @@ export function generateAgentsMdBlock({
     'The full Expo docs for this project’s SDK can be local Markdown files.',
     `- \`${PROGRAM_PREFIX} docs:sync\` downloads them and prints two directories: all docs, and this SDK’s API reference. Grep those directories.`,
     `- \`${PROGRAM_PREFIX} docs:search <query>\` returns ranked pages with file paths and line numbers.`,
+    'Links in the docs point to `https://docs.expo.dev/<path>.md`. To read one locally, open `<path>.md` in the docs directory that `docs:sync` printed.',
     'Prefer the local docs over web fetches of docs.expo.dev.',
     '',
     '## Expo skills',
