@@ -58,6 +58,16 @@ class Env {
    *
    * @see llp/0023-fingerprint-caching.rfc.md §What the stamps miss
    */
+  /**
+   * Never sync the Expo docs on its own: not in `agents:setup` or `new`, not after an install, and
+   * not in the background of a stale `docs:search`. `docs:sync` and a first search still download.
+   *
+   * @see llp/0030-local-docs.rfc.md §Automatic sync
+   */
+  get AGENT_CLI_NO_DOCS_SYNC() {
+    return boolish('AGENT_CLI_NO_DOCS_SYNC', false);
+  }
+
   get AGENT_CLI_NO_FINGERPRINT_CACHE() {
     return boolish('AGENT_CLI_NO_FINGERPRINT_CACHE', false);
   }

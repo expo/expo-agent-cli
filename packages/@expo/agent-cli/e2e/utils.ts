@@ -357,6 +357,8 @@ export function spawnAgentCli(
       AGENT_CLI_NO_DEVICE: '1',
       // Per project, so one test's Expo home state never reaches another test or the real home.
       __UNSAFE_EXPO_HOME_DIRECTORY: `${cwd}.expo-home`,
+      // Setup, `new`, install and a stale search would otherwise download docs from the network.
+      AGENT_CLI_NO_DOCS_SYNC: '1',
       ...stubExpoEnv(cwd),
       // `dev` picks the port before the plan and passes it as `--port`, which the stub listens on
       // over its own env var. Expo's default variable makes the two the same port.
