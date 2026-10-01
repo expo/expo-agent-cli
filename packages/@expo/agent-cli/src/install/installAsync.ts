@@ -1,3 +1,4 @@
+import { refreshDocsAfterInstallAsync } from '../docs/autoSync';
 import { buildInstallFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import type { FollowUp } from '../followups/types';
 import * as Log from '../log';
@@ -53,6 +54,10 @@ export async function installAsync(projectRoot: string, plan: InstallPlan): Prom
     if (plan.skillContext && plan.syncScope === 'packages') {
       await printSkillsForAgentAsync(projectRoot, { packages: plan.packages });
     }
+  }
+
+  if (!plan.check) {
+    await refreshDocsAfterInstallAsync(projectRoot);
   }
 
   await reportAsync(projectRoot, plan, { exitCode, impact, checkPayload, checkOutput });
