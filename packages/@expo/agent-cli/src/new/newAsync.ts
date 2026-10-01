@@ -4,6 +4,7 @@
 import chalk from 'chalk';
 import path from 'path';
 
+import { docsSummary, syncDocsForProjectAsync, type DocsAutoSyncResult } from '../docs/autoSync';
 import { writeProjectInstructionsAsync } from '../agents/projectInstructions';
 import type { AgentsMdResult } from '../agents/types';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
@@ -42,6 +43,8 @@ export interface NewProjectReport {
   gitInitialized: boolean;
   /** Instructions written after scaffolding, or null when creation or instruction setup failed. */
   agentsMd: AgentsMdResult | null;
+  /** The docs sync after scaffolding, or null when `--no-docs` or a failed creation skipped it. */
+  docs: DocsAutoSyncResult | null;
   errors: string[];
   followups: FollowUp[];
 }
@@ -106,6 +109,7 @@ export async function createNewProjectAsync(cwd: string, options: NewOptions): P
   } catch (error) {
     errors.push(`AGENTS.md: ${error instanceof Error ? error.message : String(error)}`);
   }
+  const docs = options.docs ? await syncDocsForProjectAsync(projectRoot) : null;
   event('created', {
     projectRoot,
     name,
@@ -127,6 +131,7 @@ export async function createNewProjectAsync(cwd: string, options: NewOptions): P
     gitInitialized: git.initialized,
     followups,
     agentsMd,
+    docs,
     errors,
   };
 
@@ -178,6 +183,7 @@ function reportFailure(
       installed: false,
       gitInitialized: false,
       agentsMd: null,
+      docs: null,
       errors: [],
       followups: [],
     };
@@ -207,6 +213,7 @@ function summaryLines(report: NewProjectReport, gitDetail: string): string[] {
   row('Install', report.installed ? 'done' : 'skipped (--no-install)');
   row('Git', gitDetail);
   row('AGENTS.md', report.agentsMd?.action ?? 'failed (see errors)');
+  if (report.docs) row('Docs', docsSummary(report.docs));
 
   return lines;
 }

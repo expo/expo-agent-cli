@@ -92,6 +92,7 @@ describe(runSetupAsync, () => {
       },
       agentsMd: { path: 'AGENTS.md', action: 'created' },
       claudeMd: { path: 'CLAUDE.md', action: 'created' },
+      docs: { status: 'skipped', reason: 'AGENT_CLI_NO_DOCS_SYNC is set' },
       notes: [],
     });
     expect(vol.readFileSync('/project/AGENTS.md', 'utf8')).toContain(
@@ -149,6 +150,12 @@ describe(runSetupAsync, () => {
     expect(syncSkillsAsync).toHaveBeenCalled();
   });
 
+  it('should skip the docs sync with docs disabled', async () => {
+    const report = await runSetupAsync(projectRoot, options({ docs: false }));
+
+    expect(report.docs).toBeNull();
+  });
+
   it('should preserve CLAUDE.md content and append the shared instructions import', async () => {
     vol.writeFileSync('/project/CLAUDE.md', '# Rules\n');
 
@@ -191,6 +198,7 @@ describe(printSetupAsync, () => {
       'agentsMd',
       'cancelled',
       'claudeMd',
+      'docs',
       'errors',
       'notes',
       'plugins',
@@ -221,6 +229,7 @@ describe(printSetupAsync, () => {
       skillsDiscovered: 1,
       agentsMdAction: 'created',
       claudeMdAction: 'created',
+      docsStatus: 'skipped',
       noteCount: 0,
       scope: 'user',
       cancelled: false,

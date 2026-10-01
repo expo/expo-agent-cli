@@ -9,6 +9,7 @@ describe(resolveNewOptions, () => {
       example: undefined,
       install: true,
       git: true,
+      docs: true,
       json: false,
       followups: true,
     });
@@ -23,6 +24,7 @@ describe(resolveNewOptions, () => {
         '--json',
         '--no-install',
         '--no-git',
+        '--no-docs',
         '--no-followups',
       ])
     ).toEqual({
@@ -32,6 +34,7 @@ describe(resolveNewOptions, () => {
       example: undefined,
       install: false,
       git: false,
+      docs: false,
       json: true,
       followups: false,
     });

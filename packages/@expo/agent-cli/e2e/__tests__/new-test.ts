@@ -313,6 +313,7 @@ fs.writeFileSync(manifestPath, JSON.stringify(manifest));
     expect(Object.keys(report).sort()).toEqual([
       'agentsMd',
       'created',
+      'docs',
       'errors',
       'followups',
       'gitInitialized',

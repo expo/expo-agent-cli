@@ -109,7 +109,7 @@ The `docs` group has no default action. Bare `docs` prints the group listing. It
 **`docs:search <query> [--regex] [--sdk N] [--limit 20] [--json] [--no-followups]`**:
 
 - It syncs when the bundles it needs are missing, unless `EXPO_OFFLINE` is set. Offline with nothing cached, it fails with `DOCS_NOT_SYNCED` and names `docs:sync`.
-- It warns on stderr when the cache is older than seven days.
+- When the cache is older than seven days, it searches the current copy and starts a background sync. When automatic syncs are off, it warns on stderr instead.
 - Scope: everything outside `versions/`, plus `versions/<chosen>/`. It never descends through `versions/latest`.
 - Default mode: case-insensitive terms that must all be on the page. The frontmatter is not body text.
 - Score, highest weight first: title, path slug (`sdk/camera`), headings, body.
@@ -118,6 +118,23 @@ The `docs` group has no default action. Bare `docs` prints the group listing. It
 - Each hit: `{ path, file, url, title, heading, line, snippet }`. `file` is absolute, so an agent opens it at `line`.
 - Human output: `title  file:line`, then one snippet line.
 - JSON keys: `dir, sdk, query, hits, followups`. `followups` is empty today: the next step is to read a file.
+
+## Automatic sync
+
+The docs must exist before an agent needs them, and they must follow the project's SDK. Four triggers sync without a `docs:sync` call. `src/docs/autoSync.ts` holds all of them.
+
+| Trigger        | How                                                                                 | Report                   |
+| -------------- | ----------------------------------------------------------------------------------- | ------------------------ |
+| `agents:setup` | In-process, after the `AGENTS.md` block. `--no-docs` skips it.                      | `docs` key, a "Docs" row |
+| `new`          | In-process, after the `AGENTS.md` block. `--no-docs` skips it.                      | `docs` key, a "Docs" row |
+| `install`      | Background, when the cache is in use and lacks the project's SDK after the install. | nothing                  |
+| `docs:search`  | Background, when the cache is older than seven days.                                | a stderr line            |
+
+- **A failed sync fails nothing.** Setup and `new` report `{ status: 'failed', reason }` and exit as they would without the sync. A host without bundles (`DOCS_UNAVAILABLE`, HTTP 404) is `failed` too. The docs build publishes the bundles before this CLI ships, so a 404 means a broken host, and it must be visible.
+- **The project's SDK** is the installed `expo`, else the `expo` range in `package.json`. A project made with `new --no-install` has only the range.
+- **A background sync** is a detached `docs:sync --sdk <N> --json --no-followups` of this CLI's own entry script. The cache lock keeps it from colliding with another sync.
+- **`install` never starts a first sync.** It acts only for a user who already has a manifest, because a download nobody asked for is not part of an install.
+- **Off switches.** `AGENT_CLI_NO_DOCS_SYNC` and `EXPO_OFFLINE` turn off every automatic sync. The unit tests and the e2e tier set `AGENT_CLI_NO_DOCS_SYNC`, so no test reaches the network by accident.
 
 ## How an agent finds the files
 
@@ -131,6 +148,6 @@ The `docs` group has no default action. Bare `docs` prints the group listing. It
 
 Unit tests cover bundle parsing and every rejected path shape, ranking and the regex mode on in-memory pages, version selection, and the swap and lock against a real temporary directory. The sync tests use a mocked `fetch`: first sync, unchanged digest, changed digest, digest mismatch, missing version, a failure mid-unpack, and two concurrent syncs that download once.
 
-The e2e tier serves a fixture `index.json` and two small bundles from a local HTTP server, and runs the built CLI with `AGENT_CLI_DOCS_URL` and `AGENT_CLI_DOCS_DIR`.
+The e2e tier serves a fixture `index.json` and small bundles from a local HTTP server, and runs the built CLI with `AGENT_CLI_DOCS_URL` and `AGENT_CLI_DOCS_DIR`. The automatic-sync tests turn `AGENT_CLI_NO_DOCS_SYNC` off for one run: setup syncs the fixture's SDK, `--no-docs` downloads nothing, a failed sync leaves setup successful, and a stale search refreshes the manifest in the background.
 
 The bundle producer is a script in expo/docs, outside this package.

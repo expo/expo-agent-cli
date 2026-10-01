@@ -10,9 +10,9 @@ import {
 } from '../followups';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
-import { readSdkVersionAsync } from '../project/nodeModules';
 import { CommandError } from '../utils/errors';
 import { findUpProjectRootOrCwd } from '../utils/findUp';
+import { projectSdkVersionAsync, startBackgroundDocsSync } from './autoSync';
 import { versionMajor, versionNames, type VersionBundleName } from './bundle';
 import {
   docsCacheDir,
@@ -35,12 +35,8 @@ interface OutputOptions {
   followups: boolean;
 }
 
-async function projectSdkVersionAsync(): Promise<string | null> {
-  try {
-    return await readSdkVersionAsync(findUpProjectRootOrCwd(process.cwd()));
-  } catch {
-    return null;
-  }
+async function cwdProjectSdkVersionAsync(): Promise<string | null> {
+  return projectSdkVersionAsync(findUpProjectRootOrCwd(process.cwd()));
 }
 
 function row(label: string, value: string): string {
@@ -71,7 +67,7 @@ export async function runDocsSyncAsync(
     dir: docsCacheDir(),
     baseUrl: docsBaseUrl(),
     sdkFlag: options.sdkFlag,
-    projectSdkVersion: await projectSdkVersionAsync(),
+    projectSdkVersion: await cwdProjectSdkVersionAsync(),
     force: options.force,
     progress: Log.progress,
   });
@@ -157,7 +153,7 @@ async function resolveSearchScopeAsync(
   dir: string,
   sdkFlag: string | undefined
 ): Promise<{ selection: SdkSelection; synced: boolean }> {
-  const projectSdkVersion = await projectSdkVersionAsync();
+  const projectSdkVersion = await cwdProjectSdkVersionAsync();
   const manifest = await readManifestAsync(dir);
   const wanted = manifest
     ? wantedVersion({ flag: sdkFlag, projectSdkVersion, latest: manifest.latest })
@@ -206,9 +202,16 @@ async function resolveSearchScopeAsync(
     available,
   });
   if (Date.now() - Date.parse(manifest.syncedAt) > STALE_AFTER_MS) {
-    Log.warn(
-      `The local Expo docs were last synced ${manifest.syncedAt.slice(0, 10)}. Run "${PROGRAM_PREFIX} docs:sync" to update them.`
-    );
+    const syncedOn = manifest.syncedAt.slice(0, 10);
+    if (startBackgroundDocsSync(selection.version)) {
+      Log.progress(
+        `The local Expo docs were last synced ${syncedOn}. They are updating in the background; this search reads the current copy.`
+      );
+    } else {
+      Log.warn(
+        `The local Expo docs were last synced ${syncedOn}. Run "${PROGRAM_PREFIX} docs:sync" to update them.`
+      );
+    }
   }
   return { selection, synced: false };
 }
