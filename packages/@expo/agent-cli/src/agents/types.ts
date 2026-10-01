@@ -1,5 +1,6 @@
 // @ref llp/0006-agent-native-cli-surface.rfc.md §The `@expo/agent-cli` launcher, §Errors are prompts
 // Shared contract of `@expo/agent-cli agents:setup`: what the command was asked to do, and what it did.
+import type { DocsAutoSyncResult } from '../docs/autoSync';
 
 export interface SetupOptions {
   /** Agent ids from `--agent`, resolved the same way `@expo/agent-cli skills:sync` resolves them. */
@@ -8,6 +9,8 @@ export interface SetupOptions {
   agentsMd: boolean;
   /** Link the agent skills of the installed packages. Disabled by `--no-agent-skills`. */
   agentSkills: boolean;
+  /** Sync the Expo docs of the project's SDK. Disabled by `--no-docs`. */
+  docs?: boolean;
   /** Install official Expo plugins or skills. Disabled by --no-plugins. */
   plugins?: boolean;
   /** Accept the setup plan without prompting. */
@@ -53,6 +56,8 @@ export interface SetupReport {
   agentsMd: AgentsMdResult | null;
   /** The Claude import, when Claude was selected and instruction setup ran. */
   claudeMd: ClaudeMdResult | null;
+  /** The docs sync. Null without a project, or when `--no-docs` skipped it. */
+  docs: DocsAutoSyncResult | null;
   /** Agent ids this run targeted, from the flags, the cached selection, or detection. */
   agents: string[];
   /** Setup notes that are not failures, such as skipped project phases. */

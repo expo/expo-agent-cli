@@ -14,6 +14,7 @@ export const agentsSetupHelp: CommandHelp = {
     `--agent <agent>     Set up for specific agents (can be used multiple times)`,
     `--no-agents-md      Do not create or update AGENTS.md or CLAUDE.md`,
     `--no-agent-skills   Do not link the agent skills of the installed packages`,
+    `--no-docs           Do not download the Expo docs of the project's SDK`,
     `--json              Print the result as JSON`,
     `-h, --help          Usage info`,
   ],
@@ -48,6 +49,7 @@ export const agentsSetupHelp: CommandHelp = {
       'skills',
       'agentsMd',
       'claudeMd',
+      'docs',
       'agents',
       'notes',
     ],
@@ -55,7 +57,7 @@ export const agentsSetupHelp: CommandHelp = {
   notes: [
     `Plugins/skills install in user home by default. --project requires an Expo app and installs`,
     `skills for Codex instead of its user-wide plugin. Use --yes for non-interactive setup.`,
-    `Inside an Expo app, package skill sync and AGENTS.md generation run with either scope.`,
+    `Inside an Expo app, package skill sync, AGENTS.md generation and the docs sync run with either scope.`,
     `Safe to run again at any time. Everything outside the AGENTS.md block markers is yours and`,
     `is left untouched. For Claude, setup creates or appends an @AGENTS.md import to CLAUDE.md.`,
   ],
@@ -73,6 +75,7 @@ export const agentCliAgentsSetup: Command = async (argv) => {
       '--agent': [String],
       '--no-agents-md': Boolean,
       '--no-agent-skills': Boolean,
+      '--no-docs': Boolean,
       // Aliases
       '-h': '--help',
     },
@@ -97,6 +100,7 @@ export const agentCliAgentsSetup: Command = async (argv) => {
       agents: args['--agent'] ?? [],
       agentsMd: !args['--no-agents-md'],
       agentSkills: !args['--no-agent-skills'],
+      docs: !args['--no-docs'],
       json: !!args['--json'],
     });
   })().catch(logCmdError);

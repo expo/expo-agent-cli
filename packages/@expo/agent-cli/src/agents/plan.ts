@@ -2,6 +2,8 @@
 import os from 'os';
 import path from 'path';
 
+import { autoSyncDisabledReason } from '../docs/autoSync';
+import { docsCacheDir } from '../docs/cache';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import { declaresExpoSync } from '../project/expoApp';
@@ -116,6 +118,9 @@ export async function prepareSetupAsync(
           `Ensure CLAUDE.md imports AGENTS.md in ${projectRoot}, preserving existing instructions and shared-file links.`
         );
       }
+    }
+    if (options.docs !== false && !autoSyncDisabledReason()) {
+      lines.push(`Download the Expo docs of the project's SDK to ${docsCacheDir()}.`);
     }
   } else {
     lines.push('No Expo project: project skill sync and instruction-file generation are skipped.');

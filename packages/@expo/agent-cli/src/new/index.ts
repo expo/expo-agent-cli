@@ -13,6 +13,7 @@ export const newHelp: CommandHelp = {
     `-e, --example <example>     Example from expo/examples to pass to create-expo`,
     `--no-install                Skip installing the dependencies`,
     `--no-git                    Skip initializing a git repository`,
+    `--no-docs                   Skip downloading the Expo docs of the new project's SDK`,
     `--json                      Print the result as JSON`,
     `--no-followups              Skip the "Suggested next:" section of suggested follow-up commands`,
     `-h, --help                  Usage info`,
@@ -39,7 +40,7 @@ export const newHelp: CommandHelp = {
   json: {
     stdout: 'one object, and nothing else',
     stderr: 'the create-expo output, progress and errors',
-    keys: ['projectRoot', 'name', 'created', 'installed', 'gitInitialized', 'followups'],
+    keys: ['projectRoot', 'name', 'created', 'installed', 'gitInitialized', 'docs', 'followups'],
   },
   notes: [
     `Runs create-expo in a subprocess with every prompt answered, so it works with no TTY`,
