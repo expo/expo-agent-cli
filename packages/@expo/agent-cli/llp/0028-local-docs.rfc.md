@@ -48,7 +48,7 @@ A bundle line is `{ "path": "versions/v57.0.0/sdk/camera", "title": "Camera", "c
 
 **Change detection by `sha256` in `index.json`.** It works the same on any static host. `index.json` is fetched with `cache: 'no-store'`. The digest of the downloaded bytes is checked before anything is unpacked.
 
-**Base URL.** `DEFAULT_DOCS_BUNDLE_URL` is a temporary GitHub release, `https://github.com/vonovak/expo-video-tests/releases/download/docs-bundle-poc`. The final host is `https://docs.expo.dev/static/agents`, after the docs build publishes the bundles. `AGENT_CLI_DOCS_URL` overrides it. The CLI always fetches the base URL, follows redirects, ignores the content type, and never stores a redirect target: a signed release-asset URL expires within an hour.
+**Base URL.** `DEFAULT_DOCS_BUNDLE_URL` is `https://docs.expo.dev/static/agents`. `AGENT_CLI_DOCS_URL` overrides it. Until the docs build publishes the bundles there, that `index.json` is HTTP 404, and a sync fails with `DOCS_UNAVAILABLE`, which names the variable. So this CLI can ship first, and the commands start to work when the docs deploy, with no new release. A temporary host for testing is the `docs-bundle-poc` release of `vonovak/expo-video-tests`. The CLI always fetches the base URL, follows redirects, ignores the content type, and never stores a redirect target: a signed release-asset URL expires within an hour.
 
 ## Local cache
 

@@ -210,6 +210,15 @@ describe(syncDocsAsync, () => {
     expect(fs.readdirSync(dir)).toEqual(['notes.txt']);
   });
 
+  it('names a host without an index as one that publishes no bundles', async () => {
+    const missing = (async () => new Response('', { status: 404 })) as unknown as typeof fetch;
+
+    await expect(syncWith({ ...fakeHost(), fetch: missing }, makeTempDir())).rejects.toMatchObject({
+      code: 'DOCS_UNAVAILABLE',
+      message: expect.stringContaining('AGENT_CLI_DOCS_URL'),
+    });
+  });
+
   it('reports an HTTP failure with the URL', async () => {
     const host = fakeHost();
     const failing = (async (url: string) =>
@@ -243,7 +252,7 @@ describe(syncDocsAsync, () => {
 });
 
 describe(docsBaseUrl, () => {
-  it('has a default host, and takes AGENT_CLI_DOCS_URL without a trailing slash', () => {
+  it('defaults to the docs site, and takes AGENT_CLI_DOCS_URL without a trailing slash', () => {
     expect(docsBaseUrl({})).toBe(DEFAULT_DOCS_BUNDLE_URL);
     expect(docsBaseUrl({ AGENT_CLI_DOCS_URL: 'http://127.0.0.1:1/x/' })).toBe(
       'http://127.0.0.1:1/x'
