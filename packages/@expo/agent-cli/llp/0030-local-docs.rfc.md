@@ -88,7 +88,7 @@ Each bundle is unpacked into `.tmp-<pid>/`. Then one top-level entry at a time i
 
 ### Concurrency
 
-`.lock` is taken with an exclusive create. A lock older than ten minutes is stale and is replaced. A second run waits, then reads `manifest.json` again. It then usually has nothing to download, because the digests match.
+`.lock` is taken with an exclusive create, and it holds the process ID of its holder. A lock whose process has exited is replaced at once: a sync stopped with Ctrl-C, or killed by a closed pipe, releases nothing [observed — a sync piped into a failing `jq` left its lock, and the next sync waited]. A lock older than ten minutes is stale and is replaced too, which covers a holder on another machine that shares the cache directory. A second run waits, then reads `manifest.json` again. It then usually has nothing to download, because the digests match.
 
 ## SDK version selection
 
