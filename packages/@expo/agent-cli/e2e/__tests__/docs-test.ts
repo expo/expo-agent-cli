@@ -523,24 +523,11 @@ describe('automatic sync', () => {
     const result = await executeAgentCliAsync(
       projectRoot,
       ['agents:setup', '--yes', '--no-plugins', '--agent', 'claude-code', '--json'],
-      autoSyncEnv({ AGENT_CLI_DOCS_URL: 'http://127.0.0.1:9/agents' })
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout).docs).toMatchObject({ status: 'failed' });
-  });
-
-  it('agents:setup skips the sync while the host publishes no bundles', async () => {
-    const projectRoot = await setupFixtureAsync('skills-app');
-
-    const result = await executeAgentCliAsync(
-      projectRoot,
-      ['agents:setup', '--yes', '--no-plugins', '--agent', 'claude-code', '--json'],
       autoSyncEnv({ AGENT_CLI_DOCS_URL: `${baseUrl}/missing` })
     );
 
     expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout).docs).toMatchObject({ status: 'skipped' });
+    expect(JSON.parse(result.stdout).docs).toMatchObject({ status: 'failed' });
   });
 
   it('a search of stale docs refreshes them in the background', async () => {

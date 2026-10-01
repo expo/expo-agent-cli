@@ -68,10 +68,6 @@ export async function syncDocsForProjectAsync(projectRoot: string): Promise<Docs
       downloaded: result.bundles.some((bundle) => bundle.status === 'downloaded'),
     };
   } catch (error) {
-    // Before the docs build publishes the bundles, a missing index is the expected state.
-    if ((error as { code?: string })?.code === 'DOCS_UNAVAILABLE') {
-      return { status: 'skipped', reason: `${docsBaseUrl()} publishes no docs bundles yet` };
-    }
     return { status: 'failed', reason: error instanceof Error ? error.message : String(error) };
   }
 }
