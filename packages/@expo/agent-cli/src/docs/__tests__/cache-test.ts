@@ -184,6 +184,22 @@ describe(acquireDocsLockAsync, () => {
     expect(fs.existsSync(path.join(dir, LOCK_FILE))).toBe(false);
   });
 
+  it('replaces at once the lock of a run that has exited', async () => {
+    const dir = makeTempDir();
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, LOCK_FILE), '424242 killed-run');
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid) => {
+      if (pid === 424242) throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+      return true;
+    });
+
+    const lock = await acquireDocsLockAsync(dir, { pollMs: 10 });
+
+    expect(lock.waited).toBe(false);
+    await lock.release();
+    kill.mockRestore();
+  });
+
   it('replaces a stale lock', async () => {
     const dir = makeTempDir();
     fs.mkdirSync(dir, { recursive: true });
