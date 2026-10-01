@@ -66,6 +66,8 @@ describe('the flags this CLI writes onto a command line', () => {
     // `--no-open` among them, which is `dev`'s own flag for "serve without opening the app". They
     // are here because leaving them out would mean keeping an exclusion list, which is a place for
     // a real one to hide.
+    // The `--json` and `--no-followups` rows of `src/docs/autoSync.ts` are the same: a background
+    // `docs:sync` of this CLI.
     //
     // `--yes  src/utils/easCli.ts` is the one row whose command line belongs to **npm's exec**
     // rather than to a member of the Expo family: it is what keeps the EAS CLI's runner from
@@ -147,9 +149,11 @@ describe('the flags this CLI writes onto a command line', () => {
           "--json  src/deploy/launchCli.ts",
           "--json  src/device/expoGoVersion.ts",
           "--json  src/device/installExpoGo.ts",
+          "--json  src/docs/autoSync.ts",
           "--json  src/impact/runtimeVersion.ts",
           "--json  src/install/resolveOptions.ts",
           "--no-bundler  src/device/installDevBuild.ts",
+          "--no-followups  src/docs/autoSync.ts",
           "--no-install  src/new/createExpo.ts",
           "--no-open  src/smoke/smokeAsync.ts",
           "--noEmit  src/typecheck/checkAsync.ts",
@@ -160,6 +164,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--preset  src/project/fingerprint.ts",
           "--pretty  src/typecheck/checkAsync.ts",
           "--project  src/deploy/launchCli.ts",
+          "--sdk  src/docs/autoSync.ts",
           "--template  src/new/createExpo.ts",
           "--type  src/config/introspectAsync.ts",
           "--type  src/impact/runtimeVersion.ts",
