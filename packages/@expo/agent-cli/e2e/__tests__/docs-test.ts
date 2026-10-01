@@ -121,6 +121,17 @@ function bundleDownloads(): string[] {
 }
 
 describe('docs:sync', () => {
+  it('names AGENT_CLI_DOCS_URL when the host publishes no bundles', async () => {
+    const result = await executeAgentCliAsync(cwd, ['docs:sync', '--json'], {
+      env: { AGENT_CLI_DOCS_URL: `${baseUrl}/missing`, AGENT_CLI_DOCS_DIR: docsDir },
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error).toMatchObject({ code: 'DOCS_UNAVAILABLE' });
+    expect(fs.existsSync(docsDir)).toBe(false);
+  });
+
   it('downloads the shared docs and the latest SDK outside a project, and prints the directories', async () => {
     const result = await executeAgentCliAsync(cwd, ['docs', 'sync', '--json'], docsEnv());
     const report = JSON.parse(result.stdout);
