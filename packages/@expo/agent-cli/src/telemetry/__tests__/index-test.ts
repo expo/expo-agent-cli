@@ -8,6 +8,7 @@ describe('command telemetry handoff', () => {
 
   beforeEach(() => {
     vi.stubEnv('EXPO_NO_TELEMETRY', '0');
+    vi.stubEnv('DO_NOT_TRACK', undefined);
     vi.stubEnv('EXPO_OFFLINE', '0');
     child.removeAllListeners();
     vi.mocked(spawn).mockReturnValue(child as unknown as ReturnType<typeof spawn>);
@@ -36,10 +37,33 @@ describe('command telemetry handoff', () => {
     expect(child.unref).toHaveBeenCalledOnce();
   });
 
-  it.each(['EXPO_NO_TELEMETRY', 'EXPO_OFFLINE'])('does no work with %s enabled', (key) => {
-    vi.stubEnv(key, 'true');
-    recordCommand('status', '1.2.3');
-    expect(spawn).not.toHaveBeenCalled();
+  it.each(['EXPO_NO_TELEMETRY', 'DO_NOT_TRACK', 'EXPO_OFFLINE'])(
+    'does no work with %s enabled',
+    (key) => {
+      vi.stubEnv(key, 'true');
+      recordCommand('status', '1.2.3');
+      expect(spawn).not.toHaveBeenCalled();
+    }
+  );
+
+  describe.each(['EXPO_NO_TELEMETRY', 'DO_NOT_TRACK'])('%s privacy handling', (key) => {
+    it.each(['', '1', 'true', 'TRUE', 'yes', 'no', '2', ' false '])(
+      'does not spawn for the opt-out value %j',
+      (value) => {
+        vi.stubEnv(key, value);
+        expect(() => recordCommand('status', '1.2.3')).not.toThrow();
+        expect(spawn).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([undefined, '0', 'false', 'FALSE'])(
+      'allows the worker when the privacy flag is %j',
+      (value) => {
+        vi.stubEnv(key, value);
+        recordCommand('status', '1.2.3');
+        expect(spawn).toHaveBeenCalledOnce();
+      }
+    );
   });
 
   it('leaves the command alone if spawning fails synchronously', () => {

@@ -100,6 +100,117 @@ it('uses the winning identity when two workers initialize it concurrently', asyn
   expect(await fs.readdir(expoHome)).toEqual(['agent-cli-telemetry-id']);
 });
 
+it.each(['', 'not-a-uuid'])('repairs a corrupt anonymous ID and reuses it: %j', async (value) => {
+  const filename = path.join(expoHome, 'agent-cli-telemetry-id');
+  vol.fromJSON({ [filename]: value });
+
+  const identity = await getTelemetryIdentityAsync();
+
+  expect(identity).toEqual({ anonymousId: expect.stringMatching(/^[a-f0-9-]{36}$/) });
+  expect(await getTelemetryIdentityAsync()).toEqual(identity);
+  expect(await fs.readFile(filename, 'utf8')).toBe(identity.anonymousId);
+  expect((await fs.stat(filename)).mode & 0o777).toBe(0o600);
+  expect(await fs.readdir(expoHome)).toEqual(['agent-cli-telemetry-id']);
+});
+
+it('uses one repaired identity when workers encounter the same corrupt ID concurrently', async () => {
+  const filename = path.join(expoHome, 'agent-cli-telemetry-id');
+  vol.fromJSON({ [filename]: 'corrupt' });
+  const unlink = vi.spyOn(fs, 'unlink');
+
+  const identities = await Promise.all(
+    Array.from({ length: 8 }, () => getTelemetryIdentityAsync())
+  );
+
+  expect(identities).toEqual(Array.from({ length: 8 }, () => identities[0]));
+  expect(await fs.readFile(filename, 'utf8')).toBe(identities[0]!.anonymousId);
+  expect(unlink.mock.calls.filter(([file]) => file === filename)).toHaveLength(1);
+  expect(await fs.readdir(expoHome)).toEqual(['agent-cli-telemetry-id']);
+});
+
+it('preserves an identity published by a new worker while a corrupt ID is being repaired', async () => {
+  const filename = path.join(expoHome, 'agent-cli-telemetry-id');
+  vol.fromJSON({ [filename]: 'corrupt' });
+  const unlink = fs.unlink;
+  let winner: Awaited<ReturnType<typeof getTelemetryIdentityAsync>> | undefined;
+  vi.spyOn(fs, 'unlink').mockImplementation(async (file) => {
+    await unlink(file);
+    if (file === filename) winner = await getTelemetryIdentityAsync();
+  });
+
+  const identity = await getTelemetryIdentityAsync();
+
+  expect(winner).toBeDefined();
+  expect(identity).toEqual(winner);
+  expect(await fs.readFile(filename, 'utf8')).toBe(winner!.anonymousId);
+  expect(await fs.readdir(expoHome)).toEqual(['agent-cli-telemetry-id']);
+});
+
+it('waits for repair when a publication collision is followed by a temporarily missing ID', async () => {
+  const filename = path.join(expoHome, 'agent-cli-telemetry-id');
+  vol.fromJSON({ [filename]: 'corrupt' });
+  const link = fs.link;
+  let repairStarted = false;
+  vi.spyOn(fs, 'link').mockImplementationOnce(async (...args) => {
+    try {
+      await link(...args);
+    } catch (error) {
+      await fs.unlink(filename);
+      repairStarted = true;
+      throw error;
+    }
+  });
+  const readFile = fs.readFile;
+  vi.spyOn(fs, 'readFile').mockImplementation(async (...args) => {
+    try {
+      return await readFile(...args);
+    } catch (error) {
+      if (args[0] === filename && repairStarted) {
+        await fs.writeFile(filename, anonymousId);
+      }
+      throw error;
+    }
+  });
+
+  expect(await getTelemetryIdentityAsync()).toEqual({ anonymousId });
+  expect(await fs.readFile(filename, 'utf8')).toBe(anonymousId);
+  expect(await fs.readdir(expoHome)).toEqual(['agent-cli-telemetry-id']);
+});
+
+it('does not treat an unreadable identity as corrupt or attempt to replace it', async () => {
+  const filename = path.join(expoHome, 'agent-cli-telemetry-id');
+  vol.fromJSON({ [filename]: anonymousId });
+  const readFile = fs.readFile;
+  vi.spyOn(fs, 'readFile').mockImplementation(async (...args) => {
+    if (args[0] === filename) throw Object.assign(new Error('unreadable'), { code: 'EACCES' });
+    return readFile(...args);
+  });
+  const link = vi.spyOn(fs, 'link');
+
+  expect(await getTelemetryIdentityAsync()).toEqual({
+    anonymousId: expect.stringMatching(/^[a-f0-9-]{36}$/),
+  });
+
+  expect(link).not.toHaveBeenCalled();
+  expect(await readFile(filename, 'utf8')).toBe(anonymousId);
+  expect(await fs.readdir(expoHome)).toEqual(['agent-cli-telemetry-id']);
+});
+
+it('falls back without stealing a repair lock left by an interrupted worker', async () => {
+  const filename = path.join(expoHome, 'agent-cli-telemetry-id');
+  vol.fromJSON({ [filename]: 'corrupt' });
+  await fs.mkdir(`${filename}.lock`);
+
+  expect(await getTelemetryIdentityAsync()).toEqual({
+    anonymousId: expect.stringMatching(/^[a-f0-9-]{36}$/),
+  });
+  expect(await fs.readFile(filename, 'utf8')).toBe('corrupt');
+  expect(await fs.readdir(expoHome)).toEqual([
+    'agent-cli-telemetry-id',
+    'agent-cli-telemetry-id.lock',
+  ]);
+});
+
 it('does not publish an incomplete ID when writing fails after file creation', async () => {
   const writeFile = fs.writeFile;
   vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (file, _data, options) => {

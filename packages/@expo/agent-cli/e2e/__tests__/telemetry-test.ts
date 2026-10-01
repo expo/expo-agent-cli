@@ -134,6 +134,7 @@ if (isWorker(process.argv[1])) {
       NODE_OPTIONS: `--require "${preload.replaceAll('\\', '/')}"`,
       __UNSAFE_EXPO_HOME_DIRECTORY: home,
       EXPO_NO_TELEMETRY: '0',
+      DO_NOT_TRACK: '0',
       EXPO_OFFLINE: '0',
       EXPO_STAGING: '0',
       EXPO_LOCAL: '0',
@@ -266,6 +267,30 @@ describe('@expo/agent-cli telemetry', () => {
     expect(telemetry.readEvents().filter((event) => event.type === 'settled')).toHaveLength(1);
   });
 
+  it('repairs a corrupt identity once across concurrent bundled workers', async () => {
+    const home = telemetry.env.__UNSAFE_EXPO_HOME_DIRECTORY;
+    const filename = path.join(home, 'agent-cli-telemetry-id');
+    await fs.promises.unlink(path.join(home, 'state.json'));
+    await fs.promises.writeFile(filename, 'corrupt');
+    await telemetry.releaseRequest();
+
+    await Promise.all(
+      Array.from({ length: 4 }, () =>
+        executeAgentCliAsync(telemetry.projectRoot, ['runtime:eval', '--json'], {
+          env: telemetry.env,
+          reject: false,
+        })
+      )
+    );
+
+    expect(await waitForAsync(() => telemetry.readRequests().length === 4, 10_000)).toBe(true);
+    const saved = await fs.promises.readFile(filename, 'utf8');
+    expect(saved).toMatch(/^[a-f0-9-]{36}$/);
+    expect(telemetry.readRequests().map((request) => request.body.batch[0]!.anonymousId)).toEqual(
+      Array(4).fill(saved)
+    );
+  });
+
   it('records a forwarded command without collecting arguments or changing its output', async () => {
     const args = ['prebuild', '--template', 'private-template-secret'];
     const baseline = await executeAgentCliAsync(telemetry.projectRoot, args, {
@@ -346,19 +371,22 @@ describe('@expo/agent-cli telemetry', () => {
     expect(telemetry.readRequests()).toEqual([]);
   });
 
-  it.each(['EXPO_NO_TELEMETRY', 'EXPO_OFFLINE'])(
-    'honors %s before spawning a worker',
-    async (name) => {
-      const result = await executeAgentCliAsync(telemetry.projectRoot, ['runtime:eval', '--json'], {
-        env: { ...telemetry.env, [name]: '1' },
-        reject: false,
-      });
+  it.each([
+    ...['EXPO_NO_TELEMETRY', 'DO_NOT_TRACK'].flatMap((name) =>
+      ['1', 'true', 'TRUE', 'yes', ''].map((value) => [name, value] as const)
+    ),
+    ['EXPO_OFFLINE', '1'] as const,
+  ])('honors %s=%j before spawning a worker', async (name, value) => {
+    const result = await executeAgentCliAsync(telemetry.projectRoot, ['runtime:eval', '--json'], {
+      env: { ...telemetry.env, [name]: value },
+      reject: false,
+    });
 
-      expect(result.exitCode).toBe(1);
-      expect(telemetry.readEvents()).toEqual([]);
-      expect(telemetry.readRequests()).toEqual([]);
-    }
-  );
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout)).toHaveProperty('error');
+    expect(telemetry.readEvents()).toEqual([]);
+    expect(telemetry.readRequests()).toEqual([]);
+  });
 
   it('bounds the detached worker lifetime when the telemetry request never completes', async () => {
     const result = await executeAgentCliAsync(telemetry.projectRoot, ['runtime:eval', '--json'], {

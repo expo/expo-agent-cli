@@ -23,7 +23,13 @@ beforeEach(() => {
   });
   vi.mocked(getAgentTelemetryContext).mockReturnValue({ id: 'codex', sessionId: 'agent-session' });
   detectSandbox.mockReturnValue({ detected: true, sandbox: { id: 'e2b' } });
-  for (const name of ['EXPO_NO_TELEMETRY', 'EXPO_OFFLINE', 'EXPO_STAGING', 'EXPO_LOCAL']) {
+  for (const name of [
+    'EXPO_NO_TELEMETRY',
+    'DO_NOT_TRACK',
+    'EXPO_OFFLINE',
+    'EXPO_STAGING',
+    'EXPO_LOCAL',
+  ]) {
     vi.stubEnv(name, undefined);
   }
 });
@@ -85,7 +91,7 @@ it.each(['EXPO_STAGING', 'EXPO_LOCAL'])('uses the staging target for %s', async 
   });
 });
 
-it.each(['EXPO_NO_TELEMETRY', 'EXPO_OFFLINE'])(
+it.each(['EXPO_NO_TELEMETRY', 'DO_NOT_TRACK', 'EXPO_OFFLINE'])(
   'respects %s without reading identity or detectors',
   async (name) => {
     vi.stubEnv(name, '1');
@@ -94,6 +100,32 @@ it.each(['EXPO_NO_TELEMETRY', 'EXPO_OFFLINE'])(
     expect(getTelemetryIdentityAsync).not.toHaveBeenCalled();
     expect(getAgentTelemetryContext).not.toHaveBeenCalled();
     expect(detectSandbox).not.toHaveBeenCalled();
+  }
+);
+
+describe.each(['EXPO_NO_TELEMETRY', 'DO_NOT_TRACK'])(
+  '%s privacy handling in the worker',
+  (name) => {
+    it.each(['', '1', 'true', 'TRUE', 'yes', 'no', '2', ' false '])(
+      'does not read identity, detect environment, or send for %j',
+      async (value) => {
+        vi.stubEnv(name, value);
+        await expect(sendCommandTelemetryAsync(data)).resolves.toBeUndefined();
+        expect(getTelemetryIdentityAsync).not.toHaveBeenCalled();
+        expect(getAgentTelemetryContext).not.toHaveBeenCalled();
+        expect(detectSandbox).not.toHaveBeenCalled();
+        expect(fetchMock).not.toHaveBeenCalled();
+      }
+    );
+
+    it.each([undefined, '0', 'false', 'FALSE'])(
+      'sends when the privacy flag is %j',
+      async (value) => {
+        vi.stubEnv(name, value);
+        await sendCommandTelemetryAsync(data);
+        expect(fetchMock).toHaveBeenCalledOnce();
+      }
+    );
   }
 );
 

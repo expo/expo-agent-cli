@@ -63,13 +63,25 @@ Reuse a UUID and hashed cached user ID from Expo's `state.json` when available. 
 staging/local home and shell-only `__UNSAFE_EXPO_HOME_DIRECTORY` override through
 `src/utils/expoHome.ts`, shared with auth session notices. Do not query authentication
 services for telemetry. When `EXPO_TOKEN` is set, do not attribute a cached interactive user's ID.
+Invalid `EXPO_STAGING` or `EXPO_LOCAL` values produce a `BAD_ENV` command error when a command
+needs them, naming the variable and the accepted values: `0`, `1`, `false`, or `true`.
 The worker never modifies the shared authentication file. Without an existing Expo UUID it persists
 an agent CLI anonymous UUID separately, with atomic exclusive publication and owner-only
 permissions. A read-only home or filesystem without hard-link support falls back to a per-run
 anonymous ID.
 
-`EXPO_NO_TELEMETRY` and `EXPO_OFFLINE` disable telemetry before the spawn and are rechecked by the
-worker. The payload is an explicit command schema, not a subscriber to `2g` events: local events can
+A readable but corrupt agent CLI identity file is repaired under an exclusive directory lock.
+Workers reread the file after taking the lock and preserve any valid ID another worker published.
+Contenders wait at most 250 ms for the repair. Unreadable files are left alone, and a lock left
+by an interrupted repair is never stolen; these cases keep the per-run fallback.
+
+`EXPO_NO_TELEMETRY`, `DO_NOT_TRACK`, and `EXPO_OFFLINE` disable telemetry before the spawn and are
+rechecked by the worker. The shared privacy check in `src/utils/env.ts` treats an unset opt-out
+variable or an explicit `0` or `false` as allowing telemetry, case-insensitively. Any other present
+value, including an empty string, disables it without throwing. This policy applies to
+`EXPO_NO_TELEMETRY` and `DO_NOT_TRACK`; `EXPO_OFFLINE` keeps its boolean parsing.
+
+The payload is an explicit command schema, not a subscriber to `2g` events: local events can
 contain raw arguments, paths, typed values, and command output. None belongs in remote telemetry.
 
 ## Validation

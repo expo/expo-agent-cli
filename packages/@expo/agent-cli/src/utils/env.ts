@@ -20,7 +20,7 @@ class Env {
 
   /** Disable telemetry */
   get EXPO_NO_TELEMETRY() {
-    return boolish('EXPO_NO_TELEMETRY', false);
+    return isPrivacyFlagEnabled('EXPO_NO_TELEMETRY');
   }
 
   /** Disable network requests */
@@ -30,12 +30,12 @@ class Env {
 
   /** Use Expo's staging services and settings */
   get EXPO_STAGING() {
-    return boolish('EXPO_STAGING', false);
+    return readServiceFlag('EXPO_STAGING');
   }
 
   /** Use locally running Expo services and settings */
   get EXPO_LOCAL() {
-    return boolish('EXPO_LOCAL', false);
+    return readServiceFlag('EXPO_LOCAL');
   }
 
   /**
@@ -84,6 +84,27 @@ class Env {
 }
 
 export const env = new Env();
+
+/** Unrecognized privacy values disable collection, including an explicitly empty value. */
+function isPrivacyFlagEnabled(name: 'EXPO_NO_TELEMETRY' | 'DO_NOT_TRACK'): boolean {
+  const value = process.env[name];
+  return value !== undefined && value !== '0' && value.toLowerCase() !== 'false';
+}
+
+/** Shared privacy policy for command telemetry and feedback. */
+export function isTelemetryDisabled(): boolean {
+  return env.EXPO_NO_TELEMETRY || isPrivacyFlagEnabled('DO_NOT_TRACK');
+}
+
+function readServiceFlag(name: 'EXPO_STAGING' | 'EXPO_LOCAL'): boolean {
+  try {
+    return boolish(name, false);
+  } catch {
+    // Load only on failure: error rendering also reads env, and normal telemetry must stay small.
+    const { CommandError } = require('./errors') as typeof import('./errors');
+    throw new CommandError('BAD_ENV', `Invalid value for ${name}. Expected 0, 1, false, or true.`);
+  }
+}
 
 export function envIsWebcontainer() {
   // See: https://github.com/unjs/std-env/blob/4b1e03c4efce58249858efc2cc5f5eac727d0adb/src/providers.ts#L134-L143

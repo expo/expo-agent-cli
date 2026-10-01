@@ -5,7 +5,7 @@ import * as os from 'node:os';
 import { detectSandbox } from 'sandbox-cli-detector';
 
 import { getAgentTelemetryContext } from '../utils/agent';
-import { env } from '../utils/env';
+import { env, isTelemetryDisabled } from '../utils/env';
 import { getTelemetryIdentityAsync } from './identity';
 import type { CommandTelemetry } from './types';
 
@@ -15,7 +15,7 @@ export const TELEMETRY_TIMEOUT_MS = 3_000;
 export async function sendCommandTelemetryAsync(data: CommandTelemetry): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    if (env.EXPO_NO_TELEMETRY || env.EXPO_OFFLINE) return;
+    if (isTelemetryDisabled() || env.EXPO_OFFLINE) return;
 
     const controller = new AbortController();
     timer = setTimeout(() => controller.abort(), TELEMETRY_TIMEOUT_MS);
