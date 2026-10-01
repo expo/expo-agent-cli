@@ -130,7 +130,8 @@ export async function acquireDocsLockAsync(
     }
 
     const stat = await fs.promises.stat(file).catch(() => null);
-    if (stat && Date.now() - stat.mtimeMs > staleMs) {
+    const holder = await fs.promises.readFile(file, 'utf8').catch(() => '');
+    if ((stat && Date.now() - stat.mtimeMs > staleMs) || holderIsGone(holder)) {
       await fs.promises.rm(file, { force: true });
       continue;
     }
@@ -139,6 +140,23 @@ export async function acquireDocsLockAsync(
       onWait?.();
     }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+/**
+ * Whether the run named in a lock file has exited, as after Ctrl-C or a closed pipe. Its lock
+ * then goes at once, not after `staleMs`. A process this user cannot signal (EPERM) is alive.
+ */
+function holderIsGone(holder: string): boolean {
+  const pid = Number(holder.split(' ')[0]);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    return false;
+  }
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error: any) {
+    return error.code === 'ESRCH';
   }
 }
 
