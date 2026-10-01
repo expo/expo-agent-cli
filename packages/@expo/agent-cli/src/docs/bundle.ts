@@ -36,7 +36,7 @@ export interface BundlePage {
 }
 
 const VERSION_NAME = /^v(\d+)\.0\.0$/;
-const PAGE_PATH = /^[a-z0-9][a-z0-9._/-]*$/;
+const PAGE_PATH = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const BUNDLE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -143,7 +143,7 @@ export function pageRelativeFile(pagePath: string, bundle: BundleName): string {
 
   if (!PAGE_PATH.test(pagePath)) {
     throw reject(
-      'a path is lowercase letters, digits, ".", "_", "-" and "/", and starts with a letter or digit'
+      'a path is letters, digits, ".", "_", "-" and "/", and starts with a letter or digit'
     );
   }
   if (

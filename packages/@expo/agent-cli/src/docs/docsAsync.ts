@@ -189,6 +189,14 @@ async function resolveSearchScopeAsync(
     throw error;
   }
   const available = syncedVersions(dir, manifest);
+  if (wanted != null && sdkFlag != null && !available.includes(wanted)) {
+    const error = new CommandError(
+      'DOCS_NOT_SYNCED',
+      `The ${wanted} docs are not synced to ${dir}, and EXPO_OFFLINE is set, so nothing was downloaded. The synced versions are ${available.join(', ') || 'none'}.`
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} docs:sync --sdk ${versionMajor(wanted)}`;
+    throw error;
+  }
   const selection = selectSdkVersion({
     flag: sdkFlag,
     projectSdkVersion,
