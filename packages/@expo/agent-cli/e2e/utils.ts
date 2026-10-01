@@ -349,6 +349,7 @@ export function spawnAgentCli(
       ...processEnv,
       // Deterministic, non-interactive output.
       CI: '1',
+      EXPO_NO_TELEMETRY: '1',
       FORCE_COLOR: '0',
       NO_COLOR: '1',
       // This tier doubles the dev server, never a device (llp/0002 §Tier 0): without this, a

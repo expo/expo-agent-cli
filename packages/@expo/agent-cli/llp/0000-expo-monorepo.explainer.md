@@ -75,6 +75,7 @@ How every command behaves:
 - [[0015-backend-selection-and-config]]: which build backend a plan uses, and the developer config that overrides it.
 - [[0021-honest-reports]]: what a command may claim, and about what.
 - [[0024-cli-ui]]: the help template, the workflow map, the on-ramp, the palette.
+- [[0028-command-telemetry]]: shared Expo ingestion, agent/sandbox context, and detached delivery.
 
 Left out:
 

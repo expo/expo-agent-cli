@@ -142,6 +142,17 @@ Flags beat `package.json`. `package.json` beats detection. Unknown keys are erro
 
 The rest of the limits live in each command's `--help`.
 
+## Telemetry
+
+The CLI sends command-usage events to Expo's shared telemetry service, identified as
+`expo/agent-cli`. Events include the canonical command name, CLI and system versions, an anonymous
+installation ID, a hashed cached user ID when available, and agent/sandbox context from
+`agent-cli-detector` and `sandbox-cli-detector`. Command arguments, project contents, credentials,
+output, and the local `LOG_EVENTS` stream are not uploaded. Help and version requests are excluded.
+
+Delivery runs in a detached worker with a three-second deadline; commands never wait for a network
+response. Set `EXPO_NO_TELEMETRY=1` or `EXPO_OFFLINE=1` to disable it.
+
 ## Status
 
 Experimental. Commands and output formats may change.

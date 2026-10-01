@@ -5,6 +5,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   root: fileURLToPath(new URL('..', import.meta.url)),
   test: {
+    env: { EXPO_NO_TELEMETRY: '1' },
     name: 'tier2',
     environment: 'node',
     include: ['tier2/*.eval.ts'],
