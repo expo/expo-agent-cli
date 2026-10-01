@@ -143,8 +143,22 @@ With `--eas`, Metro still binds a local port behind the tunnel, so the per-workt
 - Physical devices. A physical device gets a claim when you name it with `--device`, but the CLI never allocates one on its own.
 - A local daemon, a queue, and local device fleets. simlock can provide these later behind the local registry interface.
 
+## Answers from the EAS code
+
+Read on 2026-10-01 in the local clones of `eas-cli` (24.7.0, `packages/eas-cli/src`) and `universe` (`server/www/src/data/entities/device-run-session/`, `server/website/graphql/schema.generated.graphql`). The service calls a session a `DeviceRunSession`.
+
+1. **Owner mark: the service has one.** `eas simulator` accepts `--name` (at most 255 characters) and `--tag` (repeatable, stored lowercased). Both come back in `simulator:list --json`, and the list filters by `--name` (a contains match in SQL, `AppDeviceRunSessionsPagination.ts:71-72`) and `--tag` (a session must carry every listed tag, `DeviceRunSessionFilterInput.tags`). No field carries a client identity: `initiatingActor` exists on the type but the CLI never selects it, and `trackingTags.request_origin` is analytics only. So the mark is a convention this CLI sets: start each session with a tag that names the worktree, for example `agent-cli:<digest of the canonical project root>`, and list with that tag. A session without the tag is never adopted; a session with it can be found again after the local registry is lost. Other clients that ignore the tag are still not kept out, which the service does not offer.
+2. **Expiry: opt-in.** `maxIdleTimeMinutes` stops an `agent-device`, `argent` or `appium` session after that many idle minutes; "if omitted, the session has no idle timeout" (`DeviceRunSessionValidator.ts:126-142`). `maxRunTimeMinutes` is capped at 40 minutes for normal-priority accounts and 115 for high-priority ones, and a session that names none gets the account cap (`DeviceRunSessionUtils.ts:858-865`). So a crashed agent's session runs until its max duration unless this CLI passes `--max-idle-time-minutes`. The CLI should pass one by default (a value under the max duration, 30 minutes is a candidate).
+3. **Concurrency: no hard limit.** The backend has no session count per account, user or plan; the only gate is the feature flag (`DeviceRunSessionFeatureGateValidator.ts`). Sessions run as turtle jobs and queue behind the plan's job concurrency; the CLI shows "queued or waiting for available concurrency" (`commands/simulator/index.ts:363`). So parallel agents do not fail at start; they wait.
+
+Two facts correct earlier text in this RFC and in llp/0005: at eas-cli 24.7.0 a `--json` start still writes the session id to `.env.eas-simulator` once the session is ready (`commands/simulator/index.ts:401-406`); the empty file was observed on 22.5.0 and that code was not read. And `DEVICE_IN_USE` is not emitted by the backend; it comes from the controller package, which neither clone contains.
+
+## Follow-up work
+
+- Start sessions with `--tag agent-cli:<digest>` and `--max-idle-time-minutes <n>`, list with `--tag`, and prefer the tag over the dotenv rung. Both flags need an eas-cli version that has them; the first version is not known, so the CLI must read the flag refusal and fall back.
+- Three review findings left for later: the registry lock is held during inventory work; `status` still reports the first booted device as "the" local device; the project-root comparison exists in three places.
+
 ## Open questions
 
-1. For the EAS team: can a session carry an owner mark, for example a label set at start and filtered in `simulator:list`? This would protect bound sessions from other clients. It is not known whether `eas simulator` supports this today.
-2. For the EAS team: does a session expire when no client uses it? If not, a session of a crashed agent keeps running until someone stops it.
-3. How many EAS Simulator sessions may one account run at the same time? If there is a limit, parallel agents will reach it, and the CLI needs a clear error for it. Not found in this session.
+1. Which eas-cli version introduced `--tag` and `--max-idle-time-minutes`? Not read.
+2. Where does the idle check run, and what counts as activity? The backend passes `max_idle_time_minutes` to the job (`DeviceRunSessionUtils.ts:282`); the job code was not read.
