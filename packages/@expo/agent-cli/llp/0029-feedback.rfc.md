@@ -51,8 +51,10 @@ The command also follows the agent CLI help and error conventions and offers `--
 The `agent-cli` category identifies feedback about this CLI, with the full command as its subject.
 Help retains the original category-specific subject guidance.
 
-`DO_NOT_TRACK` or `EXPO_NO_TELEMETRY` set to `1` or `true` exits successfully before collecting
-metadata or sending feedback. `0` and `false` leave feedback enabled. Opt-out prints the existing
+Feedback shares `isTelemetryDisabled()` in `src/utils/env.ts` with command telemetry. Either
+`DO_NOT_TRACK` or `EXPO_NO_TELEMETRY` opts out unless it is unset, `0`, or `false`, case-insensitively.
+Other present values, including empty strings, exit successfully before collecting metadata or
+sending feedback. Opt-out prints the existing
 instruction to respect the user's choice, and JSON mode returns `{ "sent": false, "feedbackId": null }`.
 The launcher defers feedback's command event to the feedback handler, which checks opt-out after
 project config loads. A config-driven opt-out therefore prevents both network requests. The send

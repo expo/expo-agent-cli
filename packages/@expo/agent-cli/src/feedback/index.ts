@@ -6,6 +6,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { recordCommand } from '../telemetry';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
+import { isTelemetryDisabled } from '../utils/env';
 import { withStdoutRedirectedAsync } from '../utils/stdout';
 
 const { version } = require('../../package.json') as { version: string };
@@ -59,7 +60,7 @@ export const feedbackHelp: CommandHelp = {
     '  unknown: Expo product, package, feature, or topic, or leave it empty.',
     'Only a terminal can prompt for missing messages. Positional messages work but are deprecated.',
     'Includes agent, sandbox, environment, and project metadata; links your Expo account when signed in.',
-    'DO_NOT_TRACK=1 or EXPO_NO_TELEMETRY=1 prevents feedback submission.',
+    'Setting DO_NOT_TRACK or EXPO_NO_TELEMETRY to anything except 0 or false prevents feedback submission.',
     'Exit codes: 0 sent or opted out · 1 invalid input or submission failed.',
   ],
 };
@@ -94,7 +95,6 @@ export const agentCliFeedback: Command = async (argv) => {
   const {
     createFeedbackMetadataAsync,
     getSession,
-    isTelemetryDisabled,
     resolveFeedbackAsync,
     sendFeedbackAsync,
     TELEMETRY_DISABLED_MESSAGE,

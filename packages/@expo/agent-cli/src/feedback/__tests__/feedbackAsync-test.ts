@@ -335,7 +335,7 @@ describe('project and environment metadata', () => {
 
   it.each(
     ['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'].flatMap((name) =>
-      ['1', 'true', 'TRUE'].map((value) => ({ name, value }))
+      ['1', 'true', 'TRUE', 'yes', ''].map((value) => ({ name, value }))
     )
   )('collects only feedback context when $name=$value', async ({ name, value }) => {
     vi.stubEnv(name, value);
@@ -497,7 +497,7 @@ describe('feedback submission', () => {
 
   it.each(
     ['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'].flatMap((name) =>
-      ['1', 'true', 'TRUE'].map((value) => ({ name, value }))
+      ['1', 'true', 'TRUE', 'yes', ''].map((value) => ({ name, value }))
     )
   )('does not send when $name=$value after metadata was collected', async ({ name, value }) => {
     const metadata = await createFeedbackMetadataAsync(PROJECT_ROOT);
