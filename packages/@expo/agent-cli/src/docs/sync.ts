@@ -15,6 +15,7 @@ import {
   acquireDocsLockAsync,
   installBundleAsync,
   linkLatestAsync,
+  MANIFEST_FILE,
   readManifestAsync,
   removeLeftoversAsync,
   versionDir,
@@ -24,7 +25,9 @@ import {
 } from './cache';
 import { selectSdkVersion, type SdkSelection } from './version';
 
-export const DEFAULT_DOCS_BUNDLE_URL = 'https://docs.expo.dev/static/agents';
+// Temporary host until the docs build publishes the bundles at https://docs.expo.dev/static/agents.
+export const DEFAULT_DOCS_BUNDLE_URL =
+  'https://github.com/vonovak/expo-video-tests/releases/download/docs-bundle-poc';
 
 export function docsBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return (env.AGENT_CLI_DOCS_URL || DEFAULT_DOCS_BUNDLE_URL).replace(/\/+$/, '');
@@ -108,6 +111,17 @@ function sha256(bytes: Uint8Array): string {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
+/** A sync replaces top-level entries, so it only writes into an empty directory or its own cache. */
+async function assertDocsDirAsync(dir: string): Promise<void> {
+  const entries = await fs.promises.readdir(dir).catch(() => [] as string[]);
+  if (entries.some((name) => !name.startsWith('.')) && !entries.includes(MANIFEST_FILE)) {
+    throw new CommandError(
+      'DOCS_CACHE_NOT_EMPTY',
+      `${dir} holds other files and no docs ${MANIFEST_FILE}, and a docs sync replaces what is in it. Set AGENT_CLI_DOCS_DIR to an empty or new directory.`
+    );
+  }
+}
+
 /**
  * Download the shared bundle and the chosen version when their sha256 differs from the manifest.
  *
@@ -127,6 +141,7 @@ export async function syncDocsAsync(options: DocsSyncOptions): Promise<DocsSyncR
   });
   const wanted: BundleName[] = ['shared', selection.version];
 
+  await assertDocsDirAsync(dir);
   const lock = await acquireDocsLockAsync(dir, {
     onWait: () => progress('Waiting for another docs sync to finish…'),
     ...options.lock,

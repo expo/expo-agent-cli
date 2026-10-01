@@ -57,6 +57,29 @@ describe(parsePage, () => {
     expect(page.body[0]).toEqual({ number: 5, text: '# Camera', heading: true });
   });
 
+  it('does not read a # line inside a code block as a heading', () => {
+    const page: DocPage = {
+      path: 'guides/install',
+      content: [
+        '# Install',
+        '',
+        '## Steps',
+        '',
+        '```sh',
+        '# install the CLI',
+        'npm i',
+        '```',
+        'Done.',
+      ].join('\n'),
+    };
+    expect(
+      parsePage(page)
+        .body.filter((line) => line.heading)
+        .map((line) => line.text)
+    ).toEqual(['# Install', '## Steps']);
+    expect(searchRegex([page], /npm i/, 5)[0]!.heading).toBe('Steps');
+  });
+
   it('falls back to the first heading for a page without frontmatter', () => {
     expect(parsePage(noFrontmatter).title).toBe('Home');
   });

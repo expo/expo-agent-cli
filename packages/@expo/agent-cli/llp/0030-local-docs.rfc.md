@@ -48,7 +48,7 @@ A bundle line is `{ "path": "versions/v57.0.0/sdk/camera", "title": "Camera", "c
 
 **Change detection by `sha256` in `index.json`.** It works the same on any static host. `index.json` is fetched with `cache: 'no-store'`. The digest of the downloaded bytes is checked before anything is unpacked.
 
-**Base URL.** `DEFAULT_DOCS_BUNDLE_URL` is `https://docs.expo.dev/static/agents`. `AGENT_CLI_DOCS_URL` overrides it. A temporary host can replace the constant. The CLI always fetches the base URL, follows redirects, ignores the content type, and never stores a redirect target: a signed release-asset URL expires within an hour.
+**Base URL.** `DEFAULT_DOCS_BUNDLE_URL` is a temporary GitHub release, `https://github.com/vonovak/expo-video-tests/releases/download/docs-bundle-poc`. The final host is `https://docs.expo.dev/static/agents`, after the docs build publishes the bundles. `AGENT_CLI_DOCS_URL` overrides it. The CLI always fetches the base URL, follows redirects, ignores the content type, and never stores a redirect target: a signed release-asset URL expires within an hour.
 
 ## Local cache
 
@@ -72,7 +72,7 @@ The cache root mirrors site paths. A link URL without `https://docs.expo.dev/` i
 
 Every `path` is validated before anything is written:
 
-- Absolute paths, `..` segments and backslashes are rejected. A path must match `^[a-z0-9][a-z0-9._/-]*$`.
+- Absolute paths, `..` segments and backslashes are rejected. A path must match `^[A-Za-z0-9][A-Za-z0-9._/-]*$`.
 - The resolved file must stay inside the bundle's target directory.
 - A version bundle must use its own `versions/<v>/` prefix. The shared bundle must not use `versions/`.
 - A path that occurs twice in one bundle is rejected.

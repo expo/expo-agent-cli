@@ -202,6 +202,14 @@ describe(syncDocsAsync, () => {
     expect(statuses).toEqual(['downloaded', 'unchanged']);
   });
 
+  it('refuses a directory that holds other files and no manifest', async () => {
+    const dir = makeTempDir();
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'mine');
+    await expect(syncWith(fakeHost(), dir)).rejects.toMatchObject({ code: 'DOCS_CACHE_NOT_EMPTY' });
+    expect(fs.readdirSync(dir)).toEqual(['notes.txt']);
+  });
+
   it('reports an HTTP failure with the URL', async () => {
     const host = fakeHost();
     const failing = (async (url: string) =>
@@ -235,7 +243,7 @@ describe(syncDocsAsync, () => {
 });
 
 describe(docsBaseUrl, () => {
-  it('defaults to the docs site, and takes AGENT_CLI_DOCS_URL without a trailing slash', () => {
+  it('has a default host, and takes AGENT_CLI_DOCS_URL without a trailing slash', () => {
     expect(docsBaseUrl({})).toBe(DEFAULT_DOCS_BUNDLE_URL);
     expect(docsBaseUrl({ AGENT_CLI_DOCS_URL: 'http://127.0.0.1:1/x/' })).toBe(
       'http://127.0.0.1:1/x'
