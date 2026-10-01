@@ -140,7 +140,7 @@ The docs must exist before an agent needs them, and they must follow the project
 | `install`      | Background, when the cache is in use and lacks the project's SDK after the install. | nothing                  |
 | `docs:search`  | Background, when the cache is older than seven days.                                | a stderr line            |
 
-- **A failed sync fails nothing.** Setup and `new` report `{ status: 'failed', reason }` and exit as they would without the sync. A host that publishes no bundles yet (`DOCS_UNAVAILABLE`) is `skipped`, not `failed`: it is the expected state until the docs deploy.
+- **A failed sync fails nothing.** Setup and `new` report `{ status: 'failed', reason }` and exit as they would without the sync. A host without bundles (`DOCS_UNAVAILABLE`, HTTP 404) is `failed` too. The docs build publishes the bundles before this CLI ships, so a 404 means a broken host, and it must be visible.
 - **The project's SDK** is the installed `expo`, else the `expo` range in `package.json`. A project made with `new --no-install` has only the range.
 - **A background sync** is a detached `docs:sync --sdk <N> --json --no-followups` of this CLI's own entry script. The cache lock keeps it from colliding with another sync.
 - **`install` never starts a first sync.** It acts only for a user who already has a manifest, because a download nobody asked for is not part of an install.
