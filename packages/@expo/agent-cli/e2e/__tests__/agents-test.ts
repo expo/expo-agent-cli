@@ -245,6 +245,7 @@ describe('@expo/agent-cli agents:setup', () => {
       'agentsMd',
       'cancelled',
       'claudeMd',
+      'docs',
       'errors',
       'notes',
       'plugins',

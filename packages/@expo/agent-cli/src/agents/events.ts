@@ -15,6 +15,8 @@ declare module '2g' {
       /** `created`, `updated`, `skipped`, or null when `--no-agents-md` skipped the file. */
       agentsMdAction: string | null;
       claudeMdAction: string | null;
+      /** `synced`, `skipped`, `failed`, or null when `--no-docs` or no project skipped the sync. */
+      docsStatus: string | null;
       noteCount: number;
       scope: import('./types').SetupScope;
       cancelled: boolean;
