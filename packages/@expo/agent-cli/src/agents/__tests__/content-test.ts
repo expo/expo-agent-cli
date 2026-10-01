@@ -114,6 +114,22 @@ describe(generateAgentsMdBlock, () => {
     }
   });
 
+  it('should point at the local docs after the commands, without a machine path', () => {
+    const block = generateAgentsMdBlock({
+      state: createProjectState(),
+      projectName: 'my-app',
+      linkedSkills: [],
+    });
+
+    expect(block).toContain('## Expo docs');
+    expect(block.indexOf('## Commands')).toBeLessThan(block.indexOf('## Expo docs'));
+    expect(block.indexOf('## Expo docs')).toBeLessThan(block.indexOf('## Expo skills'));
+    expect(block).toContain('`npx @expo/agent-cli docs:sync` downloads them');
+    expect(block).toContain('open `<path>.md` in the docs directory that `docs:sync` printed');
+    expect(block).toContain('`npx @expo/agent-cli docs:search <query>`');
+    expect(block).not.toContain('agent-cli/docs');
+  });
+
   it('should point at skill sync when no verified skills are linked', () => {
     const block = generateAgentsMdBlock({
       state: createProjectState(),
