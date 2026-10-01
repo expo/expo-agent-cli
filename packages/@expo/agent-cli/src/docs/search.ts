@@ -52,12 +52,20 @@ export function parsePage(page: DocPage): ParsedPage {
       bodyStart = end + 1;
     }
   }
-  const body = lines.slice(bodyStart).map((text, index) => ({
-    number: bodyStart + index + 1,
-    text,
-    heading: /^#{1,6}\s/.test(text),
-  }));
-  const h1 = body.find((line) => /^#\s/.test(line.text))?.text.replace(/^#\s+/, '');
+  let fence: string | null = null;
+  const body = lines.slice(bodyStart).map((text, index) => {
+    const marker = /^\s*(`{3,}|~{3,})/.exec(text)?.[1];
+    if (marker && (fence == null || marker.startsWith(fence))) {
+      fence = fence == null ? marker : null;
+      return { number: bodyStart + index + 1, text, heading: false };
+    }
+    return {
+      number: bodyStart + index + 1,
+      text,
+      heading: fence == null && /^#{1,6}\s/.test(text),
+    };
+  });
+  const h1 = body.find((line) => line.heading && /^#\s/.test(line.text))?.text.replace(/^#\s+/, '');
   return {
     path: page.path,
     title: frontmatterTitle(frontmatter) ?? h1?.trim() ?? page.path,
@@ -69,7 +77,8 @@ export function parsePage(page: DocPage): ParsedPage {
 /** The nearest `##` or `###` at or above one body line. */
 function headingAt(page: ParsedPage, lineIndex: number): string | null {
   for (let index = lineIndex; index >= 0; index--) {
-    const match = /^#{2,3}\s+(.+?)\s*#*\s*$/.exec(page.body[index]!.text);
+    const line = page.body[index]!;
+    const match = line.heading ? /^#{2,3}\s+(.+?)\s*#*\s*$/.exec(line.text) : null;
     if (match) {
       return match[1]!;
     }

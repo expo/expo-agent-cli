@@ -257,6 +257,24 @@ describe('docs:search', () => {
     expect(requests).toEqual([]);
   });
 
+  it('names the missing version under EXPO_OFFLINE when another one is synced', async () => {
+    await executeAgentCliAsync(cwd, ['docs:sync'], docsEnv());
+    requests.length = 0;
+
+    const result = await executeAgentCliAsync(
+      cwd,
+      ['docs:search', 'camera', '--sdk', '54', '--json'],
+      { ...docsEnv({ EXPO_OFFLINE: '1' }), reject: false }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error).toMatchObject({
+      code: 'DOCS_NOT_SYNCED',
+      suggestedCommand: 'npx @expo/agent-cli docs:sync --sdk 54',
+    });
+    expect(requests).toEqual([]);
+  });
+
   it('warns when the synced docs are more than a week old', async () => {
     await executeAgentCliAsync(cwd, ['docs:sync'], docsEnv());
     const manifestFile = path.join(docsDir, 'manifest.json');

@@ -104,6 +104,9 @@ describe(pageRelativeFile, () => {
     expect(pageRelativeFile('versions/v57.0.0/sdk/camera', 'v57.0.0')).toBe(
       path.join('versions', 'v57.0.0', 'sdk', 'camera.md')
     );
+    expect(pageRelativeFile('versions/v57.0.0/sdk/captureRef', 'v57.0.0')).toBe(
+      path.join('versions', 'v57.0.0', 'sdk', 'captureRef.md')
+    );
   });
 
   it.each<[string, BundleName]>([
@@ -111,7 +114,7 @@ describe(pageRelativeFile, () => {
     ['guides/../../etc', 'shared'],
     ['..', 'shared'],
     ['guides\\overview', 'shared'],
-    ['Guides/Overview', 'shared'],
+    ['guides/over view', 'shared'],
     ['.hidden', 'shared'],
     ['guides//overview', 'shared'],
     ['guides/./overview', 'shared'],
