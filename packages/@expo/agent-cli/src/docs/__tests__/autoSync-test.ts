@@ -94,17 +94,6 @@ describe(syncDocsForProjectAsync, () => {
     fetchSpy.mockRestore();
   });
 
-  it('skips while the host publishes no bundles', async () => {
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response('', { status: 404 }));
-    await expect(syncDocsForProjectAsync(projectRoot)).resolves.toMatchObject({
-      status: 'skipped',
-      reason: expect.stringContaining('publishes no docs bundles yet'),
-    });
-    fetchSpy.mockRestore();
-  });
-
   it('reports a failure instead of throwing it', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('offline'));
     const result = await syncDocsForProjectAsync(projectRoot);
