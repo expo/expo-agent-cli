@@ -5,14 +5,13 @@ import { resolvePackageManager } from '@expo/package-manager';
 import { detectAgent } from 'agent-cli-detector';
 import * as ciInfo from 'ci-info';
 import { randomBytes } from 'crypto';
-import { boolish } from 'getenv';
 import path from 'path';
 import prompts from 'prompts';
 import { detectSandbox } from 'sandbox-cli-detector';
 
 import { PROGRAM_PREFIX } from '../programName';
 import { readJsonFileSync, resolvePackageRootSync } from '../project/nodeModules';
-import { env } from '../utils/env';
+import { env, isTelemetryDisabled } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { getExpoHomeDirectory } from '../utils/expoHome';
 
@@ -382,10 +381,6 @@ function getFeedbackValidationError(feedback: string): string | null {
     return `Feedback cannot exceed ${CLI_FEEDBACK_MAX_LENGTH.toLocaleString('en-US')} characters.`;
   }
   return null;
-}
-
-export function isTelemetryDisabled(): boolean {
-  return boolish('DO_NOT_TRACK', false) || env.EXPO_NO_TELEMETRY;
 }
 
 export function resolveFeedbackId(value?: string): string {

@@ -385,8 +385,12 @@ module.exports = ({ config }) => ({ ...config, name: 'Dynamic config app' });
   it.each([
     ['DO_NOT_TRACK', '1'],
     ['DO_NOT_TRACK', 'true'],
+    ['DO_NOT_TRACK', 'yes'],
+    ['DO_NOT_TRACK', ''],
     ['EXPO_NO_TELEMETRY', '1'],
     ['EXPO_NO_TELEMETRY', 'true'],
+    ['EXPO_NO_TELEMETRY', 'yes'],
+    ['EXPO_NO_TELEMETRY', ''],
   ])('honors %s=%s before validating or submitting', async (name, value) => {
     const result = await executeAgentCliAsync(feedback.projectRoot, ['feedback', '--json'], {
       env: { ...feedback.env, EXPO_OFFLINE: '0', [name]: value },
@@ -429,8 +433,12 @@ module.exports = ({ config }) => ({ ...config, name: 'Dynamic config app' });
   it.each([
     ['DO_NOT_TRACK', '1'],
     ['DO_NOT_TRACK', 'true'],
+    ['DO_NOT_TRACK', 'yes'],
+    ['DO_NOT_TRACK', ''],
     ['EXPO_NO_TELEMETRY', '1'],
     ['EXPO_NO_TELEMETRY', 'true'],
+    ['EXPO_NO_TELEMETRY', 'yes'],
+    ['EXPO_NO_TELEMETRY', ''],
   ])(
     'prevents feedback and command telemetry when project config sets %s=%s',
     async (name, value) => {

@@ -1,13 +1,9 @@
 import packageJson from '../../../package.json';
 import { printCommandHelp } from '../../help/format';
 import { recordCommand } from '../../telemetry';
+import { isTelemetryDisabled } from '../../utils/env';
 import { agentCliFeedback } from '..';
-import {
-  createFeedbackMetadataAsync,
-  getSession,
-  isTelemetryDisabled,
-  sendFeedbackAsync,
-} from '../feedbackAsync';
+import { createFeedbackMetadataAsync, getSession, sendFeedbackAsync } from '../feedbackAsync';
 import type { CliFeedbackMetadata } from '../types';
 
 vi.mock('../../help/format', () => ({ printCommandHelp: vi.fn() }));
@@ -63,27 +59,32 @@ it('records one command event after metadata evaluation and before submission', 
   );
 });
 
-it.each(['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'])(
-  'skips command telemetry when project config enables %s',
-  async (name) => {
-    vi.mocked(createFeedbackMetadataAsync).mockImplementation(async () => {
-      vi.stubEnv(name, 'true');
-      return metadata;
-    });
+it.each(
+  ['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'].flatMap((name) =>
+    ['true', 'yes', ''].map((value) => ({ name, value }))
+  )
+)('skips command telemetry when project config sets $name=$value', async ({ name, value }) => {
+  vi.mocked(createFeedbackMetadataAsync).mockImplementation(async () => {
+    vi.stubEnv(name, value);
+    return metadata;
+  });
 
-    await agentCliFeedback(['--message', message, '--json']);
+  await agentCliFeedback(['--message', message, '--json']);
 
-    expect(recordCommand).not.toHaveBeenCalled();
-    expect(console.log).toHaveBeenCalledExactlyOnceWith(
-      JSON.stringify({ sent: false, feedbackId: null })
-    );
-  }
-);
+  expect(recordCommand).not.toHaveBeenCalled();
+  expect(console.log).toHaveBeenCalledExactlyOnceWith(
+    JSON.stringify({ sent: false, feedbackId: null })
+  );
+});
 
-it.each(['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'])(
-  'skips metadata, command telemetry, and submission when %s is already enabled',
-  async (name) => {
-    vi.stubEnv(name, '1');
+it.each(
+  ['DO_NOT_TRACK', 'EXPO_NO_TELEMETRY'].flatMap((name) =>
+    ['1', 'yes', ''].map((value) => ({ name, value }))
+  )
+)(
+  'skips metadata, command telemetry, and submission when $name=$value',
+  async ({ name, value }) => {
+    vi.stubEnv(name, value);
 
     await agentCliFeedback(['--message', message, '--json']);
 
