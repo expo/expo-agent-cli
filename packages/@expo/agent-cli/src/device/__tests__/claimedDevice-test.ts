@@ -433,10 +433,14 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
 });
 
 describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
+  /** What the CLI spawns for the emulator on this host: `emulator.exe` on Windows. */
+  const EMULATOR = process.platform === 'win32' ? 'emulator.exe' : 'emulator';
+
   /** One AVD. An emulator shows up in `adb devices` once it was spawned on its port. */
   function fakeAndroid({ physical = [] as string[], avds = ['Pixel_8'] } = {}) {
     const running = new Map<string, string>();
-    const tools = fakeDeviceTools((command, args) => {
+    const tools = fakeDeviceTools((spawned, args) => {
+      const command = path.basename(spawned, '.exe');
       if (command === 'emulator' && args[0] === '-list-avds') {
         return { stdout: `${avds.join('\n')}\n` };
       }
@@ -483,8 +487,8 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
     expect(here).toMatchObject({ ok: true, id: 'emulator-5554', name: 'Pixel_8', booted: true });
     expect(other).toMatchObject({ ok: true, id: 'emulator-5556', booted: true });
     expect(tools.callsWith('-avd ')).toEqual([
-      'emulator -avd Pixel_8 -ports 5554,5555 -no-snapshot-save',
-      'emulator -avd Pixel_8 -ports 5556,5557 -no-snapshot-save -read-only',
+      `${EMULATOR} -avd Pixel_8 -ports 5554,5555 -no-snapshot-save`,
+      `${EMULATOR} -avd Pixel_8 -ports 5556,5557 -no-snapshot-save -read-only`,
     ]);
   });
 
@@ -541,7 +545,7 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
       await resolveClaimedDeviceAsync({ platform: 'android', projectRoot: HERE, allowBoot: true })
     ).toMatchObject({ ok: true, id: 'emulator-5554', booted: true });
     expect(tools.callsWith('-avd ')).toEqual([
-      'emulator -avd Pixel_8 -ports 5554,5555 -no-snapshot-save',
+      `${EMULATOR} -avd Pixel_8 -ports 5554,5555 -no-snapshot-save`,
     ]);
   });
 
