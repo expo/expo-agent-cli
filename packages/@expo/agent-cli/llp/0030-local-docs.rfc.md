@@ -121,7 +121,7 @@ The `docs` group has no default action. Bare `docs` prints the group listing. It
 
 ## How an agent finds the files
 
-1. **The `AGENTS.md` block.** `agents:setup` writes an "Expo docs" section after "Commands". It has no absolute path, because `AGENTS.md` is committed and home directories differ per machine.
+1. **The `AGENTS.md` block.** `agents:setup` writes an "Expo docs" section after "Commands". It has no absolute path, because `AGENTS.md` is committed and home directories differ per machine. It also states the link rule: a docs link `https://docs.expo.dev/<path>.md` is the file `<path>.md` in the docs directory. The pages keep their site links. Rewriting them to local paths waits for an eval that shows agents fetch linked pages from the web despite the rule.
 2. **`docs:sync` output.** Text prints the root and `versions/<v>`. JSON has `dir` and `sdkDir`.
 3. **`docs:search` hits.** Each hit has an absolute `file`.
 4. **A fixed default path.** `~/.expo/agent-cli/docs` does not change, so an agent can reuse it after the first sync.

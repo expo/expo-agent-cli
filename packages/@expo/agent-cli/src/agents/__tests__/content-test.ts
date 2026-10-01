@@ -125,6 +125,7 @@ describe(generateAgentsMdBlock, () => {
     expect(block.indexOf('## Commands')).toBeLessThan(block.indexOf('## Expo docs'));
     expect(block.indexOf('## Expo docs')).toBeLessThan(block.indexOf('## Expo skills'));
     expect(block).toContain('`npx @expo/agent-cli docs:sync` downloads them');
+    expect(block).toContain('open `<path>.md` in the docs directory that `docs:sync` printed');
     expect(block).toContain('`npx @expo/agent-cli docs:search <query>`');
     expect(block).not.toContain('agent-cli/docs');
   });
