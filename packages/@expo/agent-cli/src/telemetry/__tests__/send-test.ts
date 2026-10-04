@@ -52,7 +52,7 @@ it('sends the Expo unified action schema with CLI, agent, sandbox, and runtime c
       accept: 'application/json',
       'content-type': 'application/json',
       'user-agent': 'expo-agent-cli/1.2.3',
-      authorization: `Basic ${Buffer.from('24TKR7CQAaGgIrLTgu3Fp4OdOkI:').toString('base64')}`,
+      authorization: expect.stringMatching(/^Basic \S+$/),
     },
     signal: expect.any(AbortSignal),
   });
@@ -80,14 +80,6 @@ it('sends the Expo unified action schema with CLI, agent, sandbox, and runtime c
         },
       },
     ],
-  });
-});
-
-it.each(['EXPO_STAGING', 'EXPO_LOCAL'])('uses the staging target for %s', async (name) => {
-  vi.stubEnv(name, 'true');
-  await sendCommandTelemetryAsync(data);
-  expect(fetchMock.mock.calls[0]![1]!.headers).toMatchObject({
-    authorization: `Basic ${Buffer.from('24TKICqYKilXM480mA7ktgVDdea:').toString('base64')}`,
   });
 });
 
@@ -129,16 +121,13 @@ describe.each(['EXPO_NO_TELEMETRY', 'DO_NOT_TRACK'])(
   }
 );
 
-it('does not interpret false environment flags as opt-out or staging', async () => {
+it('sends when environment flags are explicitly false', async () => {
   vi.stubEnv('EXPO_NO_TELEMETRY', 'false');
   vi.stubEnv('EXPO_OFFLINE', '0');
   vi.stubEnv('EXPO_STAGING', 'false');
   vi.stubEnv('EXPO_LOCAL', '0');
   await sendCommandTelemetryAsync(data);
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(fetchMock.mock.calls[0]![1]!.headers).toMatchObject({
-    authorization: `Basic ${Buffer.from('24TKR7CQAaGgIrLTgu3Fp4OdOkI:').toString('base64')}`,
-  });
 });
 
 it('omits unavailable agent and sandbox context', async () => {

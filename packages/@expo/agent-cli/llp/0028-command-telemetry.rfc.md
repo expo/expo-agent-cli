@@ -10,9 +10,8 @@
 
 [confirmed, user, 2026-09-29] Use the Expo CLI/EAS CLI observability pipeline with a distinct CLI
 name and minimal command latency. Both repositories send RudderStack-compatible events to
-`https://cdp.expo.dev/v1/batch`. Expo CLI's `expo unified` source selects the production write key
-`24TKR7CQAaGgIrLTgu3Fp4OdOkI`, or `24TKICqYKilXM480mA7ktgVDdea` for staging/local. These public
-ingestion identifiers are the same values shipped by Expo CLI. BigQuery routing belongs to that
+`https://cdp.expo.dev/v1/batch`. The agent CLI uses the same production and staging/local
+ingestion sources as Expo CLI's `expo unified` source. BigQuery routing belongs to that
 service; this package does not connect to BigQuery directly. [observed in sibling repositories]
 
 The agent CLI sends one `track` event named `action` for each registered command invocation:

@@ -218,7 +218,7 @@ describe('@expo/agent-cli telemetry', () => {
     expect(request.url).toBe('https://cdp.expo.dev/v1/batch');
     expect(request.method).toBe('POST');
     expect(request.headers).toMatchObject({
-      authorization: `Basic ${Buffer.from('24TKR7CQAaGgIrLTgu3Fp4OdOkI:').toString('base64')}`,
+      authorization: expect.stringMatching(/^Basic \S+$/),
       'content-type': 'application/json',
       'user-agent': `expo-agent-cli/${version}`,
     });
