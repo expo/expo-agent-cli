@@ -1,12 +1,12 @@
 // @ref llp/0029-feedback.rfc.md
 // Ports submit-expo-feedback's request and metadata fields.
+import { select, text } from '@clack/prompts';
 import { getConfig, getConfigFilePaths } from '@expo/config';
 import { resolvePackageManager } from '@expo/package-manager';
 import { detectAgent } from 'agent-cli-detector';
 import * as ciInfo from 'ci-info';
 import { randomBytes } from 'crypto';
 import path from 'path';
-import prompts from 'prompts';
 import { detectSandbox } from 'sandbox-cli-detector';
 
 import { PROGRAM_PREFIX } from '../programName';
@@ -14,6 +14,7 @@ import { readJsonFileSync, resolvePackageRootSync } from '../project/nodeModules
 import { env, isTelemetryDisabled } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { getExpoHomeDirectory } from '../utils/expoHome';
+import { askAsync } from '../utils/prompts';
 
 import {
   CLI_FEEDBACK_CATEGORIES,
@@ -82,45 +83,45 @@ export async function resolveFeedbackAsync(
     );
   }
 
-  const response = await prompts(
-    [
-      {
-        type: categoryValue ? null : 'select',
-        name: 'category',
-        message: 'What is your feedback about?',
-        stdout: process.stderr,
-        choices: CLI_FEEDBACK_CATEGORIES.map((value) => ({
-          title:
-            value === 'unknown'
-              ? 'Other / unknown'
-              : value === 'evals'
-                ? 'evals (a task an AI agent failed at)'
-                : value,
-          value,
-        })),
-      },
-      {
-        type: 'text',
-        name: 'feedback',
-        message: 'Share feedback with Expo',
-        stdout: process.stderr,
-        validate: (value) => getFeedbackValidationError(value.trim()) ?? true,
-      },
-    ],
-    {
-      onCancel() {
-        throw new FeedbackError('Feedback prompt was cancelled.');
-      },
-    }
-  );
+  const promptedCategory = categoryValue
+    ? category
+    : await askAsync((io) =>
+        select<CliFeedbackCategory>({
+          ...io,
+          message: 'What is your feedback about?',
+          options: CLI_FEEDBACK_CATEGORIES.map((value) => ({
+            label:
+              value === 'unknown'
+                ? 'Other / unknown'
+                : value === 'evals'
+                  ? 'evals (a task an AI agent failed at)'
+                  : value,
+            value,
+          })),
+        })
+      );
+  if (promptedCategory === null) {
+    throw new FeedbackError('Feedback prompt was cancelled.');
+  }
 
-  const promptedFeedback = response.feedback?.trim();
+  const response = await askAsync((io) =>
+    text({
+      ...io,
+      message: 'Share feedback with Expo',
+      validate: (value) => getFeedbackValidationError(value?.trim() ?? '') ?? undefined,
+    })
+  );
+  if (response === null) {
+    throw new FeedbackError('Feedback prompt was cancelled.');
+  }
+
+  const promptedFeedback = response.trim();
   if (!promptedFeedback) {
     throw new FeedbackError('Feedback message cannot be empty.');
   }
   validateFeedback(promptedFeedback);
   return {
-    category: response.category ?? category,
+    category: promptedCategory,
     feedback: promptedFeedback,
   };
 }

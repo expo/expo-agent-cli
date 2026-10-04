@@ -55,7 +55,7 @@ Setup inspects existing installations after confirmation, reuses matching instal
 
 ### Confirmation and project phases
 
-The two setup questions use `@clack/prompts`, pinned to 1.7.0: a multi-select with detected/configured agents preselected and a confirmation defaulting to No. Prompt output goes to stderr. The adapter also maps stdin EOF and Ctrl-D to cancellation and pauses input after each question so completed setup exits normally. This is the repository's only owned interactive prompt flow. [confirmed, Kudo, 2026-09-08; observed adapter behavior]
+The two setup questions use `@clack/prompts`, pinned to 1.7.0: a multi-select with detected/configured agents preselected and a confirmation defaulting to No. Prompt output goes to stderr. The shared adapter in `src/utils/prompts.ts` also maps stdin EOF and Ctrl-D to cancellation and pauses input after each question so completed setup exits normally. Feedback uses the same adapter for its category and message questions ([[0029-feedback]]). [confirmed, Kudo, 2026-09-08; observed adapter behavior]
 
 `--yes` accepts the setup plan for automation; `--project` overrides the user-home default and repeatable `--agent` flags make agent selection explicit. Non-TTY runs without `--yes` fail promptly; `--json` alone is not consent. Decline, EOF, or Ctrl-C before confirmation causes no setup writes or installer invocations. This is the interactive exception described in [[0008-guardrails]]. [observed]
 

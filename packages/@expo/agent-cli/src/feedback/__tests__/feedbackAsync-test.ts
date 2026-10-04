@@ -14,8 +14,10 @@ import {
   sendFeedbackAsync,
 } from '../feedbackAsync';
 
-const { mockPrompts, detectAgent, detectSandbox } = vi.hoisted(() => ({
-  mockPrompts: vi.fn(),
+const { select, text, cancelled, detectAgent, detectSandbox } = vi.hoisted(() => ({
+  select: vi.fn(),
+  text: vi.fn(),
+  cancelled: Symbol('clack:cancel'),
   detectAgent: vi.fn(),
   detectSandbox: vi.fn(),
 }));
@@ -26,7 +28,11 @@ vi.mock('ci-info', async (importOriginal) => ({
   ...(await importOriginal<typeof import('ci-info')>()),
   isCI: false,
 }));
-vi.mock('prompts', () => ({ default: mockPrompts }));
+vi.mock('@clack/prompts', () => ({
+  isCancel: (value: unknown) => value === cancelled,
+  select,
+  text,
+}));
 
 const PROJECT_ROOT = path.resolve('/feedback-project');
 const VALID_FEEDBACK = 'Please improve how error messages explain actionable next steps.';
@@ -46,7 +52,8 @@ beforeEach(() => {
     name: 'not-an-expo-app',
     version: '1.0.0',
   });
-  mockPrompts.mockReset();
+  select.mockReset().mockResolvedValue('agent-cli');
+  text.mockReset().mockResolvedValue(VALID_FEEDBACK);
   detectAgent.mockReset().mockReturnValue({
     detected: true,
     agent: { id: 'codex', name: 'Codex', sessionId: 'test-session' },
@@ -144,56 +151,80 @@ describe('feedback message resolution', () => {
     await expect(resolveFeedbackAsync([], 'website')).rejects.toThrow(
       'Invalid feedback category "website".'
     );
-    expect(mockPrompts).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expect(text).not.toHaveBeenCalled();
   });
 
   it('prompts for a category and message in an interactive terminal', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
-    mockPrompts.mockResolvedValueOnce({ category: 'agent-cli', feedback: `  ${VALID_FEEDBACK}  ` });
+    text.mockResolvedValueOnce(`  ${VALID_FEEDBACK}  `);
 
     await expect(resolveFeedbackAsync([])).resolves.toEqual({
       category: 'agent-cli',
       feedback: VALID_FEEDBACK,
     });
-    expect(mockPrompts).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: 'category',
-          type: 'select',
-          choices: expect.arrayContaining([{ title: 'agent-cli', value: 'agent-cli' }]),
-        }),
-        expect.objectContaining({ name: 'feedback', type: 'text' }),
-      ]),
-      expect.any(Object)
+    expect(select).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: 'What is your feedback about?',
+        output: process.stderr,
+        options: expect.arrayContaining([
+          { label: 'agent-cli', value: 'agent-cli' },
+          { label: 'Other / unknown', value: 'unknown' },
+          { label: 'evals (a task an AI agent failed at)', value: 'evals' },
+        ]),
+      })
+    );
+    expect(text).toHaveBeenCalledWith(
+      expect.objectContaining({ message: 'Share feedback with Expo', output: process.stderr })
     );
   });
 
   it('keeps an explicitly supplied category when prompting for the message', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
-    mockPrompts.mockResolvedValueOnce({ feedback: VALID_FEEDBACK });
-
     await expect(resolveFeedbackAsync([], 'simulator')).resolves.toEqual({
       category: 'simulator',
       feedback: VALID_FEEDBACK,
     });
-    expect(mockPrompts.mock.calls[0]![0]).toEqual(
-      expect.arrayContaining([expect.objectContaining({ name: 'category', type: null })])
-    );
+    expect(select).not.toHaveBeenCalled();
+    expect(text).toHaveBeenCalledOnce();
   });
 
-  it('reports interactive cancellation without sending feedback', async () => {
+  it('reports category cancellation without asking for a message', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
-    mockPrompts.mockImplementationOnce((_questions, options) => options.onCancel());
+    select.mockResolvedValueOnce(cancelled);
 
     await expect(resolveFeedbackAsync([])).rejects.toThrow('Feedback prompt was cancelled.');
+    expect(text).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('reports message cancellation without sending feedback', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
+    text.mockResolvedValueOnce(cancelled);
+
+    await expect(resolveFeedbackAsync([], 'simulator')).rejects.toThrow(
+      'Feedback prompt was cancelled.'
+    );
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('rejects an empty interactive answer', async () => {
     Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
-    mockPrompts.mockResolvedValueOnce({ feedback: '   ' });
+    text.mockResolvedValueOnce('   ');
 
     await expect(resolveFeedbackAsync([])).rejects.toThrow('Feedback message cannot be empty.');
+  });
+
+  it('validates interactive input before accepting it', async () => {
+    Object.defineProperty(process.stdin, 'isTTY', { configurable: true, value: true });
+    await resolveFeedbackAsync([], 'docs');
+
+    const { validate } = text.mock.calls[0]![0];
+    expect(validate(undefined)).toBe('Feedback cannot be empty.');
+    expect(validate('   ')).toBe('Feedback cannot be empty.');
+    expect(validate('short')).toBe('Feedback must be at least 40 characters.');
+    expect(validate('a'.repeat(5_001))).toBe('Feedback cannot exceed 5,000 characters.');
+    expect(validate(`  ${VALID_FEEDBACK}  `)).toBeUndefined();
   });
 
   it('requires an explicit message in a non-interactive environment', async () => {
@@ -202,7 +233,8 @@ describe('feedback message resolution', () => {
     await expect(resolveFeedbackAsync([])).rejects.toThrow(
       'Feedback message is required in non-interactive environments. Pass it with --message or -m.'
     );
-    expect(mockPrompts).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expect(text).not.toHaveBeenCalled();
   });
 });
 

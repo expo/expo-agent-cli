@@ -69,9 +69,11 @@ it.each(
     return metadata;
   });
 
-  await agentCliFeedback(['--message', message, '--json']);
+  await agentCliFeedback(['--message', message, '--resume', 'bad', '--json']);
 
   expect(recordCommand).not.toHaveBeenCalled();
+  expect(console.warn).not.toHaveBeenCalled();
+  expect(console.error).not.toHaveBeenCalled();
   expect(console.log).toHaveBeenCalledExactlyOnceWith(
     JSON.stringify({ sent: false, feedbackId: null })
   );

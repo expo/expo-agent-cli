@@ -34,6 +34,9 @@ ships. Displayed help and continuation commands use `PROGRAM_PREFIX` and the `fe
 Project metadata uses the same public `@expo/config` and `@expo/package-manager` APIs as the
 original, including skipping config plugins, installed-package version lookup, and graceful
 fallback when project configuration fails. No `@expo/cli` internals are imported.
+This collection runs only for feedback submissions. It reads current project data without a
+persistent cache: lockfile timestamps cannot capture dynamic config or environment changes, and
+config evaluation can itself enable a telemetry opt-out.
 Package lookup and tolerant JSON reads use `src/project/nodeModules.ts`, including hoisted
 dependencies. JSON output shares `src/utils/stdout.ts` with agent setup to redirect console and
 direct stdout writes during config evaluation. Final results use the CLI logger so the crash
@@ -45,6 +48,8 @@ The command retains `--message`/`-m`, `--category`/`-c`, `--subject`/`-s`, and `
 feedback remains accepted with the original deprecation warning. Unknown options are rejected
 instead of becoming part of the positional message. Messages are trimmed and must
 contain 40–5,000 characters. A terminal can prompt for missing input; non-interactive runs fail.
+Interactive input uses the existing `@clack/prompts` dependency and shares `src/utils/prompts.ts`
+with agent setup. Prompts write to stderr and cancel on Escape, Ctrl-C, Ctrl-D, or stdin EOF.
 The command also follows the agent CLI help and error conventions and offers `--json` with exactly
 `sent` and `feedbackId` on success or opt-out. Failures use the shared error envelope and exit 1.
 
@@ -57,7 +62,8 @@ Other present values, including empty strings, exit successfully before collecti
 sending feedback. Opt-out prints the existing
 instruction to respect the user's choice, and JSON mode returns `{ "sent": false, "feedbackId": null }`.
 The launcher defers feedback's command event to the feedback handler, which checks opt-out after
-project config loads. A config-driven opt-out therefore prevents both network requests. The send
+project config loads. A config-driven opt-out therefore prevents both network requests and
+suppresses the submission notice and any warning about a replaced resume ID. The send
 boundary also rechecks opt-out and reports whether feedback was sent, so an opt-out returns
 `sent: false` and does not print a success message. Network failures and
 timeouts use `FEEDBACK_ERROR`, including the shared JSON error envelope, without retrying.

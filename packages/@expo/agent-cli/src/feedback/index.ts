@@ -126,18 +126,17 @@ export const agentCliFeedback: Command = async (argv) => {
   const metadata = await (args['--json']
     ? withStdoutRedirectedAsync(collectMetadataAsync)
     : collectMetadataAsync());
-  if (args['--resume'] !== undefined && metadata.feedbackId !== args['--resume']) {
-    console.warn(
-      `The provided feedback ID is invalid, so a new one was generated: ${metadata.feedbackId}`
-    );
-  }
-
-  console.error(
-    'Submitting feedback with detected agent, sandbox, environment, and project metadata. Authenticated submissions are associated with your Expo account.'
-  );
-  // Project config can enable an opt-out while metadata is collected. Defer command telemetry
-  // until that config has run, and apply the same opt-out policy as feedback submission.
+  // Project config can enable an opt-out while metadata is collected. Only announce submission
+  // and record command telemetry after that config has run and feedback remains enabled.
   if (!isTelemetryDisabled()) {
+    if (args['--resume'] !== undefined && metadata.feedbackId !== args['--resume']) {
+      console.warn(
+        `The provided feedback ID is invalid, so a new one was generated: ${metadata.feedbackId}`
+      );
+    }
+    console.error(
+      'Submitting feedback with detected agent, sandbox, environment, and project metadata. Authenticated submissions are associated with your Expo account.'
+    );
     recordCommand('feedback', version);
   }
   const sent = await sendFeedbackAsync({ feedback, metadata, session });

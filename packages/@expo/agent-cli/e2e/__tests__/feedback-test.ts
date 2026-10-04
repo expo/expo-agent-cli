@@ -448,13 +448,16 @@ module.exports = ({ config }) => ({ ...config, name: 'Dynamic config app' });
       );
       const result = await executeAgentCliAsync(
         feedback.projectRoot,
-        ['feedback', '-m', MESSAGE, '--json'],
+        ['feedback', '-m', MESSAGE, '--resume', 'bad', '--json'],
         { env: { ...feedback.env, EXPO_OFFLINE: '0' } }
       );
 
       expect(result.exitCode).toBe(0);
       expect(JSON.parse(result.stdout)).toEqual({ sent: false, feedbackId: null });
       expect(result.stderr).toContain('Feedback was not sent because telemetry is off.');
+      expect(result.stderr).not.toContain('The provided feedback ID is invalid');
+      expect(result.stderr).not.toContain('Submitting feedback');
+      expect(result.stderr).not.toContain('Authenticated submissions');
       expect(result.all).not.toContain('Thanks for the feedback!');
       expect(feedback.requests).toEqual([]);
       expect(feedback.telemetryWasSpawned()).toBe(false);
