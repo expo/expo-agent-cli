@@ -185,6 +185,40 @@ describe('auth commands outside an Expo project', () => {
     expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli@latest', 'whoami']);
   });
 
+  it.each([
+    ['EXPO_STAGING', ''],
+    ['EXPO_STAGING', 'yes'],
+    ['EXPO_LOCAL', ''],
+    ['EXPO_LOCAL', 'yes'],
+  ])('reports invalid %s=%j as a JSON command error', async (name, value) => {
+    const dir = await setupBareDirAsync([]);
+    try {
+      const result = await executeAgentCliAsync(dir, ['whoami', '--json'], {
+        env: {
+          ...isolatedEnv(dir),
+          __UNSAFE_EXPO_HOME_DIRECTORY: undefined,
+          EXPO_STAGING: '0',
+          EXPO_LOCAL: '0',
+          [name]: value,
+        },
+        reject: false,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        error: {
+          code: 'BAD_ENV',
+          message: expect.stringContaining(name),
+        },
+      });
+      expect(JSON.parse(result.stdout).error.message).toContain('0, 1, false, or true');
+      expect(result.stderr).not.toContain('GetEnv.NoBoolean');
+      expect(readInvocations(dir)).toEqual([]);
+    } finally {
+      await fs.promises.rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it(`should forward the arguments it was given`, async () => {
     const dir = await setupBareDirAsync([]);
 

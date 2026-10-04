@@ -22,11 +22,11 @@
 // has no account yet runs this once in their life [confirmed, 2026-08-26]. So `register`
 // keeps the `npx expo` rung the other three gave up, and says on stderr that it is paying for it.
 
-import os from 'os';
 import path from 'path';
 
 import type { Command } from '../types';
 import { easCliInvocation } from '../utils/easCli';
+import { getExpoHomeDirectory } from '../utils/expoHome';
 import { type Invoker } from '../utils/invoker';
 import { resolvePackageRunner } from '../utils/packageRunner';
 import { resolveProjectBin } from '../utils/projectBin';
@@ -189,22 +189,8 @@ export function resolveRegisterCli(
  * `api/user/UserSettings.ts` `getExpoHomeDirectory`, and eas-cli resolves the same directory]:
  * `__UNSAFE_EXPO_HOME_DIRECTORY` wins, then `EXPO_STAGING`, then `EXPO_LOCAL`.
  */
-export function sessionFilePath(env: NodeJS.ProcessEnv = process.env): string {
-  const home = os.homedir();
-  const unsafeHome = env.__UNSAFE_EXPO_HOME_DIRECTORY;
-  const directory = unsafeHome
-    ? unsafeHome
-    : isTruthy(env.EXPO_STAGING)
-      ? path.join(home, '.expo-staging')
-      : isTruthy(env.EXPO_LOCAL)
-        ? path.join(home, '.expo-local')
-        : path.join(home, '.expo');
-  return path.join(directory, 'state.json');
-}
-
-/** How the Expo family reads a boolean environment variable [`boolish`, @expo/cli]. */
-function isTruthy(value: string | undefined): boolean {
-  return value === '1' || value === 'true';
+export function sessionFilePath(): string {
+  return path.join(getExpoHomeDirectory(), 'state.json');
 }
 
 /**

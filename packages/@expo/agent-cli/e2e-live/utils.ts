@@ -266,6 +266,7 @@ export async function runLiveAsync(
       // "what a real non-interactive run does" is what this tier is measuring.
       FORCE_COLOR: '0',
       NO_COLOR: '1',
+      EXPO_NO_TELEMETRY: '1',
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

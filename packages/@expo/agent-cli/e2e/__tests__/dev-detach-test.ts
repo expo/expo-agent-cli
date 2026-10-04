@@ -391,7 +391,12 @@ describe('@expo/agent-cli dev --detach', () => {
 
         // 7, not 0: the CLI worked, and the macOS Automation grant the stub's stderr names is a
         // step only a person can complete. The child classified it and this parent relayed it.
-        expect(result.exitCode).toBe(7);
+        expect(
+          result.exitCode,
+          `${result.all}\nDetached child log:\n${await fs.promises
+            .readFile(path.join(projectRoot, LOG_PATH), 'utf8')
+            .catch(() => '(unavailable)')}`
+        ).toBe(7);
         const { error } = JSON.parse(result.stdout);
         expect(error.needsHuman).toMatchObject({
           scenario: 'macos-automation',

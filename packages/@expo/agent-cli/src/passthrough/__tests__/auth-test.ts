@@ -1,4 +1,5 @@
 import { vol } from 'memfs';
+import { homedir } from 'node:os';
 import path from 'path';
 
 import { agentCliPassthrough } from '..';
@@ -7,7 +8,13 @@ import { runExpoAsync } from '../../utils/expoCli';
 import { runInheritedAsync } from '../../utils/inheritedRun';
 import { resetPackageRunnerCache } from '../../utils/packageRunner';
 import * as subprocess from '../../utils/subprocess';
-import { AUTH_COMMANDS, authCliLabel, resolveAuthCliAsync, resolveRegisterCli } from '../auth';
+import {
+  AUTH_COMMANDS,
+  authCliLabel,
+  resolveAuthCliAsync,
+  resolveRegisterCli,
+  sessionFilePath,
+} from '../auth';
 
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
@@ -43,6 +50,31 @@ beforeEach(() => {
 afterEach(() => {
   mockPlatform(realPlatform);
   vi.restoreAllMocks();
+});
+
+describe(sessionFilePath, () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    [undefined, undefined, undefined, '.expo'],
+    ['1', '1', undefined, '.expo-staging'],
+    ['TRUE', '1', undefined, '.expo-staging'],
+    ['false', 'TRUE', undefined, '.expo-local'],
+    ['0', 'false', undefined, '.expo'],
+    ['FALSE', '0', undefined, '.expo'],
+    ['true', 'true', '/custom-expo', '/custom-expo'],
+    ['false', 'true', '', '.expo-local'],
+  ])(
+    'reports the selected session for staging=%s local=%s override=%s',
+    (staging, local, override, directory) => {
+      vi.stubEnv('EXPO_STAGING', staging);
+      vi.stubEnv('EXPO_LOCAL', local);
+      vi.stubEnv('__UNSAFE_EXPO_HOME_DIRECTORY', override);
+
+      const home = directory === '/custom-expo' ? directory : path.join(homedir(), directory);
+      expect(sessionFilePath()).toBe(path.join(home, 'state.json'));
+    }
+  );
 });
 
 describe(resolveAuthCliAsync, () => {
