@@ -144,6 +144,15 @@ async function setUpWorktreesAsync(run: LiveRun, { eas }: { eas: boolean }): Pro
   };
 }
 
+/** The scaffold's template. `@next` is the current SDK line; `@latest` lags it. */
+const LIVE_TEMPLATE = process.env.AGENT_CLI_LIVE_TEMPLATE || 'expo-template-default@next';
+
+/**
+ * The `@next` line pins a `react-native` prerelease, which the stable peer ranges of its own
+ * dependencies (`react-native-reanimated`) exclude, so a plain `npm install` fails with ERESOLVE.
+ */
+const SCAFFOLD_ENV = { npm_config_legacy_peer_deps: 'true' };
+
 /** `new`, then `install expo-dev-client`, then the EAS link: once per suite, cloned per worktree. */
 async function scaffoldAppAsync(run: LiveRun): Promise<string> {
   const scaffoldDir = path.join(run.tempDir, 'scaffold');
@@ -154,12 +163,14 @@ async function scaffoldAppAsync(run: LiveRun): Promise<string> {
     [
       'new',
       path.join(scaffoldDir, 'parallel-example'),
+      '--template',
+      LIVE_TEMPLATE,
       '--name',
       'Parallel Example',
       '--no-git',
       '--json',
     ],
-    { label: 'new' }
+    { label: 'new', env: SCAFFOLD_ENV }
   );
   run.spend.scaffolds += 1;
   expectExit(created, 0, '@expo/agent-cli new must create and install a project');
@@ -167,6 +178,7 @@ async function scaffoldAppAsync(run: LiveRun): Promise<string> {
 
   const installed = await runLiveAsync(run, app, ['install', 'expo-dev-client', '--json'], {
     label: 'install-expo-dev-client',
+    env: SCAFFOLD_ENV,
   });
   expectExit(installed, 0, '@expo/agent-cli install expo-dev-client');
 
