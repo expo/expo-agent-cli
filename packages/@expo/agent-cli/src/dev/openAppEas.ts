@@ -24,8 +24,11 @@ import path from 'path';
 
 import {
   bindEasSession,
+  isEndedSessionStatus,
+  lookupCloudSessionsAsync,
   probeCloudSessionAsync,
   CLOUD_SESSION_TIMEOUT_MS,
+  PENDING_SESSION_STATUS,
   type CloudPlatform,
 } from '../device/cloudSimulator';
 import { readClaims, releaseClaim } from '../deviceClaims';
@@ -293,6 +296,14 @@ export async function ensureEasSessionAsync(
       reason: null,
     };
   }
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
+  // This worktree's session exists and has not started: a second one would bill beside it.
+  if (probe.state === 'inactive' && probe.status?.toUpperCase() === PENDING_SESSION_STATUS) {
+    return failed(
+      `${probe.reason}. No second session was started beside it; run this again once it is running`,
+      { sessionId: probe.sessionId }
+    );
+  }
   if (!stillWanted()) {
     return failed('the dev server stopped before a session was started');
   }
@@ -434,7 +445,22 @@ export async function stopEasSessionAsync(
       reason: `"${easCliLabel(easCli)} ${args[0]}" could not be run (${result.spawnError})`,
     };
   }
+  const releaseOwnClaim = () => {
+    const root = canonicalizeExistingPath(projectRoot);
+    for (const claim of readClaims()) {
+      if (claim.backend === 'eas' && claim.id === sessionId && claim.projectRoot === root) {
+        releaseClaim(claim);
+      }
+    }
+  };
   if (result.exitCode !== 0) {
+    // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
+    // A stop can fail because the session ended first. Only the service's word releases the claim.
+    const [session] = await lookupCloudSessionsAsync([sessionId], { projectRoot, easCli });
+    if (isEndedSessionStatus(session?.status ?? null)) {
+      releaseOwnClaim();
+      return { ok: true, reason: null };
+    }
     return {
       ok: false,
       reason: `"${easCliLabel(easCli)} ${args.join(' ')}" exited ${result.exitCode}: ${
@@ -442,12 +468,7 @@ export async function stopEasSessionAsync(
       }`,
     };
   }
-  const root = canonicalizeExistingPath(projectRoot);
-  for (const claim of readClaims()) {
-    if (claim.backend === 'eas' && claim.id === sessionId && claim.projectRoot === root) {
-      releaseClaim(claim);
-    }
-  }
+  releaseOwnClaim();
   return { ok: true, reason: null };
 }
 

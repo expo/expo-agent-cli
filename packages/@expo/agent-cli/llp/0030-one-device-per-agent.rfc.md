@@ -88,9 +88,11 @@ Step 3 takes a device a human may have booted. That is today's behaviour, and th
 
 **Selection**, in order:
 
-1. The session named by this worktree's `eas` claim, if `eas simulator:list --status in-progress` lists it on this platform.
+1. The session named by this worktree's `eas` claim, if `eas simulator:list --status new --status in-progress` lists it in progress on this platform.
 2. The session named by `.env.eas-simulator` in this worktree, if it is in progress. `eas simulator` writes that file when a start is run from this worktree, with or without this CLI, so it is a claim made by another tool for the same worktree.
 3. A new session, started by this worktree. Its id is written as an `eas` claim.
+
+A claim whose session is not on that one page (25 sessions) is not proof that the session ended: a session just started, or one kept after a failed start, is often not on it. The CLI looks the id up with `simulator:list --status new --status in-progress --status stopped --status errored`, a page of 100 at a time with `--after`, for at most 10 pages. Only `STOPPED` or `ERRORED` releases the claim. A session that is `NEW`, or that the lookup does not find, keeps its claim, so `dev:stop --eas` stops it by id; a stop that fails releases the claim only when a lookup then reports the session over. While the claimed session is `NEW`, `dev --eas` starts no second session beside it. eas-cli 24.10 adds `queued` and `starting`, which 24.7 refuses, so they are not sent, and a session in either keeps its claim. [read — eas-cli 24.7.0 `commands/simulator/list.ts`; `npx eas-cli@latest simulator:list --help`, 24.10.0, 2026-10-05]
 
 All four verbs that resolve a session go through `probeCloudSessionAsync` → `selectCloudSession` (`smoke/smokeAsync.ts`, `navigate/device.ts`, `dev/openAppEas.ts`, `dev/stopAsync.ts`) [observed — 2026-09-30], so the rule changes in one place.
 

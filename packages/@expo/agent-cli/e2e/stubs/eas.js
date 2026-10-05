@@ -55,6 +55,11 @@
 // - STUB_SIM_ID / STUB_SIM_STATUS / STUB_SIM_PLATFORM / STUB_SIM_TYPE: the one listed session
 //   (defaults `sess-e2e`, `IN_PROGRESS`, `IOS`, `agent-device`)
 // - STUB_SIM_GET_EXIT / STUB_SIM_STDERR: a refusal, with the real CLI's wording on stderr
+// - `--status` is repeatable, as in eas-cli 24: a remembered session is listed when its status is
+//   any of them. `--limit` and `--after` page the listing the way the service does: the cursor is
+//   the offset of the next page, and `pageInfo` carries `hasNextPage` and `endCursor`
+// - STUB_SIM_LIST_EXIT_FOR: a `--status` value (`stopped`, say) whose listing exits 1, for a lookup
+//   by id that fails while the in-progress listing answers
 // - STUB_SIM_STORE: a directory that holds the remembered sessions (below) instead of the cwd, so
 //   two projects share one service: a session one of them started is listed to the other, which
 //   did not start it (@ref llp/0030-one-device-per-agent.rfc.md §EAS backend)
@@ -304,15 +309,23 @@ if (command === 'simulator:list') {
   if (exitCode !== 0) {
     exitWith(process.stderr, process.env.STUB_SIM_STDERR || 'Session not found', exitCode);
   }
-  const wanted = valueOf('--status');
+  const wanted = args.flatMap((arg, index) => (args[index - 1] === '--status' ? [arg] : []));
+  if (process.env.STUB_SIM_LIST_EXIT_FOR && wanted.includes(process.env.STUB_SIM_LIST_EXIT_FOR)) {
+    exitWith(process.stderr, process.env.STUB_SIM_STDERR || 'simulator:list failed', 1);
+  }
   const remembered = rememberedSessions().filter(
-    (session) => !wanted || same(session.status, wanted.replace('-', '_'))
+    (session) =>
+      wanted.length === 0 || wanted.some((status) => same(session.status, status.replace('-', '_')))
   );
-  const sessions = [
-    ...remembered,
-    ...(process.env.STUB_SIM_SESSIONS === '0' ? [] : [stubSession()]),
-  ];
-  printJson({ sessions, pageInfo: { hasNextPage: false } });
+  const all = [...remembered, ...(process.env.STUB_SIM_SESSIONS === '0' ? [] : [stubSession()])];
+  const offset = Number(valueOf('--after') || 0);
+  const limit = Number(valueOf('--limit') || 10);
+  const sessions = all.slice(offset, offset + limit);
+  const hasNextPage = offset + limit < all.length;
+  printJson({
+    sessions,
+    pageInfo: { hasNextPage, endCursor: hasNextPage ? String(offset + limit) : null },
+  });
   process.exit(0);
 }
 

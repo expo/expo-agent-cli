@@ -545,6 +545,60 @@ describe('the session half on its own', () => {
     expect(readClaims()).toEqual([]);
   });
 
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
+  it(`releases the claim when the stop fails and a lookup by id reports the session over`, async () => {
+    writeClaim({
+      backend: 'eas',
+      platform: 'ios',
+      id: 'sess-1',
+      projectRoot: claimRoot,
+      pid: 1,
+      claimedAt: '2026-09-30T10:00:00.000Z',
+      touchedAt: '2026-09-30T10:00:00.000Z',
+      created: true,
+      booted: false,
+    });
+    vi.mocked(spawnCaptureAsync).mockImplementation((async (_command: string, args: string[]) =>
+      args.includes('simulator:stop')
+        ? { stdout: '', stderr: 'Session is not running', exitCode: 1, spawnError: null }
+        : {
+            stdout: JSON.stringify({
+              sessions: [{ id: 'sess-1', status: 'ERRORED', platform: 'IOS' }],
+              pageInfo: { hasNextPage: false },
+            }),
+            stderr: '',
+            exitCode: 0,
+            spawnError: null,
+          }) as any);
+
+    await expect(stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI)).resolves.toEqual({
+      ok: true,
+      reason: null,
+    });
+    expect(readClaims()).toEqual([]);
+  });
+
+  it(`starts no second session while this worktree's session is NEW`, async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+      state: 'inactive',
+      sessionId: 'sess-new',
+      platform: 'ios',
+      status: 'NEW',
+      reason: "this worktree's claim names session sess-new, and the service reports it NEW",
+    } as any);
+
+    const report = await ensureEasSessionAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+
+    expect(report).toMatchObject({ ok: false, sessionId: 'sess-new', started: false });
+    expect(report.reason).toContain('No second session was started');
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+
   it(`reports a stop that took, and quotes one that did not`, async () => {
     vi.mocked(spawnCaptureAsync).mockResolvedValue({
       stdout: 'stopped',

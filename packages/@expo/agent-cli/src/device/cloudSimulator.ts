@@ -103,6 +103,12 @@ export const AGENT_DEVICE_SPEC = 'agent-device@latest';
  */
 export const ACTIVE_SESSION_STATUS = 'IN_PROGRESS';
 
+/** A session the service created and has not started yet. It bills once it starts. */
+export const PENDING_SESSION_STATUS = 'NEW';
+
+/** The statuses of a session that is over. Only these release a claim on it. */
+export const ENDED_SESSION_STATUSES: readonly string[] = ['STOPPED', 'ERRORED'];
+
 /**
  * The only session type this CLI can drive.
  *
@@ -119,9 +125,16 @@ export const DRIVABLE_SESSION_TYPE = 'agent-device';
  * `simulator:list` defaults to 10 and caps at 100 [observed — `build/commands/simulator/list.js`].
  * The listing is already filtered to the running ones, and a project with more than this many at
  * once is a billing problem rather than a selection problem — so one page, no pagination, and a
- * number with room above what anybody runs.
+ * number with room above what anybody runs. A claimed session that is not on this page is looked
+ * up by id ({@link lookupCloudSessionsAsync}), never taken as ended.
  */
 export const CLOUD_SESSION_LIST_LIMIT = 25;
+
+/** One page of the by-id lookup: the cap of `simulator:list --limit`. */
+export const CLOUD_SESSION_LOOKUP_LIMIT = 100;
+
+/** The pages the by-id lookup reads before it gives up and keeps the claim. */
+export const CLOUD_SESSION_LOOKUP_MAX_PAGES = 10;
 
 /** Where an account without EAS Simulator asks for it, when the service names one. [observed] */
 export const CLOUD_SIMULATOR_WAITLIST_URL = 'https://expo.dev/services/simulators';
@@ -159,12 +172,41 @@ export function cloudSessionStartCommand(): string {
 export function buildSessionListArgs({
   limit = CLOUD_SESSION_LIST_LIMIT,
 }: { limit?: number } = {}): string[] {
+  // `new` too: a session this worktree just started is NEW until it runs, and it is still this
+  // worktree's. eas-cli 24 takes `--status` more than once [observed — eas-cli 24.7.0 `list.ts`].
   return [
     'simulator:list',
+    '--status',
+    'new',
     '--status',
     'in-progress',
     '--limit',
     String(limit),
+    '--json',
+    '--non-interactive',
+  ];
+}
+
+/**
+ * One page of `eas simulator:list` over the four statuses eas-cli 24.7 knows, to find sessions by id.
+ *
+ * There is no `simulator:list --id`. eas-cli 24.10 adds `queued` and `starting`, which 24.7
+ * refuses, so they are not sent, and a session in either is not found: its claim is kept.
+ */
+export function buildSessionLookupArgs({ after = null }: { after?: string | null } = {}): string[] {
+  return [
+    'simulator:list',
+    '--status',
+    'new',
+    '--status',
+    'in-progress',
+    '--status',
+    'stopped',
+    '--status',
+    'errored',
+    '--limit',
+    String(CLOUD_SESSION_LOOKUP_LIMIT),
+    ...(after ? ['--after', after] : []),
     '--json',
     '--non-interactive',
   ];
@@ -459,6 +501,22 @@ export function parseSessionListJson(stdout: string): CloudSessionInfo[] | null 
     });
   }
   return sessions;
+}
+
+/** The cursor of the next page, from `pageInfo`, or null when the listing has no next page. */
+export function readNextPageCursor(stdout: string): string | null {
+  try {
+    const parsed: unknown = JSON.parse(stdout.trim());
+    const pageInfo = isRecord(parsed) && isRecord(parsed.pageInfo) ? parsed.pageInfo : null;
+    return pageInfo?.hasNextPage === true ? stringOf(pageInfo.endCursor) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether a status names a session that is over, so a claim on it holds nothing. */
+export function isEndedSessionStatus(status: string | null): boolean {
+  return status != null && ENDED_SESSION_STATUSES.includes(status.trim().toUpperCase());
 }
 
 /** Whether a status names a session that is up and can be driven. */
@@ -763,8 +821,8 @@ export async function probeCloudSessionAsync({
     };
   }
 
-  const sessions = parseSessionListJson(result.stdout);
-  if (!sessions) {
+  const page = parseSessionListJson(result.stdout);
+  if (!page) {
     return unknownSession(
       preferredId,
       `"${result.command}" answered with JSON this CLI cannot read`
@@ -772,16 +830,35 @@ export async function probeCloudSessionAsync({
   }
 
   // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
+  // One page of NEW and IN_PROGRESS sessions is not the whole project: a claim missing from it is
+  // looked up by id, and only a session the service reports over releases its claim.
   const ownClaims = ownEasClaims(projectRoot, platform);
+  const listedIds = new Set(page.map((session) => session.id));
+  const unlisted = ownClaims.filter((claim) => !listedIds.has(claim.id)).map(({ id }) => id);
+  const sessions =
+    unlisted.length > 0
+      ? [
+          ...page,
+          ...(await lookupCloudSessionsAsync(unlisted, { projectRoot, easCli: cli, timeoutMs })),
+        ]
+      : page;
+  const statusOf = new Map(sessions.map((session) => [session.id, session.status]));
   const liveIds = new Set(
     sessions.filter((session) => isActiveSessionStatus(session.status)).map((session) => session.id)
   );
   const claimedId = ownClaims.find((claim) => liveIds.has(claim.id))?.id ?? null;
-  // The listing was read, so a claim whose session is not in it is a session that ended.
-  const endedClaim = ownClaims.find((claim) => !liveIds.has(claim.id));
+  let endedClaim: SessionClaimStatus | null = null;
+  let keptClaim: SessionClaimStatus | null = null;
   for (const claim of ownClaims) {
-    if (!liveIds.has(claim.id)) {
+    if (liveIds.has(claim.id)) {
+      continue;
+    }
+    const status = statusOf.get(claim.id) ?? null;
+    if (isEndedSessionStatus(status)) {
       releaseClaim(claim);
+      endedClaim ??= { claim, status };
+    } else {
+      keptClaim ??= { claim, status };
     }
   }
 
@@ -828,7 +905,9 @@ export async function probeCloudSessionAsync({
     projectRoot,
     timeoutMs,
     preferredId,
+    preferredStatus: preferredId == null ? null : (statusOf.get(preferredId) ?? null),
     endedClaim,
+    keptClaim,
     wrongType,
     unclaimed,
     heldBy: heldBy == null || preferredId == null ? null : { id: preferredId, projectRoot: heldBy },
@@ -848,7 +927,9 @@ async function noUsableSessionAsync({
   projectRoot,
   timeoutMs,
   preferredId,
+  preferredStatus,
   endedClaim,
+  keptClaim,
   wrongType,
   unclaimed,
   heldBy,
@@ -857,7 +938,9 @@ async function noUsableSessionAsync({
   projectRoot: string;
   timeoutMs: number;
   preferredId: string | null;
-  endedClaim: DeviceClaim | undefined;
+  preferredStatus: string | null;
+  endedClaim: SessionClaimStatus | null;
+  keptClaim: SessionClaimStatus | null;
   wrongType: CloudSessionInfo[];
   unclaimed: CloudSessionInfo[];
   heldBy: { id: string; projectRoot: string } | null;
@@ -895,6 +978,24 @@ async function noUsableSessionAsync({
       sessionId: null,
       reason:
         'EAS Simulator is not enabled on this account, so no session can be started for this project',
+    };
+  }
+  // This worktree's own session, not running and not over: it may bill, so its claim stays and
+  // `dev:stop --eas` stops it by id.
+  if (keptClaim != null) {
+    const { claim, status } = keptClaim;
+    return {
+      ...base,
+      state: 'inactive',
+      sessionId: claim.id,
+      platform: claim.platform,
+      status,
+      reason:
+        status == null
+          ? `this worktree's claim names session ${claim.id}, and the service did not list it, so whether it has ended is not known; the claim is kept, and "${PROGRAM_PREFIX} dev:stop --eas" stops it by id`
+          : `this worktree's claim names session ${claim.id}, and the service reports it ${status}${
+              status.toUpperCase() === PENDING_SESSION_STATUS ? ', so it has not started yet' : ''
+            }; the claim is kept, and "${PROGRAM_PREFIX} dev:stop --eas" stops it by id`,
     };
   }
   // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
@@ -937,8 +1038,9 @@ async function noUsableSessionAsync({
     return {
       ...base,
       state: 'inactive',
-      sessionId: endedClaim.id,
-      reason: `this worktree's claim names session ${endedClaim.id}, and the service does not list it among the running sessions, so that session has ended`,
+      sessionId: endedClaim.claim.id,
+      status: endedClaim.status,
+      reason: `this worktree's claim names session ${endedClaim.claim.id}, and the service reports it ${endedClaim.status}, so that session has ended`,
     };
   }
   if (preferredId != null) {
@@ -946,7 +1048,11 @@ async function noUsableSessionAsync({
       ...base,
       state: 'inactive',
       sessionId: preferredId,
-      reason: `${CLOUD_SESSION_ENV_FILE} names session ${preferredId}, and the service does not list it among this project's running sessions, so that session has ended`,
+      status: preferredStatus,
+      reason:
+        preferredStatus?.toUpperCase() === PENDING_SESSION_STATUS
+          ? `${CLOUD_SESSION_ENV_FILE} names session ${preferredId}, and the service reports it ${preferredStatus}, so it has not started yet`
+          : `${CLOUD_SESSION_ENV_FILE} names session ${preferredId}, and the service does not list it among this project's running sessions, so that session has ended`,
     };
   }
   return {
@@ -955,6 +1061,48 @@ async function noUsableSessionAsync({
     sessionId: null,
     reason: 'the service lists no running EAS Simulator session for this project',
   };
+}
+
+interface SessionClaimStatus {
+  claim: DeviceClaim;
+  /** What the service reports for the claimed session, verbatim, or null when it did not list it. */
+  status: string | null;
+}
+
+/**
+ * The sessions of `ids` the service lists, read off every page of the project's sessions until all
+ * are found. An id it does not list, or a lookup that failed, is absent. Never throws.
+ */
+export async function lookupCloudSessionsAsync(
+  ids: readonly string[],
+  { projectRoot, easCli, timeoutMs = CLOUD_SESSION_TIMEOUT_MS }: CloudRunOptions
+): Promise<CloudSessionInfo[]> {
+  const found = new Map<string, CloudSessionInfo>();
+  const cli = easCli ?? resolveEasCli(projectRoot);
+  if (!cli) {
+    return [];
+  }
+  let after: string | null = null;
+  for (let page = 0; page < CLOUD_SESSION_LOOKUP_MAX_PAGES; page++) {
+    const result = await runEasAsync(cli, buildSessionLookupArgs({ after }), {
+      projectRoot,
+      timeoutMs,
+    });
+    const sessions = result.exitCode === 0 ? parseSessionListJson(result.stdout) : null;
+    if (sessions == null) {
+      break;
+    }
+    for (const session of sessions) {
+      if (session.id != null && ids.includes(session.id)) {
+        found.set(session.id, session);
+      }
+    }
+    after = readNextPageCursor(result.stdout);
+    if (found.size === ids.length || after == null) {
+      break;
+    }
+  }
+  return [...found.values()];
 }
 
 /**
