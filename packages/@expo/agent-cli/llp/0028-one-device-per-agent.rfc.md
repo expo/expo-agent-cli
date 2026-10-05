@@ -155,10 +155,9 @@ Two facts correct earlier text in this RFC and in llp/0005: at eas-cli 24.7.0 a 
 
 ## Follow-up work
 
-- Start sessions with `--tag agent-cli:<digest>` and `--max-idle-time-minutes <n>`, list with `--tag`, and prefer the tag over the dotenv rung. Both flags need an eas-cli version that has them; the first version is not known, so the CLI must read the flag refusal and fall back.
+- Start sessions with `--tag agent-cli:<digest>` and `--max-idle-time-minutes <n>`, list with `--tag`, and prefer the tag over the dotenv rung. `--max-idle-time-minutes` is in eas-cli since v22.5.0 (commit 28f80da6, 2026-08-26 14:39 UTC, ten minutes before the v22.5.0 tag; the changelog lists it under 22.6.0), and `--tag` since v23.2.0 (commit 926887d1, PR #4318, 2026-08-31) [read — eas-cli history and CHANGELOG.md, 2026-10-05]. An older eas-cli refuses the flag, so the CLI must read that refusal and fall back.
 - Three review findings left for later: the registry lock is held during inventory work; `status` still reports the first booted device as "the" local device; the project-root comparison exists in three places.
 
 ## Open questions
 
-1. Which eas-cli version introduced `--tag` and `--max-idle-time-minutes`? Not read.
-2. Where does the idle check run, and what counts as activity? The backend passes `max_idle_time_minutes` to the job (`DeviceRunSessionUtils.ts:282`); the job code was not read.
+1. Where does the idle check run, and what counts as activity? The backend passes `max_idle_time_minutes` to the job (`DeviceRunSessionUtils.ts:282`); the job code was not read.
