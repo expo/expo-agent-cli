@@ -717,7 +717,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
   it('binds each project to the session it started, and never takes the one another agent started', async () => {
     const store = fs.mkdtempSync(path.join(os.tmpdir(), 'stub-eas-service-'));
     seedStubSessions(store, [{ id: 'sess-foreign' }]);

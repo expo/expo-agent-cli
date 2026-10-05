@@ -28,7 +28,7 @@ const APP_ID = 'com.example.installedapp';
 
 /**
  * The device-claim registry of this test, so a reader never reads or writes the developer's
- * claims (llp/0028 §The registry).
+ * claims (llp/0030 §The registry).
  */
 function claimRegistryEnv(root: string): Record<string, string> {
   return { __UNSAFE_EXPO_HOME_DIRECTORY: path.join(root, '.expo-home') };

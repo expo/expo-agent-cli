@@ -77,7 +77,7 @@ describe('the flags this CLI writes onto a command line', () => {
     // `PATH` to prove it was the EAS CLI, and the single rung deleted both the candidate and the
     // question (llp/0015 §Resolving the EAS CLI).
     //
-    // The `-j` and `-list-avds` rows, now in `src/device/claimedDevice.ts` (llp/0028), are the
+    // The `-j` and `-list-avds` rows, now in `src/device/claimedDevice.ts` (llp/0030), are the
     // platform device tools rather than a member of the Expo family, and they were run as the rule
     // requires [observed — live, 2026-08-30, macOS
     // 26 with Xcode: `xcrun simctl list devices -j` printed the runtime table and exited 0, and
@@ -99,11 +99,11 @@ describe('the flags this CLI writes onto a command line', () => {
     // every Expo Go install.
     //
     // `-read-only  src/device/bootDevice.ts` starts a second instance of an AVD that another
-    // worktree's emulator runs (llp/0028 §Android boot) [observed — 2026-09-30, Android emulator
+    // worktree's emulator runs (llp/0030 §Android boot) [observed — 2026-09-30, Android emulator
     // 37.1.11.0: `emulator -help` lists `-read-only` as "allow running multiple instances of
     // emulators on the same AVD", beside `-ports <consoleport>,<adbport>`].
     //
-    // The `src/device/claimedDevice.ts` rows are the device inventory of llp/0028: `simctl list
+    // The `src/device/claimedDevice.ts` rows are the device inventory of llp/0030: `simctl list
     // devices -j`, `simctl list runtimes -j` and `emulator -list-avds` [observed — 2026-09-30,
     // Xcode 27: `xcrun simctl list runtimes -j` printed six iOS runtimes, each with its
     // `supportedDeviceTypes`, and exited 0].

@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Installed-app fingerprint check
 // Compare the fingerprint embedded in the installed app with the project's, per platform, and turn
 // the comparison into one verdict per platform. Reported by `status`; not a command of its own.

@@ -1,4 +1,4 @@
-# 0028: One device per platform per agent — each worktree binds its own devices, local or on EAS
+# 0030: One device per platform per agent — each worktree binds its own devices, local or on EAS
 
 **Type:** RFC
 **Status:** Draft

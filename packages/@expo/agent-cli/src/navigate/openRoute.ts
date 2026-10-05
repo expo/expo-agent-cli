@@ -83,7 +83,7 @@ export interface OpenRouteOptions {
   route: string;
   /** Platform to open on, or undefined for whichever device this worktree has up. */
   platform?: NavigatePlatform;
-  /** `--device`, claimed for this worktree (llp/0028 §Explicit device). */
+  /** `--device`, claimed for this worktree (llp/0030 §Explicit device). */
   device?: string | null;
   /** URL scheme, instead of the one read from the project's config. */
   scheme?: string;

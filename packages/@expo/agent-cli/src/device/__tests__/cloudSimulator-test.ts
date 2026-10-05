@@ -513,7 +513,7 @@ describe(selectCloudSession, () => {
     )
   )![0]!;
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
   it(`selects the session the claim names, over a newer one and over the dotenv`, () => {
     const selection = selectCloudSession([ios, android], { claimedId: 'ios-1', dotenvId: 'and-1' });
 
@@ -682,7 +682,7 @@ describe(readCloudSessionIdSync, () => {
 describe(probeCloudSessionAsync, () => {
   afterEach(() => vol.reset());
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
   // A listed session that nothing bound to this worktree is never the device. It is reported, and
   // the caller starts a session of its own.
   it(`does not use a session it never bound, and reports it`, async () => {

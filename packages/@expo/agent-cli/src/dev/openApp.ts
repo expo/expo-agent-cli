@@ -1,5 +1,5 @@
 // @ref llp/0026-dev-owns-the-open.rfc.md
-// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 // What `dev` does once its dev server is up: get the app onto a device and open it, through the
 // same tools `navigate` and `smoke` use — `simctl` and `adb`, never AppleScript.
 //
@@ -84,7 +84,7 @@ export async function openAppOnDeviceAsync(
   });
 
   // The device this worktree claims: the one it holds already, a free one that is up, or one this
-  // run boots (llp/0028 §Every verb uses the claim).
+  // run boots (llp/0030 §Every verb uses the claim).
   if (!stillWanted()) {
     return stopped('the dev server stopped before a device was claimed');
   }

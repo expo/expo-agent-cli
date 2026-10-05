@@ -155,7 +155,7 @@ describe(probeAndroidDeviceAsync, () => {
 });
 
 describe(resolveDeviceAsync, () => {
-  // @ref llp/0028-one-device-per-agent.rfc.md §Explicit device
+  // @ref llp/0030-one-device-per-agent.rfc.md §Explicit device
   it(`should use the simulator --device names, and claim it`, async () => {
     mockSpawnQueue([{ stdout: BOOTED_SIMCTL_JSON }]);
 
@@ -324,7 +324,7 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
   // The rung asks the service, and only a session this worktree bound is a device: a session
   // somebody else started is listed and not used.
   it(`does not take a session that this project never bound`, async () => {

@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §The registry
+// @ref llp/0030-one-device-per-agent.rfc.md §The registry
 //
 // Two worktrees on one machine get two devices, through the published bin. The unit tests prove the
 // allocation against a fake registry; this proves the claim crosses processes: `dev --ios` in one

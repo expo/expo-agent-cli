@@ -246,7 +246,7 @@ function foundBy(source: DevServerSource): { source: DevServerSource; discovered
 
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder — the five steps, what
 // each one proves, and why none may be skipped on the strength of a faster one.
-// @ref llp/0028-one-device-per-agent.rfc.md §Discovery
+// @ref llp/0030-one-device-per-agent.rfc.md §Discovery
 /**
  * Probe for a dev server. An explicit URL is probed alone (the user named it, so no guessing);
  * without one, 8081 is tried first and, only when it does not answer, the next few ports

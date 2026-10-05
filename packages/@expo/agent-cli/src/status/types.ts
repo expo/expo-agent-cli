@@ -341,7 +341,7 @@ export interface DevServerStatus {
   /**
    * Dev servers that answered on the scanned ports for another project. Present only when that is
    * all that answered, so a reader is not told "not running" while another project's server is up.
-   * @ref llp/0028-one-device-per-agent.rfc.md §Discovery
+   * @ref llp/0030-one-device-per-agent.rfc.md §Discovery
    */
   foreignServers?: ForeignDevServer[];
 }

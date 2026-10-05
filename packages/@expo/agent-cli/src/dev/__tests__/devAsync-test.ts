@@ -248,7 +248,7 @@ describe(devAsync, () => {
       );
     });
 
-    // @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+    // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
     it(`should pin the build to the device this worktree claims`, async () => {
       mockStaleDevClientState();
       vi.mocked(resolveClaimedDeviceAsync).mockResolvedValueOnce({

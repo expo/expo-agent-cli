@@ -380,7 +380,7 @@ export async function ensureEasSessionAsync(
   const sessionId = readSessionId(output);
   const sessionUrl = readSessionUrl(output);
   if (sessionId) {
-    // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+    // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
     // Also when the start failed after the session was created: that session is this worktree's and
     // may be billing, so `dev:stop --eas` has to find it.
     bindEasSession(projectRoot, {

@@ -437,7 +437,7 @@ function installStep(platform: NativePlatform, device: string | null): PlanStep 
 /**
  * Build, install and serve on the device this worktree claims.
  *
- * @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim — `--device`, so the Expo
+ * @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim — `--device`, so the Expo
  * CLI does not pick the first booted device, which may be another worktree's.
  */
 function runStep(platform: NativePlatform, reason: string, device: string | null): PlanStep {

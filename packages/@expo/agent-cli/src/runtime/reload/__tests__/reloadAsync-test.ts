@@ -32,7 +32,7 @@ const RUNNER_DIR = (process.env.PATH ?? '/usr/bin').split(path.delimiter)[0]!;
 const NPX_FILES = {
   [path.join(RUNNER_DIR, 'npx')]: '#!/bin/sh\n',
   [path.join(RUNNER_DIR, 'npx.cmd')]: '#!/bin/sh\n',
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend — only a session this worktree bound is used.
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend — only a session this worktree bound is used.
   [`${projectRoot}/.env.eas-simulator`]: 'EAS_SIMULATOR_SESSION_ID=session-1\n',
 };
 

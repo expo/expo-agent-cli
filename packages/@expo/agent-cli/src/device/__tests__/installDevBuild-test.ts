@@ -206,7 +206,7 @@ describe(androidDeviceNameAsync, () => {
   });
 });
 
-// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 describe(expoRunDeviceArgumentAsync, () => {
   /** Running emulators, and the AVD each one runs. */
   function adbWith(avds: Record<string, string>) {

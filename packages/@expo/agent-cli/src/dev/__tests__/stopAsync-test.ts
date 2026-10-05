@@ -573,7 +573,7 @@ describe('dev:stop --eas', () => {
   });
 });
 
-// @ref llp/0028-one-device-per-agent.rfc.md §Release and cleanup
+// @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
 describe(`${devStopAsync.name} and the device claims`, () => {
   function claim(id: string, overrides: Partial<DeviceClaim> = {}): void {
     const now = new Date().toISOString();

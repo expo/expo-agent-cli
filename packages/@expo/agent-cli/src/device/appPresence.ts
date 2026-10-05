@@ -1,5 +1,5 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
-// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 // Whether this project's development build is already on the device the run would open it on.
 //
 // The gap this closes: a fingerprint that matches the recorded build proves the *build* is current

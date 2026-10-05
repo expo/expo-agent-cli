@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 // The one place a local verb gets its device: the device this worktree claimed on the platform, or
 // a free one it claims now. It builds the local inventory for the registry's allocation, and boots
 // the device when the caller allows it. Nothing else picks "the first booted" device.
@@ -543,7 +543,7 @@ async function listSimulatorsAsync(appId: string | null): Promise<InventoryResul
 /**
  * Running emulators, this worktree's claims, and at most one emulator that could be started.
  *
- * Physical devices are never allocated (llp/0028 §Out of scope): one is listed only when this
+ * Physical devices are never allocated (llp/0030 §Out of scope): one is listed only when this
  * worktree claimed it with `--device`, or when `--device` is being matched now.
  */
 async function listEmulatorsAsync({
@@ -674,7 +674,7 @@ async function listAvdsAsync(adb: AdbResolution): Promise<string[]> {
  * `simctl create` from the newest iOS runtime and the newest iPhone it supports.
  *
  * Into the default device set: `expo run:ios` has no `--set`, so it could not build for a
- * simulator in a private one (llp/0028 §Device set).
+ * simulator in a private one (llp/0030 §Device set).
  */
 async function createSimulatorAsync(): Promise<LocalCandidate> {
   const listed = await spawnCaptureAsync('xcrun', ['simctl', 'list', 'runtimes', '-j'], {

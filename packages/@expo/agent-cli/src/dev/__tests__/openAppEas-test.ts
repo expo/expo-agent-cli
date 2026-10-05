@@ -264,7 +264,7 @@ describe(openAppOnEasAsync, () => {
     expect(options).toMatchObject({ cwd: projectRoot });
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
   it(`binds the session it started to this worktree with an eas claim`, async () => {
     await openAppOnEasAsync(projectRoot, {
       platform: 'ios',

@@ -38,7 +38,7 @@ export type RunDeviceArgument =
 /**
  * The `--device` value of `expo run:*` for the device this worktree claims.
  *
- * @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+ * @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
  *
  * iOS takes the UDID. Android depends on the project's Expo CLI: 58 matches the adb serial
  * before the name (`AndroidDeviceManager.resolveFromNameAsync`), and 57 matches only the name

@@ -1,5 +1,5 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Plan contract
-// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 // What `@expo/agent-cli dev` does: probe the project, decide what must run, emit the plan, then
 // (unless `--plan` stopped us) run its steps as subprocesses. The plain `expo start` wrapper is
 // `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.

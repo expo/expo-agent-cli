@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §The registry
+// @ref llp/0030-one-device-per-agent.rfc.md §The registry
 // The IO around `chooseDevice`: read, classify, choose and write, all under the registry lock, so
 // two worktrees can never both see a device as free and both claim it.
 
@@ -23,7 +23,7 @@ import type {
   DevicePlatform,
 } from './types';
 
-/** @ref llp/0028-one-device-per-agent.rfc.md §Release and cleanup */
+/** @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup */
 export const CREATED_DEVICE_EXPIRY_MS = 60 * 60_000;
 
 export interface AllocateDeviceOptions<C extends DeviceCandidate> {

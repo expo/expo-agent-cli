@@ -147,7 +147,7 @@ describe('@expo/agent-cli navigate --eas', () => {
     ]);
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
   // A listed session that nothing bound to this project is another agent's. It is reported in the
   // refusal and never used.
   it(`does not use a listed session that this project never bound, and says it exists`, async () => {
@@ -160,7 +160,7 @@ describe('@expo/agent-cli navigate --eas', () => {
     expect(result.stderr).toContain("not this worktree's");
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
   // `.env.eas-simulator` is copied between worktrees with the files around it. The copy names a
   // session that another worktree holds, so it is not this one's to drive.
   it(`does not use the session a dotenv names when another project holds a live claim on it`, async () => {
@@ -868,7 +868,7 @@ describe('@expo/agent-cli dev:stop --eas', () => {
     ]);
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
   it(`ends the session its claim names, and leaves the newer one of somebody else running`, async () => {
     const projectRoot = await setupAsync('go-app');
     const store = path.join(projectRoot, 'service');

@@ -119,7 +119,7 @@ export async function writeCloudSessionFileAsync(
  * Without it, each `dev --eas` of an e2e run writes an `eas` claim into the real `~/.expo` of the
  * machine. Call it once at the top of a file. Each test gets an empty registry.
  *
- * @ref llp/0028-one-device-per-agent.rfc.md §The registry
+ * @ref llp/0030-one-device-per-agent.rfc.md §The registry
  */
 export function isolateExpoHome(): void {
   let home: string | null = null;
