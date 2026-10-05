@@ -80,6 +80,27 @@ describe(parsePage, () => {
     expect(searchRegex([page], /npm i/, 5)[0]!.heading).toBe('Steps');
   });
 
+  it('keeps a block open past a fence that carries an info string', () => {
+    const page: DocPage = {
+      path: 'guides/nested',
+      content: [
+        '# Nested',
+        '````markdown',
+        '```ts',
+        '# Not a heading',
+        '```',
+        '````',
+        '## Real heading',
+        'After the block.',
+      ].join('\n'),
+    };
+    expect(
+      parsePage(page)
+        .body.filter((line) => line.heading)
+        .map((line) => line.text)
+    ).toEqual(['# Nested', '## Real heading']);
+  });
+
   it('falls back to the first heading for a page without frontmatter', () => {
     expect(parsePage(noFrontmatter).title).toBe('Home');
   });

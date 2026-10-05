@@ -1,4 +1,5 @@
 // @ref llp/0030-local-docs.rfc.md §Commands — the ranking of `docs:search`, as pure functions.
+import { nextFence } from '../utils/markdownFence';
 
 /** One page as the cache holds it: the site path and the Markdown of `<path>.md`. */
 export interface DocPage {
@@ -54,15 +55,12 @@ export function parsePage(page: DocPage): ParsedPage {
   }
   let fence: string | null = null;
   const body = lines.slice(bodyStart).map((text, index) => {
-    const marker = /^\s*(`{3,}|~{3,})/.exec(text)?.[1];
-    if (marker && (fence == null || marker.startsWith(fence))) {
-      fence = fence == null ? marker : null;
-      return { number: bodyStart + index + 1, text, heading: false };
-    }
+    const before = fence;
+    fence = nextFence(text, fence);
     return {
       number: bodyStart + index + 1,
       text,
-      heading: fence == null && /^#{1,6}\s/.test(text),
+      heading: before == null && fence == null && /^#{1,6}\s/.test(text),
     };
   });
   const h1 = body.find((line) => line.heading && /^#\s/.test(line.text))?.text.replace(/^#\s+/, '');
