@@ -5,7 +5,7 @@ import path from 'path';
 import { allocateDeviceAsync, CREATED_DEVICE_EXPIRY_MS } from '../allocate';
 import { devicesAllClaimedError } from '../errors';
 import { event } from '../events';
-import { claimFilePath, readClaims, writeClaim } from '../registry';
+import { claimFilePath, readClaims, touchClaim, writeClaim } from '../registry';
 import type { DeviceCandidate, DeviceClaim } from '../types';
 
 vi.mock('os', async (importOriginal) => {
@@ -46,8 +46,11 @@ function allocate(
     deleteDevice,
     capacity = 4,
     now = NOW,
+    duringInventory,
   }: {
     inventory?: DeviceCandidate[];
+    /** Runs while the inventory is listed, which is the slow part under the lock. */
+    duringInventory?: () => void;
     createDevice?: () => Promise<DeviceCandidate>;
     deleteDevice?: (claim: DeviceClaim) => Promise<void>;
     capacity?: number;
@@ -58,7 +61,10 @@ function allocate(
     projectRoot,
     platform: 'ios',
     backend: 'local-ios',
-    listDevices: async () => inventory,
+    listDevices: async () => {
+      duringInventory?.();
+      return inventory;
+    },
     createDevice,
     deleteDevice,
     capacity,
@@ -196,6 +202,105 @@ describe('allocateDeviceAsync', () => {
       'device_claim_stale_removed',
       expect.objectContaining({ id: 'A', projectRoot: OTHER, reason: 'taken-over' })
     );
+  });
+
+  it(`leaves a stale claim that its worktree touched while the inventory was listed`, async () => {
+    const stale = staleClaim({ id: 'A' });
+    writeClaim(stale);
+
+    const allocation = await allocate(HERE, {
+      inventory: [booted('A')],
+      duringInventory: () => touchClaim(stale, NOW),
+    });
+
+    expect(allocation).toEqual({ kind: 'exhausted', holders: [{ id: 'A', projectRoot: OTHER }] });
+    expect(readClaims()).toMatchObject([
+      { id: 'A', projectRoot: OTHER, touchedAt: NOW.toISOString() },
+    ]);
+    expect(event).not.toHaveBeenCalledWith('device_claim_stale_removed', expect.anything());
+  });
+
+  it(`takes another device when the stale claim it chose came back to life`, async () => {
+    const stale = staleClaim({ id: 'A' });
+    writeClaim(stale);
+
+    const allocation = await allocate(HERE, {
+      inventory: [booted('A'), booted('B')],
+      duringInventory: () => touchClaim(stale, NOW),
+    });
+
+    expect(allocation).toMatchObject({ kind: 'take', candidate: { id: 'B' } });
+    expect(
+      readClaims()
+        .map((claim) => [claim.id, claim.projectRoot])
+        .sort()
+    ).toEqual([
+      ['A', OTHER],
+      ['B', HERE],
+    ]);
+  });
+
+  it(`leaves a stale claim whose worktree came back while the inventory was listed`, async () => {
+    writeClaim(staleClaim({ id: 'A' }));
+
+    const allocation = await allocate(HERE, {
+      inventory: [booted('A')],
+      duringInventory: () => liveRoots.add(OTHER),
+    });
+
+    expect(allocation.kind).toBe('exhausted');
+    expect(readClaims()).toMatchObject([{ id: 'A', projectRoot: OTHER }]);
+  });
+
+  it(`leaves a stale claim on a gone device that its worktree touched meanwhile`, async () => {
+    const stale = staleClaim({ id: 'GONE' });
+    writeClaim(stale);
+
+    await allocate(HERE, {
+      inventory: [booted('A')],
+      duringInventory: () => touchClaim(stale, NOW),
+    });
+
+    expect(
+      readClaims()
+        .map((claim) => claim.id)
+        .sort()
+    ).toEqual(['A', 'GONE']);
+  });
+
+  it(`does not delete an expired device whose claim was touched meanwhile`, async () => {
+    const stale = staleClaim({ id: 'OLD', created: true });
+    writeClaim(stale);
+    const deleteDevice = vi.fn(async () => {});
+
+    await allocate(HERE, {
+      inventory: [booted('A'), shutdown('OLD')],
+      deleteDevice,
+      duringInventory: () => touchClaim(stale, NOW),
+    });
+
+    expect(deleteDevice).not.toHaveBeenCalled();
+    expect(
+      readClaims()
+        .map((claim) => claim.id)
+        .sort()
+    ).toEqual(['A', 'OLD']);
+  });
+
+  it(`does not release its own gone claim when the file names a newer claim`, async () => {
+    const old = staleClaim({ id: 'GONE', projectRoot: HERE });
+    writeClaim(old);
+    const newer = { ...old, claimedAt: NOW.toISOString(), touchedAt: NOW.toISOString() };
+
+    await allocate(HERE, {
+      inventory: [booted('A')],
+      duringInventory: () => {
+        vol.rmSync(claimFilePath('local-ios', 'GONE'));
+        writeClaim(newer);
+      },
+    });
+
+    expect(readClaims().find((claim) => claim.id === 'GONE')).toEqual(newer);
   });
 
   it(`releases a stale claim whose device is gone`, async () => {

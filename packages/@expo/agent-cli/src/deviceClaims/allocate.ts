@@ -7,7 +7,9 @@ import { chooseDevice } from './choose';
 import { debugEvent, event } from './events';
 import { classifyClaimAsync } from './liveness';
 import {
+  isSameClaim,
   pruneUnreadableClaims,
+  readClaim,
   readClaims,
   releaseClaim,
   removeClaimFile,
@@ -55,6 +57,10 @@ export interface AllocateDeviceOptions<C extends DeviceCandidate> {
  * Never boots: a boot takes a minute, and the lock would hold every other worktree for it. The
  * claim is written first, so no other worktree takes the device while the caller boots it.
  * Never touches a reused claim: only a caller that hands out a usable device may re-arm it.
+ *
+ * The inventory is slow, and `touchClaim` runs outside the lock, so a claim that was stale when it
+ * was read may be live by the time it is acted on. Each claim is read again just before it is
+ * removed, released or its device deleted, and is left when it changed or is live now.
  */
 export async function allocateDeviceAsync<C extends DeviceCandidate>({
   projectRoot: givenRoot,
@@ -72,104 +78,130 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
   probeLock,
 }: AllocateDeviceOptions<C>): Promise<Allocation<C>> {
   const projectRoot = canonicalizeExistingPath(givenRoot);
+  const classifyAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim> => ({
+    ...claim,
+    liveness: await classifyClaimAsync(claim, { now, probeLock }),
+  });
+  const currentAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim | null> => {
+    const current = readClaim(claim.backend, claim.id);
+    return current == null ? null : await classifyAsync(current);
+  };
+  const stillStaleAsync = async (claim: DeviceClaim): Promise<boolean> => {
+    const current = await currentAsync(claim);
+    return current != null && isSameClaim(current, claim) && current.liveness === 'stale';
+  };
 
   return await withRegistryLockAsync(async () => {
     pruneUnreadableClaims(now.getTime());
-    const claims: ClassifiedClaim[] = await Promise.all(
-      readClaims().map(async (claim) => ({
-        ...claim,
-        liveness: await classifyClaimAsync(claim, { now, probeLock }),
-      }))
-    );
-    const inventory = await listDevices(claims);
-    const choice = chooseDevice({
-      projectRoot,
-      platform,
-      backend,
-      claims,
-      inventory,
-      capacity: createDevice ? capacity : 0,
-      rank,
-      now,
-      pid: process.pid,
-      explicit,
-      matches,
-      isCreated,
-    });
+    let claims = await Promise.all(readClaims().map(classifyAsync));
+    let inventory = await listDevices(claims);
 
-    const chosenId =
-      choice.kind === 'reuse'
-        ? choice.claim.id
-        : 'candidate' in choice
-          ? choice.candidate.id
-          : null;
-    const inScope = claims.filter(
-      (claim) => claim.backend === backend && claim.platform === platform && claim.id !== chosenId
-    );
-    for (const claim of inScope) {
-      const gone = !inventory.some((candidate) => candidate.id === claim.id);
-      if (gone && claim.projectRoot === projectRoot) {
-        // This worktree's own claim on a device that no longer exists: it holds nothing.
-        releaseClaim(claim);
-        continue;
-      }
-      if (claim.liveness !== 'stale') {
-        continue;
-      }
-      if (gone) {
-        removeStale(claim, 'device-gone');
-      } else if (
-        claim.created &&
-        deleteDevice &&
-        now.getTime() - Date.parse(claim.touchedAt) > CREATED_DEVICE_EXPIRY_MS
-      ) {
-        try {
-          await deleteDevice(claim);
-          removeStale(claim, 'expired');
-        } catch (error: unknown) {
-          debugEvent('device_delete_failed', {
-            backend: claim.backend,
-            id: claim.id,
-            error: debugEvent.error(error as Error),
-          });
+    for (;;) {
+      const choice = chooseDevice({
+        projectRoot,
+        platform,
+        backend,
+        claims,
+        inventory,
+        capacity: createDevice ? capacity : 0,
+        rank,
+        now,
+        pid: process.pid,
+        explicit,
+        matches,
+        isCreated,
+      });
+
+      const chosenId =
+        choice.kind === 'reuse'
+          ? choice.claim.id
+          : 'candidate' in choice
+            ? choice.candidate.id
+            : null;
+      const inScope = claims.filter(
+        (claim) => claim.backend === backend && claim.platform === platform && claim.id !== chosenId
+      );
+      for (const claim of inScope) {
+        const gone = !inventory.some((candidate) => candidate.id === claim.id);
+        if (gone && claim.projectRoot === projectRoot) {
+          // This worktree's own claim on a device that no longer exists: it holds nothing.
+          const current = readClaim(claim.backend, claim.id);
+          if (current != null && isSameClaim(current, claim)) {
+            releaseClaim(claim);
+          }
+          continue;
+        }
+        if (claim.liveness !== 'stale') {
+          continue;
+        }
+        if (gone) {
+          if (await stillStaleAsync(claim)) {
+            removeStale(claim, 'device-gone');
+          }
+        } else if (
+          claim.created &&
+          deleteDevice &&
+          now.getTime() - Date.parse(claim.touchedAt) > CREATED_DEVICE_EXPIRY_MS &&
+          (await stillStaleAsync(claim))
+        ) {
+          try {
+            await deleteDevice(claim);
+            removeStale(claim, 'expired');
+            inventory = inventory.filter((candidate) => candidate.id !== claim.id);
+          } catch (error: unknown) {
+            debugEvent('device_delete_failed', {
+              backend: claim.backend,
+              id: claim.id,
+              error: debugEvent.error(error as Error),
+            });
+          }
         }
       }
-    }
 
-    switch (choice.kind) {
-      case 'reuse':
-      case 'exhausted':
-      case 'claimed':
-      case 'not-found':
-        return choice;
+      switch (choice.kind) {
+        case 'reuse':
+        case 'exhausted':
+        case 'claimed':
+        case 'not-found':
+          return choice;
 
-      case 'take':
-      case 'boot': {
-        const replaced = claims.find(
-          (claim) => claim.backend === backend && claim.id === choice.candidate.id
-        );
-        if (replaced) {
-          removeStale(replaced, 'taken-over');
+        case 'take':
+        case 'boot': {
+          const replaced = claims.find(
+            (claim) => claim.backend === backend && claim.id === choice.candidate.id
+          );
+          if (replaced) {
+            const current = await currentAsync(replaced);
+            if (current == null || !isSameClaim(current, replaced) || current.liveness === 'live') {
+              // The claim changed during the inventory. Choose again from what its file says now.
+              claims = claims.filter((claim) => claim !== replaced);
+              if (current != null) {
+                claims.push(current);
+              }
+              continue;
+            }
+            removeStale(replaced, 'taken-over');
+          }
+          writeClaim(choice.claim);
+          return choice;
         }
-        writeClaim(choice.claim);
-        return choice;
-      }
 
-      case 'create': {
-        const candidate = await createDevice!();
-        const claim: DeviceClaim = {
-          backend,
-          platform,
-          id: candidate.id,
-          projectRoot,
-          pid: process.pid,
-          claimedAt: now.toISOString(),
-          touchedAt: now.toISOString(),
-          created: true,
-          booted: true,
-        };
-        writeClaim(claim);
-        return { kind: 'created', candidate, claim };
+        case 'create': {
+          const candidate = await createDevice!();
+          const claim: DeviceClaim = {
+            backend,
+            platform,
+            id: candidate.id,
+            projectRoot,
+            pid: process.pid,
+            claimedAt: now.toISOString(),
+            touchedAt: now.toISOString(),
+            created: true,
+            booted: true,
+          };
+          writeClaim(claim);
+          return { kind: 'created', candidate, claim };
+        }
       }
     }
   });
