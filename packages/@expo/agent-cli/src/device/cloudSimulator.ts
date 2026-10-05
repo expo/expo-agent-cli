@@ -183,6 +183,7 @@ export function buildSessionListArgs({
     '--limit',
     String(limit),
     '--json',
+    '--non-interactive',
   ];
 }
 
@@ -207,6 +208,7 @@ export function buildSessionLookupArgs({ after = null }: { after?: string | null
     String(CLOUD_SESSION_LOOKUP_LIMIT),
     ...(after ? ['--after', after] : []),
     '--json',
+    '--non-interactive',
   ];
 }
 
@@ -221,7 +223,7 @@ export function buildSessionLookupArgs({ after = null }: { after?: string | null
  * `waitlistUrl` only when the account is gated.]
  */
 export function buildAvailabilityArgs(): string[] {
-  return ['simulator:availability', '--json'];
+  return ['simulator:availability', '--json', '--non-interactive'];
 }
 
 /**

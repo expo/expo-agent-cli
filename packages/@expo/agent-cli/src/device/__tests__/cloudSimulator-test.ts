@@ -389,6 +389,7 @@ describe('the argv of every eas simulator invocation', () => {
       '--limit',
       String(CLOUD_SESSION_LIST_LIMIT),
       '--json',
+      '--non-interactive',
     ]);
     expect(args).not.toContain('--type');
     expect(buildSessionListArgs({ limit: 3 })).toEqual(expect.arrayContaining(['--limit', '3']));
@@ -408,6 +409,7 @@ describe('the argv of every eas simulator invocation', () => {
       '--limit',
       '100',
       '--json',
+      '--non-interactive',
     ]);
     expect(buildSessionLookupArgs({ after: 'c1' })).toEqual(
       expect.arrayContaining(['--after', 'c1'])
@@ -415,7 +417,11 @@ describe('the argv of every eas simulator invocation', () => {
   });
 
   it(`checks availability read-only, so nothing is billed to find out`, () => {
-    expect(buildAvailabilityArgs()).toEqual(['simulator:availability', '--json']);
+    expect(buildAvailabilityArgs()).toEqual([
+      'simulator:availability',
+      '--json',
+      '--non-interactive',
+    ]);
     expect(buildAvailabilityArgs()).not.toContain('simulator:start');
   });
 

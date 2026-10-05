@@ -122,7 +122,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     // the simulator profile, and the finished build is named by one `build:list` so the session can
     // install it by id.
     expect(easInvocationArgs(projectRoot)).toEqual([
-      ['build', '--platform', 'ios', '--profile', 'development-simulator'],
+      ['build', '--platform', 'ios', '--profile', 'development-simulator', '--non-interactive'],
       [
         'build:list',
         '--platform',
@@ -164,6 +164,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
       'ios',
       '--profile',
       'development-simulator',
+      '--non-interactive',
     ]);
   });
 
@@ -179,6 +180,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
       'android',
       '--profile',
       'development-simulator',
+      '--non-interactive',
     ]);
   });
 
@@ -362,6 +364,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
       'ios',
       '--profile',
       'development',
+      '--non-interactive',
     ]);
     // The local route's own build step is `expo run:ios`, and it is not what ran.
     expect(expoInvocationArgs(projectRoot)).toEqual([
@@ -446,7 +449,15 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     const plan = JSON.parse(result.stdout);
     // No `build:configure`: `dev` writes the one profile the build needs into eas.json itself.
     expect(plan.steps.map((step: { argv: string[] }) => step.argv)).toEqual([
-      ['eas', 'build', '--platform', 'ios', '--profile', 'development-simulator'],
+      [
+        'eas',
+        'build',
+        '--platform',
+        'ios',
+        '--profile',
+        'development-simulator',
+        '--non-interactive',
+      ],
       ['expo', 'start', '--dev-client', '--tunnel'],
     ]);
     expect(plan.reasons.join('\n')).toContain(
@@ -515,6 +526,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         'ios',
         '--profile',
         'development-simulator',
+        '--non-interactive',
       ]);
       // The build that just finished, named by asking EAS for the newest finished one of its profile.
       expect(invocations).toContainEqual([
