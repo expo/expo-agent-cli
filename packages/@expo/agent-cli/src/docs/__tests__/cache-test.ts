@@ -1,16 +1,20 @@
 // @ref llp/0030-local-docs.rfc.md §Swap — against a real directory, because renames and symlinks
 // are the subject.
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
   acquireDocsLockAsync,
   docsCacheDir,
   installBundleAsync,
+  isLockAbandoned,
   linkLatestAsync,
   LOCK_FILE,
   readDocPagesAsync,
   readManifestAsync,
+  reclaimLockAsync,
+  removeLeftoversAsync,
   writeManifestAsync,
 } from '../cache';
 import { cleanupTempDirs, makeTempDir, page, sharedPages, versionPages } from './docsFixtures';
@@ -187,7 +191,7 @@ describe(acquireDocsLockAsync, () => {
   it('replaces at once the lock of a run that has exited', async () => {
     const dir = makeTempDir();
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, LOCK_FILE), '424242 killed-run');
+    fs.writeFileSync(path.join(dir, LOCK_FILE), `424242 ${os.hostname()} killed-run`);
     const kill = vi.spyOn(process, 'kill').mockImplementation((pid) => {
       if (pid === 424242) throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
       return true;
@@ -198,6 +202,25 @@ describe(acquireDocsLockAsync, () => {
     expect(lock.waited).toBe(false);
     await lock.release();
     kill.mockRestore();
+  });
+
+  it('keeps the lock of a live holder on this host, however old it is', async () => {
+    const dir = makeTempDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, LOCK_FILE);
+    fs.writeFileSync(file, `${process.pid} ${os.hostname()} long-download`);
+    const past = new Date(Date.now() - 60 * 60_000);
+    fs.utimesSync(file, past, past);
+    let acquired = false;
+    const taking = acquireDocsLockAsync(dir, { pollMs: 10 }).then((lock) => {
+      acquired = true;
+      return lock;
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(acquired).toBe(false);
+    fs.rmSync(file);
+    await (await taking).release();
   });
 
   it('replaces a stale lock', async () => {
@@ -212,5 +235,50 @@ describe(acquireDocsLockAsync, () => {
 
     expect(lock.waited).toBe(false);
     await lock.release();
+  });
+});
+
+describe(isLockAbandoned, () => {
+  it('asks a holder on this host, and ages out only a holder it cannot ask', () => {
+    const here = os.hostname();
+    expect(isLockAbandoned(`${process.pid} ${here} t`, 60 * 60_000, 1000)).toBe(false);
+    expect(isLockAbandoned(`${process.pid} other-machine t`, 60 * 60_000, 1000)).toBe(true);
+    expect(isLockAbandoned(`${process.pid} other-machine t`, 10, 1000)).toBe(false);
+    expect(isLockAbandoned('garbage', 60 * 60_000, 1000)).toBe(true);
+  });
+});
+
+describe(reclaimLockAsync, () => {
+  it('leaves a lock that another run took since it was read', async () => {
+    const dir = makeTempDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, LOCK_FILE);
+    fs.writeFileSync(file, 'new holder');
+
+    await reclaimLockAsync(file, 'dead holder');
+
+    expect(fs.readFileSync(file, 'utf8')).toBe('new holder');
+    await reclaimLockAsync(file, 'new holder');
+    expect(fs.existsSync(file)).toBe(false);
+  });
+});
+
+describe(removeLeftoversAsync, () => {
+  it('puts back a parked entry whose replacement never arrived, then cleans up', async () => {
+    const dir = makeTempDir();
+    fs.mkdirSync(path.join(dir, '.old-99999', 'guides'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.old-99999', 'guides', 'overview.md'), '# Overview');
+    fs.mkdirSync(path.join(dir, '.old-99999', 'v57.0.0', 'sdk'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.old-99999', 'v57.0.0', 'sdk', 'camera.md'), '# Camera');
+    fs.mkdirSync(path.join(dir, 'eas'), { recursive: true });
+    fs.mkdirSync(path.join(dir, '.old-99999', 'eas'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.old-99999', 'eas', 'stale.md'), 'old');
+
+    await removeLeftoversAsync(dir);
+
+    expect(fs.readFileSync(path.join(dir, 'guides', 'overview.md'), 'utf8')).toBe('# Overview');
+    expect(fs.existsSync(path.join(dir, 'versions', 'v57.0.0', 'sdk', 'camera.md'))).toBe(true);
+    expect(fs.existsSync(path.join(dir, 'eas', 'stale.md'))).toBe(false);
+    expect(fs.readdirSync(dir).filter((name) => name.startsWith('.'))).toEqual([]);
   });
 });

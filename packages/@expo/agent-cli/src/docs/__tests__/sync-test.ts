@@ -2,13 +2,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { readManifestAsync } from '../cache';
-import {
-  docsBaseUrl,
-  DEFAULT_DOCS_BUNDLE_URL,
-  isOffline,
-  syncDocsAsync,
-  type DocsSyncOptions,
-} from '../sync';
+import { docsBaseUrl, DEFAULT_DOCS_BUNDLE_URL, syncDocsAsync, type DocsSyncOptions } from '../sync';
 import {
   BASE_URL,
   cleanupTempDirs,
@@ -210,6 +204,94 @@ describe(syncDocsAsync, () => {
     expect(fs.readdirSync(dir)).toEqual(['notes.txt']);
   });
 
+  it('refuses a directory whose manifest.json is not a docs manifest', async () => {
+    const dir = makeTempDir();
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'manifest.json'), '{"name":"My web app","start_url":"/"}');
+    fs.writeFileSync(path.join(dir, 'notes.txt'), 'mine');
+
+    await expect(syncWith(fakeHost(), dir)).rejects.toMatchObject({ code: 'DOCS_CACHE_NOT_EMPTY' });
+    expect(fs.readdirSync(dir).sort()).toEqual(['manifest.json', 'notes.txt']);
+    expect(fs.readFileSync(path.join(dir, 'manifest.json'), 'utf8')).toContain('My web app');
+  });
+
+  it('drops a bundle from the manifest while its swap runs, so a failed swap is redone', async () => {
+    const host = fakeHost();
+    const dir = makeTempDir();
+    await syncWith(host, dir);
+    host.setBundle('shared', [...sharedPages, page('guides/new', 'New', 'A new page.')]);
+    const rename = fs.promises.rename;
+    const spy = vi.spyOn(fs.promises, 'rename').mockImplementation(async (from, to) => {
+      if (String(from).includes('.tmp-') && String(to) === path.join(dir, 'guides')) {
+        throw new Error('killed mid-swap');
+      }
+      return rename(from, to);
+    });
+
+    await expect(syncWith(host, dir)).rejects.toThrow('killed mid-swap');
+    spy.mockRestore();
+    expect((await readManifestAsync(dir))!.bundles.shared).toBeUndefined();
+
+    const result = await syncWith(host, dir);
+    expect(result.bundles.find((bundle) => bundle.name === 'shared')!.status).toBe('downloaded');
+    expect(fs.existsSync(path.join(dir, 'guides', 'new.md'))).toBe(true);
+  });
+
+  it('repairs a shared bundle whose swap was interrupted', async () => {
+    const host = fakeHost();
+    const dir = makeTempDir();
+    await syncWith(host, dir);
+    // The state a kill leaves between the two renames of a swap: the entry parked, the bundle
+    // already gone from the manifest.
+    const manifest = (await readManifestAsync(dir))!;
+    delete manifest.bundles.shared;
+    fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest));
+    fs.mkdirSync(path.join(dir, '.old-99999'));
+    fs.renameSync(path.join(dir, 'guides'), path.join(dir, '.old-99999', 'guides'));
+
+    const result = await syncWith(host, dir);
+
+    expect(result.bundles.find((bundle) => bundle.name === 'shared')!.status).toBe('downloaded');
+    expect(fs.existsSync(path.join(dir, 'guides', 'overview.md'))).toBe(true);
+    expect(fs.readdirSync(dir).filter((name) => name.startsWith('.'))).toEqual([]);
+  });
+
+  it('writes the manifest before the first page, so an interrupted first sync can be retried', async () => {
+    const host = fakeHost();
+    const dir = makeTempDir();
+    const failing = (async (url: string) =>
+      String(url).includes('docs-v57')
+        ? new Response('', { status: 503 })
+        : host.fetch(url)) as typeof fetch;
+
+    await expect(syncWith({ ...host, fetch: failing }, dir)).rejects.toMatchObject({
+      code: 'DOCS_FETCH_FAILED',
+    });
+    expect(await readManifestAsync(dir)).not.toBeNull();
+
+    const result = await syncWith(host, dir);
+    expect(result.bundles.map((bundle) => bundle.status)).toEqual(['unchanged', 'downloaded']);
+  });
+
+  it('reports a download whose body breaks off with the URL', async () => {
+    const host = fakeHost();
+    const breaking = (async (url: string) => {
+      if (!String(url).endsWith('.gz')) return host.fetch(url);
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new Uint8Array([31, 139]));
+          controller.error(new Error('socket hang up'));
+        },
+      });
+      return new Response(body);
+    }) as typeof fetch;
+
+    await expect(syncWith({ ...host, fetch: breaking }, makeTempDir())).rejects.toMatchObject({
+      code: 'DOCS_FETCH_FAILED',
+      message: expect.stringContaining('socket hang up'),
+    });
+  });
+
   it('names a host without an index as one that publishes no bundles', async () => {
     const missing = (async () => new Response('', { status: 404 })) as unknown as typeof fetch;
 
@@ -257,13 +339,5 @@ describe(docsBaseUrl, () => {
     expect(docsBaseUrl({ AGENT_CLI_DOCS_URL: 'http://127.0.0.1:1/x/' })).toBe(
       'http://127.0.0.1:1/x'
     );
-  });
-});
-
-describe(isOffline, () => {
-  it('reads EXPO_OFFLINE', () => {
-    expect(isOffline({})).toBe(false);
-    expect(isOffline({ EXPO_OFFLINE: '0' })).toBe(false);
-    expect(isOffline({ EXPO_OFFLINE: '1' })).toBe(true);
   });
 });

@@ -1,4 +1,4 @@
-import { parseSdkFlag, selectSdkVersion, wantedVersion } from '../version';
+import { parseSdkFlag, selectSdkVersion } from '../version';
 
 const available = ['v58.0.0', 'v57.0.0', 'v55.0.0'] as const;
 const base = { latest: 'v57.0.0' as const, available: [...available] };
@@ -62,19 +62,5 @@ describe(parseSdkFlag, () => {
 
   it.each(['latest', '57.1.0', 'abc', ''])('rejects %j', (flag) => {
     expect(() => parseSdkFlag(flag)).toThrow(expect.objectContaining({ code: 'BAD_ARGS' }));
-  });
-});
-
-describe(wantedVersion, () => {
-  it('prefers the flag, then the project, then latest', () => {
-    expect(wantedVersion({ flag: '55', projectSdkVersion: '57.0.0', latest: 'v58.0.0' })).toBe(
-      'v55.0.0'
-    );
-    expect(wantedVersion({ flag: undefined, projectSdkVersion: '57.0.0', latest: 'v58.0.0' })).toBe(
-      'v57.0.0'
-    );
-    expect(wantedVersion({ flag: undefined, projectSdkVersion: null, latest: 'v58.0.0' })).toBe(
-      'v58.0.0'
-    );
   });
 });
