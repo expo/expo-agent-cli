@@ -845,6 +845,12 @@ export function easProjectGate(): { gate: Gate; source: string | null } {
       source: null,
     };
   }
+  const owned = ciOwnedProjectGate(source);
+  return { gate: owned, source: owned.ok ? source : null };
+}
+
+/** That an app is linked to an EAS project and owned by {@link EAS_CI_ACCOUNT}. */
+export function ciOwnedProjectGate(source: string): Gate {
   let config: any = null;
   try {
     config = JSON.parse(fs.readFileSync(path.join(source, 'app.json'), 'utf8'))?.expo;
@@ -852,22 +858,54 @@ export function easProjectGate(): { gate: Gate; source: string | null } {
     config = null;
   }
   if (!config?.extra?.eas?.projectId) {
-    return {
-      gate: missing(
-        `${source} is not linked to an EAS project (no expo.extra.eas.projectId in its app.json), so there are no builds to look up`
-      ),
-      source: null,
-    };
+    return missing(
+      `${source} is not linked to an EAS project (no expo.extra.eas.projectId in its app.json)`
+    );
   }
   if (config.owner !== EAS_CI_ACCOUNT) {
-    return {
-      gate: missing(
-        `${source} is owned by "${config.owner ?? '(none)'}", not the ${EAS_CI_ACCOUNT} CI account — refusing, so no run touches a personal account`
-      ),
-      source: null,
-    };
+    return missing(
+      `${source} is owned by "${config.owner ?? '(none)'}", not the ${EAS_CI_ACCOUNT} CI account — refusing, so no run touches a personal account`
+    );
   }
-  return { gate: ok, source };
+  return ok;
+}
+
+/**
+ * The opt-in for `live-claims`. Every block builds the app twice, and the EAS block also bills two
+ * sessions, so the suite never runs without being asked for by name.
+ */
+export function claimsOptInGate(): Gate {
+  return process.env.AGENT_CLI_LIVE_CLAIMS === '1'
+    ? ok
+    : missing(
+        'AGENT_CLI_LIVE_CLAIMS=1 is not set — live-claims builds the app twice (and on EAS bills two sessions), so it never runs without being asked for by name'
+      );
+}
+
+/** At least `count` available iPhone simulators, booted or not, so that many worktrees can each claim one. */
+export function iphoneSimulatorsGate(count: number): Gate {
+  const mac = macosGate();
+  if (!mac.ok) {
+    return mac;
+  }
+  let listed: string;
+  try {
+    listed = execFileSync('xcrun', ['simctl', 'list', 'devices', 'available', '--json'], {
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+  } catch (error: any) {
+    return missing(`"xcrun simctl list devices available" could not run: ${error.message}`);
+  }
+  const iphones = Object.entries(JSON.parse(listed).devices as Record<string, any[]>)
+    .filter(([runtime]) => /\.iOS-[\d-]+$/.test(runtime))
+    .flatMap(([, devices]) => devices)
+    .filter((device) => String(device.name).startsWith('iPhone'));
+  return iphones.length >= count
+    ? ok
+    : missing(
+        `${iphones.length} available iPhone simulator(s), and this suite needs ${count} — create one with "xcrun simctl create"`
+      );
 }
 
 /** The EAS project a scaffolded suite app links itself to. */

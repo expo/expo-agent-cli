@@ -45,6 +45,7 @@
     "test:live:cloud": "vitest run --config e2e-live/vitest.config.ts live-cloud",
     "test:live:iosdevclient": "vitest run --config e2e-live/vitest.config.ts live-ios-devclient",
     "test:live:bootstrap": "vitest run --config e2e-live/vitest.config.ts live-bootstrap",
+    "test:live:claims": "vitest run --config e2e-live/vitest.config.ts live-claims",
     "prepublishOnly": "bun run clean && bun run build:prod",
     "test:eval-harness": "vitest run --config evals/harness/vitest.config.ts",
     "test:evals": "vitest run --config evals/vitest.config.ts",
