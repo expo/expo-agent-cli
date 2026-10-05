@@ -36,7 +36,10 @@ import {
   buildCloudScreenshotArgs,
   buildCloudStopAppArgs,
   buildSessionListArgs,
+  buildSessionLookupArgs,
   captureCloudScreenshotAsync,
+  CLOUD_SESSION_LOOKUP_MAX_PAGES,
+  PENDING_SESSION_STATUS,
   cloudNeedsTunnelError,
   cloudSessionUnavailableError,
   cloudSessionUnknownError,
@@ -151,6 +154,27 @@ function mockEas({
       }
       if (stdout) child.stdout.emit('data', stdout);
       if (stderr) child.stderr.emit('data', stderr);
+      child.emit('close', exitCode, null);
+    });
+    return child as any;
+  }) as any);
+}
+
+/** Answer each `eas` spawn by its argv. A string is stdout with exit 0. */
+function mockEasBy(
+  answer: (args: string[]) => string | { stdout: string; exitCode: number }
+): void {
+  spawned = [];
+  vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
+    spawned.push({ command, args });
+    const given = args.includes('simulator:availability') ? '{"available": true}' : answer(args);
+    const { stdout, exitCode } = typeof given === 'string' ? { stdout: given, exitCode: 0 } : given;
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+    });
+    process.nextTick(() => {
+      if (stdout) child.stdout.emit('data', stdout);
       child.emit('close', exitCode, null);
     });
     return child as any;
@@ -359,6 +383,8 @@ describe('the argv of every eas simulator invocation', () => {
     expect(args).toEqual([
       'simulator:list',
       '--status',
+      'new',
+      '--status',
       'in-progress',
       '--limit',
       String(CLOUD_SESSION_LIST_LIMIT),
@@ -366,6 +392,26 @@ describe('the argv of every eas simulator invocation', () => {
     ]);
     expect(args).not.toContain('--type');
     expect(buildSessionListArgs({ limit: 3 })).toEqual(expect.arrayContaining(['--limit', '3']));
+  });
+
+  it(`looks a session up by id over every status, a page at a time`, () => {
+    expect(buildSessionLookupArgs()).toEqual([
+      'simulator:list',
+      '--status',
+      'new',
+      '--status',
+      'in-progress',
+      '--status',
+      'stopped',
+      '--status',
+      'errored',
+      '--limit',
+      '100',
+      '--json',
+    ]);
+    expect(buildSessionLookupArgs({ after: 'c1' })).toEqual(
+      expect.arrayContaining(['--after', 'c1'])
+    );
   });
 
   it(`checks availability read-only, so nothing is billed to find out`, () => {
@@ -800,16 +846,129 @@ describe(probeCloudSessionAsync, () => {
     expect(probe.sessionId).toBeNull();
   });
 
-  it(`releases a claim whose session the service no longer lists`, async () => {
-    project();
-    claimSession('sess-gone');
-    mockEas({ stdout: listJson() });
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
+  // One page of NEW and IN_PROGRESS sessions is not the project: a session missing from it may be
+  // running and billing, and a released claim leaves nothing that knows to stop it.
+  describe('a claimed session the listing does not name', () => {
+    it.each(['STOPPED', 'ERRORED'])(
+      `releases the claim when the lookup by id reports it %s`,
+      async (status) => {
+        project();
+        claimSession('sess-gone');
+        mockEasBy((args) =>
+          args.includes('stopped') ? listJson(sessionRow({ id: 'sess-gone', status })) : listJson()
+        );
 
-    const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+        const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
 
-    expect(probe).toMatchObject({ state: 'inactive', sessionId: 'sess-gone' });
-    expect(probe.reason).toContain('has ended');
-    expect(readClaims()).toEqual([]);
+        expect(probe).toMatchObject({ state: 'inactive', sessionId: 'sess-gone', status });
+        expect(probe.reason).toContain(`reports it ${status}, so that session has ended`);
+        expect(readClaims()).toEqual([]);
+        expect(spawned.map(({ args }) => args.slice(EAS_PREFIX.length))).toContainEqual(
+          buildSessionLookupArgs()
+        );
+      }
+    );
+
+    it(`drives a running session the lookup finds beyond the first page`, async () => {
+      project();
+      claimSession('sess-far');
+      mockEasBy((args) =>
+        args.includes('stopped') ? listJson(sessionRow({ id: 'sess-far' })) : listJson()
+      );
+
+      const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+      expect(probe).toMatchObject({ state: 'active', sessionId: 'sess-far' });
+      expect(readClaims()).toMatchObject([{ id: 'sess-far' }]);
+    });
+
+    it(`keeps the claim when the lookup does not find the session`, async () => {
+      project();
+      claimSession('sess-missing');
+      mockEasBy(() => listJson());
+
+      const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+      expect(probe).toMatchObject({ state: 'inactive', sessionId: 'sess-missing', status: null });
+      expect(probe.reason).toContain('the claim is kept');
+      expect(probe.reason).toContain('dev:stop --eas');
+      expect(readClaims()).toMatchObject([{ id: 'sess-missing' }]);
+    });
+
+    it(`keeps the claim when the lookup fails`, async () => {
+      project();
+      claimSession('sess-1');
+      mockEasBy((args) => (args.includes('stopped') ? { stdout: '', exitCode: 1 } : listJson()));
+
+      await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+      expect(readClaims()).toMatchObject([{ id: 'sess-1' }]);
+    });
+
+    it(`keeps the claim of a NEW session, which the listing names, and looks nothing up`, async () => {
+      project();
+      claimSession('sess-new');
+      mockEasBy(() => listJson(sessionRow({ id: 'sess-new', status: PENDING_SESSION_STATUS })));
+
+      const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+      expect(probe).toMatchObject({
+        state: 'inactive',
+        sessionId: 'sess-new',
+        status: 'NEW',
+        platform: 'ios',
+      });
+      expect(probe.reason).toContain('it has not started yet');
+      expect(readClaims()).toMatchObject([{ id: 'sess-new' }]);
+      expect(spawned.some(({ args }) => args.includes('stopped'))).toBe(false);
+    });
+
+    it(`pages through the lookup with --after until it finds the id`, async () => {
+      project();
+      claimSession('sess-old');
+      mockEasBy((args) => {
+        if (!args.includes('stopped')) {
+          return listJson();
+        }
+        return args.includes('--after')
+          ? listJson(sessionRow({ id: 'sess-old', status: 'STOPPED' }))
+          : JSON.stringify({
+              sessions: [sessionRow({ id: 'sess-other', status: 'STOPPED' })],
+              pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
+            });
+      });
+
+      await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+      expect(readClaims()).toEqual([]);
+      const lookups = spawned.filter(({ args }) => args.includes('stopped'));
+      expect(lookups.map(({ args }) => args.slice(EAS_PREFIX.length))).toEqual([
+        buildSessionLookupArgs(),
+        buildSessionLookupArgs({ after: 'cursor-1' }),
+      ]);
+    });
+
+    it(`stops paging after the last page it may read, and keeps the claim`, async () => {
+      project();
+      claimSession('sess-far');
+      let cursor = 0;
+      mockEasBy((args) =>
+        args.includes('stopped')
+          ? JSON.stringify({
+              sessions: [],
+              pageInfo: { hasNextPage: true, endCursor: `cursor-${++cursor}` },
+            })
+          : listJson()
+      );
+
+      await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+      expect(spawned.filter(({ args }) => args.includes('stopped'))).toHaveLength(
+        CLOUD_SESSION_LOOKUP_MAX_PAGES
+      );
+      expect(readClaims()).toMatchObject([{ id: 'sess-far' }]);
+    });
   });
 
   it(`picks the session the dotenv names when the service lists several`, async () => {

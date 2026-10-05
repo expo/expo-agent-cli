@@ -88,6 +88,8 @@ describe('@expo/agent-cli navigate --eas', () => {
     expect(invocations[0]).toEqual([
       'simulator:list',
       '--status',
+      'new',
+      '--status',
       'in-progress',
       '--limit',
       '25',
@@ -141,7 +143,7 @@ describe('@expo/agent-cli navigate --eas', () => {
     // The listing, then the read-only availability question, and nothing that could start or bill
     // anything.
     expect(easInvocations(projectRoot)).toEqual([
-      ['simulator:list', '--status', 'in-progress', '--limit', '25', '--json'],
+      ['simulator:list', '--status', 'new', '--status', 'in-progress', '--limit', '25', '--json'],
       ['simulator:availability', '--json'],
     ]);
   });
@@ -885,6 +887,108 @@ describe('@expo/agent-cli dev:stop --eas', () => {
     const stops = easInvocations(projectRoot).filter((argv) => argv[0] === 'simulator:stop');
     expect(stops).toEqual([['simulator:stop', '--id', 'sess-mine', '--non-interactive']]);
     expect(readDeviceClaims()).toEqual([]);
+  });
+
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
+  it(`ends a claimed session the first page of running sessions does not reach`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    const store = path.join(projectRoot, 'service');
+    const foreign = Array.from({ length: 30 }, (_, index) => ({ id: `sess-foreign-${index}` }));
+    seedStubSessions(store, [...foreign, { id: 'sess-mine' }]);
+    writeEasClaimFile(projectRoot, { id: 'sess-mine' });
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+      reject: false,
+      env: { STUB_SIM_SESSIONS: '0', STUB_SIM_STORE: store },
+    });
+
+    expect(result.exitCode).toBe(0);
+    const stops = easInvocations(projectRoot).filter((argv) => argv[0] === 'simulator:stop');
+    expect(stops).toEqual([['simulator:stop', '--id', 'sess-mine', '--non-interactive']]);
+    expect(readDeviceClaims()).toEqual([]);
+  });
+
+  it(`keeps the claim of a session the service does not list, and ends it by id`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    writeEasClaimFile(projectRoot, { id: 'sess-unlisted' });
+    const env = { STUB_SIM_SESSIONS: '0' };
+
+    const navigated = await navigateCloud(projectRoot, [], env);
+
+    expect(navigated.exitCode).not.toBe(0);
+    expect(navigated.stderr).toContain('the claim is kept');
+    expect(readDeviceClaims()).toMatchObject([{ id: 'sess-unlisted' }]);
+
+    const stopped = await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+      reject: false,
+      env,
+    });
+
+    expect(stopped.exitCode).toBe(0);
+    expect(JSON.parse(stopped.stdout).sessions).toEqual([
+      { id: 'sess-unlisted', stopped: true, reason: null },
+    ]);
+    expect(easInvocations(projectRoot)).toContainEqual([
+      'simulator:stop',
+      '--id',
+      'sess-unlisted',
+      '--non-interactive',
+    ]);
+    expect(readDeviceClaims()).toEqual([]);
+  });
+
+  it(`keeps the claim of a NEW session, and ends it by id`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    const store = path.join(projectRoot, 'service');
+    seedStubSessions(store, [{ id: 'sess-new', status: 'NEW' }]);
+    writeEasClaimFile(projectRoot, { id: 'sess-new' });
+    const env = { STUB_SIM_SESSIONS: '0', STUB_SIM_STORE: store };
+
+    const navigated = await navigateCloud(projectRoot, [], env);
+
+    expect(navigated.stderr).toContain('reports it NEW, so it has not started yet');
+    expect(readDeviceClaims()).toMatchObject([{ id: 'sess-new' }]);
+
+    await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+      reject: false,
+      env,
+    });
+
+    expect(easInvocations(projectRoot)).toContainEqual([
+      'simulator:stop',
+      '--id',
+      'sess-new',
+      '--non-interactive',
+    ]);
+    expect(readDeviceClaims()).toEqual([]);
+  });
+
+  it(`releases the claim of a session the service reports stopped, and stops nothing`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    const store = path.join(projectRoot, 'service');
+    seedStubSessions(store, [{ id: 'sess-done', status: 'STOPPED' }]);
+    writeEasClaimFile(projectRoot, { id: 'sess-done' });
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+      reject: false,
+      env: { STUB_SIM_SESSIONS: '0', STUB_SIM_STORE: store },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:stop')).toBe(false);
+    expect(readDeviceClaims()).toEqual([]);
+  });
+
+  it(`keeps the claim when the lookup by id fails`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    writeEasClaimFile(projectRoot, { id: 'sess-unknown' });
+
+    await navigateCloud(projectRoot, [], {
+      STUB_SIM_SESSIONS: '0',
+      STUB_SIM_LIST_EXIT_FOR: 'stopped',
+    });
+
+    expect(readDeviceClaims()).toMatchObject([{ id: 'sess-unknown' }]);
   });
 
   it(`stops nothing for a session that nobody bound to this project`, async () => {
