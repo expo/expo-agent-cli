@@ -53,7 +53,7 @@ function fakeSimulators(
     { udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' },
     { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
   ],
-  { onBoot }: { onBoot?: () => void } = {}
+  { onBoot, bootstatusExit = 0 }: { onBoot?: () => void; bootstatusExit?: number } = {}
 ) {
   const devices = initial.map((device) => ({ ...device }));
   const tools = fakeDeviceTools((command, args) => {
@@ -78,6 +78,9 @@ function fakeSimulators(
       onBoot?.();
       devices.find((device) => device.udid === rest[0])!.state = 'Booted';
       return {};
+    }
+    if (verb === 'bootstatus') {
+      return { exitCode: bootstatusExit };
     }
     if (verb === 'create') {
       devices.push({ udid: 'SIM-NEW', name: rest[0]!, state: 'Shutdown' });
@@ -273,6 +276,46 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
       'device_claim_touch_failed',
       expect.objectContaining({ id: 'SIM-A' })
     );
+  });
+
+  it(`records the boot in the claim before it waits for the simulator`, async () => {
+    let during: unknown;
+    fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' }], {
+      onBoot: () => {
+        during = readClaims()[0];
+      },
+    });
+
+    await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: true });
+
+    expect(during).toMatchObject({ id: 'SIM-A', projectRoot: HERE, booted: true });
+  });
+
+  it(`shuts down a simulator whose boot did not finish, and releases its fresh claim`, async () => {
+    const { tools } = fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' }], {
+      bootstatusExit: 1,
+    });
+
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: true,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'boot-failed', deviceId: 'SIM-A' });
+    expect(tools.callsWith('simctl shutdown')).toEqual(['xcrun simctl shutdown SIM-A']);
+    expect(readClaims()).toEqual([]);
+  });
+
+  it(`keeps its own claim, marked booted, when a boot of its claimed simulator failed`, async () => {
+    fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' }], {
+      bootstatusExit: 1,
+    });
+    writeClaim(ownClaim('SIM-A', new Date().toISOString()));
+
+    await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: true });
+
+    expect(readClaims()).toMatchObject([{ id: 'SIM-A', projectRoot: HERE, booted: true }]);
   });
 
   it(`never takes a booted simulator another worktree claimed`, async () => {
@@ -499,7 +542,12 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
   const EMULATOR = process.platform === 'win32' ? 'emulator.exe' : 'emulator';
 
   /** One AVD. An emulator shows up in `adb devices` once it was spawned on its port. */
-  function fakeAndroid({ physical = [] as string[], avds = ['Pixel_8'] } = {}) {
+  function fakeAndroid({
+    physical = [] as string[],
+    avds = ['Pixel_8'],
+    boots = true,
+    listed = true,
+  } = {}) {
     const running = new Map<string, string>();
     const tools = fakeDeviceTools((spawned, args) => {
       const command = path.basename(spawned, '.exe');
@@ -508,7 +556,9 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
       }
       if (command === 'emulator' && args[0] === '-avd') {
         const port = args[args.indexOf('-ports') + 1]!.split(',')[0];
-        running.set(`emulator-${port}`, args[1]!);
+        if (listed) {
+          running.set(`emulator-${port}`, args[1]!);
+        }
         return {};
       }
       if (command !== 'adb') {
@@ -526,7 +576,12 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
         return { stdout: `${running.get(args[1]!)}\nOK\n` };
       }
       if (args.includes('sys.boot_completed')) {
-        return { stdout: '1\n' };
+        return boots ? { stdout: '1\n' } : { stdout: '\n' };
+      }
+      if (args.includes('emu') && args.includes('kill')) {
+        return running.has(args[1]!)
+          ? {}
+          : { exitCode: 1, stderr: `error: device '${args[1]}' not found` };
       }
       return {};
     });
@@ -609,6 +664,39 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
     expect(tools.callsWith('-avd ')).toEqual([
       `${EMULATOR} -avd Pixel_8 -ports 5554,5555 -no-snapshot-save`,
     ]);
+  });
+
+  it(`shuts down an emulator whose boot timed out, and releases its fresh claim`, async () => {
+    const { tools } = fakeAndroid({ boots: false });
+
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'android',
+      projectRoot: HERE,
+      allowBoot: true,
+      timeoutMs: 0,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'boot-failed', deviceId: 'emulator-5554' });
+    expect(tools.callsWith('emu kill')).toHaveLength(1);
+    expect(tools.kills).toEqual([]);
+    expect(readClaims()).toEqual([]);
+  });
+
+  it(`kills the emulator it spawned when adb cannot see it to shut it down`, async () => {
+    const { tools } = fakeAndroid({ boots: false, listed: false });
+
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'android',
+      projectRoot: HERE,
+      allowBoot: true,
+      timeoutMs: 0,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'boot-failed' });
+    expect(tools.kills).toEqual([
+      { command: expect.stringMatching(/emulator/), signal: 'SIGKILL' },
+    ]);
+    expect(readClaims()).toEqual([]);
   });
 
   it(`never starts an emulator another worktree is starting on the same port`, async () => {

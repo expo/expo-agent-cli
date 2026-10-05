@@ -35,6 +35,7 @@ import {
   parseAvds,
   parseSimulators,
   resolveEmulator,
+  shutdownDeviceAsync,
   type EmulatorBoot,
   type SimulatorEntry,
 } from './bootDevice';
@@ -380,12 +381,28 @@ async function resolveWithInventoryAsync(
     );
   }
 
+  // `dev:stop` shuts down only a device whose claim says this CLI booted it, and a boot that times
+  // out has still started the device. So the claim says so before the wait.
+  const booting = touchClaim(claim, new Date(), { booted: true }) ?? heldClaim(claim);
+  if (booting == null) {
+    return lostClaimRefusal(platform, candidate, readClaim(backend, candidate.id));
+  }
   options.onBooting?.({ deviceId: candidate.id, backend });
   const timeoutMs = options.timeoutMs ?? BOOT_DEVICE_TIMEOUT_MS[platform];
-  const boot = candidate.emulator
+  const emulatorBoot = candidate.emulator
     ? await bootEmulatorAsync(candidate.emulator, { timeoutMs, adb: adb ?? undefined, choice })
-    : await bootSimulatorAsync({ udid: candidate.id, name: candidate.name }, { timeoutMs, choice });
+    : null;
+  const boot =
+    emulatorBoot ??
+    (await bootSimulatorAsync({ udid: candidate.id, name: candidate.name }, { timeoutMs, choice }));
   if (!boot.ok) {
+    const shutdown = await shutdownDeviceAsync(candidate.id, backend, { adb: adb ?? undefined });
+    if (!shutdown.ok) {
+      emulatorBoot?.kill();
+    }
+    if (fresh) {
+      releaseClaim(booting);
+    }
     return {
       ...refusal('boot-failed', boot.reason ?? `${candidate.name} did not boot`),
       deviceId: candidate.id,

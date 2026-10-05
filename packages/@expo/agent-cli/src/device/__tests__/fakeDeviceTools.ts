@@ -17,12 +17,15 @@ export type ToolHandler = (command: string, args: string[]) => ToolAnswer | unde
 
 export interface FakeTools {
   calls: { command: string; args: string[] }[];
+  /** The commands whose child was killed, with the signal. */
+  kills: { command: string; signal: string | undefined }[];
   /** The calls whose argv, joined by spaces, contains `text`. */
   callsWith(text: string): string[];
 }
 
 export function fakeDeviceTools(handler: ToolHandler): FakeTools {
   const calls: FakeTools['calls'] = [];
+  const kills: FakeTools['kills'] = [];
   vi.mocked(spawn).mockImplementation(((command: string, args: string[] = []) => {
     calls.push({ command, args });
     const answer = handler(command, args) ?? {};
@@ -31,7 +34,10 @@ export function fakeDeviceTools(handler: ToolHandler): FakeTools {
       stderr: new EventEmitter(),
       pid: 4242,
       unref: () => {},
-      kill: () => true,
+      kill: (signal?: string) => {
+        kills.push({ command, signal });
+        return true;
+      },
     });
     process.nextTick(() => {
       if (answer.spawnError) {
@@ -56,6 +62,7 @@ export function fakeDeviceTools(handler: ToolHandler): FakeTools {
   }) as any);
   return {
     calls,
+    kills,
     callsWith: (text) =>
       calls
         .map(({ command, args }) => [command, ...args].join(' '))

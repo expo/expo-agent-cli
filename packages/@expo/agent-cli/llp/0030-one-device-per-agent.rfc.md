@@ -124,7 +124,7 @@ For a local device, `--device` is step 0 of the allocation, under the same regis
 ## Release and cleanup
 
 - `dev:stop` releases the local claims of its worktree only when the dev server stopped or none was running. While the dev server still runs, the claims stay and the report says why.
-- A local device is shut down only if the claim has `created: true` or `booted: true`. `booted` is set when this CLI boots the simulator or spawns the emulator, because `dev:stop` runs in a later process than the boot. The shutdown and the claim's release run under one registry lock, so no other worktree takes a device that is still up.
+- A local device is shut down only if the claim has `created: true` or `booted: true`. `booted` is set when this CLI boots the simulator or spawns the emulator, because `dev:stop` runs in a later process than the boot. The claim records it before the CLI waits for the boot, because a boot that times out has still started the device. When a boot fails, the CLI shuts the device down, kills the emulator process it spawned when `adb` cannot see the emulator yet, and releases a claim that this call made. The shutdown and the claim's release run under one registry lock, so no other worktree takes a device that is still up.
 - `dev:stop --eas` stops every EAS session the worktree claims, by id (one per platform). A plain `dev:stop` keeps the `eas` claims and reports each session as still running, with the reason ([[0021-honest-reports]]).
 - A created local device is deleted when its claim has been stale for 1 hour. The next `bindDeviceAsync` does this cleanup, because there is no daemon.
 - The CLI never shuts down or deletes a local device that it did not boot or create.
