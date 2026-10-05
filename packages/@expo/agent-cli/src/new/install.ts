@@ -11,21 +11,36 @@ import type { Invoker } from '../utils/invoker';
 
 /** What `new` knows about the dependencies of the project it created. */
 export type InstallState =
-  /** `<dir>/node_modules/expo/package.json` is on disk. */
+  /** `expo` resolves from the project directory. */
   | 'installed'
-  /** `--no-install` was passed, so nothing was asked for. */
+  /** `--no-install` was passed; no install ran. */
   | 'skipped'
-  /** An install was asked for and the project's `expo` is not on disk. */
+  /** create-expo ran its install, but `expo` did not end up in any `node_modules` the project resolves. */
   | 'missing';
+
+/**
+ * The `expo/package.json` Node would resolve from the project directory: `node_modules` of the
+ * directory itself, then of each parent. A workspace hoists `expo` to the root, so the project's
+ * own `node_modules` alone would call a working install missing.
+ */
+export function findProjectExpoPackageJson(projectRoot: string): string | null {
+  for (let dir = projectRoot; ; dir = path.dirname(dir)) {
+    const candidate = path.join(dir, 'node_modules', 'expo', 'package.json');
+    if (fileExistsSync(candidate)) {
+      return candidate;
+    }
+    if (path.dirname(dir) === dir) {
+      return null;
+    }
+  }
+}
 
 /** Decide from the disk, not from what was requested. */
 export function resolveInstallState(projectRoot: string, requested: boolean): InstallState {
   if (!requested) {
     return 'skipped';
   }
-  return fileExistsSync(path.join(projectRoot, 'node_modules', 'expo', 'package.json'))
-    ? 'installed'
-    : 'missing';
+  return findProjectExpoPackageJson(projectRoot) ? 'installed' : 'missing';
 }
 
 /**
@@ -68,7 +83,7 @@ export function describeMissingInstall(
   outputTail: string
 ): string {
   return [
-    `Dependencies are not installed: create-expo exited 0, but ${path.join(projectRoot, 'node_modules', 'expo', 'package.json')} does not exist.`,
+    `Dependencies are not installed: create-expo exited 0, but expo/package.json does not resolve from the project (looked for ${path.join(projectRoot, 'node_modules', 'expo', 'package.json')} and in the parent directories).`,
     `Why: create-expo's own dependency install did not finish, and it exited successfully anyway${outputTail ? '; its output ends with the lines below' : ''}.`,
     `How: run "${installCommand}", then continue with the next steps.`,
     ...(outputTail ? [wrapUntrustedAppOutput(outputTail)] : []),

@@ -22,7 +22,13 @@ describe(resolveInstallState, () => {
     expect(resolveInstallState(projectRoot, true)).toBe('installed');
   });
 
-  it(`should be missing when an install was asked for and node_modules is absent`, () => {
+  it(`should be installed when expo is hoisted to a parent directory`, () => {
+    vol.fromJSON({ '/work/node_modules/expo/package.json': '{}' });
+
+    expect(resolveInstallState(projectRoot, true)).toBe('installed');
+  });
+
+  it(`should be missing when the install ran and left no expo behind`, () => {
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
 
     expect(resolveInstallState(projectRoot, true)).toBe('missing');

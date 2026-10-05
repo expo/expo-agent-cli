@@ -476,6 +476,19 @@ fs.writeFileSync(manifestPath, JSON.stringify(manifest));
     expect(fs.existsSync(path.join(workDir, 'my-app', 'node_modules'))).toBe(false);
   });
 
+  it(`should accept an expo hoisted to a parent directory`, async () => {
+    const workDir = await setupWorkDirAsync();
+    const hoisted = path.join(workDir, 'node_modules', 'expo');
+    await fs.promises.mkdir(hoisted, { recursive: true });
+    await fs.promises.writeFile(path.join(hoisted, 'package.json'), '{}');
+
+    const result = await executeAgentCliAsync(workDir, ['new', 'my-app', '--json'], {
+      env: { STUB_CREATE_EXPO_INSTALL_FAILS: '1' },
+    });
+
+    expect(JSON.parse(result.stdout)).toMatchObject({ installed: true, errors: [] });
+  });
+
   it(`should say in the text report that the install failed`, async () => {
     const workDir = await setupWorkDirAsync();
 
