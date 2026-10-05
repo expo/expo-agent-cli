@@ -196,6 +196,51 @@ describe('touchClaim', () => {
     }
   });
 
+  it(`leaves a claim that replaced this one between the read and the rename`, () => {
+    writeClaim(claim());
+    const taker = claim({ projectRoot: '/work/other', claimedAt: '2026-09-30T11:00:00.000Z' });
+    const file = claimFilePath('local-ios', 'UDID-1');
+    const rename = fs.renameSync;
+    let replaced = false;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      if (!replaced) {
+        replaced = true;
+        vol.rmSync(file);
+        writeClaim(taker);
+      }
+      rename(from, to);
+    });
+
+    try {
+      expect(touchClaim(claim(), new Date())).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(readClaims()).toEqual([taker]);
+    expect(vol.readdirSync(REGISTRY)).toEqual(['local-ios-UDID-1.json']);
+  });
+
+  it(`never overwrites a claim written while this one was set aside`, () => {
+    writeClaim(claim());
+    const taker = claim({ projectRoot: '/work/other', claimedAt: '2026-09-30T11:00:00.000Z' });
+    const file = claimFilePath('local-ios', 'UDID-1');
+    const rename = fs.renameSync;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      rename(from, to);
+      if (from === file) {
+        writeClaim(taker);
+      }
+    });
+
+    try {
+      expect(touchClaim(claim(), new Date())).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(readClaims()).toEqual([taker]);
+    expect(vol.readdirSync(REGISTRY)).toEqual(['local-ios-UDID-1.json']);
+  });
+
   it(`reports no touch, and never throws, when the file system refuses`, () => {
     writeClaim(claim());
     const spy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {
@@ -211,6 +256,8 @@ describe('touchClaim', () => {
       'device_claim_touch_failed',
       expect.objectContaining({ id: 'UDID-1' })
     );
+    expect(readClaims()).toEqual([claim()]);
+    expect(vol.readdirSync(REGISTRY)).toEqual(['local-ios-UDID-1.json']);
   });
 });
 

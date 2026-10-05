@@ -77,9 +77,11 @@ export function writeClaim(claim: DeviceClaim): void {
 /**
  * Refresh `touchedAt` of a claim this worktree still holds.
  *
- * Runs outside the registry lock, because every verb calls it. The replace is a rename, so a
- * reader never sees half a file, which it would read as no claim at all. It is a compare-and-swap:
- * the file must name this claim (its worktree and its `claimedAt`) before the rename and after it.
+ * Runs outside the registry lock, because every verb calls it. It is a compare-and-swap on the
+ * inode: the file is renamed aside first, so no other writer can replace it between the check and
+ * the write. Bytes that are not this claim (its worktree and its `claimedAt`) go back unchanged.
+ * The touched file goes into place with a hard link, which fails rather than overwrite a claim
+ * another worktree wrote while this one was aside. A reader never sees half a file.
  *
  * @returns the touched claim, or null when the claim was released, another claim replaced it, or
  * the file system refused. Never throws.
@@ -90,20 +92,42 @@ export function touchClaim(
   patch: Pick<Partial<DeviceClaim>, 'booted'> = {}
 ): DeviceClaim | null {
   const file = claimFilePath(claim.backend, claim.id);
-  try {
-    const current = readClaimFile(file);
-    if (current == null || !isSameClaim(current, claim)) {
-      return null;
-    }
-    const touched = { ...current, ...patch, touchedAt: now.toISOString() };
-    const temporary = path.join(
+  const temporary = (kind: string) =>
+    path.join(
       path.dirname(file),
-      `.${path.basename(file)}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
+      `.${path.basename(file)}.${kind}-${process.pid}-${randomBytes(4).toString('hex')}`
     );
-    fs.writeFileSync(temporary, serialize(touched));
-    fs.renameSync(temporary, file);
-    const after = readClaimFile(file);
-    return after != null && isSameClaim(after, claim) ? touched : null;
+  try {
+    const aside = temporary('aside');
+    try {
+      fs.renameSync(file, aside);
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return null;
+      }
+      throw error;
+    }
+    let placed = false;
+    try {
+      const moved = readClaimFile(aside);
+      if (moved == null || !isSameClaim(moved, claim)) {
+        return null;
+      }
+      const touched = { ...moved, ...patch, touchedAt: now.toISOString() };
+      const next = temporary('touch');
+      try {
+        fs.writeFileSync(next, serialize(touched));
+        placed = linkUnlessExists(next, file);
+      } finally {
+        fs.rmSync(next, { force: true });
+      }
+      return placed ? touched : null;
+    } finally {
+      if (!placed) {
+        linkUnlessExists(aside, file);
+      }
+      fs.rmSync(aside, { force: true });
+    }
   } catch (error: unknown) {
     debugEvent('device_claim_touch_failed', {
       backend: claim.backend,
@@ -111,6 +135,19 @@ export function touchClaim(
       reason: (error as Error).message,
     });
     return null;
+  }
+}
+
+/** @returns false, and changes nothing, when `to` exists already. */
+function linkUnlessExists(from: string, to: string): boolean {
+  try {
+    fs.linkSync(from, to);
+    return true;
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      return false;
+    }
+    throw error;
   }
 }
 
