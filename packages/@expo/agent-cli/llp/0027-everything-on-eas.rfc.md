@@ -45,6 +45,10 @@ A plan for a local device keeps the `development` profile it always built. Wheth
 
 The profile writer only treats `ENOENT` as a missing file. If an existing `eas.json` cannot be read or parsed, or its root or `build` section is not an object, it stops with an actionable error before submitting the build and preserves the file. The tolerant read used by planning is not evidence that an existing file is safe to replace. [observed — regression tests in `easJson-test.ts` and `dev-eas-test.ts`, 2026-09-09]
 
+### Every `eas` argv is non-interactive
+
+The plan's `eas build` step carries `--non-interactive`. Without it, `eas build` in a directory with no git repository asked "Would you like us to run 'git init'" on a stdin the step cannot read, and stopped [observed — live, 2026-10-05]. Every other `eas` argv this CLI spawns carries the flag when the command accepts it: `simulator:list` and `simulator:availability` gained it. Two commands do not accept it, so they do not get it: `build:configure` and `simulator:exec` declare no such flag [observed — eas-cli 24.10.0, `oclif.manifest.json`, 2026-10-05]. `build:view` rejects it too; that lookup is fixed in its own PR. A device-profile build (`development`, local device) that needs credentials is expected to stop on the flag instead of prompting; that path was not run live.
+
 ## Reuse
 
 A session installs a build by id. A finished simulator build of this exact fingerprint on EAS is therefore a build the run does not have to make, and a native build is the fifteen minutes everything else in this command is measured against. `lookUpEasSimulatorBuildAsync` asks the same question `eas build:dev` asks: the per-platform fingerprint (an EAS build carries one per platform, so the probe's project hash cannot be handed to the lookup), `--build-profile development-simulator`, `--status finished`. `buildCacheArgs` gained the optional profile filter for it; `status` keeps asking about any finished build.

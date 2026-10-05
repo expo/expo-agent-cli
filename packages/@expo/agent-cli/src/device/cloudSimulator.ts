@@ -150,7 +150,15 @@ export function cloudSessionStartCommand(): string {
 export function buildSessionListArgs({
   limit = CLOUD_SESSION_LIST_LIMIT,
 }: { limit?: number } = {}): string[] {
-  return ['simulator:list', '--status', 'in-progress', '--limit', String(limit), '--json'];
+  return [
+    'simulator:list',
+    '--status',
+    'in-progress',
+    '--limit',
+    String(limit),
+    '--json',
+    '--non-interactive',
+  ];
 }
 
 /**
@@ -164,7 +172,7 @@ export function buildSessionListArgs({
  * `waitlistUrl` only when the account is gated.]
  */
 export function buildAvailabilityArgs(): string[] {
-  return ['simulator:availability', '--json'];
+  return ['simulator:availability', '--json', '--non-interactive'];
 }
 
 /**
