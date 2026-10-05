@@ -33,6 +33,9 @@ import type { DeviceBackend } from '../navigate/device';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { resolveAdb, runAdbAsync, type AdbResolution } from './adb';
 
+/** Every simulator this CLI creates is named this plus a number, and only such a one is deleted. */
+export const CREATED_SIMULATOR_PREFIX = 'agent-cli ';
+
 /**
  * How long a boot may take, per platform, before it is called a failure.
  *

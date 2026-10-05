@@ -123,6 +123,51 @@ describe('device claims across two worktrees', () => {
     }
   );
 
+  // @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
+  it.skipIf(process.platform !== 'darwin')(
+    'reaps the simulator a deleted worktree booted, on the next dev:stop of another worktree',
+    async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      projects.push(projectRoot);
+      const deleted = path.join(machine, 'deleted-worktree');
+      const directory = path.join(expoHome, 'agent-cli', 'devices');
+      await fs.promises.mkdir(directory, { recursive: true });
+      const now = new Date().toISOString();
+      fs.writeFileSync(
+        path.join(directory, `local-ios-${SIMULATORS[0]!.udid}.json`),
+        JSON.stringify({
+          backend: 'local-ios',
+          platform: 'ios',
+          id: SIMULATORS[0]!.udid,
+          projectRoot: path.join(canonicalRoot(machine), 'deleted-worktree'),
+          pid: 1,
+          claimedAt: now,
+          touchedAt: now,
+          created: false,
+          booted: true,
+        })
+      );
+      expect(fs.existsSync(deleted)).toBe(false);
+
+      const stopped = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+        env: envFor(projectRoot),
+      });
+
+      expect(stopped.exitCode).toBe(0);
+      expect(JSON.parse(stopped.stdout).reaped).toEqual([
+        expect.objectContaining({
+          id: SIMULATORS[0]!.udid,
+          backend: 'local-ios',
+          released: true,
+          shutDown: true,
+          deleted: false,
+        }),
+      ]);
+      expect(readXcrun()).toContainEqual(['simctl', 'shutdown', SIMULATORS[0]!.udid]);
+      expect(claims()).toEqual([]);
+    }
+  );
+
   // @ref llp/0021-honest-reports.rfc.md — a session left running is named, not dropped.
   it('keeps an EAS session claim that a plain dev:stop did not stop, and says it still runs', async () => {
     const projectRoot = await setupFixtureAsync('go-app');

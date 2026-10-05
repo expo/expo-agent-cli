@@ -17,6 +17,7 @@ export {
   REGISTRY_LOCK_STALE_MS,
   releaseClaim,
   releaseProjectClaimsAsync,
+  removeClaimFile,
   touchClaim,
   withRegistryLockAsync,
   writeClaim,

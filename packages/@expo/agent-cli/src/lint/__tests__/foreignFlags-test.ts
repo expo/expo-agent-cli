@@ -192,6 +192,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "-j  src/device/claimedDevice.ts",
           "-j  src/device/claimedDevice.ts",
           "-j  src/device/claimedDevice.ts",
+          "-j  src/device/reapClaims.ts",
           "-j  src/navigate/device.ts",
           "-j  src/runtime/targetPlatform.ts",
           "-list-avds  src/device/claimedDevice.ts",

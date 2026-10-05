@@ -32,6 +32,11 @@ import chalk from 'chalk';
 
 import { shutdownDeviceAsync } from '../device/bootDevice';
 import {
+  describeReapedDevice,
+  reapDeletedWorktreeClaimsAsync,
+  type ReapedDevice,
+} from '../device/reapClaims';
+import {
   readClaims,
   releaseProjectClaimsAsync,
   type DeviceBackend,
@@ -127,6 +132,12 @@ export interface DevStopResultJson {
    * kept until `--eas` stops it; `reason` says which.
    */
   devices: ReleasedDevice[];
+  /**
+   * The claims of deleted worktrees this run reaped, and what was done to each device.
+   *
+   * @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
+   */
+  reaped: ReapedDevice[];
   /**
    * Whether a lock answered for **the target**: this CLI's dev server or a stranger's.
    *
@@ -251,6 +262,7 @@ export async function devStopAsync(
     devServerRunning,
     sessions: report.sessions ?? [],
   });
+  report.reaped = await reapDeletedWorktreeClaimsAsync(projectRoot);
   report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
 
   event('stop_done', {
@@ -422,6 +434,7 @@ async function stopLockedDevServerAsync(
     detail: null,
     waitedMs: 0,
     devices: [],
+    reaped: [],
     followups: [],
   };
 
@@ -488,6 +501,7 @@ async function stopUnlockedDevServerAsync(
     detail: 'no dev-server lock answered for this project, and nothing was listening for it',
     waitedMs: Date.now() - startedAt,
     devices: [],
+    reaped: [],
     followups: [],
   };
 
@@ -773,6 +787,9 @@ function printHumanReport(report: DevStopResultJson): void {
         )
         .join(', ')}`
     );
+  }
+  for (const device of report.reaped) {
+    lines.push(chalk`{bold Reaped} ${describeReapedDevice(device)}`);
   }
   if (report.pid != null) {
     lines.push(

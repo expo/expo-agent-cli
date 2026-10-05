@@ -318,6 +318,41 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     expect(readClaims()).toMatchObject([{ id: 'SIM-A', projectRoot: HERE, booted: true }]);
   });
 
+  // @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
+  it(`reaps the simulator of a deleted worktree before it allocates, inside the grace period`, async () => {
+    const { tools } = fakeSimulators([
+      { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },
+      { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
+    ]);
+    const now = new Date().toISOString();
+    writeClaim({
+      backend: 'local-ios',
+      platform: 'ios',
+      id: 'SIM-A',
+      projectRoot: path.resolve('/work/deleted'),
+      pid: 1,
+      claimedAt: now,
+      touchedAt: now,
+      created: false,
+      booted: true,
+    });
+    const progress = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: false,
+    });
+
+    expect(tools.callsWith('simctl shutdown SIM-A')).toHaveLength(1);
+    expect(progress.mock.calls.flat().join('')).toContain(
+      `Reaped SIM-A of the deleted worktree ${path.resolve('/work/deleted')} · shut down, claim dropped.`
+    );
+    progress.mockRestore();
+    expect(result.ok).toBe(true);
+    expect(readClaims().map(({ projectRoot }) => projectRoot)).toEqual([HERE]);
+  });
+
   it(`never takes a booted simulator another worktree claimed`, async () => {
     fakeSimulators([
       { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },

@@ -243,6 +243,8 @@ describe('@expo/agent-cli dev:stop', () => {
       // is not one listener).
       'portStillAnswering',
       'processStillRunning',
+      // Claims of deleted worktrees this run reaped (llp/0030 §Release and cleanup).
+      'reaped',
       'reason',
       'signal',
       'stopped',
