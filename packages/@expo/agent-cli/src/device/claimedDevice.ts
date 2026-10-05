@@ -19,6 +19,7 @@ import {
   type DevicePlatform,
 } from '../deviceClaims';
 import { debugEvent } from '../deviceClaims/events';
+import * as Log from '../log';
 import { parseAndroidDevices } from '../navigate/device';
 import { canonicalizeExistingPath } from '../utils/dir';
 import { CommandError } from '../utils/errors';
@@ -30,6 +31,7 @@ import {
   BOOT_DEVICE_TIMEOUT_MS,
   compareSimulators,
   compareVersions,
+  CREATED_SIMULATOR_PREFIX,
   emulatorPort,
   emulatorSerial,
   findFreeEmulatorPortAsync,
@@ -41,6 +43,7 @@ import {
   type SimulatorEntry,
 } from './bootDevice';
 import { androidDeviceNameAsync } from './installDevBuild';
+import { describeReapedDevice, reapDeletedWorktreeClaimsAsync } from './reapClaims';
 import { simulatorHasAppAsync } from './installedApps';
 
 export type LocalDeviceBackend = 'local-ios' | 'local-android';
@@ -134,9 +137,6 @@ const BACKEND: Record<DevicePlatform, LocalDeviceBackend> = {
   android: 'local-android',
 };
 
-/** Every simulator `createSimulatorAsync` makes is named this plus a number. */
-const CREATED_SIMULATOR_PREFIX = 'agent-cli ';
-
 const NOUN: Record<DevicePlatform, string> = {
   ios: 'iOS simulator',
   android: 'Android emulator',
@@ -175,6 +175,10 @@ export async function resolveClaimedDeviceAsync(
   options: ResolveClaimedDeviceOptions
 ): Promise<ClaimedDeviceResult> {
   const projectRoot = canonicalizeExistingPath(options.projectRoot);
+  // @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
+  for (const device of await reapDeletedWorktreeClaimsAsync(projectRoot)) {
+    Log.progress(`Reaped ${describeReapedDevice(device)}.`);
+  }
   const seen: Seen = { inventory: null, claims: [] };
   const result = await resolveWithInventoryAsync(options, projectRoot, seen);
   if (result.ok || result.kind !== 'no-device') {

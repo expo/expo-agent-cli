@@ -991,6 +991,37 @@ describe('@expo/agent-cli dev:stop --eas', () => {
     expect(readDeviceClaims()).toMatchObject([{ id: 'sess-unknown' }]);
   });
 
+  // @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
+  it(`stops the session of a deleted worktree from this one, and drops its claim after the stop`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    const deleted = path.join(path.dirname(projectRoot), `${path.basename(projectRoot)}-deleted`);
+    await fs.promises.mkdir(deleted);
+    writeEasClaimFile(deleted, { id: 'sess-orphan' });
+    await fs.promises.rm(deleted, { recursive: true });
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+      reject: false,
+      env: { STUB_SIM_SESSIONS: '0' },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).reaped).toEqual([
+      expect.objectContaining({
+        id: 'sess-orphan',
+        backend: 'eas',
+        released: true,
+        shutDown: true,
+      }),
+    ]);
+    expect(easInvocations(projectRoot)).toContainEqual([
+      'simulator:stop',
+      '--id',
+      'sess-orphan',
+      '--non-interactive',
+    ]);
+    expect(readDeviceClaims()).toEqual([]);
+  });
+
   it(`stops nothing for a session that nobody bound to this project`, async () => {
     const projectRoot = await setupAsync('go-app');
 

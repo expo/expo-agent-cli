@@ -25,6 +25,14 @@ declare module '2g' {
       projectRoot: string;
       reason: 'device-gone' | 'taken-over' | 'expired';
     };
+    /** A claim of a deleted worktree was reaped: its device shut down, or its session stopped. */
+    'cli:device_claim_reaped': {
+      backend: DeviceBackend;
+      id: string;
+      projectRoot: string;
+      released: boolean;
+      shutDown: boolean;
+    };
     /** The registry lock was older than its limit, so its holder was taken to be dead. */
     'cli:device_registry_lock_stale_removed': { lock: string; ageMs: number };
     /** A holder found its registry lock removed or taken over while it still ran. */

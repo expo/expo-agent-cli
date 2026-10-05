@@ -171,6 +171,7 @@ describe(devStopAsync, () => {
       'port',
       'portStillAnswering',
       'processStillRunning',
+      'reaped',
       'reason',
       'signal',
       'stopped',
@@ -602,7 +603,8 @@ describe(`${devStopAsync.name} and the device claims`, () => {
     claim('SIM-FOUND');
     claim('SIM-MADE', { created: true, booted: true });
     claim('SIM-BOOTED', { booted: true });
-    claim('SIM-OTHER', { projectRoot: '/other' });
+    vol.mkdirSync('/other', { recursive: true });
+    claim('SIM-OTHER', { projectRoot: canonicalizeExistingPath('/other') });
 
     await devStopAsync(projectRoot, options());
 
@@ -619,6 +621,37 @@ describe(`${devStopAsync.name} and the device claims`, () => {
         { id: 'SIM-MADE', backend: 'local-ios', released: true, shutDown: true, reason: null },
         { id: 'SIM-BOOTED', backend: 'local-ios', released: true, shutDown: true, reason: null },
       ])
+    );
+  });
+
+  it(`reaps the claim of a deleted worktree and reports it in JSON and in words`, async () => {
+    const gone = canonicalizeExistingPath('/gone');
+    claim('SIM-GONE', { projectRoot: gone, booted: true });
+
+    const code = await devStopAsync(projectRoot, options());
+
+    expect(code).toBe(EXIT_OK);
+    expect(readClaims()).toEqual([]);
+    expect(vi.mocked(shutdownDeviceAsync).mock.calls.map(([id]) => id)).toEqual(['SIM-GONE']);
+    expect(JSON.parse(printed()).reaped).toEqual([
+      {
+        id: 'SIM-GONE',
+        backend: 'local-ios',
+        projectRoot: gone,
+        released: true,
+        shutDown: true,
+        deleted: false,
+        reason: null,
+      },
+    ]);
+
+    claim('SIM-GONE', { projectRoot: gone, booted: true });
+    vi.mocked(shutdownDeviceAsync).mockResolvedValueOnce({ ok: false, reason: 'simctl refused' });
+    vi.mocked(console.log).mockClear();
+
+    expect(await devStopAsync(projectRoot, options({ json: false }))).toBe(EXIT_OK);
+    expect(printed()).toContain(
+      `Reaped SIM-GONE of the deleted worktree ${gone} · still up — simctl refused, claim dropped`
     );
   });
 
