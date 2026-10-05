@@ -175,17 +175,9 @@ export async function lookUpCachedBuildAsync(
   return readLookupPayload(result.stdout);
 }
 
-/**
- * The argv that asks EAS what one build is.
- *
- * `eas build:view <id> --json --non-interactive` [inferred — eas-cli documents `build:view` as the
- * command that shows one build, and `--json` implies `--non-interactive` on its siblings; **not yet
- * run against the published binary**, llp/0002 §A flag is not shipped until it has run against the published binary].
- * Every caller treats a failure as "not established", so a spelling this CLI got
- * wrong costs the platform attribution and never the report.
- */
+/** `build:view` accepts `--json` only [observed — eas-cli 24.10.0]. */
 export function buildViewArgs(buildId: string): string[] {
-  return ['build:view', buildId, '--json', '--non-interactive'];
+  return ['build:view', buildId, '--json'];
 }
 
 /**

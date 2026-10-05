@@ -591,6 +591,10 @@ describe(parseBuildPlatform, () => {
 });
 
 describe(lookUpBuildPlatformAsync, () => {
+  it(`passes build:view only the flags it accepts`, () => {
+    expect(buildViewArgs('build-1')).toEqual(['build:view', 'build-1', '--json']);
+  });
+
   it(`should ask EAS about the one build`, async () => {
     mockSpawn({ stdout: JSON.stringify({ id: 'build-1', platform: 'ANDROID' }) });
 
