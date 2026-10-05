@@ -204,6 +204,22 @@ describe(devAsync, () => {
       });
     });
 
+    // A step forwards the signal and returns 0, and `kill <pid>` on a detached run in `prebuild`
+    // used to start `run:ios` next [observed — e2e, 2026-10-05].
+    it(`should stop the plan before the next step when a signal arrived during a step`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(runExpoAsync).mockImplementationOnce(async () => {
+        process.emit('SIGTERM');
+        return 0;
+      });
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
+      expect(runDevServerAsync).not.toHaveBeenCalled();
+      expect(process.listenerCount('SIGTERM')).toBe(0);
+    });
+
     it(`should run every step of a plan that builds`, async () => {
       mockStaleDevClientState();
 

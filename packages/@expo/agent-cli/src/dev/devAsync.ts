@@ -308,6 +308,34 @@ async function executePlanAsync(
   state: ProjectState,
   options: DevOptions
 ): Promise<PlanRun> {
+  // A step forwards SIGINT and SIGTERM to its tool and then returns as a clean exit, so without
+  // this the plan went on to its next step: `kill <pid>` on a detached run in `prebuild` started
+  // `run:ios` [observed — e2e, 2026-10-05]. The plan stops before the next step instead.
+  let interrupted = false;
+  const interrupt = () => {
+    interrupted = true;
+  };
+  for (const signal of PLAN_STOP_SIGNALS) {
+    process.on(signal, interrupt);
+  }
+  try {
+    return await runPlanStepsAsync(projectRoot, plan, state, options, () => interrupted);
+  } finally {
+    for (const signal of PLAN_STOP_SIGNALS) {
+      process.off(signal, interrupt);
+    }
+  }
+}
+
+const PLAN_STOP_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+
+async function runPlanStepsAsync(
+  projectRoot: string,
+  plan: StartPlan,
+  state: ProjectState,
+  options: DevOptions,
+  isInterrupted: () => boolean
+): Promise<PlanRun> {
   const output = stepOutputFor(options);
   let devServer: DevServerRun | null = null;
   let exitCode = 0;
@@ -323,6 +351,10 @@ async function executePlanAsync(
   let easBuildId: string | null = plan.easBuild?.id ?? null;
 
   for (const [index, step] of plan.steps.entries()) {
+    if (isInterrupted()) {
+      planEvent('start_plan_interrupted', { before: step.id });
+      break;
+    }
     let args = resolveStepArgs(step, options, index === plan.steps.length - 1);
     planEvent('start_plan_step', {
       id: step.id,

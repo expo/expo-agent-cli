@@ -6,8 +6,8 @@ import {
 import type { DeviceBackend, PlanPlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import type { BuildBackend, RunTarget } from '../settings/types';
+import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
-import { DEFAULT_DETACH_TIMEOUT_MS } from './detachAsync';
 import { assertKnownDevFlags } from './knownFlags';
 
 /**
@@ -202,7 +202,7 @@ export function resolveDevOptions(argv: string[]): DevOptions {
     port,
     detach,
     waitReady,
-    detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
+    detachTimeoutMs: env.AGENT_CLI_DETACH_TIMEOUT_MS,
     // The child's argv is built from the same list, so a flag added to this command reaches the
     // detached run without a second place to remember.
     detachArgv: argv,
