@@ -350,7 +350,7 @@ step probes. None trusts. The step is reported as `source`.
 | 4   | 8082-8085, in parallel                         | `scan`    | a Metro answered. not that it is this project's                     |
 
 Steps 3 and 4 now also check the project-root header of `GET /status`, so a server of
-another project is skipped. See [[0028-one-device-per-agent]] §Discovery.
+another project is skipped. See [[0030-one-device-per-agent]] §Discovery.
 
 Nothing may be skipped on the strength of a fast path. An `expo start` a developer ran
 by hand holds no lock. A project whose `.expo` was cleaned names no port. The scan is

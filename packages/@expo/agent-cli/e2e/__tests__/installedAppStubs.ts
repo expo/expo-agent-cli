@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 // @ref llp/0005-runtime-loop-tools.rfc.md §Installed-app fingerprint check
 //
 // Stub device tools for the installed-app check, shared by the reader e2e and the `status` e2e.
@@ -120,7 +120,7 @@ export async function installStubAdbAsync(
  *
  * `simulators` replaces the listing with these devices, all shut down until `simctl boot` boots
  * one, which the stub remembers, as a real `simctl` does. `bootstatus`, `openurl` and `shutdown`
- * then answer 0. For the device claims (llp/0028), whose inventory is `simctl list devices -j`.
+ * then answer 0. For the device claims (llp/0030), whose inventory is `simctl list devices -j`.
  */
 export async function installStubXcrunAsync(
   root: string,

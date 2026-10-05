@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 // @ref llp/0005-runtime-loop-tools.rfc.md §How the file is read
 // Which iOS device answers: the simulator this worktree claims first, a physical device only when
 // `--device` names it. Reading a simulator is a file read; reading a phone launches the app on it.

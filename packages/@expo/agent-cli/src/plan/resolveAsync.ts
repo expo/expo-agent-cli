@@ -19,7 +19,7 @@ import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { hasBuildProfileSync } from '../utils/easJson';
 import { CommandError } from '../utils/errors';
 
-/** The install step would have no `--device` value that is safe (llp/0028). */
+/** The install step would have no `--device` value that is safe (llp/0030). */
 export function runDeviceRefusedError(platform: NativePlatform, reason: string): CommandError {
   return new CommandError(
     'RUN_DEVICE_AMBIGUOUS',
@@ -76,7 +76,7 @@ export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
    * Claim this worktree's device for a plan that builds here, and answer what
    * `expo run:<platform> --device` calls it. Null leaves the build unpinned.
    *
-   * @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+   * @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
    * @throws {CommandError} when the device cannot be claimed or named safely.
    */
   claimRunDevice?: (platform: NativePlatform) => Promise<string | null>;

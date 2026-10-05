@@ -1,6 +1,6 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
 // @ref llp/0010-agent-conventions.rfc.md §Exit codes
-// @ref llp/0028-one-device-per-agent.rfc.md §Release and cleanup
+// @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
 // Stop this project's dev server.
 //
 // The friction this replaces is a shell incantation an agent has to compose and get right:
@@ -121,7 +121,7 @@ export interface DevStopResultJson {
   /**
    * The devices this worktree had claimed, which of them were given up, and which were shut down.
    *
-   * @ref llp/0028-one-device-per-agent.rfc.md §Release and cleanup
+   * @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
    * Only a device this CLI booted or created is shut down; any other is left running for whoever
    * uses it. A claim is kept while this worktree's dev server still runs, and an EAS session is
    * kept until `--eas` stops it; `reason` says which.

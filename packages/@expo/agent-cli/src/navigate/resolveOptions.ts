@@ -25,7 +25,7 @@ export interface NavigateOptions {
   /**
    * `--device`: the simulator, emulator or device to open on, by UDID, serial or name, or null.
    *
-   * @ref llp/0028-one-device-per-agent.rfc.md §Explicit device — claimed for this worktree.
+   * @ref llp/0030-one-device-per-agent.rfc.md §Explicit device — claimed for this worktree.
    */
   device: string | null;
   /** URL scheme, which wins over the scheme read from the project config. */

@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §The registry
+// @ref llp/0030-one-device-per-agent.rfc.md §The registry
 
 import { CommandError } from '../utils/errors';
 import type { DevicePlatform } from './types';

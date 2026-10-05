@@ -284,7 +284,7 @@ async function installStubXcrunForBootAsync(
       `  process.exit(0);`,
       `}`,
       // The full listing shows the booted device as `Booted`, as the real tool does: the device
-      // claim (llp/0028) reads this listing, not the `booted` one.
+      // claim (llp/0030) reads this listing, not the `booted` one.
       `if (args[1] === 'list') {`,
       `  const up = booted();`,
       `  const all = JSON.parse(listing).devices['com.apple.CoreSimulator.SimRuntime.iOS-26-5'];`,

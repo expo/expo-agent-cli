@@ -212,7 +212,7 @@ describe(readInstalledFingerprintAndroidAsync, () => {
     ).resolves.toMatchObject({ status: 'no-embedded-fingerprint' });
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+  // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
   it(`reads only the device this worktree claims, and lists no other`, async () => {
     const fake = fakeAdb([
       { serial: 'emulator-5554', apk: null },

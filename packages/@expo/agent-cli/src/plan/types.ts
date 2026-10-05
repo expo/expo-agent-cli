@@ -127,7 +127,7 @@ export interface DecideStartPlanOptions {
    * What `expo run:<platform> --device` calls the device this worktree claims, for a plan that
    * builds here, or null when no device was claimed and the Expo CLI picks one.
    *
-   * @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+   * @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
    */
   runDevice?: string | null;
   /**

@@ -333,7 +333,7 @@ describe('--eas puts the device on EAS', () => {
   });
 });
 
-// @ref llp/0028-one-device-per-agent.rfc.md §Explicit device
+// @ref llp/0030-one-device-per-agent.rfc.md §Explicit device
 describe('--device', () => {
   it(`is read, and never forwarded to expo start`, () => {
     const options = resolveDevOptions(['--ios', '--device', 'iPhone 17 Pro', '--port', '8082']);

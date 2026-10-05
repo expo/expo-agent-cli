@@ -1,9 +1,9 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
-// @ref llp/0028-one-device-per-agent.rfc.md §Android boot
+// @ref llp/0030-one-device-per-agent.rfc.md §Android boot
 // Boot a local device, and shut one down again.
 //
 // Which device boots is not decided here: it is the device this worktree claims
-// (`./claimedDevice.ts`, llp/0028). This module holds the boot mechanics, through the same platform
+// (`./claimedDevice.ts`, llp/0030). This module holds the boot mechanics, through the same platform
 // tools as subprocesses, with no simulator or emulator library linked in.
 //
 // **Only what this module started is ever shut down.** Nothing here decides that; the caller does
@@ -91,7 +91,7 @@ export interface ShutdownDeviceResult {
 }
 
 export interface BootDeviceOptions {
-  /** The worktree the device is claimed for (llp/0028 §The registry). */
+  /** The worktree the device is claimed for (llp/0030 §The registry). */
   projectRoot: string;
   /** How long the boot may take before it is called a failure. */
   timeoutMs: number;
@@ -199,7 +199,7 @@ export function parseSimulators(stdout: string): SimulatorEntry[] {
 }
 
 /**
- * The order in which free shut-down simulators are booted (llp/0028 §The registry, step 4).
+ * The order in which free shut-down simulators are booted (llp/0030 §The registry, step 4).
  *
  * **The one this developer last used** first. Apps are installed per device: a simulator nobody
  * has ever booted has no Expo Go on it and no development build either, so a run that picked "the
@@ -366,7 +366,7 @@ export async function shutdownDeviceAsync(
 /**
  * Boot one simulator, and wait for `bootstatus` to say it is up.
  *
- * @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+ * @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
  */
 export async function bootSimulatorAsync(
   { udid, name }: { udid: string; name: string },
@@ -474,7 +474,7 @@ export interface EmulatorBoot {
 /**
  * Spawn the emulator detached on its own ports, and poll `sys.boot_completed` on its serial.
  *
- * @ref llp/0028-one-device-per-agent.rfc.md §Android boot
+ * @ref llp/0030-one-device-per-agent.rfc.md §Android boot
  */
 export async function bootEmulatorAsync(
   { avd, port, readOnly }: EmulatorBoot,

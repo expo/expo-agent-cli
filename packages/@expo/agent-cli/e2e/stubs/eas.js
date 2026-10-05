@@ -57,7 +57,7 @@
 // - STUB_SIM_GET_EXIT / STUB_SIM_STDERR: a refusal, with the real CLI's wording on stderr
 // - STUB_SIM_STORE: a directory that holds the remembered sessions (below) instead of the cwd, so
 //   two projects share one service: a session one of them started is listed to the other, which
-//   did not start it (@ref llp/0028-one-device-per-agent.rfc.md §EAS backend)
+//   did not start it (@ref llp/0030-one-device-per-agent.rfc.md §EAS backend)
 //
 // `simulator` / `simulator:start`
 // - STUB_SIM_START_EXIT / STUB_SIM_START_STDERR: a session that never became ready

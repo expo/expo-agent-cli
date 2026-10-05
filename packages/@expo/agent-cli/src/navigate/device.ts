@@ -1,6 +1,6 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
-// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 // Device discovery for deep-link navigation. Three backends, and the first two are the iOS
 // simulator and the Android device this worktree claims (`src/device/claimedDevice.ts`), read from
 // the platform tools as subprocesses so no simulator or emulator library is linked into the CLI.
@@ -442,7 +442,7 @@ export interface ResolveDeviceContext {
   cloud?: CloudPreference;
   /** The worktree whose claimed device, or EAS session, is looked for. */
   projectRoot: string;
-  /** `--device`: a UDID, serial or name, claimed for this worktree (llp/0028 §Explicit device). */
+  /** `--device`: a UDID, serial or name, claimed for this worktree (llp/0030 §Explicit device). */
   device?: string | null;
 }
 

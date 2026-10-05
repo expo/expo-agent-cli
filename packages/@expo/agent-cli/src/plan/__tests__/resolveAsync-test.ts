@@ -276,7 +276,7 @@ describe('detection', () => {
     expect(plan.buildLocation).toMatchObject({ runsOn: 'local' });
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+  // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
   it(`pins a local build to the device this worktree claims`, async () => {
     writeProject();
     const claimRunDevice = vi.fn(async () => 'SIM-CLAIMED');

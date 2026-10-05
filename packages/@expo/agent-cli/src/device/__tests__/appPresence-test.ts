@@ -93,7 +93,7 @@ describe(probeAppPresenceAsync, () => {
     expect(probe).toEqual({ presence: 'missing', installDevice: null });
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+  // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
   it(`should carry the reason when no --device value is safe for the device`, async () => {
     const probe = await probeAppPresenceAsync(
       projectRoot,

@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §The registry
+// @ref llp/0030-one-device-per-agent.rfc.md §The registry
 // Liveness against a real dev-server lock, because the socket is the primary check.
 
 import { acquireDevServerLockAsync } from '../../devLock';

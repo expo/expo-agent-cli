@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §Every verb uses the claim
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 // Answers `xcrun simctl`, `adb` and `emulator` through the child_process mock by argv, and records
 // every call, so a test can assert which device each call named.
 

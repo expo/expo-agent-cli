@@ -118,7 +118,7 @@ export interface DevOptions {
   /**
    * The simulator, emulator or device `--device` named, by UDID, serial or name, or null.
    *
-   * @ref llp/0028-one-device-per-agent.rfc.md §Explicit device
+   * @ref llp/0030-one-device-per-agent.rfc.md §Explicit device
    * It skips the allocation and is still claimed for this worktree, so no other worktree takes it.
    */
   device: string | null;

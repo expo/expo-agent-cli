@@ -153,7 +153,7 @@ describe('@expo/agent-cli dev:stop', () => {
     }
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §Release and cleanup
+  // @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
   // Windows stops with taskkill /F, which no handler can refuse.
   it.skipIf(process.platform === 'win32')(
     'keeps the device claims while the dev server it could not stop still runs',

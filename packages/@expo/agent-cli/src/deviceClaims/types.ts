@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §The registry
+// @ref llp/0030-one-device-per-agent.rfc.md §The registry
 
 export type DeviceBackend = 'local-ios' | 'local-android' | 'eas';
 

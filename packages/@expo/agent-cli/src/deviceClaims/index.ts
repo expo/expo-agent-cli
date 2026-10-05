@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §The registry
+// @ref llp/0030-one-device-per-agent.rfc.md §The registry
 // One device per platform per worktree: a machine-wide registry of claims, and the allocation
 // that reads it.
 

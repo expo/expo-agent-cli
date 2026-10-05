@@ -1,4 +1,4 @@
-// @ref llp/0028-one-device-per-agent.rfc.md §The registry
+// @ref llp/0030-one-device-per-agent.rfc.md §The registry
 // The machine-wide registry: one JSON file per claimed device, and one lock for the decisions
 // that read several of them.
 

@@ -488,7 +488,7 @@ export interface CloudSessionSelection {
 /**
  * Pick the session to drive, deterministically.
  *
- * @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+ * @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
  *
  * Pure and total, because "which session did it use" must not depend on the order the service
  * returned or on the second the command was run (llp/0005 §Cloud simulator). Only a session this
@@ -763,7 +763,7 @@ export async function probeCloudSessionAsync({
     );
   }
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
   const ownClaims = ownEasClaims(projectRoot, platform);
   const liveIds = new Set(
     sessions.filter((session) => isActiveSessionStatus(session.status)).map((session) => session.id)
@@ -889,7 +889,7 @@ async function noUsableSessionAsync({
         'EAS Simulator is not enabled on this account, so no session can be started for this project',
     };
   }
-  // @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+  // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
   // A live session that this worktree did not start is not "no session" either, and it is not a
   // device: another worktree, another machine or a CI job may be driving it.
   if (unclaimed.length > 0) {
@@ -1381,7 +1381,7 @@ async function liveForeignHolderAsync(
  *
  * @returns false when another worktree holds the session, so the caller must not drive it.
  *
- * @ref llp/0028-one-device-per-agent.rfc.md §EAS backend
+ * @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
  */
 export function bindEasSession(
   projectRoot: string,

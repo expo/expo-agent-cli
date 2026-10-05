@@ -51,7 +51,7 @@ describe(resolveNavigateOptions, () => {
     });
   });
 
-  // @ref llp/0028-one-device-per-agent.rfc.md §Explicit device
+  // @ref llp/0030-one-device-per-agent.rfc.md §Explicit device
   it(`should read --device, and refuse it beside --eas`, () => {
     expect(resolveNavigateOptions(['/', '--device', 'iPhone 17 Pro']).device).toBe('iPhone 17 Pro');
     expect(() => resolveNavigateOptions(['/', '--device', 'X', '--eas'])).toThrow(/--eas/);
