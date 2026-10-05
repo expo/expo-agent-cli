@@ -8,6 +8,8 @@ import os from 'os';
 import {
   allocateDeviceAsync,
   devicesAllClaimedError,
+  isSameClaim,
+  readClaim,
   readClaims,
   releaseClaim,
   touchClaim,
@@ -67,7 +69,7 @@ export type DeviceRefusalKind =
   | 'exhausted'
   /** `--device` named nothing this machine has. */
   | 'not-found'
-  /** `--device` named a device another live worktree holds. */
+  /** `--device` named a device another live worktree holds, or one took the claim over meanwhile. */
   | 'claimed'
   /** {@link ResolveClaimedDeviceOptions.requireApp}, and the device to boot has not got the app. */
   | 'no-app'
@@ -313,7 +315,11 @@ async function resolveWithInventoryAsync(
 
   const { candidate, claim, fresh, choice } = picked;
   const adb = seen.inventory?.adb ?? null;
-  const device = (booted: boolean): ClaimedDevice => {
+  const device = (booted: boolean): ClaimedDeviceResult => {
+    const held = touchClaim(claim, new Date(), booted ? { booted: true } : {}) ?? heldClaim(claim);
+    if (held == null) {
+      return lostClaimRefusal(platform, candidate, readClaim(backend, candidate.id));
+    }
     if (explicit) {
       // One device per platform per worktree: the named device replaces the one held before, but
       // only once it proved usable, so a failed `--device` keeps the device that works.
@@ -332,7 +338,7 @@ async function resolveWithInventoryAsync(
       backend,
       id: candidate.id,
       name: candidate.name,
-      claim: touchClaim(claim, new Date(), booted ? { booted: true } : {}) ?? claim,
+      claim: held,
       booted,
       choice,
       hasApp: candidate.hasApp ?? null,
@@ -387,6 +393,42 @@ async function resolveWithInventoryAsync(
     };
   }
   return device(true);
+}
+
+/** The claim, when its file still names it. A touch can fail on IO alone. */
+function heldClaim(claim: DeviceClaim): DeviceClaim | null {
+  const current = readClaim(claim.backend, claim.id);
+  return current != null && isSameClaim(current, claim) ? current : null;
+}
+
+/** The claim was released or taken over while this call held it. Nothing is released here. */
+function lostClaimRefusal(
+  platform: DevicePlatform,
+  candidate: LocalCandidate,
+  current: DeviceClaim | null
+): DeviceRefusal {
+  const lost = { deviceId: candidate.id, name: candidate.name };
+  if (current != null) {
+    const error = new CommandError(
+      'DEVICE_CLAIMED',
+      [
+        `${candidate.name} (${candidate.id}) was claimed by another worktree while this command used it: ${current.projectRoot}.`,
+        `How: run this command again, so this worktree gets a device of its own.`,
+      ].join('\n')
+    );
+    error.data = { id: current.id, projectRoot: current.projectRoot };
+    return {
+      ...refusal('claimed', `${candidate.name} is claimed by ${current.projectRoot}`, error),
+      ...lost,
+    };
+  }
+  return {
+    ...refusal(
+      'no-device',
+      `this worktree's claim on the ${NOUN[platform]} ${candidate.name} was released while this command used it`
+    ),
+    ...lost,
+  };
 }
 
 /** Carries a refusal out of `listDevices`, which runs inside the registry lock. */

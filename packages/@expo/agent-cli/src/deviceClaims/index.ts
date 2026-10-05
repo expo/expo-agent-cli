@@ -10,6 +10,8 @@ export { devicesAllClaimedError } from './errors';
 export { CLAIM_GRACE_MS, classifyClaimAsync } from './liveness';
 export {
   claimFilePath,
+  isSameClaim,
+  readClaim,
   deviceRegistryDirectory,
   readClaims,
   REGISTRY_LOCK_STALE_MS,

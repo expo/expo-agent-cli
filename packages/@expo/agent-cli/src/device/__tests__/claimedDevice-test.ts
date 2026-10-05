@@ -1,8 +1,10 @@
 // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
+import fs from 'fs';
 import { vol } from 'memfs';
 import path from 'path';
 
-import { readClaims, writeClaim } from '../../deviceClaims';
+import { claimFilePath, readClaims, writeClaim } from '../../deviceClaims';
+import { debugEvent } from '../../deviceClaims/events';
 import { newestIosRuntime, resolveClaimedDeviceAsync } from '../claimedDevice';
 import { simulatorHasAppAsync } from '../installedApps';
 import { adbDevices, fakeDeviceTools, simctlDevices } from './fakeDeviceTools';
@@ -50,7 +52,8 @@ function fakeSimulators(
   initial: { udid: string; name: string; state: 'Booted' | 'Shutdown' }[] = [
     { udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' },
     { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
-  ]
+  ],
+  { onBoot }: { onBoot?: () => void } = {}
 ) {
   const devices = initial.map((device) => ({ ...device }));
   const tools = fakeDeviceTools((command, args) => {
@@ -72,6 +75,7 @@ function fakeSimulators(
       };
     }
     if (verb === 'boot') {
+      onBoot?.();
       devices.find((device) => device.udid === rest[0])!.state = 'Booted';
       return {};
     }
@@ -211,6 +215,64 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
 
     expect(result).toMatchObject({ ok: false, kind: 'no-device' });
     expect(readClaims()).toMatchObject([{ id: 'SIM-A', touchedAt: LONG_AGO }]);
+  });
+
+  it(`refuses the simulator when another worktree took its claim over during the boot`, async () => {
+    fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' }], {
+      onBoot: () => {
+        vol.rmSync(claimFilePath('local-ios', 'SIM-A'));
+        otherClaim('SIM-A');
+      },
+    });
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: true,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      kind: 'claimed',
+      deviceId: 'SIM-A',
+      error: { code: 'DEVICE_CLAIMED' },
+    });
+    expect(!result.ok && result.error.message).toContain(OTHER);
+    expect(readClaims()).toMatchObject([{ id: 'SIM-A', projectRoot: OTHER }]);
+    expect(debugEvent).not.toHaveBeenCalledWith('device_claim_touch_failed', expect.anything());
+  });
+
+  it(`refuses the simulator when its claim was released during the boot`, async () => {
+    fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' }], {
+      onBoot: () => vol.rmSync(claimFilePath('local-ios', 'SIM-A')),
+    });
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: true,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'no-device', deviceId: 'SIM-A' });
+    expect(readClaims()).toEqual([]);
+  });
+
+  it(`goes on with the simulator when only the touch failed and the claim is still its own`, async () => {
+    fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
+    writeClaim(ownClaim('SIM-A', LONG_AGO));
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+      throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
+    });
+
+    try {
+      expect(
+        await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: false })
+      ).toMatchObject({ ok: true, id: 'SIM-A', claim: { projectRoot: HERE } });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(debugEvent).toHaveBeenCalledWith(
+      'device_claim_touch_failed',
+      expect.objectContaining({ id: 'SIM-A' })
+    );
   });
 
   it(`never takes a booted simulator another worktree claimed`, async () => {
