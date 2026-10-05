@@ -379,7 +379,8 @@ describeLive(
         `eas simulator:list exited ${listed.exitCode}: ${listed.stderr.slice(-1000)}`
       );
     }
-    return (JSON.parse(listed.stdout) as { id: string }[]).map((session) => session.id);
+    const { sessions } = JSON.parse(listed.stdout) as { sessions: { id: string }[] };
+    return sessions.map((session) => session.id);
   }
 
   beforeAll(async () => {
