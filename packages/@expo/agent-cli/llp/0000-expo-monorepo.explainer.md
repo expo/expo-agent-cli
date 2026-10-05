@@ -65,6 +65,7 @@ What the CLI does:
 - [[0012-build-explain]]: deterministic triage of a native build log.
 - [[0018-interaction-commands]]: driving the app by testID.
 - [[0023-fingerprint-caching]]: paying for one fingerprint instead of three.
+- [[0029-feedback]]: feedback submission with the standalone CLI's request contract.
 
 How every command behaves:
 

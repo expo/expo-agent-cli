@@ -47,11 +47,28 @@ Design documents: `llp/0001-agentic-cli-on-expo-cli.rfc.md` and its child LLPs i
 | `inspect:build-log`                                            | Find the line in a native build log that says why it failed                 |
 | `inspect:config-plugins`                                       | What the config plugins produced. Experimental                              |
 | `agents:setup`                                                 | Set up Expo agents in a project or user home                                |
+| `feedback`                                                     | Send feedback to the Expo team, with agent and project context              |
 | `skills:sync` / `skills:list` / `skills:show` / `skills:clean` | Discover and link skills shipped by installed modules                       |
 
 Grouped commands use `group:action`, the way `eas-cli` does. The space form is the same command: `skills list` is `skills:list`. Bare `skills` syncs, bare `doctor` checks, bare `dev` runs the plan.
 
 Commands this CLI does not wrap go to the project's `expo` CLI: `run`, `run:ios`, `run:android`, `prebuild`, `config`, `export`, `export:web`, `export:embed`, `serve`, `customize`, `lint`, `login`, `logout`, `register`, `whoami`.
+
+## Send feedback
+
+Use `npx --yes @expo/agent-cli feedback` in place of `npx --yes submit-expo-feedback`:
+
+```sh
+npx --yes @expo/agent-cli feedback --message "Please explain how to recover when the dev server disconnects."
+npx --yes @expo/agent-cli feedback --category skills --subject expo-router --message "Please add an example of nested routes with shared layouts."
+npx --yes @expo/agent-cli feedback --resume abc123 --message "The issue also happens after restarting the development server."
+```
+
+Messages must contain 40–5,000 characters. `--message`/`-m`, `--category`/`-c`, `--subject`/`-s`, and `--resume` retain the standalone CLI's behavior. Positional messages are still accepted with a deprecation warning. Without a message, the command prompts in an interactive terminal; agents and CI should pass `--message`. `--json` prints `{ "sent": true, "feedbackId": "…" }` after a successful submission.
+
+Categories are `skills`, `expo-cli`, `eas-cli`, `agent-cli`, `mcp`, `docs`, `evals`, `simulator`, and `unknown` (the default). For `agent-cli`, use the full command as the subject, such as `npx @expo/agent-cli status`. Other subjects identify the exact skill, documentation URL, MCP tool, CLI command, package, simulator workflow, or topic involved.
+
+Feedback uses the same Expo endpoint and request format as `submit-expo-feedback`, including agent, sandbox, environment, and Expo project metadata. It uses `EXPO_TOKEN` or the saved Expo session when available; authenticated feedback is associated with that account. `DO_NOT_TRACK=1` or `EXPO_NO_TELEMETRY=1` skips submission and metadata collection (`--json` reports `{ "sent": false, "feedbackId": null }`).
 
 ## Set up a coding agent
 

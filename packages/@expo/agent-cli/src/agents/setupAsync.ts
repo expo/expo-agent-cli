@@ -15,12 +15,12 @@ import {
 import { discoverSkillsAsync } from '../skills/discovery';
 import { syncSkillsAsync } from '../skills/skillsAsync';
 import type { DiscoveredSkill, SkillsAgent } from '../skills/types';
+import { withStdoutRedirectedAsync } from '../utils/stdout';
 import { ensureClaudeMdReferenceAsync } from './agentsMd';
 import { event } from './events';
 import { installAgentAsync } from './installers';
 import { prepareSetupAsync } from './plan';
 import { writeProjectInstructionsAsync } from './projectInstructions';
-import { withStdoutRedirectedAsync } from './stdout';
 import type { SetupOptions, SetupReport } from './types';
 
 /** Width of the label column of the text summary, matching `@expo/agent-cli status`. */
