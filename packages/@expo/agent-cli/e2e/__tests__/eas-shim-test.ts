@@ -233,7 +233,11 @@ process.stdout.write('e2e-user\\n');
       .map((line) => JSON.parse(line) as { args: string[] });
     // `--yes` ahead of the package since wave 18: npx prompts before installing something it has
     // not seen, and this CLI never attaches stdin, so the prompt would be a hang.
-    expect(invocations[0]!.args).toEqual(['--yes', 'eas-cli@latest', 'whoami']);
+    // The first is the runner warm-up (`src/utils/runnerLock.ts` §warmUpRunnerAsync).
+    expect(invocations.map((invocation) => invocation.args)).toEqual([
+      ['--yes', 'eas-cli@latest', '--version'],
+      ['--yes', 'eas-cli@latest', 'whoami'],
+    ]);
     expect(result.all).not.toContain('rust_begin_unwind');
   });
 });

@@ -23,6 +23,8 @@ const { fsMock, promisesMock, childProcessMock } = vi.hoisted(() => {
 });
 
 delete process.env.npm_config_user_agent;
+// Off here, so a spawn queue is not offered a warm-up it did not expect. The warm-up's own tests turn it on.
+process.env.AGENT_CLI_NO_RUNNER_WARM_UP = '1';
 delete process.env.npm_execpath;
 resetInvokerCache();
 

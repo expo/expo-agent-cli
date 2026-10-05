@@ -9,7 +9,7 @@
 
 import { spawn } from 'child_process';
 
-import { withRunnerLockAsync, runnerSpawnKey } from './runnerLock';
+import { runnerSpawnKey, warmUpRunnerAsync, withRunnerLockAsync } from './runnerLock';
 import { resolveSpawnTarget } from './windowsShim';
 
 /** Signals the terminal delivers to the whole process group, so the child gets them too. */
@@ -45,9 +45,13 @@ export function runInheritedAsync(
   }
 ): Promise<number> {
   const key = runnerSpawnKey(command, args);
-  return key == null
-    ? runInheritedNowAsync(command, args, options)
-    : withRunnerLockAsync(key, () => runInheritedNowAsync(command, args, options));
+  if (key == null) {
+    return runInheritedNowAsync(command, args, options);
+  }
+  const run = () => withRunnerLockAsync(key, () => runInheritedNowAsync(command, args, options));
+  // Another process may be installing the same spec (`./runnerLock.ts` §warmUpRunnerAsync).
+  const warming = warmUpRunnerAsync(command, args, { cwd: options.cwd });
+  return warming ? warming.then(run) : run();
 }
 
 /** Spawn now, with no regard for what else is running. The body of the function above. */

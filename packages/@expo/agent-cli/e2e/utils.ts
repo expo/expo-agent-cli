@@ -428,6 +428,18 @@ export async function killAsync(
   await closed;
 }
 
+/**
+ * Whether a recorded argv is the runner warm-up (`src/utils/runnerLock.ts` §warmUpRunnerAsync):
+ * `[--yes] eas-cli@latest --version` at the runner, or `--version` alone at the `eas` it runs.
+ * It asks nothing of EAS, so a suite that asserts what ran leaves it out.
+ */
+export function isRunnerWarmUp(args: readonly string[]): boolean {
+  return (
+    args.at(-1) === '--version' &&
+    args.every((arg) => arg === '--yes' || arg === '--version' || arg.startsWith('eas-cli'))
+  );
+}
+
 /** Poll a condition until it becomes true, or the timeout expires. Returns the last result. */
 export async function waitForAsync(
   check: () => boolean,

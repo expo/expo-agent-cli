@@ -349,7 +349,11 @@ describe('a machine with no eas-cli installed', () => {
 
     expect(result.exitCode).toBe(0);
     const runs = invocations({ projectRoot: directory, binDir, logFile });
-    expect(runs[0]!.args).toEqual(['--yes', 'eas-cli@latest', 'whoami']);
+    // The warm-up fills the runner's scratch directory before the real spawn (`runnerLock.ts`).
+    expect(runs.map((run) => run.args)).toEqual([
+      ['--yes', 'eas-cli@latest', '--version'],
+      ['--yes', 'eas-cli@latest', 'whoami'],
+    ]);
     expect(result.all).not.toContain('rust_begin_unwind');
   });
 

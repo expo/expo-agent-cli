@@ -8,6 +8,7 @@ import path from 'path';
 
 import { getExpoHomeDirectory } from '../utils/expoHome';
 import { canonicalizeExistingPath } from '../utils/dir';
+import { withMkdirLockAsync } from '../utils/mkdirLock';
 import { debugEvent, event } from './events';
 import type { DeviceBackend, DeviceClaim } from './types';
 
@@ -19,11 +20,6 @@ const LOCK_HEARTBEAT_MS = 10_000;
 
 /** A claim file this old that does not parse is a crash mid-write, not a write in flight. */
 const UNREADABLE_CLAIM_MS = 60_000;
-
-const LOCK_OWNER_FILE = 'owner';
-
-const LOCK_RETRY_MIN_MS = 10;
-const LOCK_RETRY_MAX_MS = 250;
 
 export function deviceRegistryDirectory(): string {
   return path.join(getExpoHomeDirectory(), 'agent-cli', 'devices');
@@ -253,142 +249,20 @@ export function removeClaimFile(claim: DeviceClaim): void {
 }
 
 /**
- * Run `fn` while this process holds the registry lock.
- *
- * `mkdir` is the lock because it is atomic on every platform and fails when the directory exists.
- * The holder writes a token into it, so a holder whose stale lock was taken over never removes the
- * lock of the holder after it.
+ * Run `fn` while this process holds the registry lock (`../utils/mkdirLock.ts`).
  */
 export async function withRegistryLockAsync<T>(
   fn: () => Promise<T>,
   { now = Date.now }: { now?: () => number } = {}
 ): Promise<T> {
   const lock = path.join(deviceRegistryDirectory(), '.lock');
-  const owner = path.join(lock, LOCK_OWNER_FILE);
-  const token = `${process.pid}-${randomBytes(8).toString('hex')}`;
-  fs.mkdirSync(path.dirname(lock), { recursive: true });
-
-  let delay = LOCK_RETRY_MIN_MS;
-  while (!tryMkdir(lock)) {
-    if (takeOverStaleLock(lock, now())) {
-      continue;
-    }
-    await new Promise((resolve) => setTimeout(resolve, delay));
-    delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
-  }
-  fs.writeFileSync(owner, token);
-
-  let lost = false;
-  const loseLock = (reason: string) => {
-    if (!lost) {
-      lost = true;
-      debugEvent('device_registry_lock_lost', { lock, reason });
-    }
-  };
-  const heartbeat = setInterval(() => {
-    if (lost) {
-      return;
-    }
-    try {
-      if (fs.readFileSync(owner, 'utf8') !== token) {
-        loseLock('another holder took the lock over');
-        return;
-      }
-      const seconds = now() / 1000;
-      fs.utimesSync(lock, seconds, seconds);
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        loseLock('the lock was removed');
-      }
-    }
-  }, LOCK_HEARTBEAT_MS);
-  heartbeat.unref();
-
-  try {
-    return await fn();
-  } finally {
-    clearInterval(heartbeat);
-    if (readLockOwner(owner) === token) {
-      fs.rmSync(lock, { recursive: true, force: true });
-    }
-  }
-}
-
-function readLockOwner(owner: string): string | null {
-  try {
-    return fs.readFileSync(owner, 'utf8');
-  } catch {
-    return null;
-  }
-}
-
-function lockAgeMs(directory: string, now: number): number | null {
-  try {
-    return now - fs.statSync(directory).mtimeMs;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Remove the lock when it is older than the limit, so its holder is taken as dead.
- *
- * Only the waiter that holds the takeover guard may judge and remove the lock. Without it, a
- * waiter that saw the stale lock late would remove the fresh lock a faster waiter made in its
- * place. The lock is renamed aside before it is removed, so it vanishes in one step.
- *
- * @returns true when the caller may try `mkdir` again at once.
- */
-function takeOverStaleLock(lock: string, now: number): boolean {
-  const lockAge = lockAgeMs(lock, now);
-  if (lockAge == null) {
-    return true;
-  }
-  if (lockAge <= REGISTRY_LOCK_STALE_MS) {
-    return false;
-  }
-  const guard = `${lock}.takeover`;
-  if (!tryMkdir(guard)) {
-    // A guard is held for one stat and one rename; one this old has a dead holder.
-    const guardAge = lockAgeMs(guard, now);
-    if (guardAge != null && guardAge > REGISTRY_LOCK_STALE_MS) {
-      fs.rmSync(guard, { recursive: true, force: true });
-      return true;
-    }
-    return false;
-  }
-  try {
-    const ageMs = lockAgeMs(lock, now);
-    if (ageMs == null || ageMs <= REGISTRY_LOCK_STALE_MS) {
-      return true;
-    }
-    const aside = `${lock}.stale-${process.pid}-${randomBytes(4).toString('hex')}`;
-    try {
-      fs.renameSync(lock, aside);
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return true;
-      }
-      throw error;
-    }
-    fs.rmSync(aside, { recursive: true, force: true });
-    event('device_registry_lock_stale_removed', { lock, ageMs });
-    return true;
-  } finally {
-    fs.rmSync(guard, { recursive: true, force: true });
-  }
-}
-
-function tryMkdir(directory: string): boolean {
-  try {
-    fs.mkdirSync(directory);
-    return true;
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      return false;
-    }
-    throw error;
-  }
+  return await withMkdirLockAsync(lock, fn, {
+    staleMs: REGISTRY_LOCK_STALE_MS,
+    heartbeatMs: LOCK_HEARTBEAT_MS,
+    now,
+    onStaleRemoved: (ageMs) => event('device_registry_lock_stale_removed', { lock, ageMs }),
+    onLost: (reason) => debugEvent('device_registry_lock_lost', { lock, reason }),
+  });
 }
 
 function serialize(claim: DeviceClaim): string {

@@ -9,7 +9,13 @@ import { isPromptShaped, lastNonEmptyLine } from '../needsHuman/detect';
 import { fileExistsSync } from './dir';
 import { env } from './env';
 import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
-import { acquireRunnerLockAsync, runnerSpawnKey, tryAcquireRunnerLock } from './runnerLock';
+import {
+  acquireRunnerLockAsync,
+  remainingMs,
+  runnerSpawnKey,
+  tryAcquireRunnerLock,
+  warmUpRunnerAsync,
+} from './runnerLock';
 import { resolveSpawnTarget } from './windowsShim';
 
 /** What happens to the output of the subprocess. */
@@ -122,6 +128,17 @@ export function spawnSubprocessAsync(
   const key = runnerSpawnKey(command, args);
   if (key == null) {
     return spawnNowAsync(command, args, options);
+  }
+  // Another process may be installing the same spec (`./runnerLock.ts` §warmUpRunnerAsync).
+  const warming = warmUpRunnerAsync(command, args, options);
+  if (warming) {
+    const startedAt = Date.now();
+    return warming.then(() =>
+      queuedSpawnAsync(key, command, args, {
+        ...options,
+        timeoutMs: remainingMs(options.timeoutMs, startedAt),
+      })
+    );
   }
   // Nothing is holding it: spawn in this tick, the way every caller of this function has always
   // been able to rely on (`./runnerLock.ts` §tryAcquireRunnerLock).

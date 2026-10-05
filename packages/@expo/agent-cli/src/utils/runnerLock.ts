@@ -41,6 +41,28 @@
 // simulator's verbs) and `src/utils/inheritedRun.ts` (the `npx expo` fallback). A path that grows a
 // fourth spawn helper has to come through here too, which is why the key is derived from the argv
 // rather than passed in by each caller.
+//
+// **Across processes, a warm-up** [2026-10-05]. The mutex above holds in one process only, and two
+// worktrees that start sessions at the same moment are two processes: one `bunx eas-cli@latest
+// simulator …` exited 1 with only `Resolving dependencies` printed. On a cold scratch directory, 2
+// of 6 concurrent `bunx eas-cli@latest --version` exited 1 with `TypeError: (0 ,
+// minimatch_1.minimatch) is not a function`; on a warm one, 6 of 6 exited 0 [observed — bun 1.3,
+// eas-cli 24.10.0]. So before the first runner spawn of a spec in a process, `warmUpRunnerAsync`
+// takes a machine-wide `mkdir` lock (`./mkdirLock.ts`) and runs `<runner> <spec> --version` under
+// it. That fills the directory. The real command then runs unlocked, so two long sessions are
+// never serialized. Only `eas-cli` is warmed, because its `--version` is verified to print and
+// exit. A spec that resolves to the project's own `node_modules` involves no install and is
+// skipped.
+
+import { spawn } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+import { env } from './env';
+import { acquireMkdirLockAsync } from './mkdirLock';
+import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
+import { resolveSpawnTarget } from './windowsShim';
 
 /** Runner names, without extension, whose scratch directory is shared per package spec. */
 const RUNNER_NAMES = new Set(['npx', 'bunx']);
@@ -123,6 +145,171 @@ const queues = new Map<string, Queue>();
 /** Forget every lock and every waiter. For tests, and for nothing else. */
 export function resetRunnerLocks(): void {
   queues.clear();
+  warmUps.clear();
+  warmed.clear();
+}
+
+/** Packages whose `--version` is verified to print and exit, so the warm-up does no real work. */
+const WARM_UP_PACKAGES = new Set(['eas-cli']);
+
+/** A warm-up lock this old has a dead holder: a live holder refreshes it, and a warm-up is short. */
+export const RUNNER_WARM_UP_STALE_MS = 5 * 60_000;
+
+const RUNNER_WARM_UP_HEARTBEAT_MS = 10_000;
+
+/** The longest one warm-up may run. After it the real spawn runs anyway and reports for itself. */
+const RUNNER_WARM_UP_TIMEOUT_MS = 180_000;
+
+/** What one warm-up runs, and the machine-wide lock it runs under. */
+export interface RunnerWarmUp {
+  command: string;
+  args: string[];
+  lock: string;
+}
+
+/**
+ * The warm-up a runner spawn needs, or null when it needs none.
+ *
+ * None for a command that is not a runner, a spec this module cannot read, a package outside
+ * {@link WARM_UP_PACKAGES}, and an unversioned spec the project has installed: the runner then runs
+ * the local copy and installs nothing.
+ */
+export function runnerWarmUpFor(
+  command: string,
+  args: readonly string[],
+  cwd: string = process.cwd()
+): RunnerWarmUp | null {
+  const runner = runnerNameOf(command);
+  const specIndex = args.findIndex((arg) => !arg.startsWith('-'));
+  if (runner == null || specIndex < 0) {
+    return null;
+  }
+  const spec = args[specIndex]!;
+  const versionAt = spec.lastIndexOf('@');
+  const name = versionAt > 0 ? spec.slice(0, versionAt) : spec;
+  if (!WARM_UP_PACKAGES.has(name) || (versionAt <= 0 && isInstalledFrom(cwd, name))) {
+    return null;
+  }
+  return {
+    command,
+    args: [...args.slice(0, specIndex + 1), '--version'],
+    lock: path.join(os.tmpdir(), 'agent-cli-runner-locks', encodeURIComponent(`${runner}:${spec}`)),
+  };
+}
+
+/** Whether `node_modules/<name>` resolves from `cwd` or one of its parents. */
+function isInstalledFrom(cwd: string, name: string): boolean {
+  for (let dir = path.resolve(cwd); ; dir = path.dirname(dir)) {
+    if (fs.existsSync(path.join(dir, 'node_modules', name, 'package.json'))) {
+      return true;
+    }
+    if (path.dirname(dir) === dir) {
+      return false;
+    }
+  }
+}
+
+export type WarmUpSpawn = (
+  command: string,
+  args: string[],
+  options: { cwd?: string; timeoutMs: number }
+) => Promise<void>;
+
+/** The warm-up in flight per lock, so concurrent callers in one process share one. */
+const warmUps = new Map<string, Promise<void>>();
+
+/** Locks this process has warmed already. */
+const warmed = new Set<string>();
+
+/**
+ * Make sure the runner's install of the spec is complete before the real spawn.
+ *
+ * Null when there is nothing to wait for, so the caller can spawn in this tick
+ * (§tryAcquireRunnerLock). The promise never rejects: a warm-up that fails or runs out leaves the
+ * real spawn to report its own outcome.
+ *
+ * @param timeoutMs the caller's whole budget. The lock wait and the warm-up come out of it.
+ */
+export function warmUpRunnerAsync(
+  command: string,
+  args: readonly string[],
+  { cwd, timeoutMs }: { cwd?: string; timeoutMs?: number },
+  spawnWarmUp: WarmUpSpawn = spawnWarmUpAsync
+): Promise<void> | null {
+  if (env.AGENT_CLI_NO_RUNNER_WARM_UP) {
+    return null;
+  }
+  const warmUp = runnerWarmUpFor(command, args, cwd);
+  if (warmUp == null || warmed.has(warmUp.lock)) {
+    return null;
+  }
+  let pending = warmUps.get(warmUp.lock);
+  if (!pending) {
+    pending = warmUnderLockAsync(warmUp, { cwd, timeoutMs }, spawnWarmUp).finally(() => {
+      warmUps.delete(warmUp.lock);
+      warmed.add(warmUp.lock);
+    });
+    warmUps.set(warmUp.lock, pending);
+  }
+  return pending;
+}
+
+async function warmUnderLockAsync(
+  warmUp: RunnerWarmUp,
+  { cwd, timeoutMs }: { cwd?: string; timeoutMs?: number },
+  spawnWarmUp: WarmUpSpawn
+): Promise<void> {
+  const deadline = Date.now() + (timeoutMs ?? RUNNER_WARM_UP_TIMEOUT_MS);
+  try {
+    const lock = await acquireMkdirLockAsync(warmUp.lock, {
+      staleMs: RUNNER_WARM_UP_STALE_MS,
+      heartbeatMs: RUNNER_WARM_UP_HEARTBEAT_MS,
+      deadline,
+    });
+    if (lock == null) {
+      return;
+    }
+    try {
+      await spawnWarmUp(warmUp.command, warmUp.args, {
+        cwd,
+        timeoutMs: Math.max(1, Math.min(RUNNER_WARM_UP_TIMEOUT_MS, deadline - Date.now())),
+      });
+    } finally {
+      lock.release();
+    }
+  } catch {
+    // An unwritable lock directory or a failed spawn: the real spawn still runs.
+  }
+}
+
+/** What is left of a budget that started at `startedAt`, or undefined for no budget. */
+export function remainingMs(timeoutMs: number | undefined, startedAt: number): number | undefined {
+  return timeoutMs == null ? undefined : Math.max(1, timeoutMs - (Date.now() - startedAt));
+}
+
+/** Run the warm-up with no output, killing its tree at the deadline. */
+function spawnWarmUpAsync(
+  command: string,
+  args: string[],
+  { cwd, timeoutMs }: { cwd?: string; timeoutMs: number }
+): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const target = resolveSpawnTarget(command, args);
+    const child = spawn(target.command, target.args, {
+      cwd,
+      stdio: 'ignore',
+      shell: target.shell,
+      detached: USE_PROCESS_GROUP,
+    });
+    const timer = setTimeout(() => killProcessTree(child), timeoutMs);
+    timer.unref();
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    child.once('close', done);
+    child.once('error', done);
+  });
 }
 
 function queueFor(key: string): Queue {

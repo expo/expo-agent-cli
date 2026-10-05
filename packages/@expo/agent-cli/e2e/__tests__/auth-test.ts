@@ -13,6 +13,7 @@ import {
   executeAgentCliAsync,
   getTemporaryPath,
   installStubBinAsync,
+  isRunnerWarmUp,
   pathEnvVars,
   setupFixtureAsync,
 } from '../utils';
@@ -113,7 +114,8 @@ function readInvocations(dir: string): StubInvocation[] {
     .readFileSync(file, 'utf8')
     .split('\n')
     .filter(Boolean)
-    .map((line) => JSON.parse(line) as StubInvocation);
+    .map((line) => JSON.parse(line) as StubInvocation)
+    .filter((invocation) => !isRunnerWarmUp(invocation.args));
 }
 
 /**
