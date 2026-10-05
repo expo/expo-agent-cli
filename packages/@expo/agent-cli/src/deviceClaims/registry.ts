@@ -114,7 +114,13 @@ export function touchClaim(
   }
 }
 
-function isSameClaim(left: DeviceClaim, right: DeviceClaim): boolean {
+/** The claim file of one device as it is now, or null when there is none or it does not parse. */
+export function readClaim(backend: DeviceBackend, id: string): DeviceClaim | null {
+  return readClaimFile(claimFilePath(backend, id));
+}
+
+/** Two reads of one device's file name the same claim: the same worktree claimed it at the same time. */
+export function isSameClaim(left: DeviceClaim, right: DeviceClaim): boolean {
   return left.projectRoot === right.projectRoot && left.claimedAt === right.claimedAt;
 }
 
