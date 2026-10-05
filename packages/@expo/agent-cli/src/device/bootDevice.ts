@@ -24,7 +24,7 @@
 //     uses records for `expo start --ios`. `simctl boot` needs no grant, and `simctl openurl` and
 //     `simctl io … screenshot` both work against a simulator whose window nobody opened.
 
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import path from 'path';
@@ -471,6 +471,14 @@ export interface EmulatorBoot {
   readOnly: boolean;
 }
 
+export interface EmulatorBootResult extends BootDeviceResult {
+  /**
+   * Kill the process this boot spawned. For an emulator that `adb` cannot see yet, so that
+   * `adb emu kill` cannot shut it down.
+   */
+  kill: () => void;
+}
+
 /**
  * Spawn the emulator detached on its own ports, and poll `sys.boot_completed` on its serial.
  *
@@ -484,10 +492,11 @@ export async function bootEmulatorAsync(
     adb = resolveAdb(),
     choice = null,
   }: { timeoutMs: number; now?: () => number; adb?: AdbResolution; choice?: string | null }
-): Promise<BootDeviceResult> {
+): Promise<EmulatorBootResult> {
   const serial = emulatorSerial(port);
   const emulator = resolveEmulator(adb);
-  const result = (ok: boolean, reason: string | null): BootDeviceResult => ({
+  let child: ChildProcess | null = null;
+  const result = (ok: boolean, reason: string | null): EmulatorBootResult => ({
     ok,
     deviceId: serial,
     backend: 'local-android',
@@ -495,6 +504,9 @@ export async function bootEmulatorAsync(
     reason,
     refused: false,
     choice,
+    kill: () => {
+      child?.kill('SIGKILL');
+    },
   });
 
   const args = ['-avd', avd, '-ports', `${port},${port + 1}`, '-no-snapshot-save'];
@@ -509,7 +521,7 @@ export async function bootEmulatorAsync(
     wake = resolve;
   });
   try {
-    const child = spawn(emulator, args, {
+    child = spawn(emulator, args, {
       detached: true,
       // The emulator's own output is not this run's report, and a pipe nobody reads fills up and
       // blocks it. It logs to the Android SDK's own files either way.
