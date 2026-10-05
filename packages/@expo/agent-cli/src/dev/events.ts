@@ -11,6 +11,8 @@ declare module '2g' {
     };
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
     'dev:detach_spawn': { logFile: string; argv: string[] };
+    // @ref llp/0026-dev-owns-the-open.rfc.md §The detach budget follows the plan
+    'dev:detach_progress': { pid: number | null; elapsedMs: number; lastLine: string | null };
     // `ownsTarget` is false for a lock this project holds on a port other than the one `--port`
     // named: the lock was read and deliberately not acted on (llp/0021 §The rules).
     'dev:stop_lock_read': { held: boolean; pid: number | null; ownsTarget: boolean };

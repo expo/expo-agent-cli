@@ -172,6 +172,112 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
 
+  // @ref llp/0026-dev-owns-the-open.rfc.md §The detach budget follows the plan
+  // Live, `dev --ios --detach` exited 1 at 120 s while its child was in `pod install`, and the child
+  // then finished the build and opened the app. The base budget is 3 s here, the stub `prebuild`
+  // takes 8 s, and it writes a line every 300 ms the way a build does.
+  describe('the budget follows the plan', () => {
+    const SHORT_BASE = { AGENT_CLI_DETACH_TIMEOUT_MS: '3000' };
+
+    it('keeps waiting past the base while a building plan writes output', async () => {
+      const projectRoot = await setupFixtureAsync('dev-client-app');
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--detach', '--json'],
+          {
+            env: {
+              ...detachEnv(projectRoot, 8394),
+              ...SHORT_BASE,
+              STUB_EXPO_DELAY_MS: '8000',
+              STUB_EXPO_PROGRESS_MS: '300',
+              STUB_EXPO_LISTEN: '1',
+            },
+          }
+        );
+
+        expect(result.exitCode).toBe(0);
+        const report = JSON.parse(result.stdout);
+        expect(report).toMatchObject({ port: 8394, alreadyRunning: false });
+        expect(report.waitedMs).toBeGreaterThan(3000);
+      } finally {
+        await cleanUpAsync(projectRoot);
+      }
+    });
+
+    it('keeps the base for a plan that only serves', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+
+      try {
+        // No port in the stub's log, so the lock waits for its 20 s fallback, long after 3 s.
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--detach', '--json'],
+          {
+            env: { ...stubExpoEnv(projectRoot), ...SHORT_BASE, STUB_EXPO_DELAY_MS: STUB_ALIVE_MS },
+            reject: false,
+          }
+        );
+
+        expect(result.exitCode).toBe(1);
+        const { error } = JSON.parse(result.stdout);
+        expect(error.code).toBe('DEV_DETACH_FAILED');
+        expect(error.message).toMatch(/it was still running \d+ms later/);
+      } finally {
+        await cleanUpAsync(projectRoot);
+      }
+    });
+
+    it('past the ceiling, says the child is still running and how to stop it', async () => {
+      const projectRoot = await setupFixtureAsync('dev-client-app');
+      let pid: number | null = null;
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--detach', '--json'],
+          {
+            env: {
+              ...stubExpoEnv(projectRoot),
+              AGENT_CLI_DETACH_TIMEOUT_MS: '2000',
+              AGENT_CLI_DETACH_BUILD_TIMEOUT_MS: '5000',
+              STUB_EXPO_DELAY_MS: '60000',
+              STUB_EXPO_PROGRESS_MS: '300',
+            },
+            reject: false,
+          }
+        );
+
+        expect(result.exitCode).toBe(1);
+        const { error } = JSON.parse(result.stdout);
+        expect(error.code).toBe('DEV_DETACH_STILL_STARTING');
+        pid = Number(/still running \(pid (\d+)\)/.exec(error.message)?.[1]);
+        expect(isAlive(pid)).toBe(true);
+        expect(error.message).toContain(LOG_PATH);
+        expect(error.message).toContain('"npx @expo/agent-cli dev:stop" stops it');
+        if (process.platform === 'win32') {
+          expect(error.message).toContain(`"taskkill /pid ${pid} /t /f"`);
+          return;
+        }
+        expect(error.message).toContain(`"kill ${pid}"`);
+
+        // The sentence is a command that works: the wrapper forwards SIGTERM to the step, and the
+        // plan stops there instead of starting `run:ios`.
+        process.kill(pid, 'SIGTERM');
+        expect(await waitForAsync(() => !isAlive(pid!), 10_000)).toBe(true);
+        const log = fs.readFileSync(path.join(projectRoot, LOG_PATH), 'utf8');
+        expect(log).toContain('"type":"stub_expo_signal"');
+        expect(log).not.toContain('"command":"run:ios"');
+      } finally {
+        if (pid != null && isAlive(pid)) {
+          process.kill(pid, 'SIGKILL');
+        }
+        await cleanUpAsync(projectRoot);
+      }
+    });
+  });
+
   it('says a plain dev-server plan is serving', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
 

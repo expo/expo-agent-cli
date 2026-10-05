@@ -73,6 +73,24 @@ class Env {
   }
 
   /**
+   * How long `dev --detach` waits for its child before a plan's build step can extend the wait.
+   *
+   * @see llp/0026-dev-owns-the-open.rfc.md §The detach budget follows the plan
+   */
+  get AGENT_CLI_DETACH_TIMEOUT_MS() {
+    return int('AGENT_CLI_DETACH_TIMEOUT_MS', 120_000);
+  }
+
+  /**
+   * The longest `dev --detach` waits for a child whose plan builds the app, while its log grows.
+   *
+   * @see llp/0026-dev-owns-the-open.rfc.md §The detach budget follows the plan
+   */
+  get AGENT_CLI_DETACH_BUILD_TIMEOUT_MS() {
+    return int('AGENT_CLI_DETACH_BUILD_TIMEOUT_MS', 1_800_000);
+  }
+
+  /**
    * Skip the `<runner> eas-cli@latest --version` warm-up before the first runner spawn of a process.
    * For a machine whose runner cache is filled some other way. The unit tier sets it.
    *

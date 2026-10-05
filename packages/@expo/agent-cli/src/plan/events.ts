@@ -31,6 +31,8 @@ declare module '2g' {
     'cli:start_plan_step': { id: string; argv: string[]; index: number; total: number };
     /** One plan step finished. A non-zero code stops the plan. */
     'cli:start_plan_step_exit': { id: string; code: number };
+    // A signal arrived during a step, so the plan stopped before this one.
+    'cli:start_plan_interrupted': { before: string };
     'cli:last_build_record_failed': { error: SerializedError };
   }
 }

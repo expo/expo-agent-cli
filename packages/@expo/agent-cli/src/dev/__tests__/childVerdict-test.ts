@@ -5,6 +5,7 @@ import { formatNeedsHumanBlock } from '../../utils/errors';
 import {
   parseDetachedChildPhase,
   parseDetachedChildVerdict,
+  parsePlanBuildsNative,
   stepOpensPlatform,
 } from '../childVerdict';
 
@@ -161,6 +162,62 @@ describe(parseDetachedChildPhase, () => {
       step: 'expo start --go --ios --port 9201',
       opensPlatform: false,
     });
+  });
+});
+
+// @ref llp/0026-dev-owns-the-open.rfc.md §The detach budget follows the plan
+describe(parsePlanBuildsNative, () => {
+  function planLog(...argvs: string[][]): string[] {
+    const plan: StartPlan = {
+      rule: 'dev-client-stale',
+      target: 'dev-client',
+      reasons: [],
+      buildLocation: null,
+      steps: argvs.map((argv, index) => ({
+        id: `step-${index}`,
+        argv,
+        reason: 'A step.',
+        timeClass: 'minutes',
+        runsOn: null,
+      })),
+    };
+    return formatStartPlan(plan).split('\n');
+  }
+
+  it.each([
+    [
+      [
+        ['expo', 'install', 'expo-dev-client'],
+        ['expo', 'start', '--dev-client'],
+      ],
+    ],
+    [
+      [
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios'],
+      ],
+    ],
+    [[['expo', 'run:android']]],
+    [
+      [
+        ['eas', 'build', '--platform', 'ios', '--profile', 'development', '--non-interactive'],
+        ['expo', 'start', '--dev-client'],
+      ],
+    ],
+  ])('a plan of %j builds', (argvs) => {
+    expect(parsePlanBuildsNative(planLog(...argvs))).toBe(true);
+  });
+
+  it(`a plan that only serves does not build`, () => {
+    expect(parsePlanBuildsNative(planLog(['expo', 'start', '--go']))).toBe(false);
+    expect(
+      parsePlanBuildsNative(planLog(['expo', 'install', 'expo-router'], ['expo', 'start']))
+    ).toBe(false);
+  });
+
+  it(`a log with no plan in it yet answers null`, () => {
+    expect(parsePlanBuildsNative(['Starting Metro Bundler'])).toBeNull();
+    expect(parsePlanBuildsNative([])).toBeNull();
   });
 });
 
