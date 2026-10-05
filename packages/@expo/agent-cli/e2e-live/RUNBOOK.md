@@ -73,6 +73,14 @@ when no `EXPO_TOKEN` is set, because the login lives there too.
   starts the second worktree 20 s after the first. That is a workaround, not a fix.
 - **`EAS_NO_VCS=1`.** The copies are not git repositories, and eas-cli otherwise asks to run
   `git init`.
+- **The template.** The suite scaffolds with `new --template expo-template-default@next`, because
+  `@next` is the current SDK line (58 on 2026-10-05) and `@latest` lags it. Set
+  `AGENT_CLI_LIVE_TEMPLATE=expo-template-default@latest` to scaffold on the stable line instead.
+  `create-expo` accepts an npm spec with a tag in `--template` [observed — 2026-10-05]. The `@next`
+  line pins a `react-native` prerelease that `react-native-reanimated`'s peer range excludes, so the
+  scaffold sets `npm_config_legacy_peer_deps=true` for `new` and `install`. Without it `npm install`
+  fails with ERESOLVE, `create-expo` continues, and `new` still reports `installed: true` with no
+  `node_modules`.
 - **The bun pin.** The `eas.json` the suite writes pins bun 1.4.0 in each profile. The EAS
   builder's default 1.3.14 cannot read the v2 `bun.lock` that local bun 1.4.0 writes. The scaffold
   wrote a `package-lock.json` when `new` ran under node [observed — 2026-10-05], so the pin is a
