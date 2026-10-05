@@ -18,6 +18,7 @@ import {
   type DeviceClaim,
   type DevicePlatform,
 } from '../deviceClaims';
+import { debugEvent } from '../deviceClaims/events';
 import { parseAndroidDevices } from '../navigate/device';
 import { canonicalizeExistingPath } from '../utils/dir';
 import { CommandError } from '../utils/errors';
@@ -241,14 +242,25 @@ async function resolveWithInventoryAsync(
     return listed.inventory.candidates;
   };
 
-  let picked: { candidate: LocalCandidate; claim: DeviceClaim; fresh: boolean; choice: string };
+  let picked: {
+    candidate: LocalCandidate;
+    claim: DeviceClaim;
+    fresh: boolean;
+    choice: string;
+    /** This call created the device. */
+    created?: boolean;
+  };
   try {
     const allocation = await allocateDeviceAsync<LocalCandidate>({
       projectRoot,
       platform,
       backend,
       listDevices,
-      createDevice: allowBoot && platform === 'ios' && !explicit ? createSimulatorAsync : undefined,
+      // A simulator created now has no app, so a caller that needs the app gets none created.
+      createDevice:
+        allowBoot && platform === 'ios' && !explicit && !options.requireApp
+          ? createSimulatorAsync
+          : undefined,
       deleteDevice: platform === 'ios' ? deleteSimulatorAsync : undefined,
       capacity: deviceCapacity(platform),
       rank: rankCandidates,
@@ -293,6 +305,11 @@ async function resolveWithInventoryAsync(
       case 'created':
         picked = {
           ...allocation,
+          candidate: {
+            ...allocation.candidate,
+            hasApp: options.appId != null ? false : allocation.candidate.hasApp,
+          },
+          created: true,
           fresh: true,
           choice: 'every simulator was claimed, so this one was created for this worktree',
         };
@@ -314,7 +331,7 @@ async function resolveWithInventoryAsync(
     );
   }
 
-  const { candidate, claim, fresh, choice } = picked;
+  const { candidate, claim, fresh, choice, created = false } = picked;
   const adb = seen.inventory?.adb ?? null;
   const device = (booted: boolean): ClaimedDeviceResult => {
     const held = touchClaim(claim, new Date(), booted ? { booted: true } : {}) ?? heldClaim(claim);
@@ -365,6 +382,15 @@ async function resolveWithInventoryAsync(
   // A boot that cannot open the app costs a minute and answers nothing (llp/0005 §The device that
   // can open the app), so it is declined before it starts.
   if (options.requireApp && candidate.hasApp === false) {
+    if (created) {
+      await deleteSimulatorAsync(claim).catch((error: Error) =>
+        debugEvent('device_delete_failed', {
+          backend,
+          id: claim.id,
+          error: debugEvent.error(error),
+        })
+      );
+    }
     if (fresh) {
       releaseClaim(claim);
     }

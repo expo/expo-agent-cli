@@ -537,6 +537,42 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
   });
 });
 
+describe(`${resolveClaimedDeviceAsync.name} with an app to open`, () => {
+  it(`with requireApp, creates no simulator, because a new one has no app`, async () => {
+    vi.mocked(simulatorHasAppAsync).mockResolvedValue(false);
+    const { tools } = fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
+    otherClaim('SIM-A');
+
+    const result = await resolveClaimedDeviceAsync({
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: true,
+      appId: 'com.example.app',
+      requireApp: true,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(tools.callsWith('simctl create')).toEqual([]);
+    expect(tools.callsWith('simctl boot ')).toEqual([]);
+    expect(readClaims()).toMatchObject([{ id: 'SIM-A', projectRoot: OTHER }]);
+  });
+
+  it(`says a simulator it created has not got the app, so the caller installs it`, async () => {
+    vi.mocked(simulatorHasAppAsync).mockResolvedValue(false);
+    fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
+    otherClaim('SIM-A');
+
+    expect(
+      await resolveClaimedDeviceAsync({
+        platform: 'ios',
+        projectRoot: HERE,
+        allowBoot: true,
+        appId: 'com.example.app',
+      })
+    ).toMatchObject({ ok: true, id: 'SIM-NEW', hasApp: false });
+  });
+});
+
 describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
   /** What the CLI spawns for the emulator on this host: `emulator.exe` on Windows. */
   const EMULATOR = process.platform === 'win32' ? 'emulator.exe' : 'emulator';
