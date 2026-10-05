@@ -1,7 +1,13 @@
 import { spawn } from 'child_process';
 
 import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
-import { acquireRunnerLockAsync, runnerSpawnKey, tryAcquireRunnerLock } from './runnerLock';
+import {
+  acquireRunnerLockAsync,
+  remainingMs,
+  runnerSpawnKey,
+  tryAcquireRunnerLock,
+  warmUpRunnerAsync,
+} from './runnerLock';
 import { assertSubprocessDeadline, trackSubprocessDeadline } from './subprocessDeadline';
 import { resolveSpawnTarget } from './windowsShim';
 
@@ -58,6 +64,17 @@ export function spawnCaptureBufferAsync(
   const key = runnerSpawnKey(command, args);
   if (key == null) {
     return spawnCaptureNowAsync(command, args, options);
+  }
+  // Another process may be installing the same spec (`./runnerLock.ts` §warmUpRunnerAsync).
+  const warming = warmUpRunnerAsync(command, args, options);
+  if (warming) {
+    const startedAt = Date.now();
+    return warming.then(() =>
+      queuedCaptureAsync(key, command, args, {
+        ...options,
+        timeoutMs: remainingMs(options.timeoutMs, startedAt),
+      })
+    );
   }
   // Nothing is holding it: spawn in this tick (`./runnerLock.ts` §tryAcquireRunnerLock).
   const free = tryAcquireRunnerLock(key);

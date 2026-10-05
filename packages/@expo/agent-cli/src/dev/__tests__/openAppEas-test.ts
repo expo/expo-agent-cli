@@ -10,6 +10,7 @@ import {
   buildSessionStartArgs,
   findLatestSimulatorBuildIdAsync,
   openAppOnEasAsync,
+  openAppOnEasFailureLine,
   readSessionId,
   readSessionUrl,
 } from '../openAppEas';
@@ -383,6 +384,43 @@ describe(openAppOnEasAsync, () => {
     expect(report.started).toBe(true);
     expect(report.reason).toContain('exited 1');
     expect(report.reason).toContain('npx --yes eas-cli@latest simulator:stop --id sess-billed');
+  });
+
+  // @ref llp/0021-honest-reports.rfc.md §The rules — rule 11. The first stderr line of a runner is
+  // its own progress; the error is further down [observed — bunx on a half-written scratch
+  // directory, 2026-10-05].
+  it(`quotes the end of what the start printed, not the runner's first line`, async () => {
+    const noise = Array.from({ length: 30 }, (_, index) => `progress ${index}`);
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: '',
+      stderr: [
+        'Resolving dependencies',
+        ...noise,
+        'Saved lockfile',
+        '    TypeError: (0 , minimatch_1.minimatch) is not a function   ',
+        '',
+      ].join('\n'),
+      exitCode: 1,
+      spawnError: null,
+    } as any);
+
+    const report = await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+
+    expect(report.reason).toContain(
+      'Saved lockfile\nTypeError: (0 , minimatch_1.minimatch) is not a function'
+    );
+    expect(report.reason).not.toContain('Resolving dependencies');
+    expect(report.reason!.split('\n').filter((line) => line.startsWith('progress'))).toHaveLength(
+      18
+    );
+    const warning = openAppOnEasFailureLine('ios', report.reason!);
+    expect(warning).toContain('is below. The dev server is up;');
+    expect(warning.endsWith('TypeError: (0 , minimatch_1.minimatch) is not a function')).toBe(true);
   });
 
   it(`says when no eas can be run at all`, async () => {

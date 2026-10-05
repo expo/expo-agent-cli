@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
+import { resetRunnerLocks } from '../runnerLock';
 import { findExecutableOnPath, spawnSubprocessAsync } from '../subprocess';
 import type { Mock } from 'vitest';
 
@@ -257,6 +258,36 @@ describe(spawnSubprocessAsync, () => {
     await promise;
     // The listener is removed once the child is gone, or `@expo/agent-cli` would keep ignoring signals.
     expect(process.listenerCount('SIGTERM')).toBe(listenersBefore);
+  });
+
+  // @ref ../runnerLock.ts §warmUpRunnerAsync
+  it(`should warm a runner spec once, then run every real spawn`, async () => {
+    resetRunnerLocks();
+    delete process.env.AGENT_CLI_NO_RUNNER_WARM_UP;
+    vi.mocked(spawn).mockImplementation((() => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        kill: vi.fn(),
+      });
+      setTimeout(() => child.emit('close', 0, null), 5);
+      return child;
+    }) as any);
+    const args = ['--yes', 'eas-cli@latest', 'simulator:list', '--json'];
+
+    const results = await Promise.all([
+      spawnSubprocessAsync('npx', args, { cwd: '/work/app', timeoutMs: 10_000 }),
+      spawnSubprocessAsync('npx', args, { cwd: '/work/app', timeoutMs: 10_000 }),
+    ]);
+
+    expect(results.map((result) => result.exitCode)).toEqual([0, 0]);
+    expect(vi.mocked(spawn).mock.calls.map((call) => call[1])).toEqual([
+      ['--yes', 'eas-cli@latest', '--version'],
+      args,
+      args,
+    ]);
+    resetRunnerLocks();
+    process.env.AGENT_CLI_NO_RUNNER_WARM_UP = '1';
   });
 });
 

@@ -72,6 +72,16 @@ class Env {
     return int('AGENT_CLI_PROMPT_TIMEOUT_MS', 20_000);
   }
 
+  /**
+   * Skip the `<runner> eas-cli@latest --version` warm-up before the first runner spawn of a process.
+   * For a machine whose runner cache is filled some other way. The unit tier sets it.
+   *
+   * @see ../utils/runnerLock.ts §warmUpRunnerAsync
+   */
+  get AGENT_CLI_NO_RUNNER_WARM_UP() {
+    return boolish('AGENT_CLI_NO_RUNNER_WARM_UP', false);
+  }
+
   /** @internal Force the webcontainer environment checks to pass */
   get EXPO_FORCE_WEBCONTAINER_ENV() {
     return boolish('EXPO_FORCE_WEBCONTAINER_ENV', false);

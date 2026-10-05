@@ -1,14 +1,19 @@
+import { vol } from 'memfs';
 import path from 'path';
 
 import {
   acquireRunnerLockAsync,
   resetRunnerLocks,
   runnerSpawnKey,
+  runnerWarmUpFor,
+  RUNNER_WARM_UP_STALE_MS,
+  warmUpRunnerAsync,
   withRunnerLockAsync,
 } from '../runnerLock';
 
 afterEach(() => {
   resetRunnerLocks();
+  vol.reset();
 });
 
 describe(runnerSpawnKey, () => {
@@ -130,5 +135,138 @@ describe(acquireRunnerLockAsync, () => {
     const next = await acquireRunnerLockAsync('npx:eas-cli@latest', { timeoutMs: 1000 });
     expect(next).not.toBeNull();
     next!.release();
+  });
+});
+
+// @ref llp/0021-honest-reports.rfc.md §The rules — rule 11. Two processes on one cold
+// `$TMPDIR/bunx-<uid>-eas-cli@latest`: 2 of 6 exited 1 with "TypeError: (0 , minimatch_1.minimatch)
+// is not a function" under "Resolving dependencies"; 6 of 6 passed on a warm directory [observed —
+// bun 1.3, eas-cli 24.10.0, 2026-10-05].
+describe('the runner warm-up', () => {
+  const PROJECT = '/work/app';
+
+  beforeEach(() => {
+    delete process.env.AGENT_CLI_NO_RUNNER_WARM_UP;
+  });
+  afterEach(() => {
+    process.env.AGENT_CLI_NO_RUNNER_WARM_UP = '1';
+  });
+
+  it('is off when AGENT_CLI_NO_RUNNER_WARM_UP is set', () => {
+    process.env.AGENT_CLI_NO_RUNNER_WARM_UP = '1';
+    expect(warmUpRunnerAsync('npx', ['--yes', 'eas-cli@latest'], {}, vi.fn())).toBeNull();
+  });
+
+  function deferredSpawn() {
+    const calls: { command: string; args: string[] }[] = [];
+    let finish: () => void = () => {};
+    const done = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const spawn = vi.fn(async (command: string, args: string[]) => {
+      calls.push({ command, args });
+      await done;
+    });
+    return { spawn, calls, finish };
+  }
+
+  it('runs one --version warm-up for two concurrent callers, then lets both through', async () => {
+    const { spawn, calls, finish } = deferredSpawn();
+    const args = ['--yes', 'eas-cli@latest', 'simulator', '--platform', 'ios'];
+
+    const first = warmUpRunnerAsync('npx', args, { cwd: PROJECT }, spawn);
+    const second = warmUpRunnerAsync('npx', args, { cwd: PROJECT }, spawn);
+    expect(first).not.toBeNull();
+    expect(second).not.toBeNull();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    finish();
+    await Promise.all([first, second]);
+
+    expect(calls).toEqual([{ command: 'npx', args: ['--yes', 'eas-cli@latest', '--version'] }]);
+    // Warm in this process: the next spawn needs nothing and starts in its own tick.
+    expect(warmUpRunnerAsync('npx', args, { cwd: PROJECT }, spawn)).toBeNull();
+  });
+
+  it('holds a machine-wide lock while it warms, and releases it after', async () => {
+    const { spawn, finish } = deferredSpawn();
+    const warmUp = runnerWarmUpFor('bunx', ['eas-cli@latest', 'whoami'], PROJECT)!;
+
+    const pending = warmUpRunnerAsync(
+      'bunx',
+      ['eas-cli@latest', 'whoami'],
+      { cwd: PROJECT },
+      spawn
+    );
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(vol.existsSync(warmUp.lock)).toBe(true);
+    finish();
+    await pending;
+
+    expect(vol.existsSync(warmUp.lock)).toBe(false);
+  });
+
+  it('waits for another process that holds the lock, then warms', async () => {
+    const { spawn, calls, finish } = deferredSpawn();
+    finish();
+    const warmUp = runnerWarmUpFor('bunx', ['eas-cli@latest'], PROJECT)!;
+    vol.mkdirSync(warmUp.lock, { recursive: true });
+
+    const pending = warmUpRunnerAsync('bunx', ['eas-cli@latest'], { cwd: PROJECT }, spawn);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).toEqual([]);
+    vol.rmSync(warmUp.lock, { recursive: true });
+    await pending;
+
+    expect(calls).toEqual([{ command: 'bunx', args: ['eas-cli@latest', '--version'] }]);
+  });
+
+  it('removes a lock older than five minutes, whose holder is dead', async () => {
+    const { spawn, calls, finish } = deferredSpawn();
+    finish();
+    const warmUp = runnerWarmUpFor('bunx', ['eas-cli@latest'], PROJECT)!;
+    vol.mkdirSync(warmUp.lock, { recursive: true });
+    const old = (Date.now() - RUNNER_WARM_UP_STALE_MS - 1000) / 1000;
+    vol.utimesSync(warmUp.lock, old, old);
+
+    await warmUpRunnerAsync('bunx', ['eas-cli@latest'], { cwd: PROJECT }, spawn);
+
+    expect(RUNNER_WARM_UP_STALE_MS).toBe(5 * 60_000);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('gives up the lock wait at the caller deadline and spawns nothing', async () => {
+    const { spawn, calls } = deferredSpawn();
+    const warmUp = runnerWarmUpFor('bunx', ['eas-cli@latest'], PROJECT)!;
+    vol.mkdirSync(warmUp.lock, { recursive: true });
+
+    await warmUpRunnerAsync('bunx', ['eas-cli@latest'], { cwd: PROJECT, timeoutMs: 30 }, spawn);
+
+    expect(calls).toEqual([]);
+  });
+
+  it('needs no warm-up when the spec resolves to the local install', () => {
+    vol.fromJSON({ [`${PROJECT}/node_modules/eas-cli/package.json`]: '{"name":"eas-cli"}' });
+
+    expect(runnerWarmUpFor('npx', ['--yes', 'eas-cli', 'build:list'], PROJECT)).toBeNull();
+    expect(runnerWarmUpFor('npx', ['--yes', 'eas-cli', 'build:list'], `${PROJECT}/sub`)).toBeNull();
+    expect(
+      warmUpRunnerAsync('npx', ['--yes', 'eas-cli', 'build:list'], { cwd: PROJECT }, vi.fn())
+    ).toBeNull();
+  });
+
+  it('warms a versioned spec even when a local install exists, because the version defeats it', () => {
+    vol.fromJSON({ [`${PROJECT}/node_modules/eas-cli/package.json`]: '{"name":"eas-cli"}' });
+
+    expect(runnerWarmUpFor('npx', ['--yes', 'eas-cli@latest', 'whoami'], PROJECT)?.args).toEqual([
+      '--yes',
+      'eas-cli@latest',
+      '--version',
+    ]);
+  });
+
+  it('warms nothing that is not a runner, and no package whose --version is unverified', () => {
+    expect(runnerWarmUpFor('xcrun', ['simctl', 'list'], PROJECT)).toBeNull();
+    expect(runnerWarmUpFor('npx', ['--yes', 'create-expo@latest', 'app'], PROJECT)).toBeNull();
+    expect(runnerWarmUpFor('npx', ['--yes'], PROJECT)).toBeNull();
   });
 });

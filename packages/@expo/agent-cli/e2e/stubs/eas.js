@@ -85,6 +85,13 @@ const BUILDS_NAME = 'stub-eas-builds.json';
 const args = process.argv.slice(2);
 const cwd = process.cwd();
 
+// The runner warm-up (`src/utils/runnerLock.ts` §warmUpRunnerAsync). The real CLI prints its version
+// and asks EAS nothing, so it is not an invocation the log records.
+if (args.length === 1 && args[0] === '--version') {
+  process.stdout.write('eas-cli/0.0.0-stub\n');
+  process.exit(0);
+}
+
 try {
   fs.appendFileSync(
     path.join(cwd, LOG_NAME),

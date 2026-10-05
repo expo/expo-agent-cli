@@ -12,6 +12,7 @@ import {
   executeAgentCliAsync,
   getTemporaryPath,
   installStubBinAsync,
+  isRunnerWarmUp,
   readStubExpoInvocations,
   setupFixtureAsync,
   stubExpoEnv,
@@ -181,7 +182,8 @@ function readStubNpxInvocations(projectRoot: string): { args: string[]; cwd: str
     .readFileSync(logPath, 'utf8')
     .split('\n')
     .filter(Boolean)
-    .map((line) => JSON.parse(line));
+    .map((line) => JSON.parse(line))
+    .filter((invocation) => !isRunnerWarmUp(invocation.args));
 }
 
 /**
@@ -363,6 +365,7 @@ function readStubEasInvocations(
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line))
+    .filter((invocation) => !isRunnerWarmUp(invocation.args))
     .filter((invocation) => includeProbes || invocation.args[0] !== 'whoami');
 }
 

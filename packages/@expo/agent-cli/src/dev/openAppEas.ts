@@ -381,13 +381,16 @@ export async function ensureEasSessionAsync(
     });
   }
   if (result.exitCode !== 0) {
-    const said = firstLine(result.stderr) || firstLine(result.stdout) || 'it printed nothing';
+    // The end, not the first line: a runner's first stderr line is its own progress (llp/0021 rule 11).
+    const said =
+      lastLines(result.stderr, FAILURE_OUTPUT_LINES) ||
+      lastLines(result.stdout, FAILURE_OUTPUT_LINES);
     return failed(
-      `"${easCliLabel(easCli)} ${args.join(' ')}" exited ${result.exitCode}: ${said}${
+      `"${easCliLabel(easCli)} ${args.join(' ')}" exited ${result.exitCode}${
         sessionId
           ? ` — the session ${sessionId} was created before it failed and may be billing; "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`
           : ''
-      }`,
+      }${said ? `, and the end of what it printed is below\n${said}` : ', and it printed nothing'}`,
       { tunnelHost, openUrl, sessionId, sessionUrl, started: sessionId != null }
     );
   }
@@ -517,7 +520,23 @@ async function waitForTunnelHostAsync(
 
 /** The one line `dev` says about an open on EAS that did not happen, with the door that still works. */
 export function openAppOnEasFailureLine(platform: NativePlatform, reason: string): string {
-  return `The app was not opened on an EAS Simulator session: ${reason}. The dev server is up; once a session is, "${PROGRAM_PREFIX} navigate / --eas --${platform}" opens the app on it.`;
+  // A reason that quotes the tool's output carries it after its first line, and it goes last.
+  const [head, ...quoted] = reason.split('\n');
+  return `The app was not opened on an EAS Simulator session: ${head}. The dev server is up; once a session is, "${PROGRAM_PREFIX} navigate / --eas --${platform}" opens the app on it.${
+    quoted.length ? `\n${quoted.join('\n')}` : ''
+  }`;
+}
+
+/** How many lines of a failed session start's output the reason quotes. */
+const FAILURE_OUTPUT_LINES = 20;
+
+function lastLines(text: string, count: number): string {
+  return text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-count)
+    .join('\n');
 }
 
 function firstLine(text: string): string {
