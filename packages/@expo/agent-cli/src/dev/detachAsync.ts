@@ -898,13 +898,12 @@ function reportDetached(
 }
 
 /**
- * How many lines of the child's log are searched for the port move.
+ * How many lines of the child's log are searched for the port move: all of them.
  *
- * The retry is announced before the dev server it starts publishes the lock this parent waits on,
- * so the sentence is always near the top of a log that a run truncates anyway. Generous rather
- * than exact, because a prebuild step ahead of it prints its own output first.
+ * The plan's move is announced before its first step, so a `run:*` build writes thousands of
+ * compiler lines after it, and a tail would miss it on exactly the run that moved.
  */
-const PORT_MOVE_LOG_LINES = 500;
+const PORT_MOVE_LOG_LINES = Number.MAX_SAFE_INTEGER;
 
 /**
  * How many lines of the child's log are searched for its plan: all of them.

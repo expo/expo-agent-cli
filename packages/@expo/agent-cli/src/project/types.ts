@@ -127,4 +127,11 @@ export interface StartPlan {
    * (llp/0027 §Reuse). The run hands its id to `eas simulator --build-id`. Absent or null otherwise.
    */
   easBuild?: { id: string; profile: string } | null;
+  /**
+   * The port `dev` gives every step that serves, picked before the plan runs, and the busy port it
+   * moved off when it moved. Absent from a plan `dev` did not resolve a port for.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can complete
+   */
+  devServerPort?: { port: number; movedFrom: number | null };
 }

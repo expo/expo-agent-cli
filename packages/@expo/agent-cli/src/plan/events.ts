@@ -1,7 +1,7 @@
 import { events } from '2g';
 import type { SerializedError } from '2g';
 
-import type { PlanStep, ProjectTarget } from '../project/types';
+import type { PlanStep, ProjectTarget, StartPlan } from '../project/types';
 import type { PlanBuildLocation } from '../toolchain/types';
 
 declare module '2g' {
@@ -26,6 +26,8 @@ declare module '2g' {
        * @see llp/0004-smart-start-and-project-state.rfc.md §Where a build runs
        */
       buildLocation: PlanBuildLocation | null;
+      /** @see StartPlan.devServerPort */
+      devServerPort: StartPlan['devServerPort'] | null;
     };
     /** One plan step is about to be spawned. */
     'cli:start_plan_step': { id: string; argv: string[]; index: number; total: number };

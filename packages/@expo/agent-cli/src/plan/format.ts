@@ -52,6 +52,14 @@ export function formatStartPlan(plan: StartPlan): string {
     lines.push('', `  ${formatBuildLocation(plan.buildLocation)}`);
   }
 
+  if (plan.devServerPort) {
+    const { port, movedFrom } = plan.devServerPort;
+    lines.push(
+      '',
+      chalk`  {bold Dev server:} port ${port}${movedFrom == null ? '' : `, because ${movedFrom} is taken`}.`
+    );
+  }
+
   lines.push('', chalk`  {bold Why}`);
   for (const reason of plan.reasons) {
     lines.push(`    - ${reason}`);

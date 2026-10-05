@@ -16,6 +16,9 @@ import {
   breakXcodeSelectAsync,
 } from '../utils';
 
+/** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
+const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
+
 /** The shape `dev --plan --json` prints, per `src/project/types.ts`. */
 type StartPlan = {
   target: 'expo-go' | 'dev-client' | 'bare' | 'web';
@@ -171,7 +174,9 @@ describe('@expo/agent-cli dev --plan', () => {
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--plan', '--json', '--ios']);
 
       const plan: StartPlan = JSON.parse(result.stdout);
-      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go']]);
+      expect(plan.steps.map((step) => step.argv)).toEqual([
+        ['expo', 'start', '--go', ...PORT_ARGS],
+      ]);
       expect(plan.steps[0]!.reason).toContain('opened on an iOS simulator');
     });
 
@@ -190,7 +195,9 @@ describe('@expo/agent-cli dev --plan', () => {
       ]);
 
       const plan: StartPlan = JSON.parse(result.stdout);
-      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go', '--tunnel']]);
+      expect(plan.steps.map((step) => step.argv)).toEqual([
+        ['expo', 'start', '--go', '--tunnel', ...PORT_ARGS],
+      ]);
     });
 
     // Every plan acts on a named platform now, so the "opens nothing" sentence is not reachable
@@ -205,7 +212,9 @@ describe('@expo/agent-cli dev --plan', () => {
       ]);
 
       const plan: StartPlan = JSON.parse(result.stdout);
-      expect(plan.steps.map((step) => step.argv)).toEqual([['expo', 'start', '--go']]);
+      expect(plan.steps.map((step) => step.argv)).toEqual([
+        ['expo', 'start', '--go', ...PORT_ARGS],
+      ]);
       expect(plan.steps[0]!.reason).toContain('opened on an Android device or emulator');
       expect(plan.steps[0]!.reason).not.toContain('opens nothing on its own');
     });
@@ -325,7 +334,7 @@ describe('@expo/agent-cli dev --plan', () => {
       expect(plan.target).toBe('dev-client');
       expect(plan.steps.map((step) => step.argv)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios'],
+        ['expo', 'run:ios', ...PORT_ARGS],
       ]);
       expect(plan.reasons.length).toBeGreaterThan(0);
 
@@ -503,7 +512,7 @@ describe('@expo/agent-cli dev --plan', () => {
       const plan: StartPlan = JSON.parse(result.stdout);
       expect(plan.steps.map((step) => step.argv.join(' '))).toEqual([
         'expo prebuild --platform ios',
-        'expo run:ios',
+        expect.stringMatching(/^expo run:ios --port \d+$/),
       ]);
       expect(plan.buildLocation).toMatchObject({
         runsOn: 'local',
@@ -572,7 +581,7 @@ describe('@expo/agent-cli dev --plan', () => {
       expect(plan.steps.map((step) => step.argv.join(' '))).toEqual([
         'expo install expo-dev-client',
         'expo prebuild --platform ios',
-        'expo run:ios',
+        expect.stringMatching(/^expo run:ios --port \d+$/),
       ]);
       // Labelled, so a reader can tell a plan the config changed from one it did not.
       expect(plan.reasons).toContain(

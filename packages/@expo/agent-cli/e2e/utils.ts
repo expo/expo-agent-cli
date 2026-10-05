@@ -360,6 +360,9 @@ export function spawnAgentCli(
       // developer's claims, and parallel tests never claim each other's stub devices.
       __UNSAFE_EXPO_HOME_DIRECTORY: processEnv.__UNSAFE_EXPO_HOME_DIRECTORY ?? `${cwd}.expo-home`,
       ...stubExpoEnv(cwd),
+      // `dev` picks the port before the plan and passes it as `--port`, which the stub listens on
+      // over its own env var. Expo's default variable makes the two the same port.
+      ...(env?.STUB_EXPO_DEV_SERVER_PORT ? { RCT_METRO_PORT: env.STUB_EXPO_DEV_SERVER_PORT } : {}),
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

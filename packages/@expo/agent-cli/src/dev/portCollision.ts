@@ -26,7 +26,7 @@ export interface PortCollision {
 /**
  * The lines the Expo CLI prints when the port it wanted is busy.
  *
- * Three spellings, because they come from two versions and two branches of one function
+ * Four spellings, because they come from two versions and two branches of one function
  * [observed — `packages/@expo/cli/src/utils/port.ts`, and live against expo 57.0.15 on 2026-08-23]:
  *
  * - `Use port 8181 instead?` — the question itself, quoted back by the prompt helper's
@@ -35,11 +35,15 @@ export interface PortCollision {
  *   printed just above the question, which survives even when the question does not.
  * - `Port 8180 is unavailable and 'npx expo' is running in non-interactive mode` — the newer
  *   branch, which throws instead of asking when the port was explicit.
+ * - `› Skipping dev server` — what `expo run:*` prints when the question went unanswered. It then
+ *   builds, installs, deep-links the app to whatever holds the port, and exits 0
+ *   [observed — live suite, 2026-10-05].
  */
 const COLLISION_PATTERNS: RegExp[] = [
   /Use port (?<offered>\d+) instead\?/i,
   /Port\s+(?<requested>\d+)\s+is\s+(?:running\b|being used\b)/i,
   /Port\s+(?<requested>\d+)\s+is unavailable and/i,
+  /Skipping dev server/,
 ];
 
 /**
@@ -105,7 +109,7 @@ export function formatPortMove(move: PortMove): string {
 }
 
 /** `to` in the sentence above, which is the half that is always there. */
-const PORT_MOVE_TO = /started on (\d+) instead/;
+const PORT_MOVE_TO = /started on (\d+) instead/g;
 
 /** `from`, when the sentence had one. */
 const PORT_MOVE_FROM = /Port (\d+) was busy/;
@@ -113,15 +117,60 @@ const PORT_MOVE_FROM = /Port (\d+) was busy/;
 /**
  * Read {@link formatPortMove}'s sentence back out of a detached dev server's log.
  *
+ * A run can move twice: once before the plan, and once more when the port it picked was taken
+ * before the dev server bound it. `from` is the first sentence's, the port the caller expected, and
+ * `to` the last one's, the port the dev server is on.
+ *
  * @param output everything the detached run printed, escape codes already stripped.
  * @returns the move, or null when the log holds none.
  */
 export function parsePortMove(output: string): PortMove | null {
-  const to = toPort(PORT_MOVE_TO.exec(output)?.[1]);
+  const to = toPort([...output.matchAll(PORT_MOVE_TO)].at(-1)?.[1]);
   if (to == null) {
     return null;
   }
   return { from: toPort(PORT_MOVE_FROM.exec(output)?.[1]), to };
+}
+
+/** Where `expo start` and `expo run:*` listen when nothing names a port: Expo's own default. */
+export function defaultMetroPort(): number {
+  return toPort(process.env.RCT_METRO_PORT) ?? 8081;
+}
+
+/**
+ * The port a plan's dev server is given, decided before any step runs.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+ * complete. `expo run:*` answers an unanswerable port question by skipping its dev server and
+ * exiting 0, after it baked the busy port into the app [observed — live suite, 2026-10-05]. With a
+ * free port picked here and passed as `--port`, the question is never asked.
+ */
+export interface PlannedPort {
+  port: number;
+  /** The port that was wanted and was busy, or null when `port` is that port. */
+  movedFrom: number | null;
+  /** Whether `port` could be bound when it was picked: false for a taken `--port`, or a full scan. */
+  bindable: boolean;
+}
+
+/**
+ * Pick the dev server's port: the one the caller named, or the first bindable one from Expo's
+ * default.
+ *
+ * @param requested the `--port` the caller passed, which is used as is whether or not it is free.
+ */
+export async function resolvePlannedPortAsync(
+  requested: number | null,
+  { preferred = defaultMetroPort() }: { preferred?: number } = {}
+): Promise<PlannedPort> {
+  if (requested != null) {
+    return { port: requested, movedFrom: null, bindable: await isPortBindableAsync(requested) };
+  }
+  const free = await findFreePortAsync(preferred);
+  if (free == null) {
+    return { port: preferred, movedFrom: null, bindable: false };
+  }
+  return { port: free, movedFrom: free === preferred ? null : preferred, bindable: true };
 }
 
 /** How far past the busy port to look before giving up on finding a free one. */

@@ -36,7 +36,16 @@ import {
   waitForAsync,
 } from '../utils';
 
+/** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
+const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
+
 isolateExpoHome();
+
+/**
+ * A dev server that reports no port, so the open on an EAS Simulator session is never asked for.
+ * For the tests whose subject is the steps; `dev --eas — the device on EAS` below covers the open.
+ */
+const STEPS_ONLY_ENV = { env: { STUB_EXPO_NO_PORT_REPORT: '1' } };
 
 /** The record `src/plan/lastBuild.ts` writes, relative to the project root. */
 const LAST_BUILD_FILE = path.join('.expo', 'agent-cli-last-build.json');
@@ -115,7 +124,11 @@ describe('@expo/agent-cli dev — the EAS route', () => {
   it('runs build:configure, then the cloud build, then the dev server', async () => {
     const projectRoot = await setupAsync();
 
-    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas']);
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['dev', '--ios', '--eas'],
+      STEPS_ONLY_ENV
+    );
 
     expect(result.exitCode).toBe(0);
     // @ref llp/0027-everything-on-eas.rfc.md — `--eas` puts the device on EAS too, so the build is
@@ -141,7 +154,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     // tunnelled, because the device is a machine on EAS that cannot reach this loopback.
     expect(expoInvocationArgs(projectRoot)).toEqual([
       ['config', '--json'],
-      ['start', '--dev-client', '--tunnel'],
+      ['start', '--dev-client', '--tunnel', ...PORT_ARGS],
     ]);
   });
 
@@ -154,7 +167,11 @@ describe('@expo/agent-cli dev — the EAS route', () => {
       JSON.stringify({ build: { development: { developmentClient: true } } }, null, 2)
     );
 
-    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas']);
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['dev', '--ios', '--eas'],
+      STEPS_ONLY_ENV
+    );
 
     expect(result.exitCode).toBe(0);
     expect(easInvocationArgs(projectRoot).map((args) => args[0])).toEqual(['build', 'build:list']);
@@ -369,7 +386,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     // The local route's own build step is `expo run:ios`, and it is not what ran.
     expect(expoInvocationArgs(projectRoot)).toEqual([
       ['config', '--json'],
-      ['start', '--dev-client'],
+      ['start', '--dev-client', ...PORT_ARGS],
     ]);
   });
 
@@ -458,7 +475,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         'development-simulator',
         '--non-interactive',
       ],
-      ['expo', 'start', '--dev-client', '--tunnel'],
+      ['expo', 'start', '--dev-client', '--tunnel', ...PORT_ARGS],
     ]);
     expect(plan.reasons.join('\n')).toContain(
       'This project has no eas.json, so @expo/agent-cli writes one with the "development-simulator" profile'
@@ -558,7 +575,12 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       );
       expect(start).toContain('--non-interactive');
       // The dev server was tunnelled, which is what makes that URL reachable.
-      expect(expoInvocationArgs(projectRoot)).toContainEqual(['start', '--dev-client', '--tunnel']);
+      expect(expoInvocationArgs(projectRoot)).toContainEqual([
+        'start',
+        '--dev-client',
+        '--tunnel',
+        ...PORT_ARGS,
+      ]);
       // The stub wrote the dotenv the real command writes, so every later `--eas` finds the session.
       expect(
         await fs.promises.readFile(path.join(projectRoot, '.env.eas-simulator'), 'utf8')
@@ -650,7 +672,12 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       const start = invocations.find((args) => args[0] === 'simulator')!;
       expect(start).toContain('--expo-go');
       expect(start[start.indexOf('--open-url') + 1]).toBe(`exp://${TUNNEL_HOST}`);
-      expect(expoInvocationArgs(projectRoot)).toContainEqual(['start', '--go', '--tunnel']);
+      expect(expoInvocationArgs(projectRoot)).toContainEqual([
+        'start',
+        '--go',
+        '--tunnel',
+        ...PORT_ARGS,
+      ]);
     } finally {
       await cleanUpAsync(projectRoot);
     }
@@ -785,7 +812,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     expect(plan.rule).toBe('dev-client-fresh');
     expect(plan.easBuild).toEqual({ id: 'build-reuse', profile: 'development-simulator' });
     expect(plan.steps.map((step: { argv: string[] }) => step.argv)).toEqual([
-      ['expo', 'start', '--dev-client', '--tunnel'],
+      ['expo', 'start', '--dev-client', '--tunnel', ...PORT_ARGS],
     ]);
     expect(plan.reasons).toContain(
       'EAS already has a finished "development-simulator" build for this fingerprint (build-reuse), so nothing is built: the EAS Simulator session installs that build.'

@@ -9,12 +9,14 @@
 // The dev server is the stub `expo` bin, which holds the lock exactly as the real one does — the
 // wrapper is what takes the lock, and the wrapper is real here.
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 
 import {
   executeAgentCliAsync,
   installStubFingerprintAsync,
   readDevLockAsync,
+  readStubExpoInvocations,
   setupFixtureAsync,
   stubExpoEnv,
   waitForAsync,
@@ -215,7 +217,12 @@ describe('@expo/agent-cli dev --detach', () => {
           projectRoot,
           ['dev', '--ios', '--detach', '--json'],
           {
-            env: { ...stubExpoEnv(projectRoot), ...SHORT_BASE, STUB_EXPO_DELAY_MS: STUB_ALIVE_MS },
+            env: {
+              ...stubExpoEnv(projectRoot),
+              ...SHORT_BASE,
+              STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+              STUB_EXPO_NO_PORT_REPORT: '1',
+            },
             reject: false,
           }
         );
@@ -309,6 +316,8 @@ describe('@expo/agent-cli dev --detach', () => {
           env: {
             ...stubExpoEnv(projectRoot),
             STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+            // The port the plan picks, which the stub then refuses: the race the retry covers.
+            RCT_METRO_PORT: '8180',
             STUB_EXPO_PORT_BUSY: '8180',
           },
           reject: false,
@@ -335,6 +344,7 @@ describe('@expo/agent-cli dev --detach', () => {
         env: {
           ...stubExpoEnv(projectRoot),
           STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+          RCT_METRO_PORT: '8180',
           STUB_EXPO_PORT_BUSY: '8180',
         },
         reject: false,
@@ -344,6 +354,97 @@ describe('@expo/agent-cli dev --detach', () => {
     } finally {
       await cleanUpAsync(projectRoot);
     }
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+  // complete. Another project's Metro held `*:8081`, and `expo run:ios` with no terminal skipped its
+  // dev server, deep-linked the app to that Metro, and exited 0, so the detached run failed with no
+  // lock [observed — live suite, 2026-10-05]. The port is now picked before the plan runs.
+  describe('a port another project holds', () => {
+    /** Hold a port on the unspecified address, dual-stack, the way Metro does. */
+    async function holdDualStackAsync(port: number): Promise<net.Server | null> {
+      const server = net.createServer();
+      return await new Promise((resolve) => {
+        // Already held by something else on this machine, which is the same precondition.
+        server.once('error', () => resolve(null));
+        server.listen({ port, host: '::', ipv6Only: false }, () => resolve(server));
+      });
+    }
+
+    function servingEnv(projectRoot: string): Record<string, string> {
+      return {
+        ...stubExpoEnv(projectRoot),
+        STUB_EXPO_LISTEN: '1',
+        STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+      };
+    }
+
+    it('runs the plan on the next free port and publishes that port', async () => {
+      const projectRoot = await setupFixtureAsync('bare-app');
+      await installStubFingerprintAsync(projectRoot);
+      const held = await holdDualStackAsync(8081);
+
+      try {
+        const planned = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--plan', '--json'],
+          { env: stubExpoEnv(projectRoot) }
+        );
+        const plan = JSON.parse(planned.stdout);
+        expect(plan.devServerPort).toEqual({ port: expect.any(Number), movedFrom: 8081 });
+
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--detach', '--json'],
+          { env: servingEnv(projectRoot), reject: false }
+        );
+
+        expect(result.exitCode, result.all).toBe(0);
+        const report = JSON.parse(result.stdout);
+        expect(report.port).not.toBe(8081);
+        expect(report.portMoved).toEqual({ from: 8081, to: report.port });
+        expect(await readDevLockAsync(projectRoot)).toMatchObject({ port: report.port });
+        expect(readStubExpoInvocations(projectRoot).map(({ args }) => args)).toEqual([
+          ['run:ios', '--port', String(report.port)],
+        ]);
+      } finally {
+        await cleanUpAsync(projectRoot);
+        await new Promise((resolve) => (held ? held.close(resolve) : resolve(null)));
+      }
+    });
+
+    // The race the probe cannot close: the port it picked is taken before `expo run:ios` binds it.
+    it('retries a run:* step that skipped its dev server and exited 0', async () => {
+      const projectRoot = await setupFixtureAsync('bare-app');
+      await installStubFingerprintAsync(projectRoot);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--local', '--detach', '--json'],
+          {
+            env: {
+              ...servingEnv(projectRoot),
+              RCT_METRO_PORT: '8471',
+              STUB_EXPO_PORT_BUSY: '8471',
+            },
+            reject: false,
+          }
+        );
+
+        expect(result.exitCode, result.all).toBe(0);
+        const report = JSON.parse(result.stdout);
+        expect(report.port).not.toBe(8471);
+        expect(report.portMoved).toEqual({ from: 8471, to: report.port });
+        expect(await readDevLockAsync(projectRoot)).toMatchObject({ port: report.port });
+        expect(readStubExpoInvocations(projectRoot).map(({ args }) => args)).toEqual([
+          ['run:ios', '--port', '8471'],
+          ['run:ios', '--port', String(report.port)],
+        ]);
+      } finally {
+        await cleanUpAsync(projectRoot);
+      }
+    });
   });
 
   it('reports no move when the dev server took the port it was asked for', async () => {

@@ -317,6 +317,29 @@ describe(runDevServerAsync, () => {
       await promise;
     });
 
+    // `dev` passes `--port` on every serving step, so a port from the arguments alone is not proof
+    // that anything listens there once the dev server has exited.
+    it(`should open on the port it was given only while the dev server runs`, async () => {
+      const onDevServer = vi.fn();
+      const end = mockLongRunningStart();
+      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        agentSkills: false,
+        onDevServer,
+      });
+      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+
+      onResolved?.({ port: 8082, source: 'arg' });
+      expect(onDevServer).toHaveBeenCalledWith({ url: 'http://127.0.0.1:8082', port: 8082 });
+
+      end(0);
+      await promise;
+      onDevServer.mockClear();
+      onResolved?.({ port: 8082, source: 'arg' });
+      expect(onDevServer).not.toHaveBeenCalled();
+      onResolved?.({ port: 8082, source: 'log' });
+      expect(onDevServer).toHaveBeenCalledTimes(1);
+    });
+
     it(`should report the dev server as running until it exits`, async () => {
       const end = mockLongRunningStart();
       const promise = runDevServerAsync(projectRoot, ['start'], { agentSkills: false });

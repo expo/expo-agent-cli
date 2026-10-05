@@ -14,9 +14,19 @@ import { runDevServerAsync, type DevServerRun } from '../../start/startAsync';
 import { runExpoAsync, spawnExpoAsync } from '../../utils/expoCli';
 import { isInteractive } from '../../utils/interactive';
 import { devAsync } from '../devAsync';
+import { formatPortMove, resolvePlannedPortAsync } from '../portCollision';
 import { resolveDevOptions } from '../resolveOptions';
 
 vi.mock('../../log');
+// The machine running the tests may have its own Metro on 8081.
+vi.mock('../portCollision', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../portCollision')>()),
+  resolvePlannedPortAsync: vi.fn(async (requested: number | null) => ({
+    port: requested ?? 8081,
+    movedFrom: null,
+    bindable: true,
+  })),
+}));
 vi.mock('../../device/claimedDevice', () => ({
   resolveClaimedDeviceAsync: vi.fn(async () => ({
     ok: false,
@@ -209,11 +219,15 @@ describe(devAsync, () => {
         print: 'text',
         followups: [],
       });
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
-        agentSkills: true,
-        output: 'inherit',
-        onDevServer: expect.any(Function),
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--go', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+          onDevServer: expect.any(Function),
+        }
+      );
     });
 
     // A step forwards the signal and returns 0, and `kill <pid>` on a detached run in `prebuild`
@@ -254,7 +268,7 @@ describe(devAsync, () => {
       );
       expect(runDevServerAsync).toHaveBeenCalledWith(
         projectRoot,
-        ['run:ios', '--device', 'SIM-CLAIMED'],
+        ['run:ios', '--device', 'SIM-CLAIMED', '--port', '8081'],
         expect.anything()
       );
     });
@@ -291,7 +305,7 @@ describe(devAsync, () => {
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios'], {
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
       });
@@ -321,7 +335,11 @@ describe(devAsync, () => {
         ...vi.mocked(spawnExpoAsync).mock.calls,
       ].map(([, args]) => args);
       expect(prebuild).toContainEqual(['prebuild', '--platform', 'ios']);
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios'], expect.anything());
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['run:ios', '--port', '8081'],
+        expect.anything()
+      );
     });
 
     it(`should still run nothing in --plan mode, which is the run that stops`, async () => {
@@ -367,11 +385,15 @@ describe(devAsync, () => {
 
       await devAsync(projectRoot, resolveDevOptions(['--ios', '--no-agent-skills']));
 
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
-        agentSkills: false,
-        output: 'inherit',
-        onDevServer: expect.any(Function),
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--go', '--port', '8081'],
+        {
+          agentSkills: false,
+          output: 'inherit',
+          onDevServer: expect.any(Function),
+        }
+      );
     });
 
     it(`should not repeat a platform flag the plan already passes`, async () => {
@@ -379,10 +401,14 @@ describe(devAsync, () => {
 
       await devAsync(projectRoot, resolveDevOptions(['--web']));
 
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--web'], {
-        agentSkills: true,
-        output: 'inherit',
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--web', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+        }
+      );
     });
 
     // @ref llp/0026-dev-owns-the-open.rfc.md — the open is this command's own act, hung on the
@@ -434,7 +460,7 @@ describe(devAsync, () => {
         const [, args, opts] = vi.mocked(runDevServerAsync).mock.calls[0]!;
         // The platform never reaches `expo start` either: its --ios form opens the app through
         // the osascript this command exists to avoid.
-        expect(args).toEqual(['start', '--go']);
+        expect(args).toEqual(['start', '--go', '--port', '8081']);
         expect(opts!.onDevServer).toBeUndefined();
       });
 
@@ -468,7 +494,7 @@ describe(devAsync, () => {
 
       expect(runExpoAsync).toHaveBeenCalledTimes(1);
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios'], {
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
       });
@@ -616,23 +642,84 @@ describe(devAsync, () => {
         { mode: 'smart', print: 'text', followups: [] }
       );
       expect(runExpoAsync).not.toHaveBeenCalled();
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--dev-client'], {
-        agentSkills: true,
-        output: 'inherit',
-        onDevServer: expect.any(Function),
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--dev-client', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+          onDevServer: expect.any(Function),
+        }
+      );
     });
 
     it(`should warn that expo start options do not reach a build step`, async () => {
       mockStaleDevClientState();
 
-      await devAsync(projectRoot, resolveDevOptions(['--ios', '--port', '8082']));
+      await devAsync(projectRoot, resolveDevOptions(['--ios', '--tunnel']));
 
-      expect(Log.warn).toHaveBeenCalledWith(expect.stringMatching(/--port 8082/));
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios'], {
+      expect(Log.warn).toHaveBeenCalledWith(expect.stringMatching(/not passed on: --tunnel/));
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
       });
+    });
+
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person
+    // can complete — `expo run:*` bakes the port into the app, so it gets the named one too.
+    it(`should pass a named port to the build step that serves`, async () => {
+      mockStaleDevClientState();
+
+      await devAsync(projectRoot, resolveDevOptions(['--ios', '--port', '8082']));
+
+      expect(Log.warn).not.toHaveBeenCalled();
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8082'], {
+        agentSkills: true,
+        output: 'inherit',
+      });
+    });
+
+    it(`should run every serving step on the port it picked, and say once that it moved`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(resolvePlannedPortAsync).mockResolvedValueOnce({
+        port: 8082,
+        movedFrom: 8081,
+        bindable: true,
+      });
+
+      await devAsync(projectRoot, resolveDevOptions(['--ios']));
+
+      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8082'], {
+        agentSkills: true,
+        output: 'inherit',
+      });
+      const warnings = vi.mocked(Log.warn).mock.calls.map(([line]) => String(line));
+      expect(warnings.filter((line) => line.includes('started on'))).toEqual([
+        expect.stringContaining(formatPortMove({ from: 8081, to: 8082 })),
+      ]);
+      expect(vi.mocked(emitStartPlan).mock.calls[0]![0]).toMatchObject({
+        devServerPort: { port: 8082, movedFrom: 8081 },
+      });
+    });
+
+    it(`should put the picked port on the plan it prints under --plan`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(resolvePlannedPortAsync).mockResolvedValueOnce({
+        port: 8082,
+        movedFrom: 8081,
+        bindable: true,
+      });
+
+      await devAsync(projectRoot, resolveDevOptions(['--ios', '--plan']));
+
+      const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+      expect(plan.devServerPort).toEqual({ port: 8082, movedFrom: 8081 });
+      expect(plan.steps.map((step) => step.argv)).toEqual([
+        ['expo', 'prebuild', '--platform', 'ios'],
+        ['expo', 'run:ios', '--port', '8082'],
+      ]);
+      expect(runDevServerAsync).not.toHaveBeenCalled();
     });
 
     it(`should not warn about the platform flag the plan already acted on`, async () => {
@@ -655,10 +742,14 @@ describe(devAsync, () => {
       await devAsync(projectRoot, resolveDevOptions(['--android']));
 
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'android']);
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:android'], {
-        agentSkills: true,
-        output: 'inherit',
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['run:android', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+        }
+      );
     });
   });
 
@@ -755,11 +846,15 @@ describe(devAsync, () => {
 
       await devAsync(projectRoot, resolveDevOptions(['--ios', '--no-followups']));
 
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
-        agentSkills: true,
-        output: 'inherit',
-        onDevServer: expect.any(Function),
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--go', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+          onDevServer: expect.any(Function),
+        }
+      );
     });
 
     it(`should never offer more than three follow-ups`, async () => {
@@ -800,11 +895,15 @@ describe(devAsync, () => {
 
       await devAsync(projectRoot, resolveDevOptions(['--ios']));
 
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
-        agentSkills: true,
-        output: 'tee',
-        onDevServer: expect.any(Function),
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--go', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'tee',
+          onDevServer: expect.any(Function),
+        }
+      );
     });
 
     it(`should print nothing on stdout before the run in --json mode`, async () => {
@@ -817,11 +916,15 @@ describe(devAsync, () => {
         print: 'none',
         followups: [],
       });
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['start', '--go'], {
-        agentSkills: true,
-        output: 'capture',
-        onDevServer: expect.any(Function),
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--go', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'capture',
+          onDevServer: expect.any(Function),
+        }
+      );
     });
 
     it(`should print exactly one JSON object, when the run has ended`, async () => {
@@ -858,15 +961,23 @@ describe(devAsync, () => {
     // Picking a free port is mechanical, so nobody is asked.
     it(`should retry on a free port it picks, when the caller named none`, async () => {
       mockProjectState();
+      vi.mocked(resolvePlannedPortAsync).mockResolvedValueOnce({
+        port: 8180,
+        movedFrom: null,
+        bindable: true,
+      });
       vi.mocked(runDevServerAsync)
         .mockResolvedValueOnce(devServerRun({ exitCode: 1, stderr: PORT_TAKEN }))
         .mockResolvedValue(devServerRun({ exitCode: 0 }));
 
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
+      const [, firstArgs] = vi.mocked(runDevServerAsync).mock.calls[0]!;
       const [, retryArgs] = vi.mocked(runDevServerAsync).mock.calls[1]!;
-      expect(retryArgs.slice(0, 2)).toEqual(['start', '--go']);
-      expect(retryArgs[retryArgs.length - 2]).toBe('--port');
+      expect(firstArgs).toEqual(['start', '--go', '--port', '8180']);
+      expect(retryArgs.slice(0, 3)).toEqual(['start', '--go', '--port']);
+      expect(retryArgs.filter((arg) => arg === '--port')).toHaveLength(1);
+      expect(Number(retryArgs.at(-1))).toBeGreaterThan(8180);
       // It says so, on stderr, because the dev server is not where the caller asked for it.
       expect(
         vi
@@ -874,6 +985,53 @@ describe(devAsync, () => {
           .mock.calls.map(([line]) => line)
           .join('\n')
       ).toContain('Port 8180 was busy');
+    });
+
+    // What `expo run:*` printed when another project's Metro held 8081, before it built, installed,
+    // deep-linked the app to that Metro, and exited 0 [observed — live suite, 2026-10-05].
+    it(`should retry a run:* step that skipped its dev server and exited 0`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(runDevServerAsync)
+        .mockResolvedValueOnce(
+          devServerRun({
+            exitCode: 0,
+            stdout: [
+              "Input is required, but 'npx expo' is in non-interactive mode.",
+              '› Use port 8082 instead?',
+              '› Skipping dev server',
+            ].join('\n'),
+          })
+        )
+        .mockResolvedValue(devServerRun({ exitCode: 0 }));
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(vi.mocked(runDevServerAsync).mock.calls.map(([, args]) => args)).toEqual([
+        ['run:ios', '--port', '8081'],
+        ['run:ios', '--port', expect.stringMatching(/^\d+$/)],
+      ]);
+      expect(vi.mocked(runDevServerAsync).mock.calls[1]![1].at(-1)).not.toBe('8081');
+      expect(
+        vi
+          .mocked(Log.warn)
+          .mock.calls.map(([line]) => line)
+          .join('\n')
+      ).toContain('Port 8081 was busy');
+    });
+
+    it(`should refuse a named port that is taken before any step runs`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(resolvePlannedPortAsync).mockResolvedValueOnce({
+        port: 8180,
+        movedFrom: null,
+        bindable: false,
+      });
+
+      await expect(
+        devAsync(projectRoot, resolveDevOptions(['--ios', '--port', '8180']))
+      ).rejects.toMatchObject({ code: 'PORT_IN_USE', exitCode: 20 });
+      expect(runExpoAsync).not.toHaveBeenCalled();
+      expect(runDevServerAsync).not.toHaveBeenCalled();
     });
 
     // A port the caller named is a requirement: moving would leave every URL they had already

@@ -492,8 +492,15 @@ and recovers into a different command: `dev:stop --port <n> --force`, or a free 
 When the process on that port is this project's own dev server, which the lock says, the
 message says that instead.
 
-One retry per plan. A second collision means the port this CLI picked was taken between
-the bind test and the dev server's own bind.
+The port is resolved before the plan runs: the named `--port`, or the first port from
+8081 (`RCT_METRO_PORT` when set) that binds on `::` and `127.0.0.1`. It goes as `--port`
+to `expo start` and to every `expo run:*` that serves, and the plan reports it as
+`devServerPort`, because `expo run:*` left to ask skips its dev server, deep-links the
+app to whatever holds the port, and exits 0.
+
+One retry per plan, also after `Skipping dev server` with exit 0. A second collision
+means the port this CLI picked was taken between the bind test and the dev server's own
+bind.
 
 ## Where a build runs
 

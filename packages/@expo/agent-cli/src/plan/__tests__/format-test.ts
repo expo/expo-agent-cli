@@ -75,6 +75,16 @@ describe(formatStartPlan, () => {
     }
   });
 
+  it(`should name the dev server's port, and the busy one it moved off`, () => {
+    expect(
+      strip(formatStartPlan({ ...plan, devServerPort: { port: 8081, movedFrom: null } }))
+    ).toContain('Dev server: port 8081.');
+    expect(
+      strip(formatStartPlan({ ...plan, devServerPort: { port: 8082, movedFrom: 8081 } }))
+    ).toContain('Dev server: port 8082, because 8081 is taken.');
+    expect(strip(formatStartPlan(plan))).not.toContain('Dev server:');
+  });
+
   it(`should format a plan of one step`, () => {
     const output = formatStartPlan({
       ...plan,

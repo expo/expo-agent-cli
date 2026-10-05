@@ -76,3 +76,59 @@ export function withForwardedExpoArgs(
   });
   return { plan: { ...plan, steps }, dropped };
 }
+
+/**
+ * Whether this step starts the dev server, and so runs through the `@expo/agent-cli start` wrapper:
+ * `expo start`, or an `expo run:*` that serves.
+ *
+ * `eas build` finishes with an artifact and starts nothing. The install step of an `*-install`
+ * plan passes `--no-bundler` (llp/0004 §A current build is not an installed app): running it
+ * through the dev-server runner would publish a lock naming a port nothing will listen on, for as
+ * long as the install takes, and every reader of that lock (`status`, `smoke`, `dev:stop`, a
+ * `--detach` parent waiting on another port) would be told about a dev server that does not exist.
+ */
+export function isDevServerStep(step: PlanStep): boolean {
+  if (step.argv[0] !== 'expo' || step.argv.includes('--no-bundler')) {
+    return false;
+  }
+  const command = step.argv[1];
+  return command === 'start' || command === 'run:ios' || command === 'run:android';
+}
+
+/** The options without `--port`, which `dev` resolves itself and sets on every step that serves. */
+export function withoutPortArgs(args: readonly string[]): string[] {
+  const rest: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    const arg = args[index]!;
+    if (arg === '--port' || arg === '-p') {
+      index++;
+    } else if (!/^(--port|-p)=/.test(arg)) {
+      rest.push(arg);
+    }
+  }
+  return rest;
+}
+
+/** Step arguments with `--port <port>`, replacing any port they already name. */
+export function withPortArg(args: readonly string[], port: number): string[] {
+  const portArgs = ['--port', String(port)];
+  return [...withoutPortArgs(args), ...portArgs];
+}
+
+/**
+ * The same plan, with `--port` on every step that serves or compiles the dev server's port in.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+ * complete. `expo run:*` writes the port to `RCT_METRO_PORT` and `-PreactNativeDevServerPort`, so
+ * the binary and its deep link name the port the dev server takes.
+ */
+export function withDevServerPort(plan: StartPlan, port: number): StartPlan {
+  return {
+    ...plan,
+    steps: plan.steps.map((step) =>
+      isDevServerStep(step)
+        ? { ...step, argv: [step.argv[0]!, ...withPortArg(step.argv.slice(1), port)] }
+        : step
+    ),
+  };
+}

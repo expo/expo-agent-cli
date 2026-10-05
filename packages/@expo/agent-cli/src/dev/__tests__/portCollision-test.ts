@@ -3,13 +3,35 @@
 // The samples are the three spellings the Expo CLI actually produces, so a wording change upstream
 // fails here rather than silently turning a recoverable stop back into "a person must answer this".
 
+import net from 'net';
+
 import {
+  defaultMetroPort,
   detectPortCollision,
   findFreePortAsync,
   formatPortMove,
   isPortBindableAsync,
   parsePortMove,
+  resolvePlannedPortAsync,
 } from '../portCollision';
+
+/** Hold a port on the unspecified address, the way another project's Metro does. */
+async function listenDualStackAsync(): Promise<net.Server> {
+  const server = net.createServer();
+  await new Promise<void>((resolve) => {
+    server.once('error', () => server.listen(0, '0.0.0.0', () => resolve()));
+    server.listen({ port: 0, host: '::', ipv6Only: false }, () => resolve());
+  });
+  return server;
+}
+
+function portOf(server: net.Server): number {
+  return (server.address() as net.AddressInfo).port;
+}
+
+async function closeAsync(server: net.Server): Promise<void> {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}
 
 describe(detectPortCollision, () => {
   // What the friction run captured, verbatim: the prompt helper quotes the question it could not
@@ -38,6 +60,22 @@ describe(detectPortCollision, () => {
     const output = `Port 8180 is unavailable and 'npx expo' is running in non-interactive mode, so it can't prompt to use another port.`;
 
     expect(detectPortCollision(output)).toEqual({ requestedPort: 8180, offeredPort: null });
+  });
+
+  // What `expo run:*` printed with another project's Metro on 8081 and no terminal, before it built,
+  // deep-linked the app to that Metro, and exited 0 [observed — live suite, 2026-10-05].
+  it(`reads the run:* output that skipped the dev server`, () => {
+    const output = [
+      "Input is required, but 'npx expo' is in non-interactive mode.",
+      '› Use port 8082 instead?',
+      '› Skipping dev server',
+    ].join('\n');
+
+    expect(detectPortCollision(output)).toEqual({ requestedPort: null, offeredPort: 8082 });
+    expect(detectPortCollision('› Skipping dev server')).toEqual({
+      requestedPort: null,
+      offeredPort: null,
+    });
   });
 
   it.each([
@@ -140,8 +178,79 @@ describe('the port move a detached run reports', () => {
   // The reason the parent parses rather than comparing the port it asked for against the port the
   // lock reports: a dev server can land on another port for reasons that are not a collision, and
   // reporting those as a move would be this command inventing a busy port nobody observed.
+  // A plan that moved before it ran, and moved again when the port it picked was taken first.
+  it(`reports the first busy port and the last port when the log moved twice`, () => {
+    const log = [
+      formatPortMove({ from: 8081, to: 8082 }),
+      '› Compiling',
+      formatPortMove({ from: 8081, to: 8083 }),
+    ].join('\n');
+
+    expect(parsePortMove(log)).toEqual({ from: 8081, to: 8083 });
+  });
+
   it(`answers null for a log with no move in it`, () => {
     expect(parsePortMove('Starting project at /project\niOS Bundled 220ms')).toBeNull();
     expect(parsePortMove('')).toBeNull();
+  });
+});
+
+// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+// complete — the port the plan's steps are given, picked before any of them runs.
+describe(resolvePlannedPortAsync, () => {
+  it(`keeps the preferred port when it is free`, async () => {
+    const preferred = (await findFreePortAsync(49600))!;
+
+    expect(await resolvePlannedPortAsync(null, { preferred })).toEqual({
+      port: preferred,
+      movedFrom: null,
+      bindable: true,
+    });
+  });
+
+  it(`moves off a preferred port another project's Metro holds on the unspecified address`, async () => {
+    const server = await listenDualStackAsync();
+    const busy = portOf(server);
+    try {
+      const planned = await resolvePlannedPortAsync(null, { preferred: busy });
+
+      expect(planned.movedFrom).toBe(busy);
+      expect(planned.port).toBeGreaterThan(busy);
+      expect(planned.bindable).toBe(true);
+    } finally {
+      await closeAsync(server);
+    }
+  });
+
+  // A named port is a requirement: it is never moved, and the caller learns whether it is free.
+  it(`keeps a named port, and says when it is taken`, async () => {
+    const server = await listenDualStackAsync();
+    const busy = portOf(server);
+    try {
+      expect(await resolvePlannedPortAsync(busy)).toEqual({
+        port: busy,
+        movedFrom: null,
+        bindable: false,
+      });
+    } finally {
+      await closeAsync(server);
+    }
+  });
+});
+
+describe(defaultMetroPort, () => {
+  afterEach(() => {
+    delete process.env.RCT_METRO_PORT;
+  });
+
+  it(`is Expo's 8081`, () => {
+    delete process.env.RCT_METRO_PORT;
+    expect(defaultMetroPort()).toBe(8081);
+  });
+
+  // The variable `expo start` and `expo run:*` read their own default from.
+  it(`follows RCT_METRO_PORT`, () => {
+    process.env.RCT_METRO_PORT = '8300';
+    expect(defaultMetroPort()).toBe(8300);
   });
 });

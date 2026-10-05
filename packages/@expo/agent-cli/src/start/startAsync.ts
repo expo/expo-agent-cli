@@ -120,8 +120,9 @@ export async function runDevServerAsync(
     onResolved: (resolved) => {
       port = resolved;
       // `default` means nothing reported one, and an open aimed at a guessed port is the false
-      // green the lock exists to prevent.
-      if (onDevServer && resolved.source !== 'default') {
+      // green the lock exists to prevent. `arg` is only the port it was given, which `dev` always
+      // passes now, so it counts while the dev server is still running and not after.
+      if (onDevServer && (resolved.source === 'log' || (resolved.source === 'arg' && running))) {
         onDevServer({ url: `http://127.0.0.1:${resolved.port}`, port: resolved.port });
       }
     },
