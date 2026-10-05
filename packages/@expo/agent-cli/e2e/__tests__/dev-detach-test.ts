@@ -35,6 +35,19 @@ function detachEnv(projectRoot: string, port: number): Record<string, string> {
   };
 }
 
+/** Whether something on this machine answers `/status` on the port with a project root header. */
+async function isForeignDevServerOnAsync(port: number): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/status`, {
+      signal: AbortSignal.timeout(1000),
+    });
+    await response.body?.cancel();
+    return response.headers.get('x-react-native-project-root') != null;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether a pid is still alive, without signalling it. */
 function isAlive(pid: number): boolean {
   try {
@@ -124,7 +137,12 @@ describe('@expo/agent-cli dev --detach', () => {
   // stays alive without ever logging a port — which is what a compiler looks like from here. The
   // lock lands on its fallback port `PORT_WATCH_TIMEOUT_MS` in, and that wait is why this test is
   // the slow one in this file: it is the wait the finding is about.
-  it('says the plan is building rather than that a dev server started', async () => {
+  it('says the plan is building rather than that a dev server started', async (context) => {
+    // The lock's fallback here is 8081, and the lock withholds a port another project's dev server
+    // answers on (llp/0030 §Discovery). A developer's machine often has one there.
+    if (await isForeignDevServerOnAsync(8081)) {
+      context.skip();
+    }
     const projectRoot = await setupFixtureAsync('bare-app');
     await installStubFingerprintAsync(projectRoot);
 

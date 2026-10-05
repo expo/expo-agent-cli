@@ -74,6 +74,29 @@ describe(findFreePortAsync, () => {
     }
   });
 
+  // A Metro of another project on `*:8081` (IPv6, dual-stack) left `127.0.0.1:8081` bindable, so the
+  // probe called the port free [observed — macOS, 2026-10-05: `127.0.0.1` ok, `::` and `0.0.0.0`
+  // EADDRINUSE against pid 93886].
+  it(`does not offer a port a dual-stack listener on the unspecified address holds`, async () => {
+    const net = require('net') as typeof import('net');
+    const server = net.createServer();
+    await new Promise<void>((resolve) => {
+      server.once('error', () => {
+        // No IPv6 on this machine: the IPv4 unspecified address is the same shape of listener.
+        server.listen(0, '0.0.0.0', () => resolve());
+      });
+      server.listen({ port: 0, host: '::', ipv6Only: false }, () => resolve());
+    });
+    const port = (server.address() as import('net').AddressInfo).port;
+
+    try {
+      expect(await isPortBindableAsync(port)).toBe(false);
+      expect(await findFreePortAsync(port, { range: 1 })).toBeNull();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it(`answers null when the whole range it was given is busy`, async () => {
     // A range of zero ports cannot contain a free one, whatever the machine is doing.
     expect(await findFreePortAsync(49400, { range: 0 })).toBeNull();

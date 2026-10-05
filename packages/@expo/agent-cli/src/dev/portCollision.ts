@@ -148,12 +148,30 @@ export async function findFreePortAsync(
   return null;
 }
 
-/** Whether a server can bind this port on the loopback interface right now. */
+/**
+ * Whether a server can bind this port right now, on the unspecified address and on the loopback.
+ *
+ * Both, as Expo's own `freePortAsync` checks. A dual-stack listener on `*:8081` left
+ * `127.0.0.1:8081` bindable, and `dev` then passed `--port 8081` to a port another project's Metro
+ * answered [observed — macOS, 2026-10-05]. The unspecified address is `::` with `ipv6Only: false`,
+ * or `0.0.0.0` on a machine with no IPv6.
+ */
 export async function isPortBindableAsync(port: number): Promise<boolean> {
-  return await new Promise<boolean>((resolve) => {
+  let unspecified = await tryBindAsync({ port, host: '::', ipv6Only: false });
+  if (unspecified === 'no-ipv6') {
+    unspecified = await tryBindAsync({ port, host: '0.0.0.0' });
+  }
+  return unspecified === true && (await tryBindAsync({ port, host: '127.0.0.1' })) === true;
+}
+
+/** Bind and release once. `no-ipv6` when the host is an IPv6 address this machine cannot use. */
+function tryBindAsync(options: net.ListenOptions): Promise<boolean | 'no-ipv6'> {
+  return new Promise((resolve) => {
     const server = net.createServer();
-    server.once('error', () => resolve(false));
-    server.listen(port, '127.0.0.1', () => {
+    server.once('error', (error: NodeJS.ErrnoException) =>
+      resolve(error.code === 'EAFNOSUPPORT' || error.code === 'EADDRNOTAVAIL' ? 'no-ipv6' : false)
+    );
+    server.listen(options, () => {
       server.close(() => resolve(true));
     });
   });

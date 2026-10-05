@@ -30,7 +30,14 @@ export async function holdDevServerLockAsync(
   let address = '';
   try {
     address = lockAddressFor(projectRoot).address;
-    const { port, source } = await resolveDevServerPortAsync(projectRoot, args, options);
+    const resolved = await resolveDevServerPortAsync(projectRoot, args, options);
+    if (resolved == null) {
+      // The only port left to name is another project's dev server, and publishing it would point
+      // every command of this project at that project.
+      event('dev_lock_skipped', { address, reason: 'foreign-port' });
+      return null;
+    }
+    const { port, source } = resolved;
 
     if (options.isRunning?.() === false) {
       // The dev server exited before it said where it listens, so there is nothing to point at.

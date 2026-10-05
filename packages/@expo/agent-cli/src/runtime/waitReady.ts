@@ -14,13 +14,8 @@
 // documents but cannot close.
 
 import type { NavigatePlatform } from '../navigate/device';
-import {
-  decodeProjectRoot,
-  matchProjectRoot,
-  normalizeDevServerUrl,
-  PROJECT_ROOT_HEADER,
-  probeDevServerAsync,
-} from './devServer';
+import { normalizeDevServerUrl, probeDevServerAsync } from './devServer';
+import { decodeProjectRoot, matchProjectRoot, PROJECT_ROOT_HEADER } from './projectRootHeader';
 import {
   buildDeviceNameIndexIfNeededAsync,
   scopeTargets,
