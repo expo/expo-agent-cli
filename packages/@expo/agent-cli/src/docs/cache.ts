@@ -1,6 +1,7 @@
 // @ref llp/0030-local-docs.rfc.md §Local cache
 import crypto from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import { CommandError } from '../utils/errors';
@@ -18,16 +19,23 @@ import type { DocPage } from './search';
 export const MANIFEST_FILE = 'manifest.json';
 export const LOCK_FILE = '.lock';
 export const DOCS_LOCK_STALE_MS = 10 * 60_000;
+/** Far below the 256 open files a macOS shell allows by default. */
+const READ_CONCURRENCY = 32;
 
 export interface ManifestBundle {
   sha256: string;
   pages: number;
 }
 
-/** `manifest.json`: what the cache holds. Written after each bundle. */
+/**
+ * `manifest.json`: what the cache holds. A bundle is listed only while its files are complete: it is
+ * removed before its swap and added back after it.
+ */
 export interface DocsManifest {
   baseUrl: string;
   latest: VersionBundleName;
+  /** The versions the host published at the last sync, so search selects the version sync did. */
+  available?: VersionBundleName[];
   syncedAt: string;
   bundles: { [name in BundleName]?: ManifestBundle };
 }
@@ -69,7 +77,10 @@ export async function readManifestAsync(dir: string): Promise<DocsManifest | nul
       bundles[name] = { sha256: entry.sha256, pages: entry.pages };
     }
   }
-  return { baseUrl: raw.baseUrl, latest: raw.latest, syncedAt: raw.syncedAt, bundles };
+  const available = Array.isArray(raw.available)
+    ? raw.available.filter(isVersionBundleName)
+    : undefined;
+  return { baseUrl: raw.baseUrl, latest: raw.latest, available, syncedAt: raw.syncedAt, bundles };
 }
 
 export async function writeManifestAsync(dir: string, manifest: DocsManifest): Promise<void> {
@@ -92,14 +103,18 @@ export interface DocsLock {
   release(): Promise<void>;
 }
 
-/** Take `.lock` by exclusive create. A lock older than `staleMs` belongs to a run that died. */
+/**
+ * Take `.lock` by exclusive create. The file names its holder as `<pid> <host> <token>`.
+ *
+ * @ref llp/0030-local-docs.rfc.md §Concurrency
+ */
 export async function acquireDocsLockAsync(
   dir: string,
   { staleMs = DOCS_LOCK_STALE_MS, pollMs = 200, onWait }: DocsLockOptions = {}
 ): Promise<DocsLock> {
   await fs.promises.mkdir(dir, { recursive: true });
   const file = path.join(dir, LOCK_FILE);
-  const token = `${process.pid} ${crypto.randomUUID()}`;
+  const token = `${process.pid} ${os.hostname()} ${crypto.randomUUID()}`;
   let waited = false;
 
   for (;;) {
@@ -129,9 +144,9 @@ export async function acquireDocsLockAsync(
     }
 
     const stat = await fs.promises.stat(file).catch(() => null);
-    const holder = await fs.promises.readFile(file, 'utf8').catch(() => '');
-    if ((stat && Date.now() - stat.mtimeMs > staleMs) || holderIsGone(holder)) {
-      await fs.promises.rm(file, { force: true });
+    const holder = await fs.promises.readFile(file, 'utf8').catch(() => null);
+    if (stat && holder != null && isLockAbandoned(holder, Date.now() - stat.mtimeMs, staleMs)) {
+      await reclaimLockAsync(file, holder);
       continue;
     }
     if (!waited) {
@@ -143,25 +158,61 @@ export async function acquireDocsLockAsync(
 }
 
 /**
- * Whether the run named in a lock file has exited, as after Ctrl-C or a closed pipe. Its lock
- * then goes at once, not after `staleMs`. A process this user cannot signal (EPERM) is alive.
+ * Whether a lock's holder can no longer release it.
+ *
+ * A holder on this host is asked directly, so a sync stopped with Ctrl-C frees the lock at once,
+ * and a live sync keeps it however long its download takes. Only a holder this host cannot ask (on
+ * another machine that shares the directory, or an unreadable file) falls back to `staleMs`.
  */
-function holderIsGone(holder: string): boolean {
-  const pid = Number(holder.split(' ')[0]);
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
+export function isLockAbandoned(holder: string, ageMs: number, staleMs: number): boolean {
+  const [pidText, host] = holder.split(' ');
+  const pid = Number(pidText);
+  if (Number.isInteger(pid) && pid > 0 && host === os.hostname()) {
+    return !isProcessAlive(pid);
   }
+  return ageMs > staleMs;
+}
+
+/** A process this user cannot signal (EPERM) is alive. */
+function isProcessAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return false;
+    return true;
   } catch (error: any) {
-    return error.code === 'ESRCH';
+    return error.code !== 'ESRCH';
   }
 }
 
-/** Remove what a killed run left behind. Only call it while holding the lock. */
+/**
+ * Delete an abandoned lock, unless another run replaced it since it was read: two runs that read
+ * the same dead holder must not both delete, or the second deletes the first one's new lock.
+ * Node has no OS file locks, so a window of one read and one delete remains.
+ */
+export async function reclaimLockAsync(file: string, abandoned: string): Promise<void> {
+  const current = await fs.promises.readFile(file, 'utf8').catch(() => null);
+  if (current === abandoned) {
+    await fs.promises.rm(file, { force: true });
+  }
+}
+
+/**
+ * Clean up after a run that was killed. Only call it while holding the lock.
+ *
+ * A parked entry whose replacement never arrived goes back first, so a stop between the two renames
+ * of a swap loses nothing. Its bundle is already missing from the manifest, so the sync reinstalls it.
+ */
 export async function removeLeftoversAsync(dir: string): Promise<void> {
   const entries = await fs.promises.readdir(dir).catch(() => [] as string[]);
+  for (const parkedDir of entries.filter((name) => name.startsWith('.old-'))) {
+    const parked = await fs.promises.readdir(path.join(dir, parkedDir)).catch(() => [] as string[]);
+    for (const name of parked) {
+      const target = isVersionBundleName(name) ? versionDir(dir, name) : path.join(dir, name);
+      if (!(await existsAsync(target))) {
+        await fs.promises.mkdir(path.dirname(target), { recursive: true });
+        await fs.promises.rename(path.join(dir, parkedDir, name), target);
+      }
+    }
+  }
   await Promise.all(
     entries
       .filter(
@@ -208,7 +259,9 @@ async function swapEntryAsync(source: string, target: string, parked: string): P
 export async function installBundleAsync(
   dir: string,
   bundle: BundleName,
-  pages: BundlePage[]
+  pages: BundlePage[],
+  /** Runs after every page is unpacked and before the first entry is swapped. */
+  beforeSwap?: () => Promise<void>
 ): Promise<void> {
   const tmp = path.join(dir, `.tmp-${process.pid}`);
   const parked = path.join(dir, `.old-${process.pid}`);
@@ -221,6 +274,7 @@ export async function installBundleAsync(
       await fs.promises.mkdir(path.dirname(file), { recursive: true });
       await fs.promises.writeFile(file, page.content);
     }
+    await beforeSwap?.();
 
     if (bundle !== 'shared') {
       await fs.promises.mkdir(path.join(dir, 'versions'), { recursive: true });
@@ -300,11 +354,19 @@ export async function readDocPagesAsync(
   }
 
   await walk(dir, '');
-  return await Promise.all(
-    files.map(async ({ path: pagePath, file }) => ({
-      path: pagePath,
-      file,
-      content: await fs.promises.readFile(file, 'utf8'),
-    }))
-  );
+  const pages: (DocPage & { file: string })[] = [];
+  let next = 0;
+  async function readNext(): Promise<void> {
+    while (next < files.length) {
+      const { path: pagePath, file } = files[next++]!;
+      // A sync can replace a folder between the walk and the read. That page is skipped.
+      const content = await fs.promises.readFile(file, 'utf8').catch((error) => {
+        if (error.code === 'ENOENT') return null;
+        throw error;
+      });
+      if (content != null) pages.push({ path: pagePath, file, content });
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(READ_CONCURRENCY, files.length) }, readNext));
+  return pages;
 }

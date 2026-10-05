@@ -36,17 +36,6 @@ export function parseSdkFlag(flag: string): VersionBundleName {
   return versionBundleName(match[1]!);
 }
 
-/** The version the project's SDK wants, before anything is known about which bundles exist. */
-export function wantedVersion(
-  input: Pick<SdkSelectionInput, 'flag' | 'projectSdkVersion' | 'latest'>
-): VersionBundleName {
-  if (input.flag != null) {
-    return parseSdkFlag(input.flag);
-  }
-  const major = sdkMajor(input.projectSdkVersion);
-  return major ? versionBundleName(major) : input.latest;
-}
-
 export function selectSdkVersion({
   flag,
   projectSdkVersion,

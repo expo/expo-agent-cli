@@ -11,6 +11,7 @@ import {
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import { readSdkVersionAsync } from '../project/nodeModules';
+import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { findUpProjectRootOrCwd } from '../utils/findUp';
 import { versionMajor, versionNames, type VersionBundleName } from './bundle';
@@ -22,8 +23,8 @@ import {
   type DocsManifest,
 } from './cache';
 import { searchRegex, searchTerms, type SearchHit } from './search';
-import { docsBaseUrl, isOffline, syncDocsAsync, type BundleSyncReport } from './sync';
-import { selectSdkVersion, wantedVersion, type SdkSelection } from './version';
+import { docsBaseUrl, syncDocsAsync, type BundleSyncReport } from './sync';
+import { selectSdkVersion, type SdkSelection } from './version';
 
 const DOCS_SITE = 'https://docs.expo.dev';
 const DEFAULT_LIMIT = 20;
@@ -159,16 +160,23 @@ async function resolveSearchScopeAsync(
 ): Promise<{ selection: SdkSelection; synced: boolean }> {
   const projectSdkVersion = await projectSdkVersionAsync();
   const manifest = await readManifestAsync(dir);
-  const wanted = manifest
-    ? wantedVersion({ flag: sdkFlag, projectSdkVersion, latest: manifest.latest })
+  // The selection sync made, from the versions the host published: an SDK without docs falls back
+  // to latest here as it did there, instead of counting as never synced.
+  const selection = manifest
+    ? selectSdkVersion({
+        flag: sdkFlag,
+        projectSdkVersion,
+        latest: manifest.latest,
+        available: manifest.available ?? versionNames(manifest.bundles),
+      })
     : null;
   const ready =
     manifest?.bundles.shared != null &&
-    wanted != null &&
-    manifest.bundles[wanted] != null &&
-    fs.existsSync(versionDir(dir, wanted));
+    selection != null &&
+    manifest.bundles[selection.version] != null &&
+    fs.existsSync(versionDir(dir, selection.version));
 
-  if (!ready && !isOffline()) {
+  if (!ready && !env.EXPO_OFFLINE) {
     Log.progress('Syncing the Expo docs first…');
     const result = await syncDocsAsync({
       dir,
@@ -180,7 +188,7 @@ async function resolveSearchScopeAsync(
     return { selection: result.selection, synced: true };
   }
 
-  if (!manifest?.bundles.shared) {
+  if (!manifest?.bundles.shared || !selection) {
     const error = new CommandError(
       'DOCS_NOT_SYNCED',
       `The Expo docs are not synced to ${dir}, and EXPO_OFFLINE is set, so nothing was downloaded. Run "${PROGRAM_PREFIX} docs:sync" with a network connection first.`
@@ -188,23 +196,27 @@ async function resolveSearchScopeAsync(
     error.suggestedCommand = `${PROGRAM_PREFIX} docs:sync`;
     throw error;
   }
-  const available = syncedVersions(dir, manifest);
-  if (wanted != null && sdkFlag != null && !available.includes(wanted)) {
-    const error = new CommandError(
-      'DOCS_NOT_SYNCED',
-      `The ${wanted} docs are not synced to ${dir}, and EXPO_OFFLINE is set, so nothing was downloaded. The synced versions are ${available.join(', ') || 'none'}.`
-    );
-    error.suggestedCommand = `${PROGRAM_PREFIX} docs:sync --sdk ${versionMajor(wanted)}`;
-    throw error;
+  if (!ready) {
+    // Offline, the project's SDK falls back to a synced one. A version asked for by name does not.
+    const synced = syncedVersions(dir, manifest);
+    if (sdkFlag != null || !synced.length) {
+      const error = new CommandError(
+        'DOCS_NOT_SYNCED',
+        `The ${selection.version} docs are not synced to ${dir}, and EXPO_OFFLINE is set, so nothing was downloaded. The synced versions are ${synced.join(', ') || 'none'}.`
+      );
+      error.suggestedCommand = `${PROGRAM_PREFIX} docs:sync --sdk ${versionMajor(selection.version)}`;
+      throw error;
+    }
+    return {
+      selection: selectSdkVersion({
+        flag: undefined,
+        projectSdkVersion,
+        latest: synced.includes(manifest.latest) ? manifest.latest : synced[0]!,
+        available: synced,
+      }),
+      synced: false,
+    };
   }
-  const selection = selectSdkVersion({
-    flag: sdkFlag,
-    projectSdkVersion,
-    latest: available.includes(manifest.latest)
-      ? manifest.latest
-      : (available[0] ?? manifest.latest),
-    available,
-  });
   if (Date.now() - Date.parse(manifest.syncedAt) > STALE_AFTER_MS) {
     Log.warn(
       `The local Expo docs were last synced ${manifest.syncedAt.slice(0, 10)}. Run "${PROGRAM_PREFIX} docs:sync" to update them.`
@@ -226,8 +238,9 @@ export async function runDocsSearchAsync(
     limit: string | undefined;
   }
 ): Promise<void> {
-  const query = options.query.trim();
-  if (!query) {
+  // A regular expression is taken as typed: trimming `^ ` would turn it into `^`.
+  const query = options.regex ? options.query : options.query.trim();
+  if (!query.trim()) {
     const error = new CommandError(
       'BAD_ARGS',
       `Missing query. Usage: ${PROGRAM_PREFIX} docs:search <query>`

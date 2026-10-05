@@ -84,11 +84,18 @@ Each bundle is unpacked into `.tmp-<pid>/`. Then one top-level entry at a time i
 - A version bundle has one top-level entry: `versions/<v>`.
 - The shared bundle has many: `guides`, `eas`, `router`, the home page `index.md`, and more. Each entry is always complete. During a sync some can be new and some still old. That is acceptable.
 - Top-level entries that the new shared bundle no longer has are deleted. The shared swap never touches `versions/`, `manifest.json` or dot-files.
-- A failure while unpacking leaves the old cache as it was. A killed run leaves a `.tmp-*` or `.old-*` directory behind, and the next run that holds the lock deletes it.
+- A failure while unpacking leaves the old cache and its manifest entry as they were.
+- **The manifest lists a bundle only while its files are complete.** The sync writes the manifest before the first page, so an interrupted first sync still leaves a directory that is recognizably the cache. Right before a bundle's first swap, its entry leaves the manifest, and it comes back after the last one. A run killed mid-swap therefore leaves a bundle that the next sync downloads again, never an old digest over mixed or missing files [reported in review, with a kill between two renames].
+- A killed run leaves a `.tmp-*` or `.old-*` directory behind. The next run that holds the lock first moves each parked entry back if its replacement never arrived, then deletes both.
+- **Ownership.** A sync writes into a directory that has other files only if its `manifest.json` parses as a docs manifest. A file of that name alone is not enough, because a web app has one too.
 
 ### Concurrency
 
-`.lock` is taken with an exclusive create, and it holds the process ID of its holder. A lock whose process has exited is replaced at once: a sync stopped with Ctrl-C, or killed by a closed pipe, releases nothing [observed — a sync piped into a failing `jq` left its lock, and the next sync waited]. A lock older than ten minutes is stale and is replaced too, which covers a holder on another machine that shares the cache directory. A second run waits, then reads `manifest.json` again. It then usually has nothing to download, because the digests match.
+`.lock` is taken with an exclusive create, and it names its holder as `<pid> <host> <token>`.
+
+- A holder on this host is asked whether it is alive. A dead holder's lock is replaced at once: a sync stopped with Ctrl-C, or killed by a closed pipe, releases nothing [observed — a sync piped into a failing `jq` left its lock, and the next sync waited]. A live holder keeps the lock however long its download takes.
+- Only a holder this host cannot ask, on another machine that shares the directory or in an unreadable file, ages out after ten minutes.
+- A run deletes an abandoned lock only if the file still holds what it read, so two runs that found the same dead holder do not both take the lock. Node has no OS file locks, so a window of one read and one delete remains. A second run waits, then reads `manifest.json` again. It then usually has nothing to download, because the digests match.
 
 ## SDK version selection
 
@@ -108,13 +115,15 @@ The `docs` group has no default action. Bare `docs` prints the group listing. It
 
 **`docs:search <query> [--regex] [--sdk N] [--limit 20] [--json] [--no-followups]`**:
 
-- It syncs when the bundles it needs are missing, unless `EXPO_OFFLINE` is set. Offline with nothing cached, it fails with `DOCS_NOT_SYNCED` and names `docs:sync`.
+- It syncs when the bundles it needs are missing, unless `EXPO_OFFLINE` is set (read through `env.EXPO_OFFLINE`, so `false` means online). Offline with nothing cached, it fails with `DOCS_NOT_SYNCED` and names `docs:sync`.
+- It selects the version with the same rule as sync, from the versions the host published at the last sync (`available` in the manifest). A project on an SDK without docs therefore searches the latest docs it synced, instead of asking the host on every search.
+- It reads at most 32 files at a time, far below the 256 open files a macOS shell allows, and skips a file that a concurrent sync removed between the listing and the read.
 - It warns on stderr when the cache is older than seven days.
 - Scope: everything outside `versions/`, plus `versions/<chosen>/`. It never descends through `versions/latest`.
 - Default mode: case-insensitive terms that must all be on the page. The frontmatter is not body text.
 - Score, highest weight first: title, path slug (`sdk/camera`), headings, body.
 - `line` is the first line with the highest-weight matching term. `heading` is the nearest `##` or `###` at or above it.
-- `--regex`: a case-insensitive, line-level grep.
+- `--regex`: a case-insensitive, line-level grep. The pattern is used as typed, whitespace included.
 - Each hit: `{ path, file, url, title, heading, line, snippet }`. `file` is absolute, so an agent opens it at `line`.
 - Human output: `title  file:line`, then one snippet line.
 - JSON keys: `dir, sdk, query, hits, followups`. `followups` is empty today: the next step is to read a file.

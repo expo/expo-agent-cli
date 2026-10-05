@@ -31,11 +31,6 @@ export function docsBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
   return (env.AGENT_CLI_DOCS_URL || DEFAULT_DOCS_BUNDLE_URL).replace(/\/+$/, '');
 }
 
-/** The same reading of `EXPO_OFFLINE` as `src/device/expoGoVersion.ts`. */
-export function isOffline(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.EXPO_OFFLINE != null && env.EXPO_OFFLINE !== '0';
-}
-
 export interface BundleSyncReport {
   name: BundleName;
   status: 'downloaded' | 'unchanged';
@@ -91,7 +86,12 @@ async function fetchBytesAsync(
   if (!response.ok) {
     throw fetchFailed(url, `HTTP ${response.status}`);
   }
-  return new Uint8Array(await response.arrayBuffer());
+  // The body arrives after the headers, so a connection that drops mid-download fails here.
+  try {
+    return new Uint8Array(await response.arrayBuffer());
+  } catch (error: any) {
+    throw fetchFailed(url, error.cause?.message ?? error.message);
+  }
 }
 
 export async function fetchDocsIndexAsync(
@@ -122,10 +122,14 @@ function sha256(bytes: Uint8Array): string {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
-/** A sync replaces top-level entries, so it only writes into an empty directory or its own cache. */
+/**
+ * A sync replaces top-level entries, so it only writes into an empty directory or its own cache.
+ * Its own cache is one whose `manifest.json` parses as a docs manifest: any file of that name is not
+ * enough, because a web app has one too.
+ */
 async function assertDocsDirAsync(dir: string): Promise<void> {
   const entries = await fs.promises.readdir(dir).catch(() => [] as string[]);
-  if (entries.some((name) => !name.startsWith('.')) && !entries.includes(MANIFEST_FILE)) {
+  if (entries.some((name) => !name.startsWith('.')) && !(await readManifestAsync(dir))) {
     throw new CommandError(
       'DOCS_CACHE_NOT_EMPTY',
       `${dir} holds other files and no docs ${MANIFEST_FILE}, and a docs sync replaces what is in it. Set AGENT_CLI_DOCS_DIR to an empty or new directory.`
@@ -164,8 +168,11 @@ export async function syncDocsAsync(options: DocsSyncOptions): Promise<DocsSyncR
       ...(await readManifestAsync(dir)),
       baseUrl,
       latest: index.latest,
+      available: versionNames(index.bundles),
       syncedAt: new Date().toISOString(),
     };
+    // Before any page lands, so an interrupted first install still leaves a directory that is ours.
+    await writeManifestAsync(dir, manifest);
 
     const reports: BundleSyncReport[] = [];
     for (const name of wanted) {
@@ -188,7 +195,11 @@ export async function syncDocsAsync(options: DocsSyncOptions): Promise<DocsSyncR
         );
       }
       const pages = parseBundle(bytes, name);
-      await installBundleAsync(dir, name, pages);
+      // From the first swap until the last, the files are neither the old bundle nor the new one.
+      await installBundleAsync(dir, name, pages, async () => {
+        delete manifest.bundles[name];
+        await writeManifestAsync(dir, manifest);
+      });
       manifest.bundles[name] = { sha256: entry.sha256, pages: pages.length };
       await writeManifestAsync(dir, manifest);
       reports.push({ name, status: 'downloaded', pages: pages.length, sha256: entry.sha256 });

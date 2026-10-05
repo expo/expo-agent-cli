@@ -214,6 +214,57 @@ describe('docs:sync', () => {
 });
 
 describe('docs:search', () => {
+  it('searches the synced latest docs of a project whose SDK has none, without asking the host again', async () => {
+    const project = path.join(path.dirname(cwd), 'old-sdk-app');
+    await fs.promises.mkdir(path.join(project, 'node_modules', 'expo'), { recursive: true });
+    await fs.promises.writeFile(
+      path.join(project, 'package.json'),
+      JSON.stringify({ name: 'old-sdk-app', dependencies: { expo: '~50.0.0' } })
+    );
+    await fs.promises.writeFile(
+      path.join(project, 'node_modules', 'expo', 'package.json'),
+      JSON.stringify({ name: 'expo', version: '50.0.3' })
+    );
+    await executeAgentCliAsync(project, ['docs:sync'], docsEnv());
+    requests.length = 0;
+
+    const result = await executeAgentCliAsync(
+      project,
+      ['docs:search', 'camera', '--json'],
+      docsEnv()
+    );
+
+    expect(JSON.parse(result.stdout).sdk).toBe('v57.0.0');
+    expect(requests).toEqual([]);
+  });
+
+  it('downloads on a first search with EXPO_OFFLINE=false', async () => {
+    const result = await executeAgentCliAsync(
+      cwd,
+      ['docs:search', 'camera', '--json'],
+      docsEnv({ EXPO_OFFLINE: 'false' })
+    );
+
+    expect(JSON.parse(result.stdout).hits.length).toBeGreaterThan(0);
+    expect(bundleDownloads().length).toBeGreaterThan(0);
+  });
+
+  it('takes a --regex query as typed, whitespace included', async () => {
+    await executeAgentCliAsync(cwd, ['docs:sync'], docsEnv());
+
+    const result = await executeAgentCliAsync(
+      cwd,
+      ['docs:search', '--regex', '^ ', '--json'],
+      docsEnv()
+    );
+    const report = JSON.parse(result.stdout);
+
+    expect(report.query).toBe('^ ');
+    expect(report.hits.every((hit: { snippet: string }) => !hit.snippet.startsWith('#'))).toBe(
+      true
+    );
+  });
+
   it('syncs first when nothing is synced, then ranks the pages', async () => {
     const result = await executeAgentCliAsync(
       cwd,
