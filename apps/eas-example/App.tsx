@@ -4,13 +4,25 @@ import { useCallback, useEffect, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
-import { addNote, deleteNote, listNotes, migrate, readTheme, writeTheme } from './notesDb';
+import {
+  addNote,
+  deleteNote,
+  listNotes,
+  migrate,
+  readTheme,
+  updateNote,
+  writeTheme,
+} from './notesDb';
 import type { Note, Theme } from './notesDb';
 
 // A stable string the live-eas deploy test looks for in the served web bundle.
 const DEPLOY_MARKER = '@expo/agent-cli live-eas deploy marker';
 
-type Screen = { kind: 'list' } | { kind: 'new' } | { kind: 'detail'; note: Note };
+type Screen =
+  | { kind: 'list' }
+  | { kind: 'new' }
+  | { kind: 'detail'; note: Note }
+  | { kind: 'edit'; note: Note };
 
 const palettes = {
   light: { bg: '#fff', fg: '#111', muted: '#666', card: '#f2f2f2', accent: '#0a7ea4' },
@@ -35,7 +47,11 @@ function NotesApp() {
   const [theme, setTheme] = useState<Theme>('light');
   const p = palettes[theme];
 
-  const refresh = useCallback(async () => setNotes(await listNotes(db)), [db]);
+  const refresh = useCallback(async () => {
+    const next = await listNotes(db);
+    setNotes(next);
+    return next;
+  }, [db]);
 
   useEffect(() => {
     refresh();
@@ -67,7 +83,7 @@ function NotesApp() {
         />
       )}
       {screen.kind === 'new' && (
-        <NewNote
+        <NoteForm
           p={p}
           onBack={() => setScreen({ kind: 'list' })}
           onSave={async (title, body) => {
@@ -82,10 +98,25 @@ function NotesApp() {
           note={screen.note}
           p={p}
           onBack={() => setScreen({ kind: 'list' })}
+          onEdit={() => setScreen({ kind: 'edit', note: screen.note })}
           onDelete={async () => {
             await deleteNote(db, screen.note.id);
             await refresh();
             setScreen({ kind: 'list' });
+          }}
+        />
+      )}
+      {screen.kind === 'edit' && (
+        <NoteForm
+          p={p}
+          initialTitle={screen.note.title}
+          initialBody={screen.note.body}
+          onBack={() => setScreen({ kind: 'detail', note: screen.note })}
+          onSave={async (title, body) => {
+            await updateNote(db, screen.note.id, title, body);
+            const next = await refresh();
+            const note = next.find((n) => n.id === screen.note.id);
+            setScreen(note ? { kind: 'detail', note } : { kind: 'list' });
           }}
         />
       )}
@@ -138,14 +169,16 @@ function NoteList(props: {
   );
 }
 
-function NewNote(props: {
+function NoteForm(props: {
   p: Palette;
+  initialTitle?: string;
+  initialBody?: string;
   onBack: () => void;
   onSave: (title: string, body: string) => Promise<void>;
 }) {
   const { p } = props;
-  const [title, setTitle] = useState('');
-  const [body, setBody] = useState('');
+  const [title, setTitle] = useState(props.initialTitle ?? '');
+  const [body, setBody] = useState(props.initialBody ?? '');
   const canSave = title.trim() !== '' || body.trim() !== '';
   const inputStyle = [styles.input, { color: p.fg, backgroundColor: p.card }];
   return (
@@ -182,7 +215,13 @@ function NewNote(props: {
   );
 }
 
-function NoteDetail(props: { note: Note; p: Palette; onBack: () => void; onDelete: () => void }) {
+function NoteDetail(props: {
+  note: Note;
+  p: Palette;
+  onBack: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const { note, p } = props;
   return (
     <View style={styles.body}>
@@ -195,12 +234,22 @@ function NoteDetail(props: { note: Note; p: Palette; onBack: () => void; onDelet
       <Text style={[styles.date, { color: p.muted }]}>
         {new Date(note.createdAt).toLocaleString()}
       </Text>
+      {note.updatedAt !== note.createdAt && (
+        <Text testID="detail-edited" style={[styles.date, { color: p.muted }]}>
+          Edited {new Date(note.updatedAt).toLocaleString()}
+        </Text>
+      )}
       <Text testID="detail-body" style={{ color: p.fg }}>
         {note.body}
       </Text>
-      <Pressable testID="delete-note" onPress={props.onDelete} style={styles.button}>
-        <Text style={{ color: '#d33' }}>Delete</Text>
-      </Pressable>
+      <View style={styles.actions}>
+        <Pressable testID="edit-note" onPress={props.onEdit} style={styles.button}>
+          <Text style={{ color: p.accent }}>Edit</Text>
+        </Pressable>
+        <Pressable testID="delete-note" onPress={props.onDelete} style={styles.button}>
+          <Text style={{ color: '#d33' }}>Delete</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -216,6 +265,7 @@ const styles = StyleSheet.create({
   title: { fontSize: 24, fontWeight: '600' },
   body: { flex: 1, paddingHorizontal: 16, gap: 8 },
   button: { paddingVertical: 8, alignSelf: 'flex-start' },
+  actions: { flexDirection: 'row', gap: 16 },
   disabled: { opacity: 0.4 },
   empty: { marginTop: 32, textAlign: 'center' },
   card: { padding: 12, borderRadius: 8, marginBottom: 8 },
