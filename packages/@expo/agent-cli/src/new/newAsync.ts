@@ -14,11 +14,14 @@ import * as Log from '../log';
 import { directoryExistsSync } from '../utils/dir';
 import { CommandError } from '../utils/errors';
 import { isInteractive } from '../utils/interactive';
+import { detectInvoker } from '../utils/invoker';
 import { spawnSubprocessAsync, type SubprocessOptions } from '../utils/subprocess';
 import { applyAppNameAsync } from './appName';
 import { buildCreateExpoArgs, resolveCreateExpoCli } from './createExpo';
 import { debugEvent, event } from './events';
 import { resolveGitStateAsync } from './git';
+import type { InstallState } from './install';
+import { describeMissingInstall, resolveInstallState, tailLines } from './install';
 import { createExpoOutputFilter } from './output';
 import type { NewOptions } from './resolveOptions';
 
@@ -36,7 +39,7 @@ export interface NewProjectReport {
   name: string | null;
   /** `create-expo` finished successfully. */
   created: boolean;
-  /** Dependencies were installed, i.e. `--no-install` was not passed. */
+  /** `expo` resolves from the project directory (its `node_modules` or a parent's). False after `--no-install` and after a `create-expo` whose install failed. */
   installed: boolean;
   /** The project is its own git repository. */
   gitInitialized: boolean;
@@ -50,7 +53,7 @@ export interface NewProjectReport {
  * Create a new Expo project without a terminal.
  *
  * @returns the scaffolder's exit code on failure, or 20 if the project was created but its
- * instructions could not be written.
+ * dependency install did not finish or its instructions could not be written.
  */
 export async function createNewProjectAsync(cwd: string, options: NewOptions): Promise<number> {
   const projectRoot = path.resolve(cwd, options.directory);
@@ -98,9 +101,22 @@ export async function createNewProjectAsync(cwd: string, options: NewOptions): P
     );
   }
 
+  const installState = resolveInstallState(projectRoot, options.install);
+  const installed = installState === 'installed';
+  const createExpoOutput = `${result.stdout}${result.stderr}`;
+  const installCommand = detectInvoker() === 'bunx' ? 'bun install' : 'npm install';
   const git = await resolveGitStateAsync(projectRoot, { ...options, createdProjectDirectory });
   let agentsMd: AgentsMdResult | null = null;
   const errors: string[] = [];
+  if (installState === 'missing') {
+    errors.push(
+      describeMissingInstall(
+        projectRoot,
+        `cd ${options.directory} && ${installCommand}`,
+        tailLines(createExpoOutput, FAILURE_TAIL_LINES)
+      )
+    );
+  }
   try {
     agentsMd = await writeProjectInstructionsAsync(projectRoot);
   } catch (error) {
@@ -109,21 +125,21 @@ export async function createNewProjectAsync(cwd: string, options: NewOptions): P
   event('created', {
     projectRoot,
     name,
-    installed: options.install,
+    installed,
     gitInitialized: git.initialized,
     agentsMdAction: agentsMd?.action ?? null,
     errors,
   });
 
   const followups = followUpsEnabled(options.followups)
-    ? buildNewFollowUps({ directory: options.directory, installed: options.install })
+    ? buildNewFollowUps({ directory: options.directory, install: installState, installCommand })
     : [];
 
   const report: NewProjectReport = {
     projectRoot,
     name,
     created: true,
-    installed: options.install,
+    installed,
     gitInitialized: git.initialized,
     followups,
     agentsMd,
@@ -133,7 +149,7 @@ export async function createNewProjectAsync(cwd: string, options: NewOptions): P
   if (options.json) {
     Log.log(JSON.stringify(report, null, 2));
   } else {
-    for (const line of summaryLines(report, git.detail)) {
+    for (const line of summaryLines(report, git.detail, installState)) {
       Log.log(line);
     }
   }
@@ -167,7 +183,7 @@ function reportFailure(
   const exitCode = result.exitCode ?? 1;
 
   if (options.json) {
-    const captured = tail(`${result.stdout}${result.stderr}`, FAILURE_TAIL_LINES);
+    const captured = tailLines(`${result.stdout}${result.stderr}`, FAILURE_TAIL_LINES);
     if (captured) {
       Log.error(captured);
     }
@@ -195,7 +211,11 @@ function reportFailure(
   return exitCode;
 }
 
-function summaryLines(report: NewProjectReport, gitDetail: string): string[] {
+function summaryLines(
+  report: NewProjectReport,
+  gitDetail: string,
+  installState: InstallState
+): string[] {
   const lines: string[] = [];
   const row = (label: string, value: string) =>
     lines.push(`${chalk.dim(label.padEnd(LABEL_WIDTH))}${value}`);
@@ -204,19 +224,14 @@ function summaryLines(report: NewProjectReport, gitDetail: string): string[] {
   if (report.name) {
     row('Name', report.name);
   }
-  row('Install', report.installed ? 'done' : 'skipped (--no-install)');
+  row(
+    'Install',
+    { installed: 'done', skipped: 'skipped (--no-install)', missing: 'failed (see errors)' }[
+      installState
+    ]
+  );
   row('Git', gitDetail);
   row('AGENTS.md', report.agentsMd?.action ?? 'failed (see errors)');
 
   return lines;
-}
-
-/** The last non-empty lines of a captured run, which is where a tool says what went wrong. */
-function tail(output: string, maxLines: number): string {
-  return output
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter(Boolean)
-    .slice(-maxLines)
-    .join('\n');
 }

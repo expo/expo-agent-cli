@@ -41,6 +41,8 @@ const STUB_LOG_NAME = 'stub-create-expo-invocations.jsonl';
  * - STUB_CREATE_EXPO_EXIT_CODE: exit code to return (default 0), to test exit code forwarding
  * - STUB_CREATE_EXPO_GIT: `1` to also create a `.git` directory, like the real one does
  * - STUB_CREATE_EXPO_NO_APP_JSON: `1` to scaffold a project whose config is `app.config.js`
+ * - STUB_CREATE_EXPO_INSTALL_FAILS: `1` to fail the install the way create-expo does: print npm's
+ *   `ERESOLVE`, leave no `node_modules`, and still exit 0
  */
 const STUB_CREATE_EXPO = `#!/usr/bin/env node
 'use strict';
@@ -68,6 +70,13 @@ fs.writeFileSync(
   path.join(projectRoot, 'package.json'),
   JSON.stringify({ name, version: '1.0.0', dependencies: { expo: '54.0.0' } }, null, 2)
 );
+if (process.env.STUB_CREATE_EXPO_INSTALL_FAILS === '1') {
+  process.stderr.write('npm error code ERESOLVE\\nnpm error Could not resolve dependency:\\n');
+} else if (!args.includes('--no-install')) {
+  const expoDir = path.join(projectRoot, 'node_modules', 'expo');
+  fs.mkdirSync(expoDir, { recursive: true });
+  fs.writeFileSync(path.join(expoDir, 'package.json'), JSON.stringify({ name: 'expo', version: '54.0.0' }));
+}
 if (process.env.STUB_CREATE_EXPO_AGENTS_MD) {
   fs.writeFileSync(path.join(projectRoot, 'AGENTS.md'), process.env.STUB_CREATE_EXPO_AGENTS_MD);
 }
@@ -444,6 +453,53 @@ fs.writeFileSync(manifestPath, JSON.stringify(manifest));
 
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toContain('--name');
+  });
+
+  it(`should not claim an install that left no expo on disk`, async () => {
+    const workDir = await setupWorkDirAsync();
+
+    const result = await executeAgentCliAsync(workDir, ['new', 'my-app', '--json'], {
+      env: { STUB_CREATE_EXPO_INSTALL_FAILS: '1' },
+      reject: false,
+    });
+    const report: NewProjectReport = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(20);
+    expect(report).toMatchObject({ created: true, installed: false });
+    expect(report.errors).toEqual([expect.stringContaining('node_modules')]);
+    expect(report.errors[0]).toContain('--- BEGIN UNTRUSTED APP OUTPUT ---');
+    expect(report.errors[0]).toContain('npm error code ERESOLVE');
+    expect(report.followups[0]).toMatchObject({
+      id: 'install-dependencies',
+      command: 'cd my-app && npm install',
+    });
+    expect(fs.existsSync(path.join(workDir, 'my-app', 'node_modules'))).toBe(false);
+  });
+
+  it(`should accept an expo hoisted to a parent directory`, async () => {
+    const workDir = await setupWorkDirAsync();
+    const hoisted = path.join(workDir, 'node_modules', 'expo');
+    await fs.promises.mkdir(hoisted, { recursive: true });
+    await fs.promises.writeFile(path.join(hoisted, 'package.json'), '{}');
+
+    const result = await executeAgentCliAsync(workDir, ['new', 'my-app', '--json'], {
+      env: { STUB_CREATE_EXPO_INSTALL_FAILS: '1' },
+    });
+
+    expect(JSON.parse(result.stdout)).toMatchObject({ installed: true, errors: [] });
+  });
+
+  it(`should say in the text report that the install failed`, async () => {
+    const workDir = await setupWorkDirAsync();
+
+    const result = await executeAgentCliAsync(workDir, ['new', 'my-app'], {
+      env: { STUB_CREATE_EXPO_INSTALL_FAILS: '1' },
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(20);
+    expect(result.stdout).toContain('failed (see errors)');
+    expect(result.stderr).toContain('Dependencies are not installed');
   });
 
   it(`should forward the exit code of a failed scaffold`, async () => {
