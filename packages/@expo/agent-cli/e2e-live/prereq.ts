@@ -845,12 +845,6 @@ export function easProjectGate(): { gate: Gate; source: string | null } {
       source: null,
     };
   }
-  const owned = ciOwnedProjectGate(source);
-  return { gate: owned, source: owned.ok ? source : null };
-}
-
-/** That an app is linked to an EAS project and owned by {@link EAS_CI_ACCOUNT}. */
-export function ciOwnedProjectGate(source: string): Gate {
   let config: any = null;
   try {
     config = JSON.parse(fs.readFileSync(path.join(source, 'app.json'), 'utf8'))?.expo;
@@ -858,16 +852,22 @@ export function ciOwnedProjectGate(source: string): Gate {
     config = null;
   }
   if (!config?.extra?.eas?.projectId) {
-    return missing(
-      `${source} is not linked to an EAS project (no expo.extra.eas.projectId in its app.json)`
-    );
+    return {
+      gate: missing(
+        `${source} is not linked to an EAS project (no expo.extra.eas.projectId in its app.json), so there are no builds to look up`
+      ),
+      source: null,
+    };
   }
   if (config.owner !== EAS_CI_ACCOUNT) {
-    return missing(
-      `${source} is owned by "${config.owner ?? '(none)'}", not the ${EAS_CI_ACCOUNT} CI account — refusing, so no run touches a personal account`
-    );
+    return {
+      gate: missing(
+        `${source} is owned by "${config.owner ?? '(none)'}", not the ${EAS_CI_ACCOUNT} CI account — refusing, so no run touches a personal account`
+      ),
+      source: null,
+    };
   }
-  return ok;
+  return { gate: ok, source };
 }
 
 /**
