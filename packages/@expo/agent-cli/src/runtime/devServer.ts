@@ -6,13 +6,11 @@
 // either of them and owns the family's one refusal, so a failure names the missing piece instead of
 // the socket error it caused, in the same words whichever command asked.
 
-import fs from 'fs';
-import path from 'path';
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../devLock';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
-import { canonicalizeExistingPath } from '../utils/dir';
 import { CommandError } from '../utils/errors';
 import type { CdpTarget } from './cdpClient';
+import { matchProjectRoot, readReportedProjectRootAsync } from './projectRootHeader';
 
 export { readLastLoggedDevServerPort };
 
@@ -125,65 +123,6 @@ export function howToNameTheDevServer(explicit: boolean): string {
   return explicit
     ? `The URL above is the one you named, so nothing else was tried — check its host and port against the dev server you meant ("${PROGRAM_PREFIX} status --json" reports this project's).`
     : `Pass --dev-server-url, or --port for one on this machine, to reach a dev server on another host or port.`;
-}
-
-/** Header the dev server names the project root it serves in, URI-encoded. */
-export const PROJECT_ROOT_HEADER = 'x-react-native-project-root';
-
-/** The header value, URI-decoded, or null when the dev server sent none. */
-export function decodeProjectRoot(value: string | null): string | null {
-  if (value == null) {
-    return null;
-  }
-  try {
-    return decodeURI(value);
-  } catch {
-    // A value that is not a valid encoding is still the answer the dev server gave.
-    return value;
-  }
-}
-
-/**
- * Whether the dev server serves this project: its project root is this project's directory, or a
- * directory that contains it in the same checkout.
- *
- * The header is Metro's `projectRoot` from `metro.config.js`, which a monorepo sets to the
- * workspace root, so a parent directory is this project's server too. A sibling is not. A parent
- * matches only when no directory from the project up to the parent (the project included, the
- * parent not) holds a `.git` entry. A worktree inside the parent (`<repo>/.claude/worktrees/<name>`,
- * which has a `.git` file) is another checkout, and the parent's Metro serves that checkout's code.
- *
- * Both sides are resolved through the filesystem when they exist, because a temporary directory is
- * commonly reached through a symlink (`/var` -> `/private/var` on macOS) and two spellings of one
- * directory must not read as two projects. Windows path comparison is case-insensitive.
- */
-export function matchProjectRoot(
-  reported: string | null,
-  projectRoot?: string | null
-): boolean | null {
-  if (reported == null || projectRoot == null) {
-    return null;
-  }
-  const relative = path.relative(canonicalPath(reported), canonicalPath(projectRoot));
-  if (relative === '') {
-    return true;
-  }
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    return false;
-  }
-  let dir = canonicalizeExistingPath(projectRoot);
-  for (let depth = relative.split(path.sep).length; depth > 0; depth--) {
-    if (fs.existsSync(path.join(dir, '.git'))) {
-      return false;
-    }
-    dir = path.dirname(dir);
-  }
-  return true;
-}
-
-function canonicalPath(value: string): string {
-  const resolved = canonicalizeExistingPath(value);
-  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
 /** Ports `discoverDevServerAsync` scans when no explicit URL was given: Metro's default and
@@ -475,36 +414,6 @@ type Judgement =
 
 function verifiedField(judged: AcceptedJudgement): { projectRootVerified?: boolean } {
   return judged.verified === undefined ? {} : { projectRootVerified: judged.verified };
-}
-
-type ReportedRoot =
-  | { kind: 'header'; root: string }
-  | { kind: 'no-header' }
-  | { kind: 'unreachable' };
-
-/**
- * The project root a dev server names in the headers of `GET /status`, decoded. `no-header` is a
- * server that answered without one (an older dev server); `unreachable` is one that timed out or
- * failed, which proves nothing. `/status` only finishes once the bundler does, but the headers are
- * flushed first, so the request is abandoned as soon as they arrive.
- */
-async function readReportedProjectRootAsync(
-  url: string,
-  timeoutMs: number,
-  signal?: AbortSignal
-): Promise<ReportedRoot> {
-  const budget = AbortSignal.timeout(timeoutMs);
-  try {
-    const response = await fetch(`${url}/status`, {
-      signal: signal == null ? budget : AbortSignal.any([signal, budget]),
-      headers: { connection: 'close' },
-    });
-    const root = decodeProjectRoot(response.headers.get(PROJECT_ROOT_HEADER));
-    await response.body?.cancel();
-    return root == null ? { kind: 'no-header' } : { kind: 'header', root };
-  } catch {
-    return { kind: 'unreachable' };
-  }
 }
 
 export interface DevServerProbe {

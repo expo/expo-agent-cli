@@ -138,6 +138,8 @@ When no lock answers, `discoverDevServerAsync` probes 8081, then 8082–8085, an
 
 Change: a server found by the port scan counts as this project's server only if its project root matches. The source is the `X-React-Native-Project-Root` header of `GET /status`. The Expo CLI dev server sets it to `encodeURI(metroConfig.projectRoot)` (`createMetroStatusMiddleware` in `start/server/metro/dev-server/createMetroMiddleware.js`), and the RN community CLI compares it with its project root (`isDevServerRunning.js`) [observed — `@expo/cli` 57.0.21, `@react-native/community-cli-plugin` 0.86.3]. Decode the value before the comparison, and resolve both paths through symlinks. This is an HTTP check, so it works on Windows. Expo CLI's own port check reads the cwd of the listening process with `lsof`, which does not exist on Windows, so this RFC does not use it. A server that does not match is reported as foreign, the same way `dev:stop` reports it. The port that `.expo/dev/logs/start.log` names gets the same check, because the log outlives its server, and a server whose `/status` does not answer after one retry is not accepted, because it proves nothing.
 
+The lock never falls back to a `--port` or default port whose `/status` names another project root [observed — live suite, 2026-10-05: a lock on 8081 pointed at another project's Metro]. It keeps reading `start.log` while the dev server runs, and publishes nothing if the server stops first (`dev_lock_skipped`, reason `foreign-port`).
+
 With `--eas`, Metro still binds a local port behind the tunnel, so the per-worktree port handling still applies. Each worktree gets its own tunnel URL.
 
 ## Out of scope
