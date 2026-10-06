@@ -11,6 +11,7 @@ import {
   listNotes,
   migrate,
   readTheme,
+  setPinned,
   updateNote,
   writeTheme,
 } from './notesDb';
@@ -109,6 +110,12 @@ function NotesApp() {
           p={p}
           onBack={() => setScreen({ kind: 'list' })}
           onEdit={() => setScreen({ kind: 'edit', note: screen.note })}
+          onTogglePin={async () => {
+            await setPinned(db, screen.note.id, !screen.note.pinned);
+            const next = await refresh();
+            const note = next.find((n) => n.id === screen.note.id);
+            setScreen(note ? { kind: 'detail', note } : { kind: 'list' });
+          }}
           onDelete={async () => {
             await deleteNote(db, screen.note.id);
             await refresh();
@@ -181,6 +188,11 @@ function NoteList(props: {
               onPress={() => props.onOpen(item)}
               style={[styles.card, { backgroundColor: p.card }]}
             >
+              {item.pinned && (
+                <Text testID={`pinned-${item.id}`} style={[styles.date, { color: p.accent }]}>
+                  Pinned
+                </Text>
+              )}
               <Text style={[styles.noteTitle, { color: p.fg }]}>{item.title || 'Untitled'}</Text>
               <Text numberOfLines={1} style={{ color: p.muted }}>
                 {item.body.split('\n')[0]}
@@ -247,6 +259,7 @@ function NoteDetail(props: {
   p: Palette;
   onBack: () => void;
   onEdit: () => void;
+  onTogglePin: () => void;
   onDelete: () => void;
 }) {
   const { note, p } = props;
@@ -272,6 +285,9 @@ function NoteDetail(props: {
       <View style={styles.actions}>
         <Pressable testID="edit-note" onPress={props.onEdit} style={styles.button}>
           <Text style={{ color: p.accent }}>Edit</Text>
+        </Pressable>
+        <Pressable testID="pin-note" onPress={props.onTogglePin} style={styles.button}>
+          <Text style={{ color: p.accent }}>{note.pinned ? 'Unpin' : 'Pin'}</Text>
         </Pressable>
         <Pressable testID="delete-note" onPress={props.onDelete} style={styles.button}>
           <Text style={{ color: '#d33' }}>Delete</Text>
