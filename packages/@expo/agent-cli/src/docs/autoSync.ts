@@ -9,7 +9,7 @@ import { env } from '../utils/env';
 import { versionMajor, versionNames, type VersionBundleName } from './bundle';
 import { docsCacheDir, readManifestAsync, versionDir } from './cache';
 import { docsBaseUrl, syncDocsAsync } from './sync';
-import { selectSdkVersion } from './version';
+import { isNewerThanKnown, requestedVersion, selectSdkVersion } from './version';
 
 /** What an automatic sync did, for the report of the command that ran it. */
 export type DocsAutoSyncResult =
@@ -109,13 +109,19 @@ export async function refreshDocsAfterInstallAsync(projectRoot: string): Promise
     if (!manifest || !sdkVersion) {
       return false;
     }
-    // Sync's own rule: an SDK without docs falls back to latest, which is no reason to download.
-    const { version: wanted } = selectSdkVersion({
-      flag: undefined,
-      projectSdkVersion: sdkVersion,
-      latest: manifest.latest,
-      available: manifest.available ?? versionNames(manifest.bundles),
-    });
+    const known = manifest.available ?? versionNames(manifest.bundles);
+    const requested = requestedVersion(undefined, sdkVersion);
+    // An upgrade past every version the host had at the last sync may meet newly published docs.
+    // Otherwise sync's own rule: an SDK without docs falls back to latest, no reason to download.
+    const wanted =
+      requested && isNewerThanKnown(requested, known)
+        ? requested
+        : selectSdkVersion({
+            flag: undefined,
+            projectSdkVersion: sdkVersion,
+            latest: manifest.latest,
+            available: known,
+          }).version;
     if (manifest.bundles[wanted] && fs.existsSync(versionDir(dir, wanted))) {
       return false;
     }

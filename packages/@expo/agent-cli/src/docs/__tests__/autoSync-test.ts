@@ -133,6 +133,17 @@ describe(refreshDocsAfterInstallAsync, () => {
     expect(vi.mocked(spawn).mock.calls[0]![1]).toContain('58');
   });
 
+  it('syncs an SDK newer than the host had at the last sync, which may have been published since', async () => {
+    writeManifest({ shared: { sha256: 'a', pages: 1 }, 'v57.0.0': { sha256: 'b', pages: 1 } });
+    vol.fromJSON({
+      [path.join(projectRoot, 'node_modules', 'expo', 'package.json')]: JSON.stringify({
+        version: '59.0.0',
+      }),
+    });
+    await expect(refreshDocsAfterInstallAsync(projectRoot)).resolves.toBe(true);
+    expect(vi.mocked(spawn).mock.calls[0]![1]).toContain('59');
+  });
+
   it('does nothing for an SDK the host has no docs for, whose search falls back to latest', async () => {
     writeManifest({ shared: { sha256: 'a', pages: 1 }, 'v57.0.0': { sha256: 'b', pages: 1 } });
     vol.fromJSON({

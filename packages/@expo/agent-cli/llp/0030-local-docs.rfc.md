@@ -143,6 +143,7 @@ The docs must exist before an agent needs them, and they must follow the project
 - **A failed sync fails nothing.** Setup and `new` report `{ status: 'failed', reason }` and exit as they would without the sync. A host without bundles (`DOCS_UNAVAILABLE`, HTTP 404) is `failed` too. The docs build publishes the bundles before this CLI ships, so a 404 means a broken host, and it must be visible.
 - **The project's SDK** is the installed `expo`, else the `expo` range in `package.json`. A project made with `new --no-install` has only the range.
 - **A background sync** is a detached `docs:sync --sdk <N> --json --no-followups` of this CLI's own entry script. The cache lock keeps it from colliding with another sync.
+- **After an install, the SDK is chosen as search chooses it.** An upgrade past every version the host had at the last sync starts a background sync for that version, which may have been published since. An SDK without docs falls back to latest and starts nothing.
 - **`install` never starts a first sync.** It acts only for a user who already has a manifest, because a download nobody asked for is not part of an install.
 - **Off switches.** `AGENT_CLI_NO_DOCS_SYNC` and `EXPO_OFFLINE` turn off every automatic sync. The unit tests and the e2e tier set `AGENT_CLI_NO_DOCS_SYNC`, so no test reaches the network by accident.
 
