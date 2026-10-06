@@ -223,6 +223,42 @@ describe('docs:sync', () => {
 });
 
 describe('docs:search', () => {
+  it('searches the stored docs when the check for a newer project SDK fails, but not for --sdk', async () => {
+    const project = path.join(path.dirname(cwd), 'offline-new-sdk-app');
+    await fs.promises.mkdir(path.join(project, 'node_modules', 'expo'), { recursive: true });
+    await fs.promises.writeFile(
+      path.join(project, 'package.json'),
+      JSON.stringify({ name: 'offline-new-sdk-app', dependencies: { expo: '~58.0.0' } })
+    );
+    await fs.promises.writeFile(
+      path.join(project, 'node_modules', 'expo', 'package.json'),
+      JSON.stringify({ name: 'expo', version: '58.0.1' })
+    );
+    await executeAgentCliAsync(project, ['docs:sync'], docsEnv());
+    const manifestFile = path.join(docsDir, 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+    fs.writeFileSync(manifestFile, JSON.stringify({ ...manifest, syncedAt: twoHoursAgo }));
+    const unreachable = docsEnv({ AGENT_CLI_DOCS_URL: 'http://127.0.0.1:9/agents' });
+
+    const project58 = await executeAgentCliAsync(
+      project,
+      ['docs:search', 'camera', '--json'],
+      unreachable
+    );
+    expect(project58.exitCode).toBe(0);
+    expect(JSON.parse(project58.stdout).sdk).toBe('v57.0.0');
+    expect(project58.stderr).toContain('Could not check for the v58.0.0 docs');
+
+    const flag58 = await executeAgentCliAsync(
+      project,
+      ['docs:search', 'camera', '--sdk', '58', '--json'],
+      { ...unreachable, reject: false }
+    );
+    expect(flag58.exitCode).toBe(1);
+    expect(JSON.parse(flag58.stdout).error.code).toBe('DOCS_FETCH_FAILED');
+  });
+
   it('asks the host again for an SDK newer than the last sync knew', async () => {
     await executeAgentCliAsync(cwd, ['docs:sync'], docsEnv());
     const unpublish = publish('v58.0.0', versionPages('v58.0.0'));
