@@ -12,6 +12,16 @@ An agent with only this CLI built a feature on an EAS Simulator session in 45 mi
 
 The agent left the CLI for every screenshot, and it read the CLI's source twice to find a workaround. Leaving the CLI for device work on EAS is fine: `eas simulator:exec npx agent-device …` is the intended tool for screenshots and alerts there, and this CLI does not wrap everything [decided — Vojtech, 2026-10-05]. What is not fine is that nothing told the agent so, and that the verbs this CLI does own were wrong on a cloud device. Thirteen of the twenty findings that are not `nice` have one cause: **the EAS session is not a device in the runtime model.** `navigate`, `runtime:reload`, `smoke` and `dev:stop` take `--eas`; `runtime:tree`, `runtime:tap`, `runtime:type` and `runtime:errors` take only `--ios` or `--android`, and their target index reads the platform from a local device name, which a cloud session does not have. So `navigate --eas` waits 55 s for an attach it cannot see (13), `smoke --eas` says the bundle never ran while it ran (16), the runtime verbs refuse `--ios` (14), `status` names the local simulator and plans the local path (4, 12), and every follow-up drops `--eas` (3, 6, 22, 24).
 
+## What the second run showed (2026-10-06, `apps/eas-example`, journal `dogfood-eas-example.notes.md`)
+
+A second agent built the same feature in `apps/eas-example` on an EAS session: 40 minutes, 15 findings (1 blocked, 5 wrong, 2 slow, 5 unclear, 1 missing, 1 nice). Six known findings reproduced, three new ones change this plan:
+
+- **The runtime verbs read whichever app is attached to the dev server, and say nothing about whose it is** (finding 8, `blocked`). A dev client of another project, left on a local simulator from an earlier run, reconnected to the port this project's Metro now served; `runtime:tree`, `runtime:eval` and `runtime:errors` answered from that app with exit 0. The target selector in `src/runtime/cdpClient.ts` takes the first target and never compares its `appId` with the project's bundle id. Moving to another port cost a new session and a new build each time.
+- **A build made by `dev --eas` is not recorded, so every restart builds again** (finding 9, `slow`): about 4 minutes and one billed EAS build per `dev --eas`. `status --explain` reported no finished build for the fingerprint while two existed, and the fingerprint moved without a native change the agent made; with no record, nothing says which file moved it.
+- **`dev --eas` leaves the session without an agent-device controller** (finding 10, `wrong`), so the screenshot command this plan points agents at fails with `SESSION_NOT_FOUND` until `navigate --eas` has run once.
+
+Also new: `install` fails with a Node stack trace and no recovery line when the repo's `minimumReleaseAge` blocks a package (finding 5); the recovery is `install <pkg> -- --minimum-release-age 0`.
+
 ## Phases
 
 Each phase is one PR, ends green on unit and stub e2e, and is accepted by a rerun of the live check named in it. Infrastructure first.
@@ -26,6 +36,8 @@ Each phase is one PR, ends green on unit and stub e2e, and is accepted by a reru
 - `runtime:tree`, `runtime:tap`, `runtime:type`, `runtime:errors` and `runtime:eval` work without a platform flag when one app is attached, whatever device it runs on; `--ios`/`--android` means the claimed local device; `--eas` is accepted and means the claimed session. The refusal text never asks for `adb devices` or `simctl list` when the attached app is on a session.
 - Attach detection reads the dev server's `/json/list` and matches the target to the resolved device, for a cloud session as for a local one. `navigate --eas` and `smoke --eas` then see the attach they wait for, and `smoke --eas` stops labelling a running app as "the bundle never ran".
 - The bundle check must not take the debugger target away (15). Trace why the entry-bundle request drops the target on a tunnelled dev server; until then, the verb waits for the target to return and the error text names `--no-bundle-check`.
+- **The target must belong to this project.** Every runtime verb filters debugger targets by the project's app id (bundle id or Android package from the config) before it reads one; a foreign app as the only target is a refusal that names it (`dev.expo.parallelexample` is attached, this project is `dev.expo.easexample`). This is the second run's `blocked` finding.
+- `dev --eas` opens the agent-device controller the way `smoke --eas` does, so the screenshot and alert commands work right after it.
 - No `screenshot` verb. Where a report or follow-up needs a picture or an alert on EAS, it prints the `eas simulator:exec npx agent-device@latest screenshot <path>` and `alert get|accept` commands as they are.
 - Accepted by: `navigate /notes --eas` exits 0 in under 20 s, `runtime:tree` exits 0 on the first try with the app on a session, `smoke --eas` reports the app it photographed.
 
@@ -33,6 +45,7 @@ Each phase is one PR, ends green on unit and stub e2e, and is accepted by a reru
 
 - Follow-ups are built from the resolved options, so a run started with `--eas` suggests `--eas` (22, 24, 3, 6). A follow-up for a step that has not run yet is printed after the step, or worded "when the build finishes" (8).
 - `status --eas`: freshness from the EAS build the CLI itself made (12), the session on the device line, `next` for the EAS path (4). The plan reads `ios.simulator` from `eas.json` before it rejects the `development` profile (3).
+- A build that `dev --eas` made is recorded (or found again by its fingerprint and profile on EAS), so a restart of `dev --eas` reuses it instead of building; the plan names the record it reused. When the fingerprint moved, the report names the sources that moved it.
 - `install` on a CNG project says "rebuild the development build", not "prebuild" (6).
 - The Expo CLI prompt text and the QR code do not reach the agent's log when the device is a session (10).
 - `dev:stop --eas` says "stopped by the dev server on exit" when the lock holder stopped the session (24).
@@ -47,6 +60,7 @@ Each phase is one PR, ends green on unit and stub e2e, and is accepted by a reru
 ### Phase 4 — no silent side effects (findings 17, 23)
 
 - `lint` prints its plan when `expo lint` is about to install eslint and write `eslint.config.js`, and refuses under `--json` without `--yes` (23). The lockfile change is named.
+- `install` turns a package blocked by `minimumReleaseAge` into a refusal with the package, its age, and the `-- --minimum-release-age 0` recovery, instead of a stack trace.
 - `dev` and `smoke` mark the dev-menu onboarding as finished on a fresh dev build, the way they answer system alerts (17), so a relaunch does not cover the app.
 - Accepted by: stub e2e for `lint`; the dogfood screenshots show no onboarding sheet.
 

@@ -121,7 +121,8 @@ function NoteList(props: {
             <Pressable
               testID={`note-${item.id}`}
               onPress={() => props.onOpen(item)}
-              style={[styles.card, { backgroundColor: p.card }]}>
+              style={[styles.card, { backgroundColor: p.card }]}
+            >
               <Text style={[styles.noteTitle, { color: p.fg }]}>{item.title || 'Untitled'}</Text>
               <Text numberOfLines={1} style={{ color: p.muted }}>
                 {item.body.split('\n')[0]}
@@ -173,7 +174,8 @@ function NewNote(props: {
         testID="save-note"
         disabled={!canSave}
         onPress={() => props.onSave(title.trim(), body)}
-        style={[styles.button, !canSave && styles.disabled]}>
+        style={[styles.button, !canSave && styles.disabled]}
+      >
         <Text style={{ color: p.accent }}>Save</Text>
       </Pressable>
     </View>
