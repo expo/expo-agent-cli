@@ -21,12 +21,7 @@ import { buildCreateExpoArgs, resolveCreateExpoCli } from './createExpo';
 import { debugEvent, event } from './events';
 import { resolveGitStateAsync } from './git';
 import type { InstallState } from './install';
-import {
-  describeMissingInstall,
-  resolveInstallState,
-  suggestInstallCommand,
-  tailLines,
-} from './install';
+import { describeMissingInstall, resolveInstallState, tailLines } from './install';
 import { createExpoOutputFilter } from './output';
 import type { NewOptions } from './resolveOptions';
 
@@ -44,7 +39,7 @@ export interface NewProjectReport {
   name: string | null;
   /** `create-expo` finished successfully. */
   created: boolean;
-  /** `<dir>/node_modules/expo/package.json` is on disk. False after `--no-install` and after a `create-expo` whose install failed. */
+  /** `expo` resolves from the project directory (its `node_modules` or a parent's). False after `--no-install` and after a `create-expo` whose install failed. */
   installed: boolean;
   /** The project is its own git repository. */
   gitInitialized: boolean;
@@ -58,7 +53,7 @@ export interface NewProjectReport {
  * Create a new Expo project without a terminal.
  *
  * @returns the scaffolder's exit code on failure, or 20 if the project was created but its
- * instructions could not be written.
+ * dependency install did not finish or its instructions could not be written.
  */
 export async function createNewProjectAsync(cwd: string, options: NewOptions): Promise<number> {
   const projectRoot = path.resolve(cwd, options.directory);
@@ -109,7 +104,7 @@ export async function createNewProjectAsync(cwd: string, options: NewOptions): P
   const installState = resolveInstallState(projectRoot, options.install);
   const installed = installState === 'installed';
   const createExpoOutput = `${result.stdout}${result.stderr}`;
-  const installCommand = suggestInstallCommand(projectRoot, createExpoOutput, detectInvoker());
+  const installCommand = detectInvoker() === 'bunx' ? 'bun install' : 'npm install';
   const git = await resolveGitStateAsync(projectRoot, { ...options, createdProjectDirectory });
   let agentsMd: AgentsMdResult | null = null;
   const errors: string[] = [];

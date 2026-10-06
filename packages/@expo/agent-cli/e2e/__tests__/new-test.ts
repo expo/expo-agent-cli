@@ -471,7 +471,7 @@ fs.writeFileSync(manifestPath, JSON.stringify(manifest));
     expect(report.errors[0]).toContain('npm error code ERESOLVE');
     expect(report.followups[0]).toMatchObject({
       id: 'install-dependencies',
-      command: 'cd my-app && npm install --legacy-peer-deps',
+      command: 'cd my-app && npm install',
     });
     expect(fs.existsSync(path.join(workDir, 'my-app', 'node_modules'))).toBe(false);
   });

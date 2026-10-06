@@ -2,12 +2,7 @@ import { vol } from 'memfs';
 import path from 'path';
 
 import { UNTRUSTED_OUTPUT_BEGIN, UNTRUSTED_OUTPUT_END } from '../../runtime/untrusted';
-import {
-  describeMissingInstall,
-  resolveInstallState,
-  suggestInstallCommand,
-  tailLines,
-} from '../install';
+import { describeMissingInstall, resolveInstallState, tailLines } from '../install';
 
 const projectRoot = '/work/my-app';
 
@@ -47,32 +42,6 @@ describe(resolveInstallState, () => {
   });
 });
 
-describe(suggestInstallCommand, () => {
-  const eresolve = 'npm error code ERESOLVE\nnpm error Could not resolve dependency';
-
-  it(`should offer --legacy-peer-deps only for an npm ERESOLVE`, () => {
-    expect(suggestInstallCommand(projectRoot, eresolve, 'npx')).toBe(
-      'npm install --legacy-peer-deps'
-    );
-    expect(suggestInstallCommand(projectRoot, 'getaddrinfo ENOTFOUND', 'npx')).toBe('npm install');
-  });
-
-  it.each([
-    ['bun.lock', 'bun install'],
-    ['bun.lockb', 'bun install'],
-    ['pnpm-lock.yaml', 'pnpm install'],
-    ['yarn.lock', 'yarn install'],
-  ])('should follow the %s that create-expo left', (lockfile, command) => {
-    vol.fromJSON({ [path.join(projectRoot, lockfile)]: '' });
-
-    expect(suggestInstallCommand(projectRoot, eresolve, 'npx')).toBe(command);
-  });
-
-  it(`should follow the runner when no lockfile exists`, () => {
-    expect(suggestInstallCommand(projectRoot, '', 'bunx')).toBe('bun install');
-  });
-});
-
 describe(tailLines, () => {
   it(`should keep the last non-empty lines`, () => {
     const output = Array.from({ length: 30 }, (_, index) => `line ${index + 1}\n\n`).join('');
@@ -89,12 +58,12 @@ describe(describeMissingInstall, () => {
   it(`should name the file, the command and the output under the untrusted markers`, () => {
     const reason = describeMissingInstall(
       projectRoot,
-      'cd my-app && npm install --legacy-peer-deps',
+      'cd my-app && npm install',
       'npm error code ERESOLVE'
     );
 
     expect(reason).toContain(path.join(projectRoot, 'node_modules', 'expo', 'package.json'));
-    expect(reason).toContain('cd my-app && npm install --legacy-peer-deps');
+    expect(reason).toContain('cd my-app && npm install');
     expect(reason).toContain(
       `${UNTRUSTED_OUTPUT_BEGIN}\nnpm error code ERESOLVE\n${UNTRUSTED_OUTPUT_END}`
     );

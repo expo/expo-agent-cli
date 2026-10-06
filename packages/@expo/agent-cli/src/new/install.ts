@@ -5,9 +5,8 @@
 
 import path from 'path';
 
+import { resolvePackageRootSync } from '../project/nodeModules';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
-import { fileExistsSync } from '../utils/dir';
-import type { Invoker } from '../utils/invoker';
 
 /** What `new` knows about the dependencies of the project it created. */
 export type InstallState =
@@ -15,55 +14,18 @@ export type InstallState =
   | 'installed'
   /** `--no-install` was passed; no install ran. */
   | 'skipped'
-  /** create-expo ran its install, but `expo` did not end up in any `node_modules` the project resolves. */
+  /** create-expo ran its install, but `expo` does not resolve from the project. */
   | 'missing';
 
 /**
- * The `expo/package.json` Node would resolve from the project directory: `node_modules` of the
- * directory itself, then of each parent. A workspace hoists `expo` to the root, so the project's
- * own `node_modules` alone would call a working install missing.
+ * Decide from the disk, not from what was requested. `expo` is looked up the way every later verb
+ * looks it up (`resolvePackageRootSync`), so `installed` means those verbs will find it.
  */
-export function findProjectExpoPackageJson(projectRoot: string): string | null {
-  for (let dir = projectRoot; ; dir = path.dirname(dir)) {
-    const candidate = path.join(dir, 'node_modules', 'expo', 'package.json');
-    if (fileExistsSync(candidate)) {
-      return candidate;
-    }
-    if (path.dirname(dir) === dir) {
-      return null;
-    }
-  }
-}
-
-/** Decide from the disk, not from what was requested. */
 export function resolveInstallState(projectRoot: string, requested: boolean): InstallState {
   if (!requested) {
     return 'skipped';
   }
-  return findProjectExpoPackageJson(projectRoot) ? 'installed' : 'missing';
-}
-
-/**
- * The install command for the project's package manager.
- *
- * The lockfile `create-expo` left names the manager; with none (a failed install writes none),
- * the runner this process came from does. `--legacy-peer-deps` is offered only for an npm
- * `ERESOLVE`, the one case it was observed to fix [observed — 2026-10-05, a prerelease SDK whose
- * `react-native-reanimated` peer range excluded `react-native@0.88.0-rc.3`].
- */
-export function suggestInstallCommand(
-  projectRoot: string,
-  output: string,
-  invoker: Invoker
-): string {
-  const has = (file: string) => fileExistsSync(path.join(projectRoot, file));
-  if (has('bun.lock') || has('bun.lockb')) return 'bun install';
-  if (has('pnpm-lock.yaml')) return 'pnpm install';
-  if (has('yarn.lock')) return 'yarn install';
-  if (has('package-lock.json') || invoker === 'npx') {
-    return output.includes('ERESOLVE') ? 'npm install --legacy-peer-deps' : 'npm install';
-  }
-  return 'bun install';
+  return resolvePackageRootSync(projectRoot, 'expo') ? 'installed' : 'missing';
 }
 
 /** The last non-empty lines of a captured run, which is where a tool says what went wrong. */

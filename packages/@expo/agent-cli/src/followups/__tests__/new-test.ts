@@ -29,12 +29,12 @@ describe(buildNewFollowUps, () => {
     const [first] = buildNewFollowUps({
       directory: 'my-app',
       install: 'missing',
-      installCommand: 'npm install --legacy-peer-deps',
+      installCommand: 'bun install',
     });
 
     expect(first).toEqual({
       id: 'install-dependencies',
-      command: 'cd my-app && npm install --legacy-peer-deps',
+      command: 'cd my-app && bun install',
       why: expect.stringContaining('did not finish'),
     });
   });
