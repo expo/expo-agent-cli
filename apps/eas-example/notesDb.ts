@@ -38,10 +38,23 @@ export async function migrate(db: SQLiteDatabase): Promise<void> {
   }
 }
 
-export function listNotes(db: SQLiteDatabase): Promise<Note[]> {
+export function listNotes(db: SQLiteDatabase, query = ''): Promise<Note[]> {
+  const select =
+    'SELECT id, title, body, created_at AS createdAt, updated_at AS updatedAt FROM notes';
+  const order = 'ORDER BY created_at DESC, id DESC';
+  const q = query.trim();
+  if (q === '') return db.getAllAsync<Note>(`${select} ${order}`);
+  const pattern = `%${q}%`;
   return db.getAllAsync<Note>(
-    'SELECT id, title, body, created_at AS createdAt, updated_at AS updatedAt FROM notes ORDER BY created_at DESC, id DESC'
+    `${select} WHERE title LIKE ? OR body LIKE ? ${order}`,
+    pattern,
+    pattern
   );
+}
+
+export async function countNotes(db: SQLiteDatabase): Promise<number> {
+  const row = await db.getFirstAsync<{ count: number }>('SELECT COUNT(*) AS count FROM notes');
+  return row?.count ?? 0;
 }
 
 export async function addNote(db: SQLiteDatabase, title: string, body: string): Promise<void> {
