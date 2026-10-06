@@ -3,7 +3,7 @@
 **Type:** Plan
 **Status:** Draft
 **Date:** 2026-10-05
-**Source:** [[dogfood-parallel-example.notes]] (24 findings: 1 blocked, 9 wrong, 1 slow, 7 unclear, 2 missing, 4 nice), the live run of 2026-10-05 behind [[0030-one-device-per-agent]].
+**Source:** the dogfood journal `docs/dogfood-2026-10-05.md` in the `parallel-example` app repository, kept outside this one (24 findings: 1 blocked, 9 wrong, 1 slow, 7 unclear, 2 missing, 4 nice), the live run of 2026-10-05 behind [[0030-one-device-per-agent]].
 **Related:** [[0005-runtime-loop-tools]], [[0021-honest-reports]], [[0026-dev-owns-the-open]], [[0027-everything-on-eas]]
 
 ## What the run showed
@@ -58,7 +58,7 @@ Each phase is one PR, ends green on unit and stub e2e, and is accepted by a reru
 
 ### Acceptance for the whole plan
 
-Rerun the dogfood: a new agent, the same feature brief, the same rule (CLI only). Target: 0 `wrong`, no CLI source read; leaving the CLI for `eas simulator:exec` is expected and not a finding. The journal of that run replaces [[dogfood-parallel-example.notes]].
+Rerun the dogfood: a new agent, the same feature brief, the same rule (CLI only). Target: 0 `wrong`, no CLI source read; leaving the CLI for `eas simulator:exec` is expected and not a finding. The journal of that run goes next to the first one, in the app repository.
 
 ## Not in this plan
 
