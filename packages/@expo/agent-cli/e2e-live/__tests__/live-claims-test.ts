@@ -5,11 +5,11 @@
 // `simctl`; this proves it against real simulators, a real `expo run:ios`, and real EAS Simulator
 // sessions.
 //
-// Each block scaffolds one app with `@expo/agent-cli new`, adds `expo-dev-client`, links it to the
-// `expo-ci/parallel-example` EAS project, and clones it with its node_modules into two scratch
-// worktrees. The scaffold runs outside every checkout, so its node_modules are its own. Each block
-// points `__UNSAFE_EXPO_HOME_DIRECTORY` at a fresh directory, so the registry it reads and asserts
-// on is its own and the machine's `~/.expo` is untouched.
+// Each block copies the committed `apps/eas-example` (a dev-client app linked to `expo-ci`) into two
+// scratch worktrees and runs `bun install` in each. A copy inside the workspace could not build: its
+// `node_modules` are symlinks into the root. Each block points `__UNSAFE_EXPO_HOME_DIRECTORY` at a
+// fresh directory, so the registry it reads and asserts on is its own and the machine's `~/.expo` is
+// untouched.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,8 +23,9 @@ import {
   cloudOptInGate,
   describeLive,
   easCiGate,
+  easProjectGate,
   iphoneSimulatorsGate,
-  EAS_CI_ACCOUNT,
+  EAS_EXAMPLE_APP,
   networkGate,
   packageRunnerGate,
   registryGate,
@@ -67,37 +68,6 @@ const EAS_SESSION_MS = 2_400_000;
  */
 const EAS_STAGGER_MS = 20_000;
 
-/** The EAS project the scaffold is linked to. Its slug is the scaffold's directory name. */
-const PARALLEL_EXAMPLE = {
-  owner: 'expo-ci',
-  projectId: 'c0decf1c-ec1a-4e8c-92a5-8b1b9f29890c',
-  appId: 'dev.expo.parallelexample',
-};
-
-/**
- * `bun` pins the builder's version: its default bun 1.3.14 cannot read the v2 lockfile that local
- * bun 1.4.0 writes.
- */
-const EAS_JSON = {
-  cli: { version: '>= 16.0.0', appVersionSource: 'remote' },
-  build: {
-    development: {
-      developmentClient: true,
-      distribution: 'internal',
-      bun: '1.4.0',
-      android: { buildType: 'apk' },
-      ios: { simulator: true },
-    },
-    'development-simulator': {
-      developmentClient: true,
-      distribution: 'internal',
-      bun: '1.4.0',
-      ios: { simulator: true },
-    },
-    production: { autoIncrement: true, bun: '1.4.0' },
-  },
-};
-
 type Worktrees = {
   /** Canonical roots, the form a claim's `projectRoot` takes. */
   roots: [string, string];
@@ -105,8 +75,11 @@ type Worktrees = {
   env: Record<string, string>;
 };
 
-/** The two worktrees, their shared machine registry, and the env every run in them gets. */
-async function setUpWorktreesAsync(run: LiveRun, { eas }: { eas: boolean }): Promise<Worktrees> {
+/** The two worktrees of `app`, their shared machine registry, and the env every run in them gets. */
+async function setUpWorktreesAsync(
+  run: LiveRun,
+  { app, eas }: { app: string; eas: boolean }
+): Promise<Worktrees> {
   run.prepare();
   run.onCleanup('scratch worktrees', () => {
     if (!process.env.AGENT_CLI_LIVE_KEEP) {
@@ -122,12 +95,19 @@ async function setUpWorktreesAsync(run: LiveRun, { eas }: { eas: boolean }): Pro
     fs.copyFileSync(state, path.join(expoHome, 'state.json'));
   }
 
-  const app = await scaffoldAppAsync(run);
+  const bun = (await execAsync('bun', ['--version'])).stdout.trim();
   const roots = await Promise.all(
     ['worktree-a', 'worktree-b'].map(async (name) => {
       const root = path.join(run.tempDir, name);
-      await copyTreeAsync(app, root);
-      fs.rmSync(path.join(root, '.expo'), { recursive: true, force: true });
+      fs.cpSync(app, root, {
+        recursive: true,
+        filter: (source) => !NOT_COPIED.has(path.relative(app, source)),
+      });
+      const installed = await execAsync('bun', ['install'], { cwd: root });
+      if (installed.exitCode !== 0) {
+        throw new Error(`bun install in ${root} exited ${installed.exitCode}: ${installed.stderr}`);
+      }
+      pinBuilderBun(root, bun);
       return fs.realpathSync(root);
     })
   );
@@ -144,53 +124,26 @@ async function setUpWorktreesAsync(run: LiveRun, { eas }: { eas: boolean }): Pro
   };
 }
 
-/** The scaffold's template. `@next` is the current SDK line; `@latest` lags it. */
-const LIVE_TEMPLATE = process.env.AGENT_CLI_LIVE_TEMPLATE || 'expo-template-default@next';
+/** What a worktree copy leaves out: installs, native projects, and the dev server state. */
+const NOT_COPIED = new Set(['node_modules', '.expo', 'ios', 'android']);
 
 /**
- * The `@next` line pins a `react-native` prerelease, which the stable peer ranges of its own
- * dependencies (`react-native-reanimated`) exclude, so a plain `npm install` fails with ERESOLVE.
+ * Add the simulator profile `dev --eas` builds, with the EAS builder's bun pinned to the local one.
+ *
+ * The copy's own `bun install` writes a v2 `bun.lock`, and bun 1.3.14, the builder's default, cannot
+ * read it [observed — 2026-10-06, `bun@1.3.14 install --frozen-lockfile` in a copy]. `dev --eas`
+ * adds this profile itself when it is missing, but without a `bun` key.
  */
-const SCAFFOLD_ENV = { npm_config_legacy_peer_deps: 'true' };
-
-/** `new`, then `install expo-dev-client`, then the EAS link: once per suite, cloned per worktree. */
-async function scaffoldAppAsync(run: LiveRun): Promise<string> {
-  const scaffoldDir = path.join(run.tempDir, 'scaffold');
-  fs.mkdirSync(scaffoldDir, { recursive: true });
-  const created = await runLiveAsync(
-    run,
-    scaffoldDir,
-    [
-      'new',
-      path.join(scaffoldDir, 'parallel-example'),
-      '--template',
-      LIVE_TEMPLATE,
-      '--name',
-      'Parallel Example',
-      '--no-git',
-      '--json',
-    ],
-    { label: 'new', env: SCAFFOLD_ENV }
-  );
-  run.spend.scaffolds += 1;
-  expectExit(created, 0, '@expo/agent-cli new must create and install a project');
-  const app: string = parseJson(created).projectRoot;
-
-  const installed = await runLiveAsync(run, app, ['install', 'expo-dev-client', '--json'], {
-    label: 'install-expo-dev-client',
-    env: SCAFFOLD_ENV,
-  });
-  expectExit(installed, 0, '@expo/agent-cli install expo-dev-client');
-
-  const appJsonPath = path.join(app, 'app.json');
-  const appJson = JSON.parse(fs.readFileSync(appJsonPath, 'utf8'));
-  appJson.expo.owner = PARALLEL_EXAMPLE.owner;
-  appJson.expo.ios = { ...appJson.expo.ios, bundleIdentifier: PARALLEL_EXAMPLE.appId };
-  appJson.expo.android = { ...appJson.expo.android, package: PARALLEL_EXAMPLE.appId };
-  appJson.expo.extra = { ...appJson.expo.extra, eas: { projectId: PARALLEL_EXAMPLE.projectId } };
-  fs.writeFileSync(appJsonPath, `${JSON.stringify(appJson, null, 2)}\n`);
-  fs.writeFileSync(path.join(app, 'eas.json'), `${JSON.stringify(EAS_JSON, null, 2)}\n`);
-  return app;
+function pinBuilderBun(root: string, bun: string): void {
+  const easJsonPath = path.join(root, 'eas.json');
+  const easJson = JSON.parse(fs.readFileSync(easJsonPath, 'utf8'));
+  easJson.build['development-simulator'] = {
+    developmentClient: true,
+    distribution: 'internal',
+    ios: { simulator: true },
+    bun,
+  };
+  fs.writeFileSync(easJsonPath, `${JSON.stringify(easJson, null, 2)}\n`);
 }
 
 function readClaims(expoHome: string): Claim[] {
@@ -227,7 +180,7 @@ describeLive(
 
   beforeAll(
     async () => {
-      worktrees = await setUpWorktreesAsync(run, { eas: false });
+      worktrees = await setUpWorktreesAsync(run, { app: EAS_EXAMPLE_APP, eas: false });
       const { roots } = worktrees;
 
       // The parent exits 1 after its 120 s `--detach` budget while the child still builds. That
@@ -333,6 +286,7 @@ describeLive(
 });
 
 const easCi = easCiGate();
+const easProject = easProjectGate();
 
 describeLive(
   'live-claims (EAS)',
@@ -341,12 +295,7 @@ describeLive(
     builtBinGate(),
     cloudOptInGate(),
     easCi.gate,
-    PARALLEL_EXAMPLE.owner === EAS_CI_ACCOUNT
-      ? { ok: true }
-      : {
-          ok: false,
-          reason: `the scaffold links to ${PARALLEL_EXAMPLE.owner}/parallel-example, and this run's CI account is ${EAS_CI_ACCOUNT}`,
-        },
+    easProject.gate,
     packageRunnerGate(),
     networkGate(),
     registryGate()
@@ -396,7 +345,7 @@ describeLive(
   }
 
   beforeAll(async () => {
-    worktrees = await setUpWorktreesAsync(run, { eas: true });
+    worktrees = await setUpWorktreesAsync(run, { app: easProject.source!, eas: true });
 
     for (const [index, root] of worktrees.roots.entries()) {
       if (index > 0) {

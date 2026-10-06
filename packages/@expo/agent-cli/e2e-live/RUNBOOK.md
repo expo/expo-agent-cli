@@ -39,7 +39,7 @@ Everything needs the bundle built first: **`bun run build`**.
 | `live-eas`           | `AGENT_CLI_LIVE_EAS=1`; a login with `expo-ci` access (ambient EAS session, or `EXPO_TOKEN` in CI); `bunx` or `npx`; network. Reads the committed `apps/eas-example` (seeded with a FINISHED and an ERRORED build — reseed the ERRORED one, if newer builds push it out of the latest 20, by building a copy of the app with a bogus dependency pinned in `bun.lock`: a bun 404 is a failure the anchor table locates); `AGENT_CLI_LIVE_EAS_PROJECT` overrides the app |
 | `live-cloud`         | everything `live-eas` needs (`AGENT_CLI_LIVE_EAS=1`), **plus** `AGENT_CLI_LIVE_CLOUD=1`. The public origin is the dev server's own tunnel (`--tunnel` under `EXPO_UNSTABLE_TUNNEL_V2=1`, on the same EAS auth) — no proxy needed; `AGENT_CLI_LIVE_PUBLIC_ORIGIN` remains the hatch for a reverse proxy of your own                                                                                                                                                     |
 | `live-ios-devclient` | a **booted** iOS simulator, **plus** `AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT` naming a project that (a) depends on `expo-dev-client`, (b) declares `expo.scheme` and `expo.ios.bundleIdentifier`, (c) has that bundle id **installed** on the booted simulator, and (d) has an `ios` entry in `.expo/agent-cli-last-build.json`. It **does not build** — run `npx expo run:ios` once (~15 min) to make one                                                               |
-| `live-claims`        | `AGENT_CLI_LIVE_CLAIMS=1`; network (npm, for the scaffold's install). The local block needs macOS and **two available iPhone simulators**, booted or not. The EAS block also needs `AGENT_CLI_LIVE_EAS=1`, `AGENT_CLI_LIVE_CLOUD=1`, a login with `expo-ci` access, and `bunx` or `npx`. Scaffolds the app with `new`, links it to `expo-ci/parallel-example`, and clones it into two scratch worktrees                                                                |
+| `live-claims`        | `AGENT_CLI_LIVE_CLAIMS=1`; `bun`; network (npm, for each copy's install). The local block needs macOS and **two available iPhone simulators**, booted or not. The EAS block also needs `AGENT_CLI_LIVE_EAS=1`, `AGENT_CLI_LIVE_CLOUD=1`, a login with `expo-ci` access, and `bunx` or `npx`. Copies the committed `apps/eas-example` into two scratch worktrees and installs each; `AGENT_CLI_LIVE_EAS_PROJECT` overrides the app of the EAS block                     |
 | `live-bootstrap`     | macOS; **no booted** simulator anywhere (`xcrun simctl shutdown all` first — the suite skips rather than shutting down a device you are using); a shut-down simulator that has Expo Go installed (run `live-local` once to make one); network (npm, for the scaffold's install). It measures the boot and dev-server start `smoke` performs itself, so the machine state every other suite needs is exactly the state this one refuses                                 |
 
 ### Two things about `live-local`
@@ -57,35 +57,32 @@ the first command races the file watcher and reads the last good bundle.
 
 ### Things about `live-claims`
 
-It proves `llp/0030`: two worktrees of one app get two devices and never share one. Each block
-scaffolds the app once (`new`, then `install expo-dev-client`), writes the `expo-ci/parallel-example`
-link into its `app.json` and an `eas.json` beside it, clones it with its `node_modules` into two
-scratch directories, and points `__UNSAFE_EXPO_HOME_DIRECTORY` at a fresh directory, so the
-registry it asserts on is its own. The EAS block copies `~/.expo/state.json` into that directory
-when no `EXPO_TOKEN` is set, because the login lives there too.
+It proves `llp/0030`: two worktrees of one app get two devices and never share one. The app is the
+committed `apps/eas-example`, a dev-client app linked to `expo-ci`. Each block copies it into two
+scratch directories without `node_modules`, `.expo`, `ios` and `android`, and runs `bun install` in
+each copy. The copies are outside the workspace, so they need their own install: a copy inside it
+could not build, because its `node_modules` are symlinks into the root. Each block points
+`__UNSAFE_EXPO_HOME_DIRECTORY` at a fresh directory, so the registry it asserts on is its own. The
+EAS block copies `~/.expo/state.json` into that directory when no `EXPO_TOKEN` is set, because the
+login lives there too.
 
 - **The `--detach` budget.** `dev --ios --detach` exits 1 after 120 s while its child still builds.
   That budget is older than this suite. The suite waits on the registry and on `status` reporting
-  the dev server from its lock, not on the parent's exit code.
+  the dev server from its lock, not on the parent's exit code. PR #114 makes the budget follow the
+  plan's build.
 - **The bunx race, and the 20-second stagger.** Two `dev --eas` started at once each run
   `bunx eas-cli@latest`, and one failed while racing the other for the shared bunx install
   directory. `src/utils/runnerLock.ts` serializes the runner inside one process only. The suite
-  starts the second worktree 20 s after the first. That is a workaround, not a fix.
+  starts the second worktree 20 s after the first. That is a workaround, not a fix. PR #112 warms
+  the install under a lock in the Expo home.
 - **`EAS_NO_VCS=1`.** The copies are not git repositories, and eas-cli otherwise asks to run
   `git init`.
-- **The template.** The suite scaffolds with `new --template expo-template-default@next`, because
-  `@next` is the current SDK line (58 on 2026-10-05) and `@latest` lags it. Set
-  `AGENT_CLI_LIVE_TEMPLATE=expo-template-default@latest` to scaffold on the stable line instead.
-  `create-expo` accepts an npm spec with a tag in `--template` [observed — 2026-10-05]. The `@next`
-  line pins a `react-native` prerelease that `react-native-reanimated`'s peer range excludes, so the
-  scaffold sets `npm_config_legacy_peer_deps=true` for `new` and `install`. Without it `npm install`
-  fails with ERESOLVE, `create-expo` continues, and `new` still reports `installed: true` with no
-  `node_modules`.
-- **The bun pin.** The `eas.json` the suite writes pins bun 1.4.0 in each profile. The EAS
-  builder's default 1.3.14 cannot read the v2 `bun.lock` that local bun 1.4.0 writes. The scaffold
-  wrote a `package-lock.json` when `new` ran under node [observed — 2026-10-05], so the pin is a
-  guard for a scaffold that installs with bun.
-- **The cost.** Each block first scaffolds and installs the app, about 3 minutes. The local block
+- **The bun pin.** Each copy's `bun install` writes a v2 `bun.lock`, and bun 1.3.14 cannot read it
+  [observed — 2026-10-06]. 1.3.14 is the EAS builder's default. So the suite writes the
+  `development-simulator` profile into each copy's `eas.json`, with `bun` pinned to the local bun.
+  `dev --eas` adds that profile itself when it is missing, but with no `bun` key. The committed
+  `eas.json` does not change.
+- **The cost.** Each block first installs two copies of the app, seconds with a warm bun cache. The local block
   builds two development clients on this machine (5–10 minutes) and may boot a simulator. The EAS
   block builds on EAS the first time (10–15 minutes), then reuses the build. It bills two EAS
   Simulator sessions from start to `dev:stop --eas`. The `afterAll` stops any session the suite
@@ -94,7 +91,9 @@ when no `EXPO_TOKEN` is set, because the login lives there too.
   free-port probe (`src/dev/portCollision.ts` §isPortBindableAsync) binds `127.0.0.1` only. That
   bind succeeds beside a listener on `*:8081` (IPv6, dual stack), so both worktrees were given
   8081, and `status` in the first reported its lock with `projectRootMatched: false`
-  [observed — 2026-10-05]. The device assertions passed in the same run.
+  [observed — 2026-10-05]. The device assertions passed in the same run. PR #113 makes the probe
+  bind `::` too. The lock now withholds a port whose `/status` names another project
+  (`llp/0030` §Discovery).
 
 ### The live-tier hooks carry their own timeout
 
