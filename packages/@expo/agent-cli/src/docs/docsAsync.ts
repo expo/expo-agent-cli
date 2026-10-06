@@ -150,6 +150,25 @@ function parseRegex(query: string): RegExp {
   }
 }
 
+/** The selection the last sync made, when its docs are complete on disk. */
+function storedSelection(
+  dir: string,
+  manifest: DocsManifest,
+  projectSdkVersion: string | null
+): SdkSelection | null {
+  const selection = selectSdkVersion({
+    flag: undefined,
+    projectSdkVersion,
+    latest: manifest.latest,
+    available: manifest.available ?? versionNames(manifest.bundles),
+  });
+  const complete =
+    manifest.bundles.shared != null &&
+    manifest.bundles[selection.version] != null &&
+    fs.existsSync(versionDir(dir, selection.version));
+  return complete ? selection : null;
+}
+
 /**
  * The version to search, syncing first when the cache lacks the bundles it needs.
  *
@@ -191,14 +210,28 @@ async function resolveSearchScopeAsync(
 
   if (!ready && !env.EXPO_OFFLINE) {
     Log.progress('Syncing the Expo docs first…');
-    const result = await syncDocsAsync({
-      dir,
-      baseUrl: docsBaseUrl(),
-      sdkFlag,
-      projectSdkVersion,
-      progress: Log.progress,
-    });
-    return { selection: result.selection, synced: true };
+    try {
+      const result = await syncDocsAsync({
+        dir,
+        baseUrl: docsBaseUrl(),
+        sdkFlag,
+        projectSdkVersion,
+        progress: Log.progress,
+      });
+      return { selection: result.selection, synced: true };
+    } catch (error) {
+      // Checking for a newer project SDK is optional: when the host cannot answer, the docs the last
+      // sync selected are still complete on disk. A version named with --sdk has no such fallback.
+      const fallback =
+        newer && sdkFlag == null ? storedSelection(dir, manifest, projectSdkVersion) : null;
+      if (!fallback) {
+        throw error;
+      }
+      Log.warn(
+        `Could not check for the ${requested} docs: ${error instanceof Error ? error.message : String(error)} Searching the ${fallback.version} docs.`
+      );
+      return { selection: fallback, synced: false };
+    }
   }
 
   if (!manifest?.bundles.shared) {
