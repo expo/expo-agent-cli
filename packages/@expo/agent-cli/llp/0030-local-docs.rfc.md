@@ -117,6 +117,7 @@ The `docs` group has no default action. Bare `docs` prints the group listing. It
 
 - It syncs when the bundles it needs are missing, unless `EXPO_OFFLINE` is set (read through `env.EXPO_OFFLINE`, so `false` means online). Offline with nothing cached, it fails with `DOCS_NOT_SYNCED` and names `docs:sync`.
 - It selects the version with the same rule as sync, from the versions the host published at the last sync (`available` in the manifest). A project on an SDK without docs therefore searches the latest docs it synced, instead of asking the host on every search.
+- A version newer than every one in `available` may have been published since, so search asks the host again instead of answering from the stored list. A version named with `--sdk` is asked for every time; a project's SDK at most once an hour, because a canary SDK stays newer than every published one [reported in review: `--sdk 58` failed against a cache synced when 57 was the newest].
 - It reads at most 32 files at a time, far below the 256 open files a macOS shell allows, and skips a file that a concurrent sync removed between the listing and the read.
 - It warns on stderr when the cache is older than seven days.
 - Scope: everything outside `versions/`, plus `versions/<chosen>/`. It never descends through `versions/latest`.
