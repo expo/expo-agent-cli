@@ -6,6 +6,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   addNote,
+  countNotes,
   deleteNote,
   listNotes,
   migrate,
@@ -44,19 +45,25 @@ function NotesApp() {
   const db = useSQLiteContext();
   const [screen, setScreen] = useState<Screen>({ kind: 'list' });
   const [notes, setNotes] = useState<Note[]>([]);
+  const [total, setTotal] = useState(0);
+  const [query, setQuery] = useState('');
   const [theme, setTheme] = useState<Theme>('light');
   const p = palettes[theme];
 
   const refresh = useCallback(async () => {
-    const next = await listNotes(db);
+    const next = await listNotes(db, query);
     setNotes(next);
+    setTotal(await countNotes(db));
     return next;
-  }, [db]);
+  }, [db, query]);
 
   useEffect(() => {
     refresh();
+  }, [refresh]);
+
+  useEffect(() => {
     readTheme(db).then(setTheme);
-  }, [db, refresh]);
+  }, [db]);
 
   const toggleTheme = async () => {
     const next: Theme = theme === 'light' ? 'dark' : 'light';
@@ -68,7 +75,7 @@ function NotesApp() {
     <SafeAreaView style={[styles.root, { backgroundColor: p.bg }]}>
       <View style={styles.header}>
         <Text testID="notes-title" style={[styles.title, { color: p.fg }]}>
-          Notes ({notes.length})
+          Notes ({total})
         </Text>
         <Pressable testID="theme-toggle" onPress={toggleTheme} style={styles.button}>
           <Text style={{ color: p.accent }}>{theme === 'light' ? 'Dark' : 'Light'}</Text>
@@ -77,6 +84,9 @@ function NotesApp() {
       {screen.kind === 'list' && (
         <NoteList
           notes={notes}
+          total={total}
+          query={query}
+          onQuery={setQuery}
           p={p}
           onNew={() => setScreen({ kind: 'new' })}
           onOpen={(note) => setScreen({ kind: 'detail', note })}
@@ -130,6 +140,9 @@ function NotesApp() {
 
 function NoteList(props: {
   notes: Note[];
+  total: number;
+  query: string;
+  onQuery: (query: string) => void;
   p: Palette;
   onNew: () => void;
   onOpen: (note: Note) => void;
@@ -137,12 +150,26 @@ function NoteList(props: {
   const { notes, p } = props;
   return (
     <View style={styles.body}>
+      <TextInput
+        testID="search-input"
+        placeholder="Search"
+        placeholderTextColor={p.muted}
+        value={props.query}
+        onChangeText={props.onQuery}
+        autoCapitalize="none"
+        autoCorrect={false}
+        style={[styles.input, { color: p.fg, backgroundColor: p.card }]}
+      />
       <Pressable testID="new-note" onPress={props.onNew} style={styles.button}>
         <Text style={{ color: p.accent }}>New note</Text>
       </Pressable>
-      {notes.length === 0 ? (
+      {props.total === 0 ? (
         <Text testID="empty-state" style={[styles.empty, { color: p.muted }]}>
           No notes yet. Tap New note to write one.
+        </Text>
+      ) : notes.length === 0 ? (
+        <Text testID="no-matches" style={[styles.empty, { color: p.muted }]}>
+          No notes match.
         </Text>
       ) : (
         <FlatList
