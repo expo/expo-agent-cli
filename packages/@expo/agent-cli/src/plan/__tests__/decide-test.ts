@@ -872,7 +872,7 @@ describe(decideStartPlan, () => {
       });
 
       expect(argvOf(plan.steps)).toEqual([
-        ['eas', 'build', '--platform', 'ios', '--profile', 'development'],
+        ['eas', 'build', '--platform', 'ios', '--profile', 'development', '--non-interactive'],
         ['expo', 'start', '--dev-client'],
       ]);
       expect(plan.rule).toBe('dev-client-stale');
@@ -959,6 +959,7 @@ describe(decideStartPlan, () => {
         'ios',
         '--profile',
         'development',
+        '--non-interactive',
       ]);
     });
 
@@ -969,7 +970,7 @@ describe(decideStartPlan, () => {
       expect(plan.rule).toBe('needs-dev-client');
       expect(argvOf(plan.steps)).toEqual([
         ['expo', 'install', 'expo-dev-client'],
-        ['eas', 'build', '--platform', 'ios', '--profile', 'development'],
+        ['eas', 'build', '--platform', 'ios', '--profile', 'development', '--non-interactive'],
         ['expo', 'start', '--dev-client'],
       ]);
     });
@@ -980,7 +981,7 @@ describe(decideStartPlan, () => {
 
       expect(plan.rule).toBe('bare-stale');
       expect(argvOf(plan.steps)).toEqual([
-        ['eas', 'build', '--platform', 'ios', '--profile', 'development'],
+        ['eas', 'build', '--platform', 'ios', '--profile', 'development', '--non-interactive'],
         ['expo', 'start', '--dev-client'],
       ]);
     });
@@ -1107,7 +1108,15 @@ describe('the EAS device', () => {
     const plan = decideStartPlan(createDevClientState(), { ...eas, buildBackend: backend('eas') });
 
     expect(argvOf(plan.steps)).toEqual([
-      ['eas', 'build', '--platform', 'ios', '--profile', 'development-simulator'],
+      [
+        'eas',
+        'build',
+        '--platform',
+        'ios',
+        '--profile',
+        'development-simulator',
+        '--non-interactive',
+      ],
       ['expo', 'start', '--dev-client'],
     ]);
     expect(plan.steps[0]!.reason).toContain('a simulator build, which needs no signing');
@@ -1168,6 +1177,7 @@ describe('the EAS device', () => {
       'ios',
       '--profile',
       'development',
+      '--non-interactive',
     ]);
   });
 

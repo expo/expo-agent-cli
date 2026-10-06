@@ -282,7 +282,7 @@ describe('detection', () => {
     const plan = await resolveStartPlanAsync(projectRoot, devClientState(), { platform: 'ios' });
 
     expect(argvOf(plan)).toEqual([
-      ['eas', 'build', '--platform', 'ios', '--profile', 'development'],
+      ['eas', 'build', '--platform', 'ios', '--profile', 'development', '--non-interactive'],
       ['expo', 'start', '--dev-client'],
     ]);
     expect(plan.buildLocation).toMatchObject({
@@ -332,6 +332,7 @@ describe('detection', () => {
       'ios',
       '--profile',
       'development',
+      '--non-interactive',
     ]);
   });
 
@@ -501,7 +502,15 @@ describe('the EAS device', () => {
     });
 
     expect(argvOf(plan)).toEqual([
-      ['eas', 'build', '--platform', 'ios', '--profile', 'development-simulator'],
+      [
+        'eas',
+        'build',
+        '--platform',
+        'ios',
+        '--profile',
+        'development-simulator',
+        '--non-interactive',
+      ],
       ['expo', 'start', '--dev-client'],
     ]);
     expect(plan.reasons.join('\n')).toContain('eas.json has no "development-simulator" profile');
@@ -574,6 +583,7 @@ describe('the EAS device', () => {
       'ios',
       '--profile',
       'development',
+      '--non-interactive',
     ]);
   });
 });

@@ -85,6 +85,7 @@ describe('@expo/agent-cli navigate --eas', () => {
       '--limit',
       '25',
       '--json',
+      '--non-interactive',
     ]);
     expect(invocations[1]).toEqual([
       'simulator:exec',
@@ -134,8 +135,8 @@ describe('@expo/agent-cli navigate --eas', () => {
     // The listing, then the read-only availability question, and nothing that could start or bill
     // anything.
     expect(easInvocations(projectRoot)).toEqual([
-      ['simulator:list', '--status', 'in-progress', '--limit', '25', '--json'],
-      ['simulator:availability', '--json'],
+      ['simulator:list', '--status', 'in-progress', '--limit', '25', '--json', '--non-interactive'],
+      ['simulator:availability', '--json', '--non-interactive'],
     ]);
   });
 

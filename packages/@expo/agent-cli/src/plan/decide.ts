@@ -484,7 +484,7 @@ function easRouteSteps(
     ...configure,
     step(
       'eas-build',
-      ['eas', 'build', '--platform', platform, '--profile', profile],
+      ['eas', 'build', '--platform', platform, '--profile', profile, '--non-interactive'],
       'many-minutes',
       onEas
         ? `Builds the ${platform} development build ${EAS_WHERE} with the "${profile}" profile — a simulator build, which needs no signing and is what an EAS Simulator session installs (a cloud build, which needs ${EAS_REQUIREMENT} rather than ${localRequirement(platform)}). Nothing is downloaded here: the session that opens the app installs it by build id. ${reason}`
