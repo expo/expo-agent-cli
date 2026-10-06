@@ -492,6 +492,11 @@ message says that instead.
 One retry per plan. A second collision means the port this CLI picked was taken between
 the bind test and the dev server's own bind.
 
+The port probe is Expo's own `freePortAsync`, copied into `src/utils/freeport.ts`, so
+this CLI and the dev server agree on which port is free. It asks the unspecified address,
+where Metro listens, and `127.0.0.1`, because on macOS a loopback-only listener leaves the
+unspecified address bindable.
+
 ## Where a build runs
 
 Every build this CLI plans, suggests, or waits on says where it runs. `local` is on this
