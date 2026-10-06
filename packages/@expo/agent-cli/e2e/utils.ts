@@ -355,6 +355,10 @@ export function spawnAgentCli(
       // This tier doubles the dev server, never a device (llp/0002 §Tier 0): without this, a
       // `dev` run on a developer's Mac would boot a real simulator against a stub dev server.
       AGENT_CLI_NO_DEVICE: '1',
+      // The runner warm-up lock lives under the Expo home (`src/utils/runnerLock.ts`). Unless the
+      // test chose a home, one per project directory, so parallel tests never wait on each other's
+      // warm-up and no run reads the developer's own home.
+      __UNSAFE_EXPO_HOME_DIRECTORY: processEnv.__UNSAFE_EXPO_HOME_DIRECTORY ?? `${cwd}.expo-home`,
       ...stubExpoEnv(cwd),
       ...env,
     },

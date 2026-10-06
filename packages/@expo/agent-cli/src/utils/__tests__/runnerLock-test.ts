@@ -187,6 +187,22 @@ describe('the runner warm-up', () => {
     expect(warmUpRunnerAsync('npx', args, { cwd: PROJECT }, spawn)).toBeNull();
   });
 
+  it('keeps its lock in the Expo home, which a test isolates and a user shares', () => {
+    const home = process.env.__UNSAFE_EXPO_HOME_DIRECTORY;
+    process.env.__UNSAFE_EXPO_HOME_DIRECTORY = '/home/someone/.expo-e2e';
+    try {
+      expect(runnerWarmUpFor('npx', ['--yes', 'eas-cli@latest'], PROJECT)!.lock).toBe(
+        path.join('/home/someone/.expo-e2e', 'agent-cli', 'runner-locks', 'npx%3Aeas-cli%40latest')
+      );
+    } finally {
+      if (home == null) {
+        delete process.env.__UNSAFE_EXPO_HOME_DIRECTORY;
+      } else {
+        process.env.__UNSAFE_EXPO_HOME_DIRECTORY = home;
+      }
+    }
+  });
+
   it('holds a machine-wide lock while it warms, and releases it after', async () => {
     const { spawn, finish } = deferredSpawn();
     const warmUp = runnerWarmUpFor('bunx', ['eas-cli@latest', 'whoami'], PROJECT)!;

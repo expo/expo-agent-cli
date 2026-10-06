@@ -53,13 +53,17 @@
 // never serialized. Only `eas-cli` is warmed, because its `--version` is verified to print and
 // exit. A spec that resolves to the project's own `node_modules` involves no install and is
 // skipped.
+//
+// The lock lives in the Expo home. The runner's scratch directory is per user, and so is the home,
+// so two worktrees share the lock. An e2e test gets a home of its own
+// (`e2e/utils.ts`), so a slow warm-up in one test's project never spends another test's budget.
 
 import { spawn } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
 import { env } from './env';
+import { getExpoHomeDirectory } from './expoHome';
 import { acquireMkdirLockAsync } from './mkdirLock';
 import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
 import { resolveSpawnTarget } from './windowsShim';
@@ -193,7 +197,12 @@ export function runnerWarmUpFor(
   return {
     command,
     args: [...args.slice(0, specIndex + 1), '--version'],
-    lock: path.join(os.tmpdir(), 'agent-cli-runner-locks', encodeURIComponent(`${runner}:${spec}`)),
+    lock: path.join(
+      getExpoHomeDirectory(),
+      'agent-cli',
+      'runner-locks',
+      encodeURIComponent(`${runner}:${spec}`)
+    ),
   };
 }
 

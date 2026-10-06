@@ -17,7 +17,10 @@ import {
   executeAgentCliAsync,
   installStubBinAsync,
   installStubFingerprintAsync,
+  killAsync,
   setupFixtureAsync,
+  spawnAgentCli,
+  waitForAsync,
 } from '../utils';
 
 /**
@@ -38,7 +41,10 @@ require('node:fs').appendFileSync(
 );
 // Everything up to the eas command word is the runner's own: the flags and the package name.
 const command = args.find((arg) => !arg.startsWith('-') && !arg.startsWith('eas-cli'));
-if (command === 'build:list') {
+if (command == null && process.env.STUB_RUNNER_SLOW_VERSION_MS) {
+  // A runner fetching the package before it can print its version.
+  setTimeout(() => process.exit(0), Number(process.env.STUB_RUNNER_SLOW_VERSION_MS));
+} else if (command === 'build:list') {
   process.stdout.write('[]\\n');
 } else if (command === 'whoami') {
   process.stdout.write('e2e-user\\n');
@@ -294,6 +300,43 @@ describe('a machine with no eas-cli installed', () => {
         expect(platform.reason).toContain('failed to deliver the eas CLI');
       }
     });
+  });
+
+  // @ref src/utils/runnerLock.ts §warmUpRunnerAsync — the warm-up lock lives in the Expo home.
+  // A lock in the temp directory was one lock for every test on the runner: a slow warm-up in one
+  // test's project held every other test's EAS lookup until its budget ran out [observed — CI,
+  // 2026-10-05]. Each command here runs under its own project's home (`e2e/utils.ts`).
+  it('does not wait on a warm-up under another Expo home', async () => {
+    const slow = await plantAsync({ runners: ['npx'] });
+    const planted = await plantAsync({ runners: ['npx'] });
+    const holder = spawnAgentCli(slow.projectRoot, ['status', '--explain', '--json'], {
+      env: { ...pathEnv(slow.binDir), STUB_RUNNER_SLOW_VERSION_MS: '120000' },
+    });
+    try {
+      expect(
+        await waitForAsync(
+          () => invocations(slow).some((run) => run.args.at(-1) === '--version'),
+          30_000
+        )
+      ).toBe(true);
+
+      const startedAt = Date.now();
+      const result = await executeAgentCliAsync(
+        planted.projectRoot,
+        ['status', '--explain', '--json'],
+        { env: pathEnv(planted.binDir) }
+      );
+
+      // The other warm-up runs for minutes; waiting on it costs the lookup's whole 45 s budget.
+      expect(Date.now() - startedAt).toBeLessThan(20_000);
+      const report = JSON.parse(result.stdout);
+      expect(report.builds.platforms.map((platform: { state: string }) => platform.state)).toEqual([
+        'none',
+        'none',
+      ]);
+    } finally {
+      await killAsync(holder);
+    }
   });
 
   it("uses bunx in a project whose lockfile is bun's", async () => {
