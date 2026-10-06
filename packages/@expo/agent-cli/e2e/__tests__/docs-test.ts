@@ -49,24 +49,33 @@ const BUNDLES: Record<string, Page[]> = {
 let server: Server;
 let baseUrl: string;
 const requests: string[] = [];
+const files = new Map<string, Buffer>();
+const index = {
+  format: 1,
+  generatedAt: '2026-09-30T12:00:00Z',
+  latest: 'v57.0.0',
+  bundles: {} as Record<string, unknown>,
+};
+
+/** Put a bundle on the host, as a docs deploy would. Returns the undo. */
+function publish(name: string, pages: Page[]): () => void {
+  const bytes = zlib.gzipSync(pages.map((entry) => JSON.stringify(entry)).join('\n') + '\n');
+  const file = `docs-${name}.jsonl.gz`;
+  files.set(file, bytes);
+  index.bundles[name] = {
+    file,
+    sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+    pages: pages.length,
+  };
+  return () => {
+    files.delete(file);
+    delete index.bundles[name];
+  };
+}
 
 beforeAll(async () => {
-  const files = new Map<string, Buffer>();
-  const index = {
-    format: 1,
-    generatedAt: '2026-09-30T12:00:00Z',
-    latest: 'v57.0.0',
-    bundles: {} as Record<string, unknown>,
-  };
   for (const [name, pages] of Object.entries(BUNDLES)) {
-    const bytes = zlib.gzipSync(pages.map((entry) => JSON.stringify(entry)).join('\n') + '\n');
-    const file = `docs-${name}.jsonl.gz`;
-    files.set(file, bytes);
-    index.bundles[name] = {
-      file,
-      sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
-      pages: pages.length,
-    };
+    publish(name, pages);
   }
 
   server = createServer((request, response) => {
@@ -214,6 +223,62 @@ describe('docs:sync', () => {
 });
 
 describe('docs:search', () => {
+  it('asks the host again for an SDK newer than the last sync knew', async () => {
+    await executeAgentCliAsync(cwd, ['docs:sync'], docsEnv());
+    const unpublish = publish('v58.0.0', versionPages('v58.0.0'));
+    try {
+      const result = await executeAgentCliAsync(
+        cwd,
+        ['docs:search', 'camera', '--sdk', '58', '--json'],
+        docsEnv()
+      );
+
+      expect(JSON.parse(result.stdout).sdk).toBe('v58.0.0');
+      expect(bundleDownloads()).toContain('/signed/docs-v58.0.0.jsonl.gz?expires=1');
+    } finally {
+      unpublish();
+    }
+  });
+
+  it(`asks the host again for a newer project SDK only when the last sync is over an hour old`, async () => {
+    const project = path.join(path.dirname(cwd), 'new-sdk-app');
+    await fs.promises.mkdir(path.join(project, 'node_modules', 'expo'), { recursive: true });
+    await fs.promises.writeFile(
+      path.join(project, 'package.json'),
+      JSON.stringify({ name: 'new-sdk-app', dependencies: { expo: '~58.0.0' } })
+    );
+    await fs.promises.writeFile(
+      path.join(project, 'node_modules', 'expo', 'package.json'),
+      JSON.stringify({ name: 'expo', version: '58.0.1' })
+    );
+    await executeAgentCliAsync(project, ['docs:sync'], docsEnv());
+    const unpublish = publish('v58.0.0', versionPages('v58.0.0'));
+    try {
+      requests.length = 0;
+      const recent = await executeAgentCliAsync(
+        project,
+        ['docs:search', 'camera', '--json'],
+        docsEnv()
+      );
+      expect(JSON.parse(recent.stdout).sdk).toBe('v57.0.0');
+      expect(requests).toEqual([]);
+
+      const manifestFile = path.join(docsDir, 'manifest.json');
+      const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+      const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60_000).toISOString();
+      fs.writeFileSync(manifestFile, JSON.stringify({ ...manifest, syncedAt: twoHoursAgo }));
+
+      const later = await executeAgentCliAsync(
+        project,
+        ['docs:search', 'camera', '--json'],
+        docsEnv()
+      );
+      expect(JSON.parse(later.stdout).sdk).toBe('v58.0.0');
+    } finally {
+      unpublish();
+    }
+  });
+
   it('searches the synced latest docs of a project whose SDK has none, without asking the host again', async () => {
     const project = path.join(path.dirname(cwd), 'old-sdk-app');
     await fs.promises.mkdir(path.join(project, 'node_modules', 'expo'), { recursive: true });

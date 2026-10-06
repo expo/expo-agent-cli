@@ -24,11 +24,12 @@ import {
 } from './cache';
 import { searchRegex, searchTerms, type SearchHit } from './search';
 import { docsBaseUrl, syncDocsAsync, type BundleSyncReport } from './sync';
-import { selectSdkVersion, type SdkSelection } from './version';
+import { isNewerThanKnown, requestedVersion, selectSdkVersion, type SdkSelection } from './version';
 
 const DOCS_SITE = 'https://docs.expo.dev';
 const DEFAULT_LIMIT = 20;
 const STALE_AFTER_MS = 7 * 24 * 60 * 60_000;
+const RECHECK_NEWER_SDK_AFTER_MS = 60 * 60_000;
 const LABEL_WIDTH = 12;
 
 interface OutputOptions {
@@ -160,16 +161,28 @@ async function resolveSearchScopeAsync(
 ): Promise<{ selection: SdkSelection; synced: boolean }> {
   const projectSdkVersion = await projectSdkVersionAsync();
   const manifest = await readManifestAsync(dir);
-  // The selection sync made, from the versions the host published: an SDK without docs falls back
-  // to latest here as it did there, instead of counting as never synced.
-  const selection = manifest
-    ? selectSdkVersion({
-        flag: sdkFlag,
-        projectSdkVersion,
-        latest: manifest.latest,
-        available: manifest.available ?? versionNames(manifest.bundles),
-      })
-    : null;
+  const known = manifest ? (manifest.available ?? versionNames(manifest.bundles)) : [];
+  const requested = requestedVersion(sdkFlag, projectSdkVersion);
+  // A version newer than any the host had at the last sync may have been published since: only the
+  // host can say, so it is asked again instead of the stored list answering "unavailable". A version
+  // named with --sdk is asked for every time. A project's SDK at most hourly, because a canary SDK
+  // stays newer than every published one and would otherwise cost a request on every search.
+  const newer =
+    manifest != null &&
+    requested != null &&
+    isNewerThanKnown(requested, known) &&
+    (sdkFlag != null || Date.now() - Date.parse(manifest.syncedAt) > RECHECK_NEWER_SDK_AFTER_MS);
+  // Otherwise the selection sync made, from the versions the host published: an SDK without docs
+  // falls back to latest here as it did there, instead of counting as never synced.
+  const selection =
+    manifest && !newer
+      ? selectSdkVersion({
+          flag: sdkFlag,
+          projectSdkVersion,
+          latest: manifest.latest,
+          available: known,
+        })
+      : null;
   const ready =
     manifest?.bundles.shared != null &&
     selection != null &&
@@ -188,7 +201,7 @@ async function resolveSearchScopeAsync(
     return { selection: result.selection, synced: true };
   }
 
-  if (!manifest?.bundles.shared || !selection) {
+  if (!manifest?.bundles.shared) {
     const error = new CommandError(
       'DOCS_NOT_SYNCED',
       `The Expo docs are not synced to ${dir}, and EXPO_OFFLINE is set, so nothing was downloaded. Run "${PROGRAM_PREFIX} docs:sync" with a network connection first.`
@@ -199,12 +212,13 @@ async function resolveSearchScopeAsync(
   if (!ready) {
     // Offline, the project's SDK falls back to a synced one. A version asked for by name does not.
     const synced = syncedVersions(dir, manifest);
+    const missing = (selection?.version ?? requested)!;
     if (sdkFlag != null || !synced.length) {
       const error = new CommandError(
         'DOCS_NOT_SYNCED',
-        `The ${selection.version} docs are not synced to ${dir}, and EXPO_OFFLINE is set, so nothing was downloaded. The synced versions are ${synced.join(', ') || 'none'}.`
+        `The ${missing} docs are not synced to ${dir}, and EXPO_OFFLINE is set, so nothing was downloaded. The synced versions are ${synced.join(', ') || 'none'}.`
       );
-      error.suggestedCommand = `${PROGRAM_PREFIX} docs:sync --sdk ${versionMajor(selection.version)}`;
+      error.suggestedCommand = `${PROGRAM_PREFIX} docs:sync --sdk ${versionMajor(missing)}`;
       throw error;
     }
     return {

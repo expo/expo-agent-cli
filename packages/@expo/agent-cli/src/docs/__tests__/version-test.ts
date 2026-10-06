@@ -1,4 +1,4 @@
-import { parseSdkFlag, selectSdkVersion } from '../version';
+import { isNewerThanKnown, parseSdkFlag, requestedVersion, selectSdkVersion } from '../version';
 
 const available = ['v58.0.0', 'v57.0.0', 'v55.0.0'] as const;
 const base = { latest: 'v57.0.0' as const, available: [...available] };
@@ -62,5 +62,21 @@ describe(parseSdkFlag, () => {
 
   it.each(['latest', '57.1.0', 'abc', ''])('rejects %j', (flag) => {
     expect(() => parseSdkFlag(flag)).toThrow(expect.objectContaining({ code: 'BAD_ARGS' }));
+  });
+});
+
+describe(requestedVersion, () => {
+  it('takes --sdk, else the project major, else nothing', () => {
+    expect(requestedVersion('58', '57.0.3')).toBe('v58.0.0');
+    expect(requestedVersion(undefined, '57.0.3')).toBe('v57.0.0');
+    expect(requestedVersion(undefined, null)).toBeNull();
+  });
+});
+
+describe(isNewerThanKnown, () => {
+  it('is true only above every known version', () => {
+    expect(isNewerThanKnown('v58.0.0', ['v57.0.0', 'v54.0.0'])).toBe(true);
+    expect(isNewerThanKnown('v57.0.0', ['v57.0.0', 'v54.0.0'])).toBe(false);
+    expect(isNewerThanKnown('v50.0.0', ['v57.0.0', 'v54.0.0'])).toBe(false);
   });
 });
