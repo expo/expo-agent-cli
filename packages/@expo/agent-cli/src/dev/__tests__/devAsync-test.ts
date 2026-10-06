@@ -1,5 +1,6 @@
 import { vol } from 'memfs';
 import os from 'os';
+import path from 'path';
 
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
@@ -13,7 +14,10 @@ import { runDevServerAsync, type DevServerRun } from '../../start/startAsync';
 import { runExpoAsync, spawnExpoAsync } from '../../utils/expoCli';
 import { isInteractive } from '../../utils/interactive';
 import { devAsync } from '../devAsync';
+import { findFreePortAsync } from '../portCollision';
+import { findPortListenerAsync } from '../portListener';
 import { resolveDevOptions } from '../resolveOptions';
+import { isExpoDevServerAsync } from '../stopAsync';
 
 vi.mock('../../log');
 vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
@@ -60,6 +64,20 @@ vi.mock('../../toolchain', async () => {
 vi.mock('../../device/localDevice', () => ({
   probeLocalDeviceAsync: vi.fn(async () => ({ state: 'unknown', device: null, reason: null })),
 }));
+// The busy-port stop names the process on the port and probes it as a dev server; a unit test
+// must not read this machine's listeners.
+vi.mock('../portListener', async () => ({
+  ...(await vi.importActual<typeof import('../portListener')>('../portListener')),
+  findPortListenerAsync: vi.fn(async () => null),
+}));
+vi.mock('../stopAsync', async () => ({
+  ...(await vi.importActual<typeof import('../stopAsync')>('../stopAsync')),
+  isExpoDevServerAsync: vi.fn(async () => false),
+}));
+vi.mock('../portCollision', async () => {
+  const actual = await vi.importActual<typeof import('../portCollision')>('../portCollision');
+  return { ...actual, findFreePortAsync: vi.fn(actual.findFreePortAsync) };
+});
 // The follow-ups of a run are reported rather than embedded in the emitted plan, so this is where
 // a test reads them. The real reporter still runs, so the `Suggested next:` section is real too.
 vi.mock('../../followups', async () => {
@@ -704,10 +722,10 @@ describe(devAsync, () => {
 
     /** The same stop, on the one question a machine can answer for itself: a busy port. */
     const PORT_TAKEN = [
-      'Port 8180 is running node in another window',
+      'Port 8081 is running node in another window',
       "Input is required, but 'npx expo' is in non-interactive mode.",
       'Required input:',
-      '> Use port 8181 instead?',
+      '> Use port 8082 instead?',
     ].join('\n');
 
     beforeEach(() => {
@@ -792,7 +810,251 @@ describe(devAsync, () => {
           .mocked(Log.warn)
           .mock.calls.map(([line]) => line)
           .join('\n')
-      ).toContain('Port 8180 was busy');
+      ).toContain('Port 8081 was busy');
+    });
+
+    // The retry's port goes before `--`: `expo start` forwards what follows to something else.
+    it(`should put the retry's port before the separator, replacing the one there`, async () => {
+      mockProjectState();
+      vi.mocked(runDevServerAsync)
+        .mockResolvedValueOnce(devServerRun({ exitCode: 1, stderr: PORT_TAKEN }))
+        .mockResolvedValue(devServerRun({ exitCode: 0 }));
+
+      await expect(
+        devAsync(projectRoot, resolveDevOptions(['--ios', '--', '--port', '9000']))
+      ).resolves.toBe(0);
+
+      const [, retryArgs] = vi.mocked(runDevServerAsync).mock.calls[1]!;
+      const separator = retryArgs.indexOf('--');
+      expect(retryArgs.indexOf('--port')).toBeLessThan(separator);
+      expect(retryArgs.slice(separator)).toEqual(['--', '--port', '9000']);
+    });
+
+    // A `run:*` step's output carries other listeners' errors; one about another port is not this
+    // step's collision, and the step that ran on 8081 succeeded.
+    it(`should not retry a step whose output names a collision on another port`, async () => {
+      mockProjectState();
+      vi.mocked(runDevServerAsync).mockResolvedValue(
+        devServerRun({
+          exitCode: 0,
+          stdout: 'Error: listen EADDRINUSE: address already in use :::3000',
+        })
+      );
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(runDevServerAsync).toHaveBeenCalledTimes(1);
+    });
+
+    // What `expo run:*` printed when another project's Metro held 8081, before it built, installed,
+    // deep-linked the app to that Metro, and exited 0 [observed — live suite, 2026-10-05].
+    it(`should retry a run:* step that skipped its dev server and exited 0`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(runDevServerAsync)
+        .mockResolvedValueOnce(
+          devServerRun({
+            exitCode: 0,
+            stdout: [
+              '› Port 8081 is being used by another process',
+              "Input is required, but 'npx expo' is in non-interactive mode.",
+              '› Use port 8082 instead?',
+              '› Skipping dev server',
+            ].join('\n'),
+          })
+        )
+        .mockResolvedValue(devServerRun({ exitCode: 0 }));
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(vi.mocked(runDevServerAsync).mock.calls.map(([, args]) => args)).toEqual([
+        ['run:ios'],
+        ['run:ios', '--port', expect.stringMatching(/^\d+$/)],
+      ]);
+      const retryPort = vi.mocked(runDevServerAsync).mock.calls[1]![1].at(-1);
+      expect(
+        vi
+          .mocked(Log.warn)
+          .mock.calls.map(([line]) => line)
+          .join('\n')
+      ).toContain(`started on ${retryPort} instead`);
+    });
+
+    it(`should fail the plan when the retry skipped its dev server too`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(runDevServerAsync).mockImplementation(async (_root, args) => {
+        const port = args.includes('--port') ? Number(args[args.indexOf('--port') + 1]) : 8081;
+        return devServerRun({
+          exitCode: 0,
+          stdout: [
+            `› Port ${port} is being used by another process`,
+            "Input is required, but 'npx expo' is in non-interactive mode.",
+            `› Use port ${port + 1} instead?`,
+            '› Skipping dev server',
+          ].join('\n'),
+        });
+      });
+
+      const error = await devAsync(projectRoot, resolveDevOptions(['--ios', '--json'])).then(
+        () => null,
+        (thrown) => thrown
+      );
+
+      expect(error).toMatchObject({ code: 'PORT_TAKEN_AFTER_RETRY', exitCode: 20 });
+      const retryPort = Number(vi.mocked(runDevServerAsync).mock.calls[1]![1].at(-1));
+      expect(error.message).toContain('exited 0');
+      expect(error.message).toContain('asked for port 8081');
+      expect(error.message).toContain(`moved it to port ${retryPort}, which a process`);
+      // The port the retry lost is the one probed for its holder.
+      expect(findPortListenerAsync).toHaveBeenLastCalledWith(retryPort);
+      expect(error.message).toMatch(
+        /How: start on a free port with ".* dev --ios --json --port \d+"\./
+      );
+      expect(error.message).not.toContain('dev:stop');
+      expect(error.suggestedCommand).toMatch(/ dev --ios --json --port \d+$/);
+      expect(error.message).not.toContain("CLI's own");
+      expect(runDevServerAsync).toHaveBeenCalledTimes(2);
+      expect(Log.log).not.toHaveBeenCalled();
+    });
+
+    // The suggestion is the caller's own command line with a free port: an `--eas` run that is
+    // told to run without `--eas` would plan a different build.
+    it(`should suggest the caller's own command with a free port`, async () => {
+      mockProjectState();
+      vi.mocked(runDevServerAsync).mockImplementation(async (_root, args) => {
+        const port = args.includes('--port') ? Number(args[args.indexOf('--port') + 1]) : 8081;
+        return devServerRun({ exitCode: 1, stderr: PORT_TAKEN.replace('8081', String(port)) });
+      });
+
+      const error = await devAsync(
+        projectRoot,
+        resolveDevOptions(['--ios', '--clear', '--tunnel', '--json', '--', '--max-workers', '2'])
+      ).then(
+        () => null,
+        (thrown) => thrown
+      );
+
+      expect(error.suggestedCommand).toMatch(
+        / dev --ios --clear --tunnel --json --port \d+ -- --max-workers 2$/
+      );
+    });
+
+    // No free port to move to: `dev:stop --force` only when the holder answers as an Expo dev
+    // server and its process looks like one, because that is when the command acts.
+    it(`should suggest the forced stop when no port is free and a dev server holds it`, async () => {
+      mockProjectState();
+      vi.mocked(findFreePortAsync).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      vi.mocked(findPortListenerAsync).mockResolvedValueOnce({ pid: 4242, command: 'node' });
+      vi.mocked(isExpoDevServerAsync).mockResolvedValueOnce(true);
+      vi.mocked(runDevServerAsync).mockResolvedValue(
+        devServerRun({ exitCode: 1, stderr: PORT_TAKEN })
+      );
+
+      const error = await devAsync(projectRoot, resolveDevOptions(['--ios', '--json'])).then(
+        () => null,
+        (thrown) => thrown
+      );
+
+      expect(error).toMatchObject({ code: 'PORT_TAKEN_AFTER_RETRY', exitCode: 20 });
+      expect(error.message).toContain(
+        'Why: pid 4242 (node) holds port 8081, and no free port was found to retry on.'
+      );
+      expect(error.suggestedCommand).toMatch(/ dev:stop --port 8081 --force$/);
+      expect(runDevServerAsync).toHaveBeenCalledTimes(1);
+    });
+
+    it(`should name the holder and suggest nothing when no port is free and it is not a dev server`, async () => {
+      mockProjectState();
+      vi.mocked(findFreePortAsync).mockResolvedValueOnce(null).mockResolvedValueOnce(null);
+      vi.mocked(findPortListenerAsync).mockResolvedValueOnce({ pid: 4242, command: 'python3' });
+      vi.mocked(runDevServerAsync).mockResolvedValue(
+        devServerRun({ exitCode: 1, stderr: PORT_TAKEN })
+      );
+
+      const error = await devAsync(projectRoot, resolveDevOptions(['--ios', '--json'])).then(
+        () => null,
+        (thrown) => thrown
+      );
+
+      expect(error.message).toContain('How: stop pid 4242 (python3) on port 8081 yourself');
+      expect(error.message).not.toContain('dev:stop');
+      expect(error.suggestedCommand).toBeUndefined();
+    });
+
+    // `expo start` that stopped on the busy port exits 1: the same stop, with its own code named.
+    it(`should fail the plan the same way when the retry exited non-zero`, async () => {
+      mockProjectState();
+      vi.mocked(runDevServerAsync).mockImplementation(async (_root, args) => {
+        const port = args.includes('--port') ? Number(args[args.indexOf('--port') + 1]) : 8081;
+        return devServerRun({
+          exitCode: 1,
+          stderr: PORT_TAKEN.replace('8081', String(port)),
+        });
+      });
+
+      const error = await devAsync(projectRoot, resolveDevOptions(['--ios', '--json'])).then(
+        () => null,
+        (thrown) => thrown
+      );
+
+      expect(error).toMatchObject({ code: 'PORT_TAKEN_AFTER_RETRY', exitCode: 20 });
+      expect(error.isNeedsHuman).toBeUndefined();
+      expect(error.message).toContain('exited 1');
+      expect(runDevServerAsync).toHaveBeenCalledTimes(2);
+    });
+
+    // `expo run:*` that found this project's own dev server on the port reuses it: a bare skip.
+    it(`should not retry a run:* step that reused this project's dev server`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(runDevServerAsync).mockResolvedValue(
+        devServerRun({
+          exitCode: 0,
+          stdout: ['› Skipping dev server', '› Build Succeeded'].join('\n'),
+        })
+      );
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(runDevServerAsync).toHaveBeenCalledTimes(1);
+    });
+
+    // A Metro that logged `metro:instantiate` bound its port; its output is not a bind failure.
+    it(`should not retry a dev server that reported its port`, async () => {
+      mockProjectState();
+      vi.mocked(runDevServerAsync).mockResolvedValue(
+        devServerRun({
+          exitCode: 0,
+          stdout: 'Error: listen EADDRINUSE: address already in use :::9229',
+          port: { port: 8081, source: 'log' },
+        })
+      );
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(runDevServerAsync).toHaveBeenCalledTimes(1);
+    });
+
+    // The port watch stops before a long `run:*` build reaches Metro, so the step's port source is
+    // `arg`; the log the dev server wrote after the spawn is what says it bound its port.
+    it(`should not retry a run:* step whose dev server logged its port after the spawn`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(runDevServerAsync).mockImplementation(async () => {
+        vol.fromJSON({
+          [path.join(projectRoot, '.expo', 'dev', 'logs', 'start.log')]: JSON.stringify({
+            _e: 'metro:instantiate',
+            _t: Date.now(),
+            port: 8081,
+          }),
+        });
+        return devServerRun({
+          exitCode: 0,
+          stdout: 'Error: listen EADDRINUSE: address already in use :::9229',
+          port: { port: 8081, source: 'arg' },
+        });
+      });
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(runDevServerAsync).toHaveBeenCalledTimes(1);
     });
 
     // A port the caller named is a requirement: moving would leave every URL they had already
@@ -800,7 +1062,7 @@ describe(devAsync, () => {
     it(`should report an outcome, not a person, when the caller demanded the port`, async () => {
       mockProjectState();
       vi.mocked(runDevServerAsync).mockResolvedValue(
-        devServerRun({ exitCode: 1, stderr: PORT_TAKEN })
+        devServerRun({ exitCode: 1, stderr: PORT_TAKEN.replace('8081', '8180') })
       );
 
       const error = await devAsync(

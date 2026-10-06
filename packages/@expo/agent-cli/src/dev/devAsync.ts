@@ -5,6 +5,7 @@
 
 import type { OpenAppOnEasReport } from './openAppEas';
 import { outputTail } from '../deploy/parseOutput';
+import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
 import {
   buildStartPlanFollowUps,
@@ -21,6 +22,7 @@ import { emitStartPlan } from '../plan/emit';
 import { event as planEvent } from '../plan/events';
 import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBuild';
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
+import { isPlatformFlag } from '../plan/platformFlags';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
@@ -53,6 +55,7 @@ import { appReachedDevice } from './buildEvidence';
 import { event as devEvent } from './events';
 import { forwardedStepArgs, withForwardedExpoArgs } from './forwardedArgs';
 import {
+  defaultMetroPort,
   detectPortCollision,
   findFreePortAsync,
   formatPortMove,
@@ -60,9 +63,6 @@ import {
 } from './portCollision';
 import type { DevOptions } from './resolveOptions';
 import { easCommandPrefix } from '../utils/easCli';
-
-/** Where `expo start` listens when nothing names a port, for the free-port scan to start from. */
-const DEFAULT_METRO_PORT = 8081;
 
 /**
  * Probe the project, emit the plan, and run it.
@@ -311,10 +311,6 @@ async function executePlanAsync(
   const output = stepOutputFor(options);
   let devServer: DevServerRun | null = null;
   let exitCode = 0;
-  // One retry per plan, whatever it is made of: a second collision means the port this CLI picked
-  // was taken between the bind test and the dev server's own bind, and retrying forever on that
-  // would be a loop nobody asked for.
-  let retriedOnFreePort = false;
   // @ref llp/0026-dev-owns-the-open.rfc.md — the open is armed once per plan, whatever the port
   // retry does: the second bind is the same dev server, not a second app to open.
   let openArmed = false;
@@ -413,40 +409,45 @@ async function executePlanAsync(
       }
     }
 
+    let spawnedAt = Date.now();
     let result = await runStep(args);
-    let portCollided = false;
 
     // @ref llp/0010-agent-conventions.rfc.md §Needs-human protocol — the port carve-out. Checked
     // before the classifier below, because a busy port is the one stop in the Expo CLI's prompt
-    // family that a machine can get past on its own.
-    if (devServerStep && result.exitCode !== 0) {
-      const collision = detectPortCollision(`${result.stderr}\n${result.stdout}`);
+    // family that a machine can get past on its own. Whatever the exit code: `expo run:*` that
+    // skipped its dev server exits 0.
+    if (devServerStep) {
+      const collision = portCollisionIn(projectRoot, args, result as DevServerRun, spawnedAt);
       if (collision) {
-        portCollided = true;
         // A port the caller named is a requirement, not a preference: silently moving the dev
         // server somewhere else would leave every command the caller had already written — and
         // every URL it had already printed — pointing at nothing.
         if (options.port != null) {
           throw await portDemandedError(projectRoot, options.port, options.platform);
         }
-        // Once per plan. A second collision means the port this CLI picked was taken between the
-        // bind test and the dev server's own bind, and retrying forever on that is a loop nobody
-        // asked for — the step failure below reports it instead.
-        if (!retriedOnFreePort) {
-          retriedOnFreePort = true;
-          const retry = await retryOnFreePortAsync(collision, args, runStep);
-          if (retry) {
-            args = retry.args;
-            result = retry.result;
-            portCollided =
-              result.exitCode !== 0 &&
-              detectPortCollision(`${result.stderr}\n${result.stdout}`) != null;
-          }
+        const askedPort = readPortArg(args) ?? defaultMetroPort();
+        // One retry, and so one per plan: no plan `decideStartPlan` makes has two dev-server steps.
+        const retry = await retryOnFreePortAsync(collision, args, runStep);
+        if (retry) {
+          args = retry.args;
+          result = retry.result;
+          spawnedAt = retry.spawnedAt;
+        }
+        // A collision still in the output after the retry fails the run, whatever the exit code:
+        // `expo run:*` that skipped its dev server again exits 0 with nothing serving.
+        if (portCollisionIn(projectRoot, args, result as DevServerRun, spawnedAt) != null) {
+          planEvent('start_plan_step_exit', { id: step.id, code: result.exitCode });
+          throw await portTakenAfterRetryError({
+            step,
+            args,
+            askedPort,
+            movedTo: retry ? readPortArg(retry.args) : null,
+            exitCode: result.exitCode,
+            callerArgv: options.detachArgv,
+            platform: options.platform,
+          });
         }
       }
-    }
-
-    if (devServerStep) {
       devServer = result as DevServerRun;
     }
     exitCode = result.exitCode;
@@ -493,12 +494,7 @@ async function executePlanAsync(
       // is not a failed command: it is a command waiting on a person. Nothing is captured in
       // `inherit` mode, so there is nothing to classify there.
       //
-      // A port collision is excluded whatever its output looks like: it has already been retried
-      // on a port this CLI picked, and there is no answer a person could give that the retry did
-      // not already try. It falls through to the ordinary step failure below.
-      if (!portCollided) {
-        assertNotNeedsHuman(failure, options.platform);
-      }
+      assertNotNeedsHuman(failure, options.platform);
       // Every later step depends on this one having worked, so the plan stops here.
       return { exitCode, devServer, failure };
     }
@@ -537,6 +533,40 @@ async function executePlanAsync(
   return { exitCode, devServer, failure: null };
 }
 
+/**
+ * The collision a dev-server step's output reports, or null.
+ *
+ * A dev server that logged where it listens bound its port, so nothing in its output is a bind
+ * collision. The log is read here rather than trusted from the port watch, because the watch stops
+ * before a `run:*` build ends.
+ *
+ * A collision that names another port is not this step's: a `run:*` step's output carries Gradle
+ * and Xcode output too, and an `EADDRINUSE` there is some other listener. A collision that names no
+ * port (`Use port N instead?` alone) still counts.
+ *
+ * @param args the arguments the step ran with; its port is their `--port`, else Expo's default.
+ * @param spawnedAt Epoch milliseconds the step was started at; an earlier log entry is not its own.
+ */
+function portCollisionIn(
+  projectRoot: string,
+  args: string[],
+  result: DevServerRun,
+  spawnedAt: number
+): PortCollision | null {
+  if (
+    result.port?.source === 'log' ||
+    readLastLoggedDevServerPort(projectRoot, { since: spawnedAt }) != null
+  ) {
+    return null;
+  }
+  const collision = detectPortCollision(`${result.stderr}\n${result.stdout}`);
+  const stepPort = readPortArg(args) ?? defaultMetroPort();
+  if (collision?.requestedPort != null && collision.requestedPort !== stepPort) {
+    return null;
+  }
+  return collision;
+}
+
 /** What one step run amounts to, for the retry that may replace it. */
 type StepResult = {
   exitCode: number;
@@ -559,9 +589,9 @@ async function retryOnFreePortAsync(
   collision: PortCollision,
   args: string[],
   runStep: (stepArgs: string[]) => Promise<StepResult>
-): Promise<{ args: string[]; result: StepResult } | null> {
+): Promise<{ args: string[]; result: StepResult; spawnedAt: number } | null> {
   // The CLI's own offer first: it walked to that port, so it is the one it would have taken.
-  const scanFrom = collision.offeredPort ?? (collision.requestedPort ?? DEFAULT_METRO_PORT) + 1;
+  const scanFrom = collision.offeredPort ?? (collision.requestedPort ?? defaultMetroPort()) + 1;
   const free = await findFreePortAsync(scanFrom);
   const busy = collision.requestedPort;
 
@@ -591,8 +621,34 @@ async function retryOnFreePortAsync(
     }`
   );
 
-  const retryArgs = [...args, '--port', String(free)];
-  return { args: retryArgs, result: await runStep(retryArgs) };
+  const retryArgs = withPort(args, free);
+  const spawnedAt = Date.now();
+  return { args: retryArgs, result: await runStep(retryArgs), spawnedAt };
+}
+
+/**
+ * `args` with `--port <port>` before the first `--`, and no other `--port` or `-p` before it.
+ *
+ * `expo start` forwards everything after `--`, so a port there would not reach the dev server.
+ */
+function withPort(args: string[], port: number): string[] {
+  const separator = args.indexOf('--');
+  const own = separator === -1 ? args : args.slice(0, separator);
+  const rest = separator === -1 ? [] : args.slice(separator);
+  const kept: string[] = [];
+  for (let index = 0; index < own.length; index++) {
+    const arg = own[index]!;
+    if (arg === '--port' || arg === '-p') {
+      index++;
+      continue;
+    }
+    if (/^(--port|-p)=/.test(arg)) {
+      continue;
+    }
+    kept.push(arg);
+  }
+  const portArgs = ['--port', String(port)];
+  return [...kept, ...portArgs, ...rest];
 }
 
 /**
@@ -643,6 +699,77 @@ async function portDemandedError(
     : free == null
       ? `${PROGRAM_PREFIX} dev:stop --port ${port} --force`
       : `${PROGRAM_PREFIX} dev --${platform} --port ${free}`;
+  error.exitCode = EXIT_OUTCOME_FAILED;
+  return error;
+}
+
+/**
+ * The failure for a dev-server step whose port was still taken after the one retry.
+ *
+ * An outcome (llp/0010 §Exit codes): the run's code is 20, and the Expo CLI's own code, which is 0
+ * when `expo run:*` skipped its dev server, is named in the text. Never the command that just
+ * failed: running it again repeats the same race. The port it names is the one the last attempt
+ * lost, and the process on it is named the way `portDemandedError` names it.
+ */
+async function portTakenAfterRetryError(stop: {
+  step: PlanStep;
+  args: string[];
+  askedPort: number;
+  /** The port the retry moved the dev server to, or null when no free port was found. */
+  movedTo: number | null;
+  exitCode: number;
+  /** The caller's own `dev` arguments, which the suggested command repeats with a free port. */
+  callerArgv: string[];
+  platform: PlanPlatform;
+}): Promise<CommandError> {
+  const { askedPort, movedTo } = stop;
+  const { findPortListenerAsync } = require('./portListener') as typeof import('./portListener');
+  const { isExpoDevServerAsync, looksLikeDevServerProcess } =
+    require('./stopAsync') as typeof import('./stopAsync');
+  const taken = movedTo ?? askedPort;
+  const [listener, free, answersAsDevServer] = await Promise.all([
+    findPortListenerAsync(taken),
+    findFreePortAsync(taken + 1),
+    isExpoDevServerAsync(taken),
+  ]);
+  const holder = listener
+    ? `pid ${listener.pid}${listener.command ? ` (${listener.command})` : ''}`
+    : 'a process this machine would not name';
+  const invocation = `npx ${stop.step.argv[0]} ${stop.args.join(' ')}`;
+  const why =
+    movedTo != null
+      ? `Why: the step asked for port ${askedPort}, which was taken, and the one retry moved it to port ${movedTo}, which ${holder} bound before the dev server did.`
+      : `Why: ${holder} holds port ${askedPort}, and no free port was found to retry on.`;
+  // The platform flag first, so the command reads as `dev --<platform> …` wherever it was typed.
+  const separator = stop.callerArgv.indexOf('--');
+  const rest = stop.callerArgv.filter(
+    (arg, index) => !isPlatformFlag(arg) || (separator !== -1 && index > separator)
+  );
+  const onFreePort =
+    free == null
+      ? null
+      : `${PROGRAM_PREFIX} dev --${stop.platform} ${withPort(rest, free).join(' ')}`;
+  const forceStop =
+    answersAsDevServer && listener != null && looksLikeDevServerProcess(listener)
+      ? `${PROGRAM_PREFIX} dev:stop --port ${taken} --force`
+      : null;
+  const how = onFreePort
+    ? `How: start on a free port with "${onFreePort}".`
+    : forceStop
+      ? `How: stop the dev server on port ${taken} with "${forceStop}", which stops it only when it answers as an Expo dev server, then run this command again.`
+      : `How: stop ${holder} on port ${taken} yourself, then run this command again.`;
+  const error = new CommandError(
+    'PORT_TAKEN_AFTER_RETRY',
+    [
+      `No dev server was started: "${invocation}" stopped on a busy port and exited ${stop.exitCode}.`,
+      why,
+      how,
+    ].join('\n')
+  );
+  const suggested = onFreePort ?? forceStop;
+  if (suggested) {
+    error.suggestedCommand = suggested;
+  }
   error.exitCode = EXIT_OUTCOME_FAILED;
   return error;
 }

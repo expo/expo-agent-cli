@@ -15,6 +15,7 @@ import {
   executeAgentCliAsync,
   installStubFingerprintAsync,
   readDevLockAsync,
+  readStubExpoInvocations,
   setupFixtureAsync,
   stubExpoEnv,
   waitForAsync,
@@ -185,6 +186,7 @@ describe('@expo/agent-cli dev --detach', () => {
           env: {
             ...stubExpoEnv(projectRoot),
             STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+            RCT_METRO_PORT: '8180',
             STUB_EXPO_PORT_BUSY: '8180',
           },
           reject: false,
@@ -211,12 +213,50 @@ describe('@expo/agent-cli dev --detach', () => {
         env: {
           ...stubExpoEnv(projectRoot),
           STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+          RCT_METRO_PORT: '8180',
           STUB_EXPO_PORT_BUSY: '8180',
         },
         reject: false,
       });
 
       expect(result.stdout).toContain('8180 was busy');
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+  // complete. Another project's Metro held the port, and `expo run:ios` with no terminal skipped its
+  // dev server, deep-linked the app to that Metro, and exited 0, so the detached run failed with no
+  // lock [observed — live suite, 2026-10-05].
+  it('retries a run:* step that skipped its dev server and exited 0', async () => {
+    const projectRoot = await setupFixtureAsync('bare-app');
+    await installStubFingerprintAsync(projectRoot);
+
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--local', '--detach', '--json'],
+        {
+          env: {
+            ...stubExpoEnv(projectRoot),
+            STUB_EXPO_LISTEN: '1',
+            STUB_EXPO_DELAY_MS: STUB_ALIVE_MS,
+            RCT_METRO_PORT: '8471',
+            STUB_EXPO_PORT_BUSY: '8471',
+          },
+          reject: false,
+        }
+      );
+
+      expect(result.exitCode, result.all).toBe(0);
+      const report = JSON.parse(result.stdout);
+      expect(report.portMoved).toEqual({ from: 8471, to: report.port });
+      expect(await readDevLockAsync(projectRoot)).toMatchObject({ port: report.port });
+      expect(readStubExpoInvocations(projectRoot).map(({ args }) => args)).toEqual([
+        ['run:ios'],
+        ['run:ios', '--port', String(report.port)],
+      ]);
     } finally {
       await cleanUpAsync(projectRoot);
     }
