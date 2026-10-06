@@ -35,6 +35,7 @@ import { defaultSmokePlatformAsync, smokeCommand, statedSmokePlatform } from '..
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../runtime/waitReady';
 import { requestsTunnel } from '../start/followUps';
+import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
 import {
@@ -44,17 +45,28 @@ import {
   type DetachedChildPhase,
   type DetachedChildVerdict,
 } from './childVerdict';
+import {
+  createDetachBudget,
+  DETACH_PROGRESS_EVERY_MS,
+  DETACH_STALL_MS,
+  detachedLogView,
+  waitForLockAsync,
+  type DetachWaitVerdict,
+} from './detachBudget';
 import { event } from './events';
 import { openDetachedLogSync, readDetachedLogSync } from './logFile';
 import { isProcessAlive } from './processLiveness';
 import { parsePortMove, type PortMove } from './portCollision';
 import type { DevOptions } from './resolveOptions';
 
-/** How long the parent waits for the detached child to publish its lock. */
+/** How long the parent waits for the detached child to publish its lock, before a build extends it. */
 export const DEFAULT_DETACH_TIMEOUT_MS = 120_000;
 
 /** How often the lock is asked while the parent waits for it. */
 const LOCK_POLL_INTERVAL_MS = 200;
+
+/** How often the budget is judged while `--wait-ready` waits for the bundler. */
+const BUDGET_CHECK_INTERVAL_MS = 1000;
 
 /** How many lines of the child's log a failure quotes back. */
 const FAILURE_LOG_LINES = 20;
@@ -242,19 +254,40 @@ export async function devDetachAsync(
   });
   const hasExited = () => childExit != null;
 
-  const lock = await waitForLockAsync(projectRoot, {
-    timeoutMs: options.detachTimeoutMs,
+  // @ref llp/0026-dev-owns-the-open.rfc.md §The detach budget follows the plan
+  const budget = createDetachBudget({
+    policy: {
+      baseMs: options.detachTimeoutMs,
+      ceilingMs: env.AGENT_CLI_DETACH_BUILD_TIMEOUT_MS,
+      stallMs: DETACH_STALL_MS,
+      progressEveryMs: DETACH_PROGRESS_EVERY_MS,
+    },
+    startedAt,
+    log: detachedLogView(projectRoot),
+    onProgress: ({ elapsedMs, lastLine }) => {
+      event('detach_progress', { pid: child.pid ?? null, elapsedMs, lastLine });
+      if (print) {
+        Log.progress(
+          `Still starting (pid ${child.pid}, ${Math.round(elapsedMs / 1000)}s): ${JSON.stringify(lastLine ?? '')}`
+        );
+      }
+    },
+  });
+
+  const { lock, verdict: lockVerdict } = await waitForLockAsync({
+    readLock: () => readDevServerLockAsync(projectRoot),
     hasExited,
+    verdict: () => budget.check(),
+    pollMs: LOCK_POLL_INTERVAL_MS,
   });
   if (!lock) {
-    throw notStartedError(
-      projectRoot,
-      logFile,
+    throw notStartedError(projectRoot, logFile, {
       childExit,
-      child.pid ?? null,
-      Date.now() - startedAt,
-      options.platform
-    );
+      pid: child.pid ?? null,
+      waitedMs: Date.now() - startedAt,
+      verdict: lockVerdict,
+      platform: options.platform,
+    });
   }
 
   /**
@@ -275,12 +308,20 @@ export async function devDetachAsync(
   if (options.waitReady) {
     // The same wait `dev:wait` performs, and for the same reason: `/status` answers only once the
     // bundler has finished, so the request itself is the wait.
+    // A plan that builds keeps the same budget here as for the lock: `run:*` holds the lock while
+    // it compiles, so the bundler answers only after the build.
+    const budgetSpent = new AbortController();
+    const watch = setInterval(() => {
+      if (budget.check() !== 'wait') {
+        budgetSpent.abort();
+      }
+    }, BUDGET_CHECK_INTERVAL_MS);
     const result = await waitForBundlerReadyAsync(lock.url, {
-      timeoutMs: Math.max(1000, options.detachTimeoutMs - (Date.now() - startedAt)),
+      timeoutMs: Math.max(1000, budget.remainingMs()),
       projectRoot,
       // @ref ./detachAsync §childGone — a dead child never answers, so the wait ends with it.
-      signal: childGone.signal,
-    });
+      signal: AbortSignal.any([childGone.signal, budgetSpent.signal]),
+    }).finally(() => clearInterval(watch));
     ready = result.ready;
     projectRootMatched = result.projectRootMatched;
     if (!result.ready) {
@@ -334,7 +375,7 @@ export async function devDetachAsync(
         OPEN_PLATFORM_GRACE_MS,
         // Bounded by the budget the caller gave the whole run, never beyond it: a `--wait-ready`
         // that has already spent its timeout must not spend a second one here.
-        Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt))
+        Math.max(0, budget.remainingMs())
       ),
       // Only a run that waited for the bundler may be failed on the bundler.
       watchStatus: ready === true,
@@ -957,29 +998,6 @@ export function detachFollowUps(
   return followups;
 }
 
-/** Poll the project's lock until it answers, the child dies, or the budget runs out. */
-async function waitForLockAsync(
-  projectRoot: string,
-  { timeoutMs, hasExited }: { timeoutMs: number; hasExited: () => boolean }
-): Promise<DevServerLockInfo | null> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const lock = await readDevServerLockAsync(projectRoot);
-    if (lock) {
-      return lock;
-    }
-    // Checked after the read, not before: a child that started the dev server and exited in the
-    // same instant still published a lock, and that lock is the answer.
-    if (hasExited()) {
-      return null;
-    }
-    if (Date.now() + LOCK_POLL_INTERVAL_MS >= deadline) {
-      return null;
-    }
-    await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_INTERVAL_MS));
-  }
-}
-
 /**
  * The log tail a failure quotes, or an empty string when there is none.
  *
@@ -994,15 +1012,32 @@ function logTail(projectRoot: string): string {
     : '';
 }
 
-/** The error for a detached child that never published a lock. */
-function notStartedError(
+/**
+ * The error for a detached child that never published a lock.
+ *
+ * Exported for the test table. A child that is still alive when a building plan's wait ends is
+ * reported as still running, with how to stop it: nothing has failed, and the caller decides.
+ */
+export function notStartedError(
   projectRoot: string,
   logFile: string,
-  childExit: { code: number | null; signal: NodeJS.Signals | null } | null,
-  pid: number | null,
-  waitedMs: number,
-  platform: PlanPlatform
+  {
+    childExit,
+    pid,
+    waitedMs,
+    verdict,
+    platform,
+  }: {
+    childExit: { code: number | null; signal: NodeJS.Signals | null } | null;
+    pid: number | null;
+    waitedMs: number;
+    verdict: DetachWaitVerdict;
+    platform: PlanPlatform;
+  }
 ): CommandError {
+  if (childExit == null && (verdict === 'ceiling' || verdict === 'stalled')) {
+    return stillRunningError(projectRoot, logFile, { pid, waitedMs, verdict });
+  }
   const how = childExit
     ? `it exited ${childExit.signal ? `on ${childExit.signal}` : `with code ${childExit.code}`} before it did`
     : `it was still running ${waitedMs}ms later without having published one`;
@@ -1013,6 +1048,44 @@ function notStartedError(
       `The detached dev server did not start${pid == null ? '' : ` (pid ${pid})`}.`,
       `Why: a dev server this CLI starts publishes its port on the project's lock as soon as it is listening, and ${how}. Without that lock nothing can find the dev server, so reporting one here would name a server no other command could reach.`,
       `How: read what it printed in ${logFile}, or run "${PROGRAM_PREFIX} dev --${platform}" in this terminal to watch the same start happen in the foreground.${logTail(projectRoot)}`,
+    ].join('\n')
+  );
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
+  return error;
+}
+
+/**
+ * The error for a building plan whose child is alive and has published no lock when the wait ends.
+ *
+ * `dev:stop` finds a dev server through its lock, so before the lock exists the pid is the handle.
+ * The wrapper forwards SIGTERM to the step it is running.
+ */
+function stillRunningError(
+  projectRoot: string,
+  logFile: string,
+  {
+    pid,
+    waitedMs,
+    verdict,
+  }: { pid: number | null; waitedMs: number; verdict: 'ceiling' | 'stalled' }
+): CommandError {
+  const who = pid == null ? 'the process' : `pid ${pid}`;
+  const kill =
+    pid == null
+      ? null
+      : process.platform === 'win32'
+        ? `taskkill /pid ${pid} /t /f`
+        : `kill ${pid}`;
+  const error = new CommandError(
+    'DEV_DETACH_STILL_STARTING',
+    [
+      `The detached dev server has not published its lock after ${Math.round(waitedMs / 1000)}s, and it is still running (${who}).`,
+      verdict === 'ceiling'
+        ? `Why: its plan builds the app, so this command waited while the build wrote output, up to ${Math.round(env.AGENT_CLI_DETACH_BUILD_TIMEOUT_MS / 60_000)} minutes (AGENT_CLI_DETACH_BUILD_TIMEOUT_MS). That limit passed. The build has not failed; it is still going.`
+        : `Why: its plan builds the app, so this command waited while the build wrote output, and the log has not grown for ${Math.round(DETACH_STALL_MS / 60_000)} minutes. The process has not exited, so it may still finish, or it may be stuck.`,
+      `How: watch it with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}). Once it publishes its lock, "${PROGRAM_PREFIX} status" reports the dev server and "${PROGRAM_PREFIX} dev:stop" stops it.${
+        kill ? ` To stop it before then, run "${kill}".` : ''
+      }${logTail(projectRoot)}`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;

@@ -12,6 +12,7 @@ import {
   detachFollowUps,
   needsOpenPlatformGrace,
   notReadyError,
+  notStartedError,
   resolveDetachFailure,
 } from '../detachAsync';
 import type { DevDetachResultJson } from '../detachAsync';
@@ -400,6 +401,64 @@ describe(notReadyError, () => {
         notReadyError(lock, '/project/.expo/dev.log', readyResult(), building).suggestedCommand
       ).toBe('npx @expo/agent-cli dev:logs');
     });
+  });
+});
+
+// @ref llp/0026-dev-owns-the-open.rfc.md §The detach budget follows the plan
+describe(notStartedError, () => {
+  const logFile = '/project/.expo/dev/logs/dev-detached.log';
+  const base = { pid: 4242, waitedMs: 1_800_000, platform: 'ios' as const };
+
+  it(`says a building child that outlived the ceiling is still running, and how to stop it`, () => {
+    const error = notStartedError(projectRoot, logFile, {
+      ...base,
+      childExit: null,
+      verdict: 'ceiling',
+    });
+
+    expect(error.code).toBe('DEV_DETACH_STILL_STARTING');
+    expect(error.exitCode ?? 1).toBe(1);
+    expect(error.message).toContain('it is still running (pid 4242)');
+    expect(error.message).toContain(logFile);
+    expect(error.message).toContain('"npx @expo/agent-cli dev:stop" stops it');
+    expect(error.message).toContain(
+      process.platform === 'win32' ? 'taskkill /pid 4242 /t /f' : '"kill 4242"'
+    );
+    expect(error.message).toContain('The build has not failed');
+  });
+
+  it(`says a building child whose log went quiet may be stuck`, () => {
+    const error = notStartedError(projectRoot, logFile, {
+      ...base,
+      childExit: null,
+      verdict: 'stalled',
+    });
+
+    expect(error.code).toBe('DEV_DETACH_STILL_STARTING');
+    expect(error.message).toContain('the log has not grown for 5 minutes');
+  });
+
+  it(`keeps the exit wording for a child that is gone`, () => {
+    const error = notStartedError(projectRoot, logFile, {
+      ...base,
+      childExit: { code: 1, signal: null },
+      verdict: 'wait',
+    });
+
+    expect(error.code).toBe('DEV_DETACH_FAILED');
+    expect(error.message).toContain('it exited with code 1 before it did');
+  });
+
+  it(`keeps the timeout wording for a plan that only serves`, () => {
+    const error = notStartedError(projectRoot, logFile, {
+      ...base,
+      waitedMs: 120_000,
+      childExit: null,
+      verdict: 'timeout',
+    });
+
+    expect(error.code).toBe('DEV_DETACH_FAILED');
+    expect(error.message).toContain('it was still running 120000ms later');
   });
 });
 

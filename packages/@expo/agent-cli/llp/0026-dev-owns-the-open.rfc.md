@@ -2,7 +2,7 @@
 
 **Type:** RFC
 **Status:** Draft
-**Systems:** the open itself (`src/dev/openApp.ts`); the hook it hangs on (`src/start/startAsync.ts` §runDevServerAsync, `src/dev/devAsync.ts` §executePlanAsync); the plan's argv and reasons (`src/plan/decide.ts`, `src/plan/platformFlags.ts` §isNativePlatformFlag); the grace-window gate (`src/dev/childVerdict.ts` §stepOpensPlatform); the stub tier's device switch (`e2e/utils.ts`, `AGENT_CLI_NO_DEVICE`)
+**Systems:** the open itself (`src/dev/openApp.ts`); the hook it hangs on (`src/start/startAsync.ts` §runDevServerAsync, `src/dev/devAsync.ts` §executePlanAsync); the plan's argv and reasons (`src/plan/decide.ts`, `src/plan/platformFlags.ts` §isNativePlatformFlag); the grace-window gate (`src/dev/childVerdict.ts` §stepOpensPlatform); the detach budget (`src/dev/detachBudget.ts`); the stub tier's device switch (`e2e/utils.ts`, `AGENT_CLI_NO_DEVICE`)
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-09-05
 **Related:** [[0025-dev-requires-platform]], [[0005-runtime-loop-tools]], [[0010-agent-conventions]]
@@ -27,6 +27,18 @@ For a person at a terminal, the Simulator window is surfaced with `open -a Simul
 - **`--no-open` now means "skip `dev`'s own open"** — same caller intent as in 0025, one mechanism instead of two. `smoke` starts its dev server with it and keeps opening through its own phases, whose budgets and verdicts a gate needs.
 - **The F140 grace window narrowed to `expo run:*`** (`stepOpensPlatform`). A `start` step has no outstanding work that can kill it after the bundler answers, because the open is in `dev`'s process now; `run:*` still launches through AppleScript and keeps the grace.
 - **The Automation-refusal recovery** is now "run `dev --<platform> --detach` again": the build was recorded (F121), so the re-run starts the dev server and opens through `simctl` — the fifteen-minute walk that recovery used to cost is gone entirely.
+
+## The detach budget follows the plan
+
+`dev --ios --detach` on a dev-client app that needed a native build exited 1 after 120 s with "The detached dev server did not start". Its child was in `pod install` at that moment, and it later finished the build, started Metro, published its lock and opened the app [observed — live, 2026-10-05]. So the parent's wait now depends on the plan the child prints first (`parsePlanBuildsNative`, `src/dev/detachBudget.ts`):
+
+- A plan with a build step (`expo run:*`, `expo prebuild`, `eas build`, `expo install expo-dev-client`) waits past the base budget while the child is alive and its log grows. The ceiling is 30 minutes (`AGENT_CLI_DETACH_BUILD_TIMEOUT_MS`). A log that stays the same size for 5 minutes ends the wait. The same budget covers `--wait-ready` and the open grace.
+- A plan with no build step keeps the base of 120 s (`AGENT_CLI_DETACH_TIMEOUT_MS`).
+- A child that exits before its lock fails at once with its last output, as before.
+- When the ceiling or the stall ends the wait with the child alive, the report is exit 1, `DEV_DETACH_STILL_STARTING`. It says the child is still running and names its pid and log. `dev:stop` finds a dev server through its lock, so the report gives `kill <pid>` (`taskkill /pid <pid> /t /f` on Windows) for the time before the lock exists.
+- Every 15 s of the wait emits `dev:detach_progress` with the child's last log line, and prints it on stderr.
+
+`kill <pid>` did not stop that child at first. A step forwards SIGINT and SIGTERM to its tool and returns 0, so the plan went on from `prebuild` to `run:ios` [observed — e2e, 2026-10-05]. A signal during a step now stops the plan before the next step (`cli:start_plan_interrupted`), in the foreground too.
 
 ## The stub tier and devices
 

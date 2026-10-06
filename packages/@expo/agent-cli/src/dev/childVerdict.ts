@@ -168,6 +168,38 @@ export function stepOpensPlatform(step: string): boolean {
 }
 
 /**
+ * Whether the plan in the child's log has a step that builds the app, or null when the log holds no
+ * plan yet.
+ *
+ * A build step is `expo run:*`, `expo prebuild`, `eas build`, or the `expo install
+ * expo-dev-client` that makes the next run a build. It is what decides how long the detached
+ * parent waits for the lock (`./detachBudget.ts`).
+ *
+ * @ref llp/0026-dev-owns-the-open.rfc.md §The detach budget follows the plan
+ */
+export function parsePlanBuildsNative(rawLines: readonly string[]): boolean | null {
+  let sawPlan = false;
+  for (const line of rawLines.flatMap((each) => each.split('\n'))) {
+    const command = PLAN_STEP_ROW.exec(line)?.[1]?.trim();
+    if (!command) {
+      continue;
+    }
+    sawPlan = true;
+    const [cli, verb, ...rest] = command.split(/\s+/);
+    if (
+      (cli === 'eas' && verb === 'build') ||
+      (cli === 'expo' &&
+        (BUILDING_COMMANDS.includes(verb ?? '') ||
+          verb === 'prebuild' ||
+          (verb === 'install' && rest.includes('expo-dev-client'))))
+    ) {
+      return true;
+    }
+  }
+  return sawPlan ? false : null;
+}
+
+/**
  * Read the plan out of the child's log and say which half of it is running.
  *
  * Pure over the lines, like {@link parseDetachedChildVerdict}, and reading the same two formats
