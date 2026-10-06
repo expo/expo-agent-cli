@@ -2,7 +2,7 @@
   "name": "eas-example",
   "version": "1.0.0",
   "private": true,
-  "main": "index.js",
+  "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -18,5 +18,9 @@
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-web": "0.21.2"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~6.0.3"
   }
 }
