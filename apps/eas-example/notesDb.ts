@@ -6,6 +6,7 @@ export type Note = {
   body: string;
   createdAt: number;
   updatedAt: number;
+  pinned: boolean;
 };
 export type Theme = 'light' | 'dark';
 
@@ -25,6 +26,7 @@ const migrations: Array<(db: SQLiteDatabase) => Promise<void>> = [
       ALTER TABLE notes ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0;
       UPDATE notes SET updated_at = created_at;
     `),
+  (db) => db.execAsync('ALTER TABLE notes ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0'),
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {
@@ -38,18 +40,22 @@ export async function migrate(db: SQLiteDatabase): Promise<void> {
   }
 }
 
-export function listNotes(db: SQLiteDatabase, query = ''): Promise<Note[]> {
+type NoteRow = Omit<Note, 'pinned'> & { pinned: number };
+
+export async function listNotes(db: SQLiteDatabase, query = ''): Promise<Note[]> {
   const select =
-    'SELECT id, title, body, created_at AS createdAt, updated_at AS updatedAt FROM notes';
-  const order = 'ORDER BY created_at DESC, id DESC';
+    'SELECT id, title, body, created_at AS createdAt, updated_at AS updatedAt, pinned FROM notes';
+  const order = 'ORDER BY pinned DESC, created_at DESC, id DESC';
   const q = query.trim();
-  if (q === '') return db.getAllAsync<Note>(`${select} ${order}`);
-  const pattern = `%${q}%`;
-  return db.getAllAsync<Note>(
-    `${select} WHERE title LIKE ? OR body LIKE ? ${order}`,
-    pattern,
-    pattern
-  );
+  const rows =
+    q === ''
+      ? await db.getAllAsync<NoteRow>(`${select} ${order}`)
+      : await db.getAllAsync<NoteRow>(
+          `${select} WHERE title LIKE ? OR body LIKE ? ${order}`,
+          `%${q}%`,
+          `%${q}%`
+        );
+  return rows.map((row) => ({ ...row, pinned: row.pinned === 1 }));
 }
 
 export async function countNotes(db: SQLiteDatabase): Promise<number> {
@@ -85,6 +91,10 @@ export async function updateNote(
 
 export async function deleteNote(db: SQLiteDatabase, id: number): Promise<void> {
   await db.runAsync('DELETE FROM notes WHERE id = ?', id);
+}
+
+export async function setPinned(db: SQLiteDatabase, id: number, pinned: boolean): Promise<void> {
+  await db.runAsync('UPDATE notes SET pinned = ? WHERE id = ?', pinned ? 1 : 0, id);
 }
 
 export async function readTheme(db: SQLiteDatabase): Promise<Theme> {
