@@ -52,7 +52,7 @@ export async function holdDevServerLockAsync(
     ...options,
     onResolved: undefined,
   });
-  if (watched.source === 'log') {
+  if (watched?.source === 'log') {
     options.onResolved?.(watched);
     if (watched.port !== named) {
       lock?.update(lockInfo(projectRoot, options, watched.port));
@@ -80,13 +80,20 @@ function lockInfo(
 async function publishAsync(
   projectRoot: string,
   options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning'>,
-  { port, source }: ResolvedDevServerPort
+  resolved: ResolvedDevServerPort | null
 ): Promise<DevServerLockHandle | null> {
   // Derived once, inside the try, so the catch below has an address to report without being able
   // to fail deriving one — a `catch` that can throw is not a safety net.
   let address = '';
   try {
     address = lockAddressFor(projectRoot).address;
+    if (resolved == null) {
+      // The only port left to name is another project's dev server, and publishing it would point
+      // every command of this project at that project.
+      event('dev_lock_skipped', { address, reason: 'foreign-port' });
+      return null;
+    }
+    const { port, source } = resolved;
 
     if (options.isRunning?.() === false) {
       // The dev server exited before it said where it listens, so there is nothing to point at.

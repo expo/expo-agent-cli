@@ -13,7 +13,7 @@ import {
   waitForBundlerReadyAsync,
   waitForFreshAppConnectionAsync,
 } from '../waitReady';
-import { matchProjectRoot } from '../devServer';
+import { matchProjectRoot } from '../projectRootHeader';
 
 type StatusHandler = (request: { url: string }) => {
   status?: number;
