@@ -13,7 +13,7 @@
 // on a port it picked itself or — when the caller *named* the port — reports the outcome that a
 // demanded port was taken. `expo-prompt` still covers every other question the Expo CLI asks.
 
-import net from 'net';
+import { freePortAsync, testPortAsync } from '../utils/freeport';
 
 /** What the Expo CLI said when a port was taken. */
 export interface PortCollision {
@@ -124,8 +124,11 @@ export function parsePortMove(output: string): PortMove | null {
   return { from: toPort(PORT_MOVE_FROM.exec(output)?.[1]), to };
 }
 
-/** How far past the busy port to look before giving up on finding a free one. */
-const FREE_PORT_SCAN_RANGE = 200;
+/**
+ * Only `null`, the unspecified address, sees a dual-stack listener on `::`, which is how Metro
+ * binds. Only `127.0.0.1` sees a listener bound to `127.0.0.1` alone.
+ */
+const PROBE_HOSTS = [null, '127.0.0.1'];
 
 /**
  * A port on this machine that nothing is listening on, at or after `from`.
@@ -134,27 +137,13 @@ const FREE_PORT_SCAN_RANGE = 200;
  * still be unbindable (a listener on another interface, a socket in `TIME_WAIT`), and the question
  * this answers is whether the dev server will be able to *take* it.
  *
- * @returns the port, or null when the whole range was busy.
+ * @returns the port, or null when every port up to 65535 was busy.
  */
-export async function findFreePortAsync(
-  from: number,
-  { range = FREE_PORT_SCAN_RANGE }: { range?: number } = {}
-): Promise<number | null> {
-  for (let port = from; port < from + range && port <= 65535; port++) {
-    if (await isPortBindableAsync(port)) {
-      return port;
-    }
-  }
-  return null;
+export async function findFreePortAsync(from: number): Promise<number | null> {
+  return await freePortAsync(from, PROBE_HOSTS);
 }
 
-/** Whether a server can bind this port on the loopback interface right now. */
+/** Whether a server can bind this port right now, on every address in {@link PROBE_HOSTS}. */
 export async function isPortBindableAsync(port: number): Promise<boolean> {
-  return await new Promise<boolean>((resolve) => {
-    const server = net.createServer();
-    server.once('error', () => resolve(false));
-    server.listen(port, '127.0.0.1', () => {
-      server.close(() => resolve(true));
-    });
-  });
+  return await testPortAsync(port, PROBE_HOSTS);
 }
