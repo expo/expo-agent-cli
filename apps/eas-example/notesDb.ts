@@ -3,22 +3,28 @@ import type { SQLiteDatabase } from 'expo-sqlite';
 export type Note = { id: number; title: string; body: string; createdAt: number };
 export type Theme = 'light' | 'dark';
 
-const SCHEMA_VERSION = 1;
+const migrations: Array<(db: SQLiteDatabase) => Promise<void>> = [
+  (db) =>
+    db.execAsync(`
+      CREATE TABLE IF NOT EXISTS notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
+    `),
+];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {
+  await db.execAsync('PRAGMA journal_mode = WAL');
   const row = await db.getFirstAsync<{ user_version: number }>('PRAGMA user_version');
-  if ((row?.user_version ?? 0) >= SCHEMA_VERSION) return;
-  await db.execAsync(`
-    PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS notes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      created_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY NOT NULL, value TEXT NOT NULL);
-    PRAGMA user_version = ${SCHEMA_VERSION};
-  `);
+  const applied = row?.user_version ?? 0;
+  for (const [index, step] of migrations.entries()) {
+    if (index < applied) continue;
+    await step(db);
+    await db.execAsync(`PRAGMA user_version = ${index + 1}`);
+  }
 }
 
 export function listNotes(db: SQLiteDatabase): Promise<Note[]> {
