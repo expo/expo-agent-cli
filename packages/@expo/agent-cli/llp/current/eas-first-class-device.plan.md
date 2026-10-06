@@ -3,7 +3,7 @@
 **Type:** Plan
 **Status:** Draft
 **Date:** 2026-10-05
-**Source:** the dogfood journal `docs/dogfood-2026-10-05.md` in the `parallel-example` app repository, kept outside this one (24 findings: 1 blocked, 9 wrong, 1 slow, 7 unclear, 2 missing, 4 nice), the live run of 2026-10-05 behind [[0030-one-device-per-agent]].
+**Source:** the dogfood run of 2026-10-05 behind [[0030-one-device-per-agent]] (24 findings: 1 blocked, 9 wrong, 1 slow, 7 unclear, 2 missing, 4 nice). The next run dogfoods `apps/eas-example` in this repository, and its journal lives in `llp/current/`, next to this plan.
 **Related:** [[0005-runtime-loop-tools]], [[0021-honest-reports]], [[0026-dev-owns-the-open]], [[0027-everything-on-eas]]
 
 ## What the run showed
