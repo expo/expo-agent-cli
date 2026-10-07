@@ -51,7 +51,7 @@ function allocate(
     createDevice,
     deleteDevice,
     capacity = 4,
-    now = NOW,
+    clock = () => NOW,
     duringInventory,
   }: {
     inventory?: DeviceCandidate[];
@@ -60,7 +60,7 @@ function allocate(
     createDevice?: () => Promise<DeviceCandidate>;
     deleteDevice?: (claim: DeviceClaim) => Promise<void>;
     capacity?: number;
-    now?: Date;
+    clock?: () => Date;
   } = {}
 ) {
   return allocateDeviceAsync({
@@ -74,7 +74,7 @@ function allocate(
     createDevice,
     deleteDevice,
     capacity,
-    now,
+    clock,
     probeLock: async (root) => (liveRoots.has(root) ? {} : null),
   });
 }
@@ -130,7 +130,7 @@ describe('allocateDeviceAsync', () => {
     await allocate(HERE, { inventory });
     const later = new Date(NOW.getTime() + 60_000);
 
-    const again = await allocate(HERE, { inventory, now: later });
+    const again = await allocate(HERE, { inventory, clock: () => later });
 
     expect(again).toMatchObject({
       kind: 'reuse',
@@ -224,6 +224,25 @@ describe('allocateDeviceAsync', () => {
       { id: 'A', projectRoot: OTHER, touchedAt: NOW.toISOString() },
     ]);
     expect(event).not.toHaveBeenCalledWith('device_claim_stale_removed', expect.anything());
+  });
+
+  it(`re-reads a claim with the time of the re-read, so a touch made during a long inventory is not in the future`, async () => {
+    const stale = staleClaim({ id: 'A' });
+    writeClaim(stale);
+    const later = new Date(NOW.getTime() + 5 * 60_000);
+    let time = NOW;
+
+    const allocation = await allocate(HERE, {
+      inventory: [booted('A')],
+      clock: () => time,
+      duringInventory: () => {
+        time = later;
+        touchClaim(stale, later);
+      },
+    });
+
+    expect(allocation).toEqual({ kind: 'exhausted', holders: [{ id: 'A', projectRoot: OTHER }] });
+    expect(readClaims()).toMatchObject([{ id: 'A', projectRoot: OTHER }]);
   });
 
   it(`takes another device when the stale claim it chose came back to life`, async () => {
