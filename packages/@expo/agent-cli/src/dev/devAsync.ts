@@ -69,6 +69,11 @@ import {
   type PortCollision,
 } from './portCollision';
 import type { DevOptions } from './resolveOptions';
+import {
+  devServerRunningError,
+  devServerRunningReason,
+  runningDevServerAsync,
+} from './runningDevServer';
 import { easCommandPrefix } from '../utils/easCli';
 
 /**
@@ -125,7 +130,27 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // holds the port, and exits 0 [observed — live suite, 2026-10-05].
   const serving = forwardedPlan.steps.filter(isDevServerStep).at(-1);
   let plan: StartPlan = forwardedPlan;
-  if (serving) {
+  const running = serving ? await runningDevServerAsync(projectRoot) : null;
+  if (running && options.mode !== 'plan') {
+    // The smoke example needs a device platform, which the caller's `--web` is not.
+    const smokePlatform =
+      options.platform === 'web' ? await defaultSmokePlatformAsync(projectRoot) : options.platform;
+    throw devServerRunningError(running, smokePlatform);
+  }
+  if (running) {
+    // A stop lists no steps, because the run does none (llp/0015 §The plan approved is the plan run).
+    plan = {
+      ...forwardedPlan,
+      steps: [],
+      reasons: [...forwardedPlan.reasons, devServerRunningReason(running)],
+      devServerPort: {
+        port: running.lock.port,
+        movedFrom: null,
+        state: 'running',
+        phase: running.phase,
+      },
+    };
+  } else if (serving) {
     const planned = await resolvePlannedPortAsync(options.port);
     if (!planned.bindable && options.port != null && options.mode !== 'plan') {
       throw await portDemandedError(projectRoot, options.port, options.platform);
@@ -145,8 +170,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     };
   }
 
-  if (dropped.length) {
-    const last = plan.steps[plan.steps.length - 1]!;
+  const last = plan.steps.at(-1);
+  if (dropped.length && last) {
     const directCommand =
       last.argv[0] === 'expo'
         ? `${PROGRAM_PREFIX} ${last.argv.slice(1).join(' ')}`
