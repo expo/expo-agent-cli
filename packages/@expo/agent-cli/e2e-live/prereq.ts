@@ -908,6 +908,46 @@ export function iphoneSimulatorsGate(count: number): Gate {
       );
 }
 
+/**
+ * No worktree on this machine holds a local iOS simulator in the machine's device registry.
+ *
+ * The local block of `live-claims` runs its CLI against a registry of its own, which cannot show
+ * these claims, and that CLI takes a booted simulator no claim names: the one a real agent is
+ * driving (`src/deviceClaims/choose.ts`). A claim holds nothing once its worktree is gone.
+ */
+export function localSimulatorsUnclaimedGate(): Gate {
+  const directory = path.join(
+    process.env.__UNSAFE_EXPO_HOME_DIRECTORY || path.join(os.homedir(), '.expo'),
+    'agent-cli',
+    'devices'
+  );
+  let names: string[];
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return ok;
+  }
+  const held = names
+    .filter((name) => name.endsWith('.json'))
+    .flatMap((name) => {
+      try {
+        const claim = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'));
+        return claim.backend === 'local-ios' && fs.existsSync(claim.projectRoot)
+          ? [`${claim.id} (${claim.projectRoot})`]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+  return held.length === 0
+    ? ok
+    : missing(
+        `worktrees on this machine hold ${held.length} local simulator(s) in ${directory}: ${held.join(', ')}. ` +
+          `This suite's registry is its own and cannot show them, so its CLI could take one a worktree is using. ` +
+          `Run "dev:stop" in each of those worktrees, then run this again`
+      );
+}
+
 /** The EAS project a scaffolded suite app links itself to. */
 export type LivecheckLink = { owner: string; slug: string; projectId: string };
 

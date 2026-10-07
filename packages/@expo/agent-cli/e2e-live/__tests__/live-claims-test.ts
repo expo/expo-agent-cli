@@ -9,7 +9,8 @@
 // scratch worktrees and runs `bun install` in each. A copy inside the workspace could not build: its
 // `node_modules` are symlinks into the root. Each block points `__UNSAFE_EXPO_HOME_DIRECTORY` at a
 // fresh directory, so the registry it reads and asserts on is its own and the machine's `~/.expo` is
-// untouched.
+// untouched. That registry cannot show a claim a real worktree holds, so the local block runs only
+// while the machine's registry holds no claim on a local simulator.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -25,6 +26,7 @@ import {
   easCiGate,
   easProjectGate,
   iphoneSimulatorsGate,
+  localSimulatorsUnclaimedGate,
   EAS_EXAMPLE_APP,
   networkGate,
   packageRunnerGate,
@@ -227,7 +229,13 @@ function claimPerRoot(worktrees: Worktrees, backend: Claim['backend']): Map<stri
 
 describeLive(
   'live-claims (local iOS)',
-  allOf(claimsOptInGate(), builtBinGate(), iphoneSimulatorsGate(2), registryGate())
+  allOf(
+    claimsOptInGate(),
+    builtBinGate(),
+    iphoneSimulatorsGate(2),
+    localSimulatorsUnclaimedGate(),
+    registryGate()
+  )
 )('live-claims: two worktrees, two local simulators', () => {
   const run = new LiveRun('live-claims-local');
   let worktrees: Worktrees | null = null;
