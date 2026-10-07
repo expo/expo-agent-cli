@@ -32,6 +32,7 @@ import path from 'path';
 import type { DeviceBackend } from '../navigate/device';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { resolveAdb, runAdbAsync, type AdbResolution } from './adb';
+import { androidDeviceNameAsync } from './installDevBuild';
 
 /** Every simulator this CLI creates is named this plus a number, and only such a one is deleted. */
 export const CREATED_SIMULATOR_PREFIX = 'agent-cli ';
@@ -481,6 +482,12 @@ export interface EmulatorBootResult extends BootDeviceResult {
    * `adb emu kill` cannot shut it down.
    */
   kill: () => void;
+  /**
+   * The emulator on the serial, if any, may be the one this boot spawned. False when that process
+   * never started or exited, or when the serial answers with another AVD: a shutdown by serial
+   * would then stop another process's emulator.
+   */
+  ownsSerial: boolean;
 }
 
 /**
@@ -500,7 +507,7 @@ export async function bootEmulatorAsync(
   const serial = emulatorSerial(port);
   const emulator = resolveEmulator(adb);
   let child: ChildProcess | null = null;
-  const result = (ok: boolean, reason: string | null): EmulatorBootResult => ({
+  const result = (ok: boolean, reason: string | null, ownsSerial = true): EmulatorBootResult => ({
     ok,
     deviceId: serial,
     backend: 'local-android',
@@ -511,6 +518,7 @@ export async function bootEmulatorAsync(
     kill: () => {
       child?.kill('SIGKILL');
     },
+    ownsSerial,
   });
 
   const args = ['-avd', avd, '-ports', `${port},${port + 1}`, '-no-snapshot-save'];
@@ -548,28 +556,49 @@ export async function bootEmulatorAsync(
   } catch (error: unknown) {
     return result(
       false,
-      `"${emulator} -avd ${avd}" could not be started: ${error instanceof Error ? error.message : String(error)}`
+      `"${emulator} -avd ${avd}" could not be started: ${error instanceof Error ? error.message : String(error)}`,
+      false
     );
   }
 
   const deadline = now() + timeoutMs;
   for (;;) {
     if (spawnFailure != null) {
-      return result(false, `"${emulator} -avd ${avd}" could not be started: ${spawnFailure}`);
+      return result(
+        false,
+        `"${emulator} -avd ${avd}" could not be started: ${spawnFailure}`,
+        false
+      );
     }
     const probe = await runAdbAsync(['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], {
       adb,
       timeoutMs: 30_000,
     });
-    if (probe.exitCode === 0 && probe.stdout.trim() === '1') {
-      return result(true, null);
-    }
+    // Checked after the probe: an emulator that exited was not the one that answered it.
     if (exitFailure != null) {
       return result(
         false,
         `"${emulator} -avd ${avd}" ${exitFailure} before ${serial} booted${
           readOnly ? ' (it was started -read-only, beside a running instance of the AVD)' : ''
-        }`
+        }`,
+        false
+      );
+    }
+    if (probe.exitCode === 0 && probe.stdout.trim() === '1') {
+      // Another process can take the port after the registry lock is released; a launcher that
+      // exited 0 leaves only the AVD name to tell its emulator from that one.
+      const running = await androidDeviceNameAsync(serial, {
+        run: (args, options = {}) => runAdbAsync(args, { ...options, adb }),
+      });
+      if (running === avd) {
+        return result(true, null);
+      }
+      return result(
+        false,
+        running == null
+          ? `${serial} booted, but "${adb.bin} -s ${serial} emu avd name" did not name its AVD, so it may not be the ${avd} this boot started`
+          : `${serial} booted, but runs the AVD ${running}, not ${avd}: another emulator took its console port`,
+        false
       );
     }
     if (now() >= deadline) {
