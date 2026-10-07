@@ -2,7 +2,7 @@
   "name": "eas-example",
   "version": "1.0.0",
   "private": true,
-  "main": "index.js",
+  "main": "index.ts",
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
@@ -13,10 +13,16 @@
     "@expo/metro-runtime": "~58.0.11",
     "expo": "~58.0.3",
     "expo-dev-client": "~58.0.11",
+    "expo-sqlite": "~58.0.10",
     "expo-status-bar": "~58.0.3",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "react-native": "0.88.0-rc.3",
+    "react-native-safe-area-context": "~5.9.1",
     "react-native-web": "0.21.2"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.3"
   }
 }
