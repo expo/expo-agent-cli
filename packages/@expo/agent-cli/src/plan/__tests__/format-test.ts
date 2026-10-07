@@ -75,6 +75,28 @@ describe(formatStartPlan, () => {
     }
   });
 
+  it.each<[NonNullable<StartPlan['devServerPort']>, string]>([
+    [{ port: 8081, movedFrom: null, state: 'picked' }, 'Dev server: port 8081.'],
+    [
+      { port: 8082, movedFrom: 8081, state: 'picked' },
+      'Dev server: port 8082, because 8081 is taken.',
+    ],
+    [
+      { port: 8180, movedFrom: null, state: 'named', taken: false },
+      'Dev server: port 8180, as named.',
+    ],
+    [
+      { port: 8180, movedFrom: null, state: 'named', taken: true },
+      'Dev server: port 8180, as named, which is taken.',
+    ],
+  ])(`should name the dev server's port and its state: %o`, (devServerPort, line) => {
+    expect(strip(formatStartPlan({ ...plan, devServerPort }))).toContain(line);
+  });
+
+  it(`should print no dev server row for a plan without a port`, () => {
+    expect(strip(formatStartPlan(plan))).not.toContain('Dev server:');
+  });
+
   it(`should format a plan of one step`, () => {
     const output = formatStartPlan({
       ...plan,

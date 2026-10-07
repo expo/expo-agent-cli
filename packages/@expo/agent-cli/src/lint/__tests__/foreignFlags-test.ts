@@ -156,7 +156,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--non-interactive  src/deploy/deployAsync.ts",
           "--platform  src/deploy/deployAsync.ts",
           "--platform  src/project/fingerprint.ts",
-          "--port  src/dev/devAsync.ts",
+          "--port  src/dev/forwardedArgs.ts",
           "--preset  src/project/fingerprint.ts",
           "--pretty  src/typecheck/checkAsync.ts",
           "--project  src/deploy/launchCli.ts",

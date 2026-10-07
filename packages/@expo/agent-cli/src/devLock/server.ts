@@ -34,8 +34,8 @@ export async function acquireDevServerLockAsync(
 ): Promise<DevServerLockResult> {
   const { kind, address } = lockAddressFor(info.projectRoot);
   // One line, then the end of the connection: a reader needs no protocol beyond "read until
-  // close". Serialized once, so every answer is byte-identical.
-  const answer = `${JSON.stringify(info)}\n`;
+  // close". Serialized once per info, so every answer between two updates is byte-identical.
+  let answer = `${JSON.stringify(info)}\n`;
 
   if (kind === 'unix') {
     try {
@@ -106,7 +106,10 @@ export async function acquireDevServerLockAsync(
     debugEvent('dev_lock_server_error', { address, error: debugEvent.error(serverError) });
   });
 
-  return { status: 'acquired', lock: createHandle(server, kind, address, replacedStale) };
+  const update = (next: DevServerLockInfo) => {
+    answer = `${JSON.stringify(next)}\n`;
+  };
+  return { status: 'acquired', lock: createHandle(server, kind, address, replacedStale, update) };
 }
 
 /** Wrap the listening server in the handle its holder releases. */
@@ -114,7 +117,8 @@ function createHandle(
   server: net.Server,
   kind: 'unix' | 'pipe',
   address: string,
-  replacedStale: boolean
+  replacedStale: boolean,
+  update: (info: DevServerLockInfo) => void
 ): DevServerLockHandle {
   let released = false;
 
@@ -142,7 +146,7 @@ function createHandle(
   // or a signal nobody forwarded. It runs synchronously, which is all the cleanup needs.
   process.once('exit', release);
 
-  return { address, replacedStale, release };
+  return { address, replacedStale, release, update };
 }
 
 /** Listen, and resolve with the error instead of throwing it. */

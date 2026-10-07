@@ -3,14 +3,34 @@
 // The samples are the three spellings the Expo CLI actually produces, so a wording change upstream
 // fails here rather than silently turning a recoverable stop back into "a person must answer this".
 
+import net from 'net';
+
 import {
   defaultMetroPort,
   detectPortCollision,
   findFreePortAsync,
   formatPortMove,
   isPortBindableAsync,
-  parsePortMove,
+  resolvePlannedPortAsync,
 } from '../portCollision';
+
+/** Hold a port on the unspecified address, the way another project's Metro does. */
+async function listenDualStackAsync(): Promise<net.Server> {
+  const server = net.createServer();
+  await new Promise<void>((resolve) => {
+    server.once('error', () => server.listen(0, '0.0.0.0', () => resolve()));
+    server.listen({ port: 0, host: '::', ipv6Only: false }, () => resolve());
+  });
+  return server;
+}
+
+function portOf(server: net.Server): number {
+  return (server.address() as net.AddressInfo).port;
+}
+
+async function closeAsync(server: net.Server): Promise<void> {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}
 
 describe(detectPortCollision, () => {
   // What the friction run captured, verbatim: the prompt helper quotes the question it could not
@@ -153,46 +173,71 @@ describe(findFreePortAsync, () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port can
-// complete — friction run 5, F48-4. The move is decided in the child process of a `--detach` run
-// and read back by the parent, so the sentence is a *protocol* between two processes of this CLI
-// rather than only prose. These tests pin both ends of it: the parent's report is wrong the moment
-// the two drift, and nothing else would notice.
-describe('the port move a detached run reports', () => {
-  it(`round-trips a move off a port the Expo CLI named`, () => {
-    const line = formatPortMove({ from: 8081, to: 8210 });
+// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+// complete — the sentence a person reads when the dev server is not on the port it wanted. It
+// carries no protocol: a `--detach` parent computes the move from the plan and the lock.
+describe(formatPortMove, () => {
+  it(`says the plan moved off a busy port before anything ran`, () => {
+    expect(formatPortMove({ busy: 8081, to: 8082, when: 'plan' })).toBe(
+      'Port 8081 is busy; the dev server uses 8082.'
+    );
+  });
 
-    expect(line).toContain('8081');
-    expect(line).toContain('8210');
-    expect(parsePortMove(line)).toEqual({ from: 8081, to: 8210 });
+  it(`says the retry moved off a port taken before the dev server bound it`, () => {
+    expect(formatPortMove({ busy: 8082, to: 8083, when: 'retry' })).toBe(
+      'Port 8082 was taken before the dev server bound it; the dev server uses 8083.'
+    );
   });
 
   // The Expo CLI does not always name the port it wanted, and inventing one would be this CLI
-  // claiming a fact it was never told. `to` is the half that is always known.
-  it(`round-trips a move whose busy port was never named`, () => {
-    const line = formatPortMove({ from: null, to: 8210 });
+  // claiming a fact it was never told.
+  it(`names no busy port when none was named`, () => {
+    expect(formatPortMove({ busy: null, to: 8210, when: 'retry' })).toBe(
+      'The port the dev server wanted is busy; it uses 8210.'
+    );
+  });
+});
 
-    expect(line).toContain('8210');
-    expect(parsePortMove(line)).toEqual({ from: null, to: 8210 });
+// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+// complete — the port the plan's steps are given, picked before any of them runs.
+describe(resolvePlannedPortAsync, () => {
+  it(`keeps the preferred port when it is free`, async () => {
+    const preferred = (await findFreePortAsync(49600))!;
+
+    expect(await resolvePlannedPortAsync(null, { preferred })).toEqual({
+      port: preferred,
+      movedFrom: null,
+      bindable: true,
+    });
   });
 
-  it(`finds the move in a log with the bundler's own output around it`, () => {
-    const log = [
-      'Starting project at /project',
-      formatPortMove({ from: 8081, to: 8210 }),
-      'Waiting on http://127.0.0.1:8210',
-      'iOS Bundled 220ms',
-    ].join('\n');
+  it(`moves off a preferred port another project's Metro holds on the unspecified address`, async () => {
+    const server = await listenDualStackAsync();
+    const busy = portOf(server);
+    try {
+      const planned = await resolvePlannedPortAsync(null, { preferred: busy });
 
-    expect(parsePortMove(log)).toEqual({ from: 8081, to: 8210 });
+      expect(planned.movedFrom).toBe(busy);
+      expect(planned.port).toBeGreaterThan(busy);
+      expect(planned.bindable).toBe(true);
+    } finally {
+      await closeAsync(server);
+    }
   });
 
-  // The reason the parent parses rather than comparing the port it asked for against the port the
-  // lock reports: a dev server can land on another port for reasons that are not a collision, and
-  // reporting those as a move would be this command inventing a busy port nobody observed.
-  it(`answers null for a log with no move in it`, () => {
-    expect(parsePortMove('Starting project at /project\niOS Bundled 220ms')).toBeNull();
-    expect(parsePortMove('')).toBeNull();
+  // A named port is a requirement: it is never moved, and the caller learns whether it is free.
+  it(`keeps a named port, and says when it is taken`, async () => {
+    const server = await listenDualStackAsync();
+    const busy = portOf(server);
+    try {
+      expect(await resolvePlannedPortAsync(busy)).toEqual({
+        port: busy,
+        movedFrom: null,
+        bindable: false,
+      });
+    } finally {
+      await closeAsync(server);
+    }
   });
 });
 

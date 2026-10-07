@@ -565,6 +565,7 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
     // cloud session can use. The lock is what makes this project's own dev server discoverable, so
     // the run reads the advertised host rather than being handed one.
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [],
       messageSocket: 'none',
       manifestOrigin: 'https://stub-tunnel.example',
@@ -665,6 +666,7 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
   it(`says how to start a session when --eas finds none`, async () => {
     const projectRoot = await setupAsync('go-app');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [],
       messageSocket: 'none',
       manifestOrigin: 'https://stub-tunnel.example',

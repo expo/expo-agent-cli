@@ -8,6 +8,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import type { BuildBackend, RunTarget } from '../settings/types';
 import { CommandError } from '../utils/errors';
 import { DEFAULT_DETACH_TIMEOUT_MS } from './detachAsync';
+import { withoutPortArgs } from './forwardedArgs';
 import { assertKnownDevFlags } from './knownFlags';
 
 /**
@@ -106,10 +107,9 @@ export interface DevOptions {
   /**
    * Port the dev server is asked to listen on (`--port`), or null when the command line names none.
    *
-   * The flag was always forwarded to `expo start` — it is one of that CLI's — but it was in no
-   * help text, so the way to avoid the "port 8081 is busy, use 8082?" question the Expo CLI asks
-   * (and that a run with no terminal cannot answer) was undiscoverable. Naming it here also gives
-   * the follow-ups a port they can vouch for.
+   * `dev` owns the port: the flag is not forwarded as typed, and every step that serves gets
+   * `--port` with this port, or with the free one `dev` picked when it is null. Naming it here also
+   * gives the follow-ups a port they can vouch for.
    *
    * Naming it also makes the port a **requirement**: a run whose named port is taken fails rather
    * than moving to a free one (`src/dev/portCollision.ts`).
@@ -177,14 +177,15 @@ export function resolveDevOptions(argv: string[]): DevOptions {
 
   return {
     mode: argv.includes('--plan') ? 'plan' : 'run',
-    // `--port` is *not* stripped: it is an `expo start` flag and the plan's last step is the one
-    // that acts on it. Reading it only records what was asked for. A native platform flag *is*
-    // stripped: it names what the plan is for, and this command performs the open itself
-    // (`./openApp.ts`) — handing it to `expo start` would open the app a second way, through the
-    // osascript that dies without an Automation grant. `--web` stays: serving the web bundle is
-    // `expo start`'s own job.
+    // `--port` is stripped: `dev` owns the port and sets it on every step that serves
+    // (`./portCollision.ts`). A native platform flag is stripped too: it names what the plan is
+    // for, and this command performs the open itself (`./openApp.ts`) — handing it to `expo start`
+    // would open the app a second way, through the osascript that dies without an Automation grant.
+    // `--web` stays: serving the web bundle is `expo start`'s own job.
     expoArgs: [
-      ...argv.filter((arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !isNativePlatformFlag(arg)),
+      ...withoutPortArgs(
+        argv.filter((arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !isNativePlatformFlag(arg))
+      ),
       // @ref llp/0027-everything-on-eas.rfc.md §The dev server is tunnelled
       // Implied, never asked for: an EAS Simulator session is a machine in a datacenter, and
       // `exp://127.0.0.1:8081` names *its* loopback. A caller who typed `--tunnel` already has it.
@@ -401,7 +402,7 @@ function badPort(raw: string, example: string): CommandError {
     [
       `--port must be a port number from 1 to 65535, but got ${raw || '(nothing)'}.`,
       `Why: the value is handed to "expo start", which listens on it.`,
-      `How: pass one, as in "${PROGRAM_PREFIX} dev --${example} --port 8082". Leaving --port out lets the Expo CLI pick, which works when 8081 is free.`,
+      `How: pass one, as in "${PROGRAM_PREFIX} dev --${example} --port 8082". Leaving --port out lets this command pick a free port.`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} dev --${example} --port 8082`;

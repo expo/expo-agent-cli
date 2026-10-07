@@ -263,7 +263,8 @@ export async function ensureEasSessionAsync(
   // 1. A session this project already has, on this platform, is the device: reuse it. Asked before
   //    the tunnel, because a session that is up needs no URL from here — `openRouteAsync` builds
   //    the deep link it is sent — and a gate whose dev server carries no tunnel yet must not wait
-  //    two minutes to learn that the session it is about to drive was there all along.
+  //    two minutes to learn that the session it is about to drive was there all along. The deep
+  //    link still needs the tunnel, so the open after this waits for it (`openAppOnEasAsync`).
   const easCli = resolveEasCli(projectRoot);
   if (!easCli) {
     return failed(
@@ -452,13 +453,23 @@ export async function openAppOnEasAsync(
     return { ...base, opened: true, reason: null };
   }
 
-  // A session that was already up gets the deep link the way `navigate --eas` sends it.
+  // A session that was already up gets the deep link the way `navigate --eas` sends it, and that
+  // link names the host the dev server advertises. `dev --eas` tunnels its dev server, and the
+  // tunnel comes up after Metro answers: a link sent before it names the loopback, which a session
+  // on EAS cannot load. So the open waits for the tunnel, as a session this run starts does.
+  const tunnelHost = await waitForTunnelHostAsync(options, stillWanted);
+  if (!tunnelHost) {
+    return {
+      ...base,
+      opened: false,
+      reason: stillWanted()
+        ? `the dev server advertised no tunnel host within ${Math.round((options.waits?.tunnelMs ?? EAS_TUNNEL_WAIT_MS) / 1000)}s, and a session on EAS cannot reach this machine's loopback — the dev server has to run with --tunnel`
+        : 'the dev server stopped before the app was opened',
+    };
+  }
   Log.progress(
     `Opening the app on EAS Simulator session ${session.sessionId}, which is already up.`
   );
-  if (!stillWanted()) {
-    return { ...base, opened: false, reason: 'the dev server stopped before the app was opened' };
-  }
   try {
     const result = await openRouteAsync(projectRoot, {
       route: '/',

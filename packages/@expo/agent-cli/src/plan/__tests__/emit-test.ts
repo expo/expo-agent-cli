@@ -34,7 +34,20 @@ describe(emitStartPlan, () => {
       steps: plan.steps,
       reasons: plan.reasons,
       buildLocation: null,
+      devServerPort: null,
     });
+  });
+
+  it(`should carry the port the plan picked on the event`, () => {
+    emitStartPlan(
+      { ...plan, devServerPort: { port: 8082, movedFrom: 8081, state: 'picked' } },
+      { mode: 'plan' }
+    );
+
+    expect(event).toHaveBeenCalledWith(
+      'start_plan',
+      expect.objectContaining({ devServerPort: { port: 8082, movedFrom: 8081, state: 'picked' } })
+    );
   });
 
   it(`should print the plan table`, () => {

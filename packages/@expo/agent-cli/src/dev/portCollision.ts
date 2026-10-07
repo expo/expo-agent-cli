@@ -93,55 +93,63 @@ function toPort(value: string | undefined): number | null {
 }
 
 /**
- * A dev server that was started somewhere other than where it was asked for.
+ * The sentence `@expo/agent-cli dev` prints when the dev server is not on the port it wanted.
  *
- * `from` is null when the Expo CLI's own message did not name the port it wanted — it does not
- * always — and inventing one would be this CLI claiming a fact nobody told it.
+ * Two moments: the plan found the port busy before any step ran, or the port the plan picked was
+ * taken before the dev server bound it and the retry moved it again. `busy` is null when the Expo
+ * CLI did not name the port it wanted, which it does not always.
  */
-export interface PortMove {
-  /** The busy port, when the Expo CLI named it. */
-  from: number | null;
-  /** The port this CLI picked and the dev server took. */
+export function formatPortMove({
+  busy,
+  to,
+  when,
+}: {
+  busy: number | null;
   to: number;
-}
-
-/**
- * The sentence `@expo/agent-cli dev` prints when it moved the dev server off a busy port.
- *
- * Built here rather than written inline because it is read back by another *process* of this CLI:
- * a `--detach` run does the retry in the child, whose output goes to a log file, and the parent
- * has no other way to learn that the port it reports is not the port that was asked for
- * [friction run 5, F48-4]. {@link parsePortMove} is the other end, and a round-trip test pins the
- * pair — the parent's report goes silently wrong the moment the two drift.
- *
- * Why not compare the port the run asked for against the port the lock reports: a dev server can
- * land elsewhere for reasons that are not a collision, and reporting those as a move would be this
- * command inventing a busy port it never observed.
- */
-export function formatPortMove(move: PortMove): string {
-  return move.from == null
-    ? `The port the dev server wanted was busy; started on ${move.to} instead.`
-    : `Port ${move.from} was busy; started on ${move.to} instead.`;
-}
-
-/** `to` in the sentence above, which is the half that is always there. */
-const PORT_MOVE_TO = /started on (\d+) instead/;
-
-/** `from`, when the sentence had one. */
-const PORT_MOVE_FROM = /Port (\d+) was busy/;
-
-/**
- * Read {@link formatPortMove}'s sentence back out of a detached dev server's log.
- *
- * @param output everything the detached run printed, escape codes already stripped.
- * @returns the move, or null when the log holds none.
- */
-export function parsePortMove(output: string): PortMove | null {
-  const to = toPort(PORT_MOVE_TO.exec(output)?.[1]);
-  if (to == null) {
-    return null;
+  when: 'plan' | 'retry';
+}): string {
+  if (busy == null) {
+    return `The port the dev server wanted is busy; it uses ${to}.`;
   }
-  return { from: toPort(PORT_MOVE_FROM.exec(output)?.[1]), to };
+  return when === 'plan'
+    ? `Port ${busy} is busy; the dev server uses ${to}.`
+    : `Port ${busy} was taken before the dev server bound it; the dev server uses ${to}.`;
+}
+
+/**
+ * The port a plan's dev server is given, decided before any step runs.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+ * complete. `expo run:*` answers an unanswerable port question by skipping its dev server and
+ * exiting 0, after it baked the busy port into the app [observed — live suite, 2026-10-05]. With a
+ * free port picked here and passed as `--port`, the question is never asked.
+ */
+export interface PlannedPort {
+  port: number;
+  /** The port that was wanted and was busy, or null when `port` is that port. */
+  movedFrom: number | null;
+  /** Whether `port` could be bound when it was picked: false for a taken `--port`, or a full scan. */
+  bindable: boolean;
+}
+
+/**
+ * Pick the dev server's port: the one the caller named, or the first bindable one from Expo's
+ * default.
+ *
+ * @param requested the `--port` the caller passed, which is used as is whether or not it is free.
+ */
+export async function resolvePlannedPortAsync(
+  requested: number | null,
+  { preferred = defaultMetroPort() }: { preferred?: number } = {}
+): Promise<PlannedPort> {
+  if (requested != null) {
+    return { port: requested, movedFrom: null, bindable: await isPortBindableAsync(requested) };
+  }
+  const free = await findFreePortAsync(preferred);
+  if (free == null) {
+    return { port: preferred, movedFrom: null, bindable: false };
+  }
+  return { port: free, movedFrom: free === preferred ? null : preferred, bindable: true };
 }
 
 /**

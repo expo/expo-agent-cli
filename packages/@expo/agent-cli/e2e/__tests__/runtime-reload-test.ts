@@ -134,6 +134,7 @@ describe('@expo/agent-cli runtime:reload', () => {
   it('reloads over the dev server, and says what proved it', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [EXPO_GO_TARGET],
       messageSocket: 'v2',
     });
@@ -164,7 +165,7 @@ describe('@expo/agent-cli runtime:reload', () => {
 
   it('prints one JSON object with a stable set of keys', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET] });
+    const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
     const releaseLock = await lockToStubAsync(projectRoot, stub);
 
     try {
@@ -211,6 +212,7 @@ describe('@expo/agent-cli runtime:reload', () => {
   it('reports no reload when the dev server never answers on the command socket', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [EXPO_GO_TARGET],
       messageSocket: 'deaf',
     });
@@ -242,6 +244,7 @@ describe('@expo/agent-cli runtime:reload', () => {
   it('reports an unproved reload when nothing reconnected after the broadcast', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [EXPO_GO_TARGET],
       messageSocket: 'no-churn',
     });
@@ -271,7 +274,11 @@ describe('@expo/agent-cli runtime:reload', () => {
   // makes and, more importantly, that the broadcast never goes out.
   it('refuses to reload onto an entry bundle that does not compile', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET], bundle: 'broken' });
+    const stub = await startStubDevServerAsync({
+      projectRoot,
+      targets: [EXPO_GO_TARGET],
+      bundle: 'broken',
+    });
     const releaseLock = await lockToStubAsync(projectRoot, stub);
     const readXcrun = await installStubXcrunAsync(projectRoot);
 
@@ -302,7 +309,11 @@ describe('@expo/agent-cli runtime:reload', () => {
 
   it('reloads onto a broken bundle when --no-bundle-check says to', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET], bundle: 'broken' });
+    const stub = await startStubDevServerAsync({
+      projectRoot,
+      targets: [EXPO_GO_TARGET],
+      bundle: 'broken',
+    });
     const releaseLock = await lockToStubAsync(projectRoot, stub);
 
     try {
@@ -329,6 +340,7 @@ describe('@expo/agent-cli runtime:reload', () => {
   it('exits 22 when the app acted on the reload and did not come back', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [EXPO_GO_TARGET],
       reloadTargets: 'gone',
     });
@@ -364,7 +376,11 @@ describe('@expo/agent-cli runtime:reload', () => {
       'reloadTargets %s',
       async (reloadTargets) => {
         const projectRoot = await setupFixtureAsync('go-app');
-        const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET], reloadTargets });
+        const stub = await startStubDevServerAsync({
+          projectRoot,
+          targets: [EXPO_GO_TARGET],
+          reloadTargets,
+        });
         const releaseLock = await lockToStubAsync(projectRoot, stub);
 
         try {
@@ -404,7 +420,7 @@ describe('@expo/agent-cli runtime:reload', () => {
 
     it('carries the churn count behind the label the happy path prints', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
-      const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET] });
+      const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
       const releaseLock = await lockToStubAsync(projectRoot, stub);
 
       try {
@@ -430,6 +446,7 @@ describe('@expo/agent-cli runtime:reload', () => {
   it('exits 22 when the listed target is the one from before the reload', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [EXPO_GO_TARGET],
       reloadTargets: 'stale',
     });
@@ -468,6 +485,7 @@ describe('@expo/agent-cli runtime:reload', () => {
     await fs.promises.mkdir(path.dirname(logPath), { recursive: true });
     await fs.promises.writeFile(logPath, 'Starting Metro Bundler\n');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [EXPO_GO_TARGET],
       messageSocket: 'v2',
       // The window itself: the runtime that was listed goes, and its replacement registers later.
@@ -499,6 +517,7 @@ describe('@expo/agent-cli runtime:reload', () => {
   it('falls back to stopping the app on the device when no app is connected', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [EXPO_GO_TARGET],
       messagePeers: {},
       // Nothing is connected until the stub `xcrun` has opened the app, which is what "no app is
@@ -607,6 +626,7 @@ describe('an app the command socket cannot see', () => {
   it('reloads the app the debugger target list names, when --method runtime asks', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       // The app is connected: this is the list every other reading command in this CLI uses.
       targets: [CDP_TARGET],
       // And it is invisible on the command socket, which is what a cloud app over a tunnel was.
@@ -647,6 +667,7 @@ describe('an app the command socket cannot see', () => {
   it('relaunches the app when the command socket has no client to broadcast to', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [CDP_TARGET],
       messagePeers: {},
     });
@@ -700,7 +721,11 @@ describe('an app the command socket cannot see', () => {
   // methods, which is what the ladder has left to offer.
   it('exits 20 and names the deliberate methods when no rung can reach the app', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const stub = await startStubDevServerAsync({ targets: [CDP_TARGET], messagePeers: {} });
+    const stub = await startStubDevServerAsync({
+      projectRoot,
+      targets: [CDP_TARGET],
+      messagePeers: {},
+    });
     const releaseLock = await lockToStubAsync(projectRoot, stub);
     // A stub `xcrun` that reports nothing booted, so the relaunch rung has no device.
     await installStubBinAsync(
@@ -733,6 +758,7 @@ describe('an app the command socket cannot see', () => {
   it('takes --method runtime on its own', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({
+      projectRoot,
       targets: [CDP_TARGET],
       messagePeers: {},
       inspectorEvaluate: reloadResponder(),
