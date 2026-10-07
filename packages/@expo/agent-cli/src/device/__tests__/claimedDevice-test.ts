@@ -3,9 +3,20 @@ import fs from 'fs';
 import { vol } from 'memfs';
 import path from 'path';
 
-import { claimFilePath, deviceRegistryDirectory, readClaims, writeClaim } from '../../deviceClaims';
+import {
+  claimFilePath,
+  deviceRegistryDirectory,
+  readClaims,
+  writeClaim,
+  type DevicePlatform,
+} from '../../deviceClaims';
 import { debugEvent } from '../../deviceClaims/events';
-import { newestIosRuntime, resolveClaimedDeviceAsync } from '../claimedDevice';
+import {
+  newestIosRuntime,
+  resolveClaimedDeviceAsync,
+  type ClaimedDeviceResult,
+  type PeekedDeviceResult,
+} from '../claimedDevice';
 import { simulatorHasAppAsync } from '../installedApps';
 import { adbDevices, fakeDeviceTools, simctlDevices } from './fakeDeviceTools';
 
@@ -150,6 +161,48 @@ function otherClaim(id: string, backend: 'local-ios' | 'local-android' = 'local-
     created: false,
     booted: false,
   });
+}
+
+/**
+ * Registers one test per fixture and allowBoot: the fixture is set up on a fresh registry with
+ * fresh tools to peek, then again to claim, and the claim must name what the peek named. A fixture
+ * with `fails` is a known disagreement, and says why.
+ *
+ * @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
+ */
+function itPeeksWhatItClaims(
+  platform: DevicePlatform,
+  fixtures: { name: string; explicit?: string; setUp: () => unknown; fails?: string }[]
+): void {
+  const outcome = (result: ClaimedDeviceResult | PeekedDeviceResult) =>
+    result.ok
+      ? { action: result.action, id: result.action === 'create' ? null : result.id }
+      : { refused: result.kind, code: result.error.code };
+  for (const { name, explicit, setUp, fails } of fixtures) {
+    for (const allowBoot of [true, false]) {
+      const title = `claims what a peek named: ${name}, allowBoot ${allowBoot}`;
+      (fails ? it.fails : it)(fails ? `${title} (fails: ${fails})` : title, async () => {
+        const resolve = async (mode: 'peek' | 'claim') => {
+          vol.reset();
+          vol.mkdirSync(HERE, { recursive: true });
+          vol.mkdirSync(OTHER, { recursive: true });
+          setUp();
+          return outcome(
+            await resolveClaimedDeviceAsync({
+              mode,
+              platform,
+              projectRoot: HERE,
+              explicit,
+              allowBoot,
+            })
+          );
+        };
+        const peeked = await resolve('peek');
+
+        expect(await resolve('claim')).toEqual(peeked);
+      });
+    }
+  }
 }
 
 describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
@@ -991,6 +1044,14 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
       })
     ).toMatchObject({ ok: true, id: 'emulator-5556' });
   });
+
+  itPeeksWhatItClaims('android', [
+    {
+      name: 'a running emulator',
+      setUp: () => fakeAndroid().running.set('emulator-5554', 'Pixel_8'),
+    },
+    { name: 'an AVD with no emulator running', setUp: () => fakeAndroid() },
+  ]);
 });
 
 // A peek answers from the same choice as a claim, for a verb that only reads.
@@ -1060,6 +1121,52 @@ describe(`${resolveClaimedDeviceAsync.name} peeking`, () => {
       })
     ).toMatchObject({ ok: false, kind: 'no-device', reason: 'no booted iOS simulator was found' });
   });
+
+  itPeeksWhatItClaims('ios', [
+    {
+      name: 'a free booted simulator',
+      setUp: () =>
+        fakeSimulators([
+          { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },
+          { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
+        ]),
+    },
+    { name: 'shut-down simulators only', setUp: () => fakeSimulators() },
+    {
+      name: 'every booted simulator held by a live sibling, with capacity left',
+      setUp: () => {
+        fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
+        otherClaim('SIM-A');
+      },
+    },
+    {
+      name: "a deleted worktree's fresh claim on a booted simulator",
+      fails: 'the claim reaps first and shuts the simulator down, and the peek reaps nothing',
+      setUp: () => {
+        const { devices } = fakeSimulators(
+          [
+            { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },
+            { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
+          ],
+          { onShutdown: () => (devices[0]!.state = 'Shutdown') }
+        );
+        writeClaim({
+          ...ownClaim('SIM-A', new Date().toISOString()),
+          projectRoot: path.resolve('/work/deleted'),
+          booted: true,
+        });
+      },
+    },
+    {
+      name: '--device naming a shut-down simulator',
+      explicit: 'SIM-B',
+      setUp: () =>
+        fakeSimulators([
+          { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },
+          { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
+        ]),
+    },
+  ]);
 });
 
 describe(newestIosRuntime, () => {
