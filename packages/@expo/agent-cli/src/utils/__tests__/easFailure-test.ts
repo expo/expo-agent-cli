@@ -157,6 +157,36 @@ describe(readEasFailure, () => {
     expect(readEasFailure({ stdout, stderr })).toEqual(expected);
   });
 
+  // `npx --yes eas-cli@latest notacommand` on an empty npm cache, npm 10.9.4: npm's deprecation
+  // warnings first, the CLI's error, then npm's update notice [observed — 2026-10-07, abridged].
+  const NPX_DEPRECATED = [
+    'npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory.',
+    'npm warn deprecated rimraf@2.4.5: Rimraf versions prior to v4 are no longer supported',
+  ].join('\n');
+  const NPX_NOTICE = [
+    'npm notice',
+    'npm notice New major version of npm available! 10.9.4 -> 12.2.0',
+    'npm notice To update run: npm install -g npm@12.2.0',
+    'npm notice',
+  ].join('\n');
+
+  it("reads the CLI's line between npm's warnings and npm's notice", () => {
+    expect(
+      readEasFailure({
+        stdout: '',
+        stderr: `${NPX_DEPRECATED}\n ›   Error: command notacommand not found\n${NPX_NOTICE}\n`,
+      })
+    ).toEqual({ kind: 'line', line: '›   Error: command notacommand not found' });
+  });
+
+  it("reads npm's warnings and notice alone as the runner", () => {
+    expect(readEasFailure({ stdout: '', stderr: `${NPX_DEPRECATED}\n${NPX_NOTICE}\n` })).toEqual({
+      kind: 'runner-only',
+      runnerLine:
+        'npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory.',
+    });
+  });
+
   it('reads a recognised sentence after the runner', () => {
     const said = readEasFailure({ stdout: '', stderr: `${RUNNER}Error: You are not logged in.\n` });
     expect(said.kind === 'cause' && said.cause.id).toBe('eas-login');
