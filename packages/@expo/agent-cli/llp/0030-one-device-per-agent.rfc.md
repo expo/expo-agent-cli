@@ -73,7 +73,7 @@ One store: a machine-wide registry with one JSON file per claimed device, at `~/
 2. A stale claim of this worktree (the same agent, restarted), if the device still exists.
 3. A booted device with no live claim.
 4. A shut-down device with no live claim. `pickSimulator` keeps its current ranking inside this set.
-5. A new device, created from the newest runtime and device type, if the capacity allows it. Never for a caller that needs an installed app and may not install it: a new device has no app. A device created anyway counts as one without the app, and such a refusal deletes it.
+5. A new device, created from the newest runtime and device type, if the capacity allows it. Never for a caller that needs an installed app and may not install it: a new device has no app. A device created for a caller that may install the app counts as one without it.
 6. Stop with `DEVICES_ALL_CLAIMED`. The message names each holder by project root. The CLI never takes a live claim from another worktree.
 
 Step 3 takes a device a human may have booted. That is today's behaviour, and the alternative doubles the simulators on a machine where a human keeps one booted. `--device` is the override. [decided — Vojtech, 2026-09-30]

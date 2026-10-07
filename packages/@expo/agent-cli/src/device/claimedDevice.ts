@@ -24,7 +24,6 @@ import {
   type DeviceClaim,
   type DevicePlatform,
 } from '../deviceClaims';
-import { debugEvent } from '../deviceClaims/events';
 import * as Log from '../log';
 import { parseAndroidDevices } from '../navigate/device';
 import { canonicalizeExistingPath } from '../utils/dir';
@@ -296,8 +295,6 @@ async function resolveWithInventoryAsync(
     claim: DeviceClaim;
     fresh: boolean;
     choice: string;
-    /** This call created the device. */
-    created?: boolean;
   };
   try {
     // A simulator created now has no app, so a caller that needs the app gets none created.
@@ -379,7 +376,6 @@ async function resolveWithInventoryAsync(
             ...allocation.candidate,
             hasApp: options.appId != null ? false : allocation.candidate.hasApp,
           },
-          created: true,
           fresh: true,
           choice: 'every simulator was claimed, so this one was created for this worktree',
         };
@@ -404,7 +400,7 @@ async function resolveWithInventoryAsync(
     );
   }
 
-  const { action, candidate, claim, fresh, choice, created = false } = picked;
+  const { action, candidate, claim, fresh, choice } = picked;
   const adb = seen.inventory?.adb ?? null;
   const peeked = (): ExistingDevice => ({
     ok: true,
@@ -460,15 +456,6 @@ async function resolveWithInventoryAsync(
   // A boot that cannot open the app costs a minute and answers nothing (llp/0005 §The device that
   // can open the app), so it is declined before it starts.
   if (options.requireApp && candidate.hasApp === false) {
-    if (created) {
-      await deleteSimulatorAsync(claim).catch((error: Error) =>
-        debugEvent('device_delete_failed', {
-          backend,
-          id: claim.id,
-          error: debugEvent.error(error),
-        })
-      );
-    }
     if (fresh && mode === 'claim') {
       releaseClaim(claim);
     }
