@@ -10,13 +10,13 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@expo/metro-runtime": "57.0.15",
-    "expo": "57.0.19",
-    "expo-dev-client": "~57.0.18",
-    "expo-status-bar": "~57.0.1",
-    "react": "19.2.3",
-    "react-dom": "19.2.3",
-    "react-native": "0.86.3",
+    "@expo/metro-runtime": "~58.0.11",
+    "expo": "~58.0.3",
+    "expo-dev-client": "~58.0.11",
+    "expo-status-bar": "~58.0.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.0-rc.3",
     "react-native-web": "0.21.2"
   }
 }
