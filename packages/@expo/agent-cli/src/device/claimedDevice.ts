@@ -17,6 +17,7 @@ import {
   releaseClaim,
   releaseProjectClaimsAsync,
   touchClaim,
+  withRegistryLockAsync,
   type ClassifiedClaim,
   type DeviceAction,
   type DeviceCandidate,
@@ -502,13 +503,15 @@ async function resolveWithInventoryAsync(
     emulatorBoot ??
     (await bootSimulatorAsync({ udid: candidate.id, name: candidate.name }, { timeoutMs, choice }));
   if (!boot.ok) {
-    const shutdown = await shutdownDeviceAsync(candidate.id, backend, { adb: adb ?? undefined });
-    if (!shutdown.ok) {
-      emulatorBoot?.kill();
-    }
-    if (fresh) {
-      releaseClaim(booting);
-    }
+    await withRegistryLockAsync(async () => {
+      const shutdown = await shutdownDeviceAsync(candidate.id, backend, { adb: adb ?? undefined });
+      if (!shutdown.ok) {
+        emulatorBoot?.kill();
+      }
+      if (fresh) {
+        releaseClaim(booting);
+      }
+    });
     return {
       ...refusal('boot-failed', boot.reason ?? `${candidate.name} did not boot`),
       deviceId: candidate.id,

@@ -343,9 +343,13 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     expect(during).toMatchObject({ id: 'SIM-A', projectRoot: HERE, booted: true });
   });
 
-  it(`shuts down a simulator whose boot did not finish, and releases its fresh claim`, async () => {
+  it(`shuts down a simulator whose boot did not finish, and releases its fresh claim, under the lock`, async () => {
+    let lockedAtShutdown = false;
     const { tools } = fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' }], {
       bootstatusExit: 1,
+      onShutdown: () => {
+        lockedAtShutdown = vol.existsSync(path.join(deviceRegistryDirectory(), '.lock'));
+      },
     });
 
     const result = await resolveClaimedDeviceAsync({
@@ -357,6 +361,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
 
     expect(result).toMatchObject({ ok: false, kind: 'boot-failed', deviceId: 'SIM-A' });
     expect(tools.callsWith('simctl shutdown')).toEqual(['xcrun simctl shutdown SIM-A']);
+    expect(lockedAtShutdown).toBe(true);
     expect(readClaims()).toEqual([]);
   });
 
