@@ -96,6 +96,19 @@ describe('classifyClaimAsync', () => {
     expect(await classifyClaimAsync(claim(projectRoot, JUST_NOW), { now: NOW })).toBe('stale');
   });
 
+  it(`keeps a deleted worktree's claim that a reaper marked live until its grace runs out`, async () => {
+    const projectRoot = makeTempProject();
+    fs.rmSync(projectRoot, { recursive: true });
+    const reaping = (touchedAt: string) => ({
+      ...claim(projectRoot, touchedAt),
+      reaping: true as const,
+    });
+    const expired = new Date(NOW.getTime() - CLAIM_GRACE_MS - 1).toISOString();
+
+    expect(await classifyClaimAsync(reaping(JUST_NOW), { now: NOW })).toBe('live');
+    expect(await classifyClaimAsync(reaping(expired), { now: NOW })).toBe('stale');
+  });
+
   it(`stays live within the grace period when the parent is gone too, as an unmounted volume is`, async () => {
     expect(await classifyClaimAsync(claim('/no/such/volume', JUST_NOW), { now: NOW })).toBe('live');
   });

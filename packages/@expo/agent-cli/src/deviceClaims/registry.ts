@@ -133,17 +133,7 @@ export async function markClaimBootedAsync(claim: DeviceClaim): Promise<DeviceCl
       if (current == null || !isSameClaim(current, claim)) {
         return null;
       }
-      const next = path.join(
-        path.dirname(file),
-        `.${path.basename(file)}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
-      );
-      try {
-        assertRegistryLockHeld();
-        fs.writeFileSync(next, serialize({ ...current, booted: true }));
-        fs.renameSync(next, file);
-      } finally {
-        fs.rmSync(next, { force: true });
-      }
+      replaceClaim({ ...current, booted: true });
       return readClaimFile(file);
     });
   } catch (error: unknown) {
@@ -153,6 +143,25 @@ export async function markClaimBootedAsync(claim: DeviceClaim): Promise<DeviceCl
       reason: (error as Error).message,
     });
     return null;
+  }
+}
+
+/**
+ * Write a claim over the file of its device, with a fresh touch. A new file is renamed over the old
+ * one, so a reader never finds the claim missing. Only for a caller that holds the registry lock.
+ */
+export function replaceClaim(claim: DeviceClaim): void {
+  assertRegistryLockHeld();
+  const file = claimFilePath(claim.backend, claim.id);
+  const next = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
+  );
+  try {
+    fs.writeFileSync(next, serialize(claim));
+    fs.renameSync(next, file);
+  } finally {
+    fs.rmSync(next, { force: true });
   }
 }
 
@@ -457,10 +466,8 @@ function parseClaim(value: unknown, touchedAt: string): DeviceClaim | null {
   if (value == null || typeof value !== 'object') {
     return null;
   }
-  const { backend, platform, id, projectRoot, pid, claimedAt, created, booted } = value as Record<
-    string,
-    unknown
-  >;
+  const { backend, platform, id, projectRoot, pid, claimedAt, created, booted, reaping } =
+    value as Record<string, unknown>;
   if (
     (backend !== 'local-ios' && backend !== 'local-android' && backend !== 'eas') ||
     (platform !== 'ios' && platform !== 'android') ||
@@ -484,5 +491,6 @@ function parseClaim(value: unknown, touchedAt: string): DeviceClaim | null {
     touchedAt,
     created,
     booted: booted ?? false,
+    ...(reaping === true && { reaping }),
   };
 }

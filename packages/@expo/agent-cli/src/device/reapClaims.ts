@@ -9,8 +9,8 @@ import {
   readClaim,
   readClaims,
   removeClaimFile,
+  replaceClaim,
   withRegistryLockAsync,
-  writeClaim,
   type DeviceBackend,
   type DeviceClaim,
 } from '../deviceClaims';
@@ -48,8 +48,9 @@ export interface ReapOptions {
  * Reap every claim whose worktree was deleted ({@link isDeletedWorktreeAsync}). The grace period
  * does not apply.
  *
- * A local claim is taken in `liveRoot`'s name under the registry lock, so no other worktree takes
- * the device while it shuts down outside the lock. A failed shutdown or stop is reported, not thrown.
+ * A local claim is marked `reaping` under the registry lock, which refreshes its touch, so no
+ * worktree and no other reaper takes the device while it shuts down outside the lock. A failed
+ * shutdown or stop is reported, not thrown.
  */
 export async function reapDeletedWorktreeClaimsAsync(
   liveRoot: string,
@@ -60,7 +61,7 @@ export async function reapDeletedWorktreeClaimsAsync(
 
   const found: DeviceClaim[] = [];
   for (const claim of readClaims()) {
-    if (await isDeletedAsync(claim)) {
+    if (!claim.reaping && (await isDeletedAsync(claim))) {
       found.push(claim);
     }
   }
@@ -70,7 +71,12 @@ export async function reapDeletedWorktreeClaimsAsync(
   const root = canonicalizeExistingPath(liveRoot);
   const stillDeletedAsync = async (claim: DeviceClaim): Promise<boolean> => {
     const current = readClaim(claim.backend, claim.id);
-    return current != null && isSameClaim(current, claim) && (await isDeletedAsync(current));
+    return (
+      current != null &&
+      isSameClaim(current, claim) &&
+      !current.reaping &&
+      (await isDeletedAsync(current))
+    );
   };
 
   const reaped: ReapedDevice[] = [];
@@ -93,39 +99,33 @@ export async function reapDeletedWorktreeClaimsAsync(
     });
   };
 
-  const taken = await withRegistryLockAsync(async () => {
-    const takes: {
-      claim: DeviceClaim;
-      take: DeviceClaim;
-      backend: 'local-ios' | 'local-android';
-    }[] = [];
+  const marked = await withRegistryLockAsync(async () => {
+    const marks: { claim: DeviceClaim; backend: 'local-ios' | 'local-android' }[] = [];
     for (const claim of found) {
       if (claim.backend === 'eas' || !(await stillDeletedAsync(claim))) {
         continue;
       }
-      removeClaimFile(claim);
       if (!claim.booted && !claim.created) {
+        removeClaimFile(claim);
         report(claim, { released: true, shutDown: false, deleted: false, reason: null });
         continue;
       }
-      const at = new Date().toISOString();
-      const take = { ...claim, projectRoot: root, pid: process.pid, claimedAt: at, touchedAt: at };
-      writeClaim(take);
-      takes.push({ claim, take, backend: claim.backend });
+      replaceClaim({ ...claim, reaping: true });
+      marks.push({ claim, backend: claim.backend });
     }
-    return takes;
+    return marks;
   });
 
-  for (const { claim, take, backend } of taken) {
+  for (const { claim, backend } of marked) {
     const shutdown = await shutdownDeviceAsync(claim.id, backend);
     const deletion =
       shutdown.ok && claim.created && backend === 'local-ios'
         ? await deleteCreatedSimulatorAsync(claim.id)
         : null;
     await withRegistryLockAsync(async () => {
-      const current = readClaim(take.backend, take.id);
-      if (current != null && isSameClaim(current, take)) {
-        removeClaimFile(take);
+      const current = readClaim(claim.backend, claim.id);
+      if (current?.reaping && isSameClaim(current, claim)) {
+        removeClaimFile(claim);
       }
     });
     report(claim, {
