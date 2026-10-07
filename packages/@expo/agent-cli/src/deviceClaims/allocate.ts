@@ -48,7 +48,8 @@ export interface AllocateDeviceOptions<C extends DeviceCandidate> {
   explicit?: string;
   matches?: (candidate: C, query: string) => boolean;
   isCreated?: (candidate: C) => boolean;
-  now?: Date;
+  /** Read when the registry lock is held, and again for each re-read of a claim. */
+  clock?: () => Date;
   probeLock?: (projectRoot: string) => Promise<unknown>;
 }
 
@@ -70,10 +71,11 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>(
 
   return await withRegistryLockAsync(async () => {
     // Chosen once the lock is held, so a touch made while this call waited is not in the future.
-    const { projectRoot, now, classifyAsync, choose } = chooser(options);
+    const { projectRoot, now, clock, classifyAsync, choose } = chooser(options);
     const currentAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim | null> => {
       const current = readClaim(claim.backend, claim.id);
-      return current == null ? null : await classifyAsync(current);
+      // The loop can outlast the grace period, and a touch made meanwhile is not in the future.
+      return current == null ? null : await classifyAsync(current, clock());
     };
     const stillStaleAsync = async (claim: DeviceClaim): Promise<boolean> => {
       const current = await currentAsync(claim);
@@ -81,7 +83,7 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>(
     };
 
     pruneUnreadableClaims(now.getTime());
-    let claims = await Promise.all(readClaims().map(classifyAsync));
+    let claims = await Promise.all(readClaims().map((claim) => classifyAsync(claim, now)));
     let inventory = await listDevices(claims);
 
     for (;;) {
@@ -208,8 +210,8 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>(
 export async function peekDeviceAsync<C extends DeviceCandidate>(
   options: AllocateDeviceOptions<C>
 ): Promise<DeviceChoice<C>> {
-  const { classifyAsync, choose } = chooser(options);
-  const claims = await Promise.all(readClaims().map(classifyAsync));
+  const { now, classifyAsync, choose } = chooser(options);
+  const claims = await Promise.all(readClaims().map((claim) => classifyAsync(claim, now)));
   return choose(claims, await options.listDevices(claims));
 }
 
@@ -224,13 +226,14 @@ function chooser<C extends DeviceCandidate>({
   explicit,
   matches,
   isCreated,
-  now = new Date(),
+  clock = () => new Date(),
   probeLock,
 }: AllocateDeviceOptions<C>) {
   const projectRoot = canonicalizeExistingPath(givenRoot);
-  const classifyAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim> => ({
+  const now = clock();
+  const classifyAsync = async (claim: DeviceClaim, at: Date): Promise<ClassifiedClaim> => ({
     ...claim,
-    liveness: await classifyClaimAsync(claim, { now, probeLock }),
+    liveness: await classifyClaimAsync(claim, { now: at, probeLock }),
   });
   const choose = (claims: ClassifiedClaim[], inventory: C[]): DeviceChoice<C> =>
     chooseDevice({
@@ -247,7 +250,7 @@ function chooser<C extends DeviceCandidate>({
       matches,
       isCreated,
     });
-  return { projectRoot, now, classifyAsync, choose };
+  return { projectRoot, now, clock, classifyAsync, choose };
 }
 
 function removeStale(claim: DeviceClaim, reason: 'device-gone' | 'taken-over' | 'expired'): void {
