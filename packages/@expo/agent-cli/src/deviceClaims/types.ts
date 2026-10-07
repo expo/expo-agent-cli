@@ -25,6 +25,11 @@ export interface DeviceClaim {
    * runs later, in another process, so the claim is what remembers it may shut the device down.
    */
   booted: boolean;
+  /**
+   * A reaper shuts the device down (§Release and cleanup). The deleted worktree's claim, written
+   * again with a fresh touch, so it stays live for every other worktree and no other reaper takes it.
+   */
+  reaping?: true;
 }
 
 export type ClaimLiveness = 'live' | 'stale';

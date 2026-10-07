@@ -36,8 +36,9 @@ export async function classifyClaimAsync(
     probeLock = readDevServerLockAsync,
   }: { now?: Date; probeLock?: (projectRoot: string) => Promise<unknown> } = {}
 ): Promise<ClaimLiveness> {
-  // The grace period does not apply to a deleted worktree: the next claim reaps its claims.
-  if (await isDeletedWorktreeAsync(claim.projectRoot, probeLock)) {
+  // The grace period does not apply to a deleted worktree: the next claim reaps its claims. A claim
+  // a reaper marked is that reap in progress, so it keeps its device until its own grace runs out.
+  if (!claim.reaping && (await isDeletedWorktreeAsync(claim.projectRoot, probeLock))) {
     return 'stale';
   }
   // The touch is checked first only because it costs no connection; the socket is the proof.

@@ -2,7 +2,14 @@
 import { vol } from 'memfs';
 import path from 'path';
 
-import { readClaims, writeClaim, type DeviceClaim } from '../../deviceClaims';
+import {
+  allocateDeviceAsync,
+  readClaims,
+  writeClaim,
+  type Allocation,
+  type DeviceCandidate,
+  type DeviceClaim,
+} from '../../deviceClaims';
 import { describeReapedDevice, reapDeletedWorktreeClaimsAsync } from '../reapClaims';
 import { fakeDeviceTools, simctlDevices } from './fakeDeviceTools';
 
@@ -69,7 +76,9 @@ describe(reapDeletedWorktreeClaimsAsync, () => {
     const reaped = await reapDeletedWorktreeClaimsAsync(HERE, { probeLock: noLock });
 
     expect(tools.callsWith('simctl shutdown SIM-A')).toHaveLength(1);
-    expect(seenDuringShutdown).toEqual([[expect.objectContaining({ projectRoot: HERE })]]);
+    expect(seenDuringShutdown).toEqual([
+      [expect.objectContaining({ projectRoot: GONE, reaping: true })],
+    ]);
     expect(readClaims()).toEqual([]);
     expect(reaped).toEqual([
       {
@@ -82,6 +91,32 @@ describe(reapDeletedWorktreeClaimsAsync, () => {
         reason: null,
       },
     ]);
+  });
+
+  it(`never hands the device it shuts down to a command of the live worktree`, async () => {
+    claim({ id: 'SIM-A' });
+    let during: Promise<Allocation<DeviceCandidate>> | undefined;
+    fakeDeviceTools((_command, args) => {
+      if (args.includes('shutdown')) {
+        during = allocateDeviceAsync({
+          projectRoot: HERE,
+          platform: 'ios',
+          backend: 'local-ios',
+          listDevices: async () => [
+            { id: 'SIM-A', state: 'booted' },
+            { id: 'SIM-B', state: 'booted' },
+          ],
+          capacity: 0,
+          probeLock: noLock,
+        });
+      }
+      return {};
+    });
+
+    await reapDeletedWorktreeClaimsAsync(HERE, { probeLock: noLock });
+
+    expect(await during).toMatchObject({ kind: 'take', candidate: { id: 'SIM-B' } });
+    expect(readClaims()).toMatchObject([{ id: 'SIM-B', projectRoot: HERE }]);
   });
 
   it(`deletes a created simulator after the shutdown when it is named agent-cli N`, async () => {
@@ -140,6 +175,15 @@ describe(reapDeletedWorktreeClaimsAsync, () => {
     expect(readClaims()).toEqual([]);
     expect(reaped).toMatchObject({ released: true, shutDown: false, deleted: false });
     expect(reaped!.reason).toContain('Unable to shutdown device');
+  });
+
+  it(`leaves a claim that another reaper is shutting down`, async () => {
+    claim({ id: 'SIM-A', reaping: true });
+    const tools = fakeDeviceTools(() => ({}));
+
+    expect(await reapDeletedWorktreeClaimsAsync(HERE, { probeLock: noLock })).toEqual([]);
+    expect(tools.calls).toEqual([]);
+    expect(readClaims()).toMatchObject([{ id: 'SIM-A', reaping: true }]);
   });
 
   it(`leaves the claim of a worktree whose parent directory is missing, an unmounted volume`, async () => {

@@ -19,6 +19,7 @@ export {
   releaseClaim,
   releaseProjectClaimsAsync,
   removeClaimFile,
+  replaceClaim,
   touchClaim,
   withRegistryLockAsync,
   writeClaim,
