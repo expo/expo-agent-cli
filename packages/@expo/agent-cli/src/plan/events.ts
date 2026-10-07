@@ -28,6 +28,8 @@ declare module '2g' {
       buildLocation: PlanBuildLocation | null;
       /** @see StartPlan.devServerPort */
       devServerPort: StartPlan['devServerPort'] | null;
+      /** @see StartPlan.device */
+      device: StartPlan['device'] | null;
     };
     /** One plan step is about to be spawned. */
     'cli:start_plan_step': { id: string; argv: string[]; index: number; total: number };

@@ -279,7 +279,13 @@ describe('detection', () => {
   // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
   it(`pins a local build to the device this worktree claims`, async () => {
     writeProject();
-    const runDevice = vi.fn(async () => 'SIM-CLAIMED');
+    const device = {
+      action: 'reuse' as const,
+      id: 'SIM-CLAIMED',
+      name: 'iPhone 17',
+      state: 'booted' as const,
+    };
+    const runDevice = vi.fn(async () => ({ argument: 'SIM-CLAIMED', device }));
     const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
       platform: 'ios',
       devices: { runDevice, bootedDevice: async () => null },
@@ -289,13 +295,14 @@ describe('detection', () => {
       ['expo', 'prebuild', '--platform', 'ios'],
       ['expo', 'run:ios', '--device', 'SIM-CLAIMED'],
     ]);
+    expect(plan.device).toEqual(device);
     expect(runDevice).toHaveBeenCalledWith('ios');
   });
 
   it(`claims no device for a build that runs on EAS`, async () => {
     writeProject({ 'eas.json': { build: {} } });
     stubToolchain('missing');
-    const runDevice = vi.fn(async () => 'SIM-CLAIMED');
+    const runDevice = vi.fn(async () => null);
     await resolveStartPlanAsync(projectRoot, devClientState(), {
       platform: 'ios',
       devices: { runDevice, bootedDevice: async () => null },

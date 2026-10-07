@@ -5,7 +5,7 @@
 
 import chalk from 'chalk';
 
-import type { DevServerPort, StartPlan, TimeClass } from '../project/types';
+import type { DevServerPort, PlanDevice, StartPlan, TimeClass } from '../project/types';
 import { EAS_REQUIREMENT, EAS_WHERE, LOCAL_WHERE, RUNS_ON_LABELS } from '../toolchain/runsOn';
 import type { PlanBuildLocation } from '../toolchain/types';
 
@@ -59,6 +59,10 @@ export function formatStartPlan(plan: StartPlan): string {
     );
   }
 
+  if (plan.device) {
+    lines.push('', chalk`  {bold Device:} ${formatPlanDevice(plan.device)}.`);
+  }
+
   lines.push('', chalk`  {bold Why}`);
   for (const reason of plan.reasons) {
     lines.push(`    - ${reason}`);
@@ -108,6 +112,27 @@ export function formatBuildLocation(location: PlanBuildLocation): string {
       return chalk`${head} {yellow Not established}: ${location.detail} If it is missing: ${location.alternativeCommand}`;
     default:
       return head;
+  }
+}
+
+/** The device of the plan's `expo run:*` step, and what the run does to get it. */
+function formatPlanDevice(planDevice: PlanDevice): string {
+  if (planDevice.id == null) {
+    return 'the run creates a simulator for this worktree';
+  }
+  const { action, id, name, state } = planDevice;
+  const device = `${name} (${id})`;
+  switch (action) {
+    case 'reuse':
+      return state === 'booted'
+        ? `${device}, which this worktree claimed`
+        : `${device}, which this worktree claimed; the run boots it`;
+    case 'take':
+      return `${device}, which is up and claimed by no other worktree; the run claims it`;
+    case 'boot':
+      return `${device}; the run boots it for this worktree`;
+    case 'create':
+      return `${device}, created for this worktree`;
   }
 }
 

@@ -35,6 +35,7 @@ describe(emitStartPlan, () => {
       reasons: plan.reasons,
       buildLocation: null,
       devServerPort: null,
+      device: null,
     });
   });
 

@@ -4,7 +4,7 @@ import path from 'path';
 
 import { resolveClaimedDeviceAsync } from '../../device/claimedDevice';
 import { fakeDeviceTools, simctlDevices } from '../../device/__tests__/fakeDeviceTools';
-import { deviceRegistryDirectory } from '../../deviceClaims';
+import { deviceRegistryDirectory, writeClaim } from '../../deviceClaims';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
@@ -283,16 +283,16 @@ describe(devAsync, () => {
       ['a run', ['--ios']],
       ['--plan', ['--plan', '--ios']],
     ])(
-      `should refuse %s rather than leave the build unpinned when every booted simulator is another worktree's`,
+      `should refuse %s rather than leave the build unpinned when every simulator it may claim is another worktree's`,
       async (_what, argv) => {
         mockStaleDevClientState();
-        const error = Object.assign(new Error('Every booted iOS simulator is claimed'), {
+        const error = Object.assign(new Error('Every iOS simulator is claimed'), {
           code: 'DEVICES_ALL_CLAIMED',
         });
         vi.mocked(resolveClaimedDeviceAsync).mockResolvedValueOnce({
           ok: false,
-          kind: 'no-device',
-          reason: 'every booted iOS simulator is claimed by another worktree',
+          kind: 'exhausted',
+          reason: 'every iOS simulator this machine may hold is claimed by another worktree',
           error: error as any,
           deviceId: null,
           name: null,
@@ -393,6 +393,21 @@ describe(devAsync, () => {
       });
     }
 
+    function claimedByOther(id: string) {
+      const now = new Date().toISOString();
+      writeClaim({
+        backend: 'local-ios',
+        platform: 'ios',
+        id,
+        projectRoot: OTHER,
+        pid: 1,
+        claimedAt: now,
+        touchedAt: now,
+        created: false,
+        booted: true,
+      });
+    }
+
     function emittedPlan(): StartPlan {
       return vi.mocked(emitStartPlan).mock.calls.at(-1)![0];
     }
@@ -414,6 +429,37 @@ describe(devAsync, () => {
       ]);
       expect(vol.toJSON(deviceRegistryDirectory())).toEqual({});
       expect(tools.callsWith('simctl boot')).toEqual([]);
+    });
+
+    it(`--plan exits 0 when every booted simulator is another worktree's, and names the one the run boots`, async () => {
+      const tools = simulators([
+        { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },
+        { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
+      ]);
+      claimedByOther('SIM-A');
+      const registry = vol.toJSON(deviceRegistryDirectory());
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--plan', '--ios']))).resolves.toBe(0);
+
+      expect(emittedPlan().device).toEqual({
+        action: 'boot',
+        id: 'SIM-B',
+        name: 'iPhone 17 Pro',
+        state: 'shutdown',
+      });
+      expect(vol.toJSON(deviceRegistryDirectory())).toEqual(registry);
+      expect(tools.callsWith('simctl boot')).toEqual([]);
+    });
+
+    it(`--plan prints the run:ios step the run then runs, --device included`, async () => {
+      simulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' }]);
+
+      await devAsync(projectRoot, resolveDevOptions(['--plan', '--ios']));
+      const planned = runStepArgs(emittedPlan());
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, planned, expect.anything());
+      expect(planned).toEqual(['run:ios', '--device', 'SIM-A', '--port', '8081']);
     });
   });
 

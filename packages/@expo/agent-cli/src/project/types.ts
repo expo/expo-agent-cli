@@ -1,6 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md
 // Shared contract for the project-state probe, the Expo Go compatibility check, the
 // post-install impact classifier, and the smart start plan engine. Pure data — no I/O here.
+import type { DeviceAction } from '../deviceClaims/types';
 import type { RunsOn } from '../toolchain/runsOn';
 import type { PlanBuildLocation } from '../toolchain/types';
 import type { FingerprintResult, FingerprintSource } from './fingerprint';
@@ -134,7 +135,27 @@ export interface StartPlan {
    * @see llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can complete
    */
   devServerPort?: DevServerPort;
+  /**
+   * The device the plan's `expo run:*` step builds for. Absent from a plan with no such step, and
+   * from one that leaves the device to the Expo CLI.
+   */
+  device?: PlanDevice;
 }
+
+/**
+ * The device of a plan that builds here: what a run claims, and what `dev --plan` peeks at without
+ * claiming it. A run whose claim lands on another device, because a sibling claimed this one
+ * first, prints the device it got.
+ *
+ * `action` is how the run gets it: `reuse` this worktree's claim, `take` a free booted device,
+ * `boot` a free shut-down one, or `create` a simulator. `id` is the UDID or adb serial, and
+ * `state` whether the device is up now; both are null for a simulator the run creates.
+ *
+ * @see llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
+ */
+export type PlanDevice =
+  | { action: DeviceAction; id: string; name: string; state: 'booted' | 'shutdown' }
+  | { action: 'create'; id: null; name: null; state: null };
 
 /**
  * Where the plan's dev server listens.

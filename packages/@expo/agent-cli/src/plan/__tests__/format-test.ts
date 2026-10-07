@@ -97,6 +97,31 @@ describe(formatStartPlan, () => {
     expect(strip(formatStartPlan(plan))).not.toContain('Dev server:');
   });
 
+  // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
+  it.each<[NonNullable<StartPlan['device']>, string]>([
+    [
+      { action: 'reuse', id: 'SIM-A', name: 'iPhone 17', state: 'booted' },
+      'Device: iPhone 17 (SIM-A), which this worktree claimed.',
+    ],
+    [
+      { action: 'take', id: 'SIM-A', name: 'iPhone 17', state: 'booted' },
+      'Device: iPhone 17 (SIM-A), which is up and claimed by no other worktree; the run claims it.',
+    ],
+    [
+      { action: 'boot', id: 'SIM-B', name: 'iPhone 17 Pro', state: 'shutdown' },
+      'Device: iPhone 17 Pro (SIM-B); the run boots it for this worktree.',
+    ],
+    [
+      { action: 'create', id: null, name: null, state: null },
+      'Device: the run creates a simulator for this worktree.',
+    ],
+  ])(
+    `should name the device of the run step and what the run does to get it: %o`,
+    (device, line) => {
+      expect(strip(formatStartPlan({ ...plan, device }))).toContain(line);
+    }
+  );
+
   it(`should format a plan of one step`, () => {
     const output = formatStartPlan({
       ...plan,

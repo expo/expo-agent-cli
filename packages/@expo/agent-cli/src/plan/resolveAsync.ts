@@ -9,7 +9,7 @@ import {
   type ProbeAppPresenceOptions,
 } from '../device/appPresence';
 import { easJsonExistsSync } from '../followups/projectFiles';
-import type { ProjectState, StartPlan } from '../project/types';
+import type { PlanDevice, ProjectState, StartPlan } from '../project/types';
 import { readAgentCliSettings, settingsBuildBackend } from '../settings';
 import type { BuildBackend, RunTarget } from '../settings/types';
 import { applyToolchainProbe, detectToolchainAsync } from '../toolchain';
@@ -42,12 +42,15 @@ export function runDeviceRefusedError(platform: NativePlatform, reason: string):
  */
 export interface PlanDevices {
   /**
-   * What `expo run:<platform> --device` calls the device of a plan that builds here. Null leaves
-   * the build unpinned.
+   * The device of a plan that builds here, and what `expo run:<platform> --device` calls it. A null
+   * `argument` runs the build unpinned: the device does not exist yet, or cannot be named. Null
+   * leaves the device to the Expo CLI.
    *
    * @throws {CommandError} when the device cannot be had or named safely.
    */
-  runDevice: (platform: NativePlatform) => Promise<string | null>;
+  runDevice: (
+    platform: NativePlatform
+  ) => Promise<{ argument: string | null; device: PlanDevice } | null>;
   /** The booted device the presence probe asks, or null. */
   bootedDevice: NonNullable<ProbeAppPresenceOptions['probeDeviceAsync']>;
 }
@@ -228,19 +231,20 @@ export async function resolveStartPlanAsync(
   const easBuild =
     onEas && draft.rule !== 'needs-dev-client' ? await lookUpEasBuild(projectRoot, platform) : null;
 
-  const runDevice =
-    buildBackend.runsOn === 'local' && devices ? await devices.runDevice(platform) : null;
+  const run = buildBackend.runsOn === 'local' && devices ? await devices.runDevice(platform) : null;
 
   const plan = decideStartPlan(state, {
     ...planOptions,
     runTarget,
     buildBackend,
-    runDevice,
+    runDevice: run?.argument ?? null,
     easJson: buildBackend.runsOn === 'eas' ? easJsonExistsSync(projectRoot) : undefined,
     ...(onEas ? { easBuild, easSimulatorProfile: hasSimulatorProfile(projectRoot) } : {}),
   });
 
   // The probe's caveats — an SDK the tooling finds and a tool of it the shell does not — belong to
   // a plan that still builds here. A plan that moved to the cloud has no use for them.
-  return plan.buildLocation?.runsOn === 'local' && probe ? applyToolchainProbe(plan, probe) : plan;
+  const probed =
+    plan.buildLocation?.runsOn === 'local' && probe ? applyToolchainProbe(plan, probe) : plan;
+  return run ? { ...probed, device: run.device } : probed;
 }

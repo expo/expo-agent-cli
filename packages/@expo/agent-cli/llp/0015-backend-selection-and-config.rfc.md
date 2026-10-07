@@ -61,6 +61,8 @@ What "everything on EAS" is made of on `dev` — the tunnel, the simulator profi
 
 What the old "does not act" constraint forbids is a swap: steps changing between the moment a plan is printed and the moment it runs. `decideStartPlan` is handed a resolved `BuildBackendChoice` and produces the plan. `dev --plan` prints exactly the plan `dev` would execute. Nothing about the run reads the probe again.
 
+The device is part of that plan. `dev --plan` peeks at the device the run claims ([[0030-one-device-per-agent]] §Every verb uses the claim), so its `expo run:*` step carries the run's `--device`, and its `device` says when the run boots or creates one. A peek claims nothing, so another worktree can take that device before the run, and a peek reaps nothing, so the run can free a device a deleted worktree held. The run then claims another device and prints it.
+
 `applyToolchainProbe` still folds a probe into a plan without touching its steps. It is what carries the probe's caveats into a plan that stayed local.
 
 `resolveStartPlanAsync` (`src/plan/resolveAsync.ts`) runs the decision table twice, on purpose. The first pass establishes whether this project needs a native build at all and for which platform. The second is decided with the answer. Both passes are pure and free. The probe is skipped entirely when the effective choice is already `eas`.

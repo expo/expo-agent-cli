@@ -1173,8 +1173,10 @@ function resolveStepArgs(step: PlanStep, options: DevOptions, isLast: boolean): 
  * This worktree's device for the plan: a run claims it, and `--plan` peeks, which reads the same
  * answer and claims, reaps and boots nothing (llp/0030 §Every verb uses the claim).
  *
- * A run boots the device; `--plan` names only one that is up. No device pins nothing,
- * but booted devices that other worktrees hold stop the run with `DEVICES_ALL_CLAIMED`.
+ * Both resolve the device a run may boot or create, so `--plan` names the device the run builds
+ * for and never stops where the run would boot one. A simulator the run creates has no id yet, so
+ * its build is unpinned in the plan. No device pins nothing, but booted devices that other
+ * worktrees hold stop the run with `DEVICES_ALL_CLAIMED`.
  * Absent for the EAS device and for a harness that must not touch this machine's devices
  * (`AGENT_CLI_NO_DEVICE`).
  */
@@ -1199,7 +1201,7 @@ function planDevices(projectRoot: string, options: DevOptions): PlanDevices | un
         require('../device/installDevBuild') as typeof import('../device/installDevBuild');
       const { runDeviceRefusedError } =
         require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
-      const resolved = await resolveAsync(platform, options.mode === 'run');
+      const resolved = await resolveAsync(platform, true);
       if (!resolved.ok) {
         // An unpinned `expo run:*` takes the first booted device, so it may run unpinned only when
         // no booted device is another worktree's: then the Expo CLI finds or creates one, as before.
@@ -1208,14 +1210,15 @@ function planDevices(projectRoot: string, options: DevOptions): PlanDevices | un
         }
         throw resolved.error;
       }
-      if (resolved.id == null) {
-        return null;
+      if (resolved.state == null) {
+        return { argument: null, device: { action: 'create', id: null, name: null, state: null } };
       }
-      const argument = await expoRunDeviceArgumentAsync(projectRoot, platform, resolved.id);
+      const { action, id, name, state } = resolved;
+      const argument = await expoRunDeviceArgumentAsync(projectRoot, platform, id);
       if (!argument.ok) {
         throw runDeviceRefusedError(platform, argument.reason);
       }
-      return argument.value;
+      return { argument: argument.value, device: { action, id, name, state } };
     },
     async bootedDevice(_projectRoot, platform) {
       const resolved = await resolveAsync(platform, false);
