@@ -52,6 +52,7 @@ function allocate(
     deleteDevice,
     capacity = 4,
     clock = () => NOW,
+    explicit,
     duringInventory,
   }: {
     inventory?: DeviceCandidate[];
@@ -61,6 +62,7 @@ function allocate(
     deleteDevice?: (claim: DeviceClaim) => Promise<void>;
     capacity?: number;
     clock?: () => Date;
+    explicit?: string;
   } = {}
 ) {
   return allocateDeviceAsync({
@@ -75,6 +77,7 @@ function allocate(
     deleteDevice,
     capacity,
     clock,
+    explicit,
     probeLock: async (root) => (liveRoots.has(root) ? {} : null),
   });
 }
@@ -427,17 +430,45 @@ describe('allocateDeviceAsync', () => {
     ]);
   });
 
-  it(`chooses another device when a claim file still being written holds the chosen one`, async () => {
-    const file = claimFilePath('local-ios', 'A');
+  /** The claim file of a device that another worktree is writing now, so it does not parse yet. */
+  function claimFileBeingWritten(id: string): string {
+    const file = claimFilePath('local-ios', id);
     vol.mkdirSync(path.dirname(file), { recursive: true });
     vol.writeFileSync(file, '{"backend":"local-ios","plat');
     const written = (NOW.getTime() - 1000) / 1000;
     vol.utimesSync(file, written, written);
+    return file;
+  }
+
+  it(`chooses another device when a claim file still being written holds the chosen one`, async () => {
+    const file = claimFileBeingWritten('A');
 
     const allocation = await allocate(HERE, { inventory: [booted('A'), booted('B')] });
 
     expect(allocation).toMatchObject({ kind: 'take', candidate: { id: 'B' } });
     expect(String(vol.readFileSync(file))).toBe('{"backend":"local-ios","plat');
+  });
+
+  it(`answers --device for a device a claim file still being written holds as claimed, not as missing`, async () => {
+    claimFileBeingWritten('A');
+
+    const allocation = await allocate(HERE, { inventory: [booted('A')], explicit: 'A' });
+
+    expect(allocation).toMatchObject({ kind: 'claimed', holders: [{ id: 'A' }] });
+  });
+
+  it(`counts a device a claim file still being written holds, so it creates none past the capacity`, async () => {
+    claimFileBeingWritten('A');
+    const createDevice = vi.fn(async () => shutdown('NEW'));
+
+    const allocation = await allocate(HERE, {
+      inventory: [booted('A')],
+      createDevice,
+      capacity: 1,
+    });
+
+    expect(allocation).toMatchObject({ kind: 'exhausted', holders: [{ id: 'A' }] });
+    expect(createDevice).not.toHaveBeenCalled();
   });
 
   it(`reads the clock once it holds the lock, so a touch made while it waited counts`, async () => {
