@@ -439,8 +439,8 @@ is `true` or the wait failed. Without the flag `ready` is `null`.
 
 One detached dev server per project. The lock is read before anything is spawned. A
 project that already has one gets the running server reported back with
-`alreadyRunning: true` and exit 0. Two foreground servers in two terminals are a thing
-people do on purpose. A second detached one is a process nobody could find.
+`alreadyRunning: true` and exit 0. A second detached one is a process nobody could find. A
+second foreground `dev` stops instead (§A busy port).
 
 The log is one file per project, truncated per run: `.expo/dev/logs/dev-detached.log`. A
 name carrying the port could not be resolved by `dev:logs` before the port was known. A
@@ -489,8 +489,17 @@ classifier. `expo-prompt` still covers every other question the Expo CLI asks.
 A named `--port` is a requirement. Moving the server would leave every URL the caller
 had already written pointing at nothing. The message names the pid that holds the port
 and recovers into a different command: `dev:stop --port <n> --force`, or a free port.
-When the process on that port is this project's own dev server, which the lock says, the
-message says that instead.
+
+One project has one dev server. A live lock of this project stops a foreground `dev`
+whose plan serves with `DEV_SERVER_RUNNING`, exit 20, before any step and before the port
+is probed (`src/dev/runningDevServer.ts`). A second server could not hold the lock, so
+`status` and `dev:stop` could not see it. The `/status` probe of the lock's URL only picks
+the word, `already running` when it answers for this project and `starting` otherwise, and
+the suggestion: `smoke` for a server that answers, `status` for one on its way. Under
+`--plan` the plan lists no steps, because the run does none. `dev --detach` reports the
+running server with exit 0, because its contract is "a server runs" (§Daemonization). The
+plain `start` wrapper keeps allowing a second server, which the serving step's lock claim
+reports on the event stream (`cli:dev_lock_skipped`).
 
 The port is resolved before the plan runs: the named `--port`, or the first port from
 8081 (`RCT_METRO_PORT` when set) that binds on `::` and `127.0.0.1`. It goes as `--port`
@@ -498,8 +507,8 @@ to `expo start` and to every `expo run:*` that serves, and the plan reports it a
 `devServerPort`, because `expo run:*` left to ask skips its dev server, deep-links the
 app to whatever holds the port, and exits 0.
 
-A busy port is busy whoever holds it, this project's own dev server included: the plan
-moves to the next free port.
+A busy port with no live lock of this project behind it is busy whoever holds it, this
+project's own `expo start` included: the plan moves to the next free port.
 
 A server on a port is this project's unless `/status` names another project root in the
 `X-React-Native-Project-Root` header. No header, or a root that contains this project (a
@@ -514,8 +523,9 @@ another project's root is not found there, and discovery goes on to its other st
 open aimed at a port the command line named waits until `/status` answers there and
 names no other project's root. It never comes when the dev server exits first.
 
-`devServerPort.state` says what the plan does about the port: `picked`, or `named` (with
-`taken` when the named port cannot be bound).
+`devServerPort.state` says what the plan does about the port: `picked`, `named` (with
+`taken` when the named port cannot be bound), or `running` (with `phase`, `serving` or
+`starting`, when this project's dev server already holds the lock).
 
 One retry. No plan has two dev-server steps, so that is one retry per plan. The check
 runs whatever the step's exit code, because `expo run:*` that skipped its dev server on
