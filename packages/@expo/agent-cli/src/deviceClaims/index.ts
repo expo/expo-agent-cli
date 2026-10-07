@@ -3,7 +3,7 @@
 // that reads it.
 
 export { allocateDeviceAsync, CREATED_DEVICE_EXPIRY_MS, peekDeviceAsync } from './allocate';
-export type { AllocateDeviceOptions } from './allocate';
+export type { AllocateDeviceOptions, PeekDeviceOptions } from './allocate';
 export { chooseDevice } from './choose';
 export type { ChooseDeviceInput } from './choose';
 export { devicesAllClaimedError } from './errors';

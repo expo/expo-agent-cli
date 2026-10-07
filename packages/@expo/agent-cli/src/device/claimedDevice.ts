@@ -296,28 +296,31 @@ async function resolveWithInventoryAsync(
     created?: boolean;
   };
   try {
-    const allocation = await (
-      mode === 'peek' ? peekDeviceAsync : allocateDeviceAsync
-    )<LocalCandidate>({
+    // A simulator created now has no app, so a caller that needs the app gets none created.
+    const canCreate = allowBoot && platform === 'ios' && !explicit && !options.requireApp;
+    const shared = {
       projectRoot,
       platform,
       backend,
       listDevices,
-      // A simulator created now has no app, so a caller that needs the app gets none created.
-      createDevice:
-        allowBoot && platform === 'ios' && !explicit && !options.requireApp
-          ? createSimulatorAsync
-          : undefined,
-      deleteDevice: platform === 'ios' ? deleteSimulatorAsync : undefined,
       capacity: deviceCapacity(platform),
       rank: rankCandidates,
       explicit: explicit ?? undefined,
-      matches: (candidate, query) => candidate.id === query || candidate.name === query,
+      matches: (candidate: LocalCandidate, query: string) =>
+        candidate.id === query || candidate.name === query,
       // The name outlives the claim: `dev:stop` deletes the claim, and a crash between
       // `simctl create` and the claim write leaves none.
-      isCreated: (candidate) =>
+      isCreated: (candidate: LocalCandidate) =>
         candidate.simulator != null && candidate.name.startsWith(CREATED_SIMULATOR_PREFIX),
-    });
+    };
+    const allocation =
+      mode === 'peek'
+        ? await peekDeviceAsync({ ...shared, canCreate })
+        : await allocateDeviceAsync({
+            ...shared,
+            createDevice: canCreate ? createSimulatorAsync : undefined,
+            deleteDevice: platform === 'ios' ? deleteSimulatorAsync : undefined,
+          });
     switch (allocation.kind) {
       case 'reuse': {
         const candidate = seen.inventory!.candidates.find(({ id }) => id === allocation.claim.id)!;
