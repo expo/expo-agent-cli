@@ -31,12 +31,12 @@ import { hasBuildProfileSync } from '../utils/easJson';
 export interface PlanDevices {
   /**
    * The device of a plan that builds here. `expo run:<platform> --device` gets its UDID or `adb`
-   * serial; a simulator the run creates has none yet, so that build runs unpinned. Null leaves the
-   * device to the Expo CLI.
+   * serial; a simulator `--plan` says the run creates has none yet, so the plan shows that build
+   * unpinned.
    *
    * @throws {CommandError} when the device cannot be had.
    */
-  runDevice: (platform: NativePlatform) => Promise<PlanDevice | null>;
+  runDevice: (platform: NativePlatform) => Promise<PlanDevice>;
   /** The booted device the presence probe asks, or null. */
   bootedDevice: NonNullable<ProbeAppPresenceOptions['probeDeviceAsync']>;
 }
