@@ -1193,8 +1193,7 @@ function resolveStepArgs(step: PlanStep, options: DevOptions, isLast: boolean): 
  *
  * Both resolve the device a run may boot or create, so `--plan` names the device the run builds
  * for and never stops where the run would boot one. A simulator the run creates has no id yet, so
- * its build is unpinned in the plan. No device pins nothing, but booted devices that other
- * worktrees hold stop the run with `DEVICES_ALL_CLAIMED`.
+ * its build is unpinned in the plan. Every refusal stops the plan and the run.
  * Absent for the EAS device and for a harness that must not touch this machine's devices
  * (`AGENT_CLI_NO_DEVICE`).
  */
@@ -1216,12 +1215,8 @@ function planDevices(projectRoot: string, options: DevOptions): PlanDevices | un
   return {
     async runDevice(platform) {
       const resolved = await resolveAsync(platform, true);
+      // An unpinned `expo run:*` takes the first device it finds, which may be another worktree's.
       if (!resolved.ok) {
-        // An unpinned `expo run:*` takes the first booted device, so it may run unpinned only when
-        // no booted device is another worktree's: then the Expo CLI finds or creates one, as before.
-        if (resolved.kind === 'no-device' && resolved.holders.length === 0) {
-          return null;
-        }
         throw resolved.error;
       }
       if (resolved.state == null) {

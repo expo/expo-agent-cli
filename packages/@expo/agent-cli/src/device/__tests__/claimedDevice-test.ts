@@ -226,6 +226,24 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     expect(readClaims()).toMatchObject([{ id: 'SIM-A', touchedAt: LONG_AGO }]);
   });
 
+  it(`answers unavailable, not no-device, when simctl cannot list the simulators`, async () => {
+    fakeDeviceTools(() => ({
+      exitCode: 1,
+      stderr: 'CoreSimulatorService connection became invalid',
+    }));
+
+    const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: true,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'unavailable' });
+    expect(!result.ok && result.error.code).toBe('DEVICE_UNAVAILABLE');
+    expect(!result.ok && result.error.message).toContain('CoreSimulatorService');
+  });
+
   it(`refuses the simulator when another worktree took its claim over during the boot`, async () => {
     fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' }], {
       onBoot: () => {

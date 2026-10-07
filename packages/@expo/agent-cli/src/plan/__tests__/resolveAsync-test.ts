@@ -302,7 +302,12 @@ describe('detection', () => {
   it(`claims no device for a build that runs on EAS`, async () => {
     writeProject({ 'eas.json': { build: {} } });
     stubToolchain('missing');
-    const runDevice = vi.fn(async () => null);
+    const runDevice = vi.fn(async () => ({
+      action: 'create' as const,
+      id: null,
+      name: null,
+      state: null,
+    }));
     await resolveStartPlanAsync(projectRoot, devClientState(), {
       platform: 'ios',
       devices: { runDevice, bootedDevice: async () => null },

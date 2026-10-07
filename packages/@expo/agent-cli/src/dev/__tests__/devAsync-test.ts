@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { vol } from 'memfs';
 import os from 'os';
 import path from 'path';
@@ -36,16 +37,34 @@ vi.mock('../portCollision', async (importOriginal) => {
     findFreePortAsync: vi.fn(actual.findFreePortAsync),
   };
 });
+// A run claims a booted device of its own; a read finds none booted, so no presence is asked.
 vi.mock('../../device/claimedDevice', () => ({
-  resolveClaimedDeviceAsync: vi.fn(async () => ({
-    ok: false,
-    kind: 'no-device',
-    reason: 'no booted iOS simulator was found',
-    error: new Error('none'),
-    deviceId: null,
-    name: null,
-    holders: [],
-  })),
+  resolveClaimedDeviceAsync: vi.fn(
+    async ({ platform, allowBoot }: { platform: 'ios' | 'android'; allowBoot: boolean }) =>
+      allowBoot
+        ? {
+            ok: true,
+            backend: `local-${platform}`,
+            action: 'take',
+            id: platform === 'ios' ? 'SIM-1' : 'emulator-5554',
+            name: platform === 'ios' ? 'iPhone 17' : 'Pixel_8',
+            state: 'booted',
+            claim: {},
+            booted: false,
+            choice: 'it was up and no other worktree claimed it',
+            hasApp: null,
+            adb: null,
+          }
+        : {
+            ok: false,
+            kind: 'no-device',
+            reason: 'no booted iOS simulator was found',
+            error: new Error('none'),
+            deviceId: null,
+            name: null,
+            holders: [],
+          }
+  ),
 }));
 // No bind test: the machine running the tests may have an emulator of its own on 5554.
 vi.mock('../../device/bootDevice', async (importOriginal) => ({
@@ -327,10 +346,14 @@ describe(devAsync, () => {
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
-        agentSkills: true,
-        output: 'inherit',
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['run:ios', '--device', 'SIM-1', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+        }
+      );
     });
   });
 
@@ -359,7 +382,7 @@ describe(devAsync, () => {
       expect(prebuild).toContainEqual(['prebuild', '--platform', 'ios']);
       expect(runDevServerAsync).toHaveBeenCalledWith(
         projectRoot,
-        ['run:ios', '--port', '8081'],
+        ['run:ios', '--device', 'SIM-1', '--port', '8081'],
         expect.anything()
       );
     });
@@ -465,6 +488,28 @@ describe(devAsync, () => {
       });
       expect(vol.toJSON(deviceRegistryDirectory())).toEqual(registry);
       expect(tools.callsWith('simctl boot')).toEqual([]);
+    });
+
+    it(`refuses a run whose claim fails on a registry it cannot write, rather than run unpinned`, async () => {
+      simulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
+      claimedByOther('SIM-A');
+      const registry = deviceRegistryDirectory();
+      const mkdir = fs.mkdirSync;
+      vi.spyOn(fs, 'mkdirSync').mockImplementation(((target: fs.PathLike, options?: any) => {
+        if (String(target).startsWith(registry) && !options?.recursive) {
+          throw Object.assign(new Error(`EROFS: read-only file system, mkdir '${target}'`), {
+            code: 'EROFS',
+            path: String(target),
+          });
+        }
+        return mkdir(target, options);
+      }) as typeof fs.mkdirSync);
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+        code: 'DEVICE_UNAVAILABLE',
+      });
+
+      expect(runDevServerAsync).not.toHaveBeenCalled();
     });
 
     // @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
@@ -753,10 +798,14 @@ describe(devAsync, () => {
 
       expect(runExpoAsync).toHaveBeenCalledTimes(1);
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
-        agentSkills: true,
-        output: 'inherit',
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['run:ios', '--device', 'SIM-1', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+        }
+      );
     });
 
     // The code is still the subprocess's own (llp/0010 §Exit codes); what changed is that a run
@@ -918,10 +967,14 @@ describe(devAsync, () => {
       await devAsync(projectRoot, resolveDevOptions(['--ios', '--tunnel']));
 
       expect(Log.warn).toHaveBeenCalledWith(expect.stringMatching(/not passed on: --tunnel/));
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
-        agentSkills: true,
-        output: 'inherit',
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['run:ios', '--device', 'SIM-1', '--port', '8081'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+        }
+      );
     });
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person
@@ -932,10 +985,14 @@ describe(devAsync, () => {
       await devAsync(projectRoot, resolveDevOptions(['--ios', '--port', '8082']));
 
       expect(Log.warn).not.toHaveBeenCalled();
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8082'], {
-        agentSkills: true,
-        output: 'inherit',
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['run:ios', '--device', 'SIM-1', '--port', '8082'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+        }
+      );
     });
 
     it(`should run every serving step on the port it picked, and say once that it moved`, async () => {
@@ -949,10 +1006,14 @@ describe(devAsync, () => {
       await devAsync(projectRoot, resolveDevOptions(['--ios']));
 
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
-      expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8082'], {
-        agentSkills: true,
-        output: 'inherit',
-      });
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['run:ios', '--device', 'SIM-1', '--port', '8082'],
+        {
+          agentSkills: true,
+          output: 'inherit',
+        }
+      );
       const warnings = vi.mocked(Log.warn).mock.calls.map(([line]) => String(line));
       expect(warnings.filter((line) => line.includes('the dev server uses'))).toEqual([
         expect.stringContaining(formatPortMove({ busy: 8081, to: 8082, when: 'plan' })),
@@ -976,7 +1037,7 @@ describe(devAsync, () => {
       expect(plan.devServerPort).toEqual({ port: 8082, movedFrom: 8081, state: 'picked' });
       expect(plan.steps.map((step) => step.argv)).toEqual([
         ['expo', 'prebuild', '--platform', 'ios'],
-        ['expo', 'run:ios', '--port', '8082'],
+        ['expo', 'run:ios', '--device', 'SIM-1', '--port', '8082'],
       ]);
       expect(plan.reasons).toContain('The dev server port is picked again when the plan runs.');
       expect(runDevServerAsync).not.toHaveBeenCalled();
@@ -1024,7 +1085,7 @@ describe(devAsync, () => {
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'android']);
       expect(runDevServerAsync).toHaveBeenCalledWith(
         projectRoot,
-        ['run:android', '--port', '8081'],
+        ['run:android', '--device', 'emulator-5554', '--port', '8081'],
         {
           agentSkills: true,
           output: 'inherit',
@@ -1326,8 +1387,8 @@ describe(devAsync, () => {
       await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
 
       expect(vi.mocked(runDevServerAsync).mock.calls.map(([, args]) => args)).toEqual([
-        ['run:ios', '--port', '8081'],
-        ['run:ios', '--port', expect.stringMatching(/^\d+$/)],
+        ['run:ios', '--device', 'SIM-1', '--port', '8081'],
+        ['run:ios', '--device', 'SIM-1', '--port', expect.stringMatching(/^\d+$/)],
       ]);
       expect(vi.mocked(runDevServerAsync).mock.calls[1]![1].at(-1)).not.toBe('8081');
       expect(

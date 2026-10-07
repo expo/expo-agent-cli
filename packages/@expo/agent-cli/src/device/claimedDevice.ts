@@ -8,6 +8,7 @@ import os from 'os';
 
 import {
   allocateDeviceAsync,
+  deviceRegistryDirectory,
   devicesAllClaimedError,
   isSameClaim,
   markClaimBootedAsync,
@@ -88,6 +89,8 @@ export interface ClaimedDevice extends ExistingDevice {
 export type DeviceRefusalKind =
   /** `simctl` or `adb` could not run. */
   | 'no-tool'
+  /** `simctl` or `adb` failed, or the registry could not be read or written. Nothing was claimed. */
+  | 'unavailable'
   /** No device is up (allowBoot false), or none exists to boot. */
   | 'no-device'
   /** `DEVICES_ALL_CLAIMED`. */
@@ -391,9 +394,12 @@ async function resolveWithInventoryAsync(
     if (error instanceof InventoryRefusal) {
       return error.refusal;
     }
-    return refusal(
-      'no-device',
-      `no ${NOUN[platform]} could be claimed: ${error instanceof Error ? error.message : String(error)}`
+    return unavailableRefusal(
+      platform,
+      error instanceof Error ? error.message : String(error),
+      (error as NodeJS.ErrnoException).code
+        ? `make ${deviceRegistryDirectory()} writable: every worktree's device claims are kept there`
+        : 'fix the failure above, then run the command again'
     );
   }
 
@@ -563,6 +569,19 @@ function refusal(kind: DeviceRefusalKind, reason: string, error?: CommandError):
   };
 }
 
+/** A tool or the registry failed, so this worktree cannot know which device is its own. */
+function unavailableRefusal(platform: DevicePlatform, why: string, how: string): DeviceRefusal {
+  const what = `no ${NOUN[platform]} could be claimed for this worktree`;
+  return refusal(
+    'unavailable',
+    `${what}: ${why}`,
+    new CommandError(
+      'DEVICE_UNAVAILABLE',
+      [`${capitalize(what)}.`, `Why: ${why}.`, `How: ${how}.`].join('\n')
+    )
+  );
+}
+
 function noBootedReason(platform: DevicePlatform, inventory: Inventory | null): string {
   const anyBooted = inventory?.candidates.some((candidate) => candidate.state === 'booted');
   if (anyBooted) {
@@ -588,7 +607,7 @@ function exhaustedRefusal(
           ? 'this machine has no iOS simulator to boot. Install an iOS runtime in Xcode Settings > Components'
           : inventory?.avdCount
             ? 'no emulator console port in 5554-5584 is free to start an Android virtual device on'
-            : 'this machine has no Android virtual device to start. Create one in Android Studio Device Manager'
+            : 'this machine has no Android virtual device to start. Create one in Android Studio Device Manager, or name a USB device with --device <serial>'
     );
   }
   const error = devicesAllClaimedError(platform, holders);
@@ -677,9 +696,10 @@ async function listSimulatorsAsync(appId: string | null): Promise<InventoryResul
     );
   }
   if (listed.exitCode !== 0) {
-    return refusal(
-      'no-device',
-      `"xcrun simctl list devices" failed: ${listed.stderr.trim() || `exit code ${listed.exitCode}`}`
+    return unavailableRefusal(
+      'ios',
+      `"xcrun simctl list devices" failed: ${listed.stderr.trim() || `exit code ${listed.exitCode}`}`,
+      'run "xcrun simctl list devices" and fix what it reports'
     );
   }
   const simulators = parseSimulators(listed.stdout).filter((entry) => entry.isAvailable);
@@ -718,9 +738,10 @@ async function listEmulatorsAsync({
     );
   }
   if (listed.exitCode !== 0) {
-    return refusal(
-      'no-device',
-      `"${adb.bin} devices -l" failed: ${listed.stderr.trim() || `exit code ${listed.exitCode}`}`
+    return unavailableRefusal(
+      'android',
+      `"${adb.bin} devices -l" failed: ${listed.stderr.trim() || `exit code ${listed.exitCode}`}`,
+      `run "${adb.bin} devices -l" and fix what it reports`
     );
   }
 
