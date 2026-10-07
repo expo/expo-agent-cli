@@ -20,7 +20,7 @@ import type { NativePlatform } from '../plan/types';
 import { readConfiguredAppId } from '../runtime/appId';
 import { hasAppOnDeviceAsync } from './hasApp';
 import { expoRunDeviceArgumentAsync } from './installDevBuild';
-import { resolveClaimedDeviceAsync, type LocalDeviceBackend } from './claimedDevice';
+import type { LocalDeviceBackend } from './claimedDevice';
 
 /** Whether the development build is on the device, as far as this machine can be asked. */
 export type AppPresence =
@@ -67,7 +67,11 @@ export const APP_PRESENCE_BUDGET_MS = 8000;
 const UNPROBED: AppPresenceProbe = { presence: 'unknown', installDevice: null };
 
 export interface ProbeAppPresenceOptions {
-  /** Injected for tests. Defaults to the booted device this worktree claims on the platform. */
+  /**
+   * The booted device of this worktree on the platform, as the caller gets it: `dev` claims it, and
+   * `dev --plan` peeks without claiming (llp/0030 §Every verb uses the claim). Absent: nothing is
+   * asked, and the answer is `unknown`.
+   */
   probeDeviceAsync?: (
     projectRoot: string,
     platform: NativePlatform
@@ -126,7 +130,7 @@ async function askDeviceAsync(
   projectRoot: string,
   platform: NativePlatform,
   {
-    probeDeviceAsync = claimedBootedDeviceAsync,
+    probeDeviceAsync,
     readAppId = readConfiguredAppId,
     hasAppOnDevice = hasAppOnDeviceAsync,
     runDeviceArgument = expoRunDeviceArgumentAsync,
@@ -136,7 +140,7 @@ async function askDeviceAsync(
   // project whose config names no `bundleIdentifier` cannot be looked for under any name, and
   // asking a device about the Expo Go id instead would answer about a different app entirely.
   const appId = readAppId(projectRoot, platform);
-  if (appId == null) {
+  if (appId == null || probeDeviceAsync == null) {
     return UNPROBED;
   }
 
@@ -159,12 +163,4 @@ async function askDeviceAsync(
   return argument.ok
     ? { presence: 'missing', installDevice: argument.value }
     : { presence: 'missing', installDevice: null, installRefusal: argument.reason };
-}
-
-async function claimedBootedDeviceAsync(
-  projectRoot: string,
-  platform: NativePlatform
-): Promise<{ deviceId: string; backend: LocalDeviceBackend } | null> {
-  const claimed = await resolveClaimedDeviceAsync({ platform, projectRoot, allowBoot: false });
-  return claimed.ok ? { deviceId: claimed.id, backend: claimed.backend } : null;
 }

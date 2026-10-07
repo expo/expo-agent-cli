@@ -3,7 +3,11 @@
 // flags they typed, this host, and what the toolchain probe found. Everything it calls is pure
 // except the probe and two file reads, and it is the only module that knows the order they go in.
 
-import { probeAppPresenceAsync, type AppPresenceProbe } from '../device/appPresence';
+import {
+  probeAppPresenceAsync,
+  type AppPresenceProbe,
+  type ProbeAppPresenceOptions,
+} from '../device/appPresence';
 import { easJsonExistsSync } from '../followups/projectFiles';
 import type { ProjectState, StartPlan } from '../project/types';
 import { readAgentCliSettings, settingsBuildBackend } from '../settings';
@@ -28,6 +32,24 @@ export function runDeviceRefusedError(platform: NativePlatform, reason: string):
       `Why: ${reason}.`,
     ].join('\n')
   );
+}
+
+/**
+ * This worktree's device, as the caller gets it: `dev` claims it for a run, and `dev --plan` peeks
+ * at the same answer without claiming it.
+ *
+ * @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
+ */
+export interface PlanDevices {
+  /**
+   * What `expo run:<platform> --device` calls the device of a plan that builds here. Null leaves
+   * the build unpinned.
+   *
+   * @throws {CommandError} when the device cannot be had or named safely.
+   */
+  runDevice: (platform: NativePlatform) => Promise<string | null>;
+  /** The booted device the presence probe asks, or null. */
+  bootedDevice: NonNullable<ProbeAppPresenceOptions['probeDeviceAsync']>;
 }
 
 /**
@@ -60,7 +82,8 @@ export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
   /** Injected for tests, so the device question is answerable without a device. */
   probeAppPresence?: (
     projectRoot: string,
-    platform: 'ios' | 'android'
+    platform: 'ios' | 'android',
+    options: ProbeAppPresenceOptions
   ) => Promise<AppPresenceProbe>;
   /**
    * Injected for tests: whether EAS has a finished simulator build of this fingerprint.
@@ -72,14 +95,8 @@ export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
   hasSimulatorProfile?: (projectRoot: string) => boolean;
   /** Whether the per-platform fingerprint the EAS lookup needs may come from the `.expo` record. */
   fingerprintCache?: boolean;
-  /**
-   * Claim this worktree's device for a plan that builds here, and answer what
-   * `expo run:<platform> --device` calls it. Null leaves the build unpinned.
-   *
-   * @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
-   * @throws {CommandError} when the device cannot be claimed or named safely.
-   */
-  claimRunDevice?: (platform: NativePlatform) => Promise<string | null>;
+  /** Absent for a caller that asks this machine for no device: nothing is pinned or probed. */
+  devices?: PlanDevices;
 }
 
 /**
@@ -116,7 +133,7 @@ export async function resolveStartPlanAsync(
       lookUpEasSimulatorBuildAsync(root, platform, { fingerprintCache: options.fingerprintCache }),
     hasSimulatorProfile = (root) => hasBuildProfileSync(root, EAS_SIMULATOR_PROFILE),
     fingerprintCache: _fingerprintCache,
-    claimRunDevice,
+    devices,
     ...planOptions
   } = options;
 
@@ -162,7 +179,8 @@ export async function resolveStartPlanAsync(
     }
     const { presence, installDevice, installRefusal } = await probeAppPresence(
       projectRoot,
-      opensOn
+      opensOn,
+      { probeDeviceAsync: devices?.bootedDevice }
     );
     if (presence === 'missing') {
       // The install needs the local toolchain even when nothing compiles — `expo run:ios` runs
@@ -211,7 +229,7 @@ export async function resolveStartPlanAsync(
     onEas && draft.rule !== 'needs-dev-client' ? await lookUpEasBuild(projectRoot, platform) : null;
 
   const runDevice =
-    buildBackend.runsOn === 'local' && claimRunDevice ? await claimRunDevice(platform) : null;
+    buildBackend.runsOn === 'local' && devices ? await devices.runDevice(platform) : null;
 
   const plan = decideStartPlan(state, {
     ...planOptions,

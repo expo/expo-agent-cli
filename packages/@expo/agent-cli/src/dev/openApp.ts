@@ -89,6 +89,7 @@ export async function openAppOnDeviceAsync(
     return stopped('the dev server stopped before a device was claimed');
   }
   const resolved = await resolveClaimedDeviceAsync({
+    mode: 'claim',
     platform,
     projectRoot,
     explicit: options.device ?? null,

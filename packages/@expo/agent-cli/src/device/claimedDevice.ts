@@ -1,7 +1,8 @@
 // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
 // The one place a local verb gets its device: the device this worktree claimed on the platform, or
 // a free one it claims now. It builds the local inventory for the registry's allocation, and boots
-// the device when the caller allows it. Nothing else picks "the first booted" device.
+// the device when the caller allows it. A verb that only reads peeks instead: the same choice, and
+// no claim written, touched or released. Nothing else picks "the first booted" device.
 
 import os from 'os';
 
@@ -10,11 +11,13 @@ import {
   devicesAllClaimedError,
   isSameClaim,
   markClaimBootedAsync,
+  peekDeviceAsync,
   readClaim,
   readClaims,
   releaseClaim,
   touchClaim,
   type ClassifiedClaim,
+  type DeviceAction,
   type DeviceCandidate,
   type DeviceClaim,
   type DevicePlatform,
@@ -49,21 +52,37 @@ import { simulatorHasAppAsync } from './installedApps';
 
 export type LocalDeviceBackend = 'local-ios' | 'local-android';
 
-export interface ClaimedDevice {
+interface DeviceAnswer {
   ok: true;
   backend: LocalDeviceBackend;
-  /** Simulator UDID or adb serial. */
-  id: string;
-  name: string;
-  claim: DeviceClaim;
-  /** This call booted the device. */
-  booted: boolean;
+  /** How the claim gets it: this worktree's claim, a free booted device, a free shut-down one, a new one. */
+  action: DeviceAction;
   /** Why this device, as one clause for a report. */
   choice: string;
   /** Whether the device has {@link ResolveClaimedDeviceOptions.appId}. Null when nobody asked. */
   hasApp: boolean | null;
   /** Android only: the adb every later call on this device uses. */
   adb: AdbResolution | null;
+}
+
+interface ExistingDevice extends DeviceAnswer {
+  /** Simulator UDID or adb serial. */
+  id: string;
+  name: string;
+  state: DeviceCandidate['state'];
+}
+
+/** The device a claim would get now, as `peek` answers without claiming it. */
+export type PeekedDevice =
+  | ExistingDevice
+  /** The simulator `create` has not made yet. */
+  | (DeviceAnswer & { action: 'create'; id: null; name: null; state: null });
+
+export interface ClaimedDevice extends ExistingDevice {
+  state: 'booted';
+  claim: DeviceClaim;
+  /** This call booted the device. */
+  booted: boolean;
 }
 
 export type DeviceRefusalKind =
@@ -99,12 +118,20 @@ export interface DeviceRefusal {
 
 export type ClaimedDeviceResult = ClaimedDevice | DeviceRefusal;
 
+export type PeekedDeviceResult = PeekedDevice | DeviceRefusal;
+
 export interface ResolveClaimedDeviceOptions {
+  /**
+   * `claim` reaps deleted worktrees, writes and touches the claim, and boots or creates the device.
+   * `peek` is for a verb that only reads: the same choice and the same refusals, and it reaps,
+   * writes, releases, boots and creates nothing.
+   */
+  mode: 'claim' | 'peek';
   platform: DevicePlatform;
   projectRoot: string;
   /** `--device`: a UDID, serial or name. Skips allocation, and still writes the claim. */
   explicit?: string | null;
-  /** False for verbs that read a device: they never boot or create one. */
+  /** False for verbs that read a device: they never boot or create one. A peek only says it would. */
   allowBoot: boolean;
   /** Devices with this app installed rank first among the shut-down ones. */
   appId?: string | null;
@@ -173,12 +200,23 @@ interface Seen {
 }
 
 export async function resolveClaimedDeviceAsync(
+  options: ResolveClaimedDeviceOptions & { mode: 'peek' }
+): Promise<PeekedDeviceResult>;
+export async function resolveClaimedDeviceAsync(
+  options: ResolveClaimedDeviceOptions & { mode: 'claim' }
+): Promise<ClaimedDeviceResult>;
+export async function resolveClaimedDeviceAsync(
   options: ResolveClaimedDeviceOptions
-): Promise<ClaimedDeviceResult> {
+): Promise<ClaimedDeviceResult | PeekedDeviceResult>;
+export async function resolveClaimedDeviceAsync(
+  options: ResolveClaimedDeviceOptions
+): Promise<ClaimedDeviceResult | PeekedDeviceResult> {
   const projectRoot = canonicalizeExistingPath(options.projectRoot);
-  // @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
-  for (const device of await reapDeletedWorktreeClaimsAsync(projectRoot)) {
-    Log.progress(`Reaped ${describeReapedDevice(device)}.`);
+  if (options.mode === 'claim') {
+    // @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
+    for (const device of await reapDeletedWorktreeClaimsAsync(projectRoot)) {
+      Log.progress(`Reaped ${describeReapedDevice(device)}.`);
+    }
   }
   const seen: Seen = { inventory: null, claims: [] };
   const result = await resolveWithInventoryAsync(options, projectRoot, seen);
@@ -227,8 +265,8 @@ async function resolveWithInventoryAsync(
   options: ResolveClaimedDeviceOptions,
   projectRoot: string,
   seen: Seen
-): Promise<ClaimedDeviceResult> {
-  const { platform, explicit, allowBoot } = options;
+): Promise<ClaimedDeviceResult | PeekedDeviceResult> {
+  const { mode, platform, explicit, allowBoot } = options;
   const backend = BACKEND[platform];
 
   const listDevices = async (claims: ClassifiedClaim[]): Promise<LocalCandidate[]> => {
@@ -248,7 +286,9 @@ async function resolveWithInventoryAsync(
   };
 
   let picked: {
+    action: DeviceAction;
     candidate: LocalCandidate;
+    /** Never written by a peek. */
     claim: DeviceClaim;
     fresh: boolean;
     choice: string;
@@ -256,7 +296,9 @@ async function resolveWithInventoryAsync(
     created?: boolean;
   };
   try {
-    const allocation = await allocateDeviceAsync<LocalCandidate>({
+    const allocation = await (
+      mode === 'peek' ? peekDeviceAsync : allocateDeviceAsync
+    )<LocalCandidate>({
       projectRoot,
       platform,
       backend,
@@ -280,6 +322,7 @@ async function resolveWithInventoryAsync(
       case 'reuse': {
         const candidate = seen.inventory!.candidates.find(({ id }) => id === allocation.claim.id)!;
         picked = {
+          action: 'reuse',
           candidate,
           claim: allocation.claim,
           fresh: false,
@@ -290,6 +333,7 @@ async function resolveWithInventoryAsync(
       case 'take':
         picked = {
           ...allocation,
+          action: 'take',
           fresh: true,
           choice: explicit ? '--device named it' : 'it was up and no other worktree claimed it',
         };
@@ -297,6 +341,7 @@ async function resolveWithInventoryAsync(
       case 'boot':
         picked = {
           ...allocation,
+          action: 'boot',
           fresh: true,
           choice: explicit
             ? '--device named it'
@@ -307,9 +352,22 @@ async function resolveWithInventoryAsync(
                 : 'no other worktree claimed this emulator',
         };
         break;
+      case 'create':
+        return {
+          ok: true,
+          backend,
+          action: 'create',
+          id: null,
+          name: null,
+          state: null,
+          choice: 'every simulator is claimed, so one would be created for this worktree',
+          hasApp: options.appId != null ? false : null,
+          adb: null,
+        };
       case 'created':
         picked = {
           ...allocation,
+          action: 'create',
           candidate: {
             ...allocation.candidate,
             hasApp: options.appId != null ? false : allocation.candidate.hasApp,
@@ -336,8 +394,19 @@ async function resolveWithInventoryAsync(
     );
   }
 
-  const { candidate, claim, fresh, choice, created = false } = picked;
+  const { action, candidate, claim, fresh, choice, created = false } = picked;
   const adb = seen.inventory?.adb ?? null;
+  const peeked = (): ExistingDevice => ({
+    ok: true,
+    backend,
+    action,
+    id: candidate.id,
+    name: candidate.name,
+    state: candidate.state,
+    choice,
+    hasApp: candidate.hasApp ?? null,
+    adb,
+  });
   const device = (booted: boolean): ClaimedDeviceResult => {
     const held = touchClaim(claim) ?? heldClaim(claim);
     if (held == null) {
@@ -356,24 +425,14 @@ async function resolveWithInventoryAsync(
         }
       }
     }
-    return {
-      ok: true,
-      backend,
-      id: candidate.id,
-      name: candidate.name,
-      claim: held,
-      booted,
-      choice,
-      hasApp: candidate.hasApp ?? null,
-      adb,
-    };
+    return { ...peeked(), state: 'booted', claim: held, booted };
   };
 
   if (candidate.state === 'booted') {
-    return device(false);
+    return mode === 'peek' ? peeked() : device(false);
   }
   if (!allowBoot) {
-    if (fresh) {
+    if (fresh && mode === 'claim') {
       releaseClaim(claim);
     }
     return refusal(
@@ -396,7 +455,7 @@ async function resolveWithInventoryAsync(
         })
       );
     }
-    if (fresh) {
+    if (fresh && mode === 'claim') {
       releaseClaim(claim);
     }
     return refusal(
@@ -410,6 +469,9 @@ async function resolveWithInventoryAsync(
       'no-device',
       `this machine has no Android virtual device to start ${candidate.id} with. Create one in Android Studio Device Manager`
     );
+  }
+  if (mode === 'peek') {
+    return peeked();
   }
 
   // `dev:stop` shuts down only a device whose claim says this CLI booted it, and a boot that times

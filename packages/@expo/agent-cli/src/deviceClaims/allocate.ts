@@ -21,6 +21,7 @@ import type {
   ClassifiedClaim,
   DeviceBackend,
   DeviceCandidate,
+  DeviceChoice,
   DeviceClaim,
   DevicePlatform,
 } from './types';
@@ -62,30 +63,14 @@ export interface AllocateDeviceOptions<C extends DeviceCandidate> {
  * was read may be live by the time it is acted on. Each claim is read again just before it is
  * removed, released or its device deleted, and is left when it changed or is live now.
  */
-export async function allocateDeviceAsync<C extends DeviceCandidate>({
-  projectRoot: givenRoot,
-  platform,
-  backend,
-  listDevices,
-  createDevice,
-  deleteDevice,
-  capacity,
-  rank,
-  explicit,
-  matches,
-  isCreated,
-  now: givenNow,
-  probeLock,
-}: AllocateDeviceOptions<C>): Promise<Allocation<C>> {
-  const projectRoot = canonicalizeExistingPath(givenRoot);
+export async function allocateDeviceAsync<C extends DeviceCandidate>(
+  options: AllocateDeviceOptions<C>
+): Promise<Allocation<C>> {
+  const { platform, backend, listDevices, createDevice, deleteDevice } = options;
 
   return await withRegistryLockAsync(async () => {
-    // Read once the lock is held, so a touch made while this call waited is not in the future.
-    const now = givenNow ?? new Date();
-    const classifyAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim> => ({
-      ...claim,
-      liveness: await classifyClaimAsync(claim, { now, probeLock }),
-    });
+    // Chosen once the lock is held, so a touch made while this call waited is not in the future.
+    const { projectRoot, now, classifyAsync, choose } = chooser(options);
     const currentAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim | null> => {
       const current = readClaim(claim.backend, claim.id);
       return current == null ? null : await classifyAsync(current);
@@ -100,20 +85,7 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
     let inventory = await listDevices(claims);
 
     for (;;) {
-      const choice = chooseDevice({
-        projectRoot,
-        platform,
-        backend,
-        claims,
-        inventory,
-        capacity: createDevice ? capacity : 0,
-        rank,
-        now,
-        pid: process.pid,
-        explicit,
-        matches,
-        isCreated,
-      });
+      const choice = choose(claims, inventory);
 
       const chosenId =
         choice.kind === 'reuse'
@@ -226,6 +198,56 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
       }
     }
   });
+}
+
+/**
+ * What {@link allocateDeviceAsync} would choose now, read without the registry lock. It removes,
+ * writes, deletes and creates nothing, so a verb that only reads changes no claim and never waits
+ * on an allocation.
+ */
+export async function peekDeviceAsync<C extends DeviceCandidate>(
+  options: AllocateDeviceOptions<C>
+): Promise<DeviceChoice<C>> {
+  const { classifyAsync, choose } = chooser(options);
+  const claims = await Promise.all(readClaims().map(classifyAsync));
+  return choose(claims, await options.listDevices(claims));
+}
+
+/** The classification and the choice of both entry points, so a peek and a claim never disagree. */
+function chooser<C extends DeviceCandidate>({
+  projectRoot: givenRoot,
+  platform,
+  backend,
+  createDevice,
+  capacity,
+  rank,
+  explicit,
+  matches,
+  isCreated,
+  now = new Date(),
+  probeLock,
+}: AllocateDeviceOptions<C>) {
+  const projectRoot = canonicalizeExistingPath(givenRoot);
+  const classifyAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim> => ({
+    ...claim,
+    liveness: await classifyClaimAsync(claim, { now, probeLock }),
+  });
+  const choose = (claims: ClassifiedClaim[], inventory: C[]): DeviceChoice<C> =>
+    chooseDevice({
+      projectRoot,
+      platform,
+      backend,
+      claims,
+      inventory,
+      capacity: createDevice ? capacity : 0,
+      rank,
+      now,
+      pid: process.pid,
+      explicit,
+      matches,
+      isCreated,
+    });
+  return { projectRoot, now, classifyAsync, choose };
 }
 
 function removeStale(claim: DeviceClaim, reason: 'device-gone' | 'taken-over' | 'expired'): void {

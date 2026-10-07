@@ -1,10 +1,21 @@
+import { vol } from 'memfs';
+import path from 'path';
+
+import { fakeDeviceTools, simctlDevices } from '../../device/__tests__/fakeDeviceTools';
+import { deviceRegistryDirectory, writeClaim } from '../../deviceClaims';
 import {
+  claimedReadableDeviceAsync,
   matchesDeviceFilter,
   parseEmbeddedFingerprint,
   pickBestResult,
   rankInstalledResult,
   type InstalledFingerprintResult,
 } from '../installedFingerprint';
+
+vi.mock('../../deviceClaims/events', () => ({
+  event: vi.fn(),
+  debugEvent: Object.assign(vi.fn(), { error: vi.fn((error) => error) }),
+}));
 
 const device = { name: 'Pixel 9', identifier: 'emulator-5554' };
 const appId = 'com.example.app';
@@ -91,5 +102,47 @@ describe(matchesDeviceFilter, () => {
     expect(matchesDeviceFilter('pixel 9', device)).toBe(true);
     expect(matchesDeviceFilter('EMULATOR-5554', device)).toBe(true);
     expect(matchesDeviceFilter('Pixel', device)).toBe(false);
+  });
+});
+
+// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
+describe(claimedReadableDeviceAsync, () => {
+  const HERE = path.resolve('/work/here');
+  const GONE = path.resolve('/work/gone');
+
+  beforeEach(() => vol.mkdirSync(HERE, { recursive: true }));
+  afterEach(() => vol.reset());
+
+  it(`reads the simulator a claim would take, and reaps, writes and shuts down nothing`, async () => {
+    const tools = fakeDeviceTools((command, args) =>
+      command === 'xcrun' && args[1] === 'list'
+        ? {
+            stdout: simctlDevices([
+              { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },
+              { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Booted' },
+            ]),
+          }
+        : {}
+    );
+    const now = new Date().toISOString();
+    // A deleted worktree's claim on a simulator it booted: a claim would reap it and shut it down.
+    writeClaim({
+      backend: 'local-ios',
+      platform: 'ios',
+      id: 'SIM-B',
+      projectRoot: GONE,
+      pid: 1,
+      claimedAt: now,
+      touchedAt: now,
+      created: false,
+      booted: true,
+    });
+    const registry = vol.toJSON(deviceRegistryDirectory());
+
+    const read = await claimedReadableDeviceAsync('ios', HERE);
+
+    expect(read).toEqual({ device: { identifier: 'SIM-A', name: 'iPhone 17' }, adb: null });
+    expect(vol.toJSON(deviceRegistryDirectory())).toEqual(registry);
+    expect(tools.callsWith('simctl shutdown')).toEqual([]);
   });
 });

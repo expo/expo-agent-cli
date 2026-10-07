@@ -1,8 +1,7 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Proof
 // The routing between booted simulators and connected phones. Both readers are injected.
-import type { ClaimedDeviceResult } from '../../device/claimedDevice';
+import type { PeekedDeviceResult } from '../../device/claimedDevice';
 import type { IosDevice } from '../../device/devicectl';
-import type { DeviceClaim } from '../../deviceClaims';
 import { CommandError } from '../../utils/errors';
 import type { SpawnCaptureResult } from '../../utils/spawnCapture';
 import type { InstalledFingerprintResult } from '../installedFingerprint';
@@ -86,15 +85,15 @@ function read(
     deps: {
       ...fakeSimctl(simulators),
       // The worktree claims the first booted simulator, as the registry would give it.
-      resolveClaimedDeviceAsync: async (): Promise<ClaimedDeviceResult> =>
+      resolveClaimedDeviceAsync: async (): Promise<PeekedDeviceResult> =>
         simulators[0]
           ? {
               ok: true,
               backend: 'local-ios',
+              action: 'reuse',
               id: simulators[0].udid,
               name: simulators[0].name,
-              claim: {} as DeviceClaim,
-              booted: false,
+              state: 'booted',
               choice: 'this worktree claimed it already',
               hasApp: null,
               adb: null,

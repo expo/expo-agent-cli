@@ -270,6 +270,7 @@ export async function bootDeviceAsync(
   const { resolveClaimedDeviceAsync } =
     require('./claimedDevice') as typeof import('./claimedDevice');
   const resolved = await resolveClaimedDeviceAsync({
+    mode: 'claim',
     platform,
     projectRoot,
     allowBoot: true,

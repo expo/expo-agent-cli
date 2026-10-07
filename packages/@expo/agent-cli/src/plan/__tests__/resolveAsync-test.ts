@@ -279,26 +279,29 @@ describe('detection', () => {
   // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
   it(`pins a local build to the device this worktree claims`, async () => {
     writeProject();
-    const claimRunDevice = vi.fn(async () => 'SIM-CLAIMED');
+    const runDevice = vi.fn(async () => 'SIM-CLAIMED');
     const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
       platform: 'ios',
-      claimRunDevice,
+      devices: { runDevice, bootedDevice: async () => null },
     });
 
     expect(argvOf(plan)).toEqual([
       ['expo', 'prebuild', '--platform', 'ios'],
       ['expo', 'run:ios', '--device', 'SIM-CLAIMED'],
     ]);
-    expect(claimRunDevice).toHaveBeenCalledWith('ios');
+    expect(runDevice).toHaveBeenCalledWith('ios');
   });
 
   it(`claims no device for a build that runs on EAS`, async () => {
     writeProject({ 'eas.json': { build: {} } });
     stubToolchain('missing');
-    const claimRunDevice = vi.fn(async () => 'SIM-CLAIMED');
-    await resolveStartPlanAsync(projectRoot, devClientState(), { platform: 'ios', claimRunDevice });
+    const runDevice = vi.fn(async () => 'SIM-CLAIMED');
+    await resolveStartPlanAsync(projectRoot, devClientState(), {
+      platform: 'ios',
+      devices: { runDevice, bootedDevice: async () => null },
+    });
 
-    expect(claimRunDevice).not.toHaveBeenCalled();
+    expect(runDevice).not.toHaveBeenCalled();
   });
 
   it(`builds on EAS when this machine does not`, async () => {

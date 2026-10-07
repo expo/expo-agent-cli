@@ -140,11 +140,13 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
   it(`gives two worktrees two different simulators, and boots each`, async () => {
     const { tools } = fakeSimulators();
     const here = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: true,
     });
     const other = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: OTHER,
       allowBoot: true,
@@ -173,11 +175,13 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
   it(`reuses the worktree's own simulator on the next call, and boots nothing`, async () => {
     const { tools } = fakeSimulators();
     const first = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: true,
     });
     const again = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: false,
@@ -197,6 +201,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     writeClaim(ownClaim('SIM-A', LONG_AGO));
 
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: false,
@@ -211,6 +216,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     writeClaim(ownClaim('SIM-A', LONG_AGO));
 
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: false,
@@ -228,6 +234,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
       },
     });
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: true,
@@ -249,6 +256,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
       onBoot: () => vol.rmSync(claimFilePath('local-ios', 'SIM-A')),
     });
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: true,
@@ -267,7 +275,12 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
 
     try {
       expect(
-        await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: false })
+        await resolveClaimedDeviceAsync({
+          mode: 'claim',
+          platform: 'ios',
+          projectRoot: HERE,
+          allowBoot: false,
+        })
       ).toMatchObject({ ok: true, id: 'SIM-A', claim: { projectRoot: HERE } });
     } finally {
       spy.mockRestore();
@@ -286,7 +299,12 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
       },
     });
 
-    await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: true });
+    await resolveClaimedDeviceAsync({
+      mode: 'claim',
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: true,
+    });
 
     expect(during).toMatchObject({ id: 'SIM-A', projectRoot: HERE, booted: true });
   });
@@ -297,6 +315,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     });
 
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: true,
@@ -313,7 +332,12 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     });
     writeClaim(ownClaim('SIM-A', new Date().toISOString()));
 
-    await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: true });
+    await resolveClaimedDeviceAsync({
+      mode: 'claim',
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: true,
+    });
 
     expect(readClaims()).toMatchObject([{ id: 'SIM-A', projectRoot: HERE, booted: true }]);
   });
@@ -339,6 +363,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     const progress = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
 
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: false,
@@ -360,7 +385,12 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     ]);
     otherClaim('SIM-A');
     expect(
-      await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: false })
+      await resolveClaimedDeviceAsync({
+        mode: 'claim',
+        platform: 'ios',
+        projectRoot: HERE,
+        allowBoot: false,
+      })
     ).toMatchObject({ ok: true, id: 'SIM-B', booted: false });
     expect(readClaims().find(({ id }) => id === 'SIM-B')).toMatchObject({ booted: false });
   });
@@ -368,6 +398,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
   it(`with allowBoot false, boots nothing, claims nothing, and says no simulator is booted`, async () => {
     const { tools } = fakeSimulators();
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: false,
@@ -390,7 +421,12 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     ]);
     otherClaim('SIM-A');
     expect(
-      await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: false })
+      await resolveClaimedDeviceAsync({
+        mode: 'claim',
+        platform: 'ios',
+        projectRoot: HERE,
+        allowBoot: false,
+      })
     ).toMatchObject({
       ok: false,
       kind: 'no-device',
@@ -403,12 +439,14 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
   it(`takes the device --device names, by name, and claims it so no other worktree allocates it`, async () => {
     fakeSimulators();
     const named = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       explicit: 'iPhone 17 Pro',
       allowBoot: true,
     });
     const other = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: OTHER,
       allowBoot: true,
@@ -421,12 +459,14 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
   it(`gives up the worktree's previous simulator when --device names another`, async () => {
     fakeSimulators();
     await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       explicit: 'SIM-A',
       allowBoot: true,
     });
     await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       explicit: 'SIM-B',
@@ -440,9 +480,15 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
       { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },
       { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
     ]);
-    await resolveClaimedDeviceAsync({ platform: 'ios', projectRoot: HERE, allowBoot: false });
+    await resolveClaimedDeviceAsync({
+      mode: 'claim',
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: false,
+    });
 
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       explicit: 'SIM-B',
@@ -457,6 +503,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     fakeSimulators();
     otherClaim('SIM-A');
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       explicit: 'SIM-A',
@@ -469,6 +516,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
   it(`refuses a --device this machine does not have`, async () => {
     fakeSimulators();
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       explicit: 'Galaxy',
@@ -481,6 +529,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     const { tools } = fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
     otherClaim('SIM-A');
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: true,
@@ -497,6 +546,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     fakeSimulators([{ udid: 'SIM-NEW', name: 'agent-cli 1', state: 'Shutdown' }]);
 
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: true,
@@ -511,6 +561,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     const { tools } = fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
     otherClaim('SIM-A');
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: true,
@@ -525,6 +576,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
   it(`names --eas when simctl cannot run`, async () => {
     fakeDeviceTools(() => ({ spawnError: 'ENOENT' }));
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: true,
@@ -542,6 +594,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     fakeSimulators();
     expect(
       await resolveClaimedDeviceAsync({
+        mode: 'claim',
         platform: 'ios',
         projectRoot: HERE,
         allowBoot: true,
@@ -560,6 +613,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
     const { tools } = fakeSimulators();
     expect(
       await resolveClaimedDeviceAsync({
+        mode: 'claim',
         platform: 'ios',
         projectRoot: HERE,
         allowBoot: true,
@@ -579,6 +633,7 @@ describe(`${resolveClaimedDeviceAsync.name} with an app to open`, () => {
     otherClaim('SIM-A');
 
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'ios',
       projectRoot: HERE,
       allowBoot: true,
@@ -599,6 +654,7 @@ describe(`${resolveClaimedDeviceAsync.name} with an app to open`, () => {
 
     expect(
       await resolveClaimedDeviceAsync({
+        mode: 'claim',
         platform: 'ios',
         projectRoot: HERE,
         allowBoot: true,
@@ -662,11 +718,13 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
   it(`gives two worktrees two emulators on two ports, the second read-only`, async () => {
     const { tools } = fakeAndroid();
     const here = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'android',
       projectRoot: HERE,
       allowBoot: true,
     });
     const other = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'android',
       projectRoot: OTHER,
       allowBoot: true,
@@ -683,10 +741,16 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
   it(`never allocates a physical device, and claims one --device names`, async () => {
     fakeAndroid({ physical: ['R58M123ABC'] });
     expect(
-      await resolveClaimedDeviceAsync({ platform: 'android', projectRoot: HERE, allowBoot: false })
+      await resolveClaimedDeviceAsync({
+        mode: 'claim',
+        platform: 'android',
+        projectRoot: HERE,
+        allowBoot: false,
+      })
     ).toMatchObject({ ok: false, kind: 'no-device' });
     expect(
       await resolveClaimedDeviceAsync({
+        mode: 'claim',
         platform: 'android',
         projectRoot: HERE,
         explicit: 'R58M123ABC',
@@ -694,7 +758,12 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
       })
     ).toMatchObject({ ok: true, id: 'R58M123ABC', name: 'Pixel_7' });
     expect(
-      await resolveClaimedDeviceAsync({ platform: 'android', projectRoot: HERE, allowBoot: false })
+      await resolveClaimedDeviceAsync({
+        mode: 'claim',
+        platform: 'android',
+        projectRoot: HERE,
+        allowBoot: false,
+      })
     ).toMatchObject({ ok: true, id: 'R58M123ABC', choice: 'this worktree claimed it already' });
   });
 
@@ -706,6 +775,7 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
 
     expect(
       await resolveClaimedDeviceAsync({
+        mode: 'claim',
         platform: 'android',
         projectRoot: HERE,
         explicit: 'Pixel_8',
@@ -730,7 +800,12 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
     });
 
     expect(
-      await resolveClaimedDeviceAsync({ platform: 'android', projectRoot: HERE, allowBoot: true })
+      await resolveClaimedDeviceAsync({
+        mode: 'claim',
+        platform: 'android',
+        projectRoot: HERE,
+        allowBoot: true,
+      })
     ).toMatchObject({ ok: true, id: 'emulator-5554', booted: true });
     expect(tools.callsWith('-avd ')).toEqual([
       `${EMULATOR} -avd Pixel_8 -ports 5554,5555 -no-snapshot-save`,
@@ -741,6 +816,7 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
     const { tools } = fakeAndroid({ boots: false });
 
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'android',
       projectRoot: HERE,
       allowBoot: true,
@@ -757,6 +833,7 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
     const { tools } = fakeAndroid({ boots: false, listed: false });
 
     const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
       platform: 'android',
       projectRoot: HERE,
       allowBoot: true,
@@ -774,8 +851,82 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
     fakeAndroid();
     otherClaim('emulator-5554', 'local-android');
     expect(
-      await resolveClaimedDeviceAsync({ platform: 'android', projectRoot: HERE, allowBoot: true })
+      await resolveClaimedDeviceAsync({
+        mode: 'claim',
+        platform: 'android',
+        projectRoot: HERE,
+        allowBoot: true,
+      })
     ).toMatchObject({ ok: true, id: 'emulator-5556' });
+  });
+});
+
+// A peek answers from the same choice as a claim, for a verb that only reads.
+describe(`${resolveClaimedDeviceAsync.name} peeking`, () => {
+  it(`answers the simulator a claim then boots, and writes and boots nothing itself`, async () => {
+    const { tools } = fakeSimulators();
+    const peeked = await resolveClaimedDeviceAsync({
+      mode: 'peek',
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: true,
+    });
+
+    expect(peeked).toMatchObject({ ok: true, action: 'boot', state: 'shutdown' });
+    expect(readClaims()).toEqual([]);
+    expect(tools.callsWith('simctl boot')).toEqual([]);
+
+    const claimed = await resolveClaimedDeviceAsync({
+      mode: 'claim',
+      platform: 'ios',
+      projectRoot: HERE,
+      allowBoot: true,
+    });
+    expect(claimed.ok && peeked.ok && claimed.id === peeked.id).toBe(true);
+  });
+
+  it(`says a claim would create a simulator, and creates none`, async () => {
+    const { tools } = fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
+    otherClaim('SIM-A');
+
+    expect(
+      await resolveClaimedDeviceAsync({
+        mode: 'peek',
+        platform: 'ios',
+        projectRoot: HERE,
+        allowBoot: true,
+      })
+    ).toMatchObject({ ok: true, action: 'create', id: null, state: null });
+    expect(tools.callsWith('simctl create')).toEqual([]);
+    expect(readClaims().map(({ projectRoot }) => projectRoot)).toEqual([OTHER]);
+  });
+
+  it(`leaves this worktree's claim untouched`, async () => {
+    fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
+    writeClaim(ownClaim('SIM-A', LONG_AGO));
+
+    expect(
+      await resolveClaimedDeviceAsync({
+        mode: 'peek',
+        platform: 'ios',
+        projectRoot: HERE,
+        allowBoot: false,
+      })
+    ).toMatchObject({ ok: true, action: 'reuse', id: 'SIM-A', state: 'booted' });
+    expect(readClaims()).toEqual([ownClaim('SIM-A', LONG_AGO)]);
+  });
+
+  it(`refuses a shut-down device as a claim would, when it may not boot one`, async () => {
+    fakeSimulators();
+
+    expect(
+      await resolveClaimedDeviceAsync({
+        mode: 'peek',
+        platform: 'ios',
+        projectRoot: HERE,
+        allowBoot: false,
+      })
+    ).toMatchObject({ ok: false, kind: 'no-device', reason: 'no booted iOS simulator was found' });
   });
 });
 

@@ -55,3 +55,9 @@ export type Allocation<C extends DeviceCandidate> =
 export type DeviceChoice<C extends DeviceCandidate> =
   | Exclude<Allocation<C>, { kind: 'created' }>
   | { kind: 'create' };
+
+/** The choices that end in a device: this worktree's own, a free booted one, a free shut-down one, a new one. */
+export type DeviceAction = Extract<
+  DeviceChoice<DeviceCandidate>['kind'],
+  'reuse' | 'take' | 'boot' | 'create'
+>;

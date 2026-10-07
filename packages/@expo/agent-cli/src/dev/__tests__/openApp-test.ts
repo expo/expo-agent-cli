@@ -28,8 +28,10 @@ function mockClaimed({
   vi.mocked(resolveClaimedDeviceAsync).mockResolvedValue({
     ok: true,
     backend,
+    action: 'reuse',
     id,
     name: 'iPhone',
+    state: 'booted',
     claim: {} as any,
     booted,
     choice: 'this worktree claimed it already',

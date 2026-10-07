@@ -3,7 +3,11 @@
 // What reading the installed app answered, and how to pick one answer out of several devices.
 
 import type { AdbResolution } from '../device/adb';
-import { resolveClaimedDeviceAsync } from '../device/claimedDevice';
+import {
+  resolveClaimedDeviceAsync,
+  type PeekedDeviceResult,
+  type ResolveClaimedDeviceOptions,
+} from '../device/claimedDevice';
 import type { FingerprintSource } from '../project/fingerprint';
 
 /** Name of the file the expo-constants build phase embeds in a debug build. */
@@ -104,25 +108,32 @@ export function pickBestResult(
   return best;
 }
 
+/** The resolver a reader is given: it can only peek. */
+export type PeekDeviceAsync = (
+  options: ResolveClaimedDeviceOptions & { mode: 'peek' }
+) => Promise<PeekedDeviceResult>;
+
 /**
- * The device this worktree claims on the platform, as the one device a reader reads without
- * `--device`. Never boots one: `status` starts nothing it was not asked to start.
+ * The booted device this worktree claims on the platform, or the free one it would claim, as the
+ * one device a reader reads without `--device`. A peek: `status` claims, reaps and boots nothing.
  *
  * @throws the tool error when `simctl` or `adb` could not run.
  */
 export async function claimedReadableDeviceAsync(
   platform: 'ios' | 'android',
   projectRoot: string,
-  resolve: typeof resolveClaimedDeviceAsync = resolveClaimedDeviceAsync
+  resolve: PeekDeviceAsync = resolveClaimedDeviceAsync
 ): Promise<{ device: InstalledAppDevice; adb: AdbResolution | null } | null> {
-  const claimed = await resolve({ platform, projectRoot, allowBoot: false });
-  if (claimed.ok) {
-    return { device: { identifier: claimed.id, name: claimed.name }, adb: claimed.adb };
+  const claimed = await resolve({ mode: 'peek', platform, projectRoot, allowBoot: false });
+  if (!claimed.ok) {
+    if (claimed.kind === 'no-tool') {
+      throw claimed.error;
+    }
+    return null;
   }
-  if (claimed.kind === 'no-tool') {
-    throw claimed.error;
-  }
-  return null;
+  return claimed.state === 'booted'
+    ? { device: { identifier: claimed.id, name: claimed.name }, adb: claimed.adb }
+    : null;
 }
 
 /** Case-insensitive match of `--device` against a device's name or identifier. */

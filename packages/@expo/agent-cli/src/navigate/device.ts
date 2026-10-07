@@ -227,6 +227,7 @@ async function claimedLocalDeviceAsync(
   { fallsThrough = false }: { fallsThrough?: boolean } = {}
 ): Promise<{ device: NavigateDevice | null; reason: string; toolError?: CommandError }> {
   const claimed = await resolveClaimedDeviceAsync({
+    mode: 'claim',
     platform,
     projectRoot: context.projectRoot,
     explicit: context.device ?? null,

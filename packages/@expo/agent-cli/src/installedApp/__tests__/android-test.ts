@@ -6,8 +6,7 @@ import os from 'os';
 import path from 'path';
 
 import type { AdbRawRunResult, AdbRunResult } from '../../device/adb';
-import type { ClaimedDeviceResult } from '../../device/claimedDevice';
-import type { DeviceClaim } from '../../deviceClaims';
+import type { PeekedDeviceResult } from '../../device/claimedDevice';
 import { CommandError } from '../../utils/errors';
 import { readInstalledFingerprintAndroidAsync } from '../android';
 
@@ -101,16 +100,16 @@ function fakeAdb(devices: FakeDevice[]) {
   };
 
   // The worktree claims the first device, as the registry would give it.
-  const resolveClaimedDeviceAsync = async (): Promise<ClaimedDeviceResult> => {
+  const resolveClaimedDeviceAsync = async (): Promise<PeekedDeviceResult> => {
     const [first] = devices;
     return first
       ? {
           ok: true,
           backend: 'local-android',
+          action: 'reuse',
           id: first.serial,
           name: 'Pixel_9',
-          claim: {} as DeviceClaim,
-          booted: false,
+          state: 'booted',
           choice: 'this worktree claimed it already',
           hasApp: null,
           adb,

@@ -7,7 +7,6 @@ import os from 'os';
 import path from 'path';
 
 import { adbNotRunnableError, resolveAdb, runAdbAsync, runAdbRawAsync } from '../device/adb';
-import type { resolveClaimedDeviceAsync } from '../device/claimedDevice';
 import { androidPackagePathsAsync } from '../device/androidApps';
 import { androidDeviceNameAsync } from '../device/installDevBuild';
 import { parseAndroidDevices } from '../navigate/device';
@@ -28,6 +27,7 @@ import {
   pickBestResult,
   type InstalledAppDevice,
   type InstalledFingerprintResult,
+  type PeekDeviceAsync,
 } from './installedFingerprint';
 
 /** Block size of the ranged `dd` reads. `dd` seeks, so the cost is the bytes read. */
@@ -45,7 +45,7 @@ export interface AndroidReaderOptions {
   runAdbAsync?: typeof runAdbAsync;
   runAdbRawAsync?: typeof runAdbRawAsync;
   androidDeviceNameAsync?: typeof androidDeviceNameAsync;
-  resolveClaimedDeviceAsync?: typeof resolveClaimedDeviceAsync;
+  resolveClaimedDeviceAsync?: PeekDeviceAsync;
 }
 
 /**

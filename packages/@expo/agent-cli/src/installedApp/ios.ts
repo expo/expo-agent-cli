@@ -3,7 +3,6 @@
 // Which iOS device answers: the simulator this worktree claims first, a physical device only when
 // `--device` names it. Reading a simulator is a file read; reading a phone launches the app on it.
 
-import type { resolveClaimedDeviceAsync } from '../device/claimedDevice';
 import { listConnectedIosDevicesAsync, type IosDevice } from '../device/devicectl';
 import { readInstalledFingerprintIosDeviceAsync } from './iosDevice';
 import {
@@ -15,6 +14,7 @@ import {
   claimedReadableDeviceAsync,
   matchesDeviceFilter,
   type InstalledFingerprintResult,
+  type PeekDeviceAsync,
 } from './installedFingerprint';
 
 export interface IosReaderOptions {
@@ -27,7 +27,7 @@ export interface IosReaderOptions {
   timeoutMs?: number;
   /** Injected for tests. */
   deps?: IosSimulatorReaderDependencies & {
-    resolveClaimedDeviceAsync?: typeof resolveClaimedDeviceAsync;
+    resolveClaimedDeviceAsync?: PeekDeviceAsync;
     listConnectedIosDevicesAsync?: typeof listConnectedIosDevicesAsync;
     readInstalledFingerprintIosDeviceAsync?: typeof readInstalledFingerprintIosDeviceAsync;
   };

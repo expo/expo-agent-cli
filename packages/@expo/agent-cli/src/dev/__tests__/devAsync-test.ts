@@ -3,6 +3,8 @@ import os from 'os';
 import path from 'path';
 
 import { resolveClaimedDeviceAsync } from '../../device/claimedDevice';
+import { fakeDeviceTools, simctlDevices } from '../../device/__tests__/fakeDeviceTools';
+import { deviceRegistryDirectory } from '../../deviceClaims';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
@@ -10,7 +12,7 @@ import { readLastBuildRecord, recordLastBuildFingerprint } from '../../plan/last
 import { clearFingerprintMemo } from '../../project/fingerprint';
 import { clearFingerprintCache } from '../../project/fingerprintCache';
 import { probeProjectStateAsync } from '../../project/probe';
-import type { ProjectState } from '../../project/types';
+import type { ProjectState, StartPlan } from '../../project/types';
 import { runDevServerAsync, type DevServerRun } from '../../start/startAsync';
 import { runExpoAsync, spawnExpoAsync } from '../../utils/expoCli';
 import { isInteractive } from '../../utils/interactive';
@@ -254,8 +256,10 @@ describe(devAsync, () => {
       vi.mocked(resolveClaimedDeviceAsync).mockResolvedValueOnce({
         ok: true,
         backend: 'local-ios',
+        action: 'boot',
         id: 'SIM-CLAIMED',
         name: 'iPhone 17',
+        state: 'booted',
         claim: {} as any,
         booted: true,
         choice: 'it is the free simulator this machine last used',
@@ -351,6 +355,65 @@ describe(devAsync, () => {
 
       expect(runExpoAsync).not.toHaveBeenCalled();
       expect(runDevServerAsync).not.toHaveBeenCalled();
+    });
+  });
+
+  // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
+  // The real claims and allocation, against a fake `simctl` and the memfs registry.
+  describe('the device of a plan that builds, with the real registry', () => {
+    const OTHER = '/work/other';
+
+    beforeEach(async () => {
+      const actual = await vi.importActual<typeof import('../../device/claimedDevice')>(
+        '../../device/claimedDevice'
+      );
+      vi.mocked(resolveClaimedDeviceAsync).mockImplementation(actual.resolveClaimedDeviceAsync);
+      vol.mkdirSync(projectRoot, { recursive: true });
+      vol.mkdirSync(OTHER, { recursive: true });
+      mockStaleDevClientState();
+    });
+
+    afterEach(() => vi.mocked(resolveClaimedDeviceAsync).mockReset());
+
+    function simulators(
+      devices: { udid: string; name: string; state: 'Booted' | 'Shutdown' }[]
+    ): ReturnType<typeof fakeDeviceTools> {
+      return fakeDeviceTools((command, args) => {
+        const [, verb, ...rest] = args;
+        if (command !== 'xcrun') {
+          return { spawnError: 'ENOENT' };
+        }
+        if (verb === 'list') {
+          return { stdout: simctlDevices(devices) };
+        }
+        if (verb === 'boot') {
+          devices.find((device) => device.udid === rest[0])!.state = 'Booted';
+        }
+        return {};
+      });
+    }
+
+    function emittedPlan(): StartPlan {
+      return vi.mocked(emitStartPlan).mock.calls.at(-1)![0];
+    }
+
+    const runStepArgs = (plan: StartPlan) =>
+      plan.steps.find(({ argv }) => argv[1] === 'run:ios')!.argv.slice(1);
+
+    it(`--plan names the simulator a run would take, and claims nothing`, async () => {
+      const tools = simulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--plan', '--ios']))).resolves.toBe(0);
+
+      expect(runStepArgs(emittedPlan())).toEqual([
+        'run:ios',
+        '--device',
+        'SIM-A',
+        '--port',
+        '8081',
+      ]);
+      expect(vol.toJSON(deviceRegistryDirectory())).toEqual({});
+      expect(tools.callsWith('simctl boot')).toEqual([]);
     });
   });
 

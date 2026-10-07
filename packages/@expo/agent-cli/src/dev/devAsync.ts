@@ -22,7 +22,7 @@ import { needsHumanErrorFrom } from '../needsHuman/error';
 import { emitStartPlan } from '../plan/emit';
 import { event as planEvent } from '../plan/events';
 import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBuild';
-import { resolveStartPlanAsync } from '../plan/resolveAsync';
+import { resolveStartPlanAsync, type PlanDevices } from '../plan/resolveAsync';
 import { isPlatformFlag } from '../plan/platformFlags';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
@@ -93,10 +93,11 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   const state = await probeProjectStateAsync(projectRoot, {
     fingerprintCache: options.fingerprintCache,
   });
-  const claimRunDevice = runDeviceClaimer(projectRoot, options);
-  // A device the caller named is claimed first, so the presence probe below asks that device.
-  if (options.device && claimRunDevice && options.platform !== 'web') {
-    await claimRunDevice(options.platform);
+  const devices = planDevices(projectRoot, options);
+  // A device the caller named is resolved first: a run boots it, so the presence probe below asks
+  // that device, and a name that matches nothing stops `--plan` as it stops the run.
+  if (options.device && devices && options.platform !== 'web') {
+    await devices.runDevice(options.platform);
   }
   // @ref llp/0015-backend-selection-and-config.rfc.md §The selection
   // One call that folds in everything outside the project: the developer's config, the flags they
@@ -117,7 +118,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     // the build profile, adds the tunnel, and lets the resolver ask EAS for a build it already has.
     deviceBackend: options.deviceBackend,
     fingerprintCache: options.fingerprintCache,
-    claimRunDevice,
+    devices,
   });
 
   // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run
@@ -1169,46 +1170,59 @@ function resolveStepArgs(step: PlanStep, options: DevOptions, isLast: boolean): 
 }
 
 /**
- * Claims this worktree's device for the plan's `expo run:*` steps and names it for `--device`.
+ * This worktree's device for the plan: a run claims it, and `--plan` peeks, which reads the same
+ * answer and claims, reaps and boots nothing (llp/0030 §Every verb uses the claim).
  *
- * A run boots the device; `--plan` only takes one that is up. No device to claim pins nothing,
+ * A run boots the device; `--plan` names only one that is up. No device pins nothing,
  * but booted devices that other worktrees hold stop the run with `DEVICES_ALL_CLAIMED`.
  * Absent for the EAS device and for a harness that must not touch this machine's devices
  * (`AGENT_CLI_NO_DEVICE`).
  */
-function runDeviceClaimer(
-  projectRoot: string,
-  options: DevOptions
-): ((platform: NativePlatform) => Promise<string | null>) | undefined {
+function planDevices(projectRoot: string, options: DevOptions): PlanDevices | undefined {
   if (options.deviceBackend === 'eas' || process.env.AGENT_CLI_NO_DEVICE === '1') {
     return undefined;
   }
-  return async (platform) => {
+  const resolveAsync = (platform: NativePlatform, allowBoot: boolean) => {
     const { resolveClaimedDeviceAsync } =
       require('../device/claimedDevice') as typeof import('../device/claimedDevice');
-    const { expoRunDeviceArgumentAsync } =
-      require('../device/installDevBuild') as typeof import('../device/installDevBuild');
-    const { runDeviceRefusedError } =
-      require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
-    const claimed = await resolveClaimedDeviceAsync({
+    return resolveClaimedDeviceAsync({
+      mode: options.mode === 'plan' ? 'peek' : 'claim',
       platform,
       projectRoot,
       explicit: options.device,
-      allowBoot: options.mode === 'run',
+      allowBoot,
     });
-    if (!claimed.ok) {
-      // An unpinned `expo run:*` takes the first booted device, so it may run unpinned only when
-      // no booted device is another worktree's: then the Expo CLI finds or creates one, as before.
-      if (claimed.kind === 'no-device' && claimed.holders.length === 0) {
+  };
+  return {
+    async runDevice(platform) {
+      const { expoRunDeviceArgumentAsync } =
+        require('../device/installDevBuild') as typeof import('../device/installDevBuild');
+      const { runDeviceRefusedError } =
+        require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
+      const resolved = await resolveAsync(platform, options.mode === 'run');
+      if (!resolved.ok) {
+        // An unpinned `expo run:*` takes the first booted device, so it may run unpinned only when
+        // no booted device is another worktree's: then the Expo CLI finds or creates one, as before.
+        if (resolved.kind === 'no-device' && resolved.holders.length === 0) {
+          return null;
+        }
+        throw resolved.error;
+      }
+      if (resolved.id == null) {
         return null;
       }
-      throw claimed.error;
-    }
-    const argument = await expoRunDeviceArgumentAsync(projectRoot, platform, claimed.id);
-    if (!argument.ok) {
-      throw runDeviceRefusedError(platform, argument.reason);
-    }
-    return argument.value;
+      const argument = await expoRunDeviceArgumentAsync(projectRoot, platform, resolved.id);
+      if (!argument.ok) {
+        throw runDeviceRefusedError(platform, argument.reason);
+      }
+      return argument.value;
+    },
+    async bootedDevice(_projectRoot, platform) {
+      const resolved = await resolveAsync(platform, false);
+      return resolved.ok && resolved.state === 'booted'
+        ? { deviceId: resolved.id, backend: resolved.backend }
+        : null;
+    },
   };
 }
 

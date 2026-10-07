@@ -2,7 +2,7 @@
 // One device per platform per worktree: a machine-wide registry of claims, and the allocation
 // that reads it.
 
-export { allocateDeviceAsync, CREATED_DEVICE_EXPIRY_MS } from './allocate';
+export { allocateDeviceAsync, CREATED_DEVICE_EXPIRY_MS, peekDeviceAsync } from './allocate';
 export type { AllocateDeviceOptions } from './allocate';
 export { chooseDevice } from './choose';
 export type { ChooseDeviceInput } from './choose';
@@ -28,6 +28,7 @@ export type {
   ClaimLiveness,
   ClassifiedClaim,
   DeviceBackend,
+  DeviceAction,
   DeviceCandidate,
   DeviceChoice,
   DeviceClaim,
