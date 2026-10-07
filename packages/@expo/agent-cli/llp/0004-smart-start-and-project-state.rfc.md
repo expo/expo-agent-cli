@@ -496,7 +496,8 @@ is probed (`src/dev/runningDevServer.ts`). A second server could not hold the lo
 `status` and `dev:stop` could not see it. The `/status` probe of the lock's URL only picks
 the word, `already running` when it answers for this project and `starting` otherwise, and
 the suggestion: `smoke` for a server that answers, `status` for one on its way. Under
-`--plan` the plan lists no steps, because the run does none. `dev --detach` reports the
+`--plan` the plan lists no steps, because the run does none, and its one follow-up is
+`status`, never the `dev` that would stop in the same place. `dev --detach` reports the
 running server with exit 0, because its contract is "a server runs" (§Daemonization). The
 plain `start` wrapper keeps allowing a second server, which the serving step's lock claim
 reports on the event stream (`cli:dev_lock_skipped`).
@@ -507,8 +508,8 @@ to `expo start` and to every `expo run:*` that serves, and the plan reports it a
 `devServerPort`, because `expo run:*` left to ask skips its dev server, deep-links the
 app to whatever holds the port, and exits 0.
 
-A busy port with no live lock of this project behind it is busy whoever holds it, this
-project's own `expo start` included: the plan moves to the next free port.
+A busy port with no live lock of this project behind it is busy whoever holds it, an
+`npx expo start` run outside this CLI included: the plan moves to the next free port.
 
 A server on a port is this project's unless `/status` names another project root in the
 `X-React-Native-Project-Root` header. No header, or a root that contains this project (a

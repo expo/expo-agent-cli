@@ -311,6 +311,23 @@ export function buildStartPlanFollowUps(
    */
   requestedPlatform?: PlanPlatform
 ): FollowUp[] {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+  // complete — a plan that stops on this project's running dev server has no steps, so the one
+  // follow-up is that server, never the command that would stop in the same place.
+  if (plan.devServerPort?.state === 'running') {
+    const { port, phase } = plan.devServerPort;
+    return [
+      {
+        id: 'dev-server-running',
+        command: `${PROGRAM_PREFIX} status`,
+        why:
+          phase === 'serving'
+            ? `This project's dev server is already running on port ${port}, so the plan has no steps. This names what runs and what to run next; "${PROGRAM_PREFIX} dev:stop" stops it.`
+            : `This project's dev server is starting on port ${port}, so the plan has no steps. This says when it answers; "${PROGRAM_PREFIX} dev:stop" stops it.`,
+      },
+    ];
+  }
+
   // `dev` requires a platform, so this flag always states one.
   const platformFlag = ` --${requestedPlatform ?? hostPlatform()}`;
   const followups: FollowUp[] = [];
