@@ -1,4 +1,4 @@
-import { holdDevServerLockAsync } from '../devLock';
+import { claimDevServerLockAsync, holdDevServerLockAsync } from '../devLock';
 import type { ResolvedDevServerPort } from '../devLock/port';
 import { dependsOnDevClientSync, reportFollowUps } from '../followups';
 import { probeBundlerAsync } from '../runtime/bundlerStatus';
@@ -76,10 +76,18 @@ export async function runDevServerAsync(
   {
     agentSkills,
     output = 'inherit',
+    oneDevServer,
     onDevServer,
   }: {
     agentSkills: boolean;
     output?: SubprocessOutput;
+    /**
+     * Stop with `DEV_SERVER_APPEARED`, saying this, before the spawn when a live dev server of this
+     * project holds the lock. `dev` sets it for its serving step: a second dev server could not
+     * hold the lock, so nothing could find or stop it. The plain `start` wrapper forwards its
+     * arguments untouched and leaves it off.
+     */
+    oneDevServer?: Parameters<typeof import('../dev/ownDevServer').devServerAppearedError>[1];
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
      * port the arguments name.
@@ -99,10 +107,22 @@ export async function runDevServerAsync(
     timer.unref?.();
   }
 
-  // The lock is taken at the spawn when the arguments name a port, else when the dev server
-  // reports one. `holdDevServerLockAsync` swallows every failure: a lock is a convenience, and the
-  // dev server is the command.
+  // The lock is taken right before the spawn when the arguments name a port, else when the dev
+  // server reports one. With `oneDevServer`, a live dev server of this project on the lock stops
+  // the run before the spawn. Without it, the step runs without the lock, and the holder is on the
+  // event stream only. Every other lock failure is swallowed: a lock is a convenience, and the dev
+  // server is the command.
   const startedAt = Date.now();
+  let claim = await claimDevServerLockAsync(projectRoot, args, { since: startedAt });
+  if (claim.status === 'in-use') {
+    if (oneDevServer) {
+      clearTimeout(timer);
+      const { devServerAppearedError } =
+        require('../dev/ownDevServer') as typeof import('../dev/ownDevServer');
+      throw devServerAppearedError(claim.holder, oneDevServer);
+    }
+    claim = { status: 'held', lock: null };
+  }
   let running = true;
   let port: ResolvedDevServerPort | null = null;
   // The lock answers `arg` at the spawn and `log` when Metro reports, so the open is guarded here.
@@ -118,6 +138,7 @@ export async function runDevServerAsync(
   });
   const lock = holdDevServerLockAsync(projectRoot, args, {
     since: startedAt,
+    claim,
     isRunning: () => running,
     // Wakes the port watch the moment the dev server is gone, so a start that fails immediately
     // is not held up waiting for a port that will never be reported.

@@ -141,8 +141,21 @@ export interface StartPlan {
  *
  * - `picked`: `dev` picked a free port; `movedFrom` is the busy port it moved off, or null.
  * - `named`: the caller named the port; `taken` is true when it could not be bound.
+ * - `reused`: this project's dev server runs there, and the plan starts none.
+ * - `starting`, `foreign`, `mismatch`: this project's dev server holds the port and the run stops:
+ *   it is still starting, the port answers for another project, or the server lacks `missing`
+ *   or was started with the mode options in `extra` (null: its options are unknown).
+ *   Such a plan has no steps.
+ * - `elsewhere`: the run needs the server on `port`, and this project's dev server runs on
+ *   `running`; the run stops, and the plan has no steps.
  */
 export type DevServerPort = {
   port: number;
   movedFrom: number | null;
-} & ({ state: 'picked' } | { state: 'named'; taken: boolean });
+} & (
+  | { state: 'picked' }
+  | { state: 'named'; taken: boolean }
+  | { state: 'reused' | 'starting' | 'foreign' }
+  | { state: 'mismatch'; missing: string[]; extra: string[] | null }
+  | { state: 'elsewhere'; running: number }
+);

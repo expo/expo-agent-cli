@@ -5,6 +5,7 @@
 
 import type { OpenAppOnEasReport } from './openAppEas';
 import { outputTail } from '../deploy/parseOutput';
+import { readDevServerLockAsync } from '../devLock';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
 import {
@@ -22,10 +23,9 @@ import { emitStartPlan } from '../plan/emit';
 import { event as planEvent } from '../plan/events';
 import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBuild';
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
-import { isPlatformFlag } from '../plan/platformFlags';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
-import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
+import { defaultSmokePlatformAsync, smokeCommand, statedSmokePlatform } from '../smoke/suggest';
 import { clearFingerprintMemo } from '../project/fingerprint';
 import { clearFingerprintCache } from '../project/fingerprintCache';
 import { probeProjectStateAsync } from '../project/probe';
@@ -68,6 +68,16 @@ import {
   resolvePlannedPortAsync,
   type PortCollision,
 } from './portCollision';
+import {
+  devServerGoneError,
+  ownDevServerAsync,
+  ownDevServerPort,
+  ownDevServerStop,
+  portReasons,
+  withoutPlatformFlag,
+  withReusedDevServer,
+  type OwnDevServer,
+} from './ownDevServer';
 import type { DevOptions } from './resolveOptions';
 import { easCommandPrefix } from '../utils/easCli';
 
@@ -124,20 +134,47 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // serves. Left to `expo run:*`, a busy port skips its dev server, deep-links the app to whatever
   // holds the port, and exits 0 [observed — live suite, 2026-10-05].
   const serving = forwardedPlan.steps.filter(isDevServerStep).at(-1);
+  // This project's own dev server on the port the run would use (`./ownDevServer.ts`). A plan that
+  // reuses it has no serving step, and the open after the steps goes to it. Each stop comes before
+  // the first step, so before any build is paid for, and a stop's `--plan` lists no steps.
+  // `opens` is about the run, so `--plan` prints what the run would do.
+  const opens = shouldOpenApp({ ...options, mode: 'run' });
+  const own: OwnDevServer = serving
+    ? await ownDevServerAsync(
+        projectRoot,
+        await readDevServerLockAsync(projectRoot),
+        { ...options, opens },
+        serving
+      )
+    : { kind: 'none' };
+  const stop = ownDevServerStop(own, options);
+  if (stop && options.mode !== 'plan') {
+    throw stop;
+  }
+  const reused = own.kind === 'serving' && !stop ? own.lock : null;
   let plan: StartPlan = forwardedPlan;
-  if (serving) {
+  if (serving && own.kind !== 'none') {
+    plan = {
+      ...(reused
+        ? withReusedDevServer(forwardedPlan, serving, reused, opens)
+        : { ...forwardedPlan, steps: [] }),
+      reasons: [
+        ...forwardedPlan.reasons,
+        ...portReasons(forwardedPlan, serving, own, { ...options, opens }),
+      ],
+      devServerPort: ownDevServerPort(own),
+    };
+  } else if (serving) {
     const planned = await resolvePlannedPortAsync(options.port);
     if (!planned.bindable && options.port != null && options.mode !== 'plan') {
       throw await portDemandedError(projectRoot, options.port, options.platform);
     }
     plan = {
       ...withDevServerPort(forwardedPlan, planned.port),
-      // A port the plan probed is only the port that was free when the plan was printed. A named
-      // `--port` is not picked, so nothing is said about it.
-      reasons:
-        options.mode === 'plan' && options.port == null
-          ? [...forwardedPlan.reasons, 'The dev server port is picked again when the plan runs.']
-          : forwardedPlan.reasons,
+      reasons: [
+        ...forwardedPlan.reasons,
+        ...portReasons(forwardedPlan, serving, own, { ...options, opens }),
+      ],
       devServerPort:
         options.port != null
           ? { port: planned.port, movedFrom: null, state: 'named', taken: !planned.bindable }
@@ -146,7 +183,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   }
 
   if (dropped.length) {
-    const last = plan.steps[plan.steps.length - 1]!;
+    const last = forwardedPlan.steps.at(-1)!;
     const directCommand =
       last.argv[0] === 'expo'
         ? `${PROGRAM_PREFIX} ${last.argv.slice(1).join(' ')}`
@@ -211,7 +248,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // it so they can name the port it actually took. A terminal cannot wait for that: the bundler
   // takes the screen and anything printed afterwards scrolls away with its output.
   if (!options.json) {
-    reportFollowUps('dev', await resolveRunFollowUpsAsync(projectRoot, plan, options, null), {});
+    const port = reused?.port ?? plannedPort(plan);
+    reportFollowUps('dev', await resolveRunFollowUpsAsync(projectRoot, plan, options, port), {});
   }
 
   // @ref llp/0008-guardrails.rfc.md §The plan is announced, not negotiated — the plan was printed
@@ -230,10 +268,36 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     throw planStepFailedError(run.failure, stepOutputFor(options), run.exitCode, options.platform);
   }
 
+  // The open the `start` step would have made, against the server that took its place. One shot:
+  // the run ends here, and the server it opened against keeps running without it. The open is the
+  // run's only action on that server, so an open that fails fails the run.
+  if (reused && serving && run.exitCode === 0 && opens) {
+    let url = reused.url;
+    // The steps can take minutes, and the server can stop or change meanwhile: no deep link to a
+    // URL nothing serves.
+    if (plan.steps.length) {
+      const lock = await readDevServerLockAsync(projectRoot);
+      const now = await ownDevServerAsync(projectRoot, lock, { ...options, opens }, serving);
+      if (now.kind !== 'serving' || ownDevServerStop(now, options)) {
+        throw devServerGoneError(reused, now.kind === 'none', builtBy(plan.steps, options));
+      }
+      url = now.lock.url;
+    }
+    await openAppForRunAsync(projectRoot, plan, options, url, () => true, run.easBuildId, {
+      reused: true,
+    });
+  }
+  // No open runs for the web, so the dropped `start --web` is answered with where the app is. Under
+  // `--json` the follow-ups name the same URL.
+  if (reused && run.exitCode === 0 && serving?.argv.includes('--web') && !options.json) {
+    Log.log(`The web app is served at ${reused.url}.`);
+  }
+
   if (options.json) {
     // One object, when the run is over and there is something true to say about it.
     const ran = planAsRun(plan, run);
-    const followups = await resolveRunFollowUpsAsync(projectRoot, ran, options, run.devServer);
+    const port = run.devServer ? servedPort(run.devServer) : (reused?.port ?? plannedPort(ran));
+    const followups = await resolveRunFollowUpsAsync(projectRoot, ran, options, port);
     reportFollowUps('dev', followups, { json: true });
     Log.log(JSON.stringify({ ...ran, followups }, null, 2));
   }
@@ -344,6 +408,8 @@ interface PlanRun {
   failure: StepFailure | null;
   /** The step that served, with the arguments it last ran with, or null when no step served. */
   serving: { index: number; args: string[] } | null;
+  /** The EAS build an open installs: the one the plan found, or the one its `eas build` made. */
+  easBuildId: string | null;
 }
 
 async function executePlanAsync(
@@ -395,6 +461,14 @@ async function executePlanAsync(
       return await runDevServerAsync(projectRoot, stepArgs, {
         agentSkills: options.agentSkills,
         output,
+        // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a
+        // person can complete — the steps before a serving one take minutes, and another run of
+        // this project can start its dev server meanwhile. The step's lock claim stops on it; the
+        // run does not switch to that server, because the plan approved is the plan run.
+        oneDevServer: {
+          platform: statedSmokePlatform(options.platform),
+          built: builtBy(plan.steps.slice(0, index), options),
+        },
         onDevServer: opensApp
           ? (server) => {
               if (openArmed) {
@@ -501,18 +575,19 @@ async function executePlanAsync(
 
     if (
       exitCode !== 0 &&
-      step.id === 'install' &&
+      step.argv.includes('--no-bundler') &&
       appReachedDevice(`${result.stdout}\n${result.stderr}`)
     ) {
       // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
-      // The install step's job is the app on the device, and the output says it got there — so a
-      // non-zero exit is about what `expo run:*` does *after* the install, which on a Mac without
-      // the Automation grant is the AppleScript launch (observed 2026-09-04, and the reason
-      // `installDevBuildAsync` judges this command by its result rather than its exit code). The
-      // dev server still to come deep-links into the app itself, so the launch is not load-bearing
-      // here. Failing the plan over it would stop the one step the caller was waiting for.
+      // An install step, or a `run:*` that reuses this project's running dev server: the step's job
+      // is the app on the device, and the output says it got there — so a non-zero exit is about
+      // what `expo run:*` does *after* the install, which on a Mac without the Automation grant is
+      // the AppleScript launch (observed 2026-09-04, and the reason `installDevBuildAsync` judges
+      // this command by its result rather than its exit code). The open after this step deep-links
+      // into the app itself, so the launch is not load-bearing here. Failing the plan over it would
+      // stop the one step the caller was waiting for.
       Log.warn(
-        `The ${step.argv[1]} install put the app on the device, then exited with ${exitCode} — most likely the launch, which the dev server's own open replaces. Continuing.`
+        `The ${step.argv[1]} install put the app on the device, then exited with ${exitCode} — most likely the launch, which the open after this step replaces. Continuing.`
       );
       exitCode = 0;
     } else if (exitCode !== 0) {
@@ -542,7 +617,7 @@ async function executePlanAsync(
       //
       assertNotNeedsHuman(failure, options.platform);
       // Every later step depends on this one having worked, so the plan stops here.
-      return { exitCode, devServer, failure, serving };
+      return { exitCode, devServer, failure, serving, easBuildId };
     }
 
     recordBuildOf(projectRoot, step, state);
@@ -576,7 +651,19 @@ async function executePlanAsync(
     clearFingerprintCache(projectRoot);
   }
 
-  return { exitCode, devServer, failure: null, serving };
+  return { exitCode, devServer, failure: null, serving, easBuildId };
+}
+
+/** What the steps that ran left for the next run, or null when nothing. */
+function builtBy(done: PlanStep[], options: DevOptions): string | null {
+  const easBuild = done.find((earlier) => earlier.id === 'eas-build');
+  return easBuild
+    ? options.deviceBackend === 'eas'
+      ? 'the build this run did is on EAS, so the next run finds it there and skips the build'
+      : `the build this run did is on EAS, and "${easCommandPrefix()} build:run --platform ${resolveEasBuildPlatform(easBuild)} --latest" installs it`
+    : done.some((earlier) => resolveBuildPlatform(earlier) != null)
+      ? 'the build this run did is recorded, so the next run reuses it'
+      : null;
 }
 
 /**
@@ -807,10 +894,7 @@ async function portTakenAfterRetryError(stop: {
       ? `Why: the step asked for port ${askedPort}, which was taken, and the one retry moved it to port ${movedTo}, which ${holder} bound before the dev server did.`
       : `Why: ${holder} holds port ${askedPort}, and no free port was found to retry on.`;
   // The platform flag first, so the command reads as `dev --<platform> …` wherever it was typed.
-  const separator = stop.callerArgv.indexOf('--');
-  const rest = stop.callerArgv.filter(
-    (arg, index) => !isPlatformFlag(arg) || (separator !== -1 && index > separator)
-  );
+  const rest = withoutPlatformFlag(stop.callerArgv);
   const onFreePort =
     free == null
       ? null
@@ -1115,22 +1199,16 @@ function planStepFailedError(
  * arguments once made it print a development-build URL naming a port the step did not serve on
  * [F120, observed — wave 29 live, 2026-08-27]. The plan is the argv that will run (llp/0015 §The
  * plan approved is the plan run), so it is the one thing a follow-up may read.
+ *
+ * @param port the dev server's port the follow-ups name, or null for none.
  */
 async function resolveRunFollowUpsAsync(
   projectRoot: string,
   plan: StartPlan,
   options: DevOptions,
-  devServer: DevServerRun | null
+  port: number | null
 ): Promise<FollowUp[]> {
   const planArgs = plan.steps.at(-1)?.argv.slice(1) ?? [];
-  const port = devServer
-    ? // After the run: what the dev server reported, and nothing when it reported nothing.
-      devServer.port && devServer.port.source !== 'default'
-      ? devServer.port.port
-      : null
-    : // Before it: the port the plan's own last step carries, or the one the Expo CLI defaults to.
-      resolveDevServerPort(planArgs);
-
   return await resolveStartFollowUpsAsync(
     projectRoot,
     { ...options, expoArgs: planArgs },
@@ -1144,6 +1222,16 @@ async function resolveRunFollowUpsAsync(
       localBuild: plan.buildLocation?.status ?? null,
     }
   );
+}
+
+/** Before the run: the port the plan's last step carries, or the one the Expo CLI defaults to. */
+function plannedPort(plan: StartPlan): number | null {
+  return resolveDevServerPort(plan.steps.at(-1)?.argv.slice(1) ?? []);
+}
+
+/** After the run: what the dev server reported, and null when it reported nothing. */
+function servedPort(devServer: DevServerRun): number | null {
+  return devServer.port && devServer.port.source !== 'default' ? devServer.port.port : null;
 }
 
 /**
@@ -1183,8 +1271,11 @@ function shouldOpenApp(options: DevOptions): boolean {
 /**
  * Open the app for a running dev server, and say what happened on stderr.
  *
- * Never throws and never stops the server: the app not opening is a warning with the `navigate`
- * door in it, because the dev server is still doing its job.
+ * Never stops the server. For a server this run started, the app not opening is a warning with the
+ * `navigate` door in it, because the dev server is still doing its job. For a server the run
+ * reused, the open is the run's only action, so a failed open throws `APP_OPEN_FAILED`.
+ *
+ * @param reused the server is one this run reuses: it outlives the run, and a failed open fails it.
  */
 async function openAppForRunAsync(
   projectRoot: string,
@@ -1192,21 +1283,34 @@ async function openAppForRunAsync(
   options: DevOptions,
   devServerUrl: string,
   stillWanted: () => boolean,
-  easBuildId: string | null = null
+  easBuildId: string | null = null,
+  { reused = false }: { reused?: boolean } = {}
 ): Promise<OpenAppOnEasReport | null> {
   const platform = options.platform as NativePlatform;
+  const failed = (line: string) => {
+    if (reused) {
+      throw appOpenFailedError(line);
+    }
+    Log.warn(line);
+  };
   if (options.deviceBackend === 'eas') {
-    return await openAppOnEasForRunAsync(
+    const { report, failure } = await openAppOnEasForRunAsync(
       projectRoot,
       plan,
       platform,
       devServerUrl,
       stillWanted,
-      easBuildId
+      easBuildId,
+      !reused
     );
+    if (failure) {
+      failed(failure);
+    }
+    return report;
   }
   const { openAppOnDeviceAsync, openAppFailureLine } =
     require('./openApp') as typeof import('./openApp');
+  let failure: string | null = null;
   try {
     const report = await openAppOnDeviceAsync(projectRoot, {
       platform,
@@ -1222,23 +1326,37 @@ async function openAppForRunAsync(
         }.`
       );
     } else if (stillWanted()) {
-      Log.warn(openAppFailureLine(platform, report.reason ?? 'no reason was given'));
+      failure = openAppFailureLine(platform, report.reason ?? 'no reason was given');
     }
   } catch (error: unknown) {
     // `openAppOnDeviceAsync` promises not to throw; this guard is for the promise breaking.
-    Log.warn(
-      `The app was not opened: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`
-    );
+    failure = `The app was not opened: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`;
+  }
+  if (failure) {
+    failed(failure);
   }
   return null;
+}
+
+/**
+ * The stop for a run whose only action, the open against a reused dev server, failed.
+ *
+ * An outcome (llp/0010 §Exit codes): the run started nothing and opened nothing, so exit 0 would
+ * claim an app on a device that is not there. The open's own line says why and names the door.
+ */
+function appOpenFailedError(line: string): CommandError {
+  const error = new CommandError('APP_OPEN_FAILED', line);
+  error.suggestedCommand = `${PROGRAM_PREFIX} navigate /`;
+  error.exitCode = EXIT_OUTCOME_FAILED;
+  return error;
 }
 
 /**
  * Open the app on an EAS Simulator session for a running dev server, and say what happened.
  *
  * @ref llp/0027-everything-on-eas.rfc.md §The open is a session
- * The same contract as the local open: never throws, never stops the server, and a session that
- * was started says so with the command that stops it — it bills until then.
+ * Never throws and never stops the server. A session that was started says so with the command
+ * that stops it — it bills until then. A failed open comes back as its line, for the caller.
  */
 async function openAppOnEasForRunAsync(
   projectRoot: string,
@@ -1246,8 +1364,10 @@ async function openAppOnEasForRunAsync(
   platform: NativePlatform,
   devServerUrl: string,
   stillWanted: () => boolean,
-  easBuildId: string | null
-): Promise<OpenAppOnEasReport | null> {
+  easBuildId: string | null,
+  /** Whether this run stops a session it started when its dev server exits. */
+  stopsWithServer: boolean
+): Promise<{ report: OpenAppOnEasReport | null; failure: string | null }> {
   const { openAppOnEasAsync, openAppOnEasFailureLine } =
     require('./openAppEas') as typeof import('./openAppEas');
   try {
@@ -1263,22 +1383,24 @@ async function openAppOnEasForRunAsync(
         `Opened the app on EAS Simulator session ${report.sessionId ?? '(id unknown)'}${
           report.started ? ', started by this run' : ', which was already up'
         }.${report.sessionUrl ? ` Watch it at ${report.sessionUrl}.` : ''} ${
-          report.started
+          report.started && stopsWithServer
             ? `This run stops the session when the dev server exits. Use Ctrl-C or "${PROGRAM_PREFIX} dev:stop --eas".`
             : `It bills until "${PROGRAM_PREFIX} dev:stop --eas".`
         }`
       );
-    } else if (stillWanted()) {
-      Log.warn(openAppOnEasFailureLine(platform, report.reason ?? 'no reason was given'));
     }
-    return report;
+    const failure =
+      !report.opened && stillWanted()
+        ? openAppOnEasFailureLine(platform, report.reason ?? 'no reason was given')
+        : null;
+    return { report, failure };
   } catch (error: unknown) {
     // `openAppOnEasAsync` promises not to throw; this guard is for the promise breaking.
-    Log.warn(
-      `The app was not opened on EAS: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`
-    );
+    return {
+      report: null,
+      failure: `The app was not opened on EAS: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`,
+    };
   }
-  return null;
 }
 
 /** The platform an `eas build` step builds for, read off its argv. */

@@ -17,7 +17,7 @@ Now they do. `dev` opens the app itself, through the same modules `smoke` and `n
 
 The dev server's port is only knowable after the spawn, and the subprocess does not return until the server stops. So `runDevServerAsync` gained one hook: `onDevServer`, told the moment the project lock resolves the port. `dev` arms it for the `expo start` step of a run — never for `--plan`, `--web`, `--no-open`, or `expo run:*`, which installs and launches itself.
 
-The open is fire-and-forget from the dev server's point of view. It narrates each slow act on stderr (a boot, an Expo Go download), reports the outcome the same way, and a failure is a warning with `navigate /` in it — the dev server is still doing its job, and taking it down over a failed open would invert their importance. `stillWanted` stops the staging when the server dies mid-open.
+The open is fire-and-forget from the dev server's point of view. It narrates each slow act on stderr (a boot, an Expo Go download), reports the outcome the same way, and a failure is a warning with `navigate /` in it — the dev server is still doing its job, and taking it down over a failed open would invert their importance. `stillWanted` stops the staging when the server dies mid-open. A run that reuses this project's running dev server (llp/0004 §A busy port) starts no server, so the open is its only action: a failed open there fails the run with `APP_OPEN_FAILED`, exit 20.
 
 For a person at a terminal, the Simulator window is surfaced with `open -a Simulator` (DeviceHub on Xcode 27) — LaunchServices, not AppleScript, so still no grant. Headless runs skip it; `simctl openurl` needs no window.
 

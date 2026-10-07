@@ -6,13 +6,19 @@ import fs from 'fs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../client';
-import { holdDevServerLockAsync } from '../holdLock';
+import { event } from '../events';
+import { claimDevServerLockAsync, holdDevServerLockAsync } from '../holdLock';
+import { acquireDevServerLockAsync } from '../server';
 import type { DevServerLockHandle } from '../types';
 import { cleanupTempProjects, makeTempProject } from './tempProject';
 
 // The suite-wide `fs` mock is memfs, which the kernel cannot bind a socket inside.
 vi.unmock('fs');
 vi.unmock('node:fs');
+vi.mock('../events', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../events')>()),
+  event: vi.fn(),
+}));
 
 const held: (DevServerLockHandle | null)[] = [];
 
@@ -62,7 +68,7 @@ describe(holdDevServerLockAsync, () => {
       () => readDevServerLockAsync(projectRoot),
       (info) => info != null
     );
-    expect(answer).toMatchObject({ port: 8301 });
+    expect(answer).toMatchObject({ port: 8301, args: ['start', '--port', '8301'] });
     expect(resolved).toEqual(['arg:8301']);
 
     // Metro reports later, on another port: told again, and the lock follows.
@@ -94,5 +100,67 @@ describe(holdDevServerLockAsync, () => {
     await lock;
     expect(resolved).toEqual(['log:8303']);
     expect(await readDevServerLockAsync(projectRoot)).toMatchObject({ port: 8303 });
+  });
+});
+
+describe(claimDevServerLockAsync, () => {
+  it(`takes the lock before the spawn when the arguments name a port`, async () => {
+    const projectRoot = makeTempProject();
+
+    const claim = await claimDevServerLockAsync(projectRoot, ['start', '--port', '8311'], {
+      since: Date.now(),
+    });
+
+    expect(claim.status).toBe('held');
+    held.push(claim.status === 'held' ? claim.lock : null);
+    expect(await readDevServerLockAsync(projectRoot)).toMatchObject({ port: 8311 });
+  });
+
+  it(`answers in-use for a live dev server of this project`, async () => {
+    const projectRoot = makeTempProject();
+    const other = await acquireDevServerLockAsync({
+      url: 'http://127.0.0.1:8312',
+      port: 8312,
+      pid: process.pid + 1,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+      args: ['start', '--port', '8312'],
+    });
+    held.push(other.status === 'acquired' ? other.lock : null);
+
+    const claim = await claimDevServerLockAsync(projectRoot, ['start', '--port', '8313'], {
+      since: Date.now(),
+    });
+
+    expect(claim).toMatchObject({ status: 'in-use', holder: { port: 8312 } });
+    // The plain `start` wrapper spawns anyway, and this event is all that is said.
+    expect(event).toHaveBeenCalledWith(
+      'dev_lock_skipped',
+      expect.objectContaining({ reason: 'in-use', holderUrl: 'http://127.0.0.1:8312' })
+    );
+  });
+
+  // A lock this process still holds is a retry's own, not another run.
+  it(`answers held with no lock when the holder is this process`, async () => {
+    const projectRoot = makeTempProject();
+    const first = await claimDevServerLockAsync(projectRoot, ['start', '--port', '8314'], {
+      since: Date.now(),
+    });
+    held.push(first.status === 'held' ? first.lock : null);
+
+    const claim = await claimDevServerLockAsync(projectRoot, ['start', '--port', '8315'], {
+      since: Date.now(),
+    });
+
+    expect(claim).toEqual({ status: 'held', lock: null });
+  });
+
+  it(`leaves the lock to the log when the arguments name no port`, async () => {
+    const projectRoot = makeTempProject();
+
+    await expect(
+      claimDevServerLockAsync(projectRoot, ['start'], { since: Date.now() })
+    ).resolves.toEqual({ status: 'unclaimed' });
+    expect(await readDevServerLockAsync(projectRoot)).toBeNull();
   });
 });

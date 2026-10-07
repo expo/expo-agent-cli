@@ -48,6 +48,14 @@ export function formatStartPlan(plan: StartPlan): string {
     );
   }
 
+  if (plan.steps.length === 0) {
+    lines.push(
+      plan.devServerPort?.state === 'reused'
+        ? chalk`  {dim No steps: the running dev server is reused.}`
+        : chalk`  {dim No steps: nothing runs.}`
+    );
+  }
+
   if (plan.buildLocation) {
     lines.push('', `  ${formatBuildLocation(plan.buildLocation)}`);
   }
@@ -122,5 +130,24 @@ function devServerPortState(devServerPort: DevServerPort): string {
       return devServerPort.movedFrom == null ? '' : `, because ${devServerPort.movedFrom} is taken`;
     case 'named':
       return devServerPort.taken ? ', as named, which is taken' : ', as named';
+    case 'reused':
+      return ", where this project's dev server runs; the plan starts none";
+    case 'starting':
+      return ", where this project's dev server is still starting; the run stops";
+    case 'foreign':
+      return ', which answers for another project; the run stops';
+    case 'elsewhere':
+      return `, while this project's dev server runs on ${devServerPort.running}; the run stops`;
+    case 'mismatch':
+      return `, where this project's dev server runs ${
+        devServerPort.extra == null
+          ? 'with unknown options'
+          : [
+              devServerPort.missing.length ? `without ${devServerPort.missing.join(' ')}` : null,
+              devServerPort.extra.length ? `with ${devServerPort.extra.join(' ')}` : null,
+            ]
+              .filter(Boolean)
+              .join(' and ')
+      }; the run stops`;
   }
 }

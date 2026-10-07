@@ -49,6 +49,7 @@ import {
 } from './childVerdict';
 import { event } from './events';
 import { openDetachedLogSync, readDetachedLogSync, type DetachedLogRead } from './logFile';
+import { ownDevServerAsync, ownDevServerStop } from './ownDevServer';
 import { isProcessAlive } from './processLiveness';
 import type { DevOptions } from './resolveOptions';
 
@@ -194,12 +195,16 @@ export async function devDetachAsync(
   const smokePlatform =
     statedSmokePlatform(options.platform) ?? (await defaultSmokePlatformAsync(projectRoot));
 
-  // Asked before anything is spawned. A second detached dev server for one project cannot hold the
-  // lock, so nothing would be able to find it or stop it afterwards.
-  const running = await readDevServerLockAsync(projectRoot);
-  if (running) {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+  // complete — this parent installs and opens nothing, and the plan is the child's, so it compares
+  // no options: it reports a server that serves or is starting, and stops on `foreign`/`elsewhere`.
+  const reportRunningAsync = async (lock: DevServerLockInfo): Promise<number> => {
+    const own = await ownDevServerAsync(projectRoot, lock, { ...options, opens: false }, null);
+    if (own.kind === 'foreign' || own.kind === 'elsewhere') {
+      throw ownDevServerStop(own, options)!;
+    }
     return reportDetached(projectRoot, options, {
-      lock: running,
+      lock,
       alreadyRunning: true,
       ready: null,
       projectRootMatched: null,
@@ -207,9 +212,17 @@ export async function devDetachAsync(
       print,
       // Whatever the dev server that is already up advertised. Nothing is waited for here: this
       // run started nothing, so there is no tunnel of its own on its way.
-      tunnelUrl: await currentTunnelUrlAsync(projectRoot, running.url),
+      tunnelUrl: await currentTunnelUrlAsync(projectRoot, lock.url),
       smokePlatform,
+      phase: own.kind === 'starting' ? 'building' : 'serving',
     });
+  };
+
+  // Asked before anything is spawned. A second detached dev server for one project cannot hold the
+  // lock, so nothing would be able to find it or stop it afterwards.
+  const running = await readDevServerLockAsync(projectRoot);
+  if (running) {
+    return await reportRunningAsync(running);
   }
 
   const { logFile, fd } = openDetachedLogSync(projectRoot);
@@ -253,10 +266,19 @@ export async function devDetachAsync(
   const hasExited = () => childExit != null;
 
   const lock = await waitForLockAsync(projectRoot, {
+    pid: child.pid,
     timeoutMs: options.detachTimeoutMs,
     hasExited,
   });
   if (!lock) {
+    // Another `dev --detach` of this project, started in the same moment, won the lock: that
+    // server is reported. When the checks refuse it, the child's own exit is the answer.
+    const other = await readDevServerLockAsync(projectRoot);
+    const reported =
+      other && other.pid !== child.pid ? await reportRunningAsync(other).catch(() => null) : null;
+    if (reported != null) {
+      return reported;
+    }
     throw notStartedError(
       projectRoot,
       logFile,
@@ -794,6 +816,7 @@ function reportDetached(
     tunnelUrl,
     log = readDetachedLogSync(projectRoot, WHOLE_LOG),
     smokePlatform,
+    phase = childPhaseOf(log).phase,
   }: {
     lock: DevServerLockInfo;
     alreadyRunning: boolean;
@@ -812,6 +835,8 @@ function reportDetached(
      * a second read of a log a compiler may have written thousands of lines into.
      */
     log?: DetachedLogRead | null;
+    /** The phase a dev server this run did not start is in, as its lock and `/status` say. */
+    phase?: DevDetachResultJson['phase'];
   }
 ): number {
   const report: DevDetachResultJson = {
@@ -825,9 +850,8 @@ function reportDetached(
     projectRootMatched,
     alreadyRunning,
     // Read from the child's own log, which is the only channel it has to this process (F125 and
-    // F48-4 both). The phase is read even for a run that started nothing: the question "is this
-    // project's dev server listening" is the same question whoever started it.
-    phase: childPhaseOf(log).phase,
+    // F48-4 both), unless the caller passed the phase of a server it did not start.
+    phase,
     portMoved: alreadyRunning ? null : plannedPortMove(log, lock),
     tunnelUrl,
     waitedMs: Date.now() - startedAt,
@@ -964,6 +988,9 @@ export function detachFollowUps(
  * Poll the project's lock until it names the port the dev server took, the child dies, or the
  * budget runs out.
  *
+ * Only the child's own lock counts: the child holds it in its own process, so the lock's `pid` is
+ * `pid`. Another run's child that published first is not this run's answer.
+ *
  * The child publishes its lock at the spawn of a step that names a port, before Metro binds it,
  * and the busy-port retry can move the dev server after that with a new spawn and a new lock. So a
  * lock counts once Metro logged its port after the lock's `startedAt` (the spawn of the step that
@@ -973,11 +1000,16 @@ export function detachFollowUps(
  */
 async function waitForLockAsync(
   projectRoot: string,
-  { timeoutMs, hasExited }: { timeoutMs: number; hasExited: () => boolean }
+  {
+    pid,
+    timeoutMs,
+    hasExited,
+  }: { pid: number | undefined; timeoutMs: number; hasExited: () => boolean }
 ): Promise<DevServerLockInfo | null> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const lock = await readDevServerLockAsync(projectRoot);
+    const read = await readDevServerLockAsync(projectRoot);
+    const lock = read?.pid === pid ? read : null;
     if (lock) {
       const spawnedAt = Date.parse(lock.startedAt);
       if (

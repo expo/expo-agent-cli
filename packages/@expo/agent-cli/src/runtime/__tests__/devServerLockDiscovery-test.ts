@@ -49,6 +49,7 @@ async function holdLockAsync(projectRoot: string, port: number): Promise<void> {
     port,
     pid: process.pid,
     startedAt: new Date().toISOString(),
+    args: ['start'],
     projectRoot,
   });
   if (result.status !== 'acquired') {

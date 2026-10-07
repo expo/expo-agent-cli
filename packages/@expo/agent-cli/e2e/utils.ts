@@ -469,6 +469,11 @@ export type DevLockInfo = {
   pid: number;
   startedAt: string;
   projectRoot: string;
+  /**
+   * The `expo` arguments the dev server runs with, starting with the command. A lock a test
+   * publishes itself may leave it out, as a holder that predates it does.
+   */
+  args?: string[];
 };
 
 /**

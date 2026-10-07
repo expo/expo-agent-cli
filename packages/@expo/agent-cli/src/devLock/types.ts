@@ -19,6 +19,13 @@ export interface DevServerLockInfo {
   startedAt: string;
   /** Project the dev server was started for, as the lock holder resolved it. */
   projectRoot: string;
+  /**
+   * The `expo` arguments the dev server runs with, starting with the command (`start`, `run:ios`,
+   * `run:android`). A run that would reuse this dev server reads them to see whether it carries the
+   * options the run asks for. Null when they are unknown: a holder from an older version answers
+   * without them.
+   */
+  args: string[] | null;
 }
 
 /** A held lock. Releasing it frees the address for the next dev server of this project. */
