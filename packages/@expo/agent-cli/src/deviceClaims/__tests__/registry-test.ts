@@ -271,6 +271,23 @@ describe('markClaimBootedAsync', () => {
     expect(vol.readdirSync(REGISTRY)).toEqual(['local-ios-UDID-1.json']);
   });
 
+  it(`neither locks nor rewrites a claim that records the boot already`, async () => {
+    writeClaim(claim({ booted: true }));
+    const mkdir = vi.spyOn(fs, 'mkdirSync');
+    const rename = vi.spyOn(fs, 'renameSync');
+
+    try {
+      expect(await markClaimBootedAsync(claim({ booted: true }))).toMatchObject({ booted: true });
+      expect(mkdir.mock.calls.filter(([directory]) => String(directory).endsWith('.lock'))).toEqual(
+        []
+      );
+      expect(rename).not.toHaveBeenCalled();
+    } finally {
+      mkdir.mockRestore();
+      rename.mockRestore();
+    }
+  });
+
   it(`does not record a boot in a claim that another worktree took over`, async () => {
     const other = claim({ projectRoot: '/work/other' });
     writeClaim(other);

@@ -109,13 +109,18 @@ export function touchClaim(claim: DeviceClaim, now: Date = new Date()): DeviceCl
  * Record in a claim this worktree still holds that this CLI booted its device.
  *
  * Under the registry lock, so no allocation replaces the claim between the check and the write.
- * The write renames a new file over the claim, so a reader never finds the claim missing.
+ * The write renames a new file over the claim, so a reader never finds the claim missing. A claim
+ * that records the boot already is only read: the field never goes back to false.
  *
  * @returns the claim as recorded, or null when the claim was released, another claim replaced it,
  * or the file system refused. Never throws.
  */
 export async function markClaimBootedAsync(claim: DeviceClaim): Promise<DeviceClaim | null> {
   const file = claimFilePath(claim.backend, claim.id);
+  if (claim.booted) {
+    const current = readClaimFile(file);
+    return current != null && isSameClaim(current, claim) ? current : null;
+  }
   try {
     return await withRegistryLockAsync(async () => {
       const current = readClaimFile(file);
