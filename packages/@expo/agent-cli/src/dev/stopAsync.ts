@@ -306,7 +306,8 @@ export async function devStopAsync(
  * Give up the device claims of this worktree, shutting down first each local device this CLI
  * booted or created.
  *
- * A local claim is kept while the dev server still runs, because the device is still in use. An
+ * A local claim is kept while the dev server still runs, because the device is still in use, and
+ * when its shutdown failed, because the device is still up and only the claim says it is ours. An
  * EAS claim is released only for a session `--eas` stopped: a session left running still bills,
  * and releasing its claim would leave nothing on this machine that knows it is this worktree's.
  */
@@ -346,7 +347,13 @@ async function releaseDevicesAsync(
         return { release: true, shutDown: false, reason: null };
       }
       const shutdown = await shutdownDeviceAsync(id, backend);
-      return { release: true, shutDown: shutdown.ok, reason: shutdown.reason };
+      return shutdown.ok
+        ? { release: true, shutDown: true, reason: null }
+        : {
+            release: false,
+            shutDown: false,
+            reason: `its shutdown failed, so the next dev:stop tries again: ${shutdown.reason}`,
+          };
     }
   );
   return settled.map(({ claim, release, shutDown, reason }) => ({

@@ -163,7 +163,7 @@ describe(reapDeletedWorktreeClaimsAsync, () => {
     expect(reaped).toMatchObject({ released: true, shutDown: false, deleted: false });
   });
 
-  it(`reports a shutdown that failed, drops the claim, and does not throw`, async () => {
+  it(`reports a shutdown that failed and keeps the claim, so the next reap tries again`, async () => {
     claim({ id: 'SIM-A', created: true });
     const tools = fakeDeviceTools((_command, args) =>
       args.includes('shutdown') ? { exitCode: 1, stderr: 'Unable to shutdown device' } : {}
@@ -172,9 +172,17 @@ describe(reapDeletedWorktreeClaimsAsync, () => {
     const [reaped] = await reapDeletedWorktreeClaimsAsync(HERE, { probeLock: noLock });
 
     expect(tools.callsWith('simctl delete')).toEqual([]);
+    expect(readClaims()).toEqual([expect.objectContaining({ id: 'SIM-A', projectRoot: GONE })]);
+    expect(readClaims()[0]).not.toHaveProperty('reaping');
+    expect(reaped).toMatchObject({ released: false, shutDown: false, deleted: false });
+    expect(describeReapedDevice(reaped!)).toContain('still up — "xcrun simctl shutdown SIM-A"');
+    expect(describeReapedDevice(reaped!)).toContain('Unable to shutdown device, claim kept');
+
+    fakeDeviceTools(() => ({}));
+    expect(await reapDeletedWorktreeClaimsAsync(HERE, { probeLock: noLock })).toMatchObject([
+      { id: 'SIM-A', released: true, shutDown: true },
+    ]);
     expect(readClaims()).toEqual([]);
-    expect(reaped).toMatchObject({ released: true, shutDown: false, deleted: false });
-    expect(reaped!.reason).toContain('Unable to shutdown device');
   });
 
   it(`leaves a claim that another reaper is shutting down`, async () => {

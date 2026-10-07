@@ -651,8 +651,30 @@ describe(`${devStopAsync.name} and the device claims`, () => {
 
     expect(await devStopAsync(projectRoot, options({ json: false }))).toBe(EXIT_OK);
     expect(printed()).toContain(
-      `Reaped SIM-GONE of the deleted worktree ${gone} · still up — simctl refused, claim dropped`
+      `Reaped SIM-GONE of the deleted worktree ${gone} · still up — simctl refused, claim kept`
     );
+    expect(readClaims().map(({ id }) => id)).toEqual(['SIM-GONE']);
+  });
+
+  it(`keeps the claim of a device whose shutdown failed, so the next dev:stop tries again`, async () => {
+    claim('SIM-BOOTED', { booted: true });
+    vi.mocked(shutdownDeviceAsync).mockResolvedValueOnce({
+      ok: false,
+      reason: '"xcrun simctl shutdown SIM-BOOTED" exited 1: Unable to shutdown device',
+    });
+
+    await devStopAsync(projectRoot, options());
+
+    expect(readClaims().map(({ id }) => id)).toEqual(['SIM-BOOTED']);
+    expect(JSON.parse(printed()).devices).toEqual([
+      {
+        id: 'SIM-BOOTED',
+        backend: 'local-ios',
+        released: false,
+        shutDown: false,
+        reason: expect.stringContaining('Unable to shutdown device'),
+      },
+    ]);
   });
 
   it(`shuts a device down while its claim still holds it, so no worktree takes it in between`, async () => {
