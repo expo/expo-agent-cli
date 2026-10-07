@@ -7,7 +7,7 @@ export type { AllocateDeviceOptions } from './allocate';
 export { chooseDevice } from './choose';
 export type { ChooseDeviceInput } from './choose';
 export { devicesAllClaimedError } from './errors';
-export { CLAIM_GRACE_MS, classifyClaimAsync } from './liveness';
+export { CLAIM_GRACE_MS, classifyClaimAsync, isDeletedWorktreeAsync } from './liveness';
 export {
   claimFilePath,
   isSameClaim,

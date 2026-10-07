@@ -3,10 +3,8 @@
 // allocation or `dev:stop` of any worktree reaps its claims: the local device this CLI booted is
 // shut down, and its EAS session is stopped.
 
-import fs from 'fs';
-import path from 'path';
-
 import {
+  isDeletedWorktreeAsync,
   isSameClaim,
   readClaim,
   readClaims,
@@ -47,9 +45,8 @@ export interface ReapOptions {
 }
 
 /**
- * Reap every claim whose worktree was deleted: its directory is gone, its parent is still there,
- * and its dev-server lock does not answer. A missing parent is an unmounted volume, not a deleted
- * worktree, so its claims stay. The grace period does not apply.
+ * Reap every claim whose worktree was deleted ({@link isDeletedWorktreeAsync}). The grace period
+ * does not apply.
  *
  * A local claim is taken in `liveRoot`'s name under the registry lock, so no other worktree takes
  * the device while it shuts down outside the lock. A failed shutdown or stop is reported, not thrown.
@@ -58,10 +55,8 @@ export async function reapDeletedWorktreeClaimsAsync(
   liveRoot: string,
   { probeLock = readDevServerLockAsync, stopEasSession = stopEasSessionAsync }: ReapOptions = {}
 ): Promise<ReapedDevice[]> {
-  const isDeletedAsync = async (claim: DeviceClaim) =>
-    !fs.existsSync(claim.projectRoot) &&
-    fs.existsSync(path.dirname(claim.projectRoot)) &&
-    (await probeLock(claim.projectRoot)) == null;
+  const isDeletedAsync = (claim: DeviceClaim) =>
+    isDeletedWorktreeAsync(claim.projectRoot, probeLock);
 
   const found: DeviceClaim[] = [];
   for (const claim of readClaims()) {

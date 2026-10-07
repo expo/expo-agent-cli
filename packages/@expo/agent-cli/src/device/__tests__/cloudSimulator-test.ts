@@ -805,7 +805,10 @@ describe(probeCloudSessionAsync, () => {
   });
 
   it(`does not adopt the session a dotenv names when another worktree holds a live claim on it`, async () => {
-    project({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=sess-1\n' });
+    project({
+      '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=sess-1\n',
+      '/other/package.json': '{}',
+    });
     claimSession('sess-1', { projectRoot: '/other', touchedAt: new Date().toISOString() });
     let call = 0;
     vi.mocked(spawn).mockImplementation((() => {
