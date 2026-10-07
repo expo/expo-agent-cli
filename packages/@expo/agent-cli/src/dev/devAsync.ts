@@ -25,7 +25,7 @@ import { resolveStartPlanAsync } from '../plan/resolveAsync';
 import { isPlatformFlag } from '../plan/platformFlags';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
-import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
+import { defaultSmokePlatformAsync } from '../smoke/suggest';
 import { clearFingerprintMemo } from '../project/fingerprint';
 import { clearFingerprintCache } from '../project/fingerprintCache';
 import { probeProjectStateAsync } from '../project/probe';
@@ -153,7 +153,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   } else if (serving) {
     const planned = await resolvePlannedPortAsync(options.port);
     if (!planned.bindable && options.port != null && options.mode !== 'plan') {
-      throw await portDemandedError(projectRoot, options.port, options.platform);
+      throw await portDemandedError(options.port, options.platform);
     }
     plan = {
       ...withDevServerPort(forwardedPlan, planned.port),
@@ -493,7 +493,7 @@ async function executePlanAsync(
         // server somewhere else would leave every command the caller had already written — and
         // every URL it had already printed — pointing at nothing.
         if (options.port != null) {
-          throw await portDemandedError(projectRoot, options.port, options.platform);
+          throw await portDemandedError(options.port, options.platform);
         }
         const askedPort = readPortArg(args) ?? defaultMetroPort();
         // One retry, and so one per plan: no plan `decideStartPlan` makes has two dev-server steps.
@@ -749,25 +749,12 @@ function warnPortMove(move: Parameters<typeof formatPortMove>[0], expected: numb
  * to do did not happen (llp/0010 §Exit codes). It never suggests the command that just failed —
  * running it again unchanged stops in the same place until the port is freed.
  */
-async function portDemandedError(
-  projectRoot: string,
-  port: number,
-  platform: PlanPlatform
-): Promise<CommandError> {
+async function portDemandedError(port: number, platform: PlanPlatform): Promise<CommandError> {
   const { findPortListenerAsync } = require('./portListener') as typeof import('./portListener');
-  const { readDevServerLockAsync } = require('../devLock') as typeof import('../devLock');
-  const [listener, lock, free, defaultPlatform] = await Promise.all([
+  const [listener, free] = await Promise.all([
     findPortListenerAsync(port),
-    readDevServerLockAsync(projectRoot),
     findFreePortAsync(port + 1),
-    defaultSmokePlatformAsync(projectRoot),
   ]);
-  // The smoke example needs a device platform, which the caller's `--web` is not.
-  const smokePlatform = platform === 'web' ? defaultPlatform : platform;
-
-  // The most useful special case: the process on that port is this project's own dev server, so
-  // there is nothing to start and nothing to fix.
-  const ours = lock != null && lock.port === port;
   const holder = listener
     ? `pid ${listener.pid}${listener.command ? ` (${listener.command})` : ''}`
     : 'a process this machine would not name';
@@ -776,18 +763,13 @@ async function portDemandedError(
     'PORT_IN_USE',
     [
       `Port ${port} is taken, so no dev server was started on it.`,
-      ours
-        ? `Why: this project's own dev server is already on port ${port}, held by ${holder}. Nothing was started, because there is already one there.`
-        : `Why: ${holder} is listening on it, and --port ${port} is a requirement rather than a preference — moving the dev server to another port would leave every URL and every command that names ${port} pointing at nothing.`,
-      ours
-        ? `How: use the dev server that is running ("${smokeCommand(smokePlatform)}" checks its bundle and its app), or stop it first with "${PROGRAM_PREFIX} dev:stop".`
-        : `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --${platform} --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
+      `Why: ${holder} is listening on it, and --port ${port} is a requirement rather than a preference — moving the dev server to another port would leave every URL and every command that names ${port} pointing at nothing.`,
+      `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --${platform} --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
     ].join('\n')
   );
   // Never the command that just failed: it would stop in exactly the same place.
-  error.suggestedCommand = ours
-    ? smokeCommand(smokePlatform)
-    : free == null
+  error.suggestedCommand =
+    free == null
       ? `${PROGRAM_PREFIX} dev:stop --port ${port} --force`
       : `${PROGRAM_PREFIX} dev --${platform} --port ${free}`;
   error.exitCode = EXIT_OUTCOME_FAILED;
