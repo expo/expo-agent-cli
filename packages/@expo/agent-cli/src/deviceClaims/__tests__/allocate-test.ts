@@ -8,7 +8,7 @@ import { event } from '../events';
 import {
   claimFilePath,
   readClaims,
-  touchClaim,
+  touchClaimAsync,
   withRegistryLockAsync,
   writeClaim,
 } from '../registry';
@@ -86,6 +86,14 @@ function allocate(
 function takeOverLock(): void {
   const lock = path.join(path.dirname(claimFilePath('local-ios', 'A')), '.lock');
   vol.writeFileSync(path.join(lock, 'owner'), 'taker');
+}
+
+/**
+ * The mtime a touch leaves on a claim file. A touch of a stale claim waits for the registry lock,
+ * so a test that holds the lock, or runs under the allocation's, sets it directly.
+ */
+function setTouch(claim: DeviceClaim, at: Date): void {
+  vol.utimesSync(claimFilePath(claim.backend, claim.id), at, at);
 }
 
 function staleClaim(overrides: Partial<DeviceClaim>): DeviceClaim {
@@ -219,13 +227,41 @@ describe('allocateDeviceAsync', () => {
     );
   });
 
+  it(`never lets a touch land between the stale check of a takeover and the removal`, async () => {
+    const stale = staleClaim({ id: 'A' });
+    writeClaim(stale);
+    let probes = 0;
+    let touch: Promise<DeviceClaim | null> | undefined;
+
+    const allocation = await allocateDeviceAsync({
+      projectRoot: HERE,
+      platform: 'ios',
+      backend: 'local-ios',
+      listDevices: async () => [booted('A')],
+      capacity: 4,
+      clock: () => NOW,
+      // The second probe is the re-read just before the removal, once the claim is judged stale.
+      probeLock: async () => {
+        if (++probes === 2) {
+          touch = touchClaimAsync(stale, NOW);
+        }
+        return null;
+      },
+    });
+
+    expect(probes).toBe(2);
+    expect(allocation).toMatchObject({ kind: 'take', claim: { id: 'A', projectRoot: HERE } });
+    expect(await touch).toBeNull();
+    expect(readClaims()).toMatchObject([{ id: 'A', projectRoot: HERE }]);
+  });
+
   it(`leaves a stale claim that its worktree touched while the inventory was listed`, async () => {
     const stale = staleClaim({ id: 'A' });
     writeClaim(stale);
 
     const allocation = await allocate(HERE, {
       inventory: [booted('A')],
-      duringInventory: () => touchClaim(stale, NOW),
+      duringInventory: () => setTouch(stale, NOW),
     });
 
     expect(allocation).toEqual({ kind: 'exhausted', holders: [{ id: 'A', projectRoot: OTHER }] });
@@ -246,7 +282,7 @@ describe('allocateDeviceAsync', () => {
       clock: () => time,
       duringInventory: () => {
         time = later;
-        touchClaim(stale, later);
+        setTouch(stale, later);
       },
     });
 
@@ -260,7 +296,7 @@ describe('allocateDeviceAsync', () => {
 
     const allocation = await allocate(HERE, {
       inventory: [booted('A'), booted('B')],
-      duringInventory: () => touchClaim(stale, NOW),
+      duringInventory: () => setTouch(stale, NOW),
     });
 
     expect(allocation).toMatchObject({ kind: 'take', candidate: { id: 'B' } });
@@ -292,7 +328,7 @@ describe('allocateDeviceAsync', () => {
 
     await allocate(HERE, {
       inventory: [booted('A')],
-      duringInventory: () => touchClaim(stale, NOW),
+      duringInventory: () => setTouch(stale, NOW),
     });
 
     expect(
@@ -310,7 +346,7 @@ describe('allocateDeviceAsync', () => {
     await allocate(HERE, {
       inventory: [booted('A'), shutdown('OLD')],
       deleteDevice,
-      duringInventory: () => touchClaim(stale, NOW),
+      duringInventory: () => setTouch(stale, NOW),
     });
 
     expect(deleteDevice).not.toHaveBeenCalled();
@@ -495,7 +531,7 @@ describe('allocateDeviceAsync', () => {
           probeLock: async () => null,
         });
         vi.setSystemTime(NOW.getTime() + 5 * 60_000);
-        touchClaim(stale);
+        setTouch(stale, new Date());
       });
 
       expect(await waiting).toEqual({

@@ -36,7 +36,7 @@ import {
   classifyClaimAsync,
   readClaims,
   releaseClaim,
-  touchClaim,
+  touchClaimAsync,
   writeClaim,
 } from '../deviceClaims';
 import type { DeviceClaim } from '../deviceClaims';
@@ -896,11 +896,11 @@ export async function probeCloudSessionAsync({
   let { unclaimed } = selection;
   const bound =
     selected?.id != null &&
-    bindEasSession(projectRoot, {
+    (await bindEasSessionAsync(projectRoot, {
       id: selected.id,
       platform: selected.platform ?? (source === 'claim' ? platform : null),
       created: false,
-    });
+    }));
   if (selected != null && !bound) {
     // Another worktree claimed the session between the read above and the write.
     unclaimed = [...unclaimed, selected];
@@ -1564,10 +1564,10 @@ async function liveForeignHolderAsync(
  *
  * @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
  */
-export function bindEasSession(
+export async function bindEasSessionAsync(
   projectRoot: string,
   { id, platform, created }: { id: string; platform: CloudPlatform | null; created: boolean }
-): boolean {
+): Promise<boolean> {
   if (platform == null) {
     return true;
   }
@@ -1590,7 +1590,7 @@ export function bindEasSession(
       const existing = readClaims().find(
         (each) => each.backend === 'eas' && each.id === id && each.projectRoot === claim.projectRoot
       );
-      return existing != null && touchClaim(existing) != null;
+      return existing != null && (await touchClaimAsync(existing)) != null;
     }
   }
   return true;

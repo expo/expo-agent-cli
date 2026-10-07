@@ -11,6 +11,7 @@ import { getExpoHomeDirectory } from '../utils/expoHome';
 import { canonicalizeExistingPath } from '../utils/dir';
 import { CommandError } from '../utils/errors';
 import { debugEvent, event } from './events';
+import { CLAIM_GRACE_MS } from './liveness';
 import type { DeviceBackend, DeviceClaim } from './types';
 
 /** A lock this old has a dead holder: nothing under it runs for anywhere near this long. */
@@ -86,17 +87,40 @@ export function writeClaim(claim: DeviceClaim): void {
 /**
  * Refresh the touch of a claim this worktree still holds: the mtime of its file.
  *
- * Runs outside the registry lock, because every verb calls it, so it never removes or rewrites the
- * file: every reader sees the claim throughout. A touch can land on a claim that replaced this one
- * after it was read; that claim is newer than the read, so it is live already.
+ * A claim touched within half the grace period is live, and no allocation can judge it stale, so
+ * it is only read again. An older claim is touched under the registry lock, so the touch never
+ * lands between an allocation's stale check and its removal of the claim. The touch never removes
+ * or rewrites the file, so every reader sees the claim throughout.
  *
- * @returns the touched claim, or null when the claim was released, another claim replaced it, or
- * the file system refused. Never throws.
+ * @returns the claim as it is now, or null when the claim was released, another claim replaced it,
+ * this process lost the registry lock, or the file system refused. Never throws.
  */
-export function touchClaim(claim: DeviceClaim, now: Date = new Date()): DeviceClaim | null {
+export async function touchClaimAsync(
+  claim: DeviceClaim,
+  now: Date = new Date()
+): Promise<DeviceClaim | null> {
   const file = claimFilePath(claim.backend, claim.id);
+  const held = (): DeviceClaim | null => {
+    const current = readClaimFile(file);
+    return current != null && isSameClaim(current, claim) ? current : null;
+  };
+  const current = held();
+  if (current == null) {
+    return null;
+  }
+  const sinceTouchMs = now.getTime() - Date.parse(current.touchedAt);
+  if (sinceTouchMs >= 0 && sinceTouchMs < CLAIM_GRACE_MS / 2) {
+    return current;
+  }
   try {
-    fs.utimesSync(file, now, now);
+    return await withRegistryLockAsync(async () => {
+      if (held() == null) {
+        return null;
+      }
+      assertRegistryLockHeld();
+      fs.utimesSync(file, now, now);
+      return held();
+    });
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       debugEvent('device_claim_touch_failed', {
@@ -107,8 +131,6 @@ export function touchClaim(claim: DeviceClaim, now: Date = new Date()): DeviceCl
     }
     return null;
   }
-  const current = readClaimFile(file);
-  return current != null && isSameClaim(current, claim) ? current : null;
 }
 
 /**

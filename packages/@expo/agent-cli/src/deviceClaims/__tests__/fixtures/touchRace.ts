@@ -4,7 +4,7 @@
 import fs from 'fs';
 
 import { allocateDeviceAsync } from '../../allocate';
-import { touchClaim, writeClaim } from '../../registry';
+import { touchClaimAsync, writeClaim } from '../../registry';
 import type { DeviceClaim } from '../../types';
 
 const [role, projectRoot, log, startAt, stopAt] = process.argv.slice(2) as [
@@ -48,7 +48,7 @@ void (async () => {
     let lost = 0;
     while (Date.now() < Number(stopAt)) {
       touches++;
-      if (touchClaim(held) == null) {
+      if ((await touchClaimAsync(held)) == null) {
         lost++;
       }
     }

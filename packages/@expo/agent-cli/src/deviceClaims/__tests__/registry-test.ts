@@ -14,7 +14,7 @@ import {
   releaseClaim,
   releaseProjectClaimsAsync,
   removeClaimFile,
-  touchClaim,
+  touchClaimAsync,
   withRegistryLockAsync,
   writeClaim,
 } from '../registry';
@@ -56,7 +56,7 @@ afterEach(() => {
  * Touch `claim()`, and run `probe` after every file system call the touch makes, because another
  * process can run between any two of them.
  */
-function touchProbingEachStep(probe: () => void): DeviceClaim | null {
+async function touchProbingEachStep(probe: () => void): Promise<DeviceClaim | null> {
   const methods = fs as unknown as Record<string, (...args: unknown[]) => unknown>;
   let probing = false;
   const spies = Object.keys(methods)
@@ -77,7 +77,7 @@ function touchProbingEachStep(probe: () => void): DeviceClaim | null {
       });
     });
   try {
-    return touchClaim(claim(), new Date('2026-09-30T11:00:00.000Z'));
+    return await touchClaimAsync(claim(), new Date('2026-09-30T11:00:00.000Z'));
   } finally {
     for (const spy of spies) {
       spy.mockRestore();
@@ -178,69 +178,127 @@ describe('writeClaim and readClaims', () => {
   });
 });
 
-describe('touchClaim', () => {
-  it(`refreshes the file's mtime and nothing else`, () => {
+describe('touchClaimAsync', () => {
+  it(`refreshes the file's mtime and nothing else`, async () => {
     writeClaim(claim());
     const now = new Date('2026-09-30T11:00:00.000Z');
 
-    expect(touchClaim(claim(), now)).toEqual(claim({ touchedAt: now.toISOString() }));
+    expect(await touchClaimAsync(claim(), now)).toEqual(claim({ touchedAt: now.toISOString() }));
     expect(readClaims()).toEqual([claim({ touchedAt: now.toISOString() })]);
     const file = claimFilePath('local-ios', 'UDID-1');
     expect(vol.statSync(file).mtime).toEqual(now);
     expect(JSON.parse(String(vol.readFileSync(file)))).not.toHaveProperty('touchedAt');
   });
 
-  it(`reports no touch on a claim that another worktree took over, and leaves its content`, () => {
+  it(`reports no touch on a claim that another worktree took over, and leaves its content`, async () => {
     writeClaim(claim({ projectRoot: '/work/other' }));
 
-    expect(touchClaim(claim(), new Date())).toBeNull();
+    expect(await touchClaimAsync(claim(), new Date())).toBeNull();
     expect(readClaims()).toEqual([
       { ...claim({ projectRoot: '/work/other' }), touchedAt: expect.any(String) },
     ]);
   });
 
-  it(`does not bring back a claim that was released`, () => {
-    expect(touchClaim(claim(), new Date())).toBeNull();
+  it(`does not bring back a claim that was released`, async () => {
+    expect(await touchClaimAsync(claim(), new Date())).toBeNull();
     expect(readClaims()).toEqual([]);
   });
 
-  it(`does not touch the worktree's newer claim on the same device`, () => {
+  it(`does not touch the worktree's newer claim on the same device`, async () => {
     const newer = claim({ claimedAt: '2026-09-30T10:30:00.000Z' });
     writeClaim(newer);
 
-    expect(touchClaim(claim(), new Date())).toBeNull();
+    expect(await touchClaimAsync(claim(), new Date())).toBeNull();
     expect(readClaims()).toEqual([{ ...newer, touchedAt: expect.any(String) }]);
   });
 
-  it(`never hides the claim from a reader while it touches it`, () => {
+  it(`never hides the claim from a reader while it touches it`, async () => {
     writeClaim(claim());
     const seen: number[] = [];
 
-    touchProbingEachStep(() => seen.push(readClaims().length));
+    await touchProbingEachStep(() => seen.push(readClaims().length));
 
     expect(seen.length).toBeGreaterThan(0);
     expect(seen).not.toContain(0);
   });
 
-  it(`lets two touches of one worktree run at once, and both keep the claim`, () => {
+  it(`lets two touches of one worktree run at once, and both keep the claim`, async () => {
     writeClaim(claim());
-    const inner: (DeviceClaim | null)[] = [];
 
-    const outer = touchProbingEachStep(() => inner.push(touchClaim(claim(), new Date())));
+    const touches = await Promise.all([
+      touchClaimAsync(claim(), new Date()),
+      touchClaimAsync(claim(), new Date()),
+    ]);
 
-    expect(outer).not.toBeNull();
-    expect(inner).not.toContain(null);
+    expect(touches).not.toContain(null);
     expect(readClaims()).toMatchObject([{ projectRoot: '/work/here' }]);
   });
 
-  it(`reports no touch, and never throws, when the file system refuses`, () => {
+  it(`only reads a claim touched within half the grace period: no write, no lock`, async () => {
+    writeClaim(claim());
+    const file = claimFilePath('local-ios', 'UDID-1');
+    const mkdir = vi.spyOn(fs, 'mkdirSync');
+
+    try {
+      expect(await touchClaimAsync(claim(), new Date('2026-09-30T10:04:00.000Z'))).toEqual(claim());
+    } finally {
+      mkdir.mockRestore();
+    }
+    expect(vol.statSync(file).mtime).toEqual(new Date(claim().touchedAt));
+    expect(mkdir).not.toHaveBeenCalled();
+  });
+
+  it(`touches an older claim under the registry lock`, async () => {
+    writeClaim(claim());
+    const lockedAtTouch: boolean[] = [];
+    const utimes = fs.utimesSync;
+    const spy = vi.spyOn(fs, 'utimesSync').mockImplementation((file, atime, mtime) => {
+      lockedAtTouch.push(vol.existsSync(path.join(REGISTRY, '.lock')));
+      utimes(file, atime, mtime);
+    });
+
+    try {
+      expect(await touchClaimAsync(claim(), new Date('2026-09-30T10:06:00.000Z'))).toEqual(
+        claim({ touchedAt: '2026-09-30T10:06:00.000Z' })
+      );
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lockedAtTouch).toEqual([true]);
+  });
+
+  it(`reports no touch, and never throws, when another process took the lock over`, async () => {
+    writeClaim(claim());
+    const file = claimFilePath('local-ios', 'UDID-1');
+    const open = fs.openSync;
+    const spy = vi.spyOn(fs, 'openSync').mockImplementation((...args) => {
+      const owner = path.join(REGISTRY, '.lock', 'owner');
+      if (args[0] === file && vol.existsSync(owner)) {
+        vol.writeFileSync(owner, 'taker');
+      }
+      return open(...(args as Parameters<typeof open>));
+    });
+
+    try {
+      expect(await touchClaimAsync(claim(), new Date())).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(vol.statSync(file).mtime).toEqual(new Date(claim().touchedAt));
+    expect(debugEvent).toHaveBeenCalledWith(
+      'device_claim_touch_failed',
+      expect.objectContaining({ reason: expect.stringContaining('took over') })
+    );
+  });
+
+  it(`reports no touch, and never throws, when the file system refuses`, async () => {
     writeClaim(claim());
     const spy = vi.spyOn(fs, 'utimesSync').mockImplementation(() => {
       throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
     });
 
     try {
-      expect(touchClaim(claim(), new Date())).toBeNull();
+      expect(await touchClaimAsync(claim(), new Date())).toBeNull();
     } finally {
       spy.mockRestore();
     }
@@ -567,7 +625,7 @@ describe('withRegistryLockAsync across processes', () => {
   }, 30_000);
 });
 
-describe('touchClaim across processes', () => {
+describe('touchClaimAsync across processes', () => {
   it(`never lets another worktree take a device while two processes of its holder touch it`, async () => {
     const fsReal = await vi.importActual<typeof import('fs')>('node:fs');
     const osReal = await vi.importActual<typeof import('os')>('node:os');

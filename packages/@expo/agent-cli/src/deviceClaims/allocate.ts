@@ -68,7 +68,7 @@ export type PeekDeviceOptions<C extends DeviceCandidate> = Omit<
  * claim is written first, so no other worktree takes the device while the caller boots it.
  * Never touches a reused claim: only a caller that hands out a usable device may re-arm it.
  *
- * The inventory is slow, and `touchClaim` runs outside the lock, so a claim that was stale when it
+ * The inventory is slow, and a dev server can start meanwhile, so a claim that was stale when it
  * was read may be live by the time it is acted on. Each claim is read again just before it is
  * removed, released or its device deleted, and is left when it changed or is live now.
  */
@@ -85,7 +85,7 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>(
     });
     const currentAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim | null> => {
       const current = readClaim(claim.backend, claim.id);
-      // The loop can outlast the grace period, and a touch made meanwhile is not in the future.
+      // The loop can outlast the grace period, so a claim is judged at the time it is read.
       return current == null ? null : await classifyAsync(current, clock());
     };
     const stillStaleAsync = async (claim: DeviceClaim): Promise<boolean> => {

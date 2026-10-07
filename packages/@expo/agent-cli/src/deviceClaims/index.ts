@@ -20,7 +20,7 @@ export {
   releaseProjectClaimsAsync,
   removeClaimFile,
   replaceClaim,
-  touchClaim,
+  touchClaimAsync,
   withRegistryLockAsync,
   writeClaim,
 } from './registry';

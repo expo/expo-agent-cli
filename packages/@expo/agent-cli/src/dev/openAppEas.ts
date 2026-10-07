@@ -23,7 +23,7 @@
 import path from 'path';
 
 import {
-  bindEasSession,
+  bindEasSessionAsync,
   isClaimedSessionOver,
   lookupCloudSessionsAsync,
   probeCloudSessionAsync,
@@ -394,7 +394,7 @@ export async function ensureEasSessionAsync(
     // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
     // Also when the start failed after the session was created: that session is this worktree's and
     // may be billing, so `dev:stop --eas` has to find it.
-    bindEasSession(projectRoot, {
+    await bindEasSessionAsync(projectRoot, {
       id: sessionId,
       platform: platform as CloudPlatform,
       created: true,

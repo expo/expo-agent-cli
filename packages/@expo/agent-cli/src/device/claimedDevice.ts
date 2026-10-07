@@ -16,7 +16,7 @@ import {
   readClaim,
   releaseClaim,
   releaseProjectClaimsAsync,
-  touchClaim,
+  touchClaimAsync,
   withRegistryLockAsync,
   type ClassifiedClaim,
   type DeviceAction,
@@ -414,7 +414,7 @@ async function resolveWithInventoryAsync(
     adb,
   });
   const device = async (booted: boolean): Promise<ClaimedDeviceResult> => {
-    const held = touchClaim(claim) ?? heldClaim(claim);
+    const held = (await touchClaimAsync(claim)) ?? heldClaim(claim);
     if (held == null) {
       return lostClaimRefusal(platform, candidate, readClaim(backend, candidate.id));
     }
