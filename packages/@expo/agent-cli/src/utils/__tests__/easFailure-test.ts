@@ -3,7 +3,7 @@
 // signature, so an unlinked project was told it was not signed in while the real cause sat in the
 // raw output.
 
-import { classifyEasFailure } from '../easFailure';
+import { classifyEasFailure, easFailureReason, readEasFailure } from '../easFailure';
 
 /** The whole of what an unlinked project's `eas deploy` prints [observed — friction run 9]. */
 const UNLINKED_OUTPUT = [
@@ -105,6 +105,88 @@ describe('the one-line summary', () => {
   it(`names the login for a signed-out machine`, () => {
     expect(classifyEasFailure('You are not logged in')?.summary).toContain(
       'npx @expo/agent-cli login'
+    );
+  });
+});
+
+// @ref llp/0021-honest-reports.rfc.md §The rules — rules 11 and 14. On a cold scratch directory bunx
+// writes its install progress to stderr before the EAS CLI writes there [observed — 2026-10-05].
+describe(readEasFailure, () => {
+  const RUNNER =
+    'Resolving dependencies\nResolved, downloaded and extracted [214]\nSaved lockfile\n';
+
+  it.each([
+    [
+      'the first line after the runner',
+      `${RUNNER}TypeError: x is not a function\n`,
+      '',
+      { kind: 'line', line: 'TypeError: x is not a function' },
+    ],
+    [
+      'stdout when stderr is only the runner',
+      RUNNER,
+      'Error: build not found',
+      { kind: 'line', line: 'Error: build not found' },
+    ],
+    [
+      'the runner when it printed everything',
+      RUNNER,
+      '',
+      { kind: 'runner-only', runnerLine: 'Resolving dependencies' },
+    ],
+    [
+      'stdout before the closing line',
+      'Error: build:list command failed.\n',
+      'Something this CLI does not recognise.',
+      { kind: 'line', line: 'Something this CLI does not recognise.' },
+    ],
+    [
+      'the closing line when nothing else was printed',
+      'Error: build:list command failed.\n',
+      '',
+      { kind: 'line', line: 'Error: build:list command failed.' },
+    ],
+    [
+      'stderr before stdout',
+      'Error: quota exceeded\n',
+      'Simulator session created (id: s1)',
+      { kind: 'line', line: 'Error: quota exceeded' },
+    ],
+    ['nothing when nothing was printed', '', '  \n', { kind: 'nothing' }],
+  ])('reads %s', (_, stderr, stdout, expected) => {
+    expect(readEasFailure({ stdout, stderr })).toEqual(expected);
+  });
+
+  it('reads a recognised sentence after the runner', () => {
+    const said = readEasFailure({ stdout: '', stderr: `${RUNNER}Error: You are not logged in.\n` });
+    expect(said.kind === 'cause' && said.cause.id).toBe('eas-login');
+  });
+});
+
+describe(easFailureReason, () => {
+  const invocation = 'bunx eas-cli@latest simulator:start';
+
+  it('quotes what EAS said', () => {
+    expect(
+      easFailureReason(
+        { exitCode: 1, stdout: '', stderr: 'Resolving dependencies\nError: quota exceeded\n' },
+        invocation
+      )
+    ).toBe('"bunx eas-cli@latest simulator:start" exited 1: Error: quota exceeded');
+  });
+
+  it('says the runner did not deliver the CLI when only the runner printed', () => {
+    const reason = easFailureReason(
+      { exitCode: 1, stdout: '', stderr: 'Resolving dependencies\n' },
+      invocation
+    );
+    expect(reason).toContain('failed to deliver the eas CLI');
+    expect(reason).toContain('("Resolving dependencies")');
+  });
+
+  it('says a run that printed nothing printed nothing', () => {
+    expect(easFailureReason({ exitCode: null, stdout: '', stderr: '' }, invocation)).toBe(
+      '"bunx eas-cli@latest simulator:start" exited on a signal: it printed nothing'
     );
   });
 });

@@ -22,6 +22,7 @@
 /** What the EAS CLI's own words say, when they say something this CLI can act on. */
 import { PROGRAM_PREFIX } from '../programName';
 import { easCommandPrefix } from './easCli';
+import { runnerNoiseReason, withoutRunnerNoise } from './wrapperCrash';
 
 export interface EasFailureCause {
   /** Which sentence was recognised. */
@@ -136,3 +137,71 @@ export function classifyEasFailure(output: string): EasFailureCause | null {
 
 /** @deprecated The name this had when only `deploy` read it. */
 export const classifyEasDeployFailure = classifyEasFailure;
+
+/**
+ * What a failed `eas` run said, read the same way by every caller that quotes it.
+ *
+ * A recognised sentence first (llp/0027 §What EAS said), then the first stderr line that is neither
+ * the package runner's nor the CLI's closing line, then stdout (llp/0021 rules 11 and 14). On a cold
+ * scratch directory the runner writes its install progress to stderr before the CLI writes there,
+ * so the first line of stderr is often the runner's.
+ */
+export type EasSaid =
+  | { kind: 'cause'; cause: EasFailureCause }
+  | { kind: 'line'; line: string }
+  | { kind: 'runner-only'; runnerLine: string }
+  | { kind: 'nothing' };
+
+export function readEasFailure({ stdout, stderr }: { stdout: string; stderr: string }): EasSaid {
+  const cause = classifyEasFailure(`${stdout}\n${stderr}`);
+  if (cause) {
+    return { kind: 'cause', cause };
+  }
+  const line =
+    firstLine(withoutRunnerNoise(stderr), EAS_COMMAND_FAILED) ??
+    firstLine(stdout) ??
+    firstLine(withoutRunnerNoise(stderr));
+  if (line) {
+    return { kind: 'line', line };
+  }
+  const runnerLine = firstLine(stderr);
+  return runnerLine ? { kind: 'runner-only', runnerLine } : { kind: 'nothing' };
+}
+
+/** {@link readEasFailure} as one reason: `"<invocation>" exited 1: <what it said>`. */
+export function easFailureReason(
+  result: { exitCode: number | null; stdout: string; stderr: string },
+  invocation: string
+): string {
+  const said = readEasFailure(result);
+  if (said.kind === 'runner-only') {
+    return runnerNoiseReason(
+      { tool: 'eas', exitCode: result.exitCode },
+      invocation,
+      said.runnerLine
+    );
+  }
+  const text =
+    said.kind === 'cause'
+      ? said.cause.summary
+      : said.kind === 'line'
+        ? said.line
+        : 'it printed nothing';
+  return `"${invocation}" exited ${result.exitCode ?? 'on a signal'}: ${text}`;
+}
+
+/**
+ * `Error: build:list command failed.` names no cause. The EAS CLI prints it on stderr after it put the
+ * explanation on stdout [observed — live against an unlinked project, 2026-08-26].
+ */
+const EAS_COMMAND_FAILED = /^Error: \S+ command failed\.?$/;
+
+function firstLine(output: string, skip?: RegExp): string | null {
+  for (const raw of output.split('\n')) {
+    const line = raw.trim();
+    if (line && !skip?.test(line)) {
+      return line;
+    }
+  }
+  return null;
+}

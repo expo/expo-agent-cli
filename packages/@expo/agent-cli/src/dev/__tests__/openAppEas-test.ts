@@ -444,6 +444,48 @@ describe(openAppOnEasAsync, () => {
     expect(report.reason).toContain('npx --yes eas-cli@latest simulator:stop --id sess-billed');
   });
 
+  // @ref llp/0021-honest-reports.rfc.md §The rules — rules 11 and 14 [observed — bunx on a
+  // half-written scratch directory, 2026-10-05].
+  it.each([
+    [
+      'the first line after the runner progress',
+      'Resolving dependencies\nTypeError: (0 , minimatch_1.minimatch) is not a function\n',
+      'exited 1: TypeError: (0 , minimatch_1.minimatch) is not a function',
+      false,
+    ],
+    [
+      'that the runner did not deliver the CLI when the runner printed nothing else',
+      'Resolving dependencies\nResolved, downloaded and extracted [214]\n',
+      'failed to deliver the eas CLI',
+      true,
+    ],
+    [
+      'the session a cold start created, not that EAS never ran',
+      'Resolving dependencies\nSimulator session created (id: sess-billed)\nTimed out after 600s\n',
+      'simulator:stop --id sess-billed',
+      false,
+    ],
+  ])(`quotes %s`, async (_, stderr, expected, runnerOnly) => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: '',
+      stderr,
+      exitCode: 1,
+      spawnError: null,
+    } as any);
+
+    const report = await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+
+    expect(report.opened).toBe(false);
+    expect(report.reason).toContain(expected);
+    expect(report.reason).not.toContain('exited 1: Resolving dependencies');
+    expect(report.reason!.includes('failed to deliver the eas CLI')).toBe(runnerOnly);
+  });
+
   it(`says when no eas can be run at all`, async () => {
     vi.mocked(resolveEasCli).mockReturnValue(null);
     const report = await openAppOnEasAsync(projectRoot, {

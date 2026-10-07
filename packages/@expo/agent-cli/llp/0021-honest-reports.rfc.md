@@ -41,6 +41,8 @@ A detached `dev --detach --ios` **without** `--wait-ready` that prints `Dev serv
 
 The final `/status` probe can itself outlast the child. Its two-second timeout exceeds the platform-opening grace window, so reading the child state before awaiting that probe can report exit 20 even when the log already holds a needs-human handoff [confirmed — deterministic `detachAsync-test.ts`, 2026-09-30]. Both the final check and grace polls now read the process state and verdict after the awaited probe. Any failure with an exited child gets one bounded wait for the handoff to finish; healthy runs keep the existing grace budget.
 
+A failed EAS Simulator session start whose reason is `Resolving dependencies` is rules 11 and 14. On a cold scratch directory, bunx writes its install progress to stderr first, and the CLI writes after it on the same stream [observed — 2026-10-05]. `readEasFailure` in `src/utils/easFailure.ts` reads a failed `eas` run for every caller that quotes it. It takes a recognised sentence first, then the first line that is not the runner's. When the runner printed nothing else, the reason says the runner did not deliver the CLI.
+
 Copying one EAS build's fingerprint comparison onto both platforms is rule 3. `src/impact/buildCache.ts` answers per platform.
 
 `deploy` classifying EAS failures is rule 4. `src/deploy/easFailure.ts` reads the EAS CLI's own sentence first.

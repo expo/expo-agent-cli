@@ -216,6 +216,17 @@ export function runnerNoiseLine(stderr: string): string | null {
   return firstNonEmptyLine(stderr);
 }
 
+/**
+ * The output with the runner's own lines removed. On a cold scratch directory the runner prints
+ * first and the CLI prints after it, on the same stream, so the CLI's sentence is the first line left.
+ */
+export function withoutRunnerNoise(output: string): string {
+  return output
+    .split('\n')
+    .filter((line) => !RUNNER_NOISE.some((pattern) => pattern.test(line.trim())))
+    .join('\n');
+}
+
 function firstNonEmptyLine(output: string): string | null {
   for (const raw of output.split('\n')) {
     const line = raw.trim();
