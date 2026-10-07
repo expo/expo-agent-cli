@@ -24,14 +24,14 @@ import path from 'path';
 
 import {
   bindEasSession,
-  isEndedSessionStatus,
+  isClaimedSessionOver,
   lookupCloudSessionsAsync,
   probeCloudSessionAsync,
   CLOUD_SESSION_TIMEOUT_MS,
   PENDING_SESSION_STATUS,
   type CloudPlatform,
 } from '../device/cloudSimulator';
-import { readClaims, releaseClaim } from '../deviceClaims';
+import { readClaim, readClaims, releaseClaim } from '../deviceClaims';
 import * as Log from '../log';
 import { openRouteAsync, resolveRouteUrlAsync } from '../navigate/openRoute';
 import type { NativePlatform } from '../plan/types';
@@ -455,9 +455,10 @@ export async function stopEasSessionAsync(
   };
   if (result.exitCode !== 0) {
     // @ref llp/0030-one-device-per-agent.rfc.md §EAS backend
-    // A stop can fail because the session ended first. Only the service's word releases the claim.
+    // A stop can fail because the session ended first. Only the service's word, or a claim older
+    // than any session runs, releases the claim.
     const [session] = await lookupCloudSessionsAsync([sessionId], { projectRoot, easCli });
-    if (isEndedSessionStatus(session?.status ?? null)) {
+    if (isClaimedSessionOver(session?.status ?? null, readClaim('eas', sessionId))) {
       releaseOwnClaim();
       return { ok: true, reason: null };
     }
