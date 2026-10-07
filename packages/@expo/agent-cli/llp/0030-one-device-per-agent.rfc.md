@@ -108,7 +108,7 @@ The dotenv rung is skipped when the registry holds a live `eas` claim of another
 
 `--device <udid|serial|name>` on `dev` and `navigate` (`status` has the flag already) skips allocation steps 1 to 5 and writes the claim, so other agents skip that device. It names a simulator, an emulator or a device on this machine, so `dev` and `navigate` refuse it with `--eas` (`BAD_ARGS`). An EAS session is bound only by the session this worktree started or the one its `.env.eas-simulator` names (§EAS backend).
 
-For a local device, `--device` is step 0 of the allocation, under the same registry lock. Devices that another live worktree holds are dropped before the name is matched, because two emulators of one AVD share a name. The worktree's other claims on the platform are released only after the named device is claimed and usable, so a `--device` that fails keeps the device that works.
+For a local device, `--device` is step 0 of the allocation, under the same registry lock. Devices that another live worktree holds are dropped before the name is matched, because two emulators of one AVD share a name. The worktree's other claims on the platform are released only after the named device is claimed and usable, so a `--device` that fails keeps the device that works. They are released under the registry lock, as `dev:stop` releases them: a device this CLI booted or created is shut down first. A claim whose shutdown fails is released too, and the verb says on stderr that the device is still up, because the named device must be the only device this worktree holds on the platform.
 
 ## Every verb uses the claim
 
