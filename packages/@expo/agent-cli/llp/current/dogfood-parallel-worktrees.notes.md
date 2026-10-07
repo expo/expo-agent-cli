@@ -2,7 +2,7 @@
 
 Agents: three Claude (Opus 5.5) delegates, 2026-10-07 from 00:50 CEST, one per git worktree, each
 on its own feature of the Notes app (edit, search, pin). A fourth delegate then verified the
-composed app alone. A coordinator (Claude Fable 5.1) wrote the briefs, reviewed the diffs and stacked
+composed app alone, and a fifth added deep links on top. A coordinator (Claude Fable 5.1) wrote the briefs, reviewed the diffs and stacked
 the branches.
 CLI: `packages/@expo/agent-cli/bin/cli.js` built in each worktree at 1f43a33 (PR #100 rebased on
 main a1c1b29, PR #108 on top, the fixes layer of PR #107 dropped), run from `apps/eas-example`.
@@ -242,6 +242,41 @@ to `no-matches`, the state surviving `runtime:reload`, then `runtime:errors`, `s
 
 The `--verify` diff pairing unrelated texts by position (run 1, finding 15) reproduced.
 
+## A fifth run: deep links, one agent, the `navigate <route>` verb
+
+One more delegate added a deep link (`easexample://note/<id>` opens the note) on top of the
+stack, alone, through the same verbs. `navigate /note/4`, `/note/5`, `/note/999` and `/` each
+opened the URL it printed in 1 to 3 s, exit 0, with "Route not checked · this project has no app
+directory, so it does not use Expo Router". The tree proved each screen. After `runtime:reload`,
+`navigate /note/4` took the URL-event path and opened the note. `smoke --ios`, `typecheck` and
+`dev:stop` exit 0; `typecheck` caught a TS2345 that `smoke` had passed over, as its follow-up says.
+Findings 3, 10, 18 and 19 reproduced. New:
+
+### 21. `smoke --ios` reinstalls the app `dev` just installed
+
+- **What I ran.** `smoke --ios` right after `dev` had built and installed the app (link)
+- **What happened.** "install-app 30.6s · installed the app ... and left it there", 47 s in all.
+  `status` still said "no recorded build" (18).
+- **What I expected.** The install skipped when the installed build matches.
+- **Severity.** `slow`
+
+### 22. No CLI path opens a link on an app that is not running
+
+- **What I ran.** Nothing fit (link). `navigate` sends to the running app; `runtime:reload` keeps the
+  launch URL.
+- **What happened.** The `getInitialURL` branch ran only for `easexample://` when `smoke`
+  cold-opened the app. A cold start on `/note/4` was not verified.
+- **What I expected.** `navigate --cold`, or `smoke --route` doing a cold launch on that route.
+- **Severity.** `missing`
+
+### 23. `navigate` cannot say whether the app handled the link, and its follow-up points away from the verb that can
+
+- **What I ran.** `navigate /note/999` (link)
+- **What happened.** Exit 0, the same output as a valid id. The "Suggested next" names a screenshot
+  and `runtime:errors`; `runtime:tree` is what proved the screen.
+- **What I expected.** `runtime:tree` in the follow-ups of `navigate`.
+- **Severity.** `unclear`
+
 ## What worked
 
 - Three worktrees got three distinct simulators from the registry, with no flag and no config. One
@@ -269,7 +304,7 @@ The `--verify` diff pairing unrelated texts by position (run 1, finding 15) repr
 | -------- | ----- | --------------------------- |
 | blocked  | 1     | 2                           |
 | wrong    | 9     | 1, 3, 4, 5, 6, 7, 8, 17, 18 |
-| slow     | 1     | 14                          |
-| unclear  | 6     | 9, 10, 11, 12, 15, 19       |
-| missing  | 2     | 13, 20                      |
+| slow     | 2     | 14, 21                      |
+| unclear  | 7     | 9, 10, 11, 12, 15, 19, 23   |
+| missing  | 3     | 13, 20, 22                  |
 | fine     | 1     | 16                          |
