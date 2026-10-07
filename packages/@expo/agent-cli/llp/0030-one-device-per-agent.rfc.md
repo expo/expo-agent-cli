@@ -105,7 +105,7 @@ The dotenv rung is skipped when the registry holds a live `eas` claim of another
 
 ## Explicit device
 
-`--device <udid|serial|name|session-id>` on `dev` and `navigate` (`status` has the flag already) skips allocation steps 1 to 5 and writes the claim, so other agents skip that device. This is also the way to bind an EAS session that another tool started.
+`--device <udid|serial|name>` on `dev` and `navigate` (`status` has the flag already) skips allocation steps 1 to 5 and writes the claim, so other agents skip that device. It names a simulator, an emulator or a device on this machine, so `dev` and `navigate` refuse it with `--eas` (`BAD_ARGS`). An EAS session is bound only by the session this worktree started or the one its `.env.eas-simulator` names (§EAS backend).
 
 For a local device, `--device` is step 0 of the allocation, under the same registry lock. Devices that another live worktree holds are dropped before the name is matched, because two emulators of one AVD share a name. The worktree's other claims on the platform are released only after the named device is claimed and usable, so a `--device` that fails keeps the device that works.
 
@@ -166,3 +166,4 @@ Two facts correct earlier text in this RFC and in llp/0005: at eas-cli 24.7.0 a 
 ## Open questions
 
 1. Where does the idle check run, and what counts as activity? The backend passes `max_idle_time_minutes` to the job (`DeviceRunSessionUtils.ts:282`); the job code was not read.
+2. Should `--device <session-id>` with `--eas` bind an in-progress session that another tool started outside this worktree, which `dev` and `navigate` refuse today?
