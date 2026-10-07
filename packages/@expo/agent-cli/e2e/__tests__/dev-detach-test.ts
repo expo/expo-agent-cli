@@ -413,6 +413,48 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can complete
+  // A second foreground server could not hold the lock, so `status` and `dev:stop` could not see it.
+  it('stops a foreground dev, and lists no steps under --plan, while the server runs', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+
+    try {
+      const first = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--wait-ready', '--json'],
+        { env: { ...detachEnv(projectRoot, 8391), STUB_EXPO_LISTEN: '1' } }
+      );
+      const { pid } = JSON.parse(first.stdout);
+
+      const foreground = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
+        env: stubExpoEnv(projectRoot),
+        reject: false,
+      });
+
+      expect(foreground.exitCode, foreground.all).toBe(20);
+      expect(JSON.parse(foreground.stdout).error).toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+        data: { port: 8391, pid, phase: 'serving' },
+      });
+      const starts = readStubExpoInvocations(projectRoot).filter(({ args }) => args[0] === 'start');
+      expect(starts).toHaveLength(1);
+
+      const planned = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--plan', '--json'],
+        { env: stubExpoEnv(projectRoot) }
+      );
+
+      expect(planned.exitCode).toBe(0);
+      expect(JSON.parse(planned.stdout)).toMatchObject({
+        steps: [],
+        devServerPort: { port: 8391, state: 'running', phase: 'serving' },
+      });
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
   // The counterpart of the finding: `dev:stop` has to reach a process this shell never owned.
   it('is stopped by dev:stop, which takes the whole tree with it', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
