@@ -500,6 +500,48 @@ describe(devAsync, () => {
       expect(planned).toEqual(['run:ios', '--device', 'SIM-A', '--port', '8081']);
     });
 
+    /** A dev-client project whose recorded build is current, so the plan builds nothing. */
+    function freshBuild(platform: 'ios' | 'android') {
+      vol.writeFileSync(
+        path.join(projectRoot, 'app.json'),
+        JSON.stringify({
+          expo: {
+            ios: { bundleIdentifier: 'com.example.app' },
+            android: { package: 'com.example.app' },
+          },
+        })
+      );
+      vi.mocked(readLastBuildRecord).mockReturnValue({
+        [platform]: { hash: fingerprintHash, sources: null },
+      });
+    }
+
+    const stepsOf = (plan: StartPlan) => plan.steps.map(({ argv }) => argv.join(' '));
+
+    // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
+    it(`--plan --device <shut-down simulator> reads the app off its disk, and plans the install the run makes`, async () => {
+      freshBuild('ios');
+      vol.mkdirSync(
+        path.join(os.homedir(), 'Library', 'Developer', 'CoreSimulator', 'Devices', 'SIM-B'),
+        { recursive: true }
+      );
+      simulators([
+        { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },
+        { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
+      ]);
+
+      await devAsync(projectRoot, resolveDevOptions(['--plan', '--ios', '--device', 'SIM-B']));
+      const planned = emittedPlan();
+      await devAsync(projectRoot, resolveDevOptions(['--ios', '--device', 'SIM-B']));
+      const ran = emittedPlan();
+
+      expect(stepsOf(planned)).toEqual([
+        'expo run:ios --no-bundler --device SIM-B',
+        'expo start --dev-client --port 8081',
+      ]);
+      expect(stepsOf(ran)).toEqual(stepsOf(planned));
+    });
+
     /** AVDs that start on the console port they are given, and answer adb once they run. */
     function emulators(avds: string[]) {
       const running = new Map<string, string>();
@@ -553,6 +595,20 @@ describe(devAsync, () => {
         expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, planned, expect.anything());
       }
     );
+
+    it(`--plan --device <AVD not running> says it could not ask the emulator for the app`, async () => {
+      freshBuild('android');
+      emulators(['Pixel_8']);
+
+      await expect(
+        devAsync(projectRoot, resolveDevOptions(['--plan', '--android', '--device', 'Pixel_8']))
+      ).resolves.toBe(0);
+
+      expect(stepsOf(emittedPlan())).toEqual(['expo start --dev-client --port 8081']);
+      expect(emittedPlan().reasons).toContainEqual(
+        expect.stringContaining('Pixel_8 is not running, so this plan could not ask it for the app')
+      );
+    });
   });
 
   describe('running the plan', () => {

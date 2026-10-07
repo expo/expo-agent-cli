@@ -57,7 +57,7 @@ export interface PlanDevices {
  *  - **it runs a native app of this project** — `web` opens a browser, `expo-go` runs in a
  *    published app `expo start` offers to install itself, and `not-expo-app` has no app at all.
  */
-function awaitsADevice(plan: StartPlan): boolean {
+export function awaitsADevice(plan: StartPlan): boolean {
   return plan.buildLocation == null && (plan.target === 'dev-client' || plan.target === 'bare');
 }
 
