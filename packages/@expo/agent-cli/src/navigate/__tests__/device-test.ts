@@ -3,6 +3,8 @@ import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
+import { writeClaim } from '../../deviceClaims';
+import { canonicalizeExistingPath } from '../../utils/dir';
 import {
   parseBootedIosSimulators,
   probeAndroidDeviceAsync,
@@ -197,6 +199,44 @@ describe(resolveDeviceAsync, () => {
 
     expect(error.code).toBe('NO_IOS_DEVICE');
     expect(error.message).toContain('npx @expo/agent-cli dev --ios --detach');
+  });
+
+  // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
+  it(`should refuse with DEVICES_ALL_CLAIMED, as dev does, when another worktree holds every booted simulator`, async () => {
+    vol.mkdirSync('/other', { recursive: true });
+    const other = canonicalizeExistingPath('/other');
+    const now = new Date().toISOString();
+    writeClaim({
+      backend: 'local-ios',
+      platform: 'ios',
+      id: 'IOS-1',
+      projectRoot: other,
+      pid: 1,
+      claimedAt: now,
+      touchedAt: now,
+      created: false,
+      booted: false,
+    });
+    mockSpawnQueue([
+      {
+        stdout: JSON.stringify({
+          devices: {
+            'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [
+              { udid: 'IOS-1', name: 'iPhone 17', state: 'Booted', isAvailable: true },
+              { udid: 'IOS-3', name: 'iPhone 16', state: 'Shutdown', isAvailable: true },
+            ],
+          },
+        }),
+      },
+    ]);
+
+    const error = await resolveDeviceAsync('ios', LOCAL).catch((e) => e);
+
+    expect(error).toMatchObject({
+      code: 'DEVICES_ALL_CLAIMED',
+      data: { platform: 'ios', holders: [{ id: 'IOS-1', projectRoot: other }] },
+    });
+    expect(error.message).toContain('Every booted iOS simulator is claimed by another worktree.');
   });
 
   it(`should explain how to start an emulator when --android finds none`, async () => {
