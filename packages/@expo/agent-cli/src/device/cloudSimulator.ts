@@ -34,7 +34,7 @@ import { classifySubprocessFailure } from '../needsHuman/detect';
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { PROGRAM_PREFIX } from '../programName';
 import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/easCli';
-import { classifyEasFailure } from '../utils/easFailure';
+import { classifyEasFailure, easFailureReason } from '../utils/easFailure';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import {
@@ -706,18 +706,9 @@ export async function probeCloudSessionAsync({
     );
   }
   if (result.exitCode !== 0) {
-    // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — a refusal this CLI recognises is
-    // answered in its own words, with the fix; anything else quotes the CLI's first line.
-    const cause = classifyEasFailure(`${result.stdout}\n${result.stderr}`);
+    // @ref llp/0027-everything-on-eas.rfc.md §What EAS said
     return {
-      ...unknownSession(
-        preferredId,
-        cause
-          ? `"${result.command}" exited ${result.exitCode ?? 'on a signal'}: ${cause.summary}`
-          : `"${result.command}" exited ${result.exitCode ?? 'on a signal'}${
-              firstLine(result.stderr) ? `: ${firstLine(result.stderr)}` : ''
-            }`
-      ),
+      ...unknownSession(preferredId, easFailureReason(result, result.command)),
       failure: result,
     };
   }
@@ -1275,8 +1266,4 @@ function stringOf(value: unknown): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function firstLine(text: string): string {
-  return text.trim().split('\n')[0] ?? '';
 }

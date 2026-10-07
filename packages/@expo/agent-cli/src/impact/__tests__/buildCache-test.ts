@@ -106,4 +106,19 @@ describe(describeLookupFailure, () => {
       )
     ).toContain('not linked to an EAS project');
   });
+
+  // On a cold scratch directory the runner prints first and the CLI after it, on stderr
+  // [observed — 2026-10-05]. A guard that read only the first line said the runner did all of it.
+  it("quotes the CLI's line after the runner's progress", () => {
+    expect(
+      describeLookupFailure(
+        {
+          exitCode: 1,
+          stdout: '',
+          stderr: 'Resolving dependencies\nSaved lockfile\nEntity not authorized: Build (ID 123)\n',
+        },
+        INVOCATION
+      )
+    ).toBe('Entity not authorized: Build (ID 123)');
+  });
 });

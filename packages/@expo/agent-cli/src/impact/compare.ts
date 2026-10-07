@@ -8,13 +8,8 @@ import { diffFingerprintsAsync, generateFingerprintAsync } from '../project/fing
 import type { FingerprintDiffItem, FingerprintSource } from '../project/fingerprint';
 import { easCliArgs, easCliLabel, type EasCli } from '../utils/easCli';
 import { spawnSubprocessAsync } from '../utils/subprocess';
-import {
-  looksLikeRunnerNoise,
-  looksLikeWrapperCrash,
-  runnerCrashDetail,
-  runnerNoiseLine,
-  runnerNoiseReason,
-} from '../utils/wrapperCrash';
+import { readEasFailure } from '../utils/easFailure';
+import { looksLikeWrapperCrash, runnerCrashDetail, runnerNoiseReason } from '../utils/wrapperCrash';
 import type { ComparisonSide } from './types';
 import { easCommandPrefix } from '../utils/easCli';
 
@@ -217,35 +212,37 @@ export async function compareWithEasBuildAsync(
     // may be a wrapper, a shim or a stale link. Its bytes are not an answer about this build, and
     // the "check the id, check your sign-in" line below is advice about neither problem it has.
     const wrapperCrash = !result.spawnError && looksLikeWrapperCrash({ tool: 'eas', ...result });
-    // F93, the same guard the build lookup takes: a spawn that printed only the runner's install
-    // progress never reached the CLI, so "check the id, check your sign-in" is advice about a
-    // problem this run does not have.
-    const runnerNoise = !result.spawnError && looksLikeRunnerNoise({ tool: 'eas', ...result });
+    // F93: a spawn that printed only the runner's install progress never reached the CLI, so
+    // "check the id, check your sign-in" is advice about a problem this run does not have.
+    const said = result.spawnError ? null : readEasFailure(result);
+    const quoted =
+      said?.kind === 'cause' ? said.cause.summary : said?.kind === 'line' ? said.line : null;
     return {
       base: baseSide,
       head: headSide,
       items: null,
       fingerprintChanged: null,
       caveats: [],
-      error: runnerNoise
-        ? [
-            `Could not compare against EAS build ${buildId}.`,
-            `Why: ${runnerNoiseReason({ tool: 'eas', exitCode: result.exitCode }, easCliLabel(easCli), runnerNoiseLine(result.stderr))}.`,
-            `How: run this command again — the install completes once and the next run is warm. "npm install --save-dev eas-cli" pins the CLI into the project, which removes the download from every run.`,
-          ].join('\n')
-        : wrapperCrash
+      error:
+        said?.kind === 'runner-only'
           ? [
               `Could not compare against EAS build ${buildId}.`,
-              `Why: "${[easCliLabel(easCli), ...args].join(' ')}" ${describeExit(result.exitCode, result.spawnError)}.`,
-              runnerCrashDetail({ tool: 'eas', exitCode: result.exitCode }, easCliLabel(easCli)),
+              `Why: ${runnerNoiseReason({ tool: 'eas', exitCode: result.exitCode }, easCliLabel(easCli), said.runnerLine)}.`,
+              `How: run this command again — the install completes once and the next run is warm. "npm install --save-dev eas-cli" pins the CLI into the project, which removes the download from every run.`,
             ].join('\n')
-          : [
-              `Could not compare against EAS build ${buildId}.`,
-              `Why: "${[easCliLabel(easCli), ...args].join(' ')}" ${describeExit(result.exitCode, result.spawnError)}${
-                result.stderr.trim() ? `: ${outputTail(result.stderr)}` : ''
-              }`,
-              `How: check the id with "${easCommandPrefix()} build:list --limit 5 --json --non-interactive", and that this machine is signed in to the account that owns it.`,
-            ].join('\n'),
+          : wrapperCrash
+            ? [
+                `Could not compare against EAS build ${buildId}.`,
+                `Why: "${[easCliLabel(easCli), ...args].join(' ')}" ${describeExit(result.exitCode, result.spawnError)}.`,
+                runnerCrashDetail({ tool: 'eas', exitCode: result.exitCode }, easCliLabel(easCli)),
+              ].join('\n')
+            : [
+                `Could not compare against EAS build ${buildId}.`,
+                `Why: "${[easCliLabel(easCli), ...args].join(' ')}" ${describeExit(result.exitCode, result.spawnError)}${
+                  quoted ? `: ${quoted}` : ''
+                }`,
+                `How: check the id with "${easCommandPrefix()} build:list --limit 5 --json --non-interactive", and that this machine is signed in to the account that owns it.`,
+              ].join('\n'),
     };
   }
 

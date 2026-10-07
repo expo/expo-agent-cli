@@ -204,6 +204,22 @@ describe(readEasFailure, () => {
       'Simulator session created (id: s1)',
       { kind: 'line', line: 'Error: quota exceeded' },
     ],
+    [
+      "npx's install notice, which names the package, as the runner",
+      'npm warn exec The following package was not found and will be installed: eas-cli@latest\n',
+      '',
+      {
+        kind: 'runner-only',
+        runnerLine:
+          'npm warn exec The following package was not found and will be installed: eas-cli@latest',
+      },
+    ],
+    [
+      'stdout when the runner and the closing line are all of stderr',
+      'Resolving dependencies\nError: build:list command failed.\n',
+      'Something this CLI does not recognise.',
+      { kind: 'line', line: 'Something this CLI does not recognise.' },
+    ],
     ['nothing when nothing was printed', '', '  \n', { kind: 'nothing' }],
   ])('reads %s', (_, stderr, stdout, expected) => {
     expect(readEasFailure({ stdout, stderr })).toEqual(expected);

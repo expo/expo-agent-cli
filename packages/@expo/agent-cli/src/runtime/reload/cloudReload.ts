@@ -46,6 +46,7 @@ import {
 } from '../../device/cloudSimulator';
 import { resolveDeviceAsync, type NavigateDevice } from '../../navigate/device';
 import { hostPlatform } from '../../smoke/suggest';
+import { easFailureReason } from '../../utils/easFailure';
 import { resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { readConfiguredAppId, resolveAppId } from '../appId';
 import { debugEvent } from './events';
@@ -223,10 +224,5 @@ function refusalReason(result: CloudRunResult, what: string): string {
   if (controller) {
     return `${what}: the session's controller answered ${controller.code} — "${controller.message}" — so the command reached the device and the device is what said no (${result.command})`;
   }
-  const said = firstLine(result.stderr) || firstLine(result.stdout);
-  return `${what}: "${result.command}" exited ${result.exitCode ?? 'on a signal'}${said ? `: ${said}` : ''}`;
-}
-
-function firstLine(text: string): string {
-  return text.trim().split('\n')[0] ?? '';
+  return `${what}: ${easFailureReason(result, result.command)}`;
 }
