@@ -249,10 +249,12 @@ async function claimedLocalDeviceAsync(
   if (claimed.kind === 'no-tool') {
     return { device: null, reason: claimed.reason, toolError: claimed.error };
   }
-  if (fallsThrough && (claimed.kind === 'not-found' || claimed.kind === 'exhausted')) {
+  // `DEVICES_ALL_CLAIMED`, as `dev` refuses: other worktrees hold every booted device.
+  const allClaimed = claimed.kind === 'exhausted' || claimed.holders.length > 0;
+  if (fallsThrough && (claimed.kind === 'not-found' || allClaimed)) {
     return { device: null, reason: claimed.reason };
   }
-  if (claimed.kind === 'exhausted' || claimed.kind === 'not-found' || claimed.kind === 'claimed') {
+  if (allClaimed || claimed.kind === 'not-found' || claimed.kind === 'claimed') {
     throw claimed.error;
   }
   return { device: null, reason: claimed.reason };
