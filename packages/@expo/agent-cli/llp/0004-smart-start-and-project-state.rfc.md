@@ -489,8 +489,27 @@ and recovers into a different command: `dev:stop --port <n> --force`, or a free 
 When the process on that port is this project's own dev server, which the lock says, the
 message says that instead.
 
-One retry per plan. A second collision means the port this CLI picked was taken between
-the bind test and the dev server's own bind.
+One retry. No plan has two dev-server steps, so that is one retry per plan. A second
+collision means the port this CLI picked was taken between the bind test and the dev
+server's own bind.
+
+The check runs whatever the step's exit code, because `expo run:*` that skipped its dev
+server on a busy port exits 0; the `Port <n> is …` line it prints before the skip is the
+collision. A bare `Skipping dev server`, with no such line, is the Expo CLI reusing this
+project's own dev server, and the step succeeded. The check also reads Metro's
+`listen EADDRINUSE` and the Expo CLI's `Port "<n>" became busy … while the app was
+compiling` stop as collisions. A collision is the step's own only when it names the
+step's port (its `--port`, else Expo's default) or names no port: a `run:*` step's output
+carries other listeners' errors too. A dev server that logged where it listens after the
+step started bound its port, so its output is never scanned. The check reads that log
+itself, because the port watch stops before a `run:*` build ends.
+
+A collision still present after the retry stops the run with `PORT_TAKEN_AFTER_RETRY`,
+exit 20. It names the port the step asked for, the port the retry moved to and lost, the
+pid on that port, and the Expo CLI's own exit code. Its How is the caller's own command
+line with a free `--port`. With no free port, it is `dev:stop --port <n> --force` when the
+holder answers as an Expo dev server and its process looks like one, and otherwise the
+pid to stop.
 
 The port probe is Expo's own `freePortAsync`, copied into `src/utils/freeport.ts`, so
 this CLI and the dev server agree on which port is free. It asks the unspecified address,

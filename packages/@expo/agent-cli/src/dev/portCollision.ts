@@ -26,7 +26,7 @@ export interface PortCollision {
 /**
  * The lines the Expo CLI prints when the port it wanted is busy.
  *
- * Three spellings, because they come from two versions and two branches of one function
+ * The spellings come from two versions and two branches of one function
  * [observed — `packages/@expo/cli/src/utils/port.ts`, and live against expo 57.0.15 on 2026-08-23]:
  *
  * - `Use port 8181 instead?` — the question itself, quoted back by the prompt helper's
@@ -35,11 +35,26 @@ export interface PortCollision {
  *   printed just above the question, which survives even when the question does not.
  * - `Port 8180 is unavailable and 'npx expo' is running in non-interactive mode` — the newer
  *   branch, which throws instead of asking when the port was explicit.
+ * - `› Skipping dev server` is not read on its own. When another process holds the port, `expo run:*`
+ *   prints a `Port 8081 is …` line above it, which the pattern above reads, then builds, installs,
+ *   deep-links the app to that process, and exits 0 [observed — live suite, 2026-10-05]. That exit
+ *   0 is why the check runs on any exit code. A skip with no `Port N is` line before it is the
+ *   Expo CLI reusing this project's own dev server (`choosePortAsync` with `reuseExistingPort`),
+ *   not a collision.
+ * - `Port "8081" became busy running another process while the app was compiling` — what
+ *   `expo run:*` throws, exit 1, when its explicit port was taken during the build
+ *   (`utils/port.ts` `ensurePortAvailabilityAsync`).
+ *
+ * And one from Metro: `Error: listen EADDRINUSE: address already in use :::8082`, when the port
+ * this CLI picked was free at the bind test and taken before Metro bound it. `expo start` then
+ * exits 1 [observed — two worktrees resolving the port at once, 2026-10-05].
  */
 const COLLISION_PATTERNS: RegExp[] = [
   /Use port (?<offered>\d+) instead\?/i,
   /Port\s+(?<requested>\d+)\s+is\s+(?:running\b|being used\b)/i,
   /Port\s+(?<requested>\d+)\s+is unavailable and/i,
+  /Port "?(?<requested>\d+)"? became busy/,
+  /listen EADDRINUSE: address already in use \S*?:(?<requested>\d+)\b/,
 ];
 
 /**
@@ -65,6 +80,11 @@ export function detectPortCollision(output: string): PortCollision | null {
   }
 
   return matched ? { requestedPort, offeredPort } : null;
+}
+
+/** Where `expo start` and `expo run:*` listen when nothing names a port: Expo's own default. */
+export function defaultMetroPort(): number {
+  return toPort(process.env.RCT_METRO_PORT) ?? 8081;
 }
 
 function toPort(value: string | undefined): number | null {

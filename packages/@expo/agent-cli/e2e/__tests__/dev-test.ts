@@ -546,7 +546,8 @@ describe('@expo/agent-cli dev', () => {
       const projectRoot = await setupAsync('go-app');
 
       const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
-        env: { STUB_EXPO_PORT_BUSY: '8180' },
+        // Expo's own default port variable, so the busy port is the one the Expo CLI wants.
+        env: { RCT_METRO_PORT: '8180', STUB_EXPO_PORT_BUSY: '8180' },
         reject: false,
       });
 
@@ -559,6 +560,31 @@ describe('@expo/agent-cli dev', () => {
       expect(starts[0]!.args).not.toContain('--port');
       expect(starts[1]!.args).toContain('--port');
       // Nobody was asked, so stdout is still the one plan object.
+      expect(JSON.parse(result.stdout)).toMatchObject({ target: 'expo-go' });
+    });
+
+    // Two worktrees picked the same free port at once; the other one bound it first, and Metro's
+    // own bind failed.
+    it('retries on the next free port when Metro could not bind the port it was given', async () => {
+      const projectRoot = await setupAsync('go-app');
+
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
+        // The stub's own default port, which it then fails to bind.
+        env: {
+          RCT_METRO_PORT: '8290',
+          STUB_EXPO_DEV_SERVER_PORT: '8290',
+          STUB_EXPO_EADDRINUSE_PORT: '8290',
+        },
+        reject: false,
+      });
+
+      expect(result.exitCode, result.all).toBe(0);
+      expect(result.stderr).toContain('Port 8290 was busy');
+      const starts = readStubExpoInvocations(projectRoot).filter(({ args }) => args[0] === 'start');
+      expect(starts).toHaveLength(2);
+      expect(starts[0]!.args).not.toContain('--port');
+      expect(starts[1]!.args.filter((arg) => arg === '--port')).toHaveLength(1);
+      expect(Number(starts[1]!.args.at(-1))).toBeGreaterThan(8290);
       expect(JSON.parse(result.stdout)).toMatchObject({ target: 'expo-go' });
     });
 

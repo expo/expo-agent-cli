@@ -4,6 +4,7 @@
 // fails here rather than silently turning a recoverable stop back into "a person must answer this".
 
 import {
+  defaultMetroPort,
   detectPortCollision,
   findFreePortAsync,
   formatPortMove,
@@ -38,6 +39,55 @@ describe(detectPortCollision, () => {
     const output = `Port 8180 is unavailable and 'npx expo' is running in non-interactive mode, so it can't prompt to use another port.`;
 
     expect(detectPortCollision(output)).toEqual({ requestedPort: 8180, offeredPort: null });
+  });
+
+  // What `expo run:*` printed with another project's Metro on 8081 and no terminal, before it built,
+  // deep-linked the app to that Metro, and exited 0 [observed — live suite, 2026-10-05].
+  it(`reads the run:* output that skipped the dev server on a busy port`, () => {
+    const output = [
+      '› Port 8081 is being used by another process',
+      "Input is required, but 'npx expo' is in non-interactive mode.",
+      '› Use port 8082 instead?',
+      '› Skipping dev server',
+    ].join('\n');
+
+    expect(detectPortCollision(output)).toEqual({ requestedPort: 8081, offeredPort: 8082 });
+  });
+
+  // `choosePortAsync` with `reuseExistingPort` returns before it logs a `Port N is` line when the
+  // holder is this project's own dev server: the run reuses it.
+  it(`answers null for a skip that reuses this project's dev server`, () => {
+    const output = [
+      '› Skipping dev server',
+      '› Build Succeeded',
+      '› Opening exp+stub://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
+    ].join('\n');
+
+    expect(detectPortCollision(output)).toBeNull();
+  });
+
+  // Metro's own bind failing after the port was picked: another worktree took it in between
+  // [observed — two worktrees resolving the port at once, 2026-10-05].
+  it(`reads Metro's bind failure on a port taken after it was picked`, () => {
+    const output = [
+      'Starting project at /Users/someone/app',
+      'Error: listen EADDRINUSE: address already in use :::8082',
+      '    at Server.setupListenHandle [as _listen2] (node:net:1940:16)',
+      '    at listenInCluster (node:net:1997:12)',
+    ].join('\n');
+
+    expect(detectPortCollision(output)).toEqual({ requestedPort: 8082, offeredPort: null });
+    expect(
+      detectPortCollision('Error: listen EADDRINUSE: address already in use 127.0.0.1:8083')
+    ).toEqual({ requestedPort: 8083, offeredPort: null });
+  });
+
+  // `expo run:*` with an explicit port that was taken while it compiled (`ensurePortAvailabilityAsync`).
+  it(`reads the run:* stop for a port taken during the build`, () => {
+    const output =
+      'CommandError: Port "8081" became busy running another process while the app was compiling. Re-run command to use a new port.';
+
+    expect(detectPortCollision(output)).toEqual({ requestedPort: 8081, offeredPort: null });
   });
 
   it.each([
@@ -143,5 +193,22 @@ describe('the port move a detached run reports', () => {
   it(`answers null for a log with no move in it`, () => {
     expect(parsePortMove('Starting project at /project\niOS Bundled 220ms')).toBeNull();
     expect(parsePortMove('')).toBeNull();
+  });
+});
+
+describe(defaultMetroPort, () => {
+  afterEach(() => {
+    delete process.env.RCT_METRO_PORT;
+  });
+
+  it(`is Expo's 8081`, () => {
+    delete process.env.RCT_METRO_PORT;
+    expect(defaultMetroPort()).toBe(8081);
+  });
+
+  // The variable `expo start` and `expo run:*` read their own default from.
+  it(`follows RCT_METRO_PORT`, () => {
+    process.env.RCT_METRO_PORT = '8300';
+    expect(defaultMetroPort()).toBe(8300);
   });
 });
