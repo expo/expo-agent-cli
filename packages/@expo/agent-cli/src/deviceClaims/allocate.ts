@@ -7,6 +7,7 @@ import { chooseDevice } from './choose';
 import { debugEvent, event } from './events';
 import { classifyClaimAsync } from './liveness';
 import {
+  claimFilePath,
   isSameClaim,
   pruneUnreadableClaims,
   readClaim,
@@ -168,16 +169,19 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>(
             }
           }
           // Claimed since the registry was read, or held by a claim file still being written.
-          // Choose again from what the file says now.
+          // Choose again from what the file says now. A file that does not parse yet still holds
+          // the device; its path stands in for the worktree it does not name yet.
           const current = await currentAsync(choice.claim);
           claims = claims.filter(
             (claim) => !(claim.backend === backend && claim.id === choice.candidate.id)
           );
-          if (current != null) {
-            claims.push(current);
-          } else {
-            inventory = inventory.filter((candidate) => candidate.id !== choice.candidate.id);
-          }
+          claims.push(
+            current ?? {
+              ...choice.claim,
+              projectRoot: claimFilePath(backend, choice.candidate.id),
+              liveness: 'live',
+            }
+          );
           continue;
         }
 
