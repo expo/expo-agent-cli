@@ -4,9 +4,11 @@
 // mid-flight — and a stubbed `fetch` would be a test of the stub.
 
 import { createServer, type Server } from 'http';
+import { vol } from 'memfs';
 import type { AddressInfo } from 'net';
 
 import {
+  matchProjectRoot,
   PACKAGER_STATUS_READY,
   waitForAppConnectionAsync,
   waitForBundlerReadyAsync,
@@ -127,6 +129,86 @@ describe(waitForBundlerReadyAsync, () => {
     expect(result.ready).toBe(true);
     expect(result.projectRootMatched).toBe(false);
     expect(result.reportedProjectRoot).toBe('/tmp/some-other-app');
+  });
+
+  // A monorepo's `metro.config.js` sets `projectRoot` to the workspace root.
+  it(`matches a project root that contains this project`, async () => {
+    const url = await startServerAsync(() => ({
+      body: PACKAGER_STATUS_READY,
+      headers: { 'X-React-Native-Project-Root': '/tmp/workspace' },
+    }));
+
+    const result = await waitForBundlerReadyAsync(url, {
+      timeoutMs: 2000,
+      projectRoot: '/tmp/workspace/apps/my-app',
+    });
+
+    expect(result.projectRootMatched).toBe(true);
+  });
+
+  it(`does not match a sibling whose name starts the same`, async () => {
+    const url = await startServerAsync(() => ({
+      body: PACKAGER_STATUS_READY,
+      headers: { 'X-React-Native-Project-Root': '/tmp/my-app' },
+    }));
+
+    const result = await waitForBundlerReadyAsync(url, {
+      timeoutMs: 2000,
+      projectRoot: '/tmp/my-app-2',
+    });
+
+    expect(result.projectRootMatched).toBe(false);
+  });
+
+  // A Claude Code worktree lives inside the main checkout and has a `.git` file at its root. The
+  // main checkout's Metro names the repo root, and it serves the main checkout's code.
+  describe('across a checkout boundary', () => {
+    const repo = '/work/repo';
+    const worktree = `${repo}/.claude/worktrees/w`;
+
+    beforeEach(() => {
+      vol.fromJSON({
+        [`${repo}/.git/HEAD`]: 'ref: refs/heads/main\n',
+        [`${repo}/apps/foo/package.json`]: '{}',
+        [`${repo}/apps/bar/package.json`]: '{}',
+        [`${worktree}/.git`]: `gitdir: ${repo}/.git/worktrees/w\n`,
+        [`${worktree}/apps/foo/package.json`]: '{}',
+      });
+    });
+
+    afterEach(() => {
+      vol.reset();
+    });
+
+    it(`does not match a worktree inside the reported root`, async () => {
+      const url = await startServerAsync(() => ({
+        body: PACKAGER_STATUS_READY,
+        headers: { 'X-React-Native-Project-Root': repo },
+      }));
+
+      const result = await waitForBundlerReadyAsync(url, {
+        timeoutMs: 2000,
+        projectRoot: worktree,
+      });
+
+      expect(result.projectRootMatched).toBe(false);
+    });
+
+    it(`does not match an app inside a worktree inside the reported root`, () => {
+      expect(matchProjectRoot(repo, `${worktree}/apps/foo`)).toBe(false);
+    });
+
+    it(`matches a monorepo app in the same checkout`, () => {
+      expect(matchProjectRoot(repo, `${repo}/apps/foo`)).toBe(true);
+    });
+
+    it(`matches the checkout root itself`, () => {
+      expect(matchProjectRoot(repo, repo)).toBe(true);
+    });
+
+    it(`does not match a sibling in the same checkout`, () => {
+      expect(matchProjectRoot(`${repo}/apps/bar`, `${repo}/apps/foo`)).toBe(false);
+    });
   });
 
   it(`cannot decide the project root when the dev server names none`, async () => {

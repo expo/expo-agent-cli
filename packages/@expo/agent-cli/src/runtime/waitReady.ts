@@ -13,6 +13,9 @@
 // that the dev server that answered belongs to this project — the caveat `discoverDevServerAsync`
 // documents but cannot close.
 
+import fs from 'fs';
+import path from 'path';
+
 import type { NavigatePlatform } from '../navigate/device';
 import { canonicalizeExistingPath } from '../utils/dir';
 import { normalizeDevServerUrl, probeDevServerAsync } from './devServer';
@@ -432,17 +435,41 @@ function decodeProjectRoot(value: string | null): string | null {
 }
 
 /**
- * Whether the dev server's project root and this project's are the same directory.
+ * Whether the dev server serves this project: its project root is this project's directory, or a
+ * directory that contains it in the same checkout.
+ *
+ * The header is Metro's `projectRoot` from `metro.config.js`, which a monorepo sets to the
+ * workspace root, so a parent directory is this project's server too. A sibling is not. A parent
+ * matches only when no directory from the project up to the parent (the project included, the
+ * parent not) holds a `.git` entry. A worktree inside the parent (`<repo>/.claude/worktrees/<name>`,
+ * which has a `.git` file) is another checkout, and the parent's Metro serves that checkout's code.
  *
  * Both sides are resolved through the filesystem when they exist, because a temporary directory is
  * commonly reached through a symlink (`/var` -> `/private/var` on macOS) and two spellings of one
  * directory must not read as two projects. Windows path comparison is case-insensitive.
  */
-function matchProjectRoot(reported: string | null, projectRoot?: string | null): boolean | null {
+export function matchProjectRoot(
+  reported: string | null,
+  projectRoot?: string | null
+): boolean | null {
   if (reported == null || projectRoot == null) {
     return null;
   }
-  return canonicalPath(reported) === canonicalPath(projectRoot);
+  const relative = path.relative(canonicalPath(reported), canonicalPath(projectRoot));
+  if (relative === '') {
+    return true;
+  }
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    return false;
+  }
+  let dir = canonicalizeExistingPath(projectRoot);
+  for (let depth = relative.split(path.sep).length; depth > 0; depth--) {
+    if (fs.existsSync(path.join(dir, '.git'))) {
+      return false;
+    }
+    dir = path.dirname(dir);
+  }
+  return true;
 }
 
 function canonicalPath(value: string): string {

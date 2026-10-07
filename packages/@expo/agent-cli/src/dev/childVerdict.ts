@@ -10,8 +10,8 @@
 // So this reads it back. The two lines it looks for are written by `logCmdError` and
 // `formatNeedsHumanBlock` (`src/utils/errors.ts`), which is a *format of this CLI's own* — the
 // round-trip test in `__tests__/childVerdict-test.ts` builds the log out of those functions and
-// parses it back, the same way `formatPortMove`/`parsePortMove` are pinned as a pair. The parent's
-// report goes silently wrong the moment the two drift.
+// parses it back, the same way the plan table of `src/plan/format.ts` is pinned to its readers
+// below. The parent's report goes silently wrong the moment the two drift.
 
 import { appReachedDevice } from './buildEvidence';
 
@@ -213,4 +213,31 @@ export function parseDetachedChildPhase(rawLines: readonly string[]): DetachedCh
 
   const step = servingStep ?? compilingStep;
   return { phase: 'serving', step, opensPlatform: step != null && stepOpensPlatform(step) };
+}
+
+/**
+ * The `Dev server:` row of the plan table `formatStartPlan` prints: `port 8082, because 8081 is
+ * taken.` Every other state of the row names no move.
+ */
+const PLAN_PORT_ROW = /^\s*Dev server:\s+port (\d+)(?:, because (\d+) is taken)?/;
+
+/**
+ * The port the child's plan gave its dev server, and the busy port the plan moved it from.
+ *
+ * Pure over the lines, like {@link parseDetachedChildPhase}, and read from the same table. The
+ * first row is the plan's: the table is printed once, before any step runs.
+ *
+ * @param rawLines the child's log, ANSI stripped, oldest first.
+ * @returns null when the log holds no plan, or a plan with no step that serves.
+ */
+export function parseDetachedChildPort(
+  rawLines: readonly string[]
+): { port: number; movedFrom: number | null } | null {
+  for (const line of rawLines.flatMap((raw) => raw.split('\n'))) {
+    const match = PLAN_PORT_ROW.exec(line);
+    if (match) {
+      return { port: Number(match[1]), movedFrom: match[2] == null ? null : Number(match[2]) };
+    }
+  }
+  return null;
 }

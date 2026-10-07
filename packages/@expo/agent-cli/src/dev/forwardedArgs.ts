@@ -76,3 +76,71 @@ export function withForwardedExpoArgs(
   });
   return { plan: { ...plan, steps }, dropped };
 }
+
+/**
+ * Whether this step starts the dev server, and so runs through the `@expo/agent-cli start` wrapper:
+ * `expo start`, or an `expo run:*` that serves.
+ *
+ * `eas build` finishes with an artifact and starts nothing. The install step of an `*-install`
+ * plan passes `--no-bundler` (llp/0004 §A current build is not an installed app): running it
+ * through the dev-server runner would publish a lock naming a port nothing will listen on, for as
+ * long as the install takes, and every reader of that lock (`status`, `smoke`, `dev:stop`, a
+ * `--detach` parent waiting on another port) would be told about a dev server that does not exist.
+ */
+export function isDevServerStep(step: PlanStep): boolean {
+  if (step.argv[0] !== 'expo' || step.argv.includes('--no-bundler')) {
+    return false;
+  }
+  const command = step.argv[1];
+  return command === 'start' || command === 'run:ios' || command === 'run:android';
+}
+
+/**
+ * The options without `--port`, which `dev` resolves itself and sets on every step that serves.
+ *
+ * Only before a `--` separator, as `resolvePort` reads it: a `--port` after it is another tool's.
+ */
+export function withoutPortArgs(args: readonly string[]): string[] {
+  const separator = args.indexOf('--');
+  const own = separator >= 0 ? args.slice(0, separator) : args;
+  const rest: string[] = [];
+  for (let index = 0; index < own.length; index++) {
+    const arg = own[index]!;
+    if (arg === '--port' || arg === '-p') {
+      index++;
+    } else if (!/^(--port|-p)=/.test(arg)) {
+      rest.push(arg);
+    }
+  }
+  return separator >= 0 ? [...rest, ...args.slice(separator)] : rest;
+}
+
+/** Step arguments with `--port <port>` before any `--`, replacing any port they already name. */
+export function withPortArg(args: readonly string[], port: number): string[] {
+  const rest = withoutPortArgs(args);
+  const separator = rest.indexOf('--');
+  const portArgs = ['--port', String(port)];
+  return separator >= 0
+    ? [...rest.slice(0, separator), ...portArgs, ...rest.slice(separator)]
+    : [...rest, ...portArgs];
+}
+
+/**
+ * The same plan, with `--port` on every step that serves, and on no other step.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+ * complete. An `expo run:*` that serves writes the port to `RCT_METRO_PORT` and
+ * `-PreactNativeDevServerPort`, so the binary and its deep link name the port the dev server takes.
+ * An install step with `--no-bundler` gets none: the Expo CLI refuses `--port` with `--no-bundler`,
+ * and the open deep-links the app to the dev server anyway.
+ */
+export function withDevServerPort(plan: StartPlan, port: number): StartPlan {
+  return {
+    ...plan,
+    steps: plan.steps.map((step) =>
+      isDevServerStep(step)
+        ? { ...step, argv: [step.argv[0]!, ...withPortArg(step.argv.slice(1), port)] }
+        : step
+    ),
+  };
+}

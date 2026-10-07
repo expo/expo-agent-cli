@@ -314,6 +314,65 @@ describe(openAppOnEasAsync, () => {
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
 
+  // The tunnel comes up after Metro answers. A deep link sent before it names the loopback, which a
+  // session on EAS cannot load.
+  it(`waits for the tunnel before it sends the deep link to a session that is up`, async () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+        state: 'active',
+        sessionId: 'sess-up',
+        platform: 'ios',
+      } as any);
+      vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValueOnce(null).mockResolvedValue({
+        url: 'https://abc.tunnel.example',
+        host: 'abc.tunnel.example',
+        hostType: 'tunnel',
+      });
+      vi.mocked(openRouteAsync).mockResolvedValue({
+        exitCode: 0,
+        command: 'eas simulator:exec',
+      } as any);
+
+      const pending = openAppOnEasAsync(projectRoot, {
+        platform: 'ios',
+        expoGo: true,
+        devServerUrl: DEV_SERVER,
+        buildId: null,
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(openRouteAsync).not.toHaveBeenCalled();
+      await vi.runAllTimersAsync();
+
+      expect(await pending).toMatchObject({ opened: true, sessionId: 'sess-up' });
+      expect(fetchAdvertisedUrlAsync).toHaveBeenCalledTimes(2);
+      expect(openRouteAsync).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it(`sends no deep link to a session that is up when no tunnel comes`, async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+      state: 'active',
+      sessionId: 'sess-up',
+      platform: 'ios',
+    } as any);
+    mockTunnel(null);
+
+    const report = await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+      waits: { tunnelMs: 1 },
+    });
+
+    expect(report).toMatchObject({ opened: false, sessionId: 'sess-up', started: false });
+    expect(report.reason).toContain('advertised no tunnel host');
+    expect(openRouteAsync).not.toHaveBeenCalled();
+  });
+
   it(`starts a new session when the one up is the other platform`, async () => {
     vi.mocked(probeCloudSessionAsync).mockResolvedValue({
       state: 'active',

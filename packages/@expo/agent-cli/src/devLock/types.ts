@@ -29,4 +29,6 @@ export interface DevServerLockHandle {
   replacedStale: boolean;
   /** Stop answering and clean up the address. Safe to call more than once. */
   release(): void;
+  /** Answer every later connection with `info` instead. */
+  update(info: DevServerLockInfo): void;
 }

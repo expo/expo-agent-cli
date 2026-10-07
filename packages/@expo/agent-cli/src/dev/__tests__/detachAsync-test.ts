@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import { EventEmitter } from 'events';
 import fs from 'fs';
 import { vol } from 'memfs';
+import path from 'path';
 
 import { readDevServerLockAsync } from '../../devLock';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
@@ -18,6 +19,7 @@ vi.mock('../../events', () => ({ event: vi.fn() }));
 
 const projectRoot = '/project';
 const logFile = detachedLogPath(projectRoot);
+const startLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'start.log');
 const servingPlan = '  1. expo run:ios  ~minutes\n› Installing on iPhone\n';
 
 function readiness(ready = true): BundlerReadyResult {
@@ -33,15 +35,23 @@ function readiness(ready = true): BundlerReadyResult {
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(0);
-  vi.mocked(readDevServerLockAsync).mockResolvedValueOnce(null).mockResolvedValue({
-    url: 'http://127.0.0.1:8393',
-    port: 8393,
-    pid: 4242,
-    projectRoot,
-    startedAt: '2026-09-30T00:00:00.000Z',
-  });
+  vi.mocked(readDevServerLockAsync)
+    .mockResolvedValueOnce(null)
+    .mockResolvedValue({
+      url: 'http://127.0.0.1:8393',
+      port: 8393,
+      pid: 4242,
+      projectRoot,
+      startedAt: new Date(0).toISOString(),
+    });
   vi.mocked(spawn).mockImplementation(() => {
     fs.writeFileSync(logFile, servingPlan);
+    // Metro's own report of the port the lock names, which is when the parent reports it.
+    fs.mkdirSync(path.dirname(startLog), { recursive: true });
+    fs.writeFileSync(
+      startLog,
+      JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port: 8393 })
+    );
     return Object.assign(new EventEmitter(), {
       pid: 4242,
       unref: vi.fn(),
@@ -149,4 +159,102 @@ it('does not wait for a verdict when the child is alive but the bundler stopped 
 
   expect(await result).toMatchObject({ code: 'DEV_DETACH_NOT_ANSWERING', exitCode: 20 });
   expect(Date.now()).toBe(0);
+});
+
+// The child publishes its lock at the spawn of a step that names a port, before Metro binds it. A
+// retry that moves the dev server republishes, and the report names the port Metro logged.
+it('reports the port Metro logged, not the one the lock named before a retry', async () => {
+  const { event: cliEvent } = await import('../../events');
+  const lock = {
+    pid: 4242,
+    projectRoot,
+    startedAt: new Date(0).toISOString(),
+  };
+  vi.mocked(readDevServerLockAsync)
+    .mockReset()
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce({ ...lock, url: 'http://127.0.0.1:8180', port: 8180 })
+    .mockResolvedValue({ ...lock, url: 'http://127.0.0.1:8393', port: 8393 });
+
+  const result = run();
+  await vi.advanceTimersByTimeAsync(5000);
+  await expect(result).resolves.toBe(0);
+
+  expect(cliEvent).toHaveBeenCalledWith('dev_detach', expect.objectContaining({ port: 8393 }));
+});
+
+// A `run:*` build has not reached Metro yet, so `start.log` names no port. The lock's own
+// `startedAt` (the step's spawn) bounds the wait, as the port watch is bounded.
+describe('a lock whose port Metro has not logged', () => {
+  const pending = {
+    url: 'http://127.0.0.1:8180',
+    port: 8180,
+    pid: 4242,
+    projectRoot,
+    startedAt: new Date(0).toISOString(),
+  };
+  let child: EventEmitter;
+
+  beforeEach(() => {
+    vi.mocked(readDevServerLockAsync)
+      .mockReset()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(pending);
+    vi.mocked(spawn).mockImplementation(() => {
+      fs.writeFileSync(logFile, servingPlan);
+      child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
+      return child as unknown as ChildProcess;
+    });
+  });
+
+  it('accepts the lock once 20 s have passed since its spawn, and not before', async () => {
+    const { event: cliEvent } = await import('../../events');
+
+    const result = run();
+    await vi.advanceTimersByTimeAsync(19_500);
+    expect(waitForBundlerReadyAsync).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    await expect(result).resolves.toBe(0);
+    expect(waitForBundlerReadyAsync).toHaveBeenCalledWith(
+      'http://127.0.0.1:8180',
+      expect.anything()
+    );
+    expect(cliEvent).toHaveBeenCalledWith('dev_detach', expect.objectContaining({ port: 8180 }));
+  });
+
+  // The budget ends before the 20 s: the unconfirmed lock is still the answer, and the report
+  // names its port.
+  it('reports the unconfirmed lock when the budget runs out', async () => {
+    const { event: cliEvent } = await import('../../events');
+
+    const result = devDetachAsync(
+      projectRoot,
+      { ...resolveDevOptions(['--ios', '--detach', '--local', '--json']), detachTimeoutMs: 5000 },
+      { print: false }
+    );
+    await vi.runAllTimersAsync();
+
+    await expect(result).resolves.toBe(0);
+    expect(Date.now()).toBeLessThan(20_000);
+    expect(cliEvent).toHaveBeenCalledWith('dev_detach', expect.objectContaining({ port: 8180 }));
+  });
+
+  // The child exited with the lock published and unconfirmed: the lock is returned, and the run
+  // fails on the dead child rather than on a missing lock.
+  it('reports a dead child, not a missing lock, when the child exits first', async () => {
+    vi.mocked(isProcessAlive).mockReturnValue(false);
+
+    const result = devDetachAsync(
+      projectRoot,
+      resolveDevOptions(['--ios', '--detach', '--local', '--json']),
+      { print: false }
+    ).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(1000);
+    child.emit('exit', 1, null);
+    await vi.runAllTimersAsync();
+
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
+    expect(Date.now()).toBeLessThan(20_000);
+  });
 });

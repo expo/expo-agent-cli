@@ -93,7 +93,7 @@ describe('@expo/agent-cli runtime:eval', () => {
 
   it('reads the dev server off the project lock rather than assuming 8081', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const stub = await startStubDevServerAsync({ targets: [] });
+    const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
     const release = await holdLockForAsync(projectRoot, stub);
     try {
       const result = await executeAgentCliAsync(projectRoot, ['runtime:eval', '1 + 1', '--json'], {

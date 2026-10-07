@@ -56,6 +56,7 @@ export function emitStartPlan(
     // the channel a driving agent reads the plan on, and "does this machine have Xcode" is exactly
     // the sort of thing it would otherwise go and shell out to find.
     buildLocation: plan.buildLocation,
+    devServerPort: plan.devServerPort ?? null,
   });
   if (print === 'none') {
     return;

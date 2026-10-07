@@ -1,6 +1,7 @@
 import { holdDevServerLockAsync } from '../devLock';
 import type { ResolvedDevServerPort } from '../devLock/port';
 import { dependsOnDevClientSync, reportFollowUps } from '../followups';
+import { probeBundlerAsync } from '../runtime/bundlerStatus';
 import { autoSyncSkillsAsync } from '../skills/skillsAsync';
 import { CommandError } from '../utils/errors';
 import { runExpoAsync, spawnExpoAsync } from '../utils/expoCli';
@@ -80,7 +81,8 @@ export async function runDevServerAsync(
     agentSkills: boolean;
     output?: SubprocessOutput;
     /**
-     * Told once, the moment the dev server reports where it listens.
+     * Told once, the moment the dev server reports where it listens, or `/status` answers on the
+     * port the arguments name.
      *
      * `dev` hangs its app-open on this (llp/0026): the port is only knowable after the spawn, and
      * the subprocess does not return until the dev server stops.
@@ -97,13 +99,20 @@ export async function runDevServerAsync(
     timer.unref?.();
   }
 
-  // The port is only knowable after the spawn — `expo start` walks past a taken one, and
-  // `expo run:*` was given none — so the lock is taken alongside the subprocess and not before
-  // it. `holdDevServerLockAsync` swallows every failure: a lock is a convenience, and the dev
-  // server is the command.
+  // The lock is taken at the spawn when the arguments name a port, else when the dev server
+  // reports one. `holdDevServerLockAsync` swallows every failure: a lock is a convenience, and the
+  // dev server is the command.
   const startedAt = Date.now();
   let running = true;
   let port: ResolvedDevServerPort | null = null;
+  // The lock answers `arg` at the spawn and `log` when Metro reports, so the open is guarded here.
+  let opened = false;
+  const open = (server: { url: string; port: number }) => {
+    if (!opened) {
+      opened = true;
+      onDevServer?.(server);
+    }
+  };
   const run = spawnDevServerAsync(projectRoot, args, output).finally(() => {
     running = false;
   });
@@ -119,10 +128,25 @@ export async function runDevServerAsync(
     // What the dev server itself said, which is the only thing a caller may claim about it.
     onResolved: (resolved) => {
       port = resolved;
-      // `default` means nothing reported one, and an open aimed at a guessed port is the false
-      // green the lock exists to prevent.
-      if (onDevServer && resolved.source !== 'default') {
-        onDevServer({ url: `http://127.0.0.1:${resolved.port}`, port: resolved.port });
+      if (!onDevServer) {
+        return;
+      }
+      const server = { url: `http://127.0.0.1:${resolved.port}`, port: resolved.port };
+      // `log` is the dev server saying where it listens. `arg` is only the port the command line
+      // named, which `dev` always passes, so the open waits until `/status` answers there and
+      // names no other project's root, and never comes when the dev server exits first. The lock
+      // tells `arg` at the spawn and `log` later, and `open` fires once. `default` is a
+      // guess, and an open aimed at a guessed port is the false green the lock exists to prevent.
+      if (resolved.source === 'log') {
+        open(server);
+      } else if (resolved.source === 'arg') {
+        void openWhenAnsweringAsync(server.url, projectRoot, () => running && !opened).then(
+          (answered) => {
+            if (answered) {
+              open(server);
+            }
+          }
+        );
       }
     },
   });
@@ -138,6 +162,41 @@ export async function runDevServerAsync(
     clearTimeout(timer);
     (await lock)?.release();
   }
+}
+
+/** How often an open aimed at a named port asks `/status` again. */
+export const STATUS_POLL_INTERVAL_MS = 500;
+
+/**
+ * Ask `url`'s `/status` until it answers for `projectRoot`, or until `isRunning` says the dev
+ * server is gone.
+ *
+ * A port named on the command line can be held by another project's Metro, which answers `/status`
+ * as well as this one would. Its project root header tells them apart: a foreign root ends the
+ * poll without an open, and the busy-port retry of `dev` handles the step. A dev server that names
+ * no root is this one: this process spawned it on that port. A root that contains this project is
+ * this one too when it is in the same checkout (`matchProjectRoot`, for a monorepo
+ * `metro.config.js`).
+ */
+async function openWhenAnsweringAsync(
+  url: string,
+  projectRoot: string,
+  isRunning: () => boolean
+): Promise<boolean> {
+  while (isRunning()) {
+    const probe = await probeBundlerAsync(url, {
+      timeoutMs: STATUS_POLL_INTERVAL_MS,
+      projectRoot,
+    });
+    if (probe.projectRootMatched === false) {
+      return false;
+    }
+    if (probe.answering) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, STATUS_POLL_INTERVAL_MS));
+  }
+  return false;
 }
 
 /**

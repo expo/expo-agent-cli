@@ -23,6 +23,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
+import { PORT_WATCH_TIMEOUT_MS, readLastLoggedDevServerPort } from '../devLock/port';
 import { event as cliEvent } from '../events';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
@@ -33,22 +34,31 @@ import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand, statedSmokePlatform } from '../smoke/suggest';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
+import { isBundlerAnsweringAsync } from '../runtime/bundlerStatus';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../runtime/waitReady';
 import { requestsTunnel } from '../start/followUps';
 import { CommandError } from '../utils/errors';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
 import {
   parseDetachedChildPhase,
+  parseDetachedChildPort,
   parseDetachedChildVerdict,
   VERDICT_LOG_LINES,
   type DetachedChildPhase,
   type DetachedChildVerdict,
 } from './childVerdict';
 import { event } from './events';
-import { openDetachedLogSync, readDetachedLogSync } from './logFile';
+import { openDetachedLogSync, readDetachedLogSync, type DetachedLogRead } from './logFile';
 import { isProcessAlive } from './processLiveness';
-import { parsePortMove, type PortMove } from './portCollision';
 import type { DevOptions } from './resolveOptions';
+
+/** A dev server that is not on the port the caller expected. */
+export interface PortMove {
+  /** The port the caller expected: the one the plan moved from, or the one it planned. */
+  from: number;
+  /** The port the dev server took, as its lock names it. */
+  to: number;
+}
 
 /** How long the parent waits for the detached child to publish its lock. */
 export const DEFAULT_DETACH_TIMEOUT_MS = 120_000;
@@ -99,8 +109,8 @@ export interface DevDetachResultJson {
    * A detached run does its port retry in the child, so the move was reported on a stream nobody
    * was watching: the parent printed `port: 8210` and said nothing about 8081 having been asked
    * for, and every command and URL a caller had already written still named the old port
-   * [observed — friction run 5, F48-4]. `from` is null when the Expo CLI did not name the busy
-   * port, which it does not always.
+   * [observed — friction run 5, F48-4]. Computed from the plan the child printed to its log and the
+   * lock it published, so it is null when the log holds no plan with a dev-server port.
    */
   portMoved: PortMove | null;
   /**
@@ -314,8 +324,10 @@ export async function devDetachAsync(
   // The probe can outlast the child. Read its state and log only after that await, so a handoff
   // written while the probe was pending outranks the probe's generic "not answering" result.
   const statusAnswering = ready === true ? await isBundlerAnsweringAsync(lock.url) : null;
-  const phase = readChildPhaseSync(projectRoot);
-  let verdict = readChildVerdictSync(projectRoot);
+  // One read of the whole log, for the phase, the verdict and the report's port move.
+  const log = readDetachedLogSync(projectRoot, WHOLE_LOG);
+  const phase = childPhaseOf(log);
+  let verdict = log == null ? null : parseDetachedChildVerdict(log.lines.slice(-VERDICT_LOG_LINES));
   let failure = resolveDetachFailure({
     exited: childIsGone(),
     verdict,
@@ -368,7 +380,7 @@ export async function devDetachAsync(
     startedAt,
     print,
     tunnelUrl,
-    phase,
+    log,
     smokePlatform,
   });
 }
@@ -608,15 +620,6 @@ export function resolveDetachFailure({
   return null;
 }
 
-/** One `/status` probe: whether the bundler that had answered still does. */
-async function isBundlerAnsweringAsync(url: string): Promise<boolean> {
-  const result = await waitForBundlerReadyAsync(url, { timeoutMs: LIVENESS_PROBE_TIMEOUT_MS });
-  return result.ready;
-}
-
-/** How long the final `/status` probe may take. Short: the bundler already answered once. */
-const LIVENESS_PROBE_TIMEOUT_MS = 2000;
-
 /** The child's verdict, read out of the log this run opened. */
 function readChildVerdictSync(projectRoot: string): DetachedChildVerdict | null {
   const read = readDetachedLogSync(projectRoot, VERDICT_LOG_LINES);
@@ -626,16 +629,20 @@ function readChildVerdictSync(projectRoot: string): DetachedChildVerdict | null 
 /**
  * Which half of its plan the child is in, read out of the same log.
  *
- * `PHASE_LOG_LINES` rather than the verdict's window: the plan table is printed *first*, and a
+ * `WHOLE_LOG` rather than the verdict's window: the plan table is printed *first*, and a
  * `run:*` step writes thousands of lines of compiler output over it. A log this run truncated is
  * still short at the top, and a window that misses the table reads as `serving`, which is the
  * wording this has always had.
  */
 function readChildPhaseSync(projectRoot: string): DetachedChildPhase {
-  const read = readDetachedLogSync(projectRoot, PHASE_LOG_LINES);
-  return read == null
+  return childPhaseOf(readDetachedLogSync(projectRoot, WHOLE_LOG));
+}
+
+/** The phase a whole read of the child's log names, or `serving` when there is no log. */
+function childPhaseOf(log: DetachedLogRead | null): DetachedChildPhase {
+  return log == null
     ? { phase: 'serving', step: null, opensPlatform: false }
-    : parseDetachedChildPhase(read.lines);
+    : parseDetachedChildPhase(log.lines);
 }
 
 /**
@@ -785,7 +792,7 @@ function reportDetached(
     startedAt,
     print,
     tunnelUrl,
-    phase,
+    log = readDetachedLogSync(projectRoot, WHOLE_LOG),
     smokePlatform,
   }: {
     lock: DevServerLockInfo;
@@ -798,13 +805,13 @@ function reportDetached(
     /** The platform the `smoke` follow-up names. See {@link detachFollowUps}. */
     smokePlatform: NativePlatform;
     /**
-     * The phase the caller already read, when it read one.
+     * The whole child log the caller already read, when it read one, or null for no log.
      *
-     * The whole log is scanned for it (`PHASE_LOG_LINES`), so a run that has just asked the question
-     * to decide whether to hold its claim open (F140) hands the answer over rather than paying for
-     * a second scan of a log a compiler may have written thousands of lines into.
+     * The phase and the port move both scan the whole log (`WHOLE_LOG`), so a run that has just
+     * read it to decide whether to hold its claim open (F140) hands it over rather than paying for
+     * a second read of a log a compiler may have written thousands of lines into.
      */
-    phase?: DetachedChildPhase;
+    log?: DetachedLogRead | null;
   }
 ): number {
   const report: DevDetachResultJson = {
@@ -813,15 +820,15 @@ function reportDetached(
     pid: lock.pid,
     // The path only when the file is there. A dev server that was already running may have been
     // started attached, and then its output went to somebody's terminal and there is no log.
-    logFile: readDetachedLogSync(projectRoot, 0)?.logFile ?? '',
+    logFile: log?.logFile ?? '',
     ready,
     projectRootMatched,
     alreadyRunning,
     // Read from the child's own log, which is the only channel it has to this process (F125 and
     // F48-4 both). The phase is read even for a run that started nothing: the question "is this
     // project's dev server listening" is the same question whoever started it.
-    phase: (phase ?? readChildPhaseSync(projectRoot)).phase,
-    portMoved: alreadyRunning ? null : readPortMoveSync(projectRoot),
+    phase: childPhaseOf(log).phase,
+    portMoved: alreadyRunning ? null : plannedPortMove(log, lock),
     tunnelUrl,
     waitedMs: Date.now() - startedAt,
     followups: [],
@@ -857,28 +864,28 @@ function reportDetached(
 }
 
 /**
- * How many lines of the child's log are searched for the port move.
+ * Every line of the child's log, for what the child prints before its first step: the plan table.
  *
- * The retry is announced before the dev server it starts publishes the lock this parent waits on,
- * so the sentence is always near the top of a log that a run truncates anyway. Generous rather
- * than exact, because a prebuild step ahead of it prints its own output first.
+ * A `run:*` step writes thousands of lines of compiler output after them, so a tail, which is what
+ * `readDetachedLogSync` gives, would miss them on exactly the run they matter for. The whole file
+ * is read either way; the number only decides how much of it is handed back.
  */
-const PORT_MOVE_LOG_LINES = 500;
+const WHOLE_LOG = Number.MAX_SAFE_INTEGER;
 
 /**
- * How many lines of the child's log are searched for its plan: all of them.
+ * The move between the port the child's plan expected and the port its lock names.
  *
- * The plan table is printed *first*, and the `run:*` step this matters for writes thousands of
- * lines of compiler output over it — so a tail, which is what `readDetachedLogSync` gives, would
- * miss it on exactly the run this exists for. The whole file is read either way; the number only
- * decides how much of it is handed back.
+ * The plan's `movedFrom` is the port the caller expected when the plan already moved; otherwise it
+ * is the planned port. A retry after the plan moves the lock again, and the comparison still starts
+ * from what the caller expected.
  */
-const PHASE_LOG_LINES = Number.MAX_SAFE_INTEGER;
-
-/** The port move the detached child announced in its log, or null when it announced none. */
-function readPortMoveSync(projectRoot: string): PortMove | null {
-  const read = readDetachedLogSync(projectRoot, PORT_MOVE_LOG_LINES);
-  return read == null ? null : parsePortMove(read.lines.join('\n'));
+function plannedPortMove(log: DetachedLogRead | null, lock: DevServerLockInfo): PortMove | null {
+  const planned = log == null ? null : parseDetachedChildPort(log.lines);
+  if (planned == null) {
+    return null;
+  }
+  const expected = planned.movedFrom ?? planned.port;
+  return lock.port === expected ? null : { from: expected, to: lock.port };
 }
 
 function printHumanReport(report: DevDetachResultJson): void {
@@ -897,11 +904,7 @@ function printHumanReport(report: DevDetachResultJson): void {
   // every link a caller had already written names the port that was asked for, not this one.
   if (report.portMoved) {
     lines.push(
-      `${label('Port')}${
-        report.portMoved.from == null
-          ? `moved · the port it wanted was busy, so it took ${report.portMoved.to}`
-          : `moved · ${report.portMoved.from} was busy, so it took ${report.portMoved.to}`
-      }`
+      `${label('Port')}moved · ${report.portMoved.from} was busy, so it took ${report.portMoved.to}`
     );
   }
   if (report.logFile) {
@@ -957,7 +960,17 @@ export function detachFollowUps(
   return followups;
 }
 
-/** Poll the project's lock until it answers, the child dies, or the budget runs out. */
+/**
+ * Poll the project's lock until it names the port the dev server took, the child dies, or the
+ * budget runs out.
+ *
+ * The child publishes its lock at the spawn of a step that names a port, before Metro binds it,
+ * and the busy-port retry can move the dev server after that with a new spawn and a new lock. So a
+ * lock counts once Metro logged its port after the lock's `startedAt` (the spawn of the step that
+ * holds it), or once {@link PORT_WATCH_TIMEOUT_MS} has passed since that spawn, the bound the port
+ * watch itself gives up at (a `run:*` build that has not reached Metro yet). A lock that is not
+ * confirmed when the child exits or the budget runs out is still the answer.
+ */
 async function waitForLockAsync(
   projectRoot: string,
   { timeoutMs, hasExited }: { timeoutMs: number; hasExited: () => boolean }
@@ -966,15 +979,21 @@ async function waitForLockAsync(
   for (;;) {
     const lock = await readDevServerLockAsync(projectRoot);
     if (lock) {
-      return lock;
+      const spawnedAt = Date.parse(lock.startedAt);
+      if (
+        readLastLoggedDevServerPort(projectRoot, { since: spawnedAt }) === lock.port ||
+        Date.now() - spawnedAt >= PORT_WATCH_TIMEOUT_MS
+      ) {
+        return lock;
+      }
     }
     // Checked after the read, not before: a child that started the dev server and exited in the
     // same instant still published a lock, and that lock is the answer.
     if (hasExited()) {
-      return null;
+      return lock;
     }
     if (Date.now() + LOCK_POLL_INTERVAL_MS >= deadline) {
-      return null;
+      return lock;
     }
     await new Promise((resolve) => setTimeout(resolve, LOCK_POLL_INTERVAL_MS));
   }

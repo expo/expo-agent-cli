@@ -1,9 +1,12 @@
+import { stripVTControlCharacters } from 'util';
+
 import { needsHumanError } from '../../needsHuman/error';
 import { formatStartPlan } from '../../plan/format';
 import type { StartPlan } from '../../project/types';
 import { formatNeedsHumanBlock } from '../../utils/errors';
 import {
   parseDetachedChildPhase,
+  parseDetachedChildPort,
   parseDetachedChildVerdict,
   stepOpensPlatform,
 } from '../childVerdict';
@@ -166,6 +169,53 @@ describe(parseDetachedChildPhase, () => {
 
 // @ref llp/0021-honest-reports.rfc.md §The rules — F140. Which dev-server
 // steps carry work that can end the process *after* the bundler has answered.
+// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+// complete — the `--detach` parent computes the move from this row and the lock.
+describe(parseDetachedChildPort, () => {
+  function portLog(devServerPort: StartPlan['devServerPort']): string[] {
+    const plan: StartPlan = {
+      rule: 'expo-go',
+      target: 'expo-go',
+      reasons: [],
+      buildLocation: null,
+      steps: [
+        { id: 'start', argv: ['expo', 'start'], reason: 'r', timeClass: 'seconds', runsOn: null },
+      ],
+      devServerPort,
+    };
+    return [...stripVTControlCharacters(formatStartPlan(plan)).split('\n'), 'Waiting on 8083'];
+  }
+
+  it(`should read the planned port and the busy port it moved from`, () => {
+    expect(
+      parseDetachedChildPort(portLog({ port: 8082, movedFrom: 8081, state: 'picked' }))
+    ).toEqual({
+      port: 8082,
+      movedFrom: 8081,
+    });
+  });
+
+  it(`should read a plan that did not move`, () => {
+    expect(
+      parseDetachedChildPort(portLog({ port: 8082, movedFrom: null, state: 'picked' }))
+    ).toEqual({
+      port: 8082,
+      movedFrom: null,
+    });
+    expect(
+      parseDetachedChildPort(portLog({ port: 8180, movedFrom: null, state: 'named', taken: true }))
+    ).toEqual({
+      port: 8180,
+      movedFrom: null,
+    });
+  });
+
+  it(`should answer null for a log with no dev-server port`, () => {
+    expect(parseDetachedChildPort(portLog(undefined))).toBeNull();
+    expect(parseDetachedChildPort([])).toBeNull();
+  });
+});
+
 describe(stepOpensPlatform, () => {
   it.each([
     ['expo start --go --ios --port 9201', false],

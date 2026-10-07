@@ -5,7 +5,7 @@ describe(resolveDevOptions, () => {
   it(`should forward every argument the plan engine does not own`, () => {
     expect(resolveDevOptions(['--web', '--port', '8082'])).toEqual({
       mode: 'run',
-      expoArgs: ['--web', '--port', '8082'],
+      expoArgs: ['--web'],
       agentSkills: true,
       platform: 'web',
       buildBackend: null,
@@ -19,8 +19,7 @@ describe(resolveDevOptions, () => {
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
-      // Read, and still forwarded: `--port` is an `expo start` flag, and the plan's last step is
-      // what acts on it. Reading it only lets this command validate it and name it in a URL.
+      // Read and not forwarded: `dev` sets `--port` on every step that serves.
       port: 8082,
     });
   });
@@ -53,7 +52,7 @@ describe(resolveDevOptions, () => {
   it(`should enter plan mode and strip the flag`, () => {
     expect(resolveDevOptions(['--ios', '--plan', '--port', '8082'])).toEqual({
       mode: 'plan',
-      expoArgs: ['--port', '8082'],
+      expoArgs: [],
       agentSkills: true,
       platform: 'ios',
       buildBackend: null,
@@ -259,6 +258,14 @@ describe(resolveDevOptions, () => {
       expect(resolveDevOptions(['--ios', '--port', '8082']).port).toBe(8082);
       expect(resolveDevOptions(['--ios', '--port=8082']).port).toBe(8082);
       expect(resolveDevOptions(['--ios', '-p', '8082']).port).toBe(8082);
+    });
+
+    it(`should read the port and leave it out of the forwarded options`, () => {
+      const options = resolveDevOptions(['--ios', '--port', '8090', '--tunnel']);
+
+      expect(options.port).toBe(8090);
+      expect(options.expoArgs).toEqual(['--tunnel']);
+      expect(resolveDevOptions(['--ios', '-p=8090']).expoArgs).toEqual([]);
     });
 
     it(`should be null when the flag is not passed`, () => {

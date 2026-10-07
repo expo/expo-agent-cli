@@ -7,12 +7,21 @@ import * as Log from '../../log';
 import { autoSyncSkillsAsync } from '../../skills/skillsAsync';
 import { runExpoAsync, spawnExpoAsync } from '../../utils/expoCli';
 import { resolveStartOptions } from '../resolveOptions';
-import { runDevServerAsync, SKILLS_SYNC_IDLE_DELAY_MS, startAsync } from '../startAsync';
+import { probeBundlerAsync } from '../../runtime/bundlerStatus';
+import {
+  runDevServerAsync,
+  SKILLS_SYNC_IDLE_DELAY_MS,
+  startAsync,
+  STATUS_POLL_INTERVAL_MS,
+} from '../startAsync';
 
 vi.mock('../../log');
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../skills/skillsAsync', () => ({ autoSyncSkillsAsync: vi.fn() }));
 vi.mock('../../devLock', () => ({ holdDevServerLockAsync: vi.fn() }));
+vi.mock('../../runtime/bundlerStatus', () => ({
+  probeBundlerAsync: vi.fn(),
+}));
 // The ladder asks whether this machine has a device to open the app on (llp/0009 §Device-aware
 // ladders). Mocked, because a unit test must not depend on whether a simulator happens to be
 // booted on the machine running it — and `unknown` is the answer that leaves every rung as it was.
@@ -21,6 +30,11 @@ vi.mock('../../device/localDevice', () => ({
 }));
 
 const projectRoot = '/project';
+
+/** `/status` answers, per what a probe of the named port learns. */
+const silent = { answering: false, projectRootMatched: null, reportedProjectRoot: null };
+const ours = { answering: true, projectRootMatched: true, reportedProjectRoot: projectRoot };
+const foreign = { answering: true, projectRootMatched: false, reportedProjectRoot: '/other' };
 
 /**
  * Let the follow-up ladder settle without advancing the clock.
@@ -63,6 +77,7 @@ function mockHeldLock(): DevServerLockHandle {
     address: '/project/.expo/agent-cli-dev-server.sock',
     replacedStale: false,
     release: vi.fn(),
+    update: vi.fn(),
   };
   vi.mocked(holdDevServerLockAsync).mockResolvedValue(lock);
   return lock;
@@ -74,6 +89,7 @@ beforeEach(() => {
   vi.mocked(autoSyncSkillsAsync).mockResolvedValue(undefined);
   // No lock unless a test asks for one: the wrapper must work either way.
   vi.mocked(holdDevServerLockAsync).mockResolvedValue(null);
+  vi.mocked(probeBundlerAsync).mockResolvedValue(silent);
   mockLanAddress('192.168.1.5');
 });
 
@@ -313,6 +329,143 @@ describe(runDevServerAsync, () => {
         expect.objectContaining({ since: expect.any(Number), isRunning: expect.any(Function) })
       );
 
+      end(0);
+      await promise;
+    });
+
+    // `dev` passes `--port` on every serving step, so a port from the arguments alone is not proof
+    // that anything listens there: the open waits for `/status`.
+    it(`should open on the port it was given once /status answers there for this project`, async () => {
+      const onDevServer = vi.fn();
+      const end = mockLongRunningStart();
+      vi.mocked(probeBundlerAsync).mockResolvedValueOnce(silent).mockResolvedValue(ours);
+      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        agentSkills: false,
+        onDevServer,
+      });
+      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+
+      onResolved?.({ port: 8082, source: 'arg' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onDevServer).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS);
+
+      expect(probeBundlerAsync).toHaveBeenCalledWith('http://127.0.0.1:8082', {
+        timeoutMs: STATUS_POLL_INTERVAL_MS,
+        projectRoot,
+      });
+      expect(onDevServer).toHaveBeenCalledWith({ url: 'http://127.0.0.1:8082', port: 8082 });
+      end(0);
+      await promise;
+    });
+
+    // Another project's Metro on the named port answers `/status` too; its root says it is not ours.
+    it(`should not open on the port it was given when /status answers for another project`, async () => {
+      const onDevServer = vi.fn();
+      const end = mockLongRunningStart();
+      vi.mocked(probeBundlerAsync).mockResolvedValue(foreign);
+      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        agentSkills: false,
+        onDevServer,
+      });
+      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+
+      onResolved?.({ port: 8082, source: 'arg' });
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
+
+      expect(onDevServer).not.toHaveBeenCalled();
+      expect(probeBundlerAsync).toHaveBeenCalledTimes(1);
+      end(0);
+      await promise;
+    });
+
+    it(`should not open on the port it was given when the dev server exits before /status answers`, async () => {
+      const onDevServer = vi.fn();
+      const end = mockLongRunningStart();
+      vi.mocked(probeBundlerAsync).mockResolvedValue(silent);
+      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        agentSkills: false,
+        onDevServer,
+      });
+      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+
+      onResolved?.({ port: 8082, source: 'arg' });
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
+      end(0);
+      await promise;
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
+
+      expect(onDevServer).not.toHaveBeenCalled();
+      onResolved?.({ port: 8082, source: 'default' });
+      onResolved?.({ port: 8082, source: 'log' });
+      expect(onDevServer).toHaveBeenCalledTimes(1);
+    });
+
+    // The lock tells `arg` at the spawn and `log` when Metro reports: one open, not two.
+    it(`should open once when the port arrives from the arguments and then from the log`, async () => {
+      const onDevServer = vi.fn();
+      const end = mockLongRunningStart();
+      vi.mocked(probeBundlerAsync).mockResolvedValue(ours);
+      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        agentSkills: false,
+        onDevServer,
+      });
+      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+
+      onResolved?.({ port: 8082, source: 'arg' });
+      onResolved?.({ port: 8082, source: 'log' });
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
+
+      expect(onDevServer).toHaveBeenCalledTimes(1);
+      end(0);
+      await promise;
+    });
+
+    // The `/status` poll is still pending when Metro logs its port: the log opens, and the poll
+    // that answers afterwards opens nothing.
+    it(`should open once through the log while the /status poll is pending`, async () => {
+      const onDevServer = vi.fn();
+      const end = mockLongRunningStart();
+      vi.mocked(probeBundlerAsync).mockResolvedValue(silent);
+      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        agentSkills: false,
+        onDevServer,
+      });
+      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+
+      onResolved?.({ port: 8082, source: 'arg' });
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 2);
+      expect(onDevServer).not.toHaveBeenCalled();
+
+      onResolved?.({ port: 8082, source: 'log' });
+      expect(onDevServer).toHaveBeenCalledTimes(1);
+      expect(onDevServer).toHaveBeenCalledWith({ url: 'http://127.0.0.1:8082', port: 8082 });
+
+      vi.mocked(probeBundlerAsync).mockResolvedValue(ours);
+      const probes = vi.mocked(probeBundlerAsync).mock.calls.length;
+      await vi.advanceTimersByTimeAsync(STATUS_POLL_INTERVAL_MS * 3);
+      expect(onDevServer).toHaveBeenCalledTimes(1);
+      // The poll ends at its next turn, once the open has fired.
+      expect(vi.mocked(probeBundlerAsync).mock.calls.length).toBeLessThanOrEqual(probes + 1);
+      end(0);
+      await promise;
+    });
+
+    // `dev` spawned this server on the port; a Metro that names no root is that server.
+    it(`should open on the port it was given when /status names no project root`, async () => {
+      const onDevServer = vi.fn();
+      const end = mockLongRunningStart();
+      vi.mocked(probeBundlerAsync).mockResolvedValue({ ...silent, answering: true });
+      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        agentSkills: false,
+        onDevServer,
+      });
+      const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
+
+      onResolved?.({ port: 8082, source: 'arg' });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(onDevServer).toHaveBeenCalledTimes(1);
       end(0);
       await promise;
     });

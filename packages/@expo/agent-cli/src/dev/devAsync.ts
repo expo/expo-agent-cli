@@ -53,12 +53,19 @@ import {
 } from '../utils/wrapperCrash';
 import { appReachedDevice } from './buildEvidence';
 import { event as devEvent } from './events';
-import { forwardedStepArgs, withForwardedExpoArgs } from './forwardedArgs';
+import {
+  forwardedStepArgs,
+  isDevServerStep,
+  withDevServerPort,
+  withForwardedExpoArgs,
+  withPortArg,
+} from './forwardedArgs';
 import {
   defaultMetroPort,
   detectPortCollision,
   findFreePortAsync,
   formatPortMove,
+  resolvePlannedPortAsync,
   type PortCollision,
 } from './portCollision';
 import type { DevOptions } from './resolveOptions';
@@ -110,7 +117,34 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // Here, before anything is printed. The options a caller typed for `expo start` used to be folded
   // in while the step ran, so `--plan --tunnel` printed a command without `--tunnel` and the run
   // passed it [observed — friction run 7, F71; live run S5].
-  const { plan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
+  const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
+  // complete — the port is picked here, before the plan is printed, and set on every step that
+  // serves. Left to `expo run:*`, a busy port skips its dev server, deep-links the app to whatever
+  // holds the port, and exits 0 [observed — live suite, 2026-10-05].
+  const serving = forwardedPlan.steps.filter(isDevServerStep).at(-1);
+  let plan: StartPlan = forwardedPlan;
+  if (serving) {
+    const planned = await resolvePlannedPortAsync(options.port);
+    if (!planned.bindable && options.port != null && options.mode !== 'plan') {
+      throw await portDemandedError(projectRoot, options.port, options.platform);
+    }
+    plan = {
+      ...withDevServerPort(forwardedPlan, planned.port),
+      // A port the plan probed is only the port that was free when the plan was printed. A named
+      // `--port` is not picked, so nothing is said about it.
+      reasons:
+        options.mode === 'plan' && options.port == null
+          ? [...forwardedPlan.reasons, 'The dev server port is picked again when the plan runs.']
+          : forwardedPlan.reasons,
+      devServerPort:
+        options.port != null
+          ? { port: planned.port, movedFrom: null, state: 'named', taken: !planned.bindable }
+          : { port: planned.port, movedFrom: planned.movedFrom, state: 'picked' },
+    };
+  }
+
   if (dropped.length) {
     const last = plan.steps[plan.steps.length - 1]!;
     const directCommand =
@@ -166,6 +200,13 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // `--json` mode, where the plan carrying the same fact is not printed until the run is over.
   warnUnbuildable(plan);
 
+  if (plan.devServerPort?.movedFrom != null) {
+    warnPortMove(
+      { busy: plan.devServerPort.movedFrom, to: plan.devServerPort.port, when: 'plan' },
+      plan.devServerPort.movedFrom
+    );
+  }
+
   // The follow-ups of a run are the *dev server's*, and in `--json` mode they are computed after
   // it so they can name the port it actually took. A terminal cannot wait for that: the bundler
   // takes the screen and anything printed afterwards scrolls away with its output.
@@ -191,9 +232,10 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
 
   if (options.json) {
     // One object, when the run is over and there is something true to say about it.
-    const followups = await resolveRunFollowUpsAsync(projectRoot, plan, options, run.devServer);
+    const ran = planAsRun(plan, run);
+    const followups = await resolveRunFollowUpsAsync(projectRoot, ran, options, run.devServer);
     reportFollowUps('dev', followups, { json: true });
-    Log.log(JSON.stringify({ ...plan, followups }, null, 2));
+    Log.log(JSON.stringify({ ...ran, followups }, null, 2));
   }
 
   return run.exitCode;
@@ -300,6 +342,8 @@ interface PlanRun {
   devServer: DevServerRun | null;
   /** The step that stopped the plan, or null when every step succeeded. */
   failure: StepFailure | null;
+  /** The step that served, with the arguments it last ran with, or null when no step served. */
+  serving: { index: number; args: string[] } | null;
 }
 
 async function executePlanAsync(
@@ -317,6 +361,7 @@ async function executePlanAsync(
   // @ref llp/0027-everything-on-eas.rfc.md §The open is a session — the EAS build the session
   // installs: the one the plan found, or the one this run's `eas build` step makes below.
   let easBuildId: string | null = plan.easBuild?.id ?? null;
+  let serving: PlanRun['serving'] = null;
 
   for (const [index, step] of plan.steps.entries()) {
     let args = resolveStepArgs(step, options, index === plan.steps.length - 1);
@@ -427,7 +472,7 @@ async function executePlanAsync(
         }
         const askedPort = readPortArg(args) ?? defaultMetroPort();
         // One retry, and so one per plan: no plan `decideStartPlan` makes has two dev-server steps.
-        const retry = await retryOnFreePortAsync(collision, args, runStep);
+        const retry = await retryOnFreePortAsync(collision, args, plan.devServerPort, runStep);
         if (retry) {
           args = retry.args;
           result = retry.result;
@@ -449,6 +494,7 @@ async function executePlanAsync(
         }
       }
       devServer = result as DevServerRun;
+      serving = { index, args };
     }
     exitCode = result.exitCode;
     planEvent('start_plan_step_exit', { id: step.id, code: exitCode });
@@ -496,7 +542,7 @@ async function executePlanAsync(
       //
       assertNotNeedsHuman(failure, options.platform);
       // Every later step depends on this one having worked, so the plan stops here.
-      return { exitCode, devServer, failure };
+      return { exitCode, devServer, failure, serving };
     }
 
     recordBuildOf(projectRoot, step, state);
@@ -530,7 +576,7 @@ async function executePlanAsync(
     clearFingerprintCache(projectRoot);
   }
 
-  return { exitCode, devServer, failure: null };
+  return { exitCode, devServer, failure: null, serving };
 }
 
 /**
@@ -567,6 +613,38 @@ function portCollisionIn(
   return collision;
 }
 
+/**
+ * The plan as it ran: the serving step's last arguments, and the port the dev server ended on.
+ *
+ * The planned port is the hint and the retry can move it, so the `--json` object, like the
+ * follow-ups, names the port that serves.
+ */
+function planAsRun(plan: StartPlan, run: PlanRun): StartPlan {
+  const { serving } = run;
+  if (!serving || !plan.devServerPort) {
+    return plan;
+  }
+  const reported = run.devServer?.port;
+  const port =
+    reported && (reported.source === 'log' || reported.source === 'arg')
+      ? reported.port
+      : plan.devServerPort.port;
+  return {
+    ...plan,
+    steps: plan.steps.map((step, index) =>
+      index === serving.index ? { ...step, argv: [step.argv[0]!, ...serving.args] } : step
+    ),
+    devServerPort:
+      port === plan.devServerPort.port
+        ? plan.devServerPort
+        : {
+            port,
+            movedFrom: plan.devServerPort.movedFrom ?? plan.devServerPort.port,
+            state: 'picked',
+          },
+  };
+}
+
 /** What one step run amounts to, for the retry that may replace it. */
 type StepResult = {
   exitCode: number;
@@ -583,17 +661,22 @@ type StepResult = {
  * lands on is this command's to decide — which is exactly what the Expo CLI's own question is for,
  * and exactly what a run with no terminal cannot answer.
  *
+ * The plan already gave the step a free port, so this covers the race between that bind test and
+ * the dev server's own bind.
+ *
+ * @param planned the port the plan picked, which is the one the step asked for.
  * @returns the second run and the arguments it used, or null when no free port could be found.
  */
 async function retryOnFreePortAsync(
   collision: PortCollision,
   args: string[],
+  planned: StartPlan['devServerPort'],
   runStep: (stepArgs: string[]) => Promise<StepResult>
 ): Promise<{ args: string[]; result: StepResult; spawnedAt: number } | null> {
+  const asked = planned?.port ?? collision.requestedPort ?? defaultMetroPort();
   // The CLI's own offer first: it walked to that port, so it is the one it would have taken.
-  const scanFrom = collision.offeredPort ?? (collision.requestedPort ?? defaultMetroPort()) + 1;
-  const free = await findFreePortAsync(scanFrom);
-  const busy = collision.requestedPort;
+  const free = await findFreePortAsync(collision.offeredPort ?? asked + 1);
+  const busy = planned?.port ?? collision.requestedPort;
 
   devEvent('start_plan_port_retry', {
     busyPort: busy,
@@ -605,50 +688,33 @@ async function retryOnFreePortAsync(
     return null;
   }
 
-  // On stderr even in `--json` mode, where stdout is the one object this run prints. Said out loud
-  // because the dev server is not where the caller asked for it, and every URL it printed before
-  // this line is stale.
-  //
-  // The first sentence comes from `formatPortMove` because a `--detach` parent reads it back out
-  // of this child's log — that is the only channel between the two, and it is what puts
-  // `portMoved` in the parent's report (llp/0004 §A busy port is not a step only a person can
-  // complete; friction run 5, F48-4).
-  Log.warn(
-    `${formatPortMove({ from: busy, to: free })} ${
-      busy == null
-        ? 'Pass --port to name one yourself.'
-        : `Pass --port ${busy} to require that port instead of moving, which fails when it is taken.`
-    }`
+  warnPortMove(
+    { busy, to: free, when: 'retry' },
+    planned?.movedFrom ?? planned?.port ?? collision.requestedPort
   );
-
-  const retryArgs = withPort(args, free);
+  const retryArgs = withPortArg(args, free);
   const spawnedAt = Date.now();
   return { args: retryArgs, result: await runStep(retryArgs), spawnedAt };
 }
 
 /**
- * `args` with `--port <port>` before the first `--`, and no other `--port` or `-p` before it.
+ * Say that the dev server is not on the port the caller expected.
  *
- * `expo start` forwards everything after `--`, so a port there would not reach the dev server.
+ * On stderr even in `--json` mode, where stdout is the one object this run prints, because every
+ * URL the caller built on the expected port is stale. A `--detach` parent does not read this: it
+ * compares the plan in the child's log with the lock the child publishes (llp/0004 §A busy port is
+ * not a step only a person can complete).
+ *
+ * @param expected the port the caller expected, which the hint names.
  */
-function withPort(args: string[], port: number): string[] {
-  const separator = args.indexOf('--');
-  const own = separator === -1 ? args : args.slice(0, separator);
-  const rest = separator === -1 ? [] : args.slice(separator);
-  const kept: string[] = [];
-  for (let index = 0; index < own.length; index++) {
-    const arg = own[index]!;
-    if (arg === '--port' || arg === '-p') {
-      index++;
-      continue;
-    }
-    if (/^(--port|-p)=/.test(arg)) {
-      continue;
-    }
-    kept.push(arg);
-  }
-  const portArgs = ['--port', String(port)];
-  return [...kept, ...portArgs, ...rest];
+function warnPortMove(move: Parameters<typeof formatPortMove>[0], expected: number | null): void {
+  Log.warn(
+    `${formatPortMove(move)} ${
+      expected == null
+        ? 'Pass --port to name one yourself.'
+        : `Pass --port ${expected} to require that port instead of moving, which fails when it is taken.`
+    }`
+  );
 }
 
 /**
@@ -748,7 +814,7 @@ async function portTakenAfterRetryError(stop: {
   const onFreePort =
     free == null
       ? null
-      : `${PROGRAM_PREFIX} dev --${stop.platform} ${withPort(rest, free).join(' ')}`;
+      : `${PROGRAM_PREFIX} dev --${stop.platform} ${withPortArg(rest, free).join(' ')}`;
   const forceStop =
     answersAsDevServer && listener != null && looksLikeDevServerProcess(listener)
       ? `${PROGRAM_PREFIX} dev:stop --port ${taken} --force`
@@ -1045,9 +1111,8 @@ function planStepFailedError(
  *
  * The dev-server options a follow-up may quote are the **plan's last step**, never the caller's own
  * arguments. They are the same list for a plan that ends in `expo start`, and they differ for every
- * plan that does not: `--port` and `--tunnel` cannot be forwarded to `expo run:ios`, this command
- * already says so out loud, and reading the raw arguments made it print a development-build URL
- * naming the port it had just announced it was dropping — while the step was about to serve on 8081
+ * plan that does not: `--tunnel` cannot be forwarded to `expo run:ios`, and reading the raw
+ * arguments once made it print a development-build URL naming a port the step did not serve on
  * [F120, observed — wave 29 live, 2026-08-27]. The plan is the argv that will run (llp/0015 §The
  * plan approved is the plan run), so it is the one thing a follow-up may read.
  */
@@ -1220,25 +1285,6 @@ async function openAppOnEasForRunAsync(
 function resolveEasBuildPlatform(step: PlanStep): NativePlatform {
   const index = step.argv.indexOf('--platform');
   return step.argv[index + 1] === 'android' ? 'android' : 'ios';
-}
-
-/** Steps that start a dev server, and so get the skill sync of the `@expo/agent-cli start` wrapper. */
-function isDevServerStep(step: PlanStep): boolean {
-  if (step.argv[0] !== 'expo') {
-    // `eas build` finishes with an artifact and starts nothing. The dev server of an EAS-backed
-    // plan is the `expo start --dev-client` step that follows it.
-    return false;
-  }
-  if (step.argv.includes('--no-bundler')) {
-    // The install step of an `*-install` plan (llp/0004 §A current build is not an installed app).
-    // `--no-bundler` is the flag that says it serves nothing, so running it through the dev-server
-    // runner would publish a lock naming a port nothing will listen on, for as long as the install
-    // takes — and every reader of that lock (`status`, `smoke`, `dev:stop`, a `--detach` parent
-    // waiting on another port) would be told about a dev server that does not exist.
-    return false;
-  }
-  const command = step.argv[1];
-  return command === 'start' || command === 'run:ios' || command === 'run:android';
 }
 
 /**

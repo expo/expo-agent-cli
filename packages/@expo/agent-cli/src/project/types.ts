@@ -127,4 +127,22 @@ export interface StartPlan {
    * (llp/0027 §Reuse). The run hands its id to `eas simulator --build-id`. Absent or null otherwise.
    */
   easBuild?: { id: string; profile: string } | null;
+  /**
+   * The port of the plan's dev server, and what the plan does about it. Absent from a plan `dev`
+   * did not resolve a port for.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can complete
+   */
+  devServerPort?: DevServerPort;
 }
+
+/**
+ * Where the plan's dev server listens.
+ *
+ * - `picked`: `dev` picked a free port; `movedFrom` is the busy port it moved off, or null.
+ * - `named`: the caller named the port; `taken` is true when it could not be bound.
+ */
+export type DevServerPort = {
+  port: number;
+  movedFrom: number | null;
+} & ({ state: 'picked' } | { state: 'named'; taken: boolean });

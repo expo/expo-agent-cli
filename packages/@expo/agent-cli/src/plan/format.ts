@@ -5,7 +5,7 @@
 
 import chalk from 'chalk';
 
-import type { StartPlan, TimeClass } from '../project/types';
+import type { DevServerPort, StartPlan, TimeClass } from '../project/types';
 import { EAS_REQUIREMENT, EAS_WHERE, LOCAL_WHERE, RUNS_ON_LABELS } from '../toolchain/runsOn';
 import type { PlanBuildLocation } from '../toolchain/types';
 
@@ -50,6 +50,13 @@ export function formatStartPlan(plan: StartPlan): string {
 
   if (plan.buildLocation) {
     lines.push('', `  ${formatBuildLocation(plan.buildLocation)}`);
+  }
+
+  if (plan.devServerPort) {
+    lines.push(
+      '',
+      chalk`  {bold Dev server:} port ${plan.devServerPort.port}${devServerPortState(plan.devServerPort)}.`
+    );
   }
 
   lines.push('', chalk`  {bold Why}`);
@@ -101,5 +108,19 @@ export function formatBuildLocation(location: PlanBuildLocation): string {
       return chalk`${head} {yellow Not established}: ${location.detail} If it is missing: ${location.alternativeCommand}`;
     default:
       return head;
+  }
+}
+
+/**
+ * The state of the plan's dev-server port, in words after `port <n>`.
+ *
+ * `, because <n> is taken` is read back by a `--detach` parent (`parseDetachedChildPort`).
+ */
+function devServerPortState(devServerPort: DevServerPort): string {
+  switch (devServerPort.state) {
+    case 'picked':
+      return devServerPort.movedFrom == null ? '' : `, because ${devServerPort.movedFrom} is taken`;
+    case 'named':
+      return devServerPort.taken ? ', as named, which is taken' : ', as named';
   }
 }

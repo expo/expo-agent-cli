@@ -356,6 +356,9 @@ export function spawnAgentCli(
       // `dev` run on a developer's Mac would boot a real simulator against a stub dev server.
       AGENT_CLI_NO_DEVICE: '1',
       ...stubExpoEnv(cwd),
+      // `dev` picks the port before the plan and passes it as `--port`, which the stub listens on
+      // over its own env var. Expo's default variable makes the two the same port.
+      ...(env?.STUB_EXPO_DEV_SERVER_PORT ? { RCT_METRO_PORT: env.STUB_EXPO_DEV_SERVER_PORT } : {}),
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

@@ -240,14 +240,22 @@ export async function discoverDevServerAsync(
   // server holds open for as long as it runs, which answers with the URL it listens on. Nothing
   // answers unless a process is alive, so this step has no stale case to guard against. The URL
   // is still probed, never trusted: the lock proves that the wrapper is alive, and the probe
-  // proves that the dev server behind it is.
+  // proves that the dev server behind it is. The lock names its port at the spawn, before Metro
+  // binds it, so the server there is this project's only when `/status` names no other project's
+  // root (`matchProjectRoot`, the rule every `/status` reader applies). Another root falls through.
   if (projectRoot != null) {
     const lock = await readDevServerLockAsync(projectRoot);
     if (lock != null) {
       const lockUrl = normalizeDevServerUrl(lock.url);
       const lockProbe = await withTimeout(lockUrl);
       if (lockProbe.reachable) {
-        return { ...lockProbe, devServerUrl: lockUrl, ...foundBy('lock') };
+        // Lazy: `./bundlerStatus` reaches this module through `./waitReady`.
+        const { probeBundlerAsync } =
+          require('./bundlerStatus') as typeof import('./bundlerStatus');
+        const status = await probeBundlerAsync(lockUrl, { timeoutMs, projectRoot });
+        if (status.projectRootMatched !== false) {
+          return { ...lockProbe, devServerUrl: lockUrl, ...foundBy('lock') };
+        }
       }
     }
   }

@@ -21,8 +21,8 @@ import { unknownOptionError } from '../utils/unknownOption';
 /**
  * Options `@expo/agent-cli dev` acts on itself and never forwards.
  *
- * `--port` is deliberately *not* here: it is an `expo start` option that this command also reads
- * (`resolveDevOptions`), so it belongs to the list below and is forwarded as well as acted on.
+ * `--port` is not here: it is an `expo start` option, so it belongs to the list below. `dev` owns
+ * the port: `resolveDevOptions` reads it and strips it, and the plan sets it on every serving step.
  *
  * `--go` and `--dev-client` are not here either, and for the same reason: they are `expo start`'s
  * own, and this command *also* reads them as the run target the plan aims at (llp/0015 §The run

@@ -401,9 +401,12 @@ Release. On the wrapper's `finally` and on process exit, with a best-effort unli
 leftover socket file answers nothing. The next acquisition removes it.
 
 Never load-bearing. An address that cannot be taken produces one warning and a
-`cli:dev_lock_skipped` event, never a failure. The port published is the one the dev
-server itself reported in `start.log` after the spawn timestamp, falling back to
-`--port` and then 8081.
+`cli:dev_lock_skipped` event, never a failure. When the arguments name a port, the lock
+is published at the spawn with that port: `dev` passes `--port` on every step that
+serves, and the Expo CLI either binds it or exits. The log watch goes on, and a port the
+dev server reports in `start.log` after the spawn timestamp updates the lock's answer.
+With no port in the arguments, the port published is the one the dev server reported,
+falling back to 8081.
 
 Still probed. The lock proves the wrapper is alive. Only an HTTP probe of the URL proves
 the dev server behind it is. Discovery uses the lock to stop guessing which port.
@@ -489,27 +492,65 @@ and recovers into a different command: `dev:stop --port <n> --force`, or a free 
 When the process on that port is this project's own dev server, which the lock says, the
 message says that instead.
 
-One retry. No plan has two dev-server steps, so that is one retry per plan. A second
-collision means the port this CLI picked was taken between the bind test and the dev
-server's own bind.
+The port is resolved before the plan runs: the named `--port`, or the first port from
+8081 (`RCT_METRO_PORT` when set) that binds on `::` and `127.0.0.1`. It goes as `--port`
+to `expo start` and to every `expo run:*` that serves, and the plan reports it as
+`devServerPort`, because `expo run:*` left to ask skips its dev server, deep-links the
+app to whatever holds the port, and exits 0.
 
-The check runs whatever the step's exit code, because `expo run:*` that skipped its dev
-server on a busy port exits 0; the `Port <n> is …` line it prints before the skip is the
+A busy port is busy whoever holds it, this project's own dev server included: the plan
+moves to the next free port.
+
+A server on a port is this project's unless `/status` names another project root in the
+`X-React-Native-Project-Root` header. No header, or a root that contains this project (a
+monorepo `metro.config.js` sets `projectRoot` to the workspace root), is this project's
+server; a sibling is not. A containing root counts only in the same checkout: no
+directory from the project up to that root, the root excluded, holds a `.git` entry, so
+the main checkout's Metro never answers for a worktree inside it
+(`<repo>/.claude/worktrees/<name>`). Every consumer of the `/status` probe reads this one
+rule. Discovery's lock step (`discoverDevServerAsync` step 0) reads it too: the lock
+names its port at the spawn, before Metro binds it, so a lock whose port answers with
+another project's root is not found there, and discovery goes on to its other steps. An
+open aimed at a port the command line named waits until `/status` answers there and
+names no other project's root. It never comes when the dev server exits first.
+
+`devServerPort.state` says what the plan does about the port: `picked`, or `named` (with
+`taken` when the named port cannot be bound).
+
+One retry. No plan has two dev-server steps, so that is one retry per plan. The check
+runs whatever the step's exit code, because `expo run:*` that skipped its dev server on
+a busy port exits 0; the `Port <n> is …` line it prints before the skip is the
 collision. A bare `Skipping dev server`, with no such line, is the Expo CLI reusing this
-project's own dev server, and the step succeeded. The check also reads Metro's
-`listen EADDRINUSE` and the Expo CLI's `Port "<n>" became busy … while the app was
-compiling` stop as collisions. A collision is the step's own only when it names the
-step's port (its `--port`, else Expo's default) or names no port: a `run:*` step's output
-carries other listeners' errors too. A dev server that logged where it listens after the
-step started bound its port, so its output is never scanned. The check reads that log
-itself, because the port watch stops before a `run:*` build ends.
+project's own dev server, and the step succeeded. A second collision means the port this
+CLI picked was taken between the bind test and the dev server's own bind.
 
-A collision still present after the retry stops the run with `PORT_TAKEN_AFTER_RETRY`,
-exit 20. It names the port the step asked for, the port the retry moved to and lost, the
-pid on that port, and the Expo CLI's own exit code. Its How is the caller's own command
-line with a free `--port`. With no free port, it is `dev:stop --port <n> --force` when the
-holder answers as an Expo dev server and its process looks like one, and otherwise the
-pid to stop.
+The pre-resolved port is a hint, and the retry is the guarantee: two worktrees can pick
+the same free port at once, and the one that binds second fails in Metro with
+`listen EADDRINUSE`, which the retry reads as a collision like the Expo CLI's own lines.
+On a `run:*` build the same race surfaces as the Expo CLI's `Port "<n>" became busy …
+while the app was compiling` stop, which the retry reads too. A collision is the step's
+own only when it names the step's port (its `--port`, else Expo's default) or names no
+port: a `run:*` step's output carries other listeners' errors too. A dev server that
+logged where it listens after the step started bound its port, so its output is never
+scanned. The check reads that log itself, because the port watch stops before a `run:*`
+build ends.
+
+A collision still present after the retry, whatever the step's exit code, stops the run
+with `PORT_TAKEN_AFTER_RETRY`, exit 20. It names the port the step asked for, the port
+the retry moved to and lost, the pid on that port, and the Expo CLI's own exit code. Its
+How is the caller's own command line with a free `--port`. With no free port, it is
+`dev:stop --port <n> --force` when the holder answers as an Expo dev server and its
+process looks like one, and otherwise the pid to stop.
+
+A `--detach` run moves in the child, so the parent computes the move: from the plan it
+reads from the child's log and the lock the child publishes. The lock is published at the
+spawn, before Metro binds, so the parent reports it once `start.log` names its port after
+the lock's `startedAt` (the spawn of the step that holds it), or once the port watch's
+20 s have passed since that spawn. A lock that is not confirmed when the child exits or
+the budget ends is still the answer, and the checks after it judge the child. The port
+the caller expected is the plan's `movedFrom`, or its planned port when the plan did not
+move. A lock on any other port is `portMoved`. The move message the child prints is for
+a person and carries no protocol.
 
 The port probe is Expo's own `freePortAsync`, copied into `src/utils/freeport.ts`, so
 this CLI and the dev server agree on which port is free. It asks the unspecified address,

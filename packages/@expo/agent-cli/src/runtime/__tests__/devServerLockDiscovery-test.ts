@@ -16,13 +16,25 @@ vi.unmock('node:fs');
 
 const target = { webSocketDebuggerUrl: 'ws://x' } as any;
 
-/** Answer `/json/list` per port: a targets array, or refuse the connection. */
-function mockFetchByPort(answers: { [port: string]: any[] }) {
+/**
+ * Answer `/json/list` per port: a targets array, or refuse the connection. `/status` answers as a
+ * running Metro, for the project root `roots` names for the port, or for none.
+ */
+function mockFetchByPort(
+  answers: { [port: string]: any[] },
+  roots: { [port: string]: string } = {}
+) {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = new URL(String(input));
     const answer = answers[url.port];
     if (answer === undefined) {
       throw new Error('ECONNREFUSED');
+    }
+    if (url.pathname === '/status') {
+      const root = roots[url.port];
+      return new Response('packager-status:running', {
+        headers: root ? { 'X-React-Native-Project-Root': root } : {},
+      });
     }
     return { ok: true, json: async () => answer } as Response;
   });
@@ -67,8 +79,32 @@ describe('discoverDevServerAsync — the project lock', () => {
       source: 'lock',
       discovered: true,
     });
-    // The lock answered and the URL it named answered: nothing else was tried.
-    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+    // The lock answered and the URL it named answered, `/json/list` and `/status`: nothing else
+    // was tried.
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  });
+
+  // The lock names its port at the spawn, before Metro binds it, so another project's Metro can
+  // be what answers there.
+  it(`does not accept the lock's URL when /status names another project root`, async () => {
+    const projectRoot = makeTempProject();
+    await holdLockAsync(projectRoot, 8090);
+    mockFetchByPort({ '8090': [target], '8083': [target] }, { '8090': '/other-project' });
+
+    const result = await discoverDevServerAsync(undefined, { projectRoot, timeoutMs: 200 });
+
+    expect(result.source).not.toBe('lock');
+    expect(result.devServerUrl).toBe('http://127.0.0.1:8083');
+  });
+
+  it(`accepts the lock's URL when /status names this project root`, async () => {
+    const projectRoot = makeTempProject();
+    await holdLockAsync(projectRoot, 8090);
+    mockFetchByPort({ '8090': [target] }, { '8090': projectRoot });
+
+    const result = await discoverDevServerAsync(undefined, { projectRoot, timeoutMs: 200 });
+
+    expect(result).toMatchObject({ devServerUrl: 'http://127.0.0.1:8090', source: 'lock' });
   });
 
   it(`falls through when the URL the lock names does not answer`, async () => {
