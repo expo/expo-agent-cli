@@ -54,6 +54,12 @@ export interface AllocateDeviceOptions<C extends DeviceCandidate> {
   probeLock?: (projectRoot: string) => Promise<unknown>;
 }
 
+/** What a peek needs: no function that creates or deletes a device, only whether a claim may create one. */
+export type PeekDeviceOptions<C extends DeviceCandidate> = Omit<
+  AllocateDeviceOptions<C>,
+  'createDevice' | 'deleteDevice'
+> & { canCreate: boolean };
+
 /**
  * The device of this worktree, or who holds every device.
  *
@@ -72,7 +78,10 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>(
 
   return await withRegistryLockAsync(async () => {
     // Chosen once the lock is held, so a touch made while this call waited is not in the future.
-    const { projectRoot, now, clock, classifyAsync, choose } = chooser(options);
+    const { projectRoot, now, clock, classifyAsync, choose } = chooser({
+      ...options,
+      canCreate: createDevice != null,
+    });
     const currentAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim | null> => {
       const current = readClaim(claim.backend, claim.id);
       // The loop can outlast the grace period, and a touch made meanwhile is not in the future.
@@ -212,7 +221,7 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>(
  * on an allocation.
  */
 export async function peekDeviceAsync<C extends DeviceCandidate>(
-  options: AllocateDeviceOptions<C>
+  options: PeekDeviceOptions<C>
 ): Promise<DeviceChoice<C>> {
   const { now, classifyAsync, choose } = chooser(options);
   const claims = await Promise.all(readClaims().map((claim) => classifyAsync(claim, now)));
@@ -224,7 +233,7 @@ function chooser<C extends DeviceCandidate>({
   projectRoot: givenRoot,
   platform,
   backend,
-  createDevice,
+  canCreate,
   capacity,
   rank,
   explicit,
@@ -232,7 +241,7 @@ function chooser<C extends DeviceCandidate>({
   isCreated,
   clock = () => new Date(),
   probeLock,
-}: AllocateDeviceOptions<C>) {
+}: PeekDeviceOptions<C>) {
   const projectRoot = canonicalizeExistingPath(givenRoot);
   const now = clock();
   const classifyAsync = async (claim: DeviceClaim, at: Date): Promise<ClassifiedClaim> => ({
@@ -246,7 +255,7 @@ function chooser<C extends DeviceCandidate>({
       backend,
       claims,
       inventory,
-      capacity: createDevice ? capacity : 0,
+      capacity: canCreate ? capacity : 0,
       rank,
       now,
       pid: process.pid,
