@@ -3,7 +3,7 @@ import fs from 'fs';
 import { vol } from 'memfs';
 import path from 'path';
 
-import { claimFilePath, readClaims, writeClaim } from '../../deviceClaims';
+import { claimFilePath, deviceRegistryDirectory, readClaims, writeClaim } from '../../deviceClaims';
 import { debugEvent } from '../../deviceClaims/events';
 import { newestIosRuntime, resolveClaimedDeviceAsync } from '../claimedDevice';
 import { simulatorHasAppAsync } from '../installedApps';
@@ -53,7 +53,17 @@ function fakeSimulators(
     { udid: 'SIM-A', name: 'iPhone 17', state: 'Shutdown' },
     { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Shutdown' },
   ],
-  { onBoot, bootstatusExit = 0 }: { onBoot?: () => void; bootstatusExit?: number } = {}
+  {
+    onBoot,
+    bootstatusExit = 0,
+    onShutdown,
+    shutdownExit = 0,
+  }: {
+    onBoot?: () => void;
+    bootstatusExit?: number;
+    onShutdown?: () => void;
+    shutdownExit?: number;
+  } = {}
 ) {
   const devices = initial.map((device) => ({ ...device }));
   const tools = fakeDeviceTools((command, args) => {
@@ -81,6 +91,12 @@ function fakeSimulators(
     }
     if (verb === 'bootstatus') {
       return { exitCode: bootstatusExit };
+    }
+    if (verb === 'shutdown') {
+      onShutdown?.();
+      return shutdownExit === 0
+        ? {}
+        : { exitCode: shutdownExit, stderr: 'Unable to shutdown device in current state: Booted' };
     }
     if (verb === 'create') {
       devices.push({ udid: 'SIM-NEW', name: rest[0]!, state: 'Shutdown' });
@@ -491,6 +507,75 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
       allowBoot: true,
     });
     expect(readClaims().map(({ id }) => id)).toEqual(['SIM-B']);
+  });
+
+  it(`shuts down the simulator it booted, under the lock, before --device gives it up`, async () => {
+    let atShutdown: { locked: boolean; claims: string[] } | null = null;
+    const { tools } = fakeSimulators(undefined, {
+      onShutdown: () => {
+        atShutdown = {
+          locked: vol.existsSync(path.join(deviceRegistryDirectory(), '.lock')),
+          claims: readClaims()
+            .map(({ id }) => id)
+            .sort(),
+        };
+      },
+    });
+    for (const explicit of ['SIM-A', 'SIM-B']) {
+      await resolveClaimedDeviceAsync({
+        mode: 'claim',
+        platform: 'ios',
+        projectRoot: HERE,
+        explicit,
+        allowBoot: true,
+      });
+    }
+
+    expect(tools.callsWith('simctl shutdown')).toEqual(['xcrun simctl shutdown SIM-A']);
+    expect(atShutdown).toEqual({ locked: true, claims: ['SIM-A', 'SIM-B'] });
+    expect(readClaims().map(({ id }) => id)).toEqual(['SIM-B']);
+  });
+
+  it(`leaves up a simulator it did not boot when --device gives it up`, async () => {
+    const { tools } = fakeSimulators([
+      { udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' },
+      { udid: 'SIM-B', name: 'iPhone 17 Pro', state: 'Booted' },
+    ]);
+    for (const explicit of ['SIM-A', 'SIM-B']) {
+      await resolveClaimedDeviceAsync({
+        mode: 'claim',
+        platform: 'ios',
+        projectRoot: HERE,
+        explicit,
+        allowBoot: true,
+      });
+    }
+
+    expect(tools.callsWith('simctl shutdown')).toEqual([]);
+    expect(readClaims().map(({ id }) => id)).toEqual(['SIM-B']);
+  });
+
+  it(`gives up the previous simulator when its shutdown failed, and says so`, async () => {
+    fakeSimulators(undefined, { shutdownExit: 1 });
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      for (const explicit of ['SIM-A', 'SIM-B']) {
+        await resolveClaimedDeviceAsync({
+          mode: 'claim',
+          platform: 'ios',
+          projectRoot: HERE,
+          explicit,
+          allowBoot: true,
+        });
+      }
+
+      expect(readClaims().map(({ id }) => id)).toEqual(['SIM-B']);
+      expect(stderr.mock.calls.map(([text]) => String(text)).join('')).toContain(
+        'SIM-A, which --device replaced, is still up: "xcrun simctl shutdown SIM-A" exited 1'
+      );
+    } finally {
+      stderr.mockRestore();
+    }
   });
 
   it(`keeps the worktree's booted simulator when a read names a shut-down one`, async () => {

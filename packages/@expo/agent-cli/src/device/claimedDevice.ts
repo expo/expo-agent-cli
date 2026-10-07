@@ -14,8 +14,8 @@ import {
   markClaimBootedAsync,
   peekDeviceAsync,
   readClaim,
-  readClaims,
   releaseClaim,
+  releaseProjectClaimsAsync,
   touchClaim,
   type ClassifiedClaim,
   type DeviceAction,
@@ -416,29 +416,33 @@ async function resolveWithInventoryAsync(
     hasApp: candidate.hasApp ?? null,
     adb,
   });
-  const device = (booted: boolean): ClaimedDeviceResult => {
+  const device = async (booted: boolean): Promise<ClaimedDeviceResult> => {
     const held = touchClaim(claim) ?? heldClaim(claim);
     if (held == null) {
       return lostClaimRefusal(platform, candidate, readClaim(backend, candidate.id));
     }
     if (explicit) {
       // One device per platform per worktree: the named device replaces the one held before, but
-      // only once it proved usable, so a failed `--device` keeps the device that works.
-      for (const other of readClaims()) {
-        if (
-          other.backend === backend &&
-          other.projectRoot === projectRoot &&
-          other.id !== candidate.id
-        ) {
-          releaseClaim(other);
+      // only once it proved usable, so a failed `--device` keeps the device that works. The claim
+      // goes even when the shutdown fails, so the named device is the one this worktree holds.
+      await releaseProjectClaimsAsync(projectRoot, async (other) => {
+        if (other.backend !== backend || other.id === candidate.id) {
+          return { release: false };
         }
-      }
+        if (other.booted || other.created) {
+          const shutdown = await shutdownDeviceAsync(other.id, backend, { adb: adb ?? undefined });
+          if (!shutdown.ok) {
+            Log.progress(`${other.id}, which --device replaced, is still up: ${shutdown.reason}.`);
+          }
+        }
+        return { release: true };
+      });
     }
     return { ...peeked(), state: 'booted', claim: held, booted };
   };
 
   if (candidate.state === 'booted') {
-    return mode === 'peek' ? peeked() : device(false);
+    return mode === 'peek' ? peeked() : await device(false);
   }
   if (!allowBoot) {
     if (fresh && mode === 'claim') {
@@ -511,7 +515,7 @@ async function resolveWithInventoryAsync(
       name: candidate.name,
     };
   }
-  return device(true);
+  return await device(true);
 }
 
 /** The claim, when its file still names it. A touch can fail on IO alone. */
