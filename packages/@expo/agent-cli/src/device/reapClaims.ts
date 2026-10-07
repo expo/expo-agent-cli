@@ -122,14 +122,21 @@ export async function reapDeletedWorktreeClaimsAsync(
       shutdown.ok && claim.created && backend === 'local-ios'
         ? await deleteCreatedSimulatorAsync(claim.id)
         : null;
-    await withRegistryLockAsync(async () => {
+    // A device still up keeps its claim without the mark, so the next reap tries again.
+    const released = await withRegistryLockAsync(async () => {
       const current = readClaim(claim.backend, claim.id);
-      if (current?.reaping && isSameClaim(current, claim)) {
-        removeClaimFile(claim);
+      if (!current?.reaping || !isSameClaim(current, claim)) {
+        return false;
       }
+      if (!shutdown.ok) {
+        replaceClaim(claim);
+        return false;
+      }
+      removeClaimFile(claim);
+      return true;
     });
     report(claim, {
-      released: true,
+      released,
       shutDown: shutdown.ok,
       deleted: deletion?.ok ?? false,
       reason: shutdown.reason ?? deletion?.reason ?? null,
