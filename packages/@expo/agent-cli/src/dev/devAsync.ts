@@ -22,7 +22,7 @@ import { needsHumanErrorFrom } from '../needsHuman/error';
 import { emitStartPlan } from '../plan/emit';
 import { event as planEvent } from '../plan/events';
 import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBuild';
-import { resolveStartPlanAsync, type PlanDevices } from '../plan/resolveAsync';
+import { awaitsADevice, resolveStartPlanAsync, type PlanDevices } from '../plan/resolveAsync';
 import { isPlatformFlag } from '../plan/platformFlags';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
@@ -95,10 +95,13 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   });
   const devices = planDevices(projectRoot, options);
   // A device the caller named is resolved first: a run boots it, so the presence probe below asks
-  // that device, and a name that matches nothing stops `--plan` as it stops the run.
-  if (options.device && devices && options.platform !== 'web') {
-    await devices.runDevice(options.platform);
-  }
+  // that device, and a name that matches nothing stops `--plan` as it stops the run. `--plan` boots
+  // nothing: it reads a shut-down simulator's apps off its disk, and cannot ask an emulator that is
+  // not running.
+  const named =
+    options.device && devices && options.platform !== 'web'
+      ? await devices.runDevice(options.platform)
+      : null;
   // @ref llp/0015-backend-selection-and-config.rfc.md §The selection
   // One call that folds in everything outside the project: the developer's config, the flags they
   // typed, this host and the toolchain probe. The backend is chosen **here**, before the plan is
@@ -120,12 +123,27 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     fingerprintCache: options.fingerprintCache,
     devices,
   });
+  const unasked =
+    options.mode === 'plan' &&
+    options.open &&
+    options.platform === 'android' &&
+    named?.state === 'shutdown' &&
+    awaitsADevice(resolved);
+  const planned: StartPlan = unasked
+    ? {
+        ...resolved,
+        reasons: [
+          ...resolved.reasons,
+          `${named.name} is not running, so this plan could not ask it for the app. The run boots it first, and may install the app before the dev server starts.`,
+        ],
+      }
+    : resolved;
 
   // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run
   // Here, before anything is printed. The options a caller typed for `expo start` used to be folded
   // in while the step ran, so `--plan --tunnel` printed a command without `--tunnel` and the run
   // passed it [observed — friction run 7, F71; live run S5].
-  const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
+  const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(planned, options.expoArgs);
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
   // complete — the port is picked here, before the plan is printed, and set on every step that
@@ -1213,8 +1231,10 @@ function planDevices(projectRoot: string, options: DevOptions): PlanDevices | un
       return { action, id, name, state };
     },
     async bootedDevice(_projectRoot, platform) {
-      const resolved = await resolveAsync(platform, false);
-      return resolved.ok && resolved.state === 'booted'
+      // The run boots the simulator `--device` names before it asks; `--plan` reads its disk.
+      const readsDisk = options.mode === 'plan' && options.device != null && platform === 'ios';
+      const resolved = await resolveAsync(platform, readsDisk);
+      return resolved.ok && resolved.id != null && (resolved.state === 'booted' || readsDisk)
         ? { deviceId: resolved.id, backend: resolved.backend }
         : null;
     },
