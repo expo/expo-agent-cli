@@ -216,10 +216,18 @@ describe(bootEmulatorAsync, () => {
   const adb = { bin: 'adb', source: 'PATH' as const, searched: [], fromPathOnly: true };
   const emulator = process.platform === 'win32' ? 'emulator.exe' : 'emulator';
 
+  /** `getprop` says booted, and `emu avd name` names `avd`: the emulator on the port. */
+  const answering =
+    (avd = 'Pixel_8') =>
+    (_command: string, args: string[]) =>
+      args.includes('sys.boot_completed')
+        ? { stdout: '1\n' }
+        : args.includes('avd') && args.includes('name')
+          ? { stdout: `${avd}\r\nOK\r\n` }
+          : {};
+
   it(`starts the AVD on the ports it was given, and waits on that serial`, async () => {
-    const tools = fakeDeviceTools((_command, args) =>
-      args.includes('sys.boot_completed') ? { stdout: '1\n' } : {}
-    );
+    const tools = fakeDeviceTools(answering());
     const result = await bootEmulatorAsync(
       { avd: 'Pixel_8', port: 5558, readOnly: false },
       { timeoutMs: 1_000, adb }
@@ -231,6 +239,33 @@ describe(bootEmulatorAsync, () => {
     expect(tools.callsWith('getprop')).toEqual([
       'adb -s emulator-5558 shell getprop sys.boot_completed',
     ]);
+    expect(tools.callsWith('emu avd name')).toEqual(['adb -s emulator-5558 emu avd name']);
+  });
+
+  it(`fails with the exit code when its emulator exited, though another emulator answers on the port`, async () => {
+    fakeDeviceTools((command, args) =>
+      command === emulator ? { exitCode: 1 } : answering('Other_AVD')(command, args)
+    );
+
+    const result = await bootEmulatorAsync(
+      { avd: 'Pixel_8', port: 5556, readOnly: false },
+      { timeoutMs: 1_000, adb }
+    );
+
+    expect(result).toMatchObject({ ok: false, deviceId: 'emulator-5556', ownsSerial: false });
+    expect(result.reason).toContain('exited with code 1');
+  });
+
+  it(`fails when the emulator on its port runs another AVD`, async () => {
+    fakeDeviceTools(answering('Other_AVD'));
+
+    const result = await bootEmulatorAsync(
+      { avd: 'Pixel_8', port: 5556, readOnly: false },
+      { timeoutMs: 1_000, adb }
+    );
+
+    expect(result).toMatchObject({ ok: false, deviceId: 'emulator-5556', ownsSerial: false });
+    expect(result.reason).toContain('Other_AVD');
   });
 
   it(`fails at once, with the exit code, when the emulator exits before it boots`, async () => {
@@ -255,9 +290,8 @@ describe(bootEmulatorAsync, () => {
       }
       if (args.includes('sys.boot_completed')) {
         probes += 1;
-        return { stdout: '1\n' };
       }
-      return {};
+      return answering()(command, args);
     });
 
     const result = await bootEmulatorAsync(
@@ -270,9 +304,7 @@ describe(bootEmulatorAsync, () => {
   });
 
   it(`starts a second instance of a running AVD read-only`, async () => {
-    const tools = fakeDeviceTools((_command, args) =>
-      args.includes('sys.boot_completed') ? { stdout: '1\n' } : {}
-    );
+    const tools = fakeDeviceTools(answering());
     await bootEmulatorAsync(
       { avd: 'Pixel_8', port: 5556, readOnly: true },
       { timeoutMs: 1_000, adb }

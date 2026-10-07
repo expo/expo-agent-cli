@@ -776,12 +776,16 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
   /** What the CLI spawns for the emulator on this host: `emulator.exe` on Windows. */
   const EMULATOR = process.platform === 'win32' ? 'emulator.exe' : 'emulator';
 
-  /** One AVD. An emulator shows up in `adb devices` once it was spawned on its port. */
+  /**
+   * One AVD. An emulator shows up in `adb devices` once it was spawned on its port. With `foreign`,
+   * another process's emulator of that AVD takes the port first, and the one spawned exits 1.
+   */
   function fakeAndroid({
     physical = [] as string[],
     avds = ['Pixel_8'],
     boots = true,
     listed = true,
+    foreign = null as string | null,
   } = {}) {
     const running = new Map<string, string>();
     const tools = fakeDeviceTools((spawned, args) => {
@@ -791,6 +795,10 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
       }
       if (command === 'emulator' && args[0] === '-avd') {
         const port = args[args.indexOf('-ports') + 1]!.split(',')[0];
+        if (foreign != null) {
+          running.set(`emulator-${port}`, foreign);
+          return { exitCode: 1 };
+        }
         if (listed) {
           running.set(`emulator-${port}`, args[1]!);
         }
@@ -952,6 +960,22 @@ describe(`${resolveClaimedDeviceAsync.name} on Android`, () => {
     expect(tools.kills).toEqual([
       { command: expect.stringMatching(/emulator/), signal: 'SIGKILL' },
     ]);
+    expect(readClaims()).toEqual([]);
+  });
+
+  it(`fails the boot, and claims and shuts down nothing, when another emulator took its port`, async () => {
+    const { tools } = fakeAndroid({ foreign: 'Someone_Elses_AVD' });
+
+    const result = await resolveClaimedDeviceAsync({
+      mode: 'claim',
+      platform: 'android',
+      projectRoot: HERE,
+      allowBoot: true,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'boot-failed', deviceId: 'emulator-5554' });
+    expect(!result.ok && result.reason).toContain('exited with code 1');
+    expect(tools.callsWith('emu kill')).toEqual([]);
     expect(readClaims()).toEqual([]);
   });
 

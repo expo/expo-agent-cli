@@ -503,12 +503,16 @@ async function resolveWithInventoryAsync(
     emulatorBoot ??
     (await bootSimulatorAsync({ udid: candidate.id, name: candidate.name }, { timeoutMs, choice }));
   if (!boot.ok) {
+    const ownsSerial = emulatorBoot?.ownsSerial ?? true;
     await withRegistryLockAsync(async () => {
-      const shutdown = await shutdownDeviceAsync(candidate.id, backend, { adb: adb ?? undefined });
-      if (!shutdown.ok) {
+      const shutdown = ownsSerial
+        ? await shutdownDeviceAsync(candidate.id, backend, { adb: adb ?? undefined })
+        : null;
+      if (!shutdown?.ok) {
         emulatorBoot?.kill();
       }
-      if (fresh) {
+      // A serial another emulator answers on is not this worktree's to hold.
+      if (fresh || !ownsSerial) {
         releaseClaim(booting);
       }
     });
