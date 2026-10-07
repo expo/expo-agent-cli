@@ -11,6 +11,7 @@ export { CLAIM_GRACE_MS, classifyClaimAsync } from './liveness';
 export {
   claimFilePath,
   isSameClaim,
+  markClaimBootedAsync,
   readClaim,
   deviceRegistryDirectory,
   readClaims,

@@ -74,24 +74,27 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
   explicit,
   matches,
   isCreated,
-  now = new Date(),
+  now: givenNow,
   probeLock,
 }: AllocateDeviceOptions<C>): Promise<Allocation<C>> {
   const projectRoot = canonicalizeExistingPath(givenRoot);
-  const classifyAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim> => ({
-    ...claim,
-    liveness: await classifyClaimAsync(claim, { now, probeLock }),
-  });
-  const currentAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim | null> => {
-    const current = readClaim(claim.backend, claim.id);
-    return current == null ? null : await classifyAsync(current);
-  };
-  const stillStaleAsync = async (claim: DeviceClaim): Promise<boolean> => {
-    const current = await currentAsync(claim);
-    return current != null && isSameClaim(current, claim) && current.liveness === 'stale';
-  };
 
   return await withRegistryLockAsync(async () => {
+    // Read once the lock is held, so a touch made while this call waited is not in the future.
+    const now = givenNow ?? new Date();
+    const classifyAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim> => ({
+      ...claim,
+      liveness: await classifyClaimAsync(claim, { now, probeLock }),
+    });
+    const currentAsync = async (claim: DeviceClaim): Promise<ClassifiedClaim | null> => {
+      const current = readClaim(claim.backend, claim.id);
+      return current == null ? null : await classifyAsync(current);
+    };
+    const stillStaleAsync = async (claim: DeviceClaim): Promise<boolean> => {
+      const current = await currentAsync(claim);
+      return current != null && isSameClaim(current, claim) && current.liveness === 'stale';
+    };
+
     pruneUnreadableClaims(now.getTime());
     let claims = await Promise.all(readClaims().map(classifyAsync));
     let inventory = await listDevices(claims);
@@ -182,8 +185,26 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>({
             }
             removeStale(replaced, 'taken-over');
           }
-          writeClaim(choice.claim);
-          return choice;
+          try {
+            writeClaim(choice.claim);
+            return choice;
+          } catch (error: unknown) {
+            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
+              throw error;
+            }
+          }
+          // Claimed since the registry was read, or held by a claim file still being written.
+          // Choose again from what the file says now.
+          const current = await currentAsync(choice.claim);
+          claims = claims.filter(
+            (claim) => !(claim.backend === backend && claim.id === choice.candidate.id)
+          );
+          if (current != null) {
+            claims.push(current);
+          } else {
+            inventory = inventory.filter((candidate) => candidate.id !== choice.candidate.id);
+          }
+          continue;
         }
 
         case 'create': {

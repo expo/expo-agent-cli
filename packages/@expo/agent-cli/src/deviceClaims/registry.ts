@@ -59,13 +59,16 @@ export function readClaims(): DeviceClaim[] {
 }
 
 /**
- * Write a new claim.
+ * Write a new claim. Its `touchedAt` becomes the file's mtime.
  *
  * @throws with `EEXIST` when the device is claimed already, so a claim is never overwritten.
  */
 export function writeClaim(claim: DeviceClaim): void {
   fs.mkdirSync(deviceRegistryDirectory(), { recursive: true });
-  fs.writeFileSync(claimFilePath(claim.backend, claim.id), serialize(claim), { flag: 'wx' });
+  const file = claimFilePath(claim.backend, claim.id);
+  fs.writeFileSync(file, serialize(claim), { flag: 'wx' });
+  const touchedAt = new Date(claim.touchedAt);
+  fs.utimesSync(file, touchedAt, touchedAt);
   event('device_claim_written', {
     backend: claim.backend,
     id: claim.id,
@@ -75,59 +78,62 @@ export function writeClaim(claim: DeviceClaim): void {
 }
 
 /**
- * Refresh `touchedAt` of a claim this worktree still holds.
+ * Refresh the touch of a claim this worktree still holds: the mtime of its file.
  *
- * Runs outside the registry lock, because every verb calls it. It is a compare-and-swap on the
- * inode: the file is renamed aside first, so no other writer can replace it between the check and
- * the write. Bytes that are not this claim (its worktree and its `claimedAt`) go back unchanged.
- * The touched file goes into place with a hard link, which fails rather than overwrite a claim
- * another worktree wrote while this one was aside. A reader never sees half a file.
+ * Runs outside the registry lock, because every verb calls it, so it never removes or rewrites the
+ * file: every reader sees the claim throughout. A touch can land on a claim that replaced this one
+ * after it was read; that claim is newer than the read, so it is live already.
  *
  * @returns the touched claim, or null when the claim was released, another claim replaced it, or
  * the file system refused. Never throws.
  */
-export function touchClaim(
-  claim: DeviceClaim,
-  now: Date = new Date(),
-  patch: Pick<Partial<DeviceClaim>, 'booted'> = {}
-): DeviceClaim | null {
+export function touchClaim(claim: DeviceClaim, now: Date = new Date()): DeviceClaim | null {
   const file = claimFilePath(claim.backend, claim.id);
-  const temporary = (kind: string) =>
-    path.join(
-      path.dirname(file),
-      `.${path.basename(file)}.${kind}-${process.pid}-${randomBytes(4).toString('hex')}`
-    );
   try {
-    const aside = temporary('aside');
-    try {
-      fs.renameSync(file, aside);
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
-        return null;
-      }
-      throw error;
+    fs.utimesSync(file, now, now);
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+      debugEvent('device_claim_touch_failed', {
+        backend: claim.backend,
+        id: claim.id,
+        reason: (error as Error).message,
+      });
     }
-    let placed = false;
-    try {
-      const moved = readClaimFile(aside);
-      if (moved == null || !isSameClaim(moved, claim)) {
+    return null;
+  }
+  const current = readClaimFile(file);
+  return current != null && isSameClaim(current, claim) ? current : null;
+}
+
+/**
+ * Record in a claim this worktree still holds that this CLI booted its device.
+ *
+ * Under the registry lock, so no allocation replaces the claim between the check and the write.
+ * The write renames a new file over the claim, so a reader never finds the claim missing.
+ *
+ * @returns the claim as recorded, or null when the claim was released, another claim replaced it,
+ * or the file system refused. Never throws.
+ */
+export async function markClaimBootedAsync(claim: DeviceClaim): Promise<DeviceClaim | null> {
+  const file = claimFilePath(claim.backend, claim.id);
+  try {
+    return await withRegistryLockAsync(async () => {
+      const current = readClaimFile(file);
+      if (current == null || !isSameClaim(current, claim)) {
         return null;
       }
-      const touched = { ...moved, ...patch, touchedAt: now.toISOString() };
-      const next = temporary('touch');
+      const next = path.join(
+        path.dirname(file),
+        `.${path.basename(file)}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
+      );
       try {
-        fs.writeFileSync(next, serialize(touched));
-        placed = linkUnlessExists(next, file);
+        fs.writeFileSync(next, serialize({ ...current, booted: true }));
+        fs.renameSync(next, file);
       } finally {
         fs.rmSync(next, { force: true });
       }
-      return placed ? touched : null;
-    } finally {
-      if (!placed) {
-        linkUnlessExists(aside, file);
-      }
-      fs.rmSync(aside, { force: true });
-    }
+      return readClaimFile(file);
+    });
   } catch (error: unknown) {
     debugEvent('device_claim_touch_failed', {
       backend: claim.backend,
@@ -135,19 +141,6 @@ export function touchClaim(
       reason: (error as Error).message,
     });
     return null;
-  }
-}
-
-/** @returns false, and changes nothing, when `to` exists already. */
-function linkUnlessExists(from: string, to: string): boolean {
-  try {
-    fs.linkSync(from, to);
-    return true;
-  } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-      return false;
-    }
-    throw error;
   }
 }
 
@@ -391,14 +384,23 @@ function tryMkdir(directory: string): boolean {
   }
 }
 
-function serialize(claim: DeviceClaim): string {
-  return `${JSON.stringify(claim, null, 2)}\n`;
+/** The file never holds `touchedAt`: its mtime is the touch. */
+function serialize({ touchedAt: _touchedAt, ...stored }: DeviceClaim): string {
+  return `${JSON.stringify(stored, null, 2)}\n`;
 }
 
 function readClaimFile(file: string): DeviceClaim | null {
   let text: string;
+  let touchedAt: string;
   try {
-    text = fs.readFileSync(file, 'utf8');
+    // One descriptor for both, so the touch is the touch of these bytes.
+    const descriptor = fs.openSync(file, 'r');
+    try {
+      text = fs.readFileSync(descriptor, 'utf8');
+      touchedAt = fs.fstatSync(descriptor).mtime.toISOString();
+    } finally {
+      fs.closeSync(descriptor);
+    }
   } catch (error: unknown) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
       debugEvent('device_claim_unreadable', { file, reason: (error as Error).message });
@@ -414,19 +416,21 @@ function readClaimFile(file: string): DeviceClaim | null {
     return null;
   }
 
-  const claim = parseClaim(parsed);
+  const claim = parseClaim(parsed, touchedAt);
   if (!claim) {
     debugEvent('device_claim_unreadable', { file, reason: 'not a device claim' });
   }
   return claim;
 }
 
-function parseClaim(value: unknown): DeviceClaim | null {
+function parseClaim(value: unknown, touchedAt: string): DeviceClaim | null {
   if (value == null || typeof value !== 'object') {
     return null;
   }
-  const { backend, platform, id, projectRoot, pid, claimedAt, touchedAt, created, booted } =
-    value as Record<string, unknown>;
+  const { backend, platform, id, projectRoot, pid, claimedAt, created, booted } = value as Record<
+    string,
+    unknown
+  >;
   if (
     (backend !== 'local-ios' && backend !== 'local-android' && backend !== 'eas') ||
     (platform !== 'ios' && platform !== 'android') ||
@@ -434,8 +438,6 @@ function parseClaim(value: unknown): DeviceClaim | null {
     typeof projectRoot !== 'string' ||
     typeof pid !== 'number' ||
     typeof claimedAt !== 'string' ||
-    typeof touchedAt !== 'string' ||
-    Number.isNaN(Date.parse(touchedAt)) ||
     typeof created !== 'boolean' ||
     (booted !== undefined && typeof booted !== 'boolean')
   ) {

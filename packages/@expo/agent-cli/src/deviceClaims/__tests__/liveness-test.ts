@@ -86,6 +86,13 @@ describe('classifyClaimAsync', () => {
     );
   });
 
+  it(`does not count a touch from the future, which a wrong clock or a hand edit leaves`, async () => {
+    const projectRoot = makeTempProject();
+    const later = new Date(NOW.getTime() + 2 * 60_000).toISOString();
+
+    expect(await classifyClaimAsync(claim(projectRoot, later), { now: NOW })).toBe('stale');
+  });
+
   it(`does not probe the socket for a claim inside the grace period`, async () => {
     const probeLock = vi.fn(async () => null);
 

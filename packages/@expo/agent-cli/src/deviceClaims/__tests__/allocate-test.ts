@@ -5,7 +5,13 @@ import path from 'path';
 import { allocateDeviceAsync, CREATED_DEVICE_EXPIRY_MS } from '../allocate';
 import { devicesAllClaimedError } from '../errors';
 import { event } from '../events';
-import { claimFilePath, readClaims, touchClaim, writeClaim } from '../registry';
+import {
+  claimFilePath,
+  readClaims,
+  touchClaim,
+  withRegistryLockAsync,
+  writeClaim,
+} from '../registry';
 import type { DeviceCandidate, DeviceClaim } from '../types';
 
 vi.mock('os', async (importOriginal) => {
@@ -383,6 +389,66 @@ describe('allocateDeviceAsync', () => {
 
     expect(allocation).toMatchObject({ kind: 'take', candidate: { id: 'A' } });
     expect(readClaims()).toMatchObject([{ id: 'A', projectRoot: HERE }]);
+  });
+
+  it(`chooses again when another worktree claimed the chosen device during the inventory`, async () => {
+    const allocation = await allocate(HERE, {
+      inventory: [booted('A'), booted('B')],
+      duringInventory: () => writeClaim(staleClaim({ id: 'A', touchedAt: NOW.toISOString() })),
+    });
+
+    expect(allocation).toMatchObject({ kind: 'take', candidate: { id: 'B' } });
+    expect(
+      readClaims()
+        .map((claim) => [claim.id, claim.projectRoot])
+        .sort()
+    ).toEqual([
+      ['A', OTHER],
+      ['B', HERE],
+    ]);
+  });
+
+  it(`chooses another device when a claim file still being written holds the chosen one`, async () => {
+    const file = claimFilePath('local-ios', 'A');
+    vol.mkdirSync(path.dirname(file), { recursive: true });
+    vol.writeFileSync(file, '{"backend":"local-ios","plat');
+    const written = (NOW.getTime() - 1000) / 1000;
+    vol.utimesSync(file, written, written);
+
+    const allocation = await allocate(HERE, { inventory: [booted('A'), booted('B')] });
+
+    expect(allocation).toMatchObject({ kind: 'take', candidate: { id: 'B' } });
+    expect(String(vol.readFileSync(file))).toBe('{"backend":"local-ios","plat');
+  });
+
+  it(`reads the clock once it holds the lock, so a touch made while it waited counts`, async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(NOW);
+      const stale = staleClaim({ id: 'A' });
+      writeClaim(stale);
+
+      let waiting: ReturnType<typeof allocateDeviceAsync> | undefined;
+      await withRegistryLockAsync(async () => {
+        waiting = allocateDeviceAsync({
+          projectRoot: HERE,
+          platform: 'ios',
+          backend: 'local-ios',
+          listDevices: async () => [booted('A')],
+          capacity: 0,
+          probeLock: async () => null,
+        });
+        vi.setSystemTime(NOW.getTime() + 5 * 60_000);
+        touchClaim(stale);
+      });
+
+      expect(await waiting).toEqual({
+        kind: 'exhausted',
+        holders: [{ id: 'A', projectRoot: OTHER }],
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it(`leaves the registry unlocked`, async () => {

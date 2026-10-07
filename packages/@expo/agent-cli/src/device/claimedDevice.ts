@@ -9,6 +9,7 @@ import {
   allocateDeviceAsync,
   devicesAllClaimedError,
   isSameClaim,
+  markClaimBootedAsync,
   readClaim,
   readClaims,
   releaseClaim,
@@ -338,7 +339,7 @@ async function resolveWithInventoryAsync(
   const { candidate, claim, fresh, choice, created = false } = picked;
   const adb = seen.inventory?.adb ?? null;
   const device = (booted: boolean): ClaimedDeviceResult => {
-    const held = touchClaim(claim, new Date(), booted ? { booted: true } : {}) ?? heldClaim(claim);
+    const held = touchClaim(claim) ?? heldClaim(claim);
     if (held == null) {
       return lostClaimRefusal(platform, candidate, readClaim(backend, candidate.id));
     }
@@ -413,7 +414,7 @@ async function resolveWithInventoryAsync(
 
   // `dev:stop` shuts down only a device whose claim says this CLI booted it, and a boot that times
   // out has still started the device. So the claim says so before the wait.
-  const booting = touchClaim(claim, new Date(), { booted: true }) ?? heldClaim(claim);
+  const booting = (await markClaimBootedAsync(claim)) ?? heldClaim(claim);
   if (booting == null) {
     return lostClaimRefusal(platform, candidate, readClaim(backend, candidate.id));
   }

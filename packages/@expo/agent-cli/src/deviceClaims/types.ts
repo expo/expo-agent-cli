@@ -16,7 +16,7 @@ export interface DeviceClaim {
   pid: number;
   /** ISO 8601. */
   claimedAt: string;
-  /** ISO 8601. Refreshed by every verb that uses the device. */
+  /** ISO 8601. The mtime of the claim file, which every verb that uses the device refreshes. */
   touchedAt: string;
   /** This CLI created the device. Only such devices may be deleted. */
   created: boolean;

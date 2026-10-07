@@ -7,6 +7,7 @@ import { debugEvent, event } from '../events';
 import {
   claimFilePath,
   deviceRegistryDirectory,
+  markClaimBootedAsync,
   readClaims,
   pruneUnreadableClaims,
   REGISTRY_LOCK_STALE_MS,
@@ -49,6 +50,39 @@ afterEach(() => {
   vol.reset();
   vi.unstubAllEnvs();
 });
+
+/**
+ * Touch `claim()`, and run `probe` after every file system call the touch makes, because another
+ * process can run between any two of them.
+ */
+function touchProbingEachStep(probe: () => void): DeviceClaim | null {
+  const methods = fs as unknown as Record<string, (...args: unknown[]) => unknown>;
+  let probing = false;
+  const spies = Object.keys(methods)
+    .filter((method) => method.endsWith('Sync'))
+    .map((method) => {
+      const original = methods[method]!;
+      return vi.spyOn(methods, method).mockImplementation((...args) => {
+        const result = original(...args);
+        if (!probing) {
+          probing = true;
+          try {
+            probe();
+          } finally {
+            probing = false;
+          }
+        }
+        return result;
+      });
+    });
+  try {
+    return touchClaim(claim(), new Date('2026-09-30T11:00:00.000Z'));
+  } finally {
+    for (const spy of spies) {
+      spy.mockRestore();
+    }
+  }
+}
 
 describe('the registry directory', () => {
   it(`lives in ~/.expo`, () => {
@@ -127,12 +161,14 @@ describe('writeClaim and readClaims', () => {
   it(`reads a claim written before "booted" existed as one this CLI did not boot`, () => {
     vol.mkdirSync(REGISTRY, { recursive: true });
     const { booted: _booted, ...older } = claim();
-    vol.writeFileSync(claimFilePath('local-ios', 'UDID-1'), JSON.stringify(older));
+    const file = claimFilePath('local-ios', 'UDID-1');
+    vol.writeFileSync(file, JSON.stringify(older));
+    vol.utimesSync(file, new Date(older.touchedAt), new Date(older.touchedAt));
 
     expect(readClaims()).toEqual([claim({ booted: false })]);
   });
 
-  it(`ignores what is not a claim file: the lock, and a touch in flight`, () => {
+  it(`ignores what is not a claim file: the lock, and a claim being replaced`, () => {
     writeClaim(claim());
     vol.mkdirSync(path.join(REGISTRY, '.lock'));
     vol.writeFileSync(path.join(REGISTRY, '.local-ios-UDID-1.json.99.tmp'), '{');
@@ -142,27 +178,24 @@ describe('writeClaim and readClaims', () => {
 });
 
 describe('touchClaim', () => {
-  it(`refreshes touchedAt and nothing else`, () => {
+  it(`refreshes the file's mtime and nothing else`, () => {
     writeClaim(claim());
     const now = new Date('2026-09-30T11:00:00.000Z');
 
     expect(touchClaim(claim(), now)).toEqual(claim({ touchedAt: now.toISOString() }));
     expect(readClaims()).toEqual([claim({ touchedAt: now.toISOString() })]);
+    const file = claimFilePath('local-ios', 'UDID-1');
+    expect(vol.statSync(file).mtime).toEqual(now);
+    expect(JSON.parse(String(vol.readFileSync(file)))).not.toHaveProperty('touchedAt');
   });
 
-  it(`records a boot with the touch`, () => {
-    writeClaim(claim());
-    const now = new Date('2026-09-30T11:00:00.000Z');
-
-    expect(touchClaim(claim(), now, { booted: true })).toMatchObject({ booted: true });
-    expect(readClaims()).toEqual([claim({ touchedAt: now.toISOString(), booted: true })]);
-  });
-
-  it(`does not touch a claim that another worktree took over`, () => {
+  it(`reports no touch on a claim that another worktree took over, and leaves its content`, () => {
     writeClaim(claim({ projectRoot: '/work/other' }));
 
     expect(touchClaim(claim(), new Date())).toBeNull();
-    expect(readClaims()).toEqual([claim({ projectRoot: '/work/other' })]);
+    expect(readClaims()).toEqual([
+      { ...claim({ projectRoot: '/work/other' }), touchedAt: expect.any(String) },
+    ]);
   });
 
   it(`does not bring back a claim that was released`, () => {
@@ -175,75 +208,33 @@ describe('touchClaim', () => {
     writeClaim(newer);
 
     expect(touchClaim(claim(), new Date())).toBeNull();
-    expect(readClaims()).toEqual([newer]);
+    expect(readClaims()).toEqual([{ ...newer, touchedAt: expect.any(String) }]);
   });
 
-  it(`reports no touch when another worktree took the claim over as it wrote`, () => {
+  it(`never hides the claim from a reader while it touches it`, () => {
     writeClaim(claim());
-    const rename = fs.renameSync;
-    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
-      rename(from, to);
-      vol.writeFileSync(
-        claimFilePath('local-ios', 'UDID-1'),
-        JSON.stringify(claim({ projectRoot: '/work/other', claimedAt: '2026-09-30T11:00:00.000Z' }))
-      );
-    });
+    const seen: number[] = [];
 
-    try {
-      expect(touchClaim(claim(), new Date())).toBeNull();
-    } finally {
-      spy.mockRestore();
-    }
+    touchProbingEachStep(() => seen.push(readClaims().length));
+
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen).not.toContain(0);
   });
 
-  it(`leaves a claim that replaced this one between the read and the rename`, () => {
+  it(`lets two touches of one worktree run at once, and both keep the claim`, () => {
     writeClaim(claim());
-    const taker = claim({ projectRoot: '/work/other', claimedAt: '2026-09-30T11:00:00.000Z' });
-    const file = claimFilePath('local-ios', 'UDID-1');
-    const rename = fs.renameSync;
-    let replaced = false;
-    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
-      if (!replaced) {
-        replaced = true;
-        vol.rmSync(file);
-        writeClaim(taker);
-      }
-      rename(from, to);
-    });
+    const inner: (DeviceClaim | null)[] = [];
 
-    try {
-      expect(touchClaim(claim(), new Date())).toBeNull();
-    } finally {
-      spy.mockRestore();
-    }
-    expect(readClaims()).toEqual([taker]);
-    expect(vol.readdirSync(REGISTRY)).toEqual(['local-ios-UDID-1.json']);
-  });
+    const outer = touchProbingEachStep(() => inner.push(touchClaim(claim(), new Date())));
 
-  it(`never overwrites a claim written while this one was set aside`, () => {
-    writeClaim(claim());
-    const taker = claim({ projectRoot: '/work/other', claimedAt: '2026-09-30T11:00:00.000Z' });
-    const file = claimFilePath('local-ios', 'UDID-1');
-    const rename = fs.renameSync;
-    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
-      rename(from, to);
-      if (from === file) {
-        writeClaim(taker);
-      }
-    });
-
-    try {
-      expect(touchClaim(claim(), new Date())).toBeNull();
-    } finally {
-      spy.mockRestore();
-    }
-    expect(readClaims()).toEqual([taker]);
-    expect(vol.readdirSync(REGISTRY)).toEqual(['local-ios-UDID-1.json']);
+    expect(outer).not.toBeNull();
+    expect(inner).not.toContain(null);
+    expect(readClaims()).toMatchObject([{ projectRoot: '/work/here' }]);
   });
 
   it(`reports no touch, and never throws, when the file system refuses`, () => {
     writeClaim(claim());
-    const spy = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {
+    const spy = vi.spyOn(fs, 'utimesSync').mockImplementation(() => {
       throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
     });
 
@@ -257,7 +248,40 @@ describe('touchClaim', () => {
       expect.objectContaining({ id: 'UDID-1' })
     );
     expect(readClaims()).toEqual([claim()]);
+  });
+});
+
+describe('markClaimBootedAsync', () => {
+  it(`records the boot under the registry lock, and leaves no temporary file`, async () => {
+    writeClaim(claim());
+    const lockedAtRename: boolean[] = [];
+    const rename = fs.renameSync;
+    const spy = vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+      lockedAtRename.push(vol.existsSync(path.join(REGISTRY, '.lock')));
+      rename(from, to);
+    });
+
+    try {
+      expect(await markClaimBootedAsync(claim())).toMatchObject({ booted: true });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lockedAtRename).toEqual([true]);
+    expect(readClaims()).toEqual([{ ...claim({ booted: true }), touchedAt: expect.any(String) }]);
     expect(vol.readdirSync(REGISTRY)).toEqual(['local-ios-UDID-1.json']);
+  });
+
+  it(`does not record a boot in a claim that another worktree took over`, async () => {
+    const other = claim({ projectRoot: '/work/other' });
+    writeClaim(other);
+
+    expect(await markClaimBootedAsync(claim())).toBeNull();
+    expect(readClaims()).toEqual([other]);
+  });
+
+  it(`does not bring back a claim that was released`, async () => {
+    expect(await markClaimBootedAsync(claim())).toBeNull();
+    expect(readClaims()).toEqual([]);
   });
 });
 
@@ -500,6 +524,66 @@ describe('withRegistryLockAsync across processes', () => {
         expect(enter).toBe('in');
         expect(lines[index + 1]).toBe(`out ${pid}`);
       }
+    } finally {
+      fsReal.rmSync(home, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+describe('touchClaim across processes', () => {
+  it(`never lets another worktree take a device while two processes of its holder touch it`, async () => {
+    const fsReal = await vi.importActual<typeof import('fs')>('node:fs');
+    const osReal = await vi.importActual<typeof import('os')>('node:os');
+    const { spawn, spawnSync } =
+      await vi.importActual<typeof import('child_process')>('node:child_process');
+    if (spawnSync('bun', ['--version']).status !== 0) {
+      return;
+    }
+    const home = fsReal.realpathSync(
+      fsReal.mkdtempSync(path.join(osReal.tmpdir(), 'agent-cli-touch-race-'))
+    );
+    try {
+      const holder = path.join(home, 'holder');
+      const taker = path.join(home, 'taker');
+      fsReal.mkdirSync(holder);
+      fsReal.mkdirSync(taker);
+      const log = path.join(home, 'log');
+      const startAt = Date.now() + 1500;
+      const stopAt = startAt + 1500;
+      const script = path.join(__dirname, 'fixtures', 'touchRace.ts');
+      const run = (role: string, projectRoot: string) =>
+        new Promise<number | null>((resolve) => {
+          const child = spawn(
+            'bun',
+            [script, role, projectRoot, log, String(startAt), String(stopAt)],
+            {
+              env: { ...process.env, __UNSAFE_EXPO_HOME_DIRECTORY: home },
+              stdio: 'inherit',
+            }
+          );
+          child.on('exit', resolve);
+        });
+
+      const exits = await Promise.all([
+        run('touch', holder),
+        run('touch', holder),
+        run('allocate', taker),
+      ]);
+
+      expect(exits).toEqual([0, 0, 0]);
+      const results = fsReal
+        .readFileSync(log, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(results.filter(({ role }) => role === 'touch')).toEqual([
+        expect.objectContaining({ lost: 0 }),
+        expect.objectContaining({ lost: 0 }),
+      ]);
+      expect(results.filter(({ role }) => role === 'allocate')).toEqual([
+        expect.objectContaining({ outcome: 'exhausted' }),
+      ]);
+      expect(results.find(({ role }) => role === 'allocate').tries).toBeGreaterThan(10);
     } finally {
       fsReal.rmSync(home, { recursive: true, force: true });
     }

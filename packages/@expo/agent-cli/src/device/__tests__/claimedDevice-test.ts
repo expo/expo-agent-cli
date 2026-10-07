@@ -261,7 +261,7 @@ describe(`${resolveClaimedDeviceAsync.name} on iOS`, () => {
   it(`goes on with the simulator when only the touch failed and the claim is still its own`, async () => {
     fakeSimulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
     writeClaim(ownClaim('SIM-A', LONG_AGO));
-    const spy = vi.spyOn(fs, 'renameSync').mockImplementation(() => {
+    const spy = vi.spyOn(fs, 'utimesSync').mockImplementation(() => {
       throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
     });
 
