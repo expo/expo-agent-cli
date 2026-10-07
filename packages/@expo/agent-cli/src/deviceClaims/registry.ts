@@ -2,12 +2,14 @@
 // The machine-wide registry: one JSON file per claimed device, and one lock for the decisions
 // that read several of them.
 
+import { AsyncLocalStorage } from 'async_hooks';
 import { randomBytes } from 'crypto';
 import fs from 'fs';
 import path from 'path';
 
 import { getExpoHomeDirectory } from '../utils/expoHome';
 import { canonicalizeExistingPath } from '../utils/dir';
+import { CommandError } from '../utils/errors';
 import { debugEvent, event } from './events';
 import type { DeviceBackend, DeviceClaim } from './types';
 
@@ -24,6 +26,9 @@ const LOCK_OWNER_FILE = 'owner';
 
 const LOCK_RETRY_MIN_MS = 10;
 const LOCK_RETRY_MAX_MS = 250;
+
+/** The lock this call chain holds, so each change made under it can check it still holds it. */
+const heldLock = new AsyncLocalStorage<{ owner: string; token: string }>();
 
 export function deviceRegistryDirectory(): string {
   return path.join(getExpoHomeDirectory(), 'agent-cli', 'devices');
@@ -64,6 +69,7 @@ export function readClaims(): DeviceClaim[] {
  * @throws with `EEXIST` when the device is claimed already, so a claim is never overwritten.
  */
 export function writeClaim(claim: DeviceClaim): void {
+  assertRegistryLockHeld();
   fs.mkdirSync(deviceRegistryDirectory(), { recursive: true });
   const file = claimFilePath(claim.backend, claim.id);
   fs.writeFileSync(file, serialize(claim), { flag: 'wx' });
@@ -132,6 +138,7 @@ export async function markClaimBootedAsync(claim: DeviceClaim): Promise<DeviceCl
         `.${path.basename(file)}.${process.pid}-${randomBytes(4).toString('hex')}.tmp`
       );
       try {
+        assertRegistryLockHeld();
         fs.writeFileSync(next, serialize({ ...current, booted: true }));
         fs.renameSync(next, file);
       } finally {
@@ -169,6 +176,7 @@ export function releaseClaim(claim: DeviceClaim): boolean {
   if (readClaimFile(file)?.projectRoot !== claim.projectRoot) {
     return false;
   }
+  assertRegistryLockHeld();
   fs.rmSync(file, { force: true });
   event('device_claim_released', {
     backend: claim.backend,
@@ -247,6 +255,7 @@ function parsesAsJson(text: string): boolean {
 
 /** Remove a claim file whatever it names. Only for a caller that holds the registry lock. */
 export function removeClaimFile(claim: DeviceClaim): void {
+  assertRegistryLockHeld();
   fs.rmSync(claimFilePath(claim.backend, claim.id), { force: true });
 }
 
@@ -303,12 +312,28 @@ export async function withRegistryLockAsync<T>(
   heartbeat.unref();
 
   try {
-    return await fn();
+    return await heldLock.run({ owner, token }, fn);
   } finally {
     clearInterval(heartbeat);
     if (readLockOwner(owner) === token) {
       fs.rmSync(lock, { recursive: true, force: true });
     }
+  }
+}
+
+/**
+ * Throw when this call chain runs under the registry lock and another process took the lock over.
+ * A pause longer than the stale age (a laptop asleep, a stopped process) makes a live holder look
+ * dead, so every change made under the lock checks this first and a holder that lost the lock
+ * changes nothing.
+ */
+export function assertRegistryLockHeld(): void {
+  const held = heldLock.getStore();
+  if (held != null && readLockOwner(held.owner) !== held.token) {
+    throw new CommandError(
+      'DEVICE_REGISTRY_LOCK_LOST',
+      'Another process took over the device registry lock while this process held it, so this process changed no claim. Run the command again.'
+    );
   }
 }
 

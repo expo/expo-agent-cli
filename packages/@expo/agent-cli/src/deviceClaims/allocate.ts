@@ -8,6 +8,7 @@ import { debugEvent, event } from './events';
 import { classifyClaimAsync } from './liveness';
 import {
   claimFilePath,
+  assertRegistryLockHeld,
   isSameClaim,
   pruneUnreadableClaims,
   readClaim,
@@ -131,6 +132,7 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>(
           now.getTime() - Date.parse(claim.touchedAt) > CREATED_DEVICE_EXPIRY_MS &&
           (await stillStaleAsync(claim))
         ) {
+          assertRegistryLockHeld();
           try {
             await deleteDevice(claim);
             removeStale(claim, 'expired');
@@ -195,6 +197,7 @@ export async function allocateDeviceAsync<C extends DeviceCandidate>(
         }
 
         case 'create': {
+          assertRegistryLockHeld();
           const candidate = await createDevice!();
           const claim: DeviceClaim = {
             backend,
