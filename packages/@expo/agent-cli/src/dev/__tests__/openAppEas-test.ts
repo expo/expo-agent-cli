@@ -2,7 +2,7 @@
 import { readClaims, writeClaim } from '../../deviceClaims';
 import { vol } from 'memfs';
 import * as Log from '../../log';
-import { probeCloudSessionAsync } from '../../device/cloudSimulator';
+import { CLOUD_SESSION_MAX_RUN_MS, probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { resolveEasCli } from '../../utils/easCli';
 import { canonicalizeExistingPath } from '../../utils/dir';
@@ -520,7 +520,7 @@ describe('the session half on its own', () => {
       id: 'sess-1',
       projectRoot: claimRoot,
       pid: 1,
-      claimedAt: '2026-09-30T10:00:00.000Z',
+      claimedAt: new Date().toISOString(),
       touchedAt: '2026-09-30T10:00:00.000Z',
       created: true,
       booted: false,
@@ -566,6 +566,35 @@ describe('the session half on its own', () => {
               sessions: [{ id: 'sess-1', status: 'ERRORED', platform: 'IOS' }],
               pageInfo: { hasNextPage: false },
             }),
+            stderr: '',
+            exitCode: 0,
+            spawnError: null,
+          }) as any);
+
+    await expect(stopEasSessionAsync(projectRoot, 'sess-1', EAS_CLI)).resolves.toEqual({
+      ok: true,
+      reason: null,
+    });
+    expect(readClaims()).toEqual([]);
+  });
+
+  it(`releases the claim when the stop fails and no lookup finds a session older than any session runs`, async () => {
+    writeClaim({
+      backend: 'eas',
+      platform: 'ios',
+      id: 'sess-1',
+      projectRoot: claimRoot,
+      pid: 1,
+      claimedAt: new Date(Date.now() - CLOUD_SESSION_MAX_RUN_MS - 60_000).toISOString(),
+      touchedAt: new Date().toISOString(),
+      created: true,
+      booted: false,
+    });
+    vi.mocked(spawnCaptureAsync).mockImplementation((async (_command: string, args: string[]) =>
+      args.includes('simulator:stop')
+        ? { stdout: '', stderr: 'Session not found', exitCode: 1, spawnError: null }
+        : {
+            stdout: JSON.stringify({ sessions: [], pageInfo: { hasNextPage: false } }),
             stderr: '',
             exitCode: 0,
             spawnError: null,

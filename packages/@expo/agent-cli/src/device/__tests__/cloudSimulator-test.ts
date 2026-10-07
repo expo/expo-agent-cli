@@ -39,6 +39,7 @@ import {
   buildSessionLookupArgs,
   captureCloudScreenshotAsync,
   CLOUD_SESSION_LOOKUP_MAX_PAGES,
+  CLOUD_SESSION_MAX_RUN_MS,
   PENDING_SESSION_STATUS,
   cloudNeedsTunnelError,
   cloudSessionUnavailableError,
@@ -70,6 +71,7 @@ function claimSession(
   {
     platform = 'ios',
     projectRoot = '/project',
+    claimedAt = '2026-09-30T10:00:00.000Z',
     touchedAt = '2026-09-30T10:00:00.000Z',
   }: Partial<DeviceClaim> = {}
 ): void {
@@ -79,7 +81,7 @@ function claimSession(
     id,
     projectRoot: canonicalizeExistingPath(projectRoot),
     pid: 1,
-    claimedAt: '2026-09-30T10:00:00.000Z',
+    claimedAt,
     touchedAt,
     created: true,
     booted: false,
@@ -892,9 +894,9 @@ describe(probeCloudSessionAsync, () => {
       expect(readClaims()).toMatchObject([{ id: 'sess-far' }]);
     });
 
-    it(`keeps the claim when the lookup does not find the session`, async () => {
+    it(`keeps the claim when the lookup does not find a session that may still run`, async () => {
       project();
-      claimSession('sess-missing');
+      claimSession('sess-missing', { claimedAt: new Date().toISOString() });
       mockEasBy(() => listJson());
 
       const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
@@ -905,9 +907,23 @@ describe(probeCloudSessionAsync, () => {
       expect(readClaims()).toMatchObject([{ id: 'sess-missing' }]);
     });
 
+    it(`releases the claim when the lookup does not find a session older than any session runs`, async () => {
+      project();
+      claimSession('sess-purged', {
+        claimedAt: new Date(Date.now() - CLOUD_SESSION_MAX_RUN_MS - 60_000).toISOString(),
+      });
+      mockEasBy(() => listJson());
+
+      const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
+
+      expect(probe).toMatchObject({ state: 'inactive', sessionId: 'sess-purged', status: null });
+      expect(probe.reason).toContain('so that session has ended');
+      expect(readClaims()).toEqual([]);
+    });
+
     it(`keeps the claim when the lookup fails`, async () => {
       project();
-      claimSession('sess-1');
+      claimSession('sess-1', { claimedAt: new Date().toISOString() });
       mockEasBy((args) => (args.includes('stopped') ? { stdout: '', exitCode: 1 } : listJson()));
 
       await probeCloudSessionAsync({ projectRoot: '/project', platform: 'ios' });
@@ -960,7 +976,7 @@ describe(probeCloudSessionAsync, () => {
 
     it(`stops paging after the last page it may read, and keeps the claim`, async () => {
       project();
-      claimSession('sess-far');
+      claimSession('sess-far', { claimedAt: new Date().toISOString() });
       let cursor = 0;
       mockEasBy((args) =>
         args.includes('stopped')

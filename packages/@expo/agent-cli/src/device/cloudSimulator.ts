@@ -136,6 +136,14 @@ export const CLOUD_SESSION_LOOKUP_LIMIT = 100;
 /** The pages the by-id lookup reads before it gives up and keeps the claim. */
 export const CLOUD_SESSION_LOOKUP_MAX_PAGES = 10;
 
+/**
+ * The longest a session runs. The service caps `maxRunTimeMinutes` at 40 minutes for
+ * normal-priority accounts and 115 for high-priority ones, and a session that names none gets the
+ * cap [read — universe `server/www/src/data/entities/device-run-session/DeviceRunSessionUtils.ts`
+ * 858-865, 2026-10-01]. A claim older than this names a session that is over.
+ */
+export const CLOUD_SESSION_MAX_RUN_MS = 115 * 60_000;
+
 /** Where an account without EAS Simulator asks for it, when the service names one. [observed] */
 export const CLOUD_SIMULATOR_WAITLIST_URL = 'https://expo.dev/services/simulators';
 
@@ -519,6 +527,20 @@ export function isEndedSessionStatus(status: string | null): boolean {
   return status != null && ENDED_SESSION_STATUSES.includes(status.trim().toUpperCase());
 }
 
+/**
+ * Whether the session a claim names is over: the service reports it STOPPED or ERRORED, or no
+ * listing found it and the claim is older than any session runs. A purged session, or one of
+ * another EAS account, is never listed, so its claim would otherwise be kept forever.
+ */
+export function isClaimedSessionOver(status: string | null, claim: DeviceClaim | null): boolean {
+  return (
+    isEndedSessionStatus(status) ||
+    (status == null &&
+      claim != null &&
+      Date.now() - Date.parse(claim.claimedAt) > CLOUD_SESSION_MAX_RUN_MS)
+  );
+}
+
 /** Whether a status names a session that is up and can be driven. */
 export function isActiveSessionStatus(status: string | null): boolean {
   return status != null && status.trim().toUpperCase() === ACTIVE_SESSION_STATUS;
@@ -854,7 +876,7 @@ export async function probeCloudSessionAsync({
       continue;
     }
     const status = statusOf.get(claim.id) ?? null;
-    if (isEndedSessionStatus(status)) {
+    if (isClaimedSessionOver(status, claim)) {
       releaseClaim(claim);
       endedClaim ??= { claim, status };
     } else {
@@ -1040,7 +1062,10 @@ async function noUsableSessionAsync({
       state: 'inactive',
       sessionId: endedClaim.claim.id,
       status: endedClaim.status,
-      reason: `this worktree's claim names session ${endedClaim.claim.id}, and the service reports it ${endedClaim.status}, so that session has ended`,
+      reason:
+        endedClaim.status == null
+          ? `this worktree's claim names session ${endedClaim.claim.id}, which the service does not list and which was claimed longer ago than the ${CLOUD_SESSION_MAX_RUN_MS / 60_000} minutes a session can run, so that session has ended`
+          : `this worktree's claim names session ${endedClaim.claim.id}, and the service reports it ${endedClaim.status}, so that session has ended`,
     };
   }
   if (preferredId != null) {
