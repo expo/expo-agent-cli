@@ -1,7 +1,7 @@
 import { StatusBar } from 'expo-status-bar';
 import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
 import { useCallback, useEffect, useState } from 'react';
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Linking, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -16,6 +16,7 @@ import {
   writeTheme,
 } from './notesDb';
 import type { Note, Theme } from './notesDb';
+import { parseRoute } from './routes';
 
 // A stable string the live-eas deploy test looks for in the served web bundle.
 const DEPLOY_MARKER = '@expo/agent-cli live-eas deploy marker';
@@ -64,6 +65,20 @@ function NotesApp() {
 
   useEffect(() => {
     readTheme(db).then(setTheme);
+  }, [db]);
+
+  useEffect(() => {
+    const open = async (url: string) => {
+      const route = parseRoute(url);
+      const note =
+        route.kind === 'note' ? (await listNotes(db)).find((n) => n.id === route.id) : undefined;
+      setScreen(note ? { kind: 'detail', note } : { kind: 'list' });
+    };
+    Linking.getInitialURL().then((url) => {
+      if (url) open(url);
+    });
+    const subscription = Linking.addEventListener('url', ({ url }) => open(url));
+    return () => subscription.remove();
   }, [db]);
 
   const toggleTheme = async () => {
