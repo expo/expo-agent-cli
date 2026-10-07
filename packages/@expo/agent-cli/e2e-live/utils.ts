@@ -231,8 +231,21 @@ export async function runLiveAsync(
   run: LiveRun,
   cwd: string,
   argv: string[],
-  { env, label }: LiveOptions = {}
+  options: LiveOptions = {}
 ): Promise<LiveResult> {
+  return await spawnLive(run, cwd, argv, options).done;
+}
+
+/** A `@expo/agent-cli` process still running, and the result it settles to when it closes. */
+export type LiveChild = { child: ChildProcess; done: Promise<LiveResult> };
+
+/** {@link runLiveAsync} without the wait, for a foreground command the suite stops later. */
+export function spawnLive(
+  run: LiveRun,
+  cwd: string,
+  argv: string[],
+  { env, label }: LiveOptions = {}
+): LiveChild {
   run.spend.commands += 1;
   const startedAt = Date.now();
 
@@ -281,28 +294,26 @@ export async function runLiveAsync(
   child.stdout?.on('data', (chunk) => collect('stdout', chunk));
   child.stderr?.on('data', (chunk) => collect('stderr', chunk));
 
-  const { exitCode, signal } = await new Promise<{
-    exitCode: number | null;
-    signal: NodeJS.Signals | null;
-  }>((resolve, reject) => {
+  const done = new Promise<LiveResult>((resolve, reject) => {
     child.once('error', reject);
-    child.once('close', (code, sig) => resolve({ exitCode: code, signal: sig }));
+    child.once('close', (exitCode, signal) => {
+      const durationMs = Date.now() - startedAt;
+      const name = `${String(++sequence).padStart(3, '0')}-${label ?? argv.join('_')}.txt`;
+      const artifact = run.writeArtifact(
+        name,
+        [
+          `$ @expo/agent-cli ${argv.join(' ')}`,
+          `cwd: ${cwd}`,
+          `exit: ${exitCode} signal: ${signal} in ${durationMs}ms`,
+          '',
+          collected.all,
+        ].join('\n')
+      );
+      resolve({ argv, exitCode, signal, durationMs, artifact, ...collected });
+    });
   });
 
-  const durationMs = Date.now() - startedAt;
-  const name = `${String(++sequence).padStart(3, '0')}-${label ?? argv.join('_')}.txt`;
-  const artifact = run.writeArtifact(
-    name,
-    [
-      `$ @expo/agent-cli ${argv.join(' ')}`,
-      `cwd: ${cwd}`,
-      `exit: ${exitCode} signal: ${signal} in ${durationMs}ms`,
-      '',
-      collected.all,
-    ].join('\n')
-  );
-
-  return { argv, exitCode, signal, durationMs, artifact, ...collected };
+  return { child, done };
 }
 
 /**
@@ -437,16 +448,19 @@ export async function execAsync(
 }
 
 /** End a process and everything it started, then wait for it to close. */
-export async function stopProcessTreeAsync(child: ChildProcess): Promise<void> {
+export async function stopProcessTreeAsync(
+  child: ChildProcess,
+  signal: NodeJS.Signals = 'SIGTERM'
+): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
   }
   const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
   try {
     if (process.platform !== 'win32' && child.pid) {
-      process.kill(-child.pid, 'SIGTERM');
+      process.kill(-child.pid, signal);
     } else {
-      child.kill('SIGTERM');
+      child.kill(signal);
     }
   } catch {
     // Already gone.

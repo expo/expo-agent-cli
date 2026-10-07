@@ -870,6 +870,84 @@ export function easProjectGate(): { gate: Gate; source: string | null } {
   return { gate: ok, source };
 }
 
+/**
+ * The opt-in for `live-claims`. Every block builds the app twice, and the EAS block also bills two
+ * sessions, so the suite never runs without being asked for by name.
+ */
+export function claimsOptInGate(): Gate {
+  return process.env.AGENT_CLI_LIVE_CLAIMS === '1'
+    ? ok
+    : missing(
+        'AGENT_CLI_LIVE_CLAIMS=1 is not set — live-claims builds the app twice (and on EAS bills two sessions), so it never runs without being asked for by name'
+      );
+}
+
+/** At least `count` available iPhone simulators, booted or not, so that many worktrees can each claim one. */
+export function iphoneSimulatorsGate(count: number): Gate {
+  const mac = macosGate();
+  if (!mac.ok) {
+    return mac;
+  }
+  let listed: string;
+  try {
+    listed = execFileSync('xcrun', ['simctl', 'list', 'devices', 'available', '--json'], {
+      encoding: 'utf8',
+      timeout: 60_000,
+    });
+  } catch (error: any) {
+    return missing(`"xcrun simctl list devices available" could not run: ${error.message}`);
+  }
+  const iphones = Object.entries(JSON.parse(listed).devices as Record<string, any[]>)
+    .filter(([runtime]) => /\.iOS-[\d-]+$/.test(runtime))
+    .flatMap(([, devices]) => devices)
+    .filter((device) => String(device.name).startsWith('iPhone'));
+  return iphones.length >= count
+    ? ok
+    : missing(
+        `${iphones.length} available iPhone simulator(s), and this suite needs ${count} — create one with "xcrun simctl create"`
+      );
+}
+
+/**
+ * No worktree on this machine holds a local iOS simulator in the machine's device registry.
+ *
+ * The local block of `live-claims` runs its CLI against a registry of its own, which cannot show
+ * these claims, and that CLI takes a booted simulator no claim names: the one a real agent is
+ * driving (`src/deviceClaims/choose.ts`). A claim holds nothing once its worktree is gone.
+ */
+export function localSimulatorsUnclaimedGate(): Gate {
+  const directory = path.join(
+    process.env.__UNSAFE_EXPO_HOME_DIRECTORY || path.join(os.homedir(), '.expo'),
+    'agent-cli',
+    'devices'
+  );
+  let names: string[];
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return ok;
+  }
+  const held = names
+    .filter((name) => name.endsWith('.json'))
+    .flatMap((name) => {
+      try {
+        const claim = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8'));
+        return claim.backend === 'local-ios' && fs.existsSync(claim.projectRoot)
+          ? [`${claim.id} (${claim.projectRoot})`]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+  return held.length === 0
+    ? ok
+    : missing(
+        `worktrees on this machine hold ${held.length} local simulator(s) in ${directory}: ${held.join(', ')}. ` +
+          `This suite's registry is its own and cannot show them, so its CLI could take one a worktree is using. ` +
+          `Run "dev:stop" in each of those worktrees, then run this again`
+      );
+}
+
 /** The EAS project a scaffolded suite app links itself to. */
 export type LivecheckLink = { owner: string; slug: string; projectId: string };
 
