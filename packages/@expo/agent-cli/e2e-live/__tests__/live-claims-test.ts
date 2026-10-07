@@ -68,6 +68,17 @@ const EAS_SESSION_MS = 2_400_000;
  */
 const EAS_STAGGER_MS = 20_000;
 
+/**
+ * The bounds inside the EAS `afterAll`, whose own timeout is 900 s.
+ *
+ * A step that hangs is killed at its bound, so the sweep that stops every session always runs. Two
+ * `dev:stop` at 120 s, the foreground runs at 60 s, then the leak check and one stop per session at
+ * 120 s each add up to 660 s for two sessions.
+ */
+const CLEANUP_DEV_STOP_MS = 120_000;
+const CLEANUP_DEV_EXIT_MS = 60_000;
+const CLEANUP_EAS_CALL_MS = 120_000;
+
 type Worktrees = {
   /** Canonical roots, the form a claim's `projectRoot` takes. */
   roots: [string, string];
@@ -124,8 +135,12 @@ async function setUpWorktreesAsync(
   };
 }
 
-/** What a worktree copy leaves out: installs, native projects, and the dev server state. */
-const NOT_COPIED = new Set(['node_modules', '.expo', 'ios', 'android']);
+/**
+ * What a worktree copy leaves out: installs, native projects, the dev server state, and the session
+ * dotenv. A copy that carried the source app's `.env.eas-simulator` would put a session this suite
+ * did not start on the list of sessions it stops.
+ */
+const NOT_COPIED = new Set(['node_modules', '.expo', 'ios', 'android', '.env.eas-simulator']);
 
 /**
  * Add the simulator profile `dev --eas` builds, with the EAS builder's bun pinned to the local one.
@@ -154,6 +169,49 @@ function readClaims(expoHome: string): Claim[] {
         .filter((name) => name.endsWith('.json'))
         .map((name) => JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8')))
     : [];
+}
+
+/**
+ * The session `eas simulator` named in a worktree's `.env.eas-simulator`.
+ *
+ * It writes the id the moment the session exists [observed — eas-cli 24.11.0 `simulator/index.js`],
+ * minutes before `dev` binds a claim to it.
+ */
+function readSessionIdFromDotenv(root: string): string | null {
+  try {
+    const text = fs.readFileSync(path.join(root, '.env.eas-simulator'), 'utf8');
+    return /^EAS_SIMULATOR_SESSION_ID=['"]?([^'"\s]+)/m.exec(text)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Wait for `work` at most `ms`, then `abandon` it and go on.
+ *
+ * A hung step must not keep the cleanup from its sweep. A failure of `work` is printed and does not
+ * stop the cleanup either.
+ */
+async function boundedAsync(
+  what: string,
+  work: Promise<unknown>,
+  ms: number,
+  abandon: () => void
+): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<true>((resolve) => {
+    timer = setTimeout(resolve, ms, true);
+  });
+  try {
+    if ((await Promise.race([work.then(() => false), expired])) === true) {
+      console.log(`[live] ${what} still running after ${ms} ms; killing it and going on`);
+      abandon();
+    }
+  } catch (error: any) {
+    console.log(`[live] ${what} failed (continuing): ${error?.message ?? error}`);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** The one claim of `backend` per root, once both roots hold one and their ids differ. */
@@ -305,7 +363,7 @@ describeLive(
   let worktrees: Worktrees | null = null;
   let claims = new Map<string, Claim>();
   const devs: LiveChild[] = [];
-  /** Every session id this suite saw claimed, so the cleanup can name exactly these. */
+  /** Every session this suite learned of, so the cleanup can name exactly these. */
   const sessionIds = new Set<string>();
 
   const cli = (root: string, argv: string[], label: string) => {
@@ -313,12 +371,12 @@ describeLive(
     return runLiveAsync(run, root, argv, { env: worktrees!.env, label });
   };
 
-  async function easAsync(label: string, args: string[]) {
+  async function easAsync(label: string, args: string[], timeoutMs = 300_000) {
     assertEasEnabled(`eas ${args.join(' ')}`);
     const result = await execAsync('npx', ['--yes', 'eas-cli@latest', ...args], {
       cwd: worktrees!.roots[0],
       env: { EAS_NO_VCS: '1' },
-      timeoutMs: 300_000,
+      timeoutMs,
     });
     run.writeArtifact(
       `eas-${label}.txt`,
@@ -327,14 +385,57 @@ describeLive(
     return result;
   }
 
-  async function inProgressSessionIdsAsync(label: string): Promise<string[]> {
-    const listed = await easAsync(label, [
-      'simulator:list',
-      '--status',
-      'in-progress',
-      '--non-interactive',
-      '--json',
-    ]);
+  /**
+   * Record each session id the suite can name, and the stop that ends it, the moment it is first seen.
+   *
+   * Two sources, because a claim is bound only after `eas simulator` returns, which waits minutes for
+   * the session to be ready, and a session that bills from its creation has no claim until then. The
+   * dotenv has the id from the creation on. Each id gets its own cleanup, so one stop that fails does
+   * not skip the next.
+   */
+  function recordSessionIds(): void {
+    const { expoHome, roots } = worktrees!;
+    const learned = [
+      ...readClaims(expoHome)
+        .filter((claim) => claim.backend === 'eas')
+        .map((claim) => claim.id),
+      ...roots.flatMap((root) => readSessionIdFromDotenv(root) ?? []),
+    ];
+    for (const id of learned) {
+      if (sessionIds.has(id)) {
+        continue;
+      }
+      sessionIds.add(id);
+      run.spend.cloudSessions += 1;
+      run.onCleanup(`eas simulator:stop ${id}`, async () => {
+        await easAsync(
+          `cleanup-stop-${id}`,
+          ['simulator:stop', '--id', id, '--non-interactive'],
+          CLEANUP_EAS_CALL_MS
+        );
+      });
+    }
+  }
+
+  /**
+   * The sessions of this project that bill: `new` and `in-progress`, and `queued` and `starting`,
+   * which eas-cli 24.10 added [observed — eas-cli 24.11.0 `simulator/list.js`]. This suite runs
+   * `eas-cli@latest`, which is 24.11.0 [observed — `npm view eas-cli dist-tags`]. `--limit 100` is
+   * the most one page returns.
+   */
+  async function billingSessionIdsAsync(label: string, timeoutMs?: number): Promise<string[]> {
+    const listed = await easAsync(
+      label,
+      [
+        'simulator:list',
+        ...['new', 'queued', 'starting', 'in-progress'].flatMap((status) => ['--status', status]),
+        '--limit',
+        '100',
+        '--non-interactive',
+        '--json',
+      ],
+      timeoutMs
+    );
     if (listed.exitCode !== 0) {
       throw new Error(
         `eas simulator:list exited ${listed.exitCode}: ${listed.stderr.slice(-1000)}`
@@ -362,12 +463,7 @@ describeLive(
 
     const bound = await waitForAsync(
       () => {
-        for (const claim of readClaims(worktrees!.expoHome)) {
-          if (claim.backend === 'eas' && !sessionIds.has(claim.id)) {
-            sessionIds.add(claim.id);
-            run.spend.cloudSessions += 1;
-          }
-        }
+        recordSessionIds();
         const exited = devs.find(
           ({ child }) => child.exitCode !== null || child.signalCode !== null
         );
@@ -391,20 +487,35 @@ describeLive(
   afterAll(async () => {
     try {
       if (worktrees) {
+        assertEasEnabled('@expo/agent-cli dev:stop --eas');
+        recordSessionIds();
         for (const [index, root] of worktrees.roots.entries()) {
-          await cli(root, ['dev:stop', '--eas', '--json'], `cleanup-dev-stop-eas-${index}`);
+          const stop = spawnLive(run, root, ['dev:stop', '--eas', '--json'], {
+            env: worktrees.env,
+            label: `cleanup-dev-stop-eas-${index}`,
+          });
+          await boundedAsync(
+            `dev:stop --eas in worktree ${index}`,
+            stop.done,
+            CLEANUP_DEV_STOP_MS,
+            () => {
+              void stopProcessTreeAsync(stop.child, 'SIGKILL');
+            }
+          );
         }
-        await Promise.all(devs.map(({ child }) => stopProcessTreeAsync(child)));
-        const leaked = (await inProgressSessionIdsAsync('cleanup-list')).filter((id) =>
-          sessionIds.has(id)
+        await boundedAsync(
+          'the foreground dev --eas runs',
+          Promise.all(devs.map(({ child }) => stopProcessTreeAsync(child))),
+          CLEANUP_DEV_EXIT_MS,
+          () => devs.forEach(({ child }) => void stopProcessTreeAsync(child, 'SIGKILL'))
         );
-        for (const id of leaked) {
-          await easAsync(`cleanup-stop-${id}`, ['simulator:stop', '--id', id, '--non-interactive']);
-        }
-        expect(
-          leaked,
-          'sessions this suite started, still in progress after dev:stop --eas'
-        ).toEqual([]);
+        recordSessionIds();
+        const leaked = (await billingSessionIdsAsync('cleanup-list', CLEANUP_EAS_CALL_MS)).filter(
+          (id) => sessionIds.has(id)
+        );
+        expect(leaked, 'sessions this suite started, still billing after dev:stop --eas').toEqual(
+          []
+        );
         expect(readClaims(worktrees.expoHome), 'claims left in the registry').toEqual([]);
       }
     } finally {
@@ -434,7 +545,7 @@ describeLive(
 
   it("a worktree with another worktree's .env.eas-simulator does not adopt its session", async () => {
     const [a] = worktrees!.roots;
-    const listed = await inProgressSessionIdsAsync('list-both');
+    const listed = await billingSessionIdsAsync('list-both');
     expect(listed).toEqual(expect.arrayContaining([...claims.values()].map((claim) => claim.id)));
 
     // A third worktree cloned from A, so A's dotenv travels with the files around it, and with no
@@ -453,7 +564,7 @@ describeLive(
     expectExit(result, 0);
     expect(parseJson(result).session).toMatchObject({ id: null, stopped: false });
     expect(readClaims(worktrees!.expoHome).filter((claim) => claim.projectRoot === c)).toEqual([]);
-    expect(await inProgressSessionIdsAsync('list-after-copied-dotenv')).toEqual(
+    expect(await billingSessionIdsAsync('list-after-copied-dotenv')).toEqual(
       expect.arrayContaining([...claims.values()].map((claim) => claim.id))
     );
   });
@@ -471,11 +582,11 @@ describeLive(
     expect(
       await waitForAsync(
         async () =>
-          (await inProgressSessionIdsAsync('list-after-stop')).every((id) => !sessionIds.has(id)),
+          (await billingSessionIdsAsync('list-after-stop')).every((id) => !sessionIds.has(id)),
         180_000,
         15_000
       ),
-      'the sessions this suite started are no longer in progress'
+      'the sessions this suite started are no longer billing'
     ).toBe(true);
   });
 });

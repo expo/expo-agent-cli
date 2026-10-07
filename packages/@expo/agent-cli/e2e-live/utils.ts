@@ -448,16 +448,19 @@ export async function execAsync(
 }
 
 /** End a process and everything it started, then wait for it to close. */
-export async function stopProcessTreeAsync(child: ChildProcess): Promise<void> {
+export async function stopProcessTreeAsync(
+  child: ChildProcess,
+  signal: NodeJS.Signals = 'SIGTERM'
+): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) {
     return;
   }
   const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
   try {
     if (process.platform !== 'win32' && child.pid) {
-      process.kill(-child.pid, 'SIGTERM');
+      process.kill(-child.pid, signal);
     } else {
-      child.kill('SIGTERM');
+      child.kill(signal);
     }
   } catch {
     // Already gone.

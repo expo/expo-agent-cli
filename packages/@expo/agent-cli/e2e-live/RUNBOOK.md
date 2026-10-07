@@ -59,12 +59,12 @@ the first command races the file watcher and reads the last good bundle.
 
 It proves `llp/0030`: two worktrees of one app get two devices and never share one. The app is the
 committed `apps/eas-example`, a dev-client app linked to `expo-ci`. Each block copies it into two
-scratch directories without `node_modules`, `.expo`, `ios` and `android`, and runs `bun install` in
-each copy. The copies are outside the workspace, so they need their own install: a copy inside it
-could not build, because its `node_modules` are symlinks into the root. Each block points
-`__UNSAFE_EXPO_HOME_DIRECTORY` at a fresh directory, so the registry it asserts on is its own. The
-EAS block copies `~/.expo/state.json` into that directory when no `EXPO_TOKEN` is set, because the
-login lives there too.
+scratch directories without `node_modules`, `.expo`, `ios`, `android` and `.env.eas-simulator`, and
+runs `bun install` in each copy. The copies are outside the workspace, so they need their own
+install: a copy inside it could not build, because its `node_modules` are symlinks into the root.
+Each block points `__UNSAFE_EXPO_HOME_DIRECTORY` at a fresh directory, so the registry it asserts on
+is its own. The EAS block copies `~/.expo/state.json` into that directory when no `EXPO_TOKEN` is
+set, because the login lives there too.
 
 - **The `--detach` budget.** `dev --ios --detach` exits 1 after 120 s while its child still builds.
   That budget is older than this suite. The suite waits on the registry and on `status` reporting
@@ -85,8 +85,12 @@ login lives there too.
 - **The cost.** Each block first installs two copies of the app, seconds with a warm bun cache. The local block
   builds two development clients on this machine (5–10 minutes) and may boot a simulator. The EAS
   block builds on EAS the first time (10–15 minutes), then reuses the build. It bills two EAS
-  Simulator sessions from start to `dev:stop --eas`. The `afterAll` stops any session the suite
-  started that is still in progress.
+  Simulator sessions from start to `dev:stop --eas`. The `afterAll` stops every session the suite
+  learned of, by id, whatever its status and whatever `dev:stop` did. It reads the ids from the claims
+  and from each copy's `.env.eas-simulator`, which `eas simulator` writes when it creates the session,
+  minutes before `dev` binds a claim. A `dev:stop` that hangs is killed after 120 s, so the stops
+  always run. A session still `new`, `queued`, `starting` or `in-progress` after `dev:stop --eas`
+  fails the `afterAll`.
 - **Another project's Metro on 8081 turns the local block red, and that is a finding.** The
   free-port probe (`src/dev/portCollision.ts` §isPortBindableAsync) binds `127.0.0.1` only. That
   bind succeeds beside a listener on `*:8081` (IPv6, dual stack), so both worktrees were given
