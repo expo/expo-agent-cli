@@ -24,100 +24,18 @@
 // **It is not `@expo/agent-cli dev`.** That plans and starts a dev server, which is the thing this
 // run has already done; asking for it again from inside the install phase would start a second one.
 
-import path from 'path';
-
-import { readJsonFileAsync, resolvePackageRootAsync } from '../project/nodeModules';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { runAdbAsync } from './adb';
-
-/** What `expo run:<platform> --device` is given for one device, or why no value is safe. */
-export type RunDeviceArgument =
-  /** Null when the device cannot be named: the install then runs unpinned. */
-  { ok: true; value: string | null } | { ok: false; reason: string };
-
-/**
- * The `--device` value of `expo run:*` for the device this worktree claims.
- *
- * @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
- *
- * iOS takes the UDID. Android depends on the project's Expo CLI: 58 matches the adb serial
- * before the name (`AndroidDeviceManager.resolveFromNameAsync`), and 57 matches only the name
- * [observed — `@expo/cli` 57.0.21: `devices.find((device) => device.name === name)`]. An emulator's
- * name is its AVD, so on 57 a second, read-only instance of one AVD has the same name as the first,
- * and the install could land on the other worktree's emulator. That case is refused.
- */
-export async function expoRunDeviceArgumentAsync(
-  projectRoot: string,
-  platform: 'ios' | 'android',
-  deviceId: string,
-  {
-    run = runAdbAsync,
-    readCliMajor = readExpoCliMajorAsync,
-  }: {
-    run?: typeof runAdbAsync;
-    readCliMajor?: (projectRoot: string) => Promise<number | null>;
-  } = {}
-): Promise<RunDeviceArgument> {
-  if (platform === 'ios') {
-    return { ok: true, value: deviceId };
-  }
-  const major = await readCliMajor(projectRoot);
-  if (major != null && major >= 58) {
-    return { ok: true, value: deviceId };
-  }
-  const name = await androidDeviceNameAsync(deviceId, { run });
-  if (name == null || !deviceId.startsWith('emulator-')) {
-    return { ok: true, value: name };
-  }
-  const listed = await run(['devices', '-l'], { timeoutMs: NAME_TIMEOUT_MS });
-  const serials = listed.exitCode === 0 ? (listed.stdout.match(/^emulator-\d+(?=\s)/gm) ?? []) : [];
-  for (const serial of serials) {
-    if (serial !== deviceId && (await androidDeviceNameAsync(serial, { run })) === name) {
-      return {
-        ok: false,
-        reason: `${deviceId} and ${serial} both run the AVD "${name}", and this project's Expo CLI${
-          major == null ? '' : ` (${major})`
-        } picks the device for "expo run:android --device" by that name alone, so the app could be installed on the other one. Upgrade to @expo/cli 58 or newer, which takes the serial, or stop one of the two emulators`,
-      };
-    }
-  }
-  return { ok: true, value: name };
-}
-
-/** The major version of the `@expo/cli` the project runs, or null when it is not installed. */
-async function readExpoCliMajorAsync(projectRoot: string): Promise<number | null> {
-  const expoRoot = await resolvePackageRootAsync(projectRoot, 'expo');
-  const cliRoot =
-    (await resolvePackageRootAsync(projectRoot, '@expo/cli')) ??
-    (expoRoot ? await resolvePackageRootAsync(expoRoot, '@expo/cli') : null);
-  if (cliRoot == null) {
-    return null;
-  }
-  const packageJson = await readJsonFileAsync<{ version?: string }>(
-    path.join(cliRoot, 'package.json')
-  );
-  const major = Number(packageJson?.version?.split('.')[0]);
-  return Number.isInteger(major) ? major : null;
-}
 
 /** How long `adb` gets to name one device. It reads local state and answers. */
 const NAME_TIMEOUT_MS = 15_000;
 
 /**
- * What `expo run:android --device` calls this device, or null when it cannot be named.
+ * The name the Expo CLI's device list gives this device, or null when it cannot be read.
  *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
- *
- * **`--device` does not mean the same thing on the two platforms**, and the difference is not in
- * the help text in a way anybody would notice: iOS takes a *"Device name, UDID, or generic"*, and
- * Android takes a *"Device name"* and nothing else. Passing an `adb` serial to Android answers
- * `CommandError: Could not find device with name: emulator-5554` [observed — live, 2026-09-04],
- * which is what this function exists to avoid.
- *
- * The names it accepts are the ones its own device list builds
- * [reference — `@expo/cli` `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync]: an
- * emulator is its **AVD name**, from `adb -s <serial> emu avd name`, and a physical device is the
- * `model:` field of `adb devices -l`. So this asks the same two questions in the same order.
+ * An emulator is its **AVD name**, from `adb -s <serial> emu avd name`, and a physical device is
+ * the `model:` field of `adb devices -l`, asked in that order
+ * [reference — `@expo/cli` `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync].
  */
 export async function androidDeviceNameAsync(
   serial: string,
@@ -192,8 +110,6 @@ export interface InstallDevBuildOptions {
    * asked, and then the exit code decides after all — it is the only evidence left.
    */
   verifyInstalledAsync?: () => Promise<boolean | null>;
-  /** Injected for the tests, so the Android name lookup is provable without an emulator. */
-  run?: typeof runAdbAsync;
 }
 
 /** The first line of a message, for a reason that has to fit on one. */
@@ -216,29 +132,9 @@ export async function installDevBuildAsync(
     spawn = spawnCaptureAsync,
     timeoutMs = BUILD_TIMEOUT_MS,
     verifyInstalledAsync,
-    run,
   }: InstallDevBuildOptions = {}
 ): Promise<InstallDevBuildResult> {
-  // @ref ./installDevBuild §expoRunDeviceArgumentAsync. A device Android cannot name gets no
-  // `--device` at all rather than a wrong one, and a name two emulators share is refused.
-  const argument = await expoRunDeviceArgumentAsync(
-    projectRoot,
-    platform,
-    deviceId,
-    run ? { run } : {}
-  );
-  if (!argument.ok) {
-    return { ok: false, command: `npx expo run:${platform} --no-bundler`, reason: argument.reason };
-  }
-  const target = argument.value;
-  // Pushed rather than spread, so `--device` stays a literal the foreign-flag sweep can see: a
-  // conditional spread hid it, and a flag this CLI writes onto another CLI's command line without
-  // the guard noticing is exactly what that guard exists to stop (llp/0002 §A flag is not shipped
-  // until it has run against the published binary).
-  const args = [`run:${platform}`, '--no-bundler'];
-  if (target != null) {
-    args.push('--device', target);
-  }
+  const args = [`run:${platform}`, '--no-bundler', '--device', deviceId];
   const command = `npx expo ${args.join(' ')}`;
 
   const built = await spawn('npx', ['expo', ...args], { cwd: projectRoot, timeoutMs });

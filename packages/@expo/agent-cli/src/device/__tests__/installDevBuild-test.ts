@@ -9,11 +9,7 @@
 // already builds what is missing and installs it, and two flags are what make it usable from
 // inside a run that is already under way.
 
-import {
-  androidDeviceNameAsync,
-  expoRunDeviceArgumentAsync,
-  installDevBuildAsync,
-} from '../installDevBuild';
+import { androidDeviceNameAsync, installDevBuildAsync } from '../installDevBuild';
 
 /** One `adb` run's result, with the fields the name reader looks at. */
 function ranAdb(over: Partial<{ stdout: string; exitCode: number | null; notRunnable: boolean }>) {
@@ -58,10 +54,9 @@ describe(installDevBuildAsync, () => {
     ]);
   });
 
-  // @ref ../installDevBuild §androidDeviceNameAsync — the asymmetry that cost a live run: Android's
-  // `--device` takes a **name**, and an `adb` serial is answered with `Could not find device with
-  // name: emulator-5554` [observed, 2026-09-04].
-  it(`names the emulator by its AVD for android, not by its serial`, async () => {
+  // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim — @expo/cli 58 matches
+  // the serial before the name, and two emulators of one AVD share the name.
+  it(`passes the emulator's serial for android`, async () => {
     const calls: string[][] = [];
 
     const result = await installDevBuildAsync('/project', 'android', 'emulator-5554', {
@@ -69,29 +64,12 @@ describe(installDevBuildAsync, () => {
         calls.push([command, ...args]);
         return captured();
       },
-      run: async () => ranAdb({ stdout: 'tuft-pixel\nOK\n' }),
     });
 
     expect(result.ok).toBe(true);
     expect(calls).toEqual([
-      ['npx', 'expo', 'run:android', '--no-bundler', '--device', 'tuft-pixel'],
+      ['npx', 'expo', 'run:android', '--no-bundler', '--device', 'emulator-5554'],
     ]);
-  });
-
-  // A device that cannot be named gets no `--device` at all, because a wrong one is a refusal and
-  // the command picks the attached device itself.
-  it(`passes no device for an android device it could not name`, async () => {
-    const calls: string[][] = [];
-
-    await installDevBuildAsync('/project', 'android', 'emulator-5554', {
-      spawn: async (command, args) => {
-        calls.push([command, ...args]);
-        return captured();
-      },
-      run: async () => ranAdb({ notRunnable: true, exitCode: null }),
-    });
-
-    expect(calls).toEqual([['npx', 'expo', 'run:android', '--no-bundler']]);
   });
 
   // Never `@expo/agent-cli dev`: that plans *and starts a dev server*, which is the thing this run
@@ -203,51 +181,5 @@ describe(androidDeviceNameAsync, () => {
     });
 
     expect(name).toBeNull();
-  });
-});
-
-// @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
-describe(expoRunDeviceArgumentAsync, () => {
-  /** Running emulators, and the AVD each one runs. */
-  function adbWith(avds: Record<string, string>) {
-    return async (args: string[]) =>
-      args[0] === 'devices'
-        ? ranAdb({
-            stdout: [
-              'List of devices attached',
-              ...Object.keys(avds).map((serial) => `${serial}\tdevice`),
-              '',
-            ].join('\n'),
-          })
-        : ranAdb({ stdout: `${avds[args[1]!]}\nOK\n` });
-  }
-
-  it(`passes the serial to an Expo CLI of 58 or newer, which matches it first`, async () => {
-    expect(
-      await expoRunDeviceArgumentAsync('/project', 'android', 'emulator-5556', {
-        run: adbWith({ 'emulator-5554': 'Pixel_8', 'emulator-5556': 'Pixel_8' }),
-        readCliMajor: async () => 58,
-      })
-    ).toEqual({ ok: true, value: 'emulator-5556' });
-  });
-
-  it(`passes the AVD name to an Expo CLI of 57, which matches only names`, async () => {
-    expect(
-      await expoRunDeviceArgumentAsync('/project', 'android', 'emulator-5556', {
-        run: adbWith({ 'emulator-5554': 'Pixel_7', 'emulator-5556': 'Pixel_8' }),
-        readCliMajor: async () => 57,
-      })
-    ).toEqual({ ok: true, value: 'Pixel_8' });
-  });
-
-  it(`refuses on 57 when another running emulator has the same AVD name`, async () => {
-    const argument = await expoRunDeviceArgumentAsync('/project', 'android', 'emulator-5556', {
-      run: adbWith({ 'emulator-5554': 'Pixel_8', 'emulator-5556': 'Pixel_8' }),
-      readCliMajor: async () => 57,
-    });
-
-    expect(argument.ok).toBe(false);
-    expect(!argument.ok && argument.reason).toContain('emulator-5554');
-    expect(!argument.ok && argument.reason).toContain('@expo/cli 58');
   });
 });

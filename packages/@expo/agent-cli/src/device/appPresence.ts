@@ -19,7 +19,6 @@
 import type { NativePlatform } from '../plan/types';
 import { readConfiguredAppId } from '../runtime/appId';
 import { hasAppOnDeviceAsync } from './hasApp';
-import { expoRunDeviceArgumentAsync } from './installDevBuild';
 import type { LocalDeviceBackend } from './claimedDevice';
 
 /** Whether the development build is on the device, as far as this machine can be asked. */
@@ -35,16 +34,12 @@ export type AppPresence =
 export interface AppPresenceProbe {
   presence: AppPresence;
   /**
-   * What `expo run:<platform> --device` calls the device that answered, or null.
+   * The UDID or `adb` serial of the device that answered, or null.
    *
    * Set only for `missing`, which is the one answer that plans an install — the plan pins the
-   * install to the device that was actually checked, the one this worktree claims
-   * (@ref ./installDevBuild §expoRunDeviceArgumentAsync). A device the platform cannot name stays
-   * null, and the install runs unpinned.
+   * install to the device that was actually checked, the one this worktree claims.
    */
   installDevice: string | null;
-  /** Why no `--device` value is safe for this device, when that is why {@link installDevice} is null. */
-  installRefusal?: string;
 }
 
 /**
@@ -80,8 +75,6 @@ export interface ProbeAppPresenceOptions {
   readAppId?: typeof readConfiguredAppId;
   /** Injected for tests. */
   hasAppOnDevice?: typeof hasAppOnDeviceAsync;
-  /** Injected for tests. */
-  runDeviceArgument?: typeof expoRunDeviceArgumentAsync;
   /** Overrides {@link APP_PRESENCE_BUDGET_MS}, for tests. */
   budgetMs?: number;
 }
@@ -133,7 +126,6 @@ async function askDeviceAsync(
     probeDeviceAsync,
     readAppId = readConfiguredAppId,
     hasAppOnDevice = hasAppOnDeviceAsync,
-    runDeviceArgument = expoRunDeviceArgumentAsync,
   }: ProbeAppPresenceOptions
 ): Promise<AppPresenceProbe> {
   // The app id first, because it is a file read and the device probe is two subprocesses. A
@@ -156,11 +148,7 @@ async function askDeviceAsync(
   if (installed == null) {
     return UNPROBED;
   }
-  if (installed) {
-    return { presence: 'present', installDevice: null };
-  }
-  const argument = await runDeviceArgument(projectRoot, platform, device.deviceId);
-  return argument.ok
-    ? { presence: 'missing', installDevice: argument.value }
-    : { presence: 'missing', installDevice: null, installRefusal: argument.reason };
+  return installed
+    ? { presence: 'present', installDevice: null }
+    : { presence: 'missing', installDevice: device.deviceId };
 }

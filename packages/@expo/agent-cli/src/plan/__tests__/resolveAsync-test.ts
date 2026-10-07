@@ -285,7 +285,7 @@ describe('detection', () => {
       name: 'iPhone 17',
       state: 'booted' as const,
     };
-    const runDevice = vi.fn(async () => ({ argument: 'SIM-CLAIMED', device }));
+    const runDevice = vi.fn(async () => device);
     const plan = await resolveStartPlanAsync(projectRoot, devClientState(), {
       platform: 'ios',
       devices: { runDevice, bootedDevice: async () => null },

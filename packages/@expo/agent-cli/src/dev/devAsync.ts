@@ -1197,10 +1197,6 @@ function planDevices(projectRoot: string, options: DevOptions): PlanDevices | un
   };
   return {
     async runDevice(platform) {
-      const { expoRunDeviceArgumentAsync } =
-        require('../device/installDevBuild') as typeof import('../device/installDevBuild');
-      const { runDeviceRefusedError } =
-        require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
       const resolved = await resolveAsync(platform, true);
       if (!resolved.ok) {
         // An unpinned `expo run:*` takes the first booted device, so it may run unpinned only when
@@ -1211,14 +1207,10 @@ function planDevices(projectRoot: string, options: DevOptions): PlanDevices | un
         throw resolved.error;
       }
       if (resolved.state == null) {
-        return { argument: null, device: { action: 'create', id: null, name: null, state: null } };
+        return { action: 'create', id: null, name: null, state: null };
       }
       const { action, id, name, state } = resolved;
-      const argument = await expoRunDeviceArgumentAsync(projectRoot, platform, id);
-      if (!argument.ok) {
-        throw runDeviceRefusedError(platform, argument.reason);
-      }
-      return { argument: argument.value, device: { action, id, name, state } };
+      return { action, id, name, state };
     },
     async bootedDevice(_projectRoot, platform) {
       const resolved = await resolveAsync(platform, false);

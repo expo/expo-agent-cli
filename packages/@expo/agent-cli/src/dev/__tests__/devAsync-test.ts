@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 
 import { resolveClaimedDeviceAsync } from '../../device/claimedDevice';
-import { fakeDeviceTools, simctlDevices } from '../../device/__tests__/fakeDeviceTools';
+import { adbDevices, fakeDeviceTools, simctlDevices } from '../../device/__tests__/fakeDeviceTools';
 import { deviceRegistryDirectory, writeClaim } from '../../deviceClaims';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
@@ -46,6 +46,22 @@ vi.mock('../../device/claimedDevice', () => ({
     name: null,
     holders: [],
   })),
+}));
+// No bind test: the machine running the tests may have an emulator of its own on 5554.
+vi.mock('../../device/bootDevice', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../device/bootDevice')>()),
+  findFreeEmulatorPortAsync: async ({
+    skip = () => false,
+  }: {
+    skip?: (port: number) => boolean;
+  }) => {
+    for (let port = 5554; port <= 5584; port += 2) {
+      if (!skip(port)) {
+        return port;
+      }
+    }
+    return null;
+  },
 }));
 vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
 vi.mock('../openApp', () => ({
@@ -412,8 +428,8 @@ describe(devAsync, () => {
       return vi.mocked(emitStartPlan).mock.calls.at(-1)![0];
     }
 
-    const runStepArgs = (plan: StartPlan) =>
-      plan.steps.find(({ argv }) => argv[1] === 'run:ios')!.argv.slice(1);
+    const runStepArgs = (plan: StartPlan, platform = 'ios') =>
+      plan.steps.find(({ argv }) => argv[1] === `run:${platform}`)!.argv.slice(1);
 
     it(`--plan names the simulator a run would take, and claims nothing`, async () => {
       const tools = simulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
@@ -461,6 +477,60 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, planned, expect.anything());
       expect(planned).toEqual(['run:ios', '--device', 'SIM-A', '--port', '8081']);
     });
+
+    /** AVDs that start on the console port they are given, and answer adb once they run. */
+    function emulators(avds: string[]) {
+      const running = new Map<string, string>();
+      fakeDeviceTools((spawned, args) => {
+        const command = path.basename(spawned, '.exe');
+        if (command === 'emulator' && args[0] === '-list-avds') {
+          return { stdout: `${avds.join('\n')}\n` };
+        }
+        if (command === 'emulator' && args[0] === '-avd') {
+          running.set(`emulator-${args[args.indexOf('-ports') + 1]!.split(',')[0]}`, args[1]!);
+          return {};
+        }
+        if (command !== 'adb') {
+          return { spawnError: 'ENOENT' };
+        }
+        if (args[0] === 'devices') {
+          return { stdout: adbDevices([...running.keys()].map((serial) => ({ serial }))) };
+        }
+        if (args.includes('avd') && args.includes('name')) {
+          return running.has(args[1]!)
+            ? { stdout: `${running.get(args[1]!)}\nOK\n` }
+            : { exitCode: 1, stderr: `error: device '${args[1]}' not found` };
+        }
+        if (args.includes('sys.boot_completed')) {
+          return { stdout: '1\n' };
+        }
+        return {};
+      });
+    }
+
+    it.each([[[]], [['--device', 'Pixel_8']]])(
+      `--plan --android %j names the emulator the run boots by its serial, as the run does`,
+      async (device) => {
+        emulators(['Pixel_8']);
+
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--plan', '--android', ...device]))
+        ).resolves.toBe(0);
+        const planned = runStepArgs(emittedPlan(), 'android');
+        expect(emittedPlan().device).toEqual({
+          action: 'boot',
+          id: 'emulator-5554',
+          name: 'Pixel_8',
+          state: 'shutdown',
+        });
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--android', ...device]))
+        ).resolves.toBe(0);
+
+        expect(planned).toEqual(['run:android', '--device', 'emulator-5554', '--port', '8081']);
+        expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, planned, expect.anything());
+      }
+    );
   });
 
   describe('running the plan', () => {

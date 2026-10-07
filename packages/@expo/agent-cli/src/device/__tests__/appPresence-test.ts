@@ -33,10 +33,6 @@ function deps(overrides: Parameters<typeof probeAppPresenceAsync>[2] = {}) {
     readAppId: () => APP_ID,
     probeDeviceAsync: probeOf([iosDevice()]),
     hasAppOnDevice: async () => true,
-    runDeviceArgument: async (_root: string, platform: string, deviceId: string) => ({
-      ok: true as const,
-      value: platform === 'ios' ? deviceId : 'tuft-pixel',
-    }),
     ...overrides,
   };
 }
@@ -66,7 +62,7 @@ describe(probeAppPresenceAsync, () => {
     expect(probe).toEqual({ presence: 'missing', installDevice: 'UDID-1' });
   });
 
-  it(`should name an Android device by the name expo run takes, not the serial`, async () => {
+  it(`should name an Android device by its serial, which expo run:android --device takes`, async () => {
     const probe = await probeAppPresenceAsync(
       projectRoot,
       'android',
@@ -76,40 +72,7 @@ describe(probeAppPresenceAsync, () => {
       })
     );
 
-    expect(probe).toEqual({ presence: 'missing', installDevice: 'tuft-pixel' });
-  });
-
-  it(`should leave the install unpinned when Android cannot name the device`, async () => {
-    const probe = await probeAppPresenceAsync(
-      projectRoot,
-      'android',
-      deps({
-        probeDeviceAsync: probeOf([androidDevice()]),
-        hasAppOnDevice: async () => false,
-        runDeviceArgument: async () => ({ ok: true as const, value: null }),
-      })
-    );
-
-    expect(probe).toEqual({ presence: 'missing', installDevice: null });
-  });
-
-  // @ref llp/0030-one-device-per-agent.rfc.md §Every verb uses the claim
-  it(`should carry the reason when no --device value is safe for the device`, async () => {
-    const probe = await probeAppPresenceAsync(
-      projectRoot,
-      'android',
-      deps({
-        probeDeviceAsync: probeOf([androidDevice()]),
-        hasAppOnDevice: async () => false,
-        runDeviceArgument: async () => ({ ok: false as const, reason: 'two emulators share it' }),
-      })
-    );
-
-    expect(probe).toEqual({
-      presence: 'missing',
-      installDevice: null,
-      installRefusal: 'two emulators share it',
-    });
+    expect(probe).toEqual({ presence: 'missing', installDevice: 'emulator-5554' });
   });
 
   it(`should ask about the id the project config names`, async () => {

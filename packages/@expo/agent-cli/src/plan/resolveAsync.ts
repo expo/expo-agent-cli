@@ -21,18 +21,6 @@ import { selectRunTarget } from './runTarget';
 import type { DecideStartPlanOptions, NativePlatform, PlanEasBuild } from './types';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { hasBuildProfileSync } from '../utils/easJson';
-import { CommandError } from '../utils/errors';
-
-/** The install step would have no `--device` value that is safe (llp/0030). */
-export function runDeviceRefusedError(platform: NativePlatform, reason: string): CommandError {
-  return new CommandError(
-    'RUN_DEVICE_AMBIGUOUS',
-    [
-      `The ${platform} app cannot be installed on this worktree's device with "expo run:${platform} --device".`,
-      `Why: ${reason}.`,
-    ].join('\n')
-  );
-}
 
 /**
  * This worktree's device, as the caller gets it: `dev` claims it for a run, and `dev --plan` peeks
@@ -42,15 +30,13 @@ export function runDeviceRefusedError(platform: NativePlatform, reason: string):
  */
 export interface PlanDevices {
   /**
-   * The device of a plan that builds here, and what `expo run:<platform> --device` calls it. A null
-   * `argument` runs the build unpinned: the device does not exist yet, or cannot be named. Null
-   * leaves the device to the Expo CLI.
+   * The device of a plan that builds here. `expo run:<platform> --device` gets its UDID or `adb`
+   * serial; a simulator the run creates has none yet, so that build runs unpinned. Null leaves the
+   * device to the Expo CLI.
    *
-   * @throws {CommandError} when the device cannot be had or named safely.
+   * @throws {CommandError} when the device cannot be had.
    */
-  runDevice: (
-    platform: NativePlatform
-  ) => Promise<{ argument: string | null; device: PlanDevice } | null>;
+  runDevice: (platform: NativePlatform) => Promise<PlanDevice | null>;
   /** The booted device the presence probe asks, or null. */
   bootedDevice: NonNullable<ProbeAppPresenceOptions['probeDeviceAsync']>;
 }
@@ -180,11 +166,9 @@ export async function resolveStartPlanAsync(
     if ((requestedBackend ?? settingsBuildBackend(settings, opensOn)) === 'eas') {
       return draft;
     }
-    const { presence, installDevice, installRefusal } = await probeAppPresence(
-      projectRoot,
-      opensOn,
-      { probeDeviceAsync: devices?.bootedDevice }
-    );
+    const { presence, installDevice } = await probeAppPresence(projectRoot, opensOn, {
+      probeDeviceAsync: devices?.bootedDevice,
+    });
     if (presence === 'missing') {
       // The install needs the local toolchain even when nothing compiles — `expo run:ios` runs
       // through Xcode either way — so a machine without it keeps the serve-only plan rather than
@@ -193,9 +177,6 @@ export async function resolveStartPlanAsync(
       const toolchain = await detectToolchainAsync(opensOn);
       if (toolchain.status !== 'present') {
         return draft;
-      }
-      if (installRefusal) {
-        throw runDeviceRefusedError(opensOn, installRefusal);
       }
     }
     // Run again rather than patch the draft: the table is the one place a rule and its steps are
@@ -237,7 +218,7 @@ export async function resolveStartPlanAsync(
     ...planOptions,
     runTarget,
     buildBackend,
-    runDevice: run?.argument ?? null,
+    runDevice: run?.id ?? null,
     easJson: buildBackend.runsOn === 'eas' ? easJsonExistsSync(projectRoot) : undefined,
     ...(onEas ? { easBuild, easSimulatorProfile: hasSimulatorProfile(projectRoot) } : {}),
   });
@@ -246,5 +227,5 @@ export async function resolveStartPlanAsync(
   // a plan that still builds here. A plan that moved to the cloud has no use for them.
   const probed =
     plan.buildLocation?.runsOn === 'local' && probe ? applyToolchainProbe(plan, probe) : plan;
-  return run ? { ...probed, device: run.device } : probed;
+  return run ? { ...probed, device: run } : probed;
 }

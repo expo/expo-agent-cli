@@ -534,9 +534,9 @@ So a start that built forgets the target, and the next reader re-reads the proje
 
 The general shape is the one this document keeps meeting: **a fact captured before the thing it describes existed.** The pre-install app probe (§Putting Expo Go on a simulator that has not got it), the device-name index, and this. Each was a value read at the cheapest moment rather than at the moment it was needed.
 
-#### `--device` does not mean the same thing on the two platforms
+#### `--device` gets the device's id on both platforms
 
-iOS takes a _"Device name, UDID, or generic"_; Android takes a _"Device name"_ and nothing else. An `adb` serial handed to Android is answered `CommandError: Could not find device with name: emulator-5554` [observed — live, 2026-09-04], which cost a whole run to find. The names Android accepts are the ones its own device list builds [reference — `@expo/cli` `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync]: an emulator is its **AVD name**, from `adb -s <serial> emu avd name`, and a physical device is the `model:` field of `adb devices -l`. `androidDeviceNameAsync` asks those two questions in that order, and a device it cannot name gets no `--device` at all rather than a wrong one — the command then picks the attached device itself, and a wrong `--device` is a refusal.
+iOS takes a _"Device name, UDID, or generic"_, and gets the UDID. @expo/cli 58 matches Android's `--device` against the `adb` serial before the name [observed — @expo/cli 58.0.9 `AndroidDeviceManager.resolveFromNameAsync`], and this CLI targets SDK 58 and later, so Android gets the serial ([[0030-one-device-per-agent]] §Every verb uses the claim). An older Expo CLI matches a _"Device name"_ only, and answers a serial with `CommandError: Could not find device with name: emulator-5554` [observed — live, 2026-09-04].
 
 ### A link nobody can approve is a link that never opens
 

@@ -871,10 +871,10 @@ describe('@expo/agent-cli dev', () => {
     /** The application id the fixture is given, so there is a named app to ask a device about. */
     const APP_ID = 'com.example.devclientfreshapp';
 
-    /** What the stub `adb` answers `emu avd name` with, and so what the install is pinned to. */
+    /** What the stub `adb` answers `emu avd name` with. */
     const AVD_NAME = 'Pixel_7_API_36';
 
-    /** The serial the stub `adb` lists. `emulator-` is what makes the name an AVD name. */
+    /** The serial the stub `adb` lists, and so what the install is pinned to. */
     const SERIAL = 'emulator-5554';
 
     /**
@@ -962,7 +962,7 @@ describe('@expo/agent-cli dev', () => {
     }
 
     /** The install step's argv, which the plan pins to the device the probe asked. */
-    const INSTALL_STEP = ['run:android', '--no-bundler', '--device', AVD_NAME];
+    const INSTALL_STEP = ['run:android', '--no-bundler', '--device', SERIAL];
 
     it('installs the recorded build before it serves, on the device it asked', async () => {
       const { projectRoot, env } = await setupInstallAsync();
