@@ -409,13 +409,13 @@ describe(devAsync, () => {
       });
     }
 
-    function claimedByOther(id: string) {
+    function claimedByOther(id: string, projectRoot = OTHER) {
       const now = new Date().toISOString();
       writeClaim({
         backend: 'local-ios',
         platform: 'ios',
         id,
-        projectRoot: OTHER,
+        projectRoot,
         pid: 1,
         claimedAt: now,
         touchedAt: now,
@@ -465,6 +465,28 @@ describe(devAsync, () => {
       });
       expect(vol.toJSON(deviceRegistryDirectory())).toEqual(registry);
       expect(tools.callsWith('simctl boot')).toEqual([]);
+    });
+
+    // @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
+    it(`--plan takes the simulator a deleted worktree's fresh claim holds, as the run does`, async () => {
+      vi.stubEnv('EXPO_AGENT_MAX_DEVICES', '1');
+      simulators([{ udid: 'SIM-A', name: 'iPhone 17', state: 'Booted' }]);
+      claimedByOther('SIM-A', '/work/deleted');
+
+      try {
+        await expect(devAsync(projectRoot, resolveDevOptions(['--plan', '--ios']))).resolves.toBe(
+          0
+        );
+      } finally {
+        vi.unstubAllEnvs();
+      }
+
+      expect(emittedPlan().device).toEqual({
+        action: 'take',
+        id: 'SIM-A',
+        name: 'iPhone 17',
+        state: 'booted',
+      });
     });
 
     it(`--plan prints the run:ios step the run then runs, --device included`, async () => {

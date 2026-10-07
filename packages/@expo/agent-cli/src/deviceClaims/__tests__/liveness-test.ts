@@ -1,6 +1,8 @@
 // @ref llp/0030-one-device-per-agent.rfc.md §The registry
 // Liveness against a real dev-server lock, because the socket is the primary check.
 
+import fs from 'fs';
+
 import { acquireDevServerLockAsync } from '../../devLock';
 import { cleanupTempProjects, makeTempProject } from '../../devLock/__tests__/tempProject';
 import { CLAIM_GRACE_MS, classifyClaimAsync } from '../liveness';
@@ -84,6 +86,18 @@ describe('classifyClaimAsync', () => {
     expect(await classifyClaimAsync(claim('/no/such/worktree', LONG_AGO), { now: NOW })).toBe(
       'stale'
     );
+  });
+
+  // @ref llp/0030-one-device-per-agent.rfc.md §Release and cleanup
+  it(`is stale for a deleted worktree, however recent the touch`, async () => {
+    const projectRoot = makeTempProject();
+    fs.rmSync(projectRoot, { recursive: true });
+
+    expect(await classifyClaimAsync(claim(projectRoot, JUST_NOW), { now: NOW })).toBe('stale');
+  });
+
+  it(`stays live within the grace period when the parent is gone too, as an unmounted volume is`, async () => {
+    expect(await classifyClaimAsync(claim('/no/such/volume', JUST_NOW), { now: NOW })).toBe('live');
   });
 
   it(`does not count a touch from the future, which a wrong clock or a hand edit leaves`, async () => {
