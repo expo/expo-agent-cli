@@ -82,6 +82,12 @@ function allocate(
   });
 }
 
+/** What another process does once this one paused past the stale age of the lock it holds. */
+function takeOverLock(): void {
+  const lock = path.join(path.dirname(claimFilePath('local-ios', 'A')), '.lock');
+  vol.writeFileSync(path.join(lock, 'owner'), 'taker');
+}
+
 function staleClaim(overrides: Partial<DeviceClaim>): DeviceClaim {
   return {
     backend: 'local-ios',
@@ -499,6 +505,33 @@ describe('allocateDeviceAsync', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it(`creates no device and writes no claim once another process took its lock over`, async () => {
+    liveRoots.add(OTHER);
+    writeClaim(staleClaim({ id: 'A' }));
+    const createDevice = vi.fn(async () => shutdown('NEW'));
+
+    await expect(
+      allocate(HERE, { inventory: [booted('A')], createDevice, duringInventory: takeOverLock })
+    ).rejects.toMatchObject({ code: 'DEVICE_REGISTRY_LOCK_LOST' });
+    expect(createDevice).not.toHaveBeenCalled();
+    expect(readClaims().map((claim) => claim.id)).toEqual(['A']);
+  });
+
+  it(`deletes no device once another process took its lock over`, async () => {
+    writeClaim(staleClaim({ id: 'OLD', created: true }));
+    const deleteDevice = vi.fn(async () => {});
+
+    await expect(
+      allocate(HERE, {
+        inventory: [booted('B'), shutdown('OLD')],
+        deleteDevice,
+        duringInventory: takeOverLock,
+      })
+    ).rejects.toMatchObject({ code: 'DEVICE_REGISTRY_LOCK_LOST' });
+    expect(deleteDevice).not.toHaveBeenCalled();
+    expect(readClaims().map((claim) => claim.id)).toEqual(['OLD']);
   });
 
   it(`leaves the registry unlocked`, async () => {

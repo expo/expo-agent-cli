@@ -13,6 +13,7 @@ import {
   REGISTRY_LOCK_STALE_MS,
   releaseClaim,
   releaseProjectClaimsAsync,
+  removeClaimFile,
   touchClaim,
   withRegistryLockAsync,
   writeClaim,
@@ -498,6 +499,25 @@ describe('withRegistryLockAsync', () => {
     );
     expect(String(vol.readFileSync(path.join(lockDir, 'owner')))).toBe('taker');
   });
+  it.each([
+    ['writes', () => writeClaim(claim({ id: 'UDID-2' }))],
+    ['releases', () => releaseClaim(claim())],
+    ['removes', () => removeClaimFile(claim())],
+  ])(
+    `throws before it %s a claim once another holder took its lock over`,
+    async (_verb, change) => {
+      writeClaim(claim());
+      const before = readClaims();
+
+      await expect(
+        withRegistryLockAsync(async () => {
+          vol.writeFileSync(path.join(lockDir, 'owner'), 'taker');
+          change();
+        })
+      ).rejects.toMatchObject({ code: 'DEVICE_REGISTRY_LOCK_LOST' });
+      expect(readClaims()).toEqual(before);
+    }
+  );
 });
 
 describe('withRegistryLockAsync across processes', () => {
