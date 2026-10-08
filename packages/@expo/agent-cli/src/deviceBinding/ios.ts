@@ -32,7 +32,7 @@ export function parseNewestIosRuntime(stdout: string): IosInventory['newestIosRu
       platform?: string;
       version?: string;
       isAvailable?: boolean;
-      supportedDeviceTypes?: { identifier?: string; productFamily?: string }[];
+      supportedDeviceTypes?: { identifier?: string; name?: string; productFamily?: string }[];
     }[];
   };
   try {
@@ -40,19 +40,42 @@ export function parseNewestIosRuntime(stdout: string): IosInventory['newestIosRu
   } catch {
     return null;
   }
-  const candidates = (parsed.runtimes ?? [])
+  const runtimes = (parsed.runtimes ?? [])
     .filter((runtime) => runtime.platform === 'iOS' && runtime.isAvailable !== false)
     .map((runtime) => ({
       identifier: runtime.identifier ?? '',
       version: (runtime.version ?? '').split('.').map(Number),
-      deviceType:
-        runtime.supportedDeviceTypes?.find((type) => type.productFamily === 'iPhone')?.identifier ??
-        null,
+      iphones: (runtime.supportedDeviceTypes ?? []).filter(
+        (type): type is { identifier: string; name?: string; productFamily?: string } =>
+          type.productFamily === 'iPhone' && typeof type.identifier === 'string'
+      ),
     }))
-    .filter((runtime) => runtime.identifier && runtime.deviceType != null)
+    .filter((runtime) => runtime.identifier && runtime.iphones.length > 0)
     .sort((left, right) => compareVersions(right.version, left.version));
-  const newest = candidates[0];
-  return newest ? { identifier: newest.identifier, deviceType: newest.deviceType! } : null;
+  // The newest runtime can list only a device no app renders on (iOS 27.1 lists iPhone Duo alone),
+  // so a mainstream iPhone on an older runtime beats it; the newest's first iPhone is the last
+  // resort.
+  for (const runtime of runtimes) {
+    const mainstream = mainstreamIphone(runtime.iphones);
+    if (mainstream) {
+      return { identifier: runtime.identifier, deviceType: mainstream };
+    }
+  }
+  const newest = runtimes[0];
+  return newest
+    ? { identifier: newest.identifier, deviceType: newest.iphones[0]!.identifier }
+    : null;
+}
+
+/** An `iPhone <n> Pro`, else an `iPhone <n>`, by the name `simctl` lists the type under. */
+function mainstreamIphone(types: { identifier: string; name?: string }[]): string | null {
+  for (const pattern of [/^iPhone \d+ Pro$/, /^iPhone \d+$/]) {
+    const match = types.find((type) => pattern.test(type.name ?? ''));
+    if (match) {
+      return match.identifier;
+    }
+  }
+  return null;
 }
 
 function compareVersions(left: number[], right: number[]): number {
