@@ -1408,6 +1408,21 @@ describe(devAsync, () => {
       vi.mocked(devicesDisabled).mockReturnValue(true);
     });
 
+    // non-darwin-host-binds-nothing
+    it(`acquires nothing for --ios on a host with no simulators, and pins no step`, async () => {
+      mockStaleDevClientState();
+      mockPlatform('linux');
+      try {
+        await devAsync(projectRoot, resolveDevOptions(['--ios', '--local']));
+      } finally {
+        mockPlatform(realPlatform);
+      }
+      expect(acquireDeviceAsync).not.toHaveBeenCalled();
+      for (const [, args] of vi.mocked(runDevServerAsync).mock.calls) {
+        expect(args).not.toContain('--device');
+      }
+    });
+
     // withDevice-after-forwarded-args
     it(`binds after the refusals and pins the build step to the simulator, over a forwarded --device`, async () => {
       mockStaleDevClientState();
