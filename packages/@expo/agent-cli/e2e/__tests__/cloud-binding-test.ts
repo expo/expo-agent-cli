@@ -12,6 +12,7 @@ import {
 import {
   executeAgentCliAsync,
   getTemporaryPath,
+  installStubFingerprintAsync,
   setupFixtureAsync,
   stubExpoEnv,
   waitForAsync,
@@ -42,8 +43,9 @@ function envFor(root: string) {
     STUB_SIM_SESSIONS: '0',
   };
 }
-async function project() {
-  const root = fs.realpathSync(await setupFixtureAsync('go-app'));
+async function project(fixture = 'go-app') {
+  const root = fs.realpathSync(await setupFixtureAsync(fixture));
+  await installStubFingerprintAsync(root);
   await installStubEasAsync(root);
   projects.push(root);
   return root;
@@ -163,6 +165,80 @@ it('two worktrees start and drive their own sessions; plain stop keeps a binding
   expect(fs.existsSync(bindingFile(first))).toBe(false);
   expect(readBinding(second).device).toMatchObject({ id: 'replacement-1' });
 });
+it('reopens an ended session using the matching EAS build when the native project is fresh', async () => {
+  const root = await project('dev-client-fresh-app');
+  const started = await executeAgentCliAsync(
+    root,
+    ['dev', '--ios', '--eas', '--no-open', '--detach', '--wait-ready', '--json'],
+    {
+      env: {
+        ...envFor(root),
+        STUB_EXPO_DEV_SERVER_PORT: '8753',
+        STUB_EXPO_LISTEN: '1',
+        STUB_EXPO_DELAY_MS: '90000',
+        STUB_EXPO_TUNNEL_HOST: 'cloud.tunnel.example',
+        STUB_EXPO_TUNNEL_DELAY_MS: '100',
+      },
+      reject: false,
+    }
+  );
+  expect(started.exitCode, started.stderr).toBe(0);
+  bind(root, 'ended');
+  list([{ id: 'ended', status: 'STOPPED' }]);
+  await writeCloudSessionFileAsync(root, 'ended');
+  const reopened = await executeAgentCliAsync(
+    root,
+    ['dev', '--ios', '--eas', '--detach', '--json'],
+    {
+      env: {
+        ...envFor(root),
+        STUB_SIM_START_ID: 'replacement',
+        STUB_EAS_BUILDS: JSON.stringify([
+          {
+            id: 'matching-build',
+            platform: 'IOS',
+            status: 'FINISHED',
+            fingerprintHash: '0f1e2d3c4b5a69788796a5b4c3d2e1f001234567',
+            buildProfile: 'development-simulator',
+          },
+        ]),
+      },
+      reject: false,
+    }
+  );
+  expect(reopened.exitCode, reopened.stderr).toBe(0);
+  expect(readBinding(root).device).toMatchObject({ id: 'replacement', origin: 'started' });
+  const args = stubEasArgs(root);
+  expect(args.find((a) => a[0] === 'simulator')).toEqual(
+    expect.arrayContaining(['--build-id', 'matching-build'])
+  );
+  expect(args.some((a) => a[0] === 'build')).toBe(false);
+});
+it.each(['B', 'A', null])(
+  'an expired binding only permits a fresh dotenv session (%s)',
+  async (id) => {
+    const root = await project();
+    bind(root, 'A');
+    const expired = { ...readBinding(root), expiresAt: '2000-01-01T00:00:00.000Z' };
+    const before = JSON.stringify(expired);
+    fs.writeFileSync(bindingFile(root), before);
+    list([{ id: 'A' }, { id: 'B' }]);
+    if (id) await writeCloudSessionFileAsync(root, id);
+    const result = await navigate(root, ['--ios']);
+    expect(result.exitCode, result.stderr).toBe(id === 'B' ? 0 : 20);
+    if (id === 'B') {
+      expect(JSON.parse(result.stdout).deviceId).toBe('B');
+    } else {
+      expect(JSON.parse(result.stdout).error.code).toBe('NO_BOUND_DEVICE');
+    }
+    expect(
+      readStubEasInvocations(root)
+        .filter((i) => i.executedSessionId)
+        .map((i) => i.executedSessionId)
+    ).toEqual(id === 'B' ? ['B'] : []);
+    expect(fs.readFileSync(bindingFile(root), 'utf8')).toBe(before);
+  }
+);
 it('requested iOS binding wins over Android dotenv and refuses to drive that different connection', async () => {
   const root = await project();
   bind(root, 'ios-A');

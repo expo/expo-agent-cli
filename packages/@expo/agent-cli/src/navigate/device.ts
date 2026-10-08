@@ -92,10 +92,6 @@ export async function probeCloudDeviceAsync(
   const unreadable = inspections.find((i) => i.state === 'unreadable');
   if (unreadable)
     throw noBoundDeviceError('unreadable', { platform: platform ?? 'ios', path: unreadable.path });
-  const expired = inspections.find((i) => i.state === 'gone');
-  if (expired?.binding && !inspections.some((i) => i.state === 'recorded')) {
-    throw cloudBindingError(expired.binding.device.platform, 'expired');
-  }
   const probe = await probeCloudSessionAsync({
     projectRoot,
     platform,
@@ -103,6 +99,15 @@ export async function probeCloudDeviceAsync(
   });
   if (probe.state === 'queued')
     throw cloudBindingError(probe.platform ?? platform ?? 'ios', 'queued');
+  // An expired binding must not hide a different, live session named by dotenv.
+  const expired = inspections.find((i) => i.state === 'gone');
+  if (
+    probe.state !== 'active' &&
+    expired?.binding &&
+    !inspections.some((i) => i.state === 'recorded')
+  ) {
+    throw cloudBindingError(expired.binding.device.platform, 'expired');
+  }
   if (probe.state === 'inactive' && records.length)
     throw cloudBindingError(platform ?? records[0]!.device.platform, 'ended');
   if (probe.state === 'active' && probe.platform && probe.sessionId) {

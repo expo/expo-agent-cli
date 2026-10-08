@@ -1,5 +1,6 @@
 // @ref llp/0034-eas-session-binding.plan.md §PR 5 — an existing Metro can get a fresh session.
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
+import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { readLastBuildRecord } from '../plan/lastBuild';
 import { probeProjectStateAsync } from '../project/probe';
 import { CommandError } from '../utils/errors';
@@ -25,11 +26,20 @@ export async function reopenEasAsync(
     lastBuild: readLastBuildRecord(projectRoot),
     fingerprintCache: options.fingerprintCache,
   });
+  const expoGo = plan.target === 'expo-go';
+  // A fresh last-build record skips the planner's EAS lookup, but a new session needs a build ID.
+  const easBuild =
+    plan.easBuild ??
+    (expoGo
+      ? null
+      : await lookUpEasSimulatorBuildAsync(projectRoot, options.platform, {
+          fingerprintCache: options.fingerprintCache,
+        }));
   const result = await openAppOnEasAsync(projectRoot, {
     platform: options.platform,
-    expoGo: plan.target === 'expo-go',
+    expoGo,
     devServerUrl,
-    buildId: plan.easBuild?.id ?? null,
+    buildId: easBuild?.id ?? null,
   });
   if (!result.opened)
     throw new CommandError(
