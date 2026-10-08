@@ -12,6 +12,7 @@ import { generateFingerprintAsync } from '../../project/fingerprint';
 import { resolveEasCli } from '../../utils/easCli';
 import {
   EAS_BUILDS_FILE_NAME,
+  EAS_NONE_CACHE_TTL_MS,
   readEasBuildsRecord,
   readEasBuildsStatusAsync,
   writeEasBuildsEntry,
@@ -228,8 +229,80 @@ describe(readEasBuildsStatusAsync, () => {
   });
 
   // A "none" goes out of date on the timeline of the workflow it belongs to: a build started now
-  // finishes in fifteen minutes, and a cached "there is none" would be wrong exactly then.
-  it(`should record nothing for an answer of none`, async () => {
+  // finishes in fifteen minutes, and a remembered "there is none" would be wrong exactly then. So
+  // it is written with the time it was true, and believed for a bounded while.
+  it(`should record a none with the time it was true`, async () => {
+    const status = await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: true,
+      auth: signedIn,
+      projectHash: PROJECT_HASH,
+    });
+
+    expect(iosOf(status.platforms)).toMatchObject({
+      state: 'none',
+      source: 'eas',
+      checkedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      ageMs: null,
+    });
+    expect(readEasBuildsRecord(projectRoot).ios).toMatchObject({
+      projectHash: PROJECT_HASH,
+      fingerprintHash: IOS_HASH,
+      build: null,
+      checkedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+    });
+  });
+
+  it(`should answer a remembered none from the record, with its age, and spawn nothing`, async () => {
+    const checkedAt = new Date(Date.now() - 60_000).toISOString();
+    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: null, checkedAt });
+
+    const status = await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: true,
+      auth: signedIn,
+      projectHash: PROJECT_HASH,
+    });
+
+    expect(iosOf(status.platforms)).toMatchObject({
+      state: 'none',
+      source: 'cache',
+      fingerprintHash: IOS_HASH,
+      checkedAt,
+    });
+    expect(iosOf(status.platforms).ageMs).toBeGreaterThanOrEqual(60_000);
+    // Android has no entry and is looked up; iOS, which has one, spawns nothing.
+    expect(generateFingerprintAsync).not.toHaveBeenCalledWith(
+      projectRoot,
+      expect.objectContaining({ platform: 'ios' })
+    );
+    expect(lookUpCachedBuildAsync).toHaveBeenCalledTimes(1);
+    expect(lookUpCachedBuildAsync).toHaveBeenCalledWith(
+      expect.anything(),
+      projectRoot,
+      'android',
+      expect.anything(),
+      expect.anything()
+    );
+  });
+
+  // The cache is read always, so a default run gets the remembered none too — the one answer a
+  // run that may not ask EAS could not otherwise have.
+  it(`should answer a remembered none on a run that may not ask EAS`, async () => {
+    const checkedAt = new Date(Date.now() - 60_000).toISOString();
+    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: null, checkedAt });
+
+    const status = await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: false,
+      auth: signedIn,
+      projectHash: PROJECT_HASH,
+    });
+
+    expect(iosOf(status.platforms)).toMatchObject({ state: 'none', source: 'cache' });
+  });
+
+  it(`should ask EAS again once a remembered none is older than its bound`, async () => {
+    const checkedAt = new Date(Date.now() - EAS_NONE_CACHE_TTL_MS - 1000).toISOString();
+    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: null, checkedAt });
+
     const status = await readEasBuildsStatusAsync(projectRoot, {
       lookUp: true,
       auth: signedIn,
@@ -237,7 +310,88 @@ describe(readEasBuildsStatusAsync, () => {
     });
 
     expect(iosOf(status.platforms)).toMatchObject({ state: 'none', source: 'eas' });
-    expect(fs.existsSync(recordFile)).toBe(false);
+    expect(lookUpCachedBuildAsync).toHaveBeenCalled();
+  });
+
+  it(`should answer unknown, not the stale none, on a run that may not ask EAS`, async () => {
+    const checkedAt = new Date(Date.now() - EAS_NONE_CACHE_TTL_MS - 1000).toISOString();
+    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: null, checkedAt });
+
+    const status = await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: false,
+      auth: signedIn,
+      projectHash: PROJECT_HASH,
+    });
+
+    expect(iosOf(status.platforms).state).toBe('unknown');
+  });
+
+  // @ref llp/0023-fingerprint-caching.rfc.md §Every consumer can turn it off
+  // The flag is about what the caller will accept: a caller who refused the fingerprint record
+  // wants a measurement, and a remembered EAS answer is not one.
+  it(`should not read the record at all when the cache is refused`, async () => {
+    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
+
+    const status = await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: true,
+      auth: signedIn,
+      projectHash: PROJECT_HASH,
+      fingerprintCache: false,
+    });
+
+    expect(lookUpCachedBuildAsync).toHaveBeenCalled();
+    expect(iosOf(status.platforms).source).toBe('eas');
+  });
+
+  // The refusal `eas build:list` prints for an unlinked project, read off the static config for
+  // free. The sentence names the fix, with the account the auth section knew.
+  it(`should answer unknown, and ask nobody, for a project whose static config names no EAS project`, async () => {
+    const status = await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: true,
+      auth: signedIn,
+      projectHash: PROJECT_HASH,
+      easProject: { projectId: null, source: 'app.json', dynamic: false },
+    });
+
+    expect(iosOf(status.platforms).state).toBe('unknown');
+    expect(iosOf(status.platforms).reason).toContain('not linked to an EAS project');
+    expect(iosOf(status.platforms).reason).toContain('app.json names no extra.eas.projectId');
+    expect(iosOf(status.platforms).reason).toContain('init --account alice --non-interactive');
+    expect(generateFingerprintAsync).not.toHaveBeenCalled();
+    expect(lookUpCachedBuildAsync).not.toHaveBeenCalled();
+  });
+
+  it(`should still answer a remembered build for a project the static config calls unlinked`, async () => {
+    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
+
+    const status = await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: true,
+      auth: signedIn,
+      projectHash: PROJECT_HASH,
+      easProject: { projectId: null, source: 'app.json', dynamic: false },
+    });
+
+    expect(iosOf(status.platforms)).toMatchObject({ state: 'found', source: 'cache' });
+  });
+
+  // "Not seen" is not "not there": a dynamic config may name the id from the environment, and this
+  // CLI does not evaluate it (llp/0001 §Constraints item 5).
+  it.each([
+    [
+      'a dynamic config beside a static one that names none',
+      { projectId: null, source: 'app.json', dynamic: true },
+    ],
+    ['a static config that names one', { projectId: 'proj-1', source: 'app.json', dynamic: false }],
+    ['no app config at all beside a dynamic one', { projectId: null, source: null, dynamic: true }],
+  ])(`should ask EAS for %s`, async (_name, easProject) => {
+    await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: true,
+      auth: signedIn,
+      projectHash: PROJECT_HASH,
+      easProject,
+    });
+
+    expect(lookUpCachedBuildAsync).toHaveBeenCalled();
   });
 
   it(`should pass the lookup's own reason through as the unknown`, async () => {
@@ -322,10 +476,37 @@ describe(readEasBuildsRecord, () => {
       'an entry whose build has no id',
       JSON.stringify({ ios: { projectHash: 'a', fingerprintHash: 'b', build: { status: 'X' } } }),
     ],
+    // A none with no time is a none with no bound.
+    [
+      'a none that does not say when it was true',
+      JSON.stringify({ ios: { projectHash: 'a', fingerprintHash: 'b', build: null } }),
+    ],
+    [
+      'a none whose time is not one',
+      JSON.stringify({
+        ios: { projectHash: 'a', fingerprintHash: 'b', build: null, checkedAt: 'yesterday' },
+      }),
+    ],
   ])(`should drop %s rather than trusting it`, (_name, contents) => {
     vol.fromJSON({ [recordFile]: contents });
 
     expect(readEasBuildsRecord(projectRoot).ios).toBeUndefined();
+  });
+
+  it(`should read a none that says when it was true`, () => {
+    const checkedAt = '2026-08-27T10:00:00.000Z';
+    vol.fromJSON({
+      [recordFile]: JSON.stringify({
+        ios: { projectHash: 'a', fingerprintHash: 'b', build: null, checkedAt },
+      }),
+    });
+
+    expect(readEasBuildsRecord(projectRoot).ios).toEqual({
+      projectHash: 'a',
+      fingerprintHash: 'b',
+      build: null,
+      checkedAt,
+    });
   });
 });
 
@@ -340,8 +521,8 @@ describe(writeEasBuildsEntry, () => {
     });
 
     const record = readEasBuildsRecord(projectRoot);
-    expect(record.ios?.build.id).toBe(BUILD.id);
-    expect(record.android?.build.id).toBe('android-build');
+    expect(record.ios?.build?.id).toBe(BUILD.id);
+    expect(record.android?.build?.id).toBe('android-build');
   });
 
   it(`should write nothing when there is no project hash to key the entry on`, () => {

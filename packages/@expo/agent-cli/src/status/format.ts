@@ -6,6 +6,7 @@ import chalk from 'chalk';
 
 import type { ImpactClass, OtaSafety } from '../impact/types';
 import type { PlanBuildLocation } from '../toolchain/types';
+import { formatAge } from '../utils/age';
 import { renderForInvoker } from '../utils/invoker';
 import type {
   AssertStatus,
@@ -268,16 +269,17 @@ function buildLine(location: PlanBuildLocation): string {
 /**
  * Whether the EAS-build line would say anything.
  *
- * Three cases, and they are the three that carry information: a build was found (which changes what
- * to do next), the caller asked outright with `--builds` (they are owed the answer whatever it is),
- * or the section could not be read at all (the reason is worth printing). A default run with an
- * empty cache is silent here, because "nobody asked" is not a fact about the project.
+ * Three cases, and they are the three that carry information: EAS answered for a platform — a
+ * build was found, which changes what to do next, or there is none, remembered from a run that
+ * asked — the caller asked outright with `--explain` (they are owed the answer whatever it is), or
+ * the section could not be read at all (the reason is worth printing). A default run with an empty
+ * cache is silent here, because "nobody asked" is not a fact about the project.
  */
 function hasBuildsToReport(report: StatusReport): boolean {
   if (report.builds == null) {
     return true;
   }
-  return report.builds.askedEas || report.builds.platforms.some((p) => p.state === 'found');
+  return report.builds.askedEas || report.builds.platforms.some((p) => p.state !== 'unknown');
 }
 
 /**
@@ -303,7 +305,13 @@ function buildsLine(builds: BuildsStatus): string {
     // build made from this fingerprint" beside it twice says it three times. An `unknown` is the
     // opposite — the reason is the only thing that makes it worth a line.
     if (platform.state === 'none') {
-      return `${platform.platform}: ${chalk.dim('none')}`;
+      // Except for a *remembered* none, whose age is the one thing a reader has to weigh it by: a
+      // build may have finished since, and this is what says how long "since" can be.
+      const remembered =
+        platform.source === 'cache' && platform.ageMs != null
+          ? ` (as of ${formatAge(platform.ageMs)} ago)`
+          : '';
+      return `${platform.platform}: ${chalk.dim(`none${remembered}`)}`;
     }
     // A reason too long for this line is printed under it rather than clipped: the actionable half
     // of "the eas at … exited 101 and printed nothing an eas run would print, so it may not be the
@@ -562,22 +570,6 @@ function fingerprintProvenance(freshness: FreshnessStatus): string | null {
   // The same eight characters the freshness details show, so the two read as one hash.
   const hash = freshness.hash ? freshness.hash.slice(0, 8) : 'unknown';
   return `fingerprint: ${hash} (from cache, revalidated ${by} ${pinned}${age}) — pass --no-fingerprint-cache to hash the project again`;
-}
-
-/**
- * An age a reader can weigh at a glance.
- *
- * Whole units and never a decimal: this number is read to decide whether a cached answer can be
- * trusted, and "4m" answers that where "4.31 minutes" only looks like it does. Seconds below a
- * minute, because most hits in an agent loop are seconds old and "0m" would read as stale-proof.
- */
-function formatAge(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) {
-    return `${seconds}s`;
-  }
-  const minutes = Math.floor(seconds / 60);
-  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${minutes % 60}m`;
 }
 
 function devServerLine(devServer: DevServerStatus): string {
