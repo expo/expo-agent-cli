@@ -351,7 +351,9 @@ step probes. None trusts. The step is reported as `source`.
 
 Steps 2, 3 and 4 read the project-root header of `GET /status` by the rule in §A busy
 port, so a server of another project is skipped and reported as foreign. A `/status`
-that does not answer after one retry is not accepted, because it proves nothing.
+that does not answer within 3 s, on two tries, is not accepted, because it proves nothing; the
+budget is longer than the probe's, because the headers flush before the bundler works and only a
+stalled event loop is slow here.
 
 Nothing may be skipped on the strength of a fast path. An `expo start` a developer ran
 by hand holds no lock. A project whose `.expo` was cleaned names no port. The scan is

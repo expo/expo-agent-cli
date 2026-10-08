@@ -161,18 +161,10 @@ export interface DevServerDiscovery extends DevServerProbe {
    * guessed at.
    */
   discovered: boolean;
-  /**
-   * Whether discovery proved the server serves this project, per the project-root header of its
-   * `GET /status`. `true`: the header matched. `false`: the server sent none (an older dev
-   * server), so it is accepted unproved. Absent when nothing was compared: a named URL, the lock,
-   * or no `projectRoot` to compare with.
-   */
-  projectRootVerified?: boolean;
 }
 
 /** A dev server the scan reached that serves another project. */
 export interface ForeignDevServer {
-  url: string;
   port: number;
   /** The project root the server named, decoded. */
   projectRoot: string;
@@ -185,7 +177,6 @@ function foundBy(source: DevServerSource): { source: DevServerSource; discovered
 
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder — the five steps, what
 // each one proves, and why none may be skipped on the strength of a faster one.
-// @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder
 /**
  * Probe for a dev server. An explicit URL is probed alone (the user named it, so no guessing);
  * without one, 8081 is tried first and, only when it does not answer, the next few ports
@@ -195,8 +186,8 @@ function foundBy(source: DevServerSource): { source: DevServerSource; discovered
  * is given, the `X-React-Native-Project-Root` header of its `GET /status` is compared with it. A
  * mismatch is a foreign server and the scan goes on; when nothing else matches, the result is
  * unreachable and names the foreign servers in {@link DevServerProbe.foreignServers}. A server that
- * sends no header is accepted with `projectRootVerified: false`. A server whose `/status` does not
- * answer, even on a second try, proves nothing and is not accepted; the result's reason names it.
+ * sends no header (an older dev server) is accepted. A server whose `/status` does not answer
+ * within `statusTimeoutMs`, on two tries, proves nothing and is not accepted; the reason names it.
  * The explicit URL and the lock are trusted.
  *
  * @param signal the caller's own deadline, for a caller that has one. An **explicit** URL gets no
@@ -205,13 +196,26 @@ function foundBy(source: DevServerSource): { source: DevServerSource; discovered
  *   is the only thing that can stop that probe. The scan's own budget applies as well as it, never
  *   instead of it.
  */
+/**
+ * How long a server that answered the probe gets to name its project root on `GET /status`. Longer
+ * than the probe's budget: the headers flush before the bundler works, so only a stalled event loop
+ * is slow here, and a stall must not turn a running dev server into "not running".
+ */
+const STATUS_READ_TIMEOUT_MS = 3000;
+
 export async function discoverDevServerAsync(
   explicitUrl?: string,
   {
     timeoutMs = 800,
+    statusTimeoutMs = STATUS_READ_TIMEOUT_MS,
     projectRoot,
     signal,
-  }: { timeoutMs?: number; projectRoot?: string; signal?: AbortSignal } = {}
+  }: {
+    timeoutMs?: number;
+    statusTimeoutMs?: number;
+    projectRoot?: string;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<DevServerDiscovery> {
   if (explicitUrl != null) {
     const probe = await probeDevServerAsync(explicitUrl, { signal });
@@ -281,25 +285,26 @@ export async function discoverDevServerAsync(
     }
   }
 
-  /** Judge a server that answered: accepted (with how well it is proved), foreign, or unproved. */
+  /** Judge a server that answered: this project's, foreign, or unproved. */
   const judgeAsync = async (url: string): Promise<Judgement> => {
     if (projectRoot == null) {
-      return { kind: 'accepted', verified: undefined };
+      return { kind: 'accepted' };
     }
-    let reported = await readReportedProjectRootAsync(url, timeoutMs, signal);
+    let reported = await readReportedProjectRootAsync(url, statusTimeoutMs, signal);
     if (reported.kind === 'unreachable') {
-      reported = await readReportedProjectRootAsync(url, timeoutMs, signal);
+      // One retry, for a socket that hung up once [observed]; a server that is slow twice is not accepted.
+      reported = await readReportedProjectRootAsync(url, statusTimeoutMs, signal);
     }
     const port = Number(new URL(url).port);
     switch (reported.kind) {
       case 'no-header':
-        return { kind: 'accepted', verified: false };
+        return { kind: 'accepted' };
       case 'unreachable':
         return { kind: 'unproved', port };
       case 'header':
         return matchProjectRoot(reported.root, projectRoot)
-          ? { kind: 'accepted', verified: true }
-          : { kind: 'foreign', server: { url, port, projectRoot: reported.root } };
+          ? { kind: 'accepted' }
+          : { kind: 'foreign', server: { port, projectRoot: reported.root } };
     }
   };
   const foreignServers: ForeignDevServer[] = [];
@@ -330,7 +335,6 @@ export async function discoverDevServerAsync(
           ...loggedProbe,
           devServerUrl: loggedUrl,
           ...foundBy('log'),
-          ...verifiedField(judged),
         };
       }
       judgedLoggedUrl = loggedUrl;
@@ -346,7 +350,6 @@ export async function discoverDevServerAsync(
         ...defaultProbe,
         devServerUrl: DEFAULT_DEV_SERVER_URL,
         ...foundBy('default'),
-        ...verifiedField(judged),
       };
     }
     recordRejected(judged);
@@ -367,13 +370,12 @@ export async function discoverDevServerAsync(
     }
   }
   const accepted = probes.filter(({ judged }) => judged?.kind === 'accepted');
-  const hit = accepted.find(({ probe }) => probe.targets.length > 0) ?? accepted.find(() => true);
+  const hit = accepted.find(({ probe }) => probe.targets.length > 0) ?? accepted[0];
   if (hit) {
     return {
       ...hit.probe,
       devServerUrl: hit.url,
       ...foundBy('scan'),
-      ...verifiedField(hit.judged as AcceptedJudgement),
     };
   }
 
@@ -387,7 +389,7 @@ export async function discoverDevServerAsync(
     }
     if (unprovedPorts.length > 0) {
       reasons.push(
-        `a dev server answered on port ${unprovedPorts.join(', ')}, but its /status did not answer twice within ${timeoutMs}ms, so it is not shown to serve ${projectRoot}`
+        `a dev server answered on port ${unprovedPorts.join(', ')}, but its /status did not answer twice within ${statusTimeoutMs}ms, so it is not shown to serve ${projectRoot}`
       );
     }
     return {
@@ -405,16 +407,11 @@ export async function discoverDevServerAsync(
   return { ...defaultProbe, devServerUrl: DEFAULT_DEV_SERVER_URL, ...foundBy('default') };
 }
 
-type AcceptedJudgement = { kind: 'accepted'; verified: boolean | undefined };
 type Judgement =
-  | AcceptedJudgement
+  | { kind: 'accepted' }
   | { kind: 'foreign'; server: ForeignDevServer }
   /** `/status` never answered, so the server could be anyone's. Not accepted. */
   | { kind: 'unproved'; port: number };
-
-function verifiedField(judged: AcceptedJudgement): { projectRootVerified?: boolean } {
-  return judged.verified === undefined ? {} : { projectRootVerified: judged.verified };
-}
 
 export interface DevServerProbe {
   /** The dev server answered the debugger target list. */

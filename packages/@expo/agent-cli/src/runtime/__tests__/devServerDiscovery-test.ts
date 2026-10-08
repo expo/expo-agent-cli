@@ -224,7 +224,6 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     expect(await discoverDevServerAsync(undefined, { projectRoot })).toMatchObject({
       reachable: true,
       devServerUrl: 'http://127.0.0.1:8081',
-      projectRootVerified: true,
     });
   });
 
@@ -235,7 +234,6 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
       reachable: true,
       devServerUrl: 'http://127.0.0.1:8082',
       source: 'scan',
-      projectRootVerified: true,
     });
     expect(result.foreignServers).toBeUndefined();
   });
@@ -246,8 +244,8 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     expect(result).toMatchObject({
       reachable: false,
       foreignServers: [
-        { url: 'http://127.0.0.1:8081', port: 8081, projectRoot: '/a/one' },
-        { url: 'http://127.0.0.1:8083', port: 8083, projectRoot: '/b/two' },
+        { port: 8081, projectRoot: '/a/one' },
+        { port: 8083, projectRoot: '/b/two' },
       ],
     });
     expect(result.reason).toContain('8081 (/a/one)');
@@ -259,7 +257,6 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     expect(await discoverDevServerAsync(undefined, { projectRoot })).toMatchObject({
       reachable: true,
       devServerUrl: 'http://127.0.0.1:8082',
-      projectRootVerified: false,
     });
   });
 
@@ -268,7 +265,6 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     mockServers({ '8081': { root: encodeURI(spaced) } });
     expect(await discoverDevServerAsync(undefined, { projectRoot: spaced })).toMatchObject({
       reachable: true,
-      projectRootVerified: true,
     });
   });
 
@@ -276,7 +272,6 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     mockServers({ '8081': { root: encodeURI(link) } });
     expect(await discoverDevServerAsync(undefined, { projectRoot })).toMatchObject({
       reachable: true,
-      projectRootVerified: true,
     });
   });
 
@@ -284,7 +279,6 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     mockServers({ '9999': { root: '/somewhere/else' } });
     const result = await discoverDevServerAsync('http://127.0.0.1:9999', { projectRoot });
     expect(result).toMatchObject({ reachable: true, source: 'flag' });
-    expect(result.projectRootVerified).toBeUndefined();
   });
 
   it(`does not accept a server whose /status times out, and says so`, async () => {
@@ -300,7 +294,11 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
       }
       return { ok: true, json: async () => [target] } as Response;
     });
-    const result = await discoverDevServerAsync(undefined, { projectRoot, timeoutMs: 20 });
+    const result = await discoverDevServerAsync(undefined, {
+      projectRoot,
+      timeoutMs: 20,
+      statusTimeoutMs: 20,
+    });
     expect(result).toMatchObject({ reachable: false, source: 'default' });
     expect(result.reason).toContain('port 8082');
     expect(result.reason).toContain('/status did not answer');
@@ -328,7 +326,6 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     expect(await discoverDevServerAsync(undefined, { projectRoot })).toMatchObject({
       reachable: true,
       devServerUrl: 'http://127.0.0.1:8082',
-      projectRootVerified: true,
     });
   });
 
@@ -345,7 +342,6 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
       reachable: true,
       devServerUrl: 'http://127.0.0.1:8083',
       source: 'scan',
-      projectRootVerified: true,
     });
   });
 
@@ -360,9 +356,7 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     const result = await discoverDevServerAsync(undefined, { projectRoot });
     expect(result).toMatchObject({
       reachable: false,
-      foreignServers: [
-        { url: 'http://127.0.0.1:8090', port: 8090, projectRoot: '/somewhere/else' },
-      ],
+      foreignServers: [{ port: 8090, projectRoot: '/somewhere/else' }],
     });
   });
 });
