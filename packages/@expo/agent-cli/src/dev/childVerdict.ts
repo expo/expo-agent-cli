@@ -36,6 +36,8 @@ export interface DetachedChildVerdict {
    */
   code: string | null;
   exitCode: number | null;
+  /** The failure's `data`, carried on the same row, so a `--json` envelope keeps its `reason`. */
+  data: Record<string, unknown> | null;
   /** The child's `Try:` line, which is its How line as a command. */
   suggestedCommand: string | null;
 }
@@ -47,7 +49,7 @@ const ERROR_LINE = /^([A-Za-z]*Error): (.*)$/;
 const NEEDS_HUMAN_ROW = /^Needs a human\s{2,}(\S+)\s*$/;
 
 /** `Error code      <code> exit <n>` — {@link formatErrorCodeRow}'s row. */
-const ERROR_CODE_ROW = /^Error code\s{2,}(\S+) exit (\d+)\s*$/;
+const ERROR_CODE_ROW = /^Error code\s{2,}(\S+) exit (\d+)(?: data (\{.*\}))?\s*$/;
 
 /** `Try: <command>` — the last line of every failure that names a next command. */
 const TRY_LINE = /^Try: (.+)$/;
@@ -74,8 +76,11 @@ export function parseDetachedChildVerdict(
   let scenario: string | null = null;
   let code: string | null = null;
   let exitCode: number | null = null;
+  let data: Record<string, unknown> | null = null;
   let suggestedCommand: string | null = null;
   let errorAt = -1;
+  let tryAt = -1;
+  let lastTry: string | null = null;
 
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index]!;
@@ -88,11 +93,16 @@ export function parseDetachedChildVerdict(
     if (coded) {
       code = coded[1]!;
       exitCode = Number(coded[2]);
+      data = parseData(coded[3]);
+      // `logCmdError` writes the `Try:` line right above the code row; one elsewhere is output of
+      // another program, or of an earlier failure.
+      suggestedCommand = tryAt === index - 1 ? lastTry : null;
       continue;
     }
     const tried = TRY_LINE.exec(line);
     if (tried) {
-      suggestedCommand = tried[1]!.trim();
+      tryAt = index;
+      lastTry = tried[1]!.trim();
       continue;
     }
     if (ERROR_LINE.test(line)) {
@@ -112,7 +122,21 @@ export function parseDetachedChildVerdict(
     .join('\n')
     .trim();
 
-  return { scenario, message, code, exitCode, suggestedCommand };
+  return { scenario, message, code, exitCode, data, suggestedCommand };
+}
+
+function parseData(json: string | undefined): Record<string, unknown> | null {
+  if (json == null) {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return parsed != null && typeof parsed === 'object'
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The codes the parent of a detached run rethrows unchanged (llp/0030 §Output and errors). */

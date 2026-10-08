@@ -11,7 +11,6 @@ import { listConnectedIosDevicesAsync } from '../../src/device/devicectl';
 import { readInstalledFingerprintAndroidAsync } from '../../src/installedApp/android';
 import { readInstalledFingerprintIosAsync } from '../../src/installedApp/ios';
 import { readInstalledFingerprintIosDeviceAsync } from '../../src/installedApp/iosDevice';
-import { readInstalledFingerprintIosSimulatorAsync } from '../../src/installedApp/iosSimulator';
 import { getTemporaryPath, pathEnvVars } from '../utils';
 import {
   EMBEDDED_HASH,
@@ -106,15 +105,23 @@ describe('the simulator reader over a stub xcrun', () => {
   });
   afterEach(() => restore());
 
-  it('asks simctl for the app container and reads the file inside it', async () => {
-    const xcrun = await installStubXcrunAsync(root, { booted: { fingerprint: EMBEDDED_HASH } });
-    restore = withEnv(
-      pathEnvVars(`${xcrun.binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`)
-    );
+  /** The stubs on `PATH`, and the registry in the fixture's own Expo home. */
+  function useStubs(binDir: string): void {
+    restore = withEnv({
+      ...pathEnvVars(`${binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`),
+      __UNSAFE_EXPO_HOME_DIRECTORY: `${root}.expo-home`,
+    });
+  }
 
-    const result = await readInstalledFingerprintIosSimulatorAsync({
+  it('reads the bound simulator: one listing, then the app container and the file inside it', async () => {
+    const xcrun = await installStubXcrunAsync(root, { booted: { fingerprint: EMBEDDED_HASH } });
+    useStubs(xcrun.binDir);
+
+    const result = await readInstalledFingerprintIosAsync({
+      projectRoot: root,
       appId: APP_ID,
       expectedHash: EMBEDDED_HASH,
+      scheme: null,
     });
 
     expect(result).toMatchObject({
@@ -123,20 +130,27 @@ describe('the simulator reader over a stub xcrun', () => {
       device: { name: SIMULATOR_NAME, identifier: SIMULATOR_UDID },
     });
     expect(xcrun.calls()).toEqual([
-      ['simctl', 'list', 'devices', 'booted', '-j'],
+      ['simctl', 'list', 'devices', '-j'],
       ['simctl', 'get_app_container', SIMULATOR_UDID, APP_ID],
     ]);
   });
 
-  it('answers no-device when no simulator is booted', async () => {
+  it('answers no-device with the dev command when nothing is bound', async () => {
     const xcrun = await installStubXcrunAsync(root);
-    restore = withEnv(
-      pathEnvVars(`${xcrun.binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`)
-    );
+    useStubs(xcrun.binDir);
 
     await expect(
-      readInstalledFingerprintIosSimulatorAsync({ appId: APP_ID, expectedHash: EMBEDDED_HASH })
-    ).resolves.toEqual({ status: 'no-device' });
+      readInstalledFingerprintIosAsync({
+        projectRoot: root,
+        appId: APP_ID,
+        expectedHash: EMBEDDED_HASH,
+        scheme: null,
+      })
+    ).resolves.toEqual({
+      status: 'no-device',
+      hint: expect.stringContaining('dev --ios --detach --wait-ready'),
+    });
+    expect(xcrun.calls().some((args) => args[0] === 'simctl')).toBe(false);
   });
 });
 
