@@ -506,50 +506,50 @@ describe(runSmokePhasesAsync, () => {
       expect(statusOf(run, 'boot-device')).toBeUndefined();
     });
 
-    // @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app. A boot that could
-    // not have opened the app is worse than no boot: it costs the minute *and* answers nothing.
-    // Declining is the right outcome, and the report has to say that rather than describing a
-    // simulator that would not start.
-    it(`reports a declined boot as a machine with nowhere to run the app`, async () => {
+    // @ref llp/0031-ios-binding.plan.md §smoke — the simulator is this worktree's bound one, so
+    // nothing is registered to shut it down, and the phase says nothing about putting it back.
+    it(`keeps a bound simulator that registered no cleanup, and says so`, async () => {
+      const shutdownDevice = vi.fn();
       const run = await runSmokePhasesAsync(
         deps({
           ...bareMachine({
             bootDevice: async () => ({
-              ok: false,
-              deviceId: null,
-              backend: null,
-              refused: true,
-              choice: null,
-              reason: 'no iOS simulator has Expo Go installed, so booting one would open nothing',
+              ok: true,
+              deviceId: 'SIM-BOUND',
+              backend: 'local-ios' as const,
+              reason: null,
+              choice: 'agent-cli 0000',
+              installNeeded: true,
             }),
           }),
+          shutdownDevice,
         }),
         options({ bootstrap: true })
       );
 
-      expect(run.outcome).toBe('failed');
-      expect(statusOf(run, 'boot-device')).toBe('failed');
-      expect(run.phases.find((phase) => phase.id === 'boot-device')?.reason).toContain(
-        'would open nothing'
-      );
-      // Nothing was booted, so nothing is `failed` about the device: the machine is as it was.
-      expect(run.environment.device).toBe('absent');
+      expect(run.environment.device).toBe('booted');
+      expect(run.environment.deviceChoice).toBe('agent-cli 0000');
+      const reason = run.phases.find((phase) => phase.id === 'boot-device')?.reason;
+      expect(reason).toContain('booted SIM-BOUND for this run because agent-cli 0000');
+      expect(reason).not.toContain('shut it down');
+      expect(shutdownDevice).not.toHaveBeenCalled();
       expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['dev-server']);
+      // A created simulator has no app, and its disk holds nothing to read: the boot's word decides.
+      expect(statusOf(run, 'install-app')).toBe('ok');
     });
 
-    it(`says why it chose the device it booted`, async () => {
+    it(`says why it chose the emulator it booted, and that it goes back`, async () => {
       const run = await runSmokePhasesAsync(
         deps({
           ...bareMachine({
             bootDevice: async (register) => {
-              register({ deviceId: 'SIM-BOOTED', backend: 'local-ios' });
+              register({ deviceId: 'emulator-5554', backend: 'local-android' });
               return {
                 ok: true,
-                deviceId: 'SIM-BOOTED',
-                backend: 'local-ios' as const,
+                deviceId: 'emulator-5554',
+                backend: 'local-android' as const,
                 reason: null,
-                refused: false,
-                choice: 'it has Expo Go installed',
+                choice: 'it is the only Android virtual device this machine has',
               };
             },
           }),
@@ -557,9 +557,11 @@ describe(runSmokePhasesAsync, () => {
         options({ bootstrap: true })
       );
 
-      expect(run.environment.deviceChoice).toBe('it has Expo Go installed');
+      expect(run.environment.deviceChoice).toBe(
+        'it is the only Android virtual device this machine has'
+      );
       expect(run.phases.find((phase) => phase.id === 'boot-device')?.reason).toContain(
-        'because it has Expo Go installed'
+        'because it is the only Android virtual device this machine has, and shut it down again afterwards'
       );
     });
 

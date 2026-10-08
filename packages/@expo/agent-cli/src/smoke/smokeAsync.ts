@@ -15,6 +15,7 @@ import { resolveDevOptions } from '../dev/resolveOptions';
 import { resolveDevStopOptions } from '../dev/resolveStopOptions';
 import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
 import { bootDeviceAsync, shutdownDeviceAsync } from '../device/bootDevice';
+import { acquireDeviceAsync, deviceIdOf, deviceNameOf, devicesDisabled } from '../deviceBinding';
 import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
 import { installDevBuildAsync } from '../device/installDevBuild';
@@ -264,7 +265,7 @@ function explainOutcome(run: SmokeRun): string {
  * "is the bundle broken" or "which URL does this route deep-link to" is a second place for the
  * findings behind them to be forgotten.
  */
-function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
+export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
   // Built once and shared by every phase that reads a target, so no two phases can disagree about
   // which app this run is about (F51). Built lazily: a run that fails at the dev-server phase never
   // spawns a device tool for it.
@@ -508,34 +509,52 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       return { ok: result.ok, target: sessionId, reason: result.reason };
     },
 
-    // @ref src/device/bootDevice.ts. Local only, and that is not a gap: `--eas` names a session
-    // somebody else started and pays for, and the phase that calls this never runs for one.
+    // Local only, and that is not a gap: `--eas` names a session somebody else started and pays
+    // for, and the phase that calls this never runs for one.
     //
-    // The app this run is about is handed over, so the boot picks a device that **has** it and
-    // declines rather than booting one that could not open it (llp/0005 §The device that can open
-    // the app).
+    // @ref llp/0031-ios-binding.plan.md §smoke — iOS is this worktree's bound simulator, reused or
+    // created by the registry and left bound; a created one has no app, so the install phase puts
+    // it there. Android keeps its own boot and shutdown until llp/0032.
     bootDevice: async (register) => {
-      const target = await targetAsync();
-      const result = await bootDeviceAsync(options.platform, {
-        timeoutMs: BOOT_DEVICE_TIMEOUT_MS[options.platform],
+      if (options.platform === 'ios') {
+        if (devicesDisabled()) {
+          return {
+            ok: false,
+            deviceId: null,
+            backend: null,
+            choice: null,
+            reason: 'devices are off for this run (AGENT_CLI_NO_DEVICE), so no simulator was bound',
+          };
+        }
+        try {
+          const acquired = await acquireDeviceAsync(projectRoot, 'ios');
+          return {
+            ok: true,
+            deviceId: deviceIdOf(acquired.device),
+            backend: 'local-ios',
+            choice: deviceNameOf(acquired.device),
+            installNeeded: acquired.action === 'created',
+            reason: null,
+          };
+        } catch (error: unknown) {
+          return {
+            ok: false,
+            deviceId: null,
+            backend: null,
+            choice: null,
+            reason: error instanceof Error ? firstLine(error.message) : String(error),
+          };
+        }
+      }
+      const result = await bootDeviceAsync('android', {
+        timeoutMs: BOOT_DEVICE_TIMEOUT_MS.android,
         onBooting: register,
-        appId: target.appId,
-        appLabel: target.appLabel,
-        installWith: target.installWith,
-        // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
-        // Always, now. This used to be the plan's `expo-go` rule alone, on the reasoning that a
-        // development build is a compile and compiles belong to `dev`; the boundary is real and it
-        // was the caller's problem, so the boot may pick a bare device for either kind of app and
-        // the install phase puts the app there.
-        mayInstall: true,
       });
       return {
         ok: result.ok,
         deviceId: result.deviceId,
         backend: result.backend,
-        refused: result.refused,
         choice: result.choice,
-        installNeeded: result.installNeeded,
         reason: result.ok ? null : `${result.reason}${result.name ? ` (${result.name})` : ''}`,
       };
     },
@@ -643,8 +662,8 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       };
     },
 
-    shutdownDevice: async (deviceId, backend) => {
-      const result = await shutdownDeviceAsync(deviceId, backend);
+    shutdownDevice: async (deviceId) => {
+      const result = await shutdownDeviceAsync(deviceId);
       return { ok: result.ok, target: deviceId, reason: result.reason };
     },
 
@@ -1123,15 +1142,17 @@ async function resolveSmokeTargetAsync(
   let plan;
   try {
     const state = await probeProjectStateAsync(projectRoot);
-    plan = await resolveStartPlanAsync(projectRoot, state, {
-      platform: options.platform,
-      lastBuild: readLastBuildRecord(projectRoot),
-      // @ref llp/0027-everything-on-eas.rfc.md §smoke — the same plan `dev --eas` makes, so the
-      // build this names is the simulator profile on EAS and the session can install it.
-      ...(options.cloud === 'required'
-        ? { requestedBackend: 'eas' as const, deviceBackend: 'eas' as const }
-        : {}),
-    });
+    plan = (
+      await resolveStartPlanAsync(projectRoot, state, {
+        platform: options.platform,
+        lastBuild: readLastBuildRecord(projectRoot),
+        // @ref llp/0027-everything-on-eas.rfc.md §smoke — the same plan `dev --eas` makes, so the
+        // build this names is the simulator profile on EAS and the session can install it.
+        ...(options.cloud === 'required'
+          ? { requestedBackend: 'eas' as const, deviceBackend: 'eas' as const }
+          : {}),
+      })
+    ).plan;
   } catch {
     // The probe is a courtesy, not a gate: a project it could not read is one this knows nothing
     // about, and refusing or choosing a device on an unread plan would stop runs that would have

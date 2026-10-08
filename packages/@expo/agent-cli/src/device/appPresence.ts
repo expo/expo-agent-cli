@@ -15,6 +15,7 @@
 // free to give up: no device, no app id, a tool that would not run, a deadline that expired, a
 // platform this host cannot ask about. None of them are failures.
 
+import { devicesDisabled, type AcquireAction, type BoundDevice } from '../deviceBinding';
 import type { NativePlatform } from '../plan/types';
 import { readConfiguredAppId } from '../runtime/appId';
 import { hasAppOnDeviceAsync } from './hasApp';
@@ -34,16 +35,26 @@ export type AppPresence =
 export interface AppPresenceProbe {
   presence: AppPresence;
   /**
-   * What `expo run:<platform> --device` calls the device that answered, or null.
+   * What `expo run:android --device` calls the device that answered, or null.
    *
-   * Set only for `missing`, which is the one answer that plans an install — the plan pins the
-   * install to the device that was actually checked, so a machine with two devices cannot install
-   * on one and keep serving nothing to the other. iOS takes the UDID as-is; Android takes a *name*,
-   * which `androidDeviceNameAsync` resolves from the serial (@ref ./installDevBuild). A device the
-   * platform cannot name stays null, and the install runs unpinned — the Expo CLI then picks the
-   * attached device itself, which on a one-device machine is the same device.
+   * Set only for `missing` on Android, which is the one answer that plans an install there: the
+   * plan pins the install to the device that was actually checked. The name is resolved from the
+   * serial (`androidDeviceNameAsync`); a device the platform cannot name stays null, and the
+   * install runs unpinned. iOS carries nothing here: `dev` pins every `run` and `install` step to
+   * the bound simulator itself (`src/dev/forwardedArgs.ts` §withDevice).
    */
   installDevice: string | null;
+}
+
+/**
+ * The device `dev` bound for this run, and how. Null when the run bound none: Android until
+ * llp/0032, `--eas`, or a harness with devices off.
+ *
+ * @ref llp/0031-ios-binding.plan.md §How `dev` uses it
+ */
+export interface AppPresenceDevice {
+  device: BoundDevice | null;
+  action: AcquireAction | null;
 }
 
 /**
@@ -67,7 +78,7 @@ const UNPROBED: AppPresenceProbe = { presence: 'unknown', installDevice: null };
 
 export interface ProbeAppPresenceOptions {
   /** Injected for tests. Defaults to the process-cached probe every other caller shares. */
-  probeDeviceAsync?: () => Promise<LocalDeviceProbe>;
+  probeDeviceAsync?: (projectRoot: string) => Promise<LocalDeviceProbe>;
   /** Injected for tests. */
   readAppId?: typeof readConfiguredAppId;
   /** Injected for tests. */
@@ -79,12 +90,12 @@ export interface ProbeAppPresenceOptions {
 }
 
 /**
- * Whether the development build of this project is installed on a device this machine has.
+ * Whether the development build of this project is installed on the device this run has.
  *
- * The device is the one the run would open the app on: the first the local probe found for this
- * platform, which is the same choice `navigate` and `smoke` make. A machine with no device for the
- * platform answers `unknown` rather than `missing` — nothing was asked, and `expo start` boots one
- * itself, so a plan is in no position to claim the app is not on a device that does not exist yet.
+ * With a bound device the question is asked of that device, and a device this run `created` is
+ * `missing` without asking, because a fresh simulator never has the app. With none on iOS nothing
+ * is asked. With none on Android the device is the first the local probe found, until llp/0032
+ * binds Android too.
  *
  * `AGENT_CLI_NO_DEVICE` answers `unknown` without spawning anything, the same way it turns off the
  * open (`src/dev/devAsync.ts`): a stubbed harness has no device this could be true about, and a
@@ -95,10 +106,14 @@ export interface ProbeAppPresenceOptions {
 export async function probeAppPresenceAsync(
   projectRoot: string,
   platform: NativePlatform,
+  bound: AppPresenceDevice,
   options: ProbeAppPresenceOptions = {}
 ): Promise<AppPresenceProbe> {
-  if (process.env.AGENT_CLI_NO_DEVICE === '1') {
+  if (devicesDisabled()) {
     return UNPROBED;
+  }
+  if (bound.device != null && bound.action === 'created') {
+    return { presence: 'missing', installDevice: null };
   }
   const budgetMs = options.budgetMs ?? APP_PRESENCE_BUDGET_MS;
 
@@ -108,7 +123,10 @@ export async function probeAppPresenceAsync(
     timer.unref?.();
   });
   try {
-    return await Promise.race([askDeviceAsync(projectRoot, platform, options), expired]);
+    return await Promise.race([
+      askDeviceAsync(projectRoot, platform, bound.device, options),
+      expired,
+    ]);
   } catch {
     // A probe is not allowed to be the thing that fails `dev`.
     return UNPROBED;
@@ -121,8 +139,9 @@ export async function probeAppPresenceAsync(
 async function askDeviceAsync(
   projectRoot: string,
   platform: NativePlatform,
+  bound: BoundDevice | null,
   {
-    probeDeviceAsync = probeLocalDeviceAsync,
+    probeDeviceAsync = (root) => probeLocalDeviceAsync({ projectRoot: root }),
     readAppId = readConfiguredAppId,
     hasAppOnDevice = hasAppOnDeviceAsync,
     androidDeviceName = androidDeviceNameAsync,
@@ -136,15 +155,25 @@ async function askDeviceAsync(
     return UNPROBED;
   }
 
-  const probe = await probeDeviceAsync();
+  if (bound?.backend === 'local-ios') {
+    const installed = await hasAppOnDevice(bound.udid, 'local-ios', appId);
+    return installed == null
+      ? UNPROBED
+      : { presence: installed ? 'present' : 'missing', installDevice: null };
+  }
+  if (platform === 'ios') {
+    return UNPROBED;
+  }
+
+  const probe = await probeDeviceAsync(projectRoot);
   const device = probe.devices.find((candidate) => candidate.platform === platform);
   if (device == null) {
     return UNPROBED;
   }
 
-  // Three-valued through and through (@ref ./hasApp): `null` is "could not look" — a simulator
-  // whose data directory is unreadable, an adb that would not run, a cloud device this machine
-  // cannot see — and it must never read as `missing`, whose cost is an install.
+  // Three-valued through and through (@ref ./hasApp): `null` is "could not look" — an adb that
+  // would not run, a cloud device this machine cannot see — and it must never read as `missing`,
+  // whose cost is an install.
   const installed = await hasAppOnDevice(device.deviceId, device.backend, appId);
   if (installed == null) {
     return UNPROBED;
@@ -152,8 +181,5 @@ async function askDeviceAsync(
   if (installed) {
     return { presence: 'present', installDevice: null };
   }
-  return {
-    presence: 'missing',
-    installDevice: platform === 'ios' ? device.deviceId : await androidDeviceName(device.deviceId),
-  };
+  return { presence: 'missing', installDevice: await androidDeviceName(device.deviceId) };
 }

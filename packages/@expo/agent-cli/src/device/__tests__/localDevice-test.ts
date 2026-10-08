@@ -1,38 +1,43 @@
 // @ref llp/0009-smart-followups.rfc.md §Device-aware ladders
+// @ref llp/0030-one-device-per-worktree.rfc.md §Readers
 //
 // The three answers matter more than the probe: `absent` is what turns `navigate` off, and it may
-// only be given by a tool that ran and reported nothing. A tool that could not run at all is
+// only be given by a rung that ran and reported nothing. A tool that could not run at all is
 // silence, and silence has to read as `unknown` — a machine with no `adb` is not a machine with no
 // device.
 
+import type { Inspection } from '../../deviceBinding';
 import type { DeviceProbe } from '../../navigate/device';
 import { CommandError } from '../../utils/errors';
 import { probeLocalDeviceAsync, readLocalDeviceProbe, resetLocalDeviceCache } from '../localDevice';
 
-/** A probe that ran and found something. */
-const found: DeviceProbe = {
-  device: { backend: 'local-ios', platform: 'ios', deviceId: 'UDID-1', name: 'iPhone 17' },
-};
+const projectRoot = '/project';
 
-/** A probe that ran and found nothing. */
-const none: DeviceProbe = {
-  device: null,
-  reason: 'no booted iOS simulator was found',
-};
+function inspection(state: Inspection['state'], extra: Partial<Inspection> = {}): Inspection {
+  return {
+    binding:
+      state === 'none' || state === 'unreadable'
+        ? null
+        : {
+            version: 1,
+            device: {
+              backend: 'local-ios',
+              platform: 'ios',
+              udid: 'UDID-1',
+              name: 'agent-cli 0000',
+              origin: 'created',
+            },
+            projectRoot,
+            boundAt: '2026-10-08T09:00:00.000Z',
+            expiresAt: '2026-10-08T11:00:00.000Z',
+          },
+    path: '/home/.expo/agent-cli/bindings/x-ios-local-ios.json',
+    state,
+    ...extra,
+  };
+}
 
-/**
- * A probe whose tool is not installed, which establishes nothing about the machine.
- *
- * `toolError` is the device probe's own signal for it, and the same one the failure message uses
- * to avoid reporting a missing SDK as a missing device (`src/device/adb.ts`, friction run 6's F49).
- */
-const unrunnable: DeviceProbe = {
-  device: null,
-  reason: 'could not run "adb": spawn adb ENOENT',
-  toolError: new CommandError('ADB_NOT_RUNNABLE', 'adb could not be run'),
-};
-
-/** An attached Android emulator, as the second probe reports it. */
+/** An attached Android emulator, as the probe reports it. */
 const foundAndroid: DeviceProbe = {
   device: {
     backend: 'local-android',
@@ -42,54 +47,75 @@ const foundAndroid: DeviceProbe = {
   },
 };
 
-describe(readLocalDeviceProbe, () => {
-  it(`reports the device when one platform found one`, () => {
-    expect(readLocalDeviceProbe([found, none])).toEqual({
-      state: 'present',
-      device: found.device,
-      devices: [found.device],
-      reason: null,
-    });
-  });
+const noAndroid: DeviceProbe = {
+  device: null,
+  reason: 'no Android device or emulator is attached',
+};
 
-  // F106 — MED, found live on 2026-08-27. This fold took `probes.find((probe) => probe.device)` and
-  // iOS is probed first on macOS, so with a booted simulator *and* an attached emulator the report
-  // named the simulator and said nothing about the emulator at all. Live: `status` printed
-  // `device  ios iPhone 17 Pro (C159CF99-…)` while the only app on the dev server was Expo Go on
-  // `emulator-5554`, which is the reading an agent takes as "the app is on iOS".
-  //
-  // The singular `device` is unchanged — first found, which is what every ladder already branches on
-  // — and `devices` is what makes the report true rather than merely not-wrong.
-  it(`reports every device that was found, not only the first (F106)`, () => {
-    const probe = readLocalDeviceProbe([found, foundAndroid]);
+/** An `adb` that is not installed, which establishes nothing about the machine (F49). */
+const adbUnrunnable: DeviceProbe = {
+  device: null,
+  reason: 'could not run "adb": spawn adb ENOENT',
+  toolError: new CommandError('ADB_NOT_RUNNABLE', 'adb could not be run'),
+};
+
+describe(readLocalDeviceProbe, () => {
+  it(`reports the bound simulator when it is up`, () => {
+    const probe = readLocalDeviceProbe(inspection('up'), noAndroid);
 
     expect(probe.state).toBe('present');
-    expect(probe.device).toEqual(found.device);
-    expect(probe.devices).toEqual([found.device, foundAndroid.device]);
+    expect(probe.device).toMatchObject({ backend: 'local-ios', deviceId: 'UDID-1' });
+    expect(probe.devices).toHaveLength(1);
   });
 
-  it(`reports an empty device list when nothing was found (F106)`, () => {
-    expect(readLocalDeviceProbe([none, unrunnable]).devices).toEqual([]);
-    expect(readLocalDeviceProbe([]).devices).toEqual([]);
+  // probe-local-combines-platforms
+  it(`reports every up device, the bound simulator first (F106)`, () => {
+    const probe = readLocalDeviceProbe(inspection('up'), foundAndroid);
+
+    expect(probe.state).toBe('present');
+    expect(probe.devices.map((device) => device.deviceId)).toEqual(['UDID-1', 'emulator-5554']);
   });
 
-  it(`reports absent when a tool ran and reported nothing`, () => {
-    const probe = readLocalDeviceProbe([none, unrunnable]);
+  it(`reports the emulator alone when the simulator is not up`, () => {
+    const probe = readLocalDeviceProbe(inspection('not-up'), foundAndroid);
+
+    expect(probe.state).toBe('present');
+    expect(probe.devices.map((device) => device.deviceId)).toEqual(['emulator-5554']);
+  });
+
+  it.each([
+    ['none', inspection('none'), 'no simulator is bound'],
+    ['gone', inspection('gone', { cause: 'expired' }), 'lease'],
+    ['not-up', inspection('not-up'), 'not up'],
+  ] as const)(`reports absent for a %s binding and no emulator`, (_state, ios, reason) => {
+    const probe = readLocalDeviceProbe(ios, noAndroid);
 
     expect(probe.state).toBe('absent');
     expect(probe.device).toBeNull();
-    expect(probe.reason).toContain('no booted iOS simulator was found');
+    expect(probe.devices).toEqual([]);
+    expect(probe.reason).toContain(reason);
+    expect(probe.reason).toContain('no Android device');
   });
 
-  it(`reports unknown when no tool could run at all`, () => {
-    const probe = readLocalDeviceProbe([unrunnable, unrunnable]);
+  it.each([
+    ['unreadable', inspection('unreadable')],
+    ['unknown', inspection('unknown', { cause: 'timeout' })],
+  ] as const)(`reports unknown for an %s binding`, (_state, ios) => {
+    expect(readLocalDeviceProbe(ios, noAndroid).state).toBe('unknown');
+  });
+
+  it(`reports unknown when adb could not run and nothing is bound`, () => {
+    const probe = readLocalDeviceProbe(inspection('none'), adbUnrunnable);
 
     expect(probe.state).toBe('unknown');
     expect(probe.reason).toContain('could not run');
   });
 
-  it(`reports unknown for a host that was asked nothing`, () => {
-    expect(readLocalDeviceProbe([]).state).toBe('unknown');
+  it(`reads only the Android rung off macOS`, () => {
+    expect(readLocalDeviceProbe(null, noAndroid)).toMatchObject({
+      state: 'absent',
+      reason: 'Android: no Android device or emulator is attached',
+    });
   });
 });
 
@@ -97,25 +123,39 @@ describe(probeLocalDeviceAsync, () => {
   beforeEach(() => resetLocalDeviceCache());
   afterEach(() => resetLocalDeviceCache());
 
-  it(`asks the platform tools once, however many callers ask`, async () => {
-    const probes = vi.fn(async () => [none]);
+  it(`asks the rungs once per root, however many callers ask`, async () => {
+    const inspectIosAsync = vi.fn(async () => inspection('none'));
+    const probeAndroidAsync = vi.fn(async () => noAndroid);
+    const options = {
+      projectRoot,
+      inspectIosAsync,
+      probeAndroidAsync,
+      hostPlatform: 'darwin' as const,
+    };
 
     const [first, second] = await Promise.all([
-      probeLocalDeviceAsync({ probesAsync: probes }),
-      probeLocalDeviceAsync({ probesAsync: probes }),
+      probeLocalDeviceAsync(options),
+      probeLocalDeviceAsync(options),
     ]);
+    const other = await probeLocalDeviceAsync({ ...options, projectRoot: '/other' });
 
-    expect(probes).toHaveBeenCalledTimes(1);
+    expect(inspectIosAsync).toHaveBeenCalledTimes(2);
+    expect(inspectIosAsync).toHaveBeenCalledWith(projectRoot);
+    expect(inspectIosAsync).toHaveBeenCalledWith('/other');
     expect(first).toBe(second);
+    expect(other).not.toBe(first);
     expect(first.state).toBe('absent');
   });
 
   // A probe is a convenience: a suggestion ladder must never be the thing that fails a command.
-  it(`answers unknown when the probe itself throws`, async () => {
+  it(`answers unknown when a rung itself throws`, async () => {
     const probe = await probeLocalDeviceAsync({
-      probesAsync: async () => {
+      projectRoot,
+      inspectIosAsync: async () => {
         throw new Error('simctl exploded');
       },
+      probeAndroidAsync: async () => noAndroid,
+      hostPlatform: 'darwin',
     });
 
     expect(probe.state).toBe('unknown');

@@ -61,7 +61,9 @@ import {
   resolveDeepLinkUrl,
   type ProjectSchemeConfig,
 } from './deepLink';
+import type { BoundDevice } from '../deviceBinding';
 import {
+  navigateDeviceOf,
   resolveDeviceAsync,
   type CloudPreference,
   type DeviceBackend,
@@ -138,6 +140,12 @@ export interface OpenRouteOptions {
    * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
    */
   cloud?: CloudPreference;
+  /**
+   * The device `dev` already bound and booted for this run, so the open inspects nothing twice.
+   *
+   * @ref llp/0031-ios-binding.plan.md §How `dev` uses it
+   */
+  device?: BoundDevice;
 }
 
 /** Everything the URL alone amounts to: the answer of a run that opens nothing. */
@@ -457,12 +465,14 @@ export async function openRouteAsync(
 
   // The URL is known by now, so a machine with no device is told what to do with it rather than
   // only that it has none: an agent driving a cloud simulator has somewhere else to open it.
-  const device = await resolveDeviceAsync(platform, {
-    url: resolved.url,
-    devServerRunning: resolved.devServerReachable,
-    cloud: options.cloud,
-    projectRoot,
-  });
+  const device = options.device
+    ? navigateDeviceOf(options.device)
+    : await resolveDeviceAsync(platform, {
+        url: resolved.url,
+        devServerRunning: resolved.devServerReachable,
+        cloud: options.cloud,
+        projectRoot,
+      });
 
   // @ref src/device/cloudSimulator.ts §cloudNeedsTunnelError — refused before anything is opened.
   // A cloud simulator is on EAS's network, so a `127.0.0.1` or LAN host in the link resolves to

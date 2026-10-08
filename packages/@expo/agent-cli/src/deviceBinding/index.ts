@@ -23,7 +23,15 @@ import {
   writeBindingFile,
 } from './registry';
 import { defaultTools } from './tools';
-import type { AcquireAction, AcquireResult, Binding, DeviceTools, ReleasedDevice } from './types';
+import {
+  deviceIdOf,
+  deviceNameOf,
+  type AcquireAction,
+  type AcquireResult,
+  type Binding,
+  type DeviceTools,
+  type ReleasedDevice,
+} from './types';
 
 export { deviceCommand, noBoundDeviceError, deviceUnavailableError } from './errors';
 export {
@@ -34,6 +42,7 @@ export {
 } from './inspect';
 export { findBoundDeviceAsync, type AndroidRung, type BoundDeviceSearch } from './rungs';
 export { defaultTools } from './tools';
+export { deviceIdOf, deviceNameOf } from './types';
 export type * from './types';
 
 /** The waits of `acquire` and release; read verbs wait less (`./inspect.ts`). */
@@ -42,6 +51,14 @@ export const WRITE_LOCK_WAIT_MS = 30_000;
 /** `AGENT_CLI_NO_DEVICE` turns every device off for a harness whose machines must not be touched. */
 export function devicesDisabled(): boolean {
   return process.env.AGENT_CLI_NO_DEVICE === '1';
+}
+
+/** The one line a caller prints on stderr: which device the run bound, and how. */
+export function acquireLine({ device, action }: AcquireResult): string {
+  const label = `${deviceNameOf(device)} (${deviceIdOf(device)})`;
+  return action === 'created'
+    ? `Created the iOS simulator ${label} for this worktree.`
+    : `Reusing this worktree's iOS simulator ${label}.`;
 }
 
 export interface AcquireDeviceOptions {

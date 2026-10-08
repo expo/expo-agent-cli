@@ -89,7 +89,7 @@ export async function resolveStartFollowUpsAsync(
   const { expoGo, web, eas = false } = hint;
   const port = 'port' in hint ? hint.port : resolveDevServerPort(options.expoArgs);
   // A web run has no device in it at all, so the probe is not worth even a bounded wait.
-  const localDevice = web ? 'unknown' : await probeLocalDeviceWithinBudgetAsync();
+  const localDevice = web ? 'unknown' : await probeLocalDeviceWithinBudgetAsync(projectRoot);
   // @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server
   // `exp://` is the Expo Go form only. A development build opens its own scheme, so a run that
   // targets one gets the dev launcher's URL rather than a link for an app it is not.
@@ -144,14 +144,14 @@ function resolveLanConnectUrl(
 }
 
 /** The probe, or `unknown` when it takes longer than a dev-server banner may wait. */
-async function probeLocalDeviceWithinBudgetAsync(): Promise<LocalDeviceState> {
+async function probeLocalDeviceWithinBudgetAsync(projectRoot: string): Promise<LocalDeviceState> {
   let timer: NodeJS.Timeout | undefined;
   const expired = new Promise<'unknown'>((resolve) => {
     timer = setTimeout(() => resolve('unknown'), DEVICE_PROBE_BUDGET_MS);
     timer.unref?.();
   });
   try {
-    const probe = await Promise.race([probeLocalDeviceAsync(), expired]);
+    const probe = await Promise.race([probeLocalDeviceAsync({ projectRoot }), expired]);
     return typeof probe === 'string' ? probe : probe.state;
   } catch {
     // The probe does not reject, and a ladder must not be able to fail a start even so.

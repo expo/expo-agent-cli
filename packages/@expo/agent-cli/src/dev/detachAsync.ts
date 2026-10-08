@@ -23,6 +23,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
+import { acquireDeviceAsync, acquireLine, devicesDisabled } from '../deviceBinding';
 import { PORT_WATCH_TIMEOUT_MS, readLastLoggedDevServerPort } from '../devLock/port';
 import { event as cliEvent } from '../events';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
@@ -40,6 +41,7 @@ import { requestsTunnel } from '../start/followUps';
 import { CommandError } from '../utils/errors';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
 import {
+  isRelayedDeviceCode,
   parseDetachedChildPhase,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
@@ -179,6 +181,15 @@ export interface DevDetachOptions {
    * way, so a suppressed report is never a silent start.
    */
   print?: boolean;
+  /**
+   * On a dev server that is already running, boot this worktree's own simulator and refuse when
+   * it has none to reuse.
+   *
+   * @ref llp/0031-ios-binding.plan.md §How `dev` uses it
+   * `dev` passes true: its caller asked for the app on a device, and the device created now would
+   * carry no app, so only a reuse serves. `smoke` leaves it unset and binds in its own boot phase.
+   */
+  reuseBoundDevice?: boolean;
 }
 
 /**
@@ -191,7 +202,7 @@ export interface DevDetachOptions {
 export async function devDetachAsync(
   projectRoot: string,
   options: DevOptions,
-  { print = true }: DevDetachOptions = {}
+  { print = true, reuseBoundDevice = false }: DevDetachOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
 
@@ -204,6 +215,14 @@ export async function devDetachAsync(
   // lock, so nothing would be able to find it or stop it afterwards.
   const running = await readDevServerLockAsync(projectRoot);
   if (running) {
+    if (
+      reuseBoundDevice &&
+      options.platform === 'ios' &&
+      options.deviceBackend !== 'eas' &&
+      !devicesDisabled()
+    ) {
+      Log.progress(acquireLine(await acquireDeviceAsync(projectRoot, 'ios', { reuseOnly: true })));
+    }
     const checked = options.waitReady
       ? await waitForDetachedReadyAsync(projectRoot, running, {
           timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
@@ -246,8 +265,13 @@ export async function devDetachAsync(
     // Both streams into the log. `ignore` on stdin, because a detached process has no terminal to
     // read one from, and an inherited stdin would keep this shell attached to it.
     stdio: ['ignore', fd, fd],
-    // The parent command owns usage telemetry; this child only continues its work.
-    env: { ...process.env, __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1' },
+    // The parent command owns usage telemetry; this child only continues its work. The second
+    // variable makes the child's failures name their code in the log, which this process reads back.
+    env: {
+      ...process.env,
+      __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1',
+      __EXPO_AGENT_CLI_DETACHED: '1',
+    },
   });
   // The child owns the file now; a descriptor left open here would keep the parent alive.
   fs.closeSync(fd);
@@ -279,6 +303,13 @@ export async function devDetachAsync(
     hasExited,
   });
   if (!lock) {
+    // A device refusal in the child ends it before any lock, and reaches the caller unchanged.
+    const relayed = relayedDeviceError(
+      childExit ? await waitForChildVerdictAsync(projectRoot) : readChildVerdictSync(projectRoot)
+    );
+    if (relayed) {
+      throw relayed;
+    }
     throw notStartedError(
       projectRoot,
       logFile,
@@ -556,11 +587,30 @@ const VERDICT_WAIT_MS = 2_000;
 async function waitForChildVerdictAsync(projectRoot: string): Promise<DetachedChildVerdict | null> {
   let verdict = readChildVerdictSync(projectRoot);
   const deadline = Date.now() + VERDICT_WAIT_MS;
-  while (verdict?.scenario == null && Date.now() < deadline) {
+  // The code row is the last line `logCmdError` writes, so a verdict with one is complete.
+  while (verdict?.scenario == null && verdict?.code == null && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
     verdict = readChildVerdictSync(projectRoot) ?? verdict;
   }
   return verdict;
+}
+
+/**
+ * A device refusal the child raised, rebuilt as the child raised it: code, exit and How line.
+ *
+ * @ref llp/0030-one-device-per-worktree.rfc.md §Output and errors — the agent's recovery is the
+ * child's own `dev` or `dev:stop` command, not `dev:logs`.
+ */
+function relayedDeviceError(verdict: DetachedChildVerdict | null): CommandError | null {
+  if (verdict == null || !isRelayedDeviceCode(verdict.code)) {
+    return null;
+  }
+  const error = new CommandError(verdict.code, verdict.message.replace(/^[A-Za-z]*Error: /, ''));
+  error.exitCode = verdict.exitCode ?? EXIT_OUTCOME_FAILED;
+  if (verdict.suggestedCommand) {
+    error.suggestedCommand = verdict.suggestedCommand;
+  }
+  return error;
 }
 
 /**
@@ -700,6 +750,10 @@ function detachFailureError(
     platform: PlanPlatform;
   }
 ): CommandError {
+  const relayed = relayedDeviceError(verdict);
+  if (relayed) {
+    return relayed;
+  }
   if (kind === 'needs-human' && verdict?.scenario != null) {
     const scenario = findNeedsHumanScenario(verdict.scenario);
     const message = [

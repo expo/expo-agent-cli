@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import fs from 'fs';
 import { vol } from 'memfs';
+import { seedIosBinding } from '../../../deviceBinding/__tests__/fakeTools';
 import path from 'path';
 
 import { detachedLogPath } from '../../../dev/logFile';
@@ -236,6 +237,7 @@ beforeEach(() => {
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
   vi.mocked(readLastLoggedDevServerPort).mockReturnValue(null);
   Object.defineProperty(process, 'platform', { value: 'darwin' });
+  seedIosBinding(projectRoot, 'IOS-1');
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });

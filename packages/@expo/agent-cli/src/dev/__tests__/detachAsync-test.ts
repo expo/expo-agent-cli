@@ -5,13 +5,20 @@ import { vol } from 'memfs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../../devLock';
+import { acquireDeviceAsync, devicesDisabled } from '../../deviceBinding';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
+import { formatErrorCodeRow } from '../../utils/errors';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
 import { resolveDevOptions } from '../resolveOptions';
 
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
+vi.mock('../../deviceBinding', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../deviceBinding')>()),
+  devicesDisabled: vi.fn(() => true),
+  acquireDeviceAsync: vi.fn(),
+}));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
 vi.mock('../processLiveness', () => ({ isProcessAlive: vi.fn() }));
 vi.mock('../events', () => ({ event: vi.fn() }));
@@ -378,5 +385,119 @@ describe('a lock whose port Metro has not logged', () => {
 
     expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
     expect(Date.now()).toBeLessThan(20_000);
+  });
+});
+
+// @ref llp/0031-ios-binding.plan.md §How `dev` uses it
+describe('the bound device', () => {
+  const running = {
+    url: 'http://127.0.0.1:8393',
+    port: 8393,
+    pid: 4242,
+    projectRoot,
+    startedAt: new Date(0).toISOString(),
+  };
+  const reused = {
+    device: {
+      backend: 'local-ios' as const,
+      platform: 'ios' as const,
+      udid: 'SIM-1',
+      name: 'agent-cli 0000',
+      origin: 'created' as const,
+    },
+    justBooted: true,
+    action: 'reused' as const,
+  };
+
+  beforeEach(() => {
+    vi.mocked(devicesDisabled).mockReturnValue(false);
+    vi.mocked(acquireDeviceAsync).mockResolvedValue(reused);
+  });
+
+  // already-running-reuses-only
+  it('boots the parked simulator on a running server, reuse only, before the report', async () => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+    const { event: cliEvent } = await import('../../events');
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
+        print: false,
+        reuseBoundDevice: true,
+      })
+    ).resolves.toBe(0);
+
+    expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios', { reuseOnly: true });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(cliEvent).toHaveBeenCalledWith(
+      'dev_detach',
+      expect.objectContaining({ alreadyRunning: true })
+    );
+  });
+
+  it('relays the refusal of a running server with nothing to reuse', async () => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+    vi.mocked(acquireDeviceAsync).mockRejectedValue(
+      Object.assign(new Error('nothing to reuse'), { code: 'DEVICE_UNAVAILABLE', exitCode: 20 })
+    );
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
+        print: false,
+        reuseBoundDevice: true,
+      })
+    ).rejects.toMatchObject({ code: 'DEVICE_UNAVAILABLE', exitCode: 20 });
+  });
+
+  // smoke-never-reaches-already-running-reuse
+  it.each([
+    ['without reuseBoundDevice', ['--ios', '--detach', '--local'], {}],
+    ['for --android', ['--android', '--detach', '--local'], { reuseBoundDevice: true }],
+    ['for --eas', ['--ios', '--detach', '--eas'], { reuseBoundDevice: true }],
+  ])('binds nothing on a running server %s', async (_case, argv, extra) => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(argv), { print: false, ...extra })
+    ).resolves.toBe(0);
+
+    expect(acquireDeviceAsync).not.toHaveBeenCalled();
+  });
+
+  // detached-device-error-relayed
+  it("rethrows the child's device refusal unchanged: code, exit and Try line", async () => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(null);
+    let child: EventEmitter;
+    vi.mocked(spawn).mockImplementation(() => {
+      child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
+      fs.writeFileSync(
+        logFile,
+        [
+          'CommandError: No iOS runtime with an iPhone is installed, so no simulator can be created.',
+          'How: run "xcodebuild -downloadPlatform iOS", then this command again.',
+          'Try: xcodebuild -downloadPlatform iOS',
+          formatErrorCodeRow('DEVICE_UNAVAILABLE', 7),
+          '',
+        ].join('\n')
+      );
+      setTimeout(() => child.emit('exit', 7, null), 50);
+      return child as unknown as ChildProcess;
+    });
+
+    const result = devDetachAsync(
+      projectRoot,
+      resolveDevOptions(['--ios', '--detach', '--local']),
+      { print: false, reuseBoundDevice: true }
+    ).catch((error) => error);
+    await vi.runAllTimersAsync();
+
+    const error = await result;
+    expect(error).toMatchObject({
+      code: 'DEVICE_UNAVAILABLE',
+      exitCode: 7,
+      suggestedCommand: 'xcodebuild -downloadPlatform iOS',
+    });
+    expect(error.message).toBe(
+      'No iOS runtime with an iPhone is installed, so no simulator can be created.\nHow: run "xcodebuild -downloadPlatform iOS", then this command again.'
+    );
   });
 });
