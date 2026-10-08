@@ -196,7 +196,7 @@ export type ReleasedDevice = {
 
 ## Choice (`choose.ts`, pure)
 
-Inputs: the own binding and the other worktrees' bindings, each marked stale or not; the inventory, read before the lock; `explicit`; `reuseOnly`; `now`; on Android `busyPorts`, computed by `android.ts` in the same section: the running `emulator-NNNN` serials, the Android bindings whose lease is live, and every Android binding whose `emulatorPid` is alive, because a reap kills it only after the section. The free port is the first free even one in 5554..5584. `IosInventory` holds `SimulatorEntry[]` and `newestIosRuntime: { identifier, deviceType } | null`, the highest available iOS runtime that lists an iPhone and its first iPhone device type. `AndroidInventory` holds the first AVD of `emulator -list-avds` and `runningSerials`. Outputs:
+Inputs: the own binding and the other worktrees' bindings, each marked stale or not; the inventory, read before the lock; `explicit`; `reuseOnly`; `now`; on Android `busyPorts`, computed by `android.ts` in the same section: the running `emulator-NNNN` serials, the Android bindings whose lease is live, and every Android binding whose `emulatorPid` is alive, because a reap kills it only after the section. The free port is the first free even one in 5554..5584. `IosInventory` holds `SimulatorEntry[]` and `newestIosRuntime: { identifier, deviceType } | null`: the newest available iOS runtime that lists a mainstream iPhone, with its first `iPhone <n> Pro`, else its first `iPhone <n>`, because the newest runtime can list only a device no app renders on (iOS 27.1 lists iPhone Duo alone); only when no runtime has one does the newest runtime's first iPhone type apply. `AndroidInventory` holds the first AVD of `emulator -list-avds` and `runningSerials`. Outputs:
 
 ```ts
 | { kind: 'reuse'; binding }        // own binding, live or expired, device present (iOS: listed; Android spawned: emulatorPid alive; Android explicit: serial listed); also --device naming the own device
@@ -334,6 +334,7 @@ Each accepted race costs one rerun of `dev`, never a lost build or a touched hum
 12. Shutdowns run after the section, so a release or a reap can shut down a simulator that a later section reused in the same seconds; that `dev` fails its boot or install and is rerun. A sleep over 60 min with a server that `start` runs loses the device, and the next `dev --detach` rebinds it.
 13. Without a cap, one parked simulator per living worktree stays on disk, each with its installed build. `git worktree remove` reclaims it on the next reap.
 14. A worktree created at a deleted worktree's path has the same digest and inherits its bindings, devices and cloud session, with the old build installed; the fingerprint decides whether that build is current, as after a branch switch. The bindings of an unmounted volume are stale, so its simulator is deleted and its emulator killed; a rebuild on the next `dev` is the cost.
+15. The newest installed iOS runtime may list only a device no app renders on; the choice prefers a mainstream iPhone across runtimes [observed — iOS 27.1 lists only iPhone Duo, 2026-10-08].
 
 ## Open questions
 
