@@ -99,7 +99,7 @@ export async function acquireDeviceAsync(
     await releaseWorktreeDevicesAsync(projectRoot, { platform, tools, expected: binding });
     throw deviceUnavailableError('boot-failed', { platform, detail: result.reason ?? undefined });
   }
-  return { device: binding.device, justBooted: section.justBooted, action };
+  return { binding, device: binding.device, justBooted: section.justBooted, action };
 }
 
 interface Acquired {

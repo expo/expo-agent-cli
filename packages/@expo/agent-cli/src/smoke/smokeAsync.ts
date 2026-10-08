@@ -21,6 +21,7 @@ import {
   deviceNameOf,
   devicesDisabled,
   releaseWorktreeDevicesAsync,
+  type Binding,
 } from '../deviceBinding';
 import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
@@ -271,6 +272,7 @@ function explainOutcome(run: SmokeRun): string {
  * findings behind them to be forgotten.
  */
 export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
+  let bootBinding: Binding | undefined;
   // Built once and shared by every phase that reads a target, so no two phases can disagree about
   // which app this run is about (F51). Built lazily: a run that fails at the dev-server phase never
   // spawns a device tool for it.
@@ -451,7 +453,11 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       const captured: { report: DevStopResultJson | null } = { report: null };
       const code = await devStopAsync(
         projectRoot,
-        { ...resolveDevStopOptions(['--no-followups']), release: true, platform: options.platform },
+        {
+          ...resolveDevStopOptions(['--no-followups']),
+          release: options.cloud !== 'required',
+          platform: options.platform,
+        },
         {
           print: false,
           onReport: (stopped) => {
@@ -527,8 +533,10 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // @ref llp/0033-device-lifecycle.plan.md §smoke — a child-owned binding is released by
     // dev:stop; a binding acquired with a reused server is released by this hook.
     releaseDevice: async () => {
+      if (!bootBinding) return { ok: true, target: null, reason: null };
       const devices = await releaseWorktreeDevicesAsync(projectRoot, {
         platform: options.platform,
+        expected: bootBinding,
       });
       return {
         ok: devices.every((device) => device.released),
@@ -549,6 +557,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       }
       try {
         const acquired = await acquireDeviceAsync(projectRoot, platform);
+        bootBinding = acquired.binding;
         Log.progress(acquireLine(acquired));
         return {
           ok: true,
