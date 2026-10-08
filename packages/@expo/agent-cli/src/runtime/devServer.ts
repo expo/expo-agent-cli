@@ -177,8 +177,9 @@ function foundBy(source: DevServerSource): { source: DevServerSource; discovered
 
 /**
  * How long a server that answered the probe gets to name its project root on `GET /status`. Longer
- * than the probe's budget: the headers flush before the bundler works, so only a stalled event loop
- * is slow here, and a stall must not turn a running dev server into "not running".
+ * than the probe's budget, so a `/status` that is slow but answers inside it is accepted; one that
+ * stalls past it is unproved, which callers show as not running. `status` passes its own, shorter
+ * budget, because it is a report with a deadline where `navigate` is an action.
  */
 const STATUS_READ_TIMEOUT_MS = 3000;
 
@@ -194,7 +195,8 @@ const STATUS_READ_TIMEOUT_MS = 3000;
  * mismatch is a foreign server and the scan goes on; when nothing else matches, the result is
  * unreachable and names the foreign servers in {@link DevServerProbe.foreignServers}. A server that
  * sends no header (an older dev server) is accepted. A server whose `/status` does not answer
- * within `statusTimeoutMs`, on two tries, proves nothing and is not accepted; the reason names it.
+ * within `statusTimeoutMs` proves nothing and is not accepted; the reason names it. A socket error
+ * on that read gets one retry.
  * The explicit URL and the lock are trusted.
  *
  * @param signal the caller's own deadline, for a caller that has one. An **explicit** URL gets no
@@ -291,8 +293,8 @@ export async function discoverDevServerAsync(
       return { kind: 'accepted' };
     }
     let reported = await readReportedProjectRootAsync(url, statusTimeoutMs, signal);
-    if (reported.kind === 'unreachable') {
-      // One retry, for a socket that hung up once [observed]; a server that is slow twice is not accepted.
+    if (reported.kind === 'unreachable' && !reported.timedOut) {
+      // One retry for a socket that hung up at once [observed]; a read that used its budget gets none.
       reported = await readReportedProjectRootAsync(url, statusTimeoutMs, signal);
     }
     const port = Number(new URL(url).port);
@@ -389,7 +391,7 @@ export async function discoverDevServerAsync(
     }
     if (unprovedPorts.length > 0) {
       reasons.push(
-        `a dev server answered on port ${unprovedPorts.join(', ')}, but its /status did not answer twice within ${statusTimeoutMs}ms, so it is not shown to serve ${projectRoot}`
+        `a dev server answered on port ${unprovedPorts.join(', ')}, but its /status did not answer within ${statusTimeoutMs}ms, so it is not shown to serve ${projectRoot}`
       );
     }
     return {
