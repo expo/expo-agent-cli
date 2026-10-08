@@ -349,8 +349,9 @@ step probes. None trusts. The step is reported as `source`.
 | 3   | 8081                                           | `default` | Metro's default answered                                            |
 | 4   | 8082-8085, in parallel                         | `scan`    | a Metro answered. not that it is this project's                     |
 
-Steps 3 and 4 now also check the project-root header of `GET /status`, so a server of
-another project is skipped. See [[0028-one-device-per-agent]] §Discovery.
+Steps 2, 3 and 4 read the project-root header of `GET /status` by the rule in §A busy
+port, so a server of another project is skipped and reported as foreign. A `/status`
+that does not answer after one retry is not accepted, because it proves nothing.
 
 Nothing may be skipped on the strength of a fast path. An `expo start` a developer ran
 by hand holds no lock. A project whose `.expo` was cleaned names no port. The scan is
@@ -409,7 +410,10 @@ is published at the spawn with that port: `dev` passes `--port` on every step th
 serves, and the Expo CLI either binds it or exits. The log watch goes on, and a port the
 dev server reports in `start.log` after the spawn timestamp updates the lock's answer.
 With no port in the arguments, the port published is the one the dev server reported,
-falling back to 8081.
+falling back to 8081. A `--port` or default port whose `/status` names another project
+root is never published [observed — live suite, 2026-10-05: a lock on 8081 pointed at
+another project's Metro]; the log watch goes on while the dev server runs, and nothing is
+published if the server exits first (`cli:dev_lock_skipped`, reason `foreign-port`).
 
 Still probed. The lock proves the wrapper is alive. Only an HTTP probe of the URL proves
 the dev server behind it is. Discovery uses the lock to stop guessing which port.

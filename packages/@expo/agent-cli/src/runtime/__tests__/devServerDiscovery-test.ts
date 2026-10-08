@@ -190,7 +190,7 @@ describe('readLastLoggedDevServerPort via discovery', () => {
 });
 
 describe('discoverDevServerAsync — project root of a scanned server', () => {
-  // @ref llp/0028-one-device-per-agent.rfc.md §Discovery
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder
   const projectRoot = path.resolve('/work/app');
   const link = path.resolve('/work/link-to-app');
   const spaced = path.join(projectRoot, 'my app');
