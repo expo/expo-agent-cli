@@ -58,6 +58,8 @@ export interface InstalledAppReport {
 
 /** Reads a fingerprint off a device. Injected by the tests; the platform readers are the defaults. */
 export type InstalledFingerprintReader = (input: {
+  /** The worktree whose bound simulator answers on iOS. */
+  projectRoot: string;
   platform: InstalledAppPlatform;
   appId: string;
   device: string | null;
@@ -95,9 +97,9 @@ async function hasUnrecordedGeneratedDirAsync(
   return !checkedIn && readLastBuildRecord(projectRoot)[platform] == null;
 }
 
-const defaultReader: InstalledFingerprintReader = ({ platform, device, ...input }) =>
+const defaultReader: InstalledFingerprintReader = ({ projectRoot, platform, device, ...input }) =>
   platform === 'ios'
-    ? readInstalledFingerprintIosAsync({ ...input, device: device ?? undefined })
+    ? readInstalledFingerprintIosAsync({ ...input, projectRoot, device: device ?? undefined })
     : readInstalledFingerprintAndroidAsync({ ...input, device: device ?? undefined });
 
 export async function checkInstalledAppAsync(
@@ -185,6 +187,7 @@ async function checkPlatformAsync(
   // The device is read last, once the verdict is known to need it: a read has a cost, and on a
   // phone it launches the app.
   const installed = await deps.readInstalled({
+    projectRoot,
     platform,
     appId,
     device: options.device,

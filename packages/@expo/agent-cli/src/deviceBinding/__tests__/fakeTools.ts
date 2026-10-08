@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 
 import type { SpawnCaptureResult } from '../../utils/spawnCapture';
-import { registryDirectory } from '../registry';
+import { bindingPathFor, registryDirectory } from '../registry';
 import type { Binding, DeviceTools } from '../types';
 
 export const RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
@@ -156,4 +156,12 @@ export function bindingFor(
 export function writeBinding(file: string, binding: Binding): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, JSON.stringify(binding));
+}
+
+/** Bind `udid` to the worktree, live for a year, for a suite that hands a verb a booted simulator. */
+export function seedIosBinding(projectRoot: string, udid: string, name = 'iPhone 17'): void {
+  writeBinding(
+    bindingPathFor(projectRoot, 'ios', 'local-ios'),
+    bindingFor(projectRoot, udid, { name, expiresAt: '2999-01-01T00:00:00.000Z' })
+  );
 }
