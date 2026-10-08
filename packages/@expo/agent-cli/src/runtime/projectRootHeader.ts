@@ -1,4 +1,4 @@
-// @ref llp/0030-one-device-per-agent.rfc.md §Discovery
+// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
 // Which project a dev server serves, as its `GET /status` says. Imports nothing from the lock, so
 // the lock can ask it too (`src/devLock/port.ts`).
 

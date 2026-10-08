@@ -135,7 +135,7 @@ describe('@expo/agent-cli dev --detach', () => {
   // stays alive without ever logging a port — which is what a compiler looks like from here. The
   // lock lands on its fallback port `PORT_WATCH_TIMEOUT_MS` in, and that wait is why this test is
   // the slow one in this file: it is the wait the finding is about. The fallback is the `--port`
-  // passed here, so a Metro of the developer's own on 8081 changes nothing (llp/0030 §Discovery).
+  // passed here, so a Metro of the developer's own on 8081 changes nothing (llp/0004 §Discovery ladder).
   it('says the plan is building rather than that a dev server started', async () => {
     const projectRoot = await setupFixtureAsync('bare-app');
     await installStubFingerprintAsync(projectRoot);
