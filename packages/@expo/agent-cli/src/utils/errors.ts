@@ -162,6 +162,11 @@ export function formatNeedsHumanBlock(needsHuman: NeedsHuman): string[] {
   return lines;
 }
 
+/** `Error code      <code> exit <n>`, the row the detached child's parent reads back. */
+export function formatErrorCodeRow(code: string, exitCode: number): string {
+  return `${'Error code'.padEnd(NEEDS_HUMAN_LABEL_WIDTH)}${code} exit ${exitCode}`;
+}
+
 /**
  * The one JSON object a failing `--json` run prints on stdout.
  *
@@ -282,6 +287,12 @@ export function logCmdError(error: any): never {
     } else if (suggestedCommand) {
       warn(`Try: ${renderForInvoker(suggestedCommand)}`);
     }
+    const exitCode = error instanceof CommandError ? (error.exitCode ?? EXIT_ERROR) : EXIT_ERROR;
+    // The detached child's log is the one channel to its parent, which relays a device refusal
+    // unchanged (`src/dev/childVerdict.ts`); the code and the exit are on no other line.
+    if (process.env.__EXPO_AGENT_CLI_DETACHED === '1') {
+      warn(formatErrorCodeRow(code, exitCode));
+    }
     // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope — a run asked for
     // machine-readable output gets one, whether it succeeded or not. The prose above stays on
     // stderr, where nothing is parsing; this is the only thing on stdout, so `JSON.parse` of a
@@ -299,7 +310,6 @@ export function logCmdError(error: any): never {
     // LOG_EVENTS), so `exitWithCodeAsync` flushes first. It never settles, which keeps the
     // process alive until the exit fires and gives the `.catch(logCmdError)` callers nothing
     // further to run. An error that names no code is a tool error, so it exits 1 (llp/0010).
-    const exitCode = error instanceof CommandError ? (error.exitCode ?? EXIT_ERROR) : EXIT_ERROR;
     return exitWithCodeAsync(exitCode) as unknown as never;
   }
 

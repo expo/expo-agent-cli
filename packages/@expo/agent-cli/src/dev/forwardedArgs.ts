@@ -126,6 +126,38 @@ export function withPortArg(args: readonly string[], port: number): string[] {
 }
 
 /**
+ * The same plan, with `--device <id>` on every `run` and `install` step, replacing any `--device`
+ * there. A plan with neither is returned as it is.
+ *
+ * @ref llp/0031-ios-binding.plan.md §How `dev` uses it — after `withForwardedExpoArgs`, so a
+ * `--device` the caller typed for `expo start` is replaced by the bound device, and before the
+ * `--port` block.
+ */
+export function withDevice(plan: StartPlan, deviceId: string): StartPlan {
+  return {
+    ...plan,
+    steps: plan.steps.map((step) =>
+      step.id === 'run' || step.id === 'install'
+        ? { ...step, argv: [...withoutDeviceArgs(step.argv), '--device', deviceId] }
+        : step
+    ),
+  };
+}
+
+function withoutDeviceArgs(argv: readonly string[]): string[] {
+  const rest: string[] = [];
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index]!;
+    if (arg === '--device' || arg === '-d') {
+      index++;
+    } else if (!/^(--device|-d)=/.test(arg)) {
+      rest.push(arg);
+    }
+  }
+  return rest;
+}
+
+/**
  * The same plan, with `--port` on every step that serves, and on no other step.
  *
  * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can

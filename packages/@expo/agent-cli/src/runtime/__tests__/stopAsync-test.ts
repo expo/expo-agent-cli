@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { vol } from 'memfs';
+import { seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
 import type { RuntimeStopOptions } from '../resolveStopOptions';
@@ -62,6 +63,7 @@ function mockDevServer(targets: unknown[] | null) {
 function options(overrides: Partial<RuntimeStopOptions> = {}): RuntimeStopOptions {
   return {
     devServerUrl: 'http://127.0.0.1:8081',
+    platform: 'ios',
     cloud: false,
     json: true,
     followups: false,
@@ -80,6 +82,7 @@ beforeEach(() => {
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
   vi.mocked(readLastLoggedDevServerPort).mockReturnValue(null);
   Object.defineProperty(process, 'platform', { value: 'darwin' });
+  seedIosBinding(projectRoot, 'IOS-1');
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
   vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo' } }) });

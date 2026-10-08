@@ -86,15 +86,6 @@ export interface SmokeBootResult {
   backend: DeviceBackend | null;
   /** Why none came up. Null exactly when {@link ok} is true. */
   reason: string | null;
-  /**
-   * Nothing was booted **on purpose**: no device on this machine could have opened the app.
-   *
-   * @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app
-   * Reported apart from an ordinary boot failure because the two need different sentences and
-   * different next actions: one is a simulator that would not start, and this one is a machine
-   * that has nowhere to run this app yet.
-   */
-  refused?: boolean;
   /** Why this device rather than another, for the report. Null when none was chosen. */
   choice?: string | null;
   /**
@@ -1148,6 +1139,11 @@ async function runPhasesAsync(
    * the dev server still lists is one the install has already killed.
    */
   let appReplaced = false;
+  /**
+   * The boot said its device has no app: a simulator the registry created this run, whose disk
+   * holds nothing to read (llp/0031 §smoke).
+   */
+  let bootInstallNeeded = false;
 
   // @ref llp/0027-everything-on-eas.rfc.md §smoke
   // `--eas` named the device, and the device it named is not on this machine. The run still brings
@@ -1216,6 +1212,8 @@ async function runPhasesAsync(
       const found = await deviceAsync();
       if (found.deviceId == null) {
         const boot = await recordBootstrap('boot-device', async () => {
+          // @ref llp/0031-ios-binding.plan.md §smoke — an iOS simulator is this worktree's bound
+          // one and stays bound after the run; only an Android emulator this run boots is put back.
           const result = await deps.bootDevice((booted) => {
             // @ref ./phases §SmokeBootRegister — before the device is touched, so a boot that
             // hangs halfway still leaves this run holding the thing it has to put back.
@@ -1231,7 +1229,7 @@ async function runPhasesAsync(
                 reason: [
                   `booted ${result.deviceId} for this run`,
                   result.choice ? ` because ${result.choice}` : '',
-                  `, and shut it down again afterwards`,
+                  result.backend === 'local-android' ? `, and shut it down again afterwards` : '',
                 ].join(''),
                 value: result,
               }
@@ -1245,25 +1243,17 @@ async function runPhasesAsync(
           environment.device = 'booted';
           environment.deviceChoice = boot.choice ?? null;
           probed = { deviceId: boot.deviceId, backend: boot.backend, reason: null };
+          bootInstallNeeded = boot.installNeeded === true;
         } else {
-          // A boot that was **declined** left the machine exactly as it was, so the report must not
-          // say a device failed to come up: nothing was asked to (llp/0005 §The device that can
-          // open the app).
-          environment.device = boot.refused ? 'absent' : 'failed';
+          environment.device = 'failed';
           skipRest(
             'app',
-            boot.refused
-              ? 'no device on this machine has the app, so there was nothing to open it on'
-              : 'no device could be booted, so there was nothing to open the app on and nothing to read'
+            'no device could be booted, so there was nothing to open the app on and nothing to read'
           );
           return done('failed', {
             ...base,
             bundle,
-            screenshot: noScreenshot(
-              boot.refused
-                ? 'no device has the app, so none was booted and nothing was photographed'
-                : 'no device came up, so nothing was photographed'
-            ),
+            screenshot: noScreenshot('no device came up, so nothing was photographed'),
           });
         }
       }
@@ -1288,7 +1278,7 @@ async function runPhasesAsync(
     const device = await deviceAsync();
     if (
       device.deviceId != null &&
-      (await deps.installNeededOnDevice(device.deviceId, device.backend))
+      (bootInstallNeeded || (await deps.installNeededOnDevice(device.deviceId, device.backend)))
     ) {
       // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
       //

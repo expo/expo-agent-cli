@@ -3,7 +3,7 @@ import { stripVTControlCharacters } from 'util';
 import { needsHumanError } from '../../needsHuman/error';
 import { formatStartPlan } from '../../plan/format';
 import type { StartPlan } from '../../project/types';
-import { formatNeedsHumanBlock } from '../../utils/errors';
+import { formatErrorCodeRow, formatNeedsHumanBlock } from '../../utils/errors';
 import {
   parseDetachedChildPhase,
   parseDetachedChildPort,
@@ -56,7 +56,33 @@ describe(parseDetachedChildVerdict, () => {
     expect(verdict).toEqual({
       scenario: null,
       message: 'CommandError: The plan stopped at "start".\nWhy: the bundler could not start.',
+      code: null,
+      exitCode: null,
+      suggestedCommand: null,
     });
+  });
+
+  // @ref llp/0030-one-device-per-worktree.rfc.md §Output and errors — the row `logCmdError`
+  // writes for a detached child alone, read back with the `Try:` line, so a device refusal
+  // reaches the parent's caller as the child raised it.
+  it(`should read the code, the exit and the Try line of a device refusal`, () => {
+    const verdict = parseDetachedChildVerdict([
+      'CommandError: No ios device is bound to this worktree.',
+      'Why: every verb drives the bound device.',
+      'How: run "npx @expo/agent-cli dev --ios --detach --wait-ready", then this command again.',
+      'Try: npx @expo/agent-cli dev --ios --detach --wait-ready',
+      formatErrorCodeRow('NO_BOUND_DEVICE', 20),
+    ]);
+
+    expect(verdict).toMatchObject({
+      scenario: null,
+      code: 'NO_BOUND_DEVICE',
+      exitCode: 20,
+      suggestedCommand: 'npx @expo/agent-cli dev --ios --detach --wait-ready',
+    });
+    expect(verdict?.message).not.toContain('Try:');
+    expect(verdict?.message).not.toContain('Error code');
+    expect(verdict?.message).toContain('How: run');
   });
 
   it(`should keep the last error, which is the one the child stopped on`, () => {

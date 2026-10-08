@@ -1,8 +1,10 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
-// Device discovery for deep-link navigation. Three backends, and the first two are the first booted
-// iOS simulator and the first attached Android device, read from the platform tools as subprocesses
-// so no simulator or emulator library is linked into the CLI.
+// @ref llp/0030-one-device-per-worktree.rfc.md §Readers
+// Device resolution for deep-link navigation. Three backends. The local ones are the devices this
+// worktree bound with `dev` (`src/deviceBinding/`), read from the registry and verified through
+// the platform tools as subprocesses; until llp/0032 binds Android, that rung is still the first
+// attached `adb` device.
 //
 // The third is not on this machine at all: an EAS Simulator session, driven through `eas
 // simulator:*` (`src/device/cloudSimulator.ts`). It is opt-in per caller rather than always
@@ -15,6 +17,7 @@
 import {
   adbNotRunnableError,
   parseAndroidDevices,
+  resolveAdb,
   runAdbAsync,
   type AdbResolution,
 } from '../device/adb';
@@ -25,12 +28,12 @@ import {
   cloudSessionUnavailableError,
   cloudSessionUnknownError,
   probeCloudSessionAsync,
+  readCloudSessionIdSync,
   type CloudSessionProbe,
 } from '../device/cloudSimulator';
-import { parseBootedIosSimulators } from '../device/simulators';
+import { findBoundDeviceAsync, type AndroidRung, type BoundDevice } from '../deviceBinding';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
-import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { debugEvent } from './events';
 
 export type NavigatePlatform = 'ios' | 'android';
@@ -76,69 +79,26 @@ export interface DeviceProbe {
   toolError?: CommandError;
 }
 
-/**
- * Read the first booted iOS simulator out of `simctl list devices booted -j`.
- *
- * Only iOS runtimes are considered: a booted watchOS or tvOS simulator cannot open an app deep
- * link for this project.
- */
-export function parseBootedIosSimulator(stdout: string): { udid: string; name: string } | null {
-  return parseBootedIosSimulators(stdout)[0] ?? null;
+/** A bound device as the deep-link ladder drives it. */
+export function navigateDeviceOf(device: BoundDevice): NavigateDevice {
+  switch (device.backend) {
+    case 'local-ios':
+      return { backend: 'local-ios', platform: 'ios', deviceId: device.udid, name: device.name };
+    case 'local-android':
+      return {
+        backend: 'local-android',
+        platform: 'android',
+        deviceId: device.serial,
+        adb: resolveAdb(),
+      };
+    case 'cloud':
+      return { backend: 'cloud', platform: device.platform, deviceId: device.id };
+  }
 }
 
 /** Read the first ready device out of `adb devices`. */
 export function parseFirstAndroidDevice(stdout: string): string | null {
   return parseAndroidDevices(stdout)[0]?.deviceId ?? null;
-}
-
-/** Look for a booted iOS simulator. Never throws: no simulator is an answer. */
-export async function probeIosSimulatorAsync(): Promise<DeviceProbe> {
-  const { stdout, stderr, exitCode, spawnError } = await spawnCaptureAsync('xcrun', [
-    'simctl',
-    'list',
-    'devices',
-    'booted',
-    '-j',
-  ]);
-
-  if (spawnError) {
-    return {
-      device: null,
-      reason: `could not run "xcrun simctl": ${spawnError.message}`,
-      // The same distinction the Android probe draws (F49): a tool that could not be started has
-      // said nothing about this machine's devices, and a caller that turns "no device" into a
-      // changed suggestion has to be able to tell the two apart (`src/device/localDevice.ts`).
-      toolError: new CommandError(
-        'XCRUN_NOT_RUNNABLE',
-        [
-          `Could not run "xcrun simctl", so no iOS simulator was looked for.`,
-          `Why: ${spawnError.message}`,
-          `How: install Xcode and its command line tools, which provide "xcrun simctl", then run this command again.`,
-        ].join('\n')
-      ),
-    };
-  }
-  if (exitCode !== 0) {
-    return {
-      device: null,
-      reason: `"xcrun simctl list devices booted" failed: ${stderr.trim() || `exit code ${exitCode}`}`,
-    };
-  }
-
-  const simulator = parseBootedIosSimulator(stdout);
-  if (!simulator) {
-    return { device: null, reason: 'no booted iOS simulator was found' };
-  }
-
-  debugEvent('device_resolved', { platform: 'ios', deviceId: simulator.udid });
-  return {
-    device: {
-      backend: 'local-ios',
-      platform: 'ios',
-      deviceId: simulator.udid,
-      name: simulator.name || undefined,
-    },
-  };
 }
 
 /**
@@ -187,6 +147,32 @@ export async function probeAndroidDeviceAsync(): Promise<DeviceProbe> {
 }
 
 /**
+ * Main's Android rung as the rung loop takes it, until llp/0032 binds Android. The `adb` the probe
+ * resolved is kept on the side, so `openRoute`'s `adb reverse` still runs with it.
+ */
+const androidRung = (found: { adb?: AdbResolution; model?: string }): AndroidRung => {
+  return async () => {
+    const probe = await probeAndroidDeviceAsync();
+    if (probe.toolError) {
+      return { device: null, toolError: probe.toolError };
+    }
+    if (!probe.device) {
+      return { device: null };
+    }
+    found.adb = probe.device.adb;
+    found.model = probe.device.model;
+    return {
+      device: {
+        backend: 'local-android',
+        platform: 'android',
+        serial: probe.device.deviceId,
+        origin: { kind: 'explicit' },
+      },
+    };
+  };
+};
+
+/**
  * Look for a cloud simulator session this project can drive. Never throws: no session is an answer.
  *
  * **The service answers this, not the filesystem.** The first cut of this rung was gated on
@@ -232,114 +218,45 @@ export async function probeCloudDeviceAsync(
  * Resolve the device to open the deep link on.
  *
  * Three backends and one order. `--eas` (`cloud: 'required'`) names the cloud session and nothing
- * else is looked at, because a caller that named a device meant that device. Otherwise a **local**
- * device wins: it is free, it is instant, and it is what a developer at a keyboard is looking at.
- * The cloud is the last rung, taken only when the local probes found nothing and this project has a
- * session on record — which composes with wave 9's answer for that machine: instead of only being
- * handed the URL, a run with a live session opens it.
+ * else is looked at, because a caller that named a device meant that device. Otherwise the
+ * **bound** local device wins: the rung loop of llp/0030 §Readers inspects this worktree's
+ * bindings, any `up` one wins, and the winner's lease is extended. The cloud is the last rung,
+ * taken only when every local rung passed and this project has a session on record.
  *
- * With no platform flag, macOS prefers a booted iOS simulator and falls back to Android, because
- * an iOS simulator is the device an Expo project on a Mac usually has open. Every other host has
- * no iOS simulator at all, so only Android is checked there.
- *
- * @throws {CommandError} when the requested platform, or no backend at all, has a device.
+ * @throws {CommandError} `NO_BOUND_DEVICE` when no local device is bound and no session serves,
+ * and the tool error when a device tool could not run.
  */
 export async function resolveDeviceAsync(
-  platform?: NavigatePlatform,
-  context: ResolveDeviceContext = {}
+  platform: NavigatePlatform | undefined,
+  context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
   if (context.cloud === 'required') {
     return await resolveCloudDeviceAsync(platform, context);
   }
 
-  if (platform === 'ios') {
-    const probe = await probeIosSimulatorAsync();
-    if (probe.device) {
-      return probe.device;
-    }
-    if (probe.toolError) {
-      throw probe.toolError;
-    }
-    const cloud = await cloudFallbackAsync('ios', context);
-    if (cloud.device) {
-      return cloud.device;
-    }
-    throw noDeviceError(
-      'NO_IOS_DEVICE',
-      [
-        'No booted iOS simulator was found, so there is no device to open the deep link on.',
-        `Why: ${probe.reason}.`,
-        `How: boot a simulator (from Xcode, or with "xcrun simctl boot"), start the dev server with "${PROGRAM_PREFIX} dev --ios --detach", then run this command again.`,
-      ],
-      context,
-      cloud.probe
-    );
-  }
-
-  if (platform === 'android') {
-    const probe = await probeAndroidDeviceAsync();
-    if (probe.device) {
-      return probe.device;
-    }
-    // The tool, not the devices. Raised as its own failure so the reader is not sent to boot an
-    // emulator they already have running (F49).
-    if (probe.toolError) {
-      throw probe.toolError;
-    }
-    const cloud = await cloudFallbackAsync('android', context);
-    if (cloud.device) {
-      return cloud.device;
-    }
-    throw noDeviceError(
-      'NO_ANDROID_DEVICE',
-      [
-        'No Android device or emulator was found, so there is no device to open the deep link on.',
-        `Why: ${probe.reason}.`,
-        'How: start an emulator or connect a device, check that "adb devices" lists it, then run this command again.',
-      ],
-      context,
-      cloud.probe
-    );
-  }
-
-  const iosProbe = process.platform === 'darwin' ? await probeIosSimulatorAsync() : null;
-  if (iosProbe?.device) {
-    return iosProbe.device;
-  }
-
-  const androidProbe = await probeAndroidDeviceAsync();
-  if (androidProbe.device) {
-    return androidProbe.device;
+  const android: { adb?: AdbResolution; model?: string } = {};
+  const found = await findBoundDeviceAsync(context.projectRoot, {
+    platform,
+    extend: true,
+    android: androidRung(android),
+  });
+  if (found.device) {
+    const device = navigateDeviceOf(found.device);
+    debugEvent('device_resolved', { platform: device.platform, deviceId: device.deviceId });
+    return device.backend === 'local-android' ? { ...device, ...android } : device;
   }
 
   // The cloud rung, before the tool failure and before the verdict: a machine whose `adb` will not
   // start is exactly the machine this backend is for, and a session that is up answers the question
   // whichever platform tool is missing.
-  const cloud = await cloudFallbackAsync(undefined, context);
+  const cloud = await cloudFallbackAsync(platform, context);
   if (cloud.device) {
     return cloud.device;
   }
-
-  // With no platform flag on a host with no simulator, an unrunnable `adb` is the whole reason
-  // nothing was found, and saying "no booted device" would hide it.
-  if (androidProbe.toolError && iosProbe == null) {
-    throw androidProbe.toolError;
+  if (found.toolError) {
+    throw found.toolError;
   }
-
-  const reasons = [
-    iosProbe ? `iOS: ${iosProbe.reason}` : 'iOS: simulators only exist on macOS',
-    `Android: ${androidProbe.reason}`,
-  ];
-  throw noDeviceError(
-    'NO_DEVICE',
-    [
-      'No booted device was found, so there is no device to open the deep link on.',
-      `Why: ${reasons.join('; ')}.`,
-      `How: open the app on a simulator or device (for example with "${PROGRAM_PREFIX} run:ios" or "${PROGRAM_PREFIX} run:android"), then run this command again. Pass --ios or --android to name the platform to look on.`,
-    ],
-    context,
-    cloud.probe
-  );
+  throw withOtherDoors(found.refusal, context, cloud.probe);
 }
 
 /** How much of the ladder a caller wants: whether the cloud backend is on it, and how. */
@@ -366,12 +283,15 @@ export interface ResolveDeviceContext {
   devServerRunning?: boolean;
   /** Whether the cloud backend is on this run's ladder. Defaults to `off`. */
   cloud?: CloudPreference;
-  /** The project whose session is looked for. Required for anything but `off`. */
-  projectRoot?: string;
+  /** The worktree whose bindings, and whose session, are looked for. */
+  projectRoot: string;
 }
 
 /**
- * The cloud rung of the ladder, taken after the local probes found nothing.
+ * The cloud rung of the ladder, taken after the local rungs passed.
+ *
+ * Until llp/0034 binds sessions, the fallback accepts the dotenv id only, never the newest
+ * session: a worktree with no binding must not drive another worktree's session.
  *
  * A session on the **other** platform is not this run's device: `--ios` named iOS, and an Android
  * session cannot open an iOS link. It is still reported, through the probe, so the failure can say
@@ -381,11 +301,14 @@ async function cloudFallbackAsync(
   platform: NavigatePlatform | undefined,
   context: ResolveDeviceContext
 ): Promise<{ device: NavigateDevice | null; probe: CloudSessionProbe | null }> {
-  if (context.cloud !== 'fallback' || context.projectRoot == null) {
+  if (context.cloud !== 'fallback') {
     return { device: null, probe: null };
   }
   const { device, probe } = await probeCloudDeviceAsync(context.projectRoot, { platform });
-  const usable = device != null && (platform == null || device.platform === platform);
+  const usable =
+    device != null &&
+    device.deviceId === readCloudSessionIdSync(context.projectRoot) &&
+    (platform == null || device.platform === platform);
   return { device: usable ? device : null, probe };
 }
 
@@ -393,19 +316,12 @@ async function cloudFallbackAsync(
  * Resolve the cloud session as the device, for a run that named it.
  *
  * Every failure here is about the session rather than about this machine, which is why none of them
- * reuses {@link noDeviceError}: a caller that passed `--eas` is not helped by "boot a simulator".
+ * reuses {@link withOtherDoors}: a caller that passed `--eas` is not helped by "boot a simulator".
  */
 async function resolveCloudDeviceAsync(
   platform: NavigatePlatform | undefined,
   context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
-  if (context.projectRoot == null) {
-    throw new CommandError(
-      'CLOUD_SIMULATOR_UNRESOLVED',
-      'A cloud simulator was asked for and this command did not say which project to look for a session in, which is a bug in this CLI.'
-    );
-  }
-
   const { device, probe } = await probeCloudDeviceAsync(context.projectRoot, { platform });
 
   if (device) {
@@ -435,41 +351,48 @@ async function resolveCloudDeviceAsync(
 }
 
 /**
- * The failure for a machine with no device, plus the URL when one was resolved.
+ * The registry's refusal, plus the URL when one was resolved and the session when one is on record.
  *
- * "No device found" is the whole truth and less than half the answer for the case this exists for:
- * a dogfood session drove Expo Go on a **cloud** simulator, from a laptop with no simulator of its
+ * "No device" is the whole truth and less than half the answer for the case this exists for: a
+ * dogfood session drove Expo Go on a **cloud** simulator, from a laptop with no simulator of its
  * own, and every `navigate` it ran stopped here [observed — 2026-08-24]. The URL was resolved a
  * step earlier and thrown away with the error, and the URL is exactly what an external opener
  * needs. So it is named, and so is the flag that prints it without asking for a device at all.
  *
- * Deliberately **not** applied to the tool failures above: an unrunnable `adb` or `xcrun` has a
- * headline about this machine's SDK, and burying it under an alternative is friction run 6's F49.
+ * Deliberately **not** applied to the tool failures: an unrunnable `adb` or `xcrun` has a headline
+ * about this machine's SDK, and burying it under an alternative is friction run 6's F49.
  */
-function noDeviceError(
-  code: string,
-  lines: string[],
+function withOtherDoors(
+  refusal: CommandError,
   context: ResolveDeviceContext,
-  cloudProbe: CloudSessionProbe | null = null
+  cloudProbe: CloudSessionProbe | null
 ): CommandError {
-  const withUrl = context.url
-    ? [
-        ...lines,
-        `Or: this is the URL for that route — ${context.url}${
-          context.devServerRunning ? '' : ' (no dev server answered, so it may not load yet)'
-        }. Open it on a phone, a cloud simulator, or anywhere else that can reach the dev server; "${PROGRAM_PREFIX} navigate <route> --print-url" prints it without looking for a device.`,
-      ]
-    : lines;
-
+  const lines = refusal.message.split('\n');
+  // The How line stays last (llp/0030 §Output and errors), so the doors go in above it.
+  const how = lines.pop()!;
+  if (context.url) {
+    lines.push(
+      `Or: this is the URL for that route — ${context.url}${
+        context.devServerRunning ? '' : ' (no dev server answered, so it may not load yet)'
+      }. Open it on a phone, a cloud simulator, or anywhere else that can reach the dev server; "${PROGRAM_PREFIX} navigate <route> --print-url" prints it without looking for a device.`
+    );
+  }
   // A session on record that this run could not use is the one alternative worth naming above the
   // URL: it is a device this CLI *can* drive, and the reader is one command away from it. Only when
-  // there is one — a project that has never started a session gets the generic line above and no
-  // advertisement for a paid feature it may not have.
+  // there is one — a project that has never started a session gets no advertisement for a paid
+  // feature it may not have.
   const cloudLine = cloudSessionLine(cloudProbe);
-  const error = new CommandError(code, [...withUrl, ...(cloudLine ? [cloudLine] : [])].join('\n'));
+  if (cloudLine) {
+    lines.push(cloudLine);
+  }
+  const error = new CommandError(refusal.code, [...lines, how].join('\n'));
+  error.exitCode = refusal.exitCode;
+  error.data = refusal.data;
   // A caller that has no device does not get one by running the same command again, so the `Try:`
-  // is the mode that answers without one.
-  error.suggestedCommand = context.url ? `${PROGRAM_PREFIX} navigate / --print-url` : undefined;
+  // is the mode that answers without one when there is a URL.
+  error.suggestedCommand = context.url
+    ? `${PROGRAM_PREFIX} navigate / --print-url`
+    : refusal.suggestedCommand;
   return error;
 }
 
@@ -488,7 +411,8 @@ function cloudSessionLine(probe: CloudSessionProbe | null): string | null {
       : null;
   }
   if (probe.state === 'active') {
-    // Reached when the session is live and is for the *other* platform, or reported none.
+    // Reached when the session is live and is for the *other* platform, is not this worktree's
+    // dotenv session, or reported none.
     return `Or: this project has a running EAS Simulator session${
       probe.platform ? ` (${probe.platform})` : ''
     }, and it is not the device this run asked for. Run this command again with --eas and no platform flag to use it.`;
