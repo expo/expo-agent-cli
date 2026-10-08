@@ -131,11 +131,16 @@ function isolatedEnv(dir: string): Record<string, string> {
   };
 }
 
+/** {@link isolatedEnv} on the real Expo home, for a test that pins the session file under `os.homedir()`. */
+function realHomeEnv(dir: string): Record<string, string | undefined> {
+  return { ...isolatedEnv(dir), __UNSAFE_EXPO_HOME_DIRECTORY: undefined };
+}
+
 describe('auth commands outside an Expo project', () => {
   it(`should answer whoami with the EAS CLI through the package runner when there is no expo`, async () => {
     const dir = await setupBareDirAsync([]);
 
-    const result = await executeAgentCliAsync(dir, ['whoami'], { env: isolatedEnv(dir) });
+    const result = await executeAgentCliAsync(dir, ['whoami'], { env: realHomeEnv(dir) });
 
     // `--yes` and the spec ahead of the verb. `@latest` because a bare directory declares nothing.
     expect(readInvocations(dir)).toEqual([
@@ -157,7 +162,7 @@ describe('auth commands outside an Expo project', () => {
     const dir = await setupBareDirAsync(['eas']);
 
     const result = await executeAgentCliAsync(dir, ['whoami'], {
-      env: { ...isolatedEnv(dir), EXPO_STAGING: '1' },
+      env: { ...realHomeEnv(dir), EXPO_STAGING: '1' },
     });
 
     expect(result.stderr).toContain(path.join(os.homedir(), '.expo-staging', 'state.json'));
@@ -171,7 +176,7 @@ describe('auth commands outside an Expo project', () => {
     const dir = await setupBareDirAsync(['eas']);
 
     const result = await executeAgentCliAsync(dir, ['whoami', '--json'], {
-      env: isolatedEnv(dir),
+      env: realHomeEnv(dir),
     });
 
     expect(JSON.parse(result.stdout)).toEqual({
