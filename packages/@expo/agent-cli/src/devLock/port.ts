@@ -105,8 +105,11 @@ export interface ResolvedDevServerPort {
 export interface ResolveDevServerPortOptions {
   /** Epoch milliseconds of the spawn; log entries older than this belong to an earlier run. */
   since: number;
-  /** Whether the dev server is still running. Waiting stops as soon as it is not. */
-  isRunning?: () => boolean;
+  /**
+   * Whether the dev server is still running. Waiting stops as soon as it is not. Required: the
+   * watch that follows a foreign fallback port has no deadline but this one.
+   */
+  isRunning: () => boolean;
   /**
    * Settles when the dev server has stopped, which cuts the wait between two reads short.
    *
@@ -151,7 +154,7 @@ export async function resolveDevServerPortAsync(
   args: string[],
   {
     since,
-    isRunning = () => true,
+    isRunning,
     stopped,
     intervalMs = PORT_WATCH_INTERVAL_MS,
     timeoutMs = PORT_WATCH_TIMEOUT_MS,
@@ -196,7 +199,11 @@ export async function resolveDevServerPortAsync(
   return null;
 }
 
-async function servesAnotherProjectAsync(projectRoot: string, port: number): Promise<boolean> {
+/** Whether another project's dev server answers on `port`, per the `/status` header; the default check. */
+export async function servesAnotherProjectAsync(
+  projectRoot: string,
+  port: number
+): Promise<boolean> {
   const reported = await readReportedProjectRootAsync(
     `http://127.0.0.1:${port}`,
     FOREIGN_CHECK_TIMEOUT_MS

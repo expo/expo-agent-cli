@@ -103,7 +103,12 @@ describe(readLastLoggedDevServerPort, () => {
 });
 
 describe(resolveDevServerPortAsync, () => {
-  const watch = { intervalMs: 1, timeoutMs: 50, servesAnotherProject: async () => false };
+  const watch = {
+    isRunning: () => true,
+    intervalMs: 1,
+    timeoutMs: 50,
+    servesAnotherProject: async () => false,
+  };
 
   it(`resolves the port the dev server logged`, async () => {
     writeStartLog([{ port: 8090, at: 2000 }]);
@@ -116,6 +121,7 @@ describe(resolveDevServerPortAsync, () => {
   it(`waits for the log entry to appear`, async () => {
     const resolved = resolveDevServerPortAsync(projectRoot, ['start'], {
       since: 1000,
+      isRunning: () => true,
       intervalMs: 1,
       timeoutMs: 5000,
     });

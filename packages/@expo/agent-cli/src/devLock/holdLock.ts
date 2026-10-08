@@ -8,6 +8,7 @@ import { debugEvent, event } from './events';
 import {
   readPortArg,
   resolveDevServerPortAsync,
+  servesAnotherProjectAsync,
   type ResolveDevServerPortOptions,
   type ResolvedDevServerPort,
 } from './port';
@@ -20,7 +21,9 @@ export type HoldDevServerLockOptions = ResolveDevServerPortOptions;
  * Publish where this project's dev server listens, and hold the address until it is released.
  *
  * When the arguments name a port, the lock is published at the spawn with `source: 'arg'`: `dev`
- * passes `--port` on every step that serves, and the Expo CLI either binds that port or exits. The
+ * passes `--port` on every step that serves, and the Expo CLI either binds that port or exits. A
+ * named port that another project's dev server already answers on is never published; the lock
+ * then waits for the log, as with no port. The
  * log watch goes on, so `onResolved` is told again with `source: 'log'` when Metro reports, and a
  * logged port that differs from the named one updates the lock's answer. With no port in the
  * arguments, the lock waits for the log, or for the watch to give up.
@@ -37,7 +40,9 @@ export async function holdDevServerLockAsync(
   options: HoldDevServerLockOptions
 ): Promise<DevServerLockHandle | null> {
   const named = readPortArg(args);
-  if (named == null) {
+  const servesAnotherProject =
+    options.servesAnotherProject ?? ((port) => servesAnotherProjectAsync(projectRoot, port));
+  if (named == null || (await servesAnotherProject(named))) {
     return await publishAsync(
       projectRoot,
       options,
@@ -95,7 +100,7 @@ async function publishAsync(
     }
     const { port, source } = resolved;
 
-    if (options.isRunning?.() === false) {
+    if (!options.isRunning()) {
       // The dev server exited before it said where it listens, so there is nothing to point at.
       debugEvent('dev_lock_skipped', { address, reason: 'dev-server-exited' });
       return null;

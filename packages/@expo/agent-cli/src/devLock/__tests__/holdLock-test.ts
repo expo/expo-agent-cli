@@ -82,6 +82,7 @@ describe(holdDevServerLockAsync, () => {
 
     const lock = holdDevServerLockAsync(projectRoot, ['start'], {
       since: Date.now(),
+      isRunning: () => true,
       intervalMs: 10,
       onResolved: ({ port, source }) => resolved.push(`${source}:${port}`),
     }).then((handle) => (held.push(handle), handle));
@@ -94,5 +95,53 @@ describe(holdDevServerLockAsync, () => {
     await lock;
     expect(resolved).toEqual(['log:8303']);
     expect(await readDevServerLockAsync(projectRoot)).toMatchObject({ port: 8303 });
+  });
+
+  it(`never publishes a named port that another project's dev server answers, and follows the log`, async () => {
+    const projectRoot = makeTempProject();
+    const resolved: string[] = [];
+    let running = true;
+
+    const lock = holdDevServerLockAsync(projectRoot, ['start', '--port', '8304'], {
+      since: Date.now(),
+      isRunning: () => running,
+      intervalMs: 10,
+      timeoutMs: 30,
+      servesAnotherProject: async (port) => port === 8304,
+      onResolved: ({ port, source }) => resolved.push(`${source}:${port}`),
+    }).then((handle) => (held.push(handle), handle));
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await readDevServerLockAsync(projectRoot)).toBeNull();
+    expect(resolved).toEqual([]);
+
+    logPort(projectRoot, 8305);
+    await lock;
+    expect(resolved).toEqual(['log:8305']);
+    expect(await readDevServerLockAsync(projectRoot)).toMatchObject({ port: 8305 });
+    running = false;
+  });
+
+  it(`holds nothing when the dev server stops with only a foreign port to name`, async () => {
+    const projectRoot = makeTempProject();
+    let running = true;
+    let stop!: () => void;
+    const stopped = new Promise<void>((resolve) => (stop = resolve));
+
+    const lock = holdDevServerLockAsync(projectRoot, ['start', '--port', '8306'], {
+      since: Date.now(),
+      isRunning: () => running,
+      stopped,
+      intervalMs: 10,
+      timeoutMs: 30,
+      servesAnotherProject: async () => true,
+    });
+    setTimeout(() => {
+      running = false;
+      stop();
+    }, 60);
+
+    expect(await lock).toBeNull();
+    expect(await readDevServerLockAsync(projectRoot)).toBeNull();
   });
 });
