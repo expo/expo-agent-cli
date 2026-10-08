@@ -34,10 +34,12 @@ export function deviceReport(binding: Binding): ReleasedDevice {
 
 export function keptDevices(projectRoot: string, platform?: DevicePlatform): ReleasedDevice[] {
   return ownBindingFiles(projectRoot)
-    .filter((entry) => entry.backend !== 'cloud' && (!platform || entry.platform === platform))
+    .filter((entry) => !platform || entry.platform === platform)
     .flatMap(({ file }) => {
       const read = readBindingFile(file);
-      return read.kind === 'binding' ? [{ ...deviceReport(read.binding), released: null }] : [];
+      return read.kind === 'binding'
+        ? [{ ...deviceReport(read.binding), released: null, reason: backendReason(read.binding) }]
+        : [];
     });
 }
 
@@ -48,4 +50,10 @@ export function unreadableBindingFiles(projectRoot: string, platform?: DevicePla
       (!platform || entry.platform === platform) &&
       readBindingFile(entry.file).kind === 'unreadable'
   );
+}
+
+function backendReason(binding: Binding): string | null {
+  return binding.device.backend === 'cloud'
+    ? 'recorded, not checked; use dev:stop --eas to stop it'
+    : null;
 }

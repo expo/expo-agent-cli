@@ -59,7 +59,9 @@ export async function stopDevicesAsync(
             platform: unreadable.platform,
             path: unreadable.file,
           }).message;
-        if (report.devices.some((device) => device.released === false))
+        if (
+          report.devices.some((device) => device.backend !== 'cloud' && device.released === false)
+        )
           report.deviceError ??= `Some devices could not be released; see devices for details.\nHow: run "${PROGRAM_PREFIX} dev:stop --release" again.`;
       }
     }

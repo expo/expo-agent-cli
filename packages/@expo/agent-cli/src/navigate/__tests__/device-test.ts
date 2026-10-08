@@ -379,7 +379,7 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     );
 
     expect(error.code).toBe('NO_BOUND_DEVICE');
-    expect(error.message).toContain('running EAS Simulator session');
+    expect(error.message).toContain('No android device is bound');
     expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
   });
 

@@ -2,6 +2,7 @@
 // Let go of this worktree's own local bindings, one rule per origin. The file action runs under
 // the lock, the device action after it.
 
+import { releaseCloudBindingAsync } from './cloud';
 import { killEmulatorIfOurs } from './android';
 import { clearInspectCache } from './inspect';
 import { listSimulatorAsync, shutdownSimulatorAsync } from './ios';
@@ -38,8 +39,10 @@ export async function releaseWorktreeDevicesAsync(
     platform,
     tools = defaultTools(),
     expected,
-  }: { platform?: DevicePlatform; tools?: DeviceTools; expected?: Binding } = {}
+    sessionId,
+  }: { platform?: DevicePlatform; tools?: DeviceTools; expected?: Binding; sessionId?: string } = {}
 ): Promise<ReleasedDevice[]> {
+  if (sessionId) return releaseCloudBindingAsync(projectRoot, sessionId, tools);
   const platforms: DevicePlatform[] = platform ? [platform] : ['ios', 'android'];
   const released: ReleasedDevice[] = [];
   for (const each of platforms) {

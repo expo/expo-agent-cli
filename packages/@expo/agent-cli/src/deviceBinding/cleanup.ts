@@ -9,9 +9,10 @@ import type { Binding, DeviceTools, ReleasedDevice } from './types';
 
 export type Cleanup = {
   binding: Binding;
-  action: 'forget' | 'shutdown' | 'delete' | 'kill';
+  action: 'forget' | 'shutdown' | 'delete' | 'kill' | 'stop-cloud';
   reason: string;
   reaped?: boolean;
+  stopRoot?: string;
   /** The binding file the section removed; a failed device action writes the binding back to it. */
   removedFile?: string;
 };
@@ -97,7 +98,7 @@ function manualStep({ binding: { device }, action }: Cleanup): string | null {
 }
 
 async function actAsync(
-  { binding: { device }, action }: Cleanup,
+  { binding: { device, projectRoot }, action, stopRoot }: Cleanup,
   tools: DeviceTools
 ): Promise<{
   ok: boolean;
@@ -106,6 +107,8 @@ async function actAsync(
   /** Why a `kill` signalled nothing: the instance had already exited. */
   gone?: string | null;
 }> {
+  if (device.backend === 'cloud' && action === 'stop-cloud')
+    return tools.stopCloud(stopRoot ?? projectRoot, device.id);
   if (device.backend === 'local-ios' && action === 'delete')
     return deleteSimulatorAsync(tools, device.udid);
   if (device.backend === 'local-ios' && action === 'shutdown')

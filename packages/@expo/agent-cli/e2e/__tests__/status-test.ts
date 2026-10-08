@@ -12,6 +12,7 @@ import { WebSocketServer } from 'ws';
 
 import { BOOTED_SIMULATOR, installStubAdbAsync, installStubXcrunAsync } from './installedAppStubs';
 
+import { digestForRoot } from '../../src/deviceBinding/registry';
 import {
   installStubEasAsync as installSharedStubEasAsync,
   STUB_EAS_LOG_NAME,
@@ -23,6 +24,7 @@ import {
   clearStubFingerprintInvocations,
   documentedJsonKeys,
   executeAgentCliAsync,
+  expoHomeOf,
   holdDevLockAsync,
   installStubBinAsync,
   installStubEasRunnerAsync,
@@ -1360,6 +1362,24 @@ describe('@expo/agent-cli status', () => {
       const projectRoot = await setupAsync('go-app');
       const env = await stubDeviceToolsAsync(projectRoot, { ios: 'none', android: 'none' });
       await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
+      const root = fs.realpathSync(projectRoot);
+      const bindingFile = path.join(
+        expoHomeOf(projectRoot),
+        'agent-cli',
+        'bindings',
+        `${digestForRoot(root)}-ios-cloud.json`
+      );
+      await fs.promises.mkdir(path.dirname(bindingFile), { recursive: true });
+      await fs.promises.writeFile(
+        bindingFile,
+        JSON.stringify({
+          version: 1,
+          projectRoot: root,
+          device: { backend: 'cloud', platform: 'ios', id: 'sess-e2e', origin: 'dotenv' },
+          boundAt: new Date().toISOString(),
+          expiresAt: new Date(Date.now() + 3600000).toISOString(),
+        })
+      );
       const devServer = await startDevServerDoubleAsync([CDP_TARGET]);
       try {
         const result = await executeAgentCliAsync(

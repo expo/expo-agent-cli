@@ -37,6 +37,8 @@ export function reapSection(
   const files = [
     ...listBindingFiles('ios', 'local-ios'),
     ...listBindingFiles('android', 'local-android'),
+    ...listBindingFiles('ios', 'cloud'),
+    ...listBindingFiles('android', 'cloud'),
   ];
   for (const file of files) {
     if (own.has(file)) continue;
@@ -47,12 +49,13 @@ export function reapSection(
     if (!deleted && !isExpired(binding, tools.now())) continue;
     const cleanup = chooseCleanup(binding, deleted, tools, inventory);
     if (!cleanup) continue;
+    const stopRoot = deleted ? projectRoot : binding.projectRoot;
     if (cleanup.action === 'shutdown') {
       writeBindingFile(file, { ...binding, expiresAt: tools.now().toISOString() });
-      actions.push(cleanup);
+      actions.push({ ...cleanup, stopRoot });
     } else {
       removeBindingFile(file);
-      actions.push({ ...cleanup, removedFile: file });
+      actions.push({ ...cleanup, stopRoot, removedFile: file });
     }
   }
   return actions;
@@ -84,6 +87,12 @@ function chooseCleanup(
         ? result('kill')
         : result('forget', 'device-gone');
     if (deleted) return result('forget');
+  }
+  if (device.backend === 'cloud') {
+    if (device.origin === 'dotenv') return result('forget');
+    if (tools.now().getTime() - Date.parse(binding.boundAt) > 115 * 60_000)
+      return result('forget', 'session-cap');
+    return result('stop-cloud');
   }
   return null;
 }

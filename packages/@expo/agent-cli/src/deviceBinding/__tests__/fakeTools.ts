@@ -137,6 +137,7 @@ export function fakeTools({
   };
 
   return {
+    stopCloud: async () => ({ ok: true, reason: null }),
     ...android,
     simctl,
     now: () => clock.now,
