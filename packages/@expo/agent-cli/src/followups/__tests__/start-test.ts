@@ -202,6 +202,23 @@ describe(buildStartPlanFollowUps, () => {
     );
   });
 
+  it.each(['serving', 'starting'] as const)(
+    `offers the running dev server, not the plan, when the plan stopped on one (%s)`,
+    (phase) => {
+      const followups = buildStartPlanFollowUps(
+        mockPlan({
+          steps: [],
+          devServerPort: { port: 8081, movedFrom: null, state: 'running', phase },
+        }),
+        mockState()
+      );
+
+      expect(ids(followups)).toEqual(['dev-server-running']);
+      expect(followups[0]!.command).toBe('npx @expo/agent-cli status');
+      expect(followups[0]!.why).toContain('port 8081');
+    }
+  );
+
   // F103 — found live on 2026-08-27: `dev --plan --android` printed
   // `expo start --go --android` and then offered `npx @expo/agent-cli dev`, which on this Mac plans for
   // **iOS**. The one follow-up whose whole promise is "runs the plan above" ran a different plan.

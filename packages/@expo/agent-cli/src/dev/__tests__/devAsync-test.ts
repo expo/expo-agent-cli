@@ -17,6 +17,7 @@ import { devAsync } from '../devAsync';
 import { findFreePortAsync, formatPortMove, resolvePlannedPortAsync } from '../portCollision';
 import { findPortListenerAsync } from '../portListener';
 import { resolveDevOptions } from '../resolveOptions';
+import { runningDevServerAsync, type RunningDevServer } from '../runningDevServer';
 import { isExpoDevServerAsync } from '../stopAsync';
 
 vi.mock('../../log');
@@ -33,6 +34,11 @@ vi.mock('../portCollision', async (importOriginal) => {
     findFreePortAsync: vi.fn(actual.findFreePortAsync),
   };
 });
+// A unit test must not read this machine's dev-server lock; the tests that need one stub it.
+vi.mock('../runningDevServer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../runningDevServer')>()),
+  runningDevServerAsync: vi.fn(async () => null),
+}));
 vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
 vi.mock('../openApp', () => ({
   openAppOnDeviceAsync: vi.fn(),
@@ -686,6 +692,97 @@ describe(devAsync, () => {
       await devAsync(projectRoot, resolveDevOptions(['--ios']));
 
       expect(Log.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can complete
+  describe('a dev server this project already runs', () => {
+    function mockRunning(phase: RunningDevServer['phase'], port = 8081) {
+      vi.mocked(runningDevServerAsync).mockResolvedValueOnce({
+        lock: {
+          url: `http://127.0.0.1:${port}`,
+          port,
+          pid: 4242,
+          startedAt: '2026-10-07T00:00:00.000Z',
+          projectRoot,
+        },
+        phase,
+      });
+    }
+
+    it(`should stop before any step and before any port probe`, async () => {
+      mockProjectState();
+      mockRunning('serving');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+        exitCode: 20,
+        data: { port: 8081, pid: 4242, phase: 'serving' },
+      });
+      expect(resolvePlannedPortAsync).not.toHaveBeenCalled();
+      expect(runExpoAsync).not.toHaveBeenCalled();
+      expect(runDevServerAsync).not.toHaveBeenCalled();
+    });
+
+    it(`should stop on a server that is still starting`, async () => {
+      mockProjectState();
+      mockRunning('starting');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+        data: { phase: 'starting' },
+      });
+      expect(runDevServerAsync).not.toHaveBeenCalled();
+    });
+
+    it(`should stop a plan that builds before it builds`, async () => {
+      mockStaleDevClientState();
+      mockRunning('serving');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+      });
+      expect(runExpoAsync).not.toHaveBeenCalled();
+      expect(runDevServerAsync).not.toHaveBeenCalled();
+    });
+
+    it(`should say the server runs, not that the named port is taken`, async () => {
+      mockProjectState();
+      mockRunning('serving', 8081);
+
+      await expect(
+        devAsync(projectRoot, resolveDevOptions(['--ios', '--port', '8081']))
+      ).rejects.toMatchObject({ code: 'DEV_SERVER_RUNNING' });
+    });
+
+    it(`should suggest a device platform to a --web caller`, async () => {
+      mockPlatform('linux');
+      mockProjectState();
+      mockRunning('serving');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--web']))).rejects.toMatchObject({
+        suggestedCommand: 'npx @expo/agent-cli smoke --android',
+      });
+    });
+
+    it(`should print under --plan a plan with no steps`, async () => {
+      mockStaleDevClientState();
+      mockRunning('serving');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios', '--plan']))).resolves.toBe(0);
+
+      const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+      expect(plan.steps).toEqual([]);
+      expect(plan.reasons).toContain(
+        "This project's dev server is already running on port 8081 (pid 4242); the run stops instead of starting a second one."
+      );
+      expect(plan.devServerPort).toEqual({
+        port: 8081,
+        movedFrom: null,
+        state: 'running',
+        phase: 'serving',
+      });
+      expect(resolvePlannedPortAsync).not.toHaveBeenCalled();
     });
   });
 

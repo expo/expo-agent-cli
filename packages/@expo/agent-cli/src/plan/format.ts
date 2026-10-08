@@ -122,5 +122,7 @@ function devServerPortState(devServerPort: DevServerPort): string {
       return devServerPort.movedFrom == null ? '' : `, because ${devServerPort.movedFrom} is taken`;
     case 'named':
       return devServerPort.taken ? ', as named, which is taken' : ', as named';
+    case 'running':
+      return devServerPort.phase === 'serving' ? ', already running' : ', still starting';
   }
 }

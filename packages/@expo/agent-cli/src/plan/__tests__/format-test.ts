@@ -89,6 +89,14 @@ describe(formatStartPlan, () => {
       { port: 8180, movedFrom: null, state: 'named', taken: true },
       'Dev server: port 8180, as named, which is taken.',
     ],
+    [
+      { port: 8081, movedFrom: null, state: 'running', phase: 'serving' },
+      'Dev server: port 8081, already running.',
+    ],
+    [
+      { port: 8081, movedFrom: null, state: 'running', phase: 'starting' },
+      'Dev server: port 8081, still starting.',
+    ],
   ])(`should name the dev server's port and its state: %o`, (devServerPort, line) => {
     expect(strip(formatStartPlan({ ...plan, devServerPort }))).toContain(line);
   });
