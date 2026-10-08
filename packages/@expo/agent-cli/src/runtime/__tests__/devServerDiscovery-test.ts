@@ -305,7 +305,7 @@ describe('discoverDevServerAsync — project root of a scanned server', () => {
     const statusCalls = vi
       .mocked(fetch)
       .mock.calls.filter(([input]) => String(input) === 'http://127.0.0.1:8082/status');
-    expect(statusCalls).toHaveLength(2);
+    expect(statusCalls).toHaveLength(1);
   });
 
   it(`accepts a server whose /status fails once and then answers`, async () => {

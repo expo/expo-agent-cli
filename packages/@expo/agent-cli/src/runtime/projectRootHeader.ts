@@ -69,13 +69,14 @@ function canonicalPath(value: string): string {
 export type ReportedRoot =
   | { kind: 'header'; root: string }
   | { kind: 'no-header' }
-  | { kind: 'unreachable' };
+  /** `timedOut`: the budget or the caller's signal ended the read; else the socket failed. */
+  | { kind: 'unreachable'; timedOut: boolean };
 
 /**
  * The project root a dev server names in the headers of `GET /status`, decoded. `no-header` is a
  * server that answered without one (an older dev server); `unreachable` is one that timed out or
- * failed, which proves nothing. `/status` only finishes once the bundler does, but the headers are
- * flushed first, so the request is abandoned as soon as they arrive.
+ * failed, which proves nothing; `timedOut` tells the two apart. `/status` only finishes once the
+ * bundler does, but the headers are flushed first, so the request is abandoned as soon as they arrive.
  */
 export async function readReportedProjectRootAsync(
   url: string,
@@ -92,6 +93,6 @@ export async function readReportedProjectRootAsync(
     await response.body?.cancel();
     return root == null ? { kind: 'no-header' } : { kind: 'header', root };
   } catch {
-    return { kind: 'unreachable' };
+    return { kind: 'unreachable', timedOut: budget.aborted || signal?.aborted === true };
   }
 }
