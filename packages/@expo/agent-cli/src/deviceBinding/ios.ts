@@ -174,7 +174,10 @@ export async function listSimulatorAsync(
     };
   }
   const entry = parseSimulators(listed.stdout).find((simulator) => simulator.udid === udid);
-  return entry ? { kind: 'listed', state: entry.state, name: entry.name } : { kind: 'missing' };
+  // Unavailable (its runtime is gone) reads as missing: nothing can boot it.
+  return entry?.isAvailable
+    ? { kind: 'listed', state: entry.state, name: entry.name }
+    : { kind: 'missing' };
 }
 
 /**

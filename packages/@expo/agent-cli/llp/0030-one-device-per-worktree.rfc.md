@@ -167,7 +167,7 @@ export type ReleasedDevice = {
 
 - Origins. `created`: the CLI may shut down, park and delete. `spawned`: the CLI may kill the emulator it spawned. `explicit`: boot at most. `cloud` `started`: this CLI started the session or found it by tag, and may stop it; `dotenv`: adopted from `.env.eas-simulator`; a reap never stops it, `dev:stop --eas` does, as today.
 - Let go, one rule per origin, first match. The file action runs under the lock, the device action after it.
-  - A local binding whose device the inventory does not list, or a `spawned` one whose `emulatorPid` is dead: remove the file.
+  - A local binding whose device the inventory does not list or lists as unavailable (its runtime was removed), or a `spawned` one whose `emulatorPid` is dead: remove the file.
   - `created` of a deleted root: remove the file, then `simctl delete`, where "not found" counts as success.
   - `created`: park, then `simctl shutdown`, where an already shut-down simulator counts as success. A reap skips the shutdown when its inventory listed `Shutdown`.
   - `spawned`: remove the file, then kill `emulatorPid` while it is alive and, where `ps` exists, its arguments name `-avd <avd>` and `-ports <port>,<port+1>`. Never the binary name: the `emulator` launcher execs `qemu-system-<arch>`, so the pid stays and the name does not.
@@ -199,7 +199,7 @@ export type ReleasedDevice = {
 Inputs: the own binding and the other worktrees' bindings, each marked stale or not; the inventory, read before the lock; `explicit`; `reuseOnly`; `now`; on Android `busyPorts`, computed by `android.ts` in the same section: the running `emulator-NNNN` serials, the Android bindings whose lease is live, and every Android binding whose `emulatorPid` is alive, because a reap kills it only after the section. The free port is the first free even one in 5554..5584. `IosInventory` holds `SimulatorEntry[]` and `newestIosRuntime: { identifier, deviceType } | null`: the newest available iOS runtime that lists a mainstream iPhone, with its first `iPhone <n> Pro`, else its first `iPhone <n>`, because the newest runtime can list only a device no app renders on (iOS 27.1 lists iPhone Duo alone); only when no runtime has one does the newest runtime's first iPhone type apply. `AndroidInventory` holds the first AVD of `emulator -list-avds` and `runningSerials`. Outputs:
 
 ```ts
-| { kind: 'reuse'; binding }        // own binding, live or expired, device present (iOS: listed; Android spawned: emulatorPid alive; Android explicit: serial listed); also --device naming the own device
+| { kind: 'reuse'; binding }        // own binding, live or expired, device present (iOS: listed and available; Android spawned: emulatorPid alive; Android explicit: serial listed); also --device naming the own device
 | { kind: 'ios-create'; runtime; deviceType; name }
 | { kind: 'android-spawn'; port; avd }
 | { kind: 'explicit'; device }

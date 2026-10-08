@@ -23,8 +23,9 @@ export function createdSimulatorName(digest: string): string {
 /**
  * Choose the simulator of a worktree.
  *
- * The own binding is reused, live or expired, when the inventory lists its simulator. An own
- * binding whose simulator is gone is for the caller to remove; the choice goes on to a create.
+ * The own binding is reused, live or expired, when the inventory lists its simulator as available.
+ * An own binding whose simulator is gone or unavailable is for the caller to remove; the choice goes
+ * on to a create.
  */
 export function chooseIosDevice({
   own,
@@ -38,7 +39,9 @@ export function chooseIosDevice({
   digest: string;
 }): IosChoice {
   const ownUdid = own?.device.backend === 'local-ios' ? own.device.udid : null;
-  const listed = inventory.simulators.find((entry) => entry.udid === ownUdid);
+  // A simulator whose runtime was removed is still listed, unavailable; reusing it fails every
+  // boot, and a failed boot keeps the binding, so it counts as gone.
+  const listed = inventory.simulators.find((entry) => entry.udid === ownUdid && entry.isAvailable);
   if (own != null && listed != null) {
     return { kind: 'reuse', binding: own, listed };
   }

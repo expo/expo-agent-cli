@@ -15,6 +15,8 @@ export interface FakeSimulator {
   udid: string;
   name: string;
   state: 'Booted' | 'Shutdown';
+  /** False when the runtime is gone, as `simctl` lists it then. */
+  isAvailable?: boolean;
 }
 
 export interface FakeSimctlOptions {
