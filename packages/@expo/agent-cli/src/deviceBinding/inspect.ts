@@ -2,23 +2,29 @@
 // What a read verb learns about one binding: lock-free, no extension, one subprocess at most.
 
 import * as Log from '../log';
+import { getEmulatorStateAsync } from './emulator';
 import { noBoundDeviceError } from './errors';
 import { listSimulatorAsync, SIMCTL_CALL_TIMEOUT_MS } from './ios';
 import { extendLeaseAsync, isExpired } from './lease';
 import { bindingPathFor, readBindingFile } from './registry';
 import { defaultTools } from './tools';
-import type { BoundDevice, DevicePlatform, DeviceTools, Inspection } from './types';
+import {
+  deviceIdOf,
+  type Binding,
+  type BindingBackend,
+  type BoundDevice,
+  type DevicePlatform,
+  type DeviceTools,
+  type Inspection,
+} from './types';
 
 /** The wait of a read verb's lease extension; a timeout warns and goes on. */
 export const READ_LOCK_WAIT_MS = 5_000;
 
-/** The backends this PR inspects; `local-android` arrives with llp/0032. */
-export type InspectableBackend = 'local-ios' | 'cloud';
-
 export async function inspectBindingAsync(
   projectRoot: string,
   platform: DevicePlatform,
-  backend: InspectableBackend,
+  backend: BindingBackend,
   tools: DeviceTools = defaultTools(),
   { timeoutMs = SIMCTL_CALL_TIMEOUT_MS }: { timeoutMs?: number } = {}
 ): Promise<Inspection> {
@@ -37,10 +43,10 @@ export async function inspectBindingAsync(
       ? { binding, path, state: 'gone', cause: 'expired' }
       : { binding, path, state: 'recorded' };
   }
-  if (binding.device.backend !== 'local-ios') {
-    return { binding, path, state: 'unreadable' };
-  }
-  const listing = await listSimulatorAsync(tools, binding.device.udid, { timeoutMs });
+  const listing =
+    binding.device.backend === 'local-ios'
+      ? await listSimulatorAsync(tools, binding.device.udid, { timeoutMs })
+      : await getEmulatorStateAsync(tools, binding.device.serial, { timeoutMs });
   if (listing.kind === 'tool') {
     return { binding, path, state: 'unknown', cause: 'tool', toolError: listing.error };
   }
@@ -50,10 +56,21 @@ export async function inspectBindingAsync(
   if (expired) {
     return { binding, path, state: 'gone', cause: 'expired' };
   }
-  if (listing.kind === 'missing') {
+  if (listing.kind === 'missing' || instanceDead(binding, tools)) {
     return { binding, path, state: 'gone', cause: 'device-gone' };
   }
-  return { binding, path, state: listing.state === 'Booted' ? 'up' : 'not-up' };
+  const up = binding.device.backend === 'local-ios' ? 'Booted' : 'device';
+  return { binding, path, state: listing.state === up ? 'up' : 'not-up' };
+}
+
+/** A `spawned` instance whose `emulatorPid` is dead, whatever `adb` lists under its serial. */
+function instanceDead(binding: Binding, tools: DeviceTools): boolean {
+  const { device } = binding;
+  return (
+    device.backend === 'local-android' &&
+    device.origin.kind === 'spawned' &&
+    !tools.isPidAlive(device.origin.emulatorPid)
+  );
 }
 
 const cache = new Map<string, Promise<Inspection>>();
@@ -62,7 +79,7 @@ const cache = new Map<string, Promise<Inspection>>();
 export function inspectBindingCachedAsync(
   projectRoot: string,
   platform: DevicePlatform,
-  backend: InspectableBackend,
+  backend: BindingBackend,
   options: { tools?: DeviceTools; timeoutMs?: number } = {}
 ): Promise<Inspection> {
   const key = `${projectRoot}\0${platform}\0${backend}`;
@@ -112,5 +129,5 @@ export async function useBoundDeviceAsync(
 }
 
 function deviceLabel(device: BoundDevice): string {
-  return device.backend === 'local-ios' ? device.name : device.backend;
+  return device.backend === 'local-ios' ? device.name : deviceIdOf(device);
 }
