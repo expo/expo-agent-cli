@@ -108,6 +108,20 @@ describe(acquireDeviceAsync, () => {
     expect(result.device).toMatchObject({ udid: 'CREATED-1' });
   });
 
+  // unavailable-simulator-is-gone
+  it('creates again when the own simulator lost its runtime, instead of retrying it forever', async () => {
+    const tools = fakeTools({
+      simulators: [{ udid: 'OLD', name: 'agent-cli 0000', state: 'Shutdown', isAvailable: false }],
+    });
+    writeBinding(file(), bindingFor(ROOT, 'OLD'));
+
+    const result = await acquireDeviceAsync(ROOT, 'ios', { tools });
+
+    expect(result).toMatchObject({ action: 'created' });
+    expect(result.device).toMatchObject({ udid: 'CREATED-1' });
+    expect(tools.calls).not.toContainEqual(['bootstatus', 'OLD', '-b']);
+  });
+
   it('removes an own binding whose simulator is gone and creates again', async () => {
     const tools = fakeTools();
     writeBinding(file(), bindingFor(ROOT, 'GONE'));

@@ -36,9 +36,24 @@ describe(inspectBindingAsync, () => {
     ['up', { bind: 'SIM-1', listed: 'Booted' }, { state: 'up' }],
     ['not-up', { bind: 'SIM-1', listed: 'Shutdown' }, { state: 'not-up' }],
     ['gone when not listed', { bind: 'SIM-1' }, { state: 'gone', cause: 'device-gone' }],
+    [
+      'gone when listed unavailable',
+      { bind: 'SIM-1', listed: 'Shutdown', unavailable: true },
+      { state: 'gone', cause: 'device-gone' },
+    ],
   ] as const)('reports %s', async (_name, setup, expected) => {
     const tools = fakeTools({
-      simulators: 'listed' in setup ? [{ udid: 'SIM-1', name: 'x', state: setup.listed }] : [],
+      simulators:
+        'listed' in setup
+          ? [
+              {
+                udid: 'SIM-1',
+                name: 'x',
+                state: setup.listed,
+                isAvailable: !('unavailable' in setup),
+              },
+            ]
+          : [],
       spawnError: 'spawnError' in setup,
       listTimesOut: 'listTimesOut' in setup,
     });
