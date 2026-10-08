@@ -174,6 +174,48 @@ describe(acquireDeviceAsync, () => {
     expect(readBindingFile(file())).toEqual({ kind: 'none' });
   });
 
+  it.each(['devices', '-s emulator-5554 shell getprop sys.boot_completed'])(
+    'refuses another emulator answering when the child exits during %s',
+    async (exitDuring) => {
+      const tools = fakeTools();
+      const spawnEmulator = tools.spawnEmulator;
+      const isPidAlive = tools.isPidAlive;
+      let exitedPid: number | undefined;
+      let exitChild!: () => void;
+      tools.spawnEmulator = (args) => {
+        const child = spawnEmulator(args);
+        return {
+          ...child,
+          exited: new Promise<number | null>((resolve) => {
+            exitChild = () => {
+              exitedPid = child.pid;
+              resolve(1);
+            };
+          }),
+        };
+      };
+      tools.isPidAlive = (pid) => pid !== exitedPid && isPidAlive(pid);
+      const adb = tools.adb;
+      tools.adb = async (args, options) => {
+        const result = await adb(args, options);
+        if (args.join(' ') === exitDuring) {
+          exitChild();
+          // A human's emulator won the port and keeps answering under the same serial.
+          tools.emulators.splice(0, 1, { serial: 'emulator-5554', state: 'device' });
+        }
+        return result;
+      };
+
+      await expect(acquireDeviceAsync(ROOT, 'android', { tools })).rejects.toMatchObject({
+        code: 'DEVICE_UNAVAILABLE',
+        data: { reason: 'boot-failed' },
+        message: expect.stringContaining('exited with 1'),
+      });
+      expect(readBindingFile(file())).toEqual({ kind: 'none' });
+      expect(tools.killed).toEqual([]);
+    }
+  );
+
   it('kills the instance it spawned when the boot runs out of time', async () => {
     const tools = fakeTools({ neverBoots: true });
     tools.now = () => {
