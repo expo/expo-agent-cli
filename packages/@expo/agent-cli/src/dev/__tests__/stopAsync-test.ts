@@ -497,7 +497,7 @@ describe(looksLikeDevServerProcess, () => {
 describe('dev:stop --eas', () => {
   const cloud = () =>
     require('../../device/cloudSimulator') as typeof import('../../device/cloudSimulator');
-  const eas = () => require('../openAppEas') as typeof import('../openAppEas');
+  const eas = () => require('../../device/eas') as typeof import('../../device/eas');
 
   beforeEach(() => {
     vi.spyOn(cloud(), 'probeCloudSessionAsync');

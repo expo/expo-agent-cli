@@ -259,3 +259,37 @@ export function adbNotRunnableError(adb: AdbResolution, reason: string): Command
     ].join('\n')
   );
 }
+
+/** One ready device, as `adb devices -l` describes it. */
+export interface AndroidDeviceLine {
+  deviceId: string;
+  /**
+   * The `model:` field of the long listing, when there is one.
+   *
+   * Kept because it is how a debugger target is tied back to this device: React Native Android
+   * registers itself as `<Build.MODEL> - <release> - API <sdk>` [observed live — 2026-08-25, a
+   * `/json/list` target with `deviceName: "sdk_gphone64_arm64 - 15 - API 35"` for the emulator
+   * `adb devices -l` reported as `model:sdk_gphone64_arm64`]. See `src/runtime/targetPlatform.ts`.
+   */
+  model: string | null;
+}
+
+/**
+ * Read the ready devices out of `adb devices -l`.
+ *
+ * The long listing rather than the short one, because the `model:` field is what lets a debugger
+ * target be matched back to a device. Everything else about the two formats is the same.
+ */
+export function parseAndroidDevices(stdout: string): AndroidDeviceLine[] {
+  const devices: AndroidDeviceLine[] = [];
+  // The first line is the `List of devices attached` header.
+  for (const line of stdout.split('\n').slice(1)) {
+    const [deviceId, state, ...rest] = line.trim().split(/\s+/);
+    // Devices in any other state (`unauthorized`, `offline`) cannot receive an intent.
+    if (deviceId && state === 'device') {
+      const model = rest.find((field) => field.startsWith('model:'))?.slice('model:'.length);
+      devices.push({ deviceId, model: model || null });
+    }
+  }
+  return devices;
+}

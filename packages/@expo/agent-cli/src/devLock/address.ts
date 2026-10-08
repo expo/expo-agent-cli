@@ -88,7 +88,7 @@ export function lockAddressFor(
  * Lowercased first, because the Windows filesystem compares paths without case — two spellings of
  * one project must not be two locks.
  */
-function digestOf(canonicalPath: string): string {
+export function digestOf(canonicalPath: string): string {
   return crypto
     .createHash('sha1')
     .update(canonicalPath.toLowerCase())

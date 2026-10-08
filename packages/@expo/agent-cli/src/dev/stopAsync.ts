@@ -260,7 +260,7 @@ async function stopProjectEasSessionAsync(
 ): Promise<NonNullable<DevStopResultJson['session']>> {
   const { probeCloudSessionAsync } =
     require('../device/cloudSimulator') as typeof import('../device/cloudSimulator');
-  const { stopEasSessionAsync } = require('./openAppEas') as typeof import('./openAppEas');
+  const { stopEasSessionAsync } = require('../device/eas') as typeof import('../device/eas');
   const probe = await probeCloudSessionAsync({ projectRoot });
   if (probe.state !== 'active' || probe.sessionId == null) {
     return {
