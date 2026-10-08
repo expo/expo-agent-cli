@@ -275,8 +275,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
  * The callback the resolver runs for a native draft, and `devAsync` runs for a draft that builds.
  *
  * @ref llp/0031-ios-binding.plan.md §How `dev` uses it
- * iOS only, until llp/0032 binds Android; nothing for `--eas`, whose device is a session; nothing
- * under `AGENT_CLI_NO_DEVICE`. A run first refuses a named `--port` that is taken, when the draft
+ * iOS only, until llp/0032 binds Android, and on macOS only; nothing for `--eas`, whose device is
+ * a session; nothing under `AGENT_CLI_NO_DEVICE`. A run first refuses a named `--port` that is taken, when the draft
  * serves, so no simulator is created for a run that then stops on the port. `--plan` inspects the
  * own binding and acquires nothing.
  */
@@ -304,7 +304,14 @@ function deviceCallbackFor(
 }
 
 function bindsDevice(options: DevOptions): boolean {
-  return options.platform === 'ios' && options.deviceBackend !== 'eas' && !devicesDisabled();
+  // iOS simulators exist on macOS only; elsewhere `dev --ios` serves for a device somewhere else,
+  // an EAS session the caller opens itself, and binds nothing, as on main.
+  return (
+    options.platform === 'ios' &&
+    process.platform === 'darwin' &&
+    options.deviceBackend !== 'eas' &&
+    !devicesDisabled()
+  );
 }
 
 /** `--plan`'s read of the own binding: the device as `reused` when it is up or down, else null. */
