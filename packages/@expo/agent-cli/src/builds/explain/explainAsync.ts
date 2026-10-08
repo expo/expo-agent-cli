@@ -16,7 +16,7 @@ import * as Log from '../../log';
 import { PROGRAM_PREFIX } from '../../programName';
 import { CommandError } from '../../utils/errors';
 import { fetchEasBuildLogAsync } from './easLog';
-import { extractFailure, logTail } from './extract';
+import { collectErrorLines, extractFailure, logTail } from './extract';
 import { formatExplainReport } from './format';
 import { detectPhases } from './phases';
 import { readLogFileAsync, readLogStreamAsync, type ReadLogResult } from './readLog';
@@ -135,6 +135,9 @@ export function buildExplainReport(
     phases: extracted.phases,
     failure: extracted.failure,
     otherFailures: extracted.otherFailures,
+    // The meaningful part of the phase, rule or no rule: what the tools themselves marked as
+    // errors. A report whose table came up empty still points at the lines that matter.
+    errorLines: collectErrorLines(read.lines, extracted.phases, extracted.failure),
     // Always present, whether or not a failure was located: a report whose rule table came up
     // empty must still leave the caller with something to read.
     logTail: logTail(read.lines),

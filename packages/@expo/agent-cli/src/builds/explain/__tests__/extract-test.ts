@@ -320,3 +320,65 @@ describe('a log too big to hold', () => {
     readFile.mockRestore();
   });
 });
+
+import { collectErrorLines, MAX_ERROR_LINES } from '../extract';
+import type { Phase } from '../types';
+
+// @ref llp/0012-build-explain.rfc.md §Summary
+describe(collectErrorLines, () => {
+  const phases: Phase[] = [
+    { name: 'pod-install', status: 'succeeded', startLine: 1, endLine: 3 },
+    { name: 'xcodebuild', status: 'failed', startLine: 4, endLine: 9 },
+  ];
+  const lines = [
+    '[!] a pod warning with error in a word: errorCode',
+    'Pod installation complete!',
+    '0 errors, 3 warnings',
+    'Command line invocation:',
+    'Foo.swift:12:3: error: cannot find Bar in scope',
+    'Foo.swift:12:3: error: cannot find Bar in scope',
+    '** BUILD FAILED **',
+    'The following build commands failed:',
+    'no errors here',
+  ];
+
+  it('reads the failing phase only, keeps consecutive repeats once, and skips "no errors"', () => {
+    const failure = { line: 5 } as never;
+
+    expect(collectErrorLines(lines, phases, failure)).toEqual([
+      { line: 5, text: 'Foo.swift:12:3: error: cannot find Bar in scope' },
+      { line: 7, text: '** BUILD FAILED **' },
+      { line: 8, text: 'The following build commands failed:' },
+    ]);
+  });
+
+  it('reads the last phase when nothing was located', () => {
+    const unlocated: Phase[] = phases.map((phase) => ({ ...phase, status: 'unknown' }));
+
+    expect(collectErrorLines(lines, unlocated, null).map((entry) => entry.line)).toEqual([5, 7, 8]);
+  });
+
+  it('reads the whole log when no phase was detected', () => {
+    expect(collectErrorLines(['error: one', 'fine', 'fatal: two'], [], null)).toEqual([
+      { line: 1, text: 'error: one' },
+      { line: 3, text: 'fatal: two' },
+    ]);
+  });
+
+  it('is capped', () => {
+    const many = Array.from({ length: 50 }, (_, index) => `error: number ${index}`);
+
+    expect(collectErrorLines(many, [], null)).toHaveLength(MAX_ERROR_LINES);
+  });
+
+  // `errorCode` in a payload and `Errors.swift` in a path are words about errors, not errors.
+  it('reads error as a word, not a substring', () => {
+    expect(
+      collectErrorLines(
+        ['{"errorCode":"E404"}', 'compiling Errors.swift', 'e: Foo.kt: unresolved'],
+        [],
+        null
+      )
+    ).toEqual([{ line: 3, text: 'e: Foo.kt: unresolved' }]);
+  });
+});

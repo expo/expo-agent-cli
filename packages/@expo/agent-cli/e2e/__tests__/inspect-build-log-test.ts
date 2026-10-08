@@ -656,6 +656,164 @@ describe('@expo/agent-cli inspect:build-log --eas', () => {
   });
 });
 
+// @ref llp/0012-build-explain.rfc.md §Summary — the meaningful portion, rule or no rule.
+describe('the error lines of the failing phase', () => {
+  it('carries them in --json beside the located failure', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+
+    const result = await executeAgentCliAsync(projectRoot, [
+      'inspect:build-log',
+      '--file',
+      fixture('xcodebuild-no-profile.log'),
+      '--ios',
+      '--json',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const report: ExplainReport & { errorLines: { line: number; text: string }[] } = JSON.parse(
+      result.stdout
+    );
+    expect(report.errorLines.length).toBeGreaterThan(0);
+    expect(report.errorLines.map((entry) => entry.line)).toContain(report.failure!.line);
+  });
+
+  it('prints the rest of them under the located failure, numbered like the context', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+
+    const result = await executeAgentCliAsync(projectRoot, [
+      'inspect:build-log',
+      '--file',
+      fixture('gradle-duplicate-class.log'),
+      '--android',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toMatch(/Other lines that read like errors in this phase \(\d+/);
+  });
+
+  it('prints them in place of the raw tail when no rule matched but the tool marked errors', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const logPath = path.join(projectRoot, 'unknown-failure.log');
+    await fs.promises.writeFile(
+      logPath,
+      [
+        'Command line invocation:',
+        '    /usr/bin/xcodebuild -workspace App.xcworkspace',
+        'ld: error: undefined symbol: _OBJC_CLASS_$_Nope',
+        'ld: error: 1 duplicate symbol for architecture arm64',
+        'the build stopped',
+        '',
+      ].join('\n')
+    );
+
+    const result = await executeAgentCliAsync(projectRoot, [
+      'inspect:build-log',
+      '--file',
+      logPath,
+      '--ios',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('none located');
+    expect(result.stdout).toContain('The lines that read like errors in the last phase (2)');
+    expect(result.stdout).toContain('undefined symbol');
+    expect(result.stdout).not.toContain('The last lines of the log');
+  });
+});
+
+// Every way a log reaches this command, for each platform: the same report shape comes back, and
+// the platform the caller named is on it. The details of each source have their own describes.
+describe('every calling path, on both platforms', () => {
+  const PLATFORMS = ['ios', 'android'] as const;
+  const BUILD_ID = '2f1c9f0e-6b1e-4a3d-9c1a-0b6f1e2d3c4a';
+
+  async function expectReport(
+    result: { exitCode: number | null; stdout: string },
+    kind: string,
+    platform: string
+  ) {
+    expect(result.exitCode).toBe(0);
+    const report: ExplainReport = JSON.parse(result.stdout);
+    expect(report.source).toMatchObject({ kind, platform });
+    expect(Object.keys(report)).toEqual([
+      'source',
+      'phases',
+      'failure',
+      'otherFailures',
+      'errorLines',
+      'logTail',
+      'followups',
+    ]);
+  }
+
+  it.each(PLATFORMS)('--file --%s', async (platform) => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const result = await executeAgentCliAsync(projectRoot, [
+      'inspect:build-log',
+      '--file',
+      fixture('npm-peer-conflict.log'),
+      `--${platform}`,
+      '--json',
+    ]);
+    await expectReport(result, 'file', platform);
+  });
+
+  it.each(PLATFORMS)('--stdin --%s', async (platform) => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const result = await pipeIntoAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--stdin', `--${platform}`, '--json'],
+      fs.readFileSync(fixture('npm-peer-conflict.log'), 'utf8')
+    );
+    await expectReport(result, 'stdin', platform);
+  });
+
+  it.each(PLATFORMS)('--local --%s', async (platform) => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const logDir = path.join(projectRoot, '.expo', 'dev', 'logs');
+    await fs.promises.mkdir(logDir, { recursive: true });
+    await fs.promises.copyFile(
+      fixture('npm-peer-conflict.log'),
+      path.join(logDir, `build-${platform}.log`)
+    );
+    const result = await executeAgentCliAsync(projectRoot, [
+      'inspect:build-log',
+      '--local',
+      `--${platform}`,
+      '--json',
+    ]);
+    await expectReport(result, 'local', platform);
+  });
+
+  it.each(PLATFORMS)('--eas --%s, by id', async (platform) => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    await installStubEasAsync(projectRoot);
+    const manifestPath = path.join(projectRoot, 'package.json');
+    const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+    manifest.devDependencies = { ...manifest.devDependencies, 'eas-cli': '^22.0.0' };
+    await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+    const bytes = fs.readFileSync(fixture('npm-peer-conflict.log'));
+    const server = createServer((_request, response) => response.writeHead(200).end(bytes));
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['inspect:build-log', `--${platform}`, BUILD_ID, '--json'],
+        {
+          env: {
+            STUB_EAS_BUILD_VIEW_PLATFORM: platform.toUpperCase(),
+            STUB_EAS_BUILD_VIEW_LOG_FILES: JSON.stringify([`${origin}/log`]),
+          },
+        }
+      );
+      await expectReport(result, 'eas', platform);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
 describe('when no report can be produced', () => {
   it('exits 1 with the --json error envelope for a file that is not there', async () => {
     const projectRoot = await setupFixtureAsync('go-app');

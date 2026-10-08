@@ -4,16 +4,25 @@
 
 import chalk from 'chalk';
 
-import type { ExplainReport, Failure, Phase } from './types';
+import type { ErrorLine, ExplainReport, Failure, Phase } from './types';
 
 /** Width of the label column, matching `status` and `deploy`. */
 const LABEL_WIDTH = 12;
 
-/** How many lines of context the human report prints. `--json` carries all of them. */
-const PRINTED_CONTEXT_BEFORE = 3;
-const PRINTED_CONTEXT_AFTER = 8;
+/**
+ * How many lines of context the human report prints. `--json` carries all of them.
+ *
+ * Widened from 3 and 8 [Kudo, 2026-09-15]: a compiler's detail — the code frame, the candidate
+ * paths — runs past eight lines, and a reader who has to open the log for it was not given the
+ * meaningful portion.
+ */
+const PRINTED_CONTEXT_BEFORE = 5;
+const PRINTED_CONTEXT_AFTER = 12;
 
-/** How many lines of `logTail` are printed when nothing was located. */
+/** How many of the phase's error lines are printed under a located failure. */
+const PRINTED_ERROR_LINES_WITH_FAILURE = 12;
+
+/** How many lines of `logTail` are printed when nothing was located and no line reads like an error. */
 const PRINTED_TAIL = 20;
 
 /** One line per fact the report holds, then the quoted evidence for the one that matters. */
@@ -31,9 +40,21 @@ export function formatExplainReport(report: ExplainReport): string {
   if (!report.failure) {
     row('failure', chalk.yellow('none located — no rule matched this log'));
     lines.push('');
-    lines.push(chalk.dim('  The last lines of the log:'));
-    lines.push('');
-    lines.push(indent(lastLines(report.logTail, PRINTED_TAIL)));
+    // What the tools themselves marked as errors, which is the meaningful part of a log the rule
+    // table does not know. The raw tail is the fallback for a log that marked nothing.
+    if (report.errorLines.length) {
+      lines.push(
+        chalk.dim(
+          `  The lines that read like errors in the last phase (${report.errorLines.length}):`
+        )
+      );
+      lines.push('');
+      lines.push(indent(errorLinesBlock(report.errorLines, report.errorLines.length)));
+    } else {
+      lines.push(chalk.dim('  The last lines of the log:'));
+      lines.push('');
+      lines.push(indent(lastLines(report.logTail, PRINTED_TAIL)));
+    }
     return lines.join('\n');
   }
 
@@ -52,6 +73,19 @@ export function formatExplainReport(report: ExplainReport): string {
 
   lines.push('');
   lines.push(indent(contextBlock(failure)));
+
+  // The rest of what the phase marked as errors, past the one the rule matched: a build that
+  // failed on three things says so here rather than one report at a time.
+  const others = report.errorLines.filter((entry) => entry.line !== failure.line);
+  if (others.length) {
+    lines.push('');
+    lines.push(
+      chalk.dim(
+        `  Other lines that read like errors in this phase (${others.length}${others.length > PRINTED_ERROR_LINES_WITH_FAILURE ? `, first ${PRINTED_ERROR_LINES_WITH_FAILURE}` : ''}):`
+      )
+    );
+    lines.push(indent(errorLinesBlock(others, PRINTED_ERROR_LINES_WITH_FAILURE)));
+  }
 
   if (report.otherFailures.length) {
     lines.push('');
@@ -131,6 +165,14 @@ function contextBlock(failure: Failure): string {
   rendered.push(gutter(failure.line, failure.context.match, true));
   after.forEach((line, index) => rendered.push(gutter(failure.line + 1 + index, line, false)));
   return rendered.join('\n');
+}
+
+/** The error lines, numbered the way the context block is, so the two read as one log. */
+function errorLinesBlock(entries: ErrorLine[], maxLines: number): string {
+  return entries
+    .slice(0, maxLines)
+    .map((entry) => gutter(entry.line, entry.text, false))
+    .join('\n');
 }
 
 /** One quoted line, with its number and a marker on the match. */
