@@ -90,7 +90,7 @@ The service spells it `CANCELED`, with one `l`. `CANCELLED` stays in the table a
 
 Progress goes to the `LOG_EVENTS` JSONL stream as `cli:build_wait_poll`, never to stdout.
 
-`build:wait`'s errored ladder gains a rung naming `npx @expo/agent-cli inspect:build-log --file <path>`, and its `why` says the step in between out loud: once the log above is saved to a file. The obvious rung would have been the reserved `<build-id>` form, which does not work. A follow-up is the next thing to run ([[0009-smart-followups]]). A rung that cannot be run is worse than no rung. Submissions do not get it at all: a submission log is not a native build log.
+`build:wait`'s errored ladder gains a rung naming `npx @expo/agent-cli inspect:build-log --file <path>`, and its `why` says the step in between out loud: once the log above is saved to a file. When it was written the `<build-id>` form was reserved and did not work; since 2026-09-15 it does (`inspect:build-log --eas --<platform> <build-id>`, [[0012-build-explain]]), and a revived `build:wait` should name that instead. A follow-up is the next thing to run ([[0009-smart-followups]]). A rung that cannot be run is worse than no rung. Submissions do not get it at all: a submission log is not a native build log.
 
 ## runtime:network
 
@@ -139,7 +139,6 @@ No code on the shelf. Do not design these in the living LLPs.
 
 **Commands and flags**
 
-- `inspect:build-log <build-id>`. Reserved today (`BUILD_ID_UNSUPPORTED`). Needs eas-cli `build:logs`.
 - `new` one-line description, EAS init, and a first-boot check. v1 `new` is `create-expo --yes` plus optional git init.
 - `--base <ref>` on a fingerprint comparison. `--build` covers the common case.
 - `--preset` / `--profile` on `status`.

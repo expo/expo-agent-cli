@@ -372,7 +372,7 @@ declare module '2g' {
      * @see llp/0012-build-explain.rfc.md
      */
     'cli:build_explain': {
-      source: 'file' | 'stdin' | 'local';
+      source: 'file' | 'stdin' | 'local' | 'eas';
       lines: number;
       bytes: number;
       /** True when the log was longer than the line budget and the oldest lines were dropped. */

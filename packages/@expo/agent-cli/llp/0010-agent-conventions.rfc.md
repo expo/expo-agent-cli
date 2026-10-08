@@ -203,7 +203,7 @@ Gaps found while building the tool layer. Per [[0001-agentic-cli-on-expo-cli]] c
 
 `eas-cli` (swept against 22.4.0, 2026-08-26):
 
-- `build:logs`, to read a build's logs from the CLI. `build:view --json` hands back a `logFiles` array of signed GCS URLs, which is a fetch away and is not the same thing.
+- `build:logs`, to read a build's logs from the CLI. `build:view --json` hands back a `logFiles` array of signed GCS URLs, which is a fetch away and is not the same thing — `inspect:build-log --eas` makes that fetch itself since 2026-09-15 ([[0012-build-explain]]), and would retire it for `build:logs` the day it exists.
 - `credentials:list --json --non-interactive`.
 - `--non-interactive` on `build:view` and `submit:view`.
 - Typed non-interactive errors, a machine-readable code when a command cannot proceed without a prompt. This would retire the signature table.

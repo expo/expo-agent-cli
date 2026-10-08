@@ -81,6 +81,8 @@ describe('the --json shape', () => {
     expect(report.source).toEqual({
       kind: 'file',
       path: path.join(FIXTURES, 'metro-syntax-error.log'),
+      buildId: null,
+      logFiles: null,
       platform: null,
       bytes: expect.any(Number),
       lines: expect.any(Number),
@@ -273,5 +275,29 @@ describe('--local', () => {
       suggestedCommand: 'npx @expo/agent-cli dev --android',
       message: expect.stringContaining('no android build log'),
     });
+  });
+});
+
+describe('--eas', () => {
+  it('reports the build and its log files as the source, and names them again in the follow-ups', async () => {
+    const logPath = path.join(FIXTURES, 'xcodebuild-no-profile.log');
+    const read = await readLogFileAsync(logPath);
+
+    const report = buildExplainReport(
+      read,
+      { ...BASE_OPTIONS, source: { kind: 'eas', platform: 'ios', buildId: null }, platform: 'ios' },
+      { buildId: 'build-1', logFiles: 2 }
+    );
+
+    expect(report.source).toMatchObject({
+      kind: 'eas',
+      path: null,
+      buildId: 'build-1',
+      logFiles: 2,
+      platform: 'ios',
+    });
+    expect(report.followups.map((followup) => followup.command)).toContainEqual(
+      expect.stringContaining('inspect:build-log --eas --ios build-1')
+    );
   });
 });

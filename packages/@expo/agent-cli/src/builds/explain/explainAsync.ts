@@ -7,6 +7,7 @@
 // the command gives.
 
 import fs from 'node:fs';
+import { Readable } from 'node:stream';
 
 import { event } from '../../events';
 import { EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
@@ -14,6 +15,7 @@ import { buildExplainFollowUps, followUpsEnabled, reportFollowUps } from '../../
 import * as Log from '../../log';
 import { PROGRAM_PREFIX } from '../../programName';
 import { CommandError } from '../../utils/errors';
+import { fetchEasBuildLogAsync } from './easLog';
 import { extractFailure, logTail } from './extract';
 import { formatExplainReport } from './format';
 import { detectPhases } from './phases';
@@ -34,20 +36,32 @@ export async function explainAsync(options: ExplainOptions): Promise<void> {
   if (options.source.kind === 'local' && !fs.existsSync(options.source.path)) {
     throw noLocalBuildLogError(options.source);
   }
+  // @ref llp/0012-build-explain.rfc.md §What ships, and what is reserved
+  // An EAS build's log is fetched first, then read the way a pipe is: the bytes are in hand, and
+  // the line numbers of the report count the build's files in the order EAS wrote them.
+  const eas =
+    options.source.kind === 'eas'
+      ? await fetchEasBuildLogAsync(process.cwd(), {
+          platform: options.source.platform,
+          buildId: options.source.buildId,
+        })
+      : null;
   const read =
-    options.source.kind === 'stdin'
-      ? await readLogStreamAsync(process.stdin)
-      : await readLogFileAsync(options.source.path);
+    eas != null
+      ? await readLogStreamAsync(Readable.from([eas.text]))
+      : options.source.kind === 'file' || options.source.kind === 'local'
+        ? await readLogFileAsync(options.source.path)
+        : await readLogStreamAsync(process.stdin);
 
   if (read.lines.length === 0) {
-    throw emptyLogError(options);
+    throw emptyLogError(options, eas?.buildId ?? null);
   }
   // Before anything is extracted, and before a byte of it is quoted anywhere.
   if (!read.looksLikeText) {
     throw notALogError(options, read.controlRatio);
   }
 
-  const report = buildExplainReport(read, options);
+  const report = buildExplainReport(read, options, eas);
 
   event('build_explain', {
     source: report.source.kind,
@@ -77,7 +91,12 @@ export async function explainAsync(options: ExplainOptions): Promise<void> {
  * (llp/0006 §Output contract), and they must not depend on what the log held — an agent reading
  * `failure` on a log with no error in it gets `null`, not a missing key.
  */
-export function buildExplainReport(read: ReadLogResult, options: ExplainOptions): ExplainReport {
+export function buildExplainReport(
+  read: ReadLogResult,
+  options: ExplainOptions,
+  /** What the EAS fetch established, for an `eas` source. Null for every other one. */
+  eas: { buildId: string; logFiles: number } | null = null
+): ExplainReport {
   const phases = detectPhases(read.lines, options.platform);
   const extracted = extractFailure(read.lines, phases, {
     platform: options.platform,
@@ -91,14 +110,22 @@ export function buildExplainReport(read: ReadLogResult, options: ExplainOptions)
         failure: extracted.failure,
         phase: extracted.failure?.phase ?? null,
         moreMayExist: !options.all,
-        source: options.source,
+        source:
+          options.source.kind === 'eas'
+            ? { ...options.source, buildId: eas?.buildId ?? options.source.buildId }
+            : options.source,
       })
     : [];
 
   return {
     source: {
       kind: options.source.kind,
-      path: options.source.kind === 'stdin' ? null : options.source.path,
+      path:
+        options.source.kind === 'stdin' || options.source.kind === 'eas'
+          ? null
+          : options.source.path,
+      buildId: eas?.buildId ?? (options.source.kind === 'eas' ? options.source.buildId : null),
+      logFiles: eas?.logFiles ?? null,
       platform: options.platform,
       bytes: read.bytes,
       lines: read.lines.length,
@@ -157,7 +184,12 @@ function noLocalBuildLogError(source: {
  * anything at all and an agent has to carry them through its own context.
  */
 function notALogError(options: ExplainOptions, controlRatio: number): CommandError {
-  const where = options.source.kind === 'stdin' ? 'the data on stdin' : options.source.path;
+  const where =
+    options.source.kind === 'stdin'
+      ? 'the data on stdin'
+      : options.source.kind === 'eas'
+        ? `the log EAS served for build ${options.source.buildId ?? 'this platform'}`
+        : options.source.path;
   const error = new CommandError(
     'LOG_NOT_TEXT',
     [
@@ -178,7 +210,19 @@ function notALogError(options: ExplainOptions, controlRatio: number): CommandErr
  * `failure: null` means "the log was read and nothing matched", and an empty stdin means the log
  * never arrived. Reporting the first for the second would tell an agent its build log is clean.
  */
-function emptyLogError(options: ExplainOptions): CommandError {
+function emptyLogError(options: ExplainOptions, easBuildId: string | null): CommandError {
+  if (options.source.kind === 'eas') {
+    const error = new CommandError(
+      'EMPTY_LOG',
+      [
+        `The log files of EAS build ${easBuildId ?? options.source.buildId ?? ''} hold no bytes, so there is nothing to explain.`,
+        `Why: EAS named the files and they downloaded, and every one of them is empty. An empty log is not a log with no errors in it.`,
+        `How: open the build on expo.dev to see what EAS has for it.`,
+      ].join('\n')
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} inspect:build-log --help`;
+    return error;
+  }
   const error = new CommandError(
     'EMPTY_LOG',
     options.source.kind === 'stdin'

@@ -88,10 +88,17 @@ export interface Failure {
 
 /** Where the log came from, and what was actually read of it. */
 export interface ExplainSource {
-  /** `local` is the last native build `@expo/agent-cli dev` ran for the platform (`--local`). */
-  kind: 'file' | 'stdin' | 'local';
-  /** Absolute path for `--file` and `--local`; null for `--stdin`. */
+  /**
+   * `local` is the last native build `@expo/agent-cli dev` ran for the platform (`--local`);
+   * `eas` is an EAS build's log, fetched by this CLI (`--eas`, or a build id).
+   */
+  kind: 'file' | 'stdin' | 'local' | 'eas';
+  /** Absolute path for `--file` and `--local`; null for `--stdin` and `--eas`. */
   path: string | null;
+  /** The EAS build the log belongs to, for `--eas`. Null for every other source. */
+  buildId: string | null;
+  /** How many log files that build had, all read into this report. Null for every other source. */
+  logFiles: number | null;
   /** The platform hint the caller passed, which narrows the rule table. Null when none. */
   platform: 'ios' | 'android' | null;
   /** Bytes read off the stream. */
