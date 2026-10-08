@@ -5,7 +5,7 @@
 // @ref llp/0015-backend-selection-and-config.rfc.md §One flag for EAS
 //
 // Every command that takes `--eas` — `dev`, `smoke`, `navigate`, `runtime:reload`, `runtime:stop` —
-// and every section that asks EAS a question (`status --explain`, the auth line) spawns the EAS CLI
+// and every section that asks EAS a question (the build lookup of `status`, the auth line) spawns the EAS CLI
 // through a package runner (`npx eas-cli` / `bunx eas-cli`, `src/utils/easCli.ts`). This script is
 // what that runner hands the argv to under test (`e2e/stubEas.ts` installs it). It used to be three
 // scripts, one per test file, each answering the verbs its file happened to need; a command that

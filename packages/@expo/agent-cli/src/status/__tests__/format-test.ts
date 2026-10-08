@@ -267,12 +267,12 @@ describe(formatStatusReport, () => {
   });
 
   // @ref llp/0024-cli-ui.rfc.md §The template
-  // "EAS was not asked — pass --explain" is a fact about the run, and it was on the ios row and
+  // "EAS was not asked" is a fact about the run, and it was on the ios row and
   // again on the android row. A report whose whole shape is one fact per line cannot say the same
   // sentence twice and still be scannable.
   it(`should say a detail every platform shares once, under the rows`, () => {
     const base = mockReport();
-    const asked = 'EAS was not asked — pass --explain';
+    const asked = 'EAS was not asked';
     const rendered = report(
       mockReport({
         freshness: {
@@ -1006,9 +1006,9 @@ describe('the impact line', () => {
 });
 
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
-// `--explain` is recognised by its *data* — a per-source list that is present, an OTA verdict that
-// was resolved — so the text and `--json` can never disagree about what the caller asked for.
-describe('the --explain detail', () => {
+// The change detail is recognised by its *data* — a per-source list that is present, an OTA verdict
+// that was resolved — so the text and `--json` can never disagree.
+describe('the change detail', () => {
   function withSources(count: number): StatusReport {
     return mockReport({
       freshness: {
@@ -1054,7 +1054,8 @@ describe('the --explain detail', () => {
   it(`lists the sources that moved, with what each one is`, () => {
     const rendered = report(withSources(2));
 
-    expect(rendered).toContain('ios changed');
+    expect(rendered).toContain('changed');
+    expect(rendered).toMatch(/ios: \d+ sources?/);
     expect(rendered).toContain('added   node_modules/module-0 [native-module]');
     expect(rendered).toContain('node_modules/module-1');
   });
@@ -1160,7 +1161,7 @@ describe('the eas build line', () => {
     source: null,
     checkedAt: null,
     ageMs: null,
-    reason: 'EAS was not asked — pass --explain',
+    reason: 'this machine is not signed in to Expo',
   };
 
   it(`is left out entirely on a default run with nothing cached`, () => {
@@ -1270,7 +1271,7 @@ describe('the eas build line', () => {
 });
 
 // @ref llp/0021-honest-reports.rfc.md §The rules — friction
-// run 7's F66. `status --explain --build abc123` printed an ordinary report and exit 0, with the id
+// run 7's F66. `status --build abc123` printed an ordinary report and exit 0, with the id
 // nowhere on it, while the JSON carried the whole reason the comparison never happened.
 describe('a section that printed a line and still failed', () => {
   const failure = [

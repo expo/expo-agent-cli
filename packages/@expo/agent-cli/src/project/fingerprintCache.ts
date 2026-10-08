@@ -2,7 +2,7 @@
 // The record of fingerprints this project already computed, in `.expo/` beside the other records
 // (`agent-cli-last-build.json`, `agent-cli-eas-builds.json`).
 //
-// The problem it solves is that `status --explain` computes three fingerprints — the whole project
+// The problem it solves is that `status` computes three fingerprints — the whole project
 // for the freshness headline, then iOS and android for the EAS build lookup — and the same three,
 // unchanged, on the next run a minute later. Each costs about a second [observed — 1.09–1.10 s
 // whole-project and 0.95 s per platform on a real SDK 57 app, 2026-08-27].
@@ -238,7 +238,7 @@ export function writeFingerprintCacheAsync(
   if (!hash || !cliVersion || !manifest.cacheable) {
     return Promise.resolve();
   }
-  // Queued rather than started: one `status --explain` computes three fingerprints and two of them
+  // Queued rather than started: one `status` computes three fingerprints and two of them
   // finish together, and this record is one file holding all three. Two concurrent
   // read-modify-writes lose an entry at best and truncate the file at worst — which is how three
   // entries became none in an e2e run [observed — 2026-08-27, before this queue existed].

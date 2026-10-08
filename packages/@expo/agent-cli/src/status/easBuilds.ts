@@ -13,16 +13,17 @@
 //    1.10–1.33 s over five live runs, hit and miss alike, against a warm CLI [observed — same
 //    session]. `status` measures ~65 ms.
 //
-// So the network half is opt-in (`--explain`) and the **cache is always read**, because the cache
-// is exact rather than approximate: the whole-project hash *dominates* the per-platform ones —
-// `--platform` filters the same source list, so an unchanged project hash implies unchanged
-// per-platform hashes — which makes the hash `status` already has a sound key for an answer about
-// a hash it does not have. A hit costs one `readFileSync` and is as true as the lookup that wrote
-// it. See the LLP section for the argument in full.
+// So the **cache is read first**, and it is exact rather than approximate: the whole-project hash
+// *dominates* the per-platform ones — `--platform` filters the same source list, so an unchanged
+// project hash implies unchanged per-platform hashes — which makes the hash `status` already has a
+// sound key for an answer about a hash it does not have. A hit costs one `readFileSync` and is as
+// true as the lookup that wrote it. See the LLP section for the argument in full.
 //
-// A `none` is remembered too, for a short while (§A none is remembered for five minutes), and a
-// project whose static config says it is not linked to EAS is never asked at all: `eas build:list`
-// refuses an unlinked project, and this CLI can read that refusal off `app.json` for free.
+// The network half used to be opt-in (`--explain`, until 2026-09-15). It runs on every `status`
+// now, and what keeps that affordable is what is remembered: a hit for as long as the key stands,
+// a `none` for five minutes (§EAS_NONE_CACHE_TTL_MS), and a project whose static config says it
+// is not linked to EAS is never asked at all — `eas build:list` refuses an unlinked project, and
+// this CLI can read that refusal off `app.json` for free.
 
 import fs from 'fs';
 import path from 'path';
@@ -45,9 +46,9 @@ export const EAS_BUILDS_FILE_NAME = 'agent-cli-eas-builds.json';
 /**
  * How long one platform's lookup may take, fingerprint run and network call together.
  *
- * Generous, because it is only ever spent by a caller who asked for it: the two halves measured
- * 1.24 s and 1.10–1.33 s live, so a budget under about four seconds would abandon answers that were
- * on their way. Expiring costs the platform an answer (`unknown`), never the report.
+ * Generous, because it is spent at most once per fingerprint per five minutes: the two halves
+ * measured 1.24 s and 1.10–1.33 s live, so a budget under about four seconds would abandon answers
+ * that were on their way. Expiring costs the platform an answer (`unknown`), never the report.
  */
 export const EAS_BUILD_LOOKUP_TIMEOUT_MS = 10_000;
 
@@ -61,7 +62,7 @@ export const EAS_BUILD_LOOKUP_TIMEOUT_MS = 10_000;
  * one [decided — 2026-08-27, wave 18]: a wider budget, still bounded, so the common case of a modest
  * install answers rather than expires — and never the minutes a cold install, or an unreachable
  * registry, can take, because `status` must not hang. A run that expires anyway says the download was
- * why, and the next run is warm. Only reached under `--explain`; a default `status` asks EAS nothing.
+ * why, and the next run is warm.
  *
  * A project that *pins* the CLI keeps the tighter budget above: the runner resolves it out of
  * `node_modules` without a network call at all.
@@ -109,8 +110,6 @@ interface CachedEntry {
 type EasBuildsRecord = Partial<Record<NativePlatform, CachedEntry>>;
 
 export interface EasBuildsOptions {
-  /** Whether this run may call EAS. False on every run without `--explain`. */
-  lookUp: boolean;
   /**
    * What the auth section answered.
    *
@@ -128,9 +127,9 @@ export interface EasBuildsOptions {
    * whether this section's own record may answer at all.
    *
    * @see llp/0023-fingerprint-caching.rfc.md — this is the section that pays for *two* of the three
-   * fingerprints a `status --explain` used to compute, so it is the one the cache helps most. A
-   * caller who refused that cache wants a measurement, so the remembered EAS answer is refused too:
-   * the flag is about what the caller will accept, not about which file the answer came out of.
+   * fingerprints a `status` computes, so it is the one the cache helps most. A caller who refused
+   * that cache wants a measurement, so the remembered EAS answer is refused too: the flag is about
+   * what the caller will accept, not about which file the answer came out of.
    */
   fingerprintCache?: boolean;
   /**
@@ -147,7 +146,7 @@ export interface EasBuildsOptions {
 /**
  * What EAS already has for this project, per platform.
  *
- * Reads the cache always and calls EAS only under `--explain`. Never throws: every way of not
+ * Reads the record first and calls EAS for what it does not answer. Never throws: every way of not
  * getting an answer is an `unknown` carrying the reason, so a section that could not be read costs
  * one line of the report and the command still exits 0.
  */
@@ -160,11 +159,11 @@ export async function readEasBuildsStatusAsync(
   // Once for the whole section rather than once per platform: the answer cannot differ between them,
   // and the two rungs it may take both touch the filesystem. It is also what lets the deadline below
   // say *why* a lookup ran out of time.
-  const easCli = options.lookUp ? resolveEasCli(projectRoot) : null;
+  const easCli = resolveEasCli(projectRoot);
   const platforms = await Promise.all(
     PLATFORMS.map((platform) => readPlatformAsync(projectRoot, platform, record, options, easCli))
   );
-  return { askedEas: options.lookUp, platforms };
+  return { askedEas: platforms.some((platform) => platform.source === 'eas'), platforms };
 }
 
 async function readPlatformAsync(
@@ -187,11 +186,6 @@ async function readPlatformAsync(
     }
   }
 
-  if (!options.lookUp) {
-    // Short on purpose: this is the reason on every platform of every default run, and the cost it
-    // is short about is spelled out in `status --help`, which is where somebody weighing it looks.
-    return unknown(platform, null, 'EAS was not asked — pass --explain');
-  }
   if (options.auth?.loggedIn === false) {
     // The answer is already in the report. A second probe would spend a second to be told the
     // same thing, and this section must never be the reason a signed-out machine waits.

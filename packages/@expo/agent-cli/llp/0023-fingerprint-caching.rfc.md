@@ -10,7 +10,7 @@
 
 ## Summary
 
-`@expo/agent-cli status --explain` computed three fingerprints, and each one cost about a second. The three are the same three the previous run computed, in a project nobody touched in between. This document is the two caches that fix that. It is also the rules that keep the report honest about which of them answered, because a cached hash is a claim about the past reported in the present tense.
+`@expo/agent-cli status --explain` (every `status`, since the flag went on 2026-09-15) computed three fingerprints, and each one cost about a second. The three are the same three the previous run computed, in a project nobody touched in between. This document is the two caches that fix that. It is also the rules that keep the report honest about which of them answered, because a cached hash is a claim about the past reported in the present tense.
 
 Two layers, and they solve different problems:
 
@@ -25,7 +25,7 @@ The design is deliberately cheap and deliberately incomplete. The key is a stamp
 
 The key is `(projectRoot, platform ?? 'all', preset ?? 'default', cacheAllowed)`. The last component is there so a caller that passed `--no-fingerprint-cache` is never handed the memo of a caller that did not.
 
-This layer alone buys nothing on `status --explain`. The three fingerprints that run there have three different keys (`all`, `ios`, `android`), so there is no duplicate for the memo to collapse. It is kept because it is correct and cheap, it holds for the paths where a key does repeat, and it is the guard that keeps a future call site from silently doubling the cost. The win in the numbers is Layer 2's.
+This layer alone buys nothing on `status`. The three fingerprints that run there have three different keys (`all`, `ios`, `android`), so there is no duplicate for the memo to collapse. It is kept because it is correct and cheap, it holds for the paths where a key does repeat, and it is the guard that keeps a future call site from silently doubling the cost. The win in the numbers is Layer 2's.
 
 `clearFingerprintMemo(projectRoot?)` drops it. `@expo/agent-cli dev` calls it after every plan step, because an install, a prebuild, or a build has just changed the project.
 
@@ -161,6 +161,6 @@ On a real SDK 57 Expo Router app, a warm `status --explain` is about 38% faster 
 
 Unit, `src/project/__tests__/`: stamp match and mismatch including the two limits (same-size rewrite is a match, a touch without a change is a miss); the walk up to a hoisted lockfile; config-referenced files including directories; the silent-vanish class in both directions; native directories absent from the key; the invalidation matrix; the TTL; concurrent writes; the memo never crossing the cache-allowed boundary. `devAsync-test.ts` asserts both caches dropped after a completed plan step.
 
-E2E, `e2e/__tests__/status-test.ts`: the stub `fingerprint` bin records every invocation. A memo hit, a cache hit, and a recomputation all print the same hash. One default run spawns one. `--explain` spawns three. The next `--explain` spawns none and says `cache`. Touching `app.json` or adding a lockfile spawns again. Touching `index.js` does not. A nested native edit is not seen and the report names the gap.
+E2E, `e2e/__tests__/status-test.ts`: the stub `fingerprint` bin records every invocation. A memo hit, a cache hit, and a recomputation all print the same hash. A run of an unlinked project spawns one. A linked project spawns three, at once. The next run spawns none and says `cache`. Touching `app.json` or adding a lockfile spawns again. Touching `index.js` does not. A nested native edit is not seen and the report names the gap.
 
 Several tests had to alter a file's length rather than only its bytes. An in-memory filesystem can write twice inside one millisecond, so a same-length rewrite moves neither half of the stamp.

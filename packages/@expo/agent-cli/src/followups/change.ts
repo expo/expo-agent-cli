@@ -112,7 +112,7 @@ export function buildChangeFollowUps({
   if (otaSafe === false) {
     followups.push({
       id: 'change-ota-unsafe',
-      command: `${PROGRAM_PREFIX} status --explain --json`,
+      command: `${PROGRAM_PREFIX} status --json`,
       why: 'An update published now would reach installed builds that cannot run it — read the "ota" section for the runtimeVersion policy that decides this, before running eas update.',
     });
   } else if (otaSafe === true && impactClass !== 'needs-native-build') {
