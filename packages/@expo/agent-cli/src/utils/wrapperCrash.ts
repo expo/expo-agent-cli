@@ -198,10 +198,9 @@ const RUNNER_NOISE = [
  *     whole `eas init` explanation on stdout with one sentence on stderr
  *     [observed — 2026-08-26, `src/__fixtures__/eas/README.md`] — so anything on stdout is an answer,
  *     whatever the runner also said.
- *  2. **The first thing on stderr is the runner's.** The runner prints before it hands over, so a CLI
- *     that got as far as saying anything says it first. A first line this list does not recognise is
- *     left alone and quoted, which is the conservative direction: a vaguer reason costs a reader a
- *     re-run, and a wrong attribution costs them the truth.
+ *  2. **Every non-empty line on stderr is the runner's.** The CLI can print its refusal after the
+ *     runner's progress on the same stream. Any unrecognised line leaves that refusal to the caller
+ *     instead of claiming the CLI never ran.
  */
 export function looksLikeRunnerNoise({ exitCode, stdout, stderr }: WrapperCrashInput): boolean {
   if (exitCode === 0 || exitCode == null) {
@@ -210,8 +209,7 @@ export function looksLikeRunnerNoise({ exitCode, stdout, stderr }: WrapperCrashI
   if (stdout.trim()) {
     return false;
   }
-  const line = firstNonEmptyLine(stderr);
-  return line != null && RUNNER_NOISE.some((pattern) => pattern.test(line));
+  return stderr.trim().length > 0 && !withoutRunnerNoise(stderr).trim();
 }
 
 /** The runner's own first line, which is the one a reason would otherwise have quoted. */
