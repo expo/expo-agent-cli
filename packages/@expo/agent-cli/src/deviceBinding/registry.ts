@@ -2,7 +2,6 @@
 // @ref llp/0030-one-device-per-worktree.rfc.md §Lock
 // The registry directory, its binding files, and the one machine-wide lock every write runs under.
 
-import { spawnSync } from 'child_process';
 import { randomBytes } from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -12,6 +11,7 @@ import { canonicalizeExistingPath } from '../utils/dir';
 import { getExpoHomeDirectory } from '../utils/expoHome';
 import { registryLockedError } from './errors';
 import { event } from './events';
+import { commandOf } from './tools';
 import {
   parseBinding,
   type Binding,
@@ -41,6 +41,19 @@ export function bindingPathFor(
     registryDirectory(),
     `${digestForRoot(projectRoot)}-${platform}-${backend}.json`
   );
+}
+
+/** Every binding file of one platform and backend, of every worktree. */
+export function listBindingFiles(platform: DevicePlatform, backend: BindingBackend): string[] {
+  const directory = registryDirectory();
+  let names: string[];
+  try {
+    names = fs.readdirSync(directory);
+  } catch {
+    return [];
+  }
+  const suffix = `-${platform}-${backend}.json`;
+  return names.filter((name) => name.endsWith(suffix)).map((name) => path.join(directory, name));
 }
 
 export type BindingRead =
@@ -184,22 +197,7 @@ function describeLock(lock: string): {
   } catch {
     // The holder gave up between the two reads.
   }
-  return { pid: holder.pid, ageMs, command: commandOf(holder.pid) };
-}
-
-function commandOf(pid: number): string | null {
-  if (process.platform === 'win32') {
-    return null;
-  }
-  try {
-    const result = spawnSync('ps', ['-o', 'command=', '-p', String(pid)], {
-      encoding: 'utf8',
-      timeout: 2_000,
-    });
-    return (result?.status === 0 && result.stdout?.trim()) || null;
-  } catch {
-    return null;
-  }
+  return { pid: holder.pid, ageMs, command: commandOf(holder.pid) || null };
 }
 
 function rmIgnoring(file: string, codes: string[]): void {
