@@ -1,0 +1,17 @@
+{
+  "start": {
+    "exitCode": 1,
+    "stdout": "- 🚀 Creating simulator session\n✔ Simulator session created (id: sess-billed, saved to .env.eas-simulator) https://expo.dev/accounts/example/projects/app/simulator-sessions/sess-billed\n- ⏳ Waiting for agent-device session to be ready\n✖ Timed out waiting for agent-device session to start\nTimed out after 600s waiting for agent-device session to start (excluding time in the queue).\n",
+    "stderr": "    Error: simulator command failed.\n"
+  },
+  "stop": {
+    "exitCode": 1,
+    "stdout": "- 🛑 Stopping simulator session sess-billed\n✖ Failed to stop simulator session sess-billed\nService unavailable\n",
+    "stderr": "    Error: GraphQL request failed.\n"
+  },
+  "permissions": {
+    "exitCode": 1,
+    "stdout": "You don't have the required permissions to perform this operation.\n\nThis can sometimes happen if you are logged in as incorrect user.\nRun eas whoami to check the username you are logged in as.\nRun eas login to change the account.\n",
+    "stderr": "    Error: GraphQL request failed.\n"
+  }
+}

@@ -31,6 +31,17 @@ Nothing else is altered: keys, casing, ordering and null-ness are as the CLI pri
 | `whoami.txt`                   | `eas whoami`                                                                                                   | The account name is the **first** line; the email, and an `Accounts:` list when the actor belongs to more than their personal account, follow it. See `src/needsHuman/preflight.ts`.                                                                                                |
 | `simulator-availability.json`  | `eas simulator:availability --json --non-interactive`                                                          | `{ available, accountName }`. The one `simulator:*` payload that can be recorded without starting a session. See `src/device/cloudSimulator.ts`.                                                                                                                                    |
 
+## Failure stream fixtures
+
+`simulator-failures.json` is source-derived test data, not a live recording. It preserves the
+non-TTY stdout/stderr split from EAS CLI: disabled ora progress and failure messages go to stdout,
+while oclif writes the generic closing error to stderr. Session/account values are placeholders.
+The stop case uses a synthetic service refusal. Sources checked on 2026-10-08 at
+[`expo/eas-cli@1016aa3`](https://github.com/expo/eas-cli/tree/1016aa35f3aa3d22903c0a6d6ea682c19d5dad87/packages/eas-cli/src):
+`ora.ts`, `commands/simulator/index.ts`, `commands/simulator/stop.ts`, and
+`commandUtils/EasCommand.ts`. The permissions fixture reproduces the account-switching guidance,
+without the variable GraphQL request details.
+
 ## The non-terminal statuses
 
 `NEW`, `IN_QUEUE` and `IN_PROGRESS` are only observable while a build is running, so recording them

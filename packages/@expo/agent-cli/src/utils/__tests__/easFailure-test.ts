@@ -4,6 +4,7 @@
 // raw output.
 
 import { classifyEasFailure, easFailureReason, readEasFailure } from '../easFailure';
+import simulatorFailures from '../../__fixtures__/eas/simulator-failures.json';
 
 /** The whole of what an unlinked project's `eas deploy` prints [observed — friction run 9]. */
 const UNLINKED_OUTPUT = [
@@ -74,6 +75,7 @@ describe(classifyEasFailure, () => {
     ['You are not logged in. Run "eas login".'],
     ['Error: Not logged in'],
     ['An Expo user account is required. Must be logged in.'],
+    ['Either log in with "eas login" or set the EXPO_TOKEN environment variable to authenticate.'],
   ])(`should read a signed-out machine from %p`, (output) => {
     expect(classifyEasFailure(output)?.command).toBe('npx @expo/agent-cli login');
   });
@@ -86,6 +88,11 @@ describe(classifyEasFailure, () => {
   it(`should answer null for empty output`, () => {
     expect(classifyEasFailure('')).toBeNull();
   });
+
+  it.each([simulatorFailures.permissions.stdout, 'Run eas login to change the account.'])(
+    'does not diagnose a missing login from account-switching advice',
+    (output) => expect(classifyEasFailure(output)).toBeNull()
+  );
 });
 
 // @ref llp/0027-everything-on-eas.rfc.md §What EAS said
@@ -114,6 +121,51 @@ describe('the one-line summary', () => {
 describe(readEasFailure, () => {
   const RUNNER =
     'Resolving dependencies\nResolved, downloaded and extracted [214]\nSaved lockfile\n';
+
+  it.each([
+    [simulatorFailures.start, '✖ Timed out waiting for agent-device session to start'],
+    [simulatorFailures.stop, '✖ Failed to stop simulator session sess-billed'],
+    [
+      simulatorFailures.permissions,
+      "You don't have the required permissions to perform this operation.",
+    ],
+  ])('reads the failure from the non-TTY stream split', (result, line) => {
+    expect(readEasFailure(result)).toEqual({ kind: 'line', line });
+  });
+
+  it('skips progress and a session receipt on stderr too', () => {
+    expect(readEasFailure({ stdout: '', stderr: RUNNER + simulatorFailures.start.stdout })).toEqual(
+      {
+        kind: 'line',
+        line: '✖ Timed out waiting for agent-device session to start',
+      }
+    );
+  });
+
+  it('keeps a generic GraphQL closing error when there is no explanation', () => {
+    expect(readEasFailure({ stdout: '', stderr: 'Error: GraphQL request failed.\n' })).toEqual({
+      kind: 'line',
+      line: 'Error: GraphQL request failed.',
+    });
+  });
+
+  it('keeps evidence that EAS started when it printed only progress before a signal', () => {
+    expect(readEasFailure({ stdout: '- 🚀 Creating simulator session\n', stderr: RUNNER })).toEqual(
+      {
+        kind: 'line',
+        line: '- 🚀 Creating simulator session',
+      }
+    );
+  });
+
+  it('filters runner notices on stdout before reading the explanation', () => {
+    expect(
+      readEasFailure({ stdout: 'npm notice update available\nService unavailable\n', stderr: '' })
+    ).toEqual({
+      kind: 'line',
+      line: 'Service unavailable',
+    });
+  });
 
   it.each([
     [
@@ -218,5 +270,16 @@ describe(easFailureReason, () => {
     expect(easFailureReason({ exitCode: null, stdout: '', stderr: '' }, invocation)).toBe(
       '"bunx eas-cli@latest simulator:start" exited on a signal: it printed nothing'
     );
+  });
+
+  it('reports a runner interrupted by a signal without recommending a local install', () => {
+    const reason = easFailureReason(
+      { exitCode: null, stdout: '', stderr: 'Resolving dependencies\n' },
+      invocation
+    );
+    expect(reason).toContain('exited on a signal');
+    expect(reason).not.toContain('exited null');
+    expect(reason).not.toContain('install --save-dev');
+    expect(reason).toContain('run it again');
   });
 });

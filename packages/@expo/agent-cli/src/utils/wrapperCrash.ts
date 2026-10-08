@@ -245,8 +245,8 @@ function firstNonEmptyLine(output: string): string | null {
  *
  * The claim is about the **runner**, and it is the whole point: this is not the service refusing and
  * not a broken install of the package either — it is `bunx` or `npx` exiting before the CLI ran. So
- * the line it printed is quoted *as the runner's*, and the recovery is the one that removes the
- * runner from the path: pinning the CLI into the project.
+ * the line it printed is quoted *as the runner's*. A retry may finish the download; repeated failures
+ * need the runner's registry/network error, not a new dependency in the user's project.
  */
 export function runnerNoiseReason(
   { tool, exitCode }: Pick<WrapperCrashInput, 'tool' | 'exitCode'>,
@@ -255,10 +255,10 @@ export function runnerNoiseReason(
 ): string {
   const service = tool === 'eas' ? 'EAS' : 'the Expo CLI';
   return (
-    `"${invocation}" failed to deliver the ${tool} CLI: it exited ${exitCode} having printed only its own ` +
+    `"${invocation}" failed to deliver the ${tool} CLI: it exited ${exitCode ?? 'on a signal'} having printed only its own ` +
     `install progress${noiseLine ? ` ("${noiseLine}")` : ''} and nothing an ${tool} run would print, ` +
-    `so nothing here is ${service}'s answer — run it again, or pin the CLI into the project ` +
-    `("npm install --save-dev ${tool === 'eas' ? 'eas-cli' : 'expo'}") so no download can race`
+    `so nothing here is ${service}'s answer — run it again to retry the download; ` +
+    `if it keeps failing, check the runner's output and access to the package registry`
   );
 }
 
