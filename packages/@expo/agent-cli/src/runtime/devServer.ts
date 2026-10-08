@@ -175,6 +175,13 @@ function foundBy(source: DevServerSource): { source: DevServerSource; discovered
   return { source, discovered: source === 'lock' || source === 'log' || source === 'scan' };
 }
 
+/**
+ * How long a server that answered the probe gets to name its project root on `GET /status`. Longer
+ * than the probe's budget: the headers flush before the bundler works, so only a stalled event loop
+ * is slow here, and a stall must not turn a running dev server into "not running".
+ */
+const STATUS_READ_TIMEOUT_MS = 3000;
+
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder — the five steps, what
 // each one proves, and why none may be skipped on the strength of a faster one.
 /**
@@ -196,13 +203,6 @@ function foundBy(source: DevServerSource): { source: DevServerSource; discovered
  *   is the only thing that can stop that probe. The scan's own budget applies as well as it, never
  *   instead of it.
  */
-/**
- * How long a server that answered the probe gets to name its project root on `GET /status`. Longer
- * than the probe's budget: the headers flush before the bundler works, so only a stalled event loop
- * is slow here, and a stall must not turn a running dev server into "not running".
- */
-const STATUS_READ_TIMEOUT_MS = 3000;
-
 export async function discoverDevServerAsync(
   explicitUrl?: string,
   {
