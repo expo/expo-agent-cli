@@ -24,14 +24,13 @@ import type { CachedBuild } from './types';
  * nicety; a minute is not.
  *
  * The caller that *did* ask — `status --explain` — passes a wider budget of its own
- * (`EAS_BUILD_RUNNER_TIMEOUT_MS`, `src/status/easBuilds.ts`). Either way a run that expires says the
- * download was why, via {@link runnerDownloadNote}, and says that the next run is warm — so the cost
- * of guessing this too low is a re-run, never a wrong answer.
+ * (`EAS_BUILD_RUNNER_TIMEOUT_MS`, `src/status/easBuilds.ts`). A run that expires names the possible
+ * download cost via {@link runnerDownloadNote}, without claiming that a retry will have a warm cache.
  */
 export const BUILD_CACHE_TIMEOUT_MS = 20_000;
 
 /**
- * What a timeout adds to its reason when the CLI was being downloaded rather than merely slow.
+ * What a timeout adds to its reason when the invocation may need to download the CLI.
  *
  * Exported because the two timeouts a lookup can hit are in different modules — this one's, and the
  * per-platform deadline `status` wraps it in (`src/status/easBuilds.ts`) — and a reader should not
@@ -41,11 +40,9 @@ export function runnerDownloadNote(easCli: EasCli | null): string {
   if (!mayDownloadEasCli(easCli)) {
     return '';
   }
-  // Both halves are real. `@latest` installs the package on a first run, and asks the registry on
-  // every run — so a machine that cannot reach one spends the whole budget here [observed — live,
-  // 2026-08-27: ~70 s before npm gave up]. A reader who cannot tell those apart re-runs and finds
-  // out, which is why the sentence names both and promises nothing.
-  return `, and "${easCliLabel(easCli!)}" was fetching the EAS CLI: the install happens once, so a re-run should answer — unless this machine cannot reach the npm registry, in which case pinning the CLI into the project ("npm install --save-dev eas-cli") is what makes this section work offline`;
+  // An unpinned spec may need a download or registry check, but the timeout alone does not tell us
+  // which part of the command used the budget.
+  return `, and "${easCliLabel(easCli!)}" may need to download the EAS CLI first; retry the command, and check access to the package registry if the timeout persists`;
 }
 
 /**

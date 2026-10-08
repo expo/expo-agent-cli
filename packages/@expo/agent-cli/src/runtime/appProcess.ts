@@ -16,6 +16,7 @@ import {
 } from '../device/cloudSimulator';
 import { quoteForDeviceShell } from '../navigate/deepLink';
 import type { DeviceBackend, NavigatePlatform } from '../navigate/device';
+import { EAS_RUNNER_RECOVERY } from '../utils/easCli';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 
 export interface StopAppCommand {
@@ -254,9 +255,7 @@ async function stopAppOnCloudAsync(params: StopAppParams): Promise<StopAppResult
       ok: false,
       verified: false,
       wasAlreadyStopped: false,
-      // Not an install line for a *missing* CLI: the resolver's third rung downloads the published
-      // one, so what failed here is a file that exists and would not start (`src/utils/easCli.ts`).
-      reason: `could not run "${result.command}": ${result.spawnError}. Add the EAS CLI to the project with "npm install --save-dev eas-cli" — the project's own copy is resolved first, so it takes precedence over whatever could not be spawned.`,
+      reason: `could not run "${result.command}": ${result.spawnError}; ${EAS_RUNNER_RECOVERY}`,
     };
   }
   if (result.exitCode !== 0) {

@@ -11,6 +11,7 @@ import {
   findCachedBuildAsync,
   lookUpBuildPlatformAsync,
   lookUpCachedBuildAsync,
+  runnerDownloadNote,
   parseBuildPlatform,
   parseCachedBuild,
 } from '../buildCache';
@@ -55,6 +56,13 @@ function mockSpawn(result: Partial<Awaited<ReturnType<typeof spawnSubprocessAsyn
 }
 
 const source = { type: 'dir', filePath: 'node_modules/x', reasons: ['expoAutolinkingIos'] };
+
+it('describes a possible runner download without prescribing a project dependency', () => {
+  expect(runnerDownloadNote(easCli)).toContain('may need to download');
+  expect(runnerDownloadNote(easCli)).toContain('package registry');
+  expect(runnerDownloadNote(easCli)).not.toContain('install --save-dev');
+  expect(runnerDownloadNote({ ...easCli, pinned: true })).toBe('');
+});
 
 beforeEach(() => {
   vi.mocked(spawnSubprocessAsync).mockReset();
@@ -191,6 +199,36 @@ describe(compareWithEasBuildAsync, () => {
     expect(result.error).toContain('build-1');
     expect(result.error).toContain('Build not found');
     expect(result.error).toContain('eas-cli@latest build:list');
+  });
+
+  it.each([
+    [
+      'EAS project not configured.\nAccounts you can create projects in: alice',
+      'init --account alice --non-interactive',
+    ],
+    [
+      'Either log in with "eas login" or set the EXPO_TOKEN environment variable to authenticate.',
+      'npx @expo/agent-cli login',
+    ],
+  ])(
+    'uses the recognized comparison failure to choose recovery advice',
+    async (stdout, recovery) => {
+      mockSpawn({ exitCode: 1, stdout, stderr: 'Error: fingerprint:compare command failed.' });
+      const result = await compareWithEasBuildAsync(easCli, projectRoot, 'build-1');
+      const how = result.error?.split('\n').find((line) => line.startsWith('How:'));
+      expect(how).toContain(recovery);
+      expect(how).not.toContain('build:list');
+      expect(result.error).toContain('build-1');
+    }
+  );
+
+  it('offers a runner retry without adding eas-cli to the project', async () => {
+    mockSpawn({ exitCode: null, stderr: 'Resolving dependencies\n' });
+    const result = await compareWithEasBuildAsync(easCli, projectRoot, 'build-1');
+    expect(result.error).toContain('exited on a signal');
+    expect(result.error).toContain('How: run this command again');
+    expect(result.error).not.toContain('install --save-dev');
+    expect(result.error).not.toContain('build:list');
   });
 
   // The "How" line of the ordinary error is advice about the build id and the sign-in, and neither

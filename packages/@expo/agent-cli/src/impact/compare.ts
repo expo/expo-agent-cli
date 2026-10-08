@@ -228,7 +228,7 @@ export async function compareWithEasBuildAsync(
           ? [
               `Could not compare against EAS build ${buildId}.`,
               `Why: ${runnerNoiseReason({ tool: 'eas', exitCode: result.exitCode }, easCliLabel(easCli), said.runnerLine)}.`,
-              `How: run this command again — the install completes once and the next run is warm. "npm install --save-dev eas-cli" pins the CLI into the project, which removes the download from every run.`,
+              `How: run this command again to retry the package download. If it keeps failing, check the runner's output and access to the package registry.`,
             ].join('\n')
           : wrapperCrash
             ? [
@@ -241,7 +241,9 @@ export async function compareWithEasBuildAsync(
                 `Why: "${[easCliLabel(easCli), ...args].join(' ')}" ${describeExit(result.exitCode, result.spawnError)}${
                   quoted ? `: ${quoted}` : ''
                 }`,
-                `How: check the id with "${easCommandPrefix()} build:list --limit 5 --json --non-interactive", and that this machine is signed in to the account that owns it.`,
+                said?.kind === 'cause'
+                  ? `How: ${said.cause.how}`
+                  : `How: check the id with "${easCommandPrefix()} build:list --limit 5 --json --non-interactive", and that this machine is signed in to the account that owns it.`,
               ].join('\n'),
     };
   }

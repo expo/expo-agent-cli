@@ -33,7 +33,13 @@ import path from 'path';
 import { classifySubprocessFailure } from '../needsHuman/detect';
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { PROGRAM_PREFIX } from '../programName';
-import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/easCli';
+import {
+  easCliArgs,
+  easCliLabel,
+  EAS_RUNNER_RECOVERY,
+  resolveEasCli,
+  type EasCli,
+} from '../utils/easCli';
 import { classifyEasFailure, easFailureReason } from '../utils/easFailure';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
@@ -1131,7 +1137,7 @@ export function cloudVerbFailedError(
       [
         `Could not run "${result.command}", so ${what}`,
         `Why: ${result.spawnError}`,
-        `How: add the EAS CLI to the project with "npm install --save-dev eas-cli", then run this command again. The project's own copy is the first thing this command looks for, so it takes precedence over whatever could not be spawned.`,
+        `How: ${EAS_RUNNER_RECOVERY}`,
       ].join('\n')
     );
   }
@@ -1212,17 +1218,16 @@ export function cloudVerbNotSupportedError(action: string): CommandError {
   return error;
 }
 
-/** The failure for a cloud run on a machine with no EAS CLI at all. */
+/** The failure for a cloud run on a machine with no reachable package runner. */
 export function easCliMissingError(): CommandError {
   const error = new CommandError(
     'EAS_CLI_MISSING',
     [
       'The EAS CLI could not be reached, so a cloud simulator cannot be driven from here.',
-      'Why: no "eas" binary was found in node_modules/.bin or on PATH, and no package runner ("npx" or "bunx") is on PATH either, so the published eas-cli could not be downloaded to stand in for one — and an EAS Simulator session is created and driven entirely through that CLI.',
-      'How: add the EAS CLI to the project with "npm install --save-dev eas-cli", then run this command again. If that command is also unavailable, PATH is missing the Node.js install that provides npm and npx — fix that first.',
+      'Why: no package runner ("npx" or "bunx") is on PATH, so nothing here can start the published EAS CLI — and an EAS Simulator session is created and driven entirely through that CLI.',
+      `How: ${EAS_RUNNER_RECOVERY}`,
     ].join('\n')
   );
-  error.suggestedCommand = 'npm install --save-dev eas-cli';
   return error;
 }
 

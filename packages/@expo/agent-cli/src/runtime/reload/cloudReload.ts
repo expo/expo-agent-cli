@@ -46,7 +46,7 @@ import {
 } from '../../device/cloudSimulator';
 import { resolveDeviceAsync, type NavigateDevice } from '../../navigate/device';
 import { hostPlatform } from '../../smoke/suggest';
-import { easFailureReason } from '../../utils/easFailure';
+import { easFailureReason, readEasFailure } from '../../utils/easFailure';
 import { resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { readConfiguredAppId, resolveAppId } from '../appId';
 import { debugEvent } from './events';
@@ -223,6 +223,24 @@ function refusalReason(result: CloudRunResult, what: string): string {
   const controller = controllerErrorOf(result);
   if (controller) {
     return `${what}: the session's controller answered ${controller.code} — "${controller.message}" — so the command reached the device and the device is what said no (${result.command})`;
+  }
+  const said = readEasFailure(result);
+  if (said.kind === 'runner-only') {
+    // simulator:exec relays an inner npx as well as the outer EAS runner. Only an explicit install
+    // notice names the package; a generic runner line cannot establish that EAS never started.
+    const packages = [
+      ...`${result.stderr}\n${result.stdout}`.matchAll(
+        /^\s*npm warn exec The following packages? (?:was|were) not found and will be installed: (.+)$/gm
+      ),
+    ].map((match) => match[1]!.trim());
+    const isEas = (spec: string) => /^eas-cli(?:@\S+)?$/.test(spec);
+    const innerPackage = packages.find((spec) => !isEas(spec));
+    if (innerPackage || packages.length === 0) {
+      const detail = innerPackage
+        ? `the package runner printed only installation output for "${innerPackage}"`
+        : `the package runner printed only "${said.runnerLine}"; the output does not identify which package was being installed`;
+      return `${what}: "${result.command}" exited ${result.exitCode ?? 'on a signal'}: ${detail} — run this command again to retry; if it keeps failing, check the runner's output and access to the package registry`;
+    }
   }
   return `${what}: ${easFailureReason(result, result.command)}`;
 }

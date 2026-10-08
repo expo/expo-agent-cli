@@ -24,7 +24,12 @@ import {
   UNTRUSTED_OUTPUT_END,
   wrapUntrustedAppOutput,
 } from '../runtime/untrusted';
-import { easCliLabel, resolveEasCliOrThrow, type EasCli } from '../utils/easCli';
+import {
+  easCliLabel,
+  EAS_RUNNER_RECOVERY,
+  resolveEasCliOrThrow,
+  type EasCli,
+} from '../utils/easCli';
 import { CommandError } from '../utils/errors';
 import { spawnExpoAsync } from '../utils/expoCli';
 import { toPosixPath } from '../utils/filePath';
@@ -490,11 +495,10 @@ function easCliUnavailable(command: string, spawnError: NodeJS.ErrnoException): 
     'EAS_CLI_MISSING',
     [
       `Could not run the EAS CLI (${command}), so nothing was shipped.`,
-      `Why: the file was found but spawning it failed (${spawnError.code ?? spawnError.message}), which usually means a broken or partial install.`,
-      `How: add the EAS CLI to the project with "npm install --save-dev eas-cli", then run this command again — the project's own copy is the first thing this command looks for, so it takes precedence over whatever is broken.`,
+      `Why: the package runner could not be spawned (${spawnError.code ?? spawnError.message}).`,
+      `How: ${EAS_RUNNER_RECOVERY}`,
     ].join('\n')
   );
-  error.suggestedCommand = 'npm install --save-dev eas-cli';
   return error;
 }
 
