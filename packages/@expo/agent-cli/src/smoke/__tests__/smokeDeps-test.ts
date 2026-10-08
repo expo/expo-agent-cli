@@ -104,8 +104,21 @@ describe('bootDevice', () => {
   });
 });
 
-it('smoke-releases-own-platform-only', async () => {
+it('smoke releases only its acquired platform and binding', async () => {
+  const { androidBindingFor } = await import('../../deviceBinding/__tests__/fakeTools');
+  const binding = androidBindingFor(projectRoot, 'emulator-5554', { kind: 'explicit' });
+  vi.mocked(acquireDeviceAsync).mockResolvedValue({
+    binding,
+    device: binding.device,
+    action: 'reused',
+    justBooted: false,
+  });
   vi.mocked(releaseWorktreeDevicesAsync).mockResolvedValue([]);
-  await buildSmokeDeps(projectRoot, resolveSmokeOptions(['--android'])).releaseDevice();
-  expect(releaseWorktreeDevicesAsync).toHaveBeenCalledWith(projectRoot, { platform: 'android' });
+  const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--android']));
+  await deps.bootDevice();
+  await deps.releaseDevice();
+  expect(releaseWorktreeDevicesAsync).toHaveBeenCalledWith(projectRoot, {
+    platform: 'android',
+    expected: binding,
+  });
 });
