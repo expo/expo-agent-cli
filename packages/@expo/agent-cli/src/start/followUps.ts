@@ -3,7 +3,7 @@
 // wrapper) and `@expo/agent-cli dev` (the plan executor). Both know which app the URL is for, which is the
 // one fact the builder cannot guess.
 
-import { readCloudSessionIdSync } from '../device/cloudSimulator';
+import { ownCloudBindings } from '../deviceBinding/cloud';
 import { probeLocalDeviceAsync, type LocalDeviceState } from '../device/localDevice';
 import {
   buildStartFollowUps,
@@ -106,9 +106,8 @@ export async function resolveStartFollowUpsAsync(
     webUrl: web && port != null ? `http://localhost:${port}` : null,
     tunnel: requestsTunnel(options.expoArgs),
     localDevice,
-    // One `stat`, and only worth taking when the probe said this machine has nothing: it is the
-    // only branch that changes because of it.
-    cloudSession: localDevice === 'absent' && readCloudSessionIdSync(projectRoot) != null,
+    // Read the live cloud binding only when the local probe found nothing. No service call.
+    cloudSession: localDevice === 'absent' && ownCloudBindings(projectRoot).length > 0,
     easJson: easJsonExistsSync(projectRoot),
     localBuild: hint.localBuild ?? null,
     onEas: eas,

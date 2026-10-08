@@ -1108,6 +1108,7 @@ describe('reloading an app on a cloud simulator session', () => {
       // A package runner has to be findable for any `eas` to be spawned at all
       // (`src/utils/easCli.ts` — one rung, and it is the runner).
       ...NPX_FILES,
+      [path.join(projectRoot, '.env.eas-simulator')]: 'EAS_SIMULATOR_SESSION_ID=session-1\n',
       [detachedLogPath(projectRoot)]: log.join('\n') + '\n',
     });
     resetPackageRunnerCache();
@@ -1125,9 +1126,14 @@ describe('reloading an app on a cloud simulator session', () => {
 
   /** The argv of every `eas` this run spawned, as one string per spawn. */
   function spawnedCommands(): string[] {
-    return vi
-      .mocked(spawn)
-      .mock.calls.map(([bin, args]) => [bin, ...((args as string[]) ?? [])].join(' '));
+    return vi.mocked(spawn).mock.calls.map(([bin, args]) => {
+      const argv = (args as string[]) ?? [];
+      if (argv.includes('simulator:exec') && argv.includes('-e')) {
+        const target = JSON.parse(argv.at(-1)!);
+        return [target.command, ...target.args].join(' ');
+      }
+      return [bin, ...argv].join(' ');
+    });
   }
 
   // The whole fix, in two verbs, and each half is there for something that was observed to break:

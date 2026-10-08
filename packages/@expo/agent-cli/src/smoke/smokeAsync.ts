@@ -8,6 +8,7 @@
 // the same function the command that owns the question already calls.
 
 import chalk from 'chalk';
+import { acquireCloudBindingAsync, releaseCloudBindingAsync } from '../deviceBinding/cloud';
 import path from 'path';
 
 import { devDetachAsync } from '../dev/detachAsync';
@@ -497,6 +498,11 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
           platform: options.platform,
         });
         if (probe.state === 'active' && probe.platform === options.platform && probe.sessionId) {
+          await acquireCloudBindingAsync(projectRoot, {
+            platform: options.platform,
+            id: probe.sessionId,
+            origin: 'dotenv',
+          });
           return { ok: true, sessionId: probe.sessionId, started: false, reason: null };
         }
         return {
@@ -524,6 +530,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     stopEasSession: async (sessionId) => {
       const { stopEasSessionAsync } = require('../device/eas') as typeof import('../device/eas');
       const result = await stopEasSessionAsync(projectRoot, sessionId);
+      if (result.ok) await releaseCloudBindingAsync(projectRoot, sessionId);
       return { ok: result.ok, target: sessionId, reason: result.reason };
     },
 

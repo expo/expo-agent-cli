@@ -27,6 +27,7 @@
 // `still-running` — exit 20 — about a process that was already gone, with a `How:` line offering
 // `--signal SIGKILL` for a pid nothing could signal.
 
+import { stopCloudSessionsAsync } from './stopCloudSessions';
 import chalk from 'chalk';
 
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
@@ -208,11 +209,17 @@ export async function devStopAsync(
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
-  if (options.eas) {
-    report.session = await stopProjectEasSessionAsync(projectRoot);
-  }
+  const cloud = options.eas ? await stopCloudSessionsAsync(projectRoot) : null;
+  if (cloud) report.session = cloud.session;
   const devServerOk = report.stopped || report.reason === 'not-running';
   Object.assign(report, await stopDevicesAsync(projectRoot, options, devServerOk));
+  if (cloud) {
+    report.devices = [
+      ...(report.devices ?? []).filter((entry) => entry.backend !== 'cloud'),
+      ...cloud.devices,
+    ];
+    report.deviceError ??= cloud.deviceError;
+  }
   report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
 
   event('stop_done', {
@@ -247,40 +254,6 @@ export async function devStopAsync(
     reportFollowUps('dev:stop', report.followups, { json: options.json });
   }
   return exitCode;
-}
-
-/**
- * End this project's EAS Simulator session, when it has one in progress.
- *
- * @ref llp/0027-everything-on-eas.rfc.md §dev:stop
- * Found the way every `--eas` command finds it — the service's listing, with the dotenv as the
- * tiebreaker — and stopped **by id**: the bare `eas simulator:stop` ends whatever the dotenv names,
- * which may be a session another run is driving. No session is an answer, not a failure.
- */
-async function stopProjectEasSessionAsync(
-  projectRoot: string
-): Promise<NonNullable<DevStopResultJson['session']>> {
-  const { probeCloudSessionAsync } =
-    require('../device/cloudSimulator') as typeof import('../device/cloudSimulator');
-  const { stopEasSessionAsync } = require('../device/eas') as typeof import('../device/eas');
-  const probe = await probeCloudSessionAsync({ projectRoot });
-  if (probe.state !== 'active' || probe.sessionId == null) {
-    return {
-      id: null,
-      stopped: false,
-      reason:
-        probe.state === 'none' || probe.state === 'inactive'
-          ? null
-          : (probe.reason ?? 'whether this project has a session could not be established'),
-    };
-  }
-  const result = await stopEasSessionAsync(projectRoot, probe.sessionId);
-  debugEvent('stop_session', {
-    sessionId: probe.sessionId,
-    ok: result.ok,
-    platform: probe.platform,
-  });
-  return { id: probe.sessionId, stopped: result.ok, reason: result.reason };
 }
 
 /** The ordinary path: a lock answers, so the pid to signal is known and so is what it owns. */

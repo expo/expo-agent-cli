@@ -13,6 +13,7 @@ import path from 'node:path';
 
 import {
   installStubEasAsync,
+  writeCloudSessionFileAsync,
   readStubEasInvocations,
   stubEasArgs as easInvocationArgs,
 } from '../stubEas';
@@ -607,6 +608,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
               )
             : script,
       });
+      if (state === 'reused') await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
       const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas'], {
         env: {
           ...easRunEnv(projectRoot, 8588),
@@ -673,6 +675,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
   it('reuses the session this project already has, and opens the app on it instead of starting one', async () => {
     const projectRoot = await setupAsync('go-app');
+    await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
 
     try {
       const result = await executeAgentCliAsync(

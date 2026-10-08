@@ -8,9 +8,10 @@ import type { Binding, DeviceTools, ReleasedDevice } from './types';
 
 export type Cleanup = {
   binding: Binding;
-  action: 'forget' | 'shutdown' | 'delete' | 'kill';
+  action: 'forget' | 'shutdown' | 'delete' | 'kill' | 'stop-cloud';
   reason: string;
   reaped?: boolean;
+  stopRoot?: string;
 };
 export type CleanupReport = ReleasedDevice & { error?: string };
 
@@ -57,9 +58,11 @@ export async function runCleanupAsync(
 }
 
 async function actAsync(
-  { binding: { device }, action }: Cleanup,
+  { binding: { device, projectRoot }, action, stopRoot }: Cleanup,
   tools: DeviceTools
 ): Promise<{ ok: boolean; reason: string | null; shutDown?: boolean }> {
+  if (device.backend === 'cloud' && action === 'stop-cloud')
+    return tools.stopCloud(stopRoot ?? projectRoot, device.id);
   if (device.backend === 'local-ios' && action === 'delete')
     return deleteSimulatorAsync(tools, device.udid);
   if (device.backend === 'local-ios' && action === 'shutdown')

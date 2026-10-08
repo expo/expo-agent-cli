@@ -12,7 +12,7 @@ import path from 'path';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, deviceCommand } from '../deviceBinding';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
-import { readCloudSessionIdSync } from '../device/cloudSimulator';
+import { ownCloudBindings } from '../deviceBinding/cloud';
 import { probeLocalDeviceAsync } from '../device/localDevice';
 import { event } from '../events';
 import { exitWithCodeAsync } from '../exitCodes';
@@ -340,9 +340,8 @@ export async function collectStatusReportAsync(
       // reads it: `exp://` is the Expo Go form only, and a development build's connect URL takes
       // the app's own scheme (`src/navigate/connectUrl.ts`).
       devBuildScheme,
-      // A file read, not a service call: `status` promises to be instant (`src/device/
-      // cloudSimulator.ts` §readCloudSessionIdSync).
-      readCloudSessionIdSync(projectRoot) != null,
+      // A live cloud binding is recorded evidence; status makes no session service call.
+      ownCloudBindings(projectRoot).length > 0,
       // @ref llp/0015-backend-selection-and-config.rfc.md §What `status` reports
       // The plan `@expo/agent-cli dev` would make *here* — the developer's config, this host and the
       // toolchain probe folded in — rather than the one the project's state alone implies. The two
@@ -356,7 +355,7 @@ export async function collectStatusReportAsync(
       platform !== 'web' &&
       'value' in binding &&
       !binding.value.some((entry) => entry.platform === platform) &&
-      !readCloudSessionIdSync(projectRoot)
+      ownCloudBindings(projectRoot).length === 0
     ) {
       report.next = {
         ...report.next,

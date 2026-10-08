@@ -108,6 +108,8 @@ describe(buildSessionStartArgs, () => {
       '--non-interactive',
       '--name',
       'my-app — agent-cli dev',
+      '--max-idle-time-minutes',
+      '30',
     ]);
   });
 
@@ -546,5 +548,70 @@ describe('the session half on its own', () => {
     });
     const args = vi.mocked(spawnCaptureAsync).mock.calls[0]![1];
     expect(args[args.indexOf('--name') + 1]).toBe('my-app — agent-cli smoke');
+  });
+});
+
+describe('worktree session ownership', () => {
+  const options = {
+    platform: 'ios' as const,
+    expoGo: true,
+    devServerUrl: DEV_SERVER,
+    buildId: null,
+  };
+  it('a failed listing never starts a billed session', async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+      state: 'unknown',
+      reason: 'listing timed out',
+    } as any);
+    const report = await openAppOnEasAsync(projectRoot, options);
+    expect(report).toMatchObject({ opened: false, reason: 'listing timed out' });
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+  it('a queued bound session is retained without a replacement start', async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+      state: 'queued',
+      sessionId: 'queued',
+      platform: 'ios',
+      source: 'bound',
+    } as any);
+    expect(await openAppOnEasAsync(projectRoot, options)).toMatchObject({
+      opened: false,
+      sessionId: 'queued',
+    });
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+  it('records a session created before a failed start', async () => {
+    const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: 'Simulator session created (id: billed)',
+      stderr: 'failed readiness',
+      exitCode: 1,
+    });
+    await openAppOnEasAsync(projectRoot, options);
+    expect(readBindingFile(bindingPathFor(projectRoot, 'ios', 'cloud'))).toMatchObject({
+      binding: { device: { id: 'billed', origin: 'started' } },
+    });
+  });
+  it('retries only an unsupported idle flag before a creation receipt', async () => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValueOnce({
+      stdout: '',
+      stderr: 'Nonexistent flag: --max-idle-time-minutes',
+      exitCode: 2,
+    });
+    expect(await openAppOnEasAsync(projectRoot, options)).toMatchObject({ opened: true });
+    expect(spawnCaptureAsync).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(spawnCaptureAsync).mock.calls[1]![1]).not.toContain('--max-idle-time-minutes');
+  });
+  it('does not retry a flag error once a session was created', async () => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: 'Simulator session created (id: billed)',
+      stderr: 'Nonexistent flag: --max-idle-time-minutes',
+      exitCode: 2,
+    });
+    expect(await openAppOnEasAsync(projectRoot, options)).toMatchObject({
+      opened: false,
+      sessionId: 'billed',
+    });
+    expect(spawnCaptureAsync).toHaveBeenCalledTimes(1);
   });
 });

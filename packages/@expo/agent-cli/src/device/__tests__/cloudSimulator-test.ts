@@ -19,6 +19,7 @@ import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
+import { guardedCloudArgs } from '../cloudCommand';
 import recordedAvailability from '../../__fixtures__/eas/simulator-availability.json';
 import { isNeedsHumanError } from '../../utils/errors';
 import {
@@ -179,7 +180,9 @@ describe('the payloads the service really sent', () => {
         createdAt: '2026-08-26T09:56:35.286Z',
       },
     ]);
-    expect(selectCloudSession(sessions!).selected?.id).toBe('01a03d80-0556-7d22-98df-f415d9392b98');
+    expect(
+      selectCloudSession(sessions!, { boundIds: sessions!.map((s) => s.id!) }).selected?.id
+    ).toBe('01a03d80-0556-7d22-98df-f415d9392b98');
   });
 
   // `[]` and not null: the service answered, and what it answered is "nothing is running". The two
@@ -207,7 +210,9 @@ describe('the payloads the service really sent', () => {
     const [live] = parseSessionListJson(recorded('simulator-list-in-progress.json'))!;
     const older = { ...live!, id: 'older', createdAt: '2026-08-26T08:00:00.000Z' };
 
-    expect(selectCloudSession([older, live!]).selected?.id).toBe(live!.id);
+    expect(
+      selectCloudSession([older, live!], { boundIds: [older.id, live!.id!] }).selected?.id
+    ).toBe(live!.id);
   });
 });
 
@@ -327,6 +332,8 @@ describe('the argv of every eas simulator invocation', () => {
       'simulator:list',
       '--status',
       'in-progress',
+      '--status',
+      'new',
       '--limit',
       String(CLOUD_SESSION_LIST_LIMIT),
       '--json',
@@ -480,8 +487,8 @@ describe(selectCloudSession, () => {
     )
   )![0]!;
 
-  it(`picks the only live session there is`, () => {
-    expect(selectCloudSession([ios]).selected?.id).toBe('ios-1');
+  it(`picks the bound live session`, () => {
+    expect(selectCloudSession([ios], { boundIds: ['ios-1'] }).selected?.id).toBe('ios-1');
   });
 
   // Only `agent-device` answers `simulator:exec npx agent-device`. A `serve-sim` session is a
@@ -505,26 +512,40 @@ describe(selectCloudSession, () => {
   });
 
   it(`prefers the platform the caller asked for, when the dotenv names neither`, () => {
-    expect(selectCloudSession([ios, android], { platform: 'ios' }).selected?.id).toBe('ios-1');
-    expect(selectCloudSession([ios, android], { platform: 'android' }).selected?.id).toBe('and-1');
+    expect(
+      selectCloudSession([ios, android], { platform: 'ios', boundIds: ['ios-1', 'and-1'] }).selected
+        ?.id
+    ).toBe('ios-1');
+    expect(
+      selectCloudSession([ios, android], { platform: 'android', boundIds: ['ios-1', 'and-1'] })
+        .selected?.id
+    ).toBe('and-1');
   });
 
   // A session on the other platform still comes back: the caller raises the mismatch, which says a
   // session exists and is not the one asked for. "No session" would have hidden it.
   it(`still answers with the other platform's session when it is all there is`, () => {
-    expect(selectCloudSession([android], { platform: 'ios' }).selected?.id).toBe('and-1');
+    expect(
+      selectCloudSession([android], { platform: 'ios', boundIds: ['ios-1', 'and-1'] }).selected?.id
+    ).toBe('and-1');
   });
 
   it(`falls back to the most recently created`, () => {
-    expect(selectCloudSession([ios, android]).selected?.id).toBe('and-1');
+    expect(selectCloudSession([ios, android], { boundIds: ['ios-1', 'and-1'] }).selected?.id).toBe(
+      'and-1'
+    );
   });
 
   // Determinism is the point: the same listing in any order must pick the same session, or "which
   // device did it use" becomes a thing a reader has to guess at.
   it(`picks the same session whatever order the service returned`, () => {
     const same = { ...ios, id: 'ios-2' };
-    expect(selectCloudSession([ios, same]).selected?.id).toBe('ios-1');
-    expect(selectCloudSession([same, ios]).selected?.id).toBe('ios-1');
+    expect(selectCloudSession([ios, same], { boundIds: ['ios-1', 'ios-2'] }).selected?.id).toBe(
+      'ios-1'
+    );
+    expect(selectCloudSession([same, ios], { boundIds: ['ios-1', 'ios-2'] }).selected?.id).toBe(
+      'ios-1'
+    );
   });
 });
 
@@ -622,13 +643,12 @@ describe(readCloudSessionIdSync, () => {
 describe(probeCloudSessionAsync, () => {
   afterEach(() => vol.reset());
 
-  // Discovery is the listing, and the dotenv is not a gate: a project with no file at all still
-  // finds a session started by MCP or by another terminal.
-  it(`is active for a session the service lists, with no dotenv at all`, async () => {
+  // A live own binding can select a session without a dotenv; execution still checks the connection.
+  it(`is active for a bound session the service lists, with no dotenv at all`, async () => {
     project();
     mockEas({ stdout: listJson(sessionRow()) });
 
-    const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: ['sess-1'] });
 
     expect(probe).toMatchObject({
       state: 'active',
@@ -653,7 +673,7 @@ describe(probeCloudSessionAsync, () => {
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
 
-    expect(probe).toMatchObject({ state: 'active', sessionId: 'sess-2', candidateCount: 2 });
+    expect(probe).toMatchObject({ state: 'active', sessionId: 'sess-2', candidateCount: 1 });
   });
 
   it(`prefers a session on the platform the caller asked for`, async () => {
@@ -665,7 +685,11 @@ describe(probeCloudSessionAsync, () => {
       ),
     });
 
-    const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'android' });
+    const probe = await probeCloudSessionAsync({
+      projectRoot: '/project',
+      platform: 'android',
+      boundIds: ['ios-1', 'and-1'],
+    });
 
     expect(probe).toMatchObject({ state: 'active', sessionId: 'and-1', platform: 'android' });
   });
@@ -797,6 +821,7 @@ describe(openUrlOnCloudSimulatorAsync, () => {
 
     const result = await openUrlOnCloudSimulatorAsync({
       projectRoot: '/project',
+      sessionId: 'sess-1',
       url: 'exp://tunnel.example/--/?',
       platform: 'ios',
       easCli: {
@@ -809,7 +834,12 @@ describe(openUrlOnCloudSimulatorAsync, () => {
     });
 
     expect(spawned[0]!.args).toEqual(
-      easArgv(buildCloudOpenUrlArgs({ url: 'exp://tunnel.example/--/?', platform: 'ios' }))
+      easArgv(
+        guardedCloudArgs(
+          buildCloudOpenUrlArgs({ url: 'exp://tunnel.example/--/?', platform: 'ios' }),
+          'sess-1'
+        )
+      )
     );
     expect(result).toMatchObject({ exitCode: 0, stdout: 'opened', spawnError: null });
     // The reproduction line names the runner and the package, not the path npx was found at, so it
@@ -823,6 +853,7 @@ describe(openUrlOnCloudSimulatorAsync, () => {
 
     const result = await openUrlOnCloudSimulatorAsync({
       projectRoot: '/project',
+      sessionId: 'sess-1',
       url: 'exp://tunnel.example/--/?',
       platform: 'ios',
       easCli: {
@@ -848,6 +879,7 @@ describe(captureCloudScreenshotAsync, () => {
 
     await captureCloudScreenshotAsync({
       projectRoot: '/project',
+      sessionId: 'sess-1',
       filePath: '/project/.expo/agent-cli/shot.png',
       easCli: {
         command: 'npx',
@@ -859,7 +891,12 @@ describe(captureCloudScreenshotAsync, () => {
     });
 
     expect(spawned[0]!.args).toEqual(
-      easArgv(buildCloudScreenshotArgs({ filePath: '/project/.expo/agent-cli/shot.png' }))
+      easArgv(
+        guardedCloudArgs(
+          buildCloudScreenshotArgs({ filePath: '/project/.expo/agent-cli/shot.png' }),
+          'sess-1'
+        )
+      )
     );
   });
 });
