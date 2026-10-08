@@ -3,29 +3,24 @@
 // Does this worktree have a device to open an app on?
 //
 // Every rung of the CLI's ladders that reaches a screen — `@expo/agent-cli navigate /`, the screenshot
-// follow-up, `status`'s own `next` line — needs a *local* device: the iOS simulator this worktree
-// bound with `dev`, or an Android device `adb` can see. A dogfood session drove Expo Go on a
-// **cloud** simulator through a tunnel, from a machine with neither, and every one of those
-// suggestions was an instruction to run something that could not work [observed — 2026-08-24]. The
-// CLI had no way to know, because it had never asked.
+// follow-up, `status`'s own `next` line — needs a *local* device: the iOS simulator or the Android
+// emulator instance this worktree bound with `dev`. A dogfood session drove Expo Go on a **cloud**
+// simulator through a tunnel, from a machine with neither, and every one of those suggestions was
+// an instruction to run something that could not work [observed — 2026-08-24]. The CLI had no way
+// to know, because it had never asked.
 //
 // So it asks, once per process and root, and the answer has three values rather than two. `absent`
-// is the one that changes what is suggested, and it may only be given by a platform tool that
-// **ran** and reported nothing. A tool that is not installed establishes nothing — a Linux machine
-// with no `adb` is not a machine with no device — and that case answers `unknown`, which leaves
-// every ladder exactly as it was.
+// is the one that changes what is suggested, and it may only be given by a binding that was read
+// and a platform tool that **ran**. A tool that is not installed establishes nothing — a Linux
+// machine with no `adb` is not a machine with no device — and that case answers `unknown`, which
+// leaves every ladder exactly as it was.
 
 import { inspectBindingCachedAsync, type Inspection } from '../deviceBinding';
-import {
-  navigateDeviceOf,
-  probeAndroidDeviceAsync,
-  type DeviceProbe,
-  type NavigateDevice,
-} from '../navigate/device';
+import { navigateDeviceOf, type NavigateDevice, type NavigatePlatform } from '../navigate/device';
 
 /** What this machine has to open an app on. */
 export type LocalDeviceState =
-  /** A bound simulator is up, or an attached device was found. */
+  /** A bound device is up. */
   | 'present'
   /** Every rung ran and reported none. */
   | 'absent'
@@ -56,8 +51,8 @@ export interface ProbeLocalDeviceOptions {
   projectRoot: string;
   /** The iOS rung, injected for tests. Defaults to the cached inspection of the own binding. */
   inspectIosAsync?: (projectRoot: string) => Promise<Inspection>;
-  /** The Android rung, injected for tests. Defaults to main's first-`adb`-device probe. */
-  probeAndroidAsync?: () => Promise<DeviceProbe>;
+  /** The Android rung, injected for tests. Defaults to the cached inspection of the own binding. */
+  inspectAndroidAsync?: (projectRoot: string) => Promise<Inspection>;
   hostPlatform?: NodeJS.Platform;
 }
 
@@ -72,8 +67,8 @@ export function resetLocalDeviceCache(): void {
  * Whether this worktree has a device to open an app on.
  *
  * One probe per process and root: the promise is cached rather than the result, so the several
- * callers of one command — the status sections and its follow-ups, say — share one inspection and
- * one `adb`. Never rejects: a suggestion ladder must not be the thing that fails a command, so a
+ * callers of one command — the status sections and its follow-ups, say — share one inspection per
+ * platform. Never rejects: a suggestion ladder must not be the thing that fails a command, so a
  * probe that throws answers `unknown`.
  */
 export function probeLocalDeviceAsync(options: ProbeLocalDeviceOptions): Promise<LocalDeviceProbe> {
@@ -88,13 +83,13 @@ export function probeLocalDeviceAsync(options: ProbeLocalDeviceOptions): Promise
 async function runProbesAsync({
   projectRoot,
   inspectIosAsync = (root) => inspectBindingCachedAsync(root, 'ios', 'local-ios'),
-  probeAndroidAsync = probeAndroidDeviceAsync,
+  inspectAndroidAsync = (root) => inspectBindingCachedAsync(root, 'android', 'local-android'),
   hostPlatform = process.platform,
 }: ProbeLocalDeviceOptions): Promise<LocalDeviceProbe> {
   try {
     const [ios, android] = await Promise.all([
       hostPlatform === 'darwin' ? inspectIosAsync(projectRoot) : null,
-      probeAndroidAsync(),
+      inspectAndroidAsync(projectRoot),
     ]);
     return readLocalDeviceProbe(ios, android);
   } catch (error: unknown) {
@@ -110,60 +105,61 @@ async function runProbesAsync({
 /**
  * Fold the two rungs into one answer.
  *
- * Pure, so the rule that decides `absent` from `unknown` is testable without a simulator: any `up`
- * binding or attached device is `present`; else an `unreadable` or `unknown` binding, or an `adb`
- * that could not run, is `unknown`; else `absent`, with the first state seen as the reason.
+ * Pure, so the rule that decides `absent` from `unknown` is testable without a device: any `up`
+ * binding is `present`; else any `unreadable` or `unknown` binding is `unknown`; else `absent`,
+ * with the state of each rung as the reason.
  */
 export function readLocalDeviceProbe(
   ios: Inspection | null,
-  android: DeviceProbe
+  android: Inspection
 ): LocalDeviceProbe {
-  const devices: NavigateDevice[] = [];
-  if (ios?.state === 'up' && ios.binding) {
-    devices.push(navigateDeviceOf(ios.binding.device));
-  }
-  if (android.device) {
-    devices.push(android.device);
-  }
+  const rungs: [NavigatePlatform, Inspection][] = [
+    ...(ios ? ([['ios', ios]] as [NavigatePlatform, Inspection][]) : []),
+    ['android', android],
+  ];
+  const devices = rungs
+    .filter(([, inspection]) => inspection.state === 'up' && inspection.binding)
+    .map(([, inspection]) => navigateDeviceOf(inspection.binding!.device));
   if (devices.length > 0) {
     return { state: 'present', device: devices[0]!, devices, reason: null };
   }
-
-  const reasons = [
-    ios ? `iOS: ${iosReason(ios)}` : null,
-    android.reason ? `Android: ${android.reason}` : null,
-  ].filter((reason): reason is string => reason != null);
-  // An `adb` that cannot run says nothing only where it is the one rung: on a Mac the binding
-  // answered, and a missing Android SDK must not keep the ladders from `absent`.
-  const unknown = ios
-    ? ios.state === 'unreadable' || ios.state === 'unknown'
-    : android.toolError != null;
+  const unknown = rungs.some(
+    ([, inspection]) => inspection.state === 'unreadable' || inspection.state === 'unknown'
+  );
   return {
     state: unknown ? 'unknown' : 'absent',
     device: null,
     devices: [],
-    reason:
-      reasons.join('; ') ||
-      (unknown ? 'nothing is known about this machine' : 'no device was found'),
+    reason: rungs
+      .map(
+        ([platform, inspection]) =>
+          `${platformLabel(platform)}: ${inspectionReason(inspection, platform)}`
+      )
+      .join('; '),
   };
 }
 
-function iosReason(inspection: Inspection): string {
+function platformLabel(platform: NavigatePlatform): string {
+  return platform === 'ios' ? 'iOS' : 'Android';
+}
+
+function inspectionReason(inspection: Inspection, platform: NavigatePlatform): string {
+  const noun = platform === 'ios' ? 'simulator' : 'emulator instance';
   switch (inspection.state) {
     case 'none':
-      return 'no simulator is bound to this worktree';
+      return `no ${noun} is bound to this worktree`;
     case 'unreadable':
       return `the binding file ${inspection.path} does not parse`;
     case 'unknown':
       return inspection.cause === 'timeout'
-        ? 'the simulator check timed out'
+        ? `the ${noun} check timed out`
         : (inspection.toolError?.message.split('\n')[0] ?? 'the device tool could not run');
     case 'gone':
       return inspection.cause === 'expired'
-        ? 'the lease on the bound simulator expired'
-        : 'the bound simulator is gone';
+        ? `the lease on the bound ${noun} expired`
+        : `the bound ${noun} is gone`;
     case 'not-up':
-      return 'the bound simulator is not up';
+      return `the bound ${noun} is not up`;
     default:
       return inspection.state;
   }

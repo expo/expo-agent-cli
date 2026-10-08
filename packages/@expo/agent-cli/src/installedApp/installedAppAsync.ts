@@ -100,7 +100,7 @@ async function hasUnrecordedGeneratedDirAsync(
 const defaultReader: InstalledFingerprintReader = ({ projectRoot, platform, device, ...input }) =>
   platform === 'ios'
     ? readInstalledFingerprintIosAsync({ ...input, projectRoot, device: device ?? undefined })
-    : readInstalledFingerprintAndroidAsync({ ...input, device: device ?? undefined });
+    : readInstalledFingerprintAndroidAsync({ ...input, projectRoot, device: device ?? undefined });
 
 export async function checkInstalledAppAsync(
   projectRoot: string,

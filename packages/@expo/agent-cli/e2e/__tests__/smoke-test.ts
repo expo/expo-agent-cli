@@ -30,6 +30,7 @@ import {
   expoHomeOf,
 } from '../utils';
 import {
+  androidBindingFixture,
   appStartedMarkerPath,
   bindingFixture,
   installStubXcrunAsync as installStatefulXcrunAsync,
@@ -125,8 +126,8 @@ async function installStubXcrunAsync(
 }
 
 /**
- * Install a stub `adb` that reports one attached device and writes a PNG to **stdout** for
- * `exec-out screencap -p`, exactly as the real one does.
+ * Install a stub `adb` that reports one attached device, bound to the fixture, and writes a PNG to
+ * **stdout** for `exec-out screencap -p`, exactly as the real one does.
  *
  * This is the fixture the whole Android screenshot path rests on: the bytes go through a real pipe
  * into a real file descriptor, which is the one thing a mocked `spawn` cannot show.
@@ -134,6 +135,7 @@ async function installStubXcrunAsync(
 async function installStubAdbAsync(projectRoot: string): Promise<Record<string, string>> {
   const scriptPath = path.join(projectRoot, '.stub-bin', 'adb-stub.js');
   await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
+  await androidBindingFixture(projectRoot, 'emulator-5554');
   await fs.promises.writeFile(
     scriptPath,
     [
@@ -142,6 +144,7 @@ async function installStubAdbAsync(projectRoot: string): Promise<Record<string, 
       `  process.stdout.write('List of devices attached\\nemulator-5554\\tdevice\\n');`,
       `  process.exit(0);`,
       `}`,
+      `if (args[2] === 'get-state') { process.stdout.write('device\\n'); process.exit(0); }`,
       `if (args.includes('screencap')) {`,
       // Bytes a pty would rewrite, so a path that went through `adb shell` would corrupt them.
       `  process.stdout.write(Buffer.from("${PNG_HEADER_ESCAPE}\\r\\n\\x00\\xff", 'binary'));`,
@@ -183,6 +186,7 @@ async function installStubAdbForExpoGoAsync(
   const recordPath = path.join(projectRoot, '.adb-calls.jsonl');
   const scriptPath = path.join(projectRoot, '.stub-bin', 'adb-expo-go-stub.js');
   await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
+  await androidBindingFixture(projectRoot, 'emulator-5554');
   await fs.promises.writeFile(
     scriptPath,
     [
@@ -194,6 +198,7 @@ async function installStubAdbForExpoGoAsync(
       `  process.stdout.write('List of devices attached\\nemulator-5554\\tdevice\\n');`,
       `  process.exit(0);`,
       `}`,
+      `if (args[2] === 'get-state') { process.stdout.write('device\\n'); process.exit(0); }`,
       `if (args.includes('pm') && args.includes('path')) {`,
       `  if (installed == null) { process.exit(1); }`,
       `  process.stdout.write('package:/data/app/~~abc==/host.exp.exponent-def==/base.apk\\n');`,
