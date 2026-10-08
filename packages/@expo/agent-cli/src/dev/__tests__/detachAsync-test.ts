@@ -5,15 +5,22 @@ import { vol } from 'memfs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../../devLock';
-import { acquireDeviceAsync, devicesDisabled } from '../../deviceBinding';
+import { acquireDeviceAsync, acquireLine, devicesDisabled } from '../../deviceBinding';
+import { deviceUnavailableError } from '../../deviceBinding/errors';
+import * as Log from '../../log';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
-import { formatErrorCodeRow } from '../../utils/errors';
+import { logCmdError, type CommandError } from '../../utils/errors';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
 import { resolveDevOptions } from '../resolveOptions';
 
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
+vi.mock('../../log');
+vi.mock('../../exitCodes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../exitCodes')>()),
+  exitWithCodeAsync: vi.fn(() => new Promise<never>(() => {})),
+}));
 vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),
   devicesDisabled: vi.fn(() => true),
@@ -464,21 +471,16 @@ describe('the bound device', () => {
   });
 
   // detached-device-error-relayed
-  it("rethrows the child's device refusal unchanged: code, exit and Try line", async () => {
+  // detached-device-error-relayed: the child's log is what `logCmdError` writes under
+  // `__EXPO_AGENT_CLI_DETACHED=1`, captured off the log module, so the round trip is the real one.
+  it("rethrows the child's device refusal unchanged: code, exit, data and Try line", async () => {
     vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(null);
+    const refusal = deviceUnavailableError('no-ios-runtime', { platform: 'ios' });
+    refusal.suggestedCommand = 'xcodebuild -downloadPlatform iOS';
     let child: EventEmitter;
     vi.mocked(spawn).mockImplementation(() => {
       child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
-      fs.writeFileSync(
-        logFile,
-        [
-          'CommandError: No iOS runtime with an iPhone is installed, so no simulator can be created.',
-          'How: run "xcodebuild -downloadPlatform iOS", then this command again.',
-          'Try: xcodebuild -downloadPlatform iOS',
-          formatErrorCodeRow('DEVICE_UNAVAILABLE', 7),
-          '',
-        ].join('\n')
-      );
+      fs.writeFileSync(logFile, `${childLogOf(refusal).join('\n')}\n`);
       setTimeout(() => child.emit('exit', 7, null), 50);
       return child as unknown as ChildProcess;
     });
@@ -494,10 +496,62 @@ describe('the bound device', () => {
     expect(error).toMatchObject({
       code: 'DEVICE_UNAVAILABLE',
       exitCode: 7,
+      data: { reason: 'no-ios-runtime' },
       suggestedCommand: 'xcodebuild -downloadPlatform iOS',
     });
-    expect(error.message).toBe(
-      'No iOS runtime with an iPhone is installed, so no simulator can be created.\nHow: run "xcodebuild -downloadPlatform iOS", then this command again.'
-    );
+    expect(error.message).toBe(refusal.message);
+  });
+});
+
+/** The log a detached child writes for `error`, line by line, as `logCmdError` prints it. */
+function childLogOf(error: CommandError): string[] {
+  vi.mocked(Log.exception).mockClear();
+  vi.mocked(Log.warn).mockClear();
+  process.env.__EXPO_AGENT_CLI_DETACHED = '1';
+  try {
+    void logCmdError(error);
+  } finally {
+    delete process.env.__EXPO_AGENT_CLI_DETACHED;
+  }
+  return [
+    ...vi.mocked(Log.exception).mock.calls.map(([printed]) => String(printed)),
+    ...vi.mocked(Log.warn).mock.calls.map((args) => args.join(' ')),
+  ];
+}
+
+describe('the acquire line', () => {
+  it('is printed before the already-running report', async () => {
+    const running = {
+      url: 'http://127.0.0.1:8393',
+      port: 8393,
+      pid: 4242,
+      projectRoot,
+      startedAt: new Date(0).toISOString(),
+    };
+    const reused = {
+      device: {
+        backend: 'local-ios' as const,
+        platform: 'ios' as const,
+        udid: 'SIM-1',
+        name: 'agent-cli 0000',
+        origin: 'created' as const,
+      },
+      justBooted: true,
+      action: 'reused' as const,
+    };
+    vi.mocked(devicesDisabled).mockReturnValue(false);
+    vi.mocked(acquireDeviceAsync).mockResolvedValue(reused);
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+    const { event: cliEvent } = await import('../../events');
+
+    await devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
+      print: false,
+      reuseBoundDevice: true,
+    });
+
+    expect(Log.progress).toHaveBeenCalledWith(acquireLine(reused));
+    const printedAt = vi.mocked(Log.progress).mock.invocationCallOrder[0]!;
+    const reportedAt = vi.mocked(cliEvent).mock.invocationCallOrder.at(-1)!;
+    expect(printedAt).toBeLessThan(reportedAt);
   });
 });

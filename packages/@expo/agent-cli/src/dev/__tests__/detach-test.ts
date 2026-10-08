@@ -80,7 +80,7 @@ describe(buildDetachSpawn, () => {
 // 7's F61 and the 2026-08-26 live run's S4. Three facts in, one verdict out.
 describe(resolveDetachFailure, () => {
   const healthy = { exited: false, verdict: null, statusAnswering: true };
-  const noCode = { code: null, exitCode: null, suggestedCommand: null };
+  const noCode = { code: null, exitCode: null, data: null, suggestedCommand: null };
 
   it(`should let a live child with a live bundler through`, () => {
     expect(resolveDetachFailure(healthy)).toBeNull();

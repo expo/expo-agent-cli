@@ -607,6 +607,9 @@ function relayedDeviceError(verdict: DetachedChildVerdict | null): CommandError 
   }
   const error = new CommandError(verdict.code, verdict.message.replace(/^[A-Za-z]*Error: /, ''));
   error.exitCode = verdict.exitCode ?? EXIT_OUTCOME_FAILED;
+  if (verdict.data) {
+    error.data = verdict.data;
+  }
   if (verdict.suggestedCommand) {
     error.suggestedCommand = verdict.suggestedCommand;
   }

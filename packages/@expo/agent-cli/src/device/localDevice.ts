@@ -133,8 +133,11 @@ export function readLocalDeviceProbe(
     ios ? `iOS: ${iosReason(ios)}` : null,
     android.reason ? `Android: ${android.reason}` : null,
   ].filter((reason): reason is string => reason != null);
-  const unknown =
-    ios?.state === 'unreadable' || ios?.state === 'unknown' || android.toolError != null;
+  // An `adb` that cannot run says nothing only where it is the one rung: on a Mac the binding
+  // answered, and a missing Android SDK must not keep the ladders from `absent`.
+  const unknown = ios
+    ? ios.state === 'unreadable' || ios.state === 'unknown'
+    : android.toolError != null;
   return {
     state: unknown ? 'unknown' : 'absent',
     device: null,

@@ -380,9 +380,24 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
 
   // fallback-eas-rung-dotenv-only: a worktree with no binding must not drive another worktree's
   // session, so the newest session is never taken until llp/0034 binds sessions.
-  it(`refuses a session the project's dotenv does not name`, async () => {
+  it(`asks the service nothing when the project's dotenv names no session`, async () => {
     mockPlatform('linux');
     cloudProject(null);
+    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }, { stdout: liveSession }]);
+
+    const error = await resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.code).toBe('NO_BOUND_DEVICE');
+    // The Android rung alone: no `eas` was spawned for a session this worktree may not drive.
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
+  });
+
+  it(`refuses a session the dotenv names when the service lists another`, async () => {
+    mockPlatform('linux');
+    cloudProject('sess-2');
     mockSpawnQueue([{ stdout: NO_ADB_DEVICES }, { stdout: liveSession }]);
 
     const error = await resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot }).catch(
@@ -436,7 +451,11 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
       'exp://127.0.0.1:8081/--/settings'
     );
     expect(lines.at(-1)).toMatch(/^How: /);
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli navigate / --print-url');
+    // The next action stays the `dev` command; `--print-url` is a door, not the Try line.
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --android --detach --wait-ready');
+    expect(lines.find((line: string) => line.startsWith('Or: this is the URL'))).toContain(
+      'navigate <route> --print-url'
+    );
   });
 
   // `--eas` names the device, so no local tool is asked at all.

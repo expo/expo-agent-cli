@@ -1041,7 +1041,7 @@ describe(navigateAsync, () => {
       await expect(navigateAsync(projectRoot, options())).rejects.toMatchObject({
         code: 'NO_BOUND_DEVICE',
         message: expect.stringContaining('exp://127.0.0.1:8081/--/profile/42'),
-        suggestedCommand: 'npx @expo/agent-cli navigate / --print-url',
+        suggestedCommand: 'npx @expo/agent-cli dev --ios --detach --wait-ready',
       });
     });
   });

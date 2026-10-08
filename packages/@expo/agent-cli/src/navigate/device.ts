@@ -304,10 +304,15 @@ async function cloudFallbackAsync(
   if (context.cloud !== 'fallback') {
     return { device: null, probe: null };
   }
+  // No dotenv id, no session this worktree may drive: nothing to ask the service about.
+  const sessionId = readCloudSessionIdSync(context.projectRoot);
+  if (sessionId == null) {
+    return { device: null, probe: null };
+  }
   const { device, probe } = await probeCloudDeviceAsync(context.projectRoot, { platform });
   const usable =
     device != null &&
-    device.deviceId === readCloudSessionIdSync(context.projectRoot) &&
+    device.deviceId === sessionId &&
     (platform == null || device.platform === platform);
   return { device: usable ? device : null, probe };
 }
@@ -388,11 +393,9 @@ function withOtherDoors(
   const error = new CommandError(refusal.code, [...lines, how].join('\n'));
   error.exitCode = refusal.exitCode;
   error.data = refusal.data;
-  // A caller that has no device does not get one by running the same command again, so the `Try:`
-  // is the mode that answers without one when there is a URL.
-  error.suggestedCommand = context.url
-    ? `${PROGRAM_PREFIX} navigate / --print-url`
-    : refusal.suggestedCommand;
+  // The `Try:` stays the `dev` command (llp/0030 §Output and errors); `--print-url` is a door
+  // named above it, not the next action.
+  error.suggestedCommand = refusal.suggestedCommand;
   return error;
 }
 

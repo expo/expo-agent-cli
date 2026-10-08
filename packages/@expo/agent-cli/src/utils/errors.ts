@@ -162,9 +162,18 @@ export function formatNeedsHumanBlock(needsHuman: NeedsHuman): string[] {
   return lines;
 }
 
-/** `Error code      <code> exit <n>`, the row the detached child's parent reads back. */
-export function formatErrorCodeRow(code: string, exitCode: number): string {
-  return `${'Error code'.padEnd(NEEDS_HUMAN_LABEL_WIDTH)}${code} exit ${exitCode}`;
+/**
+ * `Error code      <code> exit <n> data <json>`, the row the detached child's parent reads back,
+ * so the child's refusal reaches the parent's caller with its code, exit and `data` unchanged.
+ */
+export function formatErrorCodeRow(
+  code: string,
+  exitCode: number,
+  data: Record<string, unknown> | null = null
+): string {
+  return `${'Error code'.padEnd(NEEDS_HUMAN_LABEL_WIDTH)}${code} exit ${exitCode}${
+    data ? ` data ${JSON.stringify(data)}` : ''
+  }`;
 }
 
 /**
@@ -291,7 +300,7 @@ export function logCmdError(error: any): never {
     // The detached child's log is the one channel to its parent, which relays a device refusal
     // unchanged (`src/dev/childVerdict.ts`); the code and the exit are on no other line.
     if (process.env.__EXPO_AGENT_CLI_DETACHED === '1') {
-      warn(formatErrorCodeRow(code, exitCode));
+      warn(formatErrorCodeRow(code, exitCode, data ?? null));
     }
     // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope — a run asked for
     // machine-readable output gets one, whether it succeeded or not. The prose above stays on

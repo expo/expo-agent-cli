@@ -15,7 +15,13 @@ import { resolveDevOptions } from '../dev/resolveOptions';
 import { resolveDevStopOptions } from '../dev/resolveStopOptions';
 import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
 import { bootDeviceAsync, shutdownDeviceAsync } from '../device/bootDevice';
-import { acquireDeviceAsync, deviceIdOf, deviceNameOf, devicesDisabled } from '../deviceBinding';
+import {
+  acquireDeviceAsync,
+  acquireLine,
+  deviceIdOf,
+  deviceNameOf,
+  devicesDisabled,
+} from '../deviceBinding';
 import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
 import { installDevBuildAsync } from '../device/installDevBuild';
@@ -528,6 +534,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         }
         try {
           const acquired = await acquireDeviceAsync(projectRoot, 'ios');
+          Log.progress(acquireLine(acquired));
           return {
             ok: true,
             deviceId: deviceIdOf(acquired.device),
@@ -542,7 +549,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
             deviceId: null,
             backend: null,
             choice: null,
-            reason: error instanceof Error ? firstLine(error.message) : String(error),
+            reason: error instanceof Error ? whatAndHow(error.message) : String(error),
           };
         }
       }
@@ -1180,6 +1187,13 @@ async function resolveSmokeTargetAsync(
       : `${PROGRAM_PREFIX} dev --${options.platform}${options.cloud === 'required' ? ' --eas' : ''}`,
     installWithKind: expoGo ? 'expo-go' : 'native-build',
   };
+}
+
+/** A refusal's What and its How line, as one phase reason; the Why in between is dropped. */
+function whatAndHow(message: string): string {
+  const lines = message.split('\n').filter((line) => line.trim());
+  const how = lines.find((line) => line.startsWith('How:'));
+  return how && how !== lines[0] ? `${lines[0]} ${how}` : (lines[0] ?? message);
 }
 
 function firstLine(text: string): string {
