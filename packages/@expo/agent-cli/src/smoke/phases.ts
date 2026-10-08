@@ -16,7 +16,7 @@
 // | `dev-server`       | every runtime command            | `discoverDevServerAsync`    |
 // | `bundler-ready`    | this command only                | `waitForBundlerReadyAsync`  |
 // | `bundle`           | this command, `runtime:reload`   | `checkEntryBundleAsync`     |
-// | `boot-device`      | (new, conditional)               | `bootDeviceAsync`           |
+// | `boot-device`      | `dev` (conditional)              | `acquireDeviceAsync`        |
 // | `install-app`      | (new, conditional)               | `installExpoGoAsync`        |
 // | `app`              | this command only                | `waitForAppConnectionAsync` |
 // | `reload`           | `runtime:reload`                 | `reloadOverDevServerAsync`  |
@@ -31,9 +31,10 @@
 //
 // **The three conditional phases are acts rather than questions**, and that shapes three things
 // (llp/0005 §The run brings its own environment): they are reported only by a run that performed
-// them, they are never charged to `--timeout`, and each one registers the way to undo itself
-// *before* it does anything. `runSmokePhasesAsync` is the wrapper that runs those undos, newest
-// first, on every path out of the walk.
+// them, they are never charged to `--timeout`, and the ones that hold a resource register the way
+// to undo themselves *before* they do anything. `runSmokePhasesAsync` is the wrapper that runs
+// those undos, newest first, on every path out of the walk. A booted device registers none: it is
+// this worktree's bound device and stays bound after the run (llp/0030).
 //
 // The dependencies are injected rather than imported, so the outcome table below — which is the
 // part that can be wrong in a way no type checker sees — is testable against fakes, with no dev
@@ -95,16 +96,6 @@ export interface SmokeBootResult {
    */
   installNeeded?: boolean;
 }
-
-/**
- * Told the moment the boot has a device to name, and before the device is touched.
- *
- * This is what makes "stop only what you started" hold through a boot that fails halfway: the
- * cleanup is registered from here, so a simulator that was asked to boot and then hung is still
- * shut down. A boot that registered its cleanup on the way *out* would leak exactly the device
- * that went wrong (llp/0005 §The run brings its own environment).
- */
-export type SmokeBootRegister = (device: { deviceId: string; backend: DeviceBackend }) => void;
 
 /** What putting the app on a device amounted to. Never a throw: a failed install is a result. */
 export interface SmokeInstallResult {
@@ -261,10 +252,11 @@ export interface SmokeDeps {
   ensureEasSession(devServerUrl: string): Promise<SmokeSessionResult>;
   /** End the session this run started. Only ever called for one this run started. */
   stopEasSession(sessionId: string): Promise<SmokeReleaseResult>;
-  /** Boot a device for this run's platform, telling {@link SmokeBootRegister} the id first. */
-  bootDevice(register: SmokeBootRegister): Promise<SmokeBootResult>;
-  /** Shut down the device this run booted. Only ever called for one this run booted. */
-  shutdownDevice(deviceId: string, backend: DeviceBackend): Promise<SmokeReleaseResult>;
+  /**
+   * Bind and boot this worktree's device for this run's platform (`acquireDeviceAsync`). The
+   * device stays bound after the run, so nothing is registered to put it back.
+   */
+  bootDevice(): Promise<SmokeBootResult>;
   /**
    * Put the app on the device this run booted, when the boot said it has not got it.
    *
@@ -623,10 +615,6 @@ export const START_SESSION_TIMEOUT_MS = 900_000;
  * window and the runtime read live on.
  */
 export const BUILD_DEV_SERVER_TIMEOUT_MS = 1_800_000;
-
-// The boot budget lives beside the boot itself (`src/device/bootDevice.ts`), because `dev` opens
-// the app now too and must not import this phase table for one constant.
-export { BOOT_DEVICE_TIMEOUT_MS } from '../device/bootDevice';
 
 /** Every phase, in the order they are reported. */
 const PHASE_ORDER: SmokePhaseId[] = [
@@ -1212,25 +1200,13 @@ async function runPhasesAsync(
       const found = await deviceAsync();
       if (found.deviceId == null) {
         const boot = await recordBootstrap('boot-device', async () => {
-          // @ref llp/0031-ios-binding.plan.md §smoke — an iOS simulator is this worktree's bound
-          // one and stays bound after the run; only an Android emulator this run boots is put back.
-          const result = await deps.bootDevice((booted) => {
-            // @ref ./phases §SmokeBootRegister — before the device is touched, so a boot that
-            // hangs halfway still leaves this run holding the thing it has to put back.
-            cleanups.push({
-              resource: 'device',
-              target: booted.deviceId,
-              release: () => deps.shutdownDevice(booted.deviceId, booted.backend),
-            });
-          });
+          // @ref llp/0031-ios-binding.plan.md §smoke — the device is this worktree's bound one and
+          // stays bound after the run, so nothing is registered to put it back.
+          const result = await deps.bootDevice();
           return result.ok && result.deviceId != null
             ? {
                 status: 'ok' as const,
-                reason: [
-                  `booted ${result.deviceId} for this run`,
-                  result.choice ? ` because ${result.choice}` : '',
-                  result.backend === 'local-android' ? `, and shut it down again afterwards` : '',
-                ].join(''),
+                reason: `booted ${result.deviceId} for this run${result.choice ? ` because ${result.choice}` : ''}`,
                 value: result,
               }
             : {

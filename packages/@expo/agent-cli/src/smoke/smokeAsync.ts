@@ -14,7 +14,6 @@ import { devDetachAsync } from '../dev/detachAsync';
 import { resolveDevOptions } from '../dev/resolveOptions';
 import { resolveDevStopOptions } from '../dev/resolveStopOptions';
 import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
-import { bootDeviceAsync, shutdownDeviceAsync } from '../device/bootDevice';
 import {
   acquireDeviceAsync,
   acquireLine,
@@ -61,7 +60,6 @@ import {
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { formatSmokeResult, smokeResultToJson } from './format';
 import {
-  BOOT_DEVICE_TIMEOUT_MS,
   isFailingRecord,
   runSmokePhasesAsync,
   smokeExitCode,
@@ -518,52 +516,40 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // Local only, and that is not a gap: `--eas` names a session somebody else started and pays
     // for, and the phase that calls this never runs for one.
     //
-    // @ref llp/0031-ios-binding.plan.md §smoke — iOS is this worktree's bound simulator, reused or
-    // created by the registry and left bound; a created one has no app, so the install phase puts
-    // it there. Android keeps its own boot and shutdown until llp/0032.
-    bootDevice: async (register) => {
-      if (options.platform === 'ios') {
-        if (devicesDisabled()) {
-          return {
-            ok: false,
-            deviceId: null,
-            backend: null,
-            choice: null,
-            reason: 'devices are off for this run (AGENT_CLI_NO_DEVICE), so no simulator was bound',
-          };
-        }
-        try {
-          const acquired = await acquireDeviceAsync(projectRoot, 'ios');
-          Log.progress(acquireLine(acquired));
-          return {
-            ok: true,
-            deviceId: deviceIdOf(acquired.device),
-            backend: 'local-ios',
-            choice: deviceNameOf(acquired.device),
-            installNeeded: acquired.action === 'created',
-            reason: null,
-          };
-        } catch (error: unknown) {
-          return {
-            ok: false,
-            deviceId: null,
-            backend: null,
-            choice: null,
-            reason: error instanceof Error ? whatAndHow(error.message) : String(error),
-          };
-        }
+    // @ref llp/0031-ios-binding.plan.md §smoke — the device is this worktree's bound one, reused,
+    // created or spawned by the registry and left bound; a created simulator and a read-only
+    // emulator instance have no app, so the install phase puts it there.
+    bootDevice: async () => {
+      const platform = options.platform;
+      if (devicesDisabled()) {
+        return {
+          ok: false,
+          deviceId: null,
+          backend: null,
+          choice: null,
+          reason: `devices are off for this run (AGENT_CLI_NO_DEVICE), so no ${platform} device was bound`,
+        };
       }
-      const result = await bootDeviceAsync('android', {
-        timeoutMs: BOOT_DEVICE_TIMEOUT_MS.android,
-        onBooting: register,
-      });
-      return {
-        ok: result.ok,
-        deviceId: result.deviceId,
-        backend: result.backend,
-        choice: result.choice,
-        reason: result.ok ? null : `${result.reason}${result.name ? ` (${result.name})` : ''}`,
-      };
+      try {
+        const acquired = await acquireDeviceAsync(projectRoot, platform);
+        Log.progress(acquireLine(acquired));
+        return {
+          ok: true,
+          deviceId: deviceIdOf(acquired.device),
+          backend: platform === 'ios' ? 'local-ios' : 'local-android',
+          choice: deviceNameOf(acquired.device),
+          installNeeded: acquired.action === 'created' || acquired.action === 'spawned',
+          reason: null,
+        };
+      } catch (error: unknown) {
+        return {
+          ok: false,
+          deviceId: null,
+          backend: null,
+          choice: null,
+          reason: error instanceof Error ? whatAndHow(error.message) : String(error),
+        };
+      }
     },
 
     // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
@@ -667,11 +653,6 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         replaced: null,
         reason: built.reason,
       };
-    },
-
-    shutdownDevice: async (deviceId) => {
-      const result = await shutdownDeviceAsync(deviceId);
-      return { ok: result.ok, target: deviceId, reason: result.reason };
     },
 
     waitForBundlerReady: (devServerUrl, timeoutMs) =>

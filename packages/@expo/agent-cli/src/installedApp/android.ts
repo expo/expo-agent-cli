@@ -13,6 +13,8 @@ import {
 } from '../device/adb';
 import { androidPackagePathsAsync } from '../device/androidApps';
 import { androidDeviceNameAsync } from '../device/installDevBuild';
+import { findBoundDeviceAsync } from '../deviceBinding';
+import { CommandError } from '../utils/errors';
 import {
   EOCD_MAX_LENGTH,
   LOCAL_HEADER_MAX_LENGTH,
@@ -37,6 +39,7 @@ const RANGE_BLOCK_SIZE = 65536;
 const ADB_TIMEOUT_MS = 30_000;
 
 export interface AndroidReaderOptions {
+  projectRoot: string;
   expectedHash: string;
   device?: string;
   appId: string;
@@ -44,44 +47,85 @@ export interface AndroidReaderOptions {
   runAdbAsync?: typeof runAdbAsync;
   runAdbRawAsync?: typeof runAdbRawAsync;
   androidDeviceNameAsync?: typeof androidDeviceNameAsync;
+  findBoundSerialAsync?: typeof findBoundSerialAsync;
 }
 
 /**
- * Read the fingerprint out of the app on every authorized Android device. The most informative
- * device wins. The file is a zip entry inside the APK, read through ranged `dd` reads over
- * `adb exec-out`, with a whole-APK pull as the fallback when the device lacks the tools.
+ * The bound emulator instance's serial, without extending its lease, because `status` never writes.
+ *
+ * @returns the serial, or the How line of the registry's refusal.
+ */
+async function findBoundSerialAsync(
+  projectRoot: string
+): Promise<{ serial: string | null; hint: string | null }> {
+  try {
+    const found = await findBoundDeviceAsync(projectRoot, { platform: 'android', extend: false });
+    if (found.device?.backend === 'local-android') {
+      return { serial: found.device.serial, hint: null };
+    }
+    return { serial: null, hint: lastLine(found.refusal?.message) };
+  } catch (error: unknown) {
+    if (error instanceof CommandError) {
+      return { serial: null, hint: lastLine(error.message) };
+    }
+    throw error;
+  }
+}
+
+function lastLine(text: string | undefined): string | null {
+  return text?.trim().split('\n').at(-1) ?? null;
+}
+
+/**
+ * Read the fingerprint out of the app on the Android device this worktree bound, or on every
+ * authorized device `--device` matches, where the most informative one wins (`--device` lists to
+ * filter and binds nothing, llp/0030 Contract 3). The file is a zip entry inside the APK, read
+ * through ranged `dd` reads over `adb exec-out`, with a whole-APK pull as the fallback when the
+ * device lacks the tools.
  *
  * @throws the `adb` tool error when `adb` itself could not run.
  */
 export async function readInstalledFingerprintAndroidAsync({
+  projectRoot,
   expectedHash,
   device: deviceFilter,
   appId,
   runAdbAsync: run = runAdbAsync,
   runAdbRawAsync: runRaw = runAdbRawAsync,
   androidDeviceNameAsync: deviceName = androidDeviceNameAsync,
+  findBoundSerialAsync: findBound = findBoundSerialAsync,
 }: AndroidReaderOptions): Promise<InstalledFingerprintResult> {
-  const listed = await run(['devices', '-l'], { timeoutMs: ADB_TIMEOUT_MS });
-  if (listed.notRunnable) {
-    throw adbNotRunnableError(
-      listed.adb,
-      listed.spawnError?.message ?? 'the process did not start'
-    );
-  }
-  if (listed.exitCode !== 0) {
-    throw new Error(
-      `"adb devices -l" failed: ${listed.stderr.trim() || `exit code ${listed.exitCode}`}`
-    );
-  }
-
-  let devices: InstalledAppDevice[] = await Promise.all(
-    parseAndroidDevices(listed.stdout).map(async ({ deviceId, model }) => ({
-      identifier: deviceId,
-      name: (await deviceName(deviceId, { run })) ?? model ?? deviceId,
-    }))
-  );
+  const nameOf = async (serial: string, model: string | null) =>
+    (await deviceName(serial, { run })) ?? model ?? serial;
+  let devices: InstalledAppDevice[];
+  let adb: AdbRunners['adb'] | undefined;
   if (deviceFilter) {
+    const listed = await run(['devices', '-l'], { timeoutMs: ADB_TIMEOUT_MS });
+    if (listed.notRunnable) {
+      throw adbNotRunnableError(
+        listed.adb,
+        listed.spawnError?.message ?? 'the process did not start'
+      );
+    }
+    if (listed.exitCode !== 0) {
+      throw new Error(
+        `"adb devices -l" failed: ${listed.stderr.trim() || `exit code ${listed.exitCode}`}`
+      );
+    }
+    adb = listed.adb;
+    devices = await Promise.all(
+      parseAndroidDevices(listed.stdout).map(async ({ deviceId, model }) => ({
+        identifier: deviceId,
+        name: await nameOf(deviceId, model),
+      }))
+    );
     devices = devices.filter((device) => matchesDeviceFilter(deviceFilter, device));
+  } else {
+    const bound = await findBound(projectRoot);
+    if (bound.serial == null) {
+      return bound.hint ? { status: 'no-device', hint: bound.hint } : { status: 'no-device' };
+    }
+    devices = [{ identifier: bound.serial, name: await nameOf(bound.serial, null) }];
   }
   if (!devices.length) {
     return { status: 'no-device' };
@@ -92,7 +136,7 @@ export async function readInstalledFingerprintAndroidAsync({
   for (const device of devices) {
     let result: InstalledFingerprintResult;
     try {
-      result = await readDeviceAsync(device, appId, { run, runRaw, adb: listed.adb });
+      result = await readDeviceAsync(device, appId, { run, runRaw, adb });
     } catch (error) {
       // One unreachable device must not hide the evidence of the others.
       debugEvent('device_read_failed', {
@@ -116,7 +160,8 @@ export async function readInstalledFingerprintAndroidAsync({
 type AdbRunners = {
   run: typeof runAdbAsync;
   runRaw: typeof runAdbRawAsync;
-  adb: Awaited<ReturnType<typeof runAdbAsync>>['adb'];
+  /** The `adb` the listing ran with, so every read uses the same binary; resolved anew without one. */
+  adb?: Awaited<ReturnType<typeof runAdbAsync>>['adb'];
 };
 
 async function readDeviceAsync(

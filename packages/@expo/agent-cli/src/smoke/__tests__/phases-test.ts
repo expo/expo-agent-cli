@@ -154,10 +154,12 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
     discoverDevServer: async () => discovery(),
     startDevServer: async () => ({ ok: true, devServerUrl: 'http://127.0.0.1:8081', reason: null }),
     stopDevServer: async () => ({ ok: true, target: 'http://127.0.0.1:8081', reason: null }),
-    bootDevice: async (register) => {
-      register({ deviceId: 'SIM-BOOTED', backend: 'local-ios' });
-      return { ok: true, deviceId: 'SIM-BOOTED', backend: 'local-ios' as const, reason: null };
-    },
+    bootDevice: async () => ({
+      ok: true,
+      deviceId: 'SIM-BOOTED',
+      backend: 'local-ios' as const,
+      reason: null,
+    }),
     // A session that was already up, by default: the `--eas` cases override it.
     ensureEasSession: async () => ({
       ok: true,
@@ -169,7 +171,6 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
     // Nothing to install by default: the device this run settled on already has the app.
     installNeededOnDevice: async () => false,
     installApp: async () => ({ ok: true, version: null, replaced: null, reason: null }),
-    shutdownDevice: async (deviceId) => ({ ok: true, target: deviceId, reason: null }),
     // Settled by default: the wait before the picture has its own cases (F57).
     waitForStableTargets: async () => ({ stable: true }),
     waitForBundlerReady: async () => ({
@@ -403,8 +404,7 @@ describe(runSmokePhasesAsync, () => {
           return found;
         },
         probeDevice: async () => ({ ...device, reason: device.deviceId ? null : 'no simulator' }),
-        bootDevice: async (register) => {
-          register({ deviceId: 'SIM-BOOTED', backend: 'local-ios' });
+        bootDevice: async () => {
           device = { deviceId: 'SIM-BOOTED', backend: 'local-ios' };
           return { ok: true, deviceId: 'SIM-BOOTED', backend: 'local-ios' as const, reason: null };
         },
@@ -418,48 +418,34 @@ describe(runSmokePhasesAsync, () => {
       };
     }
 
-    it(`starts the dev server and boots a device, then puts both back`, async () => {
+    it(`starts the dev server and boots a device, then puts the dev server back and keeps the device`, async () => {
       const stopDevServer = vi.fn(async () => ({
         ok: true,
         target: 'http://127.0.0.1:8081',
         reason: null,
       }));
-      const shutdownDevice = vi.fn(async (deviceId: string) => ({
-        ok: true,
-        target: deviceId,
-        reason: null,
-      }));
 
       const run = await runSmokePhasesAsync(
-        deps({ ...bareMachine(), stopDevServer, shutdownDevice }),
+        deps({ ...bareMachine(), stopDevServer }),
         options({ bootstrap: true })
       );
 
       expect(run.environment.devServer).toBe('started');
       expect(run.environment.device).toBe('booted');
       expect(stopDevServer).toHaveBeenCalled();
-      expect(shutdownDevice).toHaveBeenCalledWith('SIM-BOOTED', 'local-ios');
-      // Newest first: the device this run booted goes before the dev server it started, so nothing
-      // is left talking to a bundler that has gone.
-      expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual([
-        'device',
-        'dev-server',
-      ]);
+      // The device is this worktree's bound one and stays bound (llp/0030): only the dev server
+      // this run started goes back.
+      expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['dev-server']);
     });
 
     it(`leaves a dev server and a device it found, and cleans nothing up`, async () => {
       const stopDevServer = vi.fn();
-      const shutdownDevice = vi.fn();
 
-      const run = await runSmokePhasesAsync(
-        deps({ stopDevServer, shutdownDevice }),
-        options({ bootstrap: true })
-      );
+      const run = await runSmokePhasesAsync(deps({ stopDevServer }), options({ bootstrap: true }));
 
       expect(run.environment.devServer).toBe('reused');
       expect(run.environment.device).toBe('reused');
       expect(stopDevServer).not.toHaveBeenCalled();
-      expect(shutdownDevice).not.toHaveBeenCalled();
       expect(run.environment.cleanup).toEqual([]);
       // Neither bootstrap phase happened, so neither is reported — a `skipped` row for a step
       // nothing needed reads as a step that was owed and not done.
@@ -509,7 +495,6 @@ describe(runSmokePhasesAsync, () => {
     // @ref llp/0031-ios-binding.plan.md §smoke — the simulator is this worktree's bound one, so
     // nothing is registered to shut it down, and the phase says nothing about putting it back.
     it(`keeps a bound simulator that registered no cleanup, and says so`, async () => {
-      const shutdownDevice = vi.fn();
       const run = await runSmokePhasesAsync(
         deps({
           ...bareMachine({
@@ -522,7 +507,6 @@ describe(runSmokePhasesAsync, () => {
               installNeeded: true,
             }),
           }),
-          shutdownDevice,
         }),
         options({ bootstrap: true })
       );
@@ -532,37 +516,31 @@ describe(runSmokePhasesAsync, () => {
       const reason = run.phases.find((phase) => phase.id === 'boot-device')?.reason;
       expect(reason).toContain('booted SIM-BOUND for this run because agent-cli 0000');
       expect(reason).not.toContain('shut it down');
-      expect(shutdownDevice).not.toHaveBeenCalled();
       expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['dev-server']);
       // A created simulator has no app, and its disk holds nothing to read: the boot's word decides.
       expect(statusOf(run, 'install-app')).toBe('ok');
     });
 
-    it(`says why it chose the emulator it booted, and that it goes back`, async () => {
+    it(`says why it chose the emulator instance it booted, and keeps it bound`, async () => {
       const run = await runSmokePhasesAsync(
         deps({
           ...bareMachine({
-            bootDevice: async (register) => {
-              register({ deviceId: 'emulator-5554', backend: 'local-android' });
-              return {
-                ok: true,
-                deviceId: 'emulator-5554',
-                backend: 'local-android' as const,
-                reason: null,
-                choice: 'it is the only Android virtual device this machine has',
-              };
-            },
+            bootDevice: async () => ({
+              ok: true,
+              deviceId: 'emulator-5554',
+              backend: 'local-android' as const,
+              reason: null,
+              choice: 'Pixel_9 on emulator-5554',
+            }),
           }),
         }),
         options({ bootstrap: true })
       );
 
-      expect(run.environment.deviceChoice).toBe(
-        'it is the only Android virtual device this machine has'
-      );
-      expect(run.phases.find((phase) => phase.id === 'boot-device')?.reason).toContain(
-        'because it is the only Android virtual device this machine has, and shut it down again afterwards'
-      );
+      expect(run.environment.deviceChoice).toBe('Pixel_9 on emulator-5554');
+      const reason = run.phases.find((phase) => phase.id === 'boot-device')?.reason;
+      expect(reason).toBe('booted emulator-5554 for this run because Pixel_9 on emulator-5554');
+      expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['dev-server']);
     });
 
     it(`fails the boot phase when the device would not come up, and skips what needed it`, async () => {
@@ -666,8 +644,7 @@ describe(runSmokePhasesAsync, () => {
             reason: booted ? null : 'no simulator',
           }),
           // A boot that costs a minute of the clock this run reads.
-          bootDevice: async (register) => {
-            register({ deviceId: 'SIM-BOOTED', backend: 'local-ios' });
+          bootDevice: async () => {
             clock += 60_000;
             booted = true;
             return {
@@ -802,8 +779,7 @@ describe(runSmokePhasesAsync, () => {
             backend: booted ? ('local-ios' as const) : null,
             reason: booted ? null : 'no simulator',
           }),
-          bootDevice: async (register) => {
-            register({ deviceId: 'SIM-BOOTED', backend: 'local-ios' });
+          bootDevice: async () => {
             // A cold boot, on the clock.
             clock.ms += 60_000;
             booted = true;
@@ -883,8 +859,7 @@ describe(runSmokePhasesAsync, () => {
             backend: booted ? ('local-ios' as const) : null,
             reason: booted ? null : 'no simulator',
           }),
-          bootDevice: async (register) => {
-            register({ deviceId: 'SIM-BOOTED', backend: 'local-ios' });
+          bootDevice: async () => {
             clock.ms += 60_000;
             booted = true;
             return {
@@ -1086,8 +1061,7 @@ describe(runSmokePhasesAsync, () => {
             backend: booted ? ('local-ios' as const) : null,
             reason: booted ? null : 'no simulator',
           }),
-          bootDevice: async (register) => {
-            register({ deviceId: 'SIM-BOOTED', backend: 'local-ios' });
+          bootDevice: async () => {
             booted = true;
             return {
               ok: true,

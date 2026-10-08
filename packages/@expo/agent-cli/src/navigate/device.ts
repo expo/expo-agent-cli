@@ -3,8 +3,7 @@
 // @ref llp/0030-one-device-per-worktree.rfc.md §Readers
 // Device resolution for deep-link navigation. Three backends. The local ones are the devices this
 // worktree bound with `dev` (`src/deviceBinding/`), read from the registry and verified through
-// the platform tools as subprocesses; until llp/0032 binds Android, that rung is still the first
-// attached `adb` device.
+// the platform tools as subprocesses.
 //
 // The third is not on this machine at all: an EAS Simulator session, driven through `eas
 // simulator:*` (`src/device/cloudSimulator.ts`). It is opt-in per caller rather than always
@@ -14,13 +13,7 @@
 // names it, so a session that happens to be up never quietly bills a run a local device would have
 // served.
 
-import {
-  adbNotRunnableError,
-  parseAndroidDevices,
-  resolveAdb,
-  runAdbAsync,
-  type AdbResolution,
-} from '../device/adb';
+import { resolveAdb, type AdbResolution } from '../device/adb';
 import {
   cloudSessionStartCommand,
   cloudPlatformUnknownError,
@@ -31,7 +24,7 @@ import {
   readCloudSessionIdSync,
   type CloudSessionProbe,
 } from '../device/cloudSimulator';
-import { findBoundDeviceAsync, type AndroidRung, type BoundDevice } from '../deviceBinding';
+import { findBoundDeviceAsync, type BoundDevice } from '../deviceBinding';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import { debugEvent } from './events';
@@ -61,22 +54,6 @@ export interface NavigateDevice {
    * device probe and then spawning a bare `adb` for the deep link (`src/device/adb.ts`).
    */
   adb?: AdbResolution;
-  /** The device's hardware model, as `adb devices -l` reports it. Android only. */
-  model?: string;
-}
-
-export interface DeviceProbe {
-  device: NavigateDevice | null;
-  /** Why no device was found, for the error message. */
-  reason?: string;
-  /**
-   * The device tool itself could not be run, so nothing was asked about devices.
-   *
-   * Carried separately from {@link reason} because the two need different headlines: "no device is
-   * attached" is a fact about the machine's devices, and this is a fact about the machine's SDK.
-   * Reporting the first for the second is friction run 6's F49.
-   */
-  toolError?: CommandError;
 }
 
 /** A bound device as the deep-link ladder drives it. */
@@ -95,82 +72,6 @@ export function navigateDeviceOf(device: BoundDevice): NavigateDevice {
       return { backend: 'cloud', platform: device.platform, deviceId: device.id };
   }
 }
-
-/** Read the first ready device out of `adb devices`. */
-export function parseFirstAndroidDevice(stdout: string): string | null {
-  return parseAndroidDevices(stdout)[0]?.deviceId ?? null;
-}
-
-/**
- * Look for an attached Android device or emulator. Never throws: no device is an answer.
- *
- * An `adb` that could not be started is **not** folded into that answer. It comes back as
- * {@link DeviceProbe.toolError}, so the caller reports a missing SDK as a missing SDK — the
- * headline "no Android device or emulator is attached" is only reachable once `adb` has run
- * (`src/device/adb.ts`, friction run 6's F49).
- */
-export async function probeAndroidDeviceAsync(): Promise<DeviceProbe> {
-  const { stdout, stderr, exitCode, spawnError, adb, notRunnable } = await runAdbAsync([
-    'devices',
-    '-l',
-  ]);
-
-  if (notRunnable) {
-    return {
-      device: null,
-      reason: `"adb" could not be run (${spawnError?.message ?? 'no reason given'}), so no device was looked for`,
-      toolError: adbNotRunnableError(adb, spawnError?.message ?? 'the process did not start'),
-    };
-  }
-  if (exitCode !== 0) {
-    return {
-      device: null,
-      reason: `"${adb.bin} devices -l" failed: ${stderr.trim() || `exit code ${exitCode}`}`,
-    };
-  }
-
-  const device = parseAndroidDevices(stdout)[0];
-  if (!device) {
-    return { device: null, reason: 'no Android device or emulator is attached' };
-  }
-
-  debugEvent('device_resolved', { platform: 'android', deviceId: device.deviceId });
-  return {
-    device: {
-      backend: 'local-android',
-      platform: 'android',
-      deviceId: device.deviceId,
-      adb,
-      model: device.model ?? undefined,
-    },
-  };
-}
-
-/**
- * Main's Android rung as the rung loop takes it, until llp/0032 binds Android. The `adb` the probe
- * resolved is kept on the side, so `openRoute`'s `adb reverse` still runs with it.
- */
-const androidRung = (found: { adb?: AdbResolution; model?: string }): AndroidRung => {
-  return async () => {
-    const probe = await probeAndroidDeviceAsync();
-    if (probe.toolError) {
-      return { device: null, toolError: probe.toolError };
-    }
-    if (!probe.device) {
-      return { device: null };
-    }
-    found.adb = probe.device.adb;
-    found.model = probe.device.model;
-    return {
-      device: {
-        backend: 'local-android',
-        platform: 'android',
-        serial: probe.device.deviceId,
-        origin: { kind: 'explicit' },
-      },
-    };
-  };
-};
 
 /**
  * Look for a cloud simulator session this project can drive. Never throws: no session is an answer.
@@ -234,16 +135,11 @@ export async function resolveDeviceAsync(
     return await resolveCloudDeviceAsync(platform, context);
   }
 
-  const android: { adb?: AdbResolution; model?: string } = {};
-  const found = await findBoundDeviceAsync(context.projectRoot, {
-    platform,
-    extend: true,
-    android: androidRung(android),
-  });
+  const found = await findBoundDeviceAsync(context.projectRoot, { platform, extend: true });
   if (found.device) {
     const device = navigateDeviceOf(found.device);
     debugEvent('device_resolved', { platform: device.platform, deviceId: device.deviceId });
-    return device.backend === 'local-android' ? { ...device, ...android } : device;
+    return device;
   }
 
   // The cloud rung, before the tool failure and before the verdict: a machine whose `adb` will not

@@ -11,8 +11,11 @@ import {
   acquireLine,
   deviceIdOf,
   devicesDisabled,
+  hostBindsPlatform,
   inspectBindingAsync,
+  localBackendOf,
   type AcquireResult,
+  type DevicePlatform,
 } from '../deviceBinding';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
 import {
@@ -275,21 +278,22 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
  * The callback the resolver runs for a native draft, and `devAsync` runs for a draft that builds.
  *
  * @ref llp/0031-ios-binding.plan.md §How `dev` uses it
- * iOS only, until llp/0032 binds Android, and on macOS only; nothing for `--eas`, whose device is
- * a session; nothing under `AGENT_CLI_NO_DEVICE`. A run first refuses a named `--port` that is taken, when the draft
- * serves, so no simulator is created for a run that then stops on the port. `--plan` inspects the
- * own binding and acquires nothing.
+ * Only where this host runs the platform's device; nothing for `--eas`, whose device is a
+ * session; nothing under `AGENT_CLI_NO_DEVICE`. A run first refuses a named `--port` that is
+ * taken, when the draft serves, so no device is created for a run that then stops on the port.
+ * `--plan` inspects the own binding and acquires nothing.
  */
 function deviceCallbackFor(
   projectRoot: string,
   options: DevOptions
 ): (draft: StartPlan) => Promise<AcquireResult | null> {
   return async (draft) => {
-    if (!bindsDevice(options)) {
+    const platform = boundPlatform(options);
+    if (platform == null) {
       return null;
     }
     if (options.mode === 'plan') {
-      return await inspectOwnDeviceAsync(projectRoot);
+      return await inspectOwnDeviceAsync(projectRoot, platform);
     }
     if (options.port != null && draft.steps.some(isDevServerStep)) {
       const planned = await resolvePlannedPortAsync(options.port);
@@ -297,26 +301,33 @@ function deviceCallbackFor(
         throw await portDemandedError(projectRoot, options.port, options.platform);
       }
     }
-    const acquired = await acquireDeviceAsync(projectRoot, 'ios');
+    const acquired = await acquireDeviceAsync(projectRoot, platform);
     Log.progress(acquireLine(acquired));
     return acquired;
   };
 }
 
-function bindsDevice(options: DevOptions): boolean {
-  // iOS simulators exist on macOS only; elsewhere `dev --ios` serves for a device somewhere else,
-  // an EAS session the caller opens itself, and binds nothing, as on main.
-  return (
-    options.platform === 'ios' &&
-    process.platform === 'darwin' &&
+/**
+ * The platform this run binds a local device for, or null when it binds none: `--web`, `--eas`,
+ * devices off, or a host that cannot run the platform's device, where `dev` serves for a device
+ * somewhere else, as on main.
+ */
+function boundPlatform(options: DevOptions): DevicePlatform | null {
+  const platform = options.platform;
+  return (platform === 'ios' || platform === 'android') &&
     options.deviceBackend !== 'eas' &&
-    !devicesDisabled()
-  );
+    !devicesDisabled() &&
+    hostBindsPlatform(platform)
+    ? platform
+    : null;
 }
 
 /** `--plan`'s read of the own binding: the device as `reused` when it is up or down, else null. */
-async function inspectOwnDeviceAsync(projectRoot: string): Promise<AcquireResult | null> {
-  const inspection = await inspectBindingAsync(projectRoot, 'ios', 'local-ios');
+async function inspectOwnDeviceAsync(
+  projectRoot: string,
+  platform: DevicePlatform
+): Promise<AcquireResult | null> {
+  const inspection = await inspectBindingAsync(projectRoot, platform, localBackendOf(platform));
   return inspection.binding && (inspection.state === 'up' || inspection.state === 'not-up')
     ? { device: inspection.binding.device, justBooted: false, action: 'reused' }
     : null;
@@ -331,12 +342,13 @@ function withPlannedDevice(
   if (acquired) {
     return withDevice(plan, deviceIdOf(acquired.device));
   }
-  return bindsDevice(options)
+  const platform = boundPlatform(options);
+  return platform
     ? {
         ...plan,
         reasons: [
           ...plan.reasons,
-          'The run will reuse or create a simulator for this worktree, and pin the build steps to it.',
+          `The run will reuse or ${platform === 'ios' ? 'create a simulator' : 'start an emulator instance'} for this worktree, and pin the build steps to it.`,
         ],
       }
     : plan;
