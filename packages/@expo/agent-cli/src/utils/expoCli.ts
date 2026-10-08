@@ -49,6 +49,8 @@ export interface SpawnExpoOptions {
    * that turns it off. See {@link spawnExpoAsync} for why.
    */
   ci?: boolean;
+  /** A file the output is also written to, in arrival order. See `SubprocessOptions.logFile`. */
+  logFile?: string;
 }
 
 /**
@@ -81,7 +83,7 @@ export interface SpawnExpoOptions {
 export async function spawnExpoAsync(
   projectRoot: string,
   args: string[],
-  { output = 'capture', promptGuard, ci = true }: SpawnExpoOptions = {}
+  { output = 'capture', promptGuard, ci = true, logFile }: SpawnExpoOptions = {}
 ): Promise<{ cli: ExpoCliCommand; result: SubprocessResult }> {
   const cli = resolveExpoCli(projectRoot, args);
   debugEvent('expo_resolved', { command: cli.command, args: cli.args });
@@ -90,6 +92,7 @@ export async function spawnExpoAsync(
     cwd: projectRoot,
     output,
     promptGuard,
+    logFile,
     // Nothing rather than `CI=0`: a machine whose own environment says `CI` is a machine where the
     // frozen bundler is the right behaviour, and overriding it here would be this wrapper deciding
     // something about the caller's environment that it was never told.

@@ -4,14 +4,23 @@
 
 import path from 'node:path';
 
+import { buildLogPath } from '../../dev/buildLog';
+import type { NativePlatform } from '../../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../../programName';
 import { parseArgsOrThrow } from '../../utils/args';
 import { CommandError } from '../../utils/errors';
 import { DEFAULT_CONTEXT_AFTER, DEFAULT_CONTEXT_BEFORE } from './extract';
 import { easCommandPrefix } from '../../utils/easCli';
 
+/** Where the log comes from. */
+export type ExplainSourceOption =
+  | { kind: 'file'; path: string }
+  | { kind: 'stdin' }
+  /** The last native build `@expo/agent-cli dev` ran for this platform (`src/dev/buildLog.ts`). */
+  | { kind: 'local'; platform: NativePlatform; path: string };
+
 export interface ExplainOptions {
-  source: { kind: 'file'; path: string } | { kind: 'stdin' };
+  source: ExplainSourceOption;
   /** The `--ios` / `--android` hint, which narrows the rule table. Null when the caller passed none. */
   platform: 'ios' | 'android' | null;
   contextBefore: number;
@@ -25,6 +34,7 @@ export interface ExplainOptions {
 const EXPLAIN_ARGS = {
   '--file': String,
   '--stdin': Boolean,
+  '--local': Boolean,
   '--ios': Boolean,
   '--android': Boolean,
   '--context': String,
@@ -41,18 +51,23 @@ export interface ResolveExplainContext {
   stdinIsTTY: boolean;
   /** Where a relative `--file` is resolved from. */
   cwd: string;
+  /**
+   * The project whose last local build `--local` reads. Asked only then, because `--file` and
+   * `--stdin` explain a log from anywhere and must not require a project around the caller.
+   */
+  projectRoot?: () => string;
 }
 
 /**
  * Resolve the arguments of `@expo/agent-cli inspect:build-log`.
  *
- * @throws {CommandError} `BAD_ARGS` for two input sources, both platform flags, the retired
- *   `--platform`, an unusable `--context`, or no input source at all on a terminal;
- *   `BUILD_ID_UNSUPPORTED` for the reserved positional.
+ * @throws {CommandError} `BAD_ARGS` for two input sources, `--local` with no platform, both
+ *   platform flags, the retired `--platform`, an unusable `--context`, or no input source at all
+ *   on a terminal; `BUILD_ID_UNSUPPORTED` for the reserved positional.
  */
 export function resolveExplainOptions(
   argv: string[],
-  { stdinIsTTY, cwd }: ResolveExplainContext
+  { stdinIsTTY, cwd, projectRoot }: ResolveExplainContext
 ): ExplainOptions {
   const args = parseArgsOrThrow(EXPLAIN_ARGS, argv, 'inspect:build-log');
   const positional = args._.map(String);
@@ -63,23 +78,31 @@ export function resolveExplainOptions(
 
   const file = args['--file'];
   const stdin = !!args['--stdin'];
-  if (file && stdin) {
+  const local = !!args['--local'];
+  const named = [
+    file ? `--file ${file}` : null,
+    stdin ? '--stdin' : null,
+    local ? '--local' : null,
+  ].filter((flag): flag is string => flag != null);
+  if (named.length > 1) {
     throw new CommandError(
       'BAD_ARGS',
       [
-        `Both --file and --stdin were passed, and a report is about one log.`,
+        `${named.join(' and ')} were passed, and a report is about one log.`,
         `Why: reading two sources would mean either concatenating logs from different builds or silently ignoring one of them, and both produce a report that is about no single run.`,
-        `How: pass "--file ${file}" to read that file, or "--stdin" to read what is piped in.`,
+        `How: pass one of "--file <path>" for a saved log, "--stdin" for what is piped in, or "--local --ios|--android" for the last build ${PROGRAM_NAME} dev ran here.`,
       ].join('\n')
     );
   }
 
-  const source = resolveSource({ file, stdin, stdinIsTTY, cwd });
   const platform = resolvePlatform({
     ios: !!args['--ios'],
     android: !!args['--android'],
     retired: args['--platform'],
   });
+  const source = local
+    ? resolveLocalSource(platform, projectRoot)
+    : resolveSource({ file, stdin, stdinIsTTY, cwd });
   const context = resolveContext(args['--context']);
 
   return {
@@ -91,6 +114,36 @@ export function resolveExplainOptions(
     json: !!args['--json'],
     followups: !args['--no-followups'],
   };
+}
+
+/**
+ * The last native build `@expo/agent-cli dev` ran here, for one platform.
+ *
+ * The platform is required rather than defaulted: a project builds for two, the two logs are two
+ * files, and a default picked by this CLI would explain a build the caller may not have meant.
+ *
+ * @throws {CommandError} `BAD_ARGS` with no platform, or with no project around the caller.
+ */
+function resolveLocalSource(
+  platform: NativePlatform | null,
+  projectRoot: (() => string) | undefined
+): ExplainOptions['source'] {
+  if (!platform) {
+    const error = new CommandError(
+      'BAD_ARGS',
+      [
+        `--local needs the platform whose last build to read: --ios or --android.`,
+        `Why: ${PROGRAM_NAME} dev keeps one build log per platform, and a default picked here would explain a build you may not have meant.`,
+        `How: run "${PROGRAM_PREFIX} inspect:build-log --local --ios" or "${PROGRAM_PREFIX} inspect:build-log --local --android".`,
+      ].join('\n')
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} inspect:build-log --local --ios`;
+    throw error;
+  }
+  if (!projectRoot) {
+    throw new CommandError('BAD_ARGS', `--local needs a project to read the last build of.`);
+  }
+  return { kind: 'local', platform, path: buildLogPath(projectRoot(), platform) };
 }
 
 /**
@@ -121,9 +174,9 @@ function resolveSource({
   const error = new CommandError(
     'BAD_ARGS',
     [
-      `No log to explain: neither --file nor --stdin was passed, and stdin is a terminal.`,
+      `No log to explain: none of --file, --stdin or --local was passed, and stdin is a terminal.`,
       `Why: this command reads a build log and reports what failed in it. On a terminal there is nothing being piped in, so waiting on stdin would hang instead of answering.`,
-      `How: run "${PROGRAM_PREFIX} inspect:build-log --file <path>", or pipe a log in: "cat build.log | ${PROGRAM_PREFIX} inspect:build-log".`,
+      `How: run "${PROGRAM_PREFIX} inspect:build-log --local --ios" for the last build ${PROGRAM_NAME} dev ran here, "${PROGRAM_PREFIX} inspect:build-log --file <path>" for a saved log, or pipe one in: "cat build.log | ${PROGRAM_PREFIX} inspect:build-log".`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} inspect:build-log --help`;

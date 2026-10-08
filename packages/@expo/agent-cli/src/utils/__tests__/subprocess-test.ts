@@ -287,3 +287,47 @@ describe(findExecutableOnPath, () => {
     expect(findExecutableOnPath('eas', { pathEnv: '' })).toBeNull();
   });
 });
+
+// @ref llp/0012-build-explain.rfc.md §What ships, and what is reserved
+// The build log `inspect:build-log --local` reads is every byte the child printed, in the order
+// it arrived, whichever stream it came on.
+describe('logFile', () => {
+  const logFile = '/project/.expo/dev/logs/build-ios.log';
+
+  it(`should write both streams to the file in arrival order, and create its directory`, async () => {
+    const child = mockSpawn();
+
+    const promise = spawnSubprocessAsync('expo', ['run:ios'], { output: 'capture', logFile });
+    child.stdout!.emit('data', '› Compiling\n');
+    child.stderr!.emit('data', 'error: no such module\n');
+    child.stdout!.emit('data', '› Build Failed\n');
+    child.emit('close', 65, null);
+
+    await promise;
+    expect(vol.readFileSync(logFile, 'utf8')).toBe(
+      '› Compiling\nerror: no such module\n› Build Failed\n'
+    );
+  });
+
+  it(`should truncate a log from an earlier run`, async () => {
+    vol.fromJSON({ [logFile]: 'from last week\n' });
+    const child = mockSpawn();
+
+    const promise = spawnSubprocessAsync('expo', ['run:ios'], { output: 'tee', logFile });
+    child.stdout!.emit('data', 'today\n');
+    child.emit('close', 0, null);
+
+    await promise;
+    expect(vol.readFileSync(logFile, 'utf8')).toBe('today\n');
+  });
+
+  it(`should write nothing in inherit mode, where no byte passes through`, async () => {
+    const child = mockSpawn({ piped: false });
+
+    const promise = spawnSubprocessAsync('expo', ['run:ios'], { output: 'inherit', logFile });
+    child.emit('close', 0, null);
+
+    await promise;
+    expect(vol.existsSync(logFile)).toBe(false);
+  });
+});

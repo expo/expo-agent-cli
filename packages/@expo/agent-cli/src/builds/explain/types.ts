@@ -88,8 +88,9 @@ export interface Failure {
 
 /** Where the log came from, and what was actually read of it. */
 export interface ExplainSource {
-  kind: 'file' | 'stdin';
-  /** Absolute path for `--file`; null for `--stdin`. */
+  /** `local` is the last native build `@expo/agent-cli dev` ran for the platform (`--local`). */
+  kind: 'file' | 'stdin' | 'local';
+  /** Absolute path for `--file` and `--local`; null for `--stdin`. */
   path: string | null;
   /** The platform hint the caller passed, which narrows the rule table. Null when none. */
   platform: 'ios' | 'android' | null;

@@ -279,6 +279,95 @@ describe('@expo/agent-cli inspect:build-log --stdin', () => {
   });
 });
 
+// @ref llp/0012-build-explain.rfc.md §What ships, and what is reserved
+// `--local` reads the log `dev` wrote for the last native build of one platform.
+describe('@expo/agent-cli inspect:build-log --local', () => {
+  /** A project whose last iOS build `dev` wrote a log for, planted from a captured fixture. */
+  async function setupWithBuildLogAsync(platform: 'ios' | 'android', log: string): Promise<string> {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const logDir = path.join(projectRoot, '.expo', 'dev', 'logs');
+    await fs.promises.mkdir(logDir, { recursive: true });
+    await fs.promises.copyFile(fixture(log), path.join(logDir, `build-${platform}.log`));
+    return projectRoot;
+  }
+
+  it('reports the failure in the last build dev ran for the platform, and says where it read it', async () => {
+    const projectRoot = await setupWithBuildLogAsync('ios', 'xcodebuild-no-profile.log');
+
+    const result = await executeAgentCliAsync(projectRoot, [
+      'inspect:build-log',
+      '--local',
+      '--ios',
+      '--json',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const report = JSON.parse(result.stdout);
+    expect(report.source).toMatchObject({ kind: 'local', platform: 'ios' });
+    // The path as the CLI resolved the project, which on macOS is the real path of the temp dir.
+    expect(report.source.path).toMatch(/[\\/]\.expo[\\/]dev[\\/]logs[\\/]build-ios\.log$/);
+    expect(report.failure).not.toBeNull();
+    expect(
+      report.followups.map((followup: { command: string }) => followup.command)
+    ).toContainEqual(expect.stringContaining('inspect:build-log --local --ios'));
+  });
+
+  it('names the file and the platform on the human report', async () => {
+    const projectRoot = await setupWithBuildLogAsync('android', 'npm-peer-conflict.log');
+
+    const result = await executeAgentCliAsync(projectRoot, [
+      'inspect:build-log',
+      '--local',
+      '--android',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('build-android.log');
+    expect(result.stdout).toContain('the last android build dev ran here');
+  });
+
+  it('exits 1 naming dev when the project has no build log for the platform', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--local', '--ios'],
+      {
+        reject: false,
+      }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('no ios build log');
+    expect(result.stderr).toContain('npx @expo/agent-cli dev --ios');
+  });
+
+  it('needs a platform, and says which two', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+
+    const result = await executeAgentCliAsync(projectRoot, ['inspect:build-log', '--local'], {
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('--local needs the platform');
+    expect(result.stderr).toContain('--local --android');
+  });
+
+  it('is refused beside --file, because a report is about one log', async () => {
+    const projectRoot = await setupWithBuildLogAsync('ios', 'xcodebuild-no-profile.log');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--local', '--ios', '--file', fixture('npm-peer-conflict.log')],
+      { reject: false }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('--local were passed');
+  });
+});
+
 describe('when no report can be produced', () => {
   it('exits 1 with the --json error envelope for a file that is not there', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
