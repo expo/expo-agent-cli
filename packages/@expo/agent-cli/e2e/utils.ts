@@ -355,6 +355,8 @@ export function spawnAgentCli(
       // This tier doubles the dev server, never a device (llp/0002 §Tier 0): without this, a
       // `dev` run on a developer's Mac would boot a real simulator against a stub dev server.
       AGENT_CLI_NO_DEVICE: '1',
+      // Setup, `new`, install and a stale search would otherwise download docs from the network.
+      AGENT_CLI_NO_DOCS_SYNC: '1',
       ...stubExpoEnv(cwd),
       // `dev` picks the port before the plan and passes it as `--port`, which the stub listens on
       // over its own env var. Expo's default variable makes the two the same port.
