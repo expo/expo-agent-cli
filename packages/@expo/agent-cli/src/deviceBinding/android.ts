@@ -190,6 +190,11 @@ export async function bootEmulatorAsync(
       const booted = await tools.adb(['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], {
         timeoutMs: 30_000,
       });
+      // The child can exit during either adb call while another instance answers on its port.
+      const stopped = gone();
+      if (stopped) {
+        return { ok: false, reason: stopped };
+      }
       if (booted.exitCode === 0 && booted.stdout.trim() === '1') {
         return { ok: true, reason: null };
       }
