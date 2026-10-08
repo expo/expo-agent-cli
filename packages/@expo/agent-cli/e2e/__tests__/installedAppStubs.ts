@@ -128,7 +128,7 @@ const STUB_RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
  * container holds `booted.fingerprint` at the static-linking path; otherwise with `simulators`
  * (each `Shutdown` unless it says otherwise); otherwise none. The listing is state the stub keeps:
  * `create` adds a `Shutdown` simulator whose udid is `E2E-CREATED-<n>`, `delete` removes one,
- * `boot` and `shutdown` change its state, as a real `simctl` does. `list runtimes -j` names one
+ * `boot`, `bootstatus -b` and `shutdown` change its state, as a real `simctl` does. `list runtimes -j` names one
  * iOS runtime.
  *
  * `openurl` and `terminate` mark the app started and stopped at {@link appStartedMarkerPath}.
@@ -219,7 +219,11 @@ export async function installStubXcrunAsync(
       `  save();`,
       `  process.exit(0);`,
       `}`,
-      `if (args[0] === 'simctl' && args[1] === 'bootstatus') process.exit(0);`,
+      `if (args[0] === 'simctl' && args[1] === 'bootstatus') {`,
+      `  const sim = args.includes('-b') ? find(args[2]) : null;`,
+      `  if (sim) { sim.state = 'Booted'; save(); }`,
+      `  process.exit(0);`,
+      `}`,
       `if (args[0] === 'simctl' && args[1] === 'openurl') {`,
       `  fs.writeFileSync(marker, '');`,
       `  process.exit(0);`,
