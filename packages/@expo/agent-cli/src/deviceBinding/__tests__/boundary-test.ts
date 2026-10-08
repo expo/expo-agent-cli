@@ -32,7 +32,7 @@ describe('src/deviceBinding/', () => {
 
   it(`keeps every file under ${MAX_FILE_LINES} lines`, () => {
     const over = sources
-      .map(({ name, text }) => ({ name, lines: text.split('\n').length }))
+      .map(({ name, text }) => ({ name, lines: text.split(/\r?\n/).length }))
       .filter(({ lines }) => lines >= MAX_FILE_LINES);
     expect(over).toEqual([]);
   });
@@ -40,7 +40,7 @@ describe('src/deviceBinding/', () => {
   it(`keeps every function under ${MAX_FUNCTION_LINES} lines`, () => {
     const over: string[] = [];
     for (const { name, text } of sources) {
-      const lines = text.split('\n');
+      const lines = text.split(/\r?\n/);
       lines.forEach((line, index) => {
         const match = /^(?:export )?(?:async )?function (\w+)/.exec(line);
         if (!match) {

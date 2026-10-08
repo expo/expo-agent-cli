@@ -1,6 +1,7 @@
 // @ref llp/0031-ios-binding.plan.md §Tests
 import { vol } from 'memfs';
 
+import { canonicalizeExistingPath } from '../../utils/dir';
 import { acquireDeviceAsync, releaseWorktreeDevicesAsync } from '..';
 import { bindingPathFor, readBindingFile } from '../registry';
 import { bindingFor, fakeTools, writeBinding } from './fakeTools';
@@ -30,7 +31,9 @@ describe(acquireDeviceAsync, () => {
     ]);
     const read = readBindingFile(file());
     expect(read.kind === 'binding' && read.binding.device).toMatchObject({ udid: 'CREATED-1' });
-    expect(read.kind === 'binding' && read.binding.projectRoot).toBe(ROOT);
+    expect(read.kind === 'binding' && read.binding.projectRoot).toBe(
+      canonicalizeExistingPath(ROOT)
+    );
   });
 
   // bootstatus-b-not-boot
