@@ -14,7 +14,7 @@
 Two changes get it there.
 
 1. **The platform flag is required**: `--ios`, `--android`, or `--web`. Same rule, same one-line refusal, and same reasoning as `smoke`'s ([[0005-runtime-loop-tools]] §Which platform is the caller's to say). The old host-based default had a worse cost here than in `smoke`: the guessed platform never reached `expo start`, so a bare `dev` served a bundle and put nothing on any device.
-2. **The plan always acts on the platform.** A fresh plan runs `expo start --<platform>`, which boots a simulator or an emulator when none is up, installs Expo Go when it has to, and opens the app — the Expo CLI's own openers do all of this (`AppleDeviceManager`, `AndroidDeviceManager.startAsync` [observed — `@expo/cli` source, 2026-09-04]). A stale plan prebuilds and builds through `expo run:<platform>`, which does the same and installs the build. So `dev --ios` ends with the app running, whichever route the plan took, and no separate boot step was needed.
+2. **The plan always acts on the platform.** A fresh plan runs `expo start`, and `dev` opens the app itself on the simulator bound to the worktree or on an emulator, installing Expo Go when it has to ([[0026-dev-owns-the-open]], [[0030-one-device-per-worktree]]). A stale plan prebuilds and builds through `expo run:<platform>`, which does the same and installs the build. So `dev --ios` ends with the app running, whichever route the plan took, and no separate boot step was needed.
 
 ## What required breaks
 

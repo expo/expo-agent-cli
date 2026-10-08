@@ -12,6 +12,7 @@ import {
   installStubBinAsync,
   installStubFingerprintAsync,
   killAsync,
+  pathEnvVars,
   readDevLockAsync,
   readStubExpoInvocations,
   setupFixtureAsync,
@@ -19,6 +20,7 @@ import {
   waitForAsync,
   waitForDevLockAsync,
 } from '../utils';
+import { installStubXcrunAsync } from './installedAppStubs';
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
 const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
@@ -1073,6 +1075,68 @@ describe('@expo/agent-cli dev', () => {
       } finally {
         await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], { reject: false });
       }
+    });
+  });
+
+  // @ref llp/0031-ios-binding.plan.md §Tests
+  //
+  // Two worktrees of one app, one stub `simctl` whose simulator state both runs share, and one
+  // registry: each `dev --ios` creates its own simulator, binds it, boots it with `bootstatus -b`,
+  // and pins its build to it. The `--device` on each `run:ios` is the id in that worktree's binding,
+  // and the two ids differ.
+  describe.skipIf(process.platform !== 'darwin')('two worktrees, two simulators', () => {
+    /** Every binding in the shared registry, by the root it belongs to. */
+    function readBindings(home: string): Record<string, { udid: string; name: string }> {
+      const dir = path.join(home, 'agent-cli', 'bindings');
+      const bindings: Record<string, { udid: string; name: string }> = {};
+      for (const name of fs
+        .readdirSync(dir)
+        .filter((entry) => entry.endsWith('-ios-local-ios.json'))) {
+        const binding = JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
+        bindings[binding.projectRoot] = { udid: binding.device.udid, name: binding.device.name };
+      }
+      return bindings;
+    }
+
+    it('binds a simulator of its own to each worktree and builds onto it', async () => {
+      const [first, second] = await Promise.all([
+        setupAsync('dev-client-app'),
+        setupAsync('dev-client-app'),
+      ]);
+      // One `simctl`, installed once: both runs create and boot against its one simulator state.
+      const { binDir, calls: readXcrun } = await installStubXcrunAsync(first!);
+      const home = `${first}.expo-home`;
+      const env = {
+        ...pathEnvVars(`${binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`),
+        __UNSAFE_EXPO_HOME_DIRECTORY: home,
+        AGENT_CLI_NO_DEVICE: '0',
+      };
+
+      const results = await Promise.all(
+        [first!, second!].map((root) =>
+          executeAgentCliAsync(root, ['dev', '--ios', '--local'], { env })
+        )
+      );
+
+      expect(results.map((result) => result.exitCode)).toEqual([0, 0]);
+      const bindings = readBindings(home);
+      const udids = [first!, second!].map((root) => bindings[fs.realpathSync.native(root)]!.udid);
+      expect(udids).toEqual(expect.arrayContaining(['E2E-CREATED-1', 'E2E-CREATED-2']));
+      expect(new Set(udids).size).toBe(2);
+      for (const [index, root] of [first!, second!].entries()) {
+        expect(invocationArgs(root)).toEqual([
+          ['prebuild', '--platform', 'ios'],
+          ['run:ios', ...PORT_ARGS, '--device', udids[index]],
+        ]);
+      }
+      const booted = readXcrun()
+        .filter((argv) => argv[1] === 'bootstatus')
+        .map((argv) => argv[2]);
+      expect(new Set(booted)).toEqual(new Set(udids));
+      expect(readXcrun().every((argv) => argv[1] !== 'bootstatus' || argv.includes('-b'))).toBe(
+        true
+      );
+      expect(readXcrun().some((argv) => argv[1] === 'boot')).toBe(false);
     });
   });
 });

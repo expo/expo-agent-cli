@@ -11,7 +11,7 @@
 
 [[0025-dev-requires-platform]] made `dev --ios` put the app on a device by forwarding the flag to `expo start`. That worked through the Expo CLI's opener, which checks Simulator.app with an osascript that a Mac without the Automation grant refuses — and the refusal is uncaught, so the dev server dies with it [observed live — 2026-08-24]. `smoke` had already routed around this; Kudo asked whether `dev` and `smoke` could share that code [2026-09-05].
 
-Now they do. `dev` opens the app itself, through the same modules `smoke` and `navigate` drive: probe or boot the device (`bootDevice`), put the right Expo Go on it (`installExpoGo`, version-checked like `@expo/cli` does), and deep-link to `/` (`openRouteAsync`, which handles `adb reverse` and the dev-client launcher URL). No AppleScript anywhere, so it works headless and needs no grant.
+Now they do. `dev` opens the app itself, through the same modules `smoke` and `navigate` drive: take the simulator the registry bound to this worktree ([[0030-one-device-per-worktree]]), or probe or boot an emulator (`bootDevice`), put the right Expo Go on it (`installExpoGo`, version-checked like `@expo/cli` does), and deep-link to `/` (`openRouteAsync`, which handles `adb reverse` and the dev-client launcher URL). No AppleScript anywhere, so it works headless and needs no grant.
 
 ## How it hangs together
 
@@ -36,4 +36,4 @@ Tier 0 doubles the dev server, never a device ([[0002-testing-and-evals]]). With
 
 - Unit: 3964 pass, including the new `openApp` table and the hook wiring.
 - E2E: 629 pass — plan argvs without the flag, the forwarded options intact, the F140 grace on a `run:ios` stub that dies after its bundler answered.
-- Live: `dev --ios --detach` on the booted iPhone 17 Pro opens Expo Go on the started dev server (live-local tier).
+- Live: `dev --ios --detach` on the simulator bound to the worktree opens Expo Go on the started dev server (live-local tier).

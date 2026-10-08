@@ -155,9 +155,12 @@ describe('the phone probe over a stub devicectl', () => {
 
   async function stubPhoneAsync(phone: { fingerprint: string | null; postDelayMs?: number }) {
     const xcrun = await installStubXcrunAsync(root, { phone });
-    restore = withEnv(
-      pathEnvVars(`${xcrun.binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`)
-    );
+    restore = withEnv({
+      ...pathEnvVars(
+        `${xcrun.binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`
+      ),
+      __UNSAFE_EXPO_HOME_DIRECTORY: `${root}.expo-home`,
+    });
     return xcrun;
   }
 
@@ -229,6 +232,7 @@ describe('the phone probe over a stub devicectl', () => {
   it('names a connected phone in a hint and leaves it alone until --device names it', async () => {
     const xcrun = await stubPhoneAsync({ fingerprint: EMBEDDED_HASH });
     const unnamed = await readInstalledFingerprintIosAsync({
+      projectRoot: root,
       appId: APP_ID,
       expectedHash: EMBEDDED_HASH,
       scheme: 'installedapp',
@@ -241,6 +245,7 @@ describe('the phone probe over a stub devicectl', () => {
     expect(xcrun.calls().some((args) => args[3] === 'launch')).toBe(false);
 
     const named = await readInstalledFingerprintIosAsync({
+      projectRoot: root,
       appId: APP_ID,
       expectedHash: EMBEDDED_HASH,
       device: PHONE_NAME,

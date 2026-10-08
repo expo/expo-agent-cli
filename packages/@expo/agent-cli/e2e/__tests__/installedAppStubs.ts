@@ -7,6 +7,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { digestOf } from '../../src/devLock/address';
+import { canonicalizeExistingPath } from '../../src/utils/dir';
 import { installStubBinAsync } from '../utils';
 
 export const APK_FIXTURE = path.resolve(__dirname, '../../src/__fixtures__/zip/fixture-stored.zip');
@@ -37,6 +39,35 @@ export const PHONE_NAME = "Ada's iPhone";
 export const PHONE_UDID = '00001110-001111110110101A';
 
 export type StubCalls = () => string[][];
+
+/**
+ * Bind `udid` to the fixture worktree in the registry the harness's Expo home holds
+ * (`<projectRoot>.expo-home`, @ref ../utils §spawnAgentCli), as `dev` would have: `created`, the
+ * lease 60 min ahead, the canonical root. Every verb of the fixture then drives this simulator
+ * (llp/0030 §Readers), so a case that hands a verb a booted simulator seeds this first.
+ */
+export async function bindingFixture(projectRoot: string, udid: string, name = SIMULATOR_NAME) {
+  const root = canonicalizeExistingPath(projectRoot);
+  const now = Date.now();
+  const file = path.join(
+    `${projectRoot}.expo-home`,
+    'agent-cli',
+    'bindings',
+    `${digestOf(root)}-ios-local-ios.json`
+  );
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  await fs.promises.writeFile(
+    file,
+    JSON.stringify({
+      version: 1,
+      device: { backend: 'local-ios', platform: 'ios', udid, name, origin: 'created' },
+      projectRoot: root,
+      boundAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + 60 * 60_000).toISOString(),
+    })
+  );
+  return file;
+}
 
 function readCalls(recordPath: string): string[][] {
   return fs.existsSync(recordPath)
@@ -126,7 +157,8 @@ const STUB_RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
  *
  * `simctl list devices` answers with one booted simulator when `booted` is given, whose app
  * container holds `booted.fingerprint` at the static-linking path; otherwise with `simulators`
- * (each `Shutdown` unless it says otherwise); otherwise none. The listing is state the stub keeps:
+ * (each `Shutdown` unless it says otherwise); otherwise none. A booted simulator is also bound to
+ * the fixture through {@link bindingFixture}. The listing is state the stub keeps:
  * `create` adds a `Shutdown` simulator whose udid is `E2E-CREATED-<n>`, `delete` removes one,
  * `boot`, `bootstatus -b` and `shutdown` change its state, as a real `simctl` does. `list runtimes -j` names one
  * iOS runtime.
@@ -177,6 +209,13 @@ export async function installStubXcrunAsync(
     )
   );
   await fs.promises.rm(counterPath, { force: true });
+  // A booted simulator the stub lists is one `dev` bound to this fixture, or no verb would drive it.
+  const bound = booted
+    ? { udid: SIMULATOR_UDID, name: SIMULATOR_NAME }
+    : simulators?.find((simulator) => simulator.state === 'Booted');
+  if (bound) {
+    await bindingFixture(root, bound.udid, bound.name);
+  }
   const binDir = path.join(root, '.stub-bin');
   const scriptPath = path.join(binDir, 'xcrun-stub.js');
   await fs.promises.mkdir(binDir, { recursive: true });

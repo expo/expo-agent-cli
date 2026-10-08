@@ -22,6 +22,7 @@ import {
   stubExpoEnv,
   type StubDevServer,
 } from '../utils';
+import { bindingFixture } from './installedAppStubs';
 
 /** A port nothing listens on, for the "no dev server" state. */
 const DEAD_URL = 'http://127.0.0.1:1';
@@ -290,6 +291,7 @@ describe('a dev server whose app is re-registering', () => {
  * device method *starts* the app, so its runtime registers because a device tool ran.
  */
 async function installStubXcrunAsync(root: string, startedMarker: string | null): Promise<void> {
+  await bindingFixture(root, 'PREFLIGHT-SIM', 'iPhone 17 Pro');
   const scriptPath = path.join(root, '.stub-bin', 'xcrun-preflight.js');
   await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
   await fs.promises.writeFile(
