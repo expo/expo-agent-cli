@@ -89,12 +89,57 @@ describe(formatStartPlan, () => {
       { port: 8180, movedFrom: null, state: 'named', taken: true },
       'Dev server: port 8180, as named, which is taken.',
     ],
+    [
+      { port: 8190, movedFrom: null, state: 'reused' },
+      "Dev server: port 8190, where this project's dev server runs; the plan starts none.",
+    ],
+    [
+      { port: 8190, movedFrom: null, state: 'starting' },
+      "Dev server: port 8190, where this project's dev server is still starting; the run stops.",
+    ],
+    [
+      { port: 8190, movedFrom: null, state: 'foreign' },
+      'Dev server: port 8190, which answers for another project; the run stops.',
+    ],
+    [
+      { port: 8190, movedFrom: null, state: 'mismatch', missing: ['--tunnel'], extra: [] },
+      "Dev server: port 8190, where this project's dev server runs without --tunnel; the run stops.",
+    ],
+    [
+      {
+        port: 8190,
+        movedFrom: null,
+        state: 'mismatch',
+        missing: ['--tunnel'],
+        extra: ['--no-dev'],
+      },
+      "Dev server: port 8190, where this project's dev server runs without --tunnel and with --no-dev; the run stops.",
+    ],
+    [
+      { port: 8190, movedFrom: null, state: 'mismatch', missing: ['--tunnel'], extra: null },
+      "Dev server: port 8190, where this project's dev server runs with unknown options; the run stops.",
+    ],
+    [
+      { port: 8081, movedFrom: null, state: 'elsewhere', running: 8190 },
+      "Dev server: port 8081, while this project's dev server runs on 8190; the run stops.",
+    ],
   ])(`should name the dev server's port and its state: %o`, (devServerPort, line) => {
     expect(strip(formatStartPlan({ ...plan, devServerPort }))).toContain(line);
   });
 
   it(`should print no dev server row for a plan without a port`, () => {
     expect(strip(formatStartPlan(plan))).not.toContain('Dev server:');
+  });
+
+  it(`should say a plan with no steps runs nothing`, () => {
+    expect(strip(formatStartPlan({ ...plan, steps: [] }))).toContain('No steps: nothing runs.');
+  });
+
+  it(`should say a reuse plan with no steps reuses the running dev server`, () => {
+    const devServerPort = { port: 8190, movedFrom: null, state: 'reused' } as const;
+    expect(strip(formatStartPlan({ ...plan, steps: [], devServerPort }))).toContain(
+      'No steps: the running dev server is reused.'
+    );
   });
 
   it(`should format a plan of one step`, () => {

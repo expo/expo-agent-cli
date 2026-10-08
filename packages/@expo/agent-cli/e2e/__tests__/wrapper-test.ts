@@ -313,6 +313,7 @@ describe('@expo/agent-cli start', () => {
           url: 'http://127.0.0.1:8087',
           port: 8087,
           pid: child.pid,
+          args: ['start'],
         });
         const realpath = fs.realpathSync.native ?? fs.realpathSync;
         expect(realpath(lock!.projectRoot)).toBe(realpath(projectRoot));

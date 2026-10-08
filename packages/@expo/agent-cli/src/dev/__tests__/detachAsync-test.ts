@@ -43,6 +43,7 @@ beforeEach(() => {
       pid: 4242,
       projectRoot,
       startedAt: new Date(0).toISOString(),
+      args: ['start'],
     });
   vi.mocked(spawn).mockImplementation(() => {
     fs.writeFileSync(logFile, servingPlan);
@@ -161,6 +162,87 @@ it('does not wait for a verdict when the child is alive but the bundler stopped 
   expect(Date.now()).toBe(0);
 });
 
+// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — the `--detach` parent installs
+// and opens nothing, so it reports a server that serves or is starting, and stops only on a foreign
+// port or a named port elsewhere, before anything is spawned.
+describe('a live lock of this project', () => {
+  beforeEach(() => {
+    vi.mocked(readDevServerLockAsync)
+      .mockReset()
+      .mockResolvedValue({
+        url: 'http://127.0.0.1:8393',
+        port: 8393,
+        pid: 4242,
+        projectRoot,
+        startedAt: new Date(0).toISOString(),
+        args: ['start'],
+      });
+  });
+
+  // The plan is the child's, so the parent has no options to compare.
+  it('reports the running server for --clear, with no options compared', async () => {
+    const { event: cliEvent } = await import('../../events');
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--clear', '--json']), {
+        print: false,
+      })
+    ).resolves.toBe(0);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(cliEvent).toHaveBeenCalledWith(
+      'dev_detach',
+      expect.objectContaining({ alreadyRunning: true, phase: 'serving' })
+    );
+  });
+
+  // A `run:*` build in another terminal holds the lock for minutes; `smoke` bootstraps through here.
+  it('reports a server that is still starting as already running, building', async () => {
+    const { event: cliEvent } = await import('../../events');
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValue({
+      ...readiness(false),
+      projectRootMatched: null,
+      reportedProjectRoot: null,
+    });
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--json']), {
+        print: false,
+      })
+    ).resolves.toBe(0);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(cliEvent).toHaveBeenCalledWith(
+      'dev_detach',
+      expect.objectContaining({ alreadyRunning: true, phase: 'building', port: 8393 })
+    );
+    // One lock read: the report is of the lock the check judged.
+    expect(readDevServerLockAsync).toHaveBeenCalledTimes(1);
+  });
+
+  // One project has one lock: a second detached server on 9000 could not hold it, and reporting
+  // the server on 8393 would name a port the caller did not ask for.
+  it(`stops on a named port other than the running server's, and spawns nothing`, async () => {
+    const error = await devDetachAsync(
+      projectRoot,
+      resolveDevOptions(['--ios', '--detach', '--port', '9000', '--json']),
+      { print: false }
+    ).catch((thrown) => thrown);
+
+    expect(error).toMatchObject({ code: 'DEV_SERVER_ON_OTHER_PORT', exitCode: 20 });
+    expect(error.message).toContain('running on port 8393');
+    expect(error.message).toContain('not on the named port 9000');
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('reports the running server when nothing is missing', async () => {
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--json']), {
+        print: false,
+      })
+    ).resolves.toBe(0);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
 // The child publishes its lock at the spawn of a step that names a port, before Metro binds it. A
 // retry that moves the dev server republishes, and the report names the port Metro logged.
 it('reports the port Metro logged, not the one the lock named before a retry', async () => {
@@ -169,6 +251,7 @@ it('reports the port Metro logged, not the one the lock named before a retry', a
     pid: 4242,
     projectRoot,
     startedAt: new Date(0).toISOString(),
+    args: ['start', '--port', '8180'],
   };
   vi.mocked(readDevServerLockAsync)
     .mockReset()
@@ -183,6 +266,62 @@ it('reports the port Metro logged, not the one the lock named before a retry', a
   expect(cliEvent).toHaveBeenCalledWith('dev_detach', expect.objectContaining({ port: 8393 }));
 });
 
+// Two `dev --detach` runs started together: the other run's child published first. This parent
+// reports its own child's lock, which the lock's pid names.
+it(`reports its own child's lock, not another run's`, async () => {
+  const { event: cliEvent } = await import('../../events');
+  const lock = { projectRoot, startedAt: new Date(0).toISOString(), args: ['start'] };
+  vi.mocked(readDevServerLockAsync)
+    .mockReset()
+    .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce({ ...lock, url: 'http://127.0.0.1:8393', port: 8393, pid: 999 })
+    .mockResolvedValue({ ...lock, url: 'http://127.0.0.1:8393', port: 8393, pid: 4242 });
+
+  const result = run();
+  await vi.advanceTimersByTimeAsync(5000);
+  await expect(result).resolves.toBe(0);
+
+  expect(cliEvent).toHaveBeenCalledWith('dev_detach', expect.objectContaining({ pid: 4242 }));
+  expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.objectContaining({ pid: 999 }));
+});
+
+// Two `dev --detach` runs started within a second: this run's child met the other run's lock,
+// stopped or reused it, and exited without a lock of its own. The other run's server is reported.
+it(`reports another run's live lock as already running when its own child exits without one`, async () => {
+  const { event: cliEvent } = await import('../../events');
+  const other = {
+    url: 'http://127.0.0.1:8393',
+    port: 8393,
+    pid: 999,
+    projectRoot,
+    startedAt: new Date(0).toISOString(),
+    args: ['start'],
+  };
+  vi.mocked(readDevServerLockAsync)
+    .mockReset()
+    .mockResolvedValueOnce(null)
+    .mockResolvedValue(other);
+  let child: EventEmitter;
+  vi.mocked(spawn).mockImplementation(() => {
+    child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
+    return child as unknown as ChildProcess;
+  });
+
+  const result = devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--json']), {
+    print: false,
+  });
+  await vi.advanceTimersByTimeAsync(1000);
+  child!.emit('exit', 20, null);
+  await vi.runAllTimersAsync();
+
+  await expect(result).resolves.toBe(0);
+  expect(spawn).toHaveBeenCalledTimes(1);
+  expect(cliEvent).toHaveBeenCalledWith(
+    'dev_detach',
+    expect.objectContaining({ pid: 999, alreadyRunning: true, phase: 'serving' })
+  );
+});
+
 // A `run:*` build has not reached Metro yet, so `start.log` names no port. The lock's own
 // `startedAt` (the step's spawn) bounds the wait, as the port watch is bounded.
 describe('a lock whose port Metro has not logged', () => {
@@ -192,6 +331,7 @@ describe('a lock whose port Metro has not logged', () => {
     pid: 4242,
     projectRoot,
     startedAt: new Date(0).toISOString(),
+    args: ['run:ios', '--port', '8180'],
   };
   let child: EventEmitter;
 

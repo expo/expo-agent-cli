@@ -1217,6 +1217,7 @@ describe('reloading an app on a cloud simulator session', () => {
       port: 8081,
       pid: 1,
       startedAt: '2026-08-27T09:00:00.000Z',
+      args: ['start'],
       projectRoot,
     });
     mockConnect(fakeSocket([{}]).socket);

@@ -237,6 +237,7 @@ describe(navigateAsync, () => {
         port: 8099,
         pid: 4242,
         startedAt: '2026-08-23T00:00:00.000Z',
+        args: ['start'],
         projectRoot,
       });
       // Both ports answer, and 8081 is another project's: the lock is what tells them apart.
@@ -264,6 +265,7 @@ describe(navigateAsync, () => {
         port: 8099,
         pid: 4242,
         startedAt: '2026-08-23T00:00:00.000Z',
+        args: ['start'],
         projectRoot,
       });
       mockDevServersAt({ 'http://127.0.0.1:8123': [EXPO_GO_TARGET] });
@@ -746,6 +748,7 @@ describe(navigateAsync, () => {
         pid: 4242,
         // Before the log memfs just wrote, which is what proves the log is this run's.
         startedAt: '2020-01-01T00:00:00.000Z',
+        args: ['start'],
         projectRoot,
       });
     }

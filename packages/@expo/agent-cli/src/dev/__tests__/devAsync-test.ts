@@ -2,6 +2,7 @@ import { vol } from 'memfs';
 import os from 'os';
 import path from 'path';
 
+import { readDevServerLockAsync, type DevServerLockInfo } from '../../devLock';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
@@ -9,11 +10,15 @@ import { readLastBuildRecord, recordLastBuildFingerprint } from '../../plan/last
 import { clearFingerprintMemo } from '../../project/fingerprint';
 import { clearFingerprintCache } from '../../project/fingerprintCache';
 import { probeProjectStateAsync } from '../../project/probe';
-import type { ProjectState } from '../../project/types';
+import { probeBundlerAsync } from '../../runtime/bundlerStatus';
+import { resolveStartPlanAsync } from '../../plan/resolveAsync';
+import type { PlanStep, ProjectState, StartPlan } from '../../project/types';
 import { runDevServerAsync, type DevServerRun } from '../../start/startAsync';
 import { runExpoAsync, spawnExpoAsync } from '../../utils/expoCli';
 import { isInteractive } from '../../utils/interactive';
+import { spawnSubprocessAsync } from '../../utils/subprocess';
 import { devAsync } from '../devAsync';
+import { devServerAppearedError } from '../ownDevServer';
 import { findFreePortAsync, formatPortMove, resolvePlannedPortAsync } from '../portCollision';
 import { findPortListenerAsync } from '../portListener';
 import { resolveDevOptions } from '../resolveOptions';
@@ -33,12 +38,33 @@ vi.mock('../portCollision', async (importOriginal) => {
     findFreePortAsync: vi.fn(actual.findFreePortAsync),
   };
 });
+// No dev server of this project is running unless a test says one is.
+vi.mock('../../devLock', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../devLock')>()),
+  readDevServerLockAsync: vi.fn(async () => null),
+}));
+// A lock's dev server answers `/status` for this project unless a test says otherwise.
+vi.mock('../../runtime/bundlerStatus', () => ({ probeBundlerAsync: vi.fn() }));
 vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync: vi.fn() }));
 vi.mock('../openApp', () => ({
   openAppOnDeviceAsync: vi.fn(),
   openAppFailureLine: vi.fn((platform: string, reason: string) => `${platform}: ${reason}`),
 }));
 vi.mock('../../plan/emit', () => ({ emitStartPlan: vi.fn() }));
+// The real resolver, which a test replaces once when it needs a plan shape the probe cannot reach
+// without a device: the install plan, and the EAS plan.
+vi.mock('../../plan/resolveAsync', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../plan/resolveAsync')>();
+  return { ...actual, resolveStartPlanAsync: vi.fn(actual.resolveStartPlanAsync) };
+});
+vi.mock('../../utils/easCli', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/easCli')>()),
+  resolveEasCliOrThrow: vi.fn(() => ({ command: 'eas', prefixArgs: [] })),
+}));
+vi.mock('../../utils/subprocess', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/subprocess')>()),
+  spawnSubprocessAsync: vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' })),
+}));
 vi.mock('../../plan/events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../plan/lastBuild', () => ({
   readLastBuildRecord: vi.fn(() => ({})),
@@ -105,6 +131,29 @@ const mockReported: any[][] = [];
 
 const projectRoot = '/project';
 
+/** This project's own dev server, as its lock answers: an Expo Go `expo start`. */
+const ownLock: DevServerLockInfo = {
+  url: 'http://127.0.0.1:8190',
+  port: 8190,
+  pid: 4242,
+  startedAt: '2026-10-06T00:00:00.000Z',
+  projectRoot,
+  args: ['start', '--go', '--port', '8190'],
+};
+/** The same dev server, started for a development build. */
+const devClientLock: DevServerLockInfo = {
+  ...ownLock,
+  args: ['start', '--dev-client', '--port', '8190'],
+};
+
+/** `/status` answers, as a probe of the lock's port reports them. */
+const answersOurs = { answering: true, projectRootMatched: true, reportedProjectRoot: projectRoot };
+const answersForeign = {
+  answering: true,
+  projectRootMatched: false,
+  reportedProjectRoot: '/other-project',
+};
+const answersNothing = { answering: false, projectRootMatched: null, reportedProjectRoot: null };
 const fingerprintHash = 'abc123def4567890';
 
 /** What one dev-server run answers with, as `runDevServerAsync` reports it. */
@@ -165,6 +214,8 @@ function mockLanAddress(address: string | null) {
 
 beforeEach(() => {
   vol.reset();
+  vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
+  vi.mocked(probeBundlerAsync).mockResolvedValue(answersOurs);
   mockReported.length = 0;
   vi.mocked(readLastBuildRecord).mockReturnValue({});
   vi.mocked(runExpoAsync).mockResolvedValue(0);
@@ -231,6 +282,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'inherit',
+          oneDevServer: expect.any(Object),
           onDevServer: expect.any(Function),
         }
       );
@@ -245,6 +297,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
+        oneDevServer: expect.any(Object),
       });
     });
   });
@@ -312,9 +365,28 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(
         projectRoot,
         ['start', '--go', '--port', '8082'],
-        { agentSkills: true, output: 'inherit', onDevServer: expect.any(Function) }
+        {
+          agentSkills: true,
+          output: 'inherit',
+          oneDevServer: expect.any(Object),
+          onDevServer: expect.any(Function),
+        }
       );
       expect(runExpoAsync).not.toHaveBeenCalled();
+    });
+
+    // One project has one dev server: the serving step stops on a live holder of the lock, where
+    // the plain `start` wrapper starts a second one.
+    it(`should ask the serving step for one dev server per project`, async () => {
+      mockStaleDevClientState();
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(runDevServerAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['run:ios', '--port', '8081'],
+        expect.objectContaining({ oneDevServer: { platform: 'ios', built: null } })
+      );
     });
 
     it(`should keep the skill sync opt-out`, async () => {
@@ -328,6 +400,7 @@ describe(devAsync, () => {
         {
           agentSkills: false,
           output: 'inherit',
+          oneDevServer: expect.any(Object),
           onDevServer: expect.any(Function),
         }
       );
@@ -344,6 +417,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'inherit',
+          oneDevServer: expect.any(Object),
         }
       );
     });
@@ -434,6 +508,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
+        oneDevServer: expect.any(Object),
       });
     });
 
@@ -585,6 +660,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'inherit',
+          oneDevServer: expect.any(Object),
           onDevServer: expect.any(Function),
         }
       );
@@ -599,6 +675,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
+        oneDevServer: expect.any(Object),
       });
     });
 
@@ -613,6 +690,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8082'], {
         agentSkills: true,
         output: 'inherit',
+        oneDevServer: expect.any(Object),
       });
     });
 
@@ -630,6 +708,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8082'], {
         agentSkills: true,
         output: 'inherit',
+        oneDevServer: expect.any(Object),
       });
       const warnings = vi.mocked(Log.warn).mock.calls.map(([line]) => String(line));
       expect(warnings.filter((line) => line.includes('the dev server uses'))).toEqual([
@@ -680,6 +759,750 @@ describe(devAsync, () => {
       expect(plan.reasons).not.toContain('The dev server port is picked again when the plan runs.');
     });
 
+    describe(`with this project's own dev server running`, () => {
+      beforeEach(() => {
+        vi.mocked(readDevServerLockAsync).mockResolvedValue(ownLock);
+      });
+
+      // No dependence on the Expo CLI noticing its own server: the build installs with
+      // `--no-bundler`, and the open after it connects the app to the lock's URL.
+      it(`should install run:* with --no-bundler, and open the app against the running server`, async () => {
+        mockStaleDevClientState();
+        const { openAppOnDeviceAsync } = await import('../openApp');
+        vi.mocked(openAppOnDeviceAsync).mockResolvedValue({
+          opened: true,
+          deviceId: 'UDID-1',
+          booted: false,
+          installedExpoGo: false,
+          reason: null,
+        });
+        const env = process.env.AGENT_CLI_NO_DEVICE;
+        delete process.env.AGENT_CLI_NO_DEVICE;
+
+        try {
+          await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+        } finally {
+          if (env !== undefined) process.env.AGENT_CLI_NO_DEVICE = env;
+        }
+
+        expect(resolvePlannedPortAsync).not.toHaveBeenCalled();
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+        const args = vi
+          .mocked(runExpoAsync)
+          .mock.calls.map(([, stepArgs]) => stepArgs)
+          .find((stepArgs) => stepArgs[0] === 'run:ios')!;
+        expect(args.at(-1)).toBe('--no-bundler');
+        expect(args).not.toContain('--port');
+        expect(openAppOnDeviceAsync).toHaveBeenCalledWith(
+          projectRoot,
+          expect.objectContaining({ platform: 'ios', devServerUrl: ownLock.url })
+        );
+        const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+        expect(plan.devServerPort).toEqual({ port: 8190, movedFrom: null, state: 'reused' });
+        expect(plan.reasons).toContain(
+          'The dev server is already running on port 8190; the install uses the running server, and the app is opened against it.'
+        );
+      });
+
+      // `expo run:* --no-bundler` builds and launches the app against 8081 (the Expo CLI's
+      // `resolveBundlerProps`), and with no open after it nothing moves the app to port 8190.
+      it(`should stop before the run:* install when no open follows and the server is off 8081`, async () => {
+        mockStaleDevClientState();
+
+        const error = await devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open'])).then(
+          () => null,
+          (thrown) => thrown
+        );
+
+        expect(error).toMatchObject({ code: 'DEV_SERVER_ON_OTHER_PORT', exitCode: 20 });
+        expect(error.message).toContain('running on port 8190');
+        expect(error.message).toContain('not on port 8081');
+        expect(runExpoAsync).not.toHaveBeenCalled();
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+      });
+
+      it(`should install run:* without saying the app is opened when the server is on 8081`, async () => {
+        vi.mocked(readDevServerLockAsync).mockResolvedValue({ ...ownLock, port: 8081 });
+        mockStaleDevClientState();
+
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open']))
+        ).resolves.toBe(0);
+
+        const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+        expect(plan.reasons).toContain(
+          'The dev server is already running on port 8081; the install uses the running server.'
+        );
+        expect(plan.steps.at(-1)!.reason).toMatch(/so the step starts none\.$/);
+      });
+
+      // `agent-cli start` publishes `['start']`, and every `dev` start names a run target.
+      it(`should reuse a server started by agent-cli start for a plan that names a run target`, async () => {
+        vi.mocked(readDevServerLockAsync).mockResolvedValue({ ...ownLock, args: ['start'] });
+        mockProjectState();
+
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open']))
+        ).resolves.toBe(0);
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+      });
+
+      it(`should start no second dev server, and open the app against the running one`, async () => {
+        mockProjectState();
+        const { openAppOnDeviceAsync } = await import('../openApp');
+        vi.mocked(openAppOnDeviceAsync).mockResolvedValue({
+          opened: true,
+          deviceId: 'UDID-1',
+          booted: false,
+          installedExpoGo: false,
+          reason: null,
+        });
+        const env = process.env.AGENT_CLI_NO_DEVICE;
+        delete process.env.AGENT_CLI_NO_DEVICE;
+
+        try {
+          await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+        } finally {
+          if (env !== undefined) process.env.AGENT_CLI_NO_DEVICE = env;
+        }
+
+        expect(probeBundlerAsync).toHaveBeenCalledWith(ownLock.url, { projectRoot });
+        expect(resolvePlannedPortAsync).not.toHaveBeenCalled();
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+        expect(runExpoAsync).not.toHaveBeenCalled();
+        expect(openAppOnDeviceAsync).toHaveBeenCalledWith(
+          projectRoot,
+          expect.objectContaining({ platform: 'ios', devServerUrl: ownLock.url })
+        );
+        const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+        expect(plan.steps).toEqual([]);
+      });
+
+      // The open is the reuse run's only action, so an open that fails fails the run.
+      it(`should fail the run when the open against the running server fails`, async () => {
+        mockProjectState();
+        const { openAppOnDeviceAsync } = await import('../openApp');
+        vi.mocked(openAppOnDeviceAsync).mockResolvedValue({
+          opened: false,
+          deviceId: null,
+          booted: false,
+          installedExpoGo: false,
+          reason: 'no simulator could be booted',
+        });
+        const env = process.env.AGENT_CLI_NO_DEVICE;
+        delete process.env.AGENT_CLI_NO_DEVICE;
+
+        try {
+          await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+            code: 'APP_OPEN_FAILED',
+            exitCode: 20,
+            message: 'ios: no simulator could be booted',
+          });
+        } finally {
+          if (env !== undefined) process.env.AGENT_CLI_NO_DEVICE = env;
+        }
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+        expect(Log.warn).not.toHaveBeenCalled();
+      });
+
+      it(`should print the running server's port under --json, with no steps`, async () => {
+        mockProjectState();
+
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open', '--json']))
+        ).resolves.toBe(0);
+
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+        const printed = JSON.parse(String(vi.mocked(Log.log).mock.calls.at(-1)![0]));
+        expect(printed.steps).toEqual([]);
+        expect(printed.devServerPort).toEqual({ port: 8190, movedFrom: null, state: 'reused' });
+      });
+
+      it(`should plan the running server's port under --plan, and start nothing`, async () => {
+        mockProjectState();
+
+        await expect(devAsync(projectRoot, resolveDevOptions(['--ios', '--plan']))).resolves.toBe(
+          0
+        );
+
+        const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+        expect(plan.devServerPort).toEqual({ port: 8190, movedFrom: null, state: 'reused' });
+        expect(plan.steps).toEqual([]);
+        expect(plan.reasons).toContain(
+          'The dev server is already running on port 8190; the run reports it and starts nothing.'
+        );
+        expect(plan.reasons).not.toContain(
+          'The dev server port is picked again when the plan runs.'
+        );
+        expect(resolvePlannedPortAsync).not.toHaveBeenCalled();
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+      });
+
+      describe('with steps before expo start', () => {
+        function planStep(id: string, argv: string[]): PlanStep {
+          return { id, argv, reason: `${id} step`, timeClass: 'minutes', runsOn: null };
+        }
+        const startStep = planStep('start', ['expo', 'start', '--dev-client']);
+        const installPlan: StartPlan = {
+          target: 'dev-client',
+          rule: 'dev-client-install',
+          reasons: [],
+          buildLocation: null,
+          steps: [planStep('install', ['expo', 'run:ios', '--no-bundler']), startStep],
+        };
+        const easPlan: StartPlan = {
+          target: 'dev-client',
+          rule: 'dev-client-eas',
+          reasons: [],
+          buildLocation: null,
+          steps: [
+            planStep('eas-build', ['eas', 'build', '--platform', 'ios', '--non-interactive']),
+            startStep,
+          ],
+        };
+
+        beforeEach(() => {
+          mockStaleDevClientState();
+          vi.mocked(readDevServerLockAsync).mockResolvedValue(devClientLock);
+        });
+
+        it(`should run the install, start nothing, and open the app against the running server`, async () => {
+          vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(installPlan);
+          const { openAppOnDeviceAsync } = await import('../openApp');
+          vi.mocked(openAppOnDeviceAsync).mockResolvedValue({
+            opened: true,
+            deviceId: 'UDID-1',
+            booted: false,
+            installedExpoGo: false,
+            reason: null,
+          });
+          const env = process.env.AGENT_CLI_NO_DEVICE;
+          delete process.env.AGENT_CLI_NO_DEVICE;
+
+          try {
+            await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+          } finally {
+            if (env !== undefined) process.env.AGENT_CLI_NO_DEVICE = env;
+          }
+
+          expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--no-bundler']);
+          expect(runDevServerAsync).not.toHaveBeenCalled();
+          expect(openAppOnDeviceAsync).toHaveBeenCalledWith(
+            projectRoot,
+            expect.objectContaining({ platform: 'ios', devServerUrl: ownLock.url })
+          );
+        });
+
+        // The server stopped while the install ran: no deep link to a URL nothing serves.
+        it(`should stop instead of opening when the server stopped during the install`, async () => {
+          vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(installPlan);
+          vi.mocked(runExpoAsync).mockImplementationOnce(async () => {
+            vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
+            return 0;
+          });
+          const { openAppOnDeviceAsync } = await import('../openApp');
+          const env = process.env.AGENT_CLI_NO_DEVICE;
+          delete process.env.AGENT_CLI_NO_DEVICE;
+
+          try {
+            await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject(
+              {
+                code: 'DEV_SERVER_GONE',
+                exitCode: 20,
+                message: expect.stringContaining(
+                  "This project's dev server on port 8190, which this run reused, stopped while the steps ran, so the app was not opened."
+                ),
+              }
+            );
+          } finally {
+            if (env !== undefined) process.env.AGENT_CLI_NO_DEVICE = env;
+          }
+          expect(openAppOnDeviceAsync).not.toHaveBeenCalled();
+          expect(runDevServerAsync).not.toHaveBeenCalled();
+        });
+
+        it(`should run the EAS build and start nothing`, async () => {
+          vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(easPlan);
+
+          await expect(
+            devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open']))
+          ).resolves.toBe(0);
+
+          expect(spawnSubprocessAsync).toHaveBeenCalledWith(
+            'eas',
+            ['build', '--platform', 'ios', '--non-interactive'],
+            expect.anything()
+          );
+          expect(runDevServerAsync).not.toHaveBeenCalled();
+          const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+          expect(plan.steps.map((step) => step.id)).toEqual(['eas-build']);
+          expect(plan.reasons).toContain(
+            'The dev server is already running on port 8190; the build uses it instead of starting another.'
+          );
+        });
+
+        it(`should print the plan it ran under --json, with the running server's port`, async () => {
+          vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(installPlan);
+
+          await devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open', '--json']));
+
+          const printed = JSON.parse(String(vi.mocked(Log.log).mock.calls.at(-1)![0]));
+          expect(printed.steps.map((step: PlanStep) => step.id)).toEqual(['install']);
+          expect(printed.devServerPort).toEqual({ port: 8190, movedFrom: null, state: 'reused' });
+        });
+
+        it(`should plan the install without expo start under --plan`, async () => {
+          vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(installPlan);
+
+          await expect(devAsync(projectRoot, resolveDevOptions(['--ios', '--plan']))).resolves.toBe(
+            0
+          );
+
+          const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+          expect(plan.steps.map((step) => step.argv)).toEqual([
+            ['expo', 'run:ios', '--no-bundler'],
+          ]);
+          expect(plan.devServerPort).toEqual({ port: 8190, movedFrom: null, state: 'reused' });
+          expect(plan.reasons).toContain(
+            'The dev server is already running on port 8190; the install uses it instead of starting another.'
+          );
+          expect(runExpoAsync).not.toHaveBeenCalled();
+          expect(runDevServerAsync).not.toHaveBeenCalled();
+        });
+
+        // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — a reuse drops `start`,
+        // and its options with it, so a running server without them stops the run first.
+        describe('when the running server lacks an option the start asks for', () => {
+          const tunnelledEasPlan: StartPlan = {
+            ...easPlan,
+            steps: [
+              easPlan.steps[0]!,
+              { ...startStep, argv: ['expo', 'start', '--dev-client', '--tunnel'] },
+            ],
+          };
+
+          it(`should stop before the EAS build, and start nothing`, async () => {
+            vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(tunnelledEasPlan);
+
+            const error = await devAsync(projectRoot, resolveDevOptions(['--ios'])).then(
+              () => null,
+              (thrown) => thrown
+            );
+
+            expect(error).toMatchObject({
+              code: 'DEV_SERVER_OPTIONS_MISMATCH',
+              exitCode: 20,
+              suggestedCommand: expect.stringContaining('dev:stop'),
+              message: expect.stringContaining(
+                "This project's dev server is running on port 8190 without --tunnel, so nothing was started."
+              ),
+            });
+            expect(spawnSubprocessAsync).not.toHaveBeenCalled();
+            expect(runExpoAsync).not.toHaveBeenCalled();
+            expect(runDevServerAsync).not.toHaveBeenCalled();
+          });
+
+          it(`should stop on a forwarded --clear`, async () => {
+            vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(installPlan);
+
+            await expect(
+              devAsync(projectRoot, resolveDevOptions(['--ios', '--clear']))
+            ).rejects.toMatchObject({
+              code: 'DEV_SERVER_OPTIONS_MISMATCH',
+              exitCode: 20,
+              message: expect.stringContaining('without --clear'),
+            });
+            expect(runExpoAsync).not.toHaveBeenCalled();
+            expect(runDevServerAsync).not.toHaveBeenCalled();
+          });
+
+          it(`should reuse a server that carries the same options`, async () => {
+            vi.mocked(readDevServerLockAsync).mockResolvedValue({
+              ...devClientLock,
+              args: ['start', '--dev-client', '--port', '8190', '--tunnel'],
+            });
+            vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(tunnelledEasPlan);
+
+            await expect(
+              devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open']))
+            ).resolves.toBe(0);
+
+            expect(spawnSubprocessAsync).toHaveBeenCalledWith(
+              'eas',
+              ['build', '--platform', 'ios', '--non-interactive'],
+              expect.anything()
+            );
+            expect(runDevServerAsync).not.toHaveBeenCalled();
+          });
+
+          it(`should list no steps under --plan and say the run stops`, async () => {
+            vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(tunnelledEasPlan);
+
+            await expect(
+              devAsync(projectRoot, resolveDevOptions(['--ios', '--plan']))
+            ).resolves.toBe(0);
+
+            const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+            expect(plan.steps).toEqual([]);
+            expect(plan.devServerPort).toEqual({
+              port: 8190,
+              movedFrom: null,
+              state: 'mismatch',
+              missing: ['--tunnel'],
+              extra: [],
+            });
+            expect(plan.reasons).toContain(
+              "This project's dev server is running on port 8190 without --tunnel; the run stops instead of reusing it."
+            );
+            expect(spawnSubprocessAsync).not.toHaveBeenCalled();
+          });
+
+          it(`should reuse a holder whose options are unknown when the start asks only for its run target`, async () => {
+            vi.mocked(readDevServerLockAsync).mockResolvedValue({ ...ownLock, args: null });
+            vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(installPlan);
+
+            await expect(
+              devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open']))
+            ).resolves.toBe(0);
+            expect(runDevServerAsync).not.toHaveBeenCalled();
+          });
+
+          it(`should stop for a holder whose options are unknown when the start asks for more`, async () => {
+            vi.mocked(readDevServerLockAsync).mockResolvedValue({ ...ownLock, args: null });
+            vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(tunnelledEasPlan);
+
+            await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject(
+              {
+                code: 'DEV_SERVER_OPTIONS_MISMATCH',
+                message: expect.stringContaining(
+                  'running on port 8190 and its options are unknown (started by an older version), while this run asks for --tunnel,'
+                ),
+              }
+            );
+            expect(spawnSubprocessAsync).not.toHaveBeenCalled();
+          });
+        });
+      });
+
+      // One project has one lock: a second dev server on 8200 could not hold it.
+      it(`should stop when --port names another port than the running server's`, async () => {
+        mockStaleDevClientState();
+
+        const error = await devAsync(
+          projectRoot,
+          resolveDevOptions(['--ios', '--port', '8200'])
+        ).then(
+          () => null,
+          (thrown) => thrown
+        );
+
+        expect(error).toMatchObject({ code: 'DEV_SERVER_ON_OTHER_PORT', exitCode: 20 });
+        expect(error.message).toContain('running on port 8190');
+        expect(error.message).toContain('not on the named port 8200');
+        expect(resolvePlannedPortAsync).not.toHaveBeenCalled();
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+        expect(runExpoAsync).not.toHaveBeenCalled();
+      });
+
+      it(`should say under --plan that a named port elsewhere stops the run`, async () => {
+        mockStaleDevClientState();
+
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--ios', '--plan', '--port', '8200']))
+        ).resolves.toBe(0);
+
+        const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+        expect(plan.steps).toEqual([]);
+        expect(plan.devServerPort).toEqual({
+          port: 8200,
+          movedFrom: null,
+          state: 'elsewhere',
+          running: 8190,
+        });
+      });
+
+      // No open runs for the web, so the run says where the running server serves the app.
+      it(`should name the running server's URL for --web`, async () => {
+        mockProjectState();
+
+        await expect(devAsync(projectRoot, resolveDevOptions(['--web']))).resolves.toBe(0);
+
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+        expect(Log.log).toHaveBeenCalledWith('The web app is served at http://127.0.0.1:8190.');
+        const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+        expect(plan.reasons).toContain(
+          'The dev server is already running on port 8190; the run starts nothing, and the web app is served at http://127.0.0.1:8190.'
+        );
+      });
+
+      it(`should carry the running server's URL in the --json follow-ups for --web`, async () => {
+        mockProjectState();
+
+        await expect(devAsync(projectRoot, resolveDevOptions(['--web', '--json']))).resolves.toBe(
+          0
+        );
+
+        const printed = JSON.parse(String(vi.mocked(Log.log).mock.calls.at(-1)![0]));
+        expect(vi.mocked(Log.log)).toHaveBeenCalledTimes(1);
+        expect(printed.steps).toEqual([]);
+        expect(JSON.stringify(printed.followups)).toContain('8190');
+      });
+    });
+
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person
+    // can complete — another run of this project starts its dev server while this one builds. The
+    // serving step's lock claim stops on it (`runDevServerAsync`, here a mock that throws the way
+    // the claim does), and the plan approved is the plan run: no switch to that server.
+    describe(`with this project's dev server appearing during the steps`, () => {
+      function planStep(id: string, argv: string[]): PlanStep {
+        return { id, argv, reason: `${id} step`, timeClass: 'minutes', runsOn: null };
+      }
+      const startStep = planStep('start', ['expo', 'start', '--dev-client']);
+
+      beforeEach(() => {
+        vi.mocked(runDevServerAsync).mockImplementation(async (_root, _args, opts) => {
+          throw devServerAppearedError(devClientLock, opts.oneDevServer!);
+        });
+      });
+
+      it(`should run the EAS build, then stop at the start's claim, naming the build on EAS`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce({
+          target: 'dev-client',
+          rule: 'dev-client-eas',
+          reasons: [],
+          buildLocation: null,
+          steps: [
+            planStep('eas-build', ['eas', 'build', '--platform', 'ios', '--non-interactive']),
+            startStep,
+          ],
+        });
+
+        const error = await devAsync(projectRoot, resolveDevOptions(['--ios', '--json'])).then(
+          () => null,
+          (thrown) => thrown
+        );
+
+        expect(spawnSubprocessAsync).toHaveBeenCalledWith(
+          'eas',
+          ['build', '--platform', 'ios', '--non-interactive'],
+          expect.anything()
+        );
+        expect(error).toMatchObject({ code: 'DEV_SERVER_APPEARED', exitCode: 20 });
+        expect(error.message).toContain(
+          'Another run of this project started a dev server on port 8190 while this one built, so this step did not start a second one.'
+        );
+        expect(error.message).toContain('build:run --platform ios --latest');
+        expect(error.message).toContain('smoke --ios');
+        expect(error.suggestedCommand).toMatch(/ status$/);
+      });
+
+      it(`should stop with DEV_SERVER_APPEARED when a lock appears during the install, with the build recorded`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce({
+          target: 'dev-client',
+          rule: 'dev-client-install',
+          reasons: [],
+          buildLocation: null,
+          steps: [planStep('install', ['expo', 'run:ios', '--no-bundler']), startStep],
+        });
+        // A server that serves with the options the start asks for: still a stop.
+        vi.mocked(runExpoAsync).mockImplementationOnce(async () => {
+          vi.mocked(readDevServerLockAsync).mockResolvedValue(devClientLock);
+          return 0;
+        });
+        const { openAppOnDeviceAsync } = await import('../openApp');
+
+        const error = await devAsync(projectRoot, resolveDevOptions(['--ios'])).then(
+          () => null,
+          (thrown) => thrown
+        );
+
+        expect(error).toMatchObject({ code: 'DEV_SERVER_APPEARED', exitCode: 20 });
+        expect(error.message).toContain(
+          'Why: one dev server per project; the build this run did is recorded, so the next run reuses it.'
+        );
+        expect(recordLastBuildFingerprint).toHaveBeenCalledWith(
+          projectRoot,
+          'ios',
+          expect.objectContaining({ hash: expect.any(String) })
+        );
+        expect(runDevServerAsync).toHaveBeenCalledWith(
+          projectRoot,
+          ['start', '--dev-client', '--port', '8081'],
+          expect.objectContaining({
+            oneDevServer: {
+              platform: 'ios',
+              built: 'the build this run did is recorded, so the next run reuses it',
+            },
+          })
+        );
+        // The lock is read once, before the plan; the plan printed is the plan run.
+        expect(readDevServerLockAsync).toHaveBeenCalledTimes(1);
+        expect(openAppOnDeviceAsync).not.toHaveBeenCalled();
+      });
+
+      it(`should start the dev server when no lock appeared`, async () => {
+        vi.mocked(runDevServerAsync).mockResolvedValue(devServerRun());
+        mockStaleDevClientState();
+        vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce({
+          target: 'dev-client',
+          rule: 'dev-client-install',
+          reasons: [],
+          buildLocation: null,
+          steps: [planStep('install', ['expo', 'run:ios', '--no-bundler']), startStep],
+        });
+
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--ios', '--no-open']))
+        ).resolves.toBe(0);
+
+        expect(readDevServerLockAsync).toHaveBeenCalledTimes(1);
+        expect(runDevServerAsync).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    describe(`with this project's dev server still starting`, () => {
+      const installPlan: StartPlan = {
+        target: 'dev-client',
+        rule: 'dev-client-install',
+        reasons: [],
+        buildLocation: null,
+        steps: [
+          {
+            id: 'install',
+            argv: ['expo', 'run:ios', '--no-bundler'],
+            reason: 'install step',
+            timeClass: 'minutes',
+            runsOn: null,
+          },
+          {
+            id: 'start',
+            argv: ['expo', 'start', '--dev-client'],
+            reason: 'start step',
+            timeClass: 'seconds',
+            runsOn: null,
+          },
+        ],
+      };
+
+      beforeEach(() => {
+        vi.mocked(readDevServerLockAsync).mockResolvedValue(ownLock);
+        vi.mocked(probeBundlerAsync).mockResolvedValue(answersNothing);
+      });
+
+      it(`should stop with an outcome and start nothing`, async () => {
+        mockProjectState();
+
+        const error = await devAsync(projectRoot, resolveDevOptions(['--ios'])).then(
+          () => null,
+          (thrown) => thrown
+        );
+
+        expect(error).toMatchObject({
+          code: 'DEV_SERVER_STARTING',
+          exitCode: 20,
+          message: expect.stringContaining(
+            "This project's dev server is starting on port 8190 (pid 4242), so nothing was started."
+          ),
+        });
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+        expect(runExpoAsync).not.toHaveBeenCalled();
+      });
+
+      it(`should stop the install plan before its install`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(installPlan);
+
+        await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+          code: 'DEV_SERVER_STARTING',
+          exitCode: 20,
+        });
+        expect(runExpoAsync).not.toHaveBeenCalled();
+        expect(spawnExpoAsync).not.toHaveBeenCalled();
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+      });
+
+      it(`should list no steps under --plan, and say the run stops`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(resolveStartPlanAsync).mockResolvedValueOnce(installPlan);
+
+        await expect(devAsync(projectRoot, resolveDevOptions(['--ios', '--plan']))).resolves.toBe(
+          0
+        );
+
+        const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+        expect(plan.steps).toEqual([]);
+        expect(plan.devServerPort).toEqual({ port: 8190, movedFrom: null, state: 'starting' });
+        expect(plan.reasons).toContain(
+          'The dev server is starting on port 8190; this run stops. Run again once it answers, and it is reused.'
+        );
+        expect(runExpoAsync).not.toHaveBeenCalled();
+      });
+
+      // A plan that ends in `run:*` drops a forwarded `--clear`, and the stop empties its steps.
+      it(`should print a stop's plan with a dropped option under --plan`, async () => {
+        mockStaleDevClientState();
+
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--ios', '--plan', '--clear']))
+        ).resolves.toBe(0);
+
+        const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+        expect(plan.steps).toEqual([]);
+        expect(plan.devServerPort).toEqual({ port: 8190, movedFrom: null, state: 'starting' });
+        expect(plan.reasons).toContain(
+          'The dev server is starting on port 8190; this run stops. Run again once it answers, and it is reused.'
+        );
+      });
+    });
+
+    describe(`with the lock's port answering for another project`, () => {
+      beforeEach(() => {
+        vi.mocked(readDevServerLockAsync).mockResolvedValue(ownLock);
+        vi.mocked(probeBundlerAsync).mockResolvedValue(answersForeign);
+      });
+
+      it(`should stop with an outcome and start nothing`, async () => {
+        mockProjectState();
+
+        const error = await devAsync(projectRoot, resolveDevOptions(['--ios'])).then(
+          () => null,
+          (thrown) => thrown
+        );
+
+        expect(error).toMatchObject({
+          code: 'DEV_SERVER_PORT_FOREIGN',
+          exitCode: 20,
+          message: expect.stringContaining(
+            "This project's dev server lock names port 8190, but the server answering there reports another project root (/other-project), so nothing was started."
+          ),
+        });
+        expect(error.message).not.toContain('--force');
+        // The port may be mid-retry, so the caller's own command comes before `dev:stop`.
+        expect(error.message).toContain('How: run "npx @expo/agent-cli dev --ios" again');
+        expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios');
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+        expect(runExpoAsync).not.toHaveBeenCalled();
+      });
+
+      it(`should say the run stops under --plan`, async () => {
+        mockProjectState();
+
+        await expect(devAsync(projectRoot, resolveDevOptions(['--ios', '--plan']))).resolves.toBe(
+          0
+        );
+
+        const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+        expect(plan.steps).toEqual([]);
+        expect(plan.devServerPort).toEqual({ port: 8190, movedFrom: null, state: 'foreign' });
+        expect(plan.reasons).toContain(
+          'The dev server lock names port 8190, but the server there reports another project root (/other-project); the run stops instead of starting another.'
+        );
+        expect(runDevServerAsync).not.toHaveBeenCalled();
+      });
+    });
+
     it(`should not warn about the platform flag the plan already acted on`, async () => {
       mockStaleDevClientState();
 
@@ -706,6 +1529,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'inherit',
+          oneDevServer: expect.any(Object),
         }
       );
     });
@@ -810,6 +1634,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'inherit',
+          oneDevServer: expect.any(Object),
           onDevServer: expect.any(Function),
         }
       );
@@ -859,6 +1684,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'tee',
+          oneDevServer: expect.any(Object),
           onDevServer: expect.any(Function),
         }
       );
@@ -880,6 +1706,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'capture',
+          oneDevServer: expect.any(Object),
           onDevServer: expect.any(Function),
         }
       );

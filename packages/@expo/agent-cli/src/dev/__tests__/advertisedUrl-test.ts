@@ -255,6 +255,7 @@ describe('resolveDevServerReachAsync', () => {
       port: 8309,
       pid: 1,
       startedAt,
+      args: ['start'],
       projectRoot,
     });
   }

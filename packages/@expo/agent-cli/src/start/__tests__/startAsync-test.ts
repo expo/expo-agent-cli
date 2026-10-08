@@ -1,7 +1,7 @@
 import { vol } from 'memfs';
 import os from 'os';
 
-import { holdDevServerLockAsync } from '../../devLock';
+import { claimDevServerLockAsync, holdDevServerLockAsync } from '../../devLock';
 import type { DevServerLockHandle } from '../../devLock';
 import * as Log from '../../log';
 import { autoSyncSkillsAsync } from '../../skills/skillsAsync';
@@ -18,7 +18,10 @@ import {
 vi.mock('../../log');
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../skills/skillsAsync', () => ({ autoSyncSkillsAsync: vi.fn() }));
-vi.mock('../../devLock', () => ({ holdDevServerLockAsync: vi.fn() }));
+vi.mock('../../devLock', () => ({
+  claimDevServerLockAsync: vi.fn(async () => ({ status: 'unclaimed' })),
+  holdDevServerLockAsync: vi.fn(),
+}));
 vi.mock('../../runtime/bundlerStatus', () => ({
   probeBundlerAsync: vi.fn(),
 }));
@@ -45,6 +48,11 @@ const foreign = { answering: true, projectRootMatched: false, reportedProjectRoo
  * after Metro starts streaming survives in a terminal.
  */
 async function settleFollowUps(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(0);
+}
+
+/** Let the lock claim that comes before the spawn settle, without advancing the clock. */
+async function settleSpawn(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
 
@@ -81,6 +89,21 @@ function mockHeldLock(): DevServerLockHandle {
   };
   vi.mocked(holdDevServerLockAsync).mockResolvedValue(lock);
   return lock;
+}
+
+/** A live dev server of this project holds the lock on port 8190. */
+function mockLiveHolder() {
+  vi.mocked(claimDevServerLockAsync).mockResolvedValueOnce({
+    status: 'in-use',
+    holder: {
+      url: 'http://127.0.0.1:8190',
+      port: 8190,
+      pid: 4242,
+      startedAt: '2026-10-06T00:00:00.000Z',
+      projectRoot,
+      args: ['start', '--port', '8190'],
+    },
+  });
 }
 
 beforeEach(() => {
@@ -254,6 +277,7 @@ describe(runDevServerAsync, () => {
   it(`should run any dev server command and sync skills`, async () => {
     const end = mockLongRunningStart();
     const promise = runDevServerAsync(projectRoot, ['run:ios'], { agentSkills: true });
+    await settleSpawn();
 
     expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['run:ios']);
     vi.advanceTimersByTime(SKILLS_SYNC_IDLE_DELAY_MS);
@@ -266,6 +290,7 @@ describe(runDevServerAsync, () => {
   it(`should skip the sync when agent skills are off`, async () => {
     const end = mockLongRunningStart();
     const promise = runDevServerAsync(projectRoot, ['run:android'], { agentSkills: false });
+    await settleSpawn();
 
     vi.advanceTimersByTime(SKILLS_SYNC_IDLE_DELAY_MS * 2);
     expect(autoSyncSkillsAsync).not.toHaveBeenCalled();
@@ -320,6 +345,7 @@ describe(runDevServerAsync, () => {
       const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
         agentSkills: false,
       });
+      await settleSpawn();
 
       // The arguments go along, because the requested port is the fallback when the dev server
       // never reports the one it took.
@@ -343,6 +369,7 @@ describe(runDevServerAsync, () => {
         agentSkills: false,
         onDevServer,
       });
+      await settleSpawn();
       const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
@@ -368,6 +395,7 @@ describe(runDevServerAsync, () => {
         agentSkills: false,
         onDevServer,
       });
+      await settleSpawn();
       const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
@@ -387,6 +415,7 @@ describe(runDevServerAsync, () => {
         agentSkills: false,
         onDevServer,
       });
+      await settleSpawn();
       const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
@@ -410,6 +439,7 @@ describe(runDevServerAsync, () => {
         agentSkills: false,
         onDevServer,
       });
+      await settleSpawn();
       const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
@@ -431,6 +461,7 @@ describe(runDevServerAsync, () => {
         agentSkills: false,
         onDevServer,
       });
+      await settleSpawn();
       const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
@@ -460,6 +491,7 @@ describe(runDevServerAsync, () => {
         agentSkills: false,
         onDevServer,
       });
+      await settleSpawn();
       const { onResolved } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
 
       onResolved?.({ port: 8082, source: 'arg' });
@@ -473,6 +505,7 @@ describe(runDevServerAsync, () => {
     it(`should report the dev server as running until it exits`, async () => {
       const end = mockLongRunningStart();
       const promise = runDevServerAsync(projectRoot, ['start'], { agentSkills: false });
+      await settleSpawn();
       const { isRunning } = vi.mocked(holdDevServerLockAsync).mock.calls[0]![2];
 
       expect(isRunning?.()).toBe(true);
@@ -482,10 +515,111 @@ describe(runDevServerAsync, () => {
       expect(isRunning?.()).toBe(false);
     });
 
+    // One project has one dev server: a second one could not hold the lock, so nothing could find
+    // or stop it. The stop says what the caller passed: the platform and what its steps built.
+    it(`should not spawn a dev server while another of this project holds the lock`, async () => {
+      mockLiveHolder();
+
+      const error = await runDevServerAsync(projectRoot, ['start', '--port', '8191'], {
+        agentSkills: true,
+        oneDevServer: { platform: 'ios', built: 'the build this run did is recorded' },
+      }).catch((caught: unknown) => caught);
+
+      expect(error).toMatchObject({
+        code: 'DEV_SERVER_APPEARED',
+        exitCode: 20,
+        message: expect.stringContaining(
+          'started a dev server on port 8190 while this one built, so this step did not start a second one.\nWhy: one dev server per project; the build this run did is recorded.'
+        ),
+      });
+      expect((error as Error).message).toContain('"npx @expo/agent-cli smoke --ios"');
+      expect(runExpoAsync).not.toHaveBeenCalled();
+      expect(holdDevServerLockAsync).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(SKILLS_SYNC_IDLE_DELAY_MS);
+      expect(autoSyncSkillsAsync).not.toHaveBeenCalled();
+    });
+
+    // The plain `start` wrapper forwards its arguments untouched: a second dev server of this
+    // project runs without the lock, and the holder is on the event stream only.
+    it(`should spawn without the lock while another holds it, when not asked for one dev server`, async () => {
+      mockLiveHolder();
+      const end = mockLongRunningStart();
+      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8191'], {
+        agentSkills: false,
+      });
+      await settleSpawn();
+
+      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['start', '--port', '8191']);
+      // Held with no lock, so the hold does not publish again.
+      expect(holdDevServerLockAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--port', '8191'],
+        expect.objectContaining({ claim: { status: 'held', lock: null } })
+      );
+
+      end(0);
+      await expect(promise).resolves.toMatchObject({ exitCode: 0 });
+    });
+
+    it(`should spawn a second dev server that names no port`, async () => {
+      const end = mockLongRunningStart();
+      const promise = startAsync(projectRoot, resolveStartOptions([]));
+      await settleFollowUps();
+      await settleSpawn();
+
+      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['start']);
+      expect(holdDevServerLockAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start'],
+        expect.objectContaining({ claim: { status: 'unclaimed' } })
+      );
+
+      end(0);
+      await expect(promise).resolves.toBe(0);
+    });
+
+    it(`should spawn the start wrapper's dev server while another holds the lock`, async () => {
+      mockLiveHolder();
+      const end = mockLongRunningStart();
+      const promise = startAsync(projectRoot, resolveStartOptions(['--port', '8191']));
+      await settleFollowUps();
+      await settleSpawn();
+
+      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['start', '--port', '8191']);
+
+      end(0);
+      await expect(promise).resolves.toBe(0);
+    });
+
+    it(`should hold the lock it claimed before the spawn`, async () => {
+      const claim = { status: 'held' as const, lock: null };
+      vi.mocked(claimDevServerLockAsync).mockResolvedValueOnce(claim);
+      const end = mockLongRunningStart();
+      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        agentSkills: false,
+      });
+      await settleSpawn();
+
+      expect(claimDevServerLockAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--port', '8082'],
+        { since: expect.any(Number) }
+      );
+      expect(holdDevServerLockAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--port', '8082'],
+        expect.objectContaining({ claim })
+      );
+
+      end(0);
+      await promise;
+    });
+
     it(`should release the lock when the dev server exits`, async () => {
       const lock = mockHeldLock();
       const end = mockLongRunningStart();
       const promise = runDevServerAsync(projectRoot, ['start'], { agentSkills: false });
+      await settleSpawn();
 
       expect(lock.release).not.toHaveBeenCalled();
 
@@ -508,6 +642,7 @@ describe(runDevServerAsync, () => {
       vi.mocked(holdDevServerLockAsync).mockResolvedValue(null);
       const end = mockLongRunningStart();
       const promise = runDevServerAsync(projectRoot, ['start'], { agentSkills: false });
+      await settleSpawn();
 
       end(3);
       // The lock is a convenience; the exit code of the dev server is the answer either way.

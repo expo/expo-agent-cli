@@ -119,7 +119,8 @@ export async function probeDevServerLockAsync(
  * Parse one lock line into the info it names, or null.
  *
  * Every field is required. A partial answer is treated as no answer, because the point of the
- * lock is that what a reader gets is complete and current — half of it is neither.
+ * lock is that what a reader gets is complete and current — half of it is neither. `args` is the
+ * one exception: a holder from an older version answers without it, and reads as null (unknown).
  */
 function parseLockLine(answer: string): DevServerLockInfo | null {
   const line = answer.split('\n', 1)[0]?.trim();
@@ -137,16 +138,17 @@ function parseLockLine(answer: string): DevServerLockInfo | null {
     return null;
   }
 
-  const { url, port, pid, startedAt, projectRoot } = parsed as Record<string, unknown>;
+  const { url, port, pid, startedAt, projectRoot, args } = parsed as Record<string, unknown>;
   if (
     typeof url !== 'string' ||
     typeof port !== 'number' ||
     !Number.isInteger(port) ||
     typeof pid !== 'number' ||
     typeof startedAt !== 'string' ||
-    typeof projectRoot !== 'string'
+    typeof projectRoot !== 'string' ||
+    (args !== undefined && (!Array.isArray(args) || !args.every((arg) => typeof arg === 'string')))
   ) {
     return null;
   }
-  return { url, port, pid, startedAt, projectRoot };
+  return { url, port, pid, startedAt, projectRoot, args: (args as string[] | undefined) ?? null };
 }

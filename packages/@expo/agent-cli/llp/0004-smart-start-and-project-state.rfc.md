@@ -498,24 +498,96 @@ to `expo start` and to every `expo run:*` that serves, and the plan reports it a
 `devServerPort`, because `expo run:*` left to ask skips its dev server, deep-links the
 app to whatever holds the port, and exits 0.
 
-A busy port is busy whoever holds it, this project's own dev server included: the plan
-moves to the next free port.
-
-A server on a port is this project's unless `/status` names another project root in the
-`X-React-Native-Project-Root` header. No header, or a root that contains this project (a
-monorepo `metro.config.js` sets `projectRoot` to the workspace root), is this project's
-server; a sibling is not. A containing root counts only in the same checkout: no
-directory from the project up to that root, the root excluded, holds a `.git` entry, so
-the main checkout's Metro never answers for a worktree inside it
+A live lock of this project, on the named `--port` or with none named, means `dev` does
+not pick a port: the plan's `devServerPort` is the lock's port. The live lock is this
+project's evidence, so its server is this project's unless `/status` names another
+project root in the `X-React-Native-Project-Root` header. No header, or a root that
+contains this project (a monorepo `metro.config.js` sets `projectRoot` to the workspace
+root), is this project's server; a sibling is not. A containing root counts only in the
+same checkout: no directory from the project up to that root, the root excluded, holds a
+`.git` entry, so the main checkout's Metro never answers for a worktree inside it
 (`<repo>/.claude/worktrees/<name>`). Every consumer of the `/status` probe reads this one
-rule. Discovery's lock step (`discoverDevServerAsync` step 0) reads it too: the lock
-names its port at the spawn, before Metro binds it, so a lock whose port answers with
-another project's root is not found there, and discovery goes on to its other steps. An
-open aimed at a port the command line named waits until `/status` answers there and
-names no other project's root. It never comes when the dev server exits first.
+rule. Discovery's lock step (`discoverDevServerAsync` step 0) reads it too: a lock whose
+port answers with another project's root is not found there, and discovery goes on to
+its other steps.
 
-`devServerPort.state` says what the plan does about the port: `picked`, or `named` (with
-`taken` when the named port cannot be bound).
+Such a lock is this project's running dev server, and the plan reuses it. A reuse plan
+has no serving step: `start` is dropped, and `run:*` becomes `run:* --no-bundler` without
+`--port`, which the Expo CLI refuses with `--no-bundler`. The run reports the server,
+runs the remaining steps, and opens the app against the lock's URL, as `start` would
+have. Nothing depends on the Expo CLI finding its own server. `run:* --no-bundler`
+builds and launches the app against port 8081: the Expo CLI's `resolveBundlerProps`
+reads neither `--port` nor `RCT_METRO_PORT` on that path. Only the open after the steps
+moves the app to the lock's port. So a `run:*` reuse with no open (`--no-open`, or
+`AGENT_CLI_NO_DEVICE`) and a lock off 8081 stops with `DEV_SERVER_ON_OTHER_PORT`, exit
+20, before any step; its way out is a run with the open, or `dev:stop` and a new run.
+The plan says the app is opened against the server only when an open runs.
+
+A lock whose `/status` does not answer one probe is a dev server still starting (a
+`run:*` build that has not reached Metro yet) or a Metro that is not answering. The run
+stops with `DEV_SERVER_STARTING`, exit 20, instead of starting a second one. A lock whose
+port answers with another project root is `DEV_SERVER_PORT_FOREIGN`, exit 20: another
+project's server answers on this project's port. The lock is published at the spawn,
+before Metro binds, so this can be this project's own busy-port retry on its way to a
+free port. Its way out is the caller's own command again, and `dev:stop` for this
+project's lock only when the stop repeats; it never suggests stopping the other
+project's server. A live lock whose server answers on another port than the named
+`--port` stops the run with `DEV_SERVER_ON_OTHER_PORT`, exit 20, because a second dev
+server could not hold the lock. An open aimed at a port the command line named waits
+until `/status` answers there and names no other project's root. It never comes when
+the dev server exits first.
+
+These checks run once, before the plan is printed, and the plan approved is the plan run
+(llp/0015): a run never switches to a dev server that appears later. The serving step
+takes the lock right before its spawn. A live holder of this project there, started by
+another run during a prebuild, an install or an `eas build`, stops the step with
+`DEV_SERVER_APPEARED`, exit 20, instead of running a dev server that holds no lock. The
+earlier steps' build is kept for the next run, which reuses the server: an install is in
+the last-build record before the spawn, and an `eas build` is on EAS, which the stop
+says. A reuse run whose steps ran probes the server once more before the open, and a
+server that stopped or changed meanwhile stops the run with `DEV_SERVER_GONE`, exit 20,
+instead of an open that deep-links to nothing. The plain `start` wrapper forwards its
+arguments untouched and keeps allowing a second server: it runs without the lock, and
+the holder is reported on the event stream.
+
+The reuse applies only when the running server carries the server options the plan's
+`start` asks for. An option cannot be added to a running dev server, so `--tunnel`
+(which `--eas` implies) missing from it would be lost. `--clear` always counts as
+missing: it acts once at start, so a server started with it earlier cleared nothing for
+this run. The lock publishes the `expo` arguments the dev server runs with as `args`.
+Both sides are compared in one spelling: `-c` is `--clear`, `--host tunnel` is
+`--tunnel`, `--host localhost` is one option, `--host lan` (the Expo CLI's default host)
+is left out on both sides, an option that takes a value (`--private-key-path`, `--host`)
+is one option with it, and `--port` is left out. `--max-workers` and `--scheme` are left
+out: the first sets Metro's parallelism, and the second names the scheme of a URL that
+this CLI's open builds from the lock's URL. The run targets `--go`, `--dev-client` and
+`--web` are not server options: they choose the URL scheme, which this CLI's open sets
+itself, and one server serves each. A `run:*` step asks for no server options. The mode
+options `--no-dev`, `--minify`, `--offline` and `--https` are compared in both
+directions, because they choose the bundle: one the running server was started with and
+the run does not ask for is a mismatch too, so a plain `dev` never gets a
+production-style bundle with no HMR; host options are compared one way. When an option
+is missing or a mode option is extra, the run stops with `DEV_SERVER_OPTIONS_MISMATCH`,
+exit 20, before any step, so before a paid `eas build` or a slow native build. A lock
+without `args` is a holder from an older version, and its options are unknown (`args:
+null`): a run that asks for no server option reuses it, and a run that asks for one
+stops, with a message that says the options are unknown instead of naming them missing.
+
+`dev --detach` checks a live lock in the parent, before it spawns. The parent installs
+nothing and opens nothing, and the plan is the child's, so it compares no options: a
+server that serves or is still starting is reported as already running, with the phase
+`serving` or `building`. A lock whose port answers for another project, or a server on
+another port than the named one, stops the parent. A `--detach` parent reports its own
+child's lock, the one whose `pid` is the child's. When its child exits without one, or
+the wait ends, and a live lock of another process of this project passes the same
+checks, that server is reported as already running: two `dev --detach` runs started
+together both report the one server.
+
+`devServerPort.state` says what the plan does about the port: `picked`, `named` (with
+`taken` when the named port cannot be bound), `reused`, or one of the stops `starting`,
+`foreign`, `mismatch` (with `missing`, and `extra`, null when the options are unknown)
+and `elsewhere` (with the `running` port). A stop's `--plan` lists no steps, because the
+run does none.
 
 One retry. No plan has two dev-server steps, so that is one retry per plan. The check
 runs whatever the step's exit code, because `expo run:*` that skipped its dev server on

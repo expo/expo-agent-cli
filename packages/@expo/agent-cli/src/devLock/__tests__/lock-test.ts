@@ -22,6 +22,7 @@ function lockInfo(projectRoot: string, port: number): DevServerLockInfo {
     port,
     pid: process.pid,
     startedAt: new Date().toISOString(),
+    args: ['start'],
     projectRoot,
   };
 }
@@ -53,6 +54,15 @@ describe('dev server lock', () => {
 
     expect(result).toMatchObject({ status: 'acquired' });
     expect(await readDevServerLockAsync(projectRoot)).toEqual(info);
+  });
+
+  it(`reads an answer without args, from an older holder, as unknown args`, async () => {
+    const projectRoot = makeProjectRoot();
+    const { args: _args, ...older } = lockInfo(projectRoot, 8086);
+
+    await acquireAsync(older as DevServerLockInfo);
+
+    expect(await readDevServerLockAsync(projectRoot)).toEqual({ ...older, args: null });
   });
 
   it(`stops answering once released`, async () => {

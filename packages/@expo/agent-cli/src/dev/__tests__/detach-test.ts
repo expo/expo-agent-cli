@@ -283,6 +283,7 @@ describe(notReadyError, () => {
     pid: 4242,
     startedAt: '2026-08-25T00:00:00.000Z',
     projectRoot,
+    args: ['start'],
   };
 
   function readyResult(overrides: Partial<BundlerReadyResult> = {}): BundlerReadyResult {

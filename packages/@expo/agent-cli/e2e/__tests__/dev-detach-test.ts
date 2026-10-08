@@ -395,9 +395,11 @@ describe('@expo/agent-cli dev --detach', () => {
       );
       const firstPid = JSON.parse(first.stdout).pid;
 
+      // The stub does not listen, so `/status` does not answer: the server is still starting,
+      // which a second `--detach` reports too.
       const second = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--ios', '--detach', '--json'],
+        ['dev', '--ios', '--detach', '--clear', '--json'],
         { env: detachEnv(projectRoot, 8396) }
       );
 
@@ -407,7 +409,74 @@ describe('@expo/agent-cli dev --detach', () => {
         alreadyRunning: true,
         pid: firstPid,
         port: 8397,
+        phase: 'building',
       });
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — a foreground `dev` reads the
+  // real lock and its `args`, probes `/status`, and starts no second server. The open is off in
+  // this tier (`AGENT_CLI_NO_DEVICE`), so the run reports the server and opens nothing.
+  it('reuses the running dev server instead of starting a second one', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const env = { ...detachEnv(projectRoot, 8389), STUB_EXPO_LISTEN: '1' };
+
+    try {
+      const first = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--wait-ready', '--json'],
+        { env }
+      );
+      expect(first.exitCode).toBe(0);
+
+      const second = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
+        env,
+        reject: false,
+      });
+
+      expect(second.exitCode).toBe(0);
+      const plan = JSON.parse(second.stdout);
+      expect(plan.steps).toEqual([]);
+      expect(plan.devServerPort).toEqual({ port: 8389, movedFrom: null, state: 'reused' });
+      const starts = readStubExpoInvocations(projectRoot).filter(({ args }) => args[0] === 'start');
+      expect(starts).toHaveLength(1);
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — a reuse drops the `start`
+  // step, so a running server without an option that step asks for stops the run.
+  it('stops instead of reusing a running server that lacks a forwarded option', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const env = { ...detachEnv(projectRoot, 8391), STUB_EXPO_LISTEN: '1' };
+
+    try {
+      const first = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--wait-ready', '--json', '--port', '8391'],
+        { env }
+      );
+      expect(first.exitCode).toBe(0);
+      expect(await readDevLockAsync(projectRoot)).toMatchObject({
+        port: 8391,
+        args: ['start', '--go', '--port', '8391'],
+      });
+
+      const second = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--json', '--port', '8391', '--clear'],
+        { env, reject: false }
+      );
+
+      expect(second.exitCode).toBe(20);
+      const { error } = JSON.parse(second.stdout);
+      expect(error.code).toBe('DEV_SERVER_OPTIONS_MISMATCH');
+      expect(error.message).toContain('without --clear');
+      const starts = readStubExpoInvocations(projectRoot).filter(({ args }) => args[0] === 'start');
+      expect(starts).toHaveLength(1);
     } finally {
       await cleanUpAsync(projectRoot);
     }
