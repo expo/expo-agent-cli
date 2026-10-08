@@ -51,7 +51,7 @@ Deliberately not added: the broken-bundle ladder, whose single rung names the fi
 
 A rung that needs a local device is only offered to a machine that has one. `absent` is the only answer that turns one off. [confirmed, Kudo, 2026-08-25]
 
-`src/device/localDevice.ts` runs the two probes `navigate` already had, `xcrun simctl list devices booted -j` on macOS and `adb devices` everywhere, once per process. It folds them into `present`, `absent`, or `unknown`.
+`src/device/localDevice.ts` inspects the worktree's two local bindings ([[0030-one-device-per-worktree]] §Readers), the iOS one on macOS and the Android one everywhere, once per process and root. It folds them into `present`, `absent`, or `unknown`.
 
 `absent` may only be given by a tool that ran and reported nothing. A tool that is not installed establishes nothing: a Linux box with no `adb` is not a box with no device. `unknown` therefore leaves every ladder exactly as it was. That is also what a probe that threw or ran out of its budget reports.
 

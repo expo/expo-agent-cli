@@ -30,6 +30,18 @@ Before the lock: `adb devices -l` and `emulator -list-avds`. Under the lock: `bu
 - `openAppOnDeviceAsync`'s Android branch takes the bound device. `resolveDeviceAsync` sets `adb: resolveAdb()` on a `local-android` winner. `installDevBuild`, `askDeviceAsync` and `installedApp/android` pass the serial; `androidDeviceNameAsync` stays for display only.
 - Smoke's Android boot phase calls `acquireDeviceAsync`. `shutdownDeviceAsync` and smoke's `shutdownDevice` phase go, because every device is bound and that branch runs `emu kill` by serial (RFC Contract 6).
 
+## Decided while building
+
+- `src/deviceBinding/emulator.ts` holds the Android tool calls (the inventory, `get-state`, the `EMULATOR_NOT_RUNNABLE` error, the host check) beside `android.ts`, which holds the port choice, the section, the boot poll and the kill; `release.ts` holds the let-go rules of both platforms, so every file stays under the budget of [[0030-one-device-per-worktree]] §Contracts.
+- `DeviceTools` gains `commandOf(pid)` and `kill(pid)` beside the RFC's members, because the kill rule reads `ps` and signals, and a unit test must see both. `commandOf` is null where `ps` does not exist and `''` for a pid it does not list, so a reused pid is never killed where `ps` runs.
+- `get-state` on an instance that is still booting exits non-zero with `error: device offline`. That row is `not-up`, not `unknown`: the serial is listed, the device is not up. Only `not found` is missing, and any other non-zero exit is the tool row of the RFC.
+- The host guard is `adb` resolving on disk (`resolveAdb().fromPathOnly` false); `emulator` is found beside it, so a host with neither binds nothing and `dev --android` serves for a device elsewhere.
+- The `no-free-port` How line says to stop one of the listed instances by hand. The RFC names `dev:stop --release`, which [[0033-device-lifecycle]] adds; the suggested-command lint refuses a flag that does not exist yet, so 0033 swaps the line.
+- The section of this PR lets go of no device: an own `spawned` binding whose pid is dead loses its file before any refusal, and a live one is reused. The `finally` that runs reaped devices' actions before a refusal lands with the reap in [[0033-device-lifecycle]].
+- `status --explain --device <serial>` on Android lists through `adb devices -l` to filter and binds nothing (Contract 3); without `--device` the reader takes the bound serial and names it through `emu avd name` for display.
+- `AppPresenceProbe` loses `installDevice` on both platforms: `withDevice` pins every `run` and `install` step to the bound device, so the probe answers presence only, and a `spawned` instance is `missing` without asking, like a `created` simulator.
+- The foreign-flag sweep (`src/lint/foreignFlags.ts`) reads the registry's `tools.<runner>([...])` calls, so `-read-only`, `-ports`, `-avd`, `-list-avds`, `-b` and `-j` are pinned where they are spelled.
+
 ## Deletions
 
 `EMULATOR_SERIAL`, `bootDeviceAsync`, `shutdownDeviceAsync`, smoke's `shutdownDevice` phase, `probeAndroidDeviceAsync`, `parseFirstAndroidDevice`, `NO_ANDROID_DEVICE`, the Android `installDevice`, the "until 3b" branches of [[0031-ios-binding]], and the Android help lines that `git grep -i 'attached Android\|adb devices'` finds over `src/**/index.ts` and `runtime/stopAsync.ts`.

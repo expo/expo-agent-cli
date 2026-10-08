@@ -81,7 +81,7 @@ export function generateAgentsMdBlock({
     '',
     '## Devices',
     '',
-    `Run \`${PROGRAM_PREFIX} dev\` before \`navigate\`, \`runtime:reload\` or \`runtime:stop\`, or they refuse with \`NO_BOUND_DEVICE\` and name the command. Never boot, shut down or delete a simulator named \`agent-cli …\` yourself; it may be bound to another worktree.`,
+    `Run \`${PROGRAM_PREFIX} dev\` before \`navigate\`, \`runtime:reload\` or \`runtime:stop\`, or they refuse with \`NO_BOUND_DEVICE\` and name the command. Never boot, shut down or delete a simulator named \`agent-cli …\` yourself, and never kill an emulator instance started with \`-read-only\`; it may be bound to another worktree.`,
     '',
     '## Expo skills',
     '',
