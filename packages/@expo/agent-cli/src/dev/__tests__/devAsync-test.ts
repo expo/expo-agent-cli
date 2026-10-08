@@ -1409,17 +1409,18 @@ describe(devAsync, () => {
     });
 
     // withDevice-after-forwarded-args
-    it(`binds after the refusals and pins the build step to the simulator`, async () => {
+    it(`binds after the refusals and pins the build step to the simulator, over a forwarded --device`, async () => {
       mockStaleDevClientState();
 
-      await expect(devAsync(projectRoot, resolveDevOptions(['--ios', '--local']))).resolves.toBe(0);
+      await expect(
+        devAsync(projectRoot, resolveDevOptions(['--ios', '--local', '--', '--device', 'X']))
+      ).resolves.toBe(0);
 
       expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios');
-      expect(runDevServerAsync).toHaveBeenCalledWith(
-        projectRoot,
-        ['run:ios', '--port', '8081', '--device', 'SIM-1'],
-        expect.anything()
-      );
+      const [, args] = vi.mocked(runDevServerAsync).mock.calls[0]!;
+      expect(args.filter((arg) => arg === '--device')).toHaveLength(1);
+      expect(args).toEqual(expect.arrayContaining(['run:ios', '--device', 'SIM-1']));
+      expect(args).not.toContain('X');
       // The plan an agent reads carries the pin too: the plan approved is the plan run.
       expect(emitStartPlan).toHaveBeenCalledWith(
         expect.objectContaining({

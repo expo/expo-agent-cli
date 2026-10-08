@@ -104,8 +104,19 @@ describe(readLocalDeviceProbe, () => {
     expect(readLocalDeviceProbe(ios, noAndroid).state).toBe('unknown');
   });
 
-  it(`reports unknown when adb could not run and nothing is bound`, () => {
-    const probe = readLocalDeviceProbe(inspection('none'), adbUnrunnable);
+  // A Mac without an Android SDK: the binding answered, so the ladders still reach `absent`.
+  it.each([
+    ['none', inspection('none')],
+    ['gone', inspection('gone', { cause: 'device-gone' })],
+  ] as const)(`reports absent on macOS for a %s binding when adb could not run`, (_state, ios) => {
+    const probe = readLocalDeviceProbe(ios, adbUnrunnable);
+
+    expect(probe.state).toBe('absent');
+    expect(probe.reason).toContain('could not run');
+  });
+
+  it(`reports unknown when adb could not run and it was the only rung`, () => {
+    const probe = readLocalDeviceProbe(null, adbUnrunnable);
 
     expect(probe.state).toBe('unknown');
     expect(probe.reason).toContain('could not run');

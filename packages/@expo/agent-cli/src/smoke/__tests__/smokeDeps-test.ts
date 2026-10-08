@@ -71,7 +71,7 @@ describe('bootDevice', () => {
     expect(result).toMatchObject({
       ok: false,
       deviceId: null,
-      reason: 'No iOS runtime with an iPhone is installed.',
+      reason: 'No iOS runtime with an iPhone is installed. How: install one.',
     });
   });
 
