@@ -534,9 +534,9 @@ So a start that built forgets the target, and the next reader re-reads the proje
 
 The general shape is the one this document keeps meeting: **a fact captured before the thing it describes existed.** The pre-install app probe (§Putting Expo Go on a simulator that has not got it), the device-name index, and this. Each was a value read at the cheapest moment rather than at the moment it was needed.
 
-#### `--device` does not mean the same thing on the two platforms
+#### `--device` takes the bound device's id on both platforms
 
-iOS takes a _"Device name, UDID, or generic"_; Android takes a _"Device name"_ and nothing else. An `adb` serial handed to Android is answered `CommandError: Could not find device with name: emulator-5554` [observed — live, 2026-09-04], which cost a whole run to find. The names Android accepts are the ones its own device list builds [reference — `@expo/cli` `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync]: an emulator is its **AVD name**, from `adb -s <serial> emu avd name`, and a physical device is the `model:` field of `adb devices -l`. `androidDeviceNameAsync` asks those two questions in that order, and a device it cannot name gets no `--device` at all rather than a wrong one — the command then picks the attached device itself, and a wrong `--device` is a refusal.
+iOS takes a _"Device name, UDID, or generic"_ and gets the bound simulator's udid. Android takes a _"Device name"_, which on SDK 57 matched the AVD name only: an `adb` serial was answered `CommandError: Could not find device with name: emulator-5554` [observed — live, 2026-09-04], which cost a whole run to find, and this CLI translated the serial to the AVD name first. SDK 58, the floor, matches a serial too, and the bound device of [[0030-one-device-per-worktree]] is a read-only emulator instance whose AVD name several instances share, so the install passes the serial and no translation runs. `androidDeviceNameAsync` stays for display: an emulator is its **AVD name**, from `adb -s <serial> emu avd name`, and a physical device is the `model:` field of `adb devices -l`, the two names `@expo/cli`'s own device list builds [reference — `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync].
 
 ### A link nobody can approve is a link that never opens
 
