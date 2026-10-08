@@ -154,6 +154,7 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
     discoverDevServer: async () => discovery(),
     startDevServer: async () => ({ ok: true, devServerUrl: 'http://127.0.0.1:8081', reason: null }),
     stopDevServer: async () => ({ ok: true, target: 'http://127.0.0.1:8081', reason: null }),
+    releaseDevice: async () => ({ ok: true, target: 'SIM-BOOTED', reason: null }),
     bootDevice: async () => ({
       ok: true,
       deviceId: 'SIM-BOOTED',
@@ -418,7 +419,7 @@ describe(runSmokePhasesAsync, () => {
       };
     }
 
-    it(`starts the dev server and boots a device, then puts the dev server back and keeps the device`, async () => {
+    it(`starts the dev server and boots a device, then releases the device through dev:stop`, async () => {
       const stopDevServer = vi.fn(async () => ({
         ok: true,
         target: 'http://127.0.0.1:8081',
@@ -433,9 +434,37 @@ describe(runSmokePhasesAsync, () => {
       expect(run.environment.devServer).toBe('started');
       expect(run.environment.device).toBe('booted');
       expect(stopDevServer).toHaveBeenCalled();
-      // The device is this worktree's bound one and stays bound (llp/0030): only the dev server
-      // this run started goes back.
+      // dev:stop owns the device release after its child exits; no second device cleanup.
       expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['dev-server']);
+    });
+
+    it('releases its own boot after a reused server, without stopping that server', async () => {
+      const releaseDevice = vi.fn(async () => ({ ok: true, target: 'SIM-BOOTED', reason: null }));
+      const stopDevServer = vi.fn();
+      const run = await runSmokePhasesAsync(
+        deps({
+          ...bareMachine({ discoverDevServer: async () => discovery() }),
+          releaseDevice,
+          stopDevServer,
+        }),
+        options({ bootstrap: true })
+      );
+      expect(releaseDevice).toHaveBeenCalledTimes(1);
+      expect(stopDevServer).not.toHaveBeenCalled();
+      expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['device']);
+    });
+
+    it('no-start binds and releases nothing', async () => {
+      const bootDevice = vi.fn();
+      const releaseDevice = vi.fn();
+      const stopDevServer = vi.fn();
+      await runSmokePhasesAsync(
+        deps({ bootDevice, releaseDevice, stopDevServer }),
+        options({ bootstrap: false })
+      );
+      expect(bootDevice).not.toHaveBeenCalled();
+      expect(releaseDevice).not.toHaveBeenCalled();
+      expect(stopDevServer).not.toHaveBeenCalled();
     });
 
     it(`leaves a dev server and a device it found, and cleans nothing up`, async () => {

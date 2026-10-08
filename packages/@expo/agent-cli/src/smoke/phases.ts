@@ -254,9 +254,10 @@ export interface SmokeDeps {
   stopEasSession(sessionId: string): Promise<SmokeReleaseResult>;
   /**
    * Bind and boot this worktree's device for this run's platform (`acquireDeviceAsync`). The
-   * device stays bound after the run, so nothing is registered to put it back.
+   * device is released by dev:stop after a child exits, or by the boot phase's own cleanup.
    */
   bootDevice(): Promise<SmokeBootResult>;
+  releaseDevice(): Promise<SmokeReleaseResult>;
   /**
    * Put the app on the device this run booted, when the boot said it has not got it.
    *
@@ -1200,9 +1201,18 @@ async function runPhasesAsync(
       const found = await deviceAsync();
       if (found.deviceId == null) {
         const boot = await recordBootstrap('boot-device', async () => {
-          // @ref llp/0031-ios-binding.plan.md §smoke — the device is this worktree's bound one and
-          // stays bound after the run, so nothing is registered to put it back.
           const result = await deps.bootDevice();
+          if (
+            result.ok &&
+            result.deviceId &&
+            !cleanups.some(({ resource }) => resource === 'dev-server')
+          ) {
+            cleanups.push({
+              resource: 'device',
+              target: result.deviceId,
+              release: () => deps.releaseDevice(),
+            });
+          }
           return result.ok && result.deviceId != null
             ? {
                 status: 'ok' as const,

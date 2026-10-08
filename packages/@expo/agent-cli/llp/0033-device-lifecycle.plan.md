@@ -25,7 +25,8 @@ What happens when a worktree stops, pauses or disappears, and how does a person 
 
 ## Release
 
-- `dev:stop`: stop the dev server as today (main signals the dev-lock holder and waits for it to exit); with `--release`, then release the local bindings when the server stopped or none ran (main's `devServerOk`); then run the reap once, whatever `devServerOk` is. Without `--release` the bindings stay and are reported as kept. `--release` is in `resolveStopOptions` and sets `DevStopOptions.release`; `platform?` is internal, with no CLI flag, so smoke releases its platform only.
+- `dev:stop`: stop the dev server as today (main signals the dev-lock holder and waits for it to exit); with `--release`, then release the local bindings only when this worktree's own server stopped or is absent. `devServerOk` alone is insufficient: `--port` can name an idle port while the worktree's server runs elsewhere. Recheck the own lock before release; a remaining or replacement server keeps the devices. Then run the reap once, whatever the stop outcome. Without `--release` the bindings stay and are reported as kept. `--release` is in `resolveStopOptions` and sets `DevStopOptions.release`; `platform?` is internal, with no CLI flag, so smoke releases its platform only.
+- Release re-reads the binding under the registry lock and verifies it still names the device checked before taking the lock, including the origin and emulator pid. A replacement binding is left untouched; stale inventory or an earlier cleanup must never remove or expire its record. Device actions use the binding validated in that section. Failed-boot cleanup likewise targets the binding acquired by that run.
 - The foreground `dev` exit and the detached child touch no binding: the lease, renewed while Metro ran, expires on its own and the next reap parks or kills the device.
 
 ## Lease timer
@@ -54,6 +55,7 @@ The live tier passes `--device $AGENT_CLI_LIVE_UDID` to `dev` or lets it create.
 
 ## Tests
 
+- Required safeguards: `release-keeps-devices-when-own-server-runs-on-another-port`, `release-keeps-devices-when-server-is-replaced`, `release-leaves-replacement-binding`, and `failed-boot-leaves-replacement-binding`.
 - Unit, named: `extend-expired-is-lost`, `timer-picks-up-late-cloud-file`, `timer-resumes-revived-file`, `timer-warns-lost-once`, `deleted-worktree-deletes-simulator`, `reap-reads-after-write`, `dev-stop-keeps-without-release`, `foreground-exit-touches-no-binding`, `explicit-expires-keeps-file`, `device-over-own-created-deletes`, `smoke-releases-own-platform-only`, `dev-stop-reaps-once`, `explicit-bound-live-or-stale`, `explicit-never-shut-down`.
 - E2E, kept verbatim from the rejected branch's device-claims suite: the one machine dir, `envFor()`, the `afterEach` `dev:stop --release` loop, the `dev:stop --release` JSON plus the exact `shutdown` call, and the deleted-worktree reap case, adapted to assert the `simctl delete` call. Dropped: `touchRace.ts`, `lockRace.ts`, `claimedDevice-test.ts` and the 10-field claim literal.
 
