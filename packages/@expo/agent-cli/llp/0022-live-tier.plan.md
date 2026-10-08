@@ -218,7 +218,7 @@ AppleScript and macOS refuses that without an Automation grant. The plan is
 
 The iOS twin of `live-devclient`, same shape: it does not build, it names an
 already-built project (`AGENT_CLI_LIVE_IOS_DEVCLIENT_PROJECT`), the gate checks the app
-is installed on the booted simulator and its build is recorded, and it drives the project
+is installed on the simulator `dev` bound to the worktree and its build is recorded, and it drives the project
 in place. The lab screen is served over the wire, so the interact commands have testIDs
 without a rebuild. It is the suite that turns the iOS runtime column from `by hand` into
 `filled`.

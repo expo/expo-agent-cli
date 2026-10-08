@@ -28,6 +28,11 @@ import {
   stubExpoEnv,
   type StubDevServer,
 } from '../utils';
+import {
+  appStartedMarkerPath,
+  bindingFixture,
+  installStubXcrunAsync as installStatefulXcrunAsync,
+} from './installedAppStubs';
 
 const SIMULATOR_UDID = 'E2E-SIM-SMOKE';
 
@@ -78,6 +83,8 @@ async function installStubXcrunAsync(
    */
   opensMarker: string | null = null
 ): Promise<() => string[][]> {
+  // The booted simulator the stub lists is the one this worktree bound (llp/0030 §Readers).
+  await bindingFixture(projectRoot, SIMULATOR_UDID, 'iPhone 17 Pro');
   const logPath = path.join(projectRoot, '.stub-xcrun.jsonl');
   const scriptPath = path.join(projectRoot, '.stub-bin', 'xcrun-stub.js');
   await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
@@ -222,114 +229,6 @@ async function installStubAdbForExpoGoAsync(
   };
 }
 
-/**
- * A stub `xcrun` for the boot path: several simulators, all shut, and every call recorded.
- *
- * The list is what `pickSimulator` chooses from, so the fixture is the machine the run met — a
- * fresh device that was used most recently, and an older one that actually has the app on it.
- */
-async function installStubXcrunForBootAsync(
-  projectRoot: string,
-  devices: { udid: string; name: string; lastBootedAt?: string }[],
-  /**
-   * A file the stub writes when it opens a URL, so the dev server can start listing a target.
-   *
-   * Without it these cases would wait out the whole cold attach budget for an app that was never
-   * going to arrive — two minutes to prove something about which device was booted.
-   */
-  opensMarker: string | null = null
-): Promise<() => string[][]> {
-  const logPath = path.join(projectRoot, '.stub-boot-xcrun.jsonl');
-  const bootedPath = path.join(projectRoot, '.stub-booted-udid');
-  const scriptPath = path.join(projectRoot, '.stub-bin', 'xcrun-boot-stub.js');
-  const listing = {
-    devices: {
-      'com.apple.CoreSimulator.SimRuntime.iOS-26-5': devices.map((device) => ({
-        udid: device.udid,
-        name: device.name,
-        state: 'Shutdown',
-        isAvailable: true,
-        ...(device.lastBootedAt ? { lastBootedAt: device.lastBootedAt } : {}),
-      })),
-    },
-  };
-  await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
-  await fs.promises.writeFile(
-    scriptPath,
-    [
-      `const fs = require('fs');`,
-      `const args = process.argv.slice(2);`,
-      `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + '\\n');`,
-      // A boot is remembered, the way a real `simctl` does: the device probe that runs *after*
-      // the boot has to find the device this run just started, or every phase after it looks at a
-      // machine with no simulator on it.
-      `const bootedPath = ${JSON.stringify(bootedPath)};`,
-      `const booted = () => { try { return fs.readFileSync(bootedPath, 'utf8').trim(); } catch { return ''; } };`,
-      `if (args[1] === 'boot') { fs.writeFileSync(bootedPath, args[2]); process.exit(0); }`,
-      ...(opensMarker
-        ? [
-            `if (args[1] === 'openurl') {`,
-            `  fs.writeFileSync(${JSON.stringify(opensMarker)}, 'opened');`,
-            `}`,
-          ]
-        : []),
-      `const listing = ${JSON.stringify(JSON.stringify(listing))};`,
-      // `list devices booted` finds nothing until a boot has happened, which is what makes the run
-      // reach the boot decision at all.
-      `if (args[1] === 'list' && args.includes('booted')) {`,
-      `  const up = booted();`,
-      `  const all = JSON.parse(listing).devices['com.apple.CoreSimulator.SimRuntime.iOS-26-5'];`,
-      `  const mine = all.filter((d) => d.udid === up).map((d) => ({ ...d, state: 'Booted' }));`,
-      `  process.stdout.write(JSON.stringify(mine.length ? { devices: { 'com.apple.CoreSimulator.SimRuntime.iOS-26-5': mine } } : { devices: {} }));`,
-      `  process.exit(0);`,
-      `}`,
-      `if (args[1] === 'list') {`,
-      `  process.stdout.write(listing);`,
-      `  process.exit(0);`,
-      `}`,
-      `process.exit(0);`,
-    ].join('\n')
-  );
-  await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'xcrun', scriptPath);
-
-  return () =>
-    fs.existsSync(logPath)
-      ? fs
-          .readFileSync(logPath, 'utf8')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => JSON.parse(line))
-      : [];
-}
-
-/**
- * `plutil` ships with macOS. Linux CI has none, so a fixture that plants real Info.plist files
- * still cannot be read unless a stub answers the same extract.
- */
-async function installStubPlutilAsync(projectRoot: string): Promise<void> {
-  const scriptPath = path.join(projectRoot, '.stub-bin', 'plutil-stub.js');
-  await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
-  await fs.promises.writeFile(
-    scriptPath,
-    [
-      `const fs = require('fs');`,
-      // The key that was asked for, not always CFBundleIdentifier. Two callers read these plists
-      // now — the device choice wants the bundle id and the Expo Go version check wants
-      // CFBundleShortVersionString — and a stub that answered the same key whichever was asked
-      // would hand a bundle id back as a version string.
-      `const key = process.argv[process.argv.indexOf('-extract') + 1];`,
-      `const plist = process.argv[process.argv.length - 1];`,
-      `const xml = fs.readFileSync(plist, 'utf8');`,
-      `const match = xml.match(new RegExp('<key>' + key + '<\\\\/key>\\\\s*<string>([^<]*)<\\\\/string>'));`,
-      // Real `plutil` exits non-zero for a key the plist has not got, which is the case the
-      // version check reads as "nothing installed to compare".
-      `if (!match) process.exit(1);`,
-      `process.stdout.write(match[1] + '\\n');`,
-    ].join('\n')
-  );
-  await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'plutil', scriptPath);
-}
-
 /** Give the fixture an Expo Router `app/` directory with the named route files. */
 async function writeRoutesAsync(projectRoot: string, files: string[]): Promise<void> {
   for (const file of files) {
@@ -383,56 +282,6 @@ async function installStubNpxAsync(projectRoot: string): Promise<() => string[][
           .filter(Boolean)
           .map((line) => JSON.parse(line))
       : [];
-}
-
-/**
- * A `HOME` whose CoreSimulator tree says which apps each simulator has.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app
- * The device choice is made by **reading the simulator's disk**, because `simctl listapps` and
- * `simctl get_app_container` both refuse on a device that is not booted — and every device the
- * choice is about is shut. So the fixture is a directory tree rather than a stub command, and the
- * `Info.plist` files in it are real plists that the real `plutil` reads.
- *
- * @param installed the application ids to install, per simulator udid.
- */
-async function writeSimulatorHomeAsync(
-  projectRoot: string,
-  installed: Record<string, string[]>
-): Promise<string> {
-  await installStubPlutilAsync(projectRoot);
-  const home = path.join(projectRoot, '.sim-home');
-  for (const [udid, appIds] of Object.entries(installed)) {
-    // The device's own directory, whether or not it has apps in it. A real simulator that exists
-    // has one, and a caller that acts on "no Expo Go here" needs to tell an empty device from a
-    // machine that has no simulators at all (@ref src/device/installedApps §simulatorDiskExistsAsync).
-    await fs.promises.mkdir(
-      path.join(home, 'Library/Developer/CoreSimulator/Devices', udid, 'data'),
-      { recursive: true }
-    );
-    for (const [index, appId] of appIds.entries()) {
-      const bundle = path.join(
-        home,
-        'Library/Developer/CoreSimulator/Devices',
-        udid,
-        'data/Containers/Bundle/Application',
-        `container-${index}`,
-        `${appId}.app`
-      );
-      await fs.promises.mkdir(bundle, { recursive: true });
-      await fs.promises.writeFile(
-        path.join(bundle, 'Info.plist'),
-        [
-          `<?xml version="1.0" encoding="UTF-8"?>`,
-          `<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">`,
-          `<plist version="1.0"><dict>`,
-          `<key>CFBundleIdentifier</key><string>${appId}</string>`,
-          `</dict></plist>`,
-        ].join('\n')
-      );
-    }
-  }
-  return home;
 }
 
 /**
@@ -886,24 +735,15 @@ describe('@expo/agent-cli smoke', () => {
     });
   });
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app.
+  // @ref llp/0031-ios-binding.plan.md §smoke
   //
-  // A live run: a dev-client project booted a fresh simulator and the deep link came back `115` —
-  // no handler for the scheme — after a 12.4 s boot for a device that could never have opened it.
-  // The choice is made by reading each simulator's disk, so the fixture here is a `HOME` with a
-  // CoreSimulator tree in it and a stub `xcrun` that lists the devices, all shut.
-  describe('choosing the device to boot', () => {
-    const FRESH = 'E2E-FRESH-0000';
-    const HAS_APP = 'E2E-HASAPP-000';
+  // The device a bootstrapping run boots is this worktree's own simulator, taken from the registry
+  // or created there, and it stays bound after the run. The stub `xcrun` keeps simulator state the
+  // way `simctl` does, so what is asserted is the registry file and the calls that put the device up.
+  describe.skipIf(process.platform !== 'darwin')('binding the device to boot', () => {
     const DEV_CLIENT_ID = 'com.example.dcapp';
 
-    /**
-     * A dev-client project whose `app.json` names a bundle identifier.
-     *
-     * The `fresh` fixture is the one whose build record matches its fingerprint, so the plan needs
-     * no build and the run reaches the device choice — which is the case under test. The bundle id
-     * is written here rather than into the shared fixture, because it is this test's question.
-     */
+    /** A dev-client project whose `app.json` names a bundle identifier. */
     async function devClientFixtureAsync(): Promise<string> {
       const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
       const configPath = path.join(projectRoot, 'app.json');
@@ -913,25 +753,26 @@ describe('@expo/agent-cli smoke', () => {
       return projectRoot;
     }
 
+    /** The registry file of the fixture, as `dev` or `smoke` wrote it. */
+    function readBinding(projectRoot: string): Record<string, any> | null {
+      const dir = path.join(`${projectRoot}.expo-home`, 'agent-cli', 'bindings');
+      const file = fs.existsSync(dir)
+        ? fs.readdirSync(dir).find((name) => name.endsWith('-ios-local-ios.json'))
+        : null;
+      return file ? JSON.parse(fs.readFileSync(path.join(dir, file), 'utf8')) : null;
+    }
+
     async function runAsync(
       projectRoot: string,
-      home: string,
-      stub: StubDevServer
+      stub: StubDevServer,
+      args: string[] = []
     ): Promise<Record<string, any>> {
       const release = await holdLockForAsync(projectRoot, stub);
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
-          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '4s'],
-          {
-            env: {
-              ...stubExpoEnv(projectRoot),
-              HOME: home,
-              // `os.homedir()` on Windows reads USERPROFILE, not HOME.
-              ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
-            },
-            reject: false,
-          }
+          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '4s', ...args],
+          { env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' }, reject: false }
         );
         return JSON.parse(result.stdout);
       } finally {
@@ -939,60 +780,10 @@ describe('@expo/agent-cli smoke', () => {
       }
     }
 
-    it('boots the device that has the app, not the one used most recently', async () => {
-      const projectRoot = await setupFixtureAsync('go-app');
-      const opened = path.join(projectRoot, '.app-opened');
-      const readXcrun = await installStubXcrunForBootAsync(
-        projectRoot,
-        [
-          { udid: FRESH, name: 'iPhone 17 Pro Max', lastBootedAt: '2026-08-30T09:00:00Z' },
-          { udid: HAS_APP, name: 'iPhone 17 Pro', lastBootedAt: '2026-08-20T09:00:00Z' },
-        ],
-        opened
-      );
-      // Only the older one has Expo Go, which is what a `go-app` opens.
-      const home = await writeSimulatorHomeAsync(projectRoot, {
-        [FRESH]: [],
-        [HAS_APP]: ['host.exp.Exponent'],
-      });
-      const stub = await startStubDevServerAsync({
-        projectRoot,
-        targets: [EXPO_GO_TARGET],
-        targetsAppearWithFile: opened,
-      });
-
-      try {
-        const report = await runAsync(projectRoot, home, stub);
-
-        const booted = readXcrun().filter((argv) => argv[1] === 'boot');
-        expect(booted).toEqual([['simctl', 'boot', HAS_APP]]);
-        expect(report.environment.deviceChoice).toContain('Expo Go');
-      } finally {
-        await stub.close();
-      }
-    });
-
-    // The refusal, and the assertion that matters most: **no boot was issued at all**. The minute
-    // is the thing being saved, so a run that decided correctly and booted anyway would still be
-    // the bug.
-    // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
-    //
-    // **This case used to assert the opposite**, and the assertion was the policy: a device without
-    // this project's development build was refused before the boot, and the reason named
-    // `dev --ios`. That is a correct instruction and a dead end for an agent, which cannot
-    // take it without leaving the loop this command exists to serve
-    // [Kudo, 2026-09-04: "smoke should be self-served without running dev first"]. So the boot goes
-    // ahead for either kind of app, and the install phase puts the app there.
-    it('boots and installs when no device has the development build', async () => {
+    it('creates and binds a simulator, boots it with bootstatus -b, and installs the development build onto it', async () => {
       const projectRoot = await devClientFixtureAsync();
-      const opened = path.join(projectRoot, '.app-opened');
-      const readXcrun = await installStubXcrunForBootAsync(
-        projectRoot,
-        [{ udid: FRESH, name: 'iPhone 17 Pro', lastBootedAt: '2026-08-30T09:00:00Z' }],
-        opened
-      );
-      // A simulator with Expo Go on it and *not* this project's development build.
-      const home = await writeSimulatorHomeAsync(projectRoot, { [FRESH]: ['host.exp.Exponent'] });
+      const opened = appStartedMarkerPath(projectRoot);
+      const { calls: readXcrun } = await installStatefulXcrunAsync(projectRoot);
       const readNpx = await installStubNpxAsync(projectRoot);
       const stub = await startStubDevServerAsync({
         projectRoot,
@@ -1001,48 +792,44 @@ describe('@expo/agent-cli smoke', () => {
       });
 
       try {
-        const report = await runAsync(projectRoot, home, stub);
+        const report = await runAsync(projectRoot, stub);
 
-        // It booted rather than declining, and the reason says what the boot was for.
-        expect(readXcrun().filter((argv) => argv[1] === 'boot')).toEqual([
-          ['simctl', 'boot', FRESH],
-        ]);
+        const binding = readBinding(projectRoot);
+        expect(binding).toMatchObject({
+          version: 1,
+          device: { backend: 'local-ios', udid: 'E2E-CREATED-1', origin: 'created' },
+        });
+        expect(binding!.device.name).toMatch(/^agent-cli [0-9a-f]{8}$/);
+        expect(readXcrun()).toContainEqual(['simctl', 'bootstatus', 'E2E-CREATED-1', '-b']);
+        expect(readXcrun().some((argv) => argv[1] === 'boot')).toBe(false);
+        expect(readXcrun().some((argv) => argv[1] === 'shutdown')).toBe(false);
+
         const boot = report.phases.find((phase: any) => phase.id === 'boot-device');
         expect(boot).toMatchObject({ status: 'ok' });
+        expect(boot.reason).not.toContain('shut it down');
+        expect(report.environment.cleanup.map((entry: any) => entry.resource)).not.toContain(
+          'device'
+        );
 
-        // And the install is a **native build** rather than a download, because a development build
-        // is this project's own artefact (@ref src/device/installDevBuild.ts).
+        // A created simulator has no app, so the install is a native build pinned to it.
         const install = report.phases.find((phase: any) => phase.id === 'install-app');
         expect(install).toMatchObject({ status: 'ok' });
         const run = readNpx().find((argv) => argv.includes('run:ios'));
-        expect(run).toEqual(['expo', 'run:ios', '--no-bundler', '--device', FRESH]);
-        // Never a second dev server: this run already has one.
+        expect(run).toEqual(['expo', 'run:ios', '--no-bundler', '--device', 'E2E-CREATED-1']);
         expect(readNpx().some((argv) => argv.includes('start'))).toBe(false);
       } finally {
         await stub.close();
       }
     });
 
-    // @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
-    //
-    // An Expo Go project on a machine with no Expo Go used to be a refusal here, on the same
-    // footing as a missing development build: `simctl openurl exp://…` answers `115` for both, and
-    // the open path installs nothing [observed — live, 2026-08-30]. It is no longer, and the
-    // difference is what can be *done* about it — Expo Go is a published binary to download, so the
-    // boot goes ahead and the app is installed onto it.
-    it('boots and installs for an Expo Go project on a machine with no Expo Go', async () => {
+    it('reuses the parked simulator the worktree already has', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
-      // The marker is what keeps this test off the cold attach budget: the stub `xcrun` writes it
-      // when it opens the URL, and the stub dev server starts listing a target once it exists. A
-      // run without it waits out the whole two minutes to prove something about the install.
-      const opened = path.join(projectRoot, '.app-opened');
-      const readXcrun = await installStubXcrunForBootAsync(
-        projectRoot,
-        [{ udid: FRESH, name: 'iPhone 17 Pro', lastBootedAt: '2026-08-30T09:00:00Z' }],
-        opened
-      );
-      const readNpx = await installStubNpxAsync(projectRoot);
-      const home = await writeSimulatorHomeAsync(projectRoot, { [FRESH]: [] });
+      const opened = appStartedMarkerPath(projectRoot);
+      const { calls: readXcrun } = await installStatefulXcrunAsync(projectRoot, {
+        simulators: [{ udid: 'E2E-PARKED', name: 'agent-cli deadbeef', state: 'Shutdown' }],
+      });
+      await bindingFixture(projectRoot, 'E2E-PARKED', 'agent-cli deadbeef');
+      await installStubNpxAsync(projectRoot);
       const stub = await startStubDevServerAsync({
         projectRoot,
         targets: [EXPO_GO_TARGET],
@@ -1050,66 +837,37 @@ describe('@expo/agent-cli smoke', () => {
       });
 
       try {
-        const report = await runAsync(projectRoot, home, stub);
+        const report = await runAsync(projectRoot, stub);
 
-        // It booted, rather than declining because no device had the app.
-        expect(readXcrun().filter((argv) => argv[1] === 'boot')).toEqual([
-          ['simctl', 'boot', FRESH],
-        ]);
-        const boot = report.phases.find((phase: any) => phase.id === 'boot-device');
-        expect(boot).toMatchObject({ status: 'ok' });
-        expect(boot.reason).toContain('to install it onto');
-
-        // And it installed: the release was asked for, and `simctl install` was handed a path.
-        expect(readNpx().some((argv) => argv.includes('download'))).toBe(true);
-        expect(readXcrun().some((argv) => argv[1] === 'install')).toBe(true);
-        const install = report.phases.find((phase: any) => phase.id === 'install-app');
-        expect(install).toMatchObject({ status: 'ok' });
-
-        // Then the link works without a tap, which is the half an install alone does not buy.
-        const approvals = readXcrun().filter((argv) =>
-          argv.some((arg) => arg.includes('schemeapproval'))
-        );
-        expect(approvals.length).toBeGreaterThan(0);
+        expect(readXcrun().some((argv) => argv[1] === 'create')).toBe(false);
+        expect(readXcrun()).toContainEqual(['simctl', 'bootstatus', 'E2E-PARKED', '-b']);
+        expect(readBinding(projectRoot)).toMatchObject({ device: { udid: 'E2E-PARKED' } });
+        expect(report.phases.find((phase: any) => phase.id === 'boot-device')).toMatchObject({
+          status: 'ok',
+        });
       } finally {
         await stub.close();
       }
     });
 
-    // The boundary that remains: `--no-start` says change nothing, so a device without the app is
-    // reported rather than fixed — and the report names the run that would fix it.
-    it('reports the missing app rather than installing under --no-start', async () => {
+    // The boundary that remains: `--no-start` says change nothing, so nothing is bound and nothing
+    // is built, and the report names the run that would.
+    it('binds nothing and installs nothing under --no-start', async () => {
       const projectRoot = await devClientFixtureAsync();
-      const readXcrun = await installStubXcrunForBootAsync(projectRoot, [
-        { udid: FRESH, name: 'iPhone 17 Pro', lastBootedAt: '2026-08-30T09:00:00Z' },
-      ]);
+      const { calls: readXcrun } = await installStatefulXcrunAsync(projectRoot);
       const readNpx = await installStubNpxAsync(projectRoot);
-      const home = await writeSimulatorHomeAsync(projectRoot, { [FRESH]: ['host.exp.Exponent'] });
       const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
-      const release = await holdLockForAsync(projectRoot, stub);
 
       try {
-        const result = await executeAgentCliAsync(
-          projectRoot,
-          ['smoke', '--ios', '--json', '--no-screenshot', '--no-start', '--timeout', '4s'],
-          {
-            env: {
-              ...stubExpoEnv(projectRoot),
-              HOME: home,
-              ...(process.platform === 'win32' ? { USERPROFILE: home } : {}),
-              PATH: `${path.join(projectRoot, '.stub-bin')}${path.delimiter}${process.env.PATH}`,
-            },
-            reject: false,
-          }
-        );
-        const report = JSON.parse(result.stdout);
+        const report = await runAsync(projectRoot, stub, ['--no-start']);
 
-        // Nothing was booted and nothing was built: the flag forbade both.
-        expect(readXcrun().filter((argv) => argv[1] === 'boot')).toEqual([]);
+        expect(readBinding(projectRoot)).toBeNull();
+        expect(readXcrun().some((argv) => argv[1] === 'create' || argv[1] === 'bootstatus')).toBe(
+          false
+        );
         expect(readNpx().some((argv) => argv.includes('run:ios'))).toBe(false);
         expect(report.phases.some((phase: any) => phase.id === 'install-app')).toBe(false);
       } finally {
-        await release();
         await stub.close();
       }
     });

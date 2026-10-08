@@ -597,7 +597,7 @@ The bootstrap is not charged to `--timeout`. A cold simulator takes about a minu
 
 ### The device that can open the app
 
-Which device gets booted: the one that has the app installed. `src/device/installedApps.ts` reads the simulator filesystem (`Devices/<udid>/data/Containers/Bundle/Application/<container>/<Name>.app`, `plutil` for `CFBundleIdentifier`). `simctl get_app_container` and `simctl listapps` refuse on a shut device. `lastBootedAt` breaks the tie among the devices that have it. When no device has it, nothing is booted. `BootDeviceResult.refused` carries that difference. Expo Go is not exempt: `simctl openurl` does not install Expo Go. `expo start --ios` is what does, and `smoke` opens through `simctl openurl` to avoid the AppleScript grant. Android makes no such choice: there is normally one AVD, and the package list needs `adb` on a running emulator. `--cloud` boots nothing. A run whose dev server already has an app attached boots nothing.
+Which device gets booted: on iOS, the simulator bound to this worktree, reused or created by the device registry ([[0030-one-device-per-worktree]]); a created one has no app, so the install phase puts it there. Android makes no such choice: there is normally one AVD, and the package list needs `adb` on a running emulator. `--eas` boots nothing. A run whose dev server already has an app attached boots nothing.
 
 An attached app is not yet a readable app. Expo Go registers a target, downloads the bundle, and the target goes away and comes back when the JS runtime is created. A single read landing in that gap answers `No target found` about an app that is running. The `runtime` phase asks `Runtime.evaluate('1')` until it answers. A runtime with no debugger is asked exactly once. Polling it would turn the refusal into a hang. A wait that ends with no answer reports the runtime's own reason.
 
@@ -746,7 +746,7 @@ a reason to pull.
 **iOS simulator.** `xcrun simctl get_app_container <udid> <appId>` names the app bundle, and the file
 is read off disk at one of two paths: `EXConstants.bundle/app.fingerprint` for static linking,
 `Frameworks/EXConstants.framework/EXConstants.bundle/app.fingerprint` for `use_frameworks!`. Only
-booted simulators are read; `simctl` cannot look inside a shut-down one.
+the bound simulator is read, and only while it is up; `simctl` cannot look inside a shut-down one.
 
 **iOS device.** `devicectl` exposes no app container, so the app has to answer for itself. The
 reader starts a one-shot HTTP server on the LAN, launches the app through `devicectl device process
@@ -760,7 +760,7 @@ constant time, the body is capped at 4 KB, and the server closes as soon as it h
 response clock starts once the trigger was delivered, so a slow launch does not eat the phone's
 time; a timeout is `no-response`, never `up-to-date`.
 
-**Which iOS device.** Booted simulators first. A phone is probed only when `--device` names it:
+**Which iOS device.** The simulator bound to this worktree ([[0030-one-device-per-worktree]] §Readers); `--device` lists the booted simulators to filter instead. A phone is probed only when `--device` names it:
 the probe launches the app, and naming the phone is the consent. A phone that is connected but not
 named is mentioned in a hint. A phone that is unreachable, or has Developer Mode off, is named with
 what to do about it and not probed.

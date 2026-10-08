@@ -246,7 +246,7 @@ Two rules keep the plan honest about itself (`src/plan/decide.ts`):
   argv. `@expo/agent-cli dev --ios` has always forwarded `--ios` to `expo start`. The
   plan used to print `expo start --go` regardless.
 - The reason distinguishes the two forms. With a flag, `expo start --go --ios` really
-  does open the app. It uses a booted simulator or boots one, installs Expo Go if it is
+  does open the app. It uses the simulator bound to this worktree, booting it when it is down, installs Expo Go if it is
   missing, and sends the `exp://` URL. Without a flag, the reason says so and names
   `@expo/agent-cli navigate /`.
 
@@ -324,7 +324,7 @@ Sections:
   nothing was discovered. The section stays in `--json` and in the `cli:status` event.
   It returns to the text the moment either half has something to say, including when the
   section could not be read at all.
-- Device. A booted simulator or an attached device, reported as `present`, `absent`, or
+- Device. The bound simulator when it is up, or an attached device, reported as `present`, `absent`, or
   `unknown`. `unknown` is never rounded down to "none".
 - Next. The smart-start rule that would fire, as one line. The exception is a dev server
   this project can use already answering: then the line is `@expo/agent-cli smoke`. A
