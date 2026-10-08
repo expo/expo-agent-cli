@@ -28,6 +28,8 @@
 // of that decision, in one place.
 
 import fs from 'fs';
+import { ownCloudIdsAsync } from '../deviceBinding/cloud';
+import { guardedCloudArgs, CLOUD_SESSION_MISMATCH } from './cloudCommand';
 import path from 'path';
 
 import { classifySubprocessFailure } from '../needsHuman/detect';
@@ -160,6 +162,8 @@ export function buildSessionListArgs({
     'simulator:list',
     '--status',
     'in-progress',
+    '--status',
+    'new',
     '--limit',
     String(limit),
     '--json',
@@ -312,12 +316,12 @@ export function isOpenInAppAlert(output: string, appLabel: string): boolean {
 }
 
 /** Read the alert on the session's device. Exit 1 with "alert not found" when there is none. */
-export function readCloudAlertAsync(options: CloudRunOptions): Promise<CloudRunResult> {
+export function readCloudAlertAsync(options: CloudVerbOptions): Promise<CloudRunResult> {
   return runCloudVerbAsync(buildCloudAlertArgs({ action: 'get' }), options);
 }
 
 /** Answer the alert on the session's device with its default accept action. */
-export function acceptCloudAlertAsync(options: CloudRunOptions): Promise<CloudRunResult> {
+export function acceptCloudAlertAsync(options: CloudVerbOptions): Promise<CloudRunResult> {
   return runCloudVerbAsync(buildCloudAlertArgs({ action: 'accept' }), options);
 }
 
@@ -484,6 +488,8 @@ export interface CloudSessionSelection {
   candidates: CloudSessionInfo[];
   /** Live sessions dropped for having a controller this CLI does not speak to. */
   wrongType: CloudSessionInfo[];
+  unbound: CloudSessionInfo[];
+  source: CloudSessionSource | null;
 }
 
 /**
@@ -492,10 +498,9 @@ export interface CloudSessionSelection {
  * Pure and total, because "which session did it use" must not depend on the order the service
  * returned or on the second the command was run (llp/0005 §Cloud simulator). The rule, in order:
  *
- * 1. only `agent-device` sessions are candidates at all;
- * 2. the one `.env.eas-simulator` names, when it is among them — the file is a bad existence proof
- *    and a good preference, because it is the session this project started;
- * 3. the platform the caller asked for;
+ * 1. only live `agent-device` sessions named by an own binding or the dotenv are candidates;
+ * 2. the platform the caller asked for;
+ * 3. a bound id before the dotenv id;
  * 4. the most recently created, `id` ascending as the final tiebreaker so two sessions created in
  *    the same millisecond still order the same way on every run.
  *
@@ -503,31 +508,45 @@ export interface CloudSessionSelection {
  * and raises `cloudPlatformMismatchError`, which says a session exists and is not the one asked
  * for — an answer that "no session" would have hidden.
  */
+export type CloudSessionSource = 'bound' | 'dotenv';
+
 export function selectCloudSession(
   sessions: CloudSessionInfo[],
   {
     preferredId = null,
     platform = null,
-  }: { preferredId?: string | null; platform?: CloudPlatform | null } = {}
+    boundIds = [],
+  }: {
+    preferredId?: string | null;
+    platform?: CloudPlatform | null;
+    boundIds?: readonly string[];
+  } = {}
 ): CloudSessionSelection {
-  const live = sessions.filter((session) => isActiveSessionStatus(session.status));
-  const candidates = live.filter(isDrivableSession);
-  const wrongType = live.filter((session) => !isDrivableSession(session));
-
-  const ranked = [...candidates].sort((a, b) => {
-    const preferred = rank(b.id === preferredId) - rank(a.id === preferredId);
-    if (preferred !== 0) {
-      return preferred;
-    }
+  const live = sessions.filter(
+    (session) => isActiveSessionStatus(session.status) || session.status?.toUpperCase() === 'NEW'
+  );
+  const drivable = live.filter((session) => session.type?.toLowerCase() === DRIVABLE_SESSION_TYPE);
+  const eligible = (session: CloudSessionInfo) =>
+    session.id != null && (boundIds.includes(session.id) || session.id === preferredId);
+  const candidates = drivable.filter(eligible).sort((a, b) => {
     const wanted = rank(b.platform === platform) - rank(a.platform === platform);
-    if (wanted !== 0) {
-      return wanted;
-    }
-    const newest = (b.createdAt ?? '').localeCompare(a.createdAt ?? '');
-    return newest !== 0 ? newest : (a.id ?? '').localeCompare(b.id ?? '');
+    if (wanted) return wanted;
+    const bound = rank(boundIds.includes(b.id!)) - rank(boundIds.includes(a.id!));
+    if (bound) return bound;
+    const preferred = rank(b.id === preferredId) - rank(a.id === preferredId);
+    if (preferred) return preferred;
+    return (
+      (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || (a.id ?? '').localeCompare(b.id ?? '')
+    );
   });
-
-  return { selected: ranked[0] ?? null, candidates: ranked, wrongType };
+  const selected = candidates[0] ?? null;
+  return {
+    selected,
+    candidates,
+    unbound: drivable.filter((session) => !eligible(session)),
+    wrongType: live.filter((session) => session.type?.toLowerCase() !== DRIVABLE_SESSION_TYPE),
+    source: selected ? (boundIds.includes(selected.id!) ? 'bound' : 'dotenv') : null,
+  };
 }
 
 function rank(value: boolean): number {
@@ -565,6 +584,8 @@ export function parseAvailabilityJson(stdout: string): CloudAvailability {
 
 /** What this project has, or has not, on EAS Simulator right now. */
 export type CloudSessionState =
+  | 'queued'
+  | 'unbound'
   /** A session is up and can be driven. */
   | 'active'
   /** The dotenv names a session, and the service does not list it among the running ones. */
@@ -575,6 +596,7 @@ export type CloudSessionState =
   | 'unknown';
 
 export interface CloudSessionProbe {
+  source?: CloudSessionSource | null;
   state: CloudSessionState;
   sessionId: string | null;
   platform: CloudPlatform | null;
@@ -651,6 +673,8 @@ export interface CloudRunOptions {
   timeoutMs?: number;
 }
 
+export type CloudVerbOptions = CloudRunOptions & { sessionId: string };
+
 /** What one `eas simulator:*` run amounted to. */
 export interface CloudRunResult {
   /** The command as a person would type it, for reproducing the step by hand. */
@@ -679,8 +703,12 @@ export async function probeCloudSessionAsync({
   projectRoot,
   easCli,
   platform = null,
+  boundIds,
   timeoutMs = CLOUD_SESSION_TIMEOUT_MS,
-}: CloudRunOptions & { platform?: CloudPlatform | null }): Promise<CloudSessionProbe> {
+}: CloudRunOptions & {
+  platform?: CloudPlatform | null;
+  boundIds?: string[];
+}): Promise<CloudSessionProbe> {
   const cli = easCli ?? resolveEasCli(projectRoot);
   if (!cli) {
     // The resolver's third rung downloads the published CLI, so reaching here means this machine has
@@ -694,6 +722,7 @@ export async function probeCloudSessionAsync({
   // The file is read before the listing and used after it: it names the session this project
   // started, which is the tiebreaker when the account has several up at once.
   const preferredId = readCloudSessionIdSync(projectRoot);
+  const ownIds = boundIds ?? (await ownCloudIdsAsync(projectRoot));
 
   const result = await runEasAsync(cli, buildSessionListArgs(), { projectRoot, timeoutMs });
   if (result.spawnError) {
@@ -727,13 +756,15 @@ export async function probeCloudSessionAsync({
     );
   }
 
-  const { selected, candidates, wrongType } = selectCloudSession(sessions, {
+  const { selected, candidates, wrongType, unbound, source } = selectCloudSession(sessions, {
     preferredId,
     platform,
+    boundIds: ownIds,
   });
   if (selected?.id != null) {
     return {
-      state: 'active',
+      state: isActiveSessionStatus(selected.status) ? 'active' : 'queued',
+      source,
       sessionId: selected.id,
       platform: selected.platform,
       status: selected.status,
@@ -747,6 +778,19 @@ export async function probeCloudSessionAsync({
     };
   }
 
+  if (ownIds.length || unbound.length) {
+    return {
+      ...unknownSession(
+        ownIds[0] ?? null,
+        ownIds.length
+          ? 'The bound EAS session is no longer listed as active or queued.'
+          : 'Running EAS sessions belong to other worktrees; none is selected.'
+      ),
+      state: ownIds.length ? 'inactive' : 'unbound',
+      available: true,
+      otherSessionCount: wrongType.length + unbound.length,
+    };
+  }
   return await noUsableSessionAsync({
     cli,
     projectRoot,
@@ -858,7 +902,7 @@ export function openUrlOnCloudSimulatorAsync({
   relaunch,
   session,
   ...options
-}: CloudRunOptions & {
+}: CloudVerbOptions & {
   url: string;
   platform: CloudPlatform;
   appId?: string;
@@ -881,7 +925,7 @@ export function openUrlOnCloudSimulatorAsync({
 export function stopAppOnCloudSimulatorAsync({
   appId,
   ...options
-}: CloudRunOptions & { appId: string }): Promise<CloudRunResult> {
+}: CloudVerbOptions & { appId: string }): Promise<CloudRunResult> {
   return runCloudVerbAsync(buildCloudStopAppArgs({ appId }), options);
 }
 
@@ -889,19 +933,30 @@ export function stopAppOnCloudSimulatorAsync({
 export function captureCloudScreenshotAsync({
   filePath,
   ...options
-}: CloudRunOptions & { filePath: string }): Promise<CloudRunResult> {
+}: CloudVerbOptions & { filePath: string }): Promise<CloudRunResult> {
   return runCloudVerbAsync(buildCloudScreenshotArgs({ filePath }), options);
 }
 
 async function runCloudVerbAsync(
   args: string[],
-  { projectRoot, easCli, timeoutMs = CLOUD_VERB_TIMEOUT_MS }: CloudRunOptions
+  { projectRoot, easCli, sessionId, timeoutMs = CLOUD_VERB_TIMEOUT_MS }: CloudVerbOptions
 ): Promise<CloudRunResult> {
   const cli = easCli ?? resolveEasCli(projectRoot);
   if (!cli) {
     throw easCliMissingError();
   }
-  return await runEasAsync(cli, args, { projectRoot, timeoutMs });
+  const result = await runEasAsync(cli, guardedCloudArgs(args, sessionId), {
+    projectRoot,
+    timeoutMs,
+  });
+  result.command = [easCliLabel(cli), ...args].join(' ');
+  if (result.stderr.includes(CLOUD_SESSION_MISMATCH)) {
+    throw new CommandError(
+      'CLOUD_SESSION_MISMATCH',
+      `The EAS connection settings do not name selected session ${sessionId}. No device command ran. Restore that session's .env.eas-simulator connection settings and retry.`
+    );
+  }
+  return result;
 }
 
 async function runEasAsync(

@@ -50,6 +50,7 @@
 // - STUB_SIM_AVAILABLE: `false` for an account without the feature
 //
 // `simulator:list` / `simulator:get`
+// - STUB_SIM_STORE: shared session JSON file for several worktrees on the same EAS project
 // - STUB_SIM_SESSIONS: `0` for a project with nothing running (apart from sessions this stub
 //   started under the cwd, below)
 // - STUB_SIM_ID / STUB_SIM_STATUS / STUB_SIM_PLATFORM / STUB_SIM_TYPE: the one listed session
@@ -82,13 +83,20 @@ const LOG_NAME = 'stub-eas-invocations.jsonl';
 const SESSIONS_NAME = 'stub-eas-sessions.json';
 /** Where a finished `build` is remembered for `build:list`, under the cwd. */
 const BUILDS_NAME = 'stub-eas-builds.json';
-const args = process.argv.slice(2);
+let args = process.argv.slice(2);
+const controller = args[0] === '__controller';
+if (controller) args = ['simulator:exec', ...args.slice(1)];
 const cwd = process.cwd();
 
 try {
   fs.appendFileSync(
     path.join(cwd, LOG_NAME),
-    JSON.stringify({ args, cwd, ci: process.env.CI ?? null }) + '\n'
+    JSON.stringify({
+      args: controller ? ['__controller', ...args.slice(1)] : args,
+      cwd,
+      ci: process.env.CI ?? null,
+      executedSessionId: controller ? process.env.EAS_SIMULATOR_SESSION_ID : undefined,
+    }) + '\n'
   );
 } catch {
   // A log that cannot be written costs the assertion, not the run under test.
@@ -245,14 +253,19 @@ if (command === 'build:list') {
 /** The sessions this stub started under this cwd, newest first. */
 function rememberedSessions() {
   try {
-    return JSON.parse(fs.readFileSync(path.join(cwd, SESSIONS_NAME), 'utf8'));
+    return JSON.parse(
+      fs.readFileSync(process.env.STUB_SIM_STORE || path.join(cwd, SESSIONS_NAME), 'utf8')
+    );
   } catch {
     return [];
   }
 }
 
 function writeRememberedSessions(sessions) {
-  fs.writeFileSync(path.join(cwd, SESSIONS_NAME), JSON.stringify(sessions));
+  fs.writeFileSync(
+    process.env.STUB_SIM_STORE || path.join(cwd, SESSIONS_NAME),
+    JSON.stringify(sessions)
+  );
 }
 
 /** The session the environment describes, which `simulator:list` and `simulator:get` answer with. */
@@ -299,15 +312,20 @@ if (command === 'simulator:list') {
   if (exitCode !== 0) {
     exitWith(process.stderr, process.env.STUB_SIM_STDERR || 'Session not found', exitCode);
   }
-  const wanted = valueOf('--status');
-  const remembered = rememberedSessions().filter(
-    (session) => !wanted || same(session.status, wanted.replace('-', '_'))
+  const wanted = args.flatMap((arg, index) =>
+    arg === '--status' ? [args[index + 1].replace('-', '_')] : []
   );
+  const remembered = rememberedSessions();
   const sessions = [
     ...remembered,
     ...(process.env.STUB_SIM_SESSIONS === '0' ? [] : [stubSession()]),
   ];
-  printJson({ sessions, pageInfo: { hasNextPage: false } });
+  printJson({
+    sessions: sessions.filter(
+      (session) => !wanted.length || wanted.some((status) => same(session.status, status))
+    ),
+    pageInfo: { hasNextPage: false },
+  });
   process.exit(0);
 }
 
@@ -388,6 +406,8 @@ if (command === 'simulator' || command === 'simulator:start') {
 }
 
 if (command === 'simulator:stop') {
+  if (process.env.STUB_SIM_STOP_EXIT)
+    exitWith(process.stderr, 'Stop refused', Number(process.env.STUB_SIM_STOP_EXIT));
   const id =
     valueOf('--id') ??
     (() => {
@@ -408,6 +428,34 @@ if (command === 'simulator:stop') {
 }
 
 if (command === 'simulator:exec') {
+  if (!controller && args[2] === '-e') {
+    // Execute the real guard after loading the same connection file as EAS. Only the device
+    // controller is replaced: its process records the exact session environment it received.
+    const target = JSON.parse(args.at(-1));
+    const env = { ...process.env };
+    try {
+      for (const line of fs
+        .readFileSync(path.join(cwd, '.env.eas-simulator'), 'utf8')
+        .split('\n')) {
+        const match = /^([A-Z_]+)=(.*)$/.exec(line);
+        if (match) env[match[1]] = match[2];
+      }
+    } catch {
+      delete env.EAS_SIMULATOR_SESSION_ID;
+    }
+    const childArgs = args.slice(2);
+    childArgs[childArgs.length - 1] = JSON.stringify({
+      command: process.execPath,
+      args: [__filename, '__controller', target.command, ...target.args],
+      shell: false,
+    });
+    const result = require('node:child_process').spawnSync(args[1], childArgs, {
+      env,
+      stdio: 'inherit',
+    });
+    if (result.error) process.stderr.write(result.error.message + '\n');
+    process.exit(result.status ?? 1);
+  }
   const exitCode = Number(process.env.STUB_SIM_EXEC_EXIT || 0);
   if (exitCode !== 0) {
     exitWith(

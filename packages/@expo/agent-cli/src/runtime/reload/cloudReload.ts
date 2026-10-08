@@ -131,6 +131,7 @@ export async function reloadOnCloudSimulatorAsync(
   const relaunch = async (session?: string): Promise<CloudRunResult> =>
     await openUrlOnCloudSimulatorAsync({
       projectRoot,
+      sessionId: device.deviceId,
       // The app id **as** the thing being opened: this verb starts the shell and nothing else.
       url: appId,
       platform: device.platform as CloudPlatform,
@@ -173,6 +174,7 @@ export async function reloadOnCloudSimulatorAsync(
   // Step two: the link, into the app that is now running. The same verb `navigate --eas` runs.
   const linked = await openUrlOnCloudSimulatorAsync({
     projectRoot,
+    sessionId: device.deviceId,
     url: resolved.url,
     platform: device.platform as CloudPlatform,
     session: boundSession,

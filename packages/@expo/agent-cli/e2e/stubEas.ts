@@ -23,6 +23,7 @@ export interface StubEasInvocation {
   cwd: string;
   /** `CI` as the CLI under test passed it on, or null when it did not set one. */
   ci: string | null;
+  executedSessionId?: string;
 }
 
 /**
@@ -81,9 +82,17 @@ export function readStubEasInvocations(projectRoot: string): StubEasInvocation[]
     .map((line) => JSON.parse(line) as StubEasInvocation);
 }
 
-/** The argv of every recorded stub `eas` invocation, in order. */
+/** EAS invocations, with guarded controller commands decoded for verb assertions. */
 export function stubEasArgs(projectRoot: string): string[][] {
-  return readStubEasInvocations(projectRoot).map((invocation) => invocation.args);
+  return readStubEasInvocations(projectRoot)
+    .filter(({ args }) => args[0] !== '__controller')
+    .map(({ args }) => {
+      if (args[0] === 'simulator:exec' && args[2] === '-e') {
+        const target = JSON.parse(args.at(-1)!);
+        return ['simulator:exec', target.command, ...target.args];
+      }
+      return args;
+    });
 }
 
 /** The first word of every recorded stub `eas` invocation — the verbs, in order. */

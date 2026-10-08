@@ -129,7 +129,11 @@ function mockTool(tool: StubTool): void {
         fs.writeSync(options.stdio[1], tool.toStdout, 0, tool.toStdout.length);
       }
       if (tool.toFile) {
-        fs.writeFileSync(args[args.length - 1]!, tool.toFile);
+        const controllerArgs =
+          args.includes('simulator:exec') && args.includes('-e')
+            ? JSON.parse(args.at(-1)!).args
+            : args;
+        fs.writeFileSync(controllerArgs.at(-1)!, tool.toFile);
       }
       if (tool.stderr) {
         child.stderr.emit('data', tool.stderr);
