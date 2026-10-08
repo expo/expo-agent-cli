@@ -9,6 +9,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { readBindingSummaryAsync } from '../deviceBinding/summary';
+import { inspectBindingCachedAsync, deviceCommand } from '../deviceBinding';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
 import { readCloudSessionIdSync } from '../device/cloudSimulator';
 import { probeLocalDeviceAsync } from '../device/localDevice';
@@ -19,6 +21,7 @@ import { refineWithChangedFilesAsync } from '../impact/fromRecord';
 import type { ImpactClass, OtaSafety } from '../impact/types';
 import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
 import * as Log from '../log';
+import { PROGRAM_PREFIX } from '../programName';
 import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
 import { readLastBuildRecord, type LastBuildRecord } from '../plan/lastBuild';
@@ -231,12 +234,15 @@ export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions
 ): Promise<StatusReport> {
-  const [project, devServer, device, skills, auth] = await Promise.all([
+  const [project, devServer, device, skills, auth, binding] = await Promise.all([
     attemptAsync(() => readProjectAsync(projectRoot, options)),
     attemptAsync(() => probeDevServerStatusAsync(projectRoot, options)),
     attemptAsync(() => readLocalDeviceStatusAsync(projectRoot, options)),
     attemptAsync(() => readSkillsStatusAsync(projectRoot)),
     attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot)),
+    attemptAsync(() =>
+      readBindingSummaryAsync(projectRoot, options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS)
+    ),
   ]);
 
   const errors: Partial<Record<StatusSectionName, string>> = {};
@@ -248,6 +254,7 @@ export async function collectStatusReportAsync(
     builds: null,
     devServer: null,
     device: null,
+    binding: 'value' in binding ? binding.value : [],
     skills: null,
     auth: null,
     next: null,
@@ -255,6 +262,8 @@ export async function collectStatusReportAsync(
     probe: null,
     errors,
   };
+
+  if ('error' in binding) errors.binding = binding.error;
 
   // Read before the project section, because `next` depends on it: a dev server that is already
   // serving this project changes what the useful next command is (see `buildNextActionStatus`).
@@ -341,6 +350,22 @@ export async function collectStatusReportAsync(
       // "expo run:ios" on a Linux box would be the report disagreeing with the command.
       await attemptPlanAsync(projectRoot, state, record, options)
     );
+    const platform = options.platform ?? resolveDefaultPlatform(state);
+    if (
+      state.isExpoApp &&
+      platform !== 'web' &&
+      'value' in binding &&
+      !binding.value.some((entry) => entry.platform === platform) &&
+      !readCloudSessionIdSync(projectRoot)
+    ) {
+      report.next = {
+        ...report.next,
+        command: report.next.command.startsWith(`${PROGRAM_PREFIX} dev `)
+          ? report.next.command
+          : deviceCommand(platform),
+        why: `No ${platform} device is bound to this worktree.`,
+      };
+    }
   } else {
     // One cause, one note. The other three sections are left null, and the project line says why.
     errors.project = project.error;
@@ -760,7 +785,15 @@ async function readLocalDeviceStatusAsync(
   options: StatusOptions
 ): Promise<LocalDeviceStatus> {
   const timeoutMs = options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS;
-  const probe = await raceWithTimeoutAsync(probeLocalDeviceAsync({ projectRoot }), timeoutMs);
+  const probe = await raceWithTimeoutAsync(
+    probeLocalDeviceAsync({
+      projectRoot,
+      inspectIosAsync: (root) => inspectBindingCachedAsync(root, 'ios', 'local-ios', { timeoutMs }),
+      inspectAndroidAsync: (root) =>
+        inspectBindingCachedAsync(root, 'android', 'local-android', { timeoutMs }),
+    }),
+    timeoutMs
+  );
   return buildLocalDeviceStatus(
     probe ?? {
       state: 'unknown',

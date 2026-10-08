@@ -88,8 +88,7 @@ export function deviceUnavailableError(
     case 'no-free-port': {
       const error = refusal('DEVICE_UNAVAILABLE', reason, EXIT_OUTCOME_FAILED, [
         `Every emulator console port from 5554 to 5584 is taken: ${portHolders(boundBy)}.`,
-        // `dev:stop --release` (llp/0033) replaces the hand stop once it exists.
-        `How: stop one of the listed instances by hand, then run this command again.`,
+        `How: run "${PROGRAM_PREFIX} dev:stop --release" in one of the listed worktrees, then run this command again.`,
       ]);
       error.data = { reason, boundBy };
       return error;

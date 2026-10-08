@@ -229,7 +229,12 @@ export async function devDetachAsync(
       hostBindsPlatform(platform)
     ) {
       Log.progress(
-        acquireLine(await acquireDeviceAsync(projectRoot, platform, { reuseOnly: true }))
+        acquireLine(
+          await acquireDeviceAsync(projectRoot, platform, {
+            reuseOnly: true,
+            explicit: options.device,
+          })
+        )
       );
     }
     const checked = options.waitReady

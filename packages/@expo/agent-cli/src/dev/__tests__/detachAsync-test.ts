@@ -403,6 +403,8 @@ describe('a lock whose port Metro has not logged', () => {
 
 // @ref llp/0031-ios-binding.plan.md §How `dev` uses it
 describe('the bound device', () => {
+  const platform = process.platform;
+  afterEach(() => Object.defineProperty(process, 'platform', { value: platform }));
   const running = {
     url: 'http://127.0.0.1:8393',
     port: 8393,
@@ -423,6 +425,7 @@ describe('the bound device', () => {
   };
 
   beforeEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
     vi.mocked(devicesDisabled).mockReturnValue(false);
     // These cases model a host that can run the requested iOS simulator. Other tests below
     // exercise the unsupported-host branch explicitly.

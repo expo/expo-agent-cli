@@ -412,6 +412,7 @@ describe('@expo/agent-cli status', () => {
         'builds',
         'devServer',
         'device',
+        'binding',
         'skills',
         'auth',
         'next',

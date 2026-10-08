@@ -10,6 +10,7 @@ export const devStopHelp: CommandHelp = {
   command: 'dev:stop',
   usage: `${PROGRAM_PREFIX} dev:stop`,
   options: [
+    `--release             Release this worktree’s devices after its dev server stops`,
     `--eas                 Also end this project's EAS Simulator session (bills until stopped)`,
     `--port <port>         Look at this port when no lock answers for the project`,
     `--signal <signal>     SIGTERM (default), SIGINT, or SIGKILL`,
@@ -55,11 +56,15 @@ export const devStopHelp: CommandHelp = {
       'reason',
       'detail',
       'session',
+      'devices',
+      'reaped',
+      'deviceError',
       'waitedMs',
       'followups',
     ],
   },
   notes: [
+    `Devices stay bound by default. --release parks created simulators and ends spawned emulators.`,
     `${PROGRAM_PREFIX} stop is this same command. It stops the DEV SERVER; stopping the app`,
     `on the device is "${PROGRAM_PREFIX} runtime:stop", which is a different thing to stop.`,
     `It signals the process named by this project's dev-server lock, so there is no port to`,

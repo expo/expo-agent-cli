@@ -1407,6 +1407,7 @@ describe(devAsync, () => {
     });
 
     afterEach(() => {
+      mockPlatform(realPlatform);
       vi.mocked(devicesDisabled).mockReturnValue(true);
     });
 
@@ -1436,7 +1437,7 @@ describe(devAsync, () => {
         devAsync(projectRoot, resolveDevOptions(['--ios', '--local', '--', '--device', 'X']))
       ).resolves.toBe(0);
 
-      expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios');
+      expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios', { explicit: undefined });
       const [, args] = vi.mocked(runDevServerAsync).mock.calls[0]!;
       expect(args.filter((arg) => arg === '--device')).toHaveLength(1);
       expect(args).toEqual(expect.arrayContaining(['run:ios', '--device', 'SIM-1']));

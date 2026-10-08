@@ -1,3 +1,4 @@
+import { withLeaseExtendedAsync } from '../deviceBinding/renew';
 import { holdDevServerLockAsync } from '../devLock';
 import type { ResolvedDevServerPort } from '../devLock/port';
 import { dependsOnDevClientSync, reportFollowUps } from '../followups';
@@ -113,7 +114,9 @@ export async function runDevServerAsync(
       onDevServer?.(server);
     }
   };
-  const run = spawnDevServerAsync(projectRoot, args, output).finally(() => {
+  const run = withLeaseExtendedAsync(projectRoot, () =>
+    spawnDevServerAsync(projectRoot, args, output)
+  ).finally(() => {
     running = false;
   });
   const lock = holdDevServerLockAsync(projectRoot, args, {

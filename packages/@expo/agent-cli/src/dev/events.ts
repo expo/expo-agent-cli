@@ -15,7 +15,7 @@ declare module '2g' {
     // named: the lock was read and deliberately not acted on (llp/0021 §The rules).
     'dev:stop_lock_read': { held: boolean; pid: number | null; ownsTarget: boolean };
     /** `dev:stop --eas` asked the EAS Simulator session to end, and whether it did. */
-    'dev:stop_session': { sessionId: string; ok: boolean };
+    'dev:stop_session': { sessionId: string; ok: boolean; platform: 'ios' | 'android' | null };
     'dev:stop_signalled': { pid: number; signal: string; ok: boolean };
     // The three checks, separately, because the conclusion is drawn from the first two and the
     // third is the one that used to be able to overrule them (llp/0005 §Stopping the app

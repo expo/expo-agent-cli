@@ -4,6 +4,8 @@
 // `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
 
 import type { OpenAppOnEasReport } from './openAppEas';
+import { withLeaseExtendedAsync } from '../deviceBinding/renew';
+import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
 import { outputTail } from '../deploy/parseOutput';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
 import {
@@ -185,7 +187,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     if (bindsHere) {
       acquired = await acquireDevice(plan);
     }
-    plan = withPlannedDevice(plan, acquired, options);
+    plan = await withPlannedDevice(projectRoot, plan, acquired, options);
     const followups = followUpsEnabled(options.followups)
       ? // The typed flag, not the resolved platform: this is the plan the caller asked for, and the
         // command that runs it has to ask for the same one (F103).
@@ -293,7 +295,9 @@ function deviceCallbackFor(
       return null;
     }
     if (options.mode === 'plan') {
-      return await inspectOwnDeviceAsync(projectRoot, platform);
+      return options.device === undefined
+        ? await inspectOwnDeviceAsync(projectRoot, platform)
+        : null;
     }
     if (options.port != null && draft.steps.some(isDevServerStep)) {
       const planned = await resolvePlannedPortAsync(options.port);
@@ -301,7 +305,7 @@ function deviceCallbackFor(
         throw await portDemandedError(projectRoot, options.port, options.platform);
       }
     }
-    const acquired = await acquireDeviceAsync(projectRoot, platform);
+    const acquired = await acquireDeviceAsync(projectRoot, platform, { explicit: options.device });
     Log.progress(acquireLine(acquired));
     return acquired;
   };
@@ -334,11 +338,29 @@ async function inspectOwnDeviceAsync(
 }
 
 /** The `--plan` view: the steps pinned to the bound device, or the reason none is pinned yet. */
-function withPlannedDevice(
+async function withPlannedDevice(
+  projectRoot: string,
   plan: StartPlan,
   acquired: AcquireResult | null,
   options: DevOptions
-): StartPlan {
+): Promise<StartPlan> {
+  const selectedPlatform = boundPlatform(options);
+  if (selectedPlatform && options.device !== undefined) {
+    try {
+      return withDevice(
+        plan,
+        deviceIdOf(await previewExplicitDeviceAsync(projectRoot, selectedPlatform, options.device))
+      );
+    } catch (error) {
+      return {
+        ...plan,
+        reasons: [
+          ...plan.reasons,
+          `Will refuse: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
+        ],
+      };
+    }
+  }
   if (acquired) {
     return withDevice(plan, deviceIdOf(acquired.device));
   }
@@ -493,7 +515,9 @@ async function executePlanAsync(
     let stepRunning = false;
     const runStep = async (stepArgs: string[]) => {
       if (!devServerStep) {
-        return await runStepAsync(projectRoot, step, stepArgs, output);
+        return await withLeaseExtendedAsync(projectRoot, () =>
+          runStepAsync(projectRoot, step, stepArgs, output)
+        );
       }
       stepRunning = true;
       let openTask: Promise<OpenAppOnEasReport | null> | undefined;

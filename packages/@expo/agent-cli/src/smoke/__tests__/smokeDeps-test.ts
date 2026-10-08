@@ -1,8 +1,7 @@
 // @ref llp/0031-ios-binding.plan.md §smoke
 // @ref llp/0032-android-instance.plan.md §Wiring
-// The boot dependency smoke hands its phases: both platforms bind through the registry and keep
-// the device; nothing is registered to put it back.
-import { acquireDeviceAsync } from '../../deviceBinding';
+// Smoke binds and releases only its own platform through the registry.
+import { acquireDeviceAsync, releaseWorktreeDevicesAsync } from '../../deviceBinding';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps } from '../smokeAsync';
 
@@ -10,6 +9,7 @@ vi.mock('../../log');
 vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),
   acquireDeviceAsync: vi.fn(),
+  releaseWorktreeDevicesAsync: vi.fn(async () => []),
 }));
 
 const projectRoot = '/project';
@@ -102,4 +102,10 @@ describe('bootDevice', () => {
       delete process.env.AGENT_CLI_NO_DEVICE;
     }
   });
+});
+
+it('smoke-releases-own-platform-only', async () => {
+  vi.mocked(releaseWorktreeDevicesAsync).mockResolvedValue([]);
+  await buildSmokeDeps(projectRoot, resolveSmokeOptions(['--android'])).releaseDevice();
+  expect(releaseWorktreeDevicesAsync).toHaveBeenCalledWith(projectRoot, { platform: 'android' });
 });

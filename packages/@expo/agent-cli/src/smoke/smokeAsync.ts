@@ -20,6 +20,7 @@ import {
   deviceIdOf,
   deviceNameOf,
   devicesDisabled,
+  releaseWorktreeDevicesAsync,
 } from '../deviceBinding';
 import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
@@ -448,17 +449,24 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // lock answers for, so a cleanup can never take down something this run did not start.
     stopDevServer: async () => {
       const captured: { report: DevStopResultJson | null } = { report: null };
-      const code = await devStopAsync(projectRoot, resolveDevStopOptions(['--no-followups']), {
-        print: false,
-        onReport: (stopped) => {
-          captured.report = stopped;
-        },
-      });
+      const code = await devStopAsync(
+        projectRoot,
+        { ...resolveDevStopOptions(['--no-followups']), release: true, platform: options.platform },
+        {
+          print: false,
+          onReport: (stopped) => {
+            captured.report = stopped;
+          },
+        }
+      );
       const stopped = captured.report;
       return {
         ok: code === EXIT_OK,
         target: stopped?.url ?? (stopped?.port == null ? null : `port ${stopped.port}`),
-        reason: code === EXIT_OK ? null : (stopped?.detail ?? 'the dev server did not stop'),
+        reason:
+          code === EXIT_OK
+            ? null
+            : (stopped?.deviceError ?? stopped?.detail ?? 'the dev server did not stop'),
       };
     },
 
@@ -516,9 +524,18 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // Local only, and that is not a gap: `--eas` names a session somebody else started and pays
     // for, and the phase that calls this never runs for one.
     //
-    // @ref llp/0031-ios-binding.plan.md §smoke — the device is this worktree's bound one, reused,
-    // created or spawned by the registry and left bound; a created simulator and a read-only
-    // emulator instance have no app, so the install phase puts it there.
+    // @ref llp/0033-device-lifecycle.plan.md §smoke — a child-owned binding is released by
+    // dev:stop; a binding acquired with a reused server is released by this hook.
+    releaseDevice: async () => {
+      const devices = await releaseWorktreeDevicesAsync(projectRoot, {
+        platform: options.platform,
+      });
+      return {
+        ok: devices.every((device) => device.released),
+        target: devices.map((device) => device.id).join(', ') || null,
+        reason: devices.find((device) => !device.released)?.reason ?? null,
+      };
+    },
     bootDevice: async () => {
       const platform = options.platform;
       if (devicesDisabled()) {
