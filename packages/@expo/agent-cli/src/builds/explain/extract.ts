@@ -28,7 +28,7 @@ export const LOG_TAIL_LINES = 40;
 export const MAX_OTHER_FAILURES = 10;
 
 export interface ExtractOptions {
-  /** The caller's `--platform` hint, which rules out the other platform's rules. */
+  /** The caller's `--ios` / `--android` hint, which rules out the other platform's rules. */
   platform?: 'ios' | 'android' | null;
   contextBefore?: number;
   contextAfter?: number;

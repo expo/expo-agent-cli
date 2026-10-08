@@ -71,19 +71,39 @@ describe('the reserved build-id positional', () => {
   });
 });
 
-describe('--platform', () => {
-  it.each(['ios', 'android', 'iOS', 'ANDROID'])('accepts %p', (value) => {
-    expect(resolveExplainOptions(['--platform', value], PIPED).platform).toBe(value.toLowerCase());
+describe('the platform flags', () => {
+  it.each([
+    ['--ios', 'ios'],
+    ['--android', 'android'],
+  ])('reads %s, the spelling dev and smoke take', (flag, platform) => {
+    expect(resolveExplainOptions([flag], PIPED).platform).toBe(platform);
   });
 
   it('is null when the caller named none, so every rule runs', () => {
     expect(resolveExplainOptions([], PIPED).platform).toBeNull();
   });
 
-  it('refuses a platform this command has no rules for', () => {
-    expect(() => resolveExplainOptions(['--platform', 'web'], PIPED)).toThrow(
-      /not a platform this command knows/
+  it('refuses both at once, because a log is about one platform', () => {
+    expect(() => resolveExplainOptions(['--ios', '--android'], PIPED)).toThrow(
+      /Both --ios and --android/
     );
+  });
+
+  // Retired with no alias, and accepted only to say what replaced it.
+  it.each([
+    ['ios', '--ios'],
+    ['Android', '--android'],
+    ['web', '--ios or --android'],
+  ])('answers the retired --platform %s with %s', (value, replacement) => {
+    try {
+      resolveExplainOptions(['--platform', value], PIPED);
+      throw new Error('expected a throw');
+    } catch (error: any) {
+      expect(error.code).toBe('BAD_ARGS');
+      expect(error.message).toContain('--platform is not an option of this command any more');
+      expect(error.message).toContain(`the platform is ${replacement}`);
+      expect(error.suggestedCommand).toBe('npx @expo/agent-cli inspect:build-log --help');
+    }
   });
 });
 
@@ -143,8 +163,8 @@ describe('the rest of the flags', () => {
     });
   });
 
-  it('reads the short aliases', () => {
-    expect(resolveExplainOptions(['-f', 'a.log', '-p', 'ios'], TERMINAL)).toMatchObject({
+  it('reads the short alias of --file', () => {
+    expect(resolveExplainOptions(['-f', 'a.log', '--ios'], TERMINAL)).toMatchObject({
       source: { kind: 'file', path: path.resolve(cwd, 'a.log') },
       platform: 'ios',
     });

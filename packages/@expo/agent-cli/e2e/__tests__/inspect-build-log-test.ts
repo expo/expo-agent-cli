@@ -325,6 +325,37 @@ describe('when no report can be produced', () => {
     expect(result.stderr).toContain(`Try: npx --yes eas-cli@latest build:view ${buildId}`);
   });
 
+  // The platform is `--ios` / `--android`, the spelling `dev` and `smoke` take. `--platform` was
+  // this command's own spelling and is gone, with an answer that names the replacement.
+  it('takes --ios as the platform hint, and carries it in the report', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+
+    const result = await executeAgentCliAsync(projectRoot, [
+      'inspect:build-log',
+      '--file',
+      fixture('npm-peer-conflict.log'),
+      '--ios',
+      '--json',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).source.platform).toBe('ios');
+  });
+
+  it('answers the retired --platform with the flag that replaced it', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['inspect:build-log', '--file', fixture('npm-peer-conflict.log'), '--platform', 'android'],
+      { reject: false }
+    );
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('--platform is not an option of this command any more');
+    expect(result.stderr).toContain('the platform is --android');
+  });
+
   it('reports an unknown flag rather than ignoring it', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
 

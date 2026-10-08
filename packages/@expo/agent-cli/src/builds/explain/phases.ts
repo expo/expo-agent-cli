@@ -176,7 +176,7 @@ const CONTENT_ANCHORS: PhaseAnchor[] = [
   { phase: 'upload', layer: 2, pattern: /^Uploading (?:the )?application archive\b/i },
 ];
 
-/** Phases only one platform ever produces, so a `--platform` hint can rule the others out. */
+/** Phases only one platform ever produces, so an `--ios` / `--android` hint can rule the others out. */
 export const PLATFORM_ONLY_PHASES: Record<'ios' | 'android', PhaseName[]> = {
   ios: ['pod-install', 'xcodebuild', 'fastlane'],
   android: ['gradle'],
@@ -254,7 +254,7 @@ export function phaseAnchorFor(
  * one Gradle run, and a hundred one-line phases would be a worse answer than one.
  *
  * @param lines the log, ANSI already stripped, one entry per line.
- * @param platform the caller's `--platform` hint, which rules out the other platform's phases.
+ * @param platform the caller's `--ios` / `--android` hint, which rules out the other platform's phases.
  * @returns the segments, in order, every line of the log covered exactly once.
  */
 export function detectPhases(lines: string[], platform: 'ios' | 'android' | null = null): Phase[] {

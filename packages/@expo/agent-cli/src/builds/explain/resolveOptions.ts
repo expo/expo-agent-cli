@@ -12,7 +12,7 @@ import { easCommandPrefix } from '../../utils/easCli';
 
 export interface ExplainOptions {
   source: { kind: 'file'; path: string } | { kind: 'stdin' };
-  /** The `--platform` hint, which narrows the rule table. Null when the caller passed none. */
+  /** The `--ios` / `--android` hint, which narrows the rule table. Null when the caller passed none. */
   platform: 'ios' | 'android' | null;
   contextBefore: number;
   contextAfter: number;
@@ -25,13 +25,15 @@ export interface ExplainOptions {
 const EXPLAIN_ARGS = {
   '--file': String,
   '--stdin': Boolean,
-  '--platform': String,
+  '--ios': Boolean,
+  '--android': Boolean,
   '--context': String,
   '--all': Boolean,
   '--json': Boolean,
   '--no-followups': Boolean,
   '-f': '--file',
-  '-p': '--platform',
+  // Accepted only to explain what replaced it, see `resolvePlatform`.
+  '--platform': String,
 };
 
 export interface ResolveExplainContext {
@@ -44,9 +46,9 @@ export interface ResolveExplainContext {
 /**
  * Resolve the arguments of `@expo/agent-cli inspect:build-log`.
  *
- * @throws {CommandError} `BAD_ARGS` for two input sources, an unusable `--platform` or
- *   `--context`, or no input source at all on a terminal; `BUILD_ID_UNSUPPORTED` for the
- *   reserved positional.
+ * @throws {CommandError} `BAD_ARGS` for two input sources, both platform flags, the retired
+ *   `--platform`, an unusable `--context`, or no input source at all on a terminal;
+ *   `BUILD_ID_UNSUPPORTED` for the reserved positional.
  */
 export function resolveExplainOptions(
   argv: string[],
@@ -73,7 +75,11 @@ export function resolveExplainOptions(
   }
 
   const source = resolveSource({ file, stdin, stdinIsTTY, cwd });
-  const platform = resolvePlatform(args['--platform']);
+  const platform = resolvePlatform({
+    ios: !!args['--ios'],
+    android: !!args['--android'],
+    retired: args['--platform'],
+  });
   const context = resolveContext(args['--context']);
 
   return {
@@ -124,23 +130,51 @@ function resolveSource({
   throw error;
 }
 
-/** The platform hint, or null. */
-function resolvePlatform(value?: string): 'ios' | 'android' | null {
-  if (value == null) {
-    return null;
+/**
+ * The platform hint, or null.
+ *
+ * `--ios` / `--android`, the spelling `dev` and `smoke` take [decided — Kudo, 2026-09-15], so one
+ * platform is written one way across the CLI. `--platform ios|android` was this command's own
+ * spelling until then; it is accepted only to say what replaced it, the way `deploy` answers the
+ * flags of its retired rail.
+ *
+ * @throws {CommandError} `BAD_ARGS` for both flags at once, or for the retired one.
+ */
+function resolvePlatform({
+  ios,
+  android,
+  retired,
+}: {
+  ios: boolean;
+  android: boolean;
+  retired?: string;
+}): 'ios' | 'android' | null {
+  if (retired != null) {
+    const value = retired.toLowerCase();
+    const replacement =
+      value === 'ios' || value === 'android' ? `--${value}` : '--ios or --android';
+    const error = new CommandError(
+      'BAD_ARGS',
+      [
+        `--platform is not an option of this command any more; the platform is ${replacement}.`,
+        `Why: the dev and smoke commands name a platform as --ios or --android, and one platform written two ways across one CLI is a flag to look up every time. The hint still does what it did: it narrows the rule table to the phases that platform has — pod install and xcodebuild for ios, gradle for android.`,
+        `How: pass ${replacement} instead, or leave it off and let the log decide.`,
+      ].join('\n')
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} inspect:build-log --help`;
+    throw error;
   }
-  const platform = value.toLowerCase();
-  if (platform === 'ios' || platform === 'android') {
-    return platform;
+  if (ios && android) {
+    throw new CommandError(
+      'BAD_ARGS',
+      [
+        `Both --ios and --android were passed, and a build log is about one platform.`,
+        `Why: the flag narrows the rule table to the phases one platform has, so naming both narrows it to nothing it would not have had anyway.`,
+        `How: pass the one the log is from, or leave both off and let the log decide.`,
+      ].join('\n')
+    );
   }
-  throw new CommandError(
-    'BAD_ARGS',
-    [
-      `--platform ${value} is not a platform this command knows.`,
-      `Why: the hint narrows the rule table to the phases that platform has — pod install and xcodebuild for ios, gradle for android — so a value outside that set would narrow it to nothing.`,
-      `How: pass "--platform ios" or "--platform android", or leave it off and let the log decide.`,
-    ].join('\n')
-  );
+  return ios ? 'ios' : android ? 'android' : null;
 }
 
 /**
