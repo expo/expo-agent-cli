@@ -7,6 +7,7 @@ import path from 'path';
 import { forwardedCommands } from '../commandRegistry';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
+import { nextFence } from '../utils/markdownFence';
 import type { AgentsMdResult, ClaudeMdResult } from './types';
 
 /** The file the block is maintained in, relative to the project root. */
@@ -180,18 +181,9 @@ function claudeImportText(contents: string): { prose: string; openBlock: boolean
   let fence: string | null = null;
   const lines: string[] = [];
   for (const line of uncommented.split('\n')) {
-    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
-    if (fence) {
-      if (
-        marker &&
-        marker[1]![0] === fence[0] &&
-        marker[1]!.length >= fence.length &&
-        !marker[2]!.trim()
-      )
-        fence = null;
-    } else if (marker) {
-      fence = marker[1]!;
-    } else if (!/^( {4}|\t)/.test(line)) {
+    const before = fence;
+    fence = nextFence(line, fence);
+    if (before == null && fence == null && !/^( {4}|\t)/.test(line)) {
       lines.push(line);
     }
   }
