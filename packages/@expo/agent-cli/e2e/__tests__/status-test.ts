@@ -75,7 +75,18 @@ type StatusReport = {
     }[];
     ota: {
       safe: boolean | null;
-      runtimeVersion: { policy: string | null; literal: string | null; source: string | null };
+      runtimeVersion: {
+        policy: string | null;
+        literal: string | null;
+        source: string | null;
+        /** Set when the evaluated config came out of `.expo` rather than a subprocess (llp/0023). */
+        cache?: {
+          computedAt: string;
+          ageMs: number;
+          revalidatedAgainst: number;
+          keyKind: string;
+        } | null;
+      };
       why: string;
     } | null;
   } | null;
@@ -934,7 +945,17 @@ process.stdout.write(JSON.stringify({
 }) + '\\n');
 `;
 
-    async function setupExplainAsync(runtimeVersion: unknown): Promise<{
+    /**
+     * A project with a native change since its recorded build, and a `runtimeVersion` to judge it by.
+     *
+     * `static` writes the runtimeVersion into `app.json`, which `status` reads as a file. `dynamic`
+     * adds an `app.config.js` beside it and hands the runtimeVersion to the stub `expo config`
+     * instead, which is the one path that spawns (`src/project/evaluatedAppConfig.ts`).
+     */
+    async function setupExplainAsync(
+      runtimeVersion: unknown,
+      { config = 'static' }: { config?: 'static' | 'dynamic' } = {}
+    ): Promise<{
       projectRoot: string;
       env: Record<string, string>;
     }> {
@@ -951,6 +972,18 @@ process.stdout.write(JSON.stringify({
         JSON.stringify({ ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [] } })
       );
 
+      if (config === 'static') {
+        const configPath = path.join(projectRoot, 'app.json');
+        const app = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+        app.expo.runtimeVersion = runtimeVersion;
+        await fs.promises.writeFile(configPath, JSON.stringify(app, null, 2) + '\n');
+      } else {
+        await fs.promises.writeFile(
+          path.join(projectRoot, 'app.config.js'),
+          'module.exports = ({ config }) => ({ ...config, runtimeVersion: process.env.RUNTIME_VERSION });\n'
+        );
+      }
+
       const payloadPath = path.join(projectRoot, 'stub-expo-config.json');
       await fs.promises.writeFile(
         payloadPath,
@@ -964,6 +997,13 @@ process.stdout.write(JSON.stringify({
           STUB_FP_SOURCES: JSON.stringify([NATIVE_MODULE]),
         },
       };
+    }
+
+    /** The `expo config` spawns the stub recorded. */
+    function configSpawns(projectRoot: string) {
+      return readStubExpoInvocations(projectRoot).filter(
+        (invocation) => invocation.args[0] === 'config'
+      );
     }
 
     it('carries the per-source list and the OTA verdict, and still exits 0', async () => {
@@ -983,7 +1023,7 @@ process.stdout.write(JSON.stringify({
       ]);
       expect(report.freshness!.ota).toMatchObject({
         safe: false,
-        runtimeVersion: { policy: 'appVersion' },
+        runtimeVersion: { policy: 'appVersion', source: 'app.json' },
       });
       expect(report.errors).toEqual({});
     });
@@ -998,21 +1038,15 @@ process.stdout.write(JSON.stringify({
       expect(report.freshness!.ota).toMatchObject({ safe: true });
     });
 
-    it('spawns expo config only under --explain', async () => {
+    // A static config is the config the app sees, so it is read as a file: spawning the Expo CLI
+    // to be told what `app.json` says was a second spent on every run to learn nothing.
+    it('reads a static app.json as a file, spawning no expo config even under --explain', async () => {
       const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
 
       await reportInAsync(projectRoot, [], env);
-      const configuredWithout = readStubExpoInvocations(projectRoot).filter(
-        (invocation) => invocation.args[0] === 'config'
-      );
-      expect(configuredWithout).toHaveLength(0);
-
       await reportInAsync(projectRoot, ['--explain'], env);
-      const configuredWith = readStubExpoInvocations(projectRoot).filter(
-        (invocation) => invocation.args[0] === 'config'
-      );
-      expect(configuredWith).toHaveLength(1);
-      expect(configuredWith[0]!.args).toEqual(['config', '--json', '--type', 'public']);
+
+      expect(configSpawns(projectRoot)).toHaveLength(0);
     });
 
     it('prints the changed sources and the ota verdict for a human', async () => {
@@ -1030,20 +1064,134 @@ process.stdout.write(JSON.stringify({
       expect(result.stdout).toContain('not safe to publish');
     });
 
-    // Section isolation: `--explain` is three answers, and one that cannot be had costs one line.
-    it('keeps every other fact when the config subprocess fails', async () => {
-      const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['status', '--json', '--explain', '--dev-server-url', await getUnusedDevServerUrlAsync()],
-        { env: { ...env, STUB_EXPO_EXIT_CODE: '1' } }
-      );
+    // @ref llp/0011-impact-and-freshness.rfc.md §A fingerprint change is not "OTA-unsafe"
+    // A dynamic config has to be evaluated, and only the project's own Expo CLI may do that. The
+    // answer is remembered under `.expo` and revalidated against the pinned files, so a loop of
+    // `status` runs spawns it once (llp/0023).
+    describe('a dynamic app.config.js', () => {
+      it('evaluates it with expo config, only under --explain', async () => {
+        const { projectRoot, env } = await setupExplainAsync(
+          { policy: 'appVersion' },
+          { config: 'dynamic' }
+        );
 
-      expect(result.exitCode).toBe(0);
-      const report: StatusReport = JSON.parse(result.stdout);
-      // Nothing resolved the policy, so the verdict is unknown — never "not safe".
-      expect(report.freshness!.ota).toMatchObject({ safe: null });
-      expect(report.project).not.toBeNull();
+        await reportInAsync(projectRoot, [], env);
+        expect(configSpawns(projectRoot)).toHaveLength(0);
+
+        const report = await reportInAsync(projectRoot, ['--explain'], env);
+        expect(configSpawns(projectRoot)).toHaveLength(1);
+        expect(configSpawns(projectRoot)[0]!.args).toEqual([
+          'config',
+          '--json',
+          '--type',
+          'public',
+        ]);
+        expect(report.freshness!.ota).toMatchObject({
+          safe: false,
+          runtimeVersion: {
+            policy: 'appVersion',
+            source: 'expo config --type public',
+            cache: null,
+          },
+        });
+      });
+
+      it('remembers the evaluation, and says so with its age', async () => {
+        const { projectRoot, env } = await setupExplainAsync(
+          { policy: 'appVersion' },
+          { config: 'dynamic' }
+        );
+        await reportInAsync(projectRoot, ['--explain'], env);
+
+        const report = await reportInAsync(projectRoot, ['--explain'], env);
+
+        expect(configSpawns(projectRoot)).toHaveLength(1);
+        expect(report.freshness!.ota).toMatchObject({
+          safe: false,
+          runtimeVersion: {
+            policy: 'appVersion',
+            source: 'expo config --type public',
+            cache: { keyKind: 'mtime+size' },
+          },
+        });
+        expect(
+          (report.freshness!.ota!.runtimeVersion as { cache: { ageMs: number } }).cache.ageMs
+        ).toBeGreaterThanOrEqual(0);
+
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['status', '--explain', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+          { env }
+        );
+        expect(result.exitCode).toBe(0);
+        expect(result.stdout).toMatch(/expo config --type public, cached \d+[smh] ago/);
+      });
+
+      it('evaluates again once app.config.js changes', async () => {
+        const { projectRoot, env } = await setupExplainAsync(
+          { policy: 'appVersion' },
+          { config: 'dynamic' }
+        );
+        await reportInAsync(projectRoot, ['--explain'], env);
+
+        await fs.promises.writeFile(
+          path.join(projectRoot, 'app.config.js'),
+          "module.exports = ({ config }) => ({ ...config, runtimeVersion: { policy: 'fingerprint' } });\n"
+        );
+        await fs.promises.writeFile(
+          env.STUB_EXPO_CONFIG_JSON!,
+          JSON.stringify({
+            name: 'fresh',
+            slug: 'fresh',
+            runtimeVersion: { policy: 'fingerprint' },
+          })
+        );
+
+        const report = await reportInAsync(projectRoot, ['--explain'], env);
+
+        expect(configSpawns(projectRoot)).toHaveLength(2);
+        expect(report.freshness!.ota).toMatchObject({ safe: true });
+      });
+
+      it('evaluates again under --no-fingerprint-cache', async () => {
+        const { projectRoot, env } = await setupExplainAsync(
+          { policy: 'appVersion' },
+          { config: 'dynamic' }
+        );
+        await reportInAsync(projectRoot, ['--explain'], env);
+
+        const report = await reportInAsync(
+          projectRoot,
+          ['--explain', '--no-fingerprint-cache'],
+          env
+        );
+
+        expect(configSpawns(projectRoot)).toHaveLength(2);
+        expect(report.freshness!.ota!.runtimeVersion).toMatchObject({ cache: null });
+      });
+
+      // Section isolation: `--explain` is three answers, and one that cannot be had costs one line.
+      it('keeps every other fact when the config subprocess fails', async () => {
+        const { projectRoot, env } = await setupExplainAsync(
+          { policy: 'appVersion' },
+          { config: 'dynamic' }
+        );
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['status', '--json', '--explain', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+          { env: { ...env, STUB_EXPO_EXIT_CODE: '1' } }
+        );
+
+        expect(result.exitCode).toBe(0);
+        const report: StatusReport = JSON.parse(result.stdout);
+        // The static file beside the dynamic one answered, and it names no runtimeVersion — so the
+        // verdict is unknown, never "not safe".
+        expect(report.freshness!.ota).toMatchObject({
+          safe: null,
+          runtimeVersion: { source: 'app.json' },
+        });
+        expect(report.project).not.toBeNull();
+      });
     });
   });
 

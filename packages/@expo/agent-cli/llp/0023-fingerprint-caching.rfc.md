@@ -151,6 +151,8 @@ The way out sits on the line that makes the claim (`--no-fingerprint-cache`).
 
 `@expo/agent-cli status --no-fingerprint-cache` and `@expo/agent-cli dev --no-fingerprint-cache`, threaded to the probe and to the EAS build lookup. `AGENT_CLI_NO_FINGERPRINT_CACHE=1` for the paths with no flag of their own. A flag overrules it. A refusing run still writes the record. The flag is about what a caller will accept, not about what the project may remember.
 
+The same flag refuses the two other records `status` keeps beside this one, for the same reason: the remembered EAS answer (`.expo/agent-cli-eas-builds.json`, [[0011-impact-and-freshness]] §What `status` remembers of the answer) and the remembered evaluation of a dynamic app config (`.expo/agent-cli-app-config.json`, [[0011-impact-and-freshness]] §A fingerprint change is not "OTA-unsafe"). One flag, because the caller who typed it wants a measurement, and which file an answer came out of is not their concern. [decided — 2026-09-15]
+
 ## What it bought
 
 On a real SDK 57 Expo Router app, a warm `status --explain` is about 38% faster (roughly 1.8 s of 4.7 s). A default `status` is not faster at all. The fingerprint was never its critical path. Dev-server discovery was, and that is [[0004-smart-start-and-project-state]] §The discovery ladder. Pinning the discovery out of the way exposes the saving: about 0.9 s and 77%. The first run costs about 40 ms more, recovered on the next run.
