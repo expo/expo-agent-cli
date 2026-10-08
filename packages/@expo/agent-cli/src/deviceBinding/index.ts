@@ -39,7 +39,7 @@ export {
   useBoundDeviceAsync,
 } from './inspect';
 export { releaseWorktreeDevicesAsync, WRITE_LOCK_WAIT_MS } from './release';
-export { findBoundDeviceAsync, type AndroidRung, type BoundDeviceSearch } from './rungs';
+export { findBoundDeviceAsync, type BoundDeviceSearch } from './rungs';
 export { defaultTools } from './tools';
 export { deviceIdOf, deviceNameOf, localBackendOf } from './types';
 export type * from './types';

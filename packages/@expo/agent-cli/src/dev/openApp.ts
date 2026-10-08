@@ -9,14 +9,12 @@
 
 import { spawn } from 'child_process';
 
-import { bootDeviceAsync, BOOT_DEVICE_TIMEOUT_MS } from '../device/bootDevice';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
 import { installExpoGoAsync } from '../device/installExpoGo';
 import { simulatorHasAppAsync } from '../device/installedApps';
 import { androidHasAppAsync } from '../device/androidApps';
-import type { BoundDevice } from '../deviceBinding';
+import { deviceIdOf, type BoundDevice } from '../deviceBinding';
 import * as Log from '../log';
-import { navigateDeviceOf, probeAndroidDeviceAsync } from '../navigate/device';
 import { openRouteAsync } from '../navigate/openRoute';
 import { EXPO_GO_APP_IDS } from '../navigate/target';
 import type { NativePlatform } from '../plan/types';
@@ -48,8 +46,8 @@ export interface OpenAppOptions {
   /**
    * The device `dev` bound and booted before the plan ran, so the open probes and boots nothing.
    *
-   * @ref llp/0031-ios-binding.plan.md §How `dev` uses it — every iOS run carries one; Android
-   * carries none until llp/0032 and keeps the probe-and-boot path below.
+   * @ref llp/0031-ios-binding.plan.md §How `dev` uses it — every local run carries one; a run
+   * that bound none (a host that cannot run the platform's device) opens nothing.
    */
   device?: BoundDevice | null;
   /** Whether the registry booted {@link device} for this run, which the report says. */
@@ -69,12 +67,11 @@ export interface OpenAppReport {
 }
 
 /**
- * Take the bound simulator, or boot an emulator if none is up, put Expo Go on it if the plan needs
- * one, and open the app on the dev server — the deep-link door, which works headless and needs no
- * macOS Automation grant.
+ * Take the bound device, put Expo Go on it if the plan needs one, and open the app on the dev
+ * server — the deep-link door, which works headless and needs no macOS Automation grant.
  *
- * Narrates each act on stderr as it starts, because a simulator boot and an Expo Go download are
- * both waits a caller would otherwise read as a hang.
+ * Narrates the install on stderr as it starts, because an Expo Go download is a wait a caller
+ * would otherwise read as a hang.
  */
 export async function openAppOnDeviceAsync(
   projectRoot: string,
@@ -91,33 +88,13 @@ export async function openAppOnDeviceAsync(
     ...partial,
   });
 
-  // A device: the one `dev` bound, else the Android one that is up, else one this run boots.
+  // The device is the one `dev` bound and booted before the plan ran; nothing is probed here.
   const bound = options.device ?? null;
-  if (platform === 'ios' && bound == null) {
-    return stopped('no iOS simulator is bound to this worktree');
+  if (bound == null) {
+    return stopped(`no ${deviceNoun(platform)} is bound to this worktree`);
   }
-  let deviceId = bound ? navigateDeviceOf(bound).deviceId : null;
-  let booted = bound != null && options.justBooted === true;
-  if (deviceId == null) {
-    const probe = await probeAndroidDeviceAsync();
-    deviceId = probe.device?.deviceId ?? null;
-    if (deviceId == null && probe.toolError) {
-      return stopped(firstLine(probe.toolError.message));
-    }
-  }
-  if (deviceId == null) {
-    if (!stillWanted()) {
-      return stopped('the dev server stopped before a device was booted');
-    }
-    Log.progress(`No ${deviceNoun(platform)} is up — booting one.`);
-    event('open_app_boot', { platform });
-    const boot = await bootDeviceAsync('android', { timeoutMs: BOOT_DEVICE_TIMEOUT_MS.android });
-    if (!boot.ok || boot.deviceId == null) {
-      return stopped(boot.reason ?? 'no device could be booted');
-    }
-    deviceId = boot.deviceId;
-    booted = true;
-  }
+  const deviceId = deviceIdOf(bound);
+  const booted = options.justBooted === true;
 
   // The window, for a person: `open -a Simulator` is LaunchServices and needs no Automation
   // grant, unlike the osascript check the Expo CLI runs. Fire and forget — a headless simulator
@@ -200,7 +177,7 @@ export function openAppFailureLine(platform: NativePlatform, reason: string): st
 }
 
 function deviceNoun(platform: NativePlatform): string {
-  return platform === 'ios' ? 'iOS simulator' : 'Android device or emulator';
+  return platform === 'ios' ? 'iOS simulator' : 'Android emulator instance';
 }
 
 /**

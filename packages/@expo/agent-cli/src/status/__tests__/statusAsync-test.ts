@@ -929,7 +929,8 @@ describe(printStatusAsync, () => {
       tunnelUrl: null,
       // The best of the URLs a device opens, so the stream carries the one an agent can act on.
       openUrl: 'exp://192.168.1.233:8081',
-      localDevice: 'unknown',
+      // No binding on either platform, which the registry answers without a device tool.
+      localDevice: 'absent',
       installed: null,
       freshness: { ios: 'stale', android: 'stale' },
       // The section builder is mocked out here; its own suite covers what it answers.

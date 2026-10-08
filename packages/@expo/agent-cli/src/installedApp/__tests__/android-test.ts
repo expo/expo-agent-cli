@@ -97,7 +97,15 @@ function fakeAdb(devices: FakeDevice[]) {
     };
   };
 
-  return { calls, runAdbAsync, runAdbRawAsync, androidDeviceNameAsync: async () => null };
+  return {
+    calls,
+    projectRoot: '/project',
+    runAdbAsync,
+    runAdbRawAsync,
+    androidDeviceNameAsync: async () => null,
+    // The worktree's binding names the first device, as `dev` would have bound it.
+    findBoundSerialAsync: async () => ({ serial: devices[0]?.serial ?? null, hint: null }),
+  };
 }
 
 describe(readInstalledFingerprintAndroidAsync, () => {
@@ -128,7 +136,9 @@ describe(readInstalledFingerprintAndroidAsync, () => {
       fingerprintVersion: '0.20.0',
       sources: [],
       appId: APP_ID,
-      device: { name: 'Pixel_9', identifier: 'emulator-5554' },
+      // The bound device is read by its serial; a name comes from `emu avd name`, which this fake
+      // does not answer.
+      device: { name: 'emulator-5554', identifier: 'emulator-5554' },
     });
     expect(fake.calls.some((args) => args.includes('pull'))).toBe(false);
     const dd = fake.calls.filter((args) => args.includes('exec-out'));
@@ -176,13 +186,48 @@ describe(readInstalledFingerprintAndroidAsync, () => {
     ).resolves.toMatchObject({ status: 'no-embedded-fingerprint' });
   });
 
-  it(`skips an unreachable device and answers from the one that could be read`, async () => {
+  it(`reads the bound device only, and lists nothing to find it`, async () => {
+    const fake = fakeAdb([
+      { serial: 'emulator-5554', apk: APK },
+      { serial: 'R58M1', apk: null },
+    ]);
+    await expect(
+      readInstalledFingerprintAndroidAsync({ expectedHash: EMBEDDED_HASH, appId: APP_ID, ...fake })
+    ).resolves.toMatchObject({ status: 'ok', device: { identifier: 'emulator-5554' } });
+    expect(fake.calls.some((args) => args[0] === 'devices')).toBe(false);
+    expect(fake.calls.some((args) => args.includes('R58M1'))).toBe(false);
+  });
+
+  it(`answers no-device with the dev command when nothing is bound`, async () => {
+    const fake = fakeAdb([{ serial: 'emulator-5554', apk: APK }]);
+    await expect(
+      readInstalledFingerprintAndroidAsync({
+        expectedHash: EMBEDDED_HASH,
+        appId: APP_ID,
+        ...fake,
+        findBoundSerialAsync: undefined,
+      })
+    ).resolves.toEqual({
+      status: 'no-device',
+      hint: expect.stringContaining('npx @expo/agent-cli dev --android --detach --wait-ready'),
+    });
+    expect(fake.calls).toEqual([]);
+  });
+
+  // `--device` lists to filter and binds nothing (llp/0030 Contract 3), and one unreachable match
+  // must not hide the evidence of the others.
+  it(`skips an unreachable --device match and answers from the one that could be read`, async () => {
     const fake = fakeAdb([
       { serial: 'R58M1', apk: APK, offline: true },
       { serial: 'emulator-5554', apk: APK },
     ]);
     await expect(
-      readInstalledFingerprintAndroidAsync({ expectedHash: EMBEDDED_HASH, appId: APP_ID, ...fake })
+      readInstalledFingerprintAndroidAsync({
+        expectedHash: EMBEDDED_HASH,
+        appId: APP_ID,
+        device: 'pixel_9',
+        ...fake,
+      })
     ).resolves.toMatchObject({ status: 'ok', device: { identifier: 'emulator-5554' } });
   });
 
@@ -218,8 +263,10 @@ describe(readInstalledFingerprintAndroidAsync, () => {
   it(`throws the adb tool error when adb cannot run`, async () => {
     await expect(
       readInstalledFingerprintAndroidAsync({
+        projectRoot: '/project',
         expectedHash: 'x',
         appId: APP_ID,
+        device: 'pixel_9',
         runAdbAsync: async () => ({
           stdout: '',
           stderr: '',

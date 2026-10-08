@@ -4,26 +4,20 @@
 import type { CommandError } from '../utils/errors';
 import { noBoundDeviceError } from './errors';
 import { inspectBindingAsync, useBoundDeviceAsync } from './inspect';
-import { bindingPathFor } from './registry';
 import { defaultTools } from './tools';
 import {
   localBackendOf,
-  type Binding,
   type BoundDevice,
   type DevicePlatform,
   type DeviceTools,
   type Inspection,
 } from './types';
 
-/** Main's first-`adb`-device rung, injected by `navigate` until its caller moves to the binding. */
-export type AndroidRung = () => Promise<{ device: BoundDevice | null; toolError?: CommandError }>;
-
 export interface FindBoundDeviceOptions {
   platform?: DevicePlatform;
   /** Whether the winner's lease is extended; `status` never writes. */
   extend: boolean;
   tools?: DeviceTools;
-  android?: AndroidRung;
   hostPlatform?: NodeJS.Platform;
 }
 
@@ -52,7 +46,6 @@ export async function findBoundDeviceAsync(
     platform,
     extend,
     tools = defaultTools(),
-    android,
     hostPlatform = process.platform,
   }: FindBoundDeviceOptions
 ): Promise<BoundDeviceSearch> {
@@ -63,10 +56,7 @@ export async function findBoundDeviceAsync(
       : ['android'];
   const rungs: Rung[] = [];
   for (const each of platforms) {
-    const inspection =
-      each === 'android' && android
-        ? await injectedRung(projectRoot, android)
-        : await inspectBindingAsync(projectRoot, each, localBackendOf(each), tools);
+    const inspection = await inspectBindingAsync(projectRoot, each, localBackendOf(each), tools);
     rungs.push({ platform: each, inspection });
   }
 
@@ -75,11 +65,9 @@ export async function findBoundDeviceAsync(
     const winner = ups.reduce((best, rung) =>
       rung.inspection.binding!.boundAt > best.inspection.binding!.boundAt ? rung : best
     );
-    // An injected rung's device has no lease to extend.
-    const device =
-      extend && winner.inspection.binding!.expiresAt !== ''
-        ? await useBoundDeviceAsync(winner.inspection, tools)
-        : winner.inspection.binding!.device;
+    const device = extend
+      ? await useBoundDeviceAsync(winner.inspection, tools)
+      : winner.inspection.binding!.device;
     return { device, refusal: null, toolError: null };
   }
   return refuse(rungs, platform, hostPlatform);
@@ -118,24 +106,4 @@ function refuse(
     platform: platform ?? (hostPlatform === 'darwin' ? 'ios' : 'android'),
   });
   return { device: null, refusal, toolError };
-}
-
-/** The injected rung as an inspection: a device found is `up` with no lease, none is `none`. */
-async function injectedRung(projectRoot: string, android: AndroidRung): Promise<Inspection> {
-  const path = bindingPathFor(projectRoot, 'android', 'local-android');
-  const probe = await android();
-  if (probe.toolError) {
-    return { binding: null, path, state: 'unknown', cause: 'tool', toolError: probe.toolError };
-  }
-  if (!probe.device) {
-    return { binding: null, path, state: 'none' };
-  }
-  const binding: Binding = {
-    version: 1,
-    device: probe.device,
-    projectRoot,
-    boundAt: '',
-    expiresAt: '',
-  };
-  return { binding, path, state: 'up' };
 }

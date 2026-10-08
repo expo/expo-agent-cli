@@ -61,6 +61,7 @@ describe('the Android reader over a stub adb', () => {
 
   it('reads the fingerprint through ranged dd reads, each spelled as one exec-out argument', async () => {
     const result = await readInstalledFingerprintAndroidAsync({
+      projectRoot: root,
       appId: APP_ID,
       expectedHash: EMBEDDED_HASH,
     });
@@ -85,6 +86,7 @@ describe('the Android reader over a stub adb', () => {
   it('pulls the whole APK when the device cannot serve ranges', async () => {
     process.env.STUB_ADB_NO_DD = '1';
     const result = await readInstalledFingerprintAndroidAsync({
+      projectRoot: root,
       appId: APP_ID,
       expectedHash: EMBEDDED_HASH,
     });

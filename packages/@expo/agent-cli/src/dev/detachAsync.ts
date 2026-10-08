@@ -23,7 +23,12 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
-import { acquireDeviceAsync, acquireLine, devicesDisabled } from '../deviceBinding';
+import {
+  acquireDeviceAsync,
+  acquireLine,
+  devicesDisabled,
+  hostBindsPlatform,
+} from '../deviceBinding';
 import { PORT_WATCH_TIMEOUT_MS, readLastLoggedDevServerPort } from '../devLock/port';
 import { event as cliEvent } from '../events';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
@@ -182,8 +187,8 @@ export interface DevDetachOptions {
    */
   print?: boolean;
   /**
-   * On a dev server that is already running, boot this worktree's own simulator and refuse when
-   * it has none to reuse.
+   * On a dev server that is already running, boot this worktree's own device and refuse when it
+   * has none to reuse.
    *
    * @ref llp/0031-ios-binding.plan.md §How `dev` uses it
    * `dev` passes true: its caller asked for the app on a device, and the device created now would
@@ -215,13 +220,17 @@ export async function devDetachAsync(
   // lock, so nothing would be able to find it or stop it afterwards.
   const running = await readDevServerLockAsync(projectRoot);
   if (running) {
+    const platform = options.platform;
     if (
       reuseBoundDevice &&
-      options.platform === 'ios' &&
+      (platform === 'ios' || platform === 'android') &&
       options.deviceBackend !== 'eas' &&
-      !devicesDisabled()
+      !devicesDisabled() &&
+      hostBindsPlatform(platform)
     ) {
-      Log.progress(acquireLine(await acquireDeviceAsync(projectRoot, 'ios', { reuseOnly: true })));
+      Log.progress(
+        acquireLine(await acquireDeviceAsync(projectRoot, platform, { reuseOnly: true }))
+      );
     }
     const checked = options.waitReady
       ? await waitForDetachedReadyAsync(projectRoot, running, {

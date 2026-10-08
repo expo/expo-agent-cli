@@ -1,25 +1,23 @@
 // @ref llp/0031-ios-binding.plan.md §Tests
 import { vol } from 'memfs';
 
-import { CommandError } from '../../utils/errors';
 import { bindingPathFor } from '../registry';
-import { findBoundDeviceAsync, type AndroidRung } from '../rungs';
-import type { BoundDevice } from '../types';
-import { bindingFor, fakeTools, writeBinding } from './fakeTools';
+import { findBoundDeviceAsync } from '../rungs';
+import { androidBindingFor, bindingFor, fakeTools, writeBinding } from './fakeTools';
 
 const ROOT = '/work/app';
 const file = () => bindingPathFor(ROOT, 'ios', 'local-ios');
+const androidFile = () => bindingPathFor(ROOT, 'android', 'local-android');
+const EXPLICIT = { kind: 'explicit' } as const;
 
-const EMULATOR: BoundDevice = {
-  backend: 'local-android',
-  platform: 'android',
-  serial: 'emulator-5554',
-  origin: { kind: 'explicit' },
-};
-const androidUp: AndroidRung = async () => ({ device: EMULATOR });
-const androidNone: AndroidRung = async () => ({ device: null });
-const adbBroken = new CommandError('ADB_NOT_RUNNABLE', 'adb could not be run');
-const androidBroken: AndroidRung = async () => ({ device: null, toolError: adbBroken });
+/** An emulator instance `adb` lists as up, bound to the worktree, booked before the simulator. */
+function bindEmulatorUp(tools: ReturnType<typeof fakeTools>): void {
+  tools.emulators.push({ serial: 'emulator-5554', state: 'device' });
+  writeBinding(
+    androidFile(),
+    androidBindingFor(ROOT, 'emulator-5554', EXPLICIT, { boundAt: '2026-10-08T08:00:00.000Z' })
+  );
+}
 
 beforeEach(() => {
   vol.reset();
@@ -31,38 +29,28 @@ describe(findBoundDeviceAsync, () => {
   it('takes any up binding without a platform flag, the newer boundAt first', async () => {
     const tools = fakeTools({ simulators: [{ udid: 'SIM-1', name: 'x', state: 'Booted' }] });
     writeBinding(file(), bindingFor(ROOT, 'SIM-1'));
+    bindEmulatorUp(tools);
 
-    const ios = await findBoundDeviceAsync(ROOT, {
-      extend: false,
-      tools,
-      android: androidUp,
-      hostPlatform: 'darwin',
-    });
+    const ios = await findBoundDeviceAsync(ROOT, { extend: false, tools, hostPlatform: 'darwin' });
     expect(ios.device).toMatchObject({ udid: 'SIM-1' });
 
     tools.simulators[0]!.state = 'Shutdown';
     const android = await findBoundDeviceAsync(ROOT, {
       extend: false,
       tools,
-      android: androidUp,
       hostPlatform: 'darwin',
     });
-    expect(android.device).toBe(EMULATOR);
+    expect(android.device).toMatchObject({ serial: 'emulator-5554' });
   });
 
   it('inspects only the named platform with a flag', async () => {
     const tools = fakeTools();
-    const android = vi.fn(androidUp);
+    bindEmulatorUp(tools);
 
-    const found = await findBoundDeviceAsync(ROOT, {
-      platform: 'android',
-      extend: true,
-      tools,
-      android,
-    });
+    const found = await findBoundDeviceAsync(ROOT, { platform: 'android', extend: true, tools });
 
-    expect(found.device).toBe(EMULATOR);
-    expect(tools.calls).toEqual([]);
+    expect(found.device).toMatchObject({ serial: 'emulator-5554' });
+    expect(tools.calls).toEqual([['-s', 'emulator-5554', 'get-state']]);
   });
 
   it('extends the winner once', async () => {
@@ -81,12 +69,7 @@ describe(findBoundDeviceAsync, () => {
     const tools = fakeTools();
     writeBinding(file(), bindingFor(ROOT, 'GONE'));
 
-    const fell = await findBoundDeviceAsync(ROOT, {
-      extend: false,
-      tools,
-      android: androidNone,
-      hostPlatform: 'darwin',
-    });
+    const fell = await findBoundDeviceAsync(ROOT, { extend: false, tools, hostPlatform: 'darwin' });
 
     expect(fell.device).toBeNull();
     expect(fell.refusal?.data).toEqual({ reason: 'gone' });
@@ -101,13 +84,27 @@ describe(findBoundDeviceAsync, () => {
     const error = await findBoundDeviceAsync(ROOT, {
       extend: false,
       tools,
-      android: androidNone,
       hostPlatform: 'darwin',
     }).catch((e) => e);
 
     expect(error.code).toBe('NO_BOUND_DEVICE');
     expect(error.data).toEqual({ reason: 'not-up' });
     expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+  });
+
+  it('refuses a gone simulator and a not-up instance naming Android', async () => {
+    const tools = fakeTools({ emulators: [{ serial: 'emulator-5554', state: 'offline' }] });
+    writeBinding(file(), bindingFor(ROOT, 'GONE'));
+    writeBinding(androidFile(), androidBindingFor(ROOT, 'emulator-5554', EXPLICIT));
+
+    const error = await findBoundDeviceAsync(ROOT, {
+      extend: false,
+      tools,
+      hostPlatform: 'darwin',
+    }).catch((e) => e);
+
+    expect(error.data).toEqual({ reason: 'not-up' });
+    expect(error.message).toContain('android');
   });
 
   it('names the host platform when every state is none', async () => {
@@ -118,12 +115,14 @@ describe(findBoundDeviceAsync, () => {
 
     expect(mac.refusal?.message).toContain('No ios device is bound');
     expect(linux.refusal?.message).toContain('No android device is bound');
+    expect(tools.calls).toEqual([]);
   });
 
   // platform-flag-throws-tool-error-first
   it('throws the tool error at once with a platform flag, and after the loop without one', async () => {
-    const tools = fakeTools({ spawnError: true });
+    const tools = fakeTools({ spawnError: true, adbSpawnError: true });
     writeBinding(file(), bindingFor(ROOT, 'SIM-1'));
+    writeBinding(androidFile(), androidBindingFor(ROOT, 'emulator-5554', EXPLICIT));
 
     const flagged = await findBoundDeviceAsync(ROOT, {
       platform: 'ios',
@@ -135,7 +134,6 @@ describe(findBoundDeviceAsync, () => {
     const unflagged = await findBoundDeviceAsync(ROOT, {
       extend: false,
       tools,
-      android: androidBroken,
       hostPlatform: 'darwin',
     });
     expect(unflagged.device).toBeNull();

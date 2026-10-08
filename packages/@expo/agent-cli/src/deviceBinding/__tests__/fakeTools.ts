@@ -192,3 +192,16 @@ export function seedIosBinding(projectRoot: string, udid: string, name = 'iPhone
     bindingFor(projectRoot, udid, { name, expiresAt: '2999-01-01T00:00:00.000Z' })
   );
 }
+
+/** Bind `serial` to the worktree, live for a year, for a suite that hands a verb an emulator. */
+export function seedAndroidBinding(projectRoot: string, serial = 'emulator-5554'): void {
+  writeBinding(
+    bindingPathFor(projectRoot, 'android', 'local-android'),
+    androidBindingFor(
+      projectRoot,
+      serial,
+      { kind: 'explicit' },
+      { expiresAt: '2999-01-01T00:00:00.000Z' }
+    )
+  );
+}
