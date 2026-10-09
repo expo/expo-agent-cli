@@ -34,8 +34,8 @@ import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand, statedSmokePlatform } from '../smoke/suggest';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
-import { isBundlerAnsweringAsync } from '../runtime/bundlerStatus';
-import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../runtime/waitReady';
+import { probeBundlerAsync } from '../runtime/bundlerStatus';
+import type { BundlerReadyResult } from '../runtime/waitReady';
 import { requestsTunnel } from '../start/followUps';
 import { CommandError } from '../utils/errors';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
@@ -48,9 +48,15 @@ import {
   type DetachedChildVerdict,
 } from './childVerdict';
 import { event } from './events';
-import { openDetachedLogSync, readDetachedLogSync, type DetachedLogRead } from './logFile';
+import {
+  detachedLogPath,
+  openDetachedLogSync,
+  readDetachedLogSync,
+  type DetachedLogRead,
+} from './logFile';
 import { isProcessAlive } from './processLiveness';
 import type { DevOptions } from './resolveOptions';
+import { waitForDetachedReadyAsync } from './waitForDetachedReady';
 
 /** A dev server that is not on the port the caller expected. */
 export interface PortMove {
@@ -198,16 +204,32 @@ export async function devDetachAsync(
   // lock, so nothing would be able to find it or stop it afterwards.
   const running = await readDevServerLockAsync(projectRoot);
   if (running) {
+    const checked = options.waitReady
+      ? await waitForDetachedReadyAsync(projectRoot, running, {
+          timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
+          hasExited: () => !isProcessAlive(running.pid),
+        })
+      : null;
+    if (checked && (!checked.result.ready || checked.result.projectRootMatched === false)) {
+      throw notReadyError(
+        checked.lock,
+        detachedLogPath(projectRoot),
+        checked.result,
+        readChildPhaseSync(projectRoot),
+        options.platform
+      );
+    }
+    const lock = checked?.lock ?? running;
     return reportDetached(projectRoot, options, {
-      lock: running,
+      lock,
       alreadyRunning: true,
-      ready: null,
-      projectRootMatched: null,
+      ready: checked?.result.ready ?? null,
+      projectRootMatched: checked?.result.projectRootMatched ?? null,
       startedAt,
       print,
       // Whatever the dev server that is already up advertised. Nothing is waited for here: this
       // run started nothing, so there is no tunnel of its own on its way.
-      tunnelUrl: await currentTunnelUrlAsync(projectRoot, running.url),
+      tunnelUrl: await currentTunnelUrlAsync(projectRoot, lock.url),
       smokePlatform,
     });
   }
@@ -252,7 +274,7 @@ export async function devDetachAsync(
   });
   const hasExited = () => childExit != null;
 
-  const lock = await waitForLockAsync(projectRoot, {
+  let lock = await waitForLockAsync(projectRoot, {
     timeoutMs: options.detachTimeoutMs,
     hasExited,
   });
@@ -278,22 +300,23 @@ export async function devDetachAsync(
    * an answer that depends on the event loop having caught up is one more ordering to lose to
    * (@ref ./detachAsync §waitFailureAsync — F153).
    */
-  const childIsGone = () => hasExited() || !isProcessAlive(lock.pid);
+  const childPid = lock.pid;
+  const childIsGone = () => hasExited() || !isProcessAlive(childPid);
 
   let ready: boolean | null = null;
   let projectRootMatched: boolean | null = null;
   if (options.waitReady) {
-    // The same wait `dev:wait` performs, and for the same reason: `/status` answers only once the
-    // bundler has finished, so the request itself is the wait.
-    const result = await waitForBundlerReadyAsync(lock.url, {
-      timeoutMs: Math.max(1000, options.detachTimeoutMs - (Date.now() - startedAt)),
-      projectRoot,
+    const checked = await waitForDetachedReadyAsync(projectRoot, lock, {
+      timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
+      hasExited: childIsGone,
       // @ref ./detachAsync §childGone — a dead child never answers, so the wait ends with it.
       signal: childGone.signal,
     });
+    lock = checked.lock;
+    const { result } = checked;
     ready = result.ready;
     projectRootMatched = result.projectRootMatched;
-    if (!result.ready) {
+    if (!result.ready || result.projectRootMatched === false) {
       // The child's own answer outranks this wait's. @ref ./detachAsync §waitFailureAsync
       const stopped = await waitFailureAsync(projectRoot, childIsGone());
       if (stopped) {
@@ -323,7 +346,8 @@ export async function devDetachAsync(
   // @ref llp/0021-honest-reports.rfc.md §The rules
   // The probe can outlast the child. Read its state and log only after that await, so a handoff
   // written while the probe was pending outranks the probe's generic "not answering" result.
-  const statusAnswering = ready === true ? await isBundlerAnsweringAsync(lock.url) : null;
+  const statusAnswering =
+    ready === true ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url) : null;
   // One read of the whole log, for the phase, the verdict and the report's port move.
   const log = readDetachedLogSync(projectRoot, WHOLE_LOG);
   const phase = childPhaseOf(log);
@@ -406,6 +430,11 @@ export const OPEN_PLATFORM_GRACE_MS = 1500;
 /** How often the child is asked again while that grace runs. */
 const OPEN_PLATFORM_POLL_MS = 100;
 
+async function isOwnBundlerAnsweringAsync(projectRoot: string, url: string): Promise<boolean> {
+  const probe = await probeBundlerAsync(url, { projectRoot });
+  return probe.answering && probe.projectRootMatched !== false;
+}
+
 /**
  * Whether this run's claim is re-checked before it is printed.
  *
@@ -478,7 +507,7 @@ async function watchOpenPlatformGraceAsync(
     await new Promise((resolve) =>
       setTimeout(resolve, Math.min(OPEN_PLATFORM_POLL_MS, deadline - Date.now()))
     );
-    const statusAnswering = watchStatus ? await isBundlerAnsweringAsync(url) : null;
+    const statusAnswering = watchStatus ? await isOwnBundlerAnsweringAsync(projectRoot, url) : null;
     verdict = readChildVerdictSync(projectRoot);
     const seen = resolveDetachFailure({
       exited: hasExited(),
