@@ -209,9 +209,7 @@ export async function runtimeStopAsync(
         `How: check that ${resolved.appId} is the app you meant — ${resolved.reason} — and pass --app-id to name another. ${
           device.backend === 'cloud'
             ? `Check that the session is still running with "${easCommandPrefix()} simulator:list --status in-progress".`
-            : device.platform === 'ios'
-              ? `Check that the bound simulator is up with "${PROGRAM_PREFIX} status", or bind one again with "${PROGRAM_PREFIX} dev --ios --detach --wait-ready".`
-              : 'Check that the device is attached with "adb devices".'
+            : `Check that the bound ${device.platform === 'ios' ? 'simulator' : 'emulator'} is up with "${PROGRAM_PREFIX} status", or bind one again with "${PROGRAM_PREFIX} dev --${device.platform} --detach --wait-ready".`
         }`,
       ].join('\n')
     );

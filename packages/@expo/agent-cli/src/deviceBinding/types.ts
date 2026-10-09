@@ -41,10 +41,25 @@ export interface Binding {
   expiresAt: string;
 }
 
+/** A detached emulator this process spawned. `pid` is absent when the spawn itself failed. */
+export interface EmulatorHandle {
+  pid?: number;
+  /** Resolves with the exit code once the process is gone; never while it runs. */
+  exited: Promise<number | null>;
+  kill(): void;
+}
+
 export interface DeviceTools {
   simctl: Runner;
+  adb: Runner;
+  /** `emulator -list-avds`. */
+  emulatorList: Runner;
+  spawnEmulator(args: string[]): EmulatorHandle;
   now: () => Date;
   isPidAlive: (pid: number) => boolean;
+  /** The command line of a process, '' when `ps` lists none, null where `ps` does not exist. */
+  commandOf: (pid: number) => string | null;
+  kill: (pid: number) => void;
 }
 
 export type AcquireAction = 'reused' | 'created' | 'spawned' | 'explicit';
@@ -82,6 +97,10 @@ export interface ReleasedDevice {
   released: boolean;
   shutDown: boolean;
   reason: string | null;
+}
+
+export function localBackendOf(platform: DevicePlatform): 'local-ios' | 'local-android' {
+  return platform === 'ios' ? 'local-ios' : 'local-android';
 }
 
 /** The id a device is known by to its platform tool. */

@@ -1,12 +1,12 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §The run brings its own environment
-// The two choices this module makes before it touches anything: which simulator to boot, and which
-// AVD to start. Both are pure functions of a tool's output, and both can be wrong in a way that
-// costs a minute of a real run and then fails against the device it picked — so they are pinned
-// here, with no Xcode and no Android SDK involved.
+// What the registry reads before it touches anything: the simulator list, the AVD list, and which
+// `emulator` binary to spawn. Each is a pure function of a tool's output, and each can be wrong in
+// a way that costs a minute of a real run and then fails against the device it picked — so they
+// are pinned here, with no Xcode and no Android SDK involved.
 
 import path from 'path';
 
-import { EMULATOR_SERIAL, parseAvds, resolveEmulator } from '../bootDevice';
+import { parseAvds, resolveEmulator } from '../bootDevice';
 import { parseSimulators } from '../simulators';
 
 /** A `simctl list devices -j` payload, in the shape the real tool prints. */
@@ -127,15 +127,5 @@ describe(resolveEmulator, () => {
     expect(resolveEmulator(adb, { exists: () => false })).toBe(
       process.platform === 'win32' ? 'emulator.exe' : 'emulator'
     );
-  });
-});
-
-// @ref src/device/bootDevice.ts — friction run 6, F62. An emulator started without
-// `-ports 5554,5555` binds ephemeral ports and `adb devices` never lists it *at all*. The serial
-// is therefore knowable before the boot, which is the only reason the cleanup can be registered
-// before the device is touched.
-describe('the serial an emulator this CLI starts is always on', () => {
-  it(`is the one the -ports argument pins`, () => {
-    expect(EMULATOR_SERIAL).toBe('emulator-5554');
   });
 });

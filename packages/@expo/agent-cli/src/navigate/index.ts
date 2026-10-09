@@ -10,7 +10,7 @@ export const navigateHelp: CommandHelp = {
   options: [
     `--scheme <scheme>       URL scheme of the app, instead of the one in app.json`,
     `--ios                   Open the link on the iOS simulator bound to this worktree`,
-    `--android               Open the link on the attached Android device`,
+    `--android               Open the link on the Android emulator bound to this worktree`,
     `--eas                   Open the link on this project's EAS Simulator session`,
     `--app-id <id>           Application id of the target app`,
     `--dev-server-url <url>  Dev server to read (default: the project's own, then 8081)`,

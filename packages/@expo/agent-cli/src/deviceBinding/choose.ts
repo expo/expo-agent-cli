@@ -59,3 +59,70 @@ export function chooseIosDevice({
     name: createdSimulatorName(digest),
   };
 }
+
+export interface AndroidInventory {
+  /** The first AVD of `emulator -list-avds`, or null when there is none. */
+  avd: string | null;
+  /** The serials `adb devices -l` lists as ready. */
+  runningSerials: string[];
+}
+
+/** A serial on a console port and the worktree bound to it; `root` is null for one that is not ours. */
+export interface BoundSerial {
+  id: string;
+  root: string | null;
+}
+
+export type AndroidChoice =
+  | { kind: 'reuse'; binding: Binding }
+  | { kind: 'android-spawn'; port: number; avd: string }
+  | { kind: 'refuse'; reason: 'no-avd' | 'no-free-port' | 'not-reusable'; boundBy?: BoundSerial[] };
+
+/** Console ports of emulator instances: even, 5554 first, 5584 last. */
+export const FIRST_CONSOLE_PORT = 5554;
+export const LAST_CONSOLE_PORT = 5584;
+
+/** The console port of an `emulator-NNNN` serial, or null for any other device. */
+export function consolePortOf(serial: string): number | null {
+  const match = /^emulator-(\d+)$/.exec(serial);
+  return match ? Number(match[1]) : null;
+}
+
+/**
+ * Choose the emulator instance of a worktree.
+ *
+ * The own binding is reused, live or expired, when its instance is present: `ownPresent` is the
+ * caller's answer (a `spawned` pid alive, an `explicit` serial listed). Otherwise a read-only
+ * instance of the one AVD is spawned on the first free even console port.
+ */
+export function chooseAndroidDevice({
+  own,
+  ownPresent,
+  inventory,
+  reuseOnly,
+  busyPorts,
+  boundBy,
+}: {
+  own: Binding | null;
+  ownPresent: boolean;
+  inventory: AndroidInventory;
+  reuseOnly: boolean;
+  busyPorts: Set<number>;
+  boundBy: BoundSerial[];
+}): AndroidChoice {
+  if (own != null && ownPresent) {
+    return { kind: 'reuse', binding: own };
+  }
+  if (reuseOnly) {
+    return { kind: 'refuse', reason: 'not-reusable' };
+  }
+  if (inventory.avd == null) {
+    return { kind: 'refuse', reason: 'no-avd' };
+  }
+  for (let port = FIRST_CONSOLE_PORT; port <= LAST_CONSOLE_PORT; port += 2) {
+    if (!busyPorts.has(port)) {
+      return { kind: 'android-spawn', port, avd: inventory.avd };
+    }
+  }
+  return { kind: 'refuse', reason: 'no-free-port', boundBy };
+}

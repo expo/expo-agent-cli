@@ -54,40 +54,22 @@ describe(installDevBuildAsync, () => {
     ]);
   });
 
-  // @ref ../installDevBuild §androidDeviceNameAsync — the asymmetry that cost a live run: Android's
-  // `--device` takes a **name**, and an `adb` serial is answered with `Could not find device with
-  // name: emulator-5554` [observed, 2026-09-04].
-  it(`names the emulator by its AVD for android, not by its serial`, async () => {
+  // `run:android --device` matches a serial since SDK 58, the floor, so the bound instance's serial
+  // goes through as is and no `adb` is asked for a name.
+  it(`pins android to the bound serial, asking adb nothing`, async () => {
     const calls: string[][] = [];
 
-    const result = await installDevBuildAsync('/project', 'android', 'emulator-5554', {
+    const result = await installDevBuildAsync('/project', 'android', 'emulator-5556', {
       spawn: async (command, args) => {
         calls.push([command, ...args]);
         return captured();
       },
-      run: async () => ranAdb({ stdout: 'tuft-pixel\nOK\n' }),
     });
 
     expect(result.ok).toBe(true);
     expect(calls).toEqual([
-      ['npx', 'expo', 'run:android', '--no-bundler', '--device', 'tuft-pixel'],
+      ['npx', 'expo', 'run:android', '--no-bundler', '--device', 'emulator-5556'],
     ]);
-  });
-
-  // A device that cannot be named gets no `--device` at all, because a wrong one is a refusal and
-  // the command picks the attached device itself.
-  it(`passes no device for an android device it could not name`, async () => {
-    const calls: string[][] = [];
-
-    await installDevBuildAsync('/project', 'android', 'emulator-5554', {
-      spawn: async (command, args) => {
-        calls.push([command, ...args]);
-        return captured();
-      },
-      run: async () => ranAdb({ notRunnable: true, exitCode: null }),
-    });
-
-    expect(calls).toEqual([['npx', 'expo', 'run:android', '--no-bundler']]);
   });
 
   // Never `@expo/agent-cli dev`: that plans *and starts a dev server*, which is the thing this run

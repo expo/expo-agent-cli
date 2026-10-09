@@ -69,6 +69,101 @@ export async function bindingFixture(projectRoot: string, udid: string, name = S
   return file;
 }
 
+/**
+ * Bind `serial` to the fixture worktree as an `explicit` Android binding, the lease 60 min ahead,
+ * so every verb of the fixture drives this emulator (llp/0030 §Readers). What `dev --device`
+ * (llp/0033) writes; until then the one way a case hands a verb an attached emulator.
+ */
+export async function androidBindingFixture(projectRoot: string, serial: string) {
+  const root = canonicalizeExistingPath(projectRoot);
+  const now = Date.now();
+  const file = path.join(
+    `${projectRoot}.expo-home`,
+    'agent-cli',
+    'bindings',
+    `${digestOf(root)}-android-local-android.json`
+  );
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  await fs.promises.writeFile(
+    file,
+    JSON.stringify({
+      version: 1,
+      device: {
+        backend: 'local-android',
+        platform: 'android',
+        serial,
+        origin: { kind: 'explicit' },
+      },
+      projectRoot: root,
+      boundAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + 60 * 60_000).toISOString(),
+    })
+  );
+  return file;
+}
+
+/** The serials the stub `emulator` instances of a fixture are up under, one per line. */
+export function stubEmulatorStatePath(root: string): string {
+  return path.join(root, '.stub-emulators');
+}
+
+/**
+ * A stub `emulator`, installed beside the stub `adb`'s SDK so `resolveEmulator` finds it. It records
+ * its argv, answers `-list-avds` with `avds`, and otherwise behaves as a spawned instance: appends
+ * its serial (from `-ports`) to {@link stubEmulatorStatePath}, removes it on `SIGTERM`, and stays
+ * alive until killed. A case that spawns one kills it afterwards ({@link killBoundEmulatorsAsync}).
+ */
+export async function installStubEmulatorAsync(
+  root: string,
+  { avds = [EMULATOR_NAME] }: { avds?: string[] } = {}
+): Promise<{ calls: StubCalls }> {
+  const recordPath = path.join(root, '.emulator-calls.jsonl');
+  const sdk = path.join(root, '.stub-android-sdk');
+  const scriptPath = path.join(sdk, 'emulator', 'emulator-stub.js');
+  await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
+  await fs.promises.writeFile(
+    scriptPath,
+    [
+      `const fs = require('fs');`,
+      `const args = process.argv.slice(2);`,
+      `fs.appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify(args) + '\\n');`,
+      `if (args[0] === '-list-avds') { process.stdout.write(${JSON.stringify(avds.join('\n') + '\n')}); process.exit(0); }`,
+      `const serial = 'emulator-' + args[args.indexOf('-ports') + 1].split(',')[0];`,
+      `const state = ${JSON.stringify(stubEmulatorStatePath(root))};`,
+      `fs.appendFileSync(state, serial + '\\n');`,
+      `process.on('SIGTERM', () => {`,
+      `  const up = fs.existsSync(state) ? fs.readFileSync(state, 'utf8').split(/\\r?\\n/).filter(Boolean) : [];`,
+      `  fs.writeFileSync(state, up.filter((line) => line !== serial).map((line) => line + '\\n').join(''));`,
+      `  process.exit(0);`,
+      `});`,
+      `setInterval(() => {}, 1000);`,
+    ].join('\n')
+  );
+  await installStubBinAsync(path.join(sdk, 'emulator'), 'emulator', scriptPath);
+  return { calls: () => readCalls(recordPath) };
+}
+
+/** Kill every instance the Android bindings of `home` name, as a case's `afterEach`. */
+export async function killBoundEmulatorsAsync(home: string): Promise<void> {
+  const dir = path.join(home, 'agent-cli', 'bindings');
+  if (!fs.existsSync(dir)) {
+    return;
+  }
+  for (const name of fs
+    .readdirSync(dir)
+    .filter((entry) => entry.endsWith('-android-local-android.json'))) {
+    const binding = JSON.parse(await fs.promises.readFile(path.join(dir, name), 'utf8'));
+    const pid = binding?.device?.origin?.emulatorPid;
+    if (typeof pid === 'number') {
+      try {
+        process.kill(pid, 'SIGTERM');
+      } catch {
+        // Already gone.
+      }
+    }
+  }
+}
+
 function readCalls(recordPath: string): string[][] {
   return fs.existsSync(recordPath)
     ? fs
@@ -80,7 +175,11 @@ function readCalls(recordPath: string): string[][] {
 }
 
 /**
- * A stub `adb` with one emulator that has `appId` installed, unless `STUB_ADB_INSTALLED=0`.
+ * A stub `adb` that lists the attached emulator `EMULATOR_SERIAL` (bound to the fixture through
+ * {@link androidBindingFixture}, unless `attached` is false) and every instance the stub `emulator`
+ * is up as ({@link stubEmulatorStatePath}). `get-state` answers `device` for a listed serial and the
+ * real tool's "not found" for any other; `sys.boot_completed` is `1`. The emulator has `appId`
+ * installed, unless `STUB_ADB_INSTALLED=0`.
  *
  * `exec-out` receives the `dd` command as one argument, the way a device shell would, and the stub
  * slices the fixture APK on `skip=` and `count=`. `STUB_ADB_APK_FIXTURE=<path>` serves another
@@ -89,15 +188,20 @@ function readCalls(recordPath: string): string[][] {
  * `STUB_ADB_HANG_READ=<file>` makes `exec-out` write its pid there and never exit.
  *
  * Installed under a fake SDK: `ANDROID_HOME` beats `PATH`, so a runner with a real SDK still
- * reaches this stub (@ref src/device/adb §resolveAdb). The returned `env` names it.
+ * reaches this stub (@ref src/device/adb §resolveAdb). The returned `env` names it, and the
+ * fixture's Expo home, which holds the binding.
  */
 export async function installStubAdbAsync(
   root: string,
-  appId: string
+  appId: string,
+  { attached = true }: { attached?: boolean } = {}
 ): Promise<{ env: Record<string, string>; calls: StubCalls }> {
   const recordPath = path.join(root, '.adb-calls.jsonl');
   const scriptPath = path.join(root, '.stub-bin', 'adb-stub.js');
   await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
+  if (attached) {
+    await androidBindingFixture(root, EMULATOR_SERIAL);
+  }
   await fs.promises.writeFile(
     scriptPath,
     [
@@ -106,10 +210,20 @@ export async function installStubAdbAsync(
       `fs.appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify(args) + '\\n');`,
       `const apk = fs.readFileSync(process.env.STUB_ADB_APK_FIXTURE || ${JSON.stringify(APK_FIXTURE)});`,
       `const installed = process.env.STUB_ADB_INSTALLED !== '0';`,
+      `const state = ${JSON.stringify(stubEmulatorStatePath(root))};`,
+      `const serials = [${attached ? JSON.stringify(EMULATOR_SERIAL) : ''}].concat(`,
+      `  fs.existsSync(state) ? fs.readFileSync(state, 'utf8').split(/\\r?\\n/).filter(Boolean) : []`,
+      `);`,
       `if (args[0] === 'devices') {`,
-      `  process.stdout.write('List of devices attached\\n${EMULATOR_SERIAL}\\tdevice model:sdk_gphone64_arm64\\n');`,
+      `  process.stdout.write(['List of devices attached'].concat(serials.map((serial) => serial + '\\tdevice model:sdk_gphone64_arm64')).join('\\n') + '\\n');`,
       `  process.exit(0);`,
       `}`,
+      `if (args[2] === 'get-state') {`,
+      `  if (!serials.includes(args[1])) { process.stderr.write("error: device '" + args[1] + "' not found\\n"); process.exit(1); }`,
+      `  process.stdout.write('device\\n');`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args.includes('getprop')) { process.stdout.write('1\\n'); process.exit(0); }`,
       `if (args.includes('emu')) { process.stdout.write('${EMULATOR_NAME}\\nOK\\n'); process.exit(0); }`,
       `if (args.includes('pm')) {`,
       `  if (!installed) { process.exit(1); }`,
@@ -141,7 +255,10 @@ export async function installStubAdbAsync(
   );
   const sdk = path.join(root, '.stub-android-sdk');
   await installStubBinAsync(path.join(sdk, 'platform-tools'), 'adb', scriptPath);
-  return { env: { ANDROID_HOME: sdk }, calls: () => readCalls(recordPath) };
+  return {
+    env: { ANDROID_HOME: sdk, __UNSAFE_EXPO_HOME_DIRECTORY: `${root}.expo-home` },
+    calls: () => readCalls(recordPath),
+  };
 }
 
 /** Where the stub `xcrun` marks the app as running: `openurl` writes it, `terminate` removes it. */

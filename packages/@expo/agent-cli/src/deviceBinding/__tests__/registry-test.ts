@@ -102,6 +102,34 @@ describe(withRegistryLockAsync, () => {
     expect(order).toEqual(['first-in', 'first-out', 'second-in']);
   });
 
+  // Windows refuses the rename onto a held lock with EPERM or EACCES, where POSIX says ENOTEMPTY.
+  it.each(['EPERM', 'EACCES'])(
+    'waits on a rename refused with %s, as Windows refuses one',
+    async (code) => {
+      const renameSync = fs.renameSync;
+      let refused = 0;
+      vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+        if (refused < 2) {
+          refused += 1;
+          throw Object.assign(new Error(`${code}: operation not permitted`), { code });
+        }
+        return renameSync(from, to);
+      });
+
+      try {
+        const result = await withRegistryLockAsync(async () => 'ran', {
+          waitMs: 2_000,
+          tools: alive,
+        });
+        expect(result).toBe('ran');
+        expect(refused).toBe(2);
+      } finally {
+        vi.restoreAllMocks();
+      }
+      expect(fs.existsSync(lock())).toBe(false);
+    }
+  );
+
   it('gives the lock up when work throws', async () => {
     await expect(
       withRegistryLockAsync(

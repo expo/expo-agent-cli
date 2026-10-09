@@ -6,9 +6,7 @@
 // what was planned yesterday.
 
 import type { BoundDevice } from '../../deviceBinding';
-import type { NavigateDevice } from '../../navigate/device';
 import { probeAppPresenceAsync, type AppPresenceDevice } from '../appPresence';
-import type { LocalDeviceProbe } from '../localDevice';
 
 const APP_ID = 'com.example.app';
 const projectRoot = '/project';
@@ -20,30 +18,23 @@ const BOUND: BoundDevice = {
   name: 'agent-cli 0000',
   origin: 'created',
 };
+const BOUND_EMULATOR: BoundDevice = {
+  backend: 'local-android',
+  platform: 'android',
+  serial: 'emulator-5554',
+  origin: { kind: 'spawned', avd: 'Pixel_9', port: 5554, emulatorPid: 4242 },
+};
 const reused: AppPresenceDevice = { device: BOUND, action: 'reused' };
 const created: AppPresenceDevice = { device: BOUND, action: 'created' };
+const reusedEmulator: AppPresenceDevice = { device: BOUND_EMULATOR, action: 'reused' };
+const spawned: AppPresenceDevice = { device: BOUND_EMULATOR, action: 'spawned' };
 const unbound: AppPresenceDevice = { device: null, action: null };
-
-function androidDevice(deviceId = 'emulator-5554'): NavigateDevice {
-  return { backend: 'local-android', platform: 'android', deviceId };
-}
-
-function probeOf(devices: NavigateDevice[]): () => Promise<LocalDeviceProbe> {
-  return async () => ({
-    state: devices.length ? 'present' : 'absent',
-    device: devices[0] ?? null,
-    devices,
-    reason: devices.length ? null : 'no device',
-  });
-}
 
 /** The defaults every row overrides one of: a device that has the app. */
 function deps(overrides: Parameters<typeof probeAppPresenceAsync>[3] = {}) {
   return {
     readAppId: () => APP_ID,
-    probeDeviceAsync: probeOf([androidDevice()]),
     hasAppOnDevice: async () => true,
-    androidDeviceName: async () => 'tuft-pixel',
     ...overrides,
   };
 }
@@ -58,11 +49,10 @@ describe(probeAppPresenceAsync, () => {
   it(`should answer present when the bound device has the app`, async () => {
     expect(await probeAppPresenceAsync(projectRoot, 'ios', reused, deps())).toEqual({
       presence: 'present',
-      installDevice: null,
     });
   });
 
-  it(`should answer missing, with no device to pin, when the bound simulator has not got it`, async () => {
+  it(`should answer missing when the bound simulator has not got it`, async () => {
     const probe = await probeAppPresenceAsync(
       projectRoot,
       'ios',
@@ -70,88 +60,66 @@ describe(probeAppPresenceAsync, () => {
       deps({ hasAppOnDevice: async () => false })
     );
 
-    // `dev` pins every build step to the bound simulator itself (`withDevice`), so nothing here.
-    expect(probe).toEqual({ presence: 'missing', installDevice: null });
+    expect(probe).toEqual({ presence: 'missing' });
   });
 
   // created-device-missing-without-app-id
-  it(`should answer missing for a created device without asking, even with no app id`, async () => {
-    const hasAppOnDevice = vi.fn(async () => true);
+  it.each([
+    ['created', created],
+    ['spawned', spawned],
+  ])(
+    `should answer missing for a %s device without asking, even with no app id`,
+    async (_action, bound) => {
+      const hasAppOnDevice = vi.fn(async () => true);
 
-    const probe = await probeAppPresenceAsync(
-      projectRoot,
-      'ios',
-      created,
-      deps({ readAppId: () => null, hasAppOnDevice })
-    );
+      const probe = await probeAppPresenceAsync(
+        projectRoot,
+        bound.device!.platform,
+        bound,
+        deps({ readAppId: () => null, hasAppOnDevice })
+      );
 
-    expect(probe).toEqual({ presence: 'missing', installDevice: null });
-    expect(hasAppOnDevice).not.toHaveBeenCalled();
-  });
+      expect(probe).toEqual({ presence: 'missing' });
+      expect(hasAppOnDevice).not.toHaveBeenCalled();
+    }
+  );
 
   // null-device-ios-unprobed
-  it(`should answer unknown on iOS with no bound device, asking nothing`, async () => {
-    const probeDeviceAsync = vi.fn(probeOf([androidDevice()]));
+  it.each(['ios', 'android'] as const)(
+    `should answer unknown on %s with no bound device, asking nothing`,
+    async (platform) => {
+      const hasAppOnDevice = vi.fn(async () => true);
 
-    const probe = await probeAppPresenceAsync(
-      projectRoot,
-      'ios',
-      unbound,
-      deps({ probeDeviceAsync })
-    );
+      const probe = await probeAppPresenceAsync(
+        projectRoot,
+        platform,
+        unbound,
+        deps({ hasAppOnDevice })
+      );
 
-    expect(probe.presence).toBe('unknown');
-    expect(probeDeviceAsync).not.toHaveBeenCalled();
-  });
+      expect(probe.presence).toBe('unknown');
+      expect(hasAppOnDevice).not.toHaveBeenCalled();
+    }
+  );
 
-  it(`should ask the bound simulator, never the local probe`, async () => {
-    const probeDeviceAsync = vi.fn(probeOf([androidDevice()]));
-    const asked: string[] = [];
+  it(`should ask the bound device by its id and backend`, async () => {
+    const asked: [string, string | null][] = [];
+    const ask = async (deviceId: string, backend: string | null) => {
+      asked.push([deviceId, backend]);
+      return true;
+    };
+    await probeAppPresenceAsync(projectRoot, 'ios', reused, deps({ hasAppOnDevice: ask }));
     await probeAppPresenceAsync(
       projectRoot,
-      'ios',
-      reused,
-      deps({
-        probeDeviceAsync,
-        hasAppOnDevice: async (deviceId) => {
-          asked.push(deviceId);
-          return true;
-        },
-      })
-    );
-
-    expect(asked).toEqual(['UDID-1']);
-    expect(probeDeviceAsync).not.toHaveBeenCalled();
-  });
-
-  it(`should name an Android device by the name expo run takes, not the serial`, async () => {
-    const probe = await probeAppPresenceAsync(
-      projectRoot,
       'android',
-      unbound,
-      deps({ hasAppOnDevice: async () => false })
+      reusedEmulator,
+      deps({ hasAppOnDevice: ask })
     );
 
-    expect(probe).toEqual({ presence: 'missing', installDevice: 'tuft-pixel' });
-  });
-
-  it(`should hand the local probe the root it is about`, async () => {
-    const probeDeviceAsync = vi.fn(probeOf([androidDevice()]));
-
-    await probeAppPresenceAsync(projectRoot, 'android', unbound, deps({ probeDeviceAsync }));
-
-    expect(probeDeviceAsync).toHaveBeenCalledWith(projectRoot);
-  });
-
-  it(`should leave the install unpinned when Android cannot name the device`, async () => {
-    const probe = await probeAppPresenceAsync(
-      projectRoot,
-      'android',
-      unbound,
-      deps({ hasAppOnDevice: async () => false, androidDeviceName: async () => null })
-    );
-
-    expect(probe).toEqual({ presence: 'missing', installDevice: null });
+    expect(asked).toEqual([
+      ['UDID-1', 'local-ios'],
+      ['emulator-5554', 'local-android'],
+    ]);
   });
 
   it(`should ask about the id the project config names`, async () => {
@@ -184,17 +152,6 @@ describe(probeAppPresenceAsync, () => {
     expect(probe.presence).toBe('unknown');
   });
 
-  it(`should answer unknown when this machine has no Android device`, async () => {
-    const probe = await probeAppPresenceAsync(
-      projectRoot,
-      'android',
-      unbound,
-      deps({ probeDeviceAsync: probeOf([]) })
-    );
-
-    expect(probe.presence).toBe('unknown');
-  });
-
   // @ref ../hasApp — `null` is "could not look": an unreadable simulator tree, an adb that would
   // not run, a cloud device this machine cannot see. None of them are an app that is not there.
   it(`should read "could not look" as unknown, never as missing`, async () => {
@@ -212,8 +169,8 @@ describe(probeAppPresenceAsync, () => {
     const probe = await probeAppPresenceAsync(
       projectRoot,
       'android',
-      unbound,
-      deps({ budgetMs: 20, probeDeviceAsync: () => new Promise(() => {}) })
+      reusedEmulator,
+      deps({ budgetMs: 20, hasAppOnDevice: () => new Promise(() => {}) })
     );
 
     expect(probe.presence).toBe('unknown');
@@ -243,10 +200,6 @@ describe(probeAppPresenceAsync, () => {
   // thing that fails `dev`.
   it.each([
     [
-      'the device probe throws',
-      { probeDeviceAsync: () => Promise.reject(new Error('adb exploded')) },
-    ],
-    [
       'the app lookup throws',
       { hasAppOnDevice: () => Promise.reject(new Error('no such device')) },
     ],
@@ -262,7 +215,7 @@ describe(probeAppPresenceAsync, () => {
     const probe = await probeAppPresenceAsync(
       projectRoot,
       'android',
-      unbound,
+      reusedEmulator,
       deps(overrides as never)
     );
 

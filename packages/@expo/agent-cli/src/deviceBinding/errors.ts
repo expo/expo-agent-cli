@@ -4,6 +4,7 @@
 import { EXIT_NEEDS_HUMAN, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
+import type { BoundSerial } from './choose';
 import type { DevicePlatform, InspectCause, InspectState } from './types';
 
 /** The one command that binds a device to this worktree. */
@@ -14,8 +15,11 @@ export function deviceCommand(platform: DevicePlatform): string {
 export type UnavailableReason =
   | 'unreadable'
   | 'no-ios-runtime'
+  | 'no-avd'
+  | 'no-free-port'
   | 'not-reusable'
   | 'create-timeout'
+  | 'spawn-failed'
   | 'boot-failed';
 
 const RERUN = 'run the command again';
@@ -58,7 +62,12 @@ export function noBoundDeviceError(
 /** The refusal of `dev` or `smoke`: no device could be bound. */
 export function deviceUnavailableError(
   reason: UnavailableReason,
-  { platform, path, detail }: { platform: DevicePlatform; path?: string; detail?: string }
+  {
+    platform,
+    path,
+    detail,
+    boundBy = [],
+  }: { platform: DevicePlatform; path?: string; detail?: string; boundBy?: BoundSerial[] }
 ): CommandError {
   switch (reason) {
     case 'unreadable':
@@ -70,6 +79,25 @@ export function deviceUnavailableError(
       return refusal('DEVICE_UNAVAILABLE', reason, EXIT_NEEDS_HUMAN, [
         'No iOS runtime with an iPhone is installed, so no simulator can be created.',
         'How: run "xcodebuild -downloadPlatform iOS", then this command again.',
+      ]);
+    case 'no-avd':
+      return refusal('DEVICE_UNAVAILABLE', reason, EXIT_NEEDS_HUMAN, [
+        'No Android virtual device exists, so no emulator instance can be started.',
+        "How: create one in Android Studio's Device Manager, then run this command again.",
+      ]);
+    case 'no-free-port': {
+      const error = refusal('DEVICE_UNAVAILABLE', reason, EXIT_OUTCOME_FAILED, [
+        `Every emulator console port from 5554 to 5584 is taken: ${portHolders(boundBy)}.`,
+        // `dev:stop --release` (llp/0033) replaces the hand stop once it exists.
+        `How: stop one of the listed instances by hand, then run this command again.`,
+      ]);
+      error.data = { reason, boundBy };
+      return error;
+    }
+    case 'spawn-failed':
+      return refusal('DEVICE_UNAVAILABLE', reason, EXIT_OUTCOME_TIMEOUT, [
+        `The emulator could not be started${detail ? `: ${detail}` : '.'}`,
+        `How: ${RERUN}.`,
       ]);
     case 'not-reusable': {
       const error = refusal('DEVICE_UNAVAILABLE', reason, EXIT_OUTCOME_FAILED, [
@@ -91,6 +119,13 @@ export function deviceUnavailableError(
         `How: ${RERUN}.`,
       ]);
   }
+}
+
+function portHolders(boundBy: BoundSerial[]): string {
+  return (
+    boundBy.map(({ id, root }) => `${id} (${root ?? 'not ours'})`).join(', ') ||
+    'no serial is listed'
+  );
 }
 
 /** The refusal of a write that could not take the registry lock in time. */

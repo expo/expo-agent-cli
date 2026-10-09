@@ -7,6 +7,7 @@ import path from 'path';
 import type { SpawnCaptureResult } from '../../utils/spawnCapture';
 import { bindingPathFor, registryDirectory } from '../registry';
 import type { Binding, DeviceTools } from '../types';
+import { fakeAndroid, type FakeAndroid, type FakeAndroidOptions } from './fakeAndroidTools';
 
 export const RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
 export const DEVICE_TYPE = 'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro';
@@ -19,7 +20,7 @@ export interface FakeSimulator {
   isAvailable?: boolean;
 }
 
-export interface FakeSimctlOptions {
+export interface FakeSimctlOptions extends FakeAndroidOptions {
   simulators?: FakeSimulator[];
   /** Whether `list runtimes` names an iPhone runtime. */
   runtime?: boolean;
@@ -31,7 +32,8 @@ export interface FakeSimctlOptions {
   listTimesOut?: boolean;
 }
 
-export interface FakeTools extends DeviceTools {
+export interface FakeTools extends DeviceTools, FakeAndroid {
+  /** Every call of every tool, `emulator` ones prefixed `emulator`. */
   calls: string[][];
   simulators: FakeSimulator[];
   /** Whether the registry lock existed when each call ran, by call index. */
@@ -45,6 +47,7 @@ export function fakeTools({
   bootFails = false,
   spawnError = false,
   listTimesOut = false,
+  ...androidOptions
 }: FakeSimctlOptions = {}): FakeTools {
   const state = simulators.map((simulator) => ({ ...simulator }));
   const calls: string[][] = [];
@@ -52,10 +55,14 @@ export function fakeTools({
   const clock = { now: new Date('2026-10-08T10:00:00.000Z') };
   let created = 0;
   const ok = (stdout = ''): SpawnCaptureResult => ({ stdout, stderr: '', exitCode: 0 });
+  const record = (call: string[]) => {
+    calls.push(call);
+    lockedAt.push(fs.existsSync(path.join(registryDirectory(), '.lock')));
+  };
+  const android = fakeAndroid(androidOptions, record);
 
   const simctl: DeviceTools['simctl'] = async (args) => {
-    calls.push(args);
-    lockedAt.push(fs.existsSync(path.join(registryDirectory(), '.lock')));
+    record(args);
     if (spawnError) {
       return {
         stdout: '',
@@ -126,13 +133,31 @@ export function fakeTools({
   };
 
   return {
+    ...android,
     simctl,
     now: () => clock.now,
-    isPidAlive: () => true,
     calls,
     simulators: state,
     lockedAt,
     clock,
+  };
+}
+
+/** A `spawned` Android binding an hour from expiry, as `acquire` writes one. */
+export function androidBindingFor(
+  projectRoot: string,
+  serial: string,
+  origin:
+    | { kind: 'spawned'; avd: string; port: number; emulatorPid: number }
+    | { kind: 'explicit' },
+  { expiresAt, boundAt }: { expiresAt?: string; boundAt?: string } = {}
+): Binding {
+  return {
+    version: 1,
+    device: { backend: 'local-android', platform: 'android', serial, origin },
+    projectRoot,
+    boundAt: boundAt ?? '2026-10-08T09:00:00.000Z',
+    expiresAt: expiresAt ?? '2026-10-08T11:00:00.000Z',
   };
 }
 
@@ -165,5 +190,18 @@ export function seedIosBinding(projectRoot: string, udid: string, name = 'iPhone
   writeBinding(
     bindingPathFor(projectRoot, 'ios', 'local-ios'),
     bindingFor(projectRoot, udid, { name, expiresAt: '2999-01-01T00:00:00.000Z' })
+  );
+}
+
+/** Bind `serial` to the worktree, live for a year, for a suite that hands a verb an emulator. */
+export function seedAndroidBinding(projectRoot: string, serial = 'emulator-5554'): void {
+  writeBinding(
+    bindingPathFor(projectRoot, 'android', 'local-android'),
+    androidBindingFor(
+      projectRoot,
+      serial,
+      { kind: 'explicit' },
+      { expiresAt: '2999-01-01T00:00:00.000Z' }
+    )
   );
 }

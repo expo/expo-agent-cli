@@ -31,11 +31,18 @@ describe('exit codes per reason', () => {
       7,
       deviceUnavailableError('no-ios-runtime', { platform: 'ios' }),
     ],
+    ['DEVICE_UNAVAILABLE', 'no-avd', 7, deviceUnavailableError('no-avd', { platform: 'android' })],
     [
       'DEVICE_UNAVAILABLE',
       'not-reusable',
       20,
       deviceUnavailableError('not-reusable', { platform: 'ios' }),
+    ],
+    [
+      'DEVICE_UNAVAILABLE',
+      'spawn-failed',
+      22,
+      deviceUnavailableError('spawn-failed', { platform: 'android' }),
     ],
     [
       'DEVICE_UNAVAILABLE',

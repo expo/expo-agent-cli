@@ -1,24 +1,14 @@
-import { bootDeviceAsync } from '../../device/bootDevice';
 import { checkExpoGoVersionAsync } from '../../device/expoGoVersion';
 import { installExpoGoAsync } from '../../device/installExpoGo';
 import { simulatorHasAppAsync } from '../../device/installedApps';
 import { androidHasAppAsync } from '../../device/androidApps';
 import type { BoundDevice } from '../../deviceBinding';
-import { probeAndroidDeviceAsync } from '../../navigate/device';
 import { openRouteAsync } from '../../navigate/openRoute';
 import { CommandError } from '../../utils/errors';
 import { openAppOnDeviceAsync } from '../openApp';
 
 vi.mock('../../log');
 vi.mock('../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
-vi.mock('../../navigate/device', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../navigate/device')>()),
-  probeAndroidDeviceAsync: vi.fn(),
-}));
-vi.mock('../../device/bootDevice', () => ({
-  bootDeviceAsync: vi.fn(),
-  BOOT_DEVICE_TIMEOUT_MS: { ios: 1, android: 1 },
-}));
 vi.mock('../../device/expoGoVersion', () => ({ checkExpoGoVersionAsync: vi.fn() }));
 vi.mock('../../device/installExpoGo', () => ({ installExpoGoAsync: vi.fn() }));
 vi.mock('../../device/installedApps', () => ({ simulatorHasAppAsync: vi.fn() }));
@@ -35,6 +25,13 @@ const BOUND: BoundDevice = {
   udid: 'UDID-1',
   name: 'agent-cli 0000',
   origin: 'created',
+};
+
+const BOUND_EMULATOR: BoundDevice = {
+  backend: 'local-android',
+  platform: 'android',
+  serial: 'emulator-5554',
+  origin: { kind: 'spawned', avd: 'Pixel_9', port: 5554, emulatorPid: 4242 },
 };
 
 function mockOpenOk() {
@@ -70,8 +67,6 @@ describe(openAppOnDeviceAsync, () => {
     });
 
     expect(report).toMatchObject({ opened: true, deviceId: 'UDID-1', booted: false, reason: null });
-    expect(bootDeviceAsync).not.toHaveBeenCalled();
-    expect(probeAndroidDeviceAsync).not.toHaveBeenCalled();
     expect(openRouteAsync).toHaveBeenCalledWith(
       projectRoot,
       expect.objectContaining({
@@ -96,75 +91,37 @@ describe(openAppOnDeviceAsync, () => {
     expect(report).toMatchObject({ opened: true, booted: true });
   });
 
-  it(`stops on iOS with no bound device`, async () => {
+  it.each([
+    ['ios', 'iOS simulator'],
+    ['android', 'Android emulator instance'],
+  ] as const)(`stops on %s with no bound device`, async (platform, noun) => {
     const report = await openAppOnDeviceAsync(projectRoot, {
-      platform: 'ios',
+      platform,
       expoGo: true,
       devServerUrl: DEV_SERVER,
     });
 
-    expect(report).toMatchObject({ opened: false, reason: expect.stringContaining('bound') });
+    expect(report).toMatchObject({ opened: false, reason: `no ${noun} is bound to this worktree` });
     expect(openRouteAsync).not.toHaveBeenCalled();
   });
 
-  it(`boots an emulator when none is up`, async () => {
-    vi.mocked(probeAndroidDeviceAsync).mockResolvedValue({ device: null, reason: 'none' });
-    vi.mocked(bootDeviceAsync).mockResolvedValue({
-      ok: true,
-      deviceId: 'emulator-5554',
-      backend: 'local-android',
-      name: 'Pixel',
-      reason: null,
-      choice: 'the only AVD',
-    });
+  it(`opens on the bound emulator instance, asking adb through the same door`, async () => {
     vi.mocked(androidHasAppAsync).mockResolvedValue(true);
 
     const report = await openAppOnDeviceAsync(projectRoot, {
       platform: 'android',
       expoGo: true,
       devServerUrl: DEV_SERVER,
+      device: BOUND_EMULATOR,
+      justBooted: true,
     });
 
     expect(report).toMatchObject({ opened: true, deviceId: 'emulator-5554', booted: true });
-  });
-
-  it(`stops with the boot's own reason when no emulator comes up`, async () => {
-    vi.mocked(probeAndroidDeviceAsync).mockResolvedValue({ device: null, reason: 'none' });
-    vi.mocked(bootDeviceAsync).mockResolvedValue({
-      ok: false,
-      deviceId: null,
-      backend: null,
-      name: null,
-      reason: 'no Android virtual device exists',
-      choice: null,
-    });
-
-    const report = await openAppOnDeviceAsync(projectRoot, {
-      platform: 'android',
-      expoGo: true,
-      devServerUrl: DEV_SERVER,
-    });
-
-    expect(report).toMatchObject({ opened: false, reason: 'no Android virtual device exists' });
-    expect(openRouteAsync).not.toHaveBeenCalled();
-  });
-
-  it(`stops on a missing device tool without booting anything`, async () => {
-    vi.mocked(probeAndroidDeviceAsync).mockResolvedValue({
-      device: null,
-      reason: 'could not run "adb"',
-      toolError: new CommandError('ADB_NOT_RUNNABLE', 'Could not run "adb".\nWhy: not found.'),
-    });
-
-    const report = await openAppOnDeviceAsync(projectRoot, {
-      platform: 'android',
-      expoGo: true,
-      devServerUrl: DEV_SERVER,
-    });
-
-    expect(report.opened).toBe(false);
-    expect(report.reason).toContain('adb');
-    expect(bootDeviceAsync).not.toHaveBeenCalled();
+    expect(androidHasAppAsync).toHaveBeenCalledWith('emulator-5554', 'host.exp.exponent');
+    expect(openRouteAsync).toHaveBeenCalledWith(
+      projectRoot,
+      expect.objectContaining({ platform: 'android', device: BOUND_EMULATOR })
+    );
   });
 
   it(`installs Expo Go when the device has not got it`, async () => {
@@ -206,23 +163,6 @@ describe(openAppOnDeviceAsync, () => {
     expect(simulatorHasAppAsync).not.toHaveBeenCalled();
     expect(installExpoGoAsync).not.toHaveBeenCalled();
     expect(openRouteAsync).toHaveBeenCalled();
-  });
-
-  it(`asks adb on Android, through the same door`, async () => {
-    vi.mocked(probeAndroidDeviceAsync).mockResolvedValue({
-      device: { backend: 'local-android', platform: 'android', deviceId: 'emulator-5554' },
-    });
-    vi.mocked(androidHasAppAsync).mockResolvedValue(true);
-    vi.mocked(checkExpoGoVersionAsync).mockResolvedValue({ verdict: 'match' } as any);
-
-    const report = await openAppOnDeviceAsync(projectRoot, {
-      platform: 'android',
-      expoGo: true,
-      devServerUrl: DEV_SERVER,
-    });
-
-    expect(report).toMatchObject({ opened: true, deviceId: 'emulator-5554' });
-    expect(androidHasAppAsync).toHaveBeenCalledWith('emulator-5554', 'host.exp.exponent');
   });
 
   it(`goes no further once the dev server is gone`, async () => {

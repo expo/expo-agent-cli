@@ -115,7 +115,7 @@ describe('the device probe', () => {
       platform: 'ios',
       requestedPlatform: 'ios',
       lastBuild,
-      probeAppPresence: async () => ({ presence: 'missing', installDevice: null }),
+      probeAppPresence: async () => ({ presence: 'missing' }),
     });
 
     expect(plan.rule).toBe('dev-client-install');
@@ -123,21 +123,6 @@ describe('the device probe', () => {
       ['expo', 'run:ios', '--no-bundler'],
       ['expo', 'start', '--dev-client'],
     ]);
-  });
-
-  // In the argv itself, not added at run time: the plan approved is the plan run.
-  it(`pins the install to the device the probe asked`, async () => {
-    writeProject();
-    const { state, lastBuild } = freshProject();
-
-    const plan = await resolveStartPlanAsync(projectRoot, state, {
-      platform: 'ios',
-      requestedPlatform: 'ios',
-      lastBuild,
-      probeAppPresence: async () => ({ presence: 'missing', installDevice: 'UDID-1' }),
-    });
-
-    expect(argvOf(plan)[0]).toEqual(['expo', 'run:ios', '--no-bundler', '--device', 'UDID-1']);
   });
 
   it(`starts the dev server alone when the device has it`, async () => {
@@ -148,7 +133,7 @@ describe('the device probe', () => {
       platform: 'ios',
       requestedPlatform: 'ios',
       lastBuild,
-      probeAppPresence: async () => ({ presence: 'present', installDevice: null }),
+      probeAppPresence: async () => ({ presence: 'present' }),
     });
 
     expect(plan.rule).toBe('dev-client-fresh');
@@ -166,7 +151,7 @@ describe('the device probe', () => {
       lastBuild: { android: { hash: state.fingerprint.hash!, sources: null } },
       probeAppPresence: async (_root, platform) => {
         asked.push(platform);
-        return { presence: 'present', installDevice: null };
+        return { presence: 'present' };
       },
     });
 
@@ -236,7 +221,7 @@ describe('the device probe', () => {
       platform: 'ios',
       requestedPlatform: 'ios',
       lastBuild,
-      probeAppPresence: async () => ({ presence: 'missing', installDevice: null }),
+      probeAppPresence: async () => ({ presence: 'missing' }),
     });
 
     expect(plan.rule).toBe('dev-client-fresh');

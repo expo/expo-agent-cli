@@ -56,6 +56,13 @@ const SPAWN_HELPERS = new Set([
 ]);
 
 /**
+ * The device registry's injected tools (`src/deviceBinding/types.ts` §DeviceTools), called as
+ * `tools.simctl([...])`: each one is `xcrun simctl`, `adb` or `emulator` in a subprocess, so every
+ * option in its array literal is a foreign flag too.
+ */
+const TOOL_RUNNERS = new Set(['simctl', 'adb', 'emulatorList', 'spawnEmulator']);
+
+/**
  * What a variable holding another CLI's command line is called.
  *
  * A name rather than a list of builders, because an argv assembled ten lines above its spawn is
@@ -88,7 +95,10 @@ export function extractForeignFlags(file: string, source: string): ForeignFlagUs
       const callee = node.expression;
       // `spawnExpoAsync(root, ['export', '--platform', 'web'], …)` — every array-literal argument,
       // because which position carries the argv differs per helper.
-      if (ts.isIdentifier(callee) && SPAWN_HELPERS.has(callee.text)) {
+      if (
+        (ts.isIdentifier(callee) && SPAWN_HELPERS.has(callee.text)) ||
+        (ts.isPropertyAccessExpression(callee) && TOOL_RUNNERS.has(callee.name.text))
+      ) {
         for (const argument of node.arguments) {
           if (ts.isArrayLiteralExpression(argument)) {
             argument.elements.forEach(take);
