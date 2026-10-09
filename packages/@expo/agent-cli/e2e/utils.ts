@@ -119,7 +119,11 @@ export async function installStubBinAsync(
 export async function installStubEasRunnerAsync(
   binDir: string,
   easScript: string,
-  { names = ['npx'], logFile }: { names?: ('npx' | 'bunx')[]; logFile?: string } = {}
+  {
+    names = ['npx'],
+    logFile,
+    agentDeviceController = false,
+  }: { names?: ('npx' | 'bunx')[]; logFile?: string; agentDeviceController?: boolean } = {}
 ): Promise<void> {
   const runnerScript = path.join(binDir, 'stub-eas-runner.js');
   await fs.promises.mkdir(binDir, { recursive: true });
@@ -136,13 +140,14 @@ ${
 // \`--yes\` is npm's own flag, and never part of what the package is asked to do.
 const rest = args[0] === '--yes' ? args.slice(1) : args;
 const spec = rest[0] || '';
-if (spec !== 'eas-cli' && spec !== 'eas-cli@latest') {
+const isAgentDevice = ${agentDeviceController} && spec === 'agent-device@latest';
+if (!isAgentDevice && spec !== 'eas-cli' && spec !== 'eas-cli@latest') {
   process.stderr.write('stub runner: no such package ' + JSON.stringify(spec) + '\\n');
   process.exit(1);
 }
 const result = require('node:child_process').spawnSync(
   process.execPath,
-  [${JSON.stringify(easScript)}, ...rest.slice(1)],
+  [${JSON.stringify(easScript)}, ...(isAgentDevice ? ['__controller'] : []), ...rest.slice(1)],
   { stdio: 'inherit' }
 );
 process.exit(result.status === null ? 1 : result.status);

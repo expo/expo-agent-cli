@@ -429,9 +429,9 @@ if (command === 'simulator:stop') {
 
 if (command === 'simulator:exec') {
   if (!controller && args[2] === '-e') {
-    // Execute the real guard after loading the same connection file as EAS. Only the device
-    // controller is replaced: its process records the exact session environment it received.
-    const target = JSON.parse(args.at(-1));
+    // Execute the real guard and its prepared target unchanged after loading the same connection
+    // file as EAS. The npx stub routes agent-device to this file as __controller, after cmd.exe has
+    // decoded the Windows shim arguments just as it would for the real package runner.
     const env = { ...process.env };
     try {
       for (const line of fs
@@ -443,13 +443,7 @@ if (command === 'simulator:exec') {
     } catch {
       delete env.EAS_SIMULATOR_SESSION_ID;
     }
-    const childArgs = args.slice(2);
-    childArgs[childArgs.length - 1] = JSON.stringify({
-      command: process.execPath,
-      args: [__filename, '__controller', target.command, ...target.args],
-      shell: false,
-    });
-    const result = require('node:child_process').spawnSync(args[1], childArgs, {
+    const result = require('node:child_process').spawnSync(args[1], args.slice(2), {
       env,
       stdio: 'inherit',
     });

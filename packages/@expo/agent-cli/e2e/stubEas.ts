@@ -65,7 +65,11 @@ export async function installStubEasAsync(
   } else {
     await fs.promises.writeFile(scriptPath, script);
   }
-  await installStubEasRunnerAsync(binDir, scriptPath, { names, logFile });
+  await installStubEasRunnerAsync(binDir, scriptPath, {
+    names,
+    logFile,
+    agentDeviceController: true,
+  });
   return { binDir, scriptPath };
 }
 
@@ -82,14 +86,17 @@ export function readStubEasInvocations(projectRoot: string): StubEasInvocation[]
     .map((line) => JSON.parse(line) as StubEasInvocation);
 }
 
-/** EAS invocations, with guarded controller commands decoded for verb assertions. */
+/** Logical EAS commands and controller verbs; raw guard invocations remain available above. */
 export function stubEasArgs(projectRoot: string): string[][] {
+  // The guard launch is transport detail. Its controller's invocation is the operation tests mean.
   return readStubEasInvocations(projectRoot)
-    .filter(({ args }) => args[0] !== '__controller')
+    .filter(
+      ({ args }) =>
+        args[0] === '__controller' || !(args[0] === 'simulator:exec' && args[2] === '-e')
+    )
     .map(({ args }) => {
-      if (args[0] === 'simulator:exec' && args[2] === '-e') {
-        const target = JSON.parse(args.at(-1)!);
-        return ['simulator:exec', target.command, ...target.args];
+      if (args[0] === '__controller') {
+        return ['simulator:exec', 'npx', 'agent-device@latest', ...args.slice(1)];
       }
       return args;
     });
