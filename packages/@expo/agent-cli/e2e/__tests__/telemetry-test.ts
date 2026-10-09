@@ -27,6 +27,16 @@ type TelemetryRequest = {
 
 type WorkerEvent = { type: 'spawn' | 'request' | 'settled' | 'aborted' | 'exit'; pid: number };
 
+function processIsGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    // EPERM still means the process exists. Only ESRCH is proof that Windows has released it.
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
 /**
  * Run the published bundle and its real detached worker. Only the final fetch is replaced: it
  * captures the production request and remains pending until the test releases it or its signal
@@ -163,13 +173,19 @@ if (isWorker(process.argv[1])) {
       const workers = readEvents().filter((event) => event.type === 'spawn');
       const exited = await waitForAsync(
         () =>
-          workers.every((worker) =>
-            readEvents().some((event) => event.type === 'exit' && event.pid === worker.pid)
+          workers.every(
+            (worker) =>
+              readEvents().some((event) => event.type === 'exit' && event.pid === worker.pid) &&
+              processIsGone(worker.pid)
           ),
         10_000
       );
       if (!exited) {
         for (const worker of workers) {
+          // A logged exit may be just ahead of Windows releasing the PID, or may be recycled.
+          if (readEvents().some((event) => event.type === 'exit' && event.pid === worker.pid)) {
+            continue;
+          }
           try {
             process.kill(worker.pid, 'SIGKILL');
           } catch {
@@ -177,8 +193,13 @@ if (isWorker(process.argv[1])) {
           }
         }
       }
-      await fs.promises.rm(path.dirname(projectRoot), { recursive: true, force: true });
-      expect(exited, 'telemetry workers should exit after the request finishes').toBe(true);
+      const released =
+        exited ||
+        (await waitForAsync(() => workers.every((worker) => processIsGone(worker.pid)), 2_000));
+      if (released) {
+        await fs.promises.rm(path.dirname(projectRoot), { recursive: true, force: true });
+      }
+      expect(exited, 'telemetry workers should exit and release their process handles').toBe(true);
     },
   };
 }
