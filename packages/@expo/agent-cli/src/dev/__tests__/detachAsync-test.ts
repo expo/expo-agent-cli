@@ -5,7 +5,12 @@ import { vol } from 'memfs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../../devLock';
-import { acquireDeviceAsync, acquireLine, devicesDisabled } from '../../deviceBinding';
+import {
+  acquireDeviceAsync,
+  acquireLine,
+  devicesDisabled,
+  hostBindsPlatform,
+} from '../../deviceBinding';
 import { deviceUnavailableError } from '../../deviceBinding/errors';
 import * as Log from '../../log';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
@@ -24,6 +29,7 @@ vi.mock('../../exitCodes', async (importOriginal) => ({
 vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),
   devicesDisabled: vi.fn(() => true),
+  hostBindsPlatform: vi.fn(() => false),
   acquireDeviceAsync: vi.fn(),
 }));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
@@ -418,6 +424,9 @@ describe('the bound device', () => {
 
   beforeEach(() => {
     vi.mocked(devicesDisabled).mockReturnValue(false);
+    // These cases model a host that can run the requested iOS simulator. Other tests below
+    // exercise the unsupported-host branch explicitly.
+    vi.mocked(hostBindsPlatform).mockImplementation((platform) => platform === 'ios');
     vi.mocked(acquireDeviceAsync).mockResolvedValue(reused);
   });
 
@@ -458,13 +467,57 @@ describe('the bound device', () => {
   // smoke-never-reaches-already-running-reuse
   it.each([
     ['without reuseBoundDevice', ['--ios', '--detach', '--local'], {}],
-    ['for --android', ['--android', '--detach', '--local'], { reuseBoundDevice: true }],
+    [
+      'for --android on a host without Android tools',
+      ['--android', '--detach', '--local'],
+      { reuseBoundDevice: true },
+    ],
     ['for --eas', ['--ios', '--detach', '--eas'], { reuseBoundDevice: true }],
   ])('binds nothing on a running server %s', async (_case, argv, extra) => {
     vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
 
     await expect(
       devDetachAsync(projectRoot, resolveDevOptions(argv), { print: false, ...extra })
+    ).resolves.toBe(0);
+
+    expect(acquireDeviceAsync).not.toHaveBeenCalled();
+  });
+
+  it('reuses the worktree emulator on a running server when Android tools are available', async () => {
+    const reusedAndroid = {
+      device: {
+        backend: 'local-android' as const,
+        platform: 'android' as const,
+        serial: 'emulator-5554',
+        origin: { kind: 'spawned' as const, avd: 'Pixel_9', port: 5554, emulatorPid: 4242 },
+      },
+      justBooted: false,
+      action: 'reused' as const,
+    };
+    vi.mocked(hostBindsPlatform).mockReturnValue(true);
+    vi.mocked(acquireDeviceAsync).mockResolvedValue(reusedAndroid);
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--android', '--detach', '--local']), {
+        print: false,
+        reuseBoundDevice: true,
+      })
+    ).resolves.toBe(0);
+
+    expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'android', { reuseOnly: true });
+    expect(Log.progress).toHaveBeenCalledWith(acquireLine(reusedAndroid));
+  });
+
+  it('does not reuse an iOS simulator when this host cannot run one', async () => {
+    vi.mocked(hostBindsPlatform).mockReturnValue(false);
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
+        print: false,
+        reuseBoundDevice: true,
+      })
     ).resolves.toBe(0);
 
     expect(acquireDeviceAsync).not.toHaveBeenCalled();
@@ -540,6 +593,7 @@ describe('the acquire line', () => {
       action: 'reused' as const,
     };
     vi.mocked(devicesDisabled).mockReturnValue(false);
+    vi.mocked(hostBindsPlatform).mockReturnValue(true);
     vi.mocked(acquireDeviceAsync).mockResolvedValue(reused);
     vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
     const { event: cliEvent } = await import('../../events');
