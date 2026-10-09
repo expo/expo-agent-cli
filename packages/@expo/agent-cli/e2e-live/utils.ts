@@ -233,6 +233,17 @@ export async function runLiveAsync(
   argv: string[],
   { env, label }: LiveOptions = {}
 ): Promise<LiveResult> {
+  const udid = env?.AGENT_CLI_LIVE_UDID ?? process.env.AGENT_CLI_LIVE_UDID;
+  if (
+    argv[0] === 'dev' &&
+    argv.includes('--ios') &&
+    !argv.includes('--eas') &&
+    udid &&
+    !argv.some((arg) => arg === '--device' || arg.startsWith('--device='))
+  ) {
+    argv = [...argv, '--device', udid];
+  }
+  if (argv[0] === 'dev:stop' && !argv.includes('--release')) argv = [...argv, '--release'];
   run.spend.commands += 1;
   const startedAt = Date.now();
 

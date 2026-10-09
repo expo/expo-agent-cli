@@ -2,6 +2,7 @@
 // The shape of the status report: one object with a section per question the command answers.
 // Pure data, so the human formatter and the `--json` output describe exactly the same facts.
 
+import type { BindingSummary } from '../deviceBinding/summary';
 import type { DevServerHostType } from '../dev/advertisedUrl';
 import type { LocalDeviceState } from '../device/localDevice';
 import type { ChangedFiles, ChangedSource, ImpactClass, OtaSafety } from '../impact/types';
@@ -495,6 +496,7 @@ export interface InstalledStatus {
 
 /** Sections of the report, in the order they print. */
 export type StatusSectionName =
+  | 'binding'
   | 'project'
   | 'expoGo'
   | 'freshness'
@@ -513,6 +515,7 @@ export type StatusSectionName =
  * can, so a broken probe costs one section instead of the whole command.
  */
 export interface StatusReport {
+  binding?: BindingSummary[];
   project: ProjectStatus | null;
   expoGo: ExpoGoStatus | null;
   freshness: FreshnessStatus | null;

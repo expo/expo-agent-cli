@@ -113,6 +113,8 @@ describe('@expo/agent-cli dev:stop', () => {
 
     expect(Object.keys(JSON.parse(result.stdout)).sort()).toEqual([
       'detail',
+      'deviceError',
+      'devices',
       'followups',
       // Which of --force's two proofs a refusal failed on, null otherwise (F48-1).
       'forceRefusedBy',
@@ -125,6 +127,7 @@ describe('@expo/agent-cli dev:stop', () => {
       // is not one listener).
       'portStillAnswering',
       'processStillRunning',
+      'reaped',
       'reason',
       'signal',
       'stopped',

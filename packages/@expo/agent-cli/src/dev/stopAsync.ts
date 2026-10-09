@@ -42,6 +42,7 @@ import { windowsTaskkillCommand } from '../utils/windowsShim';
 import { debugEvent, event } from './events';
 import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
 import { isProcessAlive } from './processLiveness';
+import { stopDevicesAsync, type StoppedDevices } from './stopDevices';
 import type { DevStopOptions } from './resolveStopOptions';
 
 /** How often to re-check whether the dev server has gone. */
@@ -87,7 +88,7 @@ export type DevStopForceRefusal =
  * @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract — one JSON object on stdout,
  * every key always present, and a fact the run does not have is null.
  */
-export interface DevStopResultJson {
+export interface DevStopResultJson extends Partial<StoppedDevices> {
   /** A dev server was running and is not running now. */
   stopped: boolean;
   /** PID that was signalled, or the listener's PID when one was found but not signalled. */
@@ -210,6 +211,8 @@ export async function devStopAsync(
   if (options.eas) {
     report.session = await stopProjectEasSessionAsync(projectRoot);
   }
+  const devServerOk = report.stopped || report.reason === 'not-running';
+  Object.assign(report, await stopDevicesAsync(projectRoot, options, devServerOk));
   report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
 
   event('stop_done', {
@@ -225,10 +228,9 @@ export async function devStopAsync(
     reason: report.reason,
   });
 
-  const devServerOk = report.stopped || report.reason === 'not-running';
   // A session that was asked to stop and did not is a thing still running — and billing.
   const sessionOk = report.session == null || report.session.stopped || report.session.id == null;
-  const exitCode = devServerOk && sessionOk ? EXIT_OK : EXIT_OUTCOME_FAILED;
+  const exitCode = devServerOk && sessionOk && !report.deviceError ? EXIT_OK : EXIT_OUTCOME_FAILED;
   onReport?.(report);
 
   // The event above is emitted whatever happens: a caller that suppresses the report is still
@@ -240,7 +242,7 @@ export async function devStopAsync(
       printHumanReport(report);
     }
     if (exitCode !== EXIT_OK) {
-      Log.error(explainFailure(report, options));
+      Log.error(report.deviceError ?? explainFailure(report, options));
     }
     reportFollowUps('dev:stop', report.followups, { json: options.json });
   }
@@ -273,7 +275,11 @@ async function stopProjectEasSessionAsync(
     };
   }
   const result = await stopEasSessionAsync(projectRoot, probe.sessionId);
-  debugEvent('stop_session', { sessionId: probe.sessionId, ok: result.ok });
+  debugEvent('stop_session', {
+    sessionId: probe.sessionId,
+    ok: result.ok,
+    platform: probe.platform,
+  });
   return { id: probe.sessionId, stopped: result.ok, reason: result.reason };
 }
 
@@ -621,6 +627,11 @@ function buildFollowUps(report: DevStopResultJson): FollowUp[] {
 }
 
 function printHumanReport(report: DevStopResultJson): void {
+  for (const device of report.devices ?? []) {
+    Log.log(
+      `${device.released ? 'Released' : 'Kept'} ${device.name}${device.reason ? `: ${device.reason}` : '.'}`
+    );
+  }
   const lines = [
     chalk`{bold Stopped} ${report.stopped ? chalk.green('yes') : chalk.red('no')}${
       report.forced ? chalk.dim(' · forced') : ''

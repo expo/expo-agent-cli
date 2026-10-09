@@ -845,6 +845,7 @@ describe(printStatusAsync, () => {
       'builds',
       'devServer',
       'device',
+      'binding',
       'skills',
       'auth',
       'next',
@@ -863,6 +864,7 @@ describe(printStatusAsync, () => {
     expect(Object.keys(JSON.parse(output())).sort()).toEqual([
       'assertion',
       'auth',
+      'binding',
       'builds',
       'devServer',
       'device',
@@ -888,6 +890,7 @@ describe(printStatusAsync, () => {
     expect(Object.keys(JSON.parse(output())).sort()).toEqual([
       'assertion',
       'auth',
+      'binding',
       'builds',
       'devServer',
       'device',
@@ -1005,16 +1008,10 @@ describe(printStatusAsync, () => {
         'skills-sync',
         'install-dev-client',
       ]);
-      // The dev server of this fixture is running with an app attached, so `next` is the readiness
-      // gate rather than `@expo/agent-cli dev` — and deliberately not `runtime:errors`, which the
-      // `runtime-errors` follow-up above already names.
-      //
-      // Either platform, because this case is not about which one. It runs the whole command, so the
-      // platform in `next` comes from the devices the host has (llp/0005 §Which platform is the
-      // caller's to say) — and pinning `--ios` here passed on a Mac and failed on the Linux runner
-      // [observed — tier0-linux, 2026-09-04]. `src/status/__tests__/sections-test.ts` is where the
-      // choice itself is pinned, against a fixture that states its device.
-      expect(report.next.command).toMatch(/^npx @expo\/agent-cli smoke --(ios|android)$/);
+      // The fixture has no worktree binding: status recommends binding before any device verb.
+      expect(report.next.command).toMatch(
+        /^npx @expo\/agent-cli dev --(ios|android) --detach --wait-ready$/
+      );
       expect(
         report.followups.map((followup: { command: string }) => followup.command)
       ).not.toContain(report.next.command);

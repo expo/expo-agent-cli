@@ -1,8 +1,7 @@
 // @ref llp/0031-ios-binding.plan.md §smoke
 // @ref llp/0032-android-instance.plan.md §Wiring
-// The boot dependency smoke hands its phases: both platforms bind through the registry and keep
-// the device; nothing is registered to put it back.
-import { acquireDeviceAsync } from '../../deviceBinding';
+// Smoke binds and releases only its own platform through the registry.
+import { acquireDeviceAsync, releaseWorktreeDevicesAsync } from '../../deviceBinding';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps } from '../smokeAsync';
 
@@ -10,6 +9,7 @@ vi.mock('../../log');
 vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),
   acquireDeviceAsync: vi.fn(),
+  releaseWorktreeDevicesAsync: vi.fn(async () => []),
 }));
 
 const projectRoot = '/project';
@@ -101,5 +101,24 @@ describe('bootDevice', () => {
     } finally {
       delete process.env.AGENT_CLI_NO_DEVICE;
     }
+  });
+});
+
+it('smoke releases only its acquired platform and binding', async () => {
+  const { androidBindingFor } = await import('../../deviceBinding/__tests__/fakeTools');
+  const binding = androidBindingFor(projectRoot, 'emulator-5554', { kind: 'explicit' });
+  vi.mocked(acquireDeviceAsync).mockResolvedValue({
+    binding,
+    device: binding.device,
+    action: 'reused',
+    justBooted: false,
+  });
+  vi.mocked(releaseWorktreeDevicesAsync).mockResolvedValue([]);
+  const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--android']));
+  await deps.bootDevice();
+  await deps.releaseDevice();
+  expect(releaseWorktreeDevicesAsync).toHaveBeenCalledWith(projectRoot, {
+    platform: 'android',
+    expected: binding,
   });
 });
