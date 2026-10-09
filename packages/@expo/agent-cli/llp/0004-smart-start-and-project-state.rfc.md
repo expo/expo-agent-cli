@@ -443,12 +443,17 @@ is the output the log file exists to hold. `buildDetachSpawn` is a pure function
 argv for that reason.
 
 The parent waits for the lock, not for the child. A detached start is finished when the
-lock answers. Under `--wait-ready` it then holds one `/status` request open, so `ready`
-is `true` or the wait failed. Without the flag `ready` is `null`.
+lock answers. Under `--wait-ready` it holds one `/status` request open while following
+that child's lock. A port change cancels the old request and checks the new URL within
+the remaining budget. A ready response naming another project never completes this wait;
+the parent keeps waiting for its own server. The missing-header compatibility rule in
+§A busy port still applies, with `projectRootMatched: null`. Final readiness checks also
+reject a foreign root. Without the flag `ready` is `null`.
 
 One detached dev server per project. The lock is read before anything is spawned. A
 project that already has one gets the running server reported back with
-`alreadyRunning: true` and exit 0. Two foreground servers in two terminals are a thing
+`alreadyRunning: true`; `--wait-ready` performs the same readiness check before exit 0,
+without spawning another child. Two foreground servers in two terminals are a thing
 people do on purpose. A second detached one is a process nobody could find.
 
 The log is one file per project, truncated per run: `.expo/dev/logs/dev-detached.log`. A

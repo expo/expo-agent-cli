@@ -9,15 +9,18 @@
 // The dev server is the stub `expo` bin, which holds the lock exactly as the real one does — the
 // wrapper is what takes the lock, and the wrapper is real here.
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 
 import {
   executeAgentCliAsync,
+  holdDevLockAsync,
   installStubFingerprintAsync,
   readDevLockAsync,
   readStubExpoInvocations,
   setupFixtureAsync,
+  startStubDevServerAsync,
   stubExpoEnv,
   waitForAsync,
 } from '../utils';
@@ -65,6 +68,71 @@ async function cleanUpAsync(projectRoot: string): Promise<void> {
 }
 
 describe('@expo/agent-cli dev --detach', () => {
+  it.each(['foreign', 'hanging'] as const)(
+    'follows its lock away from a %s status endpoint before reporting ready',
+    async (answer) => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const own = await startStubDevServerAsync({ projectRoot, statusDelayMs: 200 });
+      let moveTimer: ReturnType<typeof setTimeout> | undefined;
+      let oldRequestClosed = false;
+      const info = {
+        url: '',
+        port: 0,
+        pid: process.pid,
+        projectRoot,
+        startedAt: new Date().toISOString(),
+      };
+      const previous = http.createServer((request, response) => {
+        if (request.url !== '/status') {
+          response.writeHead(404).end();
+          return;
+        }
+        response.on('close', () => {
+          oldRequestClosed = true;
+        });
+        // Move only after the CLI has actually asked the old port, avoiding a startup-time race
+        // in the test itself. The lock payload is read anew for each connection.
+        moveTimer ??= setTimeout(() => Object.assign(info, { url: own.url, port: own.port }), 500);
+        if (answer === 'foreign') {
+          response.writeHead(200, {
+            'X-React-Native-Project-Root': encodeURI(path.join(projectRoot, '..', 'sibling')),
+          });
+          response.end('packager-status:running');
+        }
+      });
+      await new Promise<void>((resolve) => previous.listen(0, '127.0.0.1', resolve));
+      info.port = (previous.address() as net.AddressInfo).port;
+      info.url = `http://127.0.0.1:${info.port}`;
+      const release = await holdDevLockAsync(projectRoot, info);
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--web', '--detach', '--wait-ready', '--json'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
+        expect(result.exitCode, result.all).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          url: own.url,
+          port: own.port,
+          pid: process.pid,
+          alreadyRunning: true,
+          ready: true,
+          projectRootMatched: true,
+        });
+        expect(oldRequestClosed).toBe(true);
+        expect(readStubExpoInvocations(projectRoot)).toEqual([]);
+        // The CLI must neither stop nor reconfigure the foreign server while waiting.
+        expect(previous.listening).toBe(true);
+      } finally {
+        clearTimeout(moveTimer);
+        release();
+        previous.closeAllConnections();
+        await new Promise<void>((resolve) => previous.close(() => resolve()));
+        await own.close();
+      }
+    }
+  );
+
   // The whole finding, in one assertion: the command returns, and a dev server is running.
   it('returns while the dev server it started keeps running', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
