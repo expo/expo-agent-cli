@@ -18,6 +18,7 @@ vi.mock('../portListener', () => ({
 }));
 
 const root = '/work/app';
+const host = process.platform;
 const lock = {
   pid: 4141,
   port: 8081,
@@ -64,6 +65,8 @@ it('release-keeps-devices-when-server-is-replaced after a successful stop', asyn
     .mockResolvedValueOnce(lock)
     .mockResolvedValueOnce(null)
     .mockResolvedValue({ ...lock, pid: 4242 });
+  // The fixture mocks process.kill, so exercise the Unix signalling branch on every CI host.
+  Object.defineProperty(process, 'platform', { value: 'darwin' });
   const kill = vi.spyOn(process, 'kill').mockImplementation(() => {
     throw Object.assign(new Error('gone'), { code: 'ESRCH' });
   });
@@ -81,6 +84,7 @@ it('release-keeps-devices-when-server-is-replaced after a successful stop', asyn
     expect(releaseWorktreeDevicesAsync).not.toHaveBeenCalled();
   } finally {
     kill.mockRestore();
+    Object.defineProperty(process, 'platform', { value: host });
   }
 });
 
