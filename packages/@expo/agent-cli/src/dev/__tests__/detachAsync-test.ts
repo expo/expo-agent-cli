@@ -183,6 +183,128 @@ it('reports the port Metro logged, not the one the lock named before a retry', a
   expect(cliEvent).toHaveBeenCalledWith('dev_detach', expect.objectContaining({ port: 8393 }));
 });
 
+describe('readiness belongs to this worktree', () => {
+  const initialLock = {
+    url: 'http://127.0.0.1:8393',
+    port: 8393,
+    pid: 4242,
+    projectRoot,
+    startedAt: new Date(0).toISOString(),
+  };
+  const movedLock = { ...initialLock, url: 'http://127.0.0.1:8394', port: 8394 };
+  const foreign = {
+    ...readiness(),
+    projectRootMatched: false,
+    reportedProjectRoot: '/sibling',
+  };
+
+  function start() {
+    return devDetachAsync(
+      projectRoot,
+      {
+        ...resolveDevOptions(['--ios', '--detach', '--wait-ready', '--local', '--json']),
+        detachTimeoutMs: 5000,
+      },
+      { print: false }
+    );
+  }
+
+  it('waits past a foreign ready server and reports the port the child moves to', async () => {
+    const { event: cliEvent } = await import('../../events');
+    vi.mocked(waitForBundlerReadyAsync).mockImplementation(async (url) =>
+      url === initialLock.url ? foreign : readiness()
+    );
+    setTimeout(() => {
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(movedLock);
+    }, 1000);
+
+    const result = start();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
+    await vi.runAllTimersAsync();
+
+    await expect(result).resolves.toBe(0);
+    expect(cliEvent).toHaveBeenCalledWith(
+      'dev_detach',
+      expect.objectContaining({ port: 8394, url: movedLock.url, ready: true })
+    );
+  });
+
+  it('cancels a pending status request when the lock moves', async () => {
+    let oldSignal: AbortSignal | undefined;
+    vi.mocked(waitForBundlerReadyAsync).mockImplementation(async (url, { signal }) => {
+      if (url !== initialLock.url) return readiness();
+      oldSignal = signal;
+      await new Promise<void>((resolve) => signal!.addEventListener('abort', () => resolve()));
+      return readiness(false);
+    });
+    setTimeout(() => {
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(movedLock);
+    }, 1000);
+
+    const result = start();
+    await vi.advanceTimersByTimeAsync(3000);
+
+    expect(oldSignal?.aborted).toBe(true);
+    await expect(result).resolves.toBe(0);
+    expect(waitForBundlerReadyAsync).toHaveBeenCalledWith(
+      movedLock.url,
+      expect.objectContaining({ timeoutMs: expect.any(Number), projectRoot })
+    );
+  });
+
+  it('fails within the original budget when only a foreign server answers', async () => {
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValue(foreign);
+
+    const result = start().catch((error) => error);
+    await vi.runAllTimersAsync();
+
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_NOT_READY' });
+    expect((await result).message).toContain('/sibling');
+    expect(Date.now()).toBe(5000);
+  });
+
+  it('checks readiness even when reusing an existing server', async () => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(initialLock);
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValue(foreign);
+
+    const result = start().catch((error) => error);
+    await vi.runAllTimersAsync();
+
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_NOT_READY' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("relays the child's failure instead of waiting on a foreign server until timeout", async () => {
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValue(foreign);
+    setTimeout(() => {
+      fs.appendFileSync(logFile, 'Needs a human   macos-automation\n');
+      vi.mocked(isProcessAlive).mockReturnValue(false);
+    }, 1000);
+
+    const result = start().catch((error) => error);
+    await vi.runAllTimersAsync();
+
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_NEEDS_HUMAN', exitCode: 7 });
+    expect(Date.now()).toBe(1000);
+  });
+
+  it.each(['final check', 'grace'])(
+    'rejects a foreign server replacing ours during %s',
+    async (check) => {
+      const probe = vi.mocked(waitForBundlerReadyAsync);
+      probe.mockResolvedValueOnce(readiness());
+      if (check === 'grace') probe.mockResolvedValueOnce(readiness());
+      probe.mockResolvedValue(foreign);
+
+      const result = run().catch((error) => error);
+      await vi.runAllTimersAsync();
+
+      expect(await result).toMatchObject({ code: 'DEV_DETACH_NOT_ANSWERING' });
+    }
+  );
+});
+
 // A `run:*` build has not reached Metro yet, so `start.log` names no port. The lock's own
 // `startedAt` (the step's spawn) bounds the wait, as the port watch is bounded.
 describe('a lock whose port Metro has not logged', () => {
