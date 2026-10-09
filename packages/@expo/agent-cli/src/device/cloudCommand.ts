@@ -9,8 +9,8 @@ export const CLOUD_SESSION_MISMATCH = 'AGENT_CLI_CLOUD_SESSION_MISMATCH';
 // when this argument is forwarded through npx.cmd on Windows.
 export const CLOUD_SESSION_GUARD = `
 const { spawnSync } = require('node:child_process');
-const [expected, targetJson] = process.argv.slice(1);
-const target = JSON.parse(targetJson);
+const [expected, targetBase64] = process.argv.slice(1);
+const target = JSON.parse(Buffer.from(targetBase64, 'base64').toString('utf8'));
 if (process.env.EAS_SIMULATOR_SESSION_ID !== expected) {
   console.error('${CLOUD_SESSION_MISMATCH}'); process.exit(20);
 }
@@ -33,6 +33,8 @@ export function guardedCloudArgs(args: string[], sessionId?: string): string[] {
     CLOUD_SESSION_GUARD,
     '--',
     sessionId,
-    JSON.stringify(target),
+    // This target already contains cmd.exe escapes on Windows. Carry it as data through the
+    // outer npx.cmd invocation so that shell cannot consume escapes meant for the inner spawn.
+    Buffer.from(JSON.stringify(target), 'utf8').toString('base64'),
   ];
 }

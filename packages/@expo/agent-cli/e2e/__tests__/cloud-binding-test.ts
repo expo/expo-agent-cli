@@ -1,8 +1,11 @@
 // @ref llp/0034-eas-session-binding.plan.md §PR 5
 import fs from 'node:fs';
 import path from 'node:path';
+import { CLOUD_SESSION_MISMATCH, guardedCloudArgs } from '../../src/device/cloudCommand';
 import { digestForRoot } from '../../src/deviceBinding/registry';
 import type { Binding } from '../../src/deviceBinding/types';
+import { easCliArgs, resolveEasCli } from '../../src/utils/easCli';
+import { spawnSubprocessAsync } from '../../src/utils/subprocess';
 import {
   installStubEasAsync,
   readStubEasInvocations,
@@ -256,6 +259,45 @@ it('requested iOS binding wins over Android dotenv and refuses to drive that dif
       .filter((i) => i.executedSessionId)
       .map((i) => i.executedSessionId)
   ).toEqual(['ios-A']);
+});
+it('round-trips guarded cloud target argv and refuses before running on a session mismatch', async () => {
+  const root = await project();
+  const sessionId = 'argv-session';
+  await writeCloudSessionFileAsync(root, sessionId);
+  const env = envFor(root);
+  const easCli = resolveEasCli(root, { env });
+  expect(easCli).not.toBeNull();
+
+  const targetArgs = [
+    'space value',
+    'double"quote',
+    'caret^value',
+    '%PATH% value',
+    'ampersand&value',
+    'Unicode café 雪',
+    'two\nlines',
+  ];
+  const target = [
+    process.execPath,
+    '-e',
+    'process.stdout.write(JSON.stringify(process.argv.slice(1)))',
+    ...targetArgs,
+  ];
+  const runGuarded = (expectedSessionId: string) =>
+    spawnSubprocessAsync(
+      easCli!.command,
+      easCliArgs(easCli!, guardedCloudArgs(['simulator:exec', ...target], expectedSessionId)),
+      { cwd: root, env }
+    );
+
+  const accepted = await runGuarded(sessionId);
+  expect(accepted.exitCode, accepted.stderr).toBe(0);
+  expect(JSON.parse(accepted.stdout)).toEqual(targetArgs);
+
+  const refused = await runGuarded('another-session');
+  expect(refused.exitCode).toBe(20);
+  expect(refused.stderr).toContain(CLOUD_SESSION_MISMATCH);
+  expect(refused.stdout).toBe('');
 });
 it.each(['NEW', 'STOPPED'])(
   'a %s bound session refuses without rewriting its binding',
