@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 import { vol } from 'memfs';
 import { acquireCloudBindingAsync, ownCloudIdsAsync } from '../cloud';
 import { inspectBindingAsync } from '../inspect';
@@ -6,12 +7,15 @@ import { releaseWorktreeDevicesAsync } from '../release';
 import { reapDevicesAsync } from '../reap';
 import { bindingPathFor, readBindingFile, registryDirectory } from '../registry';
 import { fakeTools } from './fakeTools';
-const root = '/work/app';
-const other = '/work/other';
+const root = path.resolve('/work/app');
+const other = path.resolve('/work/other');
 const file = (r = root) => bindingPathFor(r, 'ios', 'cloud');
 beforeEach(() => {
   vol.reset();
-  vol.fromJSON({ [`${root}/package.json`]: '{}', [`${other}/package.json`]: '{}' });
+  vol.fromJSON({
+    [path.join(root, 'package.json')]: '{}',
+    [path.join(other, 'package.json')]: '{}',
+  });
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-10-08T10:00:00Z'));
 });
