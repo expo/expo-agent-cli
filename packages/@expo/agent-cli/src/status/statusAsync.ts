@@ -706,6 +706,8 @@ async function probeDevServerStatusAsync(
   const discovery = await raceWithTimeoutAsync(
     discoverDevServerAsync(options.devServerUrl ?? undefined, {
       timeoutMs,
+      // The `/status` read fits the window below, so a slow one is named, not cut off unexplained.
+      statusTimeoutMs: timeoutMs,
       projectRoot,
       signal: giveUp.signal,
     }),

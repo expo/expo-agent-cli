@@ -103,7 +103,12 @@ describe(readLastLoggedDevServerPort, () => {
 });
 
 describe(resolveDevServerPortAsync, () => {
-  const watch = { intervalMs: 1, timeoutMs: 50 };
+  const watch = {
+    isRunning: () => true,
+    intervalMs: 1,
+    timeoutMs: 50,
+    servesAnotherProject: async () => false,
+  };
 
   it(`resolves the port the dev server logged`, async () => {
     writeStartLog([{ port: 8090, at: 2000 }]);
@@ -116,6 +121,7 @@ describe(resolveDevServerPortAsync, () => {
   it(`waits for the log entry to appear`, async () => {
     const resolved = resolveDevServerPortAsync(projectRoot, ['start'], {
       since: 1000,
+      isRunning: () => true,
       intervalMs: 1,
       timeoutMs: 5000,
     });
@@ -154,8 +160,69 @@ describe(resolveDevServerPortAsync, () => {
         isRunning: () => false,
         intervalMs: 1000,
         timeoutMs: 60_000,
+        servesAnotherProject: async () => false,
       })
     ).resolves.toEqual({ port: DEFAULT_DEV_SERVER_PORT, source: 'default' });
     expect(Date.now() - startedAt).toBeLessThan(1000);
+  });
+
+  // A Metro of another project on `*:8081` answered the port this run fell back to, and the lock
+  // published it [observed — live suite, 2026-10-05: `status` read `source: 'lock'` with
+  // `projectRootMatched: false`].
+  it(`never falls back to a port another project's dev server answers, and keeps watching the log`, async () => {
+    let running = true;
+    const servesAnotherProject = vi.fn(async (port: number) => port === 8081);
+    const resolved = resolveDevServerPortAsync(projectRoot, ['start', '--port', '8081'], {
+      since: 1000,
+      intervalMs: 1,
+      timeoutMs: 10,
+      isRunning: () => running,
+      servesAnotherProject,
+    });
+    setTimeout(() => writeStartLog([{ port: 8095, at: 2000 }]), 40);
+
+    await expect(resolved).resolves.toEqual({ port: 8095, source: 'log' });
+    expect(servesAnotherProject).toHaveBeenCalledWith(8081);
+    running = false;
+  });
+
+  it(`publishes nothing when the dev server stops with only a foreign port to name`, async () => {
+    let running = true;
+    const onResolved = vi.fn();
+    const resolved = resolveDevServerPortAsync(projectRoot, ['start'], {
+      since: 1000,
+      intervalMs: 1,
+      timeoutMs: 10,
+      isRunning: () => running,
+      servesAnotherProject: async () => true,
+      onResolved,
+    });
+    setTimeout(() => (running = false), 40);
+
+    await expect(resolved).resolves.toBeNull();
+    expect(onResolved).not.toHaveBeenCalled();
+  });
+
+  it(`reads another project's root off the /status header of the fallback port`, async () => {
+    const http = require('http') as typeof import('http');
+    const server = http.createServer((_request, response) => {
+      response.writeHead(200, { 'X-React-Native-Project-Root': encodeURI('/somewhere/else') });
+      response.end('packager-status:running');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const port = (server.address() as import('net').AddressInfo).port;
+
+    try {
+      await expect(
+        resolveDevServerPortAsync(projectRoot, ['start', '--port', String(port)], {
+          since: 1000,
+          intervalMs: 1,
+          timeoutMs: 10,
+          isRunning: () => false,
+        })
+      ).resolves.toBeNull();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });

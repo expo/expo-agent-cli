@@ -10,6 +10,7 @@ import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../devLock'
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import type { CdpTarget } from './cdpClient';
+import { matchProjectRoot, readReportedProjectRootAsync } from './projectRootHeader';
 
 export { readLastLoggedDevServerPort };
 
@@ -162,10 +163,25 @@ export interface DevServerDiscovery extends DevServerProbe {
   discovered: boolean;
 }
 
+/** A dev server the scan reached that serves another project. */
+export interface ForeignDevServer {
+  port: number;
+  /** The project root the server named, decoded. */
+  projectRoot: string;
+}
+
 /** The two ways of describing one discovery step, so the sources and the flag stay in step. */
 function foundBy(source: DevServerSource): { source: DevServerSource; discovered: boolean } {
   return { source, discovered: source === 'lock' || source === 'log' || source === 'scan' };
 }
+
+/**
+ * How long a server that answered the probe gets to name its project root on `GET /status`. Longer
+ * than the probe's budget, so a `/status` that is slow but answers inside it is accepted; one that
+ * stalls past it is unproved, which callers show as not running. `status` passes its own, shorter
+ * budget, because it is a report with a deadline where `navigate` is an action.
+ */
+const STATUS_READ_TIMEOUT_MS = 3000;
 
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder — the five steps, what
 // each one proves, and why none may be skipped on the strength of a faster one.
@@ -174,9 +190,14 @@ function foundBy(source: DevServerSource): { source: DevServerSource; discovered
  * without one, 8081 is tried first and, only when it does not answer, the next few ports
  * `expo start` falls back to are scanned in parallel with a short timeout each.
  *
- * Caveat (documented, accepted): the scan cannot prove the server belongs to *this* project —
- * on a machine running two Metros, the first answering port wins. `--dev-server-url` is the
- * precise spelling.
+ * A server found by the log or the port scan must prove it is this project's: when `projectRoot`
+ * is given, the `X-React-Native-Project-Root` header of its `GET /status` is compared with it. A
+ * mismatch is a foreign server and the scan goes on; when nothing else matches, the result is
+ * unreachable and names the foreign servers in {@link DevServerProbe.foreignServers}. A server that
+ * sends no header (an older dev server) is accepted. A server whose `/status` does not answer
+ * within `statusTimeoutMs` proves nothing and is not accepted; the reason names it. A socket error
+ * on that read gets one retry.
+ * The explicit URL and the lock are trusted.
  *
  * @param signal the caller's own deadline, for a caller that has one. An **explicit** URL gets no
  *   timeout from this function on purpose — a dev server on another host or behind a tunnel may
@@ -188,9 +209,15 @@ export async function discoverDevServerAsync(
   explicitUrl?: string,
   {
     timeoutMs = 800,
+    statusTimeoutMs = STATUS_READ_TIMEOUT_MS,
     projectRoot,
     signal,
-  }: { timeoutMs?: number; projectRoot?: string; signal?: AbortSignal } = {}
+  }: {
+    timeoutMs?: number;
+    statusTimeoutMs?: number;
+    projectRoot?: string;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<DevServerDiscovery> {
   if (explicitUrl != null) {
     const probe = await probeDevServerAsync(explicitUrl, { signal });
@@ -260,39 +287,133 @@ export async function discoverDevServerAsync(
     }
   }
 
+  /** Judge a server that answered: this project's, foreign, or unproved. */
+  const judgeAsync = async (url: string): Promise<Judgement> => {
+    if (projectRoot == null) {
+      return { kind: 'accepted' };
+    }
+    let reported = await readReportedProjectRootAsync(url, statusTimeoutMs, signal);
+    if (reported.kind === 'unreachable' && !reported.timedOut) {
+      // One retry for a socket that hung up at once [observed]; a read that used its budget gets none.
+      reported = await readReportedProjectRootAsync(url, statusTimeoutMs, signal);
+    }
+    const port = Number(new URL(url).port);
+    switch (reported.kind) {
+      case 'no-header':
+        return { kind: 'accepted' };
+      case 'unreachable':
+        return { kind: 'unproved', port };
+      case 'header':
+        return matchProjectRoot(reported.root, projectRoot)
+          ? { kind: 'accepted' }
+          : { kind: 'foreign', server: { port, projectRoot: reported.root } };
+    }
+  };
+  const foreignServers: ForeignDevServer[] = [];
+  const unprovedPorts: number[] = [];
+  const recordRejected = (judged: Judgement) => {
+    if (judged.kind === 'foreign') {
+      foreignServers.push(judged.server);
+    } else if (judged.kind === 'unproved') {
+      unprovedPorts.push(judged.port);
+    }
+  };
+
   // Step 1 — the project's own log: `expo start` logs a `metro:instantiate` event with the port
   // into `.expo/dev/logs/start.log`. Project-scoped, but the log outlives the server that wrote
-  // it and names no PID, so the port is only a candidate until it answers a probe. This is what
-  // finds a dev server started by `expo start` directly, with no `@expo/agent-cli` wrapper to hold a lock.
+  // it and names no PID, so the port is only a candidate until it answers a probe *and* its
+  // `/status` names this project: another worktree's Metro can bind the port after the logged
+  // server is gone. This is what finds a dev server started by `expo start` directly, with no
+  // `@expo/agent-cli` wrapper to hold a lock.
   const loggedPort = projectRoot != null ? readLastLoggedDevServerPort(projectRoot) : null;
+  let judgedLoggedUrl: string | null = null;
   if (loggedPort != null && loggedPort !== 8081) {
     const loggedUrl = `http://127.0.0.1:${loggedPort}`;
     const loggedProbe = await withTimeout(loggedUrl);
     if (loggedProbe.reachable) {
-      return { ...loggedProbe, devServerUrl: loggedUrl, ...foundBy('log') };
+      const judged = await judgeAsync(loggedUrl);
+      if (judged.kind === 'accepted') {
+        return {
+          ...loggedProbe,
+          devServerUrl: loggedUrl,
+          ...foundBy('log'),
+        };
+      }
+      judgedLoggedUrl = loggedUrl;
+      recordRejected(judged);
     }
   }
 
   const defaultProbe = await withTimeout(DEFAULT_DEV_SERVER_URL);
   if (defaultProbe.reachable) {
-    return { ...defaultProbe, devServerUrl: DEFAULT_DEV_SERVER_URL, ...foundBy('default') };
+    const judged = await judgeAsync(DEFAULT_DEV_SERVER_URL);
+    if (judged.kind === 'accepted') {
+      return {
+        ...defaultProbe,
+        devServerUrl: DEFAULT_DEV_SERVER_URL,
+        ...foundBy('default'),
+      };
+    }
+    recordRejected(judged);
   }
 
-  const candidates = DEV_SERVER_SCAN_PORTS.slice(1).map((port) => `http://127.0.0.1:${port}`);
+  const candidates = DEV_SERVER_SCAN_PORTS.slice(1)
+    .map((port) => `http://127.0.0.1:${port}`)
+    .filter((url) => url !== judgedLoggedUrl);
   const probes = await Promise.all(
-    candidates.map(async (url) => ({ url, probe: await withTimeout(url) }))
+    candidates.map(async (url) => {
+      const probe = await withTimeout(url);
+      return { url, probe, judged: probe.reachable ? await judgeAsync(url) : null };
+    })
   );
-  const hit =
-    probes.find(({ probe }) => probe.reachable && probe.targets.length > 0) ??
-    probes.find(({ probe }) => probe.reachable);
+  for (const { judged } of probes) {
+    if (judged != null) {
+      recordRejected(judged);
+    }
+  }
+  const accepted = probes.filter(({ judged }) => judged?.kind === 'accepted');
+  const hit = accepted.find(({ probe }) => probe.targets.length > 0) ?? accepted[0];
   if (hit) {
-    return { ...hit.probe, devServerUrl: hit.url, ...foundBy('scan') };
+    return {
+      ...hit.probe,
+      devServerUrl: hit.url,
+      ...foundBy('scan'),
+    };
+  }
+
+  if (foreignServers.length > 0 || unprovedPorts.length > 0) {
+    const reasons: string[] = [];
+    if (foreignServers.length > 0) {
+      const named = foreignServers.map((s) => `${s.port} (${s.projectRoot})`).join(', ');
+      reasons.push(
+        `a dev server answered on port ${named}, but it serves another project, not ${projectRoot}`
+      );
+    }
+    if (unprovedPorts.length > 0) {
+      reasons.push(
+        `a dev server answered on port ${unprovedPorts.join(', ')}, but its /status did not answer within ${statusTimeoutMs}ms, so it is not shown to serve ${projectRoot}`
+      );
+    }
+    return {
+      reachable: false,
+      targets: [],
+      reason: reasons.join('; '),
+      ...(foreignServers.length > 0 ? { foreignServers } : {}),
+      devServerUrl: DEFAULT_DEV_SERVER_URL,
+      ...foundBy('default'),
+    };
   }
 
   // Nothing answered anywhere. The default URL is reported so the caller has a dev server to name
   // in its error, and `default` is the step that produced it.
   return { ...defaultProbe, devServerUrl: DEFAULT_DEV_SERVER_URL, ...foundBy('default') };
 }
+
+type Judgement =
+  | { kind: 'accepted' }
+  | { kind: 'foreign'; server: ForeignDevServer }
+  /** `/status` never answered, so the server could be anyone's. Not accepted. */
+  | { kind: 'unproved'; port: number };
 
 export interface DevServerProbe {
   /** The dev server answered the debugger target list. */
@@ -301,6 +422,11 @@ export interface DevServerProbe {
   targets: CdpTarget[];
   /** Why the dev server could not be reached, for the error message. */
   reason?: string;
+  /**
+   * Dev servers the port scan reached that serve another project. Set only when that is all it
+   * found, so "no dev server" is never said of a machine where another project's server answered.
+   */
+  foreignServers?: ForeignDevServer[];
 }
 
 /**

@@ -8,7 +8,7 @@ import type { ChangedFiles, ChangedSource, ImpactClass, OtaSafety } from '../imp
 import type { ConnectUrl } from '../navigate/connectUrl';
 import type { NativePlatform } from '../plan/types';
 import type { PlanStep, ProjectState, ProjectTarget } from '../project/types';
-import type { DevServerSource } from '../runtime/devServer';
+import type { DevServerSource, ForeignDevServer } from '../runtime/devServer';
 import type { PlanBuildLocation } from '../toolchain/types';
 
 /** Whether the installed development build can be proven to match the project. */
@@ -338,6 +338,12 @@ export interface DevServerStatus {
   openUrls: ConnectUrl[];
   /** Why the dev server did not answer. */
   reason?: string;
+  /**
+   * Dev servers that answered on the scanned ports for another project. Present only when that is
+   * all that answered, so a reader is not told "not running" while another project's server is up.
+   * @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder
+   */
+  foreignServers?: ForeignDevServer[];
 }
 
 /** One device this machine has, as the status report lists it. */

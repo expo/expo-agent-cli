@@ -37,6 +37,15 @@ function detachEnv(projectRoot: string, port: number): Record<string, string> {
   };
 }
 
+/** A port nothing listens on now, read back from a server bound to port 0. */
+async function freePortAsync(): Promise<number> {
+  const server = net.createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as net.AddressInfo;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
 /** Whether a pid is still alive, without signalling it. */
 function isAlive(pid: number): boolean {
   try {
@@ -125,15 +134,17 @@ describe('@expo/agent-cli dev --detach', () => {
   // `bare-app`, whose plan is the single step `expo run:ios` (`plan-test.ts`), and a stub that
   // stays alive without ever logging a port — which is what a compiler looks like from here. The
   // lock lands on its fallback port `PORT_WATCH_TIMEOUT_MS` in, and that wait is why this test is
-  // the slow one in this file: it is the wait the finding is about.
+  // the slow one in this file: it is the wait the finding is about. The fallback is the `--port`
+  // passed here, so a Metro of the developer's own on 8081 changes nothing (llp/0004 §Discovery ladder).
   it('says the plan is building rather than that a dev server started', async () => {
     const projectRoot = await setupFixtureAsync('bare-app');
     await installStubFingerprintAsync(projectRoot);
+    const port = await freePortAsync();
 
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['dev', '--detach', '--ios', '--local', '--json'],
+        ['dev', '--detach', '--ios', '--local', '--json', '--port', String(port)],
         {
           env: {
             ...stubExpoEnv(projectRoot),
@@ -150,7 +161,7 @@ describe('@expo/agent-cli dev --detach', () => {
       // The port is still reported — it is where the dev server will be — and it is not claimed to
       // be one: `ready` was never asked for, and nothing here says a dev server started.
       expect(report.ready).toBeNull();
-      expect(report.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+      expect(report.url).toBe(`http://127.0.0.1:${port}`);
     } finally {
       await cleanUpAsync(projectRoot);
     }
