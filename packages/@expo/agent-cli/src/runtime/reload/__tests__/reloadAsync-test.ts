@@ -17,6 +17,7 @@ import {
   type ReloadResultJson,
 } from '../reloadAsync';
 import type { ReloadOptions } from '../resolveOptions';
+import { guardedCloudTarget } from '../../../device/cloudCommand';
 
 vi.mock('../../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -1129,7 +1130,7 @@ describe('reloading an app on a cloud simulator session', () => {
     return vi.mocked(spawn).mock.calls.map(([bin, args]) => {
       const argv = (args as string[]) ?? [];
       if (argv.includes('simulator:exec') && argv.includes('-e')) {
-        const target = JSON.parse(argv.at(-1)!);
+        const target = guardedCloudTarget(argv);
         return [target.command, ...target.args].join(' ');
       }
       return [bin, ...argv].join(' ');

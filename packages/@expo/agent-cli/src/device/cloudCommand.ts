@@ -38,3 +38,8 @@ export function guardedCloudArgs(args: string[], sessionId?: string): string[] {
     Buffer.from(JSON.stringify(target), 'utf8').toString('base64'),
   ];
 }
+
+/** The controller target a guarded `simulator:exec` argv carries, decoded the way the guard does. */
+export function guardedCloudTarget(argv: string[]): { command: string; args: string[] } {
+  return JSON.parse(Buffer.from(argv.at(-1)!, 'base64').toString('utf8'));
+}
