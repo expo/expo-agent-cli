@@ -23,6 +23,7 @@ export interface StubEasInvocation {
   cwd: string;
   /** `CI` as the CLI under test passed it on, or null when it did not set one. */
   ci: string | null;
+  executedSessionId?: string;
 }
 
 /**
@@ -64,7 +65,11 @@ export async function installStubEasAsync(
   } else {
     await fs.promises.writeFile(scriptPath, script);
   }
-  await installStubEasRunnerAsync(binDir, scriptPath, { names, logFile });
+  await installStubEasRunnerAsync(binDir, scriptPath, {
+    names,
+    logFile,
+    agentDeviceController: true,
+  });
   return { binDir, scriptPath };
 }
 
@@ -81,9 +86,20 @@ export function readStubEasInvocations(projectRoot: string): StubEasInvocation[]
     .map((line) => JSON.parse(line) as StubEasInvocation);
 }
 
-/** The argv of every recorded stub `eas` invocation, in order. */
+/** Logical EAS commands and controller verbs; raw guard invocations remain available above. */
 export function stubEasArgs(projectRoot: string): string[][] {
-  return readStubEasInvocations(projectRoot).map((invocation) => invocation.args);
+  // The guard launch is transport detail. Its controller's invocation is the operation tests mean.
+  return readStubEasInvocations(projectRoot)
+    .filter(
+      ({ args }) =>
+        args[0] === '__controller' || !(args[0] === 'simulator:exec' && args[2] === '-e')
+    )
+    .map(({ args }) => {
+      if (args[0] === '__controller') {
+        return ['simulator:exec', 'npx', 'agent-device@latest', ...args.slice(1)];
+      }
+      return args;
+    });
 }
 
 /** The first word of every recorded stub `eas` invocation — the verbs, in order. */

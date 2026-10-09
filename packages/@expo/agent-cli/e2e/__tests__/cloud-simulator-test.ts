@@ -82,6 +82,8 @@ describe('@expo/agent-cli navigate --eas', () => {
       'simulator:list',
       '--status',
       'in-progress',
+      '--status',
+      'new',
       '--limit',
       '25',
       '--json',
@@ -135,23 +137,28 @@ describe('@expo/agent-cli navigate --eas', () => {
     // The listing, then the read-only availability question, and nothing that could start or bill
     // anything.
     expect(easInvocations(projectRoot)).toEqual([
-      ['simulator:list', '--status', 'in-progress', '--limit', '25', '--json', '--non-interactive'],
+      [
+        'simulator:list',
+        '--status',
+        'in-progress',
+        '--status',
+        'new',
+        '--limit',
+        '25',
+        '--json',
+        '--non-interactive',
+      ],
       ['simulator:availability', '--json', '--non-interactive'],
     ]);
   });
 
-  // The dotenv is no longer the gate: a session somebody else started — by MCP, or in another
-  // terminal — is this project's session, and the service is what says so.
-  it(`finds a session the service lists even with no dotenv on disk`, async () => {
+  // A listing alone does not authorize driving another worktree's session.
+  it(`refuses an unbound session even when it is the only session listed`, async () => {
     const projectRoot = await setupAsync('go-app');
-
     const result = await navigateCloud(projectRoot);
-
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      deviceBackend: 'cloud',
-      deviceId: 'sess-e2e',
-    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('other worktrees');
+    expect(easInvocations(projectRoot).map((args) => args[0])).toEqual(['simulator:list']);
   });
 
   // A running `serve-sim` session has no agent-device daemon in it. Saying "no session" would send

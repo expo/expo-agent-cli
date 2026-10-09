@@ -246,6 +246,7 @@ async function stopAppOnCloudAsync(params: StopAppParams): Promise<StopAppResult
 
   const result = await stopAppOnCloudSimulatorAsync({
     projectRoot: params.projectRoot,
+    sessionId: params.deviceId,
     appId: params.appId,
   });
   if (result.spawnError) {

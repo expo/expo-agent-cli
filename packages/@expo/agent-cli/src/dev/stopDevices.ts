@@ -42,7 +42,7 @@ export async function stopDevicesAsync(
             )
         );
         report.devices.push(...remaining);
-        if (report.devices.some((device) => !device.released))
+        if (report.devices.some((device) => device.backend !== 'cloud' && !device.released))
           report.deviceError = 'Some devices could not be released; see devices for details.';
       }
     }

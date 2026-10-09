@@ -438,6 +438,7 @@ export async function openUrlOnDeviceAsync(
     }
     const result = await openUrlOnCloudSimulatorAsync({
       projectRoot: params.projectRoot,
+      sessionId: params.deviceId,
       url: params.url,
       platform: params.platform,
     });

@@ -15,6 +15,7 @@ import { deviceUnavailableError } from '../../deviceBinding/errors';
 import * as Log from '../../log';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
 import { logCmdError, type CommandError } from '../../utils/errors';
+import { reopenEasAsync } from '../reopenEas';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
@@ -33,6 +34,7 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
   acquireDeviceAsync: vi.fn(),
 }));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
+vi.mock('../reopenEas', () => ({ reopenEasAsync: vi.fn() }));
 vi.mock('../processLiveness', () => ({ isProcessAlive: vi.fn() }));
 vi.mock('../events', () => ({ event: vi.fn() }));
 vi.mock('../../events', () => ({ event: vi.fn() }));
@@ -484,6 +486,12 @@ describe('the bound device', () => {
     ).resolves.toBe(0);
 
     expect(acquireDeviceAsync).not.toHaveBeenCalled();
+    if (argv.includes('--eas'))
+      expect(reopenEasAsync).toHaveBeenCalledWith(
+        projectRoot,
+        expect.objectContaining({ deviceBackend: 'eas' }),
+        running.url
+      );
   });
 
   it('reuses the worktree emulator on a running server when Android tools are available', async () => {

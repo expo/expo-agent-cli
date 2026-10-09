@@ -19,6 +19,7 @@
 // nobody can find, because only one of them can hold the lock that names it.
 
 import type { PlanPlatform } from '../plan/types';
+import { reopenEasAsync } from './reopenEas';
 import { spawn } from 'child_process';
 import fs from 'fs';
 
@@ -220,6 +221,8 @@ export async function devDetachAsync(
   // lock, so nothing would be able to find it or stop it afterwards.
   const running = await readDevServerLockAsync(projectRoot);
   if (running) {
+    if (reuseBoundDevice && options.deviceBackend === 'eas')
+      await reopenEasAsync(projectRoot, options, running.url);
     const platform = options.platform;
     if (
       reuseBoundDevice &&
