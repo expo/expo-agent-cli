@@ -1391,6 +1391,8 @@ describe(devAsync, () => {
     };
 
     beforeEach(() => {
+      // These cases model an iOS simulator host, regardless of the machine running the suite.
+      mockPlatform('darwin');
       vi.mocked(devicesDisabled).mockReturnValue(false);
       vi.mocked(acquireDeviceAsync).mockResolvedValue({
         device,
@@ -1409,19 +1411,22 @@ describe(devAsync, () => {
     });
 
     // non-darwin-host-binds-nothing
-    it(`acquires nothing for --ios on a host with no simulators, and pins no step`, async () => {
-      mockStaleDevClientState();
-      mockPlatform('linux');
-      try {
-        await devAsync(projectRoot, resolveDevOptions(['--ios', '--local']));
-      } finally {
-        mockPlatform(realPlatform);
+    it.each(['linux', 'win32'] as const)(
+      `acquires nothing for --ios on %s, and pins no step`,
+      async (platform) => {
+        mockStaleDevClientState();
+        mockPlatform(platform);
+        try {
+          await devAsync(projectRoot, resolveDevOptions(['--ios', '--local']));
+        } finally {
+          mockPlatform(realPlatform);
+        }
+        expect(acquireDeviceAsync).not.toHaveBeenCalled();
+        for (const [, args] of vi.mocked(runDevServerAsync).mock.calls) {
+          expect(args).not.toContain('--device');
+        }
       }
-      expect(acquireDeviceAsync).not.toHaveBeenCalled();
-      for (const [, args] of vi.mocked(runDevServerAsync).mock.calls) {
-        expect(args).not.toContain('--device');
-      }
-    });
+    );
 
     // withDevice-after-forwarded-args
     it(`binds after the refusals and pins the build step to the simulator, over a forwarded --device`, async () => {
