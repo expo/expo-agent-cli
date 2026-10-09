@@ -401,7 +401,10 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     ];
     const dev = await runLiveEasAsync(run, projectRoot, devArgs, {
       label: 'dev-public',
-      env: suiteEnv(),
+      // This machine only hosts Metro; the device lives in the EAS Simulator session below.
+      // `--no-open` still binds a local device on hosts with the Android SDK, so disable device
+      // acquisition for this one child invocation.
+      env: { ...suiteEnv(), AGENT_CLI_NO_DEVICE: '1' },
     });
     expectExit(dev, 0);
     expect(parseJson(dev).port).toBe(port);
