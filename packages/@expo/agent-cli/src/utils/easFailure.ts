@@ -20,6 +20,8 @@
 // both have answers to, and only one of them needs a person.
 
 /** What the EAS CLI's own words say, when they say something this CLI can act on. */
+import { stripVTControlCharacters } from 'node:util';
+
 import { PROGRAM_PREFIX } from '../programName';
 import { easCommandPrefix } from './easCli';
 import { runnerNoiseReason, withoutRunnerNoise } from './wrapperCrash';
@@ -143,9 +145,9 @@ export const classifyEasDeployFailure = classifyEasFailure;
  * What a failed `eas` run said, read the same way by every caller that quotes it.
  *
  * A recognised sentence first (llp/0027 §What EAS said), then substantive stderr, then stdout
- * (llp/0021 rules 11 and 14). Runner notices, progress and generic closing errors yield to an
- * explanation. On a cold scratch directory the runner writes install progress to stderr before
- * the CLI writes there, so the first line of stderr is often the runner's.
+ * (llp/0021 rules 11 and 14). Runner notices, eas-cli notices, progress and generic closing errors
+ * yield to an explanation. On a cold scratch directory the runner writes install progress to stderr
+ * before the CLI writes there, so the first line of stderr is often the runner's.
  */
 export type EasSaid =
   | { kind: 'cause'; cause: EasFailureCause }
@@ -153,21 +155,28 @@ export type EasSaid =
   | { kind: 'runner-only'; runnerLine: string }
   | { kind: 'nothing' };
 
-export function readEasFailure({ stdout, stderr }: { stdout: string; stderr: string }): EasSaid {
+export function readEasFailure(result: { stdout: string; stderr: string }): EasSaid {
+  // FORCE_COLOR in the caller's environment reaches eas-cli, and chalk then colors every line.
+  const stdout = stripVTControlCharacters(result.stdout);
+  const stderr = stripVTControlCharacters(result.stderr);
   const cause = classifyEasFailure(`${stdout}\n${stderr}`);
   if (cause) {
     return { kind: 'cause', cause };
   }
   const cliStderr = withoutRunnerNoise(stderr);
   const cliStdout = withoutRunnerNoise(stdout);
-  const errors = withoutEasProgress(cliStderr);
-  const output = withoutEasProgress(cliStdout);
+  const ranStderr = withoutEasNotices(cliStderr);
+  const ranStdout = withoutEasNotices(cliStdout);
+  const errors = withoutEasProgress(ranStderr);
+  const output = withoutEasProgress(ranStdout);
   const line =
     firstLine(errors, EAS_CLOSING_ERROR) ??
     firstLine(output, EAS_CLOSING_ERROR) ??
     firstLine(errors) ??
     firstLine(output) ??
-    // Progress alone is still evidence that EAS ran, e.g. before a deadline killed it.
+    // Progress and notices alone are still evidence that EAS ran, e.g. before a deadline killed it.
+    firstLine(ranStderr) ??
+    firstLine(ranStdout) ??
     firstLine(cliStderr) ??
     firstLine(cliStdout);
   if (line) {
@@ -205,6 +214,25 @@ export function easFailureReason(
  * use the other generic closing line (`EasCommand.catch`); their explanation is on stdout too.
  */
 const EAS_CLOSING_ERROR = /^Error: (?:\S+ command failed|GraphQL request failed)\.?$/;
+
+/**
+ * eas-cli warns on stderr before a command that reads the project, when the project depends on
+ * eas-cli, so a failed lookup's first stderr line is this notice, not its error
+ * [observed — eas-cli 23.2.0 and 24.12.x, `findProjectDirAndVerifyProjectSetupAsync`; live
+ * `build:list --json` on 24.12.1, 2026-10-09].
+ */
+const EAS_NOTICES = [
+  /^Found eas-cli in your (?:project|monorepo) dependencies\.$/,
+  /^It's recommended to use the "cli\.version" field in eas\.json\b/,
+  /^Learn more: https:\/\/github\.com\/expo\/eas-cli#enforcing-eas-cli-version-for-your-project$/,
+];
+
+function withoutEasNotices(output: string): string {
+  return output
+    .split('\n')
+    .filter((line) => !EAS_NOTICES.some((pattern) => pattern.test(line.trim())))
+    .join('\n');
+}
 
 /** Non-TTY ora progress and the successful creation receipt are not a reason a run failed. */
 function withoutEasProgress(output: string): string {

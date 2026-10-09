@@ -255,6 +255,51 @@ describe(readEasFailure, () => {
     });
   });
 
+  // eas-cli writes this to stderr whenever the project depends on eas-cli
+  // [observed — eas-cli 24.12.0, findProjectDirAndVerifyProjectSetupAsync.js].
+  const DEPENDENCY_NOTICE = [
+    'Found eas-cli in your project dependencies.',
+    'Found eas-cli in your monorepo dependencies.',
+    'It\'s recommended to use the "cli.version" field in eas.json to enforce the eas-cli version for your project.',
+    'Learn more: https://github.com/expo/eas-cli#enforcing-eas-cli-version-for-your-project',
+    '',
+  ].join('\n');
+
+  it('reads the explanation on stdout past the eas-cli dependency notice on stderr', () => {
+    expect(
+      readEasFailure({
+        stdout: 'Entity not authorized: Build (ID 123)\n',
+        stderr: `${DEPENDENCY_NOTICE}Error: build:list command failed.\n`,
+      })
+    ).toEqual({ kind: 'line', line: 'Entity not authorized: Build (ID 123)' });
+  });
+
+  it('reads past the notice when FORCE_COLOR made eas-cli color it', () => {
+    // Captured from eas-cli 24.12.1 with FORCE_COLOR=1, not logged in.
+    const colored =
+      '\u001b[33mFound \u001b[1meas-cli\u001b[22m in your project dependencies.\u001b[39m\n\u001b[33mIt\'s recommended to use the \u001b[1m"cli.version"\u001b[22m field in eas.json to enforce the \u001b[1meas-cli\u001b[22m version for your project.\u001b[39m\n\u001b[33m\u001b[2mLearn more: \u001b[4mhttps://github.com/expo/eas-cli#enforcing-eas-cli-version-for-your-project\u001b[24m\u001b[22m\u001b[39m\n\n';
+    expect(
+      readEasFailure({
+        stdout: 'Entity not authorized: Build (ID 123)\n',
+        stderr: `${colored}Error: build:list command failed.\n`,
+      })
+    ).toEqual({ kind: 'line', line: 'Entity not authorized: Build (ID 123)' });
+  });
+
+  it('prefers progress to the dependency notice when EAS said nothing else', () => {
+    expect(readEasFailure({ stdout: '- Fetching builds\n', stderr: DEPENDENCY_NOTICE })).toEqual({
+      kind: 'line',
+      line: '- Fetching builds',
+    });
+  });
+
+  it('keeps the dependency notice as evidence that EAS started when it is all EAS printed', () => {
+    expect(readEasFailure({ stdout: '', stderr: `${RUNNER}${DEPENDENCY_NOTICE}` })).toEqual({
+      kind: 'line',
+      line: 'Found eas-cli in your project dependencies.',
+    });
+  });
+
   it('reads a recognised sentence after the runner', () => {
     const said = readEasFailure({ stdout: '', stderr: `${RUNNER}Error: You are not logged in.\n` });
     expect(said.kind === 'cause' && said.cause.id).toBe('eas-login');
