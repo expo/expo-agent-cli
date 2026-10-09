@@ -26,6 +26,12 @@ export const EMULATOR_SERIAL = 'emulator-5554';
 export const EMULATOR_NAME = 'Pixel_9';
 export const SIMULATOR_UDID = 'E2E-SIM-0001';
 export const SIMULATOR_NAME = 'iPhone 17 Pro';
+/** One booted simulator, for `installStubXcrunAsync`'s `simulators`. */
+export const BOOTED_SIMULATOR = {
+  udid: SIMULATOR_UDID,
+  name: SIMULATOR_NAME,
+  state: 'Booted',
+} as const;
 /** The reachable phone in the `devicectl` fixture, with Developer Mode on. */
 export const PHONE_NAME = "Ada's iPhone";
 export const PHONE_UDID = '00001110-001111110110101A';
@@ -107,23 +113,42 @@ export async function installStubAdbAsync(
   return { env: { ANDROID_HOME: sdk }, calls: () => readCalls(recordPath) };
 }
 
+/** Where the stub `xcrun` marks the app as running: `openurl` writes it, `terminate` removes it. */
+export function appStartedMarkerPath(root: string): string {
+  return path.join(root, '.stub-app-started');
+}
+
+const STUB_RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
+
 /**
  * A stub `xcrun`, installed into `<root>/.stub-bin`, which has to be first on the `PATH` of the
  * process that spawns it.
  *
- * `simctl list devices booted` answers with one booted simulator when `booted` is given, whose app
- * container holds `booted.fingerprint` at the static-linking path; otherwise none. `devicectl list`
- * answers with the fixture phones when `phone` is given; a `launch` then answers the way the
- * dev-launcher responder does, posting `phone.fingerprint` to the callback URL carried by the
- * payload URL — after `phone.postDelayMs`, for a launch that is slow to answer.
+ * `simctl list devices` answers with one booted simulator when `booted` is given, whose app
+ * container holds `booted.fingerprint` at the static-linking path; otherwise with `simulators`
+ * (each `Shutdown` unless it says otherwise); otherwise none. The listing is state the stub keeps:
+ * `create` adds a `Shutdown` simulator whose udid is `E2E-CREATED-<n>`, `delete` removes one,
+ * `boot`, `bootstatus -b` and `shutdown` change its state, as a real `simctl` does. `list runtimes -j` names one
+ * iOS runtime.
+ *
+ * `openurl` and `terminate` mark the app started and stopped at {@link appStartedMarkerPath}.
+ * `terminate` refuses an app outside `runningAppIds` the way `simctl` does, when the list is given.
+ *
+ * `devicectl list` answers with the fixture phones when `phone` is given; a `launch` then answers
+ * the way the dev-launcher responder does, posting `phone.fingerprint` to the callback URL carried
+ * by the payload URL — after `phone.postDelayMs`, for a launch that is slow to answer.
  */
 export async function installStubXcrunAsync(
   root: string,
   {
     booted,
+    simulators,
+    runningAppIds,
     phone,
   }: {
     booted?: { fingerprint: string };
+    simulators?: { udid: string; name: string; state?: 'Booted' | 'Shutdown' }[];
+    runningAppIds?: string[];
     /** `postDelayMs` holds the POST back, the way a slow cold launch does. */
     phone?: { fingerprint: string | null; postDelayMs?: number };
   } = {}
@@ -137,13 +162,21 @@ export async function installStubXcrunAsync(
       JSON.stringify({ hash: booted.fingerprint, fingerprintVersion: '0.20.0', sources: [] })
     );
   }
-  const devices = booted
-    ? {
-        'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [
-          { udid: SIMULATOR_UDID, name: SIMULATOR_NAME, state: 'Booted' },
-        ],
-      }
-    : {};
+  const statePath = path.join(root, '.xcrun-simulators.json');
+  const counterPath = path.join(root, '.xcrun-created-count');
+  await fs.promises.writeFile(
+    statePath,
+    JSON.stringify(
+      booted
+        ? [{ udid: SIMULATOR_UDID, name: SIMULATOR_NAME, state: 'Booted' }]
+        : (simulators ?? []).map(({ udid, name, state }) => ({
+            udid,
+            name,
+            state: state ?? 'Shutdown',
+          }))
+    )
+  );
+  await fs.promises.rm(counterPath, { force: true });
   const binDir = path.join(root, '.stub-bin');
   const scriptPath = path.join(binDir, 'xcrun-stub.js');
   await fs.promises.mkdir(binDir, { recursive: true });
@@ -153,8 +186,55 @@ export async function installStubXcrunAsync(
       `const fs = require('fs');`,
       `const args = process.argv.slice(2);`,
       `fs.appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify(args) + '\\n');`,
+      `const statePath = ${JSON.stringify(statePath)};`,
+      `const sims = JSON.parse(fs.readFileSync(statePath, 'utf8'));`,
+      `const save = () => fs.writeFileSync(statePath, JSON.stringify(sims));`,
+      `const find = (udid) => sims.find((sim) => sim.udid === udid);`,
+      `const marker = ${JSON.stringify(appStartedMarkerPath(root))};`,
+      `if (args[0] === 'simctl' && args[1] === 'list' && args[2] === 'runtimes') {`,
+      `  process.stdout.write(JSON.stringify({ runtimes: [{ identifier: ${JSON.stringify(STUB_RUNTIME)}, name: 'iOS 26.0', version: '26.0', platform: 'iOS', isAvailable: true, supportedDeviceTypes: [{ identifier: 'com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro', name: ${JSON.stringify(SIMULATOR_NAME)}, productFamily: 'iPhone' }] }] }));`,
+      `  process.exit(0);`,
+      `}`,
       `if (args[0] === 'simctl' && args[1] === 'list') {`,
-      `  process.stdout.write(JSON.stringify({ devices: ${JSON.stringify(devices)} }));`,
+      `  const listed = args.includes('booted') ? sims.filter((sim) => sim.state === 'Booted') : sims;`,
+      `  process.stdout.write(JSON.stringify({ devices: listed.length ? { ${JSON.stringify(STUB_RUNTIME)}: listed } : {} }));`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args[0] === 'simctl' && args[1] === 'create') {`,
+      `  const n = (Number(fs.existsSync(${JSON.stringify(counterPath)}) ? fs.readFileSync(${JSON.stringify(counterPath)}, 'utf8') : 0)) + 1;`,
+      `  fs.writeFileSync(${JSON.stringify(counterPath)}, String(n));`,
+      `  sims.push({ udid: 'E2E-CREATED-' + n, name: args[2], state: 'Shutdown' });`,
+      `  save();`,
+      `  process.stdout.write('E2E-CREATED-' + n + '\\n');`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args[0] === 'simctl' && ['delete', 'boot', 'shutdown'].includes(args[1])) {`,
+      `  const sim = find(args[2]);`,
+      `  if (!sim) {`,
+      `    process.stderr.write('Invalid device: ' + args[2] + '\\n');`,
+      `    process.exit(148);`,
+      `  }`,
+      `  if (args[1] === 'delete') sims.splice(sims.indexOf(sim), 1);`,
+      `  else sim.state = args[1] === 'boot' ? 'Booted' : 'Shutdown';`,
+      `  save();`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args[0] === 'simctl' && args[1] === 'bootstatus') {`,
+      `  const sim = args.includes('-b') ? find(args[2]) : null;`,
+      `  if (sim) { sim.state = 'Booted'; save(); }`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args[0] === 'simctl' && args[1] === 'openurl') {`,
+      `  fs.writeFileSync(marker, '');`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args[0] === 'simctl' && args[1] === 'terminate') {`,
+      `  const running = ${JSON.stringify(runningAppIds ?? null)};`,
+      `  if (running && !running.includes(args[3])) {`,
+      `    process.stderr.write('An error was encountered processing the command: found nothing to terminate');`,
+      `    process.exit(4);`,
+      `  }`,
+      `  fs.rmSync(marker, { force: true });`,
       `  process.exit(0);`,
       `}`,
       `if (args[1] === 'get_app_container') {`,

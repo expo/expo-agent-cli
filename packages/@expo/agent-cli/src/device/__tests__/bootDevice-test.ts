@@ -6,14 +6,8 @@
 
 import path from 'path';
 
-import {
-  EMULATOR_SERIAL,
-  parseAvds,
-  parseSimulators,
-  pickSimulator,
-  resolveEmulator,
-  type SimulatorEntry,
-} from '../bootDevice';
+import { EMULATOR_SERIAL, parseAvds, pickSimulator, resolveEmulator } from '../bootDevice';
+import { parseSimulators, type SimulatorEntry } from '../simulators';
 
 /** A `simctl list devices -j` payload, in the shape the real tool prints. */
 function listing(devices: Record<string, unknown[]>): string {

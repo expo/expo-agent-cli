@@ -5,12 +5,12 @@ import path from 'path';
 
 import {
   parseBootedIosSimulator,
-  parseBootedIosSimulators,
   parseFirstAndroidDevice,
   probeAndroidDeviceAsync,
   probeIosSimulatorAsync,
   resolveDeviceAsync,
 } from '../device';
+import { parseBootedIosSimulators } from '../../device/simulators';
 
 const realPlatform = process.platform;
 

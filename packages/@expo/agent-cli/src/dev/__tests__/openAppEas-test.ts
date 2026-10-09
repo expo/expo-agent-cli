@@ -457,8 +457,9 @@ describe(openAppOnEasAsync, () => {
 });
 
 describe('the session half on its own', () => {
-  const { ensureEasSessionAsync, buildSessionStopArgs, stopEasSessionAsync } =
-    require('../openAppEas') as typeof import('../openAppEas');
+  const { ensureEasSessionAsync } = require('../openAppEas') as typeof import('../openAppEas');
+  const { buildSessionStopArgs, stopEasSessionAsync } =
+    require('../../device/eas') as typeof import('../../device/eas');
 
   it('describes smoke cleanup without asking the caller to stop its session', async () => {
     await ensureEasSessionAsync(projectRoot, {

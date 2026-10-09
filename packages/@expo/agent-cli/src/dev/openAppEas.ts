@@ -34,6 +34,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/easCli';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
+import { firstLine } from '../utils/text';
 import { parseCachedBuild } from '../impact/buildCache';
 import { fetchAdvertisedUrlAsync } from './advertisedUrl';
 import { event } from './events';
@@ -53,9 +54,6 @@ const TUNNEL_POLL_MS = 2_000;
  * (ten minutes) before this bound is reached [observed — expo-ci, 2026-09-06].
  */
 export const EAS_SESSION_START_TIMEOUT_MS = 15 * 60_000;
-
-/** How long `eas simulator:stop` may take. */
-export const EAS_SESSION_STOP_TIMEOUT_MS = 60_000;
 
 /** How long the `build:list` that names the build this run just made may take. */
 const BUILD_LOOKUP_TIMEOUT_MS = 60_000;
@@ -143,11 +141,6 @@ export function buildSessionStartArgs({
     '--name',
     name,
   ];
-}
-
-/** The argv that ends one session, by id — never the bare form, which stops whatever the dotenv names. */
-export function buildSessionStopArgs(sessionId: string): string[] {
-  return ['simulator:stop', '--id', sessionId, '--non-interactive'];
 }
 
 /** The `build:list` that names the newest finished simulator build of a platform. */
@@ -395,42 +388,6 @@ export async function ensureEasSessionAsync(
   return { ok: true, sessionId, started: true, tunnelHost, openUrl, sessionUrl, reason: null };
 }
 
-/**
- * End one session by id. Never throws.
- *
- * By id and never the bare `simulator:stop`, which stops whatever `.env.eas-simulator` names —
- * possibly a session somebody else is driving.
- */
-export async function stopEasSessionAsync(
-  projectRoot: string,
-  sessionId: string,
-  easCli: EasCli | null = resolveEasCli(projectRoot)
-): Promise<{ ok: boolean; reason: string | null }> {
-  if (!easCli) {
-    return { ok: false, reason: 'no "eas" or package runner is on PATH to stop the session with' };
-  }
-  const args = buildSessionStopArgs(sessionId);
-  const result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
-    cwd: projectRoot,
-    timeoutMs: EAS_SESSION_STOP_TIMEOUT_MS,
-  });
-  if (result.spawnError) {
-    return {
-      ok: false,
-      reason: `"${easCliLabel(easCli)} ${args[0]}" could not be run (${result.spawnError})`,
-    };
-  }
-  if (result.exitCode !== 0) {
-    return {
-      ok: false,
-      reason: `"${easCliLabel(easCli)} ${args.join(' ')}" exited ${result.exitCode}: ${
-        firstLine(result.stderr) || firstLine(result.stdout) || 'it printed nothing'
-      }`,
-    };
-  }
-  return { ok: true, reason: null };
-}
-
 export async function openAppOnEasAsync(
   projectRoot: string,
   options: OpenAppOnEasOptions
@@ -529,13 +486,4 @@ async function waitForTunnelHostAsync(
 /** The one line `dev` says about an open on EAS that did not happen, with the door that still works. */
 export function openAppOnEasFailureLine(platform: NativePlatform, reason: string): string {
   return `The app was not opened on an EAS Simulator session: ${reason}. The dev server is up; once a session is, "${PROGRAM_PREFIX} navigate / --eas --${platform}" opens the app on it.`;
-}
-
-function firstLine(text: string): string {
-  return (
-    text
-      .split('\n')
-      .find((line) => line.trim())
-      ?.trim() ?? ''
-  );
 }

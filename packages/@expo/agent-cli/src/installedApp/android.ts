@@ -5,10 +5,14 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { adbNotRunnableError, runAdbAsync, runAdbRawAsync } from '../device/adb';
+import {
+  adbNotRunnableError,
+  parseAndroidDevices,
+  runAdbAsync,
+  runAdbRawAsync,
+} from '../device/adb';
 import { androidPackagePathsAsync } from '../device/androidApps';
 import { androidDeviceNameAsync } from '../device/installDevBuild';
-import { parseAndroidDevices } from '../navigate/device';
 import {
   EOCD_MAX_LENGTH,
   LOCAL_HEADER_MAX_LENGTH,

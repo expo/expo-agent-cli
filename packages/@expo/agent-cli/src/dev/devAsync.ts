@@ -421,7 +421,7 @@ async function executePlanAsync(
             const session = await openTask;
             if (session?.started && session.sessionId) {
               const { stopEasSessionAsync } =
-                require('./openAppEas') as typeof import('./openAppEas');
+                require('../device/eas') as typeof import('../device/eas');
               const stopped = await stopEasSessionAsync(projectRoot, session.sessionId);
               if (stopped.ok) {
                 Log.progress(

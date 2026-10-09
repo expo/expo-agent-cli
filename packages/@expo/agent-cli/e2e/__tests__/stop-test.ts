@@ -12,63 +12,17 @@ import path from 'node:path';
 import {
   executeAgentCliAsync,
   holdDevLockAsync,
-  installStubBinAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
   stubExpoEnv,
 } from '../utils';
-
-const SIMULATOR_UDID = 'E2E-SIM-0001';
+import { BOOTED_SIMULATOR, installStubXcrunAsync, SIMULATOR_UDID } from './installedAppStubs';
 
 const EXPO_GO_TARGET = {
   id: '1',
   appId: 'host.exp.Exponent',
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=1&page=1',
 };
-
-/**
- * Install a stub `xcrun` that reports one booted simulator and records every invocation.
- *
- * `runningAppIds` is what `simctl terminate` will find something to terminate for. The default is
- * "anything", which keeps the argv assertions below about argv; a test that names the list gets
- * the real refusal instead — `simctl` exits non-zero with `found nothing to terminate` for an app
- * that was not running, and that is half of what tells a typo from an app that has already gone.
- */
-async function installStubXcrunAsync(
-  projectRoot: string,
-  { runningAppIds }: { runningAppIds?: string[] } = {}
-): Promise<() => string[][]> {
-  const logPath = path.join(projectRoot, '.stub-xcrun.jsonl');
-  const scriptPath = path.join(projectRoot, '.stub-bin', 'xcrun-stub.js');
-  await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
-  await fs.promises.writeFile(
-    scriptPath,
-    [
-      `const fs = require('fs');`,
-      `const args = process.argv.slice(2);`,
-      `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + '\\n');`,
-      `if (args[1] === 'list') {`,
-      `  process.stdout.write(JSON.stringify({ devices: { 'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [{ udid: ${JSON.stringify(SIMULATOR_UDID)}, name: 'iPhone 17 Pro', state: 'Booted' }] } }));`,
-      `}`,
-      `const running = ${JSON.stringify(runningAppIds ?? null)};`,
-      `if (args[1] === 'terminate' && running && !running.includes(args[3])) {`,
-      `  process.stderr.write('An error was encountered processing the command: found nothing to terminate');`,
-      `  process.exit(4);`,
-      `}`,
-      `process.exit(0);`,
-    ].join('\n')
-  );
-  await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'xcrun', scriptPath);
-
-  return () =>
-    fs.existsSync(logPath)
-      ? fs
-          .readFileSync(logPath, 'utf8')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => JSON.parse(line))
-      : [];
-}
 
 /**
  * A process that does nothing but stay alive and record the signal it was sent.
@@ -307,7 +261,9 @@ describe('@expo/agent-cli dev:stop', () => {
 describe('@expo/agent-cli runtime:stop', () => {
   it('terminates the connected app on the booted simulator', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const readXcrun = await installStubXcrunAsync(projectRoot);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
     const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET] });
 
     try {
@@ -340,7 +296,7 @@ describe('@expo/agent-cli runtime:stop', () => {
 
   it('prints one JSON object with a stable set of keys', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    await installStubXcrunAsync(projectRoot);
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
     const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET] });
 
     try {
@@ -377,7 +333,8 @@ describe('@expo/agent-cli runtime:stop', () => {
   // reporting some other app.
   it('exits 20 when --app-id names an app that is not the one connected', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const readXcrun = await installStubXcrunAsync(projectRoot, {
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
       runningAppIds: ['host.exp.Exponent'],
     });
     const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET] });
@@ -422,7 +379,7 @@ describe('@expo/agent-cli runtime:stop', () => {
   // nothing connected there is no second app for the id to disagree with.
   it('stays at 0 for a repeat stop with nothing connected', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    await installStubXcrunAsync(projectRoot, { runningAppIds: [] });
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], runningAppIds: [] });
     const stub = await startStubDevServerAsync({ targets: [] });
 
     try {
@@ -446,7 +403,9 @@ describe('@expo/agent-cli runtime:stop', () => {
 
   it('stops the id --app-id names', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const readXcrun = await installStubXcrunAsync(projectRoot);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
     const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET] });
 
     try {

@@ -32,6 +32,7 @@ import type { DeviceBackend } from '../navigate/device';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { resolveAdb, runAdbAsync, type AdbResolution } from './adb';
 import { simulatorHasAppAsync } from './installedApps';
+import { parseSimulators, type SimulatorEntry } from './simulators';
 
 /** The serial an emulator started with `-ports 5554,5555` is always listed under. */
 export const EMULATOR_SERIAL = 'emulator-5554';
@@ -133,82 +134,6 @@ export interface BootDeviceOptions {
    * {@link BootDeviceResult.installNeeded} tells the caller it has an install to do.
    */
   mayInstall?: boolean;
-}
-
-/** One simulator, as `simctl list devices -j` describes it. */
-export interface SimulatorEntry {
-  udid: string;
-  name: string;
-  /** The runtime identifier it is listed under, e.g. `com.apple.CoreSimulator.SimRuntime.iOS-26-0`. */
-  runtime: string;
-  /** iOS version as a comparable tuple, from the runtime identifier. */
-  version: number[];
-  state: string;
-  isAvailable: boolean;
-  /**
-   * When this device was last booted, as epoch milliseconds. Zero for one that never has been.
-   *
-   * The field that decides the choice, and it is not about recency for its own sake. **Apps are
-   * installed per device**, so a simulator nobody has ever booted has no Expo Go on it and no
-   * development build either — a run that booted one would spend a minute and then fail at the
-   * `app` phase against a device that could never have answered.
-   */
-  lastBootedAt: number;
-}
-
-/**
- * Read the bootable iOS simulators out of `simctl list devices -j`.
- *
- * Only iOS runtimes: a watchOS or tvOS simulator cannot run this project's app, and booting one
- * would be a minute spent on a device every phase after it would then fail against.
- *
- * Exported because it is the half of the iOS path that can be wrong without any simulator being
- * involved, and pinning it needs no Xcode.
- */
-export function parseSimulators(stdout: string): SimulatorEntry[] {
-  let parsed: {
-    devices?: Record<
-      string,
-      {
-        udid?: string;
-        name?: string;
-        state?: string;
-        isAvailable?: boolean;
-        lastBootedAt?: string;
-      }[]
-    >;
-  };
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return [];
-  }
-
-  const simulators: SimulatorEntry[] = [];
-  for (const [runtime, devices] of Object.entries(parsed.devices ?? {})) {
-    const version = runtime.match(/\.iOS-([\d-]+)$/)?.[1];
-    if (version == null || !Array.isArray(devices)) {
-      continue;
-    }
-    for (const device of devices) {
-      if (device?.udid) {
-        simulators.push({
-          udid: device.udid,
-          name: device.name ?? '',
-          runtime,
-          version: version.split('-').map(Number),
-          state: device.state ?? 'Unknown',
-          // Absent means available: `simctl` omits the key for the ordinary case and sets it false
-          // for a device whose runtime is gone.
-          isAvailable: device.isAvailable !== false,
-          // `simctl` omits the key entirely for a device that has never been booted, which is
-          // exactly the device this must not choose.
-          lastBootedAt: Date.parse(device.lastBootedAt ?? '') || 0,
-        });
-      }
-    }
-  }
-  return simulators;
 }
 
 /**
