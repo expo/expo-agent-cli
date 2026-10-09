@@ -1,4 +1,5 @@
 import fs from 'fs';
+import path from 'path';
 import { vol } from 'memfs';
 
 import { acquireDeviceAsync } from '..';
@@ -82,8 +83,8 @@ it('stop without inventory leaves an expired created simulator parked, and expli
 it('runs an already queued emulator kill when a later registry removal fails', async () => {
   const registry = await import('../registry');
   const directory = registry.registryDirectory();
-  const first = `${directory}/aaa-android-local-android.json`;
-  const second = `${directory}/zzz-android-local-android.json`;
+  const first = path.join(directory, 'aaa-android-local-android.json');
+  const second = path.join(directory, 'zzz-android-local-android.json');
   const origin = { kind: 'spawned' as const, avd: 'Pixel', port: 5554, emulatorPid: 5001 };
   const binding = androidBindingFor(OTHER, 'emulator-5554', origin, {
     expiresAt: '2020-01-01T00:00:00Z',
