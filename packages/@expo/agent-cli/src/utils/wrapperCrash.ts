@@ -182,60 +182,22 @@ const RUNNER_NOISE = [
 ];
 
 /**
- * Whether a failed runner spawn printed the **runner's** progress and no answer from the CLI.
+ * The output with the runner's own lines removed.
  *
- * @ref src/utils/runnerLock.ts — F93. Two spawns of one package spec share the runner's scratch
- * directory, and the loser exits 1 having printed nothing but its own install progress. Quoted into a
- * report field that holds a *reason*, that line reads as what EAS said about the caller's builds:
- * `reason: "Resolving dependencies"` [observed — live, 2026-08-27].
+ * @ref src/utils/runnerLock.ts — F93. Quoted into a report field that holds a *reason*, a runner's
+ * line reads as what EAS said about the caller's builds: `reason: "Resolving dependencies"`
+ * [observed — live, 2026-08-27]. On a cold scratch directory the runner prints first and the CLI
+ * prints after it on the same stream, so the CLI's sentence is the first line left
+ * [observed — 2026-10-05]. `readEasFailure` in `./easFailure.ts` is the one reader.
  *
- * Two halves, the same discipline {@link looksLikeWrapperCrash} follows — and **different** halves,
- * because the runner's noise *names the package*: `npm warn exec … will be installed: eas-cli@latest`
- * matches an EAS marker, so the marker veto that guards a wrapper crash would clear this every time.
- * What is required instead is:
- *
- *  1. **Nothing on stdout.** The EAS CLI puts its own refusals there — an unlinked project gets the
- *     whole `eas init` explanation on stdout with one sentence on stderr
- *     [observed — 2026-08-26, `src/__fixtures__/eas/README.md`] — so anything on stdout is an answer,
- *     whatever the runner also said.
- *  2. **Every non-empty line on stderr is the runner's.** The CLI can print its refusal after the
- *     runner's progress on the same stream. Any unrecognised line leaves that refusal to the caller
- *     instead of claiming the CLI never ran.
- */
-export function looksLikeRunnerNoise({ exitCode, stdout, stderr }: WrapperCrashInput): boolean {
-  if (exitCode === 0 || exitCode == null) {
-    return false;
-  }
-  if (stdout.trim()) {
-    return false;
-  }
-  return stderr.trim().length > 0 && !withoutRunnerNoise(stderr).trim();
-}
-
-/** The runner's own first line, which is the one a reason would otherwise have quoted. */
-export function runnerNoiseLine(stderr: string): string | null {
-  return firstNonEmptyLine(stderr);
-}
-
-/**
- * The output with the runner's own lines removed. On a cold scratch directory the runner prints
- * first and the CLI prints after it, on the same stream, so the CLI's sentence is the first line left.
+ * Not the marker veto that guards a wrapper crash: the runner's noise *names the package*, so
+ * `npm warn exec … will be installed: eas-cli@latest` matches an EAS marker.
  */
 export function withoutRunnerNoise(output: string): string {
   return output
     .split('\n')
     .filter((line) => !RUNNER_NOISE.some((pattern) => pattern.test(line.trim())))
     .join('\n');
-}
-
-function firstNonEmptyLine(output: string): string | null {
-  for (const raw of output.split('\n')) {
-    const line = raw.trim();
-    if (line) {
-      return line;
-    }
-  }
-  return null;
 }
 
 /**

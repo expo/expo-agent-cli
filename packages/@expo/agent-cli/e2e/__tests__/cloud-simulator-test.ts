@@ -551,6 +551,51 @@ describe('@expo/agent-cli smoke --eas', () => {
 });
 
 describe('@expo/agent-cli runtime:reload --eas', () => {
+  it('reports an inner agent-device install failure without blaming the EAS installation', async () => {
+    const projectRoot = await setupAsync('go-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    const stub = await startStubDevServerAsync({
+      projectRoot,
+      targets: [],
+      messageSocket: 'none',
+      manifestOrigin: 'https://stub-tunnel.example',
+    });
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: stub.url,
+      port: stub.port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:reload', '--eas', '--json', '--no-followups'],
+        {
+          reject: false,
+          env: {
+            STUB_SIM_EXEC_EXIT: '1',
+            STUB_SIM_STDERR:
+              'npm warn exec The following package was not found and will be installed: agent-device@latest',
+          },
+        }
+      );
+      expect(result.exitCode).toBe(20);
+      const report = JSON.parse(result.stdout);
+      const attempt = report.attempts.find((item: { method: string }) => item.method === 'device');
+      expect(attempt.ok).toBe(false);
+      expect(attempt.reason).toContain('installation output for "agent-device@latest"');
+      expect(attempt.reason).not.toContain('failed to deliver the eas CLI');
+      expect(result.stdout + result.stderr).not.toContain('install --save-dev');
+      expect(
+        easInvocations(projectRoot).filter((args) => args[0] === 'simulator:exec')
+      ).toHaveLength(1);
+    } finally {
+      await releaseLock();
+      await stub.close();
+    }
+  });
+
   // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — wave 19.
   //
   // The reload on a cloud session is **two** controller verbs, and this is where the argv leaving a

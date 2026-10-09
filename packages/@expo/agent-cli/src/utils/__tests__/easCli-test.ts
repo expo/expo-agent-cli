@@ -159,15 +159,16 @@ describe(resolveEasCliOrThrow, () => {
     // Errors are prompts (llp/0006). Not an install line for eas-cli: this CLI would have run the
     // published one, so what is broken is the Node install under it.
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
-    expect.assertions(5);
+    expect.assertions(6);
     try {
       resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV });
     } catch (error: any) {
       expect(error).toBeInstanceOf(CommandError);
       expect(error.code).toBe('EAS_CLI_MISSING');
       expect(error.message).toContain('no package runner');
-      expect(error.message).not.toContain('npm install -g eas-cli');
-      expect(error.suggestedCommand).toBe('npm install --save-dev eas-cli');
+      expect(error.message).toContain('on PATH');
+      expect(error.message).not.toContain('npm install');
+      expect(error.suggestedCommand).toBeUndefined();
     }
   });
 });

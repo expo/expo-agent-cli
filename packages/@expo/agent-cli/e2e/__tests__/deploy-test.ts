@@ -786,7 +786,8 @@ describe('@expo/agent-cli deploy', () => {
       expect(result.exitCode).toBe(1);
       expect(result.stderr).toContain('The EAS CLI could not be reached');
       expect(result.stderr).toContain('no package runner');
-      expect(result.stderr).toContain('Try: npm install --save-dev eas-cli');
+      expect(result.stderr).toContain('on PATH');
+      expect(result.stderr).not.toContain('npm install --save-dev eas-cli');
       // The export costs minutes, so the missing tool is found before it runs.
       expect(readStubExpoInvocations(projectRoot)).toEqual([]);
     });
