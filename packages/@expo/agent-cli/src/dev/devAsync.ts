@@ -6,6 +6,14 @@
 import type { OpenAppOnEasReport } from './openAppEas';
 import { outputTail } from '../deploy/parseOutput';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
+import {
+  acquireDeviceAsync,
+  acquireLine,
+  deviceIdOf,
+  devicesDisabled,
+  inspectBindingAsync,
+  type AcquireResult,
+} from '../deviceBinding';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
 import {
   buildStartPlanFollowUps,
@@ -56,6 +64,7 @@ import { event as devEvent } from './events';
 import {
   forwardedStepArgs,
   isDevServerStep,
+  withDevice,
   withDevServerPort,
   withForwardedExpoArgs,
   withPortArg,
@@ -86,18 +95,23 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // the child does the probe: this run's whole job is to start that child and report on it.
   if (options.detach) {
     const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
-    return await devDetachAsync(projectRoot, options);
+    return await devDetachAsync(projectRoot, options, { reuseBoundDevice: true });
   }
 
   const state = await probeProjectStateAsync(projectRoot, {
     fingerprintCache: options.fingerprintCache,
   });
+  // @ref llp/0031-ios-binding.plan.md §How `dev` uses it — the resolver binds the device for a
+  // draft that builds nothing, before its presence probe; a draft that builds is bound below, after
+  // the refusals, so no simulator is created for a run that then refuses.
+  const acquireDevice = deviceCallbackFor(projectRoot, options);
   // @ref llp/0015-backend-selection-and-config.rfc.md §The selection
   // One call that folds in everything outside the project: the developer's config, the flags they
   // typed, this host and the toolchain probe. The backend is chosen **here**, before the plan is
   // printed, so the steps an agent approves are the steps that run — never swapped mid-run
   // (llp/0008 §Plan-with-cost dry run).
-  const resolved = await resolveStartPlanAsync(projectRoot, state, {
+  const { plan: resolved, acquired: boundEarly } = await resolveStartPlanAsync(projectRoot, state, {
+    acquireDevice,
     // The caller's own flag, which the resolver requires: the plan builds for this platform and
     // `expo start` opens the app on it — booting a simulator or an emulator when none is up, the
     // same way `expo run:ios` and `expo run:android` do.
@@ -156,10 +170,19 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     );
   }
 
+  // A draft that builds is bound here, not in the resolver: after the port check above and the
+  // refusals below, so a run that refuses creates no simulator, and `--plan` only inspects.
+  const bindsHere = resolved.buildLocation != null;
+  let acquired = boundEarly;
+
   // @ref llp/0009-smart-followups.rfc.md §Examples per command
   // `--plan` stops here, so its follow-ups are about the plan itself and the plan object is the
   // whole answer.
   if (options.mode === 'plan') {
+    if (bindsHere) {
+      acquired = await acquireDevice(plan);
+    }
+    plan = withPlannedDevice(plan, acquired, options);
     const followups = followUpsEnabled(options.followups)
       ? // The typed flag, not the resolved platform: this is the plan the caller asked for, and the
         // command that runs it has to ask for the same one (F103).
@@ -179,6 +202,13 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
 
   if (options.deviceBackend !== 'eas' && plan.buildLocation?.runsOn === 'eas') {
     await assertEasProjectConfiguredAsync(projectRoot);
+  }
+
+  if (bindsHere) {
+    acquired = await acquireDevice(plan);
+  }
+  if (acquired) {
+    plan = withDevice(plan, deviceIdOf(acquired.device));
   }
 
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope
@@ -218,7 +248,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // above, and then it runs. `dev` was asked to get this app onto a device, and a build is how that
   // is done; there is no second act of consent, in a terminal or out of one. `--plan` is the run
   // that stops.
-  const run = await executePlanAsync(projectRoot, plan, state, options);
+  const run = await executePlanAsync(projectRoot, plan, state, options, acquired);
 
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope
   // A plan whose step failed has no result to report, so it reports a failure. It used to print
@@ -239,6 +269,77 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   }
 
   return run.exitCode;
+}
+
+/**
+ * The callback the resolver runs for a native draft, and `devAsync` runs for a draft that builds.
+ *
+ * @ref llp/0031-ios-binding.plan.md §How `dev` uses it
+ * iOS only, until llp/0032 binds Android, and on macOS only; nothing for `--eas`, whose device is
+ * a session; nothing under `AGENT_CLI_NO_DEVICE`. A run first refuses a named `--port` that is taken, when the draft
+ * serves, so no simulator is created for a run that then stops on the port. `--plan` inspects the
+ * own binding and acquires nothing.
+ */
+function deviceCallbackFor(
+  projectRoot: string,
+  options: DevOptions
+): (draft: StartPlan) => Promise<AcquireResult | null> {
+  return async (draft) => {
+    if (!bindsDevice(options)) {
+      return null;
+    }
+    if (options.mode === 'plan') {
+      return await inspectOwnDeviceAsync(projectRoot);
+    }
+    if (options.port != null && draft.steps.some(isDevServerStep)) {
+      const planned = await resolvePlannedPortAsync(options.port);
+      if (!planned.bindable) {
+        throw await portDemandedError(projectRoot, options.port, options.platform);
+      }
+    }
+    const acquired = await acquireDeviceAsync(projectRoot, 'ios');
+    Log.progress(acquireLine(acquired));
+    return acquired;
+  };
+}
+
+function bindsDevice(options: DevOptions): boolean {
+  // iOS simulators exist on macOS only; elsewhere `dev --ios` serves for a device somewhere else,
+  // an EAS session the caller opens itself, and binds nothing, as on main.
+  return (
+    options.platform === 'ios' &&
+    process.platform === 'darwin' &&
+    options.deviceBackend !== 'eas' &&
+    !devicesDisabled()
+  );
+}
+
+/** `--plan`'s read of the own binding: the device as `reused` when it is up or down, else null. */
+async function inspectOwnDeviceAsync(projectRoot: string): Promise<AcquireResult | null> {
+  const inspection = await inspectBindingAsync(projectRoot, 'ios', 'local-ios');
+  return inspection.binding && (inspection.state === 'up' || inspection.state === 'not-up')
+    ? { device: inspection.binding.device, justBooted: false, action: 'reused' }
+    : null;
+}
+
+/** The `--plan` view: the steps pinned to the bound device, or the reason none is pinned yet. */
+function withPlannedDevice(
+  plan: StartPlan,
+  acquired: AcquireResult | null,
+  options: DevOptions
+): StartPlan {
+  if (acquired) {
+    return withDevice(plan, deviceIdOf(acquired.device));
+  }
+  return bindsDevice(options)
+    ? {
+        ...plan,
+        reasons: [
+          ...plan.reasons,
+          'The run will reuse or create a simulator for this worktree, and pin the build steps to it.',
+        ],
+      }
+    : plan;
 }
 
 /**
@@ -350,7 +451,8 @@ async function executePlanAsync(
   projectRoot: string,
   plan: StartPlan,
   state: ProjectState,
-  options: DevOptions
+  options: DevOptions,
+  acquired: AcquireResult | null
 ): Promise<PlanRun> {
   const output = stepOutputFor(options);
   let devServer: DevServerRun | null = null;
@@ -409,7 +511,8 @@ async function executePlanAsync(
                 options,
                 server.url,
                 () => stepRunning,
-                easBuildId
+                easBuildId,
+                acquired
               );
             }
           : undefined,
@@ -1192,7 +1295,8 @@ async function openAppForRunAsync(
   options: DevOptions,
   devServerUrl: string,
   stillWanted: () => boolean,
-  easBuildId: string | null = null
+  easBuildId: string | null = null,
+  acquired: AcquireResult | null = null
 ): Promise<OpenAppOnEasReport | null> {
   const platform = options.platform as NativePlatform;
   if (options.deviceBackend === 'eas') {
@@ -1214,6 +1318,8 @@ async function openAppForRunAsync(
       devServerUrl,
       stillWanted,
       interactive: isInteractive(),
+      device: acquired?.device ?? null,
+      justBooted: acquired?.justBooted ?? false,
     });
     if (report.opened) {
       Log.progress(

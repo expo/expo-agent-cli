@@ -80,6 +80,7 @@ describe(buildDetachSpawn, () => {
 // 7's F61 and the 2026-08-26 live run's S4. Three facts in, one verdict out.
 describe(resolveDetachFailure, () => {
   const healthy = { exited: false, verdict: null, statusAnswering: true };
+  const noCode = { code: null, exitCode: null, data: null, suggestedCommand: null };
 
   it(`should let a live child with a live bundler through`, () => {
     expect(resolveDetachFailure(healthy)).toBeNull();
@@ -99,7 +100,7 @@ describe(resolveDetachFailure, () => {
     expect(
       resolveDetachFailure({
         exited: true,
-        verdict: { scenario: 'macos-automation', message: 'macOS refused' },
+        verdict: { scenario: 'macos-automation', message: 'macOS refused', ...noCode },
         statusAnswering: false,
       })
     ).toBe('needs-human');
@@ -109,7 +110,7 @@ describe(resolveDetachFailure, () => {
     expect(
       resolveDetachFailure({
         ...healthy,
-        verdict: { scenario: 'expo-prompt', message: 'Input is required' },
+        verdict: { scenario: 'expo-prompt', message: 'Input is required', ...noCode },
       })
     ).toBe('needs-human');
   });
@@ -119,7 +120,7 @@ describe(resolveDetachFailure, () => {
     expect(
       resolveDetachFailure({
         exited: true,
-        verdict: { scenario: null, message: 'CommandError: the plan stopped' },
+        verdict: { scenario: null, message: 'CommandError: the plan stopped', ...noCode },
         statusAnswering: true,
       })
     ).toBe('child-exited');

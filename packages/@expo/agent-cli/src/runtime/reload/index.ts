@@ -12,7 +12,7 @@ export const runtimeReloadHelp: CommandHelp = {
   options: [
     `--route <route>         Open this route once the app is back`,
     `--method <method>       auto (default), dev-server, runtime, or device`,
-    `--ios, --platform ios   Reload the app on the booted iOS simulator`,
+    `--ios, --platform ios   Reload the app on the iOS simulator bound to this worktree`,
     `--android               Reload the app on the attached Android device`,
     `--eas                   Reload the app on this project's EAS Simulator session`,
     `--scheme <scheme>       URL scheme for --route, instead of the one in app.json`,

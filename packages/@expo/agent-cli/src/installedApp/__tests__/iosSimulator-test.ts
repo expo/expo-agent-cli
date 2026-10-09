@@ -1,9 +1,6 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Proof
 import type { SpawnCaptureResult } from '../../utils/spawnCapture';
-import {
-  fingerprintCandidatePaths,
-  readInstalledFingerprintIosSimulatorAsync,
-} from '../iosSimulator';
+import { fingerprintCandidatePaths, readSimulatorsAsync } from '../iosSimulator';
 
 /** The file expo-constants embeds: the hash plus the version that produced it. */
 const embed = (hash: string, fingerprintVersion: string | null = '0.21.0') =>
@@ -24,20 +21,6 @@ function fakeSimctl(simulators: FakeSimulator[], files: Record<string, string>) 
     _command: string,
     args: string[]
   ): Promise<SpawnCaptureResult> => {
-    if (args[1] === 'list') {
-      return ok(
-        JSON.stringify({
-          devices: {
-            'com.apple.CoreSimulator.SimRuntime.iOS-26-0': simulators.map(({ udid, name }) => ({
-              udid,
-              name,
-              state: 'Booted',
-            })),
-            'com.apple.CoreSimulator.SimRuntime.watchOS-11-0': [{ udid: 'WATCH', name: 'Watch' }],
-          },
-        })
-      );
-    }
     const simulator = simulators.find((s) => s.udid === args[2]);
     if (!simulator?.container) {
       return { stdout: '', stderr: 'No such file or directory', exitCode: 2 };
@@ -54,98 +37,57 @@ function fakeSimctl(simulators: FakeSimulator[], files: Record<string, string>) 
   return { spawnCaptureAsync, readFile };
 }
 
-describe(readInstalledFingerprintIosSimulatorAsync, () => {
+const device = (simulator: FakeSimulator) => ({
+  identifier: simulator.udid,
+  name: simulator.name,
+});
+
+describe(readSimulatorsAsync, () => {
   const phone = { udid: 'UDID-1', name: 'iPhone 17 Pro', container: '/sims/1/App.app' };
 
   it.each(fingerprintCandidatePaths('/sims/1/App.app').map((p) => [p]))(
-    `reads the hash at %s`,
+    `reads the embedded file at %s`,
     async (filePath) => {
-      const fake = fakeSimctl([phone], { [filePath]: embed('abc123') });
+      const fake = fakeSimctl([phone], { [filePath]: embed('abc') });
+
       await expect(
-        readInstalledFingerprintIosSimulatorAsync({
-          expectedHash: 'abc123',
-          appId: APP_ID,
-          ...fake,
-        })
-      ).resolves.toEqual({
+        readSimulatorsAsync([device(phone)], APP_ID, 'abc', fake)
+      ).resolves.toMatchObject({
         status: 'ok',
-        hash: 'abc123',
+        hash: 'abc',
         fingerprintVersion: '0.21.0',
-        sources: [],
         appId: APP_ID,
-        device: { name: 'iPhone 17 Pro', identifier: 'UDID-1' },
+        device: device(phone),
       });
     }
   );
 
-  it(`answers no-embedded-fingerprint when the container holds no file`, async () => {
-    const fake = fakeSimctl([phone], {});
-    await expect(
-      readInstalledFingerprintIosSimulatorAsync({ expectedHash: 'x', appId: APP_ID, ...fake })
-    ).resolves.toMatchObject({ status: 'no-embedded-fingerprint' });
-  });
-
-  it(`answers app-not-installed when get_app_container fails`, async () => {
+  it(`answers app-not-installed when the container is refused`, async () => {
     const fake = fakeSimctl([{ ...phone, container: null }], {});
-    await expect(
-      readInstalledFingerprintIosSimulatorAsync({ expectedHash: 'x', appId: APP_ID, ...fake })
-    ).resolves.toMatchObject({ status: 'app-not-installed' });
-  });
 
-  it(`prefers the simulator whose app matches`, async () => {
-    const old = { udid: 'UDID-2', name: 'iPad', container: '/sims/2/App.app' };
-    const fake = fakeSimctl([old, phone], {
-      [fingerprintCandidatePaths(old.container)[0]!]: embed('old'),
-      [fingerprintCandidatePaths(phone.container)[0]!]: embed('current'),
+    await expect(readSimulatorsAsync([device(phone)], APP_ID, 'x', fake)).resolves.toMatchObject({
+      status: 'app-not-installed',
+      appId: APP_ID,
     });
-    await expect(
-      readInstalledFingerprintIosSimulatorAsync({
-        expectedHash: 'current',
-        appId: APP_ID,
-        ...fake,
-      })
-    ).resolves.toMatchObject({ status: 'ok', hash: 'current', device: { identifier: 'UDID-1' } });
   });
 
-  it(`only reads the simulator --device names, and answers no-device for a name nothing has`, async () => {
+  it(`answers no-embedded-fingerprint when neither candidate file exists`, async () => {
     const fake = fakeSimctl([phone], {});
-    await expect(
-      readInstalledFingerprintIosSimulatorAsync({
-        expectedHash: 'x',
-        appId: APP_ID,
-        device: 'iphone 17 pro',
-        ...fake,
-      })
-    ).resolves.toMatchObject({ status: 'no-embedded-fingerprint' });
-    await expect(
-      readInstalledFingerprintIosSimulatorAsync({
-        expectedHash: 'x',
-        appId: APP_ID,
-        device: 'Watch',
-        ...fake,
-      })
-    ).resolves.toEqual({ status: 'no-device' });
+
+    await expect(readSimulatorsAsync([device(phone)], APP_ID, 'x', fake)).resolves.toMatchObject({
+      status: 'no-embedded-fingerprint',
+    });
   });
 
-  it(`answers no-device when nothing is booted`, async () => {
-    const fake = fakeSimctl([], {});
-    await expect(
-      readInstalledFingerprintIosSimulatorAsync({ expectedHash: 'x', appId: APP_ID, ...fake })
-    ).resolves.toEqual({ status: 'no-device' });
-  });
+  it(`keeps the answer that matches the expected hash across simulators`, async () => {
+    const stale = { udid: 'UDID-2', name: 'iPad', container: '/sims/2/App.app' };
+    const fake = fakeSimctl([phone, stale], {
+      [fingerprintCandidatePaths(phone.container)[0]!]: embed('old'),
+      [fingerprintCandidatePaths(stale.container)[0]!]: embed('current'),
+    });
 
-  it(`throws XCRUN_NOT_RUNNABLE when xcrun cannot run`, async () => {
     await expect(
-      readInstalledFingerprintIosSimulatorAsync({
-        expectedHash: 'x',
-        appId: APP_ID,
-        spawnCaptureAsync: async () => ({
-          stdout: '',
-          stderr: '',
-          exitCode: null,
-          spawnError: Object.assign(new Error('spawn xcrun ENOENT'), { code: 'ENOENT' }),
-        }),
-      })
-    ).rejects.toMatchObject({ code: 'XCRUN_NOT_RUNNABLE' });
+      readSimulatorsAsync([device(phone), device(stale)], APP_ID, 'current', fake)
+    ).resolves.toMatchObject({ status: 'ok', hash: 'current', device: device(stale) });
   });
 });

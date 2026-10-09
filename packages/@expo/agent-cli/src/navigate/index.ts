@@ -9,7 +9,7 @@ export const navigateHelp: CommandHelp = {
   usage: `${PROGRAM_PREFIX} navigate <route>`,
   options: [
     `--scheme <scheme>       URL scheme of the app, instead of the one in app.json`,
-    `--ios                   Open the link on the booted iOS simulator`,
+    `--ios                   Open the link on the iOS simulator bound to this worktree`,
     `--android               Open the link on the attached Android device`,
     `--eas                   Open the link on this project's EAS Simulator session`,
     `--app-id <id>           Application id of the target app`,
@@ -25,11 +25,11 @@ export const navigateHelp: CommandHelp = {
   examples: [
     {
       run: `${PROGRAM_PREFIX} navigate /`,
-      gets: 'the app opens on a booted device, at the root route',
+      gets: 'the app opens on the bound device, at the root route',
     },
     {
       run: `${PROGRAM_PREFIX} navigate /profile/42 --ios`,
-      gets: 'that route opens on the booted iOS simulator',
+      gets: 'that route opens on the bound iOS simulator',
     },
     {
       run: `${PROGRAM_PREFIX} navigate "/search?q=shoes" --json`,

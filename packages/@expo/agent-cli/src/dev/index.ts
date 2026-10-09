@@ -63,7 +63,7 @@ export const devRunHelp: CommandHelp = {
   notes: [
     `One command, whatever the project needs: the plan decides whether to prebuild, build, or just`,
     `serve. The platform flag is required; once the dev server is up, the app is opened on that`,
-    `platform's device — booted, and Expo Go installed, when missing. --no-open skips that step.`,
+    `platform's simulator bound to this worktree, with Expo Go installed when missing. --no-open skips that step.`,
     `This command blocks: without --detach it holds this terminal until the dev server stops, so`,
     `the "Suggested next" commands cannot run in it. --detach starts the same server and exits.`,
     `A build runs in one of two places, and the plan picks before it prints. A local build`,

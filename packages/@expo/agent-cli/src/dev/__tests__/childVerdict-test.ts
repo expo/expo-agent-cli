@@ -3,13 +3,46 @@ import { stripVTControlCharacters } from 'util';
 import { needsHumanError } from '../../needsHuman/error';
 import { formatStartPlan } from '../../plan/format';
 import type { StartPlan } from '../../project/types';
-import { formatNeedsHumanBlock } from '../../utils/errors';
+import { noBoundDeviceError } from '../../deviceBinding/errors';
+import * as Log from '../../log';
+import {
+  formatErrorCodeRow,
+  formatNeedsHumanBlock,
+  logCmdError,
+  type CommandError,
+} from '../../utils/errors';
 import {
   parseDetachedChildPhase,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
   stepOpensPlatform,
 } from '../childVerdict';
+
+vi.mock('../../log');
+vi.mock('../../events', () => ({ event: vi.fn() }));
+vi.mock('../../exitCodes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../exitCodes')>()),
+  exitWithCodeAsync: vi.fn(() => new Promise<never>(() => {})),
+}));
+
+/**
+ * The log a detached child writes for a failure, produced by `logCmdError` itself under
+ * `__EXPO_AGENT_CLI_DETACHED=1` and captured off the log module, line by line.
+ */
+function childLogOf(error: CommandError): string[] {
+  vi.mocked(Log.exception).mockClear();
+  vi.mocked(Log.warn).mockClear();
+  process.env.__EXPO_AGENT_CLI_DETACHED = '1';
+  try {
+    void logCmdError(error);
+  } finally {
+    delete process.env.__EXPO_AGENT_CLI_DETACHED;
+  }
+  return [
+    ...vi.mocked(Log.exception).mock.calls.map(([printed]) => String(printed)),
+    ...vi.mocked(Log.warn).mock.calls.map((args) => args.join(' ')),
+  ];
+}
 
 /**
  * The log a child writes when it fails, built out of the functions that write it.
@@ -56,7 +89,40 @@ describe(parseDetachedChildVerdict, () => {
     expect(verdict).toEqual({
       scenario: null,
       message: 'CommandError: The plan stopped at "start".\nWhy: the bundler could not start.',
+      code: null,
+      exitCode: null,
+      data: null,
+      suggestedCommand: null,
     });
+  });
+
+  // @ref llp/0030-one-device-per-worktree.rfc.md §Output and errors — the row `logCmdError`
+  // writes for a detached child alone, read back with the `Try:` line, so a device refusal
+  // reaches the parent's caller as the child raised it.
+  it(`should read the code, the exit, the data and the Try line of a device refusal`, () => {
+    const refusal = noBoundDeviceError('none', { platform: 'ios' });
+    const verdict = parseDetachedChildVerdict(childLogOf(refusal));
+
+    expect(verdict).toMatchObject({
+      scenario: null,
+      code: 'NO_BOUND_DEVICE',
+      exitCode: 20,
+      data: { reason: 'none' },
+      suggestedCommand: 'npx @expo/agent-cli dev --ios --detach --wait-ready',
+    });
+    expect(verdict?.message).toBe(`CommandError: ${refusal.message}`);
+  });
+
+  it(`should take only the Try line next to the code row`, () => {
+    const verdict = parseDetachedChildVerdict([
+      'Try: npx something-earlier',
+      'Waiting on http://127.0.0.1:8081',
+      'CommandError: No ios device is bound to this worktree.',
+      'How: run the dev command.',
+      formatErrorCodeRow('NO_BOUND_DEVICE', 20),
+    ]);
+
+    expect(verdict).toMatchObject({ code: 'NO_BOUND_DEVICE', suggestedCommand: null });
   });
 
   it(`should keep the last error, which is the one the child stopped on`, () => {

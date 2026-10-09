@@ -234,7 +234,7 @@ export async function collectStatusReportAsync(
   const [project, devServer, device, skills, auth] = await Promise.all([
     attemptAsync(() => readProjectAsync(projectRoot, options)),
     attemptAsync(() => probeDevServerStatusAsync(projectRoot, options)),
-    attemptAsync(() => readLocalDeviceStatusAsync(options)),
+    attemptAsync(() => readLocalDeviceStatusAsync(projectRoot, options)),
     attemptAsync(() => readSkillsStatusAsync(projectRoot)),
     attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot)),
   ]);
@@ -661,10 +661,12 @@ async function attemptPlanAsync(
   const { resolveStartPlanAsync } =
     require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
   try {
-    return await resolveStartPlanAsync(projectRoot, state, {
-      platform: options.platform ?? resolveDefaultPlatform(state),
-      lastBuild,
-    });
+    return (
+      await resolveStartPlanAsync(projectRoot, state, {
+        platform: options.platform ?? resolveDefaultPlatform(state),
+        lastBuild,
+      })
+    ).plan;
   } catch {
     return null;
   }
@@ -753,9 +755,12 @@ async function probeDevServerStatusAsync(
  * rule the probe itself follows, because a suggestion turned off on the strength of a slow
  * subprocess would be the mistake this exists to fix, backwards.
  */
-async function readLocalDeviceStatusAsync(options: StatusOptions): Promise<LocalDeviceStatus> {
+async function readLocalDeviceStatusAsync(
+  projectRoot: string,
+  options: StatusOptions
+): Promise<LocalDeviceStatus> {
   const timeoutMs = options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS;
-  const probe = await raceWithTimeoutAsync(probeLocalDeviceAsync(), timeoutMs);
+  const probe = await raceWithTimeoutAsync(probeLocalDeviceAsync({ projectRoot }), timeoutMs);
   return buildLocalDeviceStatus(
     probe ?? {
       state: 'unknown',

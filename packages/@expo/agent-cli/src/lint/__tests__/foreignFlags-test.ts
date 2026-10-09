@@ -178,8 +178,6 @@ describe('the flags this CLI writes onto a command line', () => {
           "-d  src/device/installExpoGo.ts",
           "-extract  src/device/expoGoVersion.ts",
           "-extract  src/device/installedApps.ts",
-          "-j  src/device/bootDevice.ts",
-          "-j  src/navigate/device.ts",
           "-j  src/runtime/targetPlatform.ts",
           "-list-avds  src/device/bootDevice.ts",
           "-nP  src/dev/portListener.ts",
