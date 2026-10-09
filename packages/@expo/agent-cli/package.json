@@ -52,7 +52,7 @@
     "test:eval-fixture": "node evals/tier2/verify-fixture.mjs"
   },
   "devDependencies": {
-    "2g": "^0.4.3",
+    "2g": "1.0.0",
     "@clack/prompts": "1.7.0",
     "@expo/agent-eval-vitest": "0.0.2",
     "@expo/config": "~57.0.9",

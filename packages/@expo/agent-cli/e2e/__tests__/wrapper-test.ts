@@ -443,6 +443,12 @@ describe('expo passthrough', () => {
       .split('\n')
       .filter(Boolean)
       .map((line) => JSON.parse(line));
+    const initialized = events.filter((entry) => entry._e === 'root:init');
+    expect(initialized).toHaveLength(1);
+    expect(initialized[0]).toMatchObject({
+      version: JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../package.json'), 'utf8'))
+        .version,
+    });
     const forwarded = events.filter((entry) => entry._e === 'cli:expo_passthrough');
     expect(forwarded).toHaveLength(1);
     expect(forwarded[0]).toMatchObject({ command: 'export', args: ['--platform', 'web'] });
