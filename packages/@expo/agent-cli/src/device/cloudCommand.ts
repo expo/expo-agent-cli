@@ -5,6 +5,8 @@ export const CLOUD_SESSION_MISMATCH = 'AGENT_CLI_CLOUD_SESSION_MISMATCH';
 
 // Runs inside simulator:exec, after EAS loaded the ID and connection credentials together.
 // The child inherits that exact environment even if the worktree dotenv is replaced meanwhile.
+// Keep the static program on one line: cmd.exe treats literal newlines as command boundaries
+// when this argument is forwarded through npx.cmd on Windows.
 export const CLOUD_SESSION_GUARD = `
 const { spawnSync } = require('node:child_process');
 const [expected, targetJson] = process.argv.slice(1);
@@ -15,7 +17,7 @@ if (process.env.EAS_SIMULATOR_SESSION_ID !== expected) {
 const result = spawnSync(target.command, target.args, { stdio: 'inherit', env: process.env, shell: target.shell });
 if (result.error) console.error(result.error.message);
 process.exit(result.status ?? 1);
-`;
+`.replace(/\r?\n/g, ' ');
 
 export function guardedCloudArgs(args: string[], sessionId?: string): string[] {
   if (!sessionId)
