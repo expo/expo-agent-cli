@@ -162,7 +162,10 @@ export function runnerCrashReason(
  * Lines only a package **runner** prints: its own resolution, download and install progress.
  *
  * The vocabulary of two other tools, anchored where it can be. `bunx` writes the first three on every
- * run it has to install for [observed — bun 1.3.14], and npm's exec writes the rest.
+ * run it has to install for [observed — bun 1.3.14], and npm's exec writes the rest. `npx --yes`
+ * on an empty cache writes `npm warn deprecated …` before the CLI runs and `npm notice …` after it
+ * [observed — npm 10.9.4, 2026-10-07]. `npm error` is left out: that is the runner failing, and it is
+ * the reason.
  *
  * Deliberately not a list of every line either tool can print. It is the list of lines that mean
  * "I was still fetching the package", which is the only state that produces the failure this guards.
@@ -172,7 +175,7 @@ const RUNNER_NOISE = [
   /^Resolved,? downloaded and extracted\b/i,
   /^Saved lockfile\b/i,
   /^\s*[+-]?\s*installed \d+ packages?\b/i,
-  /^npm (warn|notice) exec\b/i,
+  /^npm (warn|notice)\b/i,
   /^Need to install the following packages\b/i,
   /^Ok to proceed\? \(y\)/i,
   /^bun install v/i,
@@ -195,10 +198,9 @@ const RUNNER_NOISE = [
  *     whole `eas init` explanation on stdout with one sentence on stderr
  *     [observed — 2026-08-26, `src/__fixtures__/eas/README.md`] — so anything on stdout is an answer,
  *     whatever the runner also said.
- *  2. **The first thing on stderr is the runner's.** The runner prints before it hands over, so a CLI
- *     that got as far as saying anything says it first. A first line this list does not recognise is
- *     left alone and quoted, which is the conservative direction: a vaguer reason costs a reader a
- *     re-run, and a wrong attribution costs them the truth.
+ *  2. **Every non-empty line on stderr is the runner's.** The CLI can print its refusal after the
+ *     runner's progress on the same stream. Any unrecognised line leaves that refusal to the caller
+ *     instead of claiming the CLI never ran.
  */
 export function looksLikeRunnerNoise({ exitCode, stdout, stderr }: WrapperCrashInput): boolean {
   if (exitCode === 0 || exitCode == null) {
@@ -207,13 +209,23 @@ export function looksLikeRunnerNoise({ exitCode, stdout, stderr }: WrapperCrashI
   if (stdout.trim()) {
     return false;
   }
-  const line = firstNonEmptyLine(stderr);
-  return line != null && RUNNER_NOISE.some((pattern) => pattern.test(line));
+  return stderr.trim().length > 0 && !withoutRunnerNoise(stderr).trim();
 }
 
 /** The runner's own first line, which is the one a reason would otherwise have quoted. */
 export function runnerNoiseLine(stderr: string): string | null {
   return firstNonEmptyLine(stderr);
+}
+
+/**
+ * The output with the runner's own lines removed. On a cold scratch directory the runner prints
+ * first and the CLI prints after it, on the same stream, so the CLI's sentence is the first line left.
+ */
+export function withoutRunnerNoise(output: string): string {
+  return output
+    .split('\n')
+    .filter((line) => !RUNNER_NOISE.some((pattern) => pattern.test(line.trim())))
+    .join('\n');
 }
 
 function firstNonEmptyLine(output: string): string | null {
@@ -231,8 +243,8 @@ function firstNonEmptyLine(output: string): string | null {
  *
  * The claim is about the **runner**, and it is the whole point: this is not the service refusing and
  * not a broken install of the package either — it is `bunx` or `npx` exiting before the CLI ran. So
- * the line it printed is quoted *as the runner's*, and the recovery is the one that removes the
- * runner from the path: pinning the CLI into the project.
+ * the line it printed is quoted *as the runner's*. A retry may finish the download; repeated failures
+ * need the runner's registry/network error, not a new dependency in the user's project.
  */
 export function runnerNoiseReason(
   { tool, exitCode }: Pick<WrapperCrashInput, 'tool' | 'exitCode'>,
@@ -241,10 +253,10 @@ export function runnerNoiseReason(
 ): string {
   const service = tool === 'eas' ? 'EAS' : 'the Expo CLI';
   return (
-    `"${invocation}" failed to deliver the ${tool} CLI: it exited ${exitCode} having printed only its own ` +
+    `"${invocation}" failed to deliver the ${tool} CLI: it exited ${exitCode ?? 'on a signal'} having printed only its own ` +
     `install progress${noiseLine ? ` ("${noiseLine}")` : ''} and nothing an ${tool} run would print, ` +
-    `so nothing here is ${service}'s answer — run it again, or pin the CLI into the project ` +
-    `("npm install --save-dev ${tool === 'eas' ? 'eas-cli' : 'expo'}") so no download can race`
+    `so nothing here is ${service}'s answer — run it again to retry the download; ` +
+    `if it keeps failing, check the runner's output and access to the package registry`
   );
 }
 

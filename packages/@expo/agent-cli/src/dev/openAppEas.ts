@@ -34,6 +34,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/easCli';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
+import { easFailureReason } from '../utils/easFailure';
 import { parseCachedBuild } from '../impact/buildCache';
 import { fetchAdvertisedUrlAsync } from './advertisedUrl';
 import { event } from './events';
@@ -382,9 +383,8 @@ export async function ensureEasSessionAsync(
     });
   }
   if (result.exitCode !== 0) {
-    const said = firstLine(result.stderr) || firstLine(result.stdout) || 'it printed nothing';
     return failed(
-      `"${easCliLabel(easCli)} ${args.join(' ')}" exited ${result.exitCode}: ${said}${
+      `${easFailureReason(result, `${easCliLabel(easCli)} ${args.join(' ')}`)}${
         sessionId
           ? ` — the session ${sessionId} was created before it failed and may be billing; "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`
           : ''
@@ -423,9 +423,7 @@ export async function stopEasSessionAsync(
   if (result.exitCode !== 0) {
     return {
       ok: false,
-      reason: `"${easCliLabel(easCli)} ${args.join(' ')}" exited ${result.exitCode}: ${
-        firstLine(result.stderr) || firstLine(result.stdout) || 'it printed nothing'
-      }`,
+      reason: easFailureReason(result, `${easCliLabel(easCli)} ${args.join(' ')}`),
     };
   }
   return { ok: true, reason: null };

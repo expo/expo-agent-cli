@@ -1,5 +1,6 @@
 // @ref llp/0027-everything-on-eas.rfc.md §The open is a session
 import * as Log from '../../log';
+import simulatorFailures from '../../__fixtures__/eas/simulator-failures.json';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { resolveEasCli } from '../../utils/easCli';
@@ -444,6 +445,62 @@ describe(openAppOnEasAsync, () => {
     expect(report.reason).toContain('npx --yes eas-cli@latest simulator:stop --id sess-billed');
   });
 
+  it('quotes a non-TTY startup timeout and preserves the created session for cleanup', async () => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValue(simulatorFailures.start);
+    const report = await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+    expect(report).toMatchObject({ opened: false, started: true, sessionId: 'sess-billed' });
+    expect(report.reason).toContain('exited 1: ✖ Timed out');
+    expect(report.reason).toContain('simulator:stop --id sess-billed');
+    expect(report.sessionUrl).toContain('/simulator-sessions/sess-billed');
+  });
+
+  // @ref llp/0021-honest-reports.rfc.md §The rules — rules 11 and 14 [observed — bunx on a
+  // half-written scratch directory, 2026-10-05].
+  it.each([
+    [
+      'the first line after the runner progress',
+      'Resolving dependencies\nTypeError: (0 , minimatch_1.minimatch) is not a function\n',
+      'exited 1: TypeError: (0 , minimatch_1.minimatch) is not a function',
+      false,
+    ],
+    [
+      'that the runner did not deliver the CLI when the runner printed nothing else',
+      'Resolving dependencies\nResolved, downloaded and extracted [214]\n',
+      'failed to deliver the eas CLI',
+      true,
+    ],
+    [
+      'the session a cold start created, not that EAS never ran',
+      'Resolving dependencies\nSimulator session created (id: sess-billed)\nTimed out after 600s\n',
+      'simulator:stop --id sess-billed',
+      false,
+    ],
+  ])(`quotes %s`, async (_, stderr, expected, runnerOnly) => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: '',
+      stderr,
+      exitCode: 1,
+      spawnError: null,
+    } as any);
+
+    const report = await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+
+    expect(report.opened).toBe(false);
+    expect(report.reason).toContain(expected);
+    expect(report.reason).not.toContain('exited 1: Resolving dependencies');
+    expect(report.reason!.includes('failed to deliver the eas CLI')).toBe(runnerOnly);
+  });
+
   it(`says when no eas can be run at all`, async () => {
     vi.mocked(resolveEasCli).mockReturnValue(null);
     const report = await openAppOnEasAsync(projectRoot, {
@@ -483,6 +540,24 @@ describe('the session half on its own', () => {
       'sess-1',
       '--non-interactive',
     ]);
+  });
+
+  it('quotes the failed stop after non-TTY progress', async () => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValue(simulatorFailures.stop);
+    const result = await stopEasSessionAsync(projectRoot, 'sess-billed', EAS_CLI);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('exited 1: ✖ Failed to stop simulator session sess-billed');
+  });
+
+  it('reports a runner-only stop interrupted by a signal', async () => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      exitCode: null,
+      stdout: '',
+      stderr: 'Resolving dependencies\n',
+    });
+    const result = await stopEasSessionAsync(projectRoot, 'sess-billed', EAS_CLI);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('exited on a signal');
   });
 
   it(`reports a stop that took, and quotes one that did not`, async () => {
