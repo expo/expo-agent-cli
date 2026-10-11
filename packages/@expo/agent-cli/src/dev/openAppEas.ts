@@ -340,23 +340,7 @@ async function ensureSessionAsync(
   //    way `navigate` resolves it, so the two commands never disagree about the link.
   let openUrl: string;
   try {
-    const resolved = await resolveRouteUrlAsync(projectRoot, {
-      route: '/',
-      platform,
-      devServerUrl: options.devServerUrl,
-      devServerUrlSource: 'discovered',
-      routeCheck: false,
-      command: 'navigate',
-    });
-    const target = options.expoGo ? 'expo-go' : 'dev-build';
-    const connect = resolved.connect.find((entry) => entry.target === target);
-    if (!connect) {
-      return failed(
-        `no URL to point ${options.expoGo ? 'Expo Go' : 'the development build'} at this dev server could be built — ${resolved.resolution}`,
-        { tunnelHost }
-      );
-    }
-    openUrl = connect.url;
+    openUrl = await resolveEasOpenUrlAsync(projectRoot, options, tunnelHost);
   } catch (error: unknown) {
     return failed(error instanceof Error ? firstLine(error.message) : String(error), {
       tunnelHost,
@@ -472,10 +456,8 @@ export async function openAppOnEasAsync(
     return { ...base, opened: true, reason: null };
   }
 
-  // A session that was already up gets the deep link the way `navigate --eas` sends it, and that
-  // link names the host the dev server advertises. `dev --eas` tunnels its dev server, and the
-  // tunnel comes up after Metro answers: a link sent before it names the loopback, which a session
-  // on EAS cannot load. So the open waits for the tunnel, as a session this run starts does.
+  // The session can outlive Metro and its tunnel. Wait for the current tunnel before opening the
+  // app, just as when starting a session; a cloud device cannot reach this machine's loopback.
   const tunnelHost = await waitForTunnelHostAsync(options, stillWanted);
   if (!tunnelHost) {
     return {
@@ -490,8 +472,17 @@ export async function openAppOnEasAsync(
     `Opening the app on EAS Simulator session ${session.sessionId}, which is already up.`
   );
   try {
+    // A development build's bare scheme only navigates the app it already loaded. Send the
+    // launcher URL used for a new session so a reused session loads this Metro's current tunnel.
+    // Expo Go's route URL already contains that host, so its existing open stays unchanged.
+    const route = options.expoGo
+      ? '/'
+      : await resolveEasOpenUrlAsync(projectRoot, options, tunnelHost);
+    if (!stillWanted()) {
+      return { ...base, opened: false, reason: 'the dev server stopped before the app was opened' };
+    }
     const result = await openRouteAsync(projectRoot, {
-      route: '/',
+      route,
       platform,
       devServerUrl: options.devServerUrl,
       devServerUrlSource: 'discovered',
@@ -515,6 +506,40 @@ export async function openAppOnEasAsync(
   }
   event('open_app_eas_opened', { platform, sessionId: session.sessionId, started: false });
   return { ...base, opened: true, reason: null };
+}
+
+/** The connection URL for the app the plan selected, shared by new and reused sessions. */
+async function resolveEasOpenUrlAsync(
+  projectRoot: string,
+  options: EnsureEasSessionOptions,
+  tunnelHost: string
+): Promise<string> {
+  const resolved = await resolveRouteUrlAsync(projectRoot, {
+    route: '/',
+    platform: options.platform,
+    devServerUrl: options.devServerUrl,
+    devServerUrlSource: 'discovered',
+    routeCheck: false,
+    command: 'navigate',
+  });
+  const target = options.expoGo ? 'expo-go' : 'dev-build';
+  const connect = resolved.connect.find((entry) => entry.target === target);
+  if (!connect) {
+    throw new Error(
+      `no URL to point ${options.expoGo ? 'Expo Go' : 'the development build'} at this dev server could be built — ${resolved.resolution}`
+    );
+  }
+  // Full URL routes bypass openRoute's host check. Refuse a resolver fallback to LAN/loopback or
+  // a stale host if the tunnel changed between the manifest poll and connection URL resolution.
+  const serverUrl = options.expoGo
+    ? connect.url
+    : new URL(connect.url).searchParams.get('__expo_url');
+  if (!serverUrl || new URL(serverUrl).host !== tunnelHost) {
+    throw new Error(
+      'the connection URL does not point at the current tunnel — retry once the tunnel is ready'
+    );
+  }
+  return connect.url;
 }
 
 /** The dev server's advertised tunnel host, polled for until it appears or the wait runs out. */
