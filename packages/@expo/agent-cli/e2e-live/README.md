@@ -10,9 +10,10 @@ To exercise isolation manually, open two checkouts and run the following in each
 
 ```sh
 npx expo-agent-cli dev --ios --detach --wait-ready --port 8081
+npx expo-agent-cli status --json
 ```
 
-In the first checkout, run
+The `binding` arrays should name different devices. In the first checkout, run
 `npx expo-agent-cli dev:stop`, then start it again: it should reuse its simulator. Run
 `npx expo-agent-cli dev:stop --release --json` in each checkout to park the simulators
 (or end spawned Android instances). For explicit selection, assign a different simulator
