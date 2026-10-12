@@ -107,6 +107,14 @@ describe('device lifecycle across two worktrees', () => {
           .sort()
       ).toEqual([first.runDevice, second.runDevice].sort());
 
+      const plan = await executeAgentCliAsync(
+        projects[1]!,
+        ['dev', '--ios', '--local', '--plan', '--device', first.runDevice!, '--json'],
+        { env: envFor(projects[1]!) }
+      );
+      expect(JSON.parse(plan.stdout).reasons).toContainEqual(
+        expect.stringContaining(`is bound to the worktree ${first.projectRoot}`)
+      );
       expect(bindings()).toHaveLength(2);
 
       const kept = await executeAgentCliAsync(projects[0]!, ['dev:stop', '--json'], {

@@ -334,3 +334,29 @@ describe('--eas puts the device on EAS', () => {
     expect(options.expoArgs).toEqual(['--tunnel']);
   });
 });
+
+describe('--device', () => {
+  it.each([['--device', 'My iPhone'], ['--device=My iPhone']])(
+    'owns the selection and carries it into the detached child (%s)',
+    (...flag) => {
+      const argv = ['--ios', '--detach', ...flag, '--clear'];
+      const options = resolveDevOptions(argv);
+      expect(options.device).toBe('My iPhone');
+      expect(options.expoArgs).toEqual(['--clear']);
+      expect(options.detachArgv).toEqual(argv);
+    }
+  );
+  it('leaves arguments after the separator alone', () => {
+    expect(resolveDevOptions(['--ios', '--', '--device', 'elsewhere'])).toMatchObject({
+      expoArgs: ['--', '--device', 'elsewhere'],
+    });
+  });
+  it.each([
+    ['--ios', '--device'],
+    ['--ios', '--device='],
+    ['--ios', '--device', '--plan'],
+    ['--ios', '--device', 'SIM', '--eas'],
+  ])('refuses invalid selection flags (%s)', (...argv) => {
+    expect(() => resolveDevOptions(argv)).toThrow();
+  });
+});

@@ -531,6 +531,8 @@ describe('a lock whose port Metro has not logged', () => {
 
 // @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
 describe('the bound device', () => {
+  const platform = process.platform;
+  afterEach(() => Object.defineProperty(process, 'platform', { value: platform }));
   const running = {
     url: 'http://127.0.0.1:8393',
     port: 8393,

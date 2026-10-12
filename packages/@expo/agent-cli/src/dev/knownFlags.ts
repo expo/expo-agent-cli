@@ -30,6 +30,7 @@ import { unknownOptionError } from '../utils/unknownOption';
  * Go", which is exactly what the preference says.
  */
 export const DEV_OWN_FLAGS: readonly string[] = [
+  '--device',
   '--eas',
   '--local',
   '--no-open',
