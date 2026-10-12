@@ -2,23 +2,13 @@
 // Each worktree gets its own device. `dev` and `smoke` acquire; every other verb reads.
 
 import { BOOT_DEVICE_TIMEOUT_MS } from '../device/bootDevice';
-import { canonicalizeExistingPath } from '../utils/dir';
 import { bindAndroidSectionAsync, bootEmulatorAsync } from './android';
-import { chooseIosDevice, type IosInventory } from './choose';
 import { androidToolsResolve, readAndroidInventoryAsync } from './emulator';
 import { deviceUnavailableError } from './errors';
 import { clearInspectCache } from './inspect';
-import { bootSimulatorAsync, createSimulatorAsync, readIosInventoryAsync } from './ios';
-import { leaseFrom } from './lease';
-import {
-  bindingPathFor,
-  digestForRoot,
-  readBindingFile,
-  removeBindingFile,
-  withRegistryLockAsync,
-  writeBindingFile,
-  type BindingRead,
-} from './registry';
+import { bootSimulatorAsync, readIosInventoryAsync } from './ios';
+import { bindIosSectionAsync } from './iosAcquire';
+import { bindingPathFor, readBindingFile, withRegistryLockAsync } from './registry';
 import { releaseWorktreeDevicesAsync, WRITE_LOCK_WAIT_MS } from './release';
 import { defaultTools } from './tools';
 import {
@@ -187,55 +177,4 @@ async function bindIosAsync(projectRoot: string, reuseOnly: boolean, tools: Devi
     }
   }
   throw deviceUnavailableError('binding-changed', { platform: 'ios' });
-}
-
-/** Lease renewals and renames do not invalidate a device inventory. */
-function bindingIdentity(read: BindingRead): string {
-  return read.kind === 'binding'
-    ? `${read.binding.device.backend}:${deviceIdOf(read.binding.device)}`
-    : read.kind;
-}
-
-/** The section: read the own binding, choose, write. `simctl create` runs inside it. */
-async function bindIosSectionAsync(
-  projectRoot: string,
-  {
-    inventory,
-    before,
-    reuseOnly,
-    tools,
-  }: { inventory: IosInventory; before: BindingRead; reuseOnly: boolean; tools: DeviceTools }
-): Promise<{ binding: Binding; wasBooted: boolean; action: AcquireAction } | null> {
-  const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
-  const read = readBindingFile(file);
-  if (read.kind === 'unreadable') {
-    throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
-  }
-  if (bindingIdentity(read) !== bindingIdentity(before)) {
-    return null;
-  }
-  const own = read.kind === 'binding' ? read.binding : null;
-  const choice = chooseIosDevice({ own, inventory, reuseOnly, digest: digestForRoot(projectRoot) });
-  if (own != null && choice.kind !== 'reuse') {
-    removeBindingFile(file);
-  }
-  // The reap of other worktrees' stale bindings arrives with llp/0035 §Device lifecycle.
-  if (choice.kind === 'refuse') {
-    throw deviceUnavailableError(choice.reason, { platform: 'ios' });
-  }
-  const lease = leaseFrom(tools.now());
-  if (choice.kind === 'reuse') {
-    const reused = { ...choice.binding, ...lease };
-    writeBindingFile(file, reused);
-    return { binding: reused, wasBooted: choice.listed.state === 'Booted', action: 'reused' };
-  }
-  const udid = await createSimulatorAsync(tools, choice);
-  const created: Binding = {
-    version: 1,
-    device: { backend: 'local-ios', platform: 'ios', udid, name: choice.name, origin: 'created' },
-    projectRoot: canonicalizeExistingPath(projectRoot),
-    ...lease,
-  };
-  writeBindingFile(file, created);
-  return { binding: created, wasBooted: false, action: 'created' };
 }
