@@ -130,3 +130,27 @@ it('reuses an explicitly named owned Android instance while adb still lists it o
   ).toMatchObject({ action: 'reused', device: binding.device });
   expect(tools.spawned).toEqual([]);
 });
+
+it('explicit-android-needs-only-adb', async () => {
+  const { previewExplicitDeviceAsync } = await import('../preview');
+  const tools = fakeTools({ emulators: [{ serial: 'R58N123', state: 'device' }] });
+  tools.emulatorList = vi.fn(async () => ({
+    stdout: '',
+    stderr: '',
+    exitCode: null,
+    spawnError: Object.assign(new Error('spawn emulator ENOENT'), { code: 'ENOENT' }),
+  }));
+  expect(await previewExplicitDeviceAsync(ROOT, 'android', 'R58N123', tools)).toMatchObject({
+    serial: 'R58N123',
+    origin: { kind: 'explicit' },
+  });
+  expect(await acquireDeviceAsync(ROOT, 'android', { explicit: 'R58N123', tools })).toMatchObject({
+    action: 'explicit',
+    device: { serial: 'R58N123' },
+  });
+  expect(readBindingFile(bindingPathFor(ROOT, 'android', 'local-android'))).toMatchObject({
+    binding: { device: { serial: 'R58N123', origin: { kind: 'explicit' } } },
+  });
+  expect(tools.emulatorList).not.toHaveBeenCalled();
+  expect(tools.calls.some(([command]) => command === 'emulator')).toBe(false);
+});

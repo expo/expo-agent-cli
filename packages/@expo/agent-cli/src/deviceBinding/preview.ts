@@ -23,7 +23,7 @@ export async function previewExplicitDeviceAsync(
             name: sim.name,
             origin: 'explicit',
           }))
-      : (await readAndroidInventoryAsync(tools)).runningSerials.map((serial) => ({
+      : (await readAndroidInventoryAsync(tools, { avds: false })).runningSerials.map((serial) => ({
           backend: 'local-android',
           platform: 'android',
           serial,

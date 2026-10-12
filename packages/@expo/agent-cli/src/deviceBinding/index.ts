@@ -133,7 +133,7 @@ async function acquireAndroidAsync(
   projectRoot: string,
   { reuseOnly, tools, explicit }: { reuseOnly: boolean; tools: DeviceTools; explicit?: string }
 ): Promise<Acquired> {
-  const inventory = await readAndroidInventoryAsync(tools);
+  const inventory = await readAndroidInventoryAsync(tools, { avds: explicit === undefined });
   const { binding, action, handle } = await acquireSectionAsync(
     projectRoot,
     tools,

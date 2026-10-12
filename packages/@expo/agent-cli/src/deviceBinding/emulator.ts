@@ -43,12 +43,21 @@ function adbFailedError(reason: string): CommandError {
 }
 
 /** The Android inventory, read before the lock. @throws the tool error, or `create-timeout`. */
-export async function readAndroidInventoryAsync(tools: DeviceTools): Promise<AndroidInventory> {
+export async function readAndroidInventoryAsync(
+  tools: DeviceTools,
+  { avds: listAvds = true }: { avds?: boolean } = {}
+): Promise<AndroidInventory> {
   const devices = await tools.adb(['devices', '-l'], { timeoutMs: ADB_CALL_TIMEOUT_MS });
   if (devices.spawnError) {
     throw adbNotRunnableError(resolveAdb(), devices.spawnError.message);
   }
   assertAnswered(devices, 'adb devices -l', adbFailedError);
+  const runningSerials = parseAndroidDevices(devices.stdout).map((device) => device.deviceId);
+  const listedSerials = devices.stdout
+    .split('\n')
+    .slice(1)
+    .flatMap((line) => line.trim().split(/\s+/)[0] || []);
+  if (!listAvds) return { avd: null, runningSerials, listedSerials };
   const avds = await tools.emulatorList(['-list-avds'], { timeoutMs: 60_000 });
   if (avds.spawnError) {
     throw emulatorNotRunnableError(avds.spawnError.message);
@@ -56,11 +65,8 @@ export async function readAndroidInventoryAsync(tools: DeviceTools): Promise<And
   assertAnswered(avds, 'emulator -list-avds', emulatorNotRunnableError);
   return {
     avd: parseAvds(avds.stdout)[0] ?? null,
-    runningSerials: parseAndroidDevices(devices.stdout).map((device) => device.deviceId),
-    listedSerials: devices.stdout
-      .split('\n')
-      .slice(1)
-      .flatMap((line) => line.trim().split(/\s+/)[0] || []),
+    runningSerials,
+    listedSerials,
   };
 }
 
