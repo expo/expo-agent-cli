@@ -3,12 +3,9 @@
 // it. Reading a simulator is a file read; reading a phone launches the app on it.
 
 import { listConnectedIosDevicesAsync, type IosDevice } from '../device/devicectl';
+import { listBootedIosSimulatorsAsync } from '../device/simulators';
 import { readInstalledFingerprintIosDeviceAsync } from './iosDevice';
-import {
-  listBootedIosSimulatorsAsync,
-  readSimulatorsAsync,
-  type IosSimulatorReaderDependencies,
-} from './iosSimulator';
+import { readSimulatorsAsync, type IosSimulatorReaderDependencies } from './iosSimulator';
 import { matchesDeviceFilter, type InstalledFingerprintResult } from './installedFingerprint';
 
 export interface IosReaderOptions {

@@ -12,11 +12,11 @@ import path from 'node:path';
 import {
   executeAgentCliAsync,
   holdDevLockAsync,
-  installStubBinAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
   stubExpoEnv,
 } from '../utils';
+import { BOOTED_SIMULATOR, installStubXcrunAsync, SIMULATOR_UDID } from './installedAppStubs';
 
 /** The shape `navigate --json` prints, per `src/navigate/navigateAsync.ts`. */
 type NavigateReport = {
@@ -41,48 +41,12 @@ type NavigateReport = {
   followups: { id: string; command: string; why: string }[];
 };
 
-const SIMULATOR_UDID = 'E2E-SIM-0001';
-
 /** A debugger target that looks like Expo Go, so the `exp://` URL shape is chosen. */
 const EXPO_GO_TARGET = {
   id: '1',
   appId: 'host.exp.Exponent',
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=1&page=1',
 };
-
-/**
- * Install a stub `xcrun` that answers `simctl list devices booted -j` with one booted simulator
- * and records every `simctl openurl` it is asked to perform.
- *
- * @returns a reader for the recorded invocations
- */
-async function installStubXcrunAsync(projectRoot: string): Promise<() => string[][]> {
-  const logPath = path.join(projectRoot, '.stub-xcrun.jsonl');
-  const scriptPath = path.join(projectRoot, '.stub-bin', 'xcrun-stub.js');
-  await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
-  await fs.promises.writeFile(
-    scriptPath,
-    [
-      `const fs = require('fs');`,
-      `const args = process.argv.slice(2);`,
-      `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + '\\n');`,
-      `if (args[1] === 'list') {`,
-      `  process.stdout.write(JSON.stringify({ devices: { 'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [{ udid: ${JSON.stringify(SIMULATOR_UDID)}, name: 'iPhone 17 Pro', state: 'Booted' }] } }));`,
-      `}`,
-      `process.exit(0);`,
-    ].join('\n')
-  );
-  await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'xcrun', scriptPath);
-
-  return () =>
-    fs.existsSync(logPath)
-      ? fs
-          .readFileSync(logPath, 'utf8')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => JSON.parse(line))
-      : [];
-}
 
 describe('@expo/agent-cli navigate', () => {
   it('documents that the dev server is discovered, not assumed to be 8081', async () => {
@@ -101,7 +65,9 @@ describe('@expo/agent-cli navigate', () => {
   // `status`, `dev:wait` and the `runtime:*` actions.
   it('builds the URL from the dev-server lock rather than from 8081', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const readXcrun = await installStubXcrunAsync(projectRoot);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
     const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
     const releaseLock = await holdDevLockAsync(projectRoot, {
       url: stub.url,
@@ -139,7 +105,7 @@ describe('@expo/agent-cli navigate', () => {
 
   it('still uses --dev-server-url exactly as given', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    await installStubXcrunAsync(projectRoot);
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
     const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
 
     try {
@@ -174,7 +140,9 @@ describe('@expo/agent-cli navigate', () => {
 
     it('refuses a route the project has not got, and lists the ones it has', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
-      const readXcrun = await installStubXcrunAsync(projectRoot);
+      const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+        simulators: [BOOTED_SIMULATOR],
+      });
       await writeRoutesAsync(projectRoot, ['index.tsx', 'explore.tsx', 'notes.tsx']);
       const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
 
@@ -201,7 +169,7 @@ describe('@expo/agent-cli navigate', () => {
 
     it('names the nearest route as the command to run', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
-      await installStubXcrunAsync(projectRoot);
+      await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
       await writeRoutesAsync(projectRoot, ['index.tsx', 'notes.tsx']);
       const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
 
@@ -222,7 +190,9 @@ describe('@expo/agent-cli navigate', () => {
 
     it('matches a value against a dynamic route', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
-      const readXcrun = await installStubXcrunAsync(projectRoot);
+      const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+        simulators: [BOOTED_SIMULATOR],
+      });
       await writeRoutesAsync(projectRoot, ['index.tsx', 'users/[id].tsx']);
       const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
 
@@ -250,7 +220,9 @@ describe('@expo/agent-cli navigate', () => {
 
     it('opens anything with --no-route-check', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
-      const readXcrun = await installStubXcrunAsync(projectRoot);
+      const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+        simulators: [BOOTED_SIMULATOR],
+      });
       await writeRoutesAsync(projectRoot, ['index.tsx']);
       const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
 
@@ -280,7 +252,7 @@ describe('@expo/agent-cli navigate', () => {
     // Fail open: a project with no router directory has not been shown to lack the route.
     it('opens the link when the project has no app directory', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
-      await installStubXcrunAsync(projectRoot);
+      await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
       const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
 
       try {
@@ -301,7 +273,9 @@ describe('@expo/agent-cli navigate', () => {
   // @ref llp/0005-runtime-loop-tools.rfc.md §The route table.
   it('addresses the root route with a URL Expo Go delivers', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    const readXcrun = await installStubXcrunAsync(projectRoot);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
     const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
 
     try {
@@ -333,7 +307,7 @@ describe('@expo/agent-cli navigate', () => {
   // dev server for whichever platform the plan engine picks, which is not what was asked for.
   it('keeps the platform the caller named on the line it recovers with', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
-    await installStubXcrunAsync(projectRoot);
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
 
     const result = await executeAgentCliAsync(
       projectRoot,

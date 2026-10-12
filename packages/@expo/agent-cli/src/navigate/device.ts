@@ -12,7 +12,12 @@
 // names it, so a session that happens to be up never quietly bills a run a local device would have
 // served.
 
-import { adbNotRunnableError, runAdbAsync, type AdbResolution } from '../device/adb';
+import {
+  adbNotRunnableError,
+  parseAndroidDevices,
+  runAdbAsync,
+  type AdbResolution,
+} from '../device/adb';
 import {
   cloudSessionStartCommand,
   cloudPlatformUnknownError,
@@ -22,6 +27,7 @@ import {
   probeCloudSessionAsync,
   type CloudSessionProbe,
 } from '../device/cloudSimulator';
+import { parseBootedIosSimulators } from '../device/simulators';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
@@ -78,63 +84,6 @@ export interface DeviceProbe {
  */
 export function parseBootedIosSimulator(stdout: string): { udid: string; name: string } | null {
   return parseBootedIosSimulators(stdout)[0] ?? null;
-}
-
-/** Every booted iOS simulator in `simctl list devices booted -j`, in the order `simctl` lists them. */
-export function parseBootedIosSimulators(stdout: string): { udid: string; name: string }[] {
-  let parsed: { devices?: Record<string, { udid?: string; name?: string }[]> };
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return [];
-  }
-
-  const simulators: { udid: string; name: string }[] = [];
-  for (const [runtime, devices] of Object.entries(parsed.devices ?? {})) {
-    if (!runtime.includes('.iOS-') || !Array.isArray(devices)) {
-      continue;
-    }
-    for (const device of devices) {
-      if (device?.udid) {
-        simulators.push({ udid: device.udid, name: device.name ?? '' });
-      }
-    }
-  }
-  return simulators;
-}
-
-/** One ready device, as `adb devices -l` describes it. */
-export interface AndroidDeviceLine {
-  deviceId: string;
-  /**
-   * The `model:` field of the long listing, when there is one.
-   *
-   * Kept because it is how a debugger target is tied back to this device: React Native Android
-   * registers itself as `<Build.MODEL> - <release> - API <sdk>` [observed live — 2026-08-25, a
-   * `/json/list` target with `deviceName: "sdk_gphone64_arm64 - 15 - API 35"` for the emulator
-   * `adb devices -l` reported as `model:sdk_gphone64_arm64`]. See `src/runtime/targetPlatform.ts`.
-   */
-  model: string | null;
-}
-
-/**
- * Read the ready devices out of `adb devices -l`.
- *
- * The long listing rather than the short one, because the `model:` field is what lets a debugger
- * target be matched back to a device. Everything else about the two formats is the same.
- */
-export function parseAndroidDevices(stdout: string): AndroidDeviceLine[] {
-  const devices: AndroidDeviceLine[] = [];
-  // The first line is the `List of devices attached` header.
-  for (const line of stdout.split('\n').slice(1)) {
-    const [deviceId, state, ...rest] = line.trim().split(/\s+/);
-    // Devices in any other state (`unauthorized`, `offline`) cannot receive an intent.
-    if (deviceId && state === 'device') {
-      const model = rest.find((field) => field.startsWith('model:'))?.slice('model:'.length);
-      devices.push({ deviceId, model: model || null });
-    }
-  }
-  return devices;
 }
 
 /** Read the first ready device out of `adb devices`. */

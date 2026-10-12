@@ -15,6 +15,12 @@ export interface SpawnCaptureResult {
   spawnError?: NodeJS.ErrnoException;
 }
 
+/** A subprocess runner for one tool, injectable in tests. An `exitCode` of null with no `spawnError` is a timeout. */
+export type Runner = (
+  args: string[],
+  options?: { timeoutMs?: number }
+) => Promise<SpawnCaptureResult>;
+
 /**
  * The same run with stdout kept as bytes.
  *

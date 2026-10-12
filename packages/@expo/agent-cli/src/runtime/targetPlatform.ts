@@ -202,9 +202,8 @@ export async function buildDeviceNameIndexIfNeededAsync(
  * the three rules above, and the other two still answer for Expo Go and for React Native Android.
  */
 export async function buildDeviceNameIndexAsync(): Promise<DeviceNameIndex> {
-  const { runAdbAsync } = require('../device/adb') as typeof import('../device/adb');
-  const { parseAndroidDevices } =
-    require('../navigate/device') as typeof import('../navigate/device');
+  const { parseAndroidDevices, runAdbAsync } =
+    require('../device/adb') as typeof import('../device/adb');
   const { spawnCaptureAsync } =
     require('../utils/spawnCapture') as typeof import('../utils/spawnCapture');
 

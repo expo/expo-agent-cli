@@ -16,6 +16,12 @@ import {
   startStubDevServerAsync,
   stubExpoEnv,
 } from '../utils';
+import {
+  appStartedMarkerPath,
+  BOOTED_SIMULATOR,
+  installStubXcrunAsync,
+  SIMULATOR_UDID,
+} from './installedAppStubs';
 
 /** The shape `reload --json` prints, per `src/reload/reloadAsync.ts`. */
 type ReloadReport = {
@@ -53,55 +59,11 @@ type ReloadReport = {
   followups: { id: string; command: string; why: string }[];
 };
 
-const SIMULATOR_UDID = 'E2E-SIM-0001';
-
 const EXPO_GO_TARGET = {
   id: '1',
   appId: 'host.exp.Exponent',
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=1&page=1',
 };
-
-/** Where the stub `xcrun` records that it opened the app, so the stub dev server can see it. */
-function appStartedMarkerPath(projectRoot: string): string {
-  return path.join(projectRoot, '.stub-app-started');
-}
-
-/** Install a stub `xcrun` that reports one booted simulator and records every invocation. */
-async function installStubXcrunAsync(projectRoot: string): Promise<() => string[][]> {
-  const logPath = path.join(projectRoot, '.stub-xcrun.jsonl');
-  const scriptPath = path.join(projectRoot, '.stub-bin', 'xcrun-stub.js');
-  await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
-  await fs.promises.writeFile(
-    scriptPath,
-    [
-      `const fs = require('fs');`,
-      `const args = process.argv.slice(2);`,
-      `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + '\\n');`,
-      `if (args[1] === 'list') {`,
-      `  process.stdout.write(JSON.stringify({ devices: { 'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [{ udid: ${JSON.stringify(SIMULATOR_UDID)}, name: 'iPhone 17 Pro', state: 'Booted' }] } }));`,
-      `}`,
-      // An app that was opened is an app that can register a JavaScript runtime, and one that was
-      // terminated cannot. The stub dev server reads this to decide what `/json/list` reports.
-      `if (args[1] === 'openurl') {`,
-      `  fs.writeFileSync(${JSON.stringify(appStartedMarkerPath(projectRoot))}, '');`,
-      `}`,
-      `if (args[1] === 'terminate') {`,
-      `  try { fs.unlinkSync(${JSON.stringify(appStartedMarkerPath(projectRoot))}); } catch {}`,
-      `}`,
-      `process.exit(0);`,
-    ].join('\n')
-  );
-  await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'xcrun', scriptPath);
-
-  return () =>
-    fs.existsSync(logPath)
-      ? fs
-          .readFileSync(logPath, 'utf8')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => JSON.parse(line))
-      : [];
-}
 
 /** A stub `xcrun` that reports no booted device, for the runs where no rung may act. */
 async function writeNoDeviceXcrunAsync(projectRoot: string): Promise<string> {
@@ -139,7 +101,9 @@ describe('@expo/agent-cli runtime:reload', () => {
       messageSocket: 'v2',
     });
     const releaseLock = await lockToStubAsync(projectRoot, stub);
-    const readXcrun = await installStubXcrunAsync(projectRoot);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
 
     try {
       const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--json'], {
@@ -280,7 +244,9 @@ describe('@expo/agent-cli runtime:reload', () => {
       bundle: 'broken',
     });
     const releaseLock = await lockToStubAsync(projectRoot, stub);
-    const readXcrun = await installStubXcrunAsync(projectRoot);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
 
     try {
       const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--json'], {
@@ -526,7 +492,9 @@ describe('@expo/agent-cli runtime:reload', () => {
       targetsAppearWithFile: appStartedMarkerPath(projectRoot),
     });
     const releaseLock = await lockToStubAsync(projectRoot, stub);
-    const readXcrun = await installStubXcrunAsync(projectRoot);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
 
     try {
       const result = await executeAgentCliAsync(
@@ -635,7 +603,9 @@ describe('an app the command socket cannot see', () => {
       reloadTargets: 'reconnect',
     });
     const releaseLock = await lockToStubAsync(projectRoot, stub);
-    const readXcrun = await installStubXcrunAsync(projectRoot);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
 
     try {
       const result = await executeAgentCliAsync(
@@ -672,7 +642,9 @@ describe('an app the command socket cannot see', () => {
       messagePeers: {},
     });
     const releaseLock = await lockToStubAsync(projectRoot, stub);
-    const readXcrun = await installStubXcrunAsync(projectRoot);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
 
     try {
       const result = await executeAgentCliAsync(

@@ -4,8 +4,7 @@
 import fs from 'fs';
 import path from 'path';
 
-import { parseBootedIosSimulators } from '../navigate/device';
-import { CommandError } from '../utils/errors';
+import { listBootedIosSimulatorsAsync, SIMCTL_TIMEOUT_MS } from '../device/simulators';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import {
   FINGERPRINT_FILE_NAME,
@@ -15,8 +14,6 @@ import {
   type InstalledAppDevice,
   type InstalledFingerprintResult,
 } from './installedFingerprint';
-
-const SIMCTL_TIMEOUT_MS = 30_000;
 
 export interface IosSimulatorReaderDependencies {
   /** Injected for tests. */
@@ -42,38 +39,6 @@ export function fingerprintCandidatePaths(containerPath: string): string[] {
       FINGERPRINT_FILE_NAME
     ),
   ];
-}
-
-/**
- * The booted iOS simulators, as devices.
- *
- * @throws `XCRUN_NOT_RUNNABLE` when `xcrun` itself could not run.
- */
-export async function listBootedIosSimulatorsAsync({
-  spawnCaptureAsync: spawnCapture = spawnCaptureAsync,
-}: IosSimulatorReaderDependencies = {}): Promise<InstalledAppDevice[]> {
-  const listed = await spawnCapture('xcrun', ['simctl', 'list', 'devices', 'booted', '-j'], {
-    timeoutMs: SIMCTL_TIMEOUT_MS,
-  });
-  if (listed.spawnError) {
-    throw new CommandError(
-      'XCRUN_NOT_RUNNABLE',
-      [
-        `Could not run "xcrun simctl", so no iOS simulator was looked at.`,
-        `Why: ${listed.spawnError.message}`,
-        `How: install Xcode and its command line tools, which provide "xcrun simctl", then run this command again.`,
-      ].join('\n')
-    );
-  }
-  if (listed.exitCode !== 0) {
-    throw new Error(
-      `"xcrun simctl list devices booted" failed: ${listed.stderr.trim() || `exit code ${listed.exitCode}`}`
-    );
-  }
-  return parseBootedIosSimulators(listed.stdout).map(({ udid, name }) => ({
-    identifier: udid,
-    name: name || udid,
-  }));
 }
 
 /**

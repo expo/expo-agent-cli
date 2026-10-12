@@ -503,8 +503,7 @@ function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
       };
     },
     stopEasSession: async (sessionId) => {
-      const { stopEasSessionAsync } =
-        require('../dev/openAppEas') as typeof import('../dev/openAppEas');
+      const { stopEasSessionAsync } = require('../device/eas') as typeof import('../device/eas');
       const result = await stopEasSessionAsync(projectRoot, sessionId);
       return { ok: result.ok, target: sessionId, reason: result.reason };
     },
