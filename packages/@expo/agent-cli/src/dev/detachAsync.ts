@@ -217,6 +217,7 @@ export async function devDetachAsync(
   if (running) {
     if (
       reuseBoundDevice &&
+      process.platform === 'darwin' &&
       options.platform === 'ios' &&
       options.deviceBackend !== 'eas' &&
       !devicesDisabled()
