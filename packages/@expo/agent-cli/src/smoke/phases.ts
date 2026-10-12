@@ -33,8 +33,9 @@
 // (llp/0005 §The run brings its own environment): they are reported only by a run that performed
 // them, they are never charged to `--timeout`, and the ones that hold a resource register the way
 // to undo themselves *before* they do anything. `runSmokePhasesAsync` is the wrapper that runs
-// those undos, newest first, on every path out of the walk. A booted device registers none: it is
-// this worktree's bound device and stays bound after the run (llp/0035).
+// those undos, newest first, on every path out of the walk. A booted device registers its release
+// only after a reused dev server; after a started one, `dev:stop --release` releases it
+// (llp/0035 §Lifecycle smoke).
 //
 // The dependencies are injected rather than imported, so the outcome table below — which is the
 // part that can be wrong in a way no type checker sees — is testable against fakes, with no dev
@@ -254,9 +255,10 @@ export interface SmokeDeps {
   stopEasSession(sessionId: string): Promise<SmokeReleaseResult>;
   /**
    * Bind and boot this worktree's device for this run's platform (`acquireDeviceAsync`). The
-   * device stays bound after the run, so nothing is registered to put it back.
+   * device is released by dev:stop after a child exits, or by the boot phase's own cleanup.
    */
   bootDevice(): Promise<SmokeBootResult>;
+  releaseDevice(): Promise<SmokeReleaseResult>;
   /**
    * Put the app on the device this run booted, when the boot said it has not got it.
    *
@@ -1200,9 +1202,18 @@ async function runPhasesAsync(
       const found = await deviceAsync();
       if (found.deviceId == null) {
         const boot = await recordBootstrap('boot-device', async () => {
-          // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke — the device is this worktree's bound one and
-          // stays bound after the run, so nothing is registered to put it back.
           const result = await deps.bootDevice();
+          if (
+            result.ok &&
+            result.deviceId &&
+            !cleanups.some(({ resource }) => resource === 'dev-server')
+          ) {
+            cleanups.push({
+              resource: 'device',
+              target: result.deviceId,
+              release: () => deps.releaseDevice(),
+            });
+          }
           return result.ok && result.deviceId != null
             ? {
                 status: 'ok' as const,

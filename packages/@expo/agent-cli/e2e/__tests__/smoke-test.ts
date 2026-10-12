@@ -744,7 +744,7 @@ describe('@expo/agent-cli smoke', () => {
   // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke
   //
   // The device a bootstrapping run boots is this worktree's own simulator, taken from the registry
-  // or created there, and it stays bound after the run. The stub `xcrun` keeps simulator state the
+  // or created there, and is released after the run. The stub `xcrun` keeps simulator state the
   // way `simctl` does, so what is asserted is the registry file and the calls that put the device up.
   describe.skipIf(process.platform !== 'darwin')('binding the device to boot', () => {
     const DEV_CLIENT_ID = 'com.example.dcapp';
@@ -808,13 +808,14 @@ describe('@expo/agent-cli smoke', () => {
         expect(binding!.device.name).toMatch(/^agent-cli [0-9a-f]{8}$/);
         expect(readXcrun()).toContainEqual(['simctl', 'bootstatus', 'E2E-CREATED-1', '-b']);
         expect(readXcrun().some((argv) => argv[1] === 'boot')).toBe(false);
-        expect(readXcrun().some((argv) => argv[1] === 'shutdown')).toBe(false);
+        expect(readXcrun()).toContainEqual(['simctl', 'shutdown', 'E2E-CREATED-1']);
+        expect(Date.parse(binding!.expiresAt)).toBeLessThanOrEqual(Date.now());
 
         const boot = report.phases.find((phase: any) => phase.id === 'boot-device');
         expect(boot).toMatchObject({ status: 'ok' });
         expect(boot.reason).not.toContain('shut it down');
-        expect(report.environment.cleanup.map((entry: any) => entry.resource)).not.toContain(
-          'device'
+        expect(report.environment.cleanup).toContainEqual(
+          expect.objectContaining({ resource: 'device', ok: true })
         );
 
         // A created simulator has no app, so the install is a native build pinned to it.
@@ -894,11 +895,11 @@ describe('@expo/agent-cli smoke', () => {
         });
         expect(report.appsConnected).toBe(1);
         expect(fs.existsSync(opened)).toBe(true);
-        expect(calls.some((argv) => argv[1] === 'shutdown')).toBe(false);
-        expect(report.environment.cleanup.map((entry: any) => entry.resource)).not.toContain(
-          'device'
+        expect(calls.slice(openAt)).toContainEqual(['simctl', 'shutdown', udid]);
+        expect(report.environment.cleanup).toContainEqual(
+          expect.objectContaining({ resource: 'device', ok: true })
         );
-        expect(readBinding(projectRoot)).toEqual(binding);
+        expect(Date.parse(binding!.expiresAt)).toBeLessThanOrEqual(Date.now());
       } finally {
         await stub.close();
       }
@@ -924,6 +925,7 @@ describe('@expo/agent-cli smoke', () => {
         expect(readXcrun().some((argv) => argv[1] === 'create')).toBe(false);
         expect(readXcrun()).toContainEqual(['simctl', 'bootstatus', 'E2E-PARKED', '-b']);
         expect(readBinding(projectRoot)).toMatchObject({ device: { udid: 'E2E-PARKED' } });
+        expect(readXcrun()).toContainEqual(['simctl', 'shutdown', 'E2E-PARKED']);
         expect(report.phases.find((phase: any) => phase.id === 'boot-device')).toMatchObject({
           status: 'ok',
         });
