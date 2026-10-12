@@ -6,25 +6,12 @@
 
 import path from 'path';
 
-import { EMULATOR_SERIAL, parseAvds, pickSimulator, resolveEmulator } from '../bootDevice';
-import { parseSimulators, type SimulatorEntry } from '../simulators';
+import { EMULATOR_SERIAL, parseAvds, resolveEmulator } from '../bootDevice';
+import { parseSimulators } from '../simulators';
 
 /** A `simctl list devices -j` payload, in the shape the real tool prints. */
 function listing(devices: Record<string, unknown[]>): string {
   return JSON.stringify({ devices });
-}
-
-function simulator(overrides: Partial<SimulatorEntry> = {}): SimulatorEntry {
-  return {
-    udid: 'SIM-1',
-    name: 'iPhone 17 Pro',
-    runtime: 'com.apple.CoreSimulator.SimRuntime.iOS-26-5',
-    version: [26, 5],
-    state: 'Shutdown',
-    isAvailable: true,
-    lastBootedAt: 0,
-    ...overrides,
-  };
 }
 
 describe(parseSimulators, () => {
@@ -97,118 +84,6 @@ describe(parseSimulators, () => {
     expect(parseSimulators('')).toEqual([]);
   });
 });
-
-describe(pickSimulator, () => {
-  // The rule, and it is about **installed apps** rather than about recency. Expo Go and a
-  // development build both live on one device, so a simulator nobody has booted is a device the
-  // `app` phase could never have answered against — and this machine lists ten of them beside the
-  // one in use.
-  it(`takes the simulator this developer last used, over a newer one nobody has`, () => {
-    const picked = pickSimulator([
-      simulator({ udid: 'FRESH', name: 'iPhone 17 Pro Max', version: [26, 5], lastBootedAt: 0 }),
-      simulator({
-        udid: 'IN-USE',
-        name: 'iPhone 17 Pro',
-        version: [26, 5],
-        lastBootedAt: Date.parse('2026-08-26T04:50:48Z'),
-      }),
-    ]);
-
-    expect(picked?.udid).toBe('IN-USE');
-  });
-
-  it(`takes an iPhone on the newest runtime`, () => {
-    const picked = pickSimulator([
-      simulator({ udid: 'OLD-PHONE', name: 'iPhone 15', version: [18, 0] }),
-      simulator({ udid: 'NEW-PAD', name: 'iPad Pro 13-inch', version: [26, 5] }),
-      simulator({ udid: 'NEW-PHONE', name: 'iPhone 17 Pro', version: [26, 5] }),
-    ]);
-
-    expect(picked?.udid).toBe('NEW-PHONE');
-  });
-
-  // A run on some device is worth much more than a run on none, so an iPad is taken when that is
-  // all this machine has.
-  it(`takes whatever there is when there is no iPhone`, () => {
-    expect(pickSimulator([simulator({ udid: 'PAD', name: 'iPad Pro 13-inch' })])?.udid).toBe('PAD');
-  });
-
-  // The caller only reaches this after its own probe found nothing booted, so a `Booted` device
-  // here is a race — and joining it is both faster and less disruptive than booting a second one.
-  it(`joins a simulator that is already booted, whatever its runtime`, () => {
-    const picked = pickSimulator([
-      simulator({ udid: 'NEW', name: 'iPhone 17 Pro', version: [26, 5] }),
-      simulator({ udid: 'UP', name: 'iPhone 15', version: [18, 0], state: 'Booted' }),
-    ]);
-
-    expect(picked?.udid).toBe('UP');
-  });
-
-  it(`takes no device whose runtime is gone, and none at all when there is none`, () => {
-    expect(pickSimulator([simulator({ isAvailable: false })])).toBeNull();
-    expect(pickSimulator([])).toBeNull();
-  });
-});
-
-// @ref llp/0005-runtime-loop-tools.rfc.md §The device that can open the app.
-//
-// The rule above chose the simulator most recently used, which is a *proxy* for "the one with the
-// apps on it". A live run found where the proxy breaks: a dev-client project booted a fresh
-// simulator and the deep link came back `115` — no handler — after a 12.4 s boot for a device that
-// could never have opened it. So the app itself is the rule now, and `lastBootedAt` is what breaks
-// the tie among the devices that have it.
-describe(`${pickSimulator.name} when the app decides`, () => {
-  const fresh = simulator({ udid: 'FRESH', name: 'iPhone 17', lastBootedAt: 0 });
-  const used = simulator({
-    udid: 'USED',
-    name: 'iPhone 17 Pro',
-    lastBootedAt: Date.parse('2026-08-30T08:00:00Z'),
-  });
-  const older = simulator({
-    udid: 'OLDER',
-    name: 'iPhone Air',
-    lastBootedAt: Date.parse('2026-08-20T08:00:00Z'),
-  });
-
-  it(`takes the device that has the app over the one used more recently`, () => {
-    const picked = pickSimulator([fresh, used, older], {
-      hasApp: (entry) => entry.udid === 'OLDER',
-    });
-
-    expect(picked?.udid).toBe('OLDER');
-  });
-
-  it(`breaks a tie between devices that have it the way it always did`, () => {
-    const picked = pickSimulator([fresh, used, older], {
-      hasApp: (entry) => entry.udid !== 'FRESH',
-    });
-
-    expect(picked?.udid).toBe('USED');
-  });
-
-  // The whole point: a boot that could not have opened the app is worse than no boot, because it
-  // costs the minute *and* answers nothing.
-  it(`takes nothing when no device has the app`, () => {
-    expect(pickSimulator([fresh, used, older], { hasApp: () => false })).toBeNull();
-  });
-
-  // A booted device still wins outright, and still without asking about the app: the caller only
-  // reaches this when its own probe found none, so one here is a race worth joining.
-  it(`still joins a simulator that is already booted`, () => {
-    const up = simulator({ udid: 'UP', state: 'Booted', lastBootedAt: 0 });
-
-    expect(pickSimulator([used, up], { hasApp: (entry) => entry.udid === 'USED' })?.udid).toBe(
-      'UP'
-    );
-  });
-
-  // No question asked is not the same as answered no. A caller that does not know which app it is
-  // about gets the rule that was there before this one.
-  it(`falls back to the most recently used when nothing asks about an app`, () => {
-    expect(pickSimulator([fresh, used, older])?.udid).toBe('USED');
-  });
-});
-
 describe(parseAvds, () => {
   it(`reads one name per line`, () => {
     expect(parseAvds('Pixel_7_API_35\ntuft-pixel\n')).toEqual(['Pixel_7_API_35', 'tuft-pixel']);

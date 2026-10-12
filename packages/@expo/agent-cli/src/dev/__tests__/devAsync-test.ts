@@ -2,6 +2,7 @@ import { vol } from 'memfs';
 import os from 'os';
 import path from 'path';
 
+import { acquireDeviceAsync, devicesDisabled, inspectBindingAsync } from '../../deviceBinding';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
@@ -76,6 +77,14 @@ vi.mock('../../toolchain', async () => {
 // (llp/0009 §Device-aware ladders); `unknown` leaves every rung of the ladder as it was.
 vi.mock('../../device/localDevice', () => ({
   probeLocalDeviceAsync: vi.fn(async () => ({ state: 'unknown', device: null, reason: null })),
+}));
+// The registry is off by default, as in the e2e harness; the rows about the binding turn it on
+// and script what `acquire` answers (llp/0031 §How `dev` uses it).
+vi.mock('../../deviceBinding', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../deviceBinding')>()),
+  devicesDisabled: vi.fn(() => true),
+  acquireDeviceAsync: vi.fn(),
+  inspectBindingAsync: vi.fn(),
 }));
 // The busy-port stop names the process on the port and probes it as a dev server; a unit test
 // must not read this machine's listeners.
@@ -1366,6 +1375,166 @@ describe(devAsync, () => {
         expect(emittedFollowUpIds()).toContain('dev-server-port-unknown');
         expect(emittedFollowUps().map((followup) => followup.command)).not.toContain(
           'exp://192.168.1.5:8081'
+        );
+      });
+    });
+  });
+
+  // @ref llp/0031-ios-binding.plan.md §How `dev` uses it
+  describe('the bound device', () => {
+    const device = {
+      backend: 'local-ios' as const,
+      platform: 'ios' as const,
+      udid: 'SIM-1',
+      name: 'agent-cli 0000',
+      origin: 'created' as const,
+    };
+
+    beforeEach(() => {
+      // These cases model an iOS simulator host, regardless of the machine running the suite.
+      mockPlatform('darwin');
+      vi.mocked(devicesDisabled).mockReturnValue(false);
+      vi.mocked(acquireDeviceAsync).mockResolvedValue({
+        device,
+        justBooted: true,
+        action: 'created',
+      });
+      vi.mocked(inspectBindingAsync).mockResolvedValue({
+        binding: null,
+        path: '/b',
+        state: 'none',
+      });
+    });
+
+    afterEach(() => {
+      vi.mocked(devicesDisabled).mockReturnValue(true);
+    });
+
+    // non-darwin-host-binds-nothing
+    it.each(['linux', 'win32'] as const)(
+      `acquires nothing for --ios on %s, and pins no step`,
+      async (platform) => {
+        mockStaleDevClientState();
+        mockPlatform(platform);
+        try {
+          await devAsync(projectRoot, resolveDevOptions(['--ios', '--local']));
+        } finally {
+          mockPlatform(realPlatform);
+        }
+        expect(acquireDeviceAsync).not.toHaveBeenCalled();
+        for (const [, args] of vi.mocked(runDevServerAsync).mock.calls) {
+          expect(args).not.toContain('--device');
+        }
+      }
+    );
+
+    // withDevice-after-forwarded-args
+    it(`binds after the refusals and pins the build step to the simulator, over a forwarded --device`, async () => {
+      mockStaleDevClientState();
+
+      await expect(
+        devAsync(projectRoot, resolveDevOptions(['--ios', '--local', '--', '--device', 'X']))
+      ).resolves.toBe(0);
+
+      expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios');
+      const [, args] = vi.mocked(runDevServerAsync).mock.calls[0]!;
+      expect(args.filter((arg) => arg === '--device')).toHaveLength(1);
+      expect(args).toEqual(expect.arrayContaining(['run:ios', '--device', 'SIM-1']));
+      expect(args).not.toContain('X');
+      // The plan an agent reads carries the pin too: the plan approved is the plan run.
+      expect(emitStartPlan).toHaveBeenCalledWith(
+        expect.objectContaining({
+          steps: expect.arrayContaining([
+            expect.objectContaining({
+              id: 'run',
+              argv: expect.arrayContaining(['--device', 'SIM-1']),
+            }),
+          ]),
+        }),
+        expect.anything()
+      );
+    });
+
+    it(`binds nothing for a run that refuses its EAS route`, async () => {
+      mockStaleDevClientState();
+      vi.mocked(probeProjectStateAsync).mockResolvedValue(mockStaleDevClientState());
+      const { detectToolchainAsync } = await import('../../toolchain');
+      vi.mocked(detectToolchainAsync).mockResolvedValue({
+        platform: 'ios',
+        status: 'missing',
+        detail: 'no Xcode',
+        requirement: 'Xcode',
+        caveats: [],
+        impossible: true,
+      });
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+        code: 'EAS_ROUTE_NOT_CHOSEN',
+      });
+
+      expect(acquireDeviceAsync).not.toHaveBeenCalled();
+    });
+
+    it(`hands the open the device it bound`, async () => {
+      mockProjectState();
+      const { openAppOnDeviceAsync } = await import('../openApp');
+      vi.mocked(runDevServerAsync).mockImplementation(async (_root, _args, opts) => {
+        opts?.onDevServer?.({ url: 'http://127.0.0.1:8081', port: 8081 } as never);
+        return devServerRun();
+      });
+
+      await devAsync(projectRoot, resolveDevOptions(['--ios']));
+
+      expect(openAppOnDeviceAsync).toHaveBeenCalledWith(
+        projectRoot,
+        expect.objectContaining({ device, justBooted: true })
+      );
+    });
+
+    describe('--plan', () => {
+      it(`pins the steps to the own binding when it is up or down, and acquires nothing`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(inspectBindingAsync).mockResolvedValue({
+          binding: {
+            version: 1,
+            device,
+            projectRoot,
+            boundAt: '2026-10-08T09:00:00.000Z',
+            expiresAt: '2026-10-08T11:00:00.000Z',
+          },
+          path: '/b',
+          state: 'not-up',
+        });
+
+        await devAsync(projectRoot, resolveDevOptions(['--ios', '--local', '--plan']));
+
+        expect(acquireDeviceAsync).not.toHaveBeenCalled();
+        expect(emitStartPlan).toHaveBeenCalledWith(
+          expect.objectContaining({
+            steps: expect.arrayContaining([
+              expect.objectContaining({
+                id: 'run',
+                argv: expect.arrayContaining(['--device', 'SIM-1']),
+              }),
+            ]),
+          }),
+          expect.anything()
+        );
+      });
+
+      it(`says the run will reuse or create a simulator when none is bound`, async () => {
+        mockStaleDevClientState();
+
+        await devAsync(projectRoot, resolveDevOptions(['--ios', '--local', '--plan']));
+
+        expect(acquireDeviceAsync).not.toHaveBeenCalled();
+        expect(emitStartPlan).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reasons: expect.arrayContaining([
+              expect.stringContaining('reuse or create a simulator'),
+            ]),
+          }),
+          expect.anything()
         );
       });
     });

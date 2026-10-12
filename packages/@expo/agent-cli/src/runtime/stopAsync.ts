@@ -210,7 +210,7 @@ export async function runtimeStopAsync(
           device.backend === 'cloud'
             ? `Check that the session is still running with "${easCommandPrefix()} simulator:list --status in-progress".`
             : device.platform === 'ios'
-              ? 'Check that the simulator is booted with "xcrun simctl list devices booted".'
+              ? `Check that the bound simulator is up with "${PROGRAM_PREFIX} status", or bind one again with "${PROGRAM_PREFIX} dev --ios --detach --wait-ready".`
               : 'Check that the device is attached with "adb devices".'
         }`,
       ].join('\n')

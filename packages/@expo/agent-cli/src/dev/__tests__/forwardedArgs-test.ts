@@ -5,6 +5,7 @@
 import type { PlanStep, StartPlan } from '../../project/types';
 import {
   forwardedStepArgs,
+  withDevice,
   withDevServerPort,
   withForwardedExpoArgs,
   withoutPortArgs,
@@ -144,5 +145,34 @@ describe(withDevServerPort, () => {
       ['eas', 'build', '--platform', 'ios'],
       ['expo', 'start', '--dev-client', '--port', '8082'],
     ]);
+  });
+});
+
+// @ref llp/0031-ios-binding.plan.md §How `dev` uses it — withDevice-after-forwarded-args: the
+// bound device replaces any `--device` a step carries, on the steps that build or install only.
+describe(withDevice, () => {
+  it(`should pin run and install to the device, replacing one already named`, () => {
+    const result = withDevice(
+      plan(
+        step('prebuild', ['expo', 'prebuild', '--platform', 'ios']),
+        step('run', ['expo', 'run:ios', '--device', 'OLD', '--port', '8082']),
+        step('install', ['expo', 'run:ios', '--no-bundler', '--device=OLD']),
+        step('start', ['expo', 'start', '--dev-client', '--device', 'OLD'])
+      ),
+      'SIM-1'
+    );
+
+    expect(result.steps.map((one) => one.argv)).toEqual([
+      ['expo', 'prebuild', '--platform', 'ios'],
+      ['expo', 'run:ios', '--port', '8082', '--device', 'SIM-1'],
+      ['expo', 'run:ios', '--no-bundler', '--device', 'SIM-1'],
+      ['expo', 'start', '--dev-client', '--device', 'OLD'],
+    ]);
+  });
+
+  it(`should leave a plan with neither step as it is`, () => {
+    const serving = plan(step('start', ['expo', 'start']));
+
+    expect(withDevice(serving, 'SIM-1')).toEqual(serving);
   });
 });

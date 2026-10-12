@@ -98,9 +98,8 @@ jobs:
         working-directory: packages/@expo/agent-cli
 
   # The iOS half of the installed-app check only runs where `hostPlatforms()` asks for iOS: macOS.
-  # One runner, two files — the stub `xcrun` (simctl and devicectl) sits first on PATH, so no real
-  # simulator or phone is touched. Kept apart from the shards because macOS minutes cost ten times
-  # a Linux minute and these two files are the only ones that need the platform.
+  # The stub `xcrun` (simctl and devicectl) sits first on PATH, so no real simulator or phone
+  # is touched. Also run the macOS-only device-binding cases that Linux/Windows shards skip.
   tier0-e2e-macos:
     if: github.event_name != 'schedule'
     runs-on: macos-15
@@ -123,6 +122,9 @@ jobs:
         working-directory: packages/@expo/agent-cli
       - name: 🧪 E2E installed-app check on macOS
         run: bun run test:e2e -- status-installed-test installed-readers-test
+        working-directory: packages/@expo/agent-cli
+      - name: 🧪 E2E iOS device binding and Expo Go install
+        run: bun run test:e2e -- dev-test smoke-test -t "two worktrees, two simulators|binding the device to boot"
         working-directory: packages/@expo/agent-cli
 
   # Windows unit coverage: `resolveSpawnTarget` and the win32 branches of the path helpers.

@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { vol } from 'memfs';
+import { seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
 import { resetApprovedSchemes } from '../../device/approveScheme';
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
@@ -128,6 +129,9 @@ function mockDevServersAt(byOrigin: { [origin: string]: unknown[] }) {
 function options(overrides: Partial<NavigateOptions> = {}): NavigateOptions {
   return {
     route: '/profile/42',
+    // Named, so the rung loop inspects the bound simulator alone; the no-flag walk over both
+    // platforms is pinned in `device-test.ts` (llp/0030 §Readers).
+    platform: 'ios',
     devServerUrl: 'http://127.0.0.1:8081',
     printUrl: false,
     cloud: 'fallback',
@@ -158,6 +162,7 @@ beforeEach(() => {
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
   vi.mocked(readLastLoggedDevServerPort).mockReturnValue(null);
   mockPlatform('darwin');
+  seedIosBinding(projectRoot, 'IOS-1');
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
 });
@@ -756,7 +761,9 @@ describe(navigateAsync, () => {
       mockDevServer([EXPO_GO_TARGET]);
       mockSpawnQueue([]);
 
-      await expect(navigateAsync(projectRoot, options({ printUrl: true }))).resolves.toBe(0);
+      await expect(
+        navigateAsync(projectRoot, options({ printUrl: true, platform: undefined }))
+      ).resolves.toBe(0);
 
       expect(spawn).not.toHaveBeenCalled();
       expect(printed()).toContain('exp://127.0.0.1:8081/--/profile/42');
@@ -768,7 +775,10 @@ describe(navigateAsync, () => {
       mockTunnelledRun('znakdiwe5j2n5o0.boltexpo.dev');
       mockDevServer([EXPO_GO_TARGET]);
 
-      await navigateAsync(projectRoot, options({ devServerUrl: null, printUrl: true, json: true }));
+      await navigateAsync(
+        projectRoot,
+        options({ devServerUrl: null, printUrl: true, json: true, platform: undefined })
+      );
 
       const report = JSON.parse(printed());
       expect(report.url).toBe('exp://znakdiwe5j2n5o0.boltexpo.dev/--/profile/42');
@@ -781,7 +791,10 @@ describe(navigateAsync, () => {
       mockTunnelledRun('znakdiwe5j2n5o0.boltexpo.dev');
       mockDevServer([EXPO_GO_TARGET]);
 
-      await navigateAsync(projectRoot, options({ devServerUrl: null, printUrl: true, json: true }));
+      await navigateAsync(
+        projectRoot,
+        options({ devServerUrl: null, printUrl: true, json: true, platform: undefined })
+      );
 
       expect(JSON.parse(printed())).toMatchObject({ hostType: 'tunnel' });
     });
@@ -795,7 +808,10 @@ describe(navigateAsync, () => {
       mockExpoGoProject();
       mockDevServer([{ id: '1', appId: 'com.example.demo' }]);
 
-      await navigateAsync(projectRoot, options({ printUrl: true, json: true }));
+      await navigateAsync(
+        projectRoot,
+        options({ printUrl: true, json: true, platform: undefined })
+      );
 
       const report = JSON.parse(printed());
       expect(report.url).toBe('demoapp://profile/42');
@@ -815,7 +831,10 @@ describe(navigateAsync, () => {
       mockTunnelledRun('znakdiwe5j2n5o0.boltexpo.dev');
       mockDevServer([{ id: '1', appId: 'com.example.demo' }]);
 
-      await navigateAsync(projectRoot, options({ devServerUrl: null, printUrl: true, json: true }));
+      await navigateAsync(
+        projectRoot,
+        options({ devServerUrl: null, printUrl: true, json: true, platform: undefined })
+      );
 
       expect(JSON.parse(printed()).connect[0].url).toBe(
         'demoapp://expo-development-client/?url=https%3A%2F%2Fznakdiwe5j2n5o0.boltexpo.dev'
@@ -826,7 +845,7 @@ describe(navigateAsync, () => {
       mockExpoGoProject();
       mockDevServer([{ id: '1', appId: 'com.example.demo' }]);
 
-      await navigateAsync(projectRoot, options({ printUrl: true }));
+      await navigateAsync(projectRoot, options({ printUrl: true, platform: undefined }));
 
       expect(printed()).toContain('demoapp://expo-development-client/?url=');
       expect(printed()).toContain('open in the development build');
@@ -878,7 +897,10 @@ describe(navigateAsync, () => {
       });
       mockDevServer([EXPO_GO_TARGET]);
 
-      await navigateAsync(projectRoot, options({ printUrl: true, json: true }));
+      await navigateAsync(
+        projectRoot,
+        options({ printUrl: true, json: true, platform: undefined })
+      );
 
       expect(JSON.parse(printed()).url).toBe('exp://127.0.0.1:8081/--/profile/42');
     });
@@ -893,7 +915,10 @@ describe(navigateAsync, () => {
       });
       mockDevServer([]);
 
-      await navigateAsync(projectRoot, options({ printUrl: true, json: true }));
+      await navigateAsync(
+        projectRoot,
+        options({ printUrl: true, json: true, platform: undefined })
+      );
 
       const report = JSON.parse(printed());
       expect(report.connect).toEqual([
@@ -914,7 +939,7 @@ describe(navigateAsync, () => {
       });
       mockDevServer([]);
 
-      await navigateAsync(projectRoot, options({ printUrl: true }));
+      await navigateAsync(projectRoot, options({ printUrl: true, platform: undefined }));
 
       expect(printed()).toContain('could not be established, so both');
       expect(printed()).toContain('Expo Go');
@@ -927,7 +952,10 @@ describe(navigateAsync, () => {
       mockExpoGoProject();
       mockDevServer([{ id: '1', appId: 'com.example.demo' }]);
 
-      await navigateAsync(projectRoot, options({ printUrl: true, json: true }));
+      await navigateAsync(
+        projectRoot,
+        options({ printUrl: true, json: true, platform: undefined })
+      );
 
       const report = JSON.parse(printed());
       expect(report.url).toBe('demoapp://profile/42');
@@ -941,7 +969,10 @@ describe(navigateAsync, () => {
       mockExpoGoProject();
       mockDevServer([EXPO_GO_TARGET]);
 
-      await navigateAsync(projectRoot, options({ printUrl: true, json: true }));
+      await navigateAsync(
+        projectRoot,
+        options({ printUrl: true, json: true, platform: undefined })
+      );
 
       const report = JSON.parse(printed());
       expect(report).toMatchObject({
@@ -1005,16 +1036,12 @@ describe(navigateAsync, () => {
         [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
       });
       mockDevServer([EXPO_GO_TARGET]);
-      // No booted simulator, and no attached Android device.
-      mockSpawnQueue([
-        { stdout: JSON.stringify({ devices: {} }) },
-        { stdout: 'List of devices attached\n' },
-      ]);
-
+      // The bound simulator is gone from the listing, and no platform flag names the other rung.
+      mockSpawnQueue([{ stdout: JSON.stringify({ devices: {} }) }]);
       await expect(navigateAsync(projectRoot, options())).rejects.toMatchObject({
-        code: 'NO_DEVICE',
+        code: 'NO_BOUND_DEVICE',
         message: expect.stringContaining('exp://127.0.0.1:8081/--/profile/42'),
-        suggestedCommand: 'npx @expo/agent-cli navigate / --print-url',
+        suggestedCommand: 'npx @expo/agent-cli dev --ios --detach --wait-ready',
       });
     });
   });

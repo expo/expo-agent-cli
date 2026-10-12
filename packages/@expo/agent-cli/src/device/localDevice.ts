@@ -1,36 +1,33 @@
 // @ref llp/0009-smart-followups.rfc.md §Device-aware ladders
-// Does this machine have a device to open an app on?
+// @ref llp/0030-one-device-per-worktree.rfc.md §Readers
+// Does this worktree have a device to open an app on?
 //
 // Every rung of the CLI's ladders that reaches a screen — `@expo/agent-cli navigate /`, the screenshot
-// follow-up, `status`'s own `next` line — needs a *local* device: a booted iOS simulator, or an
-// Android device `adb` can see. A dogfood session drove Expo Go on a **cloud** simulator through a
-// tunnel, from a machine with neither, and every one of those suggestions was an instruction to run
-// something that could not work [observed — 2026-08-24]. The CLI had no way to know, because it had
-// never asked.
+// follow-up, `status`'s own `next` line — needs a *local* device: the iOS simulator this worktree
+// bound with `dev`, or an Android device `adb` can see. A dogfood session drove Expo Go on a
+// **cloud** simulator through a tunnel, from a machine with neither, and every one of those
+// suggestions was an instruction to run something that could not work [observed — 2026-08-24]. The
+// CLI had no way to know, because it had never asked.
 //
-// So it asks, once per process, and the answer has three values rather than two. `absent` is the
-// one that changes what is suggested, and it may only be given by a platform tool that **ran** and
-// reported nothing. A tool that is not installed establishes nothing — a Linux machine with no
-// `adb` is not a machine with no device — and that case answers `unknown`, which leaves every
-// ladder exactly as it was.
-//
-// That distinction is the device probe's own: `DeviceProbe.toolError` is set exactly when the tool
-// could not be started, and it is the same fact friction run 6's F49 exists for — "no Android
-// device or emulator is attached" must never be printed for a missing SDK (`src/device/adb.ts`).
-// One signal, read by the failure message there and by the suggestion ladders here.
+// So it asks, once per process and root, and the answer has three values rather than two. `absent`
+// is the one that changes what is suggested, and it may only be given by a platform tool that
+// **ran** and reported nothing. A tool that is not installed establishes nothing — a Linux machine
+// with no `adb` is not a machine with no device — and that case answers `unknown`, which leaves
+// every ladder exactly as it was.
 
+import { inspectBindingCachedAsync, type Inspection } from '../deviceBinding';
 import {
+  navigateDeviceOf,
   probeAndroidDeviceAsync,
-  probeIosSimulatorAsync,
   type DeviceProbe,
   type NavigateDevice,
 } from '../navigate/device';
 
 /** What this machine has to open an app on. */
 export type LocalDeviceState =
-  /** A booted simulator or an attached device was found. */
+  /** A bound simulator is up, or an attached device was found. */
   | 'present'
-  /** A platform tool ran and reported none. */
+  /** Every rung ran and reported none. */
   | 'absent'
   /** Nothing could be established, so nothing may be concluded. */
   | 'unknown';
@@ -54,41 +51,52 @@ export interface LocalDeviceProbe {
   reason: string | null;
 }
 
-/** Options of {@link probeLocalDeviceAsync}, for tests and for nothing else. */
 export interface ProbeLocalDeviceOptions {
-  /** The platform probes to run. Defaults to the ones this host can have. */
-  probesAsync?: () => Promise<DeviceProbe[]>;
+  /** The worktree whose bindings are read. */
+  projectRoot: string;
+  /** The iOS rung, injected for tests. Defaults to the cached inspection of the own binding. */
+  inspectIosAsync?: (projectRoot: string) => Promise<Inspection>;
+  /** The Android rung, injected for tests. Defaults to main's first-`adb`-device probe. */
+  probeAndroidAsync?: () => Promise<DeviceProbe>;
+  hostPlatform?: NodeJS.Platform;
 }
 
-/**
- * One probe per process.
- *
- * The promise is cached rather than the result, so the several callers of one command — the status
- * sections and its follow-ups, say — share a single pair of subprocesses.
- */
-let cached: Promise<LocalDeviceProbe> | null = null;
+const cached = new Map<string, Promise<LocalDeviceProbe>>();
 
 /** Forget what this process probed. For tests, and for nothing else. */
 export function resetLocalDeviceCache(): void {
-  cached = null;
+  cached.clear();
 }
 
 /**
- * Whether this machine has a device to open an app on.
+ * Whether this worktree has a device to open an app on.
  *
- * Never rejects: a suggestion ladder must not be the thing that fails a command, so a probe that
- * throws answers `unknown` and every caller carries on as it did before this existed.
+ * One probe per process and root: the promise is cached rather than the result, so the several
+ * callers of one command — the status sections and its follow-ups, say — share one inspection and
+ * one `adb`. Never rejects: a suggestion ladder must not be the thing that fails a command, so a
+ * probe that throws answers `unknown`.
  */
-export function probeLocalDeviceAsync(
-  options: ProbeLocalDeviceOptions = {}
-): Promise<LocalDeviceProbe> {
-  cached ??= runProbesAsync(options);
-  return cached;
+export function probeLocalDeviceAsync(options: ProbeLocalDeviceOptions): Promise<LocalDeviceProbe> {
+  let pending = cached.get(options.projectRoot);
+  if (!pending) {
+    pending = runProbesAsync(options);
+    cached.set(options.projectRoot, pending);
+  }
+  return pending;
 }
 
-async function runProbesAsync(options: ProbeLocalDeviceOptions): Promise<LocalDeviceProbe> {
+async function runProbesAsync({
+  projectRoot,
+  inspectIosAsync = (root) => inspectBindingCachedAsync(root, 'ios', 'local-ios'),
+  probeAndroidAsync = probeAndroidDeviceAsync,
+  hostPlatform = process.platform,
+}: ProbeLocalDeviceOptions): Promise<LocalDeviceProbe> {
   try {
-    return readLocalDeviceProbe(await (options.probesAsync ?? defaultProbesAsync)());
+    const [ios, android] = await Promise.all([
+      hostPlatform === 'darwin' ? inspectIosAsync(projectRoot) : null,
+      probeAndroidAsync(),
+    ]);
+    return readLocalDeviceProbe(ios, android);
   } catch (error: unknown) {
     return {
       state: 'unknown',
@@ -99,47 +107,64 @@ async function runProbesAsync(options: ProbeLocalDeviceOptions): Promise<LocalDe
   }
 }
 
-/** The platform probes worth running on this host: iOS simulators only exist on macOS. */
-async function defaultProbesAsync(): Promise<DeviceProbe[]> {
-  return await Promise.all([
-    ...(process.platform === 'darwin' ? [probeIosSimulatorAsync()] : []),
-    probeAndroidDeviceAsync(),
-  ]);
-}
-
 /**
- * Fold the platform probes into one answer.
+ * Fold the two rungs into one answer.
  *
- * Pure, so the rule that decides `absent` from `unknown` is testable without a simulator: a device
- * anywhere wins; otherwise one tool that ran and found nothing is enough to say `absent`; and a
- * round where nothing ran is `unknown`.
+ * Pure, so the rule that decides `absent` from `unknown` is testable without a simulator: any `up`
+ * binding or attached device is `present`; else an `unreadable` or `unknown` binding, or an `adb`
+ * that could not run, is `unknown`; else `absent`, with the first state seen as the reason.
  */
-export function readLocalDeviceProbe(probes: DeviceProbe[]): LocalDeviceProbe {
-  const devices = probes
-    .map((probe) => probe.device)
-    .filter((device): device is NavigateDevice => device != null);
+export function readLocalDeviceProbe(
+  ios: Inspection | null,
+  android: DeviceProbe
+): LocalDeviceProbe {
+  const devices: NavigateDevice[] = [];
+  if (ios?.state === 'up' && ios.binding) {
+    devices.push(navigateDeviceOf(ios.binding.device));
+  }
+  if (android.device) {
+    devices.push(android.device);
+  }
   if (devices.length > 0) {
     return { state: 'present', device: devices[0]!, devices, reason: null };
   }
 
-  const answered = probes.filter((probe) => probe.toolError == null);
-  const reason = probes
-    .map((probe) => probe.reason)
-    .filter(Boolean)
-    .join('; ');
-
-  if (answered.length === 0) {
-    return {
-      state: 'unknown',
-      device: null,
-      devices: [],
-      reason: reason || 'no platform tool could be run, so nothing is known about this machine',
-    };
-  }
+  const reasons = [
+    ios ? `iOS: ${iosReason(ios)}` : null,
+    android.reason ? `Android: ${android.reason}` : null,
+  ].filter((reason): reason is string => reason != null);
+  // An `adb` that cannot run says nothing only where it is the one rung: on a Mac the binding
+  // answered, and a missing Android SDK must not keep the ladders from `absent`.
+  const unknown = ios
+    ? ios.state === 'unreadable' || ios.state === 'unknown'
+    : android.toolError != null;
   return {
-    state: 'absent',
+    state: unknown ? 'unknown' : 'absent',
     device: null,
     devices: [],
-    reason: reason || 'no device was found',
+    reason:
+      reasons.join('; ') ||
+      (unknown ? 'nothing is known about this machine' : 'no device was found'),
   };
+}
+
+function iosReason(inspection: Inspection): string {
+  switch (inspection.state) {
+    case 'none':
+      return 'no simulator is bound to this worktree';
+    case 'unreadable':
+      return `the binding file ${inspection.path} does not parse`;
+    case 'unknown':
+      return inspection.cause === 'timeout'
+        ? 'the simulator check timed out'
+        : (inspection.toolError?.message.split('\n')[0] ?? 'the device tool could not run');
+    case 'gone':
+      return inspection.cause === 'expired'
+        ? 'the lease on the bound simulator expired'
+        : 'the bound simulator is gone';
+    case 'not-up':
+      return 'the bound simulator is not up';
+    default:
+      return inspection.state;
+  }
 }

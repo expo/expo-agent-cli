@@ -7,6 +7,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { digestOf } from '../../src/devLock/address';
+import { canonicalizeExistingPath } from '../../src/utils/dir';
 import { installStubBinAsync } from '../utils';
 
 export const APK_FIXTURE = path.resolve(__dirname, '../../src/__fixtures__/zip/fixture-stored.zip');
@@ -37,6 +39,35 @@ export const PHONE_NAME = "Ada's iPhone";
 export const PHONE_UDID = '00001110-001111110110101A';
 
 export type StubCalls = () => string[][];
+
+/**
+ * Bind `udid` to the fixture worktree in the registry the harness's Expo home holds
+ * (`<projectRoot>.expo-home`, @ref ../utils §spawnAgentCli), as `dev` would have: `created`, the
+ * lease 60 min ahead, the canonical root. Every verb of the fixture then drives this simulator
+ * (llp/0030 §Readers), so a case that hands a verb a booted simulator seeds this first.
+ */
+export async function bindingFixture(projectRoot: string, udid: string, name = SIMULATOR_NAME) {
+  const root = canonicalizeExistingPath(projectRoot);
+  const now = Date.now();
+  const file = path.join(
+    `${projectRoot}.expo-home`,
+    'agent-cli',
+    'bindings',
+    `${digestOf(root)}-ios-local-ios.json`
+  );
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  await fs.promises.writeFile(
+    file,
+    JSON.stringify({
+      version: 1,
+      device: { backend: 'local-ios', platform: 'ios', udid, name, origin: 'created' },
+      projectRoot: root,
+      boundAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + 60 * 60_000).toISOString(),
+    })
+  );
+  return file;
+}
 
 function readCalls(recordPath: string): string[][] {
   return fs.existsSync(recordPath)
@@ -126,7 +157,8 @@ const STUB_RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
  *
  * `simctl list devices` answers with one booted simulator when `booted` is given, whose app
  * container holds `booted.fingerprint` at the static-linking path; otherwise with `simulators`
- * (each `Shutdown` unless it says otherwise); otherwise none. The listing is state the stub keeps:
+ * (each `Shutdown` unless it says otherwise); otherwise none. A booted simulator is also bound to
+ * the fixture through {@link bindingFixture}. The listing is state the stub keeps:
  * `create` adds a `Shutdown` simulator whose udid is `E2E-CREATED-<n>`, `delete` removes one,
  * `boot`, `bootstatus -b` and `shutdown` change its state, as a real `simctl` does. `list runtimes -j` names one
  * iOS runtime.
@@ -144,11 +176,14 @@ export async function installStubXcrunAsync(
     booted,
     simulators,
     runningAppIds,
+    expoGoMissing = false,
     phone,
   }: {
     booted?: { fingerprint: string };
     simulators?: { udid: string; name: string; state?: 'Booted' | 'Shutdown' }[];
     runningAppIds?: string[];
+    /** Model a fresh Expo Go install; opening requires installation on that booted simulator. */
+    expoGoMissing?: boolean;
     /** `postDelayMs` holds the POST back, the way a slow cold launch does. */
     phone?: { fingerprint: string | null; postDelayMs?: number };
   } = {}
@@ -177,6 +212,13 @@ export async function installStubXcrunAsync(
     )
   );
   await fs.promises.rm(counterPath, { force: true });
+  // A booted simulator the stub lists is one `dev` bound to this fixture, or no verb would drive it.
+  const bound = booted
+    ? { udid: SIMULATOR_UDID, name: SIMULATOR_NAME }
+    : simulators?.find((simulator) => simulator.state === 'Booted');
+  if (bound) {
+    await bindingFixture(root, bound.udid, bound.name);
+  }
   const binDir = path.join(root, '.stub-bin');
   const scriptPath = path.join(binDir, 'xcrun-stub.js');
   await fs.promises.mkdir(binDir, { recursive: true });
@@ -224,7 +266,21 @@ export async function installStubXcrunAsync(
       `  if (sim) { sim.state = 'Booted'; save(); }`,
       `  process.exit(0);`,
       `}`,
+      `if (${expoGoMissing} && args[0] === 'simctl' && args[1] === 'install') {`,
+      `  const sim = find(args[2]);`,
+      `  if (!sim || sim.state !== 'Booted' || !fs.existsSync(args[3])) process.exit(1);`,
+      `  sim.expoGoInstalled = true;`,
+      `  save();`,
+      `  process.exit(0);`,
+      `}`,
+      `if (${expoGoMissing} && args[0] === 'simctl' && args[1] === 'spawn') {`,
+      `  const sim = find(args[2]);`,
+      `  const approval = args[5] === 'com.apple.launchservices.schemeapproval' && ['com.apple.CoreSimulator.CoreSimulatorBridge-->exp', 'com.apple.CoreSimulator.CoreSimulatorBridge-->exps'].includes(args[6]) && args[7] === '-string' && args[8] === 'host.exp.Exponent';`,
+      `  const onboarding = args[5] === 'host.exp.Exponent' && args[6] === 'EXDevMenuIsOnboardingFinished' && args[7] === '-bool' && args[8] === 'true';`,
+      `  if (sim?.state === 'Booted' && sim.expoGoInstalled && args[3] === 'defaults' && args[4] === 'write' && (approval || onboarding)) process.exit(0);`,
+      `}`,
       `if (args[0] === 'simctl' && args[1] === 'openurl') {`,
+      `  if (${expoGoMissing} && !find(args[2])?.expoGoInstalled) process.exit(115);`,
       `  fs.writeFileSync(marker, '');`,
       `  process.exit(0);`,
       `}`,
@@ -238,6 +294,7 @@ export async function installStubXcrunAsync(
       `  process.exit(0);`,
       `}`,
       `if (args[1] === 'get_app_container') {`,
+      `  if (${expoGoMissing} && !find(args[2])?.expoGoInstalled) process.exit(1);`,
       `  process.stdout.write(${JSON.stringify(container)} + '\\n');`,
       `  process.exit(0);`,
       `}`,
