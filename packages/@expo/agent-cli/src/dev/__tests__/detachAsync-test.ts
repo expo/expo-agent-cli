@@ -555,7 +555,9 @@ describe('the bound device', () => {
     vi.mocked(devicesDisabled).mockReturnValue(false);
     // These cases model a host that can run the requested iOS simulator. Other tests below
     // exercise the unsupported-host branch explicitly.
-    vi.mocked(hostBindsPlatform).mockImplementation((platform) => platform === 'ios');
+    vi.mocked(hostBindsPlatform).mockImplementation(
+      (platform) => platform === 'ios' && process.platform === 'darwin'
+    );
     vi.mocked(acquireDeviceAsync).mockResolvedValue(reused);
   });
 
