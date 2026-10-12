@@ -518,6 +518,68 @@ describe('@expo/agent-cli runtime:reload', () => {
     }
   });
 
+  it('reconnects a development build to this Metro before opening the requested route once', async () => {
+    const projectRoot = await setupFixtureAsync('dev-client-app');
+    await fs.promises.writeFile(
+      path.join(projectRoot, 'app.json'),
+      JSON.stringify({
+        expo: {
+          name: 'demo',
+          slug: 'demo',
+          scheme: 'demoapp',
+          ios: { bundleIdentifier: 'dev.demo' },
+        },
+      })
+    );
+    const stub = await startStubDevServerAsync({
+      projectRoot,
+      targets: [{ ...EXPO_GO_TARGET, appId: 'dev.demo' }],
+      targetsAppearWithFile: appStartedMarkerPath(projectRoot),
+      messagePeers: {},
+    });
+    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        [
+          'runtime:reload',
+          '--method',
+          'device',
+          '--ios',
+          '--route',
+          '/notes',
+          '--no-route-check',
+          '--json',
+        ],
+        { env: stubExpoEnv(projectRoot) }
+      );
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        method: 'device',
+        devServerUrl: stub.url,
+        appsReconnected: 1,
+      });
+      expect(
+        readXcrun().filter((args) => args[1] === 'terminate' || args[1] === 'openurl')
+      ).toEqual([
+        ['simctl', 'terminate', SIMULATOR_UDID, 'dev.demo'],
+        [
+          'simctl',
+          'openurl',
+          SIMULATOR_UDID,
+          `demoapp://expo-development-client/?url=${encodeURIComponent(stub.url)}`,
+        ],
+        ['simctl', 'openurl', SIMULATOR_UDID, 'demoapp://notes'],
+      ]);
+    } finally {
+      releaseLock();
+      await stub.close();
+    }
+  });
+
   it('refuses to reload onto a dev server that is not there', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
 

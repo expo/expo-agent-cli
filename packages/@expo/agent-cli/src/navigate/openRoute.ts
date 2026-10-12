@@ -852,7 +852,7 @@ async function launchDevClientFirstAsync({
 }
 
 /** The activity the Expo CLI hands a dev launcher URL to, or null when this is not that case. */
-function androidLaunchActivityFor(
+export function androidLaunchActivityFor(
   projectRoot: string,
   device: NavigateDevice,
   options: OpenRouteOptions

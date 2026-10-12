@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import fs from 'fs';
 import { vol } from 'memfs';
-import { seedIosBinding } from '../../../deviceBinding/__tests__/fakeTools';
+import { seedAndroidBinding, seedIosBinding } from '../../../deviceBinding/__tests__/fakeTools';
 import path from 'path';
 
 import { detachedLogPath } from '../../../dev/logFile';
@@ -244,6 +244,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   if (originalFetch) {
     globalThis.fetch = originalFetch;
   }
@@ -682,16 +683,27 @@ describe(reloadAsync, () => {
   // reach the app"; a frame that was delivered and produced no churn inside its window *is* nothing
   // cheaper reaching the app. `--method dev-server` still pins rung 1 and never climbs.
   it(`climbs to the relaunch when the broadcast was delivered and proved nothing`, async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     writeProject();
     // One client, and the same one afterwards: delivered, and no churn.
-    mockConnect(fakeSocket([{ 'socket#1': 'role=ios' }]).socket);
+    const { socket } = fakeSocket([{ 'socket#1': 'role=ios' }]);
+    socket.getPeersAsync
+      .mockResolvedValueOnce({ 'socket#1': 'role=ios' })
+      .mockImplementationOnce(async () => {
+        vi.setSystemTime(Date.now() + 8100);
+        return { 'socket#1': 'role=ios' };
+      });
+    mockConnect(socket);
     const server = mockDevServer([EXPO_GO_TARGET]);
     mockSpawnQueue(
       [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
       (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
-    await expect(reloadAsync(projectRoot, options({ json: true }))).resolves.toBe(EXIT_OK);
+    // Leave time after the 8 s peer window for the relaunch; an expired budget must not stop an app.
+    await expect(
+      reloadAsync(projectRoot, options({ json: true, timeoutMs: 10_000 }))
+    ).resolves.toBe(EXIT_OK);
     const report: ReloadResultJson = JSON.parse(printed());
     expect(report.method).toBe('device');
     expect(report.reloaded).toBe(true);
@@ -798,6 +810,234 @@ describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => 
     expect(platformsAsked).toEqual(['android']);
     expect(JSON.parse(printed()).bundlePlatformSource).toBe('connected-app');
     expect(JSON.parse(printed()).bundlePlatforms).toEqual(['android']);
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads
+describe('local development-client reconnect', () => {
+  const serverUrl = 'http://127.0.0.1:8083';
+  const launcherUrl = `demoapp://expo-development-client/?url=${encodeURIComponent(serverUrl)}`;
+
+  function setup(
+    platform: 'ios' | 'android',
+    {
+      refuse = false,
+      reconnect = true,
+      sameId = false,
+      stopRefused = false,
+      throwOpen = false,
+    } = {}
+  ) {
+    writeProject({
+      [`${projectRoot}/package.json`]: JSON.stringify({ dependencies: { 'expo-dev-client': '*' } }),
+      [`${projectRoot}/node_modules/expo-dev-client/package.json`]: JSON.stringify({
+        name: 'expo-dev-client',
+        version: '1.0.0',
+      }),
+      [`${projectRoot}/app.json`]: JSON.stringify({
+        expo: {
+          slug: 'demo',
+          scheme: 'demoapp',
+          ios: { bundleIdentifier: 'dev.demo' },
+          android: { package: 'dev.demo' },
+        },
+      }),
+      [`${projectRoot}/app/notes.tsx`]: 'export default function Notes() {}',
+      [detachedLogPath(projectRoot)]: 'Metro started\n',
+    });
+    seedAndroidBinding(projectRoot, 'emulator-5556');
+    const target = {
+      ...EXPO_GO_TARGET,
+      appId: 'dev.demo',
+      deviceName: platform === 'ios' ? 'iPhone 17' : 'sdk_gphone64_arm64 - 15 - API 35',
+    };
+    // Keep the old target visible until the launcher opens. It must not suppress reconnecting.
+    const server = mockDevServer([target]);
+    const calls: string[][] = [];
+    const opened: string[] = [];
+    vi.mocked(spawn).mockImplementation(((_bin: string, args: string[]) => {
+      calls.push(args);
+      let stdout = '';
+      let exitCode = 0;
+      if (args[0] === 'simctl' && args[1] === 'list') stdout = BOOTED_SIMULATOR;
+      if (args[0] === 'devices')
+        stdout =
+          'List of devices attached\nemulator-5556 device model:sdk_gphone64_arm64\nemulator-5554 device model:sibling\n';
+      if (args.includes('get-state')) stdout = 'device\n';
+      if (args.includes('pidof')) stdout = '123\n';
+      if (args[1] === 'terminate' && stopRefused) exitCode = 1;
+      const url =
+        args[1] === 'openurl'
+          ? args[3]
+          : args.includes('-d')
+            ? args[args.indexOf('-d') + 1]?.replace(/^'|'$/g, '')
+            : null;
+      if (url) {
+        opened.push(url);
+        if (url === launcherUrl) {
+          if (throwOpen) throw new Error('device disconnected');
+          exitCode = refuse ? 1 : 0;
+          if (!refuse && reconnect) {
+            server.listing([{ ...target, id: sameId ? target.id : 'reconnected' }]);
+            fs.appendFileSync(
+              detachedLogPath(projectRoot),
+              `${platform === 'ios' ? 'iOS' : 'Android'} Bundled 20ms entry.js (10 modules)\n`
+            );
+          }
+        }
+      }
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => {
+        if (stdout) child.stdout.emit('data', stdout);
+        child.emit('close', exitCode, null);
+      });
+      return child as any;
+    }) as any);
+    return { calls, opened };
+  }
+
+  it.each(['ios', 'android'] as const)(
+    'reconnects %s to the selected Metro before opening the route once',
+    async (platform) => {
+      const { calls, opened } = setup(platform);
+      await expect(
+        reloadAsync(
+          projectRoot,
+          options({
+            platform,
+            method: 'device',
+            devServerUrl: serverUrl,
+            route: '/notes',
+            json: true,
+            timeoutMs: 600,
+          })
+        )
+      ).resolves.toBe(EXIT_OK);
+      expect(opened).toEqual([launcherUrl, 'demoapp://notes']);
+      expect(connectMessageSocketAsync).not.toHaveBeenCalled();
+      const report = JSON.parse(printed());
+      expect(report).toMatchObject({
+        deviceId: platform === 'ios' ? 'IOS-1' : 'emulator-5556',
+        devServerUrl: serverUrl,
+      });
+      expect(report.attempts[0].reason).toContain(launcherUrl);
+      if (platform === 'android') {
+        expect(calls).toContainEqual(['-s', 'emulator-5556', 'reverse', 'tcp:8083', 'tcp:8083']);
+        const launch = calls.find((args) => args.includes(`'${launcherUrl}'`))!;
+        expect(launch).toContain("'dev.demo/.MainActivity'");
+        expect(
+          calls.filter((args) => args[0] === '-s').every((args) => args[1] === 'emulator-5556')
+        ).toBe(true);
+      }
+    }
+  );
+
+  it('accepts the existing bundle evidence when the debugger reconnects under the same ID', async () => {
+    const { opened } = setup('ios', { sameId: true });
+    await expect(
+      reloadAsync(
+        projectRoot,
+        options({
+          platform: 'ios',
+          method: 'device',
+          devServerUrl: serverUrl,
+          json: true,
+          timeoutMs: 600,
+        })
+      )
+    ).resolves.toBe(EXIT_OK);
+    expect(opened).toEqual([launcherUrl]);
+    expect(JSON.parse(printed()).bundlesAfterReload.observed).toBe(true);
+  });
+
+  it('reports the stopped app when the launcher URL is refused', async () => {
+    const { opened } = setup('ios', { refuse: true });
+    await expect(
+      reloadAsync(
+        projectRoot,
+        options({
+          platform: 'ios',
+          method: 'device',
+          devServerUrl: serverUrl,
+          route: '/notes',
+          json: true,
+          timeoutMs: 600,
+        })
+      )
+    ).resolves.toBe(EXIT_OUTCOME_FAILED);
+    expect(opened).toEqual([launcherUrl]);
+    expect(JSON.parse(printed()).attempts[0]).toMatchObject({
+      ok: false,
+      leftAppStopped: 'dev.demo',
+      reason: expect.stringContaining(launcherUrl),
+    });
+  });
+
+  it('does not open the requested route when reconnecting remains unconfirmed', async () => {
+    const { opened } = setup('ios', { reconnect: false });
+    await expect(
+      reloadAsync(
+        projectRoot,
+        options({
+          platform: 'ios',
+          method: 'device',
+          devServerUrl: serverUrl,
+          route: '/notes',
+          json: true,
+          timeoutMs: 100,
+        })
+      )
+    ).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
+    expect(opened).toEqual([launcherUrl]);
+    expect(JSON.parse(printed()).followups).toEqual([]);
+  });
+
+  it('does not open a connection link when stopping the app fails', async () => {
+    const { opened } = setup('ios', { stopRefused: true });
+    await expect(
+      reloadAsync(
+        projectRoot,
+        options({ platform: 'ios', method: 'device', devServerUrl: serverUrl, json: true })
+      )
+    ).resolves.toBe(EXIT_OUTCOME_FAILED);
+    expect(opened).toEqual([]);
+    expect(JSON.parse(printed()).attempts[0]).toMatchObject({ ok: false, leftAppStopped: null });
+  });
+
+  it('retains the stopped app and connection command when reopening throws', async () => {
+    setup('ios', { throwOpen: true });
+    await expect(
+      reloadAsync(
+        projectRoot,
+        options({ platform: 'ios', method: 'device', devServerUrl: serverUrl, json: true })
+      )
+    ).resolves.toBe(EXIT_OUTCOME_FAILED);
+    expect(JSON.parse(printed()).attempts[0]).toMatchObject({
+      ok: false,
+      leftAppStopped: 'dev.demo',
+      reason: expect.stringContaining('device disconnected'),
+    });
+    expect(JSON.parse(printed()).attempts[0].reason).toContain(launcherUrl);
+  });
+
+  it('leaves the app running when the broadcast has spent the reload budget', async () => {
+    const { calls } = setup('ios');
+    mockConnect(fakeSocket([{ 'socket#1': 'role=ios' }]).socket);
+    await expect(
+      reloadAsync(
+        projectRoot,
+        options({ platform: 'ios', devServerUrl: serverUrl, json: true, timeoutMs: 100 })
+      )
+    ).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
+    expect(calls.some((args) => args[1] === 'terminate' || args[1] === 'openurl')).toBe(false);
+    expect(JSON.parse(printed()).attempts[1]).toMatchObject({
+      ok: false,
+      timedOut: true,
+      leftAppStopped: null,
+    });
   });
 });
 
