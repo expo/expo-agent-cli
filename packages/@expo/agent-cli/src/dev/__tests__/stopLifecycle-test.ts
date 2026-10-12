@@ -1,5 +1,6 @@
 import { releaseWorktreeDevicesAsync } from '../../deviceBinding';
 import { keptDevices, unreadableBindingFiles } from '../../deviceBinding/records';
+import { reapDevicesAsync } from '../../deviceBinding/reap';
 import { readDevServerLockAsync } from '../../devLock';
 import { PROGRAM_PREFIX } from '../../programName';
 import { isPortInUseAsync } from '../portListener';
@@ -14,6 +15,7 @@ vi.mock('../../deviceBinding/records', () => ({
   keptDevices: vi.fn(() => []),
   unreadableBindingFiles: vi.fn(() => []),
 }));
+vi.mock('../../deviceBinding/reap', () => ({ reapDevicesAsync: vi.fn(async () => []) }));
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn(async () => null) }));
 vi.mock('../portListener', () => ({
   isPortInUseAsync: vi.fn(async () => false),
@@ -68,6 +70,7 @@ it('release-keeps-devices-when-own-server-runs-on-another-port', async () => {
       deviceError: expect.stringContaining('still running'),
     })
   );
+  expect(reapDevicesAsync).toHaveBeenCalledTimes(1);
 });
 
 it.each([
@@ -152,13 +155,14 @@ it('release-keeps-devices-when-server-is-replaced after a successful stop', asyn
   }
 });
 
-it('dev-stop-keeps-without-release', async () => {
+it('dev-stop-keeps-without-release and dev-stop-reaps-once', async () => {
   const onReport = vi.fn();
   expect(
     await devStopAsync(root, resolveDevStopOptions(['--no-followups']), { print: false, onReport })
   ).toBe(0);
   expect(onReport).toHaveBeenCalledWith(expect.objectContaining({ devices: [device] }));
   expect(releaseWorktreeDevicesAsync).not.toHaveBeenCalled();
+  expect(reapDevicesAsync).toHaveBeenCalledTimes(1);
 });
 
 it('releases only the requested internal platform once its own server is absent', async () => {
@@ -171,6 +175,7 @@ it('releases only the requested internal platform once its own server is absent'
   };
   expect(await devStopAsync(root, options, { print: false })).toBe(0);
   expect(releaseWorktreeDevicesAsync).toHaveBeenCalledWith(root, { platform: 'ios' });
+  expect(reapDevicesAsync).toHaveBeenCalledTimes(1);
 });
 
 it('release reports an unreadable binding file instead of succeeding', async () => {

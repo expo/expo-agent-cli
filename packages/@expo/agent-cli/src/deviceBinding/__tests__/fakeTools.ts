@@ -125,6 +125,10 @@ export function fakeTools({
       simulator.state = 'Shutdown';
       return ok();
     }
+    if (command === 'delete') {
+      state.splice(state.indexOf(simulator), 1);
+      return ok();
+    }
     if (command === 'boot') {
       simulator.state = 'Booted';
       return ok();

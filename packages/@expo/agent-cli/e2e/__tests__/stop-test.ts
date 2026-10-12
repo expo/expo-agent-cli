@@ -127,6 +127,7 @@ describe('@expo/agent-cli dev:stop', () => {
       // is not one listener).
       'portStillAnswering',
       'processStillRunning',
+      'reaped',
       'reason',
       'signal',
       'stopped',

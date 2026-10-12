@@ -26,25 +26,20 @@ export async function bindIosSectionAsync(
   projectRoot: string,
   {
     inventory,
-    before,
     reuseOnly,
     tools,
-  }: { inventory: IosInventory; before: BindingRead; reuseOnly: boolean; tools: DeviceTools }
-): Promise<{ binding: Binding; wasBooted: boolean; action: AcquireAction } | null> {
+  }: { inventory: IosInventory; reuseOnly: boolean; tools: DeviceTools }
+): Promise<{ binding: Binding; wasBooted: boolean; action: AcquireAction }> {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   const read = readBindingFile(file);
   if (read.kind === 'unreadable') {
     throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
-  }
-  if (bindingIdentity(read) !== bindingIdentity(before)) {
-    return null;
   }
   const own = read.kind === 'binding' ? read.binding : null;
   const choice = chooseIosDevice({ own, inventory, reuseOnly, digest: digestForRoot(projectRoot) });
   if (own != null && choice.kind !== 'reuse') {
     removeBindingFile(file);
   }
-  // The reap of other worktrees' stale bindings arrives with llp/0035 §Device lifecycle.
   if (choice.kind === 'refuse') {
     throw deviceUnavailableError(choice.reason, { platform: 'ios' });
   }

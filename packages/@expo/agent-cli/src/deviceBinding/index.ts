@@ -7,9 +7,10 @@ import { androidToolsResolve, readAndroidInventoryAsync } from './emulator';
 import { deviceUnavailableError } from './errors';
 import { clearInspectCache } from './inspect';
 import { bootSimulatorAsync, readIosInventoryAsync } from './ios';
-import { bindIosSectionAsync } from './iosAcquire';
-import { bindingPathFor, readBindingFile, withRegistryLockAsync } from './registry';
-import { releaseWorktreeDevicesAsync, WRITE_LOCK_WAIT_MS } from './release';
+import { bindingIdentity, bindIosSectionAsync } from './iosAcquire';
+import { acquireSectionAsync } from './reap';
+import { releaseWorktreeDevicesAsync } from './release';
+import { bindingPathFor, readBindingFile } from './registry';
 import { defaultTools } from './tools';
 import {
   deviceIdOf,
@@ -125,9 +126,8 @@ async function acquireAndroidAsync(
   { reuseOnly, tools }: { reuseOnly: boolean; tools: DeviceTools }
 ): Promise<Acquired> {
   const inventory = await readAndroidInventoryAsync(tools);
-  const { binding, action, handle } = await withRegistryLockAsync(
-    () => bindAndroidSectionAsync(projectRoot, { inventory, reuseOnly, tools }),
-    { waitMs: WRITE_LOCK_WAIT_MS, tools }
+  const { binding, action, handle } = await acquireSectionAsync(projectRoot, tools, async () =>
+    bindAndroidSectionAsync(projectRoot, { inventory, reuseOnly, tools })
   );
   const serial = deviceIdOf(binding.device);
   return {
@@ -168,13 +168,20 @@ async function bindIosAsync(projectRoot: string, reuseOnly: boolean, tools: Devi
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const before = readBindingFile(file);
     const inventory = await readIosInventoryAsync(tools);
-    const bound = await withRegistryLockAsync(
-      () => bindIosSectionAsync(projectRoot, { inventory, before, reuseOnly, tools }),
-      { waitMs: WRITE_LOCK_WAIT_MS, tools }
+    const bound = await acquireSectionAsync(
+      projectRoot,
+      tools,
+      async () => {
+        const read = readBindingFile(file);
+        if (read.kind === 'unreadable') {
+          throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
+        }
+        if (bindingIdentity(read) !== bindingIdentity(before)) return null;
+        return bindIosSectionAsync(projectRoot, { inventory, reuseOnly, tools });
+      },
+      inventory
     );
-    if (bound != null) {
-      return bound;
-    }
+    if (bound != null) return bound;
   }
   throw deviceUnavailableError('binding-changed', { platform: 'ios' });
 }

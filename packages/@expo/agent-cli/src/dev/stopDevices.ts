@@ -6,12 +6,15 @@ import {
 } from '../deviceBinding';
 import { deviceUnavailableError } from '../deviceBinding/errors';
 import { keptDevices, unreadableBindingFiles } from '../deviceBinding/records';
+import { reapDevicesAsync } from '../deviceBinding/reap';
+import type { CleanupReport } from '../deviceBinding/cleanup';
 import { readDevServerLockAsync } from '../devLock';
 import { PROGRAM_PREFIX } from '../programName';
 import type { DevStopOptions } from './resolveStopOptions';
 
 export interface StoppedDevices {
   devices: ReleasedDevice[];
+  reaped: CleanupReport[];
   deviceError: string | null;
 }
 
@@ -20,7 +23,7 @@ export async function stopDevicesAsync(
   options: DevStopOptions,
   stop: { reason: string | null; port: number | null; url: string | null }
 ): Promise<StoppedDevices> {
-  const report: StoppedDevices = { devices: [], deviceError: null };
+  const report: StoppedDevices = { devices: [], reaped: [], deviceError: null };
   if (devicesDisabled()) return report;
   report.devices = keptDevices(projectRoot, options.platform);
   try {
@@ -62,6 +65,12 @@ export async function stopDevicesAsync(
     }
   } catch (error) {
     report.deviceError = error instanceof Error ? error.message : String(error);
+  } finally {
+    try {
+      report.reaped = await reapDevicesAsync(projectRoot);
+    } catch (error) {
+      report.deviceError ??= error instanceof Error ? error.message : String(error);
+    }
   }
   return report;
 }
