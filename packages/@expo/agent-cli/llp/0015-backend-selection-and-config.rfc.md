@@ -97,6 +97,8 @@ runner                     ->  bunx, when the project uses bun; else npx --yes
 
 The runners already prefer the project's own copy, so a "project bin first" rung was doing nothing the runner does not do. A runner resolves a package and never a file on `PATH`, so a stray `eas` is not spawned at all. The impostor guards stay (`utils/wrapperCrash.ts`) because "unreachable" is a claim about today's resolver rather than about the process boundary.
 
+An existing project pin is respected, but error recovery does not recommend adding `eas-cli` to the project. A missing or unspawnable runner names the runner and asks for its installation/PATH to be repaired. A download failure suggests retrying or checking registry access; a timeout alone does not prove a download was in progress. [confirmed — review of #127, 2026-10-07]
+
 Load-bearing rules of the rung:
 
 - The pin survives. Local before published, in a monorepo too. A version in the spec (`@latest`) defeats the pin, so `pinned` chooses the bare name.

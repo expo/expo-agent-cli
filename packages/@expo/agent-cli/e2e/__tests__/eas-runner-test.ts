@@ -378,6 +378,8 @@ describe('a machine with no eas-cli installed', () => {
     expect(report.error.code).toBe('EAS_CLI_MISSING');
     expect(report.error.message).toContain('no package runner');
     expect(report.error.message).not.toContain('npm install -g eas-cli');
-    expect(report.error.suggestedCommand).toBe('npm install --save-dev eas-cli');
+    expect(report.error.message).toContain('on PATH');
+    expect(report.error.message).not.toContain('install --save-dev');
+    expect(report.error.suggestedCommand).toBeNull();
   });
 });

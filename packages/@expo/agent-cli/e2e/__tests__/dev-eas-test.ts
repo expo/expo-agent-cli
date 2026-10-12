@@ -311,7 +311,9 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     const report = JSON.parse(result.stdout);
     expect(report.error.code).toBe('EAS_CLI_MISSING');
     expect(report.error.message).toContain('no package runner');
-    expect(report.error.suggestedCommand).toBe('npm install --save-dev eas-cli');
+    expect(report.error.message).toContain('on PATH');
+    expect(report.error.message).not.toContain('install --save-dev');
+    expect(report.error.suggestedCommand).toBeNull();
   });
 
   // @ref llp/0001-agentic-cli-on-expo-cli.rfc.md §Constraints — the thing on the other side of the

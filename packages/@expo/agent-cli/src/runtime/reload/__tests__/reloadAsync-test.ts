@@ -183,7 +183,7 @@ function mockSpawnQueue(
     process.nextTick(() => {
       if (answer.stdout) child.stdout.emit('data', answer.stdout);
       if (answer.stderr) child.stderr.emit('data', answer.stderr);
-      child.emit('close', answer.exitCode ?? 0, null);
+      child.emit('close', answer.exitCode === undefined ? 0 : answer.exitCode, null);
     });
     return child as any;
   }) as any);
@@ -1122,6 +1122,85 @@ describe('reloading an app on a cloud simulator session', () => {
       .mocked(spawn)
       .mock.calls.map(([bin, args]) => [bin, ...((args as string[]) ?? [])].join(' '));
   }
+
+  it.each([
+    [
+      'npm warn exec The following package was not found and will be installed: agent-device@latest\n',
+      'installation output for "agent-device@latest"',
+      false,
+    ],
+    [
+      'npm warn deprecated old-package: unsupported\nnpm warn exec The following package was not found and will be installed: agent-device@latest\n',
+      'installation output for "agent-device@latest"',
+      false,
+    ],
+    [
+      'npm warn exec The following package was not found and will be installed: eas-cli@latest\n',
+      'failed to deliver the eas CLI',
+      true,
+    ],
+    [
+      'Resolving dependencies\n',
+      'the output does not identify which package was being installed',
+      false,
+    ],
+  ])(
+    'attributes interrupted runner output during cloud reload: %s',
+    async (stderr, explanation, outerEas) => {
+      writeCloudProject();
+      mockDevServer([]);
+      mockConnect(fakeSocket([{}]).socket);
+      mockSpawnQueue([{ stdout: SESSION_LISTING }, { stderr, exitCode: null }]);
+
+      await expect(reloadAsync(projectRoot, cloudOptions({ json: true }))).resolves.toBe(
+        EXIT_OUTCOME_FAILED
+      );
+      const attempt = JSON.parse(printed()).attempts.find(
+        (item: { method: string }) => item.method === 'device'
+      );
+      expect(attempt.reason).toContain('exited on a signal');
+      expect(attempt.reason).toContain(explanation);
+      expect(attempt.reason.includes('failed to deliver the eas CLI')).toBe(outerEas);
+      expect(attempt.reason).not.toContain('install --save-dev');
+      expect(spawnedCommands()).toHaveLength(2);
+    }
+  );
+
+  it.each([
+    [
+      {
+        stdout: 'EAS project not configured.',
+        stderr: 'Error: simulator:exec command failed.',
+        exitCode: 1,
+      },
+      'not linked to an EAS project',
+    ],
+    [
+      { stdout: '', stderr: 'npm warn exec installing\nError: connection refused', exitCode: 1 },
+      'Error: connection refused',
+    ],
+    [
+      {
+        stdout: '',
+        stderr: 'npm warn exec installing\nError (COMMAND_FAILED): Device refused the link.',
+        exitCode: 1,
+      },
+      "the session's controller answered COMMAND_FAILED",
+    ],
+  ])('keeps CLI and controller explanations during cloud reload', async (failure, explanation) => {
+    writeCloudProject();
+    mockDevServer([]);
+    mockConnect(fakeSocket([{}]).socket);
+    mockSpawnQueue([{ stdout: SESSION_LISTING }, failure]);
+    await expect(reloadAsync(projectRoot, cloudOptions({ json: true }))).resolves.toBe(
+      EXIT_OUTCOME_FAILED
+    );
+    const attempt = JSON.parse(printed()).attempts.find(
+      (item: { method: string }) => item.method === 'device'
+    );
+    expect(attempt.reason).toContain(explanation);
+    expect(attempt.reason).not.toContain('failed to deliver');
+  });
 
   // The whole fix, in two verbs, and each half is there for something that was observed to break:
   //

@@ -33,8 +33,14 @@ import path from 'path';
 import { classifySubprocessFailure } from '../needsHuman/detect';
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { PROGRAM_PREFIX } from '../programName';
-import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/easCli';
-import { classifyEasFailure } from '../utils/easFailure';
+import {
+  easCliArgs,
+  easCliLabel,
+  EAS_RUNNER_RECOVERY,
+  resolveEasCli,
+  type EasCli,
+} from '../utils/easCli';
+import { classifyEasFailure, easFailureReason } from '../utils/easFailure';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import {
@@ -706,18 +712,9 @@ export async function probeCloudSessionAsync({
     );
   }
   if (result.exitCode !== 0) {
-    // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — a refusal this CLI recognises is
-    // answered in its own words, with the fix; anything else quotes the CLI's first line.
-    const cause = classifyEasFailure(`${result.stdout}\n${result.stderr}`);
+    // @ref llp/0027-everything-on-eas.rfc.md §What EAS said
     return {
-      ...unknownSession(
-        preferredId,
-        cause
-          ? `"${result.command}" exited ${result.exitCode ?? 'on a signal'}: ${cause.summary}`
-          : `"${result.command}" exited ${result.exitCode ?? 'on a signal'}${
-              firstLine(result.stderr) ? `: ${firstLine(result.stderr)}` : ''
-            }`
-      ),
+      ...unknownSession(preferredId, easFailureReason(result, result.command)),
       failure: result,
     };
   }
@@ -1140,7 +1137,7 @@ export function cloudVerbFailedError(
       [
         `Could not run "${result.command}", so ${what}`,
         `Why: ${result.spawnError}`,
-        `How: add the EAS CLI to the project with "npm install --save-dev eas-cli", then run this command again. The project's own copy is the first thing this command looks for, so it takes precedence over whatever could not be spawned.`,
+        `How: ${EAS_RUNNER_RECOVERY}`,
       ].join('\n')
     );
   }
@@ -1221,17 +1218,16 @@ export function cloudVerbNotSupportedError(action: string): CommandError {
   return error;
 }
 
-/** The failure for a cloud run on a machine with no EAS CLI at all. */
+/** The failure for a cloud run on a machine with no reachable package runner. */
 export function easCliMissingError(): CommandError {
   const error = new CommandError(
     'EAS_CLI_MISSING',
     [
       'The EAS CLI could not be reached, so a cloud simulator cannot be driven from here.',
-      'Why: no "eas" binary was found in node_modules/.bin or on PATH, and no package runner ("npx" or "bunx") is on PATH either, so the published eas-cli could not be downloaded to stand in for one — and an EAS Simulator session is created and driven entirely through that CLI.',
-      'How: add the EAS CLI to the project with "npm install --save-dev eas-cli", then run this command again. If that command is also unavailable, PATH is missing the Node.js install that provides npm and npx — fix that first.',
+      'Why: no package runner ("npx" or "bunx") is on PATH, so nothing here can start the published EAS CLI — and an EAS Simulator session is created and driven entirely through that CLI.',
+      `How: ${EAS_RUNNER_RECOVERY}`,
     ].join('\n')
   );
-  error.suggestedCommand = 'npm install --save-dev eas-cli';
   return error;
 }
 
@@ -1275,8 +1271,4 @@ function stringOf(value: unknown): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function firstLine(text: string): string {
-  return text.trim().split('\n')[0] ?? '';
 }

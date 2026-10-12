@@ -92,6 +92,10 @@ export const EAS_CLI_PACKAGE_LATEST = 'eas-cli@latest';
  */
 export const EAS_CLI_PACKAGE_PINNED = 'eas-cli';
 
+/** Recovery for a runner that could not be found or spawned, before any EAS CLI could start. */
+export const EAS_RUNNER_RECOVERY =
+  'check that the package runner ("npx" or "bunx") is installed, executable and on PATH. Repair the Node.js/npm or Bun installation if needed, then run this command again.';
+
 /**
  * What goes before the package spec, per runner.
  *
@@ -267,9 +271,8 @@ export function resolveEasCliOrThrow(
     [
       `The EAS CLI could not be reached, so this command cannot run.`,
       `Why: this CLI runs the published eas-cli through a package runner, and no package runner ("npx" or "bunx") was found on PATH — so there is nothing here that can start it.`,
-      `How: PATH is missing the Node.js install that provides npm and npx; fix that, then run this command again. Once npm is reachable, "npm install --save-dev eas-cli" also pins the CLI into this project, which is the version this command would then run.`,
+      `How: ${EAS_RUNNER_RECOVERY}`,
     ].join('\n')
   );
-  error.suggestedCommand = 'npm install --save-dev eas-cli';
   throw error;
 }

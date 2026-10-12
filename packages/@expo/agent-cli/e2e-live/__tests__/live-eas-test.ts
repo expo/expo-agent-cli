@@ -182,7 +182,7 @@ describeLive('live-eas', gate)('live-eas: the real service, on expo-ci', () => {
   //
   // The fix is a per-spec mutex in the spawn layer (`src/utils/runnerLock.ts`) plus a guard that will
   // not let a runner's line be quoted as the service's answer even when the two do collide
-  // (`looksLikeRunnerNoise`). This test asserts both halves against the real runner.
+  // (`readEasFailure`). This test asserts both halves against the real runner.
   it("F93: a build lookup never reports the package runner's progress line as EAS's answer", async () => {
     // **The cache has to go first**, and this is the whole reason the test says so out loud: by the
     // time this runs, the tests above have written `.expo/agent-cli-eas-builds.json`, and a cache hit

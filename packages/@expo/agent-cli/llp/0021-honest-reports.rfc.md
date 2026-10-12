@@ -45,6 +45,8 @@ A failed EAS Simulator session start whose reason is `Resolving dependencies` is
 
 When only the outer runner printed, the reason attributes those lines to the runner and suggests retrying the download or checking registry access. Recovery advice does not recommend adding `eas-cli` to the project's dependencies. A signal is reported as a signal, never as exit code `null`.
 
+`simulator:exec` also relays an inner package runner. Cloud reload uses an explicit npm install notice to name that package; an `agent-device` download is not evidence that EAS never started. Runner output that names no package stays unattributed. Fingerprint comparison uses a recognised cause's recovery advice as well as its summary, so the Why and How describe the same failure.
+
 Copying one EAS build's fingerprint comparison onto both platforms is rule 3. `src/impact/buildCache.ts` answers per platform.
 
 `deploy` classifying EAS failures is rule 4. `src/deploy/easFailure.ts` reads the EAS CLI's own sentence first.

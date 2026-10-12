@@ -8,15 +8,9 @@
 // implication is the other CLI's and this one does not depend on it.
 
 import { easCliArgs, easCliLabel, mayDownloadEasCli, type EasCli } from '../utils/easCli';
-import { classifyEasFailure } from '../utils/easFailure';
+import { readEasFailure } from '../utils/easFailure';
 import { spawnSubprocessAsync } from '../utils/subprocess';
-import {
-  looksLikeRunnerNoise,
-  looksLikeWrapperCrash,
-  runnerCrashReason,
-  runnerNoiseLine,
-  runnerNoiseReason,
-} from '../utils/wrapperCrash';
+import { looksLikeWrapperCrash, runnerCrashReason, runnerNoiseReason } from '../utils/wrapperCrash';
 import type { CachedBuild } from './types';
 
 /**
@@ -30,14 +24,13 @@ import type { CachedBuild } from './types';
  * nicety; a minute is not.
  *
  * The caller that *did* ask — `status --explain` — passes a wider budget of its own
- * (`EAS_BUILD_RUNNER_TIMEOUT_MS`, `src/status/easBuilds.ts`). Either way a run that expires says the
- * download was why, via {@link runnerDownloadNote}, and says that the next run is warm — so the cost
- * of guessing this too low is a re-run, never a wrong answer.
+ * (`EAS_BUILD_RUNNER_TIMEOUT_MS`, `src/status/easBuilds.ts`). A run that expires names the possible
+ * download cost via {@link runnerDownloadNote}, without claiming that a retry will have a warm cache.
  */
 export const BUILD_CACHE_TIMEOUT_MS = 20_000;
 
 /**
- * What a timeout adds to its reason when the CLI was being downloaded rather than merely slow.
+ * What a timeout adds to its reason when the invocation may need to download the CLI.
  *
  * Exported because the two timeouts a lookup can hit are in different modules — this one's, and the
  * per-platform deadline `status` wraps it in (`src/status/easBuilds.ts`) — and a reader should not
@@ -47,11 +40,9 @@ export function runnerDownloadNote(easCli: EasCli | null): string {
   if (!mayDownloadEasCli(easCli)) {
     return '';
   }
-  // Both halves are real. `@latest` installs the package on a first run, and asks the registry on
-  // every run — so a machine that cannot reach one spends the whole budget here [observed — live,
-  // 2026-08-27: ~70 s before npm gave up]. A reader who cannot tell those apart re-runs and finds
-  // out, which is why the sentence names both and promises nothing.
-  return `, and "${easCliLabel(easCli!)}" was fetching the EAS CLI: the install happens once, so a re-run should answer — unless this machine cannot reach the npm registry, in which case pinning the CLI into the project ("npm install --save-dev eas-cli") is what makes this section work offline`;
+  // An unpinned spec may need a download or registry check, but the timeout alone does not tell us
+  // which part of the command used the budget.
+  return `, and "${easCliLabel(easCli!)}" may need to download the EAS CLI first; retry the command, and check access to the package registry if the timeout persists`;
 }
 
 /**
@@ -250,21 +241,15 @@ export function parseBuildPlatform(stdout: string): 'ios' | 'android' | null {
 }
 
 /**
- * Why a lookup that ran did not answer, in the words the EAS CLI used.
+ * Why a lookup that ran did not answer, in the words the EAS CLI used (`readEasFailure` in
+ * `src/utils/easFailure.ts`).
  *
- * **stdout before stderr**, which is the opposite of the usual order and is what the CLI actually
- * does: an unlinked project gets the whole explanation — `EAS project not configured…`, and the two
- * `eas init` forms that would fix it — on *stdout*, with only `Error: build:list command failed.`
- * on stderr [observed — live against an unlinked project, 2026-08-26]. Reading stderr first would
- * report the one sentence with nothing in it.
+ * What this returns is printed as what EAS answered about the caller's builds, so a line the
+ * *package runner* wrote is the one thing it may not quote: `reason: "Resolving dependencies"` is bun
+ * installing, and reads as a sentence about the account that no Expo service ever said
+ * [observed — live, 2026-08-27]. That run says the runner failed to deliver the CLI instead.
  *
- * **And never the runner's own output** (F93). What this returns is printed as what EAS answered
- * about the caller's builds, so a line the *package runner* wrote is the one thing it may not quote:
- * `reason: "Resolving dependencies"` is bun installing, and reads as a sentence about the account
- * that no Expo service ever said [observed — live, 2026-08-27]. `looksLikeRunnerNoise` is the guard,
- * and it says the runner failed to deliver the CLI instead (`src/utils/wrapperCrash.ts`).
- *
- * Exported for the tests that pin both halves.
+ * Exported for the tests.
  *
  * @param invocation how the runner and package spec are written, for the sentence about them.
  */
@@ -272,36 +257,23 @@ export function describeLookupFailure(
   result: { exitCode: number | null; stdout: string; stderr: string },
   invocation: string
 ): string {
-  if (looksLikeRunnerNoise({ tool: 'eas', ...result })) {
-    return runnerNoiseReason(
-      { tool: 'eas', exitCode: result.exitCode },
-      invocation,
-      runnerNoiseLine(result.stderr)
-    );
+  const said = readEasFailure(result);
+  switch (said.kind) {
+    case 'runner-only':
+      return runnerNoiseReason(
+        { tool: 'eas', exitCode: result.exitCode },
+        invocation,
+        said.runnerLine
+      );
+    case 'cause':
+      return said.cause.summary;
+    case 'line':
+      return said.line.length > REASON_MAX_LENGTH
+        ? `${said.line.slice(0, REASON_MAX_LENGTH).trimEnd()}…`
+        : said.line;
+    case 'nothing':
+      return 'the EAS CLI refused the lookup and printed nothing';
   }
-  // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — the sentences this CLI recognises are
-  // answered in its own words, with the command that fixes them. The first line of the real output
-  // for an unlinked project ends in "Run one of the following, then re-run this command:" and the
-  // following is what a one-line reason cut off [observed — `status --explain`, 2026-09-08].
-  const cause = classifyEasFailure(`${result.stdout}\n${result.stderr}`);
-  if (cause) {
-    return cause.summary;
-  }
-  const line = firstLine(result.stdout) ?? firstLine(result.stderr);
-  if (!line) {
-    return 'the EAS CLI refused the lookup and printed nothing';
-  }
-  return line.length > REASON_MAX_LENGTH ? `${line.slice(0, REASON_MAX_LENGTH).trimEnd()}…` : line;
-}
-
-function firstLine(output: string): string | null {
-  for (const raw of output.split('\n')) {
-    const line = raw.trim();
-    if (line) {
-      return line;
-    }
-  }
-  return null;
 }
 
 /**
