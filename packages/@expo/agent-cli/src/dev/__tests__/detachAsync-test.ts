@@ -37,6 +37,11 @@ vi.mock('../advertisedUrl', async (importOriginal) => ({
   fetchAdvertisedUrlAsync: vi.fn(),
 }));
 
+const realPlatform = process.platform;
+function mockPlatform(value: NodeJS.Platform) {
+  Object.defineProperty(process, 'platform', { value });
+}
+
 const projectRoot = '/project';
 const logFile = detachedLogPath(projectRoot);
 const startLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'start.log');
@@ -82,6 +87,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  mockPlatform(realPlatform);
   vi.useRealTimers();
   vi.resetAllMocks();
   vol.reset();
@@ -539,6 +545,7 @@ describe('the bound device', () => {
   };
 
   beforeEach(() => {
+    mockPlatform('darwin');
     vi.mocked(devicesDisabled).mockReturnValue(false);
     vi.mocked(acquireDeviceAsync).mockResolvedValue(reused);
   });
@@ -575,6 +582,41 @@ describe('the bound device', () => {
         reuseBoundDevice: true,
       })
     ).rejects.toMatchObject({ code: 'DEVICE_UNAVAILABLE', exitCode: 20 });
+  });
+
+  it.each(['linux', 'win32'] as const)(
+    'reuses the server without acquiring iOS on %s',
+    async (platform) => {
+      mockPlatform(platform);
+      vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+      const { event: cliEvent } = await import('../../events');
+
+      await expect(
+        devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
+          print: false,
+          reuseBoundDevice: true,
+        })
+      ).resolves.toBe(0);
+
+      expect(acquireDeviceAsync).not.toHaveBeenCalled();
+      expect(spawn).not.toHaveBeenCalled();
+      expect(cliEvent).toHaveBeenCalledWith(
+        'dev_detach',
+        expect.objectContaining({ alreadyRunning: true })
+      );
+    }
+  );
+
+  it('binds nothing when devices are disabled', async () => {
+    vi.mocked(devicesDisabled).mockReturnValue(true);
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
+        print: false,
+        reuseBoundDevice: true,
+      })
+    ).resolves.toBe(0);
+    expect(acquireDeviceAsync).not.toHaveBeenCalled();
   });
 
   // smoke-never-reaches-already-running-reuse
@@ -643,6 +685,7 @@ function childLogOf(error: CommandError): string[] {
 
 describe('the acquire line', () => {
   it('is printed before the already-running report', async () => {
+    mockPlatform('darwin');
     const running = {
       url: 'http://127.0.0.1:8393',
       port: 8393,
