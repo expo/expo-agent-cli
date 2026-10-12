@@ -822,6 +822,82 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
+    it('downloads and installs missing Expo Go onto the bound simulator before opening and attaching', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const opened = appStartedMarkerPath(projectRoot);
+      const { calls: readXcrun } = await installStatefulXcrunAsync(projectRoot, {
+        expoGoMissing: true,
+      });
+      const readNpx = await installStubNpxAsync(projectRoot);
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [EXPO_GO_TARGET],
+        targetsAppearWithFile: opened,
+      });
+
+      try {
+        expect(fs.existsSync(opened)).toBe(false);
+        const report = await runAsync(projectRoot, stub);
+        const binding = readBinding(projectRoot);
+        expect(binding).toMatchObject({ device: { udid: 'E2E-CREATED-1', origin: 'created' } });
+        const udid = binding!.device.udid;
+        expect(readNpx()).toContainEqual([
+          '--yes',
+          'expo-go',
+          'download',
+          'ios',
+          '54.0.0',
+          '--json',
+        ]);
+        const calls = readXcrun();
+        const installAt = calls.findIndex((argv) => argv[1] === 'install');
+        expect(installAt).toBeGreaterThan(-1);
+        expect(calls[installAt]).toEqual([
+          'simctl',
+          'install',
+          udid,
+          expect.stringMatching(/Expo-Go-57\.0\.9\.tar\.app$/),
+        ]);
+        const openAt = calls.findIndex((argv) => argv[1] === 'openurl');
+        expect(openAt).toBeGreaterThan(installAt);
+        expect(calls[openAt]).toEqual([
+          'simctl',
+          'openurl',
+          udid,
+          expect.stringMatching(/^exp:\/\//),
+        ]);
+        for (const scheme of ['exp', 'exps']) {
+          const approval = [
+            'simctl',
+            'spawn',
+            udid,
+            'defaults',
+            'write',
+            'com.apple.launchservices.schemeapproval',
+            `com.apple.CoreSimulator.CoreSimulatorBridge-->${scheme}`,
+            '-string',
+            'host.exp.Exponent',
+          ];
+          expect(calls.slice(installAt + 1, openAt)).toContainEqual(approval);
+        }
+        expect(report.phases.find((phase: any) => phase.id === 'install-app')).toMatchObject({
+          status: 'ok',
+        });
+        expect(report.phases.find((phase: any) => phase.id === 'app')).toMatchObject({
+          status: 'ok',
+        });
+        expect(report.appsConnected).toBe(1);
+        expect(fs.existsSync(opened)).toBe(true);
+        expect(calls.some((argv) => argv[1] === 'shutdown')).toBe(false);
+        expect(report.environment.cleanup.map((entry: any) => entry.resource)).not.toContain(
+          'device'
+        );
+        expect(readBinding(projectRoot)).toEqual(binding);
+      } finally {
+        await stub.close();
+      }
+    });
+
     it('reuses the parked simulator the worktree already has', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
       const opened = appStartedMarkerPath(projectRoot);
