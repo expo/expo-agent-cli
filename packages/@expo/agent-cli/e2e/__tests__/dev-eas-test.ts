@@ -512,7 +512,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
-        { env: easRunEnv(projectRoot, 8531) }
+        { env: { ...easRunEnv(projectRoot, 8531), EXPO_NO_DEV_MENU: '1' } }
       );
       expect(result.exitCode).toBe(0);
 
@@ -564,7 +564,8 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         'build-e2e',
       ]);
       expect(start[start.indexOf('--open-url') + 1]).toBe(
-        `devclient://expo-development-client/?url=${encodeURIComponent(`https://${TUNNEL_HOST}`)}`
+        `devclient://expo-development-client/?url=${encodeURIComponent(`https://${TUNNEL_HOST}?disableOnboarding=1`)}` +
+          '&disableOnboarding=1&disableFab=1&disableAutoLaunch=1'
       );
       expect(start).toContain('--non-interactive');
       // The dev server was tunnelled, which is what makes that URL reachable.
