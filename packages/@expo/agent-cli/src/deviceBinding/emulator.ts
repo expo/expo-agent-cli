@@ -7,7 +7,7 @@ import { parseAvds } from '../device/bootDevice';
 import { CommandError } from '../utils/errors';
 import type { SpawnCaptureResult } from '../utils/spawnCapture';
 import { firstLine } from '../utils/text';
-import type { AndroidInventory } from './choose';
+import { consolePortOf, type AndroidInventory } from './choose';
 import { deviceUnavailableError } from './errors';
 import type { DeviceTools } from './types';
 
@@ -45,6 +45,10 @@ export async function readAndroidInventoryAsync(tools: DeviceTools): Promise<And
   return {
     avd: parseAvds(avds.stdout)[0] ?? null,
     runningSerials: parseAndroidDevices(devices.stdout).map((device) => device.deviceId),
+    listedEmulatorSerials: devices.stdout
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/)[0]!)
+      .filter((serial) => consolePortOf(serial) != null),
   };
 }
 

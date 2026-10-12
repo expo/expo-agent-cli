@@ -29,13 +29,19 @@ import {
 } from '../../followups';
 import * as Log from '../../log';
 import {
+  buildOpenUrlCommand,
   isFullUrlRoute,
   openUrlOnDeviceAsync,
   readProjectSchemeConfig,
   resolveDeepLinkUrl,
 } from '../../navigate/deepLink';
 import { resolveDeviceAsync, type NavigateDevice } from '../../navigate/device';
-import { isCallerNamedDevServer } from '../../navigate/openRoute';
+import {
+  androidLaunchActivityFor,
+  isCallerNamedDevServer,
+  resolveRouteUrlAsync,
+} from '../../navigate/openRoute';
+import { reverseLoopbackPortAsync } from '../../navigate/adbReverse';
 import { checkRoute, routeNotFoundError, type RouteCheckJson } from '../../navigate/routeCheck';
 import { decideExpoGoTarget } from '../../navigate/target';
 import type { NativePlatform, PlanPlatform } from '../../plan/types';
@@ -49,7 +55,7 @@ import {
   readProjectPackageJsonAsync,
 } from '../../project/nodeModules';
 import { readProjectRoutesAsync } from '../../project/routes';
-import { readConfiguredAppId, resolveAppId } from '../appId';
+import { EXPO_GO_APP_ID, readConfiguredAppId, resolveAppId } from '../appId';
 import { stopAppOnDeviceAsync } from '../appProcess';
 import {
   bundleToJson,
@@ -78,6 +84,7 @@ import { reloadOnCloudSimulatorAsync } from './cloudReload';
 import { debugEvent, event } from './events';
 import type { ReloadOptions } from './resolveOptions';
 import { easCommandPrefix } from '../../utils/easCli';
+import { withSubprocessDeadlineAsync } from '../../utils/subprocessDeadline';
 
 /**
  * How long the app's message socket has to come back before the broadcast is judged to have done
@@ -148,6 +155,8 @@ export interface ReloadAttempt {
    * there fails, and there is no "delivered but unproved" for it.
    */
   delivered?: boolean | null;
+  /** The local stop/open operation exhausted this reload's remaining budget. */
+  timedOut?: boolean;
   /** Why it did not work, or what it did. Never null: an attempt always has something to say. */
   reason: string;
   /**
@@ -545,7 +554,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
         method = 'device';
       }
     } else if (relaunchRung) {
-      const attempt = await reloadOnDeviceAsync(projectRoot, options, devServerUrl);
+      const attempt = await reloadOnDeviceAsync(projectRoot, options, devServerUrl, remainingMs());
       attempts.push(
         withRelaunchCost(attempt.attempt, observedApps, { climbed: broadcastUnproved })
       );
@@ -659,11 +668,13 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
       ? EXIT_OUTCOME_FAILED
       : refusal === 'bundle-timeout'
         ? EXIT_OUTCOME_TIMEOUT
-        : method == null
-          ? EXIT_OUTCOME_FAILED
-          : observed
-            ? EXIT_OK
-            : EXIT_OUTCOME_TIMEOUT;
+        : attempts.some((attempt) => attempt.timedOut)
+          ? EXIT_OUTCOME_TIMEOUT
+          : method == null
+            ? EXIT_OUTCOME_FAILED
+            : observed
+              ? EXIT_OK
+              : EXIT_OUTCOME_TIMEOUT;
 
   const followups =
     followUpsEnabled(wantFollowUps) && exitCode === EXIT_OK
@@ -1260,76 +1271,115 @@ async function reloadOverRuntimeAsync(
 async function reloadOnDeviceAsync(
   projectRoot: string,
   options: ReloadOptions,
-  devServerUrl: string
+  devServerUrl: string,
+  budgetMs: number
 ): Promise<{ attempt: ReloadAttempt; device: NavigateDevice | null }> {
-  let device: NavigateDevice;
+  let device: NavigateDevice | null = null;
+  let leftAppStopped: string | null = null;
+  let command: string | null = null;
+  const timeoutMessage = 'The device reload exhausted its timeout before reopening was confirmed.';
   try {
-    // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator.
-    // `required` and never `fallback`: only `--eas` sends this to a device that bills by the
-    // minute, and a machine with nothing booted is told it has nothing.
-    device = await resolveDeviceAsync(options.platform, {
-      cloud: options.cloud ? 'required' : 'off',
-      projectRoot,
+    if (budgetMs <= 0) throw new Error(timeoutMessage);
+    return await withSubprocessDeadlineAsync(budgetMs, timeoutMessage, async () => {
+      // Resolve once: after stopping the app, never rediscover a sibling device.
+      const selected = await resolveDeviceAsync(options.platform, { cloud: 'off', projectRoot });
+      device = selected;
+      const openOptions = {
+        route: '/',
+        platform: selected.platform,
+        scheme: options.scheme,
+        appId: options.appId,
+        devServerUrl,
+        devServerUrlSource:
+          options.devServerUrl == null ? ('discovered' as const) : ('flag' as const),
+        routeCheck: false,
+      };
+      // Share navigation's URL resolution, but always connect a development build after a stop.
+      // A lingering debugger target (or another device) must not suppress its launcher URL.
+      // Reload owns the one evidence wait below; navigation's attachment/recovery loop is not run.
+      const resolved = await resolveRouteUrlAsync(projectRoot, openOptions);
+      // A configured bundle/package ID describes a build, not an explicit choice to run it.
+      // Stop and reopen Expo Go when URL resolution chose it, unless the caller named an app.
+      const appId = resolved.isExpoGo
+        ? (options.appId ?? EXPO_GO_APP_ID[selected.platform])
+        : await resolveAppIdAsync(projectRoot, devServerUrl, selected, options.appId);
+      const url = resolved.isExpoGo
+        ? resolved.url
+        : resolved.connect.find((entry) => entry.target === 'dev-build')?.url;
+      if (!url)
+        throw new Error(
+          'No development-client connection URL could be resolved; the app was left running.'
+        );
+      const params = {
+        projectRoot,
+        platform: selected.platform,
+        deviceId: selected.deviceId,
+        backend: selected.backend,
+        adb: selected.adb,
+        appId,
+        url,
+        launchActivity: resolved.isExpoGo
+          ? undefined
+          : androidLaunchActivityFor(projectRoot, selected, { ...openOptions, appId }),
+      };
+      command = buildOpenUrlCommand(params).display;
+      const stopped = await stopAppOnDeviceAsync({ ...params });
+      if (!stopped.ok) {
+        return {
+          attempt: {
+            method: 'device',
+            ok: false,
+            reason: `${stopped.command} failed: ${stopped.reason}`,
+            leftAppStopped: null,
+          },
+          device: selected,
+        };
+      }
+      leftAppStopped = appId;
+      const reverse =
+        selected.platform === 'android' && selected.adb != null
+          ? await reverseLoopbackPortAsync({
+              adb: selected.adb,
+              deviceId: selected.deviceId,
+              url: resolved.isExpoGo ? url : resolved.devServerUrl,
+            })
+          : null;
+      const opened = await openUrlOnDeviceAsync(params);
+      if (opened.exitCode !== 0) {
+        return {
+          attempt: {
+            method: 'device',
+            ok: false,
+            reason: `the app was stopped, but the device refused the link that would start it again (${opened.command}): ${firstLine(opened.stderr || opened.stdout) || `exit ${opened.exitCode}`}`,
+            leftAppStopped,
+          },
+          device: selected,
+        };
+      }
+      leftAppStopped = null;
+      return {
+        attempt: {
+          method: 'device',
+          ok: true,
+          reason: `${stopped.command}, then ${opened.command}${reverse?.ok === false ? `; port forwarding failed: ${reverse.reason}` : ''}`,
+          leftAppStopped: null,
+        },
+        device: selected,
+      };
     });
   } catch (error: unknown) {
+    const detail = error instanceof Error ? firstLine(error.message) : String(error);
     return {
       attempt: {
         method: 'device',
         ok: false,
-        reason: error instanceof Error ? error.message.split('\n')[0]! : String(error),
-        leftAppStopped: null,
-      },
-      device: null,
-    };
-  }
-
-  const appId = await resolveAppIdAsync(projectRoot, devServerUrl, device, options.appId);
-  const stopped = await stopAppOnDeviceAsync({
-    platform: device.platform,
-    deviceId: device.deviceId,
-    appId,
-    adb: device.adb,
-    backend: device.backend,
-    projectRoot,
-  });
-  if (!stopped.ok) {
-    return {
-      attempt: {
-        method: 'device',
-        ok: false,
-        reason: `${stopped.command} failed: ${stopped.reason}`,
-        // The stop is what failed, so the app is where it was.
-        leftAppStopped: null,
+        reason: `${leftAppStopped ? 'the app was stopped, but reopening failed: ' : ''}${detail}${command ? ` (${command})` : ''}`,
+        leftAppStopped,
+        ...(detail === timeoutMessage ? { timedOut: true } : {}),
       },
       device,
     };
   }
-
-  // Starting it again is the deep link, which is the same step `navigate` runs — so a run with a
-  // `--route` opens the route directly and a run without one opens the root.
-  const opened = await openRouteAsync(projectRoot, options, devServerUrl, device);
-  if (opened == null || opened.exitCode !== 0) {
-    return {
-      attempt: {
-        method: 'device',
-        ok: false,
-        reason: `the app was stopped, but the device refused the link that would start it again (${opened?.command ?? 'no command ran'})`,
-        // Stopped and not started: the app is off the screen because of this run.
-        leftAppStopped: appId,
-      },
-      device,
-    };
-  }
-
-  return {
-    attempt: {
-      method: 'device',
-      ok: true,
-      reason: `${stopped.command}, then ${opened.command}`,
-      leftAppStopped: null,
-    },
-    device,
-  };
 }
 
 /**

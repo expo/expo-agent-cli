@@ -66,15 +66,18 @@ describe(acquireDeviceAsync, () => {
     ]);
   });
 
-  it('takes the next even port beside a running instance and another worktree', async () => {
-    const tools = fakeTools({ emulators: [{ serial: 'emulator-5554', state: 'device' }] });
-    writeBinding(file(OTHER), androidBindingFor(OTHER, 'emulator-5556', spawned(5556, 77)));
+  it.each(['device', 'offline'] as const)(
+    'takes the next even port beside an unbound %s instance and another worktree',
+    async (state) => {
+      const tools = fakeTools({ emulators: [{ serial: 'emulator-5554', state }] });
+      writeBinding(file(OTHER), androidBindingFor(OTHER, 'emulator-5556', spawned(5556, 77)));
 
-    const result = await acquireDeviceAsync(ROOT, 'android', { tools });
+      const result = await acquireDeviceAsync(ROOT, 'android', { tools });
 
-    expect(result.device).toMatchObject({ serial: 'emulator-5558' });
-    expect(tools.spawned[0]).toContain('5558,5559');
-  });
+      expect(result.device).toMatchObject({ serial: 'emulator-5558' });
+      expect(tools.spawned[0]).toContain('5558,5559');
+    }
+  );
 
   // busy-ports-include-alive-emulators
   it('keeps the port of an expired binding whose instance is alive, and frees one whose pid is dead', async () => {
@@ -138,21 +141,24 @@ describe(acquireDeviceAsync, () => {
     expect(tools.killed).toEqual([]);
   });
 
-  it('refuses no-free-port naming every serial and its worktree, or not ours', async () => {
-    const serials = Array.from({ length: 16 }, (_, i) => `emulator-${5554 + 2 * i}`);
-    const tools = fakeTools({ emulators: serials.map((serial) => ({ serial, state: 'device' })) });
-    writeBinding(file(OTHER), androidBindingFor(OTHER, 'emulator-5554', spawned(5554, 77)));
+  it.each(['device', 'offline'] as const)(
+    'refuses no-free-port when every listed instance is %s',
+    async (state) => {
+      const serials = Array.from({ length: 16 }, (_, i) => `emulator-${5554 + 2 * i}`);
+      const tools = fakeTools({ emulators: serials.map((serial) => ({ serial, state })) });
+      writeBinding(file(OTHER), androidBindingFor(OTHER, 'emulator-5554', spawned(5554, 77)));
 
-    const error = await acquireDeviceAsync(ROOT, 'android', { tools }).catch((e) => e);
+      const error = await acquireDeviceAsync(ROOT, 'android', { tools }).catch((e) => e);
 
-    expect(error.code).toBe('DEVICE_UNAVAILABLE');
-    expect(error.exitCode).toBe(20);
-    expect(error.data.reason).toBe('no-free-port');
-    expect(error.data.boundBy).toContainEqual({ id: 'emulator-5554', root: OTHER });
-    expect(error.data.boundBy).toContainEqual({ id: 'emulator-5584', root: null });
-    expect(error.message).toContain('emulator-5584 (not ours)');
-    expect(tools.spawned).toEqual([]);
-  });
+      expect(error.code).toBe('DEVICE_UNAVAILABLE');
+      expect(error.exitCode).toBe(20);
+      expect(error.data.reason).toBe('no-free-port');
+      expect(error.data.boundBy).toContainEqual({ id: 'emulator-5554', root: OTHER });
+      expect(error.data.boundBy).toContainEqual({ id: 'emulator-5584', root: null });
+      expect(error.message).toContain('emulator-5584 (not ours)');
+      expect(tools.spawned).toEqual([]);
+    }
+  );
 
   it('refuses spawn-failed when the child has no pid, and writes nothing', async () => {
     const tools = fakeTools({ spawnFails: true });

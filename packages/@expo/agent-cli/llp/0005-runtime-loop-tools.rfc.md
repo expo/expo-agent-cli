@@ -202,6 +202,8 @@ This is preferred over the device path. It needs no platform tooling, no applica
 
 On `--cloud`, rung 2 is the two controller verbs in §Cloud simulator. Otherwise it is `simctl terminate` / `am force-stop`, then the deep link. A `terminate` that reports the app was not running is success: that is the state the step was reaching for. The application id comes from the debugger target (`appId`) and falls back to Expo Go per platform.
 
+For a local development build, that first link is always the development-client launcher URL carrying this run's Metro address. A bare route URL can reopen the client's previous server or leave it at the launcher. Reload shares navigation's URL resolution and Android port forwarding, but forces the connection link even when an old debugger target remains listed. It resolves the bound device and app before stopping, spends only the remaining reload budget, and keeps the existing fresh-target or bundle evidence wait. An optional `--route` is sent once, after that evidence. Expo Go retains its `exp://` link. A refused or throwing reopen reports which app was left stopped and the attempted connection command.
+
 `--method` pins a rung and skips the rest. `--method runtime` calls `expo.reloadAppAsync()` over the debugger, at the target `runtime:eval` reads. `auto` never picks it. On Expo Go the same call closes the app [observed, Expo Go SDK 57, iOS, 2026-08-27]. One runtime reloads and another quits. The difference is not something this command can read off a target. The `expo` global is the door. Hermes has no `require`, no `import()`, no `process`. A module the app did not already load is unreachable. An app whose `expo` global has no `reloadAppAsync` is reported as exactly that.
 
 The entry-bundle check runs before any rung [confirmed, Kudo, 2026-08-24]. A reload makes the app fetch the served bundle again. A bundle that does not compile is exit 20 with `attempts: []`. `--no-bundle-check` exists. `unknown` passes. A check that ran out of budget is 22. The `bundle` object is the one `smoke` prints, same keys, produced by the same function. `appsConnected` on a run that refuses is the count the dev server gave, not `0`.
@@ -211,6 +213,8 @@ A broadcast that was delivered is a mechanism that ran. An attempt carries `deli
 Rung 2 replaces the app's process, so the JavaScript state is gone. The attempt carries the cost, and only when there was an app to lose state. A relaunch that started an app cost nothing and says nothing.
 
 Android Expo Go holds a client on `/message`. Local Android takes rung 1. `runtime:reload` is the one runtime command that works on Expo Go for Android while five others refuse, because neither proof is a CDP read.
+
+Local target detection receives only the caller's explicit `--app-id` as an override. A configured bundle identifier or package name does not by itself select a development build. When URL resolution selects Expo Go, the stop and reopen use Expo Go's platform-specific app ID; development builds retain the debugger/config app-ID resolution.
 
 ### What proves a reload
 

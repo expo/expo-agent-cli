@@ -36,12 +36,12 @@ function otherBindings(ownFile: string): Binding[] {
 }
 
 /**
- * The console ports no spawn may take: every running `emulator-NNNN`, every Android binding whose
- * lease is live, and every binding whose instance is alive, because a reap kills it only after the
- * section.
+ * The console ports no spawn may take: every listed `emulator-NNNN` (even offline), every Android
+ * binding whose lease is live, and every binding whose instance is alive, because a reap kills it
+ * only after the section.
  */
 export function busyPortsOf(
-  runningSerials: string[],
+  listedEmulatorSerials: string[],
   bindings: Binding[],
   tools: DeviceTools
 ): { busy: Set<number>; boundBy: BoundSerial[] } {
@@ -62,7 +62,7 @@ export function busyPortsOf(
       boundBy.push({ id: device.serial, root: binding.projectRoot });
     }
   }
-  for (const serial of runningSerials) {
+  for (const serial of listedEmulatorSerials) {
     const port = consolePortOf(serial);
     if (port != null) {
       busy.add(port);
@@ -102,7 +102,11 @@ export async function bindAndroidSectionAsync(
     (ownDevice.origin.kind === 'spawned'
       ? tools.isPidAlive(ownDevice.origin.emulatorPid)
       : inventory.runningSerials.includes(ownDevice.serial));
-  const { busy, boundBy } = busyPortsOf(inventory.runningSerials, otherBindings(file), tools);
+  const { busy, boundBy } = busyPortsOf(
+    inventory.listedEmulatorSerials,
+    otherBindings(file),
+    tools
+  );
   const choice = chooseAndroidDevice({
     own,
     ownPresent,
