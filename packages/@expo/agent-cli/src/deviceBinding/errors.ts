@@ -100,15 +100,8 @@ export function deviceUnavailableError(
         `The emulator could not be started${detail ? `: ${detail}` : '.'}`,
         `How: ${RERUN}.`,
       ]);
-    case 'not-reusable': {
-      const error = refusal('DEVICE_UNAVAILABLE', reason, EXIT_OUTCOME_FAILED, [
-        `A dev server is running and this worktree has no ${platform} device to reuse.`,
-        'Why: a device created now would carry no app, because the running server already installed nothing on it.',
-        `How: run "${PROGRAM_PREFIX} dev:stop", then this command again.`,
-      ]);
-      error.suggestedCommand = `${PROGRAM_PREFIX} dev:stop`;
-      return error;
-    }
+    case 'not-reusable':
+      return notReusableError(platform);
     case 'create-timeout':
       return refusal('DEVICE_UNAVAILABLE', reason, EXIT_OUTCOME_TIMEOUT, [
         'The device tool did not answer in time.',
@@ -125,6 +118,16 @@ export function deviceUnavailableError(
         `How: ${RERUN}.`,
       ]);
   }
+}
+
+function notReusableError(platform: DevicePlatform): CommandError {
+  const error = refusal('DEVICE_UNAVAILABLE', 'not-reusable', EXIT_OUTCOME_FAILED, [
+    `A dev server is running and this worktree has no ${platform} device to reuse.`,
+    'Why: a device created now would carry no app, because the running server already installed nothing on it.',
+    `How: run "${PROGRAM_PREFIX} dev:stop", then this command again.`,
+  ]);
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev:stop`;
+  return error;
 }
 
 function portHolders(boundBy: BoundSerial[]): string {
