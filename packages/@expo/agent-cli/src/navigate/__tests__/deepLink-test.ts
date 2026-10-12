@@ -1,5 +1,6 @@
 import { vol } from 'memfs';
 
+import { devClientConnectUrl } from '../connectUrl';
 import {
   buildOpenUrlCommand,
   quoteForDeviceShell,
@@ -426,8 +427,26 @@ describe(buildOpenUrlCommand, () => {
 
     expect(command.bin).toBe('xcrun');
     expect(command.args).toEqual(['simctl', 'openurl', 'ABCD-1234', 'demoapp://profile/42']);
-    expect(command.display).toBe('xcrun simctl openurl ABCD-1234 demoapp://profile/42');
+    expect(command.display).toBe("xcrun simctl openurl ABCD-1234 'demoapp://profile/42'");
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'preserves iOS automation parameters when replayed in a shell',
+    () => {
+      const url = devClientConnectUrl('demoapp', 'localhost:8081', 'localhost', true);
+      const command = buildOpenUrlCommand({ platform: 'ios', deviceId: 'ABCD-1234', url });
+      // Use the real shell, replacing xcrun with an argument recorder so no device is touched.
+      const { execFileSync } = process.getBuiltinModule('child_process');
+      const replayed = execFileSync(
+        '/bin/sh',
+        ['-c', `xcrun() { printf '%s\\n' "$@"; }\n${command.display}\nwait`],
+        { encoding: 'utf8' }
+      );
+
+      expect(command.args.at(-1)).toBe(url);
+      expect(replayed.trimEnd().split('\n')).toEqual(command.args);
+    }
+  );
 
   it(`should build an ACTION_VIEW intent scoped to the package for Android`, () => {
     const command = buildOpenUrlCommand({

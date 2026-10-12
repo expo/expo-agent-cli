@@ -95,7 +95,7 @@ describe(openUrlOnDeviceAsync, () => {
       'ABCD-1234',
       'demoapp://profile/42',
     ]);
-    expect(result.command).toBe('xcrun simctl openurl ABCD-1234 demoapp://profile/42');
+    expect(result.command).toBe("xcrun simctl openurl ABCD-1234 'demoapp://profile/42'");
     expect(result.exitCode).toBe(0);
   });
 
