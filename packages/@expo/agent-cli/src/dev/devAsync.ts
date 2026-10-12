@@ -4,6 +4,7 @@
 // `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
 
 import type { OpenAppOnEasReport } from './openAppEas';
+import { withLeaseExtendedAsync } from '../deviceBinding/renew';
 import { outputTail } from '../deploy/parseOutput';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
 import {
@@ -493,7 +494,9 @@ async function executePlanAsync(
     let stepRunning = false;
     const runStep = async (stepArgs: string[]) => {
       if (!devServerStep) {
-        return await runStepAsync(projectRoot, step, stepArgs, output);
+        return await withLeaseExtendedAsync(projectRoot, () =>
+          runStepAsync(projectRoot, step, stepArgs, output)
+        );
       }
       stepRunning = true;
       let openTask: Promise<OpenAppOnEasReport | null> | undefined;
