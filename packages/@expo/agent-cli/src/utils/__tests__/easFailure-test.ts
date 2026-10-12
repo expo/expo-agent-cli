@@ -3,7 +3,8 @@
 // signature, so an unlinked project was told it was not signed in while the real cause sat in the
 // raw output.
 
-import { classifyEasFailure } from '../easFailure';
+import { classifyEasFailure, easFailureReason, readEasFailure } from '../easFailure';
+import simulatorFailures from '../../__fixtures__/eas/simulator-failures.json';
 
 /** The whole of what an unlinked project's `eas deploy` prints [observed — friction run 9]. */
 const UNLINKED_OUTPUT = [
@@ -74,6 +75,7 @@ describe(classifyEasFailure, () => {
     ['You are not logged in. Run "eas login".'],
     ['Error: Not logged in'],
     ['An Expo user account is required. Must be logged in.'],
+    ['Either log in with "eas login" or set the EXPO_TOKEN environment variable to authenticate.'],
   ])(`should read a signed-out machine from %p`, (output) => {
     expect(classifyEasFailure(output)?.command).toBe('npx @expo/agent-cli login');
   });
@@ -86,6 +88,11 @@ describe(classifyEasFailure, () => {
   it(`should answer null for empty output`, () => {
     expect(classifyEasFailure('')).toBeNull();
   });
+
+  it.each([simulatorFailures.permissions.stdout, 'Run eas login to change the account.'])(
+    'does not diagnose a missing login from account-switching advice',
+    (output) => expect(classifyEasFailure(output)).toBeNull()
+  );
 });
 
 // @ref llp/0027-everything-on-eas.rfc.md §What EAS said
@@ -106,5 +113,173 @@ describe('the one-line summary', () => {
     expect(classifyEasFailure('You are not logged in')?.summary).toContain(
       'npx @expo/agent-cli login'
     );
+  });
+});
+
+// @ref llp/0021-honest-reports.rfc.md §The rules — rules 11 and 14. On a cold scratch directory bunx
+// writes its install progress to stderr before the EAS CLI writes there [observed — 2026-10-05].
+describe(readEasFailure, () => {
+  const RUNNER =
+    'Resolving dependencies\nResolved, downloaded and extracted [214]\nSaved lockfile\n';
+
+  it.each([
+    [simulatorFailures.start, '✖ Timed out waiting for agent-device session to start'],
+    [simulatorFailures.stop, '✖ Failed to stop simulator session sess-billed'],
+    [
+      simulatorFailures.permissions,
+      "You don't have the required permissions to perform this operation.",
+    ],
+  ])('reads the failure from the non-TTY stream split', (result, line) => {
+    expect(readEasFailure(result)).toEqual({ kind: 'line', line });
+  });
+
+  it('skips progress and a session receipt on stderr too', () => {
+    expect(readEasFailure({ stdout: '', stderr: RUNNER + simulatorFailures.start.stdout })).toEqual(
+      {
+        kind: 'line',
+        line: '✖ Timed out waiting for agent-device session to start',
+      }
+    );
+  });
+
+  it('keeps a generic GraphQL closing error when there is no explanation', () => {
+    expect(readEasFailure({ stdout: '', stderr: 'Error: GraphQL request failed.\n' })).toEqual({
+      kind: 'line',
+      line: 'Error: GraphQL request failed.',
+    });
+  });
+
+  it('keeps evidence that EAS started when it printed only progress before a signal', () => {
+    expect(readEasFailure({ stdout: '- 🚀 Creating simulator session\n', stderr: RUNNER })).toEqual(
+      {
+        kind: 'line',
+        line: '- 🚀 Creating simulator session',
+      }
+    );
+  });
+
+  it('filters runner notices on stdout before reading the explanation', () => {
+    expect(
+      readEasFailure({ stdout: 'npm notice update available\nService unavailable\n', stderr: '' })
+    ).toEqual({
+      kind: 'line',
+      line: 'Service unavailable',
+    });
+  });
+
+  it.each([
+    [
+      'the first line after the runner',
+      `${RUNNER}TypeError: x is not a function\n`,
+      '',
+      { kind: 'line', line: 'TypeError: x is not a function' },
+    ],
+    [
+      'stdout when stderr is only the runner',
+      RUNNER,
+      'Error: build not found',
+      { kind: 'line', line: 'Error: build not found' },
+    ],
+    [
+      'the runner when it printed everything',
+      RUNNER,
+      '',
+      { kind: 'runner-only', runnerLine: 'Resolving dependencies' },
+    ],
+    [
+      'stdout before the closing line',
+      'Error: build:list command failed.\n',
+      'Something this CLI does not recognise.',
+      { kind: 'line', line: 'Something this CLI does not recognise.' },
+    ],
+    [
+      'the closing line when nothing else was printed',
+      'Error: build:list command failed.\n',
+      '',
+      { kind: 'line', line: 'Error: build:list command failed.' },
+    ],
+    [
+      'stderr before stdout',
+      'Error: quota exceeded\n',
+      'Simulator session created (id: s1)',
+      { kind: 'line', line: 'Error: quota exceeded' },
+    ],
+    ['nothing when nothing was printed', '', '  \n', { kind: 'nothing' }],
+  ])('reads %s', (_, stderr, stdout, expected) => {
+    expect(readEasFailure({ stdout, stderr })).toEqual(expected);
+  });
+
+  // `npx --yes eas-cli@latest notacommand` on an empty npm cache, npm 10.9.4: npm's deprecation
+  // warnings first, the CLI's error, then npm's update notice [observed — 2026-10-07, abridged].
+  const NPX_DEPRECATED = [
+    'npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory.',
+    'npm warn deprecated rimraf@2.4.5: Rimraf versions prior to v4 are no longer supported',
+  ].join('\n');
+  const NPX_NOTICE = [
+    'npm notice',
+    'npm notice New major version of npm available! 10.9.4 -> 12.2.0',
+    'npm notice To update run: npm install -g npm@12.2.0',
+    'npm notice',
+  ].join('\n');
+
+  it("reads the CLI's line between npm's warnings and npm's notice", () => {
+    expect(
+      readEasFailure({
+        stdout: '',
+        stderr: `${NPX_DEPRECATED}\n ›   Error: command notacommand not found\n${NPX_NOTICE}\n`,
+      })
+    ).toEqual({ kind: 'line', line: '›   Error: command notacommand not found' });
+  });
+
+  it("reads npm's warnings and notice alone as the runner", () => {
+    expect(readEasFailure({ stdout: '', stderr: `${NPX_DEPRECATED}\n${NPX_NOTICE}\n` })).toEqual({
+      kind: 'runner-only',
+      runnerLine:
+        'npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory.',
+    });
+  });
+
+  it('reads a recognised sentence after the runner', () => {
+    const said = readEasFailure({ stdout: '', stderr: `${RUNNER}Error: You are not logged in.\n` });
+    expect(said.kind === 'cause' && said.cause.id).toBe('eas-login');
+  });
+});
+
+describe(easFailureReason, () => {
+  const invocation = 'bunx eas-cli@latest simulator:start';
+
+  it('quotes what EAS said', () => {
+    expect(
+      easFailureReason(
+        { exitCode: 1, stdout: '', stderr: 'Resolving dependencies\nError: quota exceeded\n' },
+        invocation
+      )
+    ).toBe('"bunx eas-cli@latest simulator:start" exited 1: Error: quota exceeded');
+  });
+
+  it('says the runner did not deliver the CLI when only the runner printed', () => {
+    const reason = easFailureReason(
+      { exitCode: 1, stdout: '', stderr: 'Resolving dependencies\n' },
+      invocation
+    );
+    expect(reason).toContain('failed to deliver the eas CLI');
+    expect(reason).toContain('("Resolving dependencies")');
+  });
+
+  it('says a run that printed nothing printed nothing', () => {
+    expect(easFailureReason({ exitCode: null, stdout: '', stderr: '' }, invocation)).toBe(
+      '"bunx eas-cli@latest simulator:start" exited on a signal: it printed nothing'
+    );
+  });
+
+  it('reports a runner interrupted by a signal without recommending a local install', () => {
+    const reason = easFailureReason(
+      { exitCode: null, stdout: '', stderr: 'Resolving dependencies\n' },
+      invocation
+    );
+    expect(reason).toContain('exited on a signal');
+    expect(reason).not.toContain('exited null');
+    expect(reason).not.toContain('install --save-dev');
+    expect(reason).toContain('run it again');
   });
 });

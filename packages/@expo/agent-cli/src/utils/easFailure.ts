@@ -22,6 +22,7 @@
 /** What the EAS CLI's own words say, when they say something this CLI can act on. */
 import { PROGRAM_PREFIX } from '../programName';
 import { easCommandPrefix } from './easCli';
+import { runnerNoiseReason, withoutRunnerNoise } from './wrapperCrash';
 
 export interface EasFailureCause {
   /** Which sentence was recognised. */
@@ -109,9 +110,10 @@ const SIGNATURES: readonly EasFailureSignature[] = [
     },
   },
   {
-    // `You are not logged in` / `Not logged in` / `Log in with eas login` — the account case, which
-    // is what the old single `Why:` line assumed every failure was.
-    pattern: /\bnot logged in\b|\beas login\b|\bmust be logged in\b/i,
+    // The permission-denied explanation also suggests `eas login` to change accounts. Only
+    // explicit signed-out wording or the login/token authentication instruction establishes this.
+    pattern:
+      /\bnot logged in\b|\bmust be logged in\b|\blog in with ["']?eas login\b[\s\S]{0,400}\bEXPO_TOKEN\b/i,
     cause: () => ({
       id: 'eas-login',
       summary: `this machine is not signed in to an Expo account — "${PROGRAM_PREFIX} login", or EXPO_TOKEN for a machine with nobody at it`,
@@ -136,3 +138,88 @@ export function classifyEasFailure(output: string): EasFailureCause | null {
 
 /** @deprecated The name this had when only `deploy` read it. */
 export const classifyEasDeployFailure = classifyEasFailure;
+
+/**
+ * What a failed `eas` run said, read the same way by every caller that quotes it.
+ *
+ * A recognised sentence first (llp/0027 §What EAS said), then substantive stderr, then stdout
+ * (llp/0021 rules 11 and 14). Runner notices, progress and generic closing errors yield to an
+ * explanation. On a cold scratch directory the runner writes install progress to stderr before
+ * the CLI writes there, so the first line of stderr is often the runner's.
+ */
+export type EasSaid =
+  | { kind: 'cause'; cause: EasFailureCause }
+  | { kind: 'line'; line: string }
+  | { kind: 'runner-only'; runnerLine: string }
+  | { kind: 'nothing' };
+
+export function readEasFailure({ stdout, stderr }: { stdout: string; stderr: string }): EasSaid {
+  const cause = classifyEasFailure(`${stdout}\n${stderr}`);
+  if (cause) {
+    return { kind: 'cause', cause };
+  }
+  const cliStderr = withoutRunnerNoise(stderr);
+  const cliStdout = withoutRunnerNoise(stdout);
+  const errors = withoutEasProgress(cliStderr);
+  const output = withoutEasProgress(cliStdout);
+  const line =
+    firstLine(errors, EAS_CLOSING_ERROR) ??
+    firstLine(output, EAS_CLOSING_ERROR) ??
+    firstLine(errors) ??
+    firstLine(output) ??
+    // Progress alone is still evidence that EAS ran, e.g. before a deadline killed it.
+    firstLine(cliStderr) ??
+    firstLine(cliStdout);
+  if (line) {
+    return { kind: 'line', line };
+  }
+  const runnerLine = firstLine(stderr) ?? firstLine(stdout);
+  return runnerLine ? { kind: 'runner-only', runnerLine } : { kind: 'nothing' };
+}
+
+/** {@link readEasFailure} as one reason: `"<invocation>" exited 1: <what it said>`. */
+export function easFailureReason(
+  result: { exitCode: number | null; stdout: string; stderr: string },
+  invocation: string
+): string {
+  const said = readEasFailure(result);
+  if (said.kind === 'runner-only') {
+    return runnerNoiseReason(
+      { tool: 'eas', exitCode: result.exitCode },
+      invocation,
+      said.runnerLine
+    );
+  }
+  const text =
+    said.kind === 'cause'
+      ? said.cause.summary
+      : said.kind === 'line'
+        ? said.line
+        : 'it printed nothing';
+  return `"${invocation}" exited ${result.exitCode ?? 'on a signal'}: ${text}`;
+}
+
+/**
+ * `Error: build:list command failed.` names no cause. The EAS CLI prints it on stderr after it put the
+ * explanation on stdout [observed — live against an unlinked project, 2026-08-26]. GraphQL failures
+ * use the other generic closing line (`EasCommand.catch`); their explanation is on stdout too.
+ */
+const EAS_CLOSING_ERROR = /^Error: (?:\S+ command failed|GraphQL request failed)\.?$/;
+
+/** Non-TTY ora progress and the successful creation receipt are not a reason a run failed. */
+function withoutEasProgress(output: string): string {
+  return output
+    .split('\n')
+    .filter((line) => !/^(?:- |(?:[✔√] )?Simulator session created\b)/.test(line.trim()))
+    .join('\n');
+}
+
+function firstLine(output: string, skip?: RegExp): string | null {
+  for (const raw of output.split('\n')) {
+    const line = raw.trim();
+    if (line && !skip?.test(line)) {
+      return line;
+    }
+  }
+  return null;
+}

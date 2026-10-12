@@ -46,6 +46,25 @@ describe(describeLookupFailure, () => {
     ).toBe('Entity not authorized: Build (ID 123)');
   });
 
+  it.each([
+    'npm warn deprecated old-package@1.0.0: This package is no longer supported.',
+    'npm notice New major version of npm available!',
+    'Resolving dependencies\nResolved, downloaded and extracted [214]',
+  ])('preserves login advice after runner output: %s', (runnerOutput) => {
+    const reason = describeLookupFailure(
+      {
+        exitCode: 1,
+        stdout: '',
+        stderr: `${runnerOutput}\nEither log in with "eas login" or set the EXPO_TOKEN environment variable\nError: build:list command failed.\n`,
+      },
+      INVOCATION
+    );
+
+    expect(reason).toContain('not signed in to an Expo account');
+    expect(reason).toContain('EXPO_TOKEN');
+    expect(reason).not.toContain('failed to deliver the eas CLI');
+  });
+
   it('says so when the lookup ran and printed nothing at all', () => {
     expect(describeLookupFailure({ exitCode: 1, stdout: '', stderr: '' }, INVOCATION)).toBe(
       'the EAS CLI refused the lookup and printed nothing'
