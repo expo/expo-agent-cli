@@ -176,11 +176,14 @@ export async function installStubXcrunAsync(
     booted,
     simulators,
     runningAppIds,
+    expoGoMissing = false,
     phone,
   }: {
     booted?: { fingerprint: string };
     simulators?: { udid: string; name: string; state?: 'Booted' | 'Shutdown' }[];
     runningAppIds?: string[];
+    /** Model a fresh Expo Go install; opening requires installation on that booted simulator. */
+    expoGoMissing?: boolean;
     /** `postDelayMs` holds the POST back, the way a slow cold launch does. */
     phone?: { fingerprint: string | null; postDelayMs?: number };
   } = {}
@@ -263,7 +266,21 @@ export async function installStubXcrunAsync(
       `  if (sim) { sim.state = 'Booted'; save(); }`,
       `  process.exit(0);`,
       `}`,
+      `if (${expoGoMissing} && args[0] === 'simctl' && args[1] === 'install') {`,
+      `  const sim = find(args[2]);`,
+      `  if (!sim || sim.state !== 'Booted' || !fs.existsSync(args[3])) process.exit(1);`,
+      `  sim.expoGoInstalled = true;`,
+      `  save();`,
+      `  process.exit(0);`,
+      `}`,
+      `if (${expoGoMissing} && args[0] === 'simctl' && args[1] === 'spawn') {`,
+      `  const sim = find(args[2]);`,
+      `  const approval = args[5] === 'com.apple.launchservices.schemeapproval' && ['com.apple.CoreSimulator.CoreSimulatorBridge-->exp', 'com.apple.CoreSimulator.CoreSimulatorBridge-->exps'].includes(args[6]) && args[7] === '-string' && args[8] === 'host.exp.Exponent';`,
+      `  const onboarding = args[5] === 'host.exp.Exponent' && args[6] === 'EXDevMenuIsOnboardingFinished' && args[7] === '-bool' && args[8] === 'true';`,
+      `  if (sim?.state === 'Booted' && sim.expoGoInstalled && args[3] === 'defaults' && args[4] === 'write' && (approval || onboarding)) process.exit(0);`,
+      `}`,
       `if (args[0] === 'simctl' && args[1] === 'openurl') {`,
+      `  if (${expoGoMissing} && !find(args[2])?.expoGoInstalled) process.exit(115);`,
       `  fs.writeFileSync(marker, '');`,
       `  process.exit(0);`,
       `}`,
@@ -277,6 +294,7 @@ export async function installStubXcrunAsync(
       `  process.exit(0);`,
       `}`,
       `if (args[1] === 'get_app_container') {`,
+      `  if (${expoGoMissing} && !find(args[2])?.expoGoInstalled) process.exit(1);`,
       `  process.stdout.write(${JSON.stringify(container)} + '\\n');`,
       `  process.exit(0);`,
       `}`,
