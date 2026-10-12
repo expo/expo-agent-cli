@@ -212,11 +212,15 @@ export async function discoverDevServerAsync(
     statusTimeoutMs = STATUS_READ_TIMEOUT_MS,
     projectRoot,
     signal,
+    onScanCandidate,
   }: {
     timeoutMs?: number;
     statusTimeoutMs?: number;
     projectRoot?: string;
     signal?: AbortSignal;
+    /** The best accepted scan result so far, whenever it changes. Callers with a deadline can
+     * retain this result while the remaining ports are judged. Never called after cancellation. */
+    onScanCandidate?: (candidate: DevServerDiscovery) => void;
   } = {}
 ): Promise<DevServerDiscovery> {
   if (explicitUrl != null) {
@@ -360,10 +364,23 @@ export async function discoverDevServerAsync(
   const candidates = DEV_SERVER_SCAN_PORTS.slice(1)
     .map((port) => `http://127.0.0.1:${port}`)
     .filter((url) => url !== judgedLoggedUrl);
+  const accepted: (DevServerDiscovery | undefined)[] = [];
+  let published: DevServerDiscovery | undefined;
   const probes = await Promise.all(
-    candidates.map(async (url) => {
+    candidates.map(async (url, index) => {
       const probe = await withTimeout(url);
-      return { url, probe, judged: probe.reachable ? await judgeAsync(url) : null };
+      const judged = probe.reachable ? await judgeAsync(url) : null;
+      if (judged?.kind === 'accepted' && !signal?.aborted) {
+        // Keep scan order rather than completion order. A fast empty server is a useful fallback,
+        // but a later server with targets (or an earlier equally useful port) still takes priority.
+        accepted[index] = { ...probe, devServerUrl: url, ...foundBy('scan') };
+        const best = selectScanCandidate(accepted);
+        if (best && best !== published) {
+          published = best;
+          onScanCandidate?.(best);
+        }
+      }
+      return { judged };
     })
   );
   for (const { judged } of probes) {
@@ -371,14 +388,9 @@ export async function discoverDevServerAsync(
       recordRejected(judged);
     }
   }
-  const accepted = probes.filter(({ judged }) => judged?.kind === 'accepted');
-  const hit = accepted.find(({ probe }) => probe.targets.length > 0) ?? accepted[0];
+  const hit = selectScanCandidate(accepted);
   if (hit) {
-    return {
-      ...hit.probe,
-      devServerUrl: hit.url,
-      ...foundBy('scan'),
-    };
+    return hit;
   }
 
   if (foreignServers.length > 0 || unprovedPorts.length > 0) {
@@ -407,6 +419,16 @@ export async function discoverDevServerAsync(
   // Nothing answered anywhere. The default URL is reported so the caller has a dev server to name
   // in its error, and `default` is the step that produced it.
   return { ...defaultProbe, devServerUrl: DEFAULT_DEV_SERVER_URL, ...foundBy('default') };
+}
+
+/** Prefer listed targets, then scan-port order, for both progress and the final answer. */
+function selectScanCandidate(
+  accepted: (DevServerDiscovery | undefined)[]
+): DevServerDiscovery | undefined {
+  return (
+    accepted.find((candidate) => candidate != null && candidate.targets.length > 0) ??
+    accepted.find((candidate) => candidate != null)
+  );
 }
 
 type Judgement =

@@ -121,6 +121,97 @@ describe(discoverDevServerAsync, () => {
   });
 });
 
+describe('discoverDevServerAsync — accepted scan candidates', () => {
+  let replies: Map<string, (response: Response) => void>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    replies = new Map();
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const port = new URL(String(input)).port;
+      if (!['8082', '8084'].includes(port)) {
+        return Promise.reject(new Error('ECONNREFUSED'));
+      }
+      // Deliberately allow replies after abort too, to exercise the publication guard.
+      return new Promise<Response>((resolve) => replies.set(port, resolve));
+    });
+  });
+  afterEach(() => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  });
+
+  async function answer(port: string, targets: (typeof target)[]) {
+    expect(replies.has(port)).toBe(true);
+    replies.get(port)!(new Response(JSON.stringify(targets)));
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  it('replaces an empty candidate when a later server has targets', async () => {
+    const onScanCandidate = vi.fn();
+    const result = discoverDevServerAsync(undefined, { onScanCandidate });
+    await vi.advanceTimersByTimeAsync(0);
+    await answer('8082', []);
+    expect(onScanCandidate).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        devServerUrl: 'http://127.0.0.1:8082',
+        reachable: true,
+        targets: [],
+        source: 'scan',
+        discovered: true,
+      })
+    );
+    await answer('8084', [target]);
+    expect(onScanCandidate).toHaveBeenCalledTimes(2);
+    expect(onScanCandidate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ devServerUrl: 'http://127.0.0.1:8084' })
+    );
+    expect(await result).toEqual(onScanCandidate.mock.lastCall![0]);
+  });
+
+  it.each([{ targets: [] }, { targets: [target] }])(
+    'breaks ties by port order even when replies arrive backwards: $targets',
+    async ({ targets }) => {
+      const onScanCandidate = vi.fn();
+      const result = discoverDevServerAsync(undefined, { onScanCandidate });
+      await vi.advanceTimersByTimeAsync(0);
+      await answer('8084', targets);
+      expect(onScanCandidate).toHaveBeenLastCalledWith(
+        expect.objectContaining({ devServerUrl: 'http://127.0.0.1:8084' })
+      );
+      await answer('8082', targets);
+      expect(onScanCandidate).toHaveBeenCalledTimes(2);
+      expect(onScanCandidate).toHaveBeenLastCalledWith(
+        expect.objectContaining({ devServerUrl: 'http://127.0.0.1:8082' })
+      );
+      expect(await result).toEqual(onScanCandidate.mock.lastCall![0]);
+    }
+  );
+
+  it('does not replace or republish a preferred candidate when an empty server answers', async () => {
+    const onScanCandidate = vi.fn();
+    const result = discoverDevServerAsync(undefined, { onScanCandidate });
+    await vi.advanceTimersByTimeAsync(0);
+    await answer('8084', [target]);
+    await answer('8082', []);
+    expect(onScanCandidate).toHaveBeenCalledTimes(1);
+    expect(await result).toMatchObject({ devServerUrl: 'http://127.0.0.1:8084' });
+  });
+
+  it('ignores an otherwise preferred candidate that finishes after cancellation', async () => {
+    const giveUp = new AbortController();
+    const onScanCandidate = vi.fn();
+    const result = discoverDevServerAsync(undefined, { onScanCandidate, signal: giveUp.signal });
+    await vi.advanceTimersByTimeAsync(0);
+    await answer('8082', []);
+    giveUp.abort();
+    await answer('8084', [target]);
+    expect(onScanCandidate).toHaveBeenCalledTimes(1);
+    expect(await result).toMatchObject({ devServerUrl: 'http://127.0.0.1:8082', targets: [] });
+    expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
 describe('discoverDevServerAsync — what it leaves behind', () => {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Discovery ladder
   // The cost of the scan was never the probes; it was the timers that outlived them. A probe that
