@@ -7,11 +7,11 @@ import { androidToolsResolve, readAndroidInventoryAsync } from './emulator';
 import { deviceUnavailableError } from './errors';
 import { clearInspectCache } from './inspect';
 import { bootSimulatorAsync, readIosInventoryAsync } from './ios';
-import { bindIosSectionAsync } from './iosAcquire';
+import { bindingIdentity, bindIosSectionAsync } from './iosAcquire';
 import { bindExplicitSection } from './explicit';
 import { acquireSectionAsync } from './reap';
 import { releaseWorktreeDevicesAsync } from './release';
-import { bindingPathFor, readBindingFile, type BindingRead } from './registry';
+import { bindingPathFor, readBindingFile } from './registry';
 import { defaultTools } from './tools';
 import {
   deviceIdOf,
@@ -243,11 +243,4 @@ async function bindIosAsync(
     if (bound != null) return bound;
   }
   throw deviceUnavailableError('binding-changed', { platform: 'ios' });
-}
-
-/** Lease renewals and renames do not invalidate a device inventory. */
-function bindingIdentity(read: BindingRead): string {
-  return read.kind === 'binding'
-    ? `${read.binding.device.backend}:${deviceIdOf(read.binding.device)}`
-    : read.kind;
 }

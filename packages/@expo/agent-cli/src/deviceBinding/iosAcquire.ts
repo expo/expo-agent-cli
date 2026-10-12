@@ -10,8 +10,16 @@ import {
   readBindingFile,
   removeBindingFile,
   writeBindingFile,
+  type BindingRead,
 } from './registry';
-import type { Binding, DeviceTools, AcquireAction } from './types';
+import { deviceIdOf, type Binding, type DeviceTools, type AcquireAction } from './types';
+
+/** Lease renewals and renames do not invalidate a device inventory. */
+export function bindingIdentity(read: BindingRead): string {
+  return read.kind === 'binding'
+    ? `${read.binding.device.backend}:${deviceIdOf(read.binding.device)}`
+    : read.kind;
+}
 
 /** The section: read the own binding, choose, write. `simctl create` runs inside it. */
 export async function bindIosSectionAsync(
