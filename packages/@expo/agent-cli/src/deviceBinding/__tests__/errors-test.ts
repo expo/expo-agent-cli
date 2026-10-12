@@ -50,6 +50,12 @@ describe('exit codes per reason', () => {
       deviceUnavailableError('boot-failed', { platform: 'ios' }),
     ],
     [
+      'DEVICE_UNAVAILABLE',
+      'binding-changed',
+      22,
+      deviceUnavailableError('binding-changed', { platform: 'ios' }),
+    ],
+    [
       'DEVICE_REGISTRY_LOCKED',
       'locked',
       22,

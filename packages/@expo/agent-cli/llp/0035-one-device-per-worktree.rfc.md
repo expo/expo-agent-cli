@@ -75,7 +75,7 @@ The claimants of a device decide where its ownership record must live. A local d
 
 ## Invariant
 
-A created simulator boots, shuts down or is deleted, and a spawned emulator is killed, only after a section that wrote or removed its binding for that action. A child whose binding was never written is killed through its own process handle. The inventory is read before the lock and may be seconds stale; that is safe because every state change of a CLI device goes through a binding, and bindings are read under the lock.
+A created simulator boots, shuts down or is deleted, and a spawned emulator is killed, only after a section that wrote or removed its binding for that action. A child whose binding was never written is killed through its own process handle. The inventory is read before the lock and may be seconds stale; acquisition records the binding identity before reading it, then revalidates that identity under the lock before choosing a device. A changed identity leaves the registry untouched and retries with a new inventory outside the lock. Identity is absent or `(backend, device id)`; lease timestamps and names do not invalidate a snapshot. There are three attempts total (the initial snapshot and two refreshes), each retaining the existing inventory and lock timeouts. Exhaustion refuses `DEVICE_UNAVAILABLE` reason `binding-changed`, exit 22, and asks for a rerun.
 
 ## Contracts every verb honors
 
@@ -289,6 +289,7 @@ Each reaped device is reported on stderr and in JSON with reason `expired`, `del
 | `DEVICE_UNAVAILABLE`     | `own-explicit-over-owned` | 1    | "this worktree runs the emulator instance <serial>"                                                | `<cli> dev:stop --release`                                                           |
 | `DEVICE_UNAVAILABLE`     | `not-reusable`            | 20   | "a dev server is running and this worktree has no <platform> device to reuse"                      | `<cli> dev:stop`                                                                     |
 | `DEVICE_UNAVAILABLE`     | `create-timeout`          | 22   | "the device tool did not answer in time"                                                           | run the command again                                                                |
+| `DEVICE_UNAVAILABLE`     | `binding-changed`         | 22   | "the binding changed during all three inventory attempts"                                          | run the command again                                                                |
 | `DEVICE_UNAVAILABLE`     | `spawn-failed`            | 22   | the spawn error                                                                                    | run the command again                                                                |
 | `DEVICE_UNAVAILABLE`     | `boot-failed`             | 20   | the boot's reason; the binding is let go of first                                                  | run the command again                                                                |
 | `DEVICE_REGISTRY_LOCKED` | `locked`                  | 22   | "pid N (<command>) has held the device registry for <age>"                                         | run the command again, or `kill <pid>` when it repeats                               |
@@ -381,7 +382,7 @@ Module first (Decision 8). The first commits hold `src/deviceBinding/` and its u
 
 ### The module
 
-Per §Contracts every verb honors, without `android.ts`, `cloud.ts`, `reap.ts` and `ownCloudIdsAsync`. The let-go rule and `releaseWorktreeDevicesAsync` ship here, because a failed boot needs them; their only caller in 3a is the failed boot. The reap step of `acquireDeviceAsync` is a no-op until §Device lifecycle. `createSimulatorAsync` runs `simctl create` under the lock per §Lock. Two tests guard the shape: the boundary test (Contract 10) and a subprocess-count test (one subprocess per binding a read verb inspects).
+Per §Contracts every verb honors, without `android.ts`, `cloud.ts`, `reap.ts` and `ownCloudIdsAsync`. The let-go rule and `releaseWorktreeDevicesAsync` ship here, because a failed boot needs them; their only caller in 3a is the failed boot. The reap step of `acquireDeviceAsync` is a no-op until §Device lifecycle. `createSimulatorAsync` runs `simctl create` under the lock per §Lock. Acquisition snapshots the binding identity before inventory and checks it again under the lock. A mismatch retries without writes, outside the lock, for at most three attempts; lease and name changes are ignored. Exhaustion is `DEVICE_UNAVAILABLE` reason `binding-changed`, exit 22. Two tests guard the shape: the boundary test (Contract 10) and a subprocess-count test (one subprocess per binding a read verb inspects).
 
 ### How `dev` uses it
 
@@ -432,6 +433,8 @@ In bootstrap mode `smoke` starts its own `dev --detach --no-open` child through 
 The agent guide per §Output and errors. The RFC's §Readers and §Entry points are what this PR implements; first-booted sentences in llp/0004, 0005, 0022, 0025, 0026 change to the bound device.
 
 ### iOS tests
+
+- Acquisition concurrency uses real temporary storage (memfs does not model directory-lock rename semantics) and barriers before either initial snapshot advances. Empty, missing and unavailable bindings create exactly one replacement; `reuseOnly` refreshes without creating; lease/name changes do not refresh; inventory failure and three changed snapshots preserve the newer binding. Device reads and boots stay outside the lock.
 
 - Unit, named: `boot-always-runs`, `failed-boot-lets-go`, `only-create-and-spawn-under-lock`, `agent-cli-name-needs-binding`, `expo-go-and-bare-drafts-acquire`, `created-device-missing-without-app-id`, `withDevice-after-forwarded-args`, `already-running-reuses-only`, `smoke-never-reaches-already-running-reuse`, `smoke-acquires-without-bootDevice`, `smoke-registers-no-shutdown`, `created-device-plans-install`, `null-device-ios-unprobed`, `inspect-state-order`, `any-up-wins-across-platforms`, `bootstatus-b-not-boot`, `detached-device-error-relayed`, `fallback-eas-rung-dotenv-only`, `expired-is-gone`, `platform-flag-throws-tool-error-first`, `read-verb-one-subprocess-per-binding`, `rung-refusal-reports-first-state`, `probe-local-combines-platforms`, `deviceBinding-imports-nothing-from-verbs`, `exit-codes-per-reason`.
 - E2E: `bindingFixture` (`created`, `expiresAt` 60 min ahead, canonical root, macOS only) seeded in the cases that hand a verb a booted simulator. A two-worktree case asserts each `run:ios --device` equals its registry id and the two ids are distinct `E2E-CREATED-*` udids, and set equality of `simctl bootstatus -b` calls.

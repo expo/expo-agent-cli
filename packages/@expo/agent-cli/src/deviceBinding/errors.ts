@@ -16,7 +16,8 @@ export type UnavailableReason =
   | 'no-ios-runtime'
   | 'not-reusable'
   | 'create-timeout'
-  | 'boot-failed';
+  | 'boot-failed'
+  | 'binding-changed';
 
 const RERUN = 'run the command again';
 
@@ -83,6 +84,11 @@ export function deviceUnavailableError(
     case 'create-timeout':
       return refusal('DEVICE_UNAVAILABLE', reason, EXIT_OUTCOME_TIMEOUT, [
         'The device tool did not answer in time.',
+        `How: ${RERUN}.`,
+      ]);
+    case 'binding-changed':
+      return refusal('DEVICE_UNAVAILABLE', reason, EXIT_OUTCOME_TIMEOUT, [
+        `This worktree's ${platform} binding changed during all three device inventory attempts.`,
         `How: ${RERUN}.`,
       ]);
     case 'boot-failed':

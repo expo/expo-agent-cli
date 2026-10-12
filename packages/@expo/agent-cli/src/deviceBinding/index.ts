@@ -21,6 +21,7 @@ import {
   removeBindingFile,
   withRegistryLockAsync,
   writeBindingFile,
+  type BindingRead,
 } from './registry';
 import { defaultTools } from './tools';
 import {
@@ -71,7 +72,8 @@ export interface AcquireDeviceOptions {
  * Bind this worktree's simulator and boot it.
  *
  * The inventory is read before the lock. Under the lock, in one section: the own binding is
- * read, the choice made and written, with `simctl create` inside the section. After it, the boot
+ * revalidated against that snapshot, the choice made and written, with `simctl create` inside
+ * the section. A changed identity retries outside the lock, at most twice. After it, the boot
  * runs on every choice, whatever the inventory said. A failed boot lets go of the binding.
  *
  * @throws `DEVICE_UNAVAILABLE` with `data.reason`, `DEVICE_REGISTRY_LOCKED`, or the tool error.
@@ -81,11 +83,7 @@ export async function acquireDeviceAsync(
   platform: 'ios',
   { reuseOnly = false, tools = defaultTools() }: AcquireDeviceOptions = {}
 ): Promise<AcquireResult> {
-  const inventory = await readIosInventoryAsync(tools);
-  const { binding, wasBooted, action } = await withRegistryLockAsync(
-    () => bindIosSectionAsync(projectRoot, { inventory, reuseOnly, tools }),
-    { waitMs: WRITE_LOCK_WAIT_MS, tools }
-  );
+  const { binding, wasBooted, action } = await bindIosAsync(projectRoot, reuseOnly, tools);
   clearInspectCache();
 
   const device = binding.device as Extract<Binding['device'], { backend: 'local-ios' }>;
@@ -99,19 +97,47 @@ export async function acquireDeviceAsync(
   return { device, justBooted: !wasBooted, action };
 }
 
+/** Each inventory belongs to the binding identity observed before the device list was read. */
+async function bindIosAsync(projectRoot: string, reuseOnly: boolean, tools: DeviceTools) {
+  const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const before = readBindingFile(file);
+    const inventory = await readIosInventoryAsync(tools);
+    const bound = await withRegistryLockAsync(
+      () => bindIosSectionAsync(projectRoot, { inventory, before, reuseOnly, tools }),
+      { waitMs: WRITE_LOCK_WAIT_MS, tools }
+    );
+    if (bound != null) {
+      return bound;
+    }
+  }
+  throw deviceUnavailableError('binding-changed', { platform: 'ios' });
+}
+
+/** Lease renewals and renames do not invalidate a device inventory. */
+function bindingIdentity(read: BindingRead): string {
+  return read.kind === 'binding'
+    ? `${read.binding.device.backend}:${deviceIdOf(read.binding.device)}`
+    : read.kind;
+}
+
 /** The section: read the own binding, choose, write. `simctl create` runs inside it. */
 async function bindIosSectionAsync(
   projectRoot: string,
   {
     inventory,
+    before,
     reuseOnly,
     tools,
-  }: { inventory: IosInventory; reuseOnly: boolean; tools: DeviceTools }
-): Promise<{ binding: Binding; wasBooted: boolean; action: AcquireAction }> {
+  }: { inventory: IosInventory; before: BindingRead; reuseOnly: boolean; tools: DeviceTools }
+): Promise<{ binding: Binding; wasBooted: boolean; action: AcquireAction } | null> {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   const read = readBindingFile(file);
   if (read.kind === 'unreadable') {
     throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
+  }
+  if (bindingIdentity(read) !== bindingIdentity(before)) {
+    return null;
   }
   const own = read.kind === 'binding' ? read.binding : null;
   const choice = chooseIosDevice({ own, inventory, reuseOnly, digest: digestForRoot(projectRoot) });
