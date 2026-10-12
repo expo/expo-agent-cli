@@ -54,16 +54,10 @@ const EXPO_GO_TARGET = {
 };
 
 describe('@expo/agent-cli navigate', () => {
-  it.each(['57.0.0', '58.0.0'])(
-    'sends automation parameters to a cold development build on SDK %s',
-    async (sdkVersion) => {
+  it.each([true, false])(
+    'launches a cold development build (automation: %s)',
+    async (automation) => {
       const projectRoot = await setupFixtureAsync('dev-client-app');
-      const expoPackagePath = path.join(projectRoot, 'node_modules/expo/package.json');
-      const expoPackage = JSON.parse(await fs.promises.readFile(expoPackagePath, 'utf8'));
-      await fs.promises.writeFile(
-        expoPackagePath,
-        JSON.stringify({ ...expoPackage, version: sdkVersion })
-      );
       const launchedMarker = appStartedMarkerPath(projectRoot);
       const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
         simulators: [BOOTED_SIMULATOR],
@@ -89,23 +83,23 @@ describe('@expo/agent-cli navigate', () => {
             '--dev-server-url',
             stub.url,
           ],
-          { env: { ...stubExpoEnv(projectRoot), EXPO_NO_DEV_MENU: '1' } }
+          { env: { ...stubExpoEnv(projectRoot), EXPO_NO_DEV_MENU: automation ? '1' : '0' } }
         );
 
         expect(result.exitCode).toBe(0);
         const report = JSON.parse(result.stdout);
         const launch = new URL(report.launch.url);
-        const modern = sdkVersion === '58.0.0';
-        expect(launch.searchParams.get(modern ? '__expo_disable_fab' : 'disableFab')).toBe('1');
-        expect(
-          launch.searchParams.get(modern ? '__expo_disable_auto_launch' : 'disableAutoLaunch')
-        ).toBe('1');
-        expect(
-          launch.searchParams.get(modern ? '__expo_disable_onboarding' : 'disableOnboarding')
-        ).toBe('1');
-        expect(launch.searchParams.get(modern ? '__expo_url' : 'url')).toBe(
-          modern ? stub.url : `${stub.url}?disableOnboarding=1`
-        );
+        expect(launch.hostname).toBe('');
+        expect(Object.fromEntries(launch.searchParams)).toEqual({
+          __expo_url: stub.url,
+          ...(automation
+            ? {
+                __expo_disable_onboarding: '1',
+                __expo_disable_fab: '1',
+                __expo_disable_auto_launch: '1',
+              }
+            : {}),
+        });
         expect(
           readXcrun()
             .filter((args) => args[1] === 'openurl')

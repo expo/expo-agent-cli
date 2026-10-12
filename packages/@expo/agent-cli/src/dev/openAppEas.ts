@@ -301,7 +301,7 @@ export async function ensureEasSessionAsync(
   }
 
   // 3. The URL the app opens on the session, in the form the app it is takes: `exp://<host>` for
-  //    Expo Go, `<scheme>://expo-development-client/?url=…` for a development build. Resolved the
+  //    Expo Go, `<scheme>://?__expo_url=…` for a development build. Resolved the
   //    way `navigate` resolves it, so the two commands never disagree about the link.
   let openUrl: string;
   try {

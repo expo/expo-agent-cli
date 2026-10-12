@@ -128,7 +128,7 @@ describeDevClient('live-devclient: the loop on a real Android development build'
       throw new Error(
         `the development build ${project.androidPackage} did not connect to the dev server on ` +
           `port ${PORT} within ${BOUND_MS}ms. Open it by hand with "${android.adb} -s ${serial} ` +
-          `shell am start -a android.intent.action.VIEW -d '${project.scheme}://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A${PORT}'" ` +
+          `shell am start -a android.intent.action.VIEW -d '${project.scheme}://?__expo_url=http%3A%2F%2F127.0.0.1%3A${PORT}'" ` +
           `and read what it shows — a launcher stuck on its error screen is upstream, not this CLI`
       );
     }
@@ -195,7 +195,7 @@ describeDevClient('live-devclient: the loop on a real Android development build'
     expect(report.devServer.running).toBe(true);
     const urls = report.devServer.openUrls as { target: string; url: string }[];
     expect(urls.map((entry) => entry.target)).toEqual(['dev-build']);
-    expect(urls[0]!.url).toContain(`${project.scheme}://expo-development-client/?url=`);
+    expect(urls[0]!.url).toContain(`${project.scheme}://?__expo_url=`);
     expect(urls[0]!.url).not.toContain('exp://');
   });
 
@@ -494,7 +494,7 @@ describeDevClient('live-devclient: the loop on a real Android development build'
     expectExit(result, 0, 'the launcher URL loads the app, so the route link reaches a loaded app');
     const report = parseJson(result);
     // Two links, in order: the launcher's, which loads the bundle…
-    expect(report.launch.url).toContain(`${project.scheme}://expo-development-client/?url=`);
+    expect(report.launch.url).toContain(`${project.scheme}://?__expo_url=`);
     expect(report.launch.exitCode).toBe(0);
     expect(report.launch.attached).toBe(true);
     // …and the route link, which is what was asked for.

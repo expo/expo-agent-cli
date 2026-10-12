@@ -193,9 +193,7 @@ describe('@expo/agent-cli dev', () => {
         '--port',
         '8901',
       ]);
-      const connectLine = result.all
-        .split('\n')
-        .find((line) => line.includes('expo-development-client'));
+      const connectLine = result.all.split('\n').find((line) => line.includes('__expo_url='));
       expect(connectLine).toBeDefined();
       expect(connectLine).toContain('8901');
     });

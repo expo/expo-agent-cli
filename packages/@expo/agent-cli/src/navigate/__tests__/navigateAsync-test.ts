@@ -805,7 +805,7 @@ describe(navigateAsync, () => {
         {
           target: 'dev-build',
           label: 'development build',
-          url: 'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081%3FdisableOnboarding%3D1&disableOnboarding=1&disableFab=1&disableAutoLaunch=1',
+          url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
         },
       ]);
       // Never the other app's form.
@@ -820,7 +820,7 @@ describe(navigateAsync, () => {
       await navigateAsync(projectRoot, options({ devServerUrl: null, printUrl: true, json: true }));
 
       expect(JSON.parse(printed()).connect[0].url).toBe(
-        'demoapp://expo-development-client/?url=https%3A%2F%2Fznakdiwe5j2n5o0.boltexpo.dev%3FdisableOnboarding%3D1&disableOnboarding=1&disableFab=1&disableAutoLaunch=1'
+        'demoapp://?__expo_url=https%3A%2F%2Fznakdiwe5j2n5o0.boltexpo.dev&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1'
       );
     });
 
@@ -830,7 +830,7 @@ describe(navigateAsync, () => {
 
       await navigateAsync(projectRoot, options({ printUrl: true }));
 
-      expect(printed()).toContain('demoapp://expo-development-client/?url=');
+      expect(printed()).toContain('demoapp://?__expo_url=');
       expect(printed()).toContain('open in the development build');
     });
 
@@ -903,7 +903,7 @@ describe(navigateAsync, () => {
         {
           target: 'dev-build',
           label: 'development build',
-          url: 'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081%3FdisableOnboarding%3D1&disableOnboarding=1&disableFab=1&disableAutoLaunch=1',
+          url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
         },
       ]);
     });
@@ -1117,17 +1117,13 @@ describe(`${navigateAsync.name} on Android`, () => {
 // loaded it [observed — wave 29, `evidence/61-navigate-after-stop-android.json`].
 describe(`${navigateAsync.name} on a development build that is not loaded`, () => {
   /** A project that depends on `expo-dev-client`, so the target decision is a development build. */
-  function mockDevClientProject(sdkVersion = '57.0.0') {
+  function mockDevClientProject() {
     vol.fromJSON({
       [`${projectRoot}/package.json`]: JSON.stringify({
         name: 'demo',
         dependencies: { 'expo-dev-client': '5.0.0' },
       }),
       [`${projectRoot}/node_modules/expo-dev-client/package.json`]: '{"name":"expo-dev-client"}',
-      [`${projectRoot}/node_modules/expo/package.json`]: JSON.stringify({
-        name: 'expo',
-        version: sdkVersion,
-      }),
       [`${projectRoot}/app.json`]: JSON.stringify({
         expo: { slug: 'demo', scheme: 'demoapp', android: { package: 'com.example.demo' } },
       }),
@@ -1143,7 +1139,7 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
 
   /** The launcher URL this project's development build parses, as `connectUrl.ts` builds it. */
   const LAUNCHER_URL =
-    'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081%3FdisableOnboarding%3D1&disableOnboarding=1&disableFab=1&disableAutoLaunch=1';
+    'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1';
 
   /**
    * Every URL this run handed to a device, in order.
@@ -1175,10 +1171,11 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     })) as unknown as typeof fetch;
   }
 
-  it.each(['57.0.0', '58.0.0'])(
-    'opens the launcher URL first, then the route link on SDK %s',
-    async (sdkVersion) => {
-      mockDevClientProject(sdkVersion);
+  it.each([true, false])(
+    'opens the launcher URL first, then the route link (automation: %s)',
+    async (automation) => {
+      vi.stubEnv('EXPO_NO_DEV_MENU', automation ? '1' : '0');
+      mockDevClientProject();
       mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
       mockSpawnQueue([
         { stdout: ADB_DEVICES }, //        adb devices -l
@@ -1197,28 +1194,27 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
 
       // The launcher first, because it is the one that loads the bundle, and the route link after
       // it, because that is what was asked for.
-      const launcher =
-        sdkVersion === '57.0.0'
-          ? LAUNCHER_URL
-          : 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1';
+      const launcher = automation
+        ? LAUNCHER_URL
+        : 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081';
       expect(openedUrls()).toEqual([launcher, 'demoapp://profile/42']);
     }
   );
 
   it('honors EXPO_NO_DEV_MENU=0 for generated launch URLs', async () => {
     vi.stubEnv('EXPO_NO_DEV_MENU', '0');
-    mockDevClientProject('58.0.0');
+    mockDevClientProject();
     mockDevServer([]);
 
     await navigateAsync(projectRoot, options({ printUrl: true, json: true }));
 
     expect(JSON.parse(printed()).connect[0].url).toBe(
-      'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081'
+      'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081'
     );
   });
 
-  it('preserves a caller-supplied URL on SDK 58', async () => {
-    mockDevClientProject('58.0.0');
+  it('preserves a caller-supplied URL', async () => {
+    mockDevClientProject();
     mockDevServer([]);
     const route = 'demoapp://callback?token=a%2Bb&disableFab=0#done';
 
@@ -1254,13 +1250,13 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     const launcher = vi
       .mocked(spawn)
       .mock.calls.map(([, args]) => (args as string[]).join(' '))
-      .find((line) => line.includes('expo-development-client'));
+      .find((line) => line.includes('__expo_url='));
     expect(launcher).toContain(`-n 'com.example.demo/.MainActivity'`);
     expect(launcher).not.toContain('android.intent.action.VIEW');
     expect(openedUrls()).toEqual([LAUNCHER_URL, 'demoapp://profile/42']);
   });
 
-  // The dev server's own port, not the route link's: `demoapp://expo-development-client/?url=…`
+  // The dev server's own port, not the route link's: `demoapp://?__expo_url=…`
   // has no loopback host of its own, so reading the URL forwarded nothing and the launcher fetched
   // its bundle from a port on the *device* (F50's shape, one URL further out).
   it(`reverses the dev server's port before the launcher open`, async () => {
@@ -1311,7 +1307,7 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     const report = JSON.parse(printed());
     expect(report.url).toBe('demoapp://profile/42');
     expect(report.launch).toMatchObject({
-      url: 'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081%3FdisableOnboarding%3D1&disableOnboarding=1&disableFab=1&disableAutoLaunch=1',
+      url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
       exitCode: 0,
       attached: true,
     });

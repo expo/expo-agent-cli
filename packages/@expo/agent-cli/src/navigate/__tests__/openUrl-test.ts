@@ -148,7 +148,7 @@ describe(openUrlOnDeviceAsync, () => {
     const promise = openUrlOnDeviceAsync({
       platform: 'android',
       deviceId: 'emulator-5554',
-      url: 'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
+      url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081',
       launchActivity: 'com.example.demo/.MainActivity',
     });
     await promise;
@@ -166,7 +166,7 @@ describe(openUrlOnDeviceAsync, () => {
       '-n',
       `'com.example.demo/.MainActivity'`,
       '-d',
-      `'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081'`,
+      `'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081'`,
     ]);
   });
 
@@ -177,7 +177,7 @@ describe(openUrlOnDeviceAsync, () => {
     const promise = openUrlOnDeviceAsync({
       platform: 'ios',
       deviceId: 'SIM-1',
-      url: 'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
+      url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081',
       launchActivity: 'com.example.demo/.MainActivity',
     });
     await promise;
@@ -297,7 +297,7 @@ describe(openUrlOnDeviceAsync, () => {
     mockSpawn();
     resetApprovedSchemes();
 
-    for (const url of ['exp+pdfbuild://expo-development-client/?url=x', 'exp+pdfbuild://notes']) {
+    for (const url of ['exp+pdfbuild://?__expo_url=x', 'exp+pdfbuild://notes']) {
       await openUrlOnDeviceAsync({
         platform: 'ios',
         deviceId: 'SIM-1',

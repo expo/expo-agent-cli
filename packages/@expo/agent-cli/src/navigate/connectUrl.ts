@@ -3,15 +3,9 @@
 //
 // `exp://<host>` is the **Expo Go** form and nothing else. A development build is a different
 // application with its own URL scheme, and handing it an `exp://` link hands it another app's URL:
-// nothing opens, or Expo Go opens instead. The form a development build takes is the dev launcher's
-// own. Its legacy form is pinned against the launcher that parses it rather than against recollection
-// [observed — `packages/expo-dev-launcher`, 2026-08-26]:
+// nothing opens, or Expo Go opens instead. A development build uses the reserved launch parameter:
 //
-//     <scheme>://expo-development-client/?url=<url-encoded dev server origin>
-//
-// On SDK 57, `EXDevLauncherURLHelper.isDevLauncherURL` is `url.host == "expo-development-client"`, the
-// dev server URL rides in the `url` query parameter, and `DevLauncherURLHelper.kt` on Android reads
-// it identically. `@expo/cli` builds the same string in `UrlCreator.constructDevClientUrl`.
+//     <scheme>://?__expo_url=<url-encoded dev server origin>
 //
 // **A connect URL is not a route link.** `<scheme>://<route>` navigates an app that is *already*
 // loaded against a dev server; this is what gets it loaded. Both are the app's own scheme, and both
@@ -42,15 +36,6 @@ export function openInPhrase(target: string): string {
   return target === 'expo-go' ? 'Expo Go' : 'the development build';
 }
 
-/** The host used by the legacy dev launcher protocol (SDK 57 and earlier). */
-const DEV_LAUNCHER_HOST = 'expo-development-client';
-
-/** Opt in when opening an app for automation, rather than printing a link for a person. */
-export interface AutomationLaunchOptions {
-  /** Installed Expo version. Unknown versions use the backwards-compatible launcher protocol. */
-  sdkVersion: string | null;
-}
-
 /** The Expo Go connect URL: the dev server host under the `exp` scheme. */
 export function expoGoConnectUrl(host: string): string {
   return `exp://${host}`;
@@ -59,7 +44,7 @@ export function expoGoConnectUrl(host: string): string {
 /**
  * The development build connect URL.
  *
- * The origin inside the `url` parameter is `https` for a tunnel and `http` otherwise, which is what
+ * The origin inside the `__expo_url` parameter is `https` for a tunnel and `http` otherwise, which is what
  * `@expo/cli` does for the same string: a tunnel terminates TLS, so the plain-HTTP origin the dev
  * server prints for itself is not the one a device off the network should be given
  * [observed — `UrlCreator.constructDevClientUrl`, 2026-08-26].
@@ -68,21 +53,15 @@ export function devClientConnectUrl(
   scheme: string,
   host: string,
   hostType: DevServerHostType | null,
-  automation?: AutomationLaunchOptions
+  automation = false
 ): string {
   const origin = `${hostType === 'tunnel' ? 'https' : 'http'}://${host}`;
-  // SDK 58 added reserved, process-scoped flags. The legacy flags remain supported but change
-  // saved menu settings, so use them only when the project's SDK cannot use the new protocol.
+  const url = `${scheme}://?__expo_url=${encodeURIComponent(origin)}`;
+  // FAB and auto-launch overrides apply only to this process; onboarding is marked completed.
   // https://docs.expo.dev/develop/development-builds/development-workflows/#using-launch-urls-in-automation-scenarios
-  if (automation && Number(automation.sdkVersion?.split('.')[0]) >= 58) {
-    return `${scheme}://?__expo_url=${encodeURIComponent(origin)}&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1`;
-  }
-  // SDK 57's Android launcher reads onboarding from the inner URL; newer iOS launchers also
-  // accept it outside. Keep both placements for older builds. FAB and auto-launch belong only
-  // on the outer URL: https://github.com/expo/expo/pull/49651.
-  const appUrl = automation ? `${origin}?disableOnboarding=1` : origin;
-  const url = `${scheme}://${DEV_LAUNCHER_HOST}/?url=${encodeURIComponent(appUrl)}`;
-  return automation ? `${url}&disableOnboarding=1&disableFab=1&disableAutoLaunch=1` : url;
+  return automation
+    ? `${url}&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1`
+    : url;
 }
 
 export interface BuildConnectUrlsParams {
@@ -102,7 +81,7 @@ export interface BuildConnectUrlsParams {
    */
   certain: boolean;
   /** Suppress development-build onboarding, the Tools button and automatic menu opening. */
-  automation?: AutomationLaunchOptions;
+  automation?: boolean;
 }
 
 /**

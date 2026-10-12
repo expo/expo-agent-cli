@@ -124,7 +124,7 @@ describe(`${loopbackPortOfUrl.name} — a tunnelled run`, () => {
     ['a signed tunnel host', 'exp://sample-notes.on.expo.app/--/notes'],
     [
       'a dev launcher URL carrying a tunnel origin',
-      'myapp://expo-development-client/?url=https%3A%2F%2Fabc.boltexpo.dev',
+      'myapp://?__expo_url=https%3A%2F%2Fabc.boltexpo.dev',
     ],
   ])(`reverses nothing for %s`, (_name, url) => {
     expect(loopbackPortOfUrl(url)).toBeNull();
