@@ -150,6 +150,8 @@ describe(devStopAsync, () => {
 
     expect(Object.keys(JSON.parse(printed())).sort()).toEqual([
       'detail',
+      'deviceError',
+      'devices',
       'followups',
       'forceRefusedBy',
       'forced',
