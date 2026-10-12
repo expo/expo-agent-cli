@@ -113,6 +113,19 @@ it('preview reports a foreign owner without changing its expired binding or runn
   expect(tools.calls.every(([command]) => command === 'list')).toBe(true);
 });
 
+it('refuses an unbound offline emulator as an explicit command target', async () => {
+  const tools = fakeTools({ emulators: [{ serial: 'emulator-5554', state: 'offline' }] });
+
+  await expect(
+    acquireDeviceAsync(ROOT, 'android', { explicit: 'emulator-5554', tools })
+  ).rejects.toMatchObject({ data: { reason: 'explicit-not-found' } });
+  expect(readBindingFile(bindingPathFor(ROOT, 'android', 'local-android'))).toEqual({
+    kind: 'none',
+  });
+  expect(tools.spawned).toEqual([]);
+  expect(tools.androidCalls).toEqual([['devices', '-l']]);
+});
+
 it('reuses an explicitly named owned Android instance while adb still lists it offline', async () => {
   const tools = fakeTools({
     emulators: [{ serial: 'emulator-5554', state: 'offline', pid: 4001 }],

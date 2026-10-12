@@ -65,6 +65,8 @@ export interface AndroidInventory {
   avd: string | null;
   /** The serials `adb devices -l` lists as ready. */
   runningSerials: string[];
+  /** Every listed emulator, including offline ones whose console ports are still occupied. */
+  listedEmulatorSerials: string[];
 }
 
 /** A serial on a console port and the worktree bound to it; `root` is null for one that is not ours. */

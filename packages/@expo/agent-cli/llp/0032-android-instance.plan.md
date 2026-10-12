@@ -21,6 +21,8 @@ How does a worktree get an Android emulator nobody else has? The same question a
 
 ## Android boot
 
+The inventory keeps ready device serials for command selection and all listed emulator serials for port reservation. An offline emulator still reserves its console port, even when it has no CLI binding.
+
 Before the lock: `adb devices -l` and `emulator -list-avds`. Under the lock: `busyPorts` and the port choice per RFC §Choice, else `no-free-port`. Then `spawnEmulator(['-avd', avd, '-ports', 'P,P+1', '-no-snapshot-save', '-read-only'])`, then one binding with serial and pid, in that order inside one section. After it: poll `sys.boot_completed` until `BOOT_DEVICE_TIMEOUT_MS`, accepted only while the child is alive and `adb devices` lists the serial; a non-zero exit or the deadline is a failed boot.
 
 ## Wiring

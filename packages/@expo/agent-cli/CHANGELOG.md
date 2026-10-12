@@ -23,6 +23,7 @@
 
 ### 🐛 Bug fixes
 
+- Android emulator allocation reserves the ports of offline emulators, including those started outside the CLI, while device commands still require a ready device.
 - Local `runtime:reload --method device` reconnects a development build to the selected Metro before opening an optional route, including Android port forwarding. A stale debugger target no longer suppresses the connection link, and an expired reload budget no longer stops the app.
 
 - `dev --detach --wait-ready` rejects another project's Metro and follows its own child's port changes within the original timeout. The same readiness check applies when reusing a running server.
