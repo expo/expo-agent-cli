@@ -214,6 +214,8 @@ Rung 2 replaces the app's process, so the JavaScript state is gone. The attempt 
 
 Android Expo Go holds a client on `/message`. Local Android takes rung 1. `runtime:reload` is the one runtime command that works on Expo Go for Android while five others refuse, because neither proof is a CDP read.
 
+Local target detection receives only the caller's explicit `--app-id` as an override. A configured bundle identifier or package name does not by itself select a development build. When URL resolution selects Expo Go, the stop and reopen use Expo Go's platform-specific app ID; development builds retain the debugger/config app-ID resolution.
+
 ### What proves a reload
 
 A broadcast has no reply. Trusting the send would ship the same false green this command exists to remove. `reloaded: true` with exit 0 requires an observation. Name a verifying signal only when that signal's own evidence is in the payload and non-empty ([[0021-honest-reports]]).

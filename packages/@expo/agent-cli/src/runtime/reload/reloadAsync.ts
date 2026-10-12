@@ -55,7 +55,7 @@ import {
   readProjectPackageJsonAsync,
 } from '../../project/nodeModules';
 import { readProjectRoutesAsync } from '../../project/routes';
-import { readConfiguredAppId, resolveAppId } from '../appId';
+import { EXPO_GO_APP_ID, readConfiguredAppId, resolveAppId } from '../appId';
 import { stopAppOnDeviceAsync } from '../appProcess';
 import {
   bundleToJson,
@@ -1284,12 +1284,11 @@ async function reloadOnDeviceAsync(
       // Resolve once: after stopping the app, never rediscover a sibling device.
       const selected = await resolveDeviceAsync(options.platform, { cloud: 'off', projectRoot });
       device = selected;
-      const appId = await resolveAppIdAsync(projectRoot, devServerUrl, selected, options.appId);
       const openOptions = {
         route: '/',
         platform: selected.platform,
         scheme: options.scheme,
-        appId,
+        appId: options.appId,
         devServerUrl,
         devServerUrlSource:
           options.devServerUrl == null ? ('discovered' as const) : ('flag' as const),
@@ -1299,6 +1298,11 @@ async function reloadOnDeviceAsync(
       // A lingering debugger target (or another device) must not suppress its launcher URL.
       // Reload owns the one evidence wait below; navigation's attachment/recovery loop is not run.
       const resolved = await resolveRouteUrlAsync(projectRoot, openOptions);
+      // A configured bundle/package ID describes a build, not an explicit choice to run it.
+      // Stop and reopen Expo Go when URL resolution chose it, unless the caller named an app.
+      const appId = resolved.isExpoGo
+        ? (options.appId ?? EXPO_GO_APP_ID[selected.platform])
+        : await resolveAppIdAsync(projectRoot, devServerUrl, selected, options.appId);
       const url = resolved.isExpoGo
         ? resolved.url
         : resolved.connect.find((entry) => entry.target === 'dev-build')?.url;
@@ -1316,7 +1320,7 @@ async function reloadOnDeviceAsync(
         url,
         launchActivity: resolved.isExpoGo
           ? undefined
-          : androidLaunchActivityFor(projectRoot, selected, openOptions),
+          : androidLaunchActivityFor(projectRoot, selected, { ...openOptions, appId }),
       };
       command = buildOpenUrlCommand(params).display;
       const stopped = await stopAppOnDeviceAsync({ ...params });

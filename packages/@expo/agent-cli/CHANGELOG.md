@@ -23,6 +23,7 @@
 
 ### 🐛 Bug fixes
 
+- Local device reloads keep Expo Go as the target when a disconnected project declares an iOS bundle identifier or Android package name. Only an explicit `--app-id` overrides target detection; stopping and reopening use the selected target's app ID.
 - Android emulator allocation reserves the ports of offline emulators, including those started outside the CLI, while device commands still require a ready device.
 - Local `runtime:reload --method device` reconnects a development build to the selected Metro before opening an optional route, including Android port forwarding. A stale debugger target no longer suppresses the connection link, and an expired reload budget no longer stops the app.
 

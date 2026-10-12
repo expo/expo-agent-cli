@@ -480,8 +480,12 @@ describe('@expo/agent-cli runtime:reload', () => {
     }
   });
 
-  it('falls back to stopping the app on the device when no app is connected', async () => {
+  it('reloads Expo Go despite a configured bundle ID when no app is connected', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
+    const configPath = path.join(projectRoot, 'app.json');
+    const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+    config.expo.ios = { bundleIdentifier: 'dev.demo' };
+    await fs.promises.writeFile(configPath, JSON.stringify(config));
     const stub = await startStubDevServerAsync({
       projectRoot,
       targets: [EXPO_GO_TARGET],
@@ -511,7 +515,9 @@ describe('@expo/agent-cli runtime:reload', () => {
       expect(report.verifiedBy).toBe('app-relaunch');
       const calls = readXcrun();
       expect(calls).toContainEqual(['simctl', 'terminate', SIMULATOR_UDID, 'host.exp.Exponent']);
-      expect(calls.some((call) => call[1] === 'openurl')).toBe(true);
+      expect(calls.filter((call) => call[1] === 'openurl')).toEqual([
+        ['simctl', 'openurl', SIMULATOR_UDID, `exp://${new URL(stub.url).host}/--/?`],
+      ]);
     } finally {
       releaseLock();
       await stub.close();

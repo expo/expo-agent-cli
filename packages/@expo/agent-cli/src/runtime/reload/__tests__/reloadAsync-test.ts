@@ -814,7 +814,7 @@ describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => 
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads
-describe('local development-client reconnect', () => {
+describe('local device reconnect', () => {
   const serverUrl = 'http://127.0.0.1:8083';
   const launcherUrl = `demoapp://expo-development-client/?url=${encodeURIComponent(serverUrl)}`;
 
@@ -826,14 +826,23 @@ describe('local development-client reconnect', () => {
       sameId = false,
       stopRefused = false,
       throwOpen = false,
+      expoGo = false,
+      usesDevClient = true,
+      connected = true,
     } = {}
   ) {
     writeProject({
-      [`${projectRoot}/package.json`]: JSON.stringify({ dependencies: { 'expo-dev-client': '*' } }),
-      [`${projectRoot}/node_modules/expo-dev-client/package.json`]: JSON.stringify({
-        name: 'expo-dev-client',
-        version: '1.0.0',
+      [`${projectRoot}/package.json`]: JSON.stringify({
+        dependencies: usesDevClient ? { 'expo-dev-client': '*' } : {},
       }),
+      ...(usesDevClient
+        ? {
+            [`${projectRoot}/node_modules/expo-dev-client/package.json`]: JSON.stringify({
+              name: 'expo-dev-client',
+              version: '1.0.0',
+            }),
+          }
+        : {}),
       [`${projectRoot}/app.json`]: JSON.stringify({
         expo: {
           slug: 'demo',
@@ -848,11 +857,12 @@ describe('local development-client reconnect', () => {
     seedAndroidBinding(projectRoot, 'emulator-5556');
     const target = {
       ...EXPO_GO_TARGET,
-      appId: 'dev.demo',
+      appId: expoGo ? (platform === 'ios' ? 'host.exp.Exponent' : 'host.exp.exponent') : 'dev.demo',
       deviceName: platform === 'ios' ? 'iPhone 17' : 'sdk_gphone64_arm64 - 15 - API 35',
     };
     // Keep the old target visible until the launcher opens. It must not suppress reconnecting.
-    const server = mockDevServer([target]);
+    const server = mockDevServer(connected ? [target] : []);
+    const connectionUrl = expoGo ? 'exp://127.0.0.1:8083/--/?' : launcherUrl;
     const calls: string[][] = [];
     const opened: string[] = [];
     vi.mocked(spawn).mockImplementation(((_bin: string, args: string[]) => {
@@ -874,7 +884,7 @@ describe('local development-client reconnect', () => {
             : null;
       if (url) {
         opened.push(url);
-        if (url === launcherUrl) {
+        if (url === connectionUrl) {
           if (throwOpen) throw new Error('device disconnected');
           exitCode = refuse ? 1 : 0;
           if (!refuse && reconnect) {
@@ -931,6 +941,48 @@ describe('local development-client reconnect', () => {
         expect(
           calls.filter((args) => args[0] === '-s').every((args) => args[1] === 'emulator-5556')
         ).toBe(true);
+      }
+    }
+  );
+
+  it.each([
+    ['ios', undefined],
+    ['android', undefined],
+    ['ios', 'dev.demo'],
+    ['android', 'dev.demo'],
+  ] as const)(
+    'reloads a disconnected Expo Go project on %s with app-id override %s',
+    async (platform, appId) => {
+      const { calls, opened } = setup(platform, {
+        expoGo: appId == null,
+        usesDevClient: false,
+        connected: false,
+      });
+      const expectedAppId =
+        appId ?? (platform === 'ios' ? 'host.exp.Exponent' : 'host.exp.exponent');
+
+      await expect(
+        reloadAsync(
+          projectRoot,
+          options({ platform, appId, method: 'device', devServerUrl: serverUrl, json: true })
+        )
+      ).resolves.toBe(EXIT_OK);
+
+      expect(opened).toEqual([appId ? launcherUrl : 'exp://127.0.0.1:8083/--/?']);
+      if (platform === 'ios') {
+        expect(calls).toContainEqual(['simctl', 'terminate', 'IOS-1', expectedAppId]);
+      } else {
+        expect(calls).toContainEqual([
+          '-s',
+          'emulator-5556',
+          'shell',
+          'am',
+          'force-stop',
+          `'${expectedAppId}'`,
+        ]);
+        const open = calls.find((args) => args.includes('-d'))!;
+        expect(open).toContain(appId ? `'${expectedAppId}/.MainActivity'` : expectedAppId);
+        if (!appId) expect(open).not.toContain('-n');
       }
     }
   );
