@@ -21,6 +21,38 @@ describe(expoGoConnectUrl, () => {
 });
 
 describe(devClientConnectUrl, () => {
+  it.each(['58.0.0', '58.0.0-canary-20261001', '59.0.0'])(
+    'uses process-scoped automation flags on SDK %s',
+    (sdkVersion) => {
+      const url = new URL(
+        devClientConnectUrl('myapp', 'abc.boltexpo.dev', 'tunnel', { sdkVersion })
+      );
+      expect(url.searchParams.get('__expo_url')).toBe('https://abc.boltexpo.dev');
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        __expo_url: 'https://abc.boltexpo.dev',
+        __expo_disable_onboarding: '1',
+        __expo_disable_fab: '1',
+        __expo_disable_auto_launch: '1',
+      });
+    }
+  );
+
+  it.each(['57.0.0', '54.0.0', null])(
+    'keeps the legacy launcher protocol for SDK %s',
+    (sdkVersion) => {
+      const url = new URL(
+        devClientConnectUrl('myapp', 'localhost:8081', 'localhost', { sdkVersion })
+      );
+      expect(url.hostname).toBe('expo-development-client');
+      expect(Object.fromEntries(url.searchParams)).toEqual({
+        url: 'http://localhost:8081?disableOnboarding=1',
+        disableOnboarding: '1',
+        disableFab: '1',
+        disableAutoLaunch: '1',
+      });
+    }
+  );
+
   // The exact string the launcher's own test asserts.
   it(`matches the shape the dev launcher parses`, () => {
     expect(devClientConnectUrl('scheme', 'localhost:8081', 'localhost')).toBe(
@@ -51,6 +83,17 @@ describe(devClientConnectUrl, () => {
 
 describe(buildConnectUrls, () => {
   const lan = { host: '192.168.1.5:8081', hostType: 'lan' as const, scheme: 'myapp' };
+
+  it('applies automation options to the development-build connect URL', () => {
+    const urls = buildConnectUrls({
+      ...lan,
+      isExpoGo: false,
+      certain: true,
+      automation: { sdkVersion: '58.0.0' },
+    });
+    expect(urls).toHaveLength(1);
+    expect(new URL(urls[0]!.url).searchParams.get('__expo_disable_fab')).toBe('1');
+  });
 
   it(`names Expo Go alone when Expo Go is what runs this project`, () => {
     expect(buildConnectUrls({ ...lan, isExpoGo: true, certain: true })).toEqual([

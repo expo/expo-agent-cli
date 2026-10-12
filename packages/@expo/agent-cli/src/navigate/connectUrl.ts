@@ -4,12 +4,12 @@
 // `exp://<host>` is the **Expo Go** form and nothing else. A development build is a different
 // application with its own URL scheme, and handing it an `exp://` link hands it another app's URL:
 // nothing opens, or Expo Go opens instead. The form a development build takes is the dev launcher's
-// own, and it is pinned against the launcher that parses it rather than against recollection
+// own. Its legacy form is pinned against the launcher that parses it rather than against recollection
 // [observed — `packages/expo-dev-launcher`, 2026-08-26]:
 //
 //     <scheme>://expo-development-client/?url=<url-encoded dev server origin>
 //
-// `EXDevLauncherURLHelper.isDevLauncherURL` is exactly `url.host == "expo-development-client"`, the
+// On SDK 57, `EXDevLauncherURLHelper.isDevLauncherURL` is `url.host == "expo-development-client"`, the
 // dev server URL rides in the `url` query parameter, and `DevLauncherURLHelper.kt` on Android reads
 // it identically. `@expo/cli` builds the same string in `UrlCreator.constructDevClientUrl`.
 //
@@ -42,8 +42,14 @@ export function openInPhrase(target: string): string {
   return target === 'expo-go' ? 'Expo Go' : 'the development build';
 }
 
-/** The host the dev launcher URL is addressed to, and the only one it recognises. */
+/** The host used by the legacy dev launcher protocol (SDK 57 and earlier). */
 const DEV_LAUNCHER_HOST = 'expo-development-client';
+
+/** Opt in when opening an app for automation, rather than printing a link for a person. */
+export interface AutomationLaunchOptions {
+  /** Installed Expo version. Unknown versions use the backwards-compatible launcher protocol. */
+  sdkVersion: string | null;
+}
 
 /** The Expo Go connect URL: the dev server host under the `exp` scheme. */
 export function expoGoConnectUrl(host: string): string {
@@ -61,10 +67,22 @@ export function expoGoConnectUrl(host: string): string {
 export function devClientConnectUrl(
   scheme: string,
   host: string,
-  hostType: DevServerHostType | null
+  hostType: DevServerHostType | null,
+  automation?: AutomationLaunchOptions
 ): string {
   const origin = `${hostType === 'tunnel' ? 'https' : 'http'}://${host}`;
-  return `${scheme}://${DEV_LAUNCHER_HOST}/?url=${encodeURIComponent(origin)}`;
+  // SDK 58 added reserved, process-scoped flags. The legacy flags remain supported but change
+  // saved menu settings, so use them only when the project's SDK cannot use the new protocol.
+  // https://docs.expo.dev/develop/development-builds/development-workflows/#using-launch-urls-in-automation-scenarios
+  if (automation && Number(automation.sdkVersion?.split('.')[0]) >= 58) {
+    return `${scheme}://?__expo_url=${encodeURIComponent(origin)}&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1`;
+  }
+  // SDK 57's Android launcher reads onboarding from the inner URL; newer iOS launchers also
+  // accept it outside. Keep both placements for older builds. FAB and auto-launch belong only
+  // on the outer URL: https://github.com/expo/expo/pull/49651.
+  const appUrl = automation ? `${origin}?disableOnboarding=1` : origin;
+  const url = `${scheme}://${DEV_LAUNCHER_HOST}/?url=${encodeURIComponent(appUrl)}`;
+  return automation ? `${url}&disableOnboarding=1&disableFab=1&disableAutoLaunch=1` : url;
 }
 
 export interface BuildConnectUrlsParams {
@@ -83,6 +101,8 @@ export interface BuildConnectUrlsParams {
    * [decided, 2026-08-26].
    */
   certain: boolean;
+  /** Suppress development-build onboarding, the Tools button and automatic menu opening. */
+  automation?: AutomationLaunchOptions;
 }
 
 /**
@@ -97,6 +117,7 @@ export function buildConnectUrls({
   scheme,
   isExpoGo,
   certain,
+  automation,
 }: BuildConnectUrlsParams): ConnectUrl[] {
   if (host == null) {
     return [];
@@ -113,7 +134,7 @@ export function buildConnectUrls({
     ? {
         target: 'dev-build',
         label: 'development build',
-        url: devClientConnectUrl(scheme, host, hostType),
+        url: devClientConnectUrl(scheme, host, hostType, automation),
       }
     : null;
 

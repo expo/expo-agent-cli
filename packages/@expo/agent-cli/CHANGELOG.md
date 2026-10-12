@@ -21,6 +21,8 @@
 
 ### 🐛 Bug fixes
 
+- `navigate` and `smoke` now add automation parameters when launching a development build, suppressing onboarding, the floating Tools button, and automatic dev-menu opening. SDK 58+ uses process-scoped menu overrides; SDK 57 uses the legacy parameters that change saved menu settings. `EXPO_NO_DEV_MENU=0` opts out of the URL parameters.
+
 - `dev --detach --wait-ready` rejects another project's Metro and follows its own child's port changes within the original timeout. The same readiness check applies when reusing a running server.
 - Discovery skips a dev server whose `/status` names another project root, on the scanned ports and on the port `start.log` names, and reports the foreign servers in `status` when nothing else answered. A `/status` that does not answer within 3 s is not accepted. The dev-server lock never publishes a port that serves another project, named on the command line or not. ([#132](https://github.com/expo/expo-agent-cli/pull/132) by [@vonovak](https://github.com/vonovak))
 - `status --explain`, the `--eas` device commands, and a failed `eas` step of `dev` no longer quote the first line of the EAS CLI's "project not configured" message with the `eas init` forms cut off. They say the project is not linked to an EAS project and name `npx --yes eas-cli@latest init --account <account> --non-interactive`, with the account filled in when EAS listed one — the answer `deploy` already gave. An unlinked project is its own needs-human scenario, `eas-project-unlinked` (`EAS_PROJECT_NOT_LINKED`), where the generic `eas-prompt` row used to answer for it and tell the caller to answer a question in a terminal. ([#38](https://github.com/expo/expo-agent-cli/pull/38) by [@kudo](https://github.com/kudo))

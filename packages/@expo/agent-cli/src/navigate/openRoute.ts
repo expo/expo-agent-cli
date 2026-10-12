@@ -37,6 +37,7 @@ import {
   isInstalledDependencyAsync,
   listDependencyNames,
   readProjectPackageJsonAsync,
+  readSdkVersionAsync,
 } from '../project/nodeModules';
 import { readProjectRoutesAsync } from '../project/routes';
 import { readConfiguredAppId, resolveAppId } from '../runtime/appId';
@@ -307,8 +308,8 @@ export async function resolveRouteUrlAsync(
 ): Promise<ResolvedRoute> {
   const { route, platform, scheme, appId } = options;
 
-  const [devServer, config, nativeDirs, packageJson, routeTable, reach, expoGo] = await Promise.all(
-    [
+  const [devServer, config, nativeDirs, packageJson, routeTable, reach, expoGo, sdkVersion] =
+    await Promise.all([
       discoverDevServerAsync(options.devServerUrl ?? undefined, { projectRoot }),
       Promise.resolve(readProjectSchemeConfig(projectRoot)),
       readProjectNativeDirsAsync(projectRoot),
@@ -330,8 +331,8 @@ export async function resolveRouteUrlAsync(
       // project answers with reasons rather than an error — and its `compatible` is handed to
       // `decideExpoGoTarget` as the one fact about the *project* that outranks the guesses.
       checkExpoGoCompatibilityAsync(projectRoot),
-    ]
-  );
+      readSdkVersionAsync(projectRoot),
+    ]);
   const devServerUrl = devServer.devServerUrl;
 
   // Before anything is opened, and before the device is even looked for. A route the project has
@@ -432,6 +433,9 @@ export async function resolveRouteUrlAsync(
       scheme: devBuildScheme(scheme, config),
       isExpoGo: target.isExpoGo,
       certain: target.certain,
+      // These links are used by navigate and smoke to load a development build unattended.
+      // Keep Expo CLI's explicit opt-out for callers testing the dev menu itself.
+      automation: process.env.EXPO_NO_DEV_MENU === '0' ? undefined : { sdkVersion },
     }),
     routeCheck,
     // The same list the target decision was made from. Kept, because "which app is this" and "is
