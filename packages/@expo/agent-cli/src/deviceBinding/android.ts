@@ -217,7 +217,7 @@ export async function bootEmulatorAsync(
 export function killEmulatorIfOurs(
   tools: DeviceTools,
   { emulatorPid, avd, port }: SpawnedOrigin
-): { killed: boolean; reason: string | null } {
+): { killed: boolean; reason: string | null; failed?: boolean } {
   const gone = instanceGone(tools, { emulatorPid, avd, port });
   if (gone) {
     return { killed: false, reason: gone };
@@ -226,6 +226,10 @@ export function killEmulatorIfOurs(
     tools.kill(emulatorPid);
     return { killed: true, reason: null };
   } catch (error: unknown) {
-    return { killed: false, reason: error instanceof Error ? error.message : String(error) };
+    return {
+      killed: false,
+      failed: true,
+      reason: error instanceof Error ? error.message : String(error),
+    };
   }
 }

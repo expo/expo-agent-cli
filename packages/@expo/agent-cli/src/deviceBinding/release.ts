@@ -3,6 +3,7 @@
 // the lock, the device action after it.
 
 import { killEmulatorIfOurs } from './android';
+import { getEmulatorStateAsync } from './emulator';
 import { clearInspectCache } from './inspect';
 import { listSimulatorAsync, shutdownSimulatorAsync } from './ios';
 import {
@@ -96,7 +97,7 @@ async function releaseIosAsync(
     platform: 'ios',
     id: udid,
     name,
-    released: true,
+    released: stopped?.ok ?? true,
     shutDown: stopped?.ok ?? false,
     reason: stopped?.reason ?? null,
   };
@@ -115,13 +116,14 @@ async function releaseAndroidAsync(
   }
   if (expected && !sameBinding(before.binding, expected)) return null;
   const { serial, origin } = before.binding.device;
+  const listing = origin.kind === 'explicit' ? await getEmulatorStateAsync(tools, serial) : null;
   const letGo = await withRegistryLockAsync(
     async () => {
       const read = readBindingFile(file);
       if (read.kind !== 'binding' || !sameBinding(read.binding, before.binding)) {
         return false;
       }
-      if (origin.kind === 'spawned') {
+      if (origin.kind === 'spawned' || listing?.kind === 'missing') {
         removeBindingFile(file);
       } else {
         expireLease(file, read.binding, tools);
@@ -140,7 +142,7 @@ async function releaseAndroidAsync(
     platform: 'android',
     id: serial,
     name: origin.kind === 'spawned' ? `${origin.avd} on ${serial}` : serial,
-    released: true,
+    released: !killed?.failed,
     shutDown: killed?.killed ?? false,
     reason: killed?.reason ?? null,
   };
