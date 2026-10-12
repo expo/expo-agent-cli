@@ -204,13 +204,32 @@ export async function devDetachAsync(
   // lock, so nothing would be able to find it or stop it afterwards.
   const running = await readDevServerLockAsync(projectRoot);
   if (running) {
+    const hasExited = () => !isProcessAlive(running.pid);
+    async function checkReuseFailureAsync(
+      lock: DevServerLockInfo,
+      statusAnswering: boolean | null = null
+    ): Promise<void> {
+      const stopped = await waitFailureAsync(projectRoot, hasExited(), Date.parse(lock.startedAt));
+      if (stopped || statusAnswering === false) {
+        throw detachFailureError(stopped?.failure ?? 'not-answering', {
+          projectRoot,
+          lock,
+          logFile: detachedLogPath(projectRoot),
+          verdict: stopped?.verdict ?? null,
+          childExit: null,
+          platform: options.platform,
+        });
+      }
+    }
+
     const checked = options.waitReady
       ? await waitForDetachedReadyAsync(projectRoot, running, {
           timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
-          hasExited: () => !isProcessAlive(running.pid),
+          hasExited,
         })
       : null;
     if (checked && (!checked.result.ready || checked.result.projectRootMatched === false)) {
+      await checkReuseFailureAsync(checked.lock);
       throw notReadyError(
         checked.lock,
         detachedLogPath(projectRoot),
@@ -220,6 +239,14 @@ export async function devDetachAsync(
       );
     }
     const lock = checked?.lock ?? running;
+    // Reuse only reads the current tunnel; it does not wait for a new one to appear.
+    const tunnelUrl = await currentTunnelUrlAsync(projectRoot, lock.url);
+    const statusAnswering =
+      checked?.result.ready === true
+        ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url)
+        : null;
+    // Read the verdict and PID after both awaits: either can outlast the running server.
+    await checkReuseFailureAsync(lock, statusAnswering);
     return reportDetached(projectRoot, options, {
       lock,
       alreadyRunning: true,
@@ -227,9 +254,7 @@ export async function devDetachAsync(
       projectRootMatched: checked?.result.projectRootMatched ?? null,
       startedAt,
       print,
-      // Whatever the dev server that is already up advertised. Nothing is waited for here: this
-      // run started nothing, so there is no tunnel of its own on its way.
-      tunnelUrl: await currentTunnelUrlAsync(projectRoot, lock.url),
+      tunnelUrl,
       smokePlatform,
     });
   }
@@ -553,12 +578,15 @@ const VERDICT_WAIT_MS = 2_000;
  *
  * @returns the last verdict read, which is null when the child wrote none at all.
  */
-async function waitForChildVerdictAsync(projectRoot: string): Promise<DetachedChildVerdict | null> {
-  let verdict = readChildVerdictSync(projectRoot);
+async function waitForChildVerdictAsync(
+  projectRoot: string,
+  since?: number
+): Promise<DetachedChildVerdict | null> {
+  let verdict = readChildVerdictSync(projectRoot, since);
   const deadline = Date.now() + VERDICT_WAIT_MS;
   while (verdict?.scenario == null && Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, OPEN_PLATFORM_POLL_MS));
-    verdict = readChildVerdictSync(projectRoot) ?? verdict;
+    verdict = readChildVerdictSync(projectRoot, since) ?? verdict;
   }
   return verdict;
 }
@@ -591,11 +619,12 @@ async function waitForChildVerdictAsync(projectRoot: string): Promise<DetachedCh
  */
 async function waitFailureAsync(
   projectRoot: string,
-  exited: boolean
+  exited: boolean,
+  since?: number
 ): Promise<{ failure: DetachFailureKind; verdict: DetachedChildVerdict | null } | null> {
   const verdict = exited
-    ? await waitForChildVerdictAsync(projectRoot)
-    : readChildVerdictSync(projectRoot);
+    ? await waitForChildVerdictAsync(projectRoot, since)
+    : readChildVerdictSync(projectRoot, since);
   const failure = resolveDetachFailure({ exited, verdict, statusAnswering: null });
   return failure ? { failure, verdict } : null;
 }
@@ -650,7 +679,16 @@ export function resolveDetachFailure({
 }
 
 /** The child's verdict, read out of the log this run opened. */
-function readChildVerdictSync(projectRoot: string): DetachedChildVerdict | null {
+function readChildVerdictSync(projectRoot: string, since?: number): DetachedChildVerdict | null {
+  // A reused foreground server can have an earlier detached run's log beside it. Use the same
+  // freshness rule as resolveDevServerReach, rechecking on each read for a newly written handoff.
+  if (since != null) {
+    try {
+      if (fs.statSync(detachedLogPath(projectRoot)).mtimeMs < since) return null;
+    } catch {
+      return null;
+    }
+  }
   const read = readDetachedLogSync(projectRoot, VERDICT_LOG_LINES);
   return read == null ? null : parseDetachedChildVerdict(read.lines);
 }
@@ -719,7 +757,7 @@ function detachFailureError(
     kind === 'child-exited' ? 'DEV_DETACH_DIED' : 'DEV_DETACH_NOT_ANSWERING',
     [
       kind === 'child-exited'
-        ? `The detached dev server is not running any more: the process this command started (pid ${lock.pid}) exited${
+        ? `The dev server is not running any more: the process holding its lock (pid ${lock.pid}) exited${
             childExit?.signal
               ? ` on ${childExit.signal}`
               : childExit?.code != null

@@ -5,7 +5,9 @@ import { vol } from 'memfs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../../devLock';
+import { event as cliEvent } from '../../events';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
+import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
@@ -16,6 +18,10 @@ vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() })
 vi.mock('../processLiveness', () => ({ isProcessAlive: vi.fn() }));
 vi.mock('../events', () => ({ event: vi.fn() }));
 vi.mock('../../events', () => ({ event: vi.fn() }));
+vi.mock('../advertisedUrl', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../advertisedUrl')>()),
+  fetchAdvertisedUrlAsync: vi.fn(),
+}));
 
 const projectRoot = '/project';
 const logFile = detachedLogPath(projectRoot);
@@ -140,6 +146,122 @@ describe.each(['final check', 'grace'] as const)(
     });
   }
 );
+
+describe('reusing a running server', () => {
+  beforeEach(() => {
+    vi.mocked(readDevServerLockAsync)
+      .mockReset()
+      .mockResolvedValue({
+        url: 'http://127.0.0.1:8393',
+        port: 8393,
+        pid: 4242,
+        projectRoot,
+        startedAt: new Date(0).toISOString(),
+      });
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    fs.writeFileSync(logFile, servingPlan);
+    vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValue(null);
+  });
+
+  afterEach(() => expect(spawn).not.toHaveBeenCalled());
+
+  function reuse(waitReady = true) {
+    return devDetachAsync(
+      projectRoot,
+      { ...resolveDevOptions(['--ios', '--detach', '--local', '--json']), waitReady },
+      { print: false }
+    );
+  }
+
+  async function failure(waitReady = true) {
+    const result = reuse(waitReady).catch((error) => error);
+    await vi.runAllTimersAsync();
+    expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
+    return result;
+  }
+
+  it.each([true, false])('detects death during tunnel lookup (waitReady=%s)', async (waitReady) => {
+    vi.mocked(fetchAdvertisedUrlAsync).mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      vi.mocked(isProcessAlive).mockReturnValue(false);
+      return null;
+    });
+
+    expect(await failure(waitReady)).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
+    expect(Date.now()).toBe(2100); // Tunnel lookup plus one bounded verdict wait.
+    if (!waitReady) expect(waitForBundlerReadyAsync).not.toHaveBeenCalled();
+  });
+
+  it.each([100, 300])('relays a readiness failure whose handoff arrives at %sms', async (delay) => {
+    fs.utimesSync(logFile, new Date(-1000), new Date(-1000));
+    vi.mocked(waitForBundlerReadyAsync).mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      return readiness(false);
+    });
+    setTimeout(() => {
+      vi.mocked(isProcessAlive).mockReturnValue(false);
+      fs.appendFileSync(logFile, 'NeedsHumanError: macOS refused Automation permission\n');
+    }, 50);
+    setTimeout(() => fs.appendFileSync(logFile, 'Needs a human   macos-automation\n'), delay);
+
+    expect(await failure()).toMatchObject({
+      code: 'DEV_DETACH_NEEDS_HUMAN',
+      exitCode: 7,
+      needsHuman: { scenario: 'macos-automation', detectedBy: 'detached-child-log' },
+    });
+    expect(Date.now()).toBe(Math.max(200, delay));
+  });
+
+  it('reads the handoff after the final status probe', async () => {
+    vi.mocked(waitForBundlerReadyAsync)
+      .mockResolvedValueOnce(readiness())
+      .mockImplementationOnce(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        fs.appendFileSync(logFile, 'Needs a human   macos-automation\n');
+        return readiness(false);
+      });
+
+    expect(await failure()).toMatchObject({ code: 'DEV_DETACH_NEEDS_HUMAN', exitCode: 7 });
+  });
+
+  it.each(['silent', 'foreign'])('rejects a %s final status response', async (response) => {
+    vi.mocked(waitForBundlerReadyAsync)
+      .mockResolvedValueOnce(readiness())
+      .mockResolvedValue({
+        ...readiness(response !== 'silent'),
+        projectRootMatched: response !== 'foreign',
+      });
+
+    expect(await failure()).toMatchObject({ code: 'DEV_DETACH_NOT_ANSWERING', exitCode: 20 });
+    expect(Date.now()).toBe(0);
+  });
+
+  it.each([
+    [true, 'old'],
+    [false, 'old'],
+    [true, 'missing'],
+    [false, 'missing'],
+    [true, 'current'],
+  ] as const)('reports a healthy server (waitReady=%s, log=%s)', async (waitReady, log) => {
+    if (log === 'old') {
+      fs.appendFileSync(logFile, 'Needs a human   macos-automation\n');
+      fs.utimesSync(logFile, new Date(-1000), new Date(-1000));
+    } else if (log === 'missing') {
+      fs.unlinkSync(logFile);
+    }
+
+    const result = expect(reuse(waitReady)).resolves.toBe(0);
+    await vi.runAllTimersAsync();
+
+    await result;
+    expect(cliEvent).toHaveBeenCalledWith(
+      'dev_detach',
+      expect.objectContaining({ alreadyRunning: true, pid: 4242, ready: waitReady ? true : null })
+    );
+    expect(waitForBundlerReadyAsync).toHaveBeenCalledTimes(waitReady ? 2 : 0);
+    expect(Date.now()).toBe(0); // Reuse does not acquire the startup grace period.
+  });
+});
 
 it('keeps the same grace window for a child that stays healthy', async () => {
   const result = run();

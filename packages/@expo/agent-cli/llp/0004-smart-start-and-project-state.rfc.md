@@ -467,6 +467,10 @@ project that already has one gets the running server reported back with
 without spawning another child. Two foreground servers in two terminals are a thing
 people do on purpose. A second detached one is a process nobody could find.
 
+Reuse checks the process and its verdict after tunnel lookup and any final readiness
+probe, and before reporting a readiness timeout. Logs older than the lock's start time
+cannot supply a current verdict. Reuse adds no platform-opening grace period.
+
 The log is one file per project, truncated per run: `.expo/dev/logs/dev-detached.log`. A
 name carrying the port could not be resolved by `dev:logs` before the port was known. A
 file that accumulated across runs would answer with last week's output.
