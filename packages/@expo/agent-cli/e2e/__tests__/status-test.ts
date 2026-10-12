@@ -178,6 +178,16 @@ async function bindDefaultDeviceAsync(projectRoot: string): Promise<Record<strin
   return (await installStubAdbAsync(projectRoot, 'host.exp.Exponent')).env;
 }
 
+/** A host where `dev` would bind the default platform's device, and no device bound yet. */
+async function stubUnboundDeviceAsync(projectRoot: string): Promise<Record<string, string>> {
+  if (process.platform === 'darwin') {
+    await installStubXcrunAsync(projectRoot);
+    return { AGENT_CLI_NO_DEVICE: '0' };
+  }
+  const adb = await installStubAdbAsync(projectRoot, 'host.exp.Exponent', { attached: false });
+  return { ...adb.env, AGENT_CLI_NO_DEVICE: '0' };
+}
+
 /** A dev server double that answers the debugger target list, and the port it listens on. */
 async function startDevServerDoubleAsync(
   targets: unknown[],
@@ -391,11 +401,11 @@ describe('@expo/agent-cli status', () => {
   describe('go-app — an Expo Go compatible CNG project', () => {
     it('prints one line per section', async () => {
       const projectRoot = await setupAsync('go-app');
-      const result = await executeAgentCliAsync(projectRoot, [
-        'status',
-        '--dev-server-url',
-        await getUnusedDevServerUrlAsync(),
-      ]);
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        { env: await stubUnboundDeviceAsync(projectRoot) }
+      );
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain('project');

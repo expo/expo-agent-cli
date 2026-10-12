@@ -10,7 +10,12 @@ import fs from 'fs';
 import path from 'path';
 
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
-import { inspectBindingCachedAsync, deviceCommand } from '../deviceBinding';
+import {
+  inspectBindingCachedAsync,
+  deviceCommand,
+  devicesDisabled,
+  hostBindsPlatform,
+} from '../deviceBinding';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
 import { readCloudSessionIdSync } from '../device/cloudSimulator';
 import { probeLocalDeviceAsync } from '../device/localDevice';
@@ -356,7 +361,9 @@ export async function collectStatusReportAsync(
       platform !== 'web' &&
       'value' in binding &&
       !binding.value.some((entry) => entry.platform === platform) &&
-      !readCloudSessionIdSync(projectRoot)
+      !readCloudSessionIdSync(projectRoot) &&
+      !devicesDisabled() &&
+      hostBindsPlatform(platform)
     ) {
       report.next = {
         ...report.next,

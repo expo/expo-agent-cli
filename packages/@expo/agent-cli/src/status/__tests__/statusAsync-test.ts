@@ -3,6 +3,8 @@ import { vol } from 'memfs';
 
 import * as devLock from '../../devLock';
 import * as localDevice from '../../device/localDevice';
+import * as deviceBinding from '../../deviceBinding';
+import * as summary from '../../deviceBinding/summary';
 import { event } from '../../events';
 import * as network from '../../followups/network';
 import { lookUpBuildPlatformAsync } from '../../impact/buildCache';
@@ -122,6 +124,8 @@ beforeEach(() => {
   // The connect URLs of a non-tunnelled run carry this host, and a suite that read the machine's
   // own would pass or fail by which network it is on.
   vi.spyOn(network, 'resolveLanHost').mockReturnValue('192.168.1.233');
+  // Whether `dev` binds a device here is a fact about the host; the rule must not read this one's.
+  vi.spyOn(deviceBinding, 'hostBindsPlatform').mockReturnValue(true);
   vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'my-app' }) });
   mockState();
   vi.mocked(readLastBuildRecord).mockReturnValue({});
@@ -1057,6 +1061,54 @@ describe(`${collectStatusReportAsync.name} and stale debugger targets`, () => {
 
     expect(report.devServer).toMatchObject({ appsConnected: 1, appsListed: 2, appsStale: 1 });
     expect(formatStatusReport(report)).toContain('1 stale target still listed');
+  });
+});
+
+describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
+  const iosOptions = { ...options, platform: 'ios' as const };
+
+  async function planNextAsync() {
+    vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+      { platform: 'ios' } as summary.BindingSummary,
+    ]);
+    return (await collectStatusReportAsync(projectRoot, iosOptions)).next;
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it(`sends the worktree to dev when dev would bind a device`, async () => {
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+    expect(report.next?.why).toBe('No ios device is bound to this worktree.');
+  });
+
+  it(`keeps the plan's next under AGENT_CLI_NO_DEVICE, where dev binds nothing`, async () => {
+    vi.stubEnv('AGENT_CLI_NO_DEVICE', '1');
+    const plan = await planNextAsync();
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next).toEqual(plan);
+  });
+
+  it(`keeps the plan's next on a host that cannot bind the platform`, async () => {
+    vi.mocked(deviceBinding.hostBindsPlatform).mockReturnValue(false);
+    const plan = await planNextAsync();
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next).toEqual(plan);
+  });
+
+  it(`keeps the plan's next while the project has an EAS session`, async () => {
+    vol.fromJSON({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=session-1\n' });
+    const plan = await planNextAsync();
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next).toEqual(plan);
+  });
+
+  it(`keeps the plan's next for --platform web`, async () => {
+    const report = await collectStatusReportAsync(projectRoot, { ...options, platform: 'web' });
+    expect(report.next?.why).not.toBe('No web device is bound to this worktree.');
+    expect(report.next?.command).not.toMatch(/ dev --web --detach --wait-ready$/);
   });
 });
 

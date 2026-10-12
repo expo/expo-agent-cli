@@ -567,7 +567,7 @@ How does a person pick a device?
 
 How does an agent see its binding?
 
-`status --json` `binding`, per §Output and errors. With no device bound on the platform, `status`'s next action is `dev --<platform> --detach --wait-ready`, because every device verb refuses without a binding.
+`status --json` `binding`, per §Output and errors. With no device bound on the platform, `status`'s next action is `dev --<platform> --detach --wait-ready`, because every device verb refuses without a binding. Where `dev` binds no device (`AGENT_CLI_NO_DEVICE=1`, iOS off macOS, Android with no `adb`), `status` keeps the plan's next action, or it would name the same `dev` command forever.
 
 ### Lifecycle tests
 
