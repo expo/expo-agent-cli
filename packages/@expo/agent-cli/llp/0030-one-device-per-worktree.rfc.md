@@ -76,7 +76,7 @@ The claimants of a device decide where its ownership record must live. A local d
 
 ## Invariant
 
-A created simulator boots, shuts down or is deleted, and a spawned emulator is killed, only after a section that wrote or removed its binding for that action. A child whose binding was never written is killed through its own process handle. The inventory is read before the lock and may be seconds stale; that is safe because every state change of a CLI device goes through a binding, and bindings are read under the lock.
+A created simulator boots, shuts down or is deleted, and a spawned emulator is killed, only after a section that wrote or removed its binding for that action. A child whose binding was never written is killed through its own process handle. The inventory is read before the lock and may be seconds stale; acquisition records the binding identity before reading it, then revalidates that identity under the lock before choosing a device. A changed identity leaves the registry untouched and retries with a new inventory outside the lock. Identity is absent or `(backend, device id)`; lease timestamps and names do not invalidate a snapshot. There are three attempts total (the initial snapshot and two refreshes), each retaining the existing inventory and lock timeouts. Exhaustion refuses `DEVICE_UNAVAILABLE` reason `binding-changed`, exit 22, and asks for a rerun.
 
 ## Contracts every verb honors
 
@@ -290,6 +290,7 @@ Each reaped device is reported on stderr and in JSON with reason `expired`, `del
 | `DEVICE_UNAVAILABLE`     | `own-explicit-over-owned` | 1    | "this worktree runs the emulator instance <serial>"                                                | `<cli> dev:stop --release`                                                           |
 | `DEVICE_UNAVAILABLE`     | `not-reusable`            | 20   | "a dev server is running and this worktree has no <platform> device to reuse"                      | `<cli> dev:stop`                                                                     |
 | `DEVICE_UNAVAILABLE`     | `create-timeout`          | 22   | "the device tool did not answer in time"                                                           | run the command again                                                                |
+| `DEVICE_UNAVAILABLE`     | `binding-changed`         | 22   | "the binding changed during all three inventory attempts"                                          | run the command again                                                                |
 | `DEVICE_UNAVAILABLE`     | `spawn-failed`            | 22   | the spawn error                                                                                    | run the command again                                                                |
 | `DEVICE_UNAVAILABLE`     | `boot-failed`             | 20   | the boot's reason; the binding is let go of first                                                  | run the command again                                                                |
 | `DEVICE_REGISTRY_LOCKED` | `locked`                  | 22   | "pid N (<command>) has held the device registry for <age>"                                         | run the command again, or `kill <pid>` when it repeats                               |

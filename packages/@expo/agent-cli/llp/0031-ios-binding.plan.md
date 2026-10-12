@@ -28,7 +28,7 @@ Module first (RFC Decision 8). The first commits hold `src/deviceBinding/` and i
 
 ## The module
 
-Per RFC §Contracts, without `android.ts`, `cloud.ts`, `reap.ts` and `ownCloudIdsAsync`. The let-go rule and `releaseWorktreeDevicesAsync` ship here, because a failed boot needs them; their only caller in 3a is the failed boot. The reap step of `acquireDeviceAsync` is a no-op until [[0033-device-lifecycle]]. `createSimulatorAsync` runs `simctl create` under the lock per RFC §Lock. Two tests guard the shape: the boundary test (Contract 10) and a subprocess-count test (one subprocess per binding a read verb inspects).
+Per RFC §Contracts, without `android.ts`, `cloud.ts`, `reap.ts` and `ownCloudIdsAsync`. The let-go rule and `releaseWorktreeDevicesAsync` ship here, because a failed boot needs them; their only caller in 3a is the failed boot. The reap step of `acquireDeviceAsync` is a no-op until [[0033-device-lifecycle]]. `createSimulatorAsync` runs `simctl create` under the lock per RFC §Lock. Acquisition snapshots the binding identity before inventory and checks it again under the lock. A mismatch retries without writes, outside the lock, for at most three attempts; lease and name changes are ignored. Exhaustion is `DEVICE_UNAVAILABLE` reason `binding-changed`, exit 22. Two tests guard the shape: the boundary test (Contract 10) and a subprocess-count test (one subprocess per binding a read verb inspects).
 
 ## How `dev` uses it
 
@@ -79,6 +79,8 @@ In bootstrap mode `smoke` starts its own `dev --detach --no-open` child through 
 The agent guide per RFC §Output and errors. The RFC's §Readers and §Entry points are what this PR implements; first-booted sentences in llp/0004, 0005, 0022, 0025, 0026 change to the bound device.
 
 ## Tests
+
+- Acquisition concurrency uses real temporary storage (memfs does not model directory-lock rename semantics) and barriers before either initial snapshot advances. Empty, missing and unavailable bindings create exactly one replacement; `reuseOnly` refreshes without creating; lease/name changes do not refresh; inventory failure and three changed snapshots preserve the newer binding. Device reads and boots stay outside the lock.
 
 - Unit, named: `boot-always-runs`, `failed-boot-lets-go`, `only-create-and-spawn-under-lock`, `agent-cli-name-needs-binding`, `expo-go-and-bare-drafts-acquire`, `created-device-missing-without-app-id`, `withDevice-after-forwarded-args`, `already-running-reuses-only`, `smoke-never-reaches-already-running-reuse`, `smoke-acquires-without-bootDevice`, `smoke-registers-no-shutdown`, `created-device-plans-install`, `null-device-ios-unprobed`, `inspect-state-order`, `any-up-wins-across-platforms`, `bootstatus-b-not-boot`, `detached-device-error-relayed`, `fallback-eas-rung-dotenv-only`, `expired-is-gone`, `platform-flag-throws-tool-error-first`, `read-verb-one-subprocess-per-binding`, `rung-refusal-reports-first-state`, `probe-local-combines-platforms`, `deviceBinding-imports-nothing-from-verbs`, `exit-codes-per-reason`.
 - E2E: `bindingFixture` (`created`, `expiresAt` 60 min ahead, canonical root, macOS only) seeded in the cases that hand a verb a booted simulator. A two-worktree case asserts each `run:ios --device` equals its registry id and the two ids are distinct `E2E-CREATED-*` udids, and set equality of `simctl bootstatus -b` calls.
