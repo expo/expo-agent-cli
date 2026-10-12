@@ -8,6 +8,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { matchProjectRoot, readReportedProjectRootAsync } from '../runtime/projectRootHeader';
+
 /** Where `npx expo start` listens when nothing says otherwise. */
 export const DEFAULT_DEV_SERVER_PORT = 8081;
 
@@ -103,8 +105,11 @@ export interface ResolvedDevServerPort {
 export interface ResolveDevServerPortOptions {
   /** Epoch milliseconds of the spawn; log entries older than this belong to an earlier run. */
   since: number;
-  /** Whether the dev server is still running. Waiting stops as soon as it is not. */
-  isRunning?: () => boolean;
+  /**
+   * Whether the dev server is still running. Waiting stops as soon as it is not. Required: the
+   * watch that follows a foreign fallback port has no deadline but this one.
+   */
+  isRunning: () => boolean;
   /**
    * Settles when the dev server has stopped, which cuts the wait between two reads short.
    *
@@ -123,7 +128,12 @@ export interface ResolveDevServerPortOptions {
    * nothing to vouch for.
    */
   onResolved?: (resolved: ResolvedDevServerPort) => void;
+  /** Whether a dev server of another project answers on this port. Read off `/status` by default. */
+  servesAnotherProject?: (port: number) => Promise<boolean>;
 }
+
+/** How long the fallback port's `/status` may take to name its project. */
+const FOREIGN_CHECK_TIMEOUT_MS = 1000;
 
 /**
  * Wait for the dev server to report its port, then fall back to what the command line asked for.
@@ -131,19 +141,27 @@ export interface ResolveDevServerPortOptions {
  * Polling, rather than watching the file: the log is truncated and appended to by another process,
  * and `fs.watch` reports those two operations differently on every platform. A re-read every half
  * second costs nothing next to a starting bundler.
+ *
+ * A fallback port whose `/status` names another project is never the answer: the log is watched
+ * for as long as the dev server runs instead [observed — live suite, 2026-10-05: a lock on 8081
+ * pointed at another project's Metro].
+ *
+ * @returns the port, or null when the dev server stopped and the only port left to name serves
+ * another project.
  */
 export async function resolveDevServerPortAsync(
   projectRoot: string,
   args: string[],
   {
     since,
-    isRunning = () => true,
+    isRunning,
     stopped,
     intervalMs = PORT_WATCH_INTERVAL_MS,
     timeoutMs = PORT_WATCH_TIMEOUT_MS,
     onResolved,
+    servesAnotherProject = (port) => servesAnotherProjectAsync(projectRoot, port),
   }: ResolveDevServerPortOptions
-): Promise<ResolvedDevServerPort> {
+): Promise<ResolvedDevServerPort | null> {
   const deadline = Date.now() + timeoutMs;
   const answer = (resolved: ResolvedDevServerPort): ResolvedDevServerPort => {
     onResolved?.(resolved);
@@ -164,11 +182,33 @@ export async function resolveDevServerPortAsync(
   }
 
   const requested = readPortArg(args);
-  return answer(
+  const fallback: ResolvedDevServerPort =
     requested != null
       ? { port: requested, source: 'arg' }
-      : { port: DEFAULT_DEV_SERVER_PORT, source: 'default' }
+      : { port: DEFAULT_DEV_SERVER_PORT, source: 'default' };
+  if (!(await servesAnotherProject(fallback.port))) {
+    return answer(fallback);
+  }
+  while (isRunning()) {
+    await waitAsync(intervalMs, stopped);
+    const logged = readLastLoggedDevServerPort(projectRoot, { since });
+    if (logged != null) {
+      return answer({ port: logged, source: 'log' });
+    }
+  }
+  return null;
+}
+
+/** Whether another project's dev server answers on `port`, per the `/status` header; the default check. */
+export async function servesAnotherProjectAsync(
+  projectRoot: string,
+  port: number
+): Promise<boolean> {
+  const reported = await readReportedProjectRootAsync(
+    `http://127.0.0.1:${port}`,
+    FOREIGN_CHECK_TIMEOUT_MS
   );
+  return reported.kind === 'header' && matchProjectRoot(reported.root, projectRoot) === false;
 }
 
 /**

@@ -682,15 +682,15 @@ async function readProjectAsync(
 }
 
 /**
- * Probe the dev server, giving up after {@link DEV_SERVER_PROBE_TIMEOUT_MS}.
+ * Discover the dev server within twice {@link DEV_SERVER_PROBE_TIMEOUT_MS}.
  *
  * The probe itself never throws, so the timeout is the only way this reports "unknown", and giving
  * up **cancels** the request rather than walking away from it. Not cancelling changed nothing a
  * reader could see and everything about when they got the shell prompt back: a Node process exits
  * when its event loop empties, so against a dev server that accepted the connection and then never
  * answered, the report was complete at 3.07 s and `status` was still running at 45 s — undici's
- * header timeout is 300 s. It now exits at 3.12 s [observed — 2026-08-27]. Nothing reportable is
- * lost by cancelling here, because this branch has already decided the answer will not be used.
+ * header timeout is 300 s. It now exits at 3.12 s [observed — 2026-08-27]. A scan candidate already
+ * accepted before the deadline survives cancellation: slower ports cannot erase that evidence.
  *
  * The signal is threaded rather than left to the ladder's own per-probe budget because an explicit
  * `--dev-server-url` deliberately has no budget (see {@link discoverDevServerAsync}), so this
@@ -702,17 +702,30 @@ async function probeDevServerStatusAsync(
 ): Promise<DevServerStatus> {
   const timeoutMs = options.devServerTimeoutMs ?? DEV_SERVER_PROBE_TIMEOUT_MS;
   const giveUp = new AbortController();
+  let bestCandidate: DevServerDiscovery | null = null;
+  let acceptingCandidates = true;
   // No explicit URL: 8081 first, then the ports `expo start` walks to (see devServer.ts).
-  const discovery = await raceWithTimeoutAsync(
+  const completed = await raceWithTimeoutAsync(
     discoverDevServerAsync(options.devServerUrl ?? undefined, {
       timeoutMs,
+      // Each read is bounded too; the whole ladder can still exceed the deadline below.
+      statusTimeoutMs: timeoutMs,
       projectRoot,
       signal: giveUp.signal,
+      onScanCandidate: (candidate) => {
+        if (acceptingCandidates) bestCandidate = candidate;
+      },
     }),
     timeoutMs * 2
   );
-  if (discovery == null) {
+  acceptingCandidates = false;
+  const discovery = completed ?? bestCandidate;
+  if (completed == null) {
+    // Snapshot before aborting, including when we have a successful fallback. Do not await the
+    // unfinished discovery again: an uncooperative request must not extend this deadline.
     giveUp.abort();
+  }
+  if (discovery == null) {
     const timedOut: DevServerProbe = {
       reachable: false,
       targets: [],

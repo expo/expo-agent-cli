@@ -1,6 +1,8 @@
 import fs from 'fs';
 import { vol } from 'memfs';
 
+import * as devLock from '../../devLock';
+import * as localDevice from '../../device/localDevice';
 import { event } from '../../events';
 import * as network from '../../followups/network';
 import { lookUpBuildPlatformAsync } from '../../impact/buildCache';
@@ -12,7 +14,7 @@ import { readAuthPreflightAsync } from '../../needsHuman/preflight';
 import { readLastBuildRecord } from '../../plan/lastBuild';
 import { probeProjectStateAsync } from '../../project/probe';
 import type { ProjectState } from '../../project/types';
-import { discoverDevServerAsync } from '../../runtime/devServer';
+import { discoverDevServerAsync, type DevServerDiscovery } from '../../runtime/devServer';
 import { probeTargetLivenessAsync } from '../../runtime/targetLiveness';
 import { waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { getPersistedAgentIdsAsync } from '../../skills/agents';
@@ -1134,5 +1136,225 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
     expect(report.installed).toBeNull();
     expect(report.errors.installed).toBe('The installed-app check did not finish within 0.01s.');
     expect(report.project).not.toBeNull();
+  });
+});
+
+describe('status retains discovery results at its deadline', () => {
+  // Exercise real discovery and project-root checks; only the transport and unrelated report
+  // sections are doubles. Every request gets 100 ms, but the whole ladder only gets 200 ms.
+  const target = { webSocketDebuggerUrl: 'ws://app' } as any;
+  const abortTimers = new Set<ReturnType<typeof setTimeout>>();
+  let discoveryWork: Promise<DevServerDiscovery>;
+  let discoverySettled: boolean;
+  let aborted: string[];
+
+  beforeEach(async () => {
+    vi.useFakeTimers();
+    aborted = [];
+    discoverySettled = false;
+    // Native AbortSignal.timeout uses a different clock from fake setTimeout. Put both budgets
+    // on this clock, tracking the signal timers separately because native ones cannot be cleared.
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation((ms) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => {
+        abortTimers.delete(timer);
+        controller.abort(new DOMException('timed out', 'TimeoutError'));
+      }, ms);
+      abortTimers.add(timer);
+      return controller.signal;
+    });
+    vi.spyOn(devLock, 'readDevServerLockAsync').mockResolvedValue(null);
+    vi.spyOn(localDevice, 'probeLocalDeviceAsync').mockResolvedValue({
+      state: 'absent',
+      device: null,
+      devices: [],
+      reason: null,
+    });
+    vi.mocked(probeTargetLivenessAsync).mockImplementation(async (targets) => ({
+      listed: targets.length,
+      live: targets.length,
+      stale: [],
+    }));
+    const actual =
+      await vi.importActual<typeof import('../../runtime/devServer')>('../../runtime/devServer');
+    vi.mocked(discoverDevServerAsync).mockImplementation((...args) => {
+      discoveryWork = actual.discoverDevServerAsync(...args);
+      void discoveryWork.then(() => {
+        discoverySettled = true;
+      });
+      return discoveryWork;
+    });
+  });
+
+  afterEach(() => {
+    abortTimers.clear();
+    vi.clearAllTimers();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  function mockSlowScan({
+    targets = [target],
+    root = projectRoot,
+    unanswered = false,
+    lateMatch = false,
+  }: {
+    targets?: (typeof target)[];
+    root?: string | null;
+    unanswered?: boolean;
+    lateMatch?: boolean;
+  } = {}) {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = new URL(String(input));
+      const key = `${url.port}${url.pathname}`;
+      const status = url.pathname === '/status';
+      if (!['8081', '8082', '8083', '8084'].includes(url.port)) {
+        return Promise.reject(new Error('ECONNREFUSED'));
+      }
+      const hang = url.port === '8084' || (url.port === '8082' && status && unanswered);
+      const delay = url.port === '8082' ? 0 : 60;
+      const reportedRoot =
+        url.port === '8082'
+          ? root
+          : url.port === '8083' && lateMatch
+            ? projectRoot
+            : '/other-project';
+      const answer = () =>
+        status
+          ? new Response('', {
+              headers: reportedRoot == null ? {} : { 'X-React-Native-Project-Root': reportedRoot },
+            })
+          : new Response(JSON.stringify(url.port === '8082' ? targets : [target]));
+      return new Promise<Response>((resolve, reject) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const onAbort = () => {
+          aborted.push(key);
+          // An uncooperative late response must not replace the report's chosen server.
+          if (lateMatch && url.port === '8083' && status) return;
+          clearTimeout(timer);
+          reject(new Error('aborted'));
+        };
+        if (init?.signal?.aborted) {
+          onAbort();
+          return;
+        }
+        init?.signal?.addEventListener('abort', onAbort, { once: true });
+        if (!hang) {
+          timer = setTimeout(() => {
+            init?.signal?.removeEventListener('abort', onAbort);
+            resolve(answer());
+          }, delay);
+        }
+      });
+    });
+  }
+
+  function expectProbeTimersCleared() {
+    // Discard only our simulated native signal timers; probe/report and fetch timers must have
+    // been cleared by the code or the abort-aware transport, without advancing to their deadlines.
+    for (const timer of abortTimers) clearTimeout(timer);
+    abortTimers.clear();
+    expect(vi.getTimerCount()).toBe(0);
+  }
+
+  it.each([
+    { name: 'an attached app', targets: [target] },
+    { name: 'no attached app', targets: [] },
+  ])(
+    'keeps a matching server with $name and cancels both pending request stages',
+    async ({ targets }) => {
+      mockSlowScan({ targets });
+      // Do not reuse `options`: its explicit URL would bypass the scan being tested.
+      const pendingReport = collectStatusReportAsync(projectRoot, {
+        devServerUrl: null,
+        devServerTimeoutMs: 100,
+      });
+      await vi.advanceTimersByTimeAsync(199);
+      expect(discoverySettled).toBe(false);
+      expect(aborted).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      const report = await pendingReport;
+
+      expect(report.devServer).toMatchObject({
+        running: true,
+        url: 'http://127.0.0.1:8082',
+        source: 'scan',
+        appsListed: targets.length,
+        appsConnected: targets.length,
+      });
+      expect(aborted.sort()).toEqual(['8083/status', '8084/json/list']);
+      expect(discoverySettled).toBe(true);
+      expect(await discoveryWork).toMatchObject({ devServerUrl: 'http://127.0.0.1:8082' });
+      expect(
+        vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('8083/status'))
+      ).toHaveLength(1);
+      expectProbeTimersCleared();
+    }
+  );
+
+  it('keeps the existing compatibility with servers that send no project-root header', async () => {
+    mockSlowScan({ root: null });
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValue({
+      ready: true,
+      projectRootMatched: null,
+      reportedProjectRoot: null,
+      timedOut: false,
+      waitedMs: 0,
+    });
+    const pendingReport = collectStatusReportAsync(projectRoot, {
+      devServerUrl: null,
+      devServerTimeoutMs: 100,
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    expect((await pendingReport).devServer).toMatchObject({
+      running: true,
+      url: 'http://127.0.0.1:8082',
+      source: 'scan',
+      projectRootMatched: null,
+    });
+    expectProbeTimersCleared();
+  });
+
+  it.each([
+    { name: 'foreign', root: '/other-project', unanswered: false },
+    { name: 'unanswered', root: projectRoot, unanswered: true },
+  ])('does not retain a $name project check', async ({ root, unanswered }) => {
+    mockSlowScan({ root, unanswered });
+    const pendingReport = collectStatusReportAsync(projectRoot, {
+      devServerUrl: null,
+      devServerTimeoutMs: 100,
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    expect((await pendingReport).devServer).toMatchObject({
+      running: false,
+      source: 'default',
+      reason: expect.stringContaining('did not answer'),
+    });
+    expect(discoverySettled).toBe(true);
+    expectProbeTimersCleared();
+  });
+
+  it('returns without waiting for a late preferred candidate and keeps its chosen result', async () => {
+    mockSlowScan({ targets: [], lateMatch: true });
+    const pendingReport = collectStatusReportAsync(projectRoot, {
+      devServerUrl: null,
+      devServerTimeoutMs: 100,
+    });
+    await vi.advanceTimersByTimeAsync(200);
+    const report = await pendingReport;
+    expect(report.devServer).toMatchObject({
+      running: true,
+      url: 'http://127.0.0.1:8082',
+      appsListed: 0,
+    });
+    expect(discoverySettled).toBe(false);
+    await vi.advanceTimersByTimeAsync(40);
+    expect(discoverySettled).toBe(true);
+    expect(report.devServer).toMatchObject({
+      running: true,
+      url: 'http://127.0.0.1:8082',
+      appsListed: 0,
+    });
+    expectProbeTimersCleared();
   });
 });

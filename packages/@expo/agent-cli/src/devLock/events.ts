@@ -24,7 +24,7 @@ declare module '2g' {
      */
     'cli:dev_lock_skipped': {
       address: string;
-      reason: 'in-use' | 'dev-server-exited' | 'error';
+      reason: 'in-use' | 'dev-server-exited' | 'foreign-port' | 'error';
       /** Where the process that already holds the address says its dev server listens. */
       holderUrl?: string | null;
       /** PID of the process that already holds the address, when it named one. */

@@ -349,6 +349,23 @@ step probes. None trusts. The step is reported as `source`.
 | 3   | 8081                                           | `default` | Metro's default answered                                            |
 | 4   | 8082-8085, in parallel                         | `scan`    | a Metro answered. not that it is this project's                     |
 
+Steps 2, 3 and 4 read the project-root header of `GET /status` by the rule in §A busy
+port, so a server of another project is skipped and reported as foreign. A `/status`
+that does not answer within 3 s is not accepted, because it proves nothing; a socket error on that
+read gets one retry. The budget is longer than the probe's, so a slow `/status` is accepted; `status`
+reads with its own probe budget, because it is a report with a deadline.
+
+The parallel scan prefers an accepted server with listed debugger targets, then scan-port order.
+Discovery publishes its best accepted candidate as replies arrive, using the same selection rule
+as its final answer. `status` gives discovery 3 s overall (twice its 1.5 s per-request budget).
+If that deadline expires, it retains the best candidate already accepted and cancels unfinished
+discovery requests, even when the retained result reports a running server. It does not await those
+requests again or accept later candidates. With no accepted candidate, it reports the existing
+timeout result. Readiness and target liveness are still checked under their separate budgets.
+A server with no listed targets remains a valid running server; a foreign or unanswered project
+check cannot become a fallback. The existing compatibility rule for a missing project-root header
+still applies.
+
 Nothing may be skipped on the strength of a fast path. An `expo start` a developer ran
 by hand holds no lock. A project whose `.expo` was cleaned names no port. The scan is
 what finds those. `default` is also the reported source when nothing answered anywhere,
@@ -406,7 +423,10 @@ is published at the spawn with that port: `dev` passes `--port` on every step th
 serves, and the Expo CLI either binds it or exits. The log watch goes on, and a port the
 dev server reports in `start.log` after the spawn timestamp updates the lock's answer.
 With no port in the arguments, the port published is the one the dev server reported,
-falling back to 8081.
+falling back to 8081. A `--port` or default port whose `/status` names another project
+root is never published [observed — live suite, 2026-10-05: a lock on 8081 pointed at
+another project's Metro]; the log watch goes on while the dev server runs, and nothing is
+published if the server exits first (`cli:dev_lock_skipped`, reason `foreign-port`).
 
 Still probed. The lock proves the wrapper is alive. Only an HTTP probe of the URL proves
 the dev server behind it is. Discovery uses the lock to stop guessing which port.

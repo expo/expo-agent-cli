@@ -8,6 +8,7 @@ import { debugEvent, event } from './events';
 import {
   readPortArg,
   resolveDevServerPortAsync,
+  servesAnotherProjectAsync,
   type ResolveDevServerPortOptions,
   type ResolvedDevServerPort,
 } from './port';
@@ -20,7 +21,9 @@ export type HoldDevServerLockOptions = ResolveDevServerPortOptions;
  * Publish where this project's dev server listens, and hold the address until it is released.
  *
  * When the arguments name a port, the lock is published at the spawn with `source: 'arg'`: `dev`
- * passes `--port` on every step that serves, and the Expo CLI either binds that port or exits. The
+ * passes `--port` on every step that serves, and the Expo CLI either binds that port or exits. A
+ * named port that another project's dev server already answers on is never published; the lock
+ * then waits for the log, as with no port. The
  * log watch goes on, so `onResolved` is told again with `source: 'log'` when Metro reports, and a
  * logged port that differs from the named one updates the lock's answer. With no port in the
  * arguments, the lock waits for the log, or for the watch to give up.
@@ -37,7 +40,9 @@ export async function holdDevServerLockAsync(
   options: HoldDevServerLockOptions
 ): Promise<DevServerLockHandle | null> {
   const named = readPortArg(args);
-  if (named == null) {
+  const servesAnotherProject =
+    options.servesAnotherProject ?? ((port) => servesAnotherProjectAsync(projectRoot, port));
+  if (named == null || (await servesAnotherProject(named))) {
     return await publishAsync(
       projectRoot,
       options,
@@ -52,7 +57,7 @@ export async function holdDevServerLockAsync(
     ...options,
     onResolved: undefined,
   });
-  if (watched.source === 'log') {
+  if (watched?.source === 'log') {
     options.onResolved?.(watched);
     if (watched.port !== named) {
       lock?.update(lockInfo(projectRoot, options, watched.port));
@@ -80,15 +85,22 @@ function lockInfo(
 async function publishAsync(
   projectRoot: string,
   options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning'>,
-  { port, source }: ResolvedDevServerPort
+  resolved: ResolvedDevServerPort | null
 ): Promise<DevServerLockHandle | null> {
   // Derived once, inside the try, so the catch below has an address to report without being able
   // to fail deriving one — a `catch` that can throw is not a safety net.
   let address = '';
   try {
     address = lockAddressFor(projectRoot).address;
+    if (resolved == null) {
+      // The only port left to name is another project's dev server, and publishing it would point
+      // every command of this project at that project.
+      event('dev_lock_skipped', { address, reason: 'foreign-port' });
+      return null;
+    }
+    const { port, source } = resolved;
 
-    if (options.isRunning?.() === false) {
+    if (!options.isRunning()) {
       // The dev server exited before it said where it listens, so there is nothing to point at.
       debugEvent('dev_lock_skipped', { address, reason: 'dev-server-exited' });
       return null;
