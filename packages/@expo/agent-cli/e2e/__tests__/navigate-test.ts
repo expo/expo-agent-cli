@@ -16,7 +16,12 @@ import {
   startStubDevServerAsync,
   stubExpoEnv,
 } from '../utils';
-import { BOOTED_SIMULATOR, installStubXcrunAsync, SIMULATOR_UDID } from './installedAppStubs';
+import {
+  appStartedMarkerPath,
+  BOOTED_SIMULATOR,
+  installStubXcrunAsync,
+  SIMULATOR_UDID,
+} from './installedAppStubs';
 
 /** The shape `navigate --json` prints, per `src/navigate/navigateAsync.ts`. */
 type NavigateReport = {
@@ -49,6 +54,64 @@ const EXPO_GO_TARGET = {
 };
 
 describe('@expo/agent-cli navigate', () => {
+  it.each([true, false])(
+    'launches a cold development build (automation: %s)',
+    async (automation) => {
+      const projectRoot = await setupFixtureAsync('dev-client-app');
+      const launchedMarker = appStartedMarkerPath(projectRoot);
+      const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
+        simulators: [BOOTED_SIMULATOR],
+      });
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [{ id: '1', appId: 'com.example.demo', deviceName: 'iPhone 17 Pro' }],
+        targetsAppearWithFile: launchedMarker,
+      });
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          [
+            'navigate',
+            '/profile/42',
+            '--ios',
+            '--json',
+            '--scheme',
+            'demoapp',
+            '--app-id',
+            'com.example.demo',
+            '--dev-server-url',
+            stub.url,
+          ],
+          { env: { ...stubExpoEnv(projectRoot), EXPO_NO_DEV_MENU: automation ? '1' : '0' } }
+        );
+
+        expect(result.exitCode).toBe(0);
+        const report = JSON.parse(result.stdout);
+        const launch = new URL(report.launch.url);
+        expect(launch.hostname).toBe('');
+        expect(Object.fromEntries(launch.searchParams)).toEqual({
+          __expo_url: stub.url,
+          ...(automation
+            ? {
+                __expo_disable_onboarding: '1',
+                __expo_disable_fab: '1',
+                __expo_disable_auto_launch: '1',
+              }
+            : {}),
+        });
+        expect(
+          readXcrun()
+            .filter((args) => args[1] === 'openurl')
+            .map((args) => args[3])
+        ).toEqual([report.launch.url, 'demoapp://profile/42']);
+        expect(report.launch.attached).toBe(true);
+      } finally {
+        await stub.close();
+      }
+    }
+  );
+
   it('documents that the dev server is discovered, not assumed to be 8081', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
 

@@ -407,7 +407,10 @@ export function buildOpenUrlCommand({
           ],
           display: '',
         };
-  command.display = [command.bin, ...command.args].join(' ');
+  // xcrun receives raw arguments, but the displayed iOS command is replayed through a shell.
+  const displayArgs =
+    platform === 'ios' ? [...command.args.slice(0, -1), quoteForDeviceShell(url)] : command.args;
+  command.display = [command.bin, ...displayArgs].join(' ');
   return command;
 }
 
@@ -495,7 +498,7 @@ export async function openUrlOnDeviceAsync(
   return { command: display, stdout, stderr, exitCode };
 }
 
-/** Quote a value so the shell that `adb shell` starts on the device keeps it as one word. */
+/** Quote a value for a POSIX shell, including the shell that `adb shell` starts on the device. */
 export function quoteForDeviceShell(value: string): string {
   return `'${value.split("'").join(`'\\''`)}'`;
 }

@@ -71,7 +71,7 @@ export interface NavigateResultJson {
    *
    * A different URL from {@link url}: that one navigates an app already loaded against a dev
    * server, and these get it loaded. `exp://<host>` is the **Expo Go** form; a development build
-   * takes its own scheme, `<scheme>://expo-development-client/?url=…`. Two entries when nothing
+   * takes its own scheme, `<scheme>://?__expo_url=…`. Two entries when nothing
    * established which application is running, none when no dev server answered.
    */
   connect: { target: string; url: string; label: string }[];

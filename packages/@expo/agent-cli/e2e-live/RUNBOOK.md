@@ -181,7 +181,7 @@ back to LAN URL` twelve times and then exits 1 on `TypeError: Cannot read proper
 same flag uses `@expo/ws-tunnel` on the Expo account instead — no ngrok — and advertises an
 `….on.expo.app` origin that serves the world [verified live — 2026-09-05]. The suite starts its dev
 server with `--tunnel` and that env, reads the origin back from what the server advertises
-(`navigate / --print-url` for Expo Go; the `?url=` of the dev-build launcher in `status` for a dev
+(`navigate / --print-url` for Expo Go; the `__expo_url` parameter of the dev-build launcher in `status` for a dev
 build, whose route link carries no host), and curls `<origin>/status` for `packager-status:running`
 **before** it starts anything that bills. `AGENT_CLI_LIVE_PUBLIC_ORIGIN` keeps the old proxy path — a
 reverse proxy of your own, advertised via `EXPO_PACKAGER_PROXY_URL` — because the v2 flag is

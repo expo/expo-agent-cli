@@ -3,15 +3,9 @@
 //
 // `exp://<host>` is the **Expo Go** form and nothing else. A development build is a different
 // application with its own URL scheme, and handing it an `exp://` link hands it another app's URL:
-// nothing opens, or Expo Go opens instead. The form a development build takes is the dev launcher's
-// own, and it is pinned against the launcher that parses it rather than against recollection
-// [observed — `packages/expo-dev-launcher`, 2026-08-26]:
+// nothing opens, or Expo Go opens instead. A development build uses the reserved launch parameter:
 //
-//     <scheme>://expo-development-client/?url=<url-encoded dev server origin>
-//
-// `EXDevLauncherURLHelper.isDevLauncherURL` is exactly `url.host == "expo-development-client"`, the
-// dev server URL rides in the `url` query parameter, and `DevLauncherURLHelper.kt` on Android reads
-// it identically. `@expo/cli` builds the same string in `UrlCreator.constructDevClientUrl`.
+//     <scheme>://?__expo_url=<url-encoded dev server origin>
 //
 // **A connect URL is not a route link.** `<scheme>://<route>` navigates an app that is *already*
 // loaded against a dev server; this is what gets it loaded. Both are the app's own scheme, and both
@@ -42,9 +36,6 @@ export function openInPhrase(target: string): string {
   return target === 'expo-go' ? 'Expo Go' : 'the development build';
 }
 
-/** The host the dev launcher URL is addressed to, and the only one it recognises. */
-const DEV_LAUNCHER_HOST = 'expo-development-client';
-
 /** The Expo Go connect URL: the dev server host under the `exp` scheme. */
 export function expoGoConnectUrl(host: string): string {
   return `exp://${host}`;
@@ -53,7 +44,7 @@ export function expoGoConnectUrl(host: string): string {
 /**
  * The development build connect URL.
  *
- * The origin inside the `url` parameter is `https` for a tunnel and `http` otherwise, which is what
+ * The origin inside the `__expo_url` parameter is `https` for a tunnel and `http` otherwise, which is what
  * `@expo/cli` does for the same string: a tunnel terminates TLS, so the plain-HTTP origin the dev
  * server prints for itself is not the one a device off the network should be given
  * [observed — `UrlCreator.constructDevClientUrl`, 2026-08-26].
@@ -61,10 +52,16 @@ export function expoGoConnectUrl(host: string): string {
 export function devClientConnectUrl(
   scheme: string,
   host: string,
-  hostType: DevServerHostType | null
+  hostType: DevServerHostType | null,
+  automation = false
 ): string {
   const origin = `${hostType === 'tunnel' ? 'https' : 'http'}://${host}`;
-  return `${scheme}://${DEV_LAUNCHER_HOST}/?url=${encodeURIComponent(origin)}`;
+  const url = `${scheme}://?__expo_url=${encodeURIComponent(origin)}`;
+  // FAB and auto-launch overrides apply only to this process; onboarding is marked completed.
+  // https://docs.expo.dev/develop/development-builds/development-workflows/#using-launch-urls-in-automation-scenarios
+  return automation
+    ? `${url}&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1`
+    : url;
 }
 
 export interface BuildConnectUrlsParams {
@@ -83,6 +80,8 @@ export interface BuildConnectUrlsParams {
    * [decided, 2026-08-26].
    */
   certain: boolean;
+  /** Suppress development-build onboarding, the Tools button and automatic menu opening. */
+  automation?: boolean;
 }
 
 /**
@@ -97,6 +96,7 @@ export function buildConnectUrls({
   scheme,
   isExpoGo,
   certain,
+  automation,
 }: BuildConnectUrlsParams): ConnectUrl[] {
   if (host == null) {
     return [];
@@ -113,7 +113,7 @@ export function buildConnectUrls({
     ? {
         target: 'dev-build',
         label: 'development build',
-        url: devClientConnectUrl(scheme, host, hostType),
+        url: devClientConnectUrl(scheme, host, hostType, automation),
       }
     : null;
 

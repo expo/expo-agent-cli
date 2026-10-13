@@ -170,7 +170,7 @@ export interface ResolvedRoute {
    *
    * A *different* URL from {@link url}: that one navigates an app already loaded against a dev
    * server, and these get it loaded. `exp://<host>` is the Expo Go form and
-   * `<scheme>://expo-development-client/?url=…` the development build's, and they are not
+   * `<scheme>://?__expo_url=…` the development build's, and they are not
    * interchangeable — so two entries appear when nothing established which application is running,
    * and none when there is no dev server to point at.
    *
@@ -192,7 +192,7 @@ export interface ResolvedRoute {
 
 /** One open of a URL on a device, and what came of it. */
 export interface DevLauncherOpen {
-  /** The launcher URL: `<scheme>://expo-development-client/?url=<dev server origin>`. */
+  /** The launcher URL: `<scheme>://?__expo_url=<dev server origin>`. */
   url: string;
   /** The device command that opened it, for reproducing the step by hand. */
   command: string;
@@ -432,6 +432,9 @@ export async function resolveRouteUrlAsync(
       scheme: devBuildScheme(scheme, config),
       isExpoGo: target.isExpoGo,
       certain: target.certain,
+      // These links are used by navigate and smoke to load a development build unattended.
+      // Keep Expo CLI's explicit opt-out for callers testing the dev menu itself.
+      automation: process.env.EXPO_NO_DEV_MENU !== '0',
     }),
     routeCheck,
     // The same list the target decision was made from. Kept, because "which app is this" and "is
@@ -478,7 +481,7 @@ export async function openRouteAsync(
   }
 
   // Decided before the reverse, because the two links need different ports forwarded: the launcher
-  // URL carries the dev server's origin inside its `url` parameter, and a route link for a
+  // URL carries the dev server's origin inside its `__expo_url` parameter, and a route link for a
   // development build carries no host at all.
   const budgetMs = options.confirmAttachMs ?? 0;
   const launcherUrl = devLauncherUrlFor(resolved, budgetMs);
@@ -488,8 +491,8 @@ export async function openRouteAsync(
   // error screen with `am start` having exited 0 (F50).
   //
   // The **dev server's** URL when a launcher open is about to happen: what has to be reachable then
-  // is the origin the launcher will fetch the bundle from, and `<scheme>://expo-development-client/`
-  // is not a loopback host, so reading the URL itself would forward nothing (F123).
+  // is the origin the launcher will fetch the bundle from. The launcher URL carries it in a query
+  // parameter, so reading the URL's own host would forward nothing (F123).
   const reverse =
     device.platform === 'android' && device.adb != null
       ? await reverseLoopbackPortAsync({
@@ -745,7 +748,7 @@ async function attachWaiterAsync(
  *
  * @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server
  * **F123.** `<scheme>://<route>` navigates an app that is *already* running against a dev server;
- * `<scheme>://expo-development-client/?url=<origin>` is what gets it running. They are both the
+ * `<scheme>://?__expo_url=<origin>` is what gets it running. They are both the
  * app's own scheme and they are not interchangeable — so a run that had just decided "no app is
  * connected to the dev server, and the project depends on expo-dev-client" was handing a not-loaded
  * app the link that only a loaded app understands, spending its whole attach budget, and exiting 22

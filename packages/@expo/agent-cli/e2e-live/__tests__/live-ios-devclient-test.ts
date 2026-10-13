@@ -223,7 +223,7 @@ describeIosDevClient('live-ios-devclient: the loop on a real iOS development bui
     expect(report.devServer.running).toBe(true);
     const urls = report.devServer.openUrls as { target: string; url: string }[];
     expect(urls.map((entry) => entry.target)).toEqual(['dev-build']);
-    expect(urls[0]!.url).toContain(`${project.scheme}://expo-development-client/?url=`);
+    expect(urls[0]!.url).toContain(`${project.scheme}://?__expo_url=`);
     expect(urls[0]!.url).not.toContain('exp://');
   });
 

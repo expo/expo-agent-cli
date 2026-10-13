@@ -149,6 +149,7 @@ function printed(): string {
 let originalFetch: typeof fetch | undefined;
 
 beforeEach(() => {
+  vi.stubEnv('EXPO_NO_DEV_MENU', undefined);
   // @ref src/device/approveScheme §written — the two preference writes are memoized per process,
   // so a case that counts spawns has to start from an empty memo (`clearMocks` does not touch
   // module state).
@@ -163,6 +164,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   if (originalFetch) {
     globalThis.fetch = originalFetch;
   }
@@ -428,7 +430,7 @@ describe(navigateAsync, () => {
       // raises, and no alert is read on a machine that has somebody at it.
       attachAlert: null,
       reversedPort: null,
-      command: 'xcrun simctl openurl IOS-1 exp://127.0.0.1:8081/--/profile/42',
+      command: "xcrun simctl openurl IOS-1 'exp://127.0.0.1:8081/--/profile/42'",
       exitCode: 0,
       // Expo Go, so one link and nothing to load first: `exp://<host>` carries the dev server it
       // is for, which is exactly what a development build's route link does not (F123).
@@ -803,7 +805,7 @@ describe(navigateAsync, () => {
         {
           target: 'dev-build',
           label: 'development build',
-          url: 'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
+          url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
         },
       ]);
       // Never the other app's form.
@@ -818,7 +820,7 @@ describe(navigateAsync, () => {
       await navigateAsync(projectRoot, options({ devServerUrl: null, printUrl: true, json: true }));
 
       expect(JSON.parse(printed()).connect[0].url).toBe(
-        'demoapp://expo-development-client/?url=https%3A%2F%2Fznakdiwe5j2n5o0.boltexpo.dev'
+        'demoapp://?__expo_url=https%3A%2F%2Fznakdiwe5j2n5o0.boltexpo.dev&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1'
       );
     });
 
@@ -828,7 +830,7 @@ describe(navigateAsync, () => {
 
       await navigateAsync(projectRoot, options({ printUrl: true }));
 
-      expect(printed()).toContain('demoapp://expo-development-client/?url=');
+      expect(printed()).toContain('demoapp://?__expo_url=');
       expect(printed()).toContain('open in the development build');
     });
 
@@ -901,7 +903,7 @@ describe(navigateAsync, () => {
         {
           target: 'dev-build',
           label: 'development build',
-          url: 'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
+          url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
         },
       ]);
     });
@@ -1136,7 +1138,8 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
   };
 
   /** The launcher URL this project's development build parses, as `connectUrl.ts` builds it. */
-  const LAUNCHER_URL = 'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081';
+  const LAUNCHER_URL =
+    'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1';
 
   /**
    * Every URL this run handed to a device, in order.
@@ -1168,27 +1171,56 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     })) as unknown as typeof fetch;
   }
 
-  it(`opens the launcher URL first, then the route link`, async () => {
+  it.each([true, false])(
+    'opens the launcher URL first, then the route link (automation: %s)',
+    async (automation) => {
+      vi.stubEnv('EXPO_NO_DEV_MENU', automation ? '1' : '0');
+      mockDevClientProject();
+      mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
+      mockSpawnQueue([
+        { stdout: ADB_DEVICES }, //        adb devices -l
+        { stdout: '8081' }, //             adb reverse
+        { stdout: 'Starting: Intent' }, //  am start — the launcher
+        { stdout: '' }, //                 simctl list (device index)
+        { stdout: ADB_DEVICES }, //        adb devices -l (device index)
+        { stdout: 'Starting: Intent' }, //  am start — the route link
+        { stdout: '' },
+        { stdout: ADB_DEVICES },
+      ]);
+
+      await expect(
+        navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 5_000 }))
+      ).resolves.toBe(0);
+
+      // The launcher first, because it is the one that loads the bundle, and the route link after
+      // it, because that is what was asked for.
+      const launcher = automation
+        ? LAUNCHER_URL
+        : 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081';
+      expect(openedUrls()).toEqual([launcher, 'demoapp://profile/42']);
+    }
+  );
+
+  it('honors EXPO_NO_DEV_MENU=0 for generated launch URLs', async () => {
+    vi.stubEnv('EXPO_NO_DEV_MENU', '0');
     mockDevClientProject();
-    mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
-    mockSpawnQueue([
-      { stdout: ADB_DEVICES }, //        adb devices -l
-      { stdout: '8081' }, //             adb reverse
-      { stdout: 'Starting: Intent' }, //  am start — the launcher
-      { stdout: '' }, //                 simctl list (device index)
-      { stdout: ADB_DEVICES }, //        adb devices -l (device index)
-      { stdout: 'Starting: Intent' }, //  am start — the route link
-      { stdout: '' },
-      { stdout: ADB_DEVICES },
-    ]);
+    mockDevServer([]);
 
-    await expect(
-      navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 5_000 }))
-    ).resolves.toBe(0);
+    await navigateAsync(projectRoot, options({ printUrl: true, json: true }));
 
-    // The launcher first, because it is the one that loads the bundle, and the route link after
-    // it, because that is what was asked for.
-    expect(openedUrls()).toEqual([LAUNCHER_URL, 'demoapp://profile/42']);
+    expect(JSON.parse(printed()).connect[0].url).toBe(
+      'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081'
+    );
+  });
+
+  it('preserves a caller-supplied URL', async () => {
+    mockDevClientProject();
+    mockDevServer([]);
+    const route = 'demoapp://callback?token=a%2Bb&disableFab=0#done';
+
+    await navigateAsync(projectRoot, options({ route, printUrl: true, json: true }));
+
+    expect(JSON.parse(printed()).url).toBe(route);
   });
 
   // The other half of F123, and the half no URL can express: a BROWSABLE `ACTION_VIEW` intent
@@ -1218,13 +1250,13 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     const launcher = vi
       .mocked(spawn)
       .mock.calls.map(([, args]) => (args as string[]).join(' '))
-      .find((line) => line.includes('expo-development-client'));
+      .find((line) => line.includes('__expo_url='));
     expect(launcher).toContain(`-n 'com.example.demo/.MainActivity'`);
     expect(launcher).not.toContain('android.intent.action.VIEW');
     expect(openedUrls()).toEqual([LAUNCHER_URL, 'demoapp://profile/42']);
   });
 
-  // The dev server's own port, not the route link's: `demoapp://expo-development-client/?url=…`
+  // The dev server's own port, not the route link's: `demoapp://?__expo_url=…`
   // has no loopback host of its own, so reading the URL forwarded nothing and the launcher fetched
   // its bundle from a port on the *device* (F50's shape, one URL further out).
   it(`reverses the dev server's port before the launcher open`, async () => {
@@ -1275,7 +1307,7 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     const report = JSON.parse(printed());
     expect(report.url).toBe('demoapp://profile/42');
     expect(report.launch).toMatchObject({
-      url: 'demoapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
+      url: 'demoapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
       exitCode: 0,
       attached: true,
     });

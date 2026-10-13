@@ -877,7 +877,7 @@ describe(formatStatusReport, () => {
             {
               target: 'dev-build',
               label: 'development build',
-              url: 'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.expo.app',
+              url: 'exp+sampleapp://?__expo_url=https%3A%2F%2Fx8fj2.on.expo.app',
             },
           ],
           appsListed: 0,
@@ -887,9 +887,7 @@ describe(formatStatusReport, () => {
 
       const rendered = report(value);
       expect(rendered).toContain('open in development build:');
-      expect(rendered).toContain(
-        'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.expo.app'
-      );
+      expect(rendered).toContain('exp+sampleapp://?__expo_url=https%3A%2F%2Fx8fj2.on.expo.app');
     });
 
     // A local run's own `url` is the whole answer, and a second copy of it would be noise.

@@ -1243,7 +1243,7 @@ describe('@expo/agent-cli smoke', () => {
   // @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it.
   //
   // `<scheme>://<route>` navigates an app that is **already** running against a dev server;
-  // `<scheme>://expo-development-client/?url=<origin>` is what loads one. A cold development build
+  // `<scheme>://?__expo_url=<origin>` is what loads one. A cold development build
   // handed the first sits on the dev launcher's own screen, which is what the re-test
   // photographed. This tier owns the argv, which is the whole question: which URL reached the
   // device, and in what order.
@@ -1280,7 +1280,7 @@ describe('@expo/agent-cli smoke', () => {
           .filter((argv) => argv[1] === 'openurl')
           .map((argv) => argv[3]);
         // The loading link first, and it carries the dev server this run settled on.
-        expect(opens[0]).toContain('expo-development-client/?url=');
+        expect(opens[0]).toContain('?__expo_url=');
         expect(opens[0]).toContain(encodeURIComponent(stub.url));
         // And the route link after it, into the app the first one loaded — the pair is the finding,
         // and a run that opened only one of them would be the F123 shape either way round.
@@ -1310,7 +1310,7 @@ describe('@expo/agent-cli smoke', () => {
           .filter((argv) => argv[1] === 'openurl')
           .map((argv) => argv[3]);
         expect(opens).toEqual([`exp://127.0.0.1:${stub.port}/--/?`]);
-        expect(opens.join(' ')).not.toContain('expo-development-client');
+        expect(opens.join(' ')).not.toContain('__expo_url=');
       } finally {
         release();
         await stub.close();

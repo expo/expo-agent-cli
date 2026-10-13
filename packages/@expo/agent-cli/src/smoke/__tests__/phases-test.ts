@@ -1067,7 +1067,7 @@ describe(runSmokePhasesAsync, () => {
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it —
   // 2026-09-01. `<scheme>://<route>` navigates an app that is already running against a
-  // dev server; `<scheme>://expo-development-client/?url=<origin>` is what *loads* it. F123 built
+  // dev server; `<scheme>://?__expo_url=<origin>` is what *loads* it. F123 built
   // that ladder into `openRouteAsync` and gated it on an attach budget — and `smoke` passed none,
   // so a cold development build got the link only a loaded app understands and sat on the dev
   // launcher's own screen.
@@ -1730,8 +1730,8 @@ describe(`${runSmokePhasesAsync.name} and what the picture shows`, () => {
             route,
             isExpoGo: false,
             launch: {
-              url: 'dcapp://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
-              command: 'xcrun simctl openurl SIM-1 dcapp://expo-development-client/?url=…',
+              url: 'dcapp://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081',
+              command: 'xcrun simctl openurl SIM-1 dcapp://?__expo_url=…',
               exitCode: 0,
               attached: false,
               waitedMs: 20_000,
@@ -2724,7 +2724,7 @@ describe(`${runSmokePhasesAsync.name} and a device that refused the link`, () =>
           // The launcher link was refused too — same scheme, same missing app. This is the shape
           // that made the caption lie: a refused launcher open also reports `attached: false`.
           launch: {
-            url: 'com.example.app://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
+            url: 'com.example.app://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081',
             command: 'xcrun simctl openurl SIM-1 …',
             exitCode: 115,
             attached: false,
@@ -2760,7 +2760,7 @@ describe(`${runSmokePhasesAsync.name} and a device that refused the link`, () =>
           opened({
             route,
             launch: {
-              url: 'com.example.app://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081',
+              url: 'com.example.app://?__expo_url=http%3A%2F%2F127.0.0.1%3A8081',
               command: 'xcrun simctl openurl SIM-1 …',
               exitCode: 0,
               attached: false,

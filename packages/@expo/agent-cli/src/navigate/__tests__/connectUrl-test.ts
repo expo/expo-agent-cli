@@ -1,12 +1,4 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server
-//
-// The dev-client shape is pinned against the launcher that parses it, not against recollection:
-// `EXDevLauncherURLHelper.isDevLauncherURL` is `url.host == "expo-development-client"`, the dev
-// server URL rides in the `url` query parameter, and the Swift tests spell one out as
-// `scheme://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081` [observed —
-// `packages/expo-dev-launcher/ios/Tests/EXDevLauncherURLHelperTests.swift` and the identical
-// `android/.../DevLauncherURLHelper.kt`, 2026-08-26]. `@expo/cli` builds the same string in
-// `UrlCreator.constructDevClientUrl`.
 
 import { buildConnectUrls, devClientConnectUrl, expoGoConnectUrl } from '../connectUrl';
 
@@ -21,16 +13,34 @@ describe(expoGoConnectUrl, () => {
 });
 
 describe(devClientConnectUrl, () => {
-  // The exact string the launcher's own test asserts.
+  it('adds reserved automation parameters without changing the server origin', () => {
+    const url = new URL(devClientConnectUrl('myapp', 'abc.boltexpo.dev', 'tunnel', true));
+    expect(url.hostname).toBe('');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      __expo_url: 'https://abc.boltexpo.dev',
+      __expo_disable_onboarding: '1',
+      __expo_disable_fab: '1',
+      __expo_disable_auto_launch: '1',
+    });
+  });
+
+  it('keeps the reserved launch URL when automation is disabled', () => {
+    const url = new URL(devClientConnectUrl('myapp', 'localhost:8081', 'localhost', false));
+    expect(url.hostname).toBe('');
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      __expo_url: 'http://localhost:8081',
+    });
+  });
+
   it(`matches the shape the dev launcher parses`, () => {
     expect(devClientConnectUrl('scheme', 'localhost:8081', 'localhost')).toBe(
-      'scheme://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081'
+      'scheme://?__expo_url=http%3A%2F%2Flocalhost%3A8081'
     );
   });
 
-  it(`is a connect URL, not a route link: the host is always the launcher`, () => {
+  it(`carries the LAN origin in the reserved launch parameter`, () => {
     expect(devClientConnectUrl('myapp', '192.168.1.5:8081', 'lan')).toBe(
-      'myapp://expo-development-client/?url=http%3A%2F%2F192.168.1.5%3A8081'
+      'myapp://?__expo_url=http%3A%2F%2F192.168.1.5%3A8081'
     );
   });
 
@@ -38,13 +48,13 @@ describe(devClientConnectUrl, () => {
   // when the dev server's own host type is a tunnel, because a tunnel terminates TLS.
   it(`asks a tunnel for https, the way the Expo CLI does`, () => {
     expect(devClientConnectUrl('myapp', 'abc.boltexpo.dev', 'tunnel')).toBe(
-      'myapp://expo-development-client/?url=https%3A%2F%2Fabc.boltexpo.dev'
+      'myapp://?__expo_url=https%3A%2F%2Fabc.boltexpo.dev'
     );
   });
 
   it(`accepts the exp+<slug> default a managed dev build registers`, () => {
     expect(devClientConnectUrl('exp+notesapp', 'localhost:8081', 'localhost')).toBe(
-      'exp+notesapp://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081'
+      'exp+notesapp://?__expo_url=http%3A%2F%2Flocalhost%3A8081'
     );
   });
 });
@@ -52,8 +62,19 @@ describe(devClientConnectUrl, () => {
 describe(buildConnectUrls, () => {
   const lan = { host: '192.168.1.5:8081', hostType: 'lan' as const, scheme: 'myapp' };
 
+  it('applies automation options to the development-build connect URL', () => {
+    const urls = buildConnectUrls({
+      ...lan,
+      isExpoGo: false,
+      certain: true,
+      automation: true,
+    });
+    expect(urls).toHaveLength(1);
+    expect(new URL(urls[0]!.url).searchParams.get('__expo_disable_fab')).toBe('1');
+  });
+
   it(`names Expo Go alone when Expo Go is what runs this project`, () => {
-    expect(buildConnectUrls({ ...lan, isExpoGo: true, certain: true })).toEqual([
+    expect(buildConnectUrls({ ...lan, isExpoGo: true, certain: true, automation: true })).toEqual([
       {
         target: 'expo-go',
         label: 'Expo Go',
@@ -69,7 +90,7 @@ describe(buildConnectUrls, () => {
       {
         target: 'dev-build',
         label: 'development build',
-        url: 'myapp://expo-development-client/?url=http%3A%2F%2F192.168.1.5%3A8081',
+        url: 'myapp://?__expo_url=http%3A%2F%2F192.168.1.5%3A8081',
       },
     ]);
   });
@@ -111,8 +132,6 @@ describe(buildConnectUrls, () => {
     });
 
     expect(urls[0]!.url).toBe('exp://abc.boltexpo.dev');
-    expect(urls[1]!.url).toBe(
-      'myapp://expo-development-client/?url=https%3A%2F%2Fabc.boltexpo.dev'
-    );
+    expect(urls[1]!.url).toBe('myapp://?__expo_url=https%3A%2F%2Fabc.boltexpo.dev');
   });
 });
