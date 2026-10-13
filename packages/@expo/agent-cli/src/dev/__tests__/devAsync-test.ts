@@ -3,6 +3,8 @@ import os from 'os';
 import path from 'path';
 
 import { acquireDeviceAsync, devicesDisabled, inspectBindingAsync } from '../../deviceBinding';
+import { bindingFor, fakeTools, writeBinding } from '../../deviceBinding/__tests__/fakeTools';
+import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import { notReusableError } from '../../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../../deviceBinding/preview';
 import { withLeaseExtendedAsync } from '../../deviceBinding/renew';
@@ -188,6 +190,7 @@ function mockLanAddress(address: string | null) {
 beforeEach(() => {
   vol.reset();
   mockReported.length = 0;
+  vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(null);
   vi.mocked(readLastBuildRecord).mockReturnValue({});
   vi.mocked(runExpoAsync).mockResolvedValue(0);
   vi.mocked(isInteractive).mockReturnValue(true);
@@ -1475,6 +1478,37 @@ describe(devAsync, () => {
       }
     );
 
+    it.each(['SIM-1', 'HUMAN'])(
+      'protects the running server’s device when naming %s',
+      async (query) => {
+        mockProjectState();
+        vol.fromJSON({ '/project/package.json': '{}' });
+        vi.mocked(readDevServerLockAsync).mockResolvedValueOnce({ pid: 1 } as never);
+        const tools = fakeTools({
+          simulators: [
+            { udid: 'SIM-1', name: 'agent-cli own', state: 'Booted' },
+            { udid: 'HUMAN', name: 'My iPhone', state: 'Shutdown' },
+          ],
+        });
+        const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
+        writeBinding(file, bindingFor(projectRoot, 'SIM-1'));
+        const real =
+          await vi.importActual<typeof import('../../deviceBinding')>('../../deviceBinding');
+        vi.mocked(acquireDeviceAsync).mockImplementationOnce((root, platform, options) =>
+          real.acquireDeviceAsync(root, platform, { ...options, tools })
+        );
+
+        const run = devAsync(projectRoot, resolveDevOptions(['--ios', '--device', query]));
+        if (query === 'SIM-1') await expect(run).resolves.toBe(0);
+        else {
+          await expect(run).rejects.toMatchObject({ data: { reason: 'not-reusable' } });
+          expect(runDevServerAsync).not.toHaveBeenCalled();
+        }
+        expect(readBindingFile(file)).toMatchObject({ binding: { device: { udid: 'SIM-1' } } });
+        expect(tools.calls).not.toContainEqual(['delete', 'SIM-1']);
+      }
+    );
+
     // withDevice-after-forwarded-args
     it(`binds after the refusals and pins the build step to the simulator, over a forwarded --device`, async () => {
       mockStaleDevClientState();
@@ -1483,7 +1517,10 @@ describe(devAsync, () => {
         devAsync(projectRoot, resolveDevOptions(['--ios', '--local', '--', '--device', 'X']))
       ).resolves.toBe(0);
 
-      expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios', { explicit: undefined });
+      expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios', {
+        reuseOnly: false,
+        explicit: undefined,
+      });
       const [, args] = vi.mocked(runDevServerAsync).mock.calls[0]!;
       expect(args.filter((arg) => arg === '--device')).toHaveLength(1);
       expect(args).toEqual(expect.arrayContaining(['run:ios', '--device', 'SIM-1']));

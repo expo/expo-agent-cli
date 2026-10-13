@@ -1,7 +1,7 @@
 import { vol } from 'memfs';
 
 import { acquireDeviceAsync, releaseWorktreeDevicesAsync } from '..';
-import { bindingPathFor, readBindingFile } from '../registry';
+import { bindingPathFor, readBindingFile, removeBindingFile } from '../registry';
 import { androidBindingFor, bindingFor, fakeTools, writeBinding } from './fakeTools';
 
 const ROOT = '/work/app';
@@ -248,6 +248,39 @@ it('explicit-android-needs-only-adb', async () => {
   expect(readBindingFile(bindingPathFor(ROOT, 'android', 'local-android'))).toMatchObject({
     binding: { device: { serial: 'R58N123', origin: { kind: 'explicit' } } },
   });
+  await releaseWorktreeDevicesAsync(ROOT, { tools });
+  for (const reuseOnly of [false, true]) {
+    expect(await acquireDeviceAsync(ROOT, 'android', { tools, reuseOnly })).toMatchObject({
+      action: 'reused',
+      device: { serial: 'R58N123', origin: { kind: 'explicit' } },
+    });
+  }
   expect(tools.emulatorList).not.toHaveBeenCalled();
   expect(tools.calls.some(([command]) => command === 'emulator')).toBe(false);
+  tools.emulators.length = 0;
+  await expect(acquireDeviceAsync(ROOT, 'android', { tools })).rejects.toMatchObject({
+    code: 'EMULATOR_NOT_RUNNABLE',
+  });
+});
+
+it('refreshes the AVD inventory if a USB binding is removed during discovery', async () => {
+  const tools = fakeTools({ emulators: [{ serial: 'USB', state: 'device' }] });
+  const file = bindingPathFor(ROOT, 'android', 'local-android');
+  writeBinding(file, androidBindingFor(ROOT, 'USB', { kind: 'explicit' }));
+  const adb = tools.adb;
+  vi.spyOn(tools, 'adb').mockImplementationOnce(async (args, options) => {
+    const result = await adb(args, options);
+    removeBindingFile(file);
+    return result;
+  });
+
+  expect(await acquireDeviceAsync(ROOT, 'android', { tools })).toMatchObject({
+    action: 'spawned',
+    device: { serial: 'emulator-5554' },
+  });
+  const listedAvds = tools.calls.findIndex(
+    ([command, arg]) => command === 'emulator' && arg === '-list-avds'
+  );
+  expect(listedAvds).toBeGreaterThanOrEqual(0);
+  expect(tools.lockedAt[listedAvds]).toBe(false);
 });

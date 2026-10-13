@@ -3,7 +3,7 @@
 
 import { BOOT_DEVICE_TIMEOUT_MS } from '../device/bootDevice';
 import { bindAndroidSectionAsync, bootEmulatorAsync } from './android';
-import { androidToolsResolve, readAndroidInventoryAsync } from './emulator';
+import { androidToolsResolve, readAndroidBindingInventoryAsync } from './emulator';
 import { deviceUnavailableError } from './errors';
 import { clearInspectCache } from './inspect';
 import { bootSimulatorAsync, readIosInventoryAsync } from './ios';
@@ -42,11 +42,7 @@ export function devicesDisabled(): boolean {
   return process.env.AGENT_CLI_NO_DEVICE === '1';
 }
 
-/**
- * Whether this host can run the platform's local device: simulators exist on macOS only, and an
- * emulator instance needs the Android SDK's `adb` and `emulator`. Elsewhere `dev` serves for a
- * device somewhere else and binds nothing.
- */
+/** Whether local devices are supported: iOS on macOS, Android wherever `adb` resolves. */
 export function hostBindsPlatform(platform: DevicePlatform): boolean {
   return platform === 'ios' ? process.platform === 'darwin' : androidToolsResolve();
 }
@@ -79,11 +75,9 @@ type SectionOptions = { reuseOnly: boolean; tools: DeviceTools; explicit?: Expli
 /**
  * Bind this worktree's device and boot it.
  *
- * The inventory is read before the lock. Under the lock, in one section: the own binding is
- * read, the choice made and written, with `simctl create` or the emulator spawn inside the
- * section. iOS revalidates the binding against its inventory snapshot; a changed identity
- * retries outside the lock, at most twice. After the section, boot runs on every choice.
- * A failed boot lets go of the binding.
+ * Inventory is read outside the lock; binding reads, choice, writes and allocation run under it.
+ * A changed binding retries discovery outside the lock. Every choice boots after the section;
+ * a failed boot lets go of the binding.
  *
  * @throws `DEVICE_UNAVAILABLE` with `data.reason`, `DEVICE_REGISTRY_LOCKED`, or the tool error.
  */
@@ -133,35 +127,43 @@ async function acquireIosAsync(
 
 async function acquireAndroidAsync(
   projectRoot: string,
-  { reuseOnly, tools, explicit }: SectionOptions
+  { reuseOnly, tools, explicit }: SectionOptions,
+  forceAvds = false
 ): Promise<Acquired> {
-  const inventory = await readAndroidInventoryAsync(tools, { avds: explicit === undefined });
-  const { binding, action, handle } = await acquireSectionAsync(
+  const { inventory, isCurrent } = await readAndroidBindingInventoryAsync(
     projectRoot,
     tools,
-    async (actions) => {
-      if (explicit === undefined)
-        return bindAndroidSectionAsync(projectRoot, { inventory, reuseOnly, tools });
-      const candidates = inventory.runningSerials.map((serial) => ({
-        backend: 'local-android' as const,
-        platform: 'android' as const,
-        serial,
-        origin: { kind: 'explicit' as const },
-      }));
-      return {
-        ...bindExplicitSection(
-          projectRoot,
-          'android',
-          candidates,
-          explicit,
-          reuseOnly,
-          tools,
-          actions
-        ),
-        handle: null,
-      };
-    }
+    explicit !== undefined,
+    forceAvds
   );
+  const section = await acquireSectionAsync(projectRoot, tools, async (actions) => {
+    if (explicit === undefined) {
+      if (!isCurrent()) return null;
+      return bindAndroidSectionAsync(projectRoot, { inventory, reuseOnly, tools });
+    }
+    const candidates = inventory.runningSerials.map((serial) => ({
+      backend: 'local-android' as const,
+      platform: 'android' as const,
+      serial,
+      origin: { kind: 'explicit' as const },
+    }));
+    return {
+      ...bindExplicitSection(
+        projectRoot,
+        'android',
+        candidates,
+        explicit,
+        reuseOnly,
+        tools,
+        actions
+      ),
+      handle: null,
+    };
+  });
+  // Refresh the full inventory outside the lock, at most once.
+  if (section === null)
+    return acquireAndroidAsync(projectRoot, { reuseOnly, tools, explicit }, true);
+  const { binding, action, handle } = section;
   const serial = deviceIdOf(binding.device);
   return {
     binding,

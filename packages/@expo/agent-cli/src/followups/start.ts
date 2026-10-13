@@ -11,6 +11,7 @@ import { localTool, EAS_REQUIREMENT, EAS_WHERE, LOCAL_WHERE } from '../toolchain
 import type { ToolchainStatus } from '../toolchain/types';
 import { capFollowUps, type FollowUp } from './types';
 import { rerunDevCommand } from '../plan/rerun';
+import { withoutDeviceArgs } from '../dev/deviceOption';
 import { easCommandPrefix } from '../utils/easCli';
 
 /** Where `expo start` listens when the command line names no port. */
@@ -342,6 +343,7 @@ export function buildStartPlanFollowUps(
   // is not one a bare `dev` takes: it stops and asks for `--eas`. The line offered here is the one
   // that runs, and it says what the flag costs.
   const implicitEas = location?.runsOn === 'eas' && location.selection?.implicit === true;
+  const runArgv = implicitEas ? withoutDeviceArgs(callerArgv) : callerArgv;
   const device = plan.explicitDevice;
   if (device?.refuses) {
     if (device.how)
@@ -356,10 +358,11 @@ export function buildStartPlanFollowUps(
       // `dev` requires a platform, so the command always states one.
       command: rerunDevCommand(
         requestedPlatform ?? hostPlatform(),
-        implicitEas ? ['--eas', ...callerArgv] : callerArgv
+        implicitEas ? ['--eas', ...runArgv] : runArgv
       ),
       why: implicitEas
-        ? 'Runs the plan above on EAS — the build there, the app on an EAS Simulator session — which uses EAS credits, so the flag is yours to pass; without it the same command stops and says so.'
+        ? 'Runs the plan above on EAS — the build there, the app on an EAS Simulator session — which uses EAS credits, so the flag is yours to pass; without it the same command stops and says so.' +
+          (runArgv.length === callerArgv.length ? '' : ' The named local device is not used.')
         : 'Runs the plan above, emitting it again first so nothing runs unannounced.',
     });
 

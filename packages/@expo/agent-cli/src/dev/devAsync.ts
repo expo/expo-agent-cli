@@ -308,6 +308,7 @@ function deviceCallbackFor(
       }
     }
     const acquired = await acquireDeviceAsync(projectRoot, platform, {
+      reuseOnly: (await readDevServerLockAsync(projectRoot)) != null,
       explicit: explicitRequestOf(options.device, options.callerArgv),
     });
     Log.progress(acquireLine(acquired));

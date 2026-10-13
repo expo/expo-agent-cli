@@ -9,6 +9,7 @@ import type { SpawnCaptureResult } from '../utils/spawnCapture';
 import { firstLine } from '../utils/text';
 import type { AndroidInventory } from './choose';
 import { deviceUnavailableError } from './errors';
+import { bindingPathFor, readBindingFile } from './registry';
 import type { DeviceTools } from './types';
 
 /** The budget of every `adb` call that is not a boot wait. */
@@ -42,10 +43,36 @@ function adbFailedError(reason: string): CommandError {
   );
 }
 
+/** Skip AVD discovery for a bound USB device; the caller rechecks the binding under the lock. */
+export async function readAndroidBindingInventoryAsync(
+  projectRoot: string,
+  tools: DeviceTools,
+  explicit: boolean,
+  forceAvds: boolean
+) {
+  const file = bindingPathFor(projectRoot, 'android', 'local-android');
+  const explicitSerial = () => {
+    const read = readBindingFile(file);
+    const device = read.kind === 'binding' ? read.binding.device : null;
+    return device?.backend === 'local-android' && device.origin.kind === 'explicit'
+      ? device.serial
+      : undefined;
+  };
+  const reuseSerial = forceAvds ? undefined : explicitSerial();
+  const inventory = await readAndroidInventoryAsync(tools, { avds: !explicit, reuseSerial });
+  return {
+    inventory,
+    isCurrent: () =>
+      reuseSerial === undefined ||
+      !inventory.runningSerials.includes(reuseSerial) ||
+      explicitSerial() === reuseSerial,
+  };
+}
+
 /** The Android inventory, read before the lock. @throws the tool error, or `create-timeout`. */
 export async function readAndroidInventoryAsync(
   tools: DeviceTools,
-  { avds: listAvds = true }: { avds?: boolean } = {}
+  { avds: listAvds = true, reuseSerial }: { avds?: boolean; reuseSerial?: string } = {}
 ): Promise<AndroidInventory> {
   const devices = await tools.adb(['devices', '-l'], { timeoutMs: ADB_CALL_TIMEOUT_MS });
   if (devices.spawnError) {
@@ -57,7 +84,8 @@ export async function readAndroidInventoryAsync(
     .split('\n')
     .slice(1)
     .flatMap((line) => line.trim().split(/\s+/)[0] || []);
-  if (!listAvds) return { avd: null, runningSerials, listedSerials };
+  if (!listAvds || (reuseSerial !== undefined && runningSerials.includes(reuseSerial)))
+    return { avd: null, runningSerials, listedSerials };
   const avds = await tools.emulatorList(['-list-avds'], { timeoutMs: 60_000 });
   if (avds.spawnError) {
     throw emulatorNotRunnableError(avds.spawnError.message);

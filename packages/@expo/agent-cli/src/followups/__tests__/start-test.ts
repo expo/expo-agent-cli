@@ -346,7 +346,7 @@ describe(buildStartPlanFollowUps, () => {
     });
 
     // @ref llp/0015-backend-selection-and-config.rfc.md §The follow-ups of a chosen backend
-    it(`should offer the account a cloud plan needs, rather than a route it already took`, () => {
+    it.each([[], ['--device', 'SERIAL'], ['--device=SERIAL']])('cloud run %j', (...deviceArgs) => {
       const followups = buildStartPlanFollowUps(
         mockPlan({
           rule: 'dev-client-stale',
@@ -364,10 +364,17 @@ describe(buildStartPlanFollowUps, () => {
             },
           }),
         }),
-        mockState()
+        mockState(),
+        'ios',
+        ['--ios', '--plan', '--port', '8091', ...deviceArgs]
       );
 
       expect(ids(followups)).toEqual(['eas-account', 'dev', 'build-freshness']);
+      expect(followups[1]!.command).toBe(
+        'npx @expo/agent-cli dev --ios --eas --port 8091 --detach --wait-ready'
+      );
+      if (deviceArgs.length)
+        expect(followups[1]!.why).toContain('The named local device is not used.');
       expect(followups[0]!.command).toBe('npx @expo/agent-cli whoami');
       expect(followups[0]!.why).toContain('an Expo account');
       // The plan already went to the cloud, so offering the cloud again says nothing.
