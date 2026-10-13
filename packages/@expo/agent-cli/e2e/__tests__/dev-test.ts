@@ -20,7 +20,13 @@ import {
   waitForAsync,
   waitForDevLockAsync,
 } from '../utils';
-import { installStubXcrunAsync } from './installedAppStubs';
+import {
+  EMULATOR_NAME,
+  installStubAdbAsync,
+  installStubEmulatorAsync,
+  installStubXcrunAsync,
+  killBoundEmulatorsAsync,
+} from './installedAppStubs';
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
 const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
@@ -866,53 +872,40 @@ describe('@expo/agent-cli dev', () => {
   // while it runs, and a launch that fails after the app is on the device does not fail the plan.
   //
   // This is the one block in this tier that turns `AGENT_CLI_NO_DEVICE` off, because the plan is
-  // made *of* the device's answer. Nothing here can reach a real device: `adb` and `xcrun` are both
-  // stubs of this project's own, and `ANDROID_HOME` points at a stub SDK so a runner that has a
-  // real one is not preferred over them (llp/0002 §Tier 0).
+  // made *of* the device's answer. Nothing here can reach a real device: `adb`, `emulator` and
+  // `xcrun` are all stubs of this project's own, and `ANDROID_HOME` points at a stub SDK so a
+  // runner that has a real one is not preferred over them (llp/0002 §Tier 0). The first case spawns
+  // a stub emulator instance and binds it (llp/0032), and runs where the stub can be spawned and
+  // killed as the instance; the others reuse the bound attached stub emulator, so they run on
+  // Windows too.
   describe('dev-client-install — the build is current and the device has not got it', () => {
     /** The application id the fixture is given, so there is a named app to ask a device about. */
     const APP_ID = 'com.example.devclientfreshapp';
 
-    /** What the stub `adb` answers `emu avd name` with, and so what the install is pinned to. */
-    const AVD_NAME = 'Pixel_7_API_36';
-
-    /** The serial the stub `adb` lists. `emulator-` is what makes the name an AVD name. */
+    /** The attached stub emulator, and the instance the first case spawns on the first free port. */
     const SERIAL = 'emulator-5554';
 
+    const roots: string[] = [];
+    afterEach(async () => {
+      for (const root of roots.splice(0)) {
+        await killBoundEmulatorsAsync(`${root}.expo-home`);
+      }
+    });
+
     /**
-     * A device layer that answers "one emulator, and it has not got this app".
-     *
-     * Three questions, and the stub answers each the way the real tool does — the exit codes are
-     * the whole protocol here (@ref src/device/androidApps): `pm path` exits **1** for a package
-     * the device has not got, which is the one answer that plans an install.
+     * A device layer with no instance up and one AVD to spawn, whose instance has not got this
+     * app: `pm path` exits **1** for a package the device has not got, which is the one answer
+     * that plans an install (@ref src/device/androidApps).
      */
-    async function installStubDeviceAsync(projectRoot: string): Promise<Record<string, string>> {
+    async function installStubDeviceAsync(
+      projectRoot: string,
+      spawn: boolean
+    ): Promise<Record<string, string>> {
+      roots.push(projectRoot);
       const stubBin = path.join(projectRoot, '.stub-bin');
-      const adbScript = path.join(stubBin, 'adb-stub.js');
       await fs.promises.mkdir(stubBin, { recursive: true });
-      await fs.promises.writeFile(
-        adbScript,
-        [
-          `const args = process.argv.slice(2);`,
-          `if (args[0] === 'devices') {`,
-          `  process.stdout.write('List of devices attached\\n${SERIAL}       device product:sdk_gphone64_arm64 model:Pixel_7 device:emu64a transport_id:1\\n');`,
-          `  process.exit(0);`,
-          `}`,
-          // The console protocol answers with the name and then its own `OK`.
-          `if (args.includes('emu') && args.includes('avd')) {`,
-          `  process.stdout.write('${AVD_NAME}\\nOK\\n');`,
-          `  process.exit(0);`,
-          `}`,
-          // The app is not on this device, which is the whole fixture.
-          `if (args.includes('pm') && args.includes('path')) { process.exit(1); }`,
-          `process.exit(0);`,
-        ].join('\n')
-      );
-      await installStubBinAsync(stubBin, 'adb', adbScript);
-      // `ANDROID_HOME` beats `PATH`, so a runner with a real SDK would otherwise reach a real
-      // device instead of the stub above (@ref src/device/adb §resolveAdb).
-      const sdk = path.join(projectRoot, '.stub-android-sdk');
-      await installStubBinAsync(path.join(sdk, 'platform-tools'), 'adb', adbScript);
+      const adb = await installStubAdbAsync(projectRoot, APP_ID, { attached: !spawn });
+      await installStubEmulatorAsync(projectRoot);
 
       // An `xcrun` that reports no simulator, so the probe this run makes cannot reach the iOS
       // devices of the machine the suite happens to be running on.
@@ -941,7 +934,19 @@ describe('@expo/agent-cli dev', () => {
       );
       await installStubBinAsync(path.join(jdk, 'bin'), 'java', javaScript);
 
-      return { ANDROID_HOME: sdk, JAVA_HOME: jdk, AGENT_CLI_NO_DEVICE: '' };
+      return { ...adb.env, JAVA_HOME: jdk, AGENT_CLI_NO_DEVICE: '', STUB_ADB_INSTALLED: '0' };
+    }
+
+    /** The argv of every stub `emulator` invocation of the fixture. */
+    function emulatorCalls(projectRoot: string): string[][] {
+      const file = path.join(projectRoot, '.emulator-calls.jsonl');
+      return fs.existsSync(file)
+        ? fs
+            .readFileSync(file, 'utf8')
+            .split(/\r?\n/)
+            .filter(Boolean)
+            .map((line) => JSON.parse(line))
+        : [];
     }
 
     /**
@@ -951,7 +956,7 @@ describe('@expo/agent-cli dev', () => {
      * `unknown` and the plan is the serve-only one (@ref src/device/appPresence). Written here
      * rather than into the committed fixture, which every other test in this file reads.
      */
-    async function setupInstallAsync(): Promise<{
+    async function setupInstallAsync({ spawn = false }: { spawn?: boolean } = {}): Promise<{
       projectRoot: string;
       env: Record<string, string>;
     }> {
@@ -960,34 +965,60 @@ describe('@expo/agent-cli dev', () => {
       const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
       config.expo.android = { ...config.expo.android, package: APP_ID };
       await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
-      return { projectRoot, env: await installStubDeviceAsync(projectRoot) };
+      return { projectRoot, env: await installStubDeviceAsync(projectRoot, spawn) };
     }
 
-    /** The install step's argv, which the plan pins to the device the probe asked. */
-    const INSTALL_STEP = ['run:android', '--no-bundler', '--device', AVD_NAME];
+    /** The install step's argv, which `dev` pins to the instance it bound. */
+    const INSTALL_STEP = ['run:android', '--no-bundler', '--device', SERIAL];
 
-    it('installs the recorded build before it serves, on the device it asked', async () => {
-      const { projectRoot, env } = await setupInstallAsync();
+    it.skipIf(process.platform === 'win32')(
+      'spawns a read-only instance, binds it, and installs the recorded build onto it before it serves',
+      async () => {
+        const { projectRoot, env } = await setupInstallAsync({ spawn: true });
 
-      const result = await executeAgentCliAsync(projectRoot, ['dev', '--android', '--local'], {
-        env,
-      });
+        const result = await executeAgentCliAsync(projectRoot, ['dev', '--android', '--local'], {
+          env,
+        });
 
-      expect(result.exitCode).toBe(0);
-      // Two steps and no build: `--no-bundler` because the dev server is the next step, and
-      // `--device` because the answer that planned this install was about *that* device — a
-      // machine with two of them must not install on one and serve nothing to the other.
-      expect(invocationArgs(projectRoot)).toEqual([
-        INSTALL_STEP,
-        ['start', '--dev-client', ...PORT_ARGS],
-      ]);
-      // The record still names the build this plan was made from. Nothing was compiled — the step
-      // installed what was already built — so a hash that moved here would mean the next run
-      // planned a rebuild for work this one did not do.
-      expect(readLastBuildRecord(projectRoot)).toMatchObject({
-        android: { hash: RECORDED_HASH },
-      });
-    });
+        expect(result.exitCode).toBe(0);
+        // Two steps and no build: `--no-bundler` because the dev server is the next step, and
+        // `--device` because the answer that planned this install was about *that* instance — a
+        // machine with two of them must not install on one and serve nothing to the other.
+        expect(invocationArgs(projectRoot)).toEqual([
+          INSTALL_STEP,
+          ['start', '--dev-client', ...PORT_ARGS],
+        ]);
+        // One instance of the one AVD, read-only, on the first free console port (llp/0030
+        // Decision 2), and the binding names its serial and its pid.
+        expect(emulatorCalls(projectRoot)).toEqual([
+          ['-list-avds'],
+          ['-avd', EMULATOR_NAME, '-ports', '5554,5555', '-no-snapshot-save', '-read-only'],
+        ]);
+        const dir = path.join(`${projectRoot}.expo-home`, 'agent-cli', 'bindings');
+        const file = fs
+          .readdirSync(dir)
+          .find((name) => name.endsWith('-android-local-android.json'));
+        const binding = JSON.parse(fs.readFileSync(path.join(dir, file!), 'utf8'));
+        expect(binding.device).toMatchObject({
+          serial: SERIAL,
+          origin: {
+            kind: 'spawned',
+            avd: EMULATOR_NAME,
+            port: 5554,
+            emulatorPid: expect.any(Number),
+          },
+        });
+        expect(binding.projectRoot).toBe(fs.realpathSync.native(projectRoot));
+        // The instance outlives the run: it is this worktree's device until it is let go of.
+        expect(() => process.kill(binding.device.origin.emulatorPid, 0)).not.toThrow();
+        // The record still names the build this plan was made from. Nothing was compiled — the step
+        // installed what was already built — so a hash that moved here would mean the next run
+        // planned a rebuild for work this one did not do.
+        expect(readLastBuildRecord(projectRoot)).toMatchObject({
+          android: { hash: RECORDED_HASH },
+        });
+      }
+    );
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
     // The other half of F121, on the step it was found on. `expo run:*` installs the app and then
@@ -1137,6 +1168,69 @@ describe('@expo/agent-cli dev', () => {
         true
       );
       expect(readXcrun().some((argv) => argv[1] === 'boot')).toBe(false);
+    });
+  });
+
+  // @ref llp/0032-android-instance.plan.md §State it leaves
+  //
+  // Two worktrees of one app, one stub `adb` and `emulator` whose instance state both runs share,
+  // and one registry: each `dev --android` spawns its own read-only instance of the one AVD on the
+  // next free even console port, binds its serial and pid, and pins its build to that serial.
+  // Posix only: on Windows the `.cmd` stub starts under `cmd.exe`, so its pid is not the instance's.
+  describe.skipIf(process.platform === 'win32')('two worktrees, two emulator instances', () => {
+    const APP_ID = 'com.example.devclientfreshapp';
+    let home: string | null = null;
+    afterEach(async () => {
+      if (home) {
+        await killBoundEmulatorsAsync(home);
+        home = null;
+      }
+    });
+
+    /** Every Android binding in the shared registry, by the root it belongs to. */
+    function readBindings(dir: string): Record<string, { serial: string; port: number }> {
+      const bindings: Record<string, { serial: string; port: number }> = {};
+      for (const name of fs
+        .readdirSync(path.join(dir, 'agent-cli', 'bindings'))
+        .filter((entry) => entry.endsWith('-android-local-android.json'))) {
+        const binding = JSON.parse(
+          fs.readFileSync(path.join(dir, 'agent-cli', 'bindings', name), 'utf8')
+        );
+        bindings[binding.projectRoot] = {
+          serial: binding.device.serial,
+          port: binding.device.origin.port,
+        };
+      }
+      return bindings;
+    }
+
+    it('spawns an instance of its own for each worktree, on 5554 and 5556, and builds onto it', async () => {
+      const [first, second] = await Promise.all([
+        setupAsync('dev-client-app'),
+        setupAsync('dev-client-app'),
+      ]);
+      // One stub SDK and one instance state, installed once: both runs spawn against it.
+      const adb = await installStubAdbAsync(first!, APP_ID, { attached: false });
+      await installStubEmulatorAsync(first!);
+      home = `${first}.expo-home`;
+      const env = { ...adb.env, AGENT_CLI_NO_DEVICE: '0' };
+
+      const results = await Promise.all(
+        [first!, second!].map((root) =>
+          executeAgentCliAsync(root, ['dev', '--android', '--local'], { env })
+        )
+      );
+
+      expect(results.map((result) => result.exitCode)).toEqual([0, 0]);
+      const bindings = readBindings(home);
+      const ports = [first!, second!].map((root) => bindings[fs.realpathSync.native(root)]!.port);
+      expect(ports).toEqual(expect.arrayContaining([5554, 5556]));
+      for (const [index, root] of [first!, second!].entries()) {
+        expect(invocationArgs(root)).toEqual([
+          ['prebuild', '--platform', 'android'],
+          ['run:android', ...PORT_ARGS, '--device', `emulator-${ports[index]}`],
+        ]);
+      }
     });
   });
 });

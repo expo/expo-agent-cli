@@ -6,7 +6,7 @@ import path from 'path';
 import { parseBootedIosSimulators } from '../../device/simulators';
 import { bindingPathFor } from '../../deviceBinding/registry';
 import type { Binding } from '../../deviceBinding';
-import { parseFirstAndroidDevice, probeAndroidDeviceAsync, resolveDeviceAsync } from '../device';
+import { resolveDeviceAsync } from '../device';
 
 const realPlatform = process.platform;
 
@@ -33,6 +33,20 @@ function mockSpawnQueue(answers: { stdout?: string; exitCode?: number | null }[]
   }) as any);
 }
 
+/** Every `spawn` fails to start, as a missing SDK does. */
+function mockSpawnUnrunnable() {
+  vi.mocked(spawn).mockImplementation((() => {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new EventEmitter(),
+      stderr: new EventEmitter(),
+    });
+    process.nextTick(() =>
+      child.emit('error', Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' }))
+    );
+    return child as any;
+  }) as any);
+}
+
 const projectRoot = '/project';
 
 const BOOTED_SIMCTL_JSON = JSON.stringify({
@@ -55,8 +69,8 @@ const SHUTDOWN_SIMCTL_JSON = JSON.stringify({
   },
 });
 
-const ADB_DEVICES = ['List of devices attached', 'ZZZZ\tunauthorized', 'emulator-5554\tdevice', ''];
-const NO_ADB_DEVICES = 'List of devices attached\n';
+/** What `adb -s <serial> get-state` prints for an instance that is up. */
+const EMULATOR_UP = 'device\n';
 
 /** This worktree's iOS binding, naming `IOS-1`, an hour from expiry. */
 function bindSimulator(udid = 'IOS-1', { expiresAt = '2999-01-01T00:00:00.000Z' } = {}): void {
@@ -68,6 +82,20 @@ function bindSimulator(udid = 'IOS-1', { expiresAt = '2999-01-01T00:00:00.000Z' 
     expiresAt,
   };
   vol.fromJSON({ [bindingPathFor(projectRoot, 'ios', 'local-ios')]: JSON.stringify(binding) });
+}
+
+/** This worktree's Android binding, naming an emulator instance, an hour from expiry. */
+function bindEmulator(serial = 'emulator-5554'): void {
+  const binding: Binding = {
+    version: 1,
+    device: { backend: 'local-android', platform: 'android', serial, origin: { kind: 'explicit' } },
+    projectRoot,
+    boundAt: '2026-10-08T09:30:00.000Z',
+    expiresAt: '2999-01-01T00:00:00.000Z',
+  };
+  vol.fromJSON({
+    [bindingPathFor(projectRoot, 'android', 'local-android')]: JSON.stringify(binding),
+  });
 }
 
 beforeEach(() => {
@@ -90,65 +118,6 @@ describe(parseBootedIosSimulators, () => {
   it(`should list nothing for output that is not simctl JSON`, () => {
     expect(parseBootedIosSimulators('not json')).toEqual([]);
     expect(parseBootedIosSimulators('')).toEqual([]);
-  });
-});
-
-describe(parseFirstAndroidDevice, () => {
-  it(`should pick the first device that is ready and skip the others`, () => {
-    expect(parseFirstAndroidDevice(ADB_DEVICES.join('\n'))).toBe('emulator-5554');
-  });
-
-  it(`should return null when no device is attached`, () => {
-    expect(parseFirstAndroidDevice('List of devices attached\n\n')).toBeNull();
-  });
-});
-
-describe(probeAndroidDeviceAsync, () => {
-  it(`should return the first attached device`, async () => {
-    mockSpawnQueue([{ stdout: ADB_DEVICES.join('\n') }]);
-
-    const probe = await probeAndroidDeviceAsync();
-
-    expect(probe.device).toMatchObject({ platform: 'android', deviceId: 'emulator-5554' });
-    // The resolution travels with the device, so every later `adb` call spawns the same binary
-    // (`src/device/adb.ts`, F49).
-    expect(probe.device?.adb?.bin).toBeTruthy();
-    // The long listing, because its `model:` field is what ties a debugger target back to this
-    // device (`src/runtime/targetPlatform.ts`).
-    expect(spawn).toHaveBeenCalledWith(
-      expect.stringMatching(/adb(\.exe)?$/),
-      ['devices', '-l'],
-      expect.anything()
-    );
-  });
-
-  it(`should report an unrunnable adb as a tool failure rather than as a missing device`, async () => {
-    vi.mocked(spawn).mockImplementation((() => {
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() =>
-        child.emit('error', Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' }))
-      );
-      return child as any;
-    }) as any);
-
-    const probe = await probeAndroidDeviceAsync();
-
-    expect(probe.device).toBeNull();
-    expect(probe.toolError?.code).toBe('ADB_NOT_RUNNABLE');
-    // The headline a reader gets must not send them to boot a device they already have (F49).
-    expect(probe.reason).not.toMatch(/no android device/i);
-  });
-
-  it(`should report no device when none is attached`, async () => {
-    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }]);
-
-    const probe = await probeAndroidDeviceAsync();
-
-    expect(probe.device).toBeNull();
-    expect(probe.reason).toMatch(/no android/i);
   });
 });
 
@@ -177,26 +146,50 @@ describe(resolveDeviceAsync, () => {
     expect(Date.parse(written.expiresAt)).toBeGreaterThan(Date.now() + 3_500_000);
   });
 
+  it(`should use the bound emulator instance when --android is given, through adb get-state`, async () => {
+    bindEmulator();
+    mockSpawnQueue([{ stdout: EMULATOR_UP }]);
+
+    await expect(resolveDeviceAsync('android', { projectRoot })).resolves.toMatchObject({
+      backend: 'local-android',
+      deviceId: 'emulator-5554',
+      // The resolution travels with the device, so every later `adb` call spawns the same binary
+      // (`src/device/adb.ts`, F49).
+      adb: expect.objectContaining({ bin: expect.any(String) }),
+    });
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith(
+      expect.stringMatching(/adb(\.exe)?$/),
+      ['-s', 'emulator-5554', 'get-state'],
+      expect.anything()
+    );
+  });
+
   // The cloud backend costs money and spawns an `eas`, so it is on the ladder only for the callers
   // that put it there. Every `runtime:*` action keeps the local resolution exactly.
   it(`never looks for a cloud session unless the caller asked for one`, async () => {
     mockPlatform('darwin');
-    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }]);
+    mockSpawnQueue([]);
 
     await resolveDeviceAsync(undefined, { projectRoot }).catch(() => {});
 
-    // The Android rung and nothing else: no binding, so no `simctl`, and no `eas`.
-    expect(spawn).toHaveBeenCalledTimes(1);
-  });
-
-  it(`should name the dev command when --ios finds no binding`, async () => {
-    const error = await resolveDeviceAsync('ios', { projectRoot }).catch((e) => e);
-
-    expect(error.code).toBe('NO_BOUND_DEVICE');
-    expect(error.data).toEqual({ reason: 'none' });
-    expect(error.message).toContain('npx @expo/agent-cli dev --ios --detach --wait-ready');
+    // No binding on either platform, so no device tool and no `eas`.
     expect(spawn).not.toHaveBeenCalled();
   });
+
+  it.each(['ios', 'android'] as const)(
+    `should name the dev command when --%s finds no binding`,
+    async (platform) => {
+      const error = await resolveDeviceAsync(platform, { projectRoot }).catch((e) => e);
+
+      expect(error.code).toBe('NO_BOUND_DEVICE');
+      expect(error.data).toEqual({ reason: 'none' });
+      expect(error.message).toContain(
+        `npx @expo/agent-cli dev --${platform} --detach --wait-ready`
+      );
+      expect(spawn).not.toHaveBeenCalled();
+    }
+  );
 
   it(`should refuse a bound simulator that is not up, naming the dev command`, async () => {
     bindSimulator();
@@ -220,35 +213,22 @@ describe(resolveDeviceAsync, () => {
     expect(error.message).toContain('lease');
   });
 
-  it(`should keep the first adb device as the Android rung, until llp/0032`, async () => {
-    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }]);
-    const none = await resolveDeviceAsync('android', { projectRoot }).catch((e) => e);
-    expect(none.code).toBe('NO_BOUND_DEVICE');
-    expect(none.message).toContain('npx @expo/agent-cli dev --android --detach --wait-ready');
-
-    mockSpawnQueue([{ stdout: ADB_DEVICES.join('\n') }]);
-    await expect(resolveDeviceAsync('android', { projectRoot })).resolves.toMatchObject({
-      backend: 'local-android',
-      deviceId: 'emulator-5554',
-      adb: expect.objectContaining({ bin: expect.any(String) }),
-    });
-  });
-
   // any-up-wins-across-platforms
   it(`should take the bound simulator on macOS when no platform is given`, async () => {
     mockPlatform('darwin');
     bindSimulator();
-    mockSpawnQueue([{ stdout: BOOTED_SIMCTL_JSON }, { stdout: ADB_DEVICES.join('\n') }]);
+    mockSpawnQueue([{ stdout: BOOTED_SIMCTL_JSON }]);
 
     await expect(resolveDeviceAsync(undefined, { projectRoot })).resolves.toMatchObject({
       platform: 'ios',
     });
   });
 
-  it(`should fall back to Android on macOS when the simulator is not up`, async () => {
+  it(`should fall back to the bound emulator on macOS when the simulator is not up`, async () => {
     mockPlatform('darwin');
     bindSimulator();
-    mockSpawnQueue([{ stdout: SHUTDOWN_SIMCTL_JSON }, { stdout: ADB_DEVICES.join('\n') }]);
+    bindEmulator();
+    mockSpawnQueue([{ stdout: SHUTDOWN_SIMCTL_JSON }, { stdout: EMULATOR_UP }]);
 
     await expect(resolveDeviceAsync(undefined, { projectRoot })).resolves.toMatchObject({
       platform: 'android',
@@ -259,7 +239,8 @@ describe(resolveDeviceAsync, () => {
   it(`should only look for an Android device off macOS`, async () => {
     mockPlatform('linux');
     bindSimulator();
-    mockSpawnQueue([{ stdout: ADB_DEVICES.join('\n') }]);
+    bindEmulator();
+    mockSpawnQueue([{ stdout: EMULATOR_UP }]);
 
     await expect(resolveDeviceAsync(undefined, { projectRoot })).resolves.toMatchObject({
       platform: 'android',
@@ -271,7 +252,7 @@ describe(resolveDeviceAsync, () => {
   it(`should report the first state that is not none when nothing is up`, async () => {
     mockPlatform('darwin');
     bindSimulator();
-    mockSpawnQueue([{ stdout: SHUTDOWN_SIMCTL_JSON }, { stdout: NO_ADB_DEVICES }]);
+    mockSpawnQueue([{ stdout: SHUTDOWN_SIMCTL_JSON }]);
 
     const error = await resolveDeviceAsync(undefined, { projectRoot }).catch((e) => e);
 
@@ -282,7 +263,7 @@ describe(resolveDeviceAsync, () => {
 
   it(`should name iOS on macOS when nothing is bound anywhere`, async () => {
     mockPlatform('darwin');
-    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }]);
+    mockSpawnQueue([]);
 
     const error = await resolveDeviceAsync(undefined, { projectRoot }).catch((e) => e);
 
@@ -292,21 +273,14 @@ describe(resolveDeviceAsync, () => {
 
   // platform-flag-throws-tool-error-first
   it(`should throw an unrunnable adb at once with --android, and after the EAS rung without`, async () => {
-    const unrunnable = () => {
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() =>
-        child.emit('error', Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' }))
-      );
-      return child as any;
-    };
     mockPlatform('linux');
-    vi.mocked(spawn).mockImplementation(unrunnable as any);
+    bindEmulator();
+    mockSpawnUnrunnable();
 
     const flagged = await resolveDeviceAsync('android', { projectRoot }).catch((e) => e);
     expect(flagged.code).toBe('ADB_NOT_RUNNABLE');
+    // The headline a reader gets must not send them to boot a device they already have (F49).
+    expect(flagged.message).not.toMatch(/no android device/i);
 
     const unflagged = await resolveDeviceAsync(undefined, { projectRoot }).catch((e) => e);
     expect(unflagged.code).toBe('ADB_NOT_RUNNABLE');
@@ -357,7 +331,7 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
   it(`opens on the dotenv session when this worktree has no local device`, async () => {
     mockPlatform('darwin');
     cloudProject('sess-1');
-    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }, { stdout: liveSession }]);
+    mockSpawnQueue([{ stdout: liveSession }]);
 
     await expect(
       resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot })
@@ -370,12 +344,12 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     mockPlatform('darwin');
     cloudProject('sess-1');
     bindSimulator();
-    mockSpawnQueue([{ stdout: BOOTED_SIMCTL_JSON }, { stdout: ADB_DEVICES.join('\n') }]);
+    mockSpawnQueue([{ stdout: BOOTED_SIMCTL_JSON }]);
 
     await expect(
       resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot })
     ).resolves.toMatchObject({ backend: 'local-ios' });
-    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn).toHaveBeenCalledTimes(1);
   });
 
   // fallback-eas-rung-dotenv-only: a worktree with no binding must not drive another worktree's
@@ -383,22 +357,22 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
   it(`asks the service nothing when the project's dotenv names no session`, async () => {
     mockPlatform('linux');
     cloudProject(null);
-    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }, { stdout: liveSession }]);
+    mockSpawnQueue([{ stdout: liveSession }]);
 
     const error = await resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot }).catch(
       (e) => e
     );
 
     expect(error.code).toBe('NO_BOUND_DEVICE');
-    // The Android rung alone: no `eas` was spawned for a session this worktree may not drive.
-    expect(spawn).toHaveBeenCalledTimes(1);
+    // No binding and no dotenv id: no `adb`, and no `eas` for a session this worktree may not drive.
+    expect(spawn).not.toHaveBeenCalled();
     expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
   });
 
   it(`refuses a session the dotenv names when the service lists another`, async () => {
     mockPlatform('linux');
     cloudProject('sess-2');
-    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }, { stdout: liveSession }]);
+    mockSpawnQueue([{ stdout: liveSession }]);
 
     const error = await resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot }).catch(
       (e) => e
@@ -411,8 +385,8 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
 
   it(`still reports no device when the service lists nothing`, async () => {
     mockPlatform('linux');
-    cloudProject(null);
-    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }, ...noSessions]);
+    cloudProject('sess-1');
+    mockSpawnQueue(noSessions);
 
     const error = await resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot }).catch(
       (e) => e
@@ -424,7 +398,7 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
   it(`names a session that is on record and not running, in the failure`, async () => {
     mockPlatform('linux');
     cloudProject('sess-1');
-    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }, ...noSessions]);
+    mockSpawnQueue(noSessions);
 
     const error = await resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot }).catch(
       (e) => e
@@ -436,8 +410,8 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
 
   it(`keeps the route URL above the How line of the refusal`, async () => {
     mockPlatform('linux');
-    cloudProject(null);
-    mockSpawnQueue([{ stdout: NO_ADB_DEVICES }, ...noSessions]);
+    cloudProject('sess-1');
+    mockSpawnQueue(noSessions);
 
     const error = await resolveDeviceAsync(undefined, {
       cloud: 'fallback',
@@ -462,6 +436,7 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
   it(`asks no local tool when --eas named the backend`, async () => {
     mockPlatform('darwin');
     cloudProject('sess-1');
+    bindSimulator();
     mockSpawnQueue([{ stdout: liveSession }]);
 
     await expect(

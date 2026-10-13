@@ -1,17 +1,12 @@
 // @ref llp/0031-ios-binding.plan.md §smoke
-// The boot dependency smoke hands its phases: iOS binds through the registry and keeps the device;
-// Android still boots and shuts down an emulator of its own.
-import { bootDeviceAsync } from '../../device/bootDevice';
+// @ref llp/0032-android-instance.plan.md §Wiring
+// The boot dependency smoke hands its phases: both platforms bind through the registry and keep
+// the device; nothing is registered to put it back.
 import { acquireDeviceAsync } from '../../deviceBinding';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps } from '../smokeAsync';
 
 vi.mock('../../log');
-vi.mock('../../device/bootDevice', () => ({
-  bootDeviceAsync: vi.fn(),
-  shutdownDeviceAsync: vi.fn(),
-  BOOT_DEVICE_TIMEOUT_MS: { ios: 1, android: 1 },
-}));
 vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),
   acquireDeviceAsync: vi.fn(),
@@ -37,14 +32,10 @@ describe('bootDevice', () => {
       justBooted: true,
       action: 'created',
     });
-    const register = vi.fn();
 
-    const result = await buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios'])).bootDevice(
-      register
-    );
+    const result = await buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios'])).bootDevice();
 
     expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios');
-    expect(bootDeviceAsync).not.toHaveBeenCalled();
     expect(result).toEqual({
       ok: true,
       deviceId: 'SIM-1',
@@ -53,8 +44,32 @@ describe('bootDevice', () => {
       installNeeded: true,
       reason: null,
     });
-    // smoke-registers-no-shutdown: the device stays bound after the run (llp/0033 releases it).
-    expect(register).not.toHaveBeenCalled();
+  });
+
+  it(`binds this worktree's emulator instance on Android, which needs the app installed`, async () => {
+    vi.mocked(acquireDeviceAsync).mockResolvedValue({
+      device: {
+        backend: 'local-android',
+        platform: 'android',
+        serial: 'emulator-5556',
+        origin: { kind: 'spawned', avd: 'Pixel_9', port: 5556, emulatorPid: 4242 },
+      },
+      justBooted: true,
+      action: 'spawned',
+    });
+
+    const result = await buildSmokeDeps(
+      projectRoot,
+      resolveSmokeOptions(['--android'])
+    ).bootDevice();
+
+    expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'android');
+    expect(result).toMatchObject({
+      ok: true,
+      deviceId: 'emulator-5556',
+      backend: 'local-android',
+      installNeeded: true,
+    });
   });
 
   it(`reports the registry's refusal as a boot that failed`, async () => {
@@ -64,9 +79,7 @@ describe('bootDevice', () => {
       })
     );
 
-    const result = await buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios'])).bootDevice(
-      vi.fn()
-    );
+    const result = await buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios'])).bootDevice();
 
     expect(result).toMatchObject({
       ok: false,
@@ -75,26 +88,18 @@ describe('bootDevice', () => {
     });
   });
 
-  it(`still boots an emulator on Android, registering it for the shutdown`, async () => {
-    vi.mocked(bootDeviceAsync).mockImplementation(async (_platform, { onBooting }) => {
-      onBooting?.({ deviceId: 'emulator-5554', backend: 'local-android' });
-      return {
-        ok: true,
-        deviceId: 'emulator-5554',
-        backend: 'local-android',
-        name: 'Pixel',
-        reason: null,
-        choice: 'the only AVD',
-      };
-    });
-    const register = vi.fn();
+  it(`binds nothing under AGENT_CLI_NO_DEVICE and says so`, async () => {
+    process.env.AGENT_CLI_NO_DEVICE = '1';
+    try {
+      const result = await buildSmokeDeps(
+        projectRoot,
+        resolveSmokeOptions(['--android'])
+      ).bootDevice();
 
-    const result = await buildSmokeDeps(projectRoot, resolveSmokeOptions(['--android'])).bootDevice(
-      register
-    );
-
-    expect(acquireDeviceAsync).not.toHaveBeenCalled();
-    expect(register).toHaveBeenCalledWith({ deviceId: 'emulator-5554', backend: 'local-android' });
-    expect(result).toMatchObject({ ok: true, deviceId: 'emulator-5554', backend: 'local-android' });
+      expect(acquireDeviceAsync).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('android') });
+    } finally {
+      delete process.env.AGENT_CLI_NO_DEVICE;
+    }
   });
 });

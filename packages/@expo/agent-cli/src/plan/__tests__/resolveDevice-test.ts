@@ -52,7 +52,7 @@ function options(overrides: Partial<ResolveStartPlanOptions> = {}): ResolveStart
   return {
     platform: 'ios',
     requestedPlatform: 'ios',
-    probeAppPresence: async () => ({ presence: 'unknown', installDevice: null }),
+    probeAppPresence: async () => ({ presence: 'unknown' }),
     ...overrides,
   };
 }
@@ -99,7 +99,6 @@ describe('the device the resolver binds', () => {
     const acquireDevice = vi.fn(async () => ACQUIRED);
     const probeAppPresence = vi.fn(async () => ({
       presence: 'unknown' as const,
-      installDevice: null,
     }));
 
     const { plan, acquired } = await resolveStartPlanAsync(projectRoot, freshDevClient().state, {
@@ -147,7 +146,6 @@ describe('the device the resolver binds', () => {
   it(`hands the probe the bound device and its action, and plans the install it answers`, async () => {
     const probeAppPresence = vi.fn(async () => ({
       presence: 'missing' as const,
-      installDevice: null,
     }));
     const { state: project, lastBuild } = freshDevClient();
 
@@ -170,7 +168,6 @@ describe('the device the resolver binds', () => {
   it(`hands the probe no device when nothing bound one`, async () => {
     const probeAppPresence = vi.fn(async () => ({
       presence: 'unknown' as const,
-      installDevice: null,
     }));
     const { state: project, lastBuild } = freshDevClient();
 

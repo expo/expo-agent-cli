@@ -24,7 +24,6 @@ declare module '2g' {
     'dev:stop_done': { stopped: boolean; pid: number | null; reason: string | null };
     // @ref llp/0026-dev-owns-the-open.rfc.md — the acts of the open, so an agent watching the
     // stream sees the same walk the stderr narration describes.
-    'dev:open_app_boot': { platform: string };
     'dev:open_app_install_expo_go': { platform: string; replaced: boolean };
     /** `dev --eas` added the simulator dev-client profile to `eas.json` before the build. */
     'dev:eas_json_profile_added': { profile: string };
