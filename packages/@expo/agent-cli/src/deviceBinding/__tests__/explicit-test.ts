@@ -74,7 +74,12 @@ it('refuses ambiguous names, leaked creates, and reuseOnly replacement without c
   writeBinding(file(), bindingFor(ROOT, 'SECOND'));
   await expect(
     acquireDeviceAsync(ROOT, 'ios', { explicit: 'HUMAN', reuseOnly: true, tools })
-  ).rejects.toMatchObject({ data: { reason: 'not-reusable' } });
+  ).rejects.toMatchObject({
+    data: { reason: 'not-reusable' },
+    exitCode: 20,
+    message:
+      'The running dev server uses agent-cli 0000; --device names My iPhone.\nHow: run "npx @expo/agent-cli dev:stop", then this command again.',
+  });
   expect(readBindingFile(file())).toMatchObject({ binding: { device: { udid: 'SECOND' } } });
 });
 

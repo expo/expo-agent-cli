@@ -122,10 +122,18 @@ export function deviceUnavailableError(
   }
 }
 
-function notReusableError(platform: DevicePlatform): CommandError {
+/** A running dev server allows only a reuse; `devices` names the bound one and the one `--device` asks for. */
+export function notReusableError(
+  platform: DevicePlatform,
+  devices?: { bound: string; named: string }
+): CommandError {
   const error = refusal('DEVICE_UNAVAILABLE', 'not-reusable', EXIT_OUTCOME_FAILED, [
-    `A dev server is running and this worktree has no ${platform} device to reuse.`,
-    'Why: a device created now would carry no app, because the running server already installed nothing on it.',
+    ...(devices
+      ? [`The running dev server uses ${devices.bound}; --device names ${devices.named}.`]
+      : [
+          `A dev server is running and this worktree has no ${platform} device to reuse.`,
+          'Why: a device created now would carry no app, because the running server already installed nothing on it.',
+        ]),
     `How: run "${PROGRAM_PREFIX} dev:stop", then this command again.`,
   ]);
   error.suggestedCommand = `${PROGRAM_PREFIX} dev:stop`;

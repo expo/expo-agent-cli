@@ -3,7 +3,7 @@ import { canonicalizeExistingPath } from '../utils/dir';
 import { CommandError } from '../utils/errors';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Cleanup } from './cleanup';
-import { deviceCommand, deviceUnavailableError } from './errors';
+import { deviceCommand, deviceUnavailableError, notReusableError } from './errors';
 import { isStale, leaseFrom } from './lease';
 import {
   bindingPathFor,
@@ -66,7 +66,11 @@ export function chooseExplicitDevice(
     holders.length === 0
   )
     throw explicitError('explicit-not-found', query, platform);
-  if (reuseOnly) throw deviceUnavailableError('not-reusable', { platform });
+  if (reuseOnly)
+    throw notReusableError(
+      platform,
+      own ? { bound: deviceNameOf(own.device), named: deviceNameOf(device) } : undefined
+    );
   if (own?.device.backend === 'local-android' && own.device.origin.kind === 'spawned')
     throw explicitError('own-explicit-over-owned', own.device.serial, platform);
   return { device, reused: false, transfer: holders.map(({ file }) => file) };
