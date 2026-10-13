@@ -233,7 +233,7 @@ export async function devDetachAsync(
         acquireLine(
           await acquireDeviceAsync(projectRoot, platform, {
             reuseOnly: true,
-            explicit: explicitRequestOf(options.device, options.detachArgv),
+            explicit: explicitRequestOf(options.device, options.callerArgv),
           })
         )
       );
@@ -311,7 +311,7 @@ export async function devDetachAsync(
       ...process.env,
       __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1',
       __EXPO_AGENT_CLI_DETACHED: '1',
-      [CALLER_ARGV_ENV]: JSON.stringify(options.detachArgv),
+      [CALLER_ARGV_ENV]: JSON.stringify(options.callerArgv),
     },
   });
   // The child owns the file now; a descriptor left open here would keep the parent alive.

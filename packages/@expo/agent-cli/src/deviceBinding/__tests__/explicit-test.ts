@@ -122,6 +122,19 @@ it("refusals' How lines repeat the caller's flags, and an ambiguous name names a
   });
 });
 
+it("a refusal's How runs a foreground caller's command detached, without --plan", async () => {
+  const tools = fakeTools({ simulators: [human] });
+  writeBinding(file(OTHER), bindingFor(OTHER, 'HUMAN'));
+  await expect(
+    acquireDeviceAsync(ROOT, 'ios', {
+      explicit: named('HUMAN', ['--local', '--plan', '--ios', '--port', '8082']),
+      tools,
+    })
+  ).rejects.toMatchObject({
+    suggestedCommand: 'npx @expo/agent-cli dev --ios --local --port 8082 --detach --wait-ready',
+  });
+});
+
 it('preview refuses not-reusable as the run does while the own dev server runs', async () => {
   const { previewExplicitDeviceAsync } = await import('../preview');
   const tools = fakeTools({

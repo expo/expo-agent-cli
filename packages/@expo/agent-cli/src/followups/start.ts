@@ -10,7 +10,7 @@ import type { ProjectState, StartPlan } from '../project/types';
 import { localTool, EAS_REQUIREMENT, EAS_WHERE, LOCAL_WHERE } from '../toolchain/runsOn';
 import type { ToolchainStatus } from '../toolchain/types';
 import { capFollowUps, type FollowUp } from './types';
-import { quoteArgument } from '../utils/consent';
+import { rerunDevCommand } from '../plan/rerun';
 import { easCommandPrefix } from '../utils/easCli';
 
 /** Where `expo start` listens when the command line names no port. */
@@ -311,13 +311,9 @@ export function buildStartPlanFollowUps(
    * the same split `decideStartPlan` keeps: printing a flag nobody typed would claim they asked.
    */
   requestedPlatform?: PlanPlatform,
-  /** The caller's `--device`, which the command that runs the plan repeats, as it does a named `--port`. */
-  deviceFlag?: string
+  /** The caller's `dev` arguments, which the command that runs the plan repeats. */
+  callerArgv: readonly string[] = []
 ): FollowUp[] {
-  // `dev` requires a platform, so this flag always states one.
-  const platformFlag = ` --${requestedPlatform ?? hostPlatform()}`;
-  const port = plan.devServerPort?.state === 'named' ? ` --port ${plan.devServerPort.port}` : '';
-  const callerFlags = `${deviceFlag === undefined ? '' : ` --device ${quoteArgument(deviceFlag)}`}${port}`;
   const followups: FollowUp[] = [];
 
   // @ref llp/0015-backend-selection-and-config.rfc.md §The follow-ups of a chosen backend
@@ -357,7 +353,11 @@ export function buildStartPlanFollowUps(
   } else
     followups.push({
       id: 'dev',
-      command: `${PROGRAM_PREFIX} dev${platformFlag}${implicitEas ? ' --eas' : ''}${callerFlags}`,
+      // `dev` requires a platform, so the command always states one.
+      command: rerunDevCommand(
+        requestedPlatform ?? hostPlatform(),
+        implicitEas ? ['--eas', ...callerArgv] : callerArgv
+      ),
       why: implicitEas
         ? 'Runs the plan above on EAS — the build there, the app on an EAS Simulator session — which uses EAS credits, so the flag is yours to pass; without it the same command stops and says so.'
         : 'Runs the plan above, emitting it again first so nothing runs unannounced.',

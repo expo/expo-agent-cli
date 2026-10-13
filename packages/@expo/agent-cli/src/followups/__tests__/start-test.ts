@@ -238,11 +238,11 @@ describe(buildStartPlanFollowUps, () => {
       }),
       mockState(),
       'ios',
-      'dogfood s2'
+      ['--ios', '--local', '--plan', '--device', 'dogfood s2', '--port', '8091']
     );
 
     expect(followups[0]!.command).toBe(
-      "npx @expo/agent-cli dev --ios --device 'dogfood s2' --port 8091"
+      "npx @expo/agent-cli dev --ios --local --device 'dogfood s2' --port 8091 --detach --wait-ready"
     );
   });
 
@@ -252,7 +252,7 @@ describe(buildStartPlanFollowUps, () => {
     expect(ids(followups)).toEqual(['dev']);
     // `dev` requires a platform, so the command states the host's when the caller typed none.
     expect(followups[0]!.command).toBe(
-      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
+      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --wait-ready`
     );
   });
 
@@ -268,13 +268,15 @@ describe(buildStartPlanFollowUps, () => {
       buildStartPlanFollowUps(mockPlan(), mockState(), 'android').find(
         (followup) => followup.id === 'dev'
       )!.command
-    ).toBe('npx @expo/agent-cli dev --android');
+    ).toBe('npx @expo/agent-cli dev --android --detach --wait-ready');
 
     expect(
       buildStartPlanFollowUps(mockPlan(), mockState(), undefined).find(
         (followup) => followup.id === 'dev'
       )!.command
-    ).toBe(`npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`);
+    ).toBe(
+      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --wait-ready`
+    );
   });
 
   it.each(['dev-client-stale', 'bare-stale', 'needs-dev-client'])(

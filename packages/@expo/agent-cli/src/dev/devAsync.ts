@@ -33,10 +33,10 @@ import { classifySubprocessFailure, lastNonEmptyLine } from '../needsHuman/detec
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { emitStartPlan } from '../plan/emit';
+import { rerunDevCommand } from '../plan/rerun';
 import { event as planEvent } from '../plan/events';
 import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBuild';
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
-import { isPlatformFlag } from '../plan/platformFlags';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
@@ -193,7 +193,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     const followups = followUpsEnabled(options.followups)
       ? // The typed flag, not the resolved platform: this is the plan the caller asked for, and the
         // command that runs it has to ask for the same one (F103).
-        buildStartPlanFollowUps(plan, state, options.platform, options.device)
+        buildStartPlanFollowUps(plan, state, options.platform, options.callerArgv)
       : [];
     emitStartPlan(plan, { mode: 'plan', json: options.json, followups });
     reportFollowUps('dev', followups, { json: options.json });
@@ -308,7 +308,7 @@ function deviceCallbackFor(
       }
     }
     const acquired = await acquireDeviceAsync(projectRoot, platform, {
-      explicit: explicitRequestOf(options.device, options.detachArgv),
+      explicit: explicitRequestOf(options.device, options.callerArgv),
     });
     Log.progress(acquireLine(acquired));
     return acquired;
@@ -349,7 +349,7 @@ async function withPlannedDevice(
   options: DevOptions
 ): Promise<StartPlan> {
   const selectedPlatform = boundPlatform(options);
-  const explicit = explicitRequestOf(options.device, options.detachArgv);
+  const explicit = explicitRequestOf(options.device, options.callerArgv);
   if (selectedPlatform && explicit) {
     try {
       const { device, summary } = await previewExplicitDeviceAsync(
@@ -639,7 +639,7 @@ async function executePlanAsync(
             askedPort,
             movedTo: retry ? readPortArg(retry.args) : null,
             exitCode: result.exitCode,
-            callerArgv: options.detachArgv,
+            callerArgv: options.callerArgv,
             platform: options.platform,
           });
         }
@@ -957,15 +957,8 @@ async function portTakenAfterRetryError(stop: {
     movedTo != null
       ? `Why: the step asked for port ${askedPort}, which was taken, and the one retry moved it to port ${movedTo}, which ${holder} bound before the dev server did.`
       : `Why: ${holder} holds port ${askedPort}, and no free port was found to retry on.`;
-  // The platform flag first, so the command reads as `dev --<platform> …` wherever it was typed.
-  const separator = stop.callerArgv.indexOf('--');
-  const rest = stop.callerArgv.filter(
-    (arg, index) => !isPlatformFlag(arg) || (separator !== -1 && index > separator)
-  );
   const onFreePort =
-    free == null
-      ? null
-      : `${PROGRAM_PREFIX} dev --${stop.platform} ${withPortArg(rest, free).join(' ')}`;
+    free == null ? null : rerunDevCommand(stop.platform, withPortArg(stop.callerArgv, free));
   const forceStop =
     answersAsDevServer && listener != null && looksLikeDevServerProcess(listener)
       ? `${PROGRAM_PREFIX} dev:stop --port ${taken} --force`

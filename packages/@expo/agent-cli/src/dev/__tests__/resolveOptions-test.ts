@@ -1,4 +1,5 @@
 import { DEFAULT_DETACH_TIMEOUT_MS } from '../detachAsync';
+import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 
 describe(resolveDevOptions, () => {
@@ -19,6 +20,7 @@ describe(resolveDevOptions, () => {
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
+      callerArgv: expect.any(Array),
       // Read and not forwarded: `dev` sets `--port` on every step that serves.
       port: 8082,
     });
@@ -41,6 +43,7 @@ describe(resolveDevOptions, () => {
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
+      callerArgv: expect.any(Array),
       port: null,
     });
   });
@@ -66,6 +69,7 @@ describe(resolveDevOptions, () => {
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
+      callerArgv: expect.any(Array),
       port: 8082,
     });
   });
@@ -204,6 +208,7 @@ describe(resolveDevOptions, () => {
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
+      callerArgv: expect.any(Array),
       port: null,
     });
   });
@@ -229,6 +234,7 @@ describe(resolveDevOptions, () => {
       waitReady: false,
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
+      callerArgv: expect.any(Array),
       port: null,
     });
   });
@@ -358,5 +364,33 @@ describe('--device', () => {
     ['--ios', '--device', 'SIM', '--eas'],
   ])('refuses invalid selection flags (%s)', (...argv) => {
     expect(() => resolveDevOptions(argv)).toThrow();
+  });
+});
+
+describe('the caller argv of a detached child', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const child = ['--ios', '--device', 'Sim'];
+  const caller = ['--ios', '--device', 'Sim', '--detach', '--wait-ready'];
+
+  it('is the parent argv the child was given, which no subprocess of the child inherits', () => {
+    vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', '1');
+    vi.stubEnv(CALLER_ARGV_ENV, JSON.stringify(caller));
+    expect(resolveDevOptions(child).callerArgv).toEqual(caller);
+    expect(process.env[CALLER_ARGV_ENV]).toBeUndefined();
+  });
+
+  it.each(['{', '"--ios"', '[1]'])(
+    "is the child's own argv when the variable is malformed (%s)",
+    (value) => {
+      vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', '1');
+      vi.stubEnv(CALLER_ARGV_ENV, value);
+      expect(resolveDevOptions(child).callerArgv).toEqual(child);
+    }
+  );
+
+  it('is the own argv outside a detached child', () => {
+    vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', '');
+    vi.stubEnv(CALLER_ARGV_ENV, JSON.stringify(caller));
+    expect(resolveDevOptions(child).callerArgv).toEqual(child);
   });
 });

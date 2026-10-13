@@ -1,8 +1,7 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Choice
-import { quoteArgument } from '../utils/consent';
+import { rerunDevCommand } from '../plan/rerun';
 import { canonicalizeExistingPath } from '../utils/dir';
 import { CommandError } from '../utils/errors';
-import { isPlatformFlag } from '../plan/platformFlags';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Cleanup } from './cleanup';
 import { deviceUnavailableError, notReusableError } from './errors';
@@ -25,7 +24,7 @@ import {
 } from './types';
 
 export type ExplicitCandidate = Extract<BoundDevice, { backend: 'local-ios' | 'local-android' }>;
-/** `--device`'s value, and the caller's `dev` arguments without it, which a refusal's How repeats. */
+/** `--device`'s value, and the caller's `dev` arguments without it, which a refusal's How repeats (`rerunDevCommand`). */
 export type ExplicitRequest = { query: string; rerun: readonly string[] };
 type Foreign = { file: string; binding: Binding; stale: boolean };
 type Choice = { device: ExplicitCandidate; reused: boolean; transfer: string[] };
@@ -180,7 +179,7 @@ function refusalText(
   { matches, root, rerun }: { matches: string[]; root?: string; rerun: readonly string[] }
 ): { what: string; how: string; line: string } {
   if (reason === 'explicit-bound') {
-    const how = devCommand(platform, rerun);
+    const how = rerunDevCommand(platform, rerun);
     return {
       what: `${name} is bound to the worktree ${root}.`,
       how,
@@ -196,7 +195,7 @@ function refusalText(
     };
   }
   if (matches.length) {
-    const how = devCommand(platform, rerun, matches[0]);
+    const how = rerunDevCommand(platform, rerun, matches[0]);
     return {
       what: `No device uniquely matches "${name}"; matches: ${matches.join(', ')}.`,
       how,
@@ -210,15 +209,4 @@ function refusalText(
     how,
     line: `run "${how}", then pass a listed ${listed} to --device.`,
   };
-}
-
-/** The caller's `dev` command again, platform first, with `--device <device>` before any `--`. */
-function devCommand(platform: DevicePlatform, rerun: readonly string[], device?: string): string {
-  const separator = rerun.indexOf('--') < 0 ? rerun.length : rerun.indexOf('--');
-  const args = [
-    ...rerun.slice(0, separator).filter((arg) => !isPlatformFlag(arg)),
-    ...(device ? ['--device', device] : []),
-    ...rerun.slice(separator),
-  ];
-  return `${PROGRAM_PREFIX} dev --${platform}${args.map((arg) => ` ${quoteArgument(arg)}`).join('')}`;
 }

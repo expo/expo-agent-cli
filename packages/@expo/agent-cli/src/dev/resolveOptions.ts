@@ -8,7 +8,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import type { BuildBackend, RunTarget } from '../settings/types';
 import { CommandError } from '../utils/errors';
 import { DEFAULT_DETACH_TIMEOUT_MS } from './detachAsync';
-import { resolveDeviceOption, withoutDeviceArgs } from './deviceOption';
+import { CALLER_ARGV_ENV, resolveDeviceOption, withoutDeviceArgs } from './deviceOption';
 import { withoutPortArgs } from './forwardedArgs';
 import { assertKnownDevFlags } from './knownFlags';
 
@@ -132,6 +132,21 @@ export interface DevOptions {
    * parent's. Recorded here so the resolver stays the one place that reads argv.
    */
   detachArgv: string[];
+  /** The command line the caller typed, which a How line repeats; a detached child's parent gives it. */
+  callerArgv: string[];
+}
+
+/** Read once, and removed so the child's own subprocesses never inherit it. */
+function callerArgvOf(argv: string[]): string[] {
+  const value = process.env[CALLER_ARGV_ENV];
+  delete process.env[CALLER_ARGV_ENV];
+  if (process.env.__EXPO_AGENT_CLI_DETACHED !== '1' || value === undefined) return argv;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((arg) => typeof arg === 'string') ? parsed : argv;
+  } catch {
+    return argv;
+  }
 }
 
 /**
@@ -213,6 +228,7 @@ export function resolveDevOptions(argv: string[]): DevOptions {
     // The child's argv is built from the same list, so a flag added to this command reaches the
     // detached run without a second place to remember.
     detachArgv: argv,
+    callerArgv: callerArgvOf(argv),
   };
 }
 

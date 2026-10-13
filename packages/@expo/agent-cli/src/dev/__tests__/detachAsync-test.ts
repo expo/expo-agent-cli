@@ -18,9 +18,9 @@ import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime
 import { logCmdError, type CommandError } from '../../utils/errors';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
-import { CALLER_ARGV_ENV, explicitRequestOf } from '../deviceOption';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
+import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
@@ -746,15 +746,11 @@ describe('the bound device', () => {
     await result;
 
     const childArgv = spawned!.args.slice(spawned!.args.indexOf('dev') + 1);
+    vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', spawned!.env.__EXPO_AGENT_CLI_DETACHED);
     vi.stubEnv(CALLER_ARGV_ENV, spawned!.env[CALLER_ARGV_ENV]);
     try {
-      expect(explicitRequestOf('Sim', childArgv)?.rerun).toEqual([
-        '--ios',
-        '--detach',
-        '--wait-ready',
-        '--port',
-        '8092',
-      ]);
+      expect(childArgv).not.toContain('--detach');
+      expect(resolveDevOptions(childArgv).callerArgv).toEqual(argv);
     } finally {
       vi.unstubAllEnvs();
     }

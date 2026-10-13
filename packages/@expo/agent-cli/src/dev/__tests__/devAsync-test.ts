@@ -21,6 +21,7 @@ import { isInteractive } from '../../utils/interactive';
 import { devAsync } from '../devAsync';
 import { findFreePortAsync, formatPortMove, resolvePlannedPortAsync } from '../portCollision';
 import { findPortListenerAsync } from '../portListener';
+import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 import { isExpoDevServerAsync } from '../stopAsync';
 
@@ -1076,10 +1077,10 @@ describe(devAsync, () => {
       // The port the retry lost is the one probed for its holder.
       expect(findPortListenerAsync).toHaveBeenLastCalledWith(retryPort);
       expect(error.message).toMatch(
-        /How: start on a free port with ".* dev --ios --json --port \d+"\./
+        /How: start on a free port with ".* dev --ios --json --port \d+ --detach --wait-ready"\./
       );
       expect(error.message).not.toContain('dev:stop');
-      expect(error.suggestedCommand).toMatch(/ dev --ios --json --port \d+$/);
+      expect(error.suggestedCommand).toMatch(/ dev --ios --json --port \d+ --detach --wait-ready$/);
       expect(error.message).not.toContain("CLI's own");
       expect(runDevServerAsync).toHaveBeenCalledTimes(2);
       expect(Log.log).not.toHaveBeenCalled();
@@ -1106,8 +1107,30 @@ describe(devAsync, () => {
       );
 
       expect(error.suggestedCommand).toMatch(
-        / dev --ios --clear --tunnel --json --port \d+ -- --max-workers 2$/
+        / dev --ios --clear --tunnel --json --port \d+ --detach --wait-ready -- --max-workers 2$/
       );
+    });
+
+    it(`should suggest, from a detached child, the command its parent was given`, async () => {
+      mockProjectState();
+      vi.mocked(runDevServerAsync).mockImplementation(async (_root, args) => {
+        const port = args.includes('--port') ? Number(args[args.indexOf('--port') + 1]) : 8081;
+        return devServerRun({
+          exitCode: 1,
+          stderr: PORT_TAKEN.replace(/Port \d+/, `Port ${port}`),
+        });
+      });
+      vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', '1');
+      vi.stubEnv(CALLER_ARGV_ENV, JSON.stringify(['--ios', '--detach', '--wait-ready', '--json']));
+
+      const options = resolveDevOptions(['--ios', '--json']);
+      vi.unstubAllEnvs();
+      const error = await devAsync(projectRoot, options).then(
+        () => null,
+        (thrown) => thrown
+      );
+
+      expect(error.suggestedCommand).toMatch(/ dev --ios --detach --wait-ready --json --port \d+$/);
     });
 
     // No free port to move to: `dev:stop --force` only when the holder answers as an Expo dev
@@ -1579,7 +1602,7 @@ describe(devAsync, () => {
         expect(previewExplicitDeviceAsync).toHaveBeenCalledWith(
           projectRoot,
           'ios',
-          { query: 'Sim', rerun: ['--ios', '--local', '--port', '8091'] },
+          { query: 'Sim', rerun: ['--ios', '--local', '--plan', '--port', '8091'] },
           true
         );
         expect(emittedFollowUps()).toContainEqual(
@@ -1607,7 +1630,7 @@ describe(devAsync, () => {
           false
         );
         expect(emittedFollowUps().find((followup) => followup.id === 'dev')!.command).toBe(
-          "npx @expo/agent-cli dev --ios --device 'My Sim' --port 8091"
+          "npx @expo/agent-cli dev --ios --local --device 'My Sim' --port 8091 --detach --wait-ready"
         );
       });
     });

@@ -117,12 +117,12 @@ describe('device lifecycle across two worktrees', () => {
         explicitDevice: {
           refuses: true,
           summary: expect.stringContaining(`is bound to the worktree ${first.projectRoot}`),
-          how: 'npx @expo/agent-cli dev --ios --local --json',
+          how: 'npx @expo/agent-cli dev --ios --local --json --detach --wait-ready',
         },
         followups: expect.arrayContaining([
           expect.objectContaining({
             id: 'device-refusal',
-            command: 'npx @expo/agent-cli dev --ios --local --json',
+            command: 'npx @expo/agent-cli dev --ios --local --json --detach --wait-ready',
           }),
         ]),
       });
