@@ -15,7 +15,9 @@ vi.mock('../../deviceBinding/records', () => ({
   keptDevices: vi.fn(() => []),
   unreadableBindingFiles: vi.fn(() => []),
 }));
-vi.mock('../../deviceBinding/reap', () => ({ reapDevicesAsync: vi.fn(async () => []) }));
+vi.mock('../../deviceBinding/reap', () => ({
+  reapDevicesAsync: vi.fn(async () => ({ reports: [], error: null })),
+}));
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn(async () => null) }));
 vi.mock('../portListener', () => ({
   isPortInUseAsync: vi.fn(async () => false),
@@ -302,5 +304,31 @@ it.each([
       kill.mockRestore();
       Object.defineProperty(process, 'platform', { value: host });
     }
+  }
+);
+
+it.each(['cleanup', 'registry'])(
+  'reports a %s reap failure and preserves its device results',
+  async (failure) => {
+    const error = 'reap failed';
+    const reaped = [
+      {
+        ...device,
+        released: failure === 'registry',
+        shutDown: failure === 'registry',
+        ...(failure === 'cleanup' ? { error } : {}),
+      },
+    ];
+    vi.mocked(reapDevicesAsync).mockResolvedValueOnce({
+      reports: reaped,
+      error: failure === 'registry' ? error : null,
+    });
+    const onReport = vi.fn();
+    const code = await devStopAsync(root, resolveDevStopOptions(['--no-followups']), {
+      print: false,
+      onReport,
+    });
+    expect(code).toBe(20);
+    expect(onReport).toHaveBeenCalledWith(expect.objectContaining({ reaped, deviceError: error }));
   }
 );

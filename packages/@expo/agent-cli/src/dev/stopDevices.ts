@@ -67,7 +67,10 @@ export async function stopDevicesAsync(
     report.deviceError = error instanceof Error ? error.message : String(error);
   } finally {
     try {
-      report.reaped = await reapDevicesAsync(projectRoot);
+      const reaped = await reapDevicesAsync(projectRoot);
+      report.reaped = reaped.reports;
+      report.deviceError ??=
+        reaped.error ?? reaped.reports.find((device) => device.error)?.error ?? null;
     } catch (error) {
       report.deviceError ??= error instanceof Error ? error.message : String(error);
     }

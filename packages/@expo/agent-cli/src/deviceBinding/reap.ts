@@ -93,17 +93,20 @@ export async function reapDevicesAsync(
 ) {
   const actions: Cleanup[] = [];
   let reports: CleanupReport[] = [];
+  let error: string | null = null;
   try {
     await withRegistryLockAsync(async () => reapSection(projectRoot, tools, undefined, actions), {
       tools,
       waitMs: WRITE_LOCK_WAIT_MS,
     });
+  } catch (cause) {
+    error = cause instanceof Error ? cause.message : String(cause);
   } finally {
     clearInspectCache();
     // A later file failure must not abandon an earlier queued emulator kill.
     reports = await runCleanupAsync(actions, tools);
   }
-  return reports;
+  return { reports, error };
 }
 
 /** Reap even a refused choice, then run every queued action outside the lock. */

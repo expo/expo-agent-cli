@@ -37,11 +37,11 @@ export async function runCleanupAsync(
   for (const item of actions) {
     const report: CleanupReport = {
       ...deviceReport(item.binding),
-      released: true,
       reason: item.reason,
     };
     try {
       const result = await actAsync(item, tools);
+      report.released = result.ok;
       report.shutDown = result.shutDown ?? (result.ok && item.action !== 'forget');
       if (!result.ok) report.error = result.reason ?? 'device cleanup failed';
     } catch (error) {

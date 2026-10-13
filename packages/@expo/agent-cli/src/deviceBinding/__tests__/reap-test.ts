@@ -24,11 +24,32 @@ it('deleted-worktree-deletes-simulator after the registry lock is released', asy
   const file = foreign();
   writeBinding(file, bindingFor(OTHER, 'OLD'));
   fs.rmSync(OTHER, { recursive: true });
-  const reaped = await reapDevicesAsync(ROOT, { tools });
+  const { reports: reaped } = await reapDevicesAsync(ROOT, { tools });
   expect(readBindingFile(file)).toEqual({ kind: 'none' });
   expect(tools.calls).toContainEqual(['delete', 'OLD']);
   expect(tools.lockedAt[tools.calls.findIndex(([command]) => command === 'delete')]).toBe(false);
   expect(reaped).toMatchObject([{ id: 'OLD', reason: 'deleted-worktree', released: true }]);
+});
+
+it.each(['returned', 'thrown'])('reports a %s cleanup failure as not released', async (failure) => {
+  const tools = fakeTools({ simulators: [{ udid: 'OLD', name: 'old', state: 'Booted' }] });
+  writeBinding(foreign(), bindingFor(OTHER, 'OLD'));
+  fs.rmSync(OTHER, { recursive: true });
+  tools.simctl = async () => {
+    if (failure === 'thrown') throw new Error('delete failed');
+    return { exitCode: 1, stdout: '', stderr: 'delete failed' };
+  };
+  const { reports, error } = await reapDevicesAsync(ROOT, { tools });
+  expect(error).toBeNull();
+  expect(reports).toMatchObject([
+    {
+      id: 'OLD',
+      released: false,
+      shutDown: false,
+      error: expect.stringContaining('delete failed'),
+    },
+  ]);
+  expect(tools.simulators[0]!.state).toBe('Booted');
 });
 
 it('reap reads after own write and does not park the newly created simulator', async () => {
@@ -75,7 +96,7 @@ it('stop without inventory leaves an expired created simulator parked, and expli
   const tools = fakeTools({ simulators: [{ udid: 'OLD', name: 'old', state: 'Booted' }] });
   const binding = bindingFor(OTHER, 'OLD', { expiresAt: '2020-01-01T00:00:00Z' });
   writeBinding(foreign(), binding);
-  expect(await reapDevicesAsync(ROOT, { tools })).toEqual([]);
+  expect(await reapDevicesAsync(ROOT, { tools })).toEqual({ reports: [], error: null });
   expect(readBindingFile(foreign())).toEqual({ kind: 'binding', binding });
   expect(tools.calls).toEqual([]);
 });
@@ -115,7 +136,9 @@ it('runs an already queued emulator kill when a later registry removal fails', a
     remove(file);
   });
   try {
-    await expect(reapDevicesAsync(ROOT, { tools })).rejects.toThrow('disk failure');
+    const { reports, error } = await reapDevicesAsync(ROOT, { tools });
+    expect(error).toBe('disk failure');
+    expect(reports).toMatchObject([{ id: 'emulator-5554', released: true, shutDown: true }]);
     expect(tools.killed).toEqual([5001]);
     expect(readBindingFile(first)).toEqual({ kind: 'none' });
     expect(readBindingFile(second).kind).toBe('binding');
