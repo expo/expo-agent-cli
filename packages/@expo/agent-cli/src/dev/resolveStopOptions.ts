@@ -28,6 +28,9 @@ export interface DevStopOptions {
    * finds it, and stopped by id.
    */
   eas: boolean;
+  release?: boolean;
+  /** Internal: smoke releases only the platform it used. */
+  platform?: 'ios' | 'android';
   /**
    * Port to look at when no lock answers, or null to look at none.
    *
@@ -50,6 +53,7 @@ export interface DevStopOptions {
 
 const DEV_STOP_ARGS = {
   '--eas': Boolean,
+  '--release': Boolean,
   '--port': String,
   '--signal': String,
   '--force': Boolean,
@@ -85,6 +89,7 @@ export function resolveDevStopOptions(argv: string[]): DevStopOptions {
 
   return {
     eas: !!args['--eas'],
+    release: !!args['--release'],
     port: args['--port'] == null ? null : parsePort(args['--port']),
     signal,
     force: !!args['--force'],

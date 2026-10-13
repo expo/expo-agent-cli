@@ -65,6 +65,8 @@ export interface DeviceTools {
 export type AcquireAction = 'reused' | 'created' | 'spawned' | 'explicit';
 
 export interface AcquireResult {
+  /** Acquisition identity for cleanup; absent on read-only plan previews. */
+  binding?: Binding;
   device: BoundDevice;
   justBooted: boolean;
   action: AcquireAction;

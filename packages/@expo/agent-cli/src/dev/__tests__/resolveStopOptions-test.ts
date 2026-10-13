@@ -10,6 +10,7 @@ describe(resolveDevStopOptions, () => {
   it(`should look at no port and send SIGTERM by default`, () => {
     expect(resolveDevStopOptions([])).toEqual({
       eas: false,
+      release: false,
       port: null,
       signal: 'SIGTERM',
       force: false,
@@ -34,6 +35,7 @@ describe(resolveDevStopOptions, () => {
       ])
     ).toEqual({
       eas: false,
+      release: false,
       port: 8170,
       signal: 'SIGKILL',
       force: true,

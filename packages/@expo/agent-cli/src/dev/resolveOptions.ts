@@ -8,6 +8,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import type { BuildBackend, RunTarget } from '../settings/types';
 import { CommandError } from '../utils/errors';
 import { DEFAULT_DETACH_TIMEOUT_MS } from './detachAsync';
+import { resolveDeviceOption, withoutDeviceArgs } from './deviceOption';
 import { withoutPortArgs } from './forwardedArgs';
 import { assertKnownDevFlags } from './knownFlags';
 
@@ -43,6 +44,7 @@ export type DevMode =
 
 export interface DevOptions {
   mode: DevMode;
+  device?: string;
   /** Arguments to append after the plan's own, when spawning the `expo` CLI. */
   expoArgs: string[];
   /** Sync skills shortly after the dev server starts, cleared by `--no-agent-skills`. */
@@ -169,6 +171,7 @@ export function resolveDevOptions(argv: string[]): DevOptions {
   const buildBackend = resolveBuildBackend(argv, example);
   const runTarget = resolveRunTarget(argv, example);
   const port = resolvePort(argv, example);
+  const device = resolveDeviceOption(argv);
   const open = !argv.includes('--no-open');
   const deviceBackend: DeviceBackend = buildBackend === 'eas' ? 'eas' : 'local';
   if (deviceBackend === 'eas') {
@@ -177,6 +180,7 @@ export function resolveDevOptions(argv: string[]): DevOptions {
 
   return {
     mode: argv.includes('--plan') ? 'plan' : 'run',
+    ...(device === undefined ? {} : { device }),
     // `--port` is stripped: `dev` owns the port and sets it on every step that serves
     // (`./portCollision.ts`). A native platform flag is stripped too: it names what the plan is
     // for, and this command performs the open itself (`./openApp.ts`) — handing it to `expo start`
@@ -184,7 +188,9 @@ export function resolveDevOptions(argv: string[]): DevOptions {
     // `--web` stays: serving the web bundle is `expo start`'s own job.
     expoArgs: [
       ...withoutPortArgs(
-        argv.filter((arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !isNativePlatformFlag(arg))
+        withoutDeviceArgs(argv).filter(
+          (arg) => !AGENT_CLI_ONLY_FLAGS.includes(arg) && !isNativePlatformFlag(arg)
+        )
       ),
       // @ref llp/0027-everything-on-eas.rfc.md §The dev server is tunnelled
       // Implied, never asked for: an EAS Simulator session is a machine in a datacenter, and
@@ -257,6 +263,11 @@ function namesTunnel(argv: readonly string[]): boolean {
  * host the session cannot reach (`--lan`, `--localhost`, `--host lan|localhost`).
  */
 function assertEasRunFits(argv: string[]): void {
+  if (resolveDeviceOption(argv) !== undefined)
+    throw new CommandError(
+      'BAD_ARGS',
+      '--device selects a local device and cannot be used with --eas. How: remove --device to use EAS Simulator.'
+    );
   if (argv.includes('--web')) {
     throw opposite(
       '--eas and --web ask for two different places to run the app, so this run has no plan.',
