@@ -76,6 +76,15 @@ describe(acquireDeviceAsync, () => {
     expect(tools.spawned[0]).toContain('5558,5559');
   });
 
+  it('takes the next even port beside an instance that is still booting', async () => {
+    const tools = fakeTools({ emulators: [{ serial: 'emulator-5554', state: 'offline' }] });
+
+    const result = await acquireDeviceAsync(ROOT, 'android', { tools });
+
+    expect(result.device).toMatchObject({ serial: 'emulator-5556' });
+    expect(tools.spawned[0]).toContain('5556,5557');
+  });
+
   // busy-ports-include-alive-emulators
   it('keeps the port of an expired binding whose instance is alive, and frees one whose pid is dead', async () => {
     const tools = fakeTools({ alivePids: [77] });

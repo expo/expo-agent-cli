@@ -45,6 +45,10 @@ export async function readAndroidInventoryAsync(tools: DeviceTools): Promise<And
   return {
     avd: parseAvds(avds.stdout)[0] ?? null,
     runningSerials: parseAndroidDevices(devices.stdout).map((device) => device.deviceId),
+    listedSerials: devices.stdout
+      .split('\n')
+      .slice(1)
+      .flatMap((line) => line.trim().split(/\s+/)[0] || []),
   };
 }
 
