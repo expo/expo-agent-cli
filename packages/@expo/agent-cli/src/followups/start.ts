@@ -341,13 +341,22 @@ export function buildStartPlanFollowUps(
   // is not one a bare `dev` takes: it stops and asks for `--eas`. The line offered here is the one
   // that runs, and it says what the flag costs.
   const implicitEas = location?.runsOn === 'eas' && location.selection?.implicit === true;
-  followups.push({
-    id: 'dev',
-    command: `${PROGRAM_PREFIX} dev${platformFlag}${implicitEas ? ' --eas' : ''}`,
-    why: implicitEas
-      ? 'Runs the plan above on EAS — the build there, the app on an EAS Simulator session — which uses EAS credits, so the flag is yours to pass; without it the same command stops and says so.'
-      : 'Runs the plan above, emitting it again first so nothing runs unannounced.',
-  });
+  const device = plan.explicitDevice;
+  if (device?.refuses) {
+    if (device.how)
+      followups.push({
+        id: 'device-refusal',
+        command: device.how,
+        why: 'Running the plan above stops at the --device refusal printed under its steps; this is the next step that refusal names.',
+      });
+  } else
+    followups.push({
+      id: 'dev',
+      command: `${PROGRAM_PREFIX} dev${platformFlag}${implicitEas ? ' --eas' : ''}`,
+      why: implicitEas
+        ? 'Runs the plan above on EAS — the build there, the app on an EAS Simulator session — which uses EAS credits, so the flag is yours to pass; without it the same command stops and says so.'
+        : 'Runs the plan above, emitting it again first so nothing runs unannounced.',
+    });
 
   if (BUILDING_RULES.includes(plan.rule)) {
     followups.push({

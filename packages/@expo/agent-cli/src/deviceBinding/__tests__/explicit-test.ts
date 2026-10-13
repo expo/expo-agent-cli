@@ -118,6 +118,24 @@ it('preview reports a foreign owner without changing its expired binding or runn
   expect(tools.calls.every(([command]) => command === 'list')).toBe(true);
 });
 
+it('preview says which device it binds, whose expired binding it takes, and what it deletes', async () => {
+  const { previewExplicitDeviceAsync } = await import('../preview');
+  const tools = fakeTools({
+    simulators: [human, { udid: 'OLD', name: 'agent-cli 0000', state: 'Booted' }],
+  });
+  const own = bindingFor(ROOT, 'OLD');
+  const foreign = bindingFor(OTHER, 'HUMAN', { expiresAt: '2020-01-01T00:00:00Z' });
+  if (foreign.device.backend === 'local-ios') foreign.device.origin = 'explicit';
+  writeBinding(file(), own);
+  writeBinding(file(OTHER), foreign);
+  expect((await previewExplicitDeviceAsync(ROOT, 'ios', 'my iphone', tools)).summary).toBe(
+    'Will bind My iPhone (HUMAN), taken over from /work/other (lease expired); will delete agent-cli 0000 (replaced by --device).'
+  );
+  expect(readBindingFile(file())).toEqual({ kind: 'binding', binding: own });
+  expect(readBindingFile(file(OTHER))).toEqual({ kind: 'binding', binding: foreign });
+  expect(tools.calls.every(([command]) => command === 'list')).toBe(true);
+});
+
 it('reuses an explicitly named owned Android instance while adb still lists it offline', async () => {
   const tools = fakeTools({
     emulators: [{ serial: 'emulator-5554', state: 'offline', pid: 4001 }],
@@ -145,7 +163,9 @@ it('explicit-android-needs-only-adb', async () => {
     exitCode: null,
     spawnError: Object.assign(new Error('spawn emulator ENOENT'), { code: 'ENOENT' }),
   }));
-  expect(await previewExplicitDeviceAsync(ROOT, 'android', 'R58N123', tools)).toMatchObject({
+  expect(
+    (await previewExplicitDeviceAsync(ROOT, 'android', 'R58N123', tools)).device
+  ).toMatchObject({
     serial: 'R58N123',
     origin: { kind: 'explicit' },
   });

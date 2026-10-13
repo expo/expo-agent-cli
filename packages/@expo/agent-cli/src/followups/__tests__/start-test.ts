@@ -192,6 +192,23 @@ describe(buildStartFollowUps, () => {
 });
 
 describe(buildStartPlanFollowUps, () => {
+  it(`should offer the refusal's How command instead of a run of a plan that refuses --device`, () => {
+    const followups = buildStartPlanFollowUps(
+      mockPlan({
+        explicitDevice: {
+          refuses: true,
+          summary: 'agent-cli f5ce27a6 is bound to the worktree /work/other.',
+          how: 'npx @expo/agent-cli dev --ios --detach --wait-ready',
+        },
+      }),
+      mockState(),
+      'ios'
+    );
+
+    expect(ids(followups)).toEqual(['device-refusal']);
+    expect(followups[0]!.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+  });
+
   it(`should offer to run the plan that was printed`, () => {
     const followups = buildStartPlanFollowUps(mockPlan(), mockState());
 

@@ -115,6 +115,13 @@ export function readExplicitChoice(
   };
 }
 
+/** The own created simulator a new explicit choice deletes, or null. */
+export function replacedByExplicit(own: Binding | null, choice: Choice): Binding | null {
+  return !choice.reused && own?.device.backend === 'local-ios' && own.device.origin === 'created'
+    ? own
+    : null;
+}
+
 export function bindExplicitSection(
   projectRoot: string,
   platform: DevicePlatform,
@@ -139,8 +146,9 @@ export function bindExplicitSection(
     ...leaseFrom(tools.now()),
   };
   writeBindingFile(file, binding);
-  if (!choice.reused && own?.device.backend === 'local-ios' && own.device.origin === 'created')
-    actions.push({ binding: own, action: 'delete', reason: 'replaced by --device' });
+  const replaced = replacedByExplicit(own, choice);
+  if (replaced)
+    actions.push({ binding: replaced, action: 'delete', reason: 'replaced by --device' });
   for (const transferred of choice.transfer) removeBindingFile(transferred);
   return { binding, action: choice.reused ? ('reused' as const) : ('explicit' as const) };
 }
@@ -168,6 +176,7 @@ function explicitError(
     `${what}\nHow: ${reason === 'explicit-bound' ? 'remove --device, then ' : ''}run "${how}".`
   );
   error.exitCode = reason === 'explicit-bound' ? 20 : 1;
+  error.suggestedCommand = how;
   error.data = { reason, ...(matches.length ? { matches } : {}), ...(root ? { root } : {}) };
   return error;
 }

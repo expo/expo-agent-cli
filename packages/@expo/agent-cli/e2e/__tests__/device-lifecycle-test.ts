@@ -112,8 +112,22 @@ describe('device lifecycle across two worktrees', () => {
         ['dev', '--ios', '--local', '--plan', '--device', first.runDevice!, '--json'],
         { env: envFor(projects[1]!) }
       );
-      expect(JSON.parse(plan.stdout).reasons).toContainEqual(
-        expect.stringContaining(`is bound to the worktree ${first.projectRoot}`)
+      expect(plan.exitCode).toBe(0);
+      expect(JSON.parse(plan.stdout)).toMatchObject({
+        explicitDevice: {
+          refuses: true,
+          summary: expect.stringContaining(`is bound to the worktree ${first.projectRoot}`),
+          how: 'npx @expo/agent-cli dev --ios --detach --wait-ready',
+        },
+        followups: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'device-refusal',
+            command: 'npx @expo/agent-cli dev --ios --detach --wait-ready',
+          }),
+        ]),
+      });
+      expect(JSON.parse(plan.stdout).followups.map(({ id }: { id: string }) => id)).not.toContain(
+        'dev'
       );
       expect(bindings()).toHaveLength(2);
 

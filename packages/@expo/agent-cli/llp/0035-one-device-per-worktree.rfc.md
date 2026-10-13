@@ -558,7 +558,7 @@ What happens to the device of a deleted or expired worktree?
 
 How does a person pick a device?
 
-- In `DEV_OWN_FLAGS`; its value is read as `resolvePort` reads `--port`, `--device=<v>` included; the flag and value are stripped from the Expo args as `withoutPortArgs` strips the port; `detachArgv` carries it unchanged; with `--eas` it is `BAD_ARGS`, checked where `assertEasRunFits` runs. The match and the refusals are in §Choice; the origin's rule is Contract 7. With `--device`, Android reads only `adb devices -l`: a USB device needs no emulator package. `dev --plan` naming a device bound to another worktree carries "will refuse: <name> is bound to <root>".
+- In `DEV_OWN_FLAGS`; its value is read as `resolvePort` reads `--port`, `--device=<v>` included; the flag and value are stripped from the Expo args as `withoutPortArgs` strips the port; `detachArgv` carries it unchanged; with `--eas` it is `BAD_ARGS`, checked where `assertEasRunFits` runs. The match and the refusals are in §Choice; the origin's rule is Contract 7. With `--device`, Android reads only `adb devices -l`: a USB device needs no emulator package. `dev --plan --device` prints a `Device:` line under the steps from the same choice, read without writes or boots: the device it binds, the expired foreign binding it takes over and the own created simulator it deletes, or "Will refuse: <reason>", whose How command replaces the `dev` follow-up while the plan still exits 0.
 - Live tier: the live tier passes `--device $AGENT_CLI_LIVE_UDID` to `dev` or lets it create. The runbook in `e2e-live/README` gains the two-worktree setup.
 
 ### Lifecycle output

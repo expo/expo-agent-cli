@@ -347,17 +347,23 @@ async function withPlannedDevice(
   const selectedPlatform = boundPlatform(options);
   if (selectedPlatform && options.device !== undefined) {
     try {
-      return withDevice(
-        plan,
-        deviceIdOf(await previewExplicitDeviceAsync(projectRoot, selectedPlatform, options.device))
+      const { device, summary } = await previewExplicitDeviceAsync(
+        projectRoot,
+        selectedPlatform,
+        options.device
       );
+      return {
+        ...withDevice(plan, deviceIdOf(device)),
+        explicitDevice: { refuses: false, summary },
+      };
     } catch (error) {
       return {
         ...plan,
-        reasons: [
-          ...plan.reasons,
-          `Will refuse: ${error instanceof Error ? error.message.split('\n')[0] : String(error)}`,
-        ],
+        explicitDevice: {
+          refuses: true,
+          summary: error instanceof Error ? error.message.split('\n')[0]! : String(error),
+          how: (error instanceof CommandError && error.suggestedCommand) || null,
+        },
       };
     }
   }

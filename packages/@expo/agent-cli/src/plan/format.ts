@@ -48,6 +48,11 @@ export function formatStartPlan(plan: StartPlan): string {
     );
   }
 
+  if (plan.explicitDevice) {
+    const { refuses, summary } = plan.explicitDevice;
+    lines.push('', chalk`  {bold Device:} ${refuses ? chalk`{red Will refuse:} ` : ''}${summary}`);
+  }
+
   if (plan.buildLocation) {
     lines.push('', `  ${formatBuildLocation(plan.buildLocation)}`);
   }
