@@ -172,6 +172,38 @@ describe('device lifecycle across two worktrees', () => {
     }
   );
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle output
+  // The detached child's acquisition lines go to its log, so the parent names the device itself.
+  it.skipIf(process.platform !== 'darwin')('names the bound device when dev detaches', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    projects.push(projectRoot);
+    const env = {
+      ...envFor(projectRoot),
+      STUB_EXPO_DELAY_MS: '20000',
+      STUB_EXPO_DEV_SERVER_PORT: '8396',
+    };
+
+    // `--no-open`: opening the app would install Expo Go on the stub simulator.
+    const started = await executeAgentCliAsync(
+      projectRoot,
+      ['dev', '--ios', '--detach', '--no-open', '--json'],
+      { env }
+    );
+    const [binding] = bindings();
+    expect(binding?.device.backend).toBe('local-ios');
+    const { name, udid } = binding!.device as { name: string; udid: string };
+    expect(JSON.parse(started.stdout).device).toEqual(
+      expect.objectContaining({ platform: 'ios', id: udid, name, origin: 'created' })
+    );
+
+    const reused = await executeAgentCliAsync(
+      projectRoot,
+      ['dev', '--ios', '--detach', '--no-open'],
+      { env }
+    );
+    expect(reused.stdout).toContain(`Device       ${name} (${udid}) · created`);
+  });
+
   // @ref llp/0035-one-device-per-worktree.rfc.md §Reap
   it.skipIf(process.platform !== 'darwin')(
     'reaps the simulator a deleted worktree booted, on the next dev:stop of another worktree',

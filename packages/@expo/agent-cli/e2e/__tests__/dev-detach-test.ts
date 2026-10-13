@@ -176,6 +176,7 @@ describe('@expo/agent-cli dev --detach', () => {
 
       expect(Object.keys(JSON.parse(result.stdout)).sort()).toEqual([
         'alreadyRunning',
+        'device',
         'followups',
         'logFile',
         'phase',

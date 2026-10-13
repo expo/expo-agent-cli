@@ -28,7 +28,9 @@ import {
   acquireLine,
   devicesDisabled,
   hostBindsPlatform,
+  localBackendOf,
 } from '../deviceBinding';
+import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
 import { PORT_WATCH_TIMEOUT_MS, readLastLoggedDevServerPort } from '../devLock/port';
 import { event as cliEvent } from '../events';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
@@ -139,6 +141,8 @@ export interface DevDetachResultJson {
    * @see llp/0005-runtime-loop-tools.rfc.md §Where a device reaches the dev server
    */
   tunnelUrl: string | null;
+  /** This worktree's device for the platform, or null when the run binds none. */
+  device: BindingSummary | null;
   /** How long the whole thing took, in milliseconds. */
   waitedMs: number;
   followups: FollowUp[];
@@ -281,7 +285,7 @@ export async function devDetachAsync(
         : null;
     // Read the verdict and PID after both awaits: either can outlast the running server.
     await checkReuseFailureAsync(lock, statusAnswering);
-    return reportDetached(projectRoot, options, {
+    return reportDetachedAsync(projectRoot, options, {
       lock,
       alreadyRunning: true,
       ready: checked?.result.ready ?? null,
@@ -468,7 +472,7 @@ export async function devDetachAsync(
     });
   }
 
-  return reportDetached(projectRoot, options, {
+  return reportDetachedAsync(projectRoot, options, {
     lock,
     alreadyRunning: false,
     ready,
@@ -921,7 +925,7 @@ async function waitForTunnelUrlAsync(
 }
 
 /** Print the report of a detached run, in whichever form was asked for. */
-function reportDetached(
+async function reportDetachedAsync(
   projectRoot: string,
   options: DevOptions,
   {
@@ -953,7 +957,7 @@ function reportDetached(
      */
     log?: DetachedLogRead | null;
   }
-): number {
+): Promise<number> {
   const report: DevDetachResultJson = {
     url: lock.url,
     port: lock.port,
@@ -970,6 +974,7 @@ function reportDetached(
     phase: childPhaseOf(log).phase,
     portMoved: alreadyRunning ? null : plannedPortMove(log, lock),
     tunnelUrl,
+    device: await boundDeviceAsync(projectRoot, options),
     waitedMs: Date.now() - startedAt,
     followups: [],
   };
@@ -1001,6 +1006,26 @@ function reportDetached(
     reportFollowUps('dev', report.followups, { json: options.json });
   }
   return 0;
+}
+
+/** Read from the binding file, under the same conditions `dev` binds under. */
+async function boundDeviceAsync(
+  projectRoot: string,
+  options: DevOptions
+): Promise<BindingSummary | null> {
+  const platform = options.platform;
+  if (
+    (platform !== 'ios' && platform !== 'android') ||
+    options.deviceBackend === 'eas' ||
+    devicesDisabled() ||
+    !hostBindsPlatform(platform)
+  ) {
+    return null;
+  }
+  const backend = localBackendOf(platform);
+  return (
+    (await readBindingSummaryAsync(projectRoot)).find((entry) => entry.backend === backend) ?? null
+  );
 }
 
 /**
@@ -1057,6 +1082,10 @@ function printHumanReport(report: DevDetachResultJson): void {
   // the two is what a whole dogfood session was lost to [observed — 2026-08-24].
   if (report.tunnelUrl) {
     lines.push(`${label('Tunnel')}${report.tunnelUrl}`);
+  }
+  if (report.device) {
+    const { name, id, origin } = report.device;
+    lines.push(`${label('Device')}${name} (${id}) · ${origin}`);
   }
   lines.push(`${label('Took')}${report.waitedMs}ms`);
   if (report.alreadyRunning) {
