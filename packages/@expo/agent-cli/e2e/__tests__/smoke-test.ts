@@ -948,6 +948,29 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
+    it('restarts the reused dev server when no app connected to the device it released', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      await installStatefulXcrunAsync(projectRoot, {
+        simulators: [{ udid: 'E2E-PARKED', name: 'agent-cli deadbeef', state: 'Shutdown' }],
+      });
+      await bindingFixture(projectRoot, 'E2E-PARKED', 'agent-cli deadbeef');
+      await installStubNpxAsync(projectRoot);
+      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+
+      try {
+        const report = await runAsync(projectRoot, stub);
+
+        expect(report.appsConnected).toBe(0);
+        expect(report.environment).toMatchObject({ devServer: 'reused', device: 'booted' });
+        expect(report.environment.boundDevice).toMatchObject({ id: 'E2E-PARKED', released: true });
+        expect(report.followups[0].command).toBe(
+          'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --detach --wait-ready'
+        );
+      } finally {
+        await stub.close();
+      }
+    });
+
     it('names the bound device it found the app on, and keeps it', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
       const { calls: readXcrun } = await installStatefulXcrunAsync(projectRoot, {

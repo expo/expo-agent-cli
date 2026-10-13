@@ -31,7 +31,8 @@ function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput 
     appMismatch: null,
     appMismatchKind: null,
     buildAttempted: false,
-    cleanedUp: false,
+    serverStopped: false,
+    deviceReleased: false,
     port: null,
     ...overrides,
   };
@@ -118,7 +119,8 @@ describe(buildSmokeFollowUps, () => {
         appsConnected: 0,
         outcome: 'inconclusive',
         platform: 'android',
-        cleanedUp: true,
+        serverStopped: true,
+        deviceReleased: true,
         port: '8092',
       })
     ).toEqual([
@@ -126,6 +128,19 @@ describe(buildSmokeFollowUps, () => {
       'npx @expo/agent-cli navigate / --android',
       'npx @expo/agent-cli smoke --android --port 8092',
     ]);
+  });
+
+  // `dev --detach` refuses `not-reusable` while this worktree's dev server runs with no device.
+  it(`restarts the reused dev server after the run released the device it booted`, () => {
+    const followups = buildSmokeFollowUps(
+      input({ appsConnected: 0, outcome: 'inconclusive', deviceReleased: true, port: '8092' })
+    );
+    expect(followups.map((followup) => followup.command)).toEqual([
+      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --detach --wait-ready --port 8092',
+      'npx @expo/agent-cli navigate / --ios',
+      'npx @expo/agent-cli smoke --ios --port 8092',
+    ]);
+    expect(followups[0]?.why).not.toMatch(/stopped the dev server/);
   });
 
   it(`keeps the caller's --port on a repeated smoke`, () => {

@@ -95,12 +95,16 @@ export interface SmokeFollowUpInput {
    */
   cloud: boolean;
   /**
-   * This run stopped the dev server it started or released the device it bound, so `navigate`
-   * finds no dev server or refuses `NO_BOUND_DEVICE`.
+   * This run stopped the dev server it started, so `navigate` finds no dev server.
    *
    * @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
    */
-  cleanedUp: boolean;
+  serverStopped: boolean;
+  /**
+   * This run released the device it bound, so `navigate` refuses `NO_BOUND_DEVICE`, and `dev
+   * --detach` refuses `not-reusable` while this worktree's dev server still runs.
+   */
+  deviceReleased: boolean;
   /** The caller's `--port`, for a repeated run on the same dev server. */
   port: string | null;
 }
@@ -259,13 +263,20 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     ]);
   }
 
-  if (input.appsConnected === 0 && input.cleanedUp && !input.cloud) {
+  if (input.appsConnected === 0 && (input.serverStopped || input.deviceReleased) && !input.cloud) {
+    const start = `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready${onPort}`;
     return capFollowUps([
-      {
-        id: 'dev-detach',
-        command: `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready${onPort}`,
-        why: 'This run stopped the dev server it started and released its device, so nothing is left to open the app on. This starts both again and keeps them running.',
-      },
+      input.serverStopped
+        ? {
+            id: 'dev-detach',
+            command: start,
+            why: 'This run stopped the dev server it started and released its device, so nothing is left to open the app on. This starts both again and keeps them running.',
+          }
+        : {
+            id: 'dev-restart',
+            command: `${PROGRAM_PREFIX} dev:stop && ${start}`,
+            why: 'This run released the device it booted, and the dev server it found is still running without one, which dev refuses to bind a new device to. This restarts the dev server, which binds a device, and keeps both running.',
+          },
       {
         id: 'navigate',
         command: `${PROGRAM_PREFIX} navigate ${input.route ?? '/'} --${input.platform}`,

@@ -9,7 +9,8 @@ import {
 } from '../../deviceBinding';
 import { androidBindingFor, bindingFor } from '../../deviceBinding/__tests__/fakeTools';
 import { resolveSmokeOptions } from '../resolveOptions';
-import { buildSmokeDeps, deviceBoundByStart } from '../smokeAsync';
+import { buildSmokeDeps, cleanupLeft, deviceBoundByStart } from '../smokeAsync';
+import type { SmokeEnvironmentJson } from '../types';
 
 vi.mock('../../log');
 vi.mock('../../deviceBinding', async (importOriginal) => ({
@@ -182,5 +183,53 @@ describe(deviceBoundByStart, () => {
 
   it('reads no device when the start left no binding', () => {
     expect(deviceBoundByStart(bindingFor(projectRoot, 'SIM-OLD'), null)).toBeUndefined();
+  });
+});
+
+describe(cleanupLeft, () => {
+  const device = {
+    id: 'SIM-1',
+    name: 'agent-cli 0000',
+    action: 'created',
+    shutDown: true,
+  } as const;
+  const environment = (overrides: Partial<SmokeEnvironmentJson>): SmokeEnvironmentJson => ({
+    devServer: 'reused',
+    device: 'booted',
+    deviceChoice: null,
+    boundDevice: null,
+    cleanup: [],
+    ...overrides,
+  });
+
+  it('keeps the reused dev server apart from the device the run released', () => {
+    expect(
+      cleanupLeft(
+        environment({
+          boundDevice: { ...device, released: true },
+          cleanup: [{ resource: 'device', target: 'SIM-1', ok: true, reason: null, ms: 1 }],
+        })
+      )
+    ).toEqual({ serverStopped: false, deviceReleased: true });
+  });
+
+  it('reports the dev server this run stopped', () => {
+    expect(
+      cleanupLeft(
+        environment({
+          devServer: 'started',
+          boundDevice: { ...device, released: true },
+          cleanup: [
+            {
+              resource: 'dev-server',
+              target: 'http://127.0.0.1:8081',
+              ok: true,
+              reason: null,
+              ms: 1,
+            },
+          ],
+        })
+      )
+    ).toEqual({ serverStopped: true, deviceReleased: true });
   });
 });
