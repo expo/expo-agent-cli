@@ -19,6 +19,7 @@ import {
   spawnAgentCli,
   waitForAsync,
   waitForDevLockAsync,
+  expoHomeOf,
 } from '../utils';
 import { installStubXcrunAsync } from './installedAppStubs';
 
@@ -1103,7 +1104,7 @@ describe('@expo/agent-cli dev', () => {
       ]);
       // One `simctl`, installed once: both runs create and boot against its one simulator state.
       const { binDir, calls: readXcrun } = await installStubXcrunAsync(first!);
-      const home = `${first}.expo-home`;
+      const home = expoHomeOf(first);
       const env = {
         ...pathEnvVars(`${binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`),
         __UNSAFE_EXPO_HOME_DIRECTORY: home,

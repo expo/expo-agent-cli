@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import { digestOf } from '../../src/devLock/address';
 import { canonicalizeExistingPath } from '../../src/utils/dir';
-import { installStubBinAsync } from '../utils';
+import { installStubBinAsync, expoHomeOf } from '../utils';
 
 export const APK_FIXTURE = path.resolve(__dirname, '../../src/__fixtures__/zip/fixture-stored.zip');
 /** An archive whose `app.fingerprint` is not the JSON `expo-constants` writes: a pre-JSON build. */
@@ -42,7 +42,7 @@ export type StubCalls = () => string[][];
 
 /**
  * Bind `udid` to the fixture worktree in the registry the harness's Expo home holds
- * (`<projectRoot>.expo-home`, @ref ../utils §spawnAgentCli), as `dev` would have: `created`, the
+ * (`<projectRoot>/.expo-home`, @ref ../utils §spawnAgentCli), as `dev` would have: `created`, the
  * lease 60 min ahead, the canonical root. Every verb of the fixture then drives this simulator
  * (llp/0035 §Readers), so a case that hands a verb a booted simulator seeds this first.
  */
@@ -50,7 +50,7 @@ export async function bindingFixture(projectRoot: string, udid: string, name = S
   const root = canonicalizeExistingPath(projectRoot);
   const now = Date.now();
   const file = path.join(
-    `${projectRoot}.expo-home`,
+    expoHomeOf(projectRoot),
     'agent-cli',
     'bindings',
     `${digestOf(root)}-ios-local-ios.json`

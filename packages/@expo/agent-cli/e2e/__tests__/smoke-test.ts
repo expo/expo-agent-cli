@@ -27,6 +27,7 @@ import {
   readStubExpoInvocations,
   stubExpoEnv,
   type StubDevServer,
+  expoHomeOf,
 } from '../utils';
 import {
   appStartedMarkerPath,
@@ -755,7 +756,7 @@ describe('@expo/agent-cli smoke', () => {
 
     /** The registry file of the fixture, as `dev` or `smoke` wrote it. */
     function readBinding(projectRoot: string): Record<string, any> | null {
-      const dir = path.join(`${projectRoot}.expo-home`, 'agent-cli', 'bindings');
+      const dir = path.join(expoHomeOf(projectRoot), 'agent-cli', 'bindings');
       const file = fs.existsSync(dir)
         ? fs.readdirSync(dir).find((name) => name.endsWith('-ios-local-ios.json'))
         : null;

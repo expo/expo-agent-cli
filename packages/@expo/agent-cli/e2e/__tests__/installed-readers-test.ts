@@ -11,7 +11,7 @@ import { listConnectedIosDevicesAsync } from '../../src/device/devicectl';
 import { readInstalledFingerprintAndroidAsync } from '../../src/installedApp/android';
 import { readInstalledFingerprintIosAsync } from '../../src/installedApp/ios';
 import { readInstalledFingerprintIosDeviceAsync } from '../../src/installedApp/iosDevice';
-import { getTemporaryPath, pathEnvVars } from '../utils';
+import { getTemporaryPath, pathEnvVars, expoHomeOf } from '../utils';
 import {
   EMBEDDED_HASH,
   EMULATOR_NAME,
@@ -109,7 +109,7 @@ describe('the simulator reader over a stub xcrun', () => {
   function useStubs(binDir: string): void {
     restore = withEnv({
       ...pathEnvVars(`${binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`),
-      __UNSAFE_EXPO_HOME_DIRECTORY: `${root}.expo-home`,
+      __UNSAFE_EXPO_HOME_DIRECTORY: expoHomeOf(root),
     });
   }
 
@@ -173,7 +173,7 @@ describe('the phone probe over a stub devicectl', () => {
       ...pathEnvVars(
         `${xcrun.binDir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}`
       ),
-      __UNSAFE_EXPO_HOME_DIRECTORY: `${root}.expo-home`,
+      __UNSAFE_EXPO_HOME_DIRECTORY: expoHomeOf(root),
     });
     return xcrun;
   }
