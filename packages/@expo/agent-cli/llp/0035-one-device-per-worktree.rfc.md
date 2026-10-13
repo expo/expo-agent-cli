@@ -567,7 +567,7 @@ How does a person pick a device?
 
 How does an agent see its binding?
 
-`status --json` `binding`, per §Output and errors. With no device bound on the platform, or with a binding whose lease expired, `status`'s next action is `dev --<platform> --detach --wait-ready`, plus the plan's own flags such as `--eas`, because every device verb refuses without a live binding. Where `dev` binds no device (`AGENT_CLI_NO_DEVICE=1`, iOS off macOS, Android with no `adb`), `status` keeps the plan's next action, or it would name the same `dev` command forever.
+`status --json` `binding`, per §Output and errors. With no device bound on the platform, or with a binding whose lease expired, `status`'s next action is `dev --<platform> --detach --wait-ready`, plus the plan's own flags such as `--eas`, because every device verb refuses without a live binding. Where `dev` binds no device (`AGENT_CLI_NO_DEVICE=1`, iOS off macOS, Android with no `adb`), `status` keeps the plan's next action, or it would name the same `dev` command forever. A detached `dev` reads the binding after the child reports ready and prints one `Device <name> (<id>) · <origin>` line, where the origin is how the device came to be bound, not what this run did; `--json` carries the same binding summary under `device`, or `null` when the run binds none.
 
 ### Lifecycle tests
 
