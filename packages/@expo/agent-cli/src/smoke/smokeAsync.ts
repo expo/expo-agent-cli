@@ -225,6 +225,10 @@ function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
     // The `start-dev-server` phase is only in the list for a run that performed one, and it is
     // charged as a build when the plan compiled (@ref ./phases §BUILD_DEV_SERVER_TIMEOUT_MS).
     buildAttempted: run.buildAttempted,
+    cleanedUp:
+      run.environment.boundDevice?.released === true ||
+      run.environment.cleanup.some(({ resource, ok }) => resource === 'dev-server' && ok),
+    port: startPortArgs(options.devServerUrl)[1] ?? null,
     // `required` is `--eas`; `fallback` is a run that would only reach a session if this machine
     // had no device, and a ladder must not put a billed session on a line the caller never asked
     // for (llp/0005 §Cloud simulator).

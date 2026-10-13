@@ -94,6 +94,15 @@ export interface SmokeFollowUpInput {
    * already carried it; this did not.
    */
   cloud: boolean;
+  /**
+   * This run stopped the dev server it started or released the device it bound, so `navigate`
+   * finds no dev server or refuses `NO_BOUND_DEVICE`.
+   *
+   * @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
+   */
+  cleanedUp: boolean;
+  /** The caller's `--port`, for a repeated run on the same dev server. */
+  port: string | null;
 }
 
 export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
@@ -103,7 +112,8 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   // `runtime:errors` — are unaffected: none of them is about a device.
   const onCloud = input.cloud ? ' --eas' : '';
   // The flag first, so a reader sees what the command is about before what it opens.
-  const same = ` --${input.platform}${sameRoute}${onCloud}`;
+  const onPort = input.port == null ? '' : ` --port ${input.port}`;
+  const same = ` --${input.platform}${sameRoute}${onCloud}${onPort}`;
   const otherPlatform = input.platform === 'android' ? 'ios' : 'android';
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
@@ -245,6 +255,26 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
         id: 'smoke-again',
         command: `${PROGRAM_PREFIX} smoke${same}`,
         why: 'The dev server rebuilds on save, so this is the gate to run again once the file parses.',
+      },
+    ]);
+  }
+
+  if (input.appsConnected === 0 && input.cleanedUp && !input.cloud) {
+    return capFollowUps([
+      {
+        id: 'dev-detach',
+        command: `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready${onPort}`,
+        why: 'This run stopped the dev server it started and released its device, so nothing is left to open the app on. This starts both again and keeps them running.',
+      },
+      {
+        id: 'navigate',
+        command: `${PROGRAM_PREFIX} navigate ${input.route ?? '/'} --${input.platform}`,
+        why: 'Opens the app on the device the command above bound, once its dev server is ready.',
+      },
+      {
+        id: 'smoke-again',
+        command: `${PROGRAM_PREFIX} smoke${same}`,
+        why: 'Runs the same gate again, which brings its own dev server and device.',
       },
     ]);
   }

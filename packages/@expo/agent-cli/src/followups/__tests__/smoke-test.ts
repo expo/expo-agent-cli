@@ -31,6 +31,8 @@ function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput 
     appMismatch: null,
     appMismatchKind: null,
     buildAttempted: false,
+    cleanedUp: false,
+    port: null,
     ...overrides,
   };
 }
@@ -105,6 +107,30 @@ describe(buildSmokeFollowUps, () => {
     );
     expect(commands({ appsConnected: 0, outcome: 'inconclusive', platform: 'android' })[0]).toBe(
       'npx @expo/agent-cli navigate / --android'
+    );
+  });
+
+  // `navigate` refuses NO_BOUND_DEVICE once the run released its device, and finds no dev server
+  // once it stopped the one it started.
+  it(`answers no connected app after the run put its environment back with the start that brings it again`, () => {
+    expect(
+      commands({
+        appsConnected: 0,
+        outcome: 'inconclusive',
+        platform: 'android',
+        cleanedUp: true,
+        port: '8092',
+      })
+    ).toEqual([
+      'npx @expo/agent-cli dev --android --detach --wait-ready --port 8092',
+      'npx @expo/agent-cli navigate / --android',
+      'npx @expo/agent-cli smoke --android --port 8092',
+    ]);
+  });
+
+  it(`keeps the caller's --port on a repeated smoke`, () => {
+    expect(commands({ appsConnected: 0, outcome: 'inconclusive', port: '8092' })).toContain(
+      'npx @expo/agent-cli smoke --ios --port 8092'
     );
   });
 

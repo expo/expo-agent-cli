@@ -985,6 +985,13 @@ describe('@expo/agent-cli smoke', () => {
           expect.objectContaining({ resource: 'device', target: 'E2E-PARKED', ok: true })
         );
         expect(readXcrun()).toContainEqual(['simctl', 'shutdown', 'E2E-PARKED']);
+        // The run put back both the dev server and the device, so `navigate` alone has neither.
+        expect(report.outcome).toBe('inconclusive');
+        expect(report.followups.map((followup: any) => followup.command)).toEqual([
+          'npx @expo/agent-cli dev --ios --detach --wait-ready --port 9353',
+          'npx @expo/agent-cli navigate / --ios',
+          'npx @expo/agent-cli smoke --ios --port 9353',
+        ]);
       } finally {
         await executeAgentCliAsync(projectRoot, ['dev:stop', '--release', '--json'], {
           env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' },
