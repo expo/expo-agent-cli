@@ -103,7 +103,7 @@ export async function acquireDeviceAsync(
   const { binding, action, boot } = section;
   const result = await boot();
   if (!result.ok) {
-    await releaseWorktreeDevicesAsync(projectRoot, { platform, tools });
+    await releaseWorktreeDevicesAsync(projectRoot, { platform, tools, expected: binding });
     throw deviceUnavailableError('boot-failed', { platform, detail: result.reason ?? undefined });
   }
   return { device: binding.device, justBooted: section.justBooted, action };
