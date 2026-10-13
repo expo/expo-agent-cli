@@ -20,6 +20,10 @@ on:
   workflow_dispatch: {}
   pull_request: {}
 
+concurrency:
+  cancel_in_progress: true
+  group: ${{ workflow.filename }}-${{ github.ref }}
+
 # Base dir is packages/@expo/agent-cli; the monorepo is three levels up. Steps run from the repo root so
 # the bun workspace resolves; the last step cds into the package to run the suite. Node 24 because the
 # Expo Go jobs scaffold an app with create-expo, which needs the Node 20+ `File` global.
