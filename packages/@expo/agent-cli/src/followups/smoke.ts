@@ -101,8 +101,9 @@ export interface SmokeFollowUpInput {
    */
   serverStopped: boolean;
   /**
-   * This run released the device it bound, so `navigate` refuses `NO_BOUND_DEVICE`, and `dev
-   * --detach` refuses `not-reusable` while this worktree's dev server still runs.
+   * This run released the device it bound, so `navigate` refuses `NO_BOUND_DEVICE`. On Android the
+   * release removes a spawned instance's binding, so `dev --detach` refuses `not-reusable` while
+   * this worktree's dev server still runs; a parked simulator keeps its binding.
    */
   deviceReleased: boolean;
   /** The caller's `--port`, for a repeated run on the same dev server. */
@@ -263,23 +264,41 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     ]);
   }
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
+  const start = `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready${onPort}`;
+  const deviceBack: FollowUp[] =
+    !input.deviceReleased || input.serverStopped || input.cloud
+      ? []
+      : input.platform === 'ios'
+        ? [
+            {
+              id: 'dev-detach',
+              command: start,
+              why: "This run released the simulator it booted, and the dev server it found still runs without a device. The simulator keeps this worktree's binding, so this binds it again beside that dev server.",
+            },
+          ]
+        : [
+            {
+              id: 'dev-restart',
+              command: `${PROGRAM_PREFIX} dev:stop && ${start}`,
+              why: "This run released the emulator it bound, which removes a spawned instance's binding, and the dev server it found still runs without a device, which dev refuses to bind a new device to. This restarts the dev server, which binds a device, and keeps both running.",
+            },
+          ];
+
   const lookAgain =
     input.appsConnected === 0 ||
     (input.outcome === 'inconclusive' && input.runtimeSupported !== false);
   if (lookAgain && (input.serverStopped || input.deviceReleased) && !input.cloud) {
-    const start = `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready${onPort}`;
     return capFollowUps([
-      input.serverStopped
-        ? {
-            id: 'dev-detach',
-            command: start,
-            why: 'This run stopped the dev server it started and released its device, so nothing is left to open the app on. This starts both again and keeps them running.',
-          }
-        : {
-            id: 'dev-restart',
-            command: `${PROGRAM_PREFIX} dev:stop && ${start}`,
-            why: 'This run released the device it booted, and the dev server it found is still running without one, which dev refuses to bind a new device to. This restarts the dev server, which binds a device, and keeps both running.',
-          },
+      ...(input.serverStopped
+        ? [
+            {
+              id: 'dev-detach',
+              command: start,
+              why: 'This run stopped the dev server it started and released its device, so nothing is left to open the app on. This starts both again and keeps them running.',
+            },
+          ]
+        : deviceBack),
       {
         id: 'navigate',
         command: `${PROGRAM_PREFIX} navigate ${input.route ?? '/'} --${input.platform}`,
@@ -314,6 +333,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   // platform (llp/0005-runtime-loop-tools.rfc.md §Android), and a caller told to look again would loop.
   if (input.runtimeSupported === false) {
     return capFollowUps([
+      ...deviceBack,
       {
         id: 'runtime-errors',
         // @ref ../runtime/runtimeAsync — friction run 6, F52 and F55. This used to be
@@ -350,6 +370,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     const windowMightPredateTheFix =
       input.reloadDisposition === 'declined' || input.reloadDisposition === 'unproved';
     return capFollowUps([
+      ...deviceBack,
       ...(windowMightPredateTheFix
         ? [
             {
@@ -381,6 +402,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   // right — the `Spacing.md` finding rendered a screen with `padding: undefined` and every gate
   // green.
   const passed: FollowUp[] = [
+    ...deviceBack,
     {
       id: 'typecheck',
       command: `${PROGRAM_PREFIX} typecheck`,
