@@ -2,14 +2,18 @@
 import type { ExplicitRequest } from '../deviceBinding/explicit';
 import { CommandError } from '../utils/errors';
 
+/** The caller's argv, set on a detached child, whose own argv lacks `--detach`, `--wait-ready` and `--json`. */
+export const CALLER_ARGV_ENV = '__EXPO_AGENT_CLI_CALLER_ARGV';
+
 /** A refusal's How repeats the caller's arguments, but runs the plan instead of printing it again. */
 export function explicitRequestOf(
   device: string | undefined,
   argv: readonly string[]
 ): ExplicitRequest | undefined {
-  return device === undefined
-    ? undefined
-    : { query: device, rerun: withoutDeviceArgs(argv).filter((arg) => arg !== '--plan') };
+  if (device === undefined) return undefined;
+  const caller = process.env[CALLER_ARGV_ENV];
+  const command = caller ? (JSON.parse(caller) as string[]) : argv;
+  return { query: device, rerun: withoutDeviceArgs(command).filter((arg) => arg !== '--plan') };
 }
 
 export function resolveDeviceOption(argv: string[]): string | undefined {

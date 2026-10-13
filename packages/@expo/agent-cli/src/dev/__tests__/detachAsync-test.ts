@@ -18,6 +18,7 @@ import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime
 import { logCmdError, type CommandError } from '../../utils/errors';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
+import { CALLER_ARGV_ENV, explicitRequestOf } from '../deviceOption';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
 import { resolveDevOptions } from '../resolveOptions';
@@ -721,6 +722,42 @@ describe('the bound device', () => {
       suggestedCommand: 'xcodebuild -downloadPlatform iOS',
     });
     expect(error.message).toBe(refusal.message);
+  });
+
+  it("gives the child's --device refusal the caller's flags, --detach and --wait-ready too", async () => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(null);
+    const argv = ['--ios', '--device', 'Sim', '--detach', '--wait-ready', '--port', '8092'];
+    let spawned: { args: readonly string[]; env: NodeJS.ProcessEnv } | undefined;
+    vi.mocked(spawn).mockImplementation(((
+      _command: string,
+      args: string[],
+      options: { env: NodeJS.ProcessEnv }
+    ) => {
+      spawned = { args, env: options.env };
+      const child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
+      setTimeout(() => child.emit('exit', 1, null), 50);
+      return child as unknown as ChildProcess;
+    }) as typeof spawn);
+
+    const result = devDetachAsync(projectRoot, resolveDevOptions(argv), { print: false }).catch(
+      () => null
+    );
+    await vi.runAllTimersAsync();
+    await result;
+
+    const childArgv = spawned!.args.slice(spawned!.args.indexOf('dev') + 1);
+    vi.stubEnv(CALLER_ARGV_ENV, spawned!.env[CALLER_ARGV_ENV]);
+    try {
+      expect(explicitRequestOf('Sim', childArgv)?.rerun).toEqual([
+        '--ios',
+        '--detach',
+        '--wait-ready',
+        '--port',
+        '8092',
+      ]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
