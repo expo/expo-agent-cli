@@ -886,7 +886,7 @@ describe('@expo/agent-cli dev', () => {
     const roots: string[] = [];
     afterEach(async () => {
       for (const root of roots.splice(0)) {
-        await killBoundEmulatorsAsync(`${root}.expo-home`);
+        await killBoundEmulatorsAsync(expoHomeOf(root));
       }
     });
 
@@ -990,7 +990,7 @@ describe('@expo/agent-cli dev', () => {
         ['-list-avds'],
         ['-avd', EMULATOR_NAME, '-ports', '5554,5555', '-no-snapshot-save', '-read-only'],
       ]);
-      const dir = path.join(`${projectRoot}.expo-home`, 'agent-cli', 'bindings');
+      const dir = path.join(expoHomeOf(projectRoot), 'agent-cli', 'bindings');
       const file = fs.readdirSync(dir).find((name) => name.endsWith('-android-local-android.json'));
       const binding = JSON.parse(fs.readFileSync(path.join(dir, file!), 'utf8'));
       expect(binding.device).toMatchObject({
@@ -1204,7 +1204,7 @@ describe('@expo/agent-cli dev', () => {
       // One stub SDK and one instance state, installed once: both runs spawn against it.
       const adb = await installStubAdbAsync(first!, APP_ID, { attached: false });
       await installStubEmulatorAsync(first!);
-      home = `${first}.expo-home`;
+      home = expoHomeOf(first);
       const env = { ...adb.env, AGENT_CLI_NO_DEVICE: '0' };
 
       const results = await Promise.all(

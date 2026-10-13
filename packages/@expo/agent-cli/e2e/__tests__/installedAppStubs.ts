@@ -79,7 +79,7 @@ export async function androidBindingFixture(projectRoot: string, serial: string)
   const root = canonicalizeExistingPath(projectRoot);
   const now = Date.now();
   const file = path.join(
-    `${projectRoot}.expo-home`,
+    expoHomeOf(projectRoot),
     'agent-cli',
     'bindings',
     `${digestOf(root)}-android-local-android.json`
@@ -257,7 +257,7 @@ export async function installStubAdbAsync(
   const sdk = path.join(root, '.stub-android-sdk');
   await installStubBinAsync(path.join(sdk, 'platform-tools'), 'adb', scriptPath);
   return {
-    env: { ANDROID_HOME: sdk, __UNSAFE_EXPO_HOME_DIRECTORY: `${root}.expo-home` },
+    env: { ANDROID_HOME: sdk, __UNSAFE_EXPO_HOME_DIRECTORY: expoHomeOf(root) },
     calls: () => readCalls(recordPath),
   };
 }
