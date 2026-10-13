@@ -374,7 +374,12 @@ export function buildStartPlanFollowUps(
     });
   }
 
-  return capFollowUps(followups);
+  return capFollowUps(
+    followups.filter(
+      (followup, index) =>
+        followups.findIndex((first) => first.command === followup.command) === index
+    )
+  );
 }
 
 /**

@@ -59,9 +59,20 @@ describe(formatStartPlan, () => {
       .split('\n')
       .map(strip);
 
-    const device = lines.indexOf('  Device: Will refuse: No device uniquely matches "x".');
+    const device = lines.indexOf('  Device: Will refuse — No device uniquely matches "x".');
     expect(device).toBeGreaterThan(lines.findIndex((line) => line.includes('expo run:ios')));
     expect(device).toBeLessThan(lines.indexOf('  Why'));
+  });
+
+  it(`should print a binding plan's summary after Device with no verb of its own`, () => {
+    const lines = formatStartPlan({
+      ...plan,
+      explicitDevice: { refuses: false, summary: 'Will bind Sim (UDID-1).' },
+    })
+      .split('\n')
+      .map(strip);
+
+    expect(lines).toContain('  Device: Will bind Sim (UDID-1).');
   });
 
   it(`should report the rule and the target`, () => {

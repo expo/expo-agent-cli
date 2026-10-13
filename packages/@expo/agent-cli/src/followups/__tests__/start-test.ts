@@ -209,6 +209,27 @@ describe(buildStartPlanFollowUps, () => {
     expect(followups[0]!.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
   });
 
+  it(`should list a refusal's How once when another follow-up carries the same command`, () => {
+    const followups = buildStartPlanFollowUps(
+      mockPlan({
+        explicitDevice: {
+          refuses: true,
+          summary: 'No device uniquely matches "x".',
+          how: 'npx @expo/agent-cli status --json',
+        },
+      }),
+      mockState({
+        expoGo: {
+          compatible: false,
+          reasons: [{ kind: 'custom-native-code', detail: 'Native module.' }],
+        },
+      }),
+      'ios'
+    );
+
+    expect(ids(followups)).toEqual(['device-refusal']);
+  });
+
   it(`should offer to run the plan that was printed`, () => {
     const followups = buildStartPlanFollowUps(mockPlan(), mockState());
 
