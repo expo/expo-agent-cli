@@ -33,9 +33,17 @@ const device = {
   shutDown: false,
   reason: null,
 };
+let originalFetch: typeof fetch;
 beforeEach(() => {
+  originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('connect ECONNREFUSED');
+  }) as unknown as typeof fetch;
   vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
   vi.mocked(keptDevices).mockReturnValue([device]);
+});
+afterEach(() => {
+  globalThis.fetch = originalFetch;
 });
 
 it('release-keeps-devices-when-own-server-runs-on-another-port', async () => {
