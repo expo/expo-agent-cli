@@ -232,4 +232,15 @@ describe(cleanupLeft, () => {
       )
     ).toEqual({ serverStopped: true, deviceReleased: true });
   });
+
+  it('reports a device the run did not bind as not released', () => {
+    expect(
+      cleanupLeft(
+        environment({
+          device: 'reused',
+          boundDevice: { ...device, action: 'existing', released: null },
+        })
+      )
+    ).toEqual({ serverStopped: false, deviceReleased: false });
+  });
 });

@@ -168,8 +168,11 @@ export interface SmokeBoundDeviceJson {
    * acquired nothing and the worktree's binding names the device the run used.
    */
   action: AcquireAction | 'existing';
-  /** The release at the end of the run let go of it. */
-  released: boolean;
+  /**
+   * The release at the end of the run let go of it. `false` when that release failed, `null` for
+   * an `existing` device, which this run did not bind and keeps.
+   */
+  released: boolean | null;
   /** That release shut it down: a parked simulator, a stopped emulator instance. */
   shutDown: boolean;
 }

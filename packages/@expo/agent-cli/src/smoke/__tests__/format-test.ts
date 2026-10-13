@@ -440,7 +440,7 @@ describe(formatSmokeResult, () => {
                 id: 'B632F0AE',
                 name: 'dogfood-explicit',
                 action: 'existing',
-                released: false,
+                released: null,
                 shutDown: false,
               },
               cleanup: [],
@@ -452,6 +452,34 @@ describe(formatSmokeResult, () => {
 
       expect(printed).toContain(`device      dogfood-explicit (B632F0AE) · already bound · kept`);
       expect(printed).not.toContain('NOT released');
+    });
+
+    it(`says a device it bound and could not release was not released`, () => {
+      const printed = stripVTControlCharacters(
+        formatSmokeResult(
+          run({
+            deviceId: 'A31EB033',
+            environment: {
+              devServer: 'reused',
+              device: 'booted',
+              deviceChoice: 'agent-cli e09c747f',
+              boundDevice: {
+                id: 'A31EB033',
+                name: 'agent-cli e09c747f',
+                action: 'created',
+                released: false,
+                shutDown: false,
+              },
+              cleanup: [],
+            },
+          }),
+          options()
+        )
+      );
+
+      expect(printed).toContain(
+        `device      agent-cli e09c747f (A31EB033) · created for this run · NOT released`
+      );
     });
 
     // Most runs start nothing, and a line saying so every time would bury the runs that did.

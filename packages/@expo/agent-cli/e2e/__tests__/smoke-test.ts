@@ -994,7 +994,7 @@ describe('@expo/agent-cli smoke', () => {
           id: 'E2E-BOOTED',
           name: 'dogfood-explicit',
           action: 'existing',
-          released: false,
+          released: null,
           shutDown: false,
         });
         expect(report.environment.cleanup).toEqual([]);

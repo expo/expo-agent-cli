@@ -591,7 +591,7 @@ describe(runSmokePhasesAsync, () => {
     });
 
     it.each([
-      ['the device it found', 'SIM-1', { action: 'existing', released: false, shutDown: false }],
+      ['the device it found', 'SIM-1', { action: 'existing', released: null, shutDown: false }],
       ['no device for a binding of another device', 'SIM-OTHER', null],
     ] as const)(`names this worktree's binding when it reuses %s`, async (_, id, expected) => {
       const run = await runSmokePhasesAsync(

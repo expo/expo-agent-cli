@@ -185,7 +185,7 @@ const ACQUIRED: Record<SmokeBoundDeviceJson['action'], string> = {
 /** @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke */
 function boundDeviceLine(device: SmokeBoundDeviceJson, platform: SmokeOptions['platform']): string {
   const release =
-    device.action === 'existing'
+    device.released == null
       ? 'kept'
       : !device.released
         ? chalk.yellow('NOT released')

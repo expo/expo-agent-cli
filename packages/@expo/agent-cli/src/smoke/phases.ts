@@ -749,7 +749,7 @@ export async function runSmokePhasesAsync(
         environment.boundDevice = {
           ...existing,
           action: 'existing',
-          released: false,
+          released: null,
           shutDown: false,
         };
       }
