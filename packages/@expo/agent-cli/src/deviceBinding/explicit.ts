@@ -1,9 +1,11 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Choice
+import { quoteArgument } from '../utils/consent';
 import { canonicalizeExistingPath } from '../utils/dir';
 import { CommandError } from '../utils/errors';
+import { isPlatformFlag } from '../plan/platformFlags';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Cleanup } from './cleanup';
-import { deviceCommand, deviceUnavailableError, notReusableError } from './errors';
+import { deviceUnavailableError, notReusableError } from './errors';
 import { isStale, leaseFrom } from './lease';
 import {
   bindingPathFor,
@@ -23,6 +25,8 @@ import {
 } from './types';
 
 export type ExplicitCandidate = Extract<BoundDevice, { backend: 'local-ios' | 'local-android' }>;
+/** `--device`'s value, and the caller's `dev` arguments without it, which a refusal's How repeats. */
+export type ExplicitRequest = { query: string; rerun: readonly string[] };
 type Foreign = { file: string; binding: Binding; stale: boolean };
 type Choice = { device: ExplicitCandidate; reused: boolean; transfer: string[] };
 
@@ -31,7 +35,7 @@ export function chooseExplicitDevice(
   own: Binding | null,
   others: Foreign[],
   candidates: ExplicitCandidate[],
-  query: string,
+  { query, rerun }: ExplicitRequest,
   platform: DevicePlatform,
   reuseOnly: boolean
 ): Choice {
@@ -43,6 +47,7 @@ export function chooseExplicitDevice(
   if (matches.length !== 1)
     throw explicitError('explicit-not-found', query, platform, {
       matches: matches.map(deviceIdOf),
+      rerun,
     });
   const device = matches[0]!;
   const id = deviceIdOf(device);
@@ -59,20 +64,21 @@ export function chooseExplicitDevice(
   if (blocked)
     throw explicitError('explicit-bound', deviceNameOf(device), platform, {
       root: blocked.binding.projectRoot,
+      rerun,
     });
   if (
     device.backend === 'local-ios' &&
     device.name.startsWith('agent-cli ') &&
     holders.length === 0
   )
-    throw explicitError('explicit-not-found', query, platform);
+    throw explicitError('explicit-not-found', query, platform, { rerun });
   if (reuseOnly)
     throw notReusableError(
       platform,
       own ? { bound: deviceNameOf(own.device), named: deviceNameOf(device) } : undefined
     );
   if (own?.device.backend === 'local-android' && own.device.origin.kind === 'spawned')
-    throw explicitError('own-explicit-over-owned', own.device.serial, platform);
+    throw explicitError('own-explicit-over-owned', own.device.serial, platform, { rerun });
   return { device, reused: false, transfer: holders.map(({ file }) => file) };
 }
 
@@ -81,7 +87,7 @@ export function readExplicitChoice(
   projectRoot: string,
   platform: DevicePlatform,
   candidates: ExplicitCandidate[],
-  query: string,
+  explicit: ExplicitRequest,
   reuseOnly: boolean,
   tools: DeviceTools
 ) {
@@ -111,7 +117,7 @@ export function readExplicitChoice(
   return {
     file,
     own,
-    choice: chooseExplicitDevice(own, others, candidates, query, platform, reuseOnly),
+    choice: chooseExplicitDevice(own, others, candidates, explicit, platform, reuseOnly),
   };
 }
 
@@ -126,7 +132,7 @@ export function bindExplicitSection(
   projectRoot: string,
   platform: DevicePlatform,
   candidates: ExplicitCandidate[],
-  query: string,
+  explicit: ExplicitRequest,
   reuseOnly: boolean,
   tools: DeviceTools,
   actions: Cleanup[]
@@ -135,7 +141,7 @@ export function bindExplicitSection(
     projectRoot,
     platform,
     candidates,
-    query,
+    explicit,
     reuseOnly,
     tools
   );
@@ -157,26 +163,62 @@ function explicitError(
   reason: 'explicit-not-found' | 'explicit-bound' | 'own-explicit-over-owned',
   name: string,
   platform: DevicePlatform,
-  { matches = [], root }: { matches?: string[]; root?: string } = {}
+  { matches = [], root, rerun }: { matches?: string[]; root?: string; rerun: readonly string[] }
 ): CommandError {
-  const what =
-    reason === 'explicit-bound'
-      ? `${name} is bound to the worktree ${root}.`
-      : reason === 'own-explicit-over-owned'
-        ? `This worktree runs the emulator instance ${name}.`
-        : `No device uniquely matches "${name}"${matches.length ? `; matches: ${matches.join(', ')}` : ''}.`;
-  const how =
-    reason === 'explicit-bound'
-      ? deviceCommand(platform)
-      : reason === 'own-explicit-over-owned'
-        ? `${PROGRAM_PREFIX} dev:stop --release`
-        : `${PROGRAM_PREFIX} status --json`;
-  const error = new CommandError(
-    'DEVICE_UNAVAILABLE',
-    `${what}\nHow: ${reason === 'explicit-bound' ? 'remove --device, then ' : ''}run "${how}".`
-  );
+  const { what, how, line } = refusalText(reason, name, platform, { matches, root, rerun });
+  const error = new CommandError('DEVICE_UNAVAILABLE', `${what}\nHow: ${line}`);
   error.exitCode = reason === 'explicit-bound' ? 20 : 1;
   error.suggestedCommand = how;
   error.data = { reason, ...(matches.length ? { matches } : {}), ...(root ? { root } : {}) };
   return error;
+}
+
+function refusalText(
+  reason: 'explicit-not-found' | 'explicit-bound' | 'own-explicit-over-owned',
+  name: string,
+  platform: DevicePlatform,
+  { matches, root, rerun }: { matches: string[]; root?: string; rerun: readonly string[] }
+): { what: string; how: string; line: string } {
+  if (reason === 'explicit-bound') {
+    const how = devCommand(platform, rerun);
+    return {
+      what: `${name} is bound to the worktree ${root}.`,
+      how,
+      line: `remove --device, then run "${how}".`,
+    };
+  }
+  if (reason === 'own-explicit-over-owned') {
+    const how = `${PROGRAM_PREFIX} dev:stop --release`;
+    return {
+      what: `This worktree runs the emulator instance ${name}.`,
+      how,
+      line: `run "${how}".`,
+    };
+  }
+  if (matches.length) {
+    const how = devCommand(platform, rerun, matches[0]);
+    return {
+      what: `No device uniquely matches "${name}"; matches: ${matches.join(', ')}.`,
+      how,
+      line: `run "${how}", or pass another match to --device.`,
+    };
+  }
+  const how = platform === 'ios' ? 'xcrun simctl list devices available' : 'adb devices';
+  const listed = platform === 'ios' ? 'name or UDID' : 'serial';
+  return {
+    what: `No device uniquely matches "${name}".`,
+    how,
+    line: `run "${how}", then pass a listed ${listed} to --device.`,
+  };
+}
+
+/** The caller's `dev` command again, platform first, with `--device <device>` before any `--`. */
+function devCommand(platform: DevicePlatform, rerun: readonly string[], device?: string): string {
+  const separator = rerun.indexOf('--') < 0 ? rerun.length : rerun.indexOf('--');
+  const args = [
+    ...rerun.slice(0, separator).filter((arg) => !isPlatformFlag(arg)),
+    ...(device ? ['--device', device] : []),
+    ...rerun.slice(separator),
+  ];
+  return `${PROGRAM_PREFIX} dev --${platform}${args.map((arg) => ` ${quoteArgument(arg)}`).join('')}`;
 }

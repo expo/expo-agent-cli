@@ -27,7 +27,7 @@ const YES_FLAGS = new Set(['--yes', '-y']);
 const NEEDS_QUOTING = /[^\w@%+=:,./-]/;
 
 /** One argument, as a shell would have to be given it to arrive unchanged. */
-function quoteArgument(argument: string): string {
+export function quoteArgument(argument: string): string {
   if (argument !== '' && !NEEDS_QUOTING.test(argument)) {
     return argument;
   }

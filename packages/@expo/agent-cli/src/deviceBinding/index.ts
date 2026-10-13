@@ -8,7 +8,7 @@ import { deviceUnavailableError } from './errors';
 import { clearInspectCache } from './inspect';
 import { bootSimulatorAsync, readIosInventoryAsync } from './ios';
 import { bindingIdentity, bindIosSectionAsync } from './iosAcquire';
-import { bindExplicitSection } from './explicit';
+import { bindExplicitSection, type ExplicitRequest } from './explicit';
 import { acquireSectionAsync } from './reap';
 import { releaseWorktreeDevicesAsync } from './release';
 import { bindingPathFor, readBindingFile } from './registry';
@@ -71,8 +71,10 @@ export interface AcquireDeviceOptions {
   /** Any choice but a reuse is refused `not-reusable`. */
   reuseOnly?: boolean;
   tools?: DeviceTools;
-  explicit?: string;
+  explicit?: ExplicitRequest;
 }
+
+type SectionOptions = { reuseOnly: boolean; tools: DeviceTools; explicit?: ExplicitRequest };
 
 /**
  * Bind this worktree's device and boot it.
@@ -113,7 +115,7 @@ interface Acquired {
 
 async function acquireIosAsync(
   projectRoot: string,
-  { reuseOnly, tools, explicit }: { reuseOnly: boolean; tools: DeviceTools; explicit?: string }
+  { reuseOnly, tools, explicit }: SectionOptions
 ): Promise<Acquired> {
   const { binding, wasBooted, action } = await bindIosAsync(projectRoot, {
     reuseOnly,
@@ -131,7 +133,7 @@ async function acquireIosAsync(
 
 async function acquireAndroidAsync(
   projectRoot: string,
-  { reuseOnly, tools, explicit }: { reuseOnly: boolean; tools: DeviceTools; explicit?: string }
+  { reuseOnly, tools, explicit }: SectionOptions
 ): Promise<Acquired> {
   const inventory = await readAndroidInventoryAsync(tools, { avds: explicit === undefined });
   const { binding, action, handle } = await acquireSectionAsync(
@@ -194,10 +196,7 @@ function instanceWatcher(
 }
 
 /** Each inventory belongs to the binding identity observed before the device list was read. */
-async function bindIosAsync(
-  projectRoot: string,
-  { reuseOnly, tools, explicit }: { reuseOnly: boolean; tools: DeviceTools; explicit?: string }
-) {
+async function bindIosAsync(projectRoot: string, { reuseOnly, tools, explicit }: SectionOptions) {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const before = readBindingFile(file);

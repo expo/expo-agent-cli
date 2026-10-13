@@ -1,5 +1,16 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §--device on dev
+import type { ExplicitRequest } from '../deviceBinding/explicit';
 import { CommandError } from '../utils/errors';
+
+/** A refusal's How repeats the caller's arguments, but runs the plan instead of printing it again. */
+export function explicitRequestOf(
+  device: string | undefined,
+  argv: readonly string[]
+): ExplicitRequest | undefined {
+  return device === undefined
+    ? undefined
+    : { query: device, rerun: withoutDeviceArgs(argv).filter((arg) => arg !== '--plan') };
+}
 
 export function resolveDeviceOption(argv: string[]): string | undefined {
   const separator = argv.indexOf('--');

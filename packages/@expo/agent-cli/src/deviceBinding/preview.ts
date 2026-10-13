@@ -1,16 +1,25 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §--device on dev
 import { readAndroidInventoryAsync } from './emulator';
-import { readExplicitChoice, replacedByExplicit, type ExplicitCandidate } from './explicit';
+import {
+  readExplicitChoice,
+  replacedByExplicit,
+  type ExplicitCandidate,
+  type ExplicitRequest,
+} from './explicit';
 import { readIosInventoryAsync } from './ios';
 import { readBindingFile } from './registry';
 import { defaultTools } from './tools';
 import { deviceIdOf, deviceNameOf, type DevicePlatform, type DeviceTools } from './types';
 
-/** A plan reads the same choice as acquisition, but never writes, boots or reaps. */
+/**
+ * A plan reads the same choice as acquisition, but never writes, boots or reaps. `reuseOnly` is
+ * the run's: true while this worktree's dev server runs.
+ */
 export async function previewExplicitDeviceAsync(
   projectRoot: string,
   platform: DevicePlatform,
-  query: string,
+  explicit: ExplicitRequest,
+  reuseOnly: boolean,
   tools: DeviceTools = defaultTools()
 ) {
   const candidates: ExplicitCandidate[] =
@@ -34,8 +43,8 @@ export async function previewExplicitDeviceAsync(
     projectRoot,
     platform,
     candidates,
-    query,
-    false,
+    explicit,
+    reuseOnly,
     tools
   );
   const label = `${deviceNameOf(choice.device)} (${deviceIdOf(choice.device)})`;

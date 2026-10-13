@@ -7,6 +7,7 @@ import type { OpenAppOnEasReport } from './openAppEas';
 import { withLeaseExtendedAsync } from '../deviceBinding/renew';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
 import { outputTail } from '../deploy/parseOutput';
+import { readDevServerLockAsync } from '../devLock/client';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
 import {
   acquireDeviceAsync,
@@ -65,6 +66,7 @@ import {
   type WrapperCrashTool,
 } from '../utils/wrapperCrash';
 import { appReachedDevice } from './buildEvidence';
+import { explicitRequestOf } from './deviceOption';
 import { event as devEvent } from './events';
 import {
   forwardedStepArgs,
@@ -191,7 +193,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     const followups = followUpsEnabled(options.followups)
       ? // The typed flag, not the resolved platform: this is the plan the caller asked for, and the
         // command that runs it has to ask for the same one (F103).
-        buildStartPlanFollowUps(plan, state, options.platform)
+        buildStartPlanFollowUps(plan, state, options.platform, options.device)
       : [];
     emitStartPlan(plan, { mode: 'plan', json: options.json, followups });
     reportFollowUps('dev', followups, { json: options.json });
@@ -305,7 +307,9 @@ function deviceCallbackFor(
         throw await portDemandedError(projectRoot, options.port, options.platform);
       }
     }
-    const acquired = await acquireDeviceAsync(projectRoot, platform, { explicit: options.device });
+    const acquired = await acquireDeviceAsync(projectRoot, platform, {
+      explicit: explicitRequestOf(options.device, options.detachArgv),
+    });
     Log.progress(acquireLine(acquired));
     return acquired;
   };
@@ -345,12 +349,14 @@ async function withPlannedDevice(
   options: DevOptions
 ): Promise<StartPlan> {
   const selectedPlatform = boundPlatform(options);
-  if (selectedPlatform && options.device !== undefined) {
+  const explicit = explicitRequestOf(options.device, options.detachArgv);
+  if (selectedPlatform && explicit) {
     try {
       const { device, summary } = await previewExplicitDeviceAsync(
         projectRoot,
         selectedPlatform,
-        options.device
+        explicit,
+        (await readDevServerLockAsync(projectRoot)) != null
       );
       return {
         ...withDevice(plan, deviceIdOf(device)),

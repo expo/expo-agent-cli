@@ -3,7 +3,10 @@ import os from 'os';
 import path from 'path';
 
 import { acquireDeviceAsync, devicesDisabled, inspectBindingAsync } from '../../deviceBinding';
+import { notReusableError } from '../../deviceBinding/errors';
+import { previewExplicitDeviceAsync } from '../../deviceBinding/preview';
 import { withLeaseExtendedAsync } from '../../deviceBinding/renew';
+import { readDevServerLockAsync } from '../../devLock/client';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
@@ -51,6 +54,11 @@ vi.mock('../../project/fingerprint', () => ({ clearFingerprintMemo: vi.fn() }));
 vi.mock('../../project/fingerprintCache', () => ({ clearFingerprintCache: vi.fn() }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../start/startAsync', () => ({ runDevServerAsync: vi.fn() }));
+vi.mock('../../deviceBinding/preview', () => ({ previewExplicitDeviceAsync: vi.fn() }));
+vi.mock('../../devLock/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../devLock/client')>()),
+  readDevServerLockAsync: vi.fn(async () => null),
+}));
 vi.mock('../../deviceBinding/renew', () => ({
   withLeaseExtendedAsync: vi.fn((_root: string, work: () => Promise<unknown>) => work()),
 }));
@@ -1551,6 +1559,55 @@ describe(devAsync, () => {
             ]),
           }),
           expect.anything()
+        );
+      });
+
+      it(`reads --device as the run does while this worktree's dev server runs: reuse only`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(readDevServerLockAsync).mockResolvedValueOnce({ pid: 1 } as never);
+        vi.mocked(previewExplicitDeviceAsync).mockRejectedValueOnce(
+          notReusableError('ios', { bound: 'agent-cli 0000', named: 'Sim' })
+        );
+
+        await expect(
+          devAsync(
+            projectRoot,
+            resolveDevOptions(['--ios', '--local', '--plan', '--device', 'Sim', '--port', '8091'])
+          )
+        ).resolves.toBe(0);
+
+        expect(previewExplicitDeviceAsync).toHaveBeenCalledWith(
+          projectRoot,
+          'ios',
+          { query: 'Sim', rerun: ['--ios', '--local', '--port', '8091'] },
+          true
+        );
+        expect(emittedFollowUps()).toContainEqual(
+          expect.objectContaining({ id: 'device-refusal', command: 'npx @expo/agent-cli dev:stop' })
+        );
+      });
+
+      it(`offers a bind plan's run with the caller's --device and --port`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(readDevServerLockAsync).mockResolvedValueOnce(null);
+        vi.mocked(previewExplicitDeviceAsync).mockResolvedValueOnce({
+          device: { ...device, name: 'My Sim', origin: 'explicit' },
+          summary: 'Will bind My Sim (SIM-1).',
+        });
+
+        await devAsync(
+          projectRoot,
+          resolveDevOptions(['--ios', '--local', '--plan', '--device', 'My Sim', '--port', '8091'])
+        );
+
+        expect(previewExplicitDeviceAsync).toHaveBeenCalledWith(
+          projectRoot,
+          'ios',
+          expect.anything(),
+          false
+        );
+        expect(emittedFollowUps().find((followup) => followup.id === 'dev')!.command).toBe(
+          "npx @expo/agent-cli dev --ios --device 'My Sim' --port 8091"
         );
       });
     });

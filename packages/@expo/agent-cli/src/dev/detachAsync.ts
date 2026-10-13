@@ -54,6 +54,7 @@ import {
   type DetachedChildPhase,
   type DetachedChildVerdict,
 } from './childVerdict';
+import { explicitRequestOf } from './deviceOption';
 import { event } from './events';
 import {
   detachedLogPath,
@@ -232,7 +233,7 @@ export async function devDetachAsync(
         acquireLine(
           await acquireDeviceAsync(projectRoot, platform, {
             reuseOnly: true,
-            explicit: options.device,
+            explicit: explicitRequestOf(options.device, options.detachArgv),
           })
         )
       );

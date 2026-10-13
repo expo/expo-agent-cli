@@ -230,6 +230,22 @@ describe(buildStartPlanFollowUps, () => {
     expect(ids(followups)).toEqual(['device-refusal']);
   });
 
+  it(`should keep the caller's --device and named --port in the command that runs a bind plan`, () => {
+    const followups = buildStartPlanFollowUps(
+      mockPlan({
+        explicitDevice: { refuses: false, summary: 'Will bind dogfood s2 (UDID-1).' },
+        devServerPort: { port: 8091, movedFrom: null, state: 'named', taken: true },
+      }),
+      mockState(),
+      'ios',
+      'dogfood s2'
+    );
+
+    expect(followups[0]!.command).toBe(
+      "npx @expo/agent-cli dev --ios --device 'dogfood s2' --port 8091"
+    );
+  });
+
   it(`should offer to run the plan that was printed`, () => {
     const followups = buildStartPlanFollowUps(mockPlan(), mockState());
 
