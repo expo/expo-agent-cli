@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { digestOf } from '../../src/devLock/address';
+import { killEmulator } from '../../src/deviceBinding/tools';
 import { canonicalizeExistingPath } from '../../src/utils/dir';
 import { installStubBinAsync, expoHomeOf } from '../utils';
 
@@ -156,7 +157,7 @@ export async function killBoundEmulatorsAsync(home: string): Promise<void> {
     const pid = binding?.device?.origin?.emulatorPid;
     if (typeof pid === 'number') {
       try {
-        process.kill(pid, 'SIGTERM');
+        killEmulator(pid);
       } catch {
         // Already gone.
       }

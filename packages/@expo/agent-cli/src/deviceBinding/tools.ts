@@ -6,6 +6,7 @@ import { spawn, spawnSync } from 'child_process';
 import { resolveAdb } from '../device/adb';
 import { resolveEmulator } from '../device/bootDevice';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
+import { resolveSpawnTarget, windowsTaskkillCommand } from '../utils/windowsShim';
 import type { DeviceTools, EmulatorHandle } from './types';
 
 export function defaultTools(): DeviceTools {
@@ -19,18 +20,24 @@ export function defaultTools(): DeviceTools {
     now: () => new Date(),
     isPidAlive,
     commandOf,
-    kill: (pid) => process.kill(pid, 'SIGTERM'),
+    kill: killEmulator,
   };
 }
 
 /**
  * Detached, with its output dropped and the handle unreferenced, so the instance outlives this
- * process; a pipe nobody reads would fill up and block the emulator.
+ * process; a pipe nobody reads would fill up and block the emulator. A Windows `.cmd` starts under
+ * `cmd.exe`, so the pid is the shell's and {@link killEmulator} takes its tree.
  */
 function spawnEmulator(emulator: string, args: string[]): EmulatorHandle {
   let child: ReturnType<typeof spawn>;
   try {
-    child = spawn(emulator, args, { detached: true, stdio: 'ignore' });
+    const target = resolveSpawnTarget(emulator, args);
+    child = spawn(target.command, target.args, {
+      detached: true,
+      stdio: 'ignore',
+      shell: target.shell,
+    });
   } catch {
     return { exited: Promise.resolve(null), kill: () => {} };
   }
@@ -44,12 +51,29 @@ function spawnEmulator(emulator: string, args: string[]): EmulatorHandle {
     exited,
     kill: () => {
       try {
-        child.kill('SIGTERM');
+        if (child.pid != null) {
+          killEmulator(child.pid);
+        }
       } catch {
         // Already gone.
       }
     },
   };
+}
+
+/** On Windows `/T` also ends what the pid started: the emulator under a `.cmd` shim's `cmd.exe`. */
+export function killEmulator(pid: number): void {
+  if (process.platform !== 'win32') {
+    process.kill(pid, 'SIGTERM');
+    return;
+  }
+  const result = spawnSync(windowsTaskkillCommand(), ['/PID', String(pid), '/T', '/F'], {
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  if (result.error || result.status !== 0) {
+    throw result.error ?? new Error(`taskkill /PID ${pid} exited with ${result.status}`);
+  }
 }
 
 /** `EPERM` is a process this user may not signal, which is a process that is there. */

@@ -874,9 +874,8 @@ describe('@expo/agent-cli dev', () => {
   // made *of* the device's answer. Nothing here can reach a real device: `adb`, `emulator` and
   // `xcrun` are all stubs of this project's own, and `ANDROID_HOME` points at a stub SDK so a
   // runner that has a real one is not preferred over them (llp/0002 §Tier 0). The first case spawns
-  // a stub emulator instance and binds it (llp/0035 §Android instance), and runs where the stub can be spawned and
-  // killed as the instance; the others reuse the bound attached stub emulator, so they run on
-  // Windows too.
+  // a stub emulator instance and binds it (llp/0035 §Android instance); the others reuse the bound attached stub
+  // emulator.
   describe('dev-client-install — the build is current and the device has not got it', () => {
     /** The application id the fixture is given, so there is a named app to ask a device about. */
     const APP_ID = 'com.example.devclientfreshapp';
@@ -970,54 +969,49 @@ describe('@expo/agent-cli dev', () => {
     /** The install step's argv, which `dev` pins to the instance it bound. */
     const INSTALL_STEP = ['run:android', '--no-bundler', '--device', SERIAL];
 
-    it.skipIf(process.platform === 'win32')(
-      'spawns a read-only instance, binds it, and installs the recorded build onto it before it serves',
-      async () => {
-        const { projectRoot, env } = await setupInstallAsync({ spawn: true });
+    it('spawns a read-only instance, binds it, and installs the recorded build onto it before it serves', async () => {
+      const { projectRoot, env } = await setupInstallAsync({ spawn: true });
 
-        const result = await executeAgentCliAsync(projectRoot, ['dev', '--android', '--local'], {
-          env,
-        });
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--android', '--local'], {
+        env,
+      });
 
-        expect(result.exitCode).toBe(0);
-        // Two steps and no build: `--no-bundler` because the dev server is the next step, and
-        // `--device` because the answer that planned this install was about *that* instance — a
-        // machine with two of them must not install on one and serve nothing to the other.
-        expect(invocationArgs(projectRoot)).toEqual([
-          INSTALL_STEP,
-          ['start', '--dev-client', ...PORT_ARGS],
-        ]);
-        // One instance of the one AVD, read-only, on the first free console port (llp/0035
-        // Decision 2), and the binding names its serial and its pid.
-        expect(emulatorCalls(projectRoot)).toEqual([
-          ['-list-avds'],
-          ['-avd', EMULATOR_NAME, '-ports', '5554,5555', '-no-snapshot-save', '-read-only'],
-        ]);
-        const dir = path.join(`${projectRoot}.expo-home`, 'agent-cli', 'bindings');
-        const file = fs
-          .readdirSync(dir)
-          .find((name) => name.endsWith('-android-local-android.json'));
-        const binding = JSON.parse(fs.readFileSync(path.join(dir, file!), 'utf8'));
-        expect(binding.device).toMatchObject({
-          serial: SERIAL,
-          origin: {
-            kind: 'spawned',
-            avd: EMULATOR_NAME,
-            port: 5554,
-            emulatorPid: expect.any(Number),
-          },
-        });
-        expect(binding.projectRoot).toBe(fs.realpathSync.native(projectRoot));
-        // The instance outlives the run: it is this worktree's device until it is let go of.
-        expect(() => process.kill(binding.device.origin.emulatorPid, 0)).not.toThrow();
-        // The record still names the build this plan was made from. Nothing was compiled — the step
-        // installed what was already built — so a hash that moved here would mean the next run
-        // planned a rebuild for work this one did not do.
-        expect(readLastBuildRecord(projectRoot)).toMatchObject({
-          android: { hash: RECORDED_HASH },
-        });
-      }
-    );
+      expect(result.exitCode).toBe(0);
+      // Two steps and no build: `--no-bundler` because the dev server is the next step, and
+      // `--device` because the answer that planned this install was about *that* instance — a
+      // machine with two of them must not install on one and serve nothing to the other.
+      expect(invocationArgs(projectRoot)).toEqual([
+        INSTALL_STEP,
+        ['start', '--dev-client', ...PORT_ARGS],
+      ]);
+      // One instance of the one AVD, read-only, on the first free console port (llp/0035
+      // Decision 2), and the binding names its serial and its pid.
+      expect(emulatorCalls(projectRoot)).toEqual([
+        ['-list-avds'],
+        ['-avd', EMULATOR_NAME, '-ports', '5554,5555', '-no-snapshot-save', '-read-only'],
+      ]);
+      const dir = path.join(`${projectRoot}.expo-home`, 'agent-cli', 'bindings');
+      const file = fs.readdirSync(dir).find((name) => name.endsWith('-android-local-android.json'));
+      const binding = JSON.parse(fs.readFileSync(path.join(dir, file!), 'utf8'));
+      expect(binding.device).toMatchObject({
+        serial: SERIAL,
+        origin: {
+          kind: 'spawned',
+          avd: EMULATOR_NAME,
+          port: 5554,
+          emulatorPid: expect.any(Number),
+        },
+      });
+      expect(binding.projectRoot).toBe(fs.realpathSync.native(projectRoot));
+      // The instance outlives the run: it is this worktree's device until it is let go of.
+      expect(() => process.kill(binding.device.origin.emulatorPid, 0)).not.toThrow();
+      // The record still names the build this plan was made from. Nothing was compiled — the step
+      // installed what was already built — so a hash that moved here would mean the next run
+      // planned a rebuild for work this one did not do.
+      expect(readLastBuildRecord(projectRoot)).toMatchObject({
+        android: { hash: RECORDED_HASH },
+      });
+    });
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
     // The other half of F121, on the step it was found on. `expo run:*` installs the app and then
@@ -1175,8 +1169,7 @@ describe('@expo/agent-cli dev', () => {
   // Two worktrees of one app, one stub `adb` and `emulator` whose instance state both runs share,
   // and one registry: each `dev --android` spawns its own read-only instance of the one AVD on the
   // next free even console port, binds its serial and pid, and pins its build to that serial.
-  // Posix only: on Windows the `.cmd` stub starts under `cmd.exe`, so its pid is not the instance's.
-  describe.skipIf(process.platform === 'win32')('two worktrees, two emulator instances', () => {
+  describe('two worktrees, two emulator instances', () => {
     const APP_ID = 'com.example.devclientfreshapp';
     let home: string | null = null;
     afterEach(async () => {
