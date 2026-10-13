@@ -427,6 +427,33 @@ describe(formatSmokeResult, () => {
       }
     );
 
+    it(`names the device it found bound to this worktree, and that it kept it`, () => {
+      const printed = stripVTControlCharacters(
+        formatSmokeResult(
+          run({
+            deviceId: 'B632F0AE',
+            environment: {
+              devServer: 'reused',
+              device: 'reused',
+              deviceChoice: null,
+              boundDevice: {
+                id: 'B632F0AE',
+                name: 'dogfood-explicit',
+                action: 'existing',
+                released: false,
+                shutDown: false,
+              },
+              cleanup: [],
+            },
+          }),
+          options()
+        )
+      );
+
+      expect(printed).toContain(`device      dogfood-explicit (B632F0AE) · already bound · kept`);
+      expect(printed).not.toContain('NOT released');
+    });
+
     // Most runs start nothing, and a line saying so every time would bury the runs that did.
     it(`says nothing at all when it started nothing`, () => {
       expect(formatSmokeResult(run(), options())).not.toContain('environment');

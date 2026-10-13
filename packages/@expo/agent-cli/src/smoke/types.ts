@@ -163,8 +163,11 @@ export interface SmokeCleanupJson {
 export interface SmokeBoundDeviceJson {
   id: string;
   name: string;
-  /** How the boot got it: `created`, `reused`, `spawned` or `explicit`. */
-  action: AcquireAction;
+  /**
+   * How the boot got it: `created`, `reused`, `spawned` or `explicit`. `existing` when this run
+   * acquired nothing and the worktree's binding names the device the run used.
+   */
+  action: AcquireAction | 'existing';
   /** The release at the end of the run let go of it. */
   released: boolean;
   /** That release shut it down: a parked simulator, a stopped emulator instance. */
@@ -190,7 +193,10 @@ export interface SmokeEnvironmentJson {
    * have opened the app. `"it has Expo Go installed"`, `"it was already booted"`.
    */
   deviceChoice: string | null;
-  /** The worktree device this run's boot bound, and what its release did. Null when it bound none. */
+  /**
+   * The worktree device this run bound, or the bound device it used, and what its release did.
+   * Null when the run used no device of this worktree's binding.
+   */
   boundDevice: SmokeBoundDeviceJson | null;
   /**
    * Everything this run put back, newest first.

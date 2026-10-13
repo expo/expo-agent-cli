@@ -155,6 +155,7 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
     startDevServer: async () => ({ ok: true, devServerUrl: 'http://127.0.0.1:8081', reason: null }),
     stopDevServer: async () => ({ ok: true, target: 'http://127.0.0.1:8081', reason: null }),
     releaseDevice: async () => ({ ok: true, target: 'SIM-BOOTED', reason: null }),
+    readBoundDevice: () => null,
     bootDevice: async () => ({
       ok: true,
       deviceId: 'SIM-BOOTED',
@@ -587,6 +588,22 @@ describe(runSmokePhasesAsync, () => {
       // nothing needed reads as a step that was owed and not done.
       expect(statusOf(run, 'start-dev-server')).toBeUndefined();
       expect(statusOf(run, 'boot-device')).toBeUndefined();
+    });
+
+    it.each([
+      ['the device it found', 'SIM-1', { action: 'existing', released: false, shutDown: false }],
+      ['no device for a binding of another device', 'SIM-OTHER', null],
+    ] as const)(`names this worktree's binding when it reuses %s`, async (_, id, expected) => {
+      const run = await runSmokePhasesAsync(
+        deps({ readBoundDevice: () => ({ id, name: 'dogfood-explicit' }) }),
+        options({ bootstrap: true })
+      );
+
+      expect(run.environment.device).toBe('reused');
+      expect(run.environment.boundDevice).toEqual(
+        expected && { id, name: 'dogfood-explicit', ...expected }
+      );
+      expect(run.environment.cleanup).toEqual([]);
     });
 
     it(`boots nothing when the caller named the cloud as the device`, async () => {

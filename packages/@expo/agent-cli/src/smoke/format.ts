@@ -5,7 +5,6 @@
 
 import chalk from 'chalk';
 
-import type { AcquireAction } from '../deviceBinding';
 import type { FollowUp } from '../followups';
 import type { RouteCheckJson } from '../navigate/routeCheck';
 import { bundleToJson } from '../runtime/bundleCheck';
@@ -175,18 +174,22 @@ function environmentLine(run: SmokeRun): string | null {
   return acts.length > 0 ? acts.join(SEPARATOR) : null;
 }
 
-const ACQUIRED: Record<AcquireAction, string> = {
+const ACQUIRED: Record<SmokeBoundDeviceJson['action'], string> = {
   created: 'created for this run',
   spawned: 'started for this run',
   reused: 'reused from this worktree',
   explicit: 'bound with --device',
+  existing: 'already bound',
 };
 
 /** @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke */
 function boundDeviceLine(device: SmokeBoundDeviceJson, platform: SmokeOptions['platform']): string {
-  const release = !device.released
-    ? chalk.yellow('NOT released')
-    : `released (${device.shutDown ? (platform === 'ios' ? 'parked' : 'shut down') : 'left running'})`;
+  const release =
+    device.action === 'existing'
+      ? 'kept'
+      : !device.released
+        ? chalk.yellow('NOT released')
+        : `released (${device.shutDown ? (platform === 'ios' ? 'parked' : 'shut down') : 'left running'})`;
   return [`${device.name} (${device.id})`, ACQUIRED[device.action], release].join(SEPARATOR);
 }
 

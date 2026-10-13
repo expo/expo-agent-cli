@@ -266,6 +266,8 @@ export interface SmokeDeps {
    */
   bootDevice(): Promise<SmokeBootResult>;
   releaseDevice(): Promise<SmokeReleaseResult>;
+  /** This worktree's binding for the run's platform, read only. Null when there is none. */
+  readBoundDevice(): { id: string; name: string } | null;
   /**
    * Put the app on the device this run booted, when the boot said it has not got it.
    *
@@ -740,6 +742,17 @@ export async function runSmokePhasesAsync(
     // it goes past. The screenshot resolves one anyway (F98), and that is the answer.
     if (environment.device === 'absent' && run.deviceId != null) {
       environment.device = 'reused';
+    }
+    if (environment.device === 'reused' && environment.boundDevice == null) {
+      const existing = deps.readBoundDevice();
+      if (existing != null && existing.id === run.deviceId) {
+        environment.boundDevice = {
+          ...existing,
+          action: 'existing',
+          released: false,
+          shutDown: false,
+        };
+      }
     }
     await releaseAsync(deps, cleanups, environment);
     return { ...run, environment, durationMs: deps.now() - startedAt };

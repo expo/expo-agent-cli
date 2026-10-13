@@ -336,6 +336,14 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
   const forgetTarget = () => {
     target = null;
   };
+  const ownBinding = (): Binding | null => {
+    const bindsDevice =
+      options.cloud !== 'required' && !devicesDisabled() && hostBindsPlatform(options.platform);
+    if (!bindsDevice) return null;
+    const backend = localBackendOf(options.platform);
+    const read = readBindingFile(bindingPathFor(projectRoot, options.platform, backend));
+    return read.kind === 'binding' ? read.binding : null;
+  };
 
   /**
    * What this machine's device tools reported, kept for as long as it still answers.
@@ -424,14 +432,6 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         // read above is about the project as it was before it.
         forgetTarget();
       }
-      const bindsDevice =
-        options.cloud !== 'required' && !devicesDisabled() && hostBindsPlatform(options.platform);
-      const ownBinding = (): Binding | null => {
-        if (!bindsDevice) return null;
-        const backend = localBackendOf(options.platform);
-        const read = readBindingFile(bindingPathFor(projectRoot, options.platform, backend));
-        return read.kind === 'binding' ? read.binding : null;
-      };
       const before = ownBinding();
       const argv = [
         `--${options.platform}`,
@@ -567,6 +567,11 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       const { stopEasSessionAsync } = require('../device/eas') as typeof import('../device/eas');
       const result = await stopEasSessionAsync(projectRoot, sessionId);
       return { ok: result.ok, target: sessionId, reason: result.reason };
+    },
+
+    readBoundDevice: () => {
+      const binding = ownBinding();
+      return binding && { id: deviceIdOf(binding.device), name: deviceNameOf(binding.device) };
     },
 
     // Local only, and that is not a gap: `--eas` names a session somebody else started and pays
