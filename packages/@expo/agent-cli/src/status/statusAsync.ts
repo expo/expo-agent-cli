@@ -356,21 +356,27 @@ export async function collectStatusReportAsync(
       await attemptPlanAsync(projectRoot, state, record, options)
     );
     const platform = options.platform ?? resolveDefaultPlatform(state);
+    const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
     if (
       state.isExpoApp &&
       platform !== 'web' &&
       'value' in binding &&
-      !binding.value.some((entry) => entry.platform === platform) &&
+      !bound.some((entry) => Date.parse(entry.expiresAt) > Date.now()) &&
       !readCloudSessionIdSync(projectRoot) &&
       !devicesDisabled() &&
       hostBindsPlatform(platform)
     ) {
+      const planned = report.next.command;
       report.next = {
         ...report.next,
-        command: report.next.command.startsWith(`${PROGRAM_PREFIX} dev `)
-          ? report.next.command
-          : deviceCommand(platform),
-        why: `No ${platform} device is bound to this worktree.`,
+        command: !planned.startsWith(`${PROGRAM_PREFIX} dev `)
+          ? deviceCommand(platform)
+          : planned.includes(' --detach')
+            ? planned
+            : `${planned} --detach --wait-ready`,
+        why: bound.length
+          ? `The lease on the bound ${platform} device expired.`
+          : `No ${platform} device is bound to this worktree.`,
       };
     }
   } else {

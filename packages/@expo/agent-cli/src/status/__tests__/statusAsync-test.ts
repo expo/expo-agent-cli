@@ -14,8 +14,9 @@ import { resolveRuntimeVersionAsync } from '../../impact/runtimeVersion';
 import * as Log from '../../log';
 import { readAuthPreflightAsync } from '../../needsHuman/preflight';
 import { readLastBuildRecord } from '../../plan/lastBuild';
+import * as resolveAsync from '../../plan/resolveAsync';
 import { probeProjectStateAsync } from '../../project/probe';
-import type { ProjectState } from '../../project/types';
+import type { ProjectState, StartPlan } from '../../project/types';
 import { discoverDevServerAsync, type DevServerDiscovery } from '../../runtime/devServer';
 import { probeTargetLivenessAsync } from '../../runtime/targetLiveness';
 import { waitForBundlerReadyAsync } from '../../runtime/waitReady';
@@ -1069,9 +1070,20 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
 
   async function planNextAsync() {
     vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
-      { platform: 'ios' } as summary.BindingSummary,
+      { platform: 'ios', expiresAt: '2999-01-01T00:00:00.000Z' } as summary.BindingSummary,
     ]);
     return (await collectStatusReportAsync(projectRoot, iosOptions)).next;
+  }
+
+  function stopDevServer() {
+    vi.mocked(discoverDevServerAsync).mockResolvedValue({
+      reachable: false,
+      targets: [],
+      reason: 'fetch failed',
+      devServerUrl,
+      source: 'default',
+      discovered: false,
+    });
   }
 
   afterEach(() => {
@@ -1082,6 +1094,41 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     const report = await collectStatusReportAsync(projectRoot, iosOptions);
     expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
     expect(report.next?.why).toBe('No ios device is bound to this worktree.');
+  });
+
+  it(`detaches the plan's own dev command`, async () => {
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+  });
+
+  it(`keeps the plan's flags when it detaches the plan's dev command`, async () => {
+    stopDevServer();
+    const resolve = resolveAsync.resolveStartPlanAsync;
+    vi.spyOn(resolveAsync, 'resolveStartPlanAsync').mockImplementationOnce(async (...args) => {
+      const resolved = await resolve(...args);
+      const buildLocation = {
+        ...resolved.plan.buildLocation,
+        runsOn: 'eas',
+        selection: { implicit: true },
+      } as StartPlan['buildLocation'];
+      return { ...resolved, plan: { ...resolved.plan, buildLocation } };
+    });
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --eas --detach --wait-ready');
+  });
+
+  it(`sends a worktree whose lease expired to dev`, async () => {
+    vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+      {
+        platform: 'ios',
+        state: 'gone',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      } as summary.BindingSummary,
+    ]);
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+    expect(report.next?.why).toBe('The lease on the bound ios device expired.');
   });
 
   it(`keeps the plan's next under AGENT_CLI_NO_DEVICE, where dev binds nothing`, async () => {
