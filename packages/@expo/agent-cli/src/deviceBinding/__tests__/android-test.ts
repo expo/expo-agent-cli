@@ -257,6 +257,7 @@ describe(releaseWorktreeDevicesAsync, () => {
     ['the AVD and the ports', `qemu-system-aarch64 ${SPAWN_ARGS.join(' ')}`, true],
     ['another AVD', 'qemu-system-aarch64 -avd Other -ports 5554,5555 -read-only', false],
     ['other ports', `emulator -avd ${AVD} -ports 5556,5557 -read-only`, false],
+    ['an AVD whose name starts with ours', `emulator -avd ${AVD}_API_36 -ports 5554,5555`, false],
   ])('kills a spawned instance only when its arguments name %s', async (_case, command, killed) => {
     const tools = fakeTools({
       emulators: [{ serial: 'emulator-5554', state: 'device', pid: 77, command }],
