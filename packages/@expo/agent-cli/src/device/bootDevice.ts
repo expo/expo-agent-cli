@@ -43,7 +43,9 @@ export function resolveEmulator(
   adb: AdbResolution,
   { exists = fs.existsSync }: { exists?: (candidate: string) => boolean } = {}
 ): string {
-  const executable = process.platform === 'win32' ? 'emulator.exe' : 'emulator';
-  const beside = path.join(path.dirname(path.dirname(adb.bin)), 'emulator', executable);
-  return exists(beside) ? beside : executable;
+  const executables =
+    process.platform === 'win32' ? ['emulator.exe', 'emulator.cmd'] : ['emulator'];
+  const dir = path.join(path.dirname(path.dirname(adb.bin)), 'emulator');
+  const beside = executables.map((name) => path.join(dir, name)).find((file) => exists(file));
+  return beside ?? executables[0]!;
 }
