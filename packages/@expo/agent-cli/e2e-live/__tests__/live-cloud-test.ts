@@ -453,7 +453,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
         (parseJson(status)?.devServer?.openUrls ?? []).find(
           (entry: any) => entry.target === 'dev-build'
         )?.url ?? '';
-      const advertised = launcher.match(/[?&]url=([^&]+)/)?.[1] ?? '';
+      const advertised = launcher.match(/[?&]__expo_url=([^&]+)/)?.[1] ?? '';
       const advertisedOrigin = decodeURIComponent(advertised).replace(/\/+$/, '');
       if (!advertisedOrigin) {
         throw new Error(
