@@ -44,17 +44,17 @@ jobs:
       AGENT_CLI_LIVE_CLOUD_MODE: expo-go
     steps:
       - uses: eas/checkout
-      - name: Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
-      - name: Build @expo/agent-cli
-        run: bun run --filter @expo/agent-cli build
-      - name: Run live-cloud over the dev server's own tunnel
+      - name: Build and run live-cloud (one-hour limit)
         run: |
-          set -euo pipefail
+          # One budget for all commands after checkout, including the native-build wait.
+          timeout --signal=KILL 1h bash -euo pipefail <<'COMMANDS'
+          bun install --ignore-scripts --frozen-lockfile
+          bun run --filter @expo/agent-cli build
           cd packages/@expo/agent-cli
           AGENT_CLI_LIVE_EAS=1 \
           AGENT_CLI_LIVE_CLOUD=1 \
             bun run test:live:cloud
+          COMMANDS
 
   cloud-e2e-expo-go-android:
     name: live-cloud on EAS (Android, Expo Go)
@@ -65,17 +65,17 @@ jobs:
       AGENT_CLI_LIVE_CLOUD_MODE: expo-go
     steps:
       - uses: eas/checkout
-      - name: Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
-      - name: Build @expo/agent-cli
-        run: bun run --filter @expo/agent-cli build
-      - name: Run live-cloud over the dev server's own tunnel
+      - name: Build and run live-cloud (one-hour limit)
         run: |
-          set -euo pipefail
+          # One budget for all commands after checkout, including the native-build wait.
+          timeout --signal=KILL 1h bash -euo pipefail <<'COMMANDS'
+          bun install --ignore-scripts --frozen-lockfile
+          bun run --filter @expo/agent-cli build
           cd packages/@expo/agent-cli
           AGENT_CLI_LIVE_EAS=1 \
           AGENT_CLI_LIVE_CLOUD=1 \
             bun run test:live:cloud
+          COMMANDS
 
   cloud-e2e-dev-build-ios:
     name: live-cloud on EAS (iOS, dev build)
@@ -86,22 +86,21 @@ jobs:
       AGENT_CLI_LIVE_CLOUD_MODE: dev-build
     steps:
       - uses: eas/checkout
-      - name: Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
-      - name: Build @expo/agent-cli
-        run: bun run --filter @expo/agent-cli build
-      - name: Build the dev client on EAS
+      - name: Build and run live-cloud (one-hour limit)
         run: |
-          set -euo pipefail
-          cd apps/eas-example
-          npx --yes eas-cli@latest build --platform "${AGENT_CLI_LIVE_CLOUD_PLATFORM}" --profile development --non-interactive
-      - name: Run live-cloud over the dev server's own tunnel
-        run: |
-          set -euo pipefail
+          # One budget for all commands after checkout, including the native-build wait.
+          timeout --signal=KILL 1h bash -euo pipefail <<'COMMANDS'
+          bun install --ignore-scripts --frozen-lockfile
+          bun run --filter @expo/agent-cli build
+          (
+            cd apps/eas-example
+            npx --yes eas-cli@latest build --platform "${AGENT_CLI_LIVE_CLOUD_PLATFORM}" --profile development --non-interactive
+          )
           cd packages/@expo/agent-cli
           AGENT_CLI_LIVE_EAS=1 \
           AGENT_CLI_LIVE_CLOUD=1 \
             bun run test:live:cloud
+          COMMANDS
 
   cloud-e2e-dev-build-android:
     name: live-cloud on EAS (Android, dev build)
@@ -112,19 +111,18 @@ jobs:
       AGENT_CLI_LIVE_CLOUD_MODE: dev-build
     steps:
       - uses: eas/checkout
-      - name: Install dependencies
-        run: bun install --ignore-scripts --frozen-lockfile
-      - name: Build @expo/agent-cli
-        run: bun run --filter @expo/agent-cli build
-      - name: Build the dev client on EAS
+      - name: Build and run live-cloud (one-hour limit)
         run: |
-          set -euo pipefail
-          cd apps/eas-example
-          npx --yes eas-cli@latest build --platform "${AGENT_CLI_LIVE_CLOUD_PLATFORM}" --profile development --non-interactive
-      - name: Run live-cloud over the dev server's own tunnel
-        run: |
-          set -euo pipefail
+          # One budget for all commands after checkout, including the native-build wait.
+          timeout --signal=KILL 1h bash -euo pipefail <<'COMMANDS'
+          bun install --ignore-scripts --frozen-lockfile
+          bun run --filter @expo/agent-cli build
+          (
+            cd apps/eas-example
+            npx --yes eas-cli@latest build --platform "${AGENT_CLI_LIVE_CLOUD_PLATFORM}" --profile development --non-interactive
+          )
           cd packages/@expo/agent-cli
           AGENT_CLI_LIVE_EAS=1 \
           AGENT_CLI_LIVE_CLOUD=1 \
             bun run test:live:cloud
+          COMMANDS
