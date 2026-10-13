@@ -13,13 +13,20 @@ import {
   writeBindingFile,
 } from './registry';
 import { defaultTools } from './tools';
-import type { Binding, DevicePlatform, DeviceTools, ReleasedDevice } from './types';
+import {
+  deviceIdOf,
+  type Binding,
+  type DevicePlatform,
+  type DeviceTools,
+  type ReleasedDevice,
+} from './types';
 
 /** The waits of `acquire` and release; read verbs wait less (`./inspect.ts`). */
 export const WRITE_LOCK_WAIT_MS = 30_000;
 
 /**
  * Let go of this worktree's local bindings, or only `platform`'s. Never reaps.
+ * `expected` restricts failed-boot cleanup to that acquisition, leaving a replacement alone.
  *
  * A `created` simulator is parked and shut down; an `explicit` device keeps its file with an
  * expired lease; a `spawned` instance loses its file and is killed; a binding whose device the
@@ -27,15 +34,19 @@ export const WRITE_LOCK_WAIT_MS = 30_000;
  */
 export async function releaseWorktreeDevicesAsync(
   projectRoot: string,
-  { platform, tools = defaultTools() }: { platform?: DevicePlatform; tools?: DeviceTools } = {}
+  {
+    platform,
+    tools = defaultTools(),
+    expected,
+  }: { platform?: DevicePlatform; tools?: DeviceTools; expected?: Binding } = {}
 ): Promise<ReleasedDevice[]> {
   const platforms: DevicePlatform[] = platform ? [platform] : ['ios', 'android'];
   const released: ReleasedDevice[] = [];
   for (const each of platforms) {
     const letGo =
       each === 'ios'
-        ? await releaseIosAsync(projectRoot, tools)
-        : await releaseAndroidAsync(projectRoot, tools);
+        ? await releaseIosAsync(projectRoot, tools, expected)
+        : await releaseAndroidAsync(projectRoot, tools, expected);
     if (letGo) {
       released.push(letGo);
     }
@@ -45,20 +56,22 @@ export async function releaseWorktreeDevicesAsync(
 
 async function releaseIosAsync(
   projectRoot: string,
-  tools: DeviceTools
+  tools: DeviceTools,
+  expected?: Binding
 ): Promise<ReleasedDevice | null> {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   const before = readBindingFile(file);
   if (before.kind !== 'binding' || before.binding.device.backend !== 'local-ios') {
     return null;
   }
+  if (expected && !sameBinding(before.binding, expected)) return null;
   const { udid, name, origin } = before.binding.device;
   const listing = await listSimulatorAsync(tools, udid);
 
   const letGo = await withRegistryLockAsync(
     async () => {
       const read = readBindingFile(file);
-      if (read.kind !== 'binding') {
+      if (read.kind !== 'binding' || !sameBinding(read.binding, before.binding)) {
         return null;
       }
       if (listing.kind === 'missing') {
@@ -92,18 +105,20 @@ async function releaseIosAsync(
 /** A `spawned` instance: remove the file, then kill the pid while it is ours. `explicit`: expire. */
 async function releaseAndroidAsync(
   projectRoot: string,
-  tools: DeviceTools
+  tools: DeviceTools,
+  expected?: Binding
 ): Promise<ReleasedDevice | null> {
   const file = bindingPathFor(projectRoot, 'android', 'local-android');
   const before = readBindingFile(file);
   if (before.kind !== 'binding' || before.binding.device.backend !== 'local-android') {
     return null;
   }
+  if (expected && !sameBinding(before.binding, expected)) return null;
   const { serial, origin } = before.binding.device;
   const letGo = await withRegistryLockAsync(
     async () => {
       const read = readBindingFile(file);
-      if (read.kind !== 'binding') {
+      if (read.kind !== 'binding' || !sameBinding(read.binding, before.binding)) {
         return false;
       }
       if (origin.kind === 'spawned') {
@@ -133,4 +148,20 @@ async function releaseAndroidAsync(
 
 function expireLease(file: string, binding: Binding, tools: DeviceTools): void {
   writeBindingFile(file, { ...binding, expiresAt: tools.now().toISOString() });
+}
+
+/** Compare the acquisition too: a later dev may have rebound the same device. */
+function sameBinding(a: Binding, b: Binding): boolean {
+  const identity = ({ projectRoot, boundAt, device }: Binding) => [
+    projectRoot,
+    boundAt,
+    device.backend,
+    device.platform,
+    deviceIdOf(device),
+    device.backend === 'local-android' ? device.origin.kind : device.origin,
+    ...(device.backend === 'local-android' && device.origin.kind === 'spawned'
+      ? [device.origin.avd, device.origin.port, device.origin.emulatorPid]
+      : []),
+  ];
+  return JSON.stringify(identity(a)) === JSON.stringify(identity(b));
 }

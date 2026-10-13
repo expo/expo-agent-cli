@@ -333,6 +333,28 @@ describe(releaseWorktreeDevicesAsync, () => {
 
     expect(released.map((device) => device.id)).toEqual(['SIM-1', 'emulator-5554']);
   });
+
+  it('release validates the Android pid even when its serial did not change', async () => {
+    const registry = await import('../registry');
+    const old = androidBindingFor(ROOT, 'emulator-5554', spawned(5554, 77));
+    const replacement = androidBindingFor(ROOT, 'emulator-5554', spawned(5554, 88));
+    writeBinding(file(), old);
+    const lock = registry.withRegistryLockAsync;
+    const replaced = vi
+      .spyOn(registry, 'withRegistryLockAsync')
+      .mockImplementation(async (work, options) => {
+        writeBinding(file(), replacement);
+        return lock(work, options);
+      });
+    const tools = fakeTools({ alivePids: [77, 88] });
+    try {
+      expect(await releaseWorktreeDevicesAsync(ROOT, { tools, platform: 'android' })).toEqual([]);
+      expect(readBindingFile(file())).toEqual({ kind: 'binding', binding: replacement });
+      expect(tools.killed).toEqual([]);
+    } finally {
+      replaced.mockRestore();
+    }
+  });
 });
 
 describe(inspectBindingAsync, () => {
