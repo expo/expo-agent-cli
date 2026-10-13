@@ -12,6 +12,7 @@ import {
   hostBindsPlatform,
 } from '../../deviceBinding';
 import { deviceUnavailableError } from '../../deviceBinding/errors';
+import * as bindingSummary from '../../deviceBinding/summary';
 import { event as cliEvent } from '../../events';
 import * as Log from '../../log';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
@@ -107,6 +108,40 @@ function run() {
     { print: false }
   );
 }
+
+it.each([false, true])('detects death during the device probe (reusing=%s)', async (reusing) => {
+  vi.mocked(devicesDisabled).mockReturnValue(false);
+  vi.mocked(hostBindsPlatform).mockReturnValue(true);
+  if (reusing) {
+    vi.mocked(readDevServerLockAsync)
+      .mockReset()
+      .mockResolvedValue({
+        url: 'http://127.0.0.1:8393',
+        port: 8393,
+        pid: 4242,
+        projectRoot,
+        startedAt: new Date(0).toISOString(),
+      });
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    fs.writeFileSync(logFile, servingPlan);
+    vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValue(null);
+  }
+  vi.spyOn(bindingSummary, 'readBindingSummaryAsync').mockImplementationOnce(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    vi.mocked(isProcessAlive).mockReturnValue(false);
+    return [];
+  });
+
+  const result = devDetachAsync(
+    projectRoot,
+    resolveDevOptions(['--ios', '--detach', '--wait-ready', '--local', '--json'])
+  ).catch((error) => error);
+  await vi.runAllTimersAsync();
+
+  expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
+  expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
+  expect(Log.log).not.toHaveBeenCalled();
+});
 
 /** Fail a status probe after the child exits, optionally before its handoff reaches the log. */
 function diesDuringProbe(check: 'final check' | 'grace', handoffDelay: number | null) {

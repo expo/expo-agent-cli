@@ -127,6 +127,7 @@ beforeEach(() => {
   vi.spyOn(network, 'resolveLanHost').mockReturnValue('192.168.1.233');
   // Whether `dev` binds a device here is a fact about the host; the rule must not read this one's.
   vi.spyOn(deviceBinding, 'hostBindsPlatform').mockReturnValue(true);
+  vi.spyOn(devLock, 'readDevServerLockAsync').mockResolvedValue(null);
   vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'my-app' }) });
   mockState();
   vi.mocked(readLastBuildRecord).mockReturnValue({});
@@ -1073,6 +1074,13 @@ describe(`${collectStatusReportAsync.name} and stale debugger targets`, () => {
 
 describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
   const iosOptions = { ...options, platform: 'ios' as const };
+  const running = {
+    projectRoot,
+    url: devServerUrl,
+    port: 8081,
+    pid: 4242,
+    startedAt: new Date(0).toISOString(),
+  };
 
   async function planNextAsync() {
     vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
@@ -1096,7 +1104,12 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     vi.unstubAllEnvs();
   });
 
-  it(`sends the worktree to dev when dev would bind a device`, async () => {
+  it.each([
+    ['ios', false],
+    ['android', false],
+    ['ios', true],
+    ['android', true],
+  ] as const)('recovers an unbound %s device (own server=%s)', async (platform, ownServer) => {
     vi.mocked(discoverDevServerAsync).mockResolvedValue({
       reachable: true,
       targets: [],
@@ -1105,9 +1118,21 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
       discovered: false,
     });
     vi.mocked(probeTargetLivenessAsync).mockResolvedValueOnce({ listed: 0, live: 0, stale: [] });
-    const report = await collectStatusReportAsync(projectRoot, iosOptions);
-    expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
-    expect(report.next?.why).toBe('No ios device is bound to this worktree.');
+    vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue(ownServer ? running : null);
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValueOnce({
+      ready: true,
+      projectRootMatched: ownServer,
+      reportedProjectRoot: ownServer ? projectRoot : '/other',
+      timedOut: false,
+      waitedMs: 1,
+    });
+    const report = await collectStatusReportAsync(projectRoot, { ...options, platform });
+    const restart = ownServer ? 'npx @expo/agent-cli dev:stop && ' : '';
+    expect(report.next?.command).toBe(
+      `${restart}npx @expo/agent-cli dev --${platform} --detach --wait-ready`
+    );
+    expect(report.next?.why).toContain(`No ${platform} device is bound to this worktree.`);
+    if (ownServer) expect(report.next?.why).toContain('restart');
   });
 
   it(`detaches the plan's own dev command`, async () => {
@@ -1132,8 +1157,9 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --eas --detach --wait-ready');
   });
 
-  it(`sends a worktree whose lease expired to dev`, async () => {
+  it.each([false, true])('reuses an expired binding (own server=%s)', async (ownServer) => {
     stopDevServer();
+    vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue(ownServer ? running : null);
     vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
       {
         platform: 'ios',

@@ -279,13 +279,14 @@ export async function devDetachAsync(
     const lock = checked?.lock ?? running;
     // Reuse only reads the current tunnel; it does not wait for a new one to appear.
     const tunnelUrl = await currentTunnelUrlAsync(projectRoot, lock.url);
+    const device = await boundDeviceAsync(projectRoot, options);
     const statusAnswering =
       checked?.result.ready === true
         ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url)
         : null;
-    // Read the verdict and PID after both awaits: either can outlast the running server.
+    // Read the verdict and PID after all probes: any can outlast the running server.
     await checkReuseFailureAsync(lock, statusAnswering);
-    return reportDetachedAsync(projectRoot, options, {
+    return reportDetached(projectRoot, options, {
       lock,
       alreadyRunning: true,
       ready: checked?.result.ready ?? null,
@@ -293,6 +294,7 @@ export async function devDetachAsync(
       startedAt,
       print,
       tunnelUrl,
+      device,
       smokePlatform,
     });
   }
@@ -413,6 +415,7 @@ export async function devDetachAsync(
   }
 
   const tunnelUrl = await waitForTunnelUrlAsync(projectRoot, options, childIsGone);
+  const device = await boundDeviceAsync(projectRoot, options);
 
   // The last thing before anything is claimed. Everything above is a fact about a moment that has
   // passed: the lock answered, the bundler answered, the tunnel wait ran — and a child that died in
@@ -472,7 +475,7 @@ export async function devDetachAsync(
     });
   }
 
-  return reportDetachedAsync(projectRoot, options, {
+  return reportDetached(projectRoot, options, {
     lock,
     alreadyRunning: false,
     ready,
@@ -480,6 +483,7 @@ export async function devDetachAsync(
     startedAt,
     print,
     tunnelUrl,
+    device,
     log,
     smokePlatform,
   });
@@ -925,7 +929,7 @@ async function waitForTunnelUrlAsync(
 }
 
 /** Print the report of a detached run, in whichever form was asked for. */
-async function reportDetachedAsync(
+function reportDetached(
   projectRoot: string,
   options: DevOptions,
   {
@@ -936,6 +940,7 @@ async function reportDetachedAsync(
     startedAt,
     print,
     tunnelUrl,
+    device,
     log = readDetachedLogSync(projectRoot, WHOLE_LOG),
     smokePlatform,
   }: {
@@ -946,6 +951,7 @@ async function reportDetachedAsync(
     startedAt: number;
     print: boolean;
     tunnelUrl: string | null;
+    device: BindingSummary | null;
     /** The platform the `smoke` follow-up names. See {@link detachFollowUps}. */
     smokePlatform: NativePlatform;
     /**
@@ -957,7 +963,7 @@ async function reportDetachedAsync(
      */
     log?: DetachedLogRead | null;
   }
-): Promise<number> {
+): number {
   const report: DevDetachResultJson = {
     url: lock.url,
     port: lock.port,
@@ -974,7 +980,7 @@ async function reportDetachedAsync(
     phase: childPhaseOf(log).phase,
     portMoved: alreadyRunning ? null : plannedPortMove(log, lock),
     tunnelUrl,
-    device: await boundDeviceAsync(projectRoot, options),
+    device,
     waitedMs: Date.now() - startedAt,
     followups: [],
   };

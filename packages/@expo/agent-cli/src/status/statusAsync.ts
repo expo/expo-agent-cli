@@ -9,6 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 
+import { readDevServerLockAsync } from '../devLock';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import {
   inspectBindingCachedAsync,
@@ -372,16 +373,19 @@ export async function collectStatusReportAsync(
       hostBindsPlatform(platform)
     ) {
       const planned = report.next.command;
+      const command = !planned.startsWith(`${PROGRAM_PREFIX} dev `)
+        ? deviceCommand(platform)
+        : planned.includes(' --detach')
+          ? planned
+          : `${planned} --detach --wait-ready`;
+      // Detached dev can only reuse beside an own server; an expired binding can still be reused.
+      const restart = bound.length === 0 && (await readDevServerLockAsync(projectRoot)) != null;
       report.next = {
         ...report.next,
-        command: !planned.startsWith(`${PROGRAM_PREFIX} dev `)
-          ? deviceCommand(platform)
-          : planned.includes(' --detach')
-            ? planned
-            : `${planned} --detach --wait-ready`,
+        command: restart ? `${PROGRAM_PREFIX} dev:stop && ${command}` : command,
         why: bound.length
           ? `The lease on the bound ${platform} device expired.`
-          : `No ${platform} device is bound to this worktree.`,
+          : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`,
       };
     }
   } else {
