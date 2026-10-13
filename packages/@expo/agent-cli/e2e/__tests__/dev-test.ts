@@ -874,103 +874,107 @@ describe('@expo/agent-cli dev', () => {
   // This is the one block in this tier that turns `AGENT_CLI_NO_DEVICE` off, because the plan is
   // made *of* the device's answer. Nothing here can reach a real device: `adb`, `emulator` and
   // `xcrun` are all stubs of this project's own, and `ANDROID_HOME` points at a stub SDK so a
-  // runner that has a real one is not preferred over them (llp/0002 §Tier 0). The run spawns a
-  // stub emulator instance and binds it (llp/0032), so the step is pinned to that instance's
-  // serial; skipped on Windows, where the stub cannot be signalled.
-  describe.skipIf(process.platform === 'win32')(
-    'dev-client-install — the build is current and the device has not got it',
-    () => {
-      /** The application id the fixture is given, so there is a named app to ask a device about. */
-      const APP_ID = 'com.example.devclientfreshapp';
+  // runner that has a real one is not preferred over them (llp/0002 §Tier 0). The first case spawns
+  // a stub emulator instance and binds it (llp/0032), and runs where the stub can be spawned and
+  // killed as the instance; the others reuse the bound attached stub emulator, so they run on
+  // Windows too.
+  describe('dev-client-install — the build is current and the device has not got it', () => {
+    /** The application id the fixture is given, so there is a named app to ask a device about. */
+    const APP_ID = 'com.example.devclientfreshapp';
 
-      /** The serial of the instance the run spawns on the first free console port. */
-      const SERIAL = 'emulator-5554';
+    /** The attached stub emulator, and the instance the first case spawns on the first free port. */
+    const SERIAL = 'emulator-5554';
 
-      const roots: string[] = [];
-      afterEach(async () => {
-        for (const root of roots.splice(0)) {
-          await killBoundEmulatorsAsync(`${root}.expo-home`);
-        }
-      });
-
-      /**
-       * A device layer with no instance up and one AVD to spawn, whose instance has not got this
-       * app: `pm path` exits **1** for a package the device has not got, which is the one answer
-       * that plans an install (@ref src/device/androidApps).
-       */
-      async function installStubDeviceAsync(projectRoot: string): Promise<Record<string, string>> {
-        roots.push(projectRoot);
-        const stubBin = path.join(projectRoot, '.stub-bin');
-        await fs.promises.mkdir(stubBin, { recursive: true });
-        const adb = await installStubAdbAsync(projectRoot, APP_ID, { attached: false });
-        await installStubEmulatorAsync(projectRoot);
-
-        // An `xcrun` that reports no simulator, so the probe this run makes cannot reach the iOS
-        // devices of the machine the suite happens to be running on.
-        const xcrunScript = path.join(stubBin, 'xcrun-stub.js');
-        await fs.promises.writeFile(
-          xcrunScript,
-          [
-            `const args = process.argv.slice(2);`,
-            `if (args[1] === 'list') { process.stdout.write(JSON.stringify({ devices: {} })); }`,
-            `process.exit(0);`,
-          ].join('\n')
-        );
-        await installStubBinAsync(stubBin, 'xcrun', xcrunScript);
-
-        // A JVM, because the install is planned only where it could be **run**: `expo run:android`
-        // goes through Gradle whether or not anything compiles, so a machine with no Java runtime
-        // keeps the serve-only plan rather than gaining a step that can only fail
-        // (@ref src/plan/resolveAsync). `JAVA_HOME` is what the probe asks first, so the answer here
-        // is the same on a runner with a JDK and on one without.
-        const jdk = path.join(projectRoot, '.stub-jdk');
-        const javaScript = path.join(stubBin, 'java-stub.js');
-        await fs.promises.writeFile(
-          javaScript,
-          // `java -version` writes to **stderr**, which is where every JDK has always put it.
-          `process.stderr.write('openjdk version "17.0.11" 2026-04-16\\n');\nprocess.exit(0);\n`
-        );
-        await installStubBinAsync(path.join(jdk, 'bin'), 'java', javaScript);
-
-        return { ...adb.env, JAVA_HOME: jdk, AGENT_CLI_NO_DEVICE: '', STUB_ADB_INSTALLED: '0' };
+    const roots: string[] = [];
+    afterEach(async () => {
+      for (const root of roots.splice(0)) {
+        await killBoundEmulatorsAsync(`${root}.expo-home`);
       }
+    });
 
-      /** The argv of every stub `emulator` invocation of the fixture. */
-      function emulatorCalls(projectRoot: string): string[][] {
-        const file = path.join(projectRoot, '.emulator-calls.jsonl');
-        return fs.existsSync(file)
-          ? fs
-              .readFileSync(file, 'utf8')
-              .split(/\r?\n/)
-              .filter(Boolean)
-              .map((line) => JSON.parse(line))
-          : [];
-      }
+    /**
+     * A device layer with no instance up and one AVD to spawn, whose instance has not got this
+     * app: `pm path` exits **1** for a package the device has not got, which is the one answer
+     * that plans an install (@ref src/device/androidApps).
+     */
+    async function installStubDeviceAsync(
+      projectRoot: string,
+      spawn: boolean
+    ): Promise<Record<string, string>> {
+      roots.push(projectRoot);
+      const stubBin = path.join(projectRoot, '.stub-bin');
+      await fs.promises.mkdir(stubBin, { recursive: true });
+      const adb = await installStubAdbAsync(projectRoot, APP_ID, { attached: !spawn });
+      await installStubEmulatorAsync(projectRoot);
 
-      /**
-       * The fixture, plus the one thing it lacks: an Android application id.
-       *
-       * A project whose config names none cannot be looked for under any name, so the probe answers
-       * `unknown` and the plan is the serve-only one (@ref src/device/appPresence). Written here
-       * rather than into the committed fixture, which every other test in this file reads.
-       */
-      async function setupInstallAsync(): Promise<{
-        projectRoot: string;
-        env: Record<string, string>;
-      }> {
-        const projectRoot = await setupAsync('dev-client-fresh-app');
-        const configPath = path.join(projectRoot, 'app.json');
-        const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
-        config.expo.android = { ...config.expo.android, package: APP_ID };
-        await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
-        return { projectRoot, env: await installStubDeviceAsync(projectRoot) };
-      }
+      // An `xcrun` that reports no simulator, so the probe this run makes cannot reach the iOS
+      // devices of the machine the suite happens to be running on.
+      const xcrunScript = path.join(stubBin, 'xcrun-stub.js');
+      await fs.promises.writeFile(
+        xcrunScript,
+        [
+          `const args = process.argv.slice(2);`,
+          `if (args[1] === 'list') { process.stdout.write(JSON.stringify({ devices: {} })); }`,
+          `process.exit(0);`,
+        ].join('\n')
+      );
+      await installStubBinAsync(stubBin, 'xcrun', xcrunScript);
 
-      /** The install step's argv, which `dev` pins to the instance it bound. */
-      const INSTALL_STEP = ['run:android', '--no-bundler', '--device', SERIAL];
+      // A JVM, because the install is planned only where it could be **run**: `expo run:android`
+      // goes through Gradle whether or not anything compiles, so a machine with no Java runtime
+      // keeps the serve-only plan rather than gaining a step that can only fail
+      // (@ref src/plan/resolveAsync). `JAVA_HOME` is what the probe asks first, so the answer here
+      // is the same on a runner with a JDK and on one without.
+      const jdk = path.join(projectRoot, '.stub-jdk');
+      const javaScript = path.join(stubBin, 'java-stub.js');
+      await fs.promises.writeFile(
+        javaScript,
+        // `java -version` writes to **stderr**, which is where every JDK has always put it.
+        `process.stderr.write('openjdk version "17.0.11" 2026-04-16\\n');\nprocess.exit(0);\n`
+      );
+      await installStubBinAsync(path.join(jdk, 'bin'), 'java', javaScript);
 
-      it('spawns a read-only instance, binds it, and installs the recorded build onto it before it serves', async () => {
-        const { projectRoot, env } = await setupInstallAsync();
+      return { ...adb.env, JAVA_HOME: jdk, AGENT_CLI_NO_DEVICE: '', STUB_ADB_INSTALLED: '0' };
+    }
+
+    /** The argv of every stub `emulator` invocation of the fixture. */
+    function emulatorCalls(projectRoot: string): string[][] {
+      const file = path.join(projectRoot, '.emulator-calls.jsonl');
+      return fs.existsSync(file)
+        ? fs
+            .readFileSync(file, 'utf8')
+            .split(/\r?\n/)
+            .filter(Boolean)
+            .map((line) => JSON.parse(line))
+        : [];
+    }
+
+    /**
+     * The fixture, plus the one thing it lacks: an Android application id.
+     *
+     * A project whose config names none cannot be looked for under any name, so the probe answers
+     * `unknown` and the plan is the serve-only one (@ref src/device/appPresence). Written here
+     * rather than into the committed fixture, which every other test in this file reads.
+     */
+    async function setupInstallAsync({ spawn = false }: { spawn?: boolean } = {}): Promise<{
+      projectRoot: string;
+      env: Record<string, string>;
+    }> {
+      const projectRoot = await setupAsync('dev-client-fresh-app');
+      const configPath = path.join(projectRoot, 'app.json');
+      const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+      config.expo.android = { ...config.expo.android, package: APP_ID };
+      await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2));
+      return { projectRoot, env: await installStubDeviceAsync(projectRoot, spawn) };
+    }
+
+    /** The install step's argv, which `dev` pins to the instance it bound. */
+    const INSTALL_STEP = ['run:android', '--no-bundler', '--device', SERIAL];
+
+    it.skipIf(process.platform === 'win32')(
+      'spawns a read-only instance, binds it, and installs the recorded build onto it before it serves',
+      async () => {
+        const { projectRoot, env } = await setupInstallAsync({ spawn: true });
 
         const result = await executeAgentCliAsync(projectRoot, ['dev', '--android', '--local'], {
           env,
@@ -1013,97 +1017,97 @@ describe('@expo/agent-cli dev', () => {
         expect(readLastBuildRecord(projectRoot)).toMatchObject({
           android: { hash: RECORDED_HASH },
         });
+      }
+    );
+
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
+    // The other half of F121, on the step it was found on. `expo run:*` installs the app and then
+    // launches it, and on a Mac without the Automation grant the launch is what fails — after the
+    // install this step exists for has already succeeded. The dev server still to come deep-links
+    // into the app itself, so failing the plan here would stop the one step the caller waited for.
+    it('keeps going when the install put the app on the device and the launch failed', async () => {
+      const { projectRoot, env } = await setupInstallAsync();
+
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--android', '--local'], {
+        env: { ...env, STUB_EXPO_RUN_LAUNCH_FAILS: '1' },
       });
 
-      // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
-      // The other half of F121, on the step it was found on. `expo run:*` installs the app and then
-      // launches it, and on a Mac without the Automation grant the launch is what fails — after the
-      // install this step exists for has already succeeded. The dev server still to come deep-links
-      // into the app itself, so failing the plan here would stop the one step the caller waited for.
-      it('keeps going when the install put the app on the device and the launch failed', async () => {
-        const { projectRoot, env } = await setupInstallAsync();
+      // Exit 0: the step failed and the plan did not, and the report says which of the two.
+      expect(result.exitCode).toBe(0);
+      expect(result.all).toContain('most likely the launch');
+      expect(invocationArgs(projectRoot)).toEqual([
+        INSTALL_STEP,
+        ['start', '--dev-client', ...PORT_ARGS],
+      ]);
+    });
 
-        const result = await executeAgentCliAsync(projectRoot, ['dev', '--android', '--local'], {
-          env: { ...env, STUB_EXPO_RUN_LAUNCH_FAILS: '1' },
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — F125.
+    //
+    // The lock is what every other command finds a dev server by, and it names a port. The install
+    // step serves nothing — that is what `--no-bundler` says — so a lock taken for it would name a
+    // port nothing will listen on for as long as the install takes, and `status`, `smoke` and
+    // `dev:stop` would all be answering about a dev server that does not exist.
+    it('publishes no dev-server lock while the install runs, and one when it serves', async () => {
+      const { projectRoot, env } = await setupInstallAsync();
+      // Long enough that the read below lands inside the install by a wide margin, and paid only
+      // once: the run is killed as soon as the dev server it is waiting for has published.
+      const child = spawnAgentCli(projectRoot, ['dev', '--android', '--local'], {
+        env: { ...env, STUB_EXPO_DELAY_MS: '5000', STUB_EXPO_DEV_SERVER_PORT: '8097' },
+      });
+
+      try {
+        // The install has started — the step records itself before it sleeps — and it is still
+        // running, so this is the window the finding is about.
+        expect(
+          await waitForAsync(
+            () => invocationArgs(projectRoot).some((args) => args[0] === 'run:android'),
+            30_000
+          )
+        ).toBe(true);
+        expect(await readDevLockAsync(projectRoot)).toBeNull();
+
+        // And the step that does serve takes it, which is the same lock a plain `dev` run takes.
+        expect(await waitForDevLockAsync(projectRoot, 30_000)).toMatchObject({
+          url: 'http://127.0.0.1:8097',
+          port: 8097,
+          pid: child.pid,
         });
+      } finally {
+        await killAsync(child);
+      }
+    });
 
-        // Exit 0: the step failed and the plan did not, and the report says which of the two.
+    // @ref ./childVerdict.ts §parseDetachedChildPhase — the other side of F125. The child's log
+    // holds a `run:android` row for the whole run, and a parser that read it alone would report
+    // `building` about a dev server that is up and answering. What ends the building half is the
+    // install's own marker, which is the same evidence F121 reads.
+    it('reports a detached install plan as serving once the app is on the device', async () => {
+      const { projectRoot, env } = await setupInstallAsync();
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--android', '--local', '--detach', '--json'],
+        {
+          env: {
+            ...env,
+            // The install prints what it installed and then fails its launch, which is the shape
+            // that leaves a `run:android` row above a dev server that is serving.
+            STUB_EXPO_RUN_LAUNCH_FAILS: '1',
+            STUB_EXPO_DELAY_MS: '20000',
+            STUB_EXPO_DEV_SERVER_PORT: '8098',
+          },
+          reject: false,
+        }
+      );
+
+      try {
         expect(result.exitCode).toBe(0);
-        expect(result.all).toContain('most likely the launch');
-        expect(invocationArgs(projectRoot)).toEqual([
-          INSTALL_STEP,
-          ['start', '--dev-client', ...PORT_ARGS],
-        ]);
-      });
-
-      // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — F125.
-      //
-      // The lock is what every other command finds a dev server by, and it names a port. The install
-      // step serves nothing — that is what `--no-bundler` says — so a lock taken for it would name a
-      // port nothing will listen on for as long as the install takes, and `status`, `smoke` and
-      // `dev:stop` would all be answering about a dev server that does not exist.
-      it('publishes no dev-server lock while the install runs, and one when it serves', async () => {
-        const { projectRoot, env } = await setupInstallAsync();
-        // Long enough that the read below lands inside the install by a wide margin, and paid only
-        // once: the run is killed as soon as the dev server it is waiting for has published.
-        const child = spawnAgentCli(projectRoot, ['dev', '--android', '--local'], {
-          env: { ...env, STUB_EXPO_DELAY_MS: '5000', STUB_EXPO_DEV_SERVER_PORT: '8097' },
-        });
-
-        try {
-          // The install has started — the step records itself before it sleeps — and it is still
-          // running, so this is the window the finding is about.
-          expect(
-            await waitForAsync(
-              () => invocationArgs(projectRoot).some((args) => args[0] === 'run:android'),
-              30_000
-            )
-          ).toBe(true);
-          expect(await readDevLockAsync(projectRoot)).toBeNull();
-
-          // And the step that does serve takes it, which is the same lock a plain `dev` run takes.
-          expect(await waitForDevLockAsync(projectRoot, 30_000)).toMatchObject({
-            url: 'http://127.0.0.1:8097',
-            port: 8097,
-            pid: child.pid,
-          });
-        } finally {
-          await killAsync(child);
-        }
-      });
-
-      // @ref ./childVerdict.ts §parseDetachedChildPhase — the other side of F125. The child's log
-      // holds a `run:android` row for the whole run, and a parser that read it alone would report
-      // `building` about a dev server that is up and answering. What ends the building half is the
-      // install's own marker, which is the same evidence F121 reads.
-      it('reports a detached install plan as serving once the app is on the device', async () => {
-        const { projectRoot, env } = await setupInstallAsync();
-
-        const result = await executeAgentCliAsync(
-          projectRoot,
-          ['dev', '--android', '--local', '--detach', '--json'],
-          {
-            env: {
-              ...env,
-              // The install prints what it installed and then fails its launch, which is the shape
-              // that leaves a `run:android` row above a dev server that is serving.
-              STUB_EXPO_RUN_LAUNCH_FAILS: '1',
-              STUB_EXPO_DELAY_MS: '20000',
-              STUB_EXPO_DEV_SERVER_PORT: '8098',
-            },
-            reject: false,
-          }
-        );
-
-        try {
-          expect(result.exitCode).toBe(0);
-          expect(JSON.parse(result.stdout)).toMatchObject({ port: 8098, phase: 'serving' });
-        } finally {
-          await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], { reject: false });
-        }
-      });
-    }
-  );
+        expect(JSON.parse(result.stdout)).toMatchObject({ port: 8098, phase: 'serving' });
+      } finally {
+        await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], { reject: false });
+      }
+    });
+  });
 
   // @ref llp/0031-ios-binding.plan.md §Tests
   //
@@ -1172,6 +1176,7 @@ describe('@expo/agent-cli dev', () => {
   // Two worktrees of one app, one stub `adb` and `emulator` whose instance state both runs share,
   // and one registry: each `dev --android` spawns its own read-only instance of the one AVD on the
   // next free even console port, binds its serial and pid, and pins its build to that serial.
+  // Posix only: on Windows the `.cmd` stub starts under `cmd.exe`, so its pid is not the instance's.
   describe.skipIf(process.platform === 'win32')('two worktrees, two emulator instances', () => {
     const APP_ID = 'com.example.devclientfreshapp';
     let home: string | null = null;
