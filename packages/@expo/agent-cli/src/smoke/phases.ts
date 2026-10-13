@@ -42,6 +42,7 @@
 // server, no device and no clock.
 
 import type { ScreenshotResult } from '../device/screenshot';
+import type { AcquireAction, ReleasedDevice } from '../deviceBinding';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import type { DeviceBackend } from '../navigate/device';
 import type { OpenRouteResult } from '../navigate/openRoute';
@@ -96,6 +97,8 @@ export interface SmokeBootResult {
    * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
    */
   installNeeded?: boolean;
+  /** The worktree device the boot bound, for the report. */
+  bound?: { name: string; action: AcquireAction };
 }
 
 /** What putting the app on a device amounted to. Never a throw: a failed install is a result. */
@@ -120,6 +123,8 @@ export interface SmokeReleaseResult {
   target: string | null;
   /** Why it was not. Null exactly when {@link ok} is true. */
   reason: string | null;
+  /** The bound devices this release let go of. */
+  devices?: ReleasedDevice[];
 }
 
 /** What making sure there is an EAS Simulator session amounted to. */
@@ -716,6 +721,7 @@ export async function runSmokePhasesAsync(
     devServer: 'absent',
     device: 'absent',
     deviceChoice: null,
+    boundDevice: null,
     cleanup: [],
   };
 
@@ -733,10 +739,10 @@ export async function runSmokePhasesAsync(
     if (environment.device === 'absent' && run.deviceId != null) {
       environment.device = 'reused';
     }
-    environment.cleanup = await releaseAsync(deps, cleanups);
+    await releaseAsync(deps, cleanups, environment);
     return { ...run, environment, durationMs: deps.now() - startedAt };
   } catch (error: unknown) {
-    environment.cleanup = await releaseAsync(deps, cleanups);
+    await releaseAsync(deps, cleanups, environment);
     throw error;
   }
 }
@@ -762,13 +768,16 @@ interface RegisteredCleanup {
  */
 async function releaseAsync(
   deps: SmokeDeps,
-  cleanups: RegisteredCleanup[]
-): Promise<SmokeCleanupJson[]> {
+  cleanups: RegisteredCleanup[],
+  environment: SmokeEnvironmentJson
+): Promise<void> {
   const released: SmokeCleanupJson[] = [];
+  const devices: ReleasedDevice[] = [];
   for (const cleanup of [...cleanups].reverse()) {
     const at = deps.now();
     try {
       const result = await cleanup.release();
+      devices.push(...(result.devices ?? []));
       released.push({
         resource: cleanup.resource,
         target: result.target ?? cleanup.target,
@@ -786,7 +795,13 @@ async function releaseAsync(
       });
     }
   }
-  return released;
+  environment.cleanup = released;
+  const bound = environment.boundDevice;
+  const device = bound && devices.find(({ id }) => id === bound.id);
+  if (bound && device) {
+    bound.released = device.released;
+    bound.shutDown = device.shutDown;
+  }
 }
 
 /** What {@link runSmokePhasesAsync} hands the phase walk, so the walk owns none of it. */
@@ -1229,6 +1244,9 @@ async function runPhasesAsync(
         if (boot.ok && boot.deviceId != null) {
           environment.device = 'booted';
           environment.deviceChoice = boot.choice ?? null;
+          environment.boundDevice = boot.bound
+            ? { id: boot.deviceId, ...boot.bound, released: false, shutDown: false }
+            : null;
           probed = { deviceId: boot.deviceId, backend: boot.backend, reason: null };
           bootInstallNeeded = boot.installNeeded === true;
         } else {

@@ -6,6 +6,7 @@
 // formatter and the follow-ups depend on the shape rather than on the machinery that fills it.
 
 import type { ScreenshotResult } from '../device/screenshot';
+import type { AcquireAction } from '../deviceBinding';
 import type { FollowUp } from '../followups';
 import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckJson } from '../runtime/bundleCheck';
@@ -158,6 +159,18 @@ export interface SmokeCleanupJson {
   ms: number;
 }
 
+/** @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke */
+export interface SmokeBoundDeviceJson {
+  id: string;
+  name: string;
+  /** How the boot got it: `created`, `reused`, `spawned` or `explicit`. */
+  action: AcquireAction;
+  /** The release at the end of the run let go of it. */
+  released: boolean;
+  /** That release shut it down: a parked simulator, a stopped emulator instance. */
+  shutDown: boolean;
+}
+
 /**
  * What this run found, what it started, and what it put back.
  *
@@ -177,6 +190,8 @@ export interface SmokeEnvironmentJson {
    * have opened the app. `"it has Expo Go installed"`, `"it was already booted"`.
    */
   deviceChoice: string | null;
+  /** The worktree device this run's boot bound, and what its release did. Null when it bound none. */
+  boundDevice: SmokeBoundDeviceJson | null;
   /**
    * Everything this run put back, newest first.
    *

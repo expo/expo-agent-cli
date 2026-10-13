@@ -474,6 +474,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
           code === EXIT_OK
             ? null
             : (stopped?.deviceError ?? stopped?.detail ?? 'the dev server did not stop'),
+        devices: stopped?.devices,
       };
     },
 
@@ -543,6 +544,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         ok: devices.every((device) => device.released),
         target: devices.map((device) => device.id).join(', ') || null,
         reason: devices.find((device) => !device.released)?.reason ?? null,
+        devices,
       };
     },
     bootDevice: async () => {
@@ -567,6 +569,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
           choice: choiceOf(acquired.device),
           installNeeded: acquired.action === 'created' || acquired.action === 'spawned',
           reason: null,
+          bound: { name: deviceNameOf(acquired.device), action: acquired.action },
         };
       } catch (error: unknown) {
         return {

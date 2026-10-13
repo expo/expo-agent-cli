@@ -39,3 +39,21 @@ it('cloud smoke stops its server without releasing local devices', async () => {
     expect.anything()
   );
 });
+
+it('the dev server cleanup carries the devices dev:stop released', async () => {
+  const device = {
+    backend: 'local-ios' as const,
+    platform: 'ios' as const,
+    id: 'A',
+    name: 'agent-cli 0000',
+    released: true,
+    shutDown: true,
+    reason: null,
+  };
+  vi.mocked(devStopAsync).mockImplementationOnce(async (_root, _options, { onReport } = {}) => {
+    onReport?.({ stopped: true, devices: [device], deviceError: null } as any);
+    return 0;
+  });
+  const result = await buildSmokeDeps(root, resolveSmokeOptions(['--ios'])).stopDevServer();
+  expect(result.devices).toEqual([device]);
+});

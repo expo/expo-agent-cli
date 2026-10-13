@@ -389,6 +389,7 @@ describe('@expo/agent-cli smoke', () => {
         devServer: 'absent',
         device: 'absent',
         deviceChoice: null,
+        boundDevice: null,
         cleanup: [],
       });
       expect(report.phases[0]).toMatchObject({ id: 'dev-server', status: 'failed' });
@@ -817,6 +818,13 @@ describe('@expo/agent-cli smoke', () => {
         expect(report.environment.cleanup).toContainEqual(
           expect.objectContaining({ resource: 'device', ok: true })
         );
+        expect(report.environment.boundDevice).toEqual({
+          id: 'E2E-CREATED-1',
+          name: binding!.device.name,
+          action: 'created',
+          released: true,
+          shutDown: true,
+        });
 
         // A created simulator has no app, so the install is a native build pinned to it.
         const install = report.phases.find((phase: any) => phase.id === 'install-app');
@@ -926,6 +934,12 @@ describe('@expo/agent-cli smoke', () => {
         expect(readXcrun()).toContainEqual(['simctl', 'bootstatus', 'E2E-PARKED', '-b']);
         expect(readBinding(projectRoot)).toMatchObject({ device: { udid: 'E2E-PARKED' } });
         expect(readXcrun()).toContainEqual(['simctl', 'shutdown', 'E2E-PARKED']);
+        expect(report.environment.boundDevice).toMatchObject({
+          id: 'E2E-PARKED',
+          action: 'reused',
+          released: true,
+          shutDown: true,
+        });
         expect(report.phases.find((phase: any) => phase.id === 'boot-device')).toMatchObject({
           status: 'ok',
         });

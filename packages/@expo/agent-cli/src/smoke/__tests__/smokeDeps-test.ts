@@ -43,6 +43,7 @@ describe('bootDevice', () => {
       choice: 'agent-cli 0000',
       installNeeded: true,
       reason: null,
+      bound: { name: 'agent-cli 0000', action: 'created' },
     });
   });
 

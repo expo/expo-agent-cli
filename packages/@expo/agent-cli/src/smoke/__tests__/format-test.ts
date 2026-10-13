@@ -3,6 +3,8 @@
 // property the contract is: a caller reading `screenshot.ok` after a run that never reached a
 // device branches on a value rather than on a missing key.
 
+import { stripVTControlCharacters } from 'node:util';
+
 import { formatSmokeResult, smokeResultToJson } from '../format';
 import { noReload, noScreenshot, type SmokeRun } from '../phases';
 import type { SmokeOptions } from '../resolveOptions';
@@ -51,7 +53,13 @@ function run(overrides: Partial<SmokeRun> = {}): SmokeRun {
     },
     projectRootMatched: true,
     started: false,
-    environment: { devServer: 'reused', device: 'reused', deviceChoice: null, cleanup: [] },
+    environment: {
+      devServer: 'reused',
+      device: 'reused',
+      deviceChoice: null,
+      boundDevice: null,
+      cleanup: [],
+    },
     appsConnected: 1,
     bundle: {
       outcome: 'ok',
@@ -294,6 +302,7 @@ describe(formatSmokeResult, () => {
             devServer: 'started',
             device: 'booted',
             deviceChoice: 'it has Expo Go installed',
+            boundDevice: null,
             cleanup: [
               { resource: 'device', target: 'SIM-BOOTED', ok: true, reason: null, ms: 2100 },
               {
@@ -324,6 +333,7 @@ describe(formatSmokeResult, () => {
             devServer: 'reused',
             device: 'booted',
             deviceChoice: null,
+            boundDevice: null,
             cleanup: [
               {
                 resource: 'session',
@@ -351,6 +361,7 @@ describe(formatSmokeResult, () => {
             devServer: 'started',
             device: 'reused',
             deviceChoice: null,
+            boundDevice: null,
             cleanup: [
               {
                 resource: 'dev-server',
@@ -369,6 +380,52 @@ describe(formatSmokeResult, () => {
       expect(printed).toContain('http://127.0.0.1:8210');
       expect(printed).toContain('still running');
     });
+
+    it.each([
+      ['ios', true, 'released (parked)'],
+      ['android', true, 'released (shut down)'],
+      ['ios', false, 'released (left running)'],
+    ] as const)(
+      'names the device it bound and its release (%s, shut down %s)',
+      (platform, shutDown, release) => {
+        const printed = stripVTControlCharacters(
+          formatSmokeResult(
+            run({
+              started: true,
+              deviceId: 'A31EB033',
+              environment: {
+                devServer: 'started',
+                device: 'booted',
+                deviceChoice: 'agent-cli e09c747f',
+                boundDevice: {
+                  id: 'A31EB033',
+                  name: 'agent-cli e09c747f',
+                  action: 'created',
+                  released: true,
+                  shutDown,
+                },
+                cleanup: [
+                  {
+                    resource: 'dev-server',
+                    target: 'http://127.0.0.1:8081',
+                    ok: true,
+                    reason: null,
+                    ms: 9,
+                  },
+                ],
+              },
+            }),
+            options({ platform })
+          )
+        );
+
+        expect(printed).toContain(
+          `device      agent-cli e09c747f (A31EB033) · created for this run · ${release}`
+        );
+        expect(printed).not.toContain('still running');
+        expect(printed).not.toContain('booted A31EB033');
+      }
+    );
 
     // Most runs start nothing, and a line saying so every time would bury the runs that did.
     it(`says nothing at all when it started nothing`, () => {

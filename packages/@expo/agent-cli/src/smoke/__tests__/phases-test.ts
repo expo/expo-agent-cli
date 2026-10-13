@@ -438,6 +438,59 @@ describe(runSmokePhasesAsync, () => {
       expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['dev-server']);
     });
 
+    it.each([
+      ['started', {}],
+      ['reused', { discoverDevServer: async () => discovery() }],
+    ] as const)(
+      'names the device it bound and its release, after a %s dev server',
+      async (_, server) => {
+        const released = {
+          backend: 'local-ios' as const,
+          platform: 'ios' as const,
+          id: 'SIM-BOOTED',
+          name: 'agent-cli 0000',
+          released: true,
+          shutDown: true,
+          reason: null,
+        };
+        const run = await runSmokePhasesAsync(
+          deps({
+            ...bareMachine({
+              ...server,
+              bootDevice: async () => ({
+                ok: true,
+                deviceId: 'SIM-BOOTED',
+                backend: 'local-ios' as const,
+                reason: null,
+                bound: { name: 'agent-cli 0000', action: 'created' as const },
+              }),
+            }),
+            stopDevServer: async () => ({
+              ok: true,
+              target: 'http://127.0.0.1:8081',
+              reason: null,
+              devices: [released],
+            }),
+            releaseDevice: async () => ({
+              ok: true,
+              target: 'SIM-BOOTED',
+              reason: null,
+              devices: [released],
+            }),
+          }),
+          options({ bootstrap: true })
+        );
+
+        expect(run.environment.boundDevice).toEqual({
+          id: 'SIM-BOOTED',
+          name: 'agent-cli 0000',
+          action: 'created',
+          released: true,
+          shutDown: true,
+        });
+      }
+    );
+
     it('releases its own boot after a reused server, without stopping that server', async () => {
       const releaseDevice = vi.fn(async () => ({ ok: true, target: 'SIM-BOOTED', reason: null }));
       const stopDevServer = vi.fn();
