@@ -222,9 +222,10 @@ export function killEmulatorIfOurs(
     return { killed: false, reason: `pid ${emulatorPid} is not running` };
   }
   const command = tools.commandOf(emulatorPid);
+  const args = ` ${command} `;
   if (
     command != null &&
-    !(command.includes(`-avd ${avd}`) && command.includes(`-ports ${port},${port + 1}`))
+    !(args.includes(` -avd ${avd} `) && args.includes(` -ports ${port},${port + 1} `))
   ) {
     return {
       killed: false,
