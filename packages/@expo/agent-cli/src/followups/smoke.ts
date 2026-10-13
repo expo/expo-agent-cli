@@ -263,7 +263,10 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     ]);
   }
 
-  if (input.appsConnected === 0 && (input.serverStopped || input.deviceReleased) && !input.cloud) {
+  const lookAgain =
+    input.appsConnected === 0 ||
+    (input.outcome === 'inconclusive' && input.runtimeSupported !== false);
+  if (lookAgain && (input.serverStopped || input.deviceReleased) && !input.cloud) {
     const start = `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready${onPort}`;
     return capFollowUps([
       input.serverStopped

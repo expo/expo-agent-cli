@@ -130,6 +130,24 @@ describe(buildSmokeFollowUps, () => {
     ]);
   });
 
+  it(`answers a runtime that did not answer after the run put its environment back with the same start`, () => {
+    expect(
+      commands({
+        appsConnected: 1,
+        runtimeSupported: null,
+        outcome: 'inconclusive',
+        platform: 'android',
+        serverStopped: true,
+        deviceReleased: true,
+        port: '8092',
+      })
+    ).toEqual([
+      'npx @expo/agent-cli dev --android --detach --wait-ready --port 8092',
+      'npx @expo/agent-cli navigate / --android',
+      'npx @expo/agent-cli smoke --android --port 8092',
+    ]);
+  });
+
   // `dev --detach` refuses `not-reusable` while this worktree's dev server runs with no device.
   it(`restarts the reused dev server after the run released the device it booted`, () => {
     const followups = buildSmokeFollowUps(

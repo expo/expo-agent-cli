@@ -1314,6 +1314,9 @@ async function runPhasesAsync(
       device.deviceId != null &&
       (bootInstallNeeded || (await deps.installNeededOnDevice(device.deviceId, device.backend)))
     ) {
+      const releasedAfterRun =
+        environment.boundDevice?.id === device.deviceId &&
+        environment.boundDevice.released !== null;
       // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
       //
       // The build budget rather than an install budget, because this phase now covers both and the
@@ -1331,7 +1334,7 @@ async function runPhasesAsync(
                 reason: [
                   `installed ${result.version ?? 'the app'} on ${device.deviceId}`,
                   result.replaced ? `, replacing ${result.replaced}` : '',
-                  `, and left it there`,
+                  releasedAfterRun ? '' : `, and left it there`,
                 ].join(''),
                 value: result,
               }

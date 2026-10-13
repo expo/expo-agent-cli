@@ -546,6 +546,40 @@ describe(runSmokePhasesAsync, () => {
       ]);
     });
 
+    it.each([
+      ['the device its started dev server bound, which the run releases', true, false],
+      ['a device this run did not bind', false, true],
+    ] as const)(
+      `says it left the app it installed on %s only when the device stays`,
+      async (_, bound, left) => {
+        const run = await runSmokePhasesAsync(
+          deps({
+            ...bareMachine({
+              probeDevice: async () => ({
+                deviceId: 'emulator-5556',
+                backend: 'local-android' as const,
+                reason: null,
+              }),
+            }),
+            startDevServer: async () => ({
+              ok: true,
+              devServerUrl: 'http://127.0.0.1:8081',
+              reason: null,
+              bound: bound
+                ? { id: 'emulator-5556', name: 'emulator-5556', action: 'spawned' as const }
+                : undefined,
+            }),
+            installNeededOnDevice: async () => true,
+          }),
+          options({ bootstrap: true, platform: 'android' })
+        );
+
+        const install = run.phases.find((phase) => phase.id === 'install-app')?.reason;
+        expect(install).toContain('installed the app on emulator-5556');
+        expect(install?.includes('left it there')).toBe(left);
+      }
+    );
+
     it('releases its own boot after a reused server, without stopping that server', async () => {
       const releaseDevice = vi.fn(async () => ({ ok: true, target: 'SIM-BOOTED', reason: null }));
       const stopDevServer = vi.fn();
