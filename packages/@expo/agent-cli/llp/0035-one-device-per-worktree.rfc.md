@@ -312,7 +312,7 @@ Each reaped device is reported on stderr and in JSON with reason `expired`, `del
 
 ## Not built
 
-The agent's pid in the binding; a take of another worktree's simulator; a cap on parked simulators; allocation from "any free booted device"; `peek` mode; capacity from cpus and RAM; mtime touch, lock token and heartbeat; a `pool.json`, a create marker, adopt-by-name; a lock-free write path; a `busy` lease result; a `StartPlan.device` or `dev --json` device field; dev-lock socket liveness; a writable first emulator; `emu kill` by serial; `--device` on `navigate`; a "still booting" inspect state; a stop of the old session on a cloud id change.
+The agent's pid in the binding; a take of another worktree's simulator; a cap on parked simulators; allocation from "any free booted device"; `peek` mode; capacity from cpus and RAM; mtime touch, lock token and heartbeat; a `pool.json`, a create marker, adopt-by-name; a lock-free write path; a `busy` lease result; a `StartPlan.device`; dev-lock socket liveness; a writable first emulator; `emu kill` by serial; `--device` on `navigate`; a "still booting" inspect state; a stop of the old session on a cloud id change.
 
 ## Answers from the EAS code
 
