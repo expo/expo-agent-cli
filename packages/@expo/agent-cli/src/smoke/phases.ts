@@ -80,7 +80,7 @@ export interface SmokeStartResult {
    */
   built?: boolean;
   /** The worktree device the detached `dev` bound, read from its binding file, for the report. */
-  bound?: { id: string; name: string; action: AcquireAction };
+  bound?: { id: string; name: string; action: AcquireAction | 'existing' };
 }
 
 /** What booting a simulator or an emulator amounted to. */
@@ -985,7 +985,11 @@ async function runPhasesAsync(
       started = true;
       environment.devServer = 'started';
       environment.boundDevice = start.bound
-        ? { ...start.bound, released: false, shutDown: false }
+        ? {
+            ...start.bound,
+            released: start.bound.action === 'existing' ? null : false,
+            shutDown: false,
+          }
         : null;
       // Discovered the same way the first look was, rather than by naming the URL the start
       // reported: naming it would make `source` say `flag` for a run whose caller passed no flag,

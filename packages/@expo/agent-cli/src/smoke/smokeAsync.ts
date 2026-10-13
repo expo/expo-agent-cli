@@ -21,6 +21,7 @@ import {
   deviceNameOf,
   devicesDisabled,
   hostBindsPlatform,
+  inspectBindingAsync,
   localBackendOf,
   releaseWorktreeDevicesAsync,
   type Binding,
@@ -113,23 +114,26 @@ export const START_DEV_SERVER_ARGV: readonly string[] = ['--detach', '--wait-rea
 
 /**
  * The device the detached `dev` of the start phase bound, from the worktree's binding file before
- * and after the start. The child acquires and the parent only reads its result.
+ * and after the start. The child acquires and the parent only reads its result. A device whose
+ * binding was live and up before the start is `existing`: the run keeps it.
  *
  * @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
  */
 export function deviceBoundByStart(
   before: Binding | null,
-  after: Binding | null
+  after: Binding | null,
+  beforeUp: boolean
 ): SmokeStartResult['bound'] {
   if (after == null) {
     return undefined;
   }
   const id = deviceIdOf(after.device);
   const reused = before != null && deviceIdOf(before.device) === id;
+  const fresh = after.device.backend === 'local-android' ? 'spawned' : 'created';
   return {
     id,
     name: deviceNameOf(after.device),
-    action: reused ? 'reused' : after.device.backend === 'local-android' ? 'spawned' : 'created',
+    action: !reused ? fresh : beforeUp ? 'existing' : 'reused',
   };
 }
 
@@ -328,6 +332,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
    * that decided there was an install to do has already resolved the target.
    */
   let installKind: SmokeTarget['installWithKind'] | null = null;
+  let keepBoundDevice = false;
   const targetAsync = () =>
     (target ??= resolveSmokeTargetAsync(projectRoot, options).then((resolved) => {
       installKind = resolved.installWithKind;
@@ -443,6 +448,11 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         forgetTarget();
       }
       const before = ownBinding();
+      const beforeUp =
+        before != null &&
+        (await inspectBindingAsync(projectRoot, options.platform, before.device.backend)).state ===
+          'up';
+      keepBoundDevice = beforeUp;
       const argv = [
         `--${options.platform}`,
         ...START_DEV_SERVER_ARGV,
@@ -489,7 +499,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         ok: found.reachable,
         devServerUrl: found.devServerUrl,
         built,
-        bound: deviceBoundByStart(before, ownBinding()),
+        bound: deviceBoundByStart(before, ownBinding(), beforeUp),
         reason: found.reachable
           ? null
           : `a dev server was started and nothing answered at ${found.devServerUrl} afterwards (${found.reason ?? 'no answer'})`,
@@ -506,7 +516,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         projectRoot,
         {
           ...resolveDevStopOptions(['--no-followups']),
-          release: options.cloud !== 'required',
+          release: options.cloud !== 'required' && !keepBoundDevice,
           platform: options.platform,
         },
         {
@@ -524,7 +534,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
           code === EXIT_OK
             ? null
             : (stopped?.deviceError ?? stopped?.detail ?? 'the dev server did not stop'),
-        devices: stopped?.devices,
+        devices: keepBoundDevice ? undefined : stopped?.devices,
       };
     },
 

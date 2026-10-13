@@ -546,6 +546,36 @@ describe(runSmokePhasesAsync, () => {
       ]);
     });
 
+    it('keeps the device its started dev server found bound and up before the run', async () => {
+      const run = await runSmokePhasesAsync(
+        deps({
+          ...bareMachine({
+            probeDevice: async () => ({
+              deviceId: 'SIM-UP',
+              backend: 'local-ios' as const,
+              reason: null,
+            }),
+          }),
+          startDevServer: async () => ({
+            ok: true,
+            devServerUrl: 'http://127.0.0.1:8081',
+            reason: null,
+            bound: { id: 'SIM-UP', name: 'agent-cli f5ce27a6', action: 'existing' as const },
+          }),
+        }),
+        options({ bootstrap: true })
+      );
+
+      expect(run.environment.boundDevice).toEqual({
+        id: 'SIM-UP',
+        name: 'agent-cli f5ce27a6',
+        action: 'existing',
+        released: null,
+        shutDown: false,
+      });
+      expect(run.environment.cleanup.map(({ resource }) => resource)).toEqual(['dev-server']);
+    });
+
     it.each([
       ['the device its started dev server bound, which the run releases', true, false],
       ['a device this run did not bind', false, true],

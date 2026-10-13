@@ -173,7 +173,7 @@ describe(deviceBoundByStart, () => {
   ] as const)(
     'reads a %s device from the binding the detached dev wrote',
     (action, before, after) => {
-      expect(deviceBoundByStart(before, after)).toEqual({
+      expect(deviceBoundByStart(before, after, false)).toEqual({
         id: deviceIdOf(after.device),
         name: deviceNameOf(after.device),
         action,
@@ -181,8 +181,17 @@ describe(deviceBoundByStart, () => {
     }
   );
 
+  it('reads the device as existing when its binding was live and up before the start', () => {
+    const binding = bindingFor(projectRoot, 'SIM-OLD');
+    expect(deviceBoundByStart(binding, binding, true)).toEqual({
+      id: 'SIM-OLD',
+      name: deviceNameOf(binding.device),
+      action: 'existing',
+    });
+  });
+
   it('reads no device when the start left no binding', () => {
-    expect(deviceBoundByStart(bindingFor(projectRoot, 'SIM-OLD'), null)).toBeUndefined();
+    expect(deviceBoundByStart(bindingFor(projectRoot, 'SIM-OLD'), null, false)).toBeUndefined();
   });
 });
 

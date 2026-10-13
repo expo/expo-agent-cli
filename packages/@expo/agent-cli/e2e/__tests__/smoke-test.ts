@@ -1058,6 +1058,53 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
+    it('keeps the device that was bound and booted before its started dev server', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const { calls: readXcrun } = await installStatefulXcrunAsync(projectRoot, {
+        simulators: [{ udid: 'E2E-BOOTED', name: 'agent-cli f5ce27a6', state: 'Booted' }],
+      });
+      await bindingFixture(projectRoot, 'E2E-BOOTED', 'agent-cli f5ce27a6');
+      const before = readBinding(projectRoot);
+      await installStubNpxAsync(projectRoot);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-screenshot', '--port', '9354', '--timeout', '4s'],
+          {
+            env: {
+              ...stubExpoEnv(projectRoot),
+              AGENT_CLI_NO_DEVICE: '0',
+              STUB_EXPO_DELAY_MS: '30000',
+              STUB_EXPO_DEV_SERVER_PORT: '9354',
+              STUB_EXPO_LISTEN: '1',
+            },
+            reject: false,
+          }
+        );
+
+        const report = JSON.parse(result.stdout);
+        expect(report.environment.devServer).toBe('started');
+        expect(report.environment.boundDevice).toEqual({
+          id: 'E2E-BOOTED',
+          name: 'agent-cli f5ce27a6',
+          action: 'existing',
+          released: null,
+          shutDown: false,
+        });
+        expect(report.environment.cleanup.map((entry: any) => entry.resource)).toEqual([
+          'dev-server',
+        ]);
+        expect(readXcrun().some((argv) => argv[1] === 'shutdown')).toBe(false);
+        expect(readBinding(projectRoot)?.device).toEqual(before?.device);
+      } finally {
+        await executeAgentCliAsync(projectRoot, ['dev:stop', '--release', '--json'], {
+          env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' },
+          reject: false,
+        });
+      }
+    });
+
     // The boundary that remains: `--no-start` says change nothing, so nothing is bound and nothing
     // is built, and the report names the run that would.
     it('binds nothing and installs nothing under --no-start', async () => {

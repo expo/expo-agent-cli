@@ -165,7 +165,8 @@ export interface SmokeBoundDeviceJson {
   name: string;
   /**
    * How the boot got it: `created`, `reused`, `spawned` or `explicit`. `existing` when this run
-   * acquired nothing and the worktree's binding names the device the run used.
+   * acquired nothing, or its started dev server found the binding live and up, and the worktree's
+   * binding names the device the run used.
    */
   action: AcquireAction | 'existing';
   /**
