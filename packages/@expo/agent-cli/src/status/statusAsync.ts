@@ -362,6 +362,11 @@ export async function collectStatusReportAsync(
       platform !== 'web' &&
       'value' in binding &&
       !bound.some((entry) => Date.parse(entry.expiresAt) > Date.now()) &&
+      !(
+        report.devServer?.running &&
+        report.devServer.appsConnected > 0 &&
+        report.devServer.projectRootMatched !== false
+      ) &&
       !readCloudSessionIdSync(projectRoot) &&
       !devicesDisabled() &&
       hostBindsPlatform(platform)

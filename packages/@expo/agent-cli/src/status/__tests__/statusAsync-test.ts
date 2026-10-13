@@ -1015,10 +1015,16 @@ describe(printStatusAsync, () => {
         'skills-sync',
         'install-dev-client',
       ]);
-      // The fixture has no worktree binding: status recommends binding before any device verb.
-      expect(report.next.command).toMatch(
-        /^npx @expo\/agent-cli dev --(ios|android) --detach --wait-ready$/
-      );
+      // The dev server of this fixture is running with an app attached, so `next` is the readiness
+      // gate rather than `@expo/agent-cli dev` — and deliberately not `runtime:errors`, which the
+      // `runtime-errors` follow-up above already names.
+      //
+      // Either platform, because this case is not about which one. It runs the whole command, so the
+      // platform in `next` comes from the devices the host has (llp/0005 §Which platform is the
+      // caller's to say) — and pinning `--ios` here passed on a Mac and failed on the Linux runner
+      // [observed — tier0-linux, 2026-09-04]. `src/status/__tests__/sections-test.ts` is where the
+      // choice itself is pinned, against a fixture that states its device.
+      expect(report.next.command).toMatch(/^npx @expo\/agent-cli smoke --(ios|android)$/);
       expect(
         report.followups.map((followup: { command: string }) => followup.command)
       ).not.toContain(report.next.command);
@@ -1091,6 +1097,14 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
   });
 
   it(`sends the worktree to dev when dev would bind a device`, async () => {
+    vi.mocked(discoverDevServerAsync).mockResolvedValue({
+      reachable: true,
+      targets: [],
+      devServerUrl,
+      source: 'default',
+      discovered: false,
+    });
+    vi.mocked(probeTargetLivenessAsync).mockResolvedValueOnce({ listed: 0, live: 0, stale: [] });
     const report = await collectStatusReportAsync(projectRoot, iosOptions);
     expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
     expect(report.next?.why).toBe('No ios device is bound to this worktree.');
@@ -1119,6 +1133,7 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
   });
 
   it(`sends a worktree whose lease expired to dev`, async () => {
+    stopDevServer();
     vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
       {
         platform: 'ios',
@@ -1129,6 +1144,19 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     const report = await collectStatusReportAsync(projectRoot, iosOptions);
     expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
     expect(report.next?.why).toBe('The lease on the bound ios device expired.');
+  });
+
+  it(`keeps the plan's next while an app is connected to this project's dev server`, async () => {
+    const plan = await planNextAsync();
+    vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+      {
+        platform: 'ios',
+        state: 'gone',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      } as summary.BindingSummary,
+    ]);
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next).toEqual(plan);
   });
 
   it(`keeps the plan's next under AGENT_CLI_NO_DEVICE, where dev binds nothing`, async () => {
