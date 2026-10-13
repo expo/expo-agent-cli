@@ -1,5 +1,5 @@
 import { releaseWorktreeDevicesAsync } from '../../deviceBinding';
-import { keptDevices } from '../../deviceBinding/records';
+import { keptDevices, unreadableBindingFiles } from '../../deviceBinding/records';
 import { readDevServerLockAsync } from '../../devLock';
 import { isPortInUseAsync } from '../portListener';
 import { resolveDevStopOptions } from '../resolveStopOptions';
@@ -9,7 +9,10 @@ vi.mock('../../deviceBinding', () => ({
   devicesDisabled: () => false,
   releaseWorktreeDevicesAsync: vi.fn(async () => []),
 }));
-vi.mock('../../deviceBinding/records', () => ({ keptDevices: vi.fn(() => []) }));
+vi.mock('../../deviceBinding/records', () => ({
+  keptDevices: vi.fn(() => []),
+  unreadableBindingFiles: vi.fn(() => []),
+}));
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn(async () => null) }));
 vi.mock('../portListener', () => ({
   isPortInUseAsync: vi.fn(async () => false),
@@ -131,4 +134,45 @@ it('releases only the requested internal platform once its own server is absent'
   };
   expect(await devStopAsync(root, options, { print: false })).toBe(0);
   expect(releaseWorktreeDevicesAsync).toHaveBeenCalledWith(root, { platform: 'ios' });
+});
+
+it('release reports an unreadable binding file instead of succeeding', async () => {
+  vi.mocked(unreadableBindingFiles).mockReturnValueOnce([
+    { platform: 'ios', backend: 'local-ios', file: '/expo-home/agent-cli/bindings/x.json' },
+  ]);
+  const onReport = vi.fn();
+  const code = await devStopAsync(root, resolveDevStopOptions(['--release', '--no-followups']), {
+    print: false,
+    onReport,
+  });
+  expect(code).toBe(20);
+  expect(onReport.mock.calls[0]![0].deviceError).toContain(
+    '/expo-home/agent-cli/bindings/x.json does not parse'
+  );
+});
+
+it('release keeps an earlier platform released when a later one throws', async () => {
+  const android = {
+    ...device,
+    backend: 'local-android' as const,
+    platform: 'android' as const,
+    id: 'emulator-5554',
+    name: 'emulator-5554',
+  };
+  vi.mocked(keptDevices).mockReturnValue([device, android]);
+  vi.mocked(releaseWorktreeDevicesAsync).mockImplementation(async (_root, options) => {
+    if (options?.platform === 'android') throw new Error('the registry lock stayed busy');
+    return [{ ...device, released: true, shutDown: true }];
+  });
+  const onReport = vi.fn();
+  await devStopAsync(root, resolveDevStopOptions(['--release', '--no-followups']), {
+    print: false,
+    onReport,
+  });
+  const report = onReport.mock.calls[0]![0];
+  expect(report.devices).toEqual([
+    expect.objectContaining({ id: 'SIM', released: true, shutDown: true }),
+    expect.objectContaining({ id: 'emulator-5554', released: false }),
+  ]);
+  expect(report.deviceError).toBe('the registry lock stayed busy');
 });

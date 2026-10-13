@@ -4,7 +4,8 @@ import {
   releaseWorktreeDevicesAsync,
   type ReleasedDevice,
 } from '../deviceBinding';
-import { keptDevices } from '../deviceBinding/records';
+import { deviceUnavailableError } from '../deviceBinding/errors';
+import { keptDevices, unreadableBindingFiles } from '../deviceBinding/records';
 import { readDevServerLockAsync } from '../devLock';
 import type { DevStopOptions } from './resolveStopOptions';
 
@@ -34,18 +35,28 @@ export async function stopDevicesAsync(
         report.deviceError =
           "Devices were kept because this worktree's dev server is still running.";
       } else {
-        report.devices = await releaseWorktreeDevicesAsync(projectRoot, {
-          platform: options.platform,
-        });
+        const released: ReleasedDevice[] = [];
+        for (const platform of options.platform
+          ? [options.platform]
+          : (['ios', 'android'] as const)) {
+          try {
+            released.push(...(await releaseWorktreeDevicesAsync(projectRoot, { platform })));
+          } catch (error) {
+            report.deviceError ??= error instanceof Error ? error.message : String(error);
+          }
+        }
         const remaining = keptDevices(projectRoot, options.platform).filter(
-          (kept) =>
-            !report.devices.some(
-              (released) => released.id === kept.id && released.platform === kept.platform
-            )
+          (kept) => !released.some((done) => done.id === kept.id && done.platform === kept.platform)
         );
-        report.devices.push(...remaining);
+        report.devices = [...released, ...remaining];
+        const [unreadable] = unreadableBindingFiles(projectRoot, options.platform);
+        if (unreadable)
+          report.deviceError ??= deviceUnavailableError('unreadable', {
+            platform: unreadable.platform,
+            path: unreadable.file,
+          }).message;
         if (report.devices.some((device) => !device.released))
-          report.deviceError = 'Some devices could not be released; see devices for details.';
+          report.deviceError ??= 'Some devices could not be released; see devices for details.';
       }
     }
   } catch (error) {

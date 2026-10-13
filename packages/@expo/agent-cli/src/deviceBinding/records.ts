@@ -40,3 +40,12 @@ export function keptDevices(projectRoot: string, platform?: DevicePlatform): Rel
       return read.kind === 'binding' ? [deviceReport(read.binding)] : [];
     });
 }
+
+export function unreadableBindingFiles(projectRoot: string, platform?: DevicePlatform) {
+  return ownBindingFiles(projectRoot).filter(
+    (entry) =>
+      entry.backend !== 'cloud' &&
+      (!platform || entry.platform === platform) &&
+      readBindingFile(entry.file).kind === 'unreadable'
+  );
+}
