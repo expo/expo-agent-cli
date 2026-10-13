@@ -948,6 +948,51 @@ describe('@expo/agent-cli smoke', () => {
       }
     });
 
+    it('names the device its started dev server bound, and the release dev:stop did', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const { calls: readXcrun } = await installStatefulXcrunAsync(projectRoot, {
+        simulators: [{ udid: 'E2E-PARKED', name: 'agent-cli deadbeef', state: 'Shutdown' }],
+      });
+      await bindingFixture(projectRoot, 'E2E-PARKED', 'agent-cli deadbeef');
+      await installStubNpxAsync(projectRoot);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-screenshot', '--port', '9353', '--timeout', '4s'],
+          {
+            env: {
+              ...stubExpoEnv(projectRoot),
+              AGENT_CLI_NO_DEVICE: '0',
+              STUB_EXPO_DELAY_MS: '30000',
+              STUB_EXPO_DEV_SERVER_PORT: '9353',
+              STUB_EXPO_LISTEN: '1',
+            },
+            reject: false,
+          }
+        );
+
+        const report = JSON.parse(result.stdout);
+        expect(report.environment.devServer).toBe('started');
+        expect(report.environment.boundDevice).toEqual({
+          id: 'E2E-PARKED',
+          name: 'agent-cli deadbeef',
+          action: 'reused',
+          released: true,
+          shutDown: true,
+        });
+        expect(report.environment.cleanup).toContainEqual(
+          expect.objectContaining({ resource: 'device', target: 'E2E-PARKED', ok: true })
+        );
+        expect(readXcrun()).toContainEqual(['simctl', 'shutdown', 'E2E-PARKED']);
+      } finally {
+        await executeAgentCliAsync(projectRoot, ['dev:stop', '--release', '--json'], {
+          env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' },
+          reject: false,
+        });
+      }
+    });
+
     // The boundary that remains: `--no-start` says change nothing, so nothing is bound and nothing
     // is built, and the report names the run that would.
     it('binds nothing and installs nothing under --no-start', async () => {

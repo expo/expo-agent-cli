@@ -20,10 +20,13 @@ import {
   deviceIdOf,
   deviceNameOf,
   devicesDisabled,
+  hostBindsPlatform,
+  localBackendOf,
   releaseWorktreeDevicesAsync,
   type Binding,
   type BoundDevice,
 } from '../deviceBinding';
+import { bindingPathFor, readBindingFile } from '../deviceBinding/registry';
 import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
 import { installDevBuildAsync } from '../device/installDevBuild';
@@ -70,6 +73,7 @@ import {
   START_DEV_SERVER_TIMEOUT_MS,
   type SmokeDeps,
   type SmokeRun,
+  type SmokeStartResult,
 } from './phases';
 import { buildSmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
@@ -105,6 +109,28 @@ const TARGET_SETTLE_POLL_MS = 500;
  * @ref llp/0026-dev-owns-the-open.rfc.md
  */
 export const START_DEV_SERVER_ARGV: readonly string[] = ['--detach', '--wait-ready', '--no-open'];
+
+/**
+ * The device the detached `dev` of the start phase bound, from the worktree's binding file before
+ * and after the start. The child acquires and the parent only reads its result.
+ *
+ * @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
+ */
+export function deviceBoundByStart(
+  before: Binding | null,
+  after: Binding | null
+): SmokeStartResult['bound'] {
+  if (after == null) {
+    return undefined;
+  }
+  const id = deviceIdOf(after.device);
+  const reused = before != null && deviceIdOf(before.device) === id;
+  return {
+    id,
+    name: deviceNameOf(after.device),
+    action: reused ? 'reused' : after.device.backend === 'local-android' ? 'spawned' : 'created',
+  };
+}
 
 /**
  * The port `--start` asks the dev server for, out of the dev server this run was pointed at.
@@ -394,6 +420,15 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         // read above is about the project as it was before it.
         forgetTarget();
       }
+      const bindsDevice =
+        options.cloud !== 'required' && !devicesDisabled() && hostBindsPlatform(options.platform);
+      const ownBinding = (): Binding | null => {
+        if (!bindsDevice) return null;
+        const backend = localBackendOf(options.platform);
+        const read = readBindingFile(bindingPathFor(projectRoot, options.platform, backend));
+        return read.kind === 'binding' ? read.binding : null;
+      };
+      const before = ownBinding();
       const argv = [
         `--${options.platform}`,
         ...START_DEV_SERVER_ARGV,
@@ -440,6 +475,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         ok: found.reachable,
         devServerUrl: found.devServerUrl,
         built,
+        bound: deviceBoundByStart(before, ownBinding()),
         reason: found.reachable
           ? null
           : `a dev server was started and nothing answered at ${found.devServerUrl} afterwards (${found.reason ?? 'no answer'})`,

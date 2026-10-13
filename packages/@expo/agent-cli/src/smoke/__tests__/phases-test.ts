@@ -491,6 +491,60 @@ describe(runSmokePhasesAsync, () => {
       }
     );
 
+    it('names the device its started dev server bound, and lists the release dev:stop did', async () => {
+      const released = {
+        backend: 'local-android' as const,
+        platform: 'android' as const,
+        id: 'emulator-5556',
+        name: 'emulator-5556',
+        released: true,
+        shutDown: true,
+        reason: null,
+      };
+      const bootDevice = vi.fn();
+      const run = await runSmokePhasesAsync(
+        deps({
+          ...bareMachine({
+            probeDevice: async () => ({
+              deviceId: 'emulator-5556',
+              backend: 'local-ios' as const,
+              reason: null,
+            }),
+            bootDevice,
+          }),
+          startDevServer: async () => ({
+            ok: true,
+            devServerUrl: 'http://127.0.0.1:8081',
+            reason: null,
+            bound: { id: 'emulator-5556', name: 'emulator-5556', action: 'spawned' as const },
+          }),
+          stopDevServer: async () => ({
+            ok: true,
+            target: 'http://127.0.0.1:8081',
+            reason: null,
+            devices: [released],
+          }),
+        }),
+        options({ bootstrap: true, platform: 'android' })
+      );
+
+      expect(bootDevice).not.toHaveBeenCalled();
+      expect(run.environment.device).toBe('reused');
+      expect(run.environment.boundDevice).toEqual({
+        id: 'emulator-5556',
+        name: 'emulator-5556',
+        action: 'spawned',
+        released: true,
+        shutDown: true,
+      });
+      expect(
+        run.environment.cleanup.map(({ resource, target, ok }) => [resource, target, ok])
+      ).toEqual([
+        ['dev-server', 'http://127.0.0.1:8081', true],
+        ['device', 'emulator-5556', true],
+      ]);
+    });
+
     it('releases its own boot after a reused server, without stopping that server', async () => {
       const releaseDevice = vi.fn(async () => ({ ok: true, target: 'SIM-BOOTED', reason: null }));
       const stopDevServer = vi.fn();

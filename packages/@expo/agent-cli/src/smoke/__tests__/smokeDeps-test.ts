@@ -1,9 +1,15 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke
 // @ref llp/0035-one-device-per-worktree.rfc.md §Wiring
 // Smoke binds and releases only its own platform through the registry.
-import { acquireDeviceAsync, releaseWorktreeDevicesAsync } from '../../deviceBinding';
+import {
+  acquireDeviceAsync,
+  deviceIdOf,
+  deviceNameOf,
+  releaseWorktreeDevicesAsync,
+} from '../../deviceBinding';
+import { androidBindingFor, bindingFor } from '../../deviceBinding/__tests__/fakeTools';
 import { resolveSmokeOptions } from '../resolveOptions';
-import { buildSmokeDeps } from '../smokeAsync';
+import { buildSmokeDeps, deviceBoundByStart } from '../smokeAsync';
 
 vi.mock('../../log');
 vi.mock('../../deviceBinding', async (importOriginal) => ({
@@ -146,5 +152,35 @@ it('smoke releases only its acquired platform and binding', async () => {
   expect(releaseWorktreeDevicesAsync).toHaveBeenCalledWith(projectRoot, {
     platform: 'android',
     expected: binding,
+  });
+});
+
+describe(deviceBoundByStart, () => {
+  it.each([
+    ['created', null, bindingFor(projectRoot, 'SIM-NEW', { name: 'agent-cli 0000' })],
+    ['reused', bindingFor(projectRoot, 'SIM-OLD'), bindingFor(projectRoot, 'SIM-OLD')],
+    [
+      'spawned',
+      null,
+      androidBindingFor(projectRoot, 'emulator-5556', {
+        kind: 'spawned',
+        avd: 'Pixel_9',
+        port: 5556,
+        emulatorPid: 4242,
+      }),
+    ],
+  ] as const)(
+    'reads a %s device from the binding the detached dev wrote',
+    (action, before, after) => {
+      expect(deviceBoundByStart(before, after)).toEqual({
+        id: deviceIdOf(after.device),
+        name: deviceNameOf(after.device),
+        action,
+      });
+    }
+  );
+
+  it('reads no device when the start left no binding', () => {
+    expect(deviceBoundByStart(bindingFor(projectRoot, 'SIM-OLD'), null)).toBeUndefined();
   });
 });

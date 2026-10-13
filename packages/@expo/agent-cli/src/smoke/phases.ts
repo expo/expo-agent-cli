@@ -79,6 +79,8 @@ export interface SmokeStartResult {
    * find out why — is most useful exactly when it failed.
    */
   built?: boolean;
+  /** The worktree device the detached `dev` bound, read from its binding file, for the report. */
+  bound?: { id: string; name: string; action: AcquireAction };
 }
 
 /** What booting a simulator or an emulator amounted to. */
@@ -785,6 +787,17 @@ async function releaseAsync(
         reason: result.ok ? null : (result.reason ?? 'no reason was given'),
         ms: deps.now() - at,
       });
+      if (cleanup.resource === 'dev-server') {
+        for (const device of result.devices ?? []) {
+          released.push({
+            resource: 'device',
+            target: device.id,
+            ok: device.released,
+            reason: device.released ? null : (device.reason ?? 'no reason was given'),
+            ms: deps.now() - at,
+          });
+        }
+      }
     } catch (error: unknown) {
       released.push({
         resource: cleanup.resource,
@@ -958,6 +971,9 @@ async function runPhasesAsync(
     if (start.ok && start.devServerUrl != null) {
       started = true;
       environment.devServer = 'started';
+      environment.boundDevice = start.bound
+        ? { ...start.bound, released: false, shutDown: false }
+        : null;
       // Discovered the same way the first look was, rather than by naming the URL the start
       // reported: naming it would make `source` say `flag` for a run whose caller passed no flag,
       // and `source` is reported precisely because `lock` and `flag` prove different things
