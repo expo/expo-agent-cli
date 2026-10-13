@@ -1,6 +1,7 @@
 import { releaseWorktreeDevicesAsync } from '../../deviceBinding';
 import { keptDevices } from '../../deviceBinding/records';
 import { readDevServerLockAsync } from '../../devLock';
+import { isPortInUseAsync } from '../portListener';
 import { resolveDevStopOptions } from '../resolveStopOptions';
 import { devStopAsync } from '../stopAsync';
 
@@ -63,6 +64,24 @@ it('release-keeps-devices-when-own-server-runs-on-another-port', async () => {
       deviceError: expect.stringContaining('still running'),
     })
   );
+});
+
+it('release keeps devices beside a foreign server and does not blame this worktree', async () => {
+  vi.mocked(isPortInUseAsync).mockResolvedValueOnce(true);
+  const onReport = vi.fn();
+  await devStopAsync(
+    root,
+    resolveDevStopOptions(['--port', '8081', '--release', '--no-followups']),
+    {
+      print: false,
+      onReport,
+    }
+  );
+  expect(releaseWorktreeDevicesAsync).not.toHaveBeenCalled();
+  const report = onReport.mock.calls[0]![0];
+  expect(report.reason).toBe('foreign-dev-server');
+  expect(report.deviceError).toContain('port 8081');
+  expect(report.deviceError).not.toContain("this worktree's dev server is still running");
 });
 
 it('release-keeps-devices-when-server-is-replaced after a successful stop', async () => {

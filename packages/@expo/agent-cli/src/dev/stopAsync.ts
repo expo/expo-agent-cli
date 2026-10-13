@@ -212,7 +212,7 @@ export async function devStopAsync(
     report.session = await stopProjectEasSessionAsync(projectRoot);
   }
   const devServerOk = report.stopped || report.reason === 'not-running';
-  Object.assign(report, await stopDevicesAsync(projectRoot, options, devServerOk));
+  Object.assign(report, await stopDevicesAsync(projectRoot, options, report));
   report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
 
   event('stop_done', {

@@ -16,7 +16,7 @@ export interface StoppedDevices {
 export async function stopDevicesAsync(
   projectRoot: string,
   options: DevStopOptions,
-  devServerOk: boolean
+  stop: { stopped: boolean; reason: string | null; port: number | null }
 ): Promise<StoppedDevices> {
   const report: StoppedDevices = { devices: [], deviceError: null };
   if (devicesDisabled()) return report;
@@ -25,7 +25,12 @@ export async function stopDevicesAsync(
     if (options.release) {
       // A requested port may be idle while this worktree's server runs on another port.
       // Read again after stopping: a replacement server may now hold the same lock.
-      if (!devServerOk || (await readDevServerLockAsync(projectRoot))) {
+      if (stop.reason === 'foreign-dev-server') {
+        report.deviceError = `Devices were kept because a dev server this worktree did not start answers on port ${stop.port}.`;
+      } else if (
+        !(stop.stopped || stop.reason === 'not-running') ||
+        (await readDevServerLockAsync(projectRoot))
+      ) {
         report.deviceError =
           "Devices were kept because this worktree's dev server is still running.";
       } else {
