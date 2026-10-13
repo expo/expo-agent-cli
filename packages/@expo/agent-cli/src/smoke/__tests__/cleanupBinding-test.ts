@@ -57,3 +57,28 @@ it('the dev server cleanup carries the devices dev:stop released', async () => {
   const result = await buildSmokeDeps(root, resolveSmokeOptions(['--ios'])).stopDevServer();
   expect(result.devices).toEqual([device]);
 });
+
+it('a device that dev:stop could not release does not mark the dev server as still running', async () => {
+  const device = {
+    backend: 'local-ios' as const,
+    platform: 'ios' as const,
+    id: 'A',
+    name: 'agent-cli 0000',
+    released: false,
+    shutDown: false,
+    reason: 'simctl shutdown failed',
+  };
+  vi.mocked(devStopAsync).mockImplementationOnce(async (_root, _options, { onReport } = {}) => {
+    onReport?.({
+      stopped: true,
+      reason: null,
+      url: 'http://127.0.0.1:8081',
+      devices: [device],
+      deviceError: 'Some devices could not be released; see devices for details.',
+    } as any);
+    return 20;
+  });
+  const result = await buildSmokeDeps(root, resolveSmokeOptions(['--ios'])).stopDevServer();
+  expect(result.ok).toBe(true);
+  expect(result.devices).toEqual([device]);
+});

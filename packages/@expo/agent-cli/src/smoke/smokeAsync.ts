@@ -35,7 +35,6 @@ import { installExpoGoAsync } from '../device/installExpoGo';
 import { hasAppOnDeviceAsync } from '../device/hasApp';
 import { captureScreenshotAsync, defaultScreenshotPath } from '../device/screenshot';
 import { event } from '../events';
-import { EXIT_OK } from '../exitCodes';
 import { buildSmokeFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
 import { resolveDeviceAsync, type DeviceBackend } from '../navigate/device';
@@ -415,6 +414,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       // needs is the sentence that tells them which it is. On stderr, because stdout carries one
       // JSON object and nothing else (llp/0006 §Output contract), and as an event too so a reader
       // of the stream sees it without parsing English.
+      keepBoundDevice = true;
       const target = await targetAsync();
       // @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken. A
       // build that would land on EAS because this machine cannot build, and that nobody asked for,
@@ -512,7 +512,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // lock answers for, so a cleanup can never take down something this run did not start.
     stopDevServer: async () => {
       const captured: { report: DevStopResultJson | null } = { report: null };
-      const code = await devStopAsync(
+      await devStopAsync(
         projectRoot,
         {
           ...resolveDevStopOptions(['--no-followups']),
@@ -527,13 +527,12 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         }
       );
       const stopped = captured.report;
+      const serverStopped =
+        stopped != null && (stopped.stopped || stopped.reason === 'not-running');
       return {
-        ok: code === EXIT_OK,
+        ok: serverStopped,
         target: stopped?.url ?? (stopped?.port == null ? null : `port ${stopped.port}`),
-        reason:
-          code === EXIT_OK
-            ? null
-            : (stopped?.deviceError ?? stopped?.detail ?? 'the dev server did not stop'),
+        reason: serverStopped ? null : (stopped?.detail ?? 'the dev server did not stop'),
         devices: keepBoundDevice ? undefined : stopped?.devices,
       };
     },
