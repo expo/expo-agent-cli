@@ -189,7 +189,7 @@ export async function captureScreenshotAsync({
   }
 
   const run = cloud
-    ? await runCloudScreenshotAsync(projectRoot!, filePath, timeoutMs)
+    ? await runCloudScreenshotAsync(projectRoot!, filePath, timeoutMs, deviceId)
     : await runScreenshotAsync(command, filePath, timeoutMs);
   if (run.spawnError) {
     return {
@@ -249,9 +249,10 @@ function cloudScreenshotCommand(filePath: string): ScreenshotCommand {
 async function runCloudScreenshotAsync(
   projectRoot: string,
   filePath: string,
-  timeoutMs: number
+  timeoutMs: number,
+  sessionId: string
 ): Promise<{ exitCode: number | null; stderr: string; spawnError?: string }> {
-  const result = await captureCloudScreenshotAsync({ projectRoot, filePath, timeoutMs });
+  const result = await captureCloudScreenshotAsync({ projectRoot, filePath, timeoutMs, sessionId });
   return {
     exitCode: result.exitCode,
     // Both streams, because the EAS CLI reports a dead session on either one and the reason line

@@ -109,6 +109,8 @@ describe(buildSessionStartArgs, () => {
       '--non-interactive',
       '--name',
       'my-app — agent-cli dev',
+      '--max-idle-time-minutes',
+      '30',
     ]);
   });
 
@@ -314,6 +316,91 @@ describe(openAppOnEasAsync, () => {
     );
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
+
+  it.each(['ios', 'android'] as const)(
+    'reconnects a reused %s development build to the new tunnel after Metro restarts',
+    async (platform) => {
+      vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+        state: 'active',
+        sessionId: 'sess-up',
+        platform,
+      } as any);
+      vi.mocked(openRouteAsync).mockResolvedValue({ exitCode: 0 } as any);
+
+      for (const host of ['old.tunnel.example', 'new.tunnel.example']) {
+        mockTunnel(host);
+        const url = `myapp://expo-development-client/?url=${encodeURIComponent(`https://${host}`)}`;
+        vi.mocked(resolveRouteUrlAsync).mockResolvedValue({
+          url: 'myapp://',
+          connect: [{ target: 'dev-build', url }],
+        } as any);
+
+        const report = await openAppOnEasAsync(projectRoot, {
+          platform,
+          expoGo: false,
+          devServerUrl: DEV_SERVER,
+          buildId: null,
+        });
+
+        expect(report).toMatchObject({ opened: true, sessionId: 'sess-up', started: false });
+        expect(openRouteAsync).toHaveBeenLastCalledWith(
+          projectRoot,
+          expect.objectContaining({ route: url, platform, cloud: 'required' })
+        );
+      }
+      expect(spawnCaptureAsync).not.toHaveBeenCalled();
+    }
+  );
+
+  it('does not send a bare route when a reused development build has no connection URL', async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+      state: 'active',
+      sessionId: 'sess-up',
+      platform: 'ios',
+    } as any);
+    vi.mocked(resolveRouteUrlAsync).mockResolvedValue({ connect: [], resolution: 'scheme' } as any);
+
+    const report = await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: false,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+
+    expect(report).toMatchObject({ opened: false, sessionId: 'sess-up', started: false });
+    expect(report.reason).toContain('no URL to point the development build at this dev server');
+    expect(openRouteAsync).not.toHaveBeenCalled();
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+
+  it.each(['http://127.0.0.1:8081', 'http://192.168.1.2:8081', 'https://old.tunnel.example'])(
+    'refuses a reused development-client URL pointing at %s instead of the current tunnel',
+    async (origin) => {
+      vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+        state: 'active',
+        sessionId: 'sess-up',
+        platform: 'ios',
+      } as any);
+      vi.mocked(resolveRouteUrlAsync).mockResolvedValue({
+        connect: [
+          {
+            target: 'dev-build',
+            url: `myapp://expo-development-client/?url=${encodeURIComponent(origin)}`,
+          },
+        ],
+      } as any);
+      const report = await openAppOnEasAsync(projectRoot, {
+        platform: 'ios',
+        expoGo: false,
+        devServerUrl: DEV_SERVER,
+        buildId: null,
+      });
+      expect(report.opened).toBe(false);
+      expect(report.reason).toContain('does not point at the current tunnel');
+      expect(openRouteAsync).not.toHaveBeenCalled();
+      expect(spawnCaptureAsync).not.toHaveBeenCalled();
+    }
+  );
 
   // The tunnel comes up after Metro answers. A deep link sent before it names the loopback, which a
   // session on EAS cannot load.
@@ -621,5 +708,70 @@ describe('the session half on its own', () => {
     });
     const args = vi.mocked(spawnCaptureAsync).mock.calls[0]![1];
     expect(args[args.indexOf('--name') + 1]).toBe('my-app — agent-cli smoke');
+  });
+});
+
+describe('worktree session ownership', () => {
+  const options = {
+    platform: 'ios' as const,
+    expoGo: true,
+    devServerUrl: DEV_SERVER,
+    buildId: null,
+  };
+  it('a failed listing never starts a billed session', async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+      state: 'unknown',
+      reason: 'listing timed out',
+    } as any);
+    const report = await openAppOnEasAsync(projectRoot, options);
+    expect(report).toMatchObject({ opened: false, reason: 'listing timed out' });
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+  it('a queued bound session is retained without a replacement start', async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
+      state: 'queued',
+      sessionId: 'queued',
+      platform: 'ios',
+      source: 'bound',
+    } as any);
+    expect(await openAppOnEasAsync(projectRoot, options)).toMatchObject({
+      opened: false,
+      sessionId: 'queued',
+    });
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+  it('records a session created before a failed start', async () => {
+    const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: 'Simulator session created (id: billed)',
+      stderr: 'failed readiness',
+      exitCode: 1,
+    });
+    await openAppOnEasAsync(projectRoot, options);
+    expect(readBindingFile(bindingPathFor(projectRoot, 'ios', 'cloud'))).toMatchObject({
+      binding: { device: { id: 'billed', origin: 'started' } },
+    });
+  });
+  it('retries only an unsupported idle flag before a creation receipt', async () => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValueOnce({
+      stdout: '',
+      stderr: 'Nonexistent flag: --max-idle-time-minutes',
+      exitCode: 2,
+    });
+    expect(await openAppOnEasAsync(projectRoot, options)).toMatchObject({ opened: true });
+    expect(spawnCaptureAsync).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(spawnCaptureAsync).mock.calls[1]![1]).not.toContain('--max-idle-time-minutes');
+  });
+  it('does not retry a flag error once a session was created', async () => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: 'Simulator session created (id: billed)',
+      stderr: 'Nonexistent flag: --max-idle-time-minutes',
+      exitCode: 2,
+    });
+    expect(await openAppOnEasAsync(projectRoot, options)).toMatchObject({
+      opened: false,
+      sessionId: 'billed',
+    });
+    expect(spawnCaptureAsync).toHaveBeenCalledTimes(1);
   });
 });

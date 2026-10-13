@@ -14,6 +14,7 @@ import { EventEmitter } from 'events';
 import fs from 'fs';
 import { vol } from 'memfs';
 import path from 'path';
+import { guardedCloudTarget } from '../cloudCommand';
 
 import {
   buildScreenshotCommand,
@@ -129,7 +130,11 @@ function mockTool(tool: StubTool): void {
         fs.writeSync(options.stdio[1], tool.toStdout, 0, tool.toStdout.length);
       }
       if (tool.toFile) {
-        fs.writeFileSync(args[args.length - 1]!, tool.toFile);
+        const controllerArgs =
+          args.includes('simulator:exec') && args.includes('-e')
+            ? guardedCloudTarget(args).args
+            : args;
+        fs.writeFileSync(controllerArgs.at(-1)!, tool.toFile);
       }
       if (tool.stderr) {
         child.stderr.emit('data', tool.stderr);

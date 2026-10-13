@@ -50,6 +50,7 @@ export interface EmulatorHandle {
 }
 
 export interface DeviceTools {
+  stopCloud(root: string, id: string): Promise<{ ok: boolean; reason: string | null }>;
   simctl: Runner;
   adb: Runner;
   /** `emulator -list-avds`. */

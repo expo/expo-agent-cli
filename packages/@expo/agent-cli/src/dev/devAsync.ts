@@ -3,6 +3,7 @@
 // (unless `--plan` stopped us) run its steps as subprocesses. The plain `expo start` wrapper is
 // `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
 
+import { releaseCloudBindingAsync } from '../deviceBinding/cloud';
 import type { OpenAppOnEasReport } from './openAppEas';
 import { withLeaseExtendedAsync } from '../deviceBinding/renew';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
@@ -558,11 +559,17 @@ async function executePlanAsync(
           if (ownsEasLifecycle && openTask) {
             Log.progress('Finishing EAS session work before exiting.');
             const session = await openTask;
-            if (session?.started && session.sessionId) {
+            // Detached sessions belong to the worktree; plain dev:stop preserves them.
+            if (
+              session?.started &&
+              session.sessionId &&
+              process.env.__EXPO_AGENT_CLI_DETACHED !== '1'
+            ) {
               const { stopEasSessionAsync } =
                 require('../device/eas') as typeof import('../device/eas');
               const stopped = await stopEasSessionAsync(projectRoot, session.sessionId);
               if (stopped.ok) {
+                await releaseCloudBindingAsync(projectRoot, session.sessionId);
                 Log.progress(
                   `Stopped EAS Simulator session ${session.sessionId}, created by this run.`
                 );

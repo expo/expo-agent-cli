@@ -3,6 +3,7 @@
 
 import { spawn, spawnSync } from 'child_process';
 
+import { stopEasSessionAsync } from '../device/eas';
 import { resolveAdb } from '../device/adb';
 import { resolveEmulator } from '../device/bootDevice';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
@@ -12,6 +13,7 @@ export function defaultTools(): DeviceTools {
   const adb = resolveAdb();
   const emulator = resolveEmulator(adb);
   return {
+    stopCloud: stopEasSessionAsync,
     simctl: (args, options) => spawnCaptureAsync('xcrun', ['simctl', ...args], options),
     adb: (args, options) => spawnCaptureAsync(adb.bin, args, options),
     emulatorList: (args, options) => spawnCaptureAsync(emulator, args, options),

@@ -621,6 +621,7 @@ async function openUrlOnBackendAsync(
 
   const result = await openUrlOnCloudSimulatorAsync({
     projectRoot,
+    sessionId: device.deviceId,
     url,
     platform: device.platform,
   });
@@ -941,6 +942,7 @@ async function confirmAttachAsync({
   // force-stop-and-relink would do next, so the dialog has to come off the screen first.
   if (targets === 0 && device.backend === 'cloud') {
     alert = await resolveOpenDialogAsync({
+      sessionId: device.deviceId,
       projectRoot,
       platform: device.platform,
       appLabel: options.appId ?? EXPO_GO_DIALOG_LABEL,
@@ -1035,15 +1037,17 @@ const EXPO_GO_DIALOG_LABEL = 'Expo Go';
  * recovery inside a check that already has an honest answer without it.
  */
 async function resolveOpenDialogAsync({
+  sessionId,
   projectRoot,
   platform,
   appLabel,
 }: {
+  sessionId: string;
   projectRoot: string;
   platform: NavigatePlatform;
   appLabel: string;
 }): Promise<AlertCheck> {
-  const read = await readCloudAlertAsync({ projectRoot }).catch((error: unknown) => ({
+  const read = await readCloudAlertAsync({ projectRoot, sessionId }).catch((error: unknown) => ({
     command: `${AGENT_DEVICE_SPEC} alert get`,
     stdout: '',
     stderr: error instanceof Error ? error.message : String(error),
@@ -1079,7 +1083,7 @@ async function resolveOpenDialogAsync({
     };
   }
 
-  const accepted = await acceptCloudAlertAsync({ projectRoot }).catch(() => null);
+  const accepted = await acceptCloudAlertAsync({ projectRoot, sessionId }).catch(() => null);
   if (accepted == null || accepted.exitCode !== 0) {
     return {
       ...base,

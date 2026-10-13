@@ -21,6 +21,7 @@
 // Never throws: `dev`'s server outlives a failed open, the same as for a local device.
 
 import path from 'path';
+import { acquireCloudBindingAsync } from '../deviceBinding/cloud';
 
 import {
   probeCloudSessionAsync,
@@ -82,6 +83,7 @@ export interface EnsureEasSessionOptions {
 
 /** What making sure there is a session with the app on it amounted to. */
 export interface EnsureEasSessionReport {
+  source?: 'bound' | 'dotenv' | 'started' | null;
   /** A session on this platform is up, with the app on it (started) or at least drivable (reused). */
   ok: boolean;
   /** The session, or null when none was reached. */
@@ -141,6 +143,8 @@ export function buildSessionStartArgs({
     '--non-interactive',
     '--name',
     name,
+    '--max-idle-time-minutes',
+    '30',
   ];
 }
 
@@ -238,6 +242,29 @@ export async function ensureEasSessionAsync(
   projectRoot: string,
   options: EnsureEasSessionOptions
 ): Promise<EnsureEasSessionReport> {
+  const session = await ensureSessionAsync(projectRoot, options);
+  if (session.sessionId) {
+    try {
+      await acquireCloudBindingAsync(projectRoot, {
+        platform: options.platform,
+        id: session.sessionId,
+        origin: session.started ? 'started' : 'dotenv',
+      });
+    } catch (error) {
+      return {
+        ...session,
+        ok: false,
+        reason: `EAS session ${session.sessionId} could not be recorded: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+  return session;
+}
+
+async function ensureSessionAsync(
+  projectRoot: string,
+  options: EnsureEasSessionOptions
+): Promise<EnsureEasSessionReport> {
   const { platform } = options;
   const stillWanted = options.stillWanted ?? (() => true);
   const failed = (
@@ -276,6 +303,7 @@ export async function ensureEasSessionAsync(
     return {
       ok: true,
       sessionId: probe.sessionId,
+      source: probe.source,
       started: false,
       tunnelHost: null,
       openUrl: null,
@@ -283,6 +311,13 @@ export async function ensureEasSessionAsync(
       reason: null,
     };
   }
+  if (probe.state === 'unknown' || probe.available === false)
+    return failed(probe.reason ?? 'EAS session discovery failed; no session was started.');
+  if (probe.state === 'queued' && probe.platform === platform)
+    return failed('The bound EAS session is still queued; retry in a minute.', {
+      sessionId: probe.sessionId,
+      source: probe.source,
+    });
   if (!stillWanted()) {
     return failed('the dev server stopped before a session was started');
   }
@@ -305,23 +340,7 @@ export async function ensureEasSessionAsync(
   //    way `navigate` resolves it, so the two commands never disagree about the link.
   let openUrl: string;
   try {
-    const resolved = await resolveRouteUrlAsync(projectRoot, {
-      route: '/',
-      platform,
-      devServerUrl: options.devServerUrl,
-      devServerUrlSource: 'discovered',
-      routeCheck: false,
-      command: 'navigate',
-    });
-    const target = options.expoGo ? 'expo-go' : 'dev-build';
-    const connect = resolved.connect.find((entry) => entry.target === target);
-    if (!connect) {
-      return failed(
-        `no URL to point ${options.expoGo ? 'Expo Go' : 'the development build'} at this dev server could be built — ${resolved.resolution}`,
-        { tunnelHost }
-      );
-    }
-    openUrl = connect.url;
+    openUrl = await resolveEasOpenUrlAsync(projectRoot, options, tunnelHost);
   } catch (error: unknown) {
     return failed(error instanceof Error ? firstLine(error.message) : String(error), {
       tunnelHost,
@@ -362,10 +381,21 @@ export async function ensureEasSessionAsync(
         : `The session bills until "${PROGRAM_PREFIX} dev:stop --eas".`
     }`
   );
-  const result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
+  const spawnOptions = {
     cwd: projectRoot,
     timeoutMs: options.waits?.sessionStartMs ?? EAS_SESSION_START_TIMEOUT_MS,
-  });
+  };
+  let result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), spawnOptions);
+  if (
+    result.exitCode !== 0 &&
+    !readSessionId(`${result.stdout}\n${result.stderr}`) &&
+    /Nonexistent flags?:[^\n]*--max-idle-time-minutes\b/i.test(result.stderr)
+  ) {
+    event('open_app_eas_flag_unsupported', { flag: '--max-idle-time-minutes' });
+    const index = args.indexOf('--max-idle-time-minutes');
+    const retry = [...args.slice(0, index), ...args.slice(index + 2)];
+    result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, retry), spawnOptions);
+  }
   const output = `${result.stdout}\n${result.stderr}`;
   const sessionId = readSessionId(output);
   const sessionUrl = readSessionUrl(output);
@@ -382,10 +412,26 @@ export async function ensureEasSessionAsync(
           ? ` — the session ${sessionId} was created before it failed and may be billing; "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`
           : ''
       }`,
-      { tunnelHost, openUrl, sessionId, sessionUrl, started: sessionId != null }
+      {
+        tunnelHost,
+        openUrl,
+        sessionId,
+        sessionUrl,
+        started: sessionId != null,
+        source: sessionId ? 'started' : null,
+      }
     );
   }
-  return { ok: true, sessionId, started: true, tunnelHost, openUrl, sessionUrl, reason: null };
+  return {
+    ok: true,
+    sessionId,
+    source: 'started',
+    started: true,
+    tunnelHost,
+    openUrl,
+    sessionUrl,
+    reason: null,
+  };
 }
 
 export async function openAppOnEasAsync(
@@ -410,10 +456,8 @@ export async function openAppOnEasAsync(
     return { ...base, opened: true, reason: null };
   }
 
-  // A session that was already up gets the deep link the way `navigate --eas` sends it, and that
-  // link names the host the dev server advertises. `dev --eas` tunnels its dev server, and the
-  // tunnel comes up after Metro answers: a link sent before it names the loopback, which a session
-  // on EAS cannot load. So the open waits for the tunnel, as a session this run starts does.
+  // The session can outlive Metro and its tunnel. Wait for the current tunnel before opening the
+  // app, just as when starting a session; a cloud device cannot reach this machine's loopback.
   const tunnelHost = await waitForTunnelHostAsync(options, stillWanted);
   if (!tunnelHost) {
     return {
@@ -428,8 +472,17 @@ export async function openAppOnEasAsync(
     `Opening the app on EAS Simulator session ${session.sessionId}, which is already up.`
   );
   try {
+    // A development build's bare scheme only navigates the app it already loaded. Send the
+    // launcher URL used for a new session so a reused session loads this Metro's current tunnel.
+    // Expo Go's route URL already contains that host, so its existing open stays unchanged.
+    const route = options.expoGo
+      ? '/'
+      : await resolveEasOpenUrlAsync(projectRoot, options, tunnelHost);
+    if (!stillWanted()) {
+      return { ...base, opened: false, reason: 'the dev server stopped before the app was opened' };
+    }
     const result = await openRouteAsync(projectRoot, {
-      route: '/',
+      route,
       platform,
       devServerUrl: options.devServerUrl,
       devServerUrlSource: 'discovered',
@@ -453,6 +506,38 @@ export async function openAppOnEasAsync(
   }
   event('open_app_eas_opened', { platform, sessionId: session.sessionId, started: false });
   return { ...base, opened: true, reason: null };
+}
+
+/** The connection URL for the app the plan selected, shared by new and reused sessions. */
+async function resolveEasOpenUrlAsync(
+  projectRoot: string,
+  options: EnsureEasSessionOptions,
+  tunnelHost: string
+): Promise<string> {
+  const resolved = await resolveRouteUrlAsync(projectRoot, {
+    route: '/',
+    platform: options.platform,
+    devServerUrl: options.devServerUrl,
+    devServerUrlSource: 'discovered',
+    routeCheck: false,
+    command: 'navigate',
+  });
+  const target = options.expoGo ? 'expo-go' : 'dev-build';
+  const connect = resolved.connect.find((entry) => entry.target === target);
+  if (!connect) {
+    throw new Error(
+      `no URL to point ${options.expoGo ? 'Expo Go' : 'the development build'} at this dev server could be built — ${resolved.resolution}`
+    );
+  }
+  // Full URL routes bypass openRoute's host check. Refuse a resolver fallback to LAN/loopback or
+  // a stale host if the tunnel changed between the manifest poll and connection URL resolution.
+  const serverUrl = options.expoGo ? connect.url : new URL(connect.url).searchParams.get('url');
+  if (!serverUrl || new URL(serverUrl).host !== tunnelHost) {
+    throw new Error(
+      'the connection URL does not point at the current tunnel — retry once the tunnel is ready'
+    );
+  }
+  return connect.url;
 }
 
 /** The dev server's advertised tunnel host, polled for until it appears or the wait runs out. */

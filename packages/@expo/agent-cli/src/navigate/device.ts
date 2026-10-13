@@ -13,6 +13,9 @@
 // names it, so a session that happens to be up never quietly bills a run a local device would have
 // served.
 
+import { ownCloudBindings, ownCloudIdsAsync } from '../deviceBinding/cloud';
+import { inspectBindingAsync, useBoundDeviceAsync } from '../deviceBinding/inspect';
+import { noBoundDeviceError } from '../deviceBinding/errors';
 import { resolveAdb, type AdbResolution } from '../device/adb';
 import {
   cloudSessionStartCommand,
@@ -73,28 +76,55 @@ export function navigateDeviceOf(device: BoundDevice): NavigateDevice {
   }
 }
 
-/**
- * Look for a cloud simulator session this project can drive. Never throws: no session is an answer.
- *
- * **The service answers this, not the filesystem.** The first cut of this rung was gated on
- * `.env.eas-simulator` existing, which is cheaper and wrong in both directions: the file outlives
- * the session it names, and a session started by MCP, by another terminal, or by a
- * `simulator:start --json` never writes it. So the rung spawns one `eas simulator:list`, and the
- * cost of that is paid here on purpose — this is about to open a link on a device, and llp/0005
- * §Cloud simulator is where the split between this ladder and the instant suggestion ladders is
- * argued.
- *
- * `platform` is passed through as a **preference** for picking between several live sessions, not
- * as a filter: the caller compares afterwards, so a session on the other platform is reported as
- * one rather than hidden behind "no session".
- *
- * @see src/device/cloudSimulator.ts — where the argv lives, and how much of it has been verified.
- */
+/** Verify a session this worktree owns, then renew only the selected binding's lease. */
 export async function probeCloudDeviceAsync(
   projectRoot: string,
   { platform = null }: { platform?: NavigatePlatform | null } = {}
 ): Promise<{ device: NavigateDevice | null; probe: CloudSessionProbe }> {
-  const probe = await probeCloudSessionAsync({ projectRoot, platform });
+  const records = ownCloudBindings(projectRoot, true).filter(
+    (binding) => platform == null || binding.device.platform === platform
+  );
+  const inspections = await Promise.all(
+    (platform ? [platform] : (['ios', 'android'] as const)).map((p) =>
+      inspectBindingAsync(projectRoot, p, 'cloud')
+    )
+  );
+  const unreadable = inspections.find((i) => i.state === 'unreadable');
+  if (unreadable)
+    throw noBoundDeviceError('unreadable', { platform: platform ?? 'ios', path: unreadable.path });
+  const probe = await probeCloudSessionAsync({
+    projectRoot,
+    platform,
+    boundIds: await ownCloudIdsAsync(projectRoot),
+  });
+  if (probe.state === 'queued')
+    throw cloudBindingError(probe.platform ?? platform ?? 'ios', 'queued');
+  // An expired binding must not hide a different, live session named by dotenv.
+  const expired = inspections.find((i) => i.state === 'gone');
+  if (
+    probe.state !== 'active' &&
+    expired?.binding &&
+    !inspections.some((i) => i.state === 'recorded')
+  ) {
+    throw cloudBindingError(expired.binding.device.platform, 'expired');
+  }
+  if (probe.state === 'inactive' && records.length)
+    throw cloudBindingError(platform ?? records[0]!.device.platform, 'ended');
+  if (probe.state === 'active' && probe.platform && probe.sessionId) {
+    const record = records.find(
+      ({ device }) => device.backend === 'cloud' && device.id === probe.sessionId
+    );
+    if (record) {
+      const inspection = await inspectBindingAsync(projectRoot, probe.platform, 'cloud');
+      if (
+        inspection.state !== 'recorded' ||
+        inspection.binding?.device.backend !== 'cloud' ||
+        inspection.binding.device.id !== probe.sessionId
+      )
+        throw cloudBindingError(probe.platform, 'expired');
+      await useBoundDeviceAsync({ ...inspection, state: 'up' });
+    }
+  }
   if (probe.state !== 'active' || probe.platform == null || probe.sessionId == null) {
     // A live session whose platform could not be read is not a device this can be handed: the URL
     // shape differs per platform. The caller raises `cloudPlatformUnknownError` for it.
@@ -186,8 +216,8 @@ export interface ResolveDeviceContext {
 /**
  * The cloud rung of the ladder, taken after the local rungs passed.
  *
- * Until llp/0034 binds sessions, the fallback accepts the dotenv id only, never the newest
- * session: a worktree with no binding must not drive another worktree's session.
+ * The fallback accepts this worktree's bindings or its dotenv connection. Unbound sessions
+ * are reported without becoming candidates.
  *
  * A session on the **other** platform is not this run's device: `--ios` named iOS, and an Android
  * session cannot open an iOS link. It is still reported, through the probe, so the failure can say
@@ -202,14 +232,11 @@ async function cloudFallbackAsync(
   }
   // No dotenv id, no session this worktree may drive: nothing to ask the service about.
   const sessionId = readCloudSessionIdSync(context.projectRoot);
-  if (sessionId == null) {
+  if (sessionId == null && (await ownCloudIdsAsync(context.projectRoot)).length === 0) {
     return { device: null, probe: null };
   }
   const { device, probe } = await probeCloudDeviceAsync(context.projectRoot, { platform });
-  const usable =
-    device != null &&
-    device.deviceId === sessionId &&
-    (platform == null || device.platform === platform);
+  const usable = device != null && (platform == null || device.platform === platform);
   return { device: usable ? device : null, probe };
 }
 
@@ -317,4 +344,22 @@ function cloudSessionLine(probe: CloudSessionProbe | null): string | null {
     }, and it is not the device this run asked for. Run this command again with --eas and no platform flag to use it.`;
   }
   return `Or: this project has an EAS Simulator session on record and it is not usable — ${probe.reason ?? 'the service did not report it as running'}. Start a new one with "${cloudSessionStartCommand()}" and pass --eas.`;
+}
+
+function cloudBindingError(
+  platform: NavigatePlatform,
+  state: 'expired' | 'queued' | 'ended'
+): CommandError {
+  const error = noBoundDeviceError(state === 'queued' ? 'not-up' : 'gone', {
+    platform,
+    cause: state === 'expired' ? 'expired' : 'device-gone',
+  });
+  const how =
+    state === 'queued'
+      ? 'The bound session is still queued; retry in a minute.'
+      : `Run "${PROGRAM_PREFIX} dev --${platform} --eas --detach" to bind a session again.`;
+  error.message = `The bound ${platform} EAS session is ${state}.\nHow: ${how}`;
+  error.suggestedCommand =
+    state === 'queued' ? undefined : `${PROGRAM_PREFIX} dev --${platform} --eas --detach`;
+  return error;
 }

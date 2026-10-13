@@ -37,6 +37,8 @@ export function reapSection(
   const files = [
     ...listBindingFiles('ios', 'local-ios'),
     ...listBindingFiles('android', 'local-android'),
+    ...listBindingFiles('ios', 'cloud'),
+    ...listBindingFiles('android', 'cloud'),
   ];
   for (const file of files) {
     if (own.has(file)) continue;
@@ -52,7 +54,7 @@ export function reapSection(
     } else {
       removeBindingFile(file);
     }
-    actions.push(cleanup);
+    actions.push({ ...cleanup, stopRoot: deleted ? projectRoot : binding.projectRoot });
   }
   return actions;
 }
@@ -83,6 +85,12 @@ function chooseCleanup(
         ? result('kill')
         : result('forget', 'device-gone');
     if (deleted) return result('forget');
+  }
+  if (device.backend === 'cloud') {
+    if (device.origin === 'dotenv') return result('forget');
+    if (tools.now().getTime() - Date.parse(binding.boundAt) > 115 * 60_000)
+      return result('forget', 'session-cap');
+    return result('stop-cloud');
   }
   return null;
 }

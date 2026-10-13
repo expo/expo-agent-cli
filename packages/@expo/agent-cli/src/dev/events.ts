@@ -2,6 +2,7 @@ import { events } from '2g';
 
 declare module '2g' {
   interface EventRegistry {
+    'dev:open_app_eas_flag_unsupported': { flag: string };
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Plan contract — the port a busy start moved
     // to, so a reader of the event stream can see the dev server is not where it was asked for.
     'dev:start_plan_port_retry': {
