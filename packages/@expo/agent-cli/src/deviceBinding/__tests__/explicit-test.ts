@@ -252,6 +252,29 @@ it('reuses an explicitly named owned Android instance while adb still lists it o
   expect(tools.spawned).toEqual([]);
 });
 
+it.each(['offline', 'unauthorized'] as const)(
+  'refuses a serial adb lists %s as not ready, and names it again in the How',
+  async (state) => {
+    const { previewExplicitDeviceAsync } = await import('../preview');
+    const tools = fakeTools({ emulators: [{ serial: 'R58N123', state }] });
+    const explicit = named('R58N123', ['--android']);
+    const refusal = {
+      data: { reason: 'explicit-not-ready', state },
+      exitCode: 7,
+      suggestedCommand: 'npx @expo/agent-cli dev --android --device R58N123 --detach --wait-ready',
+    };
+    await expect(
+      previewExplicitDeviceAsync(ROOT, 'android', explicit, false, tools)
+    ).rejects.toMatchObject(refusal);
+    await expect(acquireDeviceAsync(ROOT, 'android', { explicit, tools })).rejects.toMatchObject(
+      refusal
+    );
+    expect(readBindingFile(bindingPathFor(ROOT, 'android', 'local-android'))).toEqual({
+      kind: 'none',
+    });
+  }
+);
+
 it('explicit-android-needs-only-adb', async () => {
   const { previewExplicitDeviceAsync } = await import('../preview');
   const tools = fakeTools({ emulators: [{ serial: 'R58N123', state: 'device' }] });

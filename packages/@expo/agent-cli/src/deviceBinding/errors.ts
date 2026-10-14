@@ -142,6 +142,7 @@ export function notReusableError(
 
 const CHOICE_REFUSALS = [
   'explicit-not-found',
+  'explicit-not-ready',
   'explicit-bound',
   'own-explicit-over-owned',
   'not-reusable',

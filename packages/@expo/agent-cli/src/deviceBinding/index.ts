@@ -155,7 +155,8 @@ async function acquireAndroidAsync(
         explicit,
         reuseOnly,
         tools,
-        actions
+        actions,
+        inventory.unready
       ),
       handle: null,
     };

@@ -1,8 +1,10 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Choice
 import { rerunDevCommand } from '../plan/rerun';
 import { canonicalizeExistingPath } from '../utils/dir';
+import { EXIT_NEEDS_HUMAN } from '../exitCodes';
 import { CommandError } from '../utils/errors';
 import { PROGRAM_PREFIX } from '../programName';
+import type { AndroidInventory } from './choose';
 import type { Cleanup } from './cleanup';
 import { deviceUnavailableError, notReusableError } from './errors';
 import { instanceGone } from './emulator';
@@ -29,6 +31,13 @@ export type ExplicitCandidate = Extract<BoundDevice, { backend: 'local-ios' | 'l
 export type ExplicitRequest = { query: string; rerun: readonly string[] };
 type Foreign = { file: string; binding: Binding; stale: boolean };
 type Choice = { device: ExplicitCandidate; reused: boolean; transfer: string[] };
+type Unready = AndroidInventory['unready'];
+type ExplicitReason =
+  | 'explicit-not-found'
+  | 'explicit-not-ready'
+  | 'explicit-bound'
+  | 'own-explicit-over-owned';
+type RefusalFacts = { matches?: string[]; root?: string; state?: string; rerun: readonly string[] };
 
 /** Pure choice; refusing never changes the current binding. */
 export function chooseExplicitDevice(
@@ -37,13 +46,20 @@ export function chooseExplicitDevice(
   candidates: ExplicitCandidate[],
   { query, rerun }: ExplicitRequest,
   platform: DevicePlatform,
-  reuseOnly: boolean
+  reuseOnly: boolean,
+  unready: Unready = []
 ): Choice {
   const matches = candidates.filter(
     (device) =>
       deviceIdOf(device).toLowerCase() === query.toLowerCase() ||
       (device.backend === 'local-ios' && device.name.toLowerCase() === query.toLowerCase())
   );
+  const listed = unready.find(({ serial }) => serial.toLowerCase() === query.toLowerCase());
+  if (matches.length === 0 && listed)
+    throw explicitError('explicit-not-ready', listed.serial, platform, {
+      state: listed.state,
+      rerun,
+    });
   if (matches.length !== 1)
     throw explicitError('explicit-not-found', query, platform, {
       matches: matches.map(deviceIdOf),
@@ -89,7 +105,8 @@ export function readExplicitChoice(
   candidates: ExplicitCandidate[],
   explicit: ExplicitRequest,
   reuseOnly: boolean,
-  tools: DeviceTools
+  tools: DeviceTools,
+  unready: Unready = []
 ) {
   const backend = localBackendOf(platform);
   const file = bindingPathFor(projectRoot, platform, backend);
@@ -115,7 +132,7 @@ export function readExplicitChoice(
   return {
     file,
     own,
-    choice: chooseExplicitDevice(own, others, candidates, explicit, platform, reuseOnly),
+    choice: chooseExplicitDevice(own, others, candidates, explicit, platform, reuseOnly, unready),
   };
 }
 
@@ -133,7 +150,8 @@ export function bindExplicitSection(
   explicit: ExplicitRequest,
   reuseOnly: boolean,
   tools: DeviceTools,
-  actions: Cleanup[]
+  actions: Cleanup[],
+  unready: Unready = []
 ) {
   const { file, own, choice } = readExplicitChoice(
     projectRoot,
@@ -141,7 +159,8 @@ export function bindExplicitSection(
     candidates,
     explicit,
     reuseOnly,
-    tools
+    tools,
+    unready
   );
   const binding: Binding = {
     version: 1,
@@ -158,25 +177,35 @@ export function bindExplicitSection(
 }
 
 function explicitError(
-  reason: 'explicit-not-found' | 'explicit-bound' | 'own-explicit-over-owned',
+  reason: ExplicitReason,
   name: string,
   platform: DevicePlatform,
-  { matches = [], root, rerun }: { matches?: string[]; root?: string; rerun: readonly string[] }
+  { matches = [], root, state, rerun }: RefusalFacts
 ): CommandError {
-  const { what, how, line } = refusalText(reason, name, platform, { matches, root, rerun });
+  const { what, how, line } = refusalText(reason, name, platform, { matches, root, state, rerun });
   const error = new CommandError('DEVICE_UNAVAILABLE', `${what}\nHow: ${line}`);
-  error.exitCode = reason === 'explicit-bound' ? 20 : 1;
+  error.exitCode =
+    reason === 'explicit-not-ready' ? EXIT_NEEDS_HUMAN : reason === 'explicit-bound' ? 20 : 1;
   error.suggestedCommand = how;
   error.data = { reason, ...(matches.length ? { matches } : {}), ...(root ? { root } : {}) };
+  if (state) error.data.state = state;
   return error;
 }
 
 function refusalText(
-  reason: 'explicit-not-found' | 'explicit-bound' | 'own-explicit-over-owned',
+  reason: ExplicitReason,
   name: string,
   platform: DevicePlatform,
-  { matches, root, rerun }: { matches: string[]; root?: string; rerun: readonly string[] }
+  { matches = [], root, state, rerun }: RefusalFacts
 ): { what: string; how: string; line: string } {
+  if (reason === 'explicit-not-ready') {
+    const how = rerunDevCommand(platform, rerun, name);
+    return {
+      what: `adb lists ${name} as ${state}, so it cannot be bound.`,
+      how,
+      line: `${state === 'unauthorized' ? 'allow USB debugging on the device' : 'reconnect the device'}, then run "${how}".`,
+    };
+  }
   if (reason === 'explicit-bound') {
     const how = rerunDevCommand(platform, rerun);
     return {

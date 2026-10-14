@@ -67,6 +67,8 @@ export interface AndroidInventory {
   runningSerials: string[];
   /** Every serial `adb devices -l` lists, in any state: a booting instance already holds its port. */
   listedSerials: string[];
+  /** Serials adb lists in a state other than `device`, with that state. */
+  unready: { serial: string; state: string }[];
 }
 
 /** A serial on a console port and the worktree bound to it; `root` is null for one that is not ours. */

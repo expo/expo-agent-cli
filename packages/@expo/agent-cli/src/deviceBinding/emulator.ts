@@ -84,8 +84,15 @@ export async function readAndroidInventoryAsync(
     .split('\n')
     .slice(1)
     .flatMap((line) => line.trim().split(/\s+/)[0] || []);
+  const unready = devices.stdout
+    .split('\n')
+    .slice(1)
+    .flatMap((line) => {
+      const [serial, state] = line.trim().split(/\s+/);
+      return serial && state && state !== 'device' ? [{ serial, state }] : [];
+    });
   if (!listAvds || (reuseSerial !== undefined && runningSerials.includes(reuseSerial)))
-    return { avd: null, runningSerials, listedSerials };
+    return { avd: null, runningSerials, listedSerials, unready };
   const avds = await tools.emulatorList(['-list-avds'], { timeoutMs: 60_000 });
   if (avds.spawnError) {
     throw emulatorNotRunnableError(avds.spawnError.message);
@@ -95,6 +102,7 @@ export async function readAndroidInventoryAsync(
     avd: parseAvds(avds.stdout)[0] ?? null,
     runningSerials,
     listedSerials,
+    unready,
   };
 }
 

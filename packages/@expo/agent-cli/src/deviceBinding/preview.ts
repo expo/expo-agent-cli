@@ -22,30 +22,32 @@ export async function previewExplicitDeviceAsync(
   reuseOnly: boolean,
   tools: DeviceTools = defaultTools()
 ) {
-  const candidates: ExplicitCandidate[] =
-    platform === 'ios'
-      ? (await readIosInventoryAsync(tools)).simulators
-          .filter((sim) => sim.isAvailable)
-          .map((sim) => ({
-            backend: 'local-ios',
-            platform: 'ios',
-            udid: sim.udid,
-            name: sim.name,
-            origin: 'explicit',
-          }))
-      : (await readAndroidInventoryAsync(tools, { avds: false })).runningSerials.map((serial) => ({
-          backend: 'local-android',
-          platform: 'android',
-          serial,
-          origin: { kind: 'explicit' },
-        }));
+  const android =
+    platform === 'android' ? await readAndroidInventoryAsync(tools, { avds: false }) : null;
+  const candidates: ExplicitCandidate[] = !android
+    ? (await readIosInventoryAsync(tools)).simulators
+        .filter((sim) => sim.isAvailable)
+        .map((sim) => ({
+          backend: 'local-ios',
+          platform: 'ios',
+          udid: sim.udid,
+          name: sim.name,
+          origin: 'explicit',
+        }))
+    : android.runningSerials.map((serial) => ({
+        backend: 'local-android',
+        platform: 'android',
+        serial,
+        origin: { kind: 'explicit' },
+      }));
   const { own, choice } = readExplicitChoice(
     projectRoot,
     platform,
     candidates,
     explicit,
     reuseOnly,
-    tools
+    tools,
+    android?.unready ?? []
   );
   const label = `${deviceNameOf(choice.device)} (${deviceIdOf(choice.device)})`;
   const parts = [
