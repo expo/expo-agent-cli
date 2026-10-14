@@ -67,12 +67,18 @@ export function parseNewestIosRuntime(stdout: string): IosInventory['newestIosRu
     : null;
 }
 
-/** An `iPhone <n> Pro`, else an `iPhone <n>`, by the name `simctl` lists the type under. */
+/**
+ * The highest-numbered `iPhone <n> Pro`, else `iPhone <n>`, else `iPhone <n> Pro Max`, by the name
+ * `simctl` lists the type under, whatever order it lists them in.
+ */
 function mainstreamIphone(types: { identifier: string; name?: string }[]): string | null {
-  for (const pattern of [/^iPhone \d+ Pro$/, /^iPhone \d+$/]) {
-    const match = types.find((type) => pattern.test(type.name ?? ''));
-    if (match) {
-      return match.identifier;
+  for (const pattern of [/^iPhone (\d+) Pro$/, /^iPhone (\d+)$/, /^iPhone (\d+) Pro Max$/]) {
+    const [highest] = types
+      .map((type) => ({ type, number: Number(pattern.exec(type.name ?? '')?.[1]) }))
+      .filter(({ number }) => !Number.isNaN(number))
+      .sort((left, right) => right.number - left.number);
+    if (highest) {
+      return highest.type.identifier;
     }
   }
   return null;

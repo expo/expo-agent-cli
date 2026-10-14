@@ -41,6 +41,25 @@ describe(parseNewestIosRuntime, () => {
     ).toMatchObject({ deviceType: 'com.apple.CoreSimulator.SimDeviceType.iPhone-17' });
   });
 
+  it(`takes the highest-numbered Pro whatever the listing order, and a newer runtime's Pro Max over an older runtime's Pro`, () => {
+    expect(
+      parseNewestIosRuntime(
+        listing(runtime('27.0', ['iPhone 11 Pro', 'iPhone 18 Pro', 'iPhone 18 Pro Max']))
+      )
+    ).toMatchObject({ deviceType: 'com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro' });
+    expect(
+      parseNewestIosRuntime(
+        listing(
+          runtime('26.4', ['iPhone 17 Pro']),
+          runtime('27.0', ['iPhone 18 Pro Max', 'iPhone Air'])
+        )
+      )
+    ).toEqual({
+      identifier: 'com.apple.CoreSimulator.SimRuntime.iOS-27-0',
+      deviceType: 'com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro-Max',
+    });
+  });
+
   it(`falls back to the newest runtime's first iPhone when no runtime has a mainstream one`, () => {
     expect(
       parseNewestIosRuntime(
