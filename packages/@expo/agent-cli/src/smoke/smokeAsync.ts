@@ -20,6 +20,7 @@ import {
   deviceIdOf,
   deviceNameOf,
   devicesDisabled,
+  type BoundDevice,
 } from '../deviceBinding';
 import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
@@ -537,7 +538,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
           ok: true,
           deviceId: deviceIdOf(acquired.device),
           backend: platform === 'ios' ? 'local-ios' : 'local-android',
-          choice: deviceNameOf(acquired.device),
+          choice: choiceOf(acquired.device),
           installNeeded: acquired.action === 'created' || acquired.action === 'spawned',
           reason: null,
         };
@@ -1168,6 +1169,14 @@ async function resolveSmokeTargetAsync(
       : `${PROGRAM_PREFIX} dev --${options.platform}${options.cloud === 'required' ? ' --eas' : ''}`,
     installWithKind: expoGo ? 'expo-go' : 'native-build',
   };
+}
+
+/** The boot line's "because": a spawned instance's AVD, and nothing for an explicit serial. */
+function choiceOf(device: BoundDevice): string | null {
+  if (device.backend !== 'local-android') {
+    return deviceNameOf(device);
+  }
+  return device.origin.kind === 'spawned' ? device.origin.avd : null;
 }
 
 /** A refusal's What and its How line, as one phase reason; the Why in between is dropped. */

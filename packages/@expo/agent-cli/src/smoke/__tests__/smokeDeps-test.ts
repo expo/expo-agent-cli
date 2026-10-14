@@ -72,6 +72,31 @@ describe('bootDevice', () => {
     });
   });
 
+  it.each([
+    [
+      'emulator-5556',
+      { kind: 'spawned', avd: 'Pixel_9', port: 5556, emulatorPid: 4242 } as const,
+      'Pixel_9',
+    ],
+    ['R58N123', { kind: 'explicit' } as const, null],
+  ])(
+    'names the AVD of a spawned instance as the choice, and nothing for an explicit serial: %s',
+    async (serial, origin, choice) => {
+      vi.mocked(acquireDeviceAsync).mockResolvedValue({
+        device: { backend: 'local-android', platform: 'android', serial, origin },
+        justBooted: true,
+        action: 'reused',
+      });
+
+      const result = await buildSmokeDeps(
+        projectRoot,
+        resolveSmokeOptions(['--android'])
+      ).bootDevice();
+
+      expect(result).toMatchObject({ ok: true, deviceId: serial, choice });
+    }
+  );
+
   it(`reports the registry's refusal as a boot that failed`, async () => {
     vi.mocked(acquireDeviceAsync).mockRejectedValue(
       Object.assign(new Error('No iOS runtime with an iPhone is installed.\nHow: install one.'), {

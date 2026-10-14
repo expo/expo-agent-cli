@@ -530,16 +530,16 @@ describe(runSmokePhasesAsync, () => {
               deviceId: 'emulator-5554',
               backend: 'local-android' as const,
               reason: null,
-              choice: 'Pixel_9 on emulator-5554',
+              choice: 'Pixel_9',
             }),
           }),
         }),
         options({ bootstrap: true })
       );
 
-      expect(run.environment.deviceChoice).toBe('Pixel_9 on emulator-5554');
+      expect(run.environment.deviceChoice).toBe('Pixel_9');
       const reason = run.phases.find((phase) => phase.id === 'boot-device')?.reason;
-      expect(reason).toBe('booted emulator-5554 for this run because Pixel_9 on emulator-5554');
+      expect(reason).toBe('booted emulator-5554 for this run because Pixel_9');
       expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['dev-server']);
     });
 

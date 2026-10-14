@@ -472,7 +472,7 @@ Before the lock: `adb devices -l` and `emulator -list-avds`. Under the lock: `bu
 - `android.ts`; the `emulatorList` and `spawnEmulator` tools; the `android-spawn` choice; the boot poll with deadline and exit watcher.
 - The resolver callback and the `reuseBoundDevice` reuse of §iOS binding run for Android too. `AppPresenceProbe.installDevice` goes for Android. `withDevice` sets `--device <serial>`.
 - `openAppOnDeviceAsync`'s Android branch takes the bound device. `resolveDeviceAsync` sets `adb: resolveAdb()` on a `local-android` winner. `installDevBuild`, `askDeviceAsync` and `installedApp/android` pass the serial; `androidDeviceNameAsync` stays for display only.
-- Smoke's Android boot phase calls `acquireDeviceAsync`. `shutdownDeviceAsync` and smoke's `shutdownDevice` phase go, because every device is bound and that branch runs `emu kill` by serial (Contract 6).
+- Smoke's Android boot phase calls `acquireDeviceAsync`, and maps a `spawned` instance's AVD to `choice`, and nothing for an `explicit` serial, which the phase line already names. `shutdownDeviceAsync` and smoke's `shutdownDevice` phase go, because every device is bound and that branch runs `emu kill` by serial (Contract 6).
 - A release acts only on the binding it read. Under the lock it compares the whole acquisition (`sameBinding`: root, `boundAt`, device, and for a `spawned` instance its AVD, port and pid), and a failed boot passes the binding it wrote as `expected`, so a replacement keeps its file and its device.
 
 ### Decided while building
