@@ -550,6 +550,7 @@ The report names the device in `environment.boundDevice` (`id`, `name`, `action`
 What happens to the device of a deleted or expired worktree?
 
 - `reap.ts` per §Reap, called from `acquireDeviceAsync` and `dev:stop`. The `cloud` rows wait for §EAS session binding.
+- `cleanup.ts` runs the let-go device actions after the section (`runCleanupAsync`, `deleteSimulatorAsync`); `iosAcquire.ts` holds the iOS section (`bindIosSectionAsync`) and the binding identity of §Invariant.
 - The reap events and the `cli:device_binding_reaped` reasons, per §Output and errors.
 - Reap reports identify `projectRoot` and carry `devServerCleanup: 'not-checked'`: they describe device cleanup only. Deleted-worktree output warns that CLI/Metro processes may remain. Stopping those requires separate server ownership evidence; a device binding grants none. A late last-build write does not recreate an already deleted worktree.
 
