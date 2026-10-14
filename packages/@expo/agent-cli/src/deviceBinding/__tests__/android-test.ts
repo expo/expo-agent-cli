@@ -397,6 +397,26 @@ describe(releaseWorktreeDevicesAsync, () => {
     expect(readBindingFile(file())).toEqual({ kind: 'none' });
   });
 
+  it('writes a spawned binding back, expired, when the kill throws and the instance still runs', async () => {
+    const tools = fakeTools({
+      emulators: [{ serial: 'emulator-5554', state: 'device', pid: 77 }],
+      noPs: true,
+    });
+    tools.kill = () => {
+      throw new Error('kill EPERM');
+    };
+    writeBinding(file(), androidBindingFor(ROOT, 'emulator-5554', spawned(5554, 77)));
+
+    const released = await releaseWorktreeDevicesAsync(ROOT, { platform: 'android', tools });
+
+    expect(released).toEqual([expect.objectContaining({ released: false, reason: 'kill EPERM' })]);
+    const read = readBindingFile(file());
+    expect(read.kind === 'binding' && read.binding).toMatchObject({
+      device: { origin: { emulatorPid: 77 } },
+      expiresAt: '2026-10-08T10:00:00.000Z',
+    });
+  });
+
   it('expires an explicit binding and keeps its file and its device', async () => {
     const tools = fakeTools({ emulators: [{ serial: 'emulator-5554', state: 'device' }] });
     writeBinding(file(), androidBindingFor(ROOT, 'emulator-5554', { kind: 'explicit' }));
