@@ -12,7 +12,7 @@ export interface FakeEmulator {
   state: 'device' | 'offline';
   /** The pid `isPidAlive` answers for. Absent for a device that is not an instance of ours. */
   pid?: number;
-  /** The command line `commandOf` answers; defaults to the one the spawn wrote. */
+  /** The command line `commandOf` answers; defaults to an instance of ours on its serial's port. */
   command?: string;
 }
 
@@ -145,8 +145,19 @@ export function fakeAndroid(
     emulatorList,
     spawnEmulator,
     isPidAlive: (pid) => alive.has(pid),
-    commandOf: (pid) =>
-      noPs ? null : (state.find((e) => e.pid === pid)?.command ?? (alive.has(pid) ? 'node' : '')),
+    commandOf: (pid) => {
+      if (noPs) {
+        return null;
+      }
+      const emulator = state.find((e) => e.pid === pid);
+      if (!emulator) {
+        return alive.has(pid) ? 'node' : '';
+      }
+      const port = Number(emulator.serial.replace('emulator-', ''));
+      return (
+        emulator.command ?? `qemu-system-aarch64 -avd ${AVD} -ports ${port},${port + 1} -read-only`
+      );
+    },
     kill: (pid) => {
       killed.push(pid);
       alive.delete(pid);

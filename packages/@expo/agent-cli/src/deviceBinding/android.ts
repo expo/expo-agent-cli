@@ -11,7 +11,7 @@ import {
   type AndroidInventory,
   type BoundSerial,
 } from './choose';
-import { ADB_CALL_TIMEOUT_MS } from './emulator';
+import { ADB_CALL_TIMEOUT_MS, instanceGone } from './emulator';
 import { deviceUnavailableError } from './errors';
 import { isExpired, leaseFrom } from './lease';
 import {
@@ -100,7 +100,7 @@ export async function bindAndroidSectionAsync(
   const ownPresent =
     ownDevice != null &&
     (ownDevice.origin.kind === 'spawned'
-      ? tools.isPidAlive(ownDevice.origin.emulatorPid)
+      ? instanceGone(tools, ownDevice.origin) == null
       : inventory.runningSerials.includes(ownDevice.serial));
   const { busy, boundBy } = busyPortsOf(inventory.listedSerials, otherBindings(file), tools);
   const choice = chooseAndroidDevice({
@@ -209,28 +209,14 @@ export async function bootEmulatorAsync(
   }
 }
 
-/**
- * Kill the instance a `spawned` binding names, while its pid is alive and, where `ps` exists, its
- * arguments name the AVD and the ports. Never the binary name: the `emulator` launcher execs
- * `qemu-system-<arch>`, so the pid stays and the name does not.
- */
+/** Kill the instance a `spawned` binding names, while {@link instanceGone} says it is there. */
 export function killEmulatorIfOurs(
   tools: DeviceTools,
   { emulatorPid, avd, port }: SpawnedOrigin
 ): { killed: boolean; reason: string | null } {
-  if (!tools.isPidAlive(emulatorPid)) {
-    return { killed: false, reason: `pid ${emulatorPid} is not running` };
-  }
-  const command = tools.commandOf(emulatorPid);
-  const args = ` ${command} `;
-  if (
-    command != null &&
-    !(args.includes(` -avd ${avd} `) && args.includes(` -ports ${port},${port + 1} `))
-  ) {
-    return {
-      killed: false,
-      reason: `pid ${emulatorPid} is not the emulator instance of ${avd} on port ${port} any more`,
-    };
+  const gone = instanceGone(tools, { emulatorPid, avd, port });
+  if (gone) {
+    return { killed: false, reason: gone };
   }
   try {
     tools.kill(emulatorPid);

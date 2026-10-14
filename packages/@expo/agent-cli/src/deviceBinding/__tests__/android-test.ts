@@ -134,6 +134,39 @@ describe(acquireDeviceAsync, () => {
     expect(result.device).toMatchObject({ serial: 'emulator-5554' });
   });
 
+  it.each([
+    [
+      'a pid ps shows running another command',
+      { command: 'node server.js' },
+      {},
+      { state: 'gone', cause: 'device-gone' },
+      { action: 'spawned', device: { serial: 'emulator-5554' } },
+    ],
+    [
+      'a live pid where ps does not exist',
+      {},
+      { noPs: true },
+      { state: 'up' },
+      { action: 'reused', device: { serial: 'emulator-5556' } },
+    ],
+  ])(
+    'checks a live pid against the AVD and the ports before it reuses or reports the instance: %s',
+    async (_case, row, rowTools, inspected, acquired) => {
+      const tools = fakeTools({
+        emulators: [{ serial: 'emulator-5556', state: 'device', pid: 77, ...row }],
+        ...rowTools,
+      });
+      writeBinding(file(), androidBindingFor(ROOT, 'emulator-5556', spawned(5556, 77)));
+
+      const inspection = await inspectBindingAsync(ROOT, 'android', 'local-android', tools);
+      const result = await acquireDeviceAsync(ROOT, 'android', { tools });
+
+      expect(inspection).toMatchObject(inspected);
+      expect(result).toMatchObject(acquired);
+      expect(tools.killed).toEqual([]);
+    }
+  );
+
   // let-go-runs-before-refusal
   it('lets go of the dead own instance before it refuses no-avd, and kills nothing', async () => {
     const tools = fakeTools({ avds: [] });

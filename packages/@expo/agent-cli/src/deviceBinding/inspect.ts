@@ -1,8 +1,9 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Entry points
-// What a read verb learns about one binding: lock-free, no extension, one subprocess at most.
+// What a read verb learns about one binding: lock-free, no extension, one device-tool
+// subprocess at most.
 
 import * as Log from '../log';
-import { getEmulatorStateAsync } from './emulator';
+import { getEmulatorStateAsync, instanceGone } from './emulator';
 import { noBoundDeviceError } from './errors';
 import { listSimulatorAsync, SIMCTL_CALL_TIMEOUT_MS } from './ios';
 import { extendLeaseAsync, isExpired } from './lease';
@@ -63,13 +64,13 @@ export async function inspectBindingAsync(
   return { binding, path, state: listing.state === up ? 'up' : 'not-up' };
 }
 
-/** A `spawned` instance whose `emulatorPid` is dead, whatever `adb` lists under its serial. */
+/** A `spawned` instance that fails {@link instanceGone}, whatever `adb` lists under its serial. */
 function instanceDead(binding: Binding, tools: DeviceTools): boolean {
   const { device } = binding;
   return (
     device.backend === 'local-android' &&
     device.origin.kind === 'spawned' &&
-    !tools.isPidAlive(device.origin.emulatorPid)
+    instanceGone(tools, device.origin) != null
   );
 }
 

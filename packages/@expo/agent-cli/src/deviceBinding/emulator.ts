@@ -77,6 +77,29 @@ function assertAnswered(
   }
 }
 
+/**
+ * Why a `spawned` binding's instance is gone, or null while its pid is alive and, where `ps` exists,
+ * its arguments name the AVD and the ports. Never the binary name: the `emulator` launcher execs
+ * `qemu-system-<arch>`, so the pid stays and the name does not.
+ */
+export function instanceGone(
+  tools: DeviceTools,
+  { emulatorPid, avd, port }: { emulatorPid: number; avd: string; port: number }
+): string | null {
+  if (!tools.isPidAlive(emulatorPid)) {
+    return `pid ${emulatorPid} is not running`;
+  }
+  const command = tools.commandOf(emulatorPid);
+  const args = ` ${command} `;
+  if (
+    command != null &&
+    !(args.includes(` -avd ${avd} `) && args.includes(` -ports ${port},${port + 1} `))
+  ) {
+    return `pid ${emulatorPid} is not the emulator instance of ${avd} on port ${port} any more`;
+  }
+  return null;
+}
+
 /** What one `adb get-state` says about one serial. */
 export type EmulatorListing =
   | { kind: 'listed'; state: string }
