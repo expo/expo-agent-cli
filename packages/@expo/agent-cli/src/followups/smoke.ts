@@ -295,7 +295,9 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
             {
               id: 'dev-detach',
               command: start,
-              why: 'This run stopped the dev server it started and released its device, so nothing is left to open the app on. This starts both again and keeps them running.',
+              why: input.deviceReleased
+                ? 'This run stopped the dev server it started and released its device, so nothing is left to open the app on. This starts both again and keeps them running.'
+                : 'This run stopped the dev server it started, so no dev server is left to open the app on. This starts it again and keeps it running.',
             },
           ]
         : deviceBack),

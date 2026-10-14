@@ -148,6 +148,19 @@ describe(buildSmokeFollowUps, () => {
     ]);
   });
 
+  it(`claims no release when the run stopped its dev server and kept its device`, () => {
+    const followups = buildSmokeFollowUps(
+      input({
+        appsConnected: 0,
+        outcome: 'inconclusive',
+        serverStopped: true,
+        deviceReleased: false,
+      })
+    );
+    expect(followups[0]?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+    expect(followups[0]?.why).not.toMatch(/released/);
+  });
+
   // A released simulator keeps its binding, so `dev --detach` reuses it beside the running server.
   it(`binds the parked simulator again after the run released it beside a reused dev server`, () => {
     const followups = buildSmokeFollowUps(
