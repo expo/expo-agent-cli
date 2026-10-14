@@ -1,3 +1,4 @@
+import type { ChildEventObserver } from '../utils/childEvents';
 import { holdDevServerLockAsync } from '../devLock';
 import type { ResolvedDevServerPort } from '../devLock/port';
 import { dependsOnDevClientSync, reportFollowUps } from '../followups';
@@ -77,8 +78,10 @@ export async function runDevServerAsync(
     agentSkills,
     output = 'inherit',
     onDevServer,
+    onEvent,
   }: {
     agentSkills: boolean;
+    onEvent?: ChildEventObserver;
     output?: SubprocessOutput;
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
@@ -113,7 +116,7 @@ export async function runDevServerAsync(
       onDevServer?.(server);
     }
   };
-  const run = spawnDevServerAsync(projectRoot, args, output).finally(() => {
+  const run = spawnDevServerAsync(projectRoot, args, output, onEvent).finally(() => {
     running = false;
   });
   const lock = holdDevServerLockAsync(projectRoot, args, {
@@ -217,13 +220,22 @@ async function openWhenAnsweringAsync(
 async function spawnDevServerAsync(
   projectRoot: string,
   args: string[],
-  output: SubprocessOutput
+  output: SubprocessOutput,
+  onEvent?: ChildEventObserver
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   if (output === 'inherit') {
-    return { exitCode: await runExpoAsync(projectRoot, args), stdout: '', stderr: '' };
+    return {
+      exitCode: await runExpoAsync(projectRoot, args, ...(onEvent ? [onEvent] : [])),
+      stdout: '',
+      stderr: '',
+    };
   }
 
-  const { result } = await spawnExpoAsync(projectRoot, args, { output, ci: false });
+  const { result } = await spawnExpoAsync(projectRoot, args, {
+    output,
+    ci: false,
+    ...(onEvent ? { onEvent } : null),
+  });
   if (result.spawnError) {
     throw new CommandError(
       'EXPO_CLI_NOT_FOUND',

@@ -63,19 +63,19 @@ describe(`${readLastBuildRecord.name} — an unreadable record`, () => {
 });
 
 describe(recordLastBuildFingerprint, () => {
-  it(`should create the record in the .expo directory`, () => {
+  it(`should create the record in the .expo directory`, async () => {
     vol.fromJSON({ '/project/package.json': '{}' });
 
-    recordLastBuildFingerprint(projectRoot, 'ios', 'hash-ios');
+    await recordLastBuildFingerprint(projectRoot, 'ios', 'hash-ios');
 
     expect(readLastBuildRecord(projectRoot)).toEqual({ ios: { hash: 'hash-ios', sources: null } });
     expect(fs.existsSync(lastBuildFile)).toBe(true);
   });
 
-  it(`should keep the hash recorded for the other platform`, () => {
+  it(`should keep the hash recorded for the other platform`, async () => {
     vol.fromJSON({ [lastBuildFile]: JSON.stringify({ android: 'hash-android' }) });
 
-    recordLastBuildFingerprint(projectRoot, 'ios', 'hash-ios');
+    await recordLastBuildFingerprint(projectRoot, 'ios', 'hash-ios');
 
     expect(readLastBuildRecord(projectRoot)).toEqual({
       ios: { hash: 'hash-ios', sources: null },
@@ -83,49 +83,49 @@ describe(recordLastBuildFingerprint, () => {
     });
   });
 
-  it(`should replace the hash of the same platform`, () => {
+  it(`should replace the hash of the same platform`, async () => {
     vol.fromJSON({ [lastBuildFile]: JSON.stringify({ ios: 'old-hash' }) });
 
-    recordLastBuildFingerprint(projectRoot, 'ios', 'new-hash');
+    await recordLastBuildFingerprint(projectRoot, 'ios', 'new-hash');
 
     expect(readLastBuildRecord(projectRoot)).toEqual({ ios: { hash: 'new-hash', sources: null } });
   });
 
-  it(`should replace a corrupt record`, () => {
+  it(`should replace a corrupt record`, async () => {
     vol.fromJSON({ [lastBuildFile]: '{ not json' });
 
-    recordLastBuildFingerprint(projectRoot, 'android', 'hash-android');
+    await recordLastBuildFingerprint(projectRoot, 'android', 'hash-android');
 
     expect(readLastBuildRecord(projectRoot)).toEqual({
       android: { hash: 'hash-android', sources: null },
     });
   });
 
-  it(`should never fail the command when the record cannot be written`, () => {
+  it(`should never fail the command when the record cannot be written`, async () => {
     vol.fromJSON({ '/project/package.json': '{}' });
     const writeFileSync = vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {
       throw new Error('EACCES: permission denied');
     });
 
-    expect(() => recordLastBuildFingerprint(projectRoot, 'ios', 'hash-ios')).not.toThrow();
+    await expect(recordLastBuildFingerprint(projectRoot, 'ios', 'hash-ios')).resolves.toBe(false);
 
     writeFileSync.mockRestore();
   });
 
-  it(`should store the sources so a later diff has a base`, () => {
+  it(`should store the sources so a later diff has a base`, async () => {
     vol.fromJSON({ '/project/package.json': '{}' });
 
-    recordLastBuildFingerprint(projectRoot, 'ios', { hash: 'hash-ios', sources: [source] });
+    await recordLastBuildFingerprint(projectRoot, 'ios', { hash: 'hash-ios', sources: [source] });
 
     expect(readLastBuildRecord(projectRoot)).toEqual({
       ios: { hash: 'hash-ios', sources: [source] },
     });
   });
 
-  it(`should keep a v1 entry of the other platform while writing a v2 one`, () => {
+  it(`should keep a v1 entry of the other platform while writing a v2 one`, async () => {
     vol.fromJSON({ [lastBuildFile]: JSON.stringify({ android: 'hash-android' }) });
 
-    recordLastBuildFingerprint(projectRoot, 'ios', { hash: 'hash-ios', sources: [source] });
+    await recordLastBuildFingerprint(projectRoot, 'ios', { hash: 'hash-ios', sources: [source] });
 
     expect(readLastBuildRecord(projectRoot)).toEqual({
       ios: { hash: 'hash-ios', sources: [source] },

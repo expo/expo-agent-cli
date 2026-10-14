@@ -6,7 +6,7 @@ import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
 import { readLastBuildRecord, recordLastBuildFingerprint } from '../../plan/lastBuild';
-import { clearFingerprintMemo } from '../../project/fingerprint';
+import { clearFingerprintMemo, generateFingerprintAsync } from '../../project/fingerprint';
 import { clearFingerprintCache } from '../../project/fingerprintCache';
 import { probeProjectStateAsync } from '../../project/probe';
 import type { ProjectState } from '../../project/types';
@@ -45,7 +45,10 @@ vi.mock('../../plan/lastBuild', () => ({
   recordLastBuildFingerprint: vi.fn(),
 }));
 vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
-vi.mock('../../project/fingerprint', () => ({ clearFingerprintMemo: vi.fn() }));
+vi.mock('../../project/fingerprint', () => ({
+  clearFingerprintMemo: vi.fn(),
+  generateFingerprintAsync: vi.fn(),
+}));
 vi.mock('../../project/fingerprintCache', () => ({ clearFingerprintCache: vi.fn() }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../start/startAsync', () => ({ runDevServerAsync: vi.fn() }));
@@ -167,13 +170,31 @@ beforeEach(() => {
   vol.reset();
   mockReported.length = 0;
   vi.mocked(readLastBuildRecord).mockReturnValue({});
+  vi.mocked(generateFingerprintAsync)
+    .mockReset()
+    .mockResolvedValue({ hash: fingerprintHash, sources: null });
+  vi.mocked(recordLastBuildFingerprint).mockResolvedValue(true);
+  vol.fromJSON({
+    '/project/app.json': JSON.stringify({
+      expo: { ios: { bundleIdentifier: 'dev.app' }, android: { package: 'dev.app' } },
+    }),
+  });
   vi.mocked(runExpoAsync).mockResolvedValue(0);
   vi.mocked(isInteractive).mockReturnValue(true);
   vi.mocked(spawnExpoAsync).mockResolvedValue({
     cli: { command: 'expo', args: [] },
     result: { exitCode: 0, stdout: '', stderr: '' },
   });
-  vi.mocked(runDevServerAsync).mockResolvedValue(devServerRun());
+  vi.mocked(runDevServerAsync).mockImplementation(async (_root, args, options) => {
+    await options.onEvent?.({
+      _e: 'run:install',
+      _t: Date.now(),
+      _d: 10,
+      platform: args[0] === 'run:ios' ? 'ios' : 'android',
+      appId: 'dev.app',
+    });
+    return devServerRun();
+  });
   mockLanAddress('192.168.1.5');
 });
 
@@ -243,6 +264,7 @@ describe(devAsync, () => {
 
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
+        onEvent: expect.any(Function),
         agentSkills: true,
         output: 'inherit',
       });
@@ -432,6 +454,7 @@ describe(devAsync, () => {
       expect(runExpoAsync).toHaveBeenCalledTimes(1);
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
+        onEvent: expect.any(Function),
         agentSkills: true,
         output: 'inherit',
       });
@@ -452,8 +475,9 @@ describe(devAsync, () => {
       expect(recordLastBuildFingerprint).not.toHaveBeenCalled();
     });
 
-    it(`should record the fingerprint of a build that succeeded`, async () => {
+    it(`should record the fingerprint of a verified installation`, async () => {
       mockStaleDevClientState();
+      completeInstall(devServerRun());
 
       await devAsync(projectRoot, resolveDevOptions(['--android']));
 
@@ -508,7 +532,7 @@ describe(devAsync, () => {
     // [observed — wave 29, `evidence/07-dev-build-ios-2.log`]. The build is a fact of its own.
     it(`should record the build when the step failed after installing the app`, async () => {
       mockStaleDevClientState();
-      vi.mocked(runDevServerAsync).mockResolvedValue(
+      completeInstall(
         devServerRun({
           exitCode: 1,
           stdout: '› Build Succeeded\n› Installing on iPhone 17 Pro\n› Opening on iPhone 17 Pro',
@@ -535,7 +559,7 @@ describe(devAsync, () => {
     // was kept, because "run it again" costs fifteen minutes if that sentence is missing.
     it(`should say the build was recorded in the failure it reports`, async () => {
       mockStaleDevClientState();
-      vi.mocked(runDevServerAsync).mockResolvedValue(
+      completeInstall(
         devServerRun({ exitCode: 1, stdout: '› Build Succeeded\n› Installing on iPhone 17 Pro' })
       );
 
@@ -560,6 +584,7 @@ describe(devAsync, () => {
 
     it(`should not record anything when the fingerprint is unavailable`, async () => {
       mockStaleDevClientState({ fingerprint: { hash: null, error: 'fingerprint failed' } });
+      vi.mocked(generateFingerprintAsync).mockResolvedValue({ hash: null, sources: null });
 
       await devAsync(projectRoot, resolveDevOptions(['--ios']));
 
@@ -597,6 +622,7 @@ describe(devAsync, () => {
 
       expect(Log.warn).toHaveBeenCalledWith(expect.stringMatching(/not passed on: --tunnel/));
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
+        onEvent: expect.any(Function),
         agentSkills: true,
         output: 'inherit',
       });
@@ -611,6 +637,7 @@ describe(devAsync, () => {
 
       expect(Log.warn).not.toHaveBeenCalled();
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8082'], {
+        onEvent: expect.any(Function),
         agentSkills: true,
         output: 'inherit',
       });
@@ -628,6 +655,7 @@ describe(devAsync, () => {
 
       expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8082'], {
+        onEvent: expect.any(Function),
         agentSkills: true,
         output: 'inherit',
       });
@@ -703,10 +731,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(
         projectRoot,
         ['run:android', '--port', '8081'],
-        {
-          agentSkills: true,
-          output: 'inherit',
-        }
+        { onEvent: expect.any(Function), agentSkills: true, output: 'inherit' }
       );
     });
   });
@@ -1371,3 +1396,16 @@ describe(devAsync, () => {
     });
   });
 });
+
+function completeInstall(result: DevServerRun) {
+  vi.mocked(runDevServerAsync).mockImplementationOnce(async (_root, args, options) => {
+    await options.onEvent?.({
+      _e: 'run:install',
+      _t: Date.now(),
+      _d: 10,
+      platform: args[0] === 'run:ios' ? 'ios' : 'android',
+      appId: 'dev.app',
+    });
+    return result;
+  });
+}

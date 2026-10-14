@@ -77,6 +77,16 @@ The read is backwards compatible. A bare string reads as `{hash, sources: null}`
 
 A two-platform record is about 56 KB. No gzip, no subset, no second file. A project where this grows unreasonably loses a comparison and never a command. The record is advisory.
 
+A local install publishes its captured input hash and sources while the native runner and
+Metro are alive ([[0036-record-build-before-metro-exits]]). It never assigns a post-build hash
+to a binary built earlier. Each installation attempt completes once; exit handling cannot
+republish it after another build. A short exclusive file lock serializes read/merge/write
+across processes, and a temporary file plus rename makes every read a complete record. The
+lock is held only for this synchronous write, not for compilation or Metro. Lock contention
+has a five-second bound; an unwritable record or an orphaned lock is reported as an advisory
+write failure. A lock left by an abruptly killed writer is not stolen from a potentially
+suspended writer; remove it only after that writer is known to have stopped.
+
 `status --json` explicitly drops the sources. `status` promises to be instant and small. Its freshness section is a hash comparison.
 
 The same sources are also in the fingerprint cache ([[0023-fingerprint-caching]]), as `{hash, sources}` per key. A warm run that kept only the hash would keep the freshness verdict and lose the diff.

@@ -20,7 +20,7 @@ import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { emitStartPlan } from '../plan/emit';
 import { event as planEvent } from '../plan/events';
-import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBuild';
+import { readLastBuildRecord } from '../plan/lastBuild';
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
 import { isPlatformFlag } from '../plan/platformFlags';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
@@ -29,7 +29,7 @@ import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
 import { clearFingerprintMemo } from '../project/fingerprint';
 import { clearFingerprintCache } from '../project/fingerprintCache';
 import { probeProjectStateAsync } from '../project/probe';
-import type { PlanStep, ProjectState, StartPlan } from '../project/types';
+import type { PlanStep, StartPlan } from '../project/types';
 import { resolveStartFollowUpsAsync } from '../start/followUps';
 import { runDevServerAsync, type DevServerRun } from '../start/startAsync';
 import {
@@ -51,7 +51,8 @@ import {
   wrapperCrashDetail,
   type WrapperCrashTool,
 } from '../utils/wrapperCrash';
-import { appReachedDevice } from './buildEvidence';
+import { captureNativeBuildInputsAsync, NativeInstallAttempt } from './nativeBuildRecord';
+import type { ChildEventObserver } from '../utils/childEvents';
 import { event as devEvent } from './events';
 import {
   forwardedStepArgs,
@@ -218,7 +219,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // above, and then it runs. `dev` was asked to get this app onto a device, and a build is how that
   // is done; there is no second act of consent, in a terminal or out of one. `--plan` is the run
   // that stops.
-  const run = await executePlanAsync(projectRoot, plan, state, options);
+  const run = await executePlanAsync(projectRoot, plan, options);
 
   // @ref llp/0010-agent-conventions.rfc.md §The `--json` error envelope
   // A plan whose step failed has no result to report, so it reports a failure. It used to print
@@ -349,7 +350,6 @@ interface PlanRun {
 async function executePlanAsync(
   projectRoot: string,
   plan: StartPlan,
-  state: ProjectState,
   options: DevOptions
 ): Promise<PlanRun> {
   const output = stepOutputFor(options);
@@ -362,6 +362,7 @@ async function executePlanAsync(
   // installs: the one the plan found, or the one this run's `eas build` step makes below.
   let easBuildId: string | null = plan.easBuild?.id ?? null;
   let serving: PlanRun['serving'] = null;
+  let buildInputs: Awaited<ReturnType<typeof captureNativeBuildInputsAsync>> | undefined;
 
   for (const [index, step] of plan.steps.entries()) {
     let args = resolveStepArgs(step, options, index === plan.steps.length - 1);
@@ -377,9 +378,25 @@ async function executePlanAsync(
     // itself, and a build step serves nothing to open.
     const opensApp = devServerStep && step.argv[1] === 'start' && shouldOpenApp(options);
     let stepRunning = false;
+    const buildPlatform = resolveBuildPlatform(step);
+    if (!buildInputs && (step.argv[1] === 'prebuild' || buildPlatform)) {
+      buildInputs = await captureNativeBuildInputsAsync(projectRoot);
+    }
+    let attempt: NativeInstallAttempt | undefined;
     const runStep = async (stepArgs: string[]) => {
+      if (buildPlatform && buildInputs) {
+        await buildInputs.beforeCompile();
+        attempt = new NativeInstallAttempt(projectRoot, buildPlatform, stepArgs, buildInputs);
+      }
+      try {
+        return await runObservedStep(stepArgs, attempt?.onEvent);
+      } finally {
+        await attempt?.finish();
+      }
+    };
+    const runObservedStep = async (stepArgs: string[], onEvent?: ChildEventObserver) => {
       if (!devServerStep) {
-        return await runStepAsync(projectRoot, step, stepArgs, output);
+        return await runStepAsync(projectRoot, step, stepArgs, output, onEvent);
       }
       stepRunning = true;
       let openTask: Promise<OpenAppOnEasReport | null> | undefined;
@@ -395,6 +412,7 @@ async function executePlanAsync(
       return await runDevServerAsync(projectRoot, stepArgs, {
         agentSkills: options.agentSkills,
         output,
+        ...(onEvent ? { onEvent } : null),
         onDevServer: opensApp
           ? (server) => {
               if (openArmed) {
@@ -499,13 +517,9 @@ async function executePlanAsync(
     exitCode = result.exitCode;
     planEvent('start_plan_step_exit', { id: step.id, code: exitCode });
 
-    if (
-      exitCode !== 0 &&
-      step.id === 'install' &&
-      appReachedDevice(`${result.stdout}\n${result.stderr}`)
-    ) {
+    if (exitCode !== 0 && step.id === 'install' && attempt?.installed) {
       // @ref llp/0004-smart-start-and-project-state.rfc.md §A current build is not an installed app
-      // The install step's job is the app on the device, and the output says it got there — so a
+      // The install step's job is the app on the device, and its completion event confirms it — so a
       // non-zero exit is about what `expo run:*` does *after* the install, which on a Mac without
       // the Automation grant is the AppleScript launch (observed 2026-09-04, and the reason
       // `installDevBuildAsync` judges this command by its result rather than its exit code). The
@@ -517,13 +531,10 @@ async function executePlanAsync(
       exitCode = 0;
     } else if (exitCode !== 0) {
       // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
-      // F121, and **before** the needs-human throw below rather than after it: `expo run:*` builds,
-      // installs and launches in one subprocess, and a launch that failed is not a build that did.
-      // A build whose app is on the device is a fact of its own, so it is recorded here, and the
-      // step failure below is reported exactly as it was. The `macos-automation` recovery — start
-      // the dev server and deep-link in — no longer walks back into the same fifteen-minute build,
-      // which is what made that handoff wrong rather than merely incomplete.
-      const buildRecorded = recordBuildReachedDevice(projectRoot, step, state, result);
+      // F121: installation and launch have separate outcomes. The live observer already recorded
+      // a verified installation, if one completed. Carry that fact into the failure report before
+      // the needs-human throw, so recovery can start the server without requesting another build.
+      const buildRecorded = attempt?.recorded ?? false;
       const failure: StepFailure = {
         step,
         args,
@@ -545,7 +556,6 @@ async function executePlanAsync(
       return { exitCode, devServer, failure, serving };
     }
 
-    recordBuildOf(projectRoot, step, state);
     if (step.id === 'eas-build' && options.deviceBackend === 'eas') {
       // The build that just finished is the newest finished one of its profile, and its id is what
       // the session installs. Asked of EAS rather than parsed out of the step, whose output went to
@@ -845,17 +855,21 @@ async function runStepAsync(
   projectRoot: string,
   step: PlanStep,
   args: string[],
-  output: SubprocessOutput
+  output: SubprocessOutput,
+  onEvent?: ChildEventObserver
 ): Promise<StepResult> {
   if (step.argv[0] === 'eas') {
     return await runEasStepAsync(projectRoot, args, output);
   }
   if (output === 'inherit') {
     // Nothing is captured, so there is nothing for the wrapper-crash guard to read either.
-    const exitCode = await runExpoAsync(projectRoot, args);
+    const exitCode = await runExpoAsync(projectRoot, args, ...(onEvent ? [onEvent] : []));
     return { exitCode, stdout: '', stderr: '', binPath: null };
   }
-  const { cli, result } = await spawnExpoAsync(projectRoot, args, { output });
+  const { cli, result } = await spawnExpoAsync(projectRoot, args, {
+    output,
+    ...(onEvent ? { onEvent } : null),
+  });
   return {
     exitCode: result.exitCode ?? 1,
     stdout: result.stdout,
@@ -1285,57 +1299,6 @@ async function openAppOnEasForRunAsync(
 function resolveEasBuildPlatform(step: PlanStep): NativePlatform {
   const index = step.argv.indexOf('--platform');
   return step.argv[index + 1] === 'android' ? 'android' : 'ios';
-}
-
-/**
- * Record what a successful `expo run:*` built, so the next run can skip the build.
- *
- * The hash comes from the probe, meaning it describes the project as it was *before* prebuild
- * ran. That is the same hash the next probe computes for an unchanged project, which is what
- * makes the comparison in `decideStartPlan` work.
- *
- * The probe's `sources` go in with it, because a hash alone lets a later `@expo/agent-cli impact` say the
- * native surface changed and never what changed (llp/0011 §The record has to hold the sources).
- * They are already in hand: the probe computed them to get the hash.
- */
-function recordBuildOf(projectRoot: string, step: PlanStep, state: ProjectState): void {
-  const platform = resolveBuildPlatform(step);
-  if (platform && state.fingerprint.hash) {
-    recordLastBuildFingerprint(projectRoot, platform, {
-      hash: state.fingerprint.hash,
-      sources: state.fingerprint.sources ?? null,
-    });
-  }
-}
-
-/**
- * Record the build of a step that **failed**, when its own output shows the app reached a device.
- *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
- * The other half of {@link recordBuildOf}, and the whole of F121. `expo run:*` is one subprocess
- * that builds, installs and launches, so its exit code is the *launch's* answer as often as the
- * compiler's — and a plan that rebuilds because the launch failed spends fifteen minutes to change
- * nothing. What is read is the install (`./buildEvidence.ts`), because the record is a claim about
- * the app on a device rather than about a binary in a build directory.
- *
- * @returns whether a build was recorded, which is what the failure report has to say out loud.
- */
-function recordBuildReachedDevice(
-  projectRoot: string,
-  step: PlanStep,
-  state: ProjectState,
-  result: StepResult
-): boolean {
-  if (resolveBuildPlatform(step) == null) {
-    return false;
-  }
-  if (!appReachedDevice(`${result.stdout}\n${result.stderr}`)) {
-    return false;
-  }
-  recordBuildOf(projectRoot, step, state);
-  // Only when something was written: a project with no fingerprint records nothing, and a report
-  // that promised the next plan would skip the build would be promising the opposite of the truth.
-  return state.fingerprint.hash != null;
 }
 
 function resolveBuildPlatform(step: PlanStep): NativePlatform | null {

@@ -36,6 +36,11 @@ const CHANGED_HASH = 'b1c2d3e4f5061728394a5b6c7d8e9f0011223344';
 async function setupAsync(fixtureName: string): Promise<string> {
   const projectRoot = await setupFixtureAsync(fixtureName);
   await installStubFingerprintAsync(projectRoot);
+  const appFile = path.join(projectRoot, 'app.json');
+  const config = JSON.parse(fs.readFileSync(appFile, 'utf8'));
+  config.expo.ios = { bundleIdentifier: 'com.example.stub' };
+  config.expo.android = { package: 'com.example.stub' };
+  fs.writeFileSync(appFile, JSON.stringify(config));
   return projectRoot;
 }
 

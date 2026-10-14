@@ -3,6 +3,7 @@
 // covers the ones `@expo/agent-cli` has to find for itself (`create-expo`, `eas`) and the two output modes
 // a command needs: hand the terminal over, or capture what the tool printed.
 import { spawn } from 'child_process';
+import { prepareChildEvents, type ChildEventObserver } from './childEvents';
 import path from 'path';
 
 import { isPromptShaped, lastNonEmptyLine } from '../needsHuman/detect';
@@ -33,6 +34,7 @@ export type SubprocessOutput =
 export type CapturedOutput = Exclude<SubprocessOutput, 'inherit'>;
 
 export interface SubprocessOptions {
+  onEvent?: ChildEventObserver;
   cwd?: string;
   /** Defaults to `capture`. */
   output?: SubprocessOutput;
@@ -169,23 +171,29 @@ function spawnNowAsync(
     promptGuard,
     timeoutMs,
     printFilter,
+    onEvent,
   }: SubprocessOptions = {}
 ): Promise<SubprocessResult> {
   return new Promise<SubprocessResult>((resolve) => {
     // `eas`, `create-expo` and `npx` all resolve to a batch shim on Windows, which needs `cmd.exe`.
     const target = resolveSpawnTarget(command, args);
-    const child = spawn(target.command, target.args, {
-      cwd,
-      stdio: stdioFor(output),
-      shell: target.shell,
-      // Its own process group, so a deadline or the prompt guard can stop the whole tree. What this
-      // spawns is usually a package runner, and the program that does the work is the runner's
-      // child (`src/utils/processGroup.ts`).
-      detached: USE_PROCESS_GROUP,
-      // Only when there is something to add: `undefined` is what makes the child inherit, and
-      // spelling out `process.env` here would freeze a copy for no reason.
-      ...(childEnv ? { env: { ...process.env, ...childEnv } } : null),
-    });
+    const observation = prepareChildEvents(
+      {
+        cwd,
+        stdio: stdioFor(output),
+        shell: target.shell,
+        // Its own process group, so a deadline or the prompt guard can stop the whole tree. What this
+        // spawns is usually a package runner, and the program that does the work is the runner's
+        // child (`src/utils/processGroup.ts`).
+        detached: USE_PROCESS_GROUP,
+        // Only when there is something to add: `undefined` is what makes the child inherit, and
+        // spelling out `process.env` here would freeze a copy for no reason.
+        ...(childEnv ? { env: { ...process.env, ...childEnv } } : null),
+      },
+      onEvent
+    );
+    const child = spawn(target.command, target.args, observation.options);
+    const events = observation.attach(child);
 
     let stdout = '';
     let stderr = '';
@@ -262,8 +270,9 @@ function spawnNowAsync(
       resolve({ exitCode: null, stdout, stderr, spawnError });
     });
 
-    child.on('close', (code, signal) => {
+    child.on('close', async (code, signal) => {
       stopWatching();
+      await events?.finished;
       // A child this process killed on a prompt reports no code of its own, and the stop was not
       // asked for, so it must not read as the clean interrupt below.
       if (promptHang != null) {
