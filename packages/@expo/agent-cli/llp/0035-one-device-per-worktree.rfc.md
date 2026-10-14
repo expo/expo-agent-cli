@@ -135,7 +135,12 @@ export interface DeviceTools {
   simctl: Runner;
   adb: Runner;
   emulatorList: Runner;
-  spawnEmulator(args: string[]): { pid?: number; exited: Promise<number | null>; kill(): void };
+  spawnEmulator(args: string[]): {
+    pid?: number;
+    exited: Promise<number | null>;
+    kill(): void;
+    lastOutput(): string;
+  };
   now: () => Date;
   isPidAlive: (pid: number) => boolean;
   commandOf: (pid: number) => string | null; // '' when `ps` lists none, null where `ps` does not exist
@@ -460,7 +465,7 @@ How does a worktree get an Android emulator nobody else has? The same question a
 
 ### Android boot
 
-Before the lock: `adb devices -l` and `emulator -list-avds`. Under the lock: `busyPorts` and the port choice per §Choice, else `no-free-port`. Then `spawnEmulator(['-avd', avd, '-ports', 'P,P+1', '-no-snapshot-save', '-read-only'])`, then one binding with serial and pid, in that order inside one section. After it: poll `sys.boot_completed` until `BOOT_DEVICE_TIMEOUT_MS`, accepted only while the child is alive and `adb devices` lists the serial; a non-zero exit or the deadline is a failed boot.
+Before the lock: `adb devices -l` and `emulator -list-avds`. Under the lock: `busyPorts` and the port choice per §Choice, else `no-free-port`. Then `spawnEmulator(['-avd', avd, '-ports', 'P,P+1', '-no-snapshot-save', '-read-only'])`, then one binding with serial and pid, in that order inside one section. After it: poll `sys.boot_completed` until `BOOT_DEVICE_TIMEOUT_MS`, accepted only while the child is alive and `adb devices` lists the serial; a non-zero exit or the deadline is a failed boot. The child's stdout and stderr go to `agent-cli-emulator-<port>.log` in the temp directory, truncated at each spawn; a child that exits during the boot fails it with that file's last line and its path.
 
 ### Wiring
 

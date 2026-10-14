@@ -27,6 +27,8 @@ export interface FakeAndroidOptions {
   spawnFails?: boolean;
   /** The spawned child exits with this code at once. */
   exitsWith?: number;
+  /** What the child's handle reports as its last output. */
+  prints?: string;
   /** `sys.boot_completed` never answers 1. */
   neverBoots?: boolean;
   /** `ps` is not available, as on Windows. */
@@ -56,6 +58,7 @@ export function fakeAndroid(
     stateTimesOut = false,
     spawnFails = false,
     exitsWith,
+    prints,
     neverBoots = false,
     noPs = false,
     alivePids,
@@ -115,8 +118,9 @@ export function fakeAndroid(
   const spawnEmulator = (args: string[]): EmulatorHandle => {
     record(['emulator', ...args]);
     spawned.push(args);
+    const lastOutput = () => prints ?? 'it printed nothing';
     if (spawnFails) {
-      return { exited: Promise.resolve(null), kill: () => {} };
+      return { exited: Promise.resolve(null), kill: () => {}, lastOutput };
     }
     const pid = (nextPid += 1);
     const port = Number(args[args.indexOf('-ports') + 1]!.split(',')[0]);
@@ -137,6 +141,7 @@ export function fakeAndroid(
         killed.push(pid);
         alive.delete(pid);
       },
+      lastOutput,
     };
   };
 

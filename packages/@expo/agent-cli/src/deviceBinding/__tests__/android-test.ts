@@ -228,6 +228,28 @@ describe(acquireDeviceAsync, () => {
     expect(readBindingFile(file())).toEqual({ kind: 'none' });
   });
 
+  it.each([
+    [
+      'an exit during the boot',
+      { exitsWith: 1, prints: 'PANIC: Missing emulator engine' },
+      'boot-failed',
+      'exited with 1: PANIC: Missing emulator engine',
+    ],
+    [
+      'a spawn that fails',
+      { spawnFails: true, prints: 'spawn /sdk/emulator ENOENT' },
+      'spawn-failed',
+      'could not be started: spawn /sdk/emulator ENOENT',
+    ],
+  ])('puts what the emulator said on the refusal for %s', async (_case, options, reason, said) => {
+    const tools = fakeTools(options);
+
+    await expect(acquireDeviceAsync(ROOT, 'android', { tools })).rejects.toMatchObject({
+      data: { reason },
+      message: expect.stringContaining(said),
+    });
+  });
+
   it.each(['devices', '-s emulator-5554 shell getprop sys.boot_completed'])(
     'refuses another emulator answering when the child exits during %s',
     async (exitDuring) => {

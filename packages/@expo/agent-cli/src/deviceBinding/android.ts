@@ -126,12 +126,12 @@ export async function bindAndroidSectionAsync(
 }
 
 /** Spawn detached, then write the binding with serial and pid; a write that fails kills the child. */
-function spawnInstance(
+async function spawnInstance(
   file: string,
   projectRoot: string,
   { port, avd }: { port: number; avd: string },
   tools: DeviceTools
-): AndroidSection {
+): Promise<AndroidSection> {
   const ports = `${port},${port + 1}`;
   const handle = tools.spawnEmulator([
     '-avd',
@@ -143,7 +143,11 @@ function spawnInstance(
   ]);
   if (handle.pid == null) {
     handle.kill();
-    throw deviceUnavailableError('spawn-failed', { platform: 'android' });
+    await handle.exited;
+    throw deviceUnavailableError('spawn-failed', {
+      platform: 'android',
+      detail: handle.lastOutput(),
+    });
   }
   const spawned: Binding = {
     version: 1,

@@ -47,6 +47,8 @@ export interface EmulatorHandle {
   /** Resolves with the exit code once the process is gone; never while it runs. */
   exited: Promise<number | null>;
   kill(): void;
+  /** The spawn error, else the last line of output and the log's path, else `it printed nothing`. */
+  lastOutput(): string;
 }
 
 export interface DeviceTools {

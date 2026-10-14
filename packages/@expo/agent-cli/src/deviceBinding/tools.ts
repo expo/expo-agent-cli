@@ -2,6 +2,9 @@
 // The platform tools the registry drives, as subprocesses. Injected in tests.
 
 import { spawn, spawnSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 import { resolveAdb } from '../device/adb';
 import { resolveEmulator } from '../device/bootDevice';
@@ -25,24 +28,38 @@ export function defaultTools(): DeviceTools {
 }
 
 /**
- * Detached, with its output dropped and the handle unreferenced, so the instance outlives this
- * process; a pipe nobody reads would fill up and block the emulator. A Windows `.cmd` starts under
- * `cmd.exe`, so the pid is the shell's and {@link killEmulator} takes its tree.
+ * Detached, with its output in a log file and the handle unreferenced, so the instance outlives
+ * this process; a pipe nobody reads would fill up and block the emulator. A Windows `.cmd` starts
+ * under `cmd.exe`, so the pid is the shell's and {@link killEmulator} takes its tree.
  */
 function spawnEmulator(emulator: string, args: string[]): EmulatorHandle {
+  const port = args[args.indexOf('-ports') + 1]?.split(',')[0];
+  const log = path.join(os.tmpdir(), `agent-cli-emulator-${port}.log`);
+  const output = openLog(log);
+  let spawnError: string | null = null;
+  const lastOutput = () =>
+    spawnError ?? (output === 'ignore' ? null : lastLineOf(log)) ?? 'it printed nothing';
   let child: ReturnType<typeof spawn>;
   try {
     const target = resolveSpawnTarget(emulator, args);
     child = spawn(target.command, target.args, {
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', output, output],
       shell: target.shell,
     });
-  } catch {
-    return { exited: Promise.resolve(null), kill: () => {} };
+  } catch (error: unknown) {
+    spawnError = error instanceof Error ? error.message : String(error);
+    return { exited: Promise.resolve(null), kill: () => {}, lastOutput };
+  } finally {
+    if (output !== 'ignore') {
+      fs.closeSync(output);
+    }
   }
   const exited = new Promise<number | null>((resolve) => {
-    child.once('error', () => resolve(null));
+    child.once('error', (error) => {
+      spawnError = error.message;
+      resolve(null);
+    });
     child.once('exit', (code) => resolve(code));
   });
   child.unref();
@@ -58,7 +75,27 @@ function spawnEmulator(emulator: string, args: string[]): EmulatorHandle {
         // Already gone.
       }
     },
+    lastOutput,
   };
+}
+
+/** Truncated at each spawn on its port; without it the output is dropped. */
+function openLog(log: string): number | 'ignore' {
+  try {
+    return fs.openSync(log, 'w');
+  } catch {
+    return 'ignore';
+  }
+}
+
+function lastLineOf(log: string): string | null {
+  try {
+    const lines = fs.readFileSync(log, 'utf8').split(/\r?\n/);
+    const last = lines.findLast((line) => line.trim() !== '');
+    return last ? `${last.trim()} (full output in ${log})` : null;
+  } catch {
+    return null;
+  }
 }
 
 /** On Windows `/T` also ends what the pid started: the emulator under a `.cmd` shim's `cmd.exe`. */

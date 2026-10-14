@@ -159,11 +159,11 @@ function instanceWatcher(
 ): () => string | null {
   const { device } = binding;
   if (handle) {
-    let exit: { code: number | null } | null = null;
+    let exit: string | null = null;
     void handle.exited.then((code) => {
-      exit = { code };
+      exit = `the emulator exited with ${code ?? 'a signal'}: ${handle.lastOutput()}`;
     });
-    return () => (exit ? `the emulator exited with ${exit.code ?? 'a signal'}` : null);
+    return () => exit;
   }
   if (device.backend === 'local-android' && device.origin.kind === 'spawned') {
     const { emulatorPid } = device.origin;
