@@ -472,7 +472,7 @@ Before the lock: `adb devices -l` and `emulator -list-avds`. Under the lock: `bu
 
 ### Decided while building
 
-- `src/deviceBinding/emulator.ts` holds the Android tool calls (the inventory, `get-state`, the `EMULATOR_NOT_RUNNABLE` error, the host check) beside `android.ts`, which holds the port choice, the section, the boot poll and the kill; `release.ts` holds the let-go rules of both platforms, so every file stays under the budget of §Contracts every verb honors.
+- `src/deviceBinding/emulator.ts` holds the Android tool calls (the inventory, `get-state`, the `EMULATOR_NOT_RUNNABLE` and `ADB_FAILED` errors, the host check) beside `android.ts`, which holds the port choice, the section, the boot poll and the kill; `release.ts` holds the let-go rules of both platforms, so every file stays under the budget of §Contracts every verb honors.
 - `DeviceTools` gains `commandOf(pid)` and `kill(pid)` beside the RFC's members, because the kill rule reads `ps` and signals, and a unit test must see both. `commandOf` is null where `ps` does not exist and `''` for a pid it does not list, so a reused pid is never killed where `ps` runs.
 - `get-state` on an instance that is still booting exits non-zero with `error: device offline`. That row is `not-up`, not `unknown`: the serial is listed, the device is not up. Only `not found` is missing, and any other non-zero exit is the tool row of the RFC.
 - The host guard is `adb` resolving on disk (`resolveAdb().fromPathOnly` false); `emulator` is found beside it, so a host with neither binds nothing and `dev --android` serves for a device elsewhere.

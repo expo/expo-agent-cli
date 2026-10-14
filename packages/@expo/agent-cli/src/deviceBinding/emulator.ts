@@ -30,18 +30,30 @@ export function emulatorNotRunnableError(reason: string): CommandError {
   );
 }
 
+/** `adb` ran and exited non-zero; one that could not start is `adbNotRunnableError`. */
+function adbFailedError(reason: string): CommandError {
+  return new CommandError(
+    'ADB_FAILED',
+    [
+      `"adb" failed, so no Android device was looked at.`,
+      `Why: ${reason}`,
+      `How: fix the error adb printed, then run this command again.`,
+    ].join('\n')
+  );
+}
+
 /** The Android inventory, read before the lock. @throws the tool error, or `create-timeout`. */
 export async function readAndroidInventoryAsync(tools: DeviceTools): Promise<AndroidInventory> {
   const devices = await tools.adb(['devices', '-l'], { timeoutMs: ADB_CALL_TIMEOUT_MS });
   if (devices.spawnError) {
     throw adbNotRunnableError(resolveAdb(), devices.spawnError.message);
   }
-  assertAnswered(devices, 'adb devices -l');
+  assertAnswered(devices, 'adb devices -l', adbFailedError);
   const avds = await tools.emulatorList(['-list-avds'], { timeoutMs: 60_000 });
   if (avds.spawnError) {
     throw emulatorNotRunnableError(avds.spawnError.message);
   }
-  assertAnswered(avds, 'emulator -list-avds');
+  assertAnswered(avds, 'emulator -list-avds', emulatorNotRunnableError);
   return {
     avd: parseAvds(avds.stdout)[0] ?? null,
     runningSerials: parseAndroidDevices(devices.stdout).map((device) => device.deviceId),
@@ -52,14 +64,16 @@ export async function readAndroidInventoryAsync(tools: DeviceTools): Promise<And
   };
 }
 
-function assertAnswered(result: SpawnCaptureResult, call: string): void {
+function assertAnswered(
+  result: SpawnCaptureResult,
+  call: string,
+  failed: (reason: string) => CommandError
+): void {
   if (result.exitCode == null) {
     throw deviceUnavailableError('create-timeout', { platform: 'android' });
   }
   if (result.exitCode !== 0) {
-    throw emulatorNotRunnableError(
-      `"${call}" exited ${result.exitCode}: ${firstLine(result.stderr) || 'no output'}`
-    );
+    throw failed(`"${call}" exited ${result.exitCode}: ${firstLine(result.stderr) || 'no output'}`);
   }
 }
 
@@ -94,7 +108,7 @@ export async function getEmulatorStateAsync(
   }
   return {
     kind: 'tool',
-    error: emulatorNotRunnableError(
+    error: adbFailedError(
       `"adb -s ${serial} get-state" exited ${result.exitCode}: ${firstLine(result.stderr) || 'no output'}`
     ),
   };

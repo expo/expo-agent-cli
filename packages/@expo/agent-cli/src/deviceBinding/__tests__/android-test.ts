@@ -258,6 +258,26 @@ describe(acquireDeviceAsync, () => {
 
     expect(error.code).toBe('ADB_NOT_RUNNABLE');
   });
+
+  it('reports adb exiting non-zero as an adb failure that quotes stderr, in the inventory and in get-state', async () => {
+    const tools = fakeTools();
+    tools.adb = async () => ({
+      stdout: '',
+      stderr: 'error: could not install *smartsocket* listener\n',
+      exitCode: 1,
+    });
+    writeBinding(file(), androidBindingFor(ROOT, 'emulator-5554', { kind: 'explicit' }));
+
+    const error = await acquireDeviceAsync(ROOT, 'android', { tools }).catch((e) => e);
+    const inspection = await inspectBindingAsync(ROOT, 'android', 'local-android', tools);
+
+    for (const failure of [error, inspection.toolError]) {
+      expect(failure).toMatchObject({
+        code: 'ADB_FAILED',
+        message: expect.stringContaining('exited 1: error: could not install *smartsocket*'),
+      });
+    }
+  });
 });
 
 describe(releaseWorktreeDevicesAsync, () => {
