@@ -64,6 +64,11 @@ export const EAS_BUILD_LOOKUP_TIMEOUT_MS = 10_000;
  */
 export const EAS_BUILD_RUNNER_TIMEOUT_MS = 45_000;
 
+/** The budget one lookup gets with this CLI: the wider one when it may have to download first. */
+export function easBuildLookupTimeoutMs(easCli: EasCli | null): number {
+  return mayDownloadEasCli(easCli) ? EAS_BUILD_RUNNER_TIMEOUT_MS : EAS_BUILD_LOOKUP_TIMEOUT_MS;
+}
+
 /** What was cached for one platform, and the working tree it was cached for. */
 interface CachedEntry {
   /**
@@ -154,9 +159,7 @@ async function readPlatformAsync(
     );
   }
 
-  const deadline =
-    options.timeoutMs ??
-    (mayDownloadEasCli(easCli) ? EAS_BUILD_RUNNER_TIMEOUT_MS : EAS_BUILD_LOOKUP_TIMEOUT_MS);
+  const deadline = options.timeoutMs ?? easBuildLookupTimeoutMs(easCli);
   const outcome = await withDeadlineAsync(
     lookUpPlatformAsync(projectRoot, platform, deadline, easCli, options.fingerprintCache),
     deadline

@@ -13,6 +13,7 @@ import { refineWithChangedFilesAsync } from '../../impact/fromRecord';
 import { resolveRuntimeVersionAsync } from '../../impact/runtimeVersion';
 import * as Log from '../../log';
 import { readAuthPreflightAsync } from '../../needsHuman/preflight';
+import * as easBuildLookup from '../../plan/easBuildLookup';
 import { readLastBuildRecord } from '../../plan/lastBuild';
 import * as resolveAsync from '../../plan/resolveAsync';
 import { probeProjectStateAsync } from '../../project/probe';
@@ -1337,6 +1338,32 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     const report = await collectStatusReportAsync(projectRoot, { ...options, platform: 'web' });
     expect(report.next?.why).not.toBe('No web device is bound to this worktree.');
     expect(report.next?.command).not.toMatch(/ dev --web --detach --wait-ready$/);
+  });
+
+  it("asks EAS for a saved --eas request's build only under --explain, with the fingerprint-cache choice", async () => {
+    const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
+    mockState({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } });
+    vol.fromJSON({
+      '/project/.expo/agent-cli-last-dev.json': JSON.stringify({
+        version: 1,
+        platform: 'ios',
+        port: null,
+        buildBackend: 'eas',
+        runTarget: null,
+      }),
+    });
+    await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(lookUp).not.toHaveBeenCalled();
+    await collectStatusReportAsync(projectRoot, {
+      devServerUrl: null,
+      explain: true,
+      fingerprintCache: false,
+      buildLookupTimeoutMs: 1_000,
+    });
+    expect(lookUp).toHaveBeenCalledWith(projectRoot, 'ios', {
+      fingerprintCache: false,
+      timeoutMs: 1_000,
+    });
   });
 });
 

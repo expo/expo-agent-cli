@@ -12,6 +12,7 @@ import path from 'path';
 import { readDevServerLockAsync } from '../devLock';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
 import { withDevServerPort } from '../dev/forwardedArgs';
+import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { rerunDevCommand } from '../plan/rerun';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
@@ -43,9 +44,10 @@ import { waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { getAllAgents, getPersistedAgentIdsAsync } from '../skills/agents';
 import { discoverSkillsAsync } from '../skills/discovery';
 import type { DiscoveredSkill } from '../skills/types';
+import { resolveEasCli } from '../utils/easCli';
 import { withSubprocessDeadlineAsync } from '../utils/subprocessDeadline';
 import { buildAssertStatus } from './assert';
-import { readEasBuildsStatusAsync } from './easBuilds';
+import { easBuildLookupTimeoutMs, readEasBuildsStatusAsync } from './easBuilds';
 import { formatStatusReport } from './format';
 import { readInstalledStatusAsync } from './installed';
 import {
@@ -776,6 +778,15 @@ async function attemptPlanAsync(
         requestedBackend: request?.buildBackend,
         requestedTarget: request?.runTarget,
         deviceBackend: request?.buildBackend === 'eas' ? 'eas' : 'local',
+        // Only `--explain` asks EAS, on the budget of status's own lookup (llp/0035 §Decisions).
+        lookUpEasBuild: options.explain
+          ? (root, platform) =>
+              lookUpEasSimulatorBuildAsync(root, platform, {
+                fingerprintCache: options.fingerprintCache,
+                timeoutMs:
+                  options.buildLookupTimeoutMs ?? easBuildLookupTimeoutMs(resolveEasCli(root)),
+              })
+          : async () => null,
       })
     ).plan;
   } catch {
