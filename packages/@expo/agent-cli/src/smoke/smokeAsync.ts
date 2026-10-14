@@ -513,11 +513,12 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // lock answers for, so a cleanup can never take down something this run did not start.
     stopDevServer: async () => {
       const captured: { report: DevStopResultJson | null } = { report: null };
+      const release = options.cloud !== 'required' && !keepBoundDevice;
       await devStopAsync(
         projectRoot,
         {
           ...resolveDevStopOptions(['--no-followups']),
-          release: options.cloud !== 'required' && !keepBoundDevice,
+          release,
           platform: options.platform,
         },
         {
@@ -534,7 +535,14 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         ok: serverStopped,
         target: stopped?.url ?? (stopped?.port == null ? null : `port ${stopped.port}`),
         reason: serverStopped ? null : (stopped?.detail ?? 'the dev server did not stop'),
-        devices: keepBoundDevice ? undefined : stopped?.devices,
+        // A refused release leaves each kept row without a reason; dev:stop's refusal is that reason.
+        devices: release
+          ? stopped?.devices?.map((device) =>
+              device.released || device.reason != null || stopped.deviceError == null
+                ? device
+                : { ...device, reason: whatAndHow(stopped.deviceError) }
+            )
+          : undefined,
       };
     },
 

@@ -80,6 +80,64 @@ it('cloud smoke stops its server without releasing local devices', async () => {
   );
 });
 
+it('cloud smoke reports no device rows for the local devices dev:stop kept', async () => {
+  const kept = {
+    backend: 'local-ios' as const,
+    platform: 'ios' as const,
+    id: 'A',
+    name: 'agent-cli 0000',
+    released: false,
+    shutDown: false,
+    reason: null,
+  };
+  vi.mocked(devStopAsync).mockImplementationOnce(async (_root, _options, { onReport } = {}) => {
+    onReport?.({
+      stopped: true,
+      reason: null,
+      url: 'http://127.0.0.1:8081',
+      devices: [kept],
+      deviceError: null,
+    } as any);
+    return 0;
+  });
+  const result = await buildSmokeDeps(
+    root,
+    resolveSmokeOptions(['--ios', '--eas'])
+  ).stopDevServer();
+  expect(result.devices).toBeUndefined();
+});
+
+it('a release dev:stop refused gives its reason to each device it kept', async () => {
+  const kept = {
+    backend: 'local-ios' as const,
+    platform: 'ios' as const,
+    id: 'A',
+    name: 'agent-cli 0000',
+    released: false,
+    shutDown: false,
+    reason: null,
+  };
+  vi.mocked(devStopAsync).mockImplementationOnce(async (_root, _options, { onReport } = {}) => {
+    onReport?.({
+      stopped: true,
+      reason: null,
+      url: 'http://127.0.0.1:8081',
+      devices: [kept],
+      deviceError:
+        'Devices were kept because this worktree\'s dev server is still running.\nHow: run "npx @expo/agent-cli dev:stop --release" with no --port.',
+    } as any);
+    return 0;
+  });
+  const result = await buildSmokeDeps(root, resolveSmokeOptions(['--ios'])).stopDevServer();
+  expect(result.devices).toEqual([
+    {
+      ...kept,
+      reason:
+        'Devices were kept because this worktree\'s dev server is still running. How: run "npx @expo/agent-cli dev:stop --release" with no --port.',
+    },
+  ]);
+});
+
 it('the dev server cleanup carries the devices dev:stop released', async () => {
   const device = {
     backend: 'local-ios' as const,
