@@ -2,6 +2,7 @@ import { vol } from 'memfs';
 
 import { acquireDeviceAsync, releaseWorktreeDevicesAsync } from '..';
 import { bindingPathFor, readBindingFile, removeBindingFile } from '../registry';
+import { AVD } from './fakeAndroidTools';
 import { androidBindingFor, bindingFor, fakeTools, writeBinding } from './fakeTools';
 
 const ROOT = '/work/app';
@@ -161,7 +162,7 @@ it('will not orphan an own spawned emulator when asked to use another serial', a
   const file = bindingPathFor(ROOT, 'android', 'local-android');
   const binding = androidBindingFor(ROOT, 'emulator-5554', {
     kind: 'spawned',
-    avd: 'Pixel',
+    avd: AVD,
     port: 5554,
     emulatorPid: 4001,
   });
@@ -170,6 +171,33 @@ it('will not orphan an own spawned emulator when asked to use another serial', a
     acquireDeviceAsync(ROOT, 'android', { explicit: named('emulator-5556'), tools })
   ).rejects.toMatchObject({ data: { reason: 'own-explicit-over-owned' }, exitCode: 1 });
   expect(readBindingFile(file)).toEqual({ kind: 'binding', binding });
+  expect(tools.killed).toEqual([]);
+});
+
+it('binds another serial over an own spawned emulator whose pid is dead', async () => {
+  const tools = fakeTools({
+    emulators: [{ serial: 'emulator-5556', state: 'device' }],
+    alivePids: [],
+  });
+  const file = bindingPathFor(ROOT, 'android', 'local-android');
+  writeBinding(
+    file,
+    androidBindingFor(ROOT, 'emulator-5554', {
+      kind: 'spawned',
+      avd: AVD,
+      port: 5554,
+      emulatorPid: 4001,
+    })
+  );
+  expect(
+    await acquireDeviceAsync(ROOT, 'android', {
+      explicit: named('emulator-5556', ['--android']),
+      tools,
+    })
+  ).toMatchObject({ action: 'explicit', device: { serial: 'emulator-5556' } });
+  expect(readBindingFile(file)).toMatchObject({
+    binding: { device: { serial: 'emulator-5556', origin: { kind: 'explicit' } } },
+  });
   expect(tools.killed).toEqual([]);
 });
 
@@ -213,7 +241,7 @@ it('reuses an explicitly named owned Android instance while adb still lists it o
   const file = bindingPathFor(ROOT, 'android', 'local-android');
   const binding = androidBindingFor(ROOT, 'emulator-5554', {
     kind: 'spawned',
-    avd: 'Pixel',
+    avd: AVD,
     port: 5554,
     emulatorPid: 4001,
   });

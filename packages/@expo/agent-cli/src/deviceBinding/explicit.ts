@@ -5,6 +5,7 @@ import { CommandError } from '../utils/errors';
 import { PROGRAM_PREFIX } from '../programName';
 import type { Cleanup } from './cleanup';
 import { deviceUnavailableError, notReusableError } from './errors';
+import { instanceGone } from './emulator';
 import { isStale, leaseFrom } from './lease';
 import {
   bindingPathFor,
@@ -95,15 +96,13 @@ export function readExplicitChoice(
   const read = readBindingFile(file);
   if (read.kind === 'unreadable')
     throw deviceUnavailableError('unreadable', { platform, path: file });
-  const own = read.kind === 'binding' ? read.binding : null;
-  if (
-    own?.device.backend === 'local-android' &&
-    own.device.origin.kind === 'spawned' &&
-    tools.isPidAlive(own.device.origin.emulatorPid) &&
-    !candidates.some((candidate) => deviceIdOf(candidate) === deviceIdOf(own.device))
-  ) {
-    // adb can still list the owned instance offline; its live pid is the reuse proof.
-    candidates = [...candidates, own.device];
+  let own = read.kind === 'binding' ? read.binding : null;
+  if (own?.device.backend === 'local-android' && own.device.origin.kind === 'spawned') {
+    const device = own.device;
+    if (instanceGone(tools, own.device.origin) != null) own = null;
+    // adb can still list the owned instance offline; the instance check is the reuse proof.
+    else if (!candidates.some((candidate) => deviceIdOf(candidate) === device.serial))
+      candidates = [...candidates, device];
   }
   const others = listBindingFiles(platform, backend)
     .filter((other) => other !== file)
