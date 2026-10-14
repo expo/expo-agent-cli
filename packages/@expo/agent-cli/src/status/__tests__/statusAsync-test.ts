@@ -1073,6 +1073,127 @@ describe(`${collectStatusReportAsync.name} and stale debugger targets`, () => {
 });
 
 describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
+  function lastRequest() {
+    vol.fromJSON({
+      '/project/.expo/agent-cli-last-dev.json': JSON.stringify({
+        version: 1,
+        platform: 'android',
+        port: 19082,
+        device: 'emulator-5556',
+        buildBackend: 'local',
+        runTarget: 'dev-build',
+      }),
+    });
+  }
+
+  it('keeps Android startup context before Metro has published a lock', async () => {
+    lastRequest();
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(report.next?.command).toBe(
+      'npx @expo/agent-cli dev --android --local --dev-client --port 19082 --device emulator-5556 --detach --wait-ready'
+    );
+    expect(report.next?.why).toContain('No android device');
+    expect(discoverDevServerAsync).toHaveBeenCalledWith(
+      'http://127.0.0.1:19082',
+      expect.anything()
+    );
+  });
+
+  it('prefers the explicit platform over the saved Android request', async () => {
+    lastRequest();
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, {
+      devServerUrl: null,
+      platform: 'ios',
+    });
+    expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+  });
+
+  it('preserves a stopped request and prefers an explicitly selected port and device', async () => {
+    lastRequest();
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, {
+      devServerUrl: 'http://localhost:19090',
+      device: 'Pixel; echo nope',
+    });
+    expect(report.next?.command).toContain("--port 19090 --device 'Pixel; echo nope'");
+    expect(report.next?.command).not.toContain('19082');
+    expect(report.next?.steps.some((step) => step.argv.includes('19090'))).toBe(true);
+  });
+
+  it('uses a current own lock instead of an old requested port', async () => {
+    lastRequest();
+    stopDevServer();
+    vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue({
+      ...running,
+      port: 19091,
+      url: 'http://127.0.0.1:19091',
+    });
+    const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(report.next?.command).toContain('--port 19091');
+    expect(discoverDevServerAsync).toHaveBeenCalledWith(
+      'http://127.0.0.1:19091',
+      expect.anything()
+    );
+    expect(report.devServer?.source).toBe('lock');
+  });
+
+  it('does not turn a remote URL into a local Metro port', async () => {
+    lastRequest();
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, {
+      devServerUrl: 'http://example.test:19090',
+    });
+    expect(report.next?.command).not.toContain('--port');
+  });
+
+  it('does not suggest a saved port that now serves another project', async () => {
+    lastRequest();
+    vi.mocked(discoverDevServerAsync).mockResolvedValue({
+      reachable: true,
+      targets: [],
+      devServerUrl: 'http://127.0.0.1:19082',
+      source: 'default',
+      discovered: false,
+    });
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValue({
+      ready: false,
+      projectRootMatched: false,
+      reportedProjectRoot: '/other-project',
+      timedOut: false,
+      waitedMs: 1,
+    });
+    const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(report.next?.command).toContain('dev --android --local --dev-client');
+    expect(report.next?.command).not.toContain('--port');
+    expect(report.next?.steps.some((step) => step.argv.includes('19082'))).toBe(false);
+  });
+
+  it('restores the dev plan steps when rebinding replaces a navigate suggestion', async () => {
+    vi.mocked(discoverDevServerAsync).mockResolvedValue({
+      reachable: true,
+      targets: [],
+      devServerUrl,
+      source: 'default',
+      discovered: false,
+    });
+    vi.mocked(probeTargetLivenessAsync).mockResolvedValueOnce({ listed: 0, live: 0, stale: [] });
+    vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue(running);
+    const report = await collectStatusReportAsync(projectRoot, { ...options, platform: 'android' });
+    expect(report.next?.command).toContain('dev:stop &&');
+    expect(report.next?.steps.length).toBeGreaterThan(0);
+  });
+
+  it('uses a sole Android binding when there is no saved request or platform flag', async () => {
+    stopDevServer();
+    vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+      { platform: 'android', expiresAt: '2020-01-01T00:00:00.000Z' } as summary.BindingSummary,
+    ]);
+    const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(report.next?.command).toBe('npx @expo/agent-cli dev --android --detach --wait-ready');
+    expect(report.next?.why).toContain('android');
+  });
   const iosOptions = { ...options, platform: 'ios' as const };
   const running = {
     projectRoot,
@@ -1129,7 +1250,7 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     const report = await collectStatusReportAsync(projectRoot, { ...options, platform });
     const restart = ownServer ? 'npx @expo/agent-cli dev:stop && ' : '';
     expect(report.next?.command).toBe(
-      `${restart}npx @expo/agent-cli dev --${platform} --detach --wait-ready`
+      `${restart}npx @expo/agent-cli dev --${platform}${ownServer ? ' --port 8081' : ''} --detach --wait-ready`
     );
     expect(report.next?.why).toContain(`No ${platform} device is bound to this worktree.`);
     if (ownServer) expect(report.next?.why).toContain('restart');
@@ -1138,7 +1259,9 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
   it(`detaches the plan's own dev command`, async () => {
     stopDevServer();
     const report = await collectStatusReportAsync(projectRoot, iosOptions);
-    expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+    expect(report.next?.command).toBe(
+      'npx @expo/agent-cli dev --ios --port 8081 --detach --wait-ready'
+    );
   });
 
   it(`keeps the plan's flags when it detaches the plan's dev command`, async () => {
@@ -1154,7 +1277,9 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
       return { ...resolved, plan: { ...resolved.plan, buildLocation } };
     });
     const report = await collectStatusReportAsync(projectRoot, iosOptions);
-    expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --eas --detach --wait-ready');
+    expect(report.next?.command).toBe(
+      'npx @expo/agent-cli dev --ios --eas --port 8081 --detach --wait-ready'
+    );
   });
 
   it.each([false, true])('reuses an expired binding (own server=%s)', async (ownServer) => {
@@ -1168,7 +1293,9 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
       } as summary.BindingSummary,
     ]);
     const report = await collectStatusReportAsync(projectRoot, iosOptions);
-    expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+    expect(report.next?.command).toBe(
+      'npx @expo/agent-cli dev --ios --port 8081 --detach --wait-ready'
+    );
     expect(report.next?.why).toBe('The lease on the bound ios device expired.');
   });
 

@@ -454,7 +454,13 @@ describe('@expo/agent-cli status', () => {
       });
       expect(report.expoGo).toEqual({ compatible: true, reasonCount: 0 });
       expect(report.next?.rule).toBe('expo-go');
-      expect(report.next?.steps[0]!.argv).toEqual(['expo', 'start', '--go']);
+      expect(report.next?.steps[0]!.argv).toEqual([
+        'expo',
+        'start',
+        '--go',
+        '--port',
+        new URL(report.devServer!.url).port,
+      ]);
     });
 
     it('reports an unknown freshness when the project has no fingerprint tool', async () => {
@@ -2231,7 +2237,9 @@ describe('status on a machine that cannot build', () => {
 
       const report = await reportInAsync(projectRoot);
 
-      expect(report.next!.command).toBe('npx @expo/agent-cli dev --ios --eas');
+      expect(report.next!.command).toBe(
+        `npx @expo/agent-cli dev --ios --eas --port ${new URL(report.devServer!.url).port} --detach --wait-ready`
+      );
       expect(report.next!.steps.map((step) => step.argv[0])).toContain('eas');
     }
   );

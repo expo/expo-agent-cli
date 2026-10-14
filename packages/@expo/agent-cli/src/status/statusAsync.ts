@@ -10,13 +10,11 @@ import fs from 'fs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../devLock';
+import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
+import { withDevServerPort } from '../dev/forwardedArgs';
+import { rerunDevCommand } from '../plan/rerun';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
-import {
-  inspectBindingCachedAsync,
-  deviceCommand,
-  devicesDisabled,
-  hostBindsPlatform,
-} from '../deviceBinding';
+import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
 import { readCloudSessionIdSync } from '../device/cloudSimulator';
 import { probeLocalDeviceAsync } from '../device/localDevice';
@@ -240,15 +238,21 @@ export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions
 ): Promise<StatusReport> {
-  const [project, devServer, device, skills, auth, binding] = await Promise.all([
+  const saved = readLastDevRequest(projectRoot);
+  const request =
+    saved && (!options.platform || options.platform === saved.platform) ? saved : null;
+  const [project, devServer, device, skills, auth, binding, ownServer] = await Promise.all([
     attemptAsync(() => readProjectAsync(projectRoot, options)),
-    attemptAsync(() => probeDevServerStatusAsync(projectRoot, options)),
+    attemptAsync(() => probeDevServerStatusAsync(projectRoot, options, request)),
     attemptAsync(() => readLocalDeviceStatusAsync(projectRoot, options)),
     attemptAsync(() => readSkillsStatusAsync(projectRoot)),
     attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot)),
     attemptAsync(() =>
       readBindingSummaryAsync(projectRoot, options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS)
     ),
+    readDevServerLockAsync(projectRoot, {
+      timeoutMs: options.devServerTimeoutMs ?? DEV_SERVER_PROBE_TIMEOUT_MS,
+    }),
   ]);
 
   const errors: Partial<Record<StatusSectionName, string>> = {};
@@ -336,10 +340,36 @@ export async function collectStatusReportAsync(
     // (K7(c)).
     const devBuildScheme = devBuildSchemeSync(projectRoot);
     applyOpenUrls(report.devServer, state, devBuildScheme);
+    const boundPlatforms = [...new Set((report.binding ?? []).map((entry) => entry.platform))];
+    const platform =
+      options.platform ??
+      request?.platform ??
+      (boundPlatforms.length === 1 ? boundPlatforms[0]! : resolveDefaultPlatform(state));
+    const requestedPort =
+      options.devServerUrl != null
+        ? localPortOf(options.devServerUrl)
+        : (ownServer?.port ?? request?.port ?? null);
+    // A selected address is a preference, not permission to take another project's port.
+    const recoveryPort =
+      report.devServer?.projectRootMatched === false &&
+      requestedPort === localPortOf(report.devServer.url)
+        ? null
+        : requestedPort;
+    const resolvedPlan = await attemptPlanAsync(
+      projectRoot,
+      state,
+      record,
+      { ...options, platform },
+      request
+    );
+    const recoveryPlan =
+      resolvedPlan && recoveryPort != null
+        ? withDevServerPort(resolvedPlan, recoveryPort)
+        : resolvedPlan;
     report.next = buildNextActionStatus(
       state,
       record,
-      options.platform ?? resolveDefaultPlatform(state),
+      platform,
       report.devServer,
       report.device,
       // The scheme a development build of this project registers, read the same way the deep link
@@ -354,9 +384,34 @@ export async function collectStatusReportAsync(
       // toolchain probe folded in — rather than the one the project's state alone implies. The two
       // differ on exactly the machines where it matters, and a `status` that reported
       // "expo run:ios" on a Linux box would be the report disagreeing with the command.
-      await attemptPlanAsync(projectRoot, state, record, options)
+      recoveryPlan
     );
-    const platform = options.platform ?? resolveDefaultPlatform(state);
+    const devNext = buildNextActionStatus(
+      state,
+      record,
+      platform,
+      null,
+      report.device,
+      devBuildScheme,
+      false,
+      recoveryPlan
+    );
+    const backend = request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null);
+    const devCommand = rerunDevCommand(
+      platform,
+      [
+        ...(backend ? [`--${backend}`] : []),
+        ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
+        ...(recoveryPort != null ? ['--port', String(recoveryPort)] : []),
+      ],
+      backend === 'eas' ? undefined : (options.device ?? request?.device)
+    );
+    if (
+      platform !== 'web' &&
+      (request || recoveryPort != null || options.device) &&
+      report.next.command.startsWith(`${PROGRAM_PREFIX} dev `)
+    )
+      report.next.command = devCommand;
     const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
     if (
       state.isExpoApp &&
@@ -372,17 +427,11 @@ export async function collectStatusReportAsync(
       !devicesDisabled() &&
       hostBindsPlatform(platform)
     ) {
-      const planned = report.next.command;
-      const command = !planned.startsWith(`${PROGRAM_PREFIX} dev `)
-        ? deviceCommand(platform)
-        : planned.includes(' --detach')
-          ? planned
-          : `${planned} --detach --wait-ready`;
       // Detached dev can only reuse beside an own server; an expired binding can still be reused.
-      const restart = bound.length === 0 && (await readDevServerLockAsync(projectRoot)) != null;
+      const restart = bound.length === 0 && ownServer != null;
       report.next = {
-        ...report.next,
-        command: restart ? `${PROGRAM_PREFIX} dev:stop && ${command}` : command,
+        ...devNext,
+        command: restart ? `${PROGRAM_PREFIX} dev:stop && ${devCommand}` : devCommand,
         why: bound.length
           ? `The lease on the bound ${platform} device expired.`
           : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`,
@@ -690,7 +739,18 @@ function devBuildSchemeSync(projectRoot: string): string | null {
   return config.scheme ?? (config.slug ? `exp+${config.slug}` : null);
 }
 
-/** The probed project state, plus the name only the project's own `package.json` knows. */
+/** A remote URL's port is not a request to start a local Metro on that port. */
+function localPortOf(url: string): number | null {
+  try {
+    const parsed = new URL(url);
+    return ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname) && parsed.port
+      ? Number(parsed.port)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The plan `@expo/agent-cli dev` would make, or null when it could not be made.
  *
@@ -703,7 +763,8 @@ async function attemptPlanAsync(
   projectRoot: string,
   state: ProjectState,
   lastBuild: LastBuildRecord,
-  options: StatusOptions
+  options: StatusOptions,
+  request: LastDevRequest | null
 ): Promise<StartPlan | null> {
   const { resolveStartPlanAsync } =
     require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
@@ -712,6 +773,9 @@ async function attemptPlanAsync(
       await resolveStartPlanAsync(projectRoot, state, {
         platform: options.platform ?? resolveDefaultPlatform(state),
         lastBuild,
+        requestedBackend: request?.buildBackend,
+        requestedTarget: request?.runTarget,
+        deviceBackend: request?.buildBackend === 'eas' ? 'eas' : 'local',
       })
     ).plan;
   } catch {
@@ -747,15 +811,23 @@ async function readProjectAsync(
  */
 async function probeDevServerStatusAsync(
   projectRoot: string,
-  options: StatusOptions
+  options: StatusOptions,
+  request: LastDevRequest | null
 ): Promise<DevServerStatus> {
   const timeoutMs = options.devServerTimeoutMs ?? DEV_SERVER_PROBE_TIMEOUT_MS;
+  const own =
+    options.devServerUrl == null && request?.port != null
+      ? await readDevServerLockAsync(projectRoot, { timeoutMs })
+      : null;
+  const inferredUrl =
+    own?.url ?? (request?.port != null ? `http://127.0.0.1:${request.port}` : null);
+  const url = options.devServerUrl ?? inferredUrl;
   const giveUp = new AbortController();
   let bestCandidate: DevServerDiscovery | null = null;
   let acceptingCandidates = true;
   // No explicit URL: 8081 first, then the ports `expo start` walks to (see devServer.ts).
   const completed = await raceWithTimeoutAsync(
-    discoverDevServerAsync(options.devServerUrl ?? undefined, {
+    discoverDevServerAsync(url ?? undefined, {
       timeoutMs,
       // Each read is bounded too; the whole ladder can still exceed the deadline below.
       statusTimeoutMs: timeoutMs,
@@ -769,6 +841,9 @@ async function probeDevServerStatusAsync(
   );
   acceptingCandidates = false;
   const discovery = completed ?? bestCandidate;
+  if (discovery && options.devServerUrl == null && inferredUrl != null) {
+    discovery.source = own ? 'lock' : 'last-request';
+  }
   if (completed == null) {
     // Snapshot before aborting, including when we have a successful fallback. Do not await the
     // unfinished discovery again: an uncooperative request must not extend this deadline.
@@ -780,8 +855,15 @@ async function probeDevServerStatusAsync(
       targets: [],
       reason: `the dev server did not answer within ${timeoutMs}ms`,
     };
-    return buildDevServerStatus(options.devServerUrl ?? 'http://127.0.0.1:8081', timedOut, {
-      source: options.devServerUrl != null ? 'flag' : 'default',
+    return buildDevServerStatus(url ?? 'http://127.0.0.1:8081', timedOut, {
+      source:
+        options.devServerUrl != null
+          ? 'flag'
+          : own
+            ? 'lock'
+            : inferredUrl
+              ? 'last-request'
+              : 'default',
       ready: null,
       projectRootMatched: null,
     });

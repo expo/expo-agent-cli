@@ -138,6 +138,8 @@ export const DEV_SERVER_SCAN_PORTS = [8081, 8082, 8083, 8084, 8085];
  * `--dev-server-url` to remove it.
  */
 export type DevServerSource =
+  /** Requested by the last dev invocation; a recovery hint, not a live ownership claim. */
+  | 'last-request'
   /** An explicit `--dev-server-url`. */
   | 'flag'
   /** The project's dev-server lock, held by an `@expo/agent-cli`-started dev server. */

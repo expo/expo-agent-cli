@@ -68,6 +68,51 @@ async function cleanUpAsync(projectRoot: string): Promise<void> {
 }
 
 describe('@expo/agent-cli dev --detach', () => {
+  it('retains the Android request for status after stopping its server', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const port = await freePortAsync();
+    const env = { ...detachEnv(projectRoot, port), STUB_EXPO_LISTEN: '1' };
+    try {
+      const started = await executeAgentCliAsync(
+        projectRoot,
+        [
+          'dev',
+          '--android',
+          '--local',
+          '--go',
+          '--port',
+          String(port),
+          '--detach',
+          '--wait-ready',
+          '--json',
+        ],
+        { env, reject: false }
+      );
+      expect(started.exitCode, started.all).toBe(0);
+      expect(
+        JSON.parse(
+          fs.readFileSync(path.join(projectRoot, '.expo', 'agent-cli-last-dev.json'), 'utf8')
+        )
+      ).toMatchObject({ platform: 'android', port, buildBackend: 'local', runTarget: 'expo-go' });
+      await cleanUpAsync(projectRoot);
+      const status = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
+        env,
+        reject: false,
+      });
+      expect(status.exitCode, status.all).toBe(0);
+      const report = JSON.parse(status.stdout);
+      expect(report.next.command).toBe(
+        `npx @expo/agent-cli dev --android --local --go --port ${port} --detach --wait-ready`
+      );
+      expect(report.devServer).toMatchObject({
+        url: `http://127.0.0.1:${port}`,
+        running: false,
+        source: 'last-request',
+      });
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
   it.each(['foreign', 'hanging'] as const)(
     'follows its lock away from a %s status endpoint before reporting ready',
     async (answer) => {
