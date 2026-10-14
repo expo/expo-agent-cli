@@ -20,6 +20,8 @@ export interface NewOptions {
   install: boolean;
   /** Initialize a git repository when the new project is not in one, cleared by `--no-git`. */
   git: boolean;
+  /** Sync the Expo docs of the new project's SDK, cleared by `--no-docs`. */
+  docs: boolean;
   /** Print the result as one JSON object instead of a summary (`--json`). */
   json: boolean;
   /** Attach the state-aware next actions to the output, cleared by `--no-followups`. */
@@ -35,6 +37,7 @@ const NEW_ARGS = {
   '--json': Boolean,
   '--no-install': Boolean,
   '--no-git': Boolean,
+  '--no-docs': Boolean,
   '--no-followups': Boolean,
 };
 
@@ -104,6 +107,7 @@ export function resolveNewOptions(argv: string[]): NewOptions {
     example,
     install: !args['--no-install'],
     git: !args['--no-git'],
+    docs: !args['--no-docs'],
     json: !!args['--json'],
     followups: !args['--no-followups'],
   };

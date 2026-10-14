@@ -3,6 +3,7 @@
 // without discarding useful work in the other.
 import chalk from 'chalk';
 
+import { docsSummary, syncDocsForProjectAsync } from '../docs/autoSync';
 import { EXIT_OUTCOME_FAILED, exitWithCodeAsync } from '../exitCodes';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
@@ -39,6 +40,7 @@ export async function printSetupAsync(
     skillsDiscovered: report.skills?.discovered ?? 0,
     agentsMdAction: report.agentsMd?.action ?? null,
     claudeMdAction: report.claudeMd?.action ?? null,
+    docsStatus: report.docs?.status ?? null,
     noteCount: report.notes.length,
     scope: report.scope,
     cancelled: report.cancelled,
@@ -75,6 +77,7 @@ export async function runSetupAsync(
     skills: null,
     agentsMd: null,
     claudeMd: null,
+    docs: null,
     agents: plan.agents.map((agent) => agent.id),
     notes: [],
   };
@@ -146,6 +149,11 @@ async function setupProjectAsync(
       }
     }
   }
+
+  // A failed docs sync is reported, not an error: the project setup it belongs to still worked.
+  if (options.docs !== false) {
+    report.docs = await syncDocsForProjectAsync(projectRoot);
+  }
 }
 
 function errorMessage(error: unknown): string {
@@ -212,6 +220,8 @@ function summaryLines(report: SetupReport): string[] {
   }
 
   if (report.claudeMd) row('CLAUDE.md', `${report.claudeMd.action} (shared instructions)`);
+
+  if (report.docs) row('Docs', docsSummary(report.docs));
 
   if (report.projectRoot) row('Next', chalk.bold(`${PROGRAM_PREFIX} status`));
 

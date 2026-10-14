@@ -24,6 +24,8 @@ const { fsMock, promisesMock, childProcessMock } = vi.hoisted(() => {
 
 delete process.env.npm_config_user_agent;
 delete process.env.npm_execpath;
+// Setup and `new` sync the Expo docs, and `fetch` is not mocked: no unit test may reach the network.
+process.env.AGENT_CLI_NO_DOCS_SYNC = '1';
 resetInvokerCache();
 
 vi.mock('fs', () => fsMock);

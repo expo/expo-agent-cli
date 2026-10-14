@@ -18,7 +18,7 @@ export type SdkSelection =
 export interface SdkSelectionInput {
   /** The raw `--sdk` value: `57`, `57.0.0` or `v57.0.0`. */
   flag: string | undefined;
-  /** The installed `expo` version of the project, or null outside one. */
+  /** The installed Expo version or the minimum of its declared range, or null when unknown. */
   projectSdkVersion: string | null;
   latest: VersionBundleName;
   available: VersionBundleName[];
