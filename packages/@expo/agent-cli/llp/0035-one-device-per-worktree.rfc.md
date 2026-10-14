@@ -431,7 +431,7 @@ In bootstrap mode `smoke` starts its own `dev --detach --no-open` child through 
 
 ### iOS deletions
 
-`bootSimulatorAsync`, `pickSimulator`, the iOS branch of `bootDeviceAsync` (`BOOT_DEVICE_TIMEOUT_MS` stays; §Android deletions removes the rest), `probeIosSimulatorAsync`, `parseBootedIosSimulator` (the plural `parseBootedIosSimulators` stays for `status --device`), the iOS `installDevice`, `NO_DEVICE` and `NO_IOS_DEVICE`. Help texts: the iOS lines that `git grep -i 'booted'` finds over `src/**/index.ts` and `runtime/stopAsync.ts`; the Android lines wait for 3b.
+`bootSimulatorAsync`, `pickSimulator`, the iOS branch of `bootDeviceAsync` (`BOOT_DEVICE_TIMEOUT_MS` stays; §Android deletions removes the rest), `probeIosSimulatorAsync`, `parseBootedIosSimulator` (the plural `parseBootedIosSimulators` stays for `status --device`), the iOS `installDevice`, `NO_DEVICE` and `NO_IOS_DEVICE`. Help texts: the iOS lines that `git grep -i 'booted'` finds over `src/**/index.ts` and `runtime/stopAsync.ts`; the Android lines are covered by §Android instance.
 
 ### Docs
 
@@ -524,7 +524,8 @@ What happens when a worktree stops, pauses or disappears, and how does a person 
 How does a running Metro or build step keep its device?
 
 - `withLeaseExtendedAsync` of §Lease wraps the Metro runner (for `dev`, the detached child and `start`) and the step runner.
-- The foreground `dev` exit and the detached child touch no binding: the lease, renewed while Metro ran, expires on its own and the next reap parks or kills the device.
+- The foreground `dev` exit and the detached child touch no local binding: the lease, renewed while Metro ran, expires on its own and the next reap parks or kills the device.
+- `renew.ts` holds `withLeaseExtendedAsync`; `records.ts` holds the own-binding file readers and the kept-device rows (`ownBindingFiles`, `keptDevices`, `deviceReport`).
 
 ### Release
 
