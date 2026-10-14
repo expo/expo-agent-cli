@@ -167,6 +167,18 @@ describe(acquireDeviceAsync, () => {
     }
   );
 
+  it('reuses an own explicit binding whose serial adb lists offline, and spawns nothing', async () => {
+    const tools = fakeTools({ emulators: [{ serial: 'emulator-5554', state: 'offline' }] });
+    writeBinding(file(), androidBindingFor(ROOT, 'emulator-5554', { kind: 'explicit' }));
+
+    const result = await acquireDeviceAsync(ROOT, 'android', { tools });
+
+    expect(result).toMatchObject({ action: 'reused', device: { serial: 'emulator-5554' } });
+    expect(tools.spawned).toEqual([]);
+    const read = readBindingFile(file());
+    expect(read.kind === 'binding' && read.binding.device.origin).toEqual({ kind: 'explicit' });
+  });
+
   // let-go-runs-before-refusal
   it('lets go of the dead own instance before it refuses no-avd, and kills nothing', async () => {
     const tools = fakeTools({ avds: [] });

@@ -101,7 +101,7 @@ export async function bindAndroidSectionAsync(
     ownDevice != null &&
     (ownDevice.origin.kind === 'spawned'
       ? instanceGone(tools, ownDevice.origin) == null
-      : inventory.runningSerials.includes(ownDevice.serial));
+      : inventory.listedSerials.includes(ownDevice.serial));
   const { busy, boundBy } = busyPortsOf(inventory.listedSerials, otherBindings(file), tools);
   const choice = chooseAndroidDevice({
     own,
