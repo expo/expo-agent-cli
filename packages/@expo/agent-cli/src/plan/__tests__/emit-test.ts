@@ -35,6 +35,7 @@ describe(emitStartPlan, () => {
       reasons: plan.reasons,
       buildLocation: null,
       devServerPort: null,
+      explicitDevice: null,
     });
   });
 
@@ -48,6 +49,14 @@ describe(emitStartPlan, () => {
       'start_plan',
       expect.objectContaining({ devServerPort: { port: 8082, movedFrom: 8081, state: 'picked' } })
     );
+  });
+
+  it(`should carry the --device choice on the event, null without one`, () => {
+    const explicitDevice = { refuses: true, summary: 'x', how: 'h' } as const;
+
+    emitStartPlan({ ...plan, explicitDevice }, { mode: 'plan' });
+
+    expect(event).toHaveBeenCalledWith('start_plan', expect.objectContaining({ explicitDevice }));
   });
 
   it(`should print the plan table`, () => {
