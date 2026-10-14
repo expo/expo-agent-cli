@@ -335,3 +335,34 @@ it('refreshes the AVD inventory if a USB binding is removed during discovery', a
   expect(listedAvds).toBeGreaterThanOrEqual(0);
   expect(tools.lockedAt[listedAvds]).toBe(false);
 });
+
+it('reuses an own USB binding adb lists unauthorized, and lists no AVD', async () => {
+  const tools = fakeTools({ emulators: [{ serial: 'R58N123', state: 'unauthorized' }] });
+  writeBinding(
+    bindingPathFor(ROOT, 'android', 'local-android'),
+    androidBindingFor(ROOT, 'R58N123', { kind: 'explicit' })
+  );
+
+  expect(await acquireDeviceAsync(ROOT, 'android', { tools })).toMatchObject({
+    action: 'reused',
+    device: { serial: 'R58N123', origin: { kind: 'explicit' } },
+  });
+  expect(tools.calls.some(([command]) => command === 'emulator')).toBe(false);
+});
+
+it('refreshes the AVD inventory if an unauthorized USB binding is removed during discovery', async () => {
+  const tools = fakeTools({ emulators: [{ serial: 'USB', state: 'unauthorized' }] });
+  const file = bindingPathFor(ROOT, 'android', 'local-android');
+  writeBinding(file, androidBindingFor(ROOT, 'USB', { kind: 'explicit' }));
+  const adb = tools.adb;
+  vi.spyOn(tools, 'adb').mockImplementationOnce(async (args, options) => {
+    const result = await adb(args, options);
+    removeBindingFile(file);
+    return result;
+  });
+
+  expect(await acquireDeviceAsync(ROOT, 'android', { tools })).toMatchObject({
+    action: 'spawned',
+    device: { serial: 'emulator-5554' },
+  });
+});

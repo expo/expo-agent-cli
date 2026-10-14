@@ -64,7 +64,7 @@ export async function readAndroidBindingInventoryAsync(
     inventory,
     isCurrent: () =>
       reuseSerial === undefined ||
-      !inventory.runningSerials.includes(reuseSerial) ||
+      !inventory.listedSerials.includes(reuseSerial) ||
       explicitSerial() === reuseSerial,
   };
 }
@@ -91,7 +91,7 @@ export async function readAndroidInventoryAsync(
       const [serial, state] = line.trim().split(/\s+/);
       return serial && state && state !== 'device' ? [{ serial, state }] : [];
     });
-  if (!listAvds || (reuseSerial !== undefined && runningSerials.includes(reuseSerial)))
+  if (!listAvds || (reuseSerial !== undefined && listedSerials.includes(reuseSerial)))
     return { avd: null, runningSerials, listedSerials, unready };
   const avds = await tools.emulatorList(['-list-avds'], { timeoutMs: 60_000 });
   if (avds.spawnError) {
