@@ -406,11 +406,11 @@ export async function collectStatusReportAsync(
         ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
         ...(recoveryPort != null ? ['--port', String(recoveryPort)] : []),
       ],
-      backend === 'eas' ? undefined : (options.device ?? request?.device)
+      backend === 'eas' ? undefined : request?.device
     );
     if (
       platform !== 'web' &&
-      (request || recoveryPort != null || options.device) &&
+      (request || recoveryPort != null) &&
       report.next.command.startsWith(`${PROGRAM_PREFIX} dev `)
     )
       report.next.command = devCommand;

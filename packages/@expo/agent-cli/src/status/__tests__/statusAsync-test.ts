@@ -1111,16 +1111,25 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
   });
 
-  it('preserves a stopped request and prefers an explicitly selected port and device', async () => {
+  it('keeps the installed-app --device out of the dev command and the saved device in it', async () => {
     lastRequest();
     stopDevServer();
     const report = await collectStatusReportAsync(projectRoot, {
       devServerUrl: 'http://localhost:19090',
+      explain: true,
       device: 'Pixel; echo nope',
     });
-    expect(report.next?.command).toContain("--port 19090 --device 'Pixel; echo nope'");
-    expect(report.next?.command).not.toContain('19082');
+    expect(report.next?.command).toBe(
+      'npx @expo/agent-cli dev --android --local --dev-client --port 19090 --device emulator-5556 --detach --wait-ready'
+    );
     expect(report.next?.steps.some((step) => step.argv.includes('19090'))).toBe(true);
+    const ios = await collectStatusReportAsync(projectRoot, {
+      devServerUrl: null,
+      platform: 'ios',
+      explain: true,
+      device: 'iPhone 15',
+    });
+    expect(ios.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
   });
 
   it('uses a current own lock instead of an old requested port', async () => {
