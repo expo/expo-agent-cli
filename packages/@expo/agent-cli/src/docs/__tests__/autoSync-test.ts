@@ -73,12 +73,18 @@ describe(syncDocsForProjectAsync, () => {
 
 describe(startBackgroundDocsSync, () => {
   it('starts a detached docs:sync for the version', () => {
+    process.env.__EXPO_AGENT_CLI_INTERNAL_INVOCATION = '0';
+    const parentEnv = { ...process.env };
     expect(startBackgroundDocsSync('v56.0.0')).toBe(true);
     expect(spawn).toHaveBeenCalledWith(
       process.execPath,
       [process.argv[1], 'docs:sync', '--sdk', '56', '--json', '--no-followups'],
       expect.objectContaining({ detached: true, stdio: 'ignore' })
     );
+    const childEnv = vi.mocked(spawn).mock.calls[0]![2]!.env;
+    expect(childEnv?.__EXPO_AGENT_CLI_INTERNAL_INVOCATION).toBe('1');
+    expect(childEnv).toEqual({ ...parentEnv, __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1' });
+    expect(process.env).toEqual(parentEnv);
   });
 
   it('starts nothing under EXPO_OFFLINE', () => {

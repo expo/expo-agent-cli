@@ -69,7 +69,11 @@ export function startBackgroundDocsSync(version: VersionBundleName): boolean {
     const child = spawn(
       process.execPath,
       [bin, 'docs:sync', '--sdk', String(versionMajor(version)), '--json', '--no-followups'],
-      { detached: true, stdio: 'ignore', env: process.env }
+      {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1' },
+      }
     );
     child.on('error', () => {});
     child.unref();
