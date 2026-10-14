@@ -9,7 +9,13 @@ import {
   withRegistryLockAsync,
   writeBindingFile,
 } from './registry';
-import type { Binding, BindingBackend, DevicePlatform, DeviceTools } from './types';
+import {
+  deviceIdOf,
+  type Binding,
+  type BindingBackend,
+  type DevicePlatform,
+  type DeviceTools,
+} from './types';
 
 export const LEASE_MS = 3_600_000;
 export const EXTEND_EVERY_MS = 300_000;
@@ -39,7 +45,8 @@ export function isStale(binding: Binding, now: Date): boolean {
 }
 
 /**
- * Renew a live lease under the lock. An expired or missing one is `lost`, and nothing is written.
+ * Renew a live lease under the lock. An expired or missing one, or, with `deviceId`, one whose
+ * file names another device, is `lost`, and nothing is written.
  *
  * @throws `DEVICE_REGISTRY_LOCKED` when the lock is not obtained in `waitMs`.
  */
@@ -48,14 +55,18 @@ export async function extendLeaseAsync(
   platform: DevicePlatform,
   backend: BindingBackend,
   tools: DeviceTools,
-  { waitMs }: { waitMs: number }
+  { waitMs, deviceId }: { waitMs: number; deviceId?: string }
 ): Promise<'extended' | 'lost'> {
   const file = bindingPathFor(projectRoot, platform, backend);
   return await withRegistryLockAsync(
     async () => {
       const read = readBindingFile(file);
       const now = tools.now();
-      if (read.kind !== 'binding' || isExpired(read.binding, now)) {
+      if (
+        read.kind !== 'binding' ||
+        isExpired(read.binding, now) ||
+        (deviceId != null && deviceIdOf(read.binding.device) !== deviceId)
+      ) {
         return 'lost';
       }
       writeBindingFile(file, {

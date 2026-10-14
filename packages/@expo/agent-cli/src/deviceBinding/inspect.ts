@@ -7,7 +7,13 @@ import { listSimulatorAsync, SIMCTL_CALL_TIMEOUT_MS } from './ios';
 import { extendLeaseAsync, isExpired } from './lease';
 import { bindingPathFor, readBindingFile } from './registry';
 import { defaultTools } from './tools';
-import type { BoundDevice, DevicePlatform, DeviceTools, Inspection } from './types';
+import {
+  deviceIdOf,
+  type BoundDevice,
+  type DevicePlatform,
+  type DeviceTools,
+  type Inspection,
+} from './types';
 
 /** The wait of a read verb's lease extension; a timeout warns and goes on. */
 export const READ_LOCK_WAIT_MS = 5_000;
@@ -80,7 +86,7 @@ export function clearInspectCache(): void {
 
 /**
  * Take an `up` inspection, extend its lease, and hand back the device. Never inspects again and
- * never boots. `lost` throws `gone` with cause `expired`.
+ * never boots. `lost`, a rebind to another device included, throws `gone` with cause `expired`.
  */
 export async function useBoundDeviceAsync(
   inspection: Inspection,
@@ -95,6 +101,7 @@ export async function useBoundDeviceAsync(
   try {
     outcome = await extendLeaseAsync(binding.projectRoot, platform, backend, tools, {
       waitMs: READ_LOCK_WAIT_MS,
+      deviceId: deviceIdOf(binding.device),
     });
   } catch (error: unknown) {
     if ((error as { code?: string }).code !== 'DEVICE_REGISTRY_LOCKED') {

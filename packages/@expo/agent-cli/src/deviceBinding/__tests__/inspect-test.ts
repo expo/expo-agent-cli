@@ -124,4 +124,23 @@ describe(useBoundDeviceAsync, () => {
     expect(error.message).toContain('lease');
     expect(tools.calls).toEqual([['list', 'devices', '-j']]);
   });
+
+  it('throws gone and writes nothing when the binding names another simulator since the inspect', async () => {
+    const tools = fakeTools({
+      simulators: [
+        { udid: 'SIM-1', name: 'x', state: 'Booted' },
+        { udid: 'SIM-2', name: 'y', state: 'Booted' },
+      ],
+    });
+    writeBinding(file(), bindingFor(ROOT, 'SIM-1', { expiresAt: '2026-10-08T10:30:00.000Z' }));
+    const inspection = await inspectBindingAsync(ROOT, 'ios', 'local-ios', tools);
+    writeBinding(file(), bindingFor(ROOT, 'SIM-2', { expiresAt: '2026-10-08T10:30:00.000Z' }));
+
+    const error = await useBoundDeviceAsync(inspection, tools).catch((e) => e);
+
+    expect(error.code).toBe('NO_BOUND_DEVICE');
+    expect(error.data).toEqual({ reason: 'gone' });
+    const read = readBindingFile(file());
+    expect(read.kind === 'binding' && read.binding.expiresAt).toBe('2026-10-08T10:30:00.000Z');
+  });
 });

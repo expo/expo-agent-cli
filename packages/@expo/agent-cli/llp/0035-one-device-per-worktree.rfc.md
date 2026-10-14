@@ -180,9 +180,9 @@ export type ReleasedDevice = {
 ## Lease
 
 - `LEASE_MS = 3_600_000` (60 min), `EXTEND_EVERY_MS = 300_000` (5 min).
-- `extendLease(root, platform, backend, tools, { waitMs })` → `'extended' | 'lost'`, under the lock. A live lease is renewed. An expired or missing one is `lost`, and nothing is written.
+- `extendLease(root, platform, backend, tools, { waitMs, deviceId? })` → `'extended' | 'lost'`, under the lock. A live lease is renewed. An expired or missing one, or, with `deviceId`, one whose file names another device, is `lost`, and nothing is written.
 - A lock not obtained in `waitMs` throws `DEVICE_REGISTRY_LOCKED` before any write.
-- Read verbs extend with a 5 s wait through `useBoundDeviceAsync`: a lock timeout warns and goes on; `lost` (the file went missing or expired since the inspect) throws `gone`.
+- Read verbs extend with a 5 s wait through `useBoundDeviceAsync`: a lock timeout warns and goes on; `lost` (the file went missing, expired, or names another device since the inspect) throws `gone`.
 - `isStale(b, now)`: expired, or the root is deleted (Decision 6). `git worktree move` makes the old path stale at once.
 - `withLeaseExtendedAsync(root, work)`: a 5 min `unref` timer around `work`, cleared when `work` ends. Every tick tries every one of the worktree's four candidate files that exists, so a cloud file that appears after Metro starts, and a parked file that `dev --detach` revived, are both picked up. A 5 s lock wait that fails skips the tick. The timer warns once per change from `extended` to `lost`. A tick never throws. Used by the Metro runner and around the step runner.
 
