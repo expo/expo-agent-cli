@@ -399,21 +399,24 @@ export async function collectStatusReportAsync(
       recoveryPlan
     );
     const backend = request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null);
+    const devArgs = [
+      ...(backend ? [`--${backend}`] : []),
+      ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
+      ...(recoveryPort != null ? ['--port', String(recoveryPort)] : []),
+    ];
     const devCommand = rerunDevCommand(
       platform,
-      [
-        ...(backend ? [`--${backend}`] : []),
-        ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
-        ...(recoveryPort != null ? ['--port', String(recoveryPort)] : []),
-      ],
+      devArgs,
       backend === 'eas' ? undefined : request?.device
     );
     if (
-      platform !== 'web' &&
       (request || recoveryPort != null) &&
       report.next.command.startsWith(`${PROGRAM_PREFIX} dev `)
     )
-      report.next.command = devCommand;
+      report.next.command =
+        platform === 'web'
+          ? `${PROGRAM_PREFIX} dev --web${devArgs.map((arg) => ` ${arg}`).join('')}`
+          : devCommand;
     const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
     if (
       state.isExpoApp &&

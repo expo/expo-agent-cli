@@ -1349,6 +1349,21 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     expect(report.next?.command).not.toMatch(/ dev --web --detach --wait-ready$/);
   });
 
+  it("carries a saved web request's port and flags into its dev command without detaching", async () => {
+    vol.fromJSON({
+      '/project/.expo/agent-cli-last-dev.json': JSON.stringify({
+        version: 1,
+        platform: 'web',
+        port: 19006,
+        buildBackend: 'local',
+        runTarget: 'expo-go',
+      }),
+    });
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(report.next?.command).toBe('npx @expo/agent-cli dev --web --local --go --port 19006');
+  });
+
   it("asks EAS for a saved --eas request's build only under --explain, with the fingerprint-cache choice", async () => {
     const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
     mockState({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } });
