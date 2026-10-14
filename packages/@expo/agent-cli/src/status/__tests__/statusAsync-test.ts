@@ -4,6 +4,7 @@ import { vol } from 'memfs';
 import * as devLock from '../../devLock';
 import * as localDevice from '../../device/localDevice';
 import * as deviceBinding from '../../deviceBinding';
+import { bindingPathFor } from '../../deviceBinding/registry';
 import * as summary from '../../deviceBinding/summary';
 import { event } from '../../events';
 import * as network from '../../followups/network';
@@ -1362,6 +1363,19 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     stopDevServer();
     const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
     expect(report.next?.command).toBe('npx @expo/agent-cli dev --web --local --go --port 19006');
+  });
+
+  it('removes an unreadable binding file before the dev command that would refuse on it', async () => {
+    stopDevServer();
+    const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
+    vol.fromJSON({ [file]: '{' });
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next?.command).toBe(
+      `rm -f '${file}' && npx @expo/agent-cli dev --ios --port 8081 --detach --wait-ready`
+    );
+    expect(report.next?.why).toBe(
+      `The binding file ${file} does not parse; a newer CLI may have written it.`
+    );
   });
 
   it("asks EAS for a saved --eas request's build only under --explain, with the fingerprint-cache choice", async () => {

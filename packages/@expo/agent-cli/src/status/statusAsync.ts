@@ -14,6 +14,7 @@ import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
 import { withDevServerPort } from '../dev/forwardedArgs';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { rerunDevCommand } from '../plan/rerun';
+import { unreadableBindingFiles } from '../deviceBinding/records';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
@@ -434,12 +435,16 @@ export async function collectStatusReportAsync(
     ) {
       // Detached dev can only reuse beside an own server; an expired binding can still be reused.
       const restart = bound.length === 0 && ownServer != null;
+      const [unreadable] = unreadableBindingFiles(projectRoot, platform);
+      const command = restart ? `${PROGRAM_PREFIX} dev:stop && ${devCommand}` : devCommand;
       report.next = {
         ...devNext,
-        command: restart ? `${PROGRAM_PREFIX} dev:stop && ${devCommand}` : devCommand,
-        why: bound.length
-          ? `The lease on the bound ${platform} device expired.`
-          : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`,
+        command: unreadable ? `rm -f '${unreadable.file}' && ${command}` : command,
+        why: unreadable
+          ? `The binding file ${unreadable.file} does not parse; a newer CLI may have written it.`
+          : bound.length
+            ? `The lease on the bound ${platform} device expired.`
+            : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`,
       };
     }
   } else {
