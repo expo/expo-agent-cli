@@ -485,6 +485,48 @@ describe('automatic sync', () => {
   const autoSyncEnv = (extra: Record<string, string> = {}) =>
     docsEnv({ AGENT_CLI_NO_DOCS_SYNC: '0', ...extra });
 
+  it.each(['agents:setup', 'docs:sync'])(
+    '%s selects the declared SDK before dependencies are installed',
+    async (command) => {
+      const projectRoot = path.join(path.dirname(cwd), 'manifest-only-app');
+      await fs.promises.mkdir(projectRoot);
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'package.json'),
+        JSON.stringify({ name: 'manifest-only-app', dependencies: { expo: '>=54.0.0 <55.0.0' } })
+      );
+      const args =
+        command === 'agents:setup'
+          ? [
+              command,
+              '--yes',
+              '--no-plugins',
+              '--no-agent-skills',
+              '--agent',
+              'claude-code',
+              '--json',
+            ]
+          : [command, '--json'];
+      const result = await executeAgentCliAsync(projectRoot, args, autoSyncEnv());
+      const report = JSON.parse(result.stdout);
+      expect(command === 'agents:setup' ? report.docs.sdk : report.sdk).toBe('v54.0.0');
+      expect(fs.existsSync(path.join(docsDir, 'versions', 'v54.0.0', 'sdk', 'camera.md'))).toBe(
+        true
+      );
+      expect(bundleDownloads()).toHaveLength(2);
+      expect(bundleDownloads().some((url) => url.includes('docs-v57.0.0'))).toBe(false);
+
+      requests.length = 0;
+      const search = await executeAgentCliAsync(
+        projectRoot,
+        ['docs:search', 'camera', '--json'],
+        docsEnv()
+      );
+      expect(JSON.parse(search.stdout)).toMatchObject({ sdk: 'v54.0.0', hits: expect.any(Array) });
+      expect(JSON.parse(search.stdout).hits.length).toBeGreaterThan(0);
+      expect(requests).toEqual([]);
+    }
+  );
+
   it(`agents:setup syncs the docs of the project's SDK`, async () => {
     const projectRoot = await setupFixtureAsync('skills-app');
 

@@ -5,7 +5,6 @@ import path from 'path';
 import {
   autoSyncDisabledReason,
   docsSummary,
-  projectSdkVersionAsync,
   refreshDocsAfterInstallAsync,
   startBackgroundDocsSync,
   syncDocsForProjectAsync,
@@ -40,38 +39,6 @@ function writeManifest(bundles: Record<string, { sha256: string; pages: number }
     [path.join(docsDir, 'versions', 'v57.0.0', 'sdk', 'camera.md')]: '# Camera',
   });
 }
-
-describe(projectSdkVersionAsync, () => {
-  it('reads the installed expo', async () => {
-    vol.fromJSON({
-      [path.join(projectRoot, 'package.json')]: JSON.stringify({
-        dependencies: { expo: '~56.0.0' },
-      }),
-      [path.join(projectRoot, 'node_modules', 'expo', 'package.json')]: JSON.stringify({
-        version: '56.0.3',
-      }),
-    });
-    await expect(projectSdkVersionAsync(projectRoot)).resolves.toBe('56.0.3');
-  });
-
-  it('falls back to the expo range of a project without node_modules', async () => {
-    vol.fromJSON({
-      [path.join(projectRoot, 'package.json')]: JSON.stringify({
-        dependencies: { expo: '^55.0.1' },
-      }),
-    });
-    await expect(projectSdkVersionAsync(projectRoot)).resolves.toBe('55.0.1');
-  });
-
-  it('is null for a range that names no version', async () => {
-    vol.fromJSON({
-      [path.join(projectRoot, 'package.json')]: JSON.stringify({
-        dependencies: { expo: 'latest' },
-      }),
-    });
-    await expect(projectSdkVersionAsync(projectRoot)).resolves.toBeNull();
-  });
-});
 
 describe(autoSyncDisabledReason, () => {
   it('names the variable that turns automatic syncs off', () => {

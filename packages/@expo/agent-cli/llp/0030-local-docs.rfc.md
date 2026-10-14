@@ -102,7 +102,7 @@ Each bundle is unpacked into `.tmp-<pid>/`. Then one top-level entry at a time i
 One result with three cases (`src/docs/version.ts` §SdkSelection):
 
 1. `explicit`: `--sdk <N>`. When there is no bundle for it, the run fails with `DOCS_SDK_UNAVAILABLE` and lists the versions that exist.
-2. `project`: the installed SDK of the project at or above the current directory (`findUpProjectRootOrCwd`, `readSdkVersionAsync`, `sdkMajor`). `docs` also works outside a project.
+2. `project`: the installed SDK of the project at or above the current directory, else the minimum version allowed by its Expo declaration (`findUpProjectRootOrCwd`, `projectSdkVersionAsync`, `sdkMajor`). `docs` also works outside a project.
 3. `latest`: `latest` from `index.json`. It is also the fallback for a canary or an unknown major. The reason is printed on stderr.
 
 ## Commands
@@ -141,7 +141,7 @@ The docs must exist before an agent needs them, and they must follow the project
 | `docs:search`  | Background, when the cache is older than seven days.                                | a stderr line            |
 
 - **A failed sync fails nothing.** Setup and `new` report `{ status: 'failed', reason }` and exit as they would without the sync. A host without bundles (`DOCS_UNAVAILABLE`, HTTP 404) is `failed` too. The docs build publishes the bundles before this CLI ships, so a 404 means a broken host, and it must be visible.
-- **The project's SDK** is the installed `expo`, else the `expo` range in `package.json`. A project made with `new --no-install` has only the range.
+- **The project's SDK** is resolved by `projectSdkVersionAsync` in `src/project/nodeModules.ts`: installed `expo` first, else `semver.minVersion` of `dependencies.expo` or, when absent, `devDependencies.expo`. A project made with `new --no-install` has only the range. Empty, invalid and non-semver specs yield no version. Broad ranges use their minimum; `*` yields `0.0.0`, whose missing bundle falls back to latest. `readSdkVersionAsync` stays installed-only for runtime probes.
 - **A background sync** is a detached `docs:sync --sdk <N> --json --no-followups` of this CLI's own entry script. The cache lock keeps it from colliding with another sync.
 - **After an install, the SDK is chosen as search chooses it.** An upgrade past every version the host had at the last sync starts a background sync for that version, which may have been published since. An SDK without docs falls back to latest and starts nothing.
 - **`install` never starts a first sync.** It acts only for a user who already has a manifest, because a download nobody asked for is not part of an install.

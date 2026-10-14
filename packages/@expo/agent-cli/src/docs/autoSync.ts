@@ -4,7 +4,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 
 import * as Log from '../log';
-import { readProjectPackageJsonAsync, readSdkVersionAsync } from '../project/nodeModules';
+import { projectSdkVersionAsync } from '../project/nodeModules';
 import { env } from '../utils/env';
 import { versionMajor, versionNames, type VersionBundleName } from './bundle';
 import { docsCacheDir, readManifestAsync, versionDir } from './cache';
@@ -16,24 +16,6 @@ export type DocsAutoSyncResult =
   | { status: 'synced'; sdk: VersionBundleName; dir: string; sdkDir: string; downloaded: boolean }
   | { status: 'skipped'; reason: string }
   | { status: 'failed'; reason: string };
-
-/**
- * The project's SDK: the installed `expo`, else the `expo` range in package.json, which is all a
- * project created with `--no-install` has.
- */
-export async function projectSdkVersionAsync(projectRoot: string): Promise<string | null> {
-  try {
-    const installed = await readSdkVersionAsync(projectRoot);
-    if (installed) {
-      return installed;
-    }
-    const packageJson = await readProjectPackageJsonAsync(projectRoot);
-    const range = packageJson?.dependencies?.expo ?? packageJson?.devDependencies?.expo;
-    return /^[\^~]?(\d+(?:\.\d+)*)/.exec(range ?? '')?.[1] ?? null;
-  } catch {
-    return null;
-  }
-}
 
 /** Why no automatic sync may run, or null when one may. */
 export function autoSyncDisabledReason(): string | null {

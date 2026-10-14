@@ -3,6 +3,7 @@
 // package of the project is ever loaded, so probing a project cannot run project code.
 import fs from 'fs';
 import path from 'path';
+import { minVersion } from 'semver';
 
 import { fileExistsAsync } from '../utils/dir';
 
@@ -146,6 +147,28 @@ export async function readSdkVersionAsync(projectRoot: string): Promise<string |
     path.join(expoRoot, 'package.json')
   );
   return packageJson?.version ?? null;
+}
+
+/**
+ * The installed Expo version, else the minimum version allowed by its declaration. The fallback
+ * supports projects created with `--no-install`; runtime probes use installed-only readSdkVersionAsync.
+ */
+export async function projectSdkVersionAsync(projectRoot: string): Promise<string | null> {
+  try {
+    const installed = await readSdkVersionAsync(projectRoot);
+    if (installed) {
+      return installed;
+    }
+    const packageJson = await readProjectPackageJsonAsync(projectRoot);
+    const range = packageJson?.dependencies?.expo ?? packageJson?.devDependencies?.expo;
+    if (typeof range !== 'string' || !range.trim()) {
+      return null;
+    }
+    return minVersion(range)?.version ?? null;
+  } catch {
+    // Tags and non-semver package specs have no version we can infer without installing them.
+    return null;
+  }
 }
 
 /**

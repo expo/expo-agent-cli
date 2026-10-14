@@ -10,10 +10,11 @@ import {
 } from '../followups';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
+import { projectSdkVersionAsync } from '../project/nodeModules';
 import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { findUpProjectRootOrCwd } from '../utils/findUp';
-import { projectSdkVersionAsync, startBackgroundDocsSync } from './autoSync';
+import { startBackgroundDocsSync } from './autoSync';
 import { versionMajor, versionNames, type VersionBundleName } from './bundle';
 import {
   docsCacheDir,
