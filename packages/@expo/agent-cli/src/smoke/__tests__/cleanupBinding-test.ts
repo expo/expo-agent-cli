@@ -52,6 +52,17 @@ it('an older smoke cleanup leaves a replacement binding untouched', async () => 
   expect(tools.calls.filter(([command]) => command === 'shutdown')).toEqual([]);
 });
 
+it('a smoke cleanup that finds its binding replaced reports its device as not released', async () => {
+  vi.spyOn(deviceTools, 'defaultTools').mockReturnValue(
+    fakeTools({ simulators: [{ udid: 'B', name: 'Personal', state: 'Booted' }] })
+  );
+  const deps = buildSmokeDeps(root, resolveSmokeOptions(['--ios']));
+  expect((await deps.bootDevice()).ok).toBe(true);
+  writeBinding(bindingPathFor(root, 'ios', 'local-ios'), bindingFor(root, 'B'));
+  const result = await deps.releaseDevice();
+  expect(result).toMatchObject({ ok: false, reason: expect.stringContaining('released nothing') });
+});
+
 it('a start whose device check did not answer keeps the bound device on cleanup', async () => {
   writeBinding(bindingPathFor(root, 'ios', 'local-ios'), bindingFor(root, 'A'));
   vi.spyOn(deviceTools, 'defaultTools').mockReturnValue(

@@ -613,6 +613,15 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         platform: options.platform,
         expected: bootBinding,
       });
+      if (devices.length === 0) {
+        return {
+          ok: false,
+          target: null,
+          reason:
+            "this worktree's binding no longer names the device this run bound, so this run released nothing",
+          devices,
+        };
+      }
       return {
         ok: devices.every((device) => device.released),
         target: devices.map((device) => device.id).join(', ') || null,
