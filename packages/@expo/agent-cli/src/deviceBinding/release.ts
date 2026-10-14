@@ -3,7 +3,6 @@
 // the lock, the device action after it.
 
 import { killEmulatorIfOurs } from './android';
-import { getEmulatorStateAsync } from './emulator';
 import { clearInspectCache } from './inspect';
 import { listSimulatorAsync, shutdownSimulatorAsync } from './ios';
 import {
@@ -30,8 +29,8 @@ export const WRITE_LOCK_WAIT_MS = 30_000;
  * `expected` restricts failed-boot cleanup to that acquisition, leaving a replacement alone.
  *
  * A `created` simulator is parked and shut down; an `explicit` device keeps its file with an
- * expired lease; a `spawned` instance loses its file and is killed; a binding whose device the
- * inventory does not list loses its file.
+ * expired lease; a `spawned` instance loses its file and is killed; a simulator the inventory does
+ * not list loses its file.
  */
 export async function releaseWorktreeDevicesAsync(
   projectRoot: string,
@@ -116,14 +115,13 @@ async function releaseAndroidAsync(
   }
   if (expected && !sameBinding(before.binding, expected)) return null;
   const { serial, origin } = before.binding.device;
-  const listing = origin.kind === 'explicit' ? await getEmulatorStateAsync(tools, serial) : null;
   const letGo = await withRegistryLockAsync(
     async () => {
       const read = readBindingFile(file);
       if (read.kind !== 'binding' || !sameBinding(read.binding, before.binding)) {
         return false;
       }
-      if (origin.kind === 'spawned' || listing?.kind === 'missing') {
+      if (origin.kind === 'spawned') {
         removeBindingFile(file);
       } else {
         expireLease(file, read.binding, tools);

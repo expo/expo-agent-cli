@@ -408,6 +408,17 @@ describe(releaseWorktreeDevicesAsync, () => {
     expect(tools.killed).toEqual([]);
   });
 
+  it('expires an explicit binding and keeps its file when adb does not find its serial', async () => {
+    const tools = fakeTools();
+    writeBinding(file(), androidBindingFor(ROOT, 'emulator-5554', { kind: 'explicit' }));
+
+    await releaseWorktreeDevicesAsync(ROOT, { platform: 'android', tools });
+
+    const read = readBindingFile(file());
+    expect(read.kind === 'binding' && read.binding.expiresAt).toBe('2026-10-08T10:00:00.000Z');
+    expect(tools.androidCalls).toEqual([]);
+  });
+
   it('lets go of both platforms without a platform', async () => {
     const tools = fakeTools({
       simulators: [{ udid: 'SIM-1', name: 'x', state: 'Booted' }],
