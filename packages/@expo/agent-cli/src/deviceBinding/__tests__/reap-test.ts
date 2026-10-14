@@ -20,6 +20,7 @@ beforeEach(() => {
 });
 
 it('deleted-worktree-deletes-simulator after the registry lock is released', async () => {
+  const stderr = vi.spyOn(console, 'error');
   const tools = fakeTools({ simulators: [{ udid: 'OLD', name: 'old', state: 'Booted' }] });
   const file = foreign();
   writeBinding(file, bindingFor(OTHER, 'OLD'));
@@ -28,7 +29,16 @@ it('deleted-worktree-deletes-simulator after the registry lock is released', asy
   expect(readBindingFile(file)).toEqual({ kind: 'none' });
   expect(tools.calls).toContainEqual(['delete', 'OLD']);
   expect(tools.lockedAt[tools.calls.findIndex(([command]) => command === 'delete')]).toBe(false);
-  expect(reaped).toMatchObject([{ id: 'OLD', reason: 'deleted-worktree', released: true }]);
+  expect(reaped).toMatchObject([
+    {
+      id: 'OLD',
+      reason: 'deleted-worktree',
+      released: true,
+      projectRoot: OTHER,
+      devServerCleanup: 'not-checked',
+    },
+  ]);
+  expect(stderr.mock.calls.flat().join('\n')).toContain('Dev-server cleanup was not checked');
 });
 
 it.each(['returned', 'thrown'])('reports a %s cleanup failure as not released', async (failure) => {
@@ -47,6 +57,8 @@ it.each(['returned', 'thrown'])('reports a %s cleanup failure as not released', 
       released: false,
       shutDown: false,
       error: expect.stringContaining('delete failed'),
+      projectRoot: OTHER,
+      devServerCleanup: 'not-checked',
     },
   ]);
   expect(tools.simulators[0]!.state).toBe('Booted');

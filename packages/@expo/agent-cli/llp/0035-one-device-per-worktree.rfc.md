@@ -551,6 +551,7 @@ What happens to the device of a deleted or expired worktree?
 
 - `reap.ts` per §Reap, called from `acquireDeviceAsync` and `dev:stop`. The `cloud` rows wait for §EAS session binding.
 - The reap events and the `cli:device_binding_reaped` reasons, per §Output and errors.
+- Reap reports identify `projectRoot` and carry `devServerCleanup: 'not-checked'`: they describe device cleanup only. Deleted-worktree output warns that CLI/Metro processes may remain. Stopping those requires separate server ownership evidence; a device binding grants none. A late last-build write does not recreate an already deleted worktree.
 
 ### `--device` on `dev`
 

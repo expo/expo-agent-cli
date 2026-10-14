@@ -12,7 +12,12 @@ export type Cleanup = {
   reason: string;
   reaped?: boolean;
 };
-export type CleanupReport = ReleasedDevice & { error?: string };
+export type CleanupReport = ReleasedDevice & {
+  error?: string;
+  /** Present for cross-worktree reaping; device cleanup does not inspect or stop Metro. */
+  projectRoot?: string;
+  devServerCleanup?: 'not-checked';
+};
 
 export async function deleteSimulatorAsync(tools: DeviceTools, udid: string) {
   const result = await tools.simctl(['delete', udid], { timeoutMs: 60_000 });
@@ -38,6 +43,9 @@ export async function runCleanupAsync(
     const report: CleanupReport = {
       ...deviceReport(item.binding),
       reason: item.reason,
+      ...(item.reaped
+        ? { projectRoot: item.binding.projectRoot, devServerCleanup: 'not-checked' as const }
+        : {}),
     };
     try {
       const result = await actAsync(item, tools);
@@ -50,6 +58,11 @@ export async function runCleanupAsync(
     console.error(
       `${report.error ? 'Could not release' : item.action === 'delete' ? 'Deleted' : 'Released'} ${report.name} (${item.reason})${report.error ? `: ${report.error}` : '.'}`
     );
+    if (item.reaped && item.reason === 'deleted-worktree') {
+      console.error(
+        `Dev-server cleanup was not checked for deleted worktree ${item.binding.projectRoot}; a CLI or Metro process may still be running.`
+      );
+    }
     if (item.reaped) event('device_binding_reaped', { reason: item.reason });
     reports.push(report);
   }

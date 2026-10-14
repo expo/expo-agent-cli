@@ -184,6 +184,8 @@ describe('device lifecycle across two worktrees', () => {
           released: true,
           shutDown: true,
           reason: 'deleted-worktree',
+          projectRoot: path.join(canonicalRoot(machine), 'deleted-worktree'),
+          devServerCleanup: 'not-checked',
         }),
       ]);
       expect(readXcrun()).toContainEqual(['simctl', 'delete', SIMULATORS[0]!.udid]);
