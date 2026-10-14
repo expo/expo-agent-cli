@@ -1,6 +1,6 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Android boot
 // The Android tool calls the registry reads with: the inventory before the lock, and `get-state`
-// for one serial, each one `adb` or `emulator` subprocess.
+// for one serial, each one `adb` or `emulator` subprocess; and the instance check a `spawned` pid must pass.
 
 import { adbNotRunnableError, parseAndroidDevices, resolveAdb } from '../device/adb';
 import { parseAvds } from '../device/bootDevice';

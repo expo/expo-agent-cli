@@ -94,7 +94,7 @@ export function consolePortOf(serial: string): number | null {
  * Choose the emulator instance of a worktree.
  *
  * The own binding is reused, live or expired, when its instance is present: `ownPresent` is the
- * caller's answer (a `spawned` pid alive, an `explicit` serial listed). Otherwise a read-only
+ * caller's answer (a `spawned` instance that passes the instance check, an `explicit` serial listed). Otherwise a read-only
  * instance of the one AVD is spawned on the first free even console port.
  */
 export function chooseAndroidDevice({
