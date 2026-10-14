@@ -88,7 +88,8 @@ export async function readAndroidInventoryAsync(
     .split('\n')
     .slice(1)
     .flatMap((line) => {
-      const [serial, state] = line.trim().split(/\s+/);
+      const [serial, word, next] = line.trim().split(/\s+/);
+      const state = word === 'no' && next === 'permissions' ? 'no permissions' : word;
       return serial && state && state !== 'device' ? [{ serial, state }] : [];
     });
   if (!listAvds || (reuseSerial !== undefined && listedSerials.includes(reuseSerial)))

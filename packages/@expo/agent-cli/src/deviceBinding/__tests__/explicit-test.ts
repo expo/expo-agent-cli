@@ -252,7 +252,7 @@ it('reuses an explicitly named owned Android instance while adb still lists it o
   expect(tools.spawned).toEqual([]);
 });
 
-it.each(['offline', 'unauthorized'] as const)(
+it.each(['offline', 'unauthorized', 'no permissions'] as const)(
   'refuses a serial adb lists %s as not ready, and names it again in the How',
   async (state) => {
     const { previewExplicitDeviceAsync } = await import('../preview');
