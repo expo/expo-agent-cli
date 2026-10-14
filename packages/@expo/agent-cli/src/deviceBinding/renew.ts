@@ -1,4 +1,5 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Lease
+import { deviceCommand } from './errors';
 import { extendLeaseAsync, EXTEND_EVERY_MS } from './lease';
 import { ownBindingFiles } from './records';
 import { readBindingFile } from './registry';
@@ -26,7 +27,7 @@ export async function withLeaseExtendedAsync<T>(
         });
         if (state === 'lost' && states.get(file) === 'extended') {
           warn(
-            `The ${platform} device lease expired or disappeared. Run dev --${platform} to bind it again.`
+            `The ${platform} device lease expired or disappeared. Run "${deviceCommand(platform, { eas: backend === 'cloud' })}" to bind it again.`
           );
         }
         states.set(file, state);

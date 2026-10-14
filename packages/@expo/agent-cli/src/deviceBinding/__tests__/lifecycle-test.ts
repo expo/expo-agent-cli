@@ -1,5 +1,6 @@
 import { vol } from 'memfs';
 
+import { deviceCommand } from '../errors';
 import { EXTEND_EVERY_MS, LEASE_MS } from '../lease';
 import { withLeaseExtendedAsync } from '../renew';
 import { bindingPathFor, readBindingFile } from '../registry';
@@ -64,4 +65,33 @@ it('foreground-exit-touches-no-binding', async () => {
   writeBinding(file(), binding);
   await withLeaseExtendedAsync(ROOT, async () => {}, { tools: fakeTools() });
   expect(readBindingFile(file())).toEqual({ kind: 'binding', binding });
+});
+
+it('a lost lease names the dev command, with --eas for a cloud file', async () => {
+  vi.useFakeTimers();
+  const tools = fakeTools();
+  const warn = vi.fn();
+  writeBinding(file(), bindingFor(ROOT, 'SIM'));
+  writeBinding(bindingPathFor(ROOT, 'android', 'cloud'), {
+    ...bindingFor(ROOT, 'unused'),
+    device: { backend: 'cloud', platform: 'android', id: 'session', origin: 'started' },
+  });
+  let finish!: () => void;
+  const work = withLeaseExtendedAsync(
+    ROOT,
+    () =>
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    { tools, warn }
+  );
+  await vi.advanceTimersByTimeAsync(EXTEND_EVERY_MS);
+  tools.clock.now = new Date(tools.now().getTime() + LEASE_MS + 1);
+  await vi.advanceTimersByTimeAsync(EXTEND_EVERY_MS);
+  finish();
+  await work;
+  expect(warn.mock.calls.map(([message]) => message)).toEqual([
+    expect.stringContaining(`"${deviceCommand('ios')}"`),
+    expect.stringContaining('dev --android --eas --detach --wait-ready'),
+  ]);
 });

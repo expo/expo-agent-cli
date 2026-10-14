@@ -191,7 +191,7 @@ export type ReleasedDevice = {
 - A lock not obtained in `waitMs` throws `DEVICE_REGISTRY_LOCKED` before any write.
 - Read verbs extend with a 5 s wait through `useBoundDeviceAsync`: a lock timeout warns and goes on; `lost` (the file went missing, expired, or names another device since the inspect) throws `gone`.
 - `isStale(b, now)`: expired, or the root is deleted (Decision 6). `git worktree move` makes the old path stale at once.
-- `withLeaseExtendedAsync(root, work)`: a 5 min `unref` timer around `work`, cleared when `work` ends. Every tick tries every one of the worktree's four candidate files that exists, so a cloud file that appears after Metro starts, and a parked file that `dev --detach` revived, are both picked up. A 5 s lock wait that fails skips the tick. The timer warns once per change from `extended` to `lost`. A tick never throws. Used by the Metro runner and around the step runner.
+- `withLeaseExtendedAsync(root, work)`: a 5 min `unref` timer around `work`, cleared when `work` ends. Every tick tries every one of the worktree's four candidate files that exists, so a cloud file that appears after Metro starts, and a parked file that `dev --detach` revived, are both picked up. A 5 s lock wait that fails skips the tick. The timer warns once per change from `extended` to `lost`, naming the `dev` command of §Output and errors, with `--eas` for a `cloud` file. A tick never throws. Used by the Metro runner and around the step runner.
 
 ## Lock
 
