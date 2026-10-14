@@ -4,7 +4,8 @@ import { vol } from 'memfs';
 import { canonicalizeExistingPath } from '../../utils/dir';
 import { acquireDeviceAsync, releaseWorktreeDevicesAsync } from '..';
 import { bindingPathFor, readBindingFile } from '../registry';
-import { bindingFor, fakeTools, writeBinding } from './fakeTools';
+import type { Binding } from '../types';
+import { bindingFor, fakeTools, writeBinding, type FakeTools } from './fakeTools';
 
 const ROOT = '/work/app';
 
@@ -96,6 +97,54 @@ describe(acquireDeviceAsync, () => {
     const read = readBindingFile(file());
     expect(read.kind === 'binding' && read.binding.expiresAt).toBe('2026-10-08T10:00:00.000Z');
   });
+
+  // failed-boot-leaves-replacement-binding
+  it.each([
+    [
+      'bound another simulator during the boot',
+      (tools: FakeTools, [command]: string[]): Binding | null => {
+        if (command !== 'bootstatus') return null;
+        tools.simulators.push({ udid: 'OTHER', name: 'x', state: 'Booted' });
+        return bindingFor(ROOT, 'OTHER');
+      },
+    ],
+    [
+      'rebound the same simulator after the release read the file',
+      (tools: FakeTools, [command, what]: string[]): Binding | null => {
+        const booted = tools.calls.some(([called]) => called === 'bootstatus');
+        const read = readBindingFile(file());
+        if (!booted || command !== 'list' || what !== 'devices' || read.kind !== 'binding') {
+          return null;
+        }
+        tools.simulators.find(({ udid }) => udid === 'CREATED-1')!.state = 'Booted';
+        return {
+          ...read.binding,
+          boundAt: '2026-10-08T10:00:05.000Z',
+          expiresAt: '2026-10-08T11:00:05.000Z',
+        };
+      },
+    ],
+  ] as const)(
+    'leaves the binding and simulator of a concurrent dev that %s alone when the boot fails',
+    async (_name, concurrentDev) => {
+      const tools = fakeTools({ bootFails: true });
+      const simctl = tools.simctl;
+      let replacement: Binding | null = null;
+      tools.simctl = async (args, options) => {
+        if (replacement == null) {
+          replacement = concurrentDev(tools, args);
+          if (replacement != null) writeBinding(file(), replacement);
+        }
+        return simctl(args, options);
+      };
+
+      const error = await acquireDeviceAsync(ROOT, 'ios', { tools }).catch((e) => e);
+
+      expect(error.data).toEqual({ reason: 'boot-failed' });
+      expect(readBindingFile(file())).toEqual({ kind: 'binding', binding: replacement });
+      expect(tools.calls.some(([command]) => command === 'shutdown')).toBe(false);
+    }
+  );
 
   // agent-cli-name-needs-binding
   it('never adopts an agent-cli simulator no binding names', async () => {

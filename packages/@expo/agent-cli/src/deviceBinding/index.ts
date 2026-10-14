@@ -91,7 +91,7 @@ export async function acquireDeviceAsync(
     timeoutMs: BOOT_DEVICE_TIMEOUT_MS.ios,
   });
   if (!boot.ok) {
-    await releaseWorktreeDevicesAsync(projectRoot, { platform, tools });
+    await releaseWorktreeDevicesAsync(projectRoot, { platform, tools, expected: binding });
     throw deviceUnavailableError('boot-failed', { platform, detail: boot.reason ?? undefined });
   }
   return { device, justBooted: !wasBooted, action };
@@ -167,13 +167,18 @@ async function bindIosSectionAsync(
 
 /**
  * Let go of this worktree's local bindings, or only `platform`'s. Never reaps.
+ * `expected` restricts failed-boot cleanup to that acquisition, leaving a replacement alone.
  *
  * A `created` simulator is parked and shut down; an `explicit` one keeps its file with an expired
  * lease; a binding whose simulator the inventory does not list loses its file.
  */
 export async function releaseWorktreeDevicesAsync(
   projectRoot: string,
-  { platform, tools = defaultTools() }: { platform?: 'ios' | 'android'; tools?: DeviceTools } = {}
+  {
+    platform,
+    tools = defaultTools(),
+    expected,
+  }: { platform?: 'ios' | 'android'; tools?: DeviceTools; expected?: Binding } = {}
 ): Promise<ReleasedDevice[]> {
   if (platform === 'android') {
     return [];
@@ -183,13 +188,14 @@ export async function releaseWorktreeDevicesAsync(
   if (before.kind !== 'binding' || before.binding.device.backend !== 'local-ios') {
     return [];
   }
+  if (expected && !sameBinding(before.binding, expected)) return [];
   const { udid, name, origin } = before.binding.device;
   const listing = await listSimulatorAsync(tools, udid);
 
   const letGo = await withRegistryLockAsync(
     async () => {
       const read = readBindingFile(file);
-      if (read.kind !== 'binding') {
+      if (read.kind !== 'binding' || !sameBinding(read.binding, before.binding)) {
         return null;
       }
       if (listing.kind === 'missing') {
@@ -220,4 +226,20 @@ export async function releaseWorktreeDevicesAsync(
       reason: stopped?.reason ?? null,
     },
   ];
+}
+
+/** Compare the acquisition too: a later dev may have rebound the same device. */
+function sameBinding(a: Binding, b: Binding): boolean {
+  const identity = ({ projectRoot, boundAt, device }: Binding) => [
+    projectRoot,
+    boundAt,
+    device.backend,
+    device.platform,
+    deviceIdOf(device),
+    device.backend === 'local-android' ? device.origin.kind : device.origin,
+    ...(device.backend === 'local-android' && device.origin.kind === 'spawned'
+      ? [device.origin.avd, device.origin.port, device.origin.emulatorPid]
+      : []),
+  ];
+  return JSON.stringify(identity(a)) === JSON.stringify(identity(b));
 }
