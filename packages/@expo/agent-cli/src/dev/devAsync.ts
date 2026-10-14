@@ -182,15 +182,19 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // refusals below, so a run that refuses creates no simulator, and `--plan` only inspects.
   const bindsHere = resolved.buildLocation != null;
   let acquired = boundEarly;
+  const implicitEas =
+    plan.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit === true;
 
   // @ref llp/0009-smart-followups.rfc.md §Examples per command
   // `--plan` stops here, so its follow-ups are about the plan itself and the plan object is the
   // whole answer.
   if (options.mode === 'plan') {
-    if (bindsHere) {
-      acquired = await acquireDevice(plan);
+    if (!implicitEas) {
+      if (bindsHere) {
+        acquired = await acquireDevice(plan);
+      }
+      plan = await withPlannedDevice(projectRoot, plan, acquired, options);
     }
-    plan = await withPlannedDevice(projectRoot, plan, acquired, options);
     const followups = followUpsEnabled(options.followups)
       ? // The typed flag, not the resolved platform: this is the plan the caller asked for, and the
         // command that runs it has to ask for the same one (F103).
@@ -204,7 +208,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken.
   // Detection may say the cloud is the only route this host leaves; it may not spend the caller's
   // EAS credits on that finding. A flag or the config is a person's own choice and runs.
-  if (plan.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit) {
+  if (implicitEas) {
     throw implicitEasRouteError(plan, options.platform);
   }
 

@@ -1686,6 +1686,33 @@ describe(devAsync, () => {
 
         expect(emitStartPlan).not.toHaveBeenCalled();
       });
+
+      it(`previews no --device for a plan whose EAS route nobody chose, and offers the --eas run without it`, async () => {
+        mockStaleDevClientState();
+        const { detectToolchainAsync } = await import('../../toolchain');
+        vi.mocked(detectToolchainAsync).mockResolvedValue({
+          platform: 'ios',
+          status: 'missing',
+          detail: 'no Xcode',
+          requirement: 'Xcode',
+          caveats: [],
+          impossible: true,
+        });
+        vi.mocked(previewExplicitDeviceAsync).mockResolvedValueOnce({
+          device: { ...device, name: 'My Sim', origin: 'explicit' },
+          summary: 'Will bind My Sim (SIM-1).',
+        });
+
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--ios', '--plan', '--device', 'My Sim']))
+        ).resolves.toBe(0);
+
+        expect(previewExplicitDeviceAsync).not.toHaveBeenCalled();
+        expect(vi.mocked(emitStartPlan).mock.calls[0]![0]).not.toHaveProperty('explicitDevice');
+        expect(emittedFollowUps().find((followup) => followup.id === 'dev')!.command).toBe(
+          'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
+        );
+      });
     });
   });
 });
