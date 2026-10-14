@@ -114,7 +114,8 @@ export const START_DEV_SERVER_ARGV: readonly string[] = ['--detach', '--wait-rea
 /**
  * The device the detached `dev` of the start phase bound, from the worktree's binding file before
  * and after the start. The child acquires and the parent only reads its result. A device whose
- * binding was live and up before the start is `existing`: the run keeps it.
+ * binding was live and up, or whose check did not answer, before the start is `existing`: the run
+ * keeps it.
  *
  * @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
  */
@@ -448,10 +449,10 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         forgetTarget();
       }
       const before = ownBinding();
-      const beforeUp =
-        before != null &&
-        (await inspectBindingAsync(projectRoot, options.platform, before.device.backend)).state ===
-          'up';
+      const state =
+        before &&
+        (await inspectBindingAsync(projectRoot, options.platform, before.device.backend)).state;
+      const beforeUp = state === 'up' || state === 'unknown';
       keepBoundDevice = beforeUp;
       const argv = [
         `--${options.platform}`,

@@ -10,6 +10,27 @@ import { buildSmokeDeps } from '../smokeAsync';
 
 vi.mock('../../log');
 vi.mock('../../dev/stopAsync', () => ({ devStopAsync: vi.fn(async () => 0) }));
+vi.mock('../../deviceBinding', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../deviceBinding')>()),
+  hostBindsPlatform: vi.fn(() => true),
+}));
+vi.mock('../../project/probe', () => ({
+  probeProjectStateAsync: vi.fn(async () => {
+    throw new Error('no project');
+  }),
+}));
+vi.mock('../../dev/detachAsync', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../dev/detachAsync')>()),
+  devDetachAsync: vi.fn(async () => 0),
+}));
+vi.mock('../../runtime/devServer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../runtime/devServer')>()),
+  discoverDevServerAsync: vi.fn(async () => ({
+    reachable: true,
+    devServerUrl: 'http://127.0.0.1:8081',
+    reason: null,
+  })),
+}));
 const root = '/work/app';
 beforeEach(() => {
   vol.reset();
@@ -29,6 +50,25 @@ it('an older smoke cleanup leaves a replacement binding untouched', async () => 
   await deps.releaseDevice();
   expect(readBindingFile(file)).toEqual(replacement);
   expect(tools.calls.filter(([command]) => command === 'shutdown')).toEqual([]);
+});
+
+it('a start whose device check did not answer keeps the bound device on cleanup', async () => {
+  writeBinding(bindingPathFor(root, 'ios', 'local-ios'), bindingFor(root, 'A'));
+  vi.spyOn(deviceTools, 'defaultTools').mockReturnValue(
+    fakeTools({
+      simulators: [{ udid: 'A', name: 'agent-cli 0000', state: 'Booted' }],
+      listTimesOut: true,
+    })
+  );
+  const deps = buildSmokeDeps(root, resolveSmokeOptions(['--ios']));
+  const start = await deps.startDevServer();
+  await deps.stopDevServer();
+  expect(start.bound).toMatchObject({ id: 'A', action: 'existing' });
+  expect(devStopAsync).toHaveBeenCalledWith(
+    root,
+    expect.objectContaining({ release: false }),
+    expect.anything()
+  );
 });
 
 it('cloud smoke stops its server without releasing local devices', async () => {
