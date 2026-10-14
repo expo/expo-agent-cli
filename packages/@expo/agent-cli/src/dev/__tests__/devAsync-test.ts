@@ -5,7 +5,7 @@ import path from 'path';
 import { acquireDeviceAsync, devicesDisabled, inspectBindingAsync } from '../../deviceBinding';
 import { bindingFor, fakeTools, writeBinding } from '../../deviceBinding/__tests__/fakeTools';
 import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
-import { notReusableError } from '../../deviceBinding/errors';
+import { deviceUnavailableError, notReusableError } from '../../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../../deviceBinding/preview';
 import { withLeaseExtendedAsync } from '../../deviceBinding/renew';
 import { readDevServerLockAsync } from '../../devLock/client';
@@ -1669,6 +1669,22 @@ describe(devAsync, () => {
         expect(emittedFollowUps().find((followup) => followup.id === 'dev')!.command).toBe(
           "npx @expo/agent-cli dev --ios --local --device 'My Sim' --port 8091 --detach --wait-ready"
         );
+      });
+
+      it(`fails --plan --device as the run does when the device tool times out`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(previewExplicitDeviceAsync).mockRejectedValueOnce(
+          deviceUnavailableError('create-timeout', { platform: 'ios' })
+        );
+
+        await expect(
+          devAsync(
+            projectRoot,
+            resolveDevOptions(['--ios', '--local', '--plan', '--device', 'Sim'])
+          )
+        ).rejects.toMatchObject({ data: { reason: 'create-timeout' }, exitCode: 22 });
+
+        expect(emitStartPlan).not.toHaveBeenCalled();
       });
     });
   });

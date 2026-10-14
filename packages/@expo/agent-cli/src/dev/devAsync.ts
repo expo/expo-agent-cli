@@ -5,6 +5,7 @@
 
 import type { OpenAppOnEasReport } from './openAppEas';
 import { withLeaseExtendedAsync } from '../deviceBinding/renew';
+import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
 import { outputTail } from '../deploy/parseOutput';
 import { readDevServerLockAsync } from '../devLock/client';
@@ -364,12 +365,13 @@ async function withPlannedDevice(
         explicitDevice: { refuses: false, summary },
       };
     } catch (error) {
+      if (!isExplicitChoiceRefusal(error)) throw error;
       return {
         ...plan,
         explicitDevice: {
           refuses: true,
-          summary: error instanceof Error ? error.message.split('\n')[0]! : String(error),
-          how: (error instanceof CommandError && error.suggestedCommand) || null,
+          summary: error.message.split('\n')[0]!,
+          how: error.suggestedCommand ?? null,
         },
       };
     }

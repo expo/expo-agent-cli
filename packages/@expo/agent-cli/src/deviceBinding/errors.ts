@@ -140,6 +140,18 @@ export function notReusableError(
   return error;
 }
 
+const CHOICE_REFUSALS = [
+  'explicit-not-found',
+  'explicit-bound',
+  'own-explicit-over-owned',
+  'not-reusable',
+];
+
+/** A refusal of the choice itself, which `dev --plan --device` prints; any other error fails the plan as it fails the run. */
+export function isExplicitChoiceRefusal(error: unknown): error is CommandError {
+  return error instanceof CommandError && CHOICE_REFUSALS.includes(error.data?.reason as string);
+}
+
 function portHolders(boundBy: BoundSerial[]): string {
   return (
     boundBy.map(({ id, root }) => `${id} (${root ?? 'not ours'})`).join(', ') ||
