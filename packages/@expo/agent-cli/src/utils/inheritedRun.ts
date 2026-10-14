@@ -8,6 +8,7 @@
 // copied: getting it subtly different for one of the two CLIs is a bug nobody would look for.
 
 import { spawn } from 'child_process';
+import { prepareChildEvents, type ChildEventObserver } from './childEvents';
 
 import { withRunnerLockAsync, runnerSpawnKey } from './runnerLock';
 import { resolveSpawnTarget } from './windowsShim';
@@ -40,6 +41,7 @@ export function runInheritedAsync(
   args: string[],
   options: {
     cwd: string;
+    onEvent?: ChildEventObserver;
     onExit?: (code: number, signal: NodeJS.Signals | null) => void;
     onSpawnError?: (error: NodeJS.ErrnoException) => void;
   }
@@ -58,8 +60,10 @@ function runInheritedNowAsync(
     cwd,
     onExit,
     onSpawnError,
+    onEvent,
   }: {
     cwd: string;
+    onEvent?: ChildEventObserver;
     onExit?: (code: number, signal: NodeJS.Signals | null) => void;
     onSpawnError?: (error: NodeJS.ErrnoException) => void;
   }
@@ -67,11 +71,16 @@ function runInheritedNowAsync(
   return new Promise<number>((resolve, reject) => {
     // On Windows the resolved bin is a batch shim, which only `cmd.exe` can run.
     const target = resolveSpawnTarget(command, args);
-    const child = spawn(target.command, target.args, {
-      cwd,
-      stdio: 'inherit',
-      shell: target.shell,
-    });
+    const observation = prepareChildEvents(
+      {
+        cwd,
+        stdio: 'inherit',
+        shell: target.shell,
+      },
+      onEvent
+    );
+    const child = spawn(target.command, target.args, observation.options);
+    const events = observation.attach(child);
 
     const listeners = TERMINAL_SIGNALS.map((signal) => {
       const forward = () => {
@@ -92,8 +101,9 @@ function runInheritedNowAsync(
       reject(error);
     });
 
-    child.on('close', (code, signal) => {
+    child.on('close', async (code, signal) => {
       stopForwardingSignals();
+      await events?.finished;
       const exitCode = code ?? (signal === 'SIGINT' || signal === 'SIGTERM' ? 0 : 1);
       onExit?.(exitCode, signal);
       resolve(exitCode);

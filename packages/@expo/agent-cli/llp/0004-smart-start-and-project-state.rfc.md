@@ -493,11 +493,20 @@ A `--wait-ready` failure of a building plan recovers into
 up. `dev --detach --json` carries `phase`. See [[0021-honest-reports]] for the window
 after a `--wait-ready` claim when the step also opens the app.
 
-A build is recorded when the app reaches the device, whatever the launch then does
-(`src/dev/buildEvidence.ts`). The install line is what is read (`› Installing …` from
-`@expo/cli`). A step that failed still has its output read. Two cases are not recorded:
-a build that died before the install, and anything in `inherit` output mode, where
-nothing is captured.
+A local build is recorded as soon as its child reports a validated `run:install`, before
+Metro exits, whatever the launch then does ([[0036-record-build-before-metro-exits]]).
+The private event pipe works with captured, tee and inherited terminal output. The
+application and platform must match; a known device target must match the child's selection.
+`› Installing …` only marks progress and cannot establish completed installation.
+
+The recorded fingerprint is measured before preparation (or compilation when no preparation
+is planned), independently of both fingerprint caches. A changed post-preparation measurement
+stops compilation and asks for another run. A changed or unavailable post-install measurement
+keeps the previous record and reports unknown freshness. A confirmed installation survives
+launch failure, but compilation success, cancellation and a clean exit alone never publish a
+record. Older or unrecognized Expo CLIs run with their original transport and retain the
+previous record. The exact CLI version is checked before attaching an event pipe: the SDK 57
+logger crashes on a pipe because it calls `fsync` on that descriptor. [observed, 2026-10-14]
 
 Exit codes. `dev --detach` exits 0 when a dev server is up, whether it started one or
 found one. Exit 1 when the child never published a lock, and 1 when `--wait-ready` gave

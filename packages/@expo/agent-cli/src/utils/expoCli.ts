@@ -1,3 +1,6 @@
+import semver from 'semver';
+import { Log } from '../log';
+import type { ChildEventObserver } from './childEvents';
 import { debugEvent } from '../events';
 import { CommandError } from './errors';
 import { runInheritedAsync } from './inheritedRun';
@@ -40,6 +43,7 @@ export function resolveExpoCli(projectRoot: string, args: string[]): ExpoCliComm
 }
 
 export interface SpawnExpoOptions {
+  onEvent?: ChildEventObserver;
   /** Defaults to `capture`. `inherit` is {@link runExpoAsync}'s mode, and only its. */
   output?: CapturedOutput;
   /** Kill the run when it goes silent on a question. See `SubprocessOptions.promptGuard`. */
@@ -81,15 +85,17 @@ export interface SpawnExpoOptions {
 export async function spawnExpoAsync(
   projectRoot: string,
   args: string[],
-  { output = 'capture', promptGuard, ci = true }: SpawnExpoOptions = {}
+  { output = 'capture', promptGuard, ci = true, onEvent }: SpawnExpoOptions = {}
 ): Promise<{ cli: ExpoCliCommand; result: SubprocessResult }> {
   const cli = resolveExpoCli(projectRoot, args);
   debugEvent('expo_resolved', { command: cli.command, args: cli.args });
+  if (onEvent && !(await supportsInstallEventsAsync(projectRoot))) onEvent = undefined;
 
   const result = await spawnSubprocessAsync(cli.command, cli.args, {
     cwd: projectRoot,
     output,
     promptGuard,
+    ...(onEvent ? { onEvent } : null),
     // Nothing rather than `CI=0`: a machine whose own environment says `CI` is a machine where the
     // frozen bundler is the right behaviour, and overriding it here would be this wrapper deciding
     // something about the caller's environment that it was never told.
@@ -110,12 +116,18 @@ export async function spawnExpoAsync(
  * stop the dev server, which matters for agents that drive the CLI programmatically.
  * An interrupt then resolves as a clean exit, because the stop was asked for.
  */
-export function runExpoAsync(projectRoot: string, args: string[]): Promise<number> {
+export async function runExpoAsync(
+  projectRoot: string,
+  args: string[],
+  onEvent?: ChildEventObserver
+): Promise<number> {
   const { command, args: commandArgs } = resolveExpoCli(projectRoot, args);
   debugEvent('expo_resolved', { command, args: commandArgs });
+  if (onEvent && !(await supportsInstallEventsAsync(projectRoot))) onEvent = undefined;
 
   return runInheritedAsync(command, commandArgs, {
     cwd: projectRoot,
+    ...(onEvent ? { onEvent } : null),
     onExit: (code, signal) => debugEvent('expo_exit', { code, signal: signal ?? undefined }),
     onSpawnError: (error) =>
       debugEvent('expo_spawn_failed', { command, error: debugEvent.error(error) }),
@@ -128,4 +140,38 @@ export function runExpoAsync(projectRoot: string, args: string[]): Promise<numbe
     }
     throw error;
   });
+}
+
+/** SDK 57's logger fsyncs numeric LOG_EVENTS descriptors and crashes on a pipe. Only
+ * verified event-capable CLI versions get one; query the exact executable, not Expo's SDK.
+ * Unknown/older versions keep their original environment and streams, and record nothing.
+ */
+const eventSupport = new Map<string, Promise<boolean>>();
+async function supportsInstallEventsAsync(projectRoot: string): Promise<boolean> {
+  const cli = resolveExpoCli(projectRoot, ['--version']);
+  const key = JSON.stringify([projectRoot, cli]);
+  let pending = eventSupport.get(key);
+  if (!pending) {
+    pending = (async () => {
+      const result = await spawnSubprocessAsync(cli.command, cli.args, {
+        cwd: projectRoot,
+        output: 'capture',
+        timeoutMs: 10000,
+      });
+      const version = result.stdout.trim();
+      const supported =
+        result.exitCode === 0 &&
+        !result.timedOut &&
+        semver.valid(version) != null &&
+        semver.gte(version, '58.1.4');
+      if (!supported) {
+        Log.warn(
+          'This Expo CLI version has no verified live installation event transport. The build will run with its usual output, but cannot update the verified build record.'
+        );
+      }
+      return supported;
+    })();
+    eventSupport.set(key, pending);
+  }
+  return pending;
 }

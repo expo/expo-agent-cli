@@ -15,6 +15,7 @@
 // `sources` are `null`, which every consumer already has to handle for a failed fingerprint.
 
 import fs from 'fs';
+import { randomUUID } from 'crypto';
 import path from 'path';
 
 import type { FingerprintSource } from '../project/fingerprint';
@@ -109,21 +110,49 @@ function parseEntry(value: unknown): LastBuildFingerprint | null {
  *
  * @param fingerprint the hash alone, or the whole fingerprint so a later `impact` can diff it.
  */
-export function recordLastBuildFingerprint(
+export async function recordLastBuildFingerprint(
   projectRoot: string,
   platform: NativePlatform,
   fingerprint: string | LastBuildFingerprint
-): void {
+): Promise<boolean> {
+  const destination = getLastBuildFilePath(projectRoot);
+  const lock = `${destination}.lock`;
+  const temporary = `${destination}.${randomUUID()}.tmp`;
+  let held = false;
   try {
-    const entry: LastBuildFingerprint =
+    ensureDotExpoProjectDirectoryInitialized(projectRoot);
+    const deadline = Date.now() + 5000;
+    // Exclusive creation serializes read/merge/write across processes as well as platforms.
+    // Never steal a timed-out lock: a suspended writer may still own it. A crash leaves an
+    // advisory lock that can be removed with the stopped process's .expo state.
+    while (!held) {
+      try {
+        const fd = fs.openSync(lock, 'wx');
+        held = true;
+        fs.closeSync(fd);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || Date.now() >= deadline)
+          throw error;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+    const entry =
       typeof fingerprint === 'string' ? { hash: fingerprint, sources: null } : fingerprint;
     const record = { ...readLastBuildRecord(projectRoot), [platform]: entry };
-    ensureDotExpoProjectDirectoryInitialized(projectRoot);
-    // Not pretty-printed. A real project's fingerprint is tens of thousands of bytes of sources
-    // (an SDK 57 Expo Router app measures ~25 KB for iOS and ~30 KB for android [observed —
-    // 2026-08-24]), and indenting it is a third again of that for a file nobody reads by hand.
-    fs.writeFileSync(getLastBuildFilePath(projectRoot), JSON.stringify(record) + '\n');
+    fs.writeFileSync(temporary, JSON.stringify(record) + '\n', { flag: 'wx' });
+    fs.renameSync(temporary, destination);
+    return true;
   } catch (error) {
     debugEvent('last_build_record_failed', { error: debugEvent.error(error as Error) });
+    return false;
+  } finally {
+    try {
+      fs.unlinkSync(temporary);
+    } catch {}
+    if (held) {
+      try {
+        fs.unlinkSync(lock);
+      } catch {}
+    }
   }
 }

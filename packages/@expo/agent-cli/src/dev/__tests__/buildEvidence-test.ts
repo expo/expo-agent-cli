@@ -1,11 +1,11 @@
-import { appReachedDevice } from '../buildEvidence';
+import { installationStarted } from '../buildEvidence';
 
-describe(appReachedDevice, () => {
+describe(installationStarted, () => {
   // The line that stopped `05-dev-build-ios.log` before the compiler ever ran. Nothing was built
   // and nothing was installed, so nothing may be recorded.
   it(`should be false for a step that failed before it built anything`, () => {
     expect(
-      appReachedDevice(
+      installationStarted(
         [
           '› Planning build',
           "CommandError: 'pod install' failed.",
@@ -19,7 +19,7 @@ describe(appReachedDevice, () => {
     // The compiler finished and the step died before the install. The record is a claim about the
     // app **on a device**, so a binary that never left the build directory is not one.
     expect(
-      appReachedDevice(['› Build Succeeded', '› 0 error(s), and 1 warning(s)'].join('\n'))
+      installationStarted(['› Build Succeeded', '› 0 error(s), and 1 warning(s)'].join('\n'))
     ).toBe(false);
   });
 
@@ -27,7 +27,7 @@ describe(appReachedDevice, () => {
   // `› Build Succeeded` to the `osascript` refusal that ended the step.
   it(`should be true for the iOS run that built, installed, and died at the launch`, () => {
     expect(
-      appReachedDevice(
+      installationStarted(
         [
           '› Build Succeeded',
           '',
@@ -44,7 +44,7 @@ describe(appReachedDevice, () => {
   // `runAndroidAsync` logs the same `› Installing <binary>` line for the APK it resolved.
   it(`should be true for the Android run that installed the APK it built`, () => {
     expect(
-      appReachedDevice(
+      installationStarted(
         [
           'BUILD SUCCESSFUL in 4m 11s',
           '› Installing /project/android/app/build/outputs/apk/debug/app-debug.apk',
@@ -56,20 +56,20 @@ describe(appReachedDevice, () => {
 
   // The fallback path of `installAppAsync`, for a build whose APK this CLI could not name.
   it(`should be true for the Gradle install fallback`, () => {
-    expect(appReachedDevice('› Failed to locate binary file, installing with Gradle...\n')).toBe(
+    expect(installationStarted('› Failed to locate binary file, installing with Gradle...\n')).toBe(
       true
     );
   });
 
   it(`should be false for output that was never captured`, () => {
-    expect(appReachedDevice('')).toBe(false);
+    expect(installationStarted('')).toBe(false);
   });
 
   // The word is not the sentence: `expo install` and every npm-shaped tool print "Installing"
   // constantly, and the marker is the Expo CLI's own `›`-prefixed item.
   it(`should not read a package installer's line as an app reaching a device`, () => {
     expect(
-      appReachedDevice(
+      installationStarted(
         ['Installing NDK (Side by side) 27.1.12297006 in /Users/me/Library/Android/sdk/ndk'].join(
           '\n'
         )

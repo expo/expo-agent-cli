@@ -13,7 +13,7 @@
 // parses it back, the same way the plan table of `src/plan/format.ts` is pinned to its readers
 // below. The parent's report goes silently wrong the moment the two drift.
 
-import { appReachedDevice } from './buildEvidence';
+import { installationStarted } from './buildEvidence';
 
 /** How many lines of the child's log are searched for its verdict. */
 export const VERDICT_LOG_LINES = 400;
@@ -172,8 +172,7 @@ export function stepOpensPlatform(step: string): boolean {
  *
  * Pure over the lines, like {@link parseDetachedChildVerdict}, and reading the same two formats
  * this CLI owns: the plan table of `src/plan/format.ts`, and the install marker of
- * `./buildEvidence.ts` — the one that already decides whether a `run:*` step got its app onto a
- * device (F121). Together they answer the only question the parent has: is the compiler still
+ * `./buildEvidence.ts` — a progress marker only, never successful-installation evidence. Together they answer the only question the parent has: is the compiler still
  * running, or is what follows it.
  *
  * @param rawLines the child's log, ANSI stripped, oldest first.
@@ -207,7 +206,7 @@ export function parseDetachedChildPhase(rawLines: readonly string[]): DetachedCh
   // The install is what says the compiler finished: it is the next thing `expo run:*` does, and it
   // is the marker F121 already reads for exactly that reason. After it, what remains of the plan is
   // a dev server, and a bundler that has not answered yet is about the wait rather than a build.
-  if (compilingStep != null && !appReachedDevice(lines.join('\n'))) {
+  if (compilingStep != null && !installationStarted(lines.join('\n'))) {
     return { phase: 'building', step: compilingStep, opensPlatform: true };
   }
 
