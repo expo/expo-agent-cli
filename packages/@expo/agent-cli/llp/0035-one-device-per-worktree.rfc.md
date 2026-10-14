@@ -138,6 +138,8 @@ export interface DeviceTools {
   spawnEmulator(args: string[]): { pid?: number; exited: Promise<number | null>; kill(): void };
   now: () => Date;
   isPidAlive: (pid: number) => boolean;
+  commandOf: (pid: number) => string | null; // '' when `ps` lists none, null where `ps` does not exist
+  kill: (pid: number) => void;
 }
 export type AcquireResult = {
   device: BoundDevice;
@@ -222,7 +224,7 @@ Inputs: the own binding and the other worktrees' bindings, each marked stale or 
 
 **`acquireCloudBindingAsync(root, { platform, id, origin, tools? })`**: under the lock, writes or rewrites the own `cloud` binding (a reuse of the same id keeps `boundAt` and `origin`), then reaps the rows that need no inventory. The `origin` comes from the probe's reported source. Every session id a verb obtains is bound, a reuse of the bound id and a start that failed after it created the session included, so a later reap can stop that session.
 
-**`inspectBindingAsync(root, platform, backend, tools?) → Inspection`**, lock-free, no extension, no network, one subprocess at most. iOS: one `simctl list devices -j` filtered by udid. Android: `get-state`, plus `isPidAlive` for `spawned`; a `get-state` whose stderr says the device is not found counts as not listed, and any other non-zero exit is `cause: tool`. Cloud: the binding alone. The device check uses the 20 s timeout; `status` uses its own probe deadline. The inspect cache is main's probe cache with the root added to its key; `acquire` and release clear it; the rung loop never uses it. `state` is the first row that matches:
+**`inspectBindingAsync(root, platform, backend, tools?) → Inspection`**, lock-free, no extension, no network, one subprocess at most. iOS: one `simctl list devices -j` filtered by udid. Android: `get-state`, plus `isPidAlive` for `spawned`; a `get-state` whose stderr says the device is not found counts as not listed, one that says offline, unauthorized or still authorizing counts as listed and not up, and any other non-zero exit is `cause: tool`. Cloud: the binding alone. The device check uses the 20 s timeout; `status` uses its own probe deadline. The inspect cache is main's probe cache with the root added to its key; `acquire` and release clear it; the rung loop never uses it. `state` is the first row that matches:
 
 | Condition                                                                                                      | `state`                     | Rung loop                                                                                                                          |
 | -------------------------------------------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
@@ -320,7 +322,7 @@ At eas-cli 24.7.0 a `--json` start still writes the session id to `.env.eas-simu
 
 Each accepted race costs one rerun of `dev`, never a lost build or a touched human device.
 
-1. `-read-only` with `adb reverse` and install, "an emulator on a taken port exits non-zero", and the cold boot time are unverified here. The §Live gate runs before 3a to 4 merge.
+1. The Android facts §Live gate verifies: a second `-read-only` instance boots beside the first and takes `adb reverse` and an install, an emulator started on a taken port exits non-zero, the launcher keeps its pid, and a cold boot plus the install fits `BOOT_DEVICE_TIMEOUT_MS`. The gate passed on SDK 58; the cold start's wall time is the cost every instance start pays (Decision 2).
 2. A pid reused by an unrelated long-lived process keeps the registry lock until a human reads the message; a reused emulator pid is never killed where `ps` exists, and on a platform without `ps` the kill can hit the wrong process. Needs pid wrap-around during days of uptime.
 3. eas-cli skew: a project pinned under 23.2 refuses `--tag` on the start; §EAS session binding tests the fallback.
 4. The idle-timeout semantics on the service are unread; 30 min may stop a session during a long pause.
@@ -374,7 +376,7 @@ How does a worktree get an iOS simulator nobody else has, and how do the other v
 - `dev --detach` on a running server boots its own `Shutdown` simulator and refuses otherwise.
 - `navigate` without `dev` falls to the EAS rung, which until PR 5 accepts the dotenv id only, then refuses naming `dev`; with it, it drives the bound device only. Without a platform flag, any `up` binding wins.
 - `smoke --ios` gets its simulator from the binding and leaves it bound.
-- Android unchanged.
+- Android follows §Android instance.
 
 ### Commit order
 
@@ -410,9 +412,9 @@ Per §Contracts every verb honors, without `android.ts`, `cloud.ts`, `reap.ts` a
   - The `--plan` reason "will reuse or create a simulator" is added only for `--ios` without `--eas` and with devices on, so a stubbed harness's plans are unchanged.
   - `smoke`'s iOS boot skips under `AGENT_CLI_NO_DEVICE` and reports a failed boot phase; its install phase honours the boot's `installNeeded`, because a created simulator's disk holds nothing to read.
 - `withDevice(plan, device)` runs once a device is acquired, after the `--port` block, the `--plan` return and the refusals, for a serving draft (acquired in the resolver's callback) and a building one alike. It sets `--device <udid>` on every `run` and `install` step and replaces any `--device` there; on a plan with neither it is a no-op. `AppPresenceProbe.installDevice` goes for iOS. `devAsync` passes `acquired.device` through `executePlanAsync` to `openAppForRunAsync`'s local branch, which hands it to `openAppOnDeviceAsync`; its iOS probe and boot go, and it passes the device to `openRouteAsync` through a new `device?: BoundDevice` option, which skips `resolveDeviceAsync`, so the open inspects nothing twice. `report.booted` is `acquired.justBooted`.
-- The callback runs for iOS only, and on macOS only; on another host `dev --ios` binds nothing and the plan is unprobed, which is what the live-cloud suite's Linux worker relies on. Android keeps main's probe-and-boot path, its first-adb rung, its `probeLocalDeviceAsync` branch and its `installDevice` until 3b. `acquire` is skipped for `--eas`.
+- The callback runs for iOS on macOS only; on another host `dev --ios` binds nothing and the plan is unprobed, which is what the live-cloud suite's Linux worker relies on. Android acquisition, where `adb` resolves, is described in §Android instance. `acquire` is skipped for `--eas`.
 - `dev --plan` passes a callback that inspects the own binding and returns it as `reused` with `justBooted: false` when the state is `up` or `not-up`; otherwise null. For a building draft `devAsync` calls that same callback itself and pins the plan, with no probe. When the callback returned null, `devAsync` leaves the step unpinned and adds the reason "will reuse or create a simulator" to the plan, building or not.
-- `dev --detach`: the child acquires and never releases on exit. `devDetachAsync` gains an option `reuseBoundDevice`, default false, that `devAsync` passes as true and `smoke` leaves unset. With it, when the server is already running, `devDetachAsync` calls `acquireDeviceAsync` with `reuseOnly` before `reportDetached` prints, on macOS for `--ios` without `--eas` and without `AGENT_CLI_NO_DEVICE`. Linux and Windows reuse the server without acquiring an iOS simulator. A parked own simulator is booted, the boot is waited for, and the `action` line is printed on stderr before the report. Any other choice refuses `not-reusable` (exit 20), because a device created here would carry no app. The child's `DEVICE_*` and `NO_BOUND_DEVICE` errors are written to the child verdict and the parent rethrows them unchanged, per §Output and errors; `detachFailureError` keeps `DEV_DETACH_DIED` for everything else.
+- `dev --detach`: the child acquires and never releases on exit. `devDetachAsync` gains an option `reuseBoundDevice`, default false, that `devAsync` passes as true and `smoke` leaves unset. With it, when the server is already running, `devDetachAsync` calls `acquireDeviceAsync` with `reuseOnly` before `reportDetached` prints, for `--ios` on macOS and for `--android` where `adb` resolves, without `--eas` and without `AGENT_CLI_NO_DEVICE`. A host that cannot run the platform's device reuses the server without acquiring. A parked own simulator is booted, the boot is waited for, and the `action` line is printed on stderr before the report. Any other choice refuses `not-reusable` (exit 20), because a device created here would carry no app. The child's `DEVICE_*` and `NO_BOUND_DEVICE` errors are written to the child verdict and the parent rethrows them unchanged, per §Output and errors; `detachFailureError` keeps `DEV_DETACH_DIED` for everything else.
 
 ### iOS readers
 
@@ -426,7 +428,7 @@ In bootstrap mode `smoke` starts its own `dev --detach --no-open` child through 
 
 ### iOS deletions
 
-`bootSimulatorAsync`, `pickSimulator`, the iOS branch of `bootDeviceAsync` (the Android branch and `BOOT_DEVICE_TIMEOUT_MS` stay), `probeIosSimulatorAsync`, `parseBootedIosSimulator` (the plural `parseBootedIosSimulators` stays for `status --device`), the iOS `installDevice`, `NO_DEVICE` and `NO_IOS_DEVICE`. Help texts: the iOS lines that `git grep -i 'booted'` finds over `src/**/index.ts` and `runtime/stopAsync.ts`; the Android lines wait for 3b.
+`bootSimulatorAsync`, `pickSimulator`, the iOS branch of `bootDeviceAsync` (`BOOT_DEVICE_TIMEOUT_MS` stays; §Android deletions removes the rest), `probeIosSimulatorAsync`, `parseBootedIosSimulator` (the plural `parseBootedIosSimulators` stays for `status --device`), the iOS `installDevice`, `NO_DEVICE` and `NO_IOS_DEVICE`. Help texts: the iOS lines that `git grep -i 'booted'` finds over `src/**/index.ts` and `runtime/stopAsync.ts`; the Android lines wait for 3b.
 
 ### Docs
 
