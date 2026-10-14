@@ -47,23 +47,28 @@ export async function runCleanupAsync(
         ? { projectRoot: item.binding.projectRoot, devServerCleanup: 'not-checked' as const }
         : {}),
     };
+    let gone: string | null = null;
     try {
       const result = await actAsync(item, tools);
       report.released = result.ok;
       report.shutDown = result.shutDown ?? (result.ok && item.action !== 'forget');
       if (!result.ok) report.error = result.reason ?? 'device cleanup failed';
+      gone = result.gone ?? null;
     } catch (error) {
       report.error = error instanceof Error ? error.message : String(error);
     }
+    const reason = gone ? 'device-gone' : item.reason;
+    report.reason = reason;
+    const detail = report.error ?? gone;
     console.error(
-      `${report.error ? 'Could not release' : item.action === 'delete' ? 'Deleted' : 'Released'} ${report.name} (${item.reason})${report.error ? `: ${report.error}` : '.'}`
+      `${report.error ? 'Could not release' : item.action === 'delete' ? 'Deleted' : 'Released'} ${report.name} (${reason})${detail ? `: ${detail}` : '.'}`
     );
     if (item.reaped && item.reason === 'deleted-worktree') {
       console.error(
         `Dev-server cleanup was not checked for deleted worktree ${item.binding.projectRoot}; a CLI or Metro process may still be running.`
       );
     }
-    if (item.reaped) event('device_binding_reaped', { reason: item.reason });
+    if (item.reaped) event('device_binding_reaped', { reason });
     reports.push(report);
   }
   return reports;
@@ -72,14 +77,21 @@ export async function runCleanupAsync(
 async function actAsync(
   { binding: { device }, action }: Cleanup,
   tools: DeviceTools
-): Promise<{ ok: boolean; reason: string | null; shutDown?: boolean }> {
+): Promise<{
+  ok: boolean;
+  reason: string | null;
+  shutDown?: boolean;
+  /** Why a `kill` signalled nothing: the instance had already exited. */
+  gone?: string | null;
+}> {
   if (device.backend === 'local-ios' && action === 'delete')
     return deleteSimulatorAsync(tools, device.udid);
   if (device.backend === 'local-ios' && action === 'shutdown')
     return shutdownSimulatorAsync(tools, device.udid);
   if (device.backend === 'local-android' && device.origin.kind === 'spawned' && action === 'kill') {
     const result = killEmulatorIfOurs(tools, device.origin);
-    return { ok: !result.failed, reason: result.reason, shutDown: result.killed };
+    if (result.failed) return { ok: false, reason: result.reason, shutDown: false };
+    return { ok: true, reason: null, shutDown: result.killed, gone: result.reason };
   }
   return { ok: true, reason: null };
 }

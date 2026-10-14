@@ -158,3 +158,25 @@ it('runs an already queued emulator kill when a later registry removal fails', a
     spy.mockRestore();
   }
 });
+
+it('a reaped emulator whose pid now runs another program is reported device-gone and not killed', async () => {
+  const stderr = vi.spyOn(console, 'error');
+  const tools = fakeTools({ alivePids: [5001] });
+  writeBinding(
+    bindingPathFor(OTHER, 'android', 'local-android'),
+    androidBindingFor(
+      OTHER,
+      'emulator-5554',
+      { kind: 'spawned', avd: 'Pixel', port: 5554, emulatorPid: 5001 },
+      { expiresAt: '2020-01-01T00:00:00Z' }
+    )
+  );
+  const { reports } = await reapDevicesAsync(ROOT, { tools });
+  expect(tools.killed).toEqual([]);
+  expect(reports).toMatchObject([
+    { id: 'emulator-5554', released: true, shutDown: false, reason: 'device-gone' },
+  ]);
+  expect(stderr.mock.calls.flat().join('\n')).toContain(
+    '(device-gone): pid 5001 is not the emulator instance of Pixel on port 5554 any more'
+  );
+});
