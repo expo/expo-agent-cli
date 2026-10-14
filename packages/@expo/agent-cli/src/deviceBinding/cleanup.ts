@@ -4,6 +4,7 @@ import { killEmulatorIfOurs } from './android';
 import { event } from './events';
 import { shutdownSimulatorAsync } from './ios';
 import { deviceReport } from './records';
+import { restoreBindingIfGoneAsync } from './release';
 import type { Binding, DeviceTools, ReleasedDevice } from './types';
 
 export type Cleanup = {
@@ -11,6 +12,8 @@ export type Cleanup = {
   action: 'forget' | 'shutdown' | 'delete' | 'kill';
   reason: string;
   reaped?: boolean;
+  /** The binding file the section removed; a failed device action writes the binding back to it. */
+  removedFile?: string;
 };
 export type CleanupReport = ReleasedDevice & {
   error?: string;
@@ -57,12 +60,22 @@ export async function runCleanupAsync(
     } catch (error) {
       report.error = error instanceof Error ? error.message : String(error);
     }
+    if (report.error && item.removedFile) {
+      try {
+        await restoreBindingIfGoneAsync(item.removedFile, item.binding, tools);
+      } catch (error) {
+        report.error += `; the binding was not written back: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
     const reason = gone ? 'device-gone' : item.reason;
     report.reason = reason;
     const detail = report.error ?? gone;
     console.error(
       `${report.error ? 'Could not release' : item.action === 'delete' ? 'Deleted' : 'Released'} ${report.name} (${reason})${detail ? `: ${detail}` : '.'}`
     );
+    // The How line rides on the error dev:stop prints, not on the progress line above.
+    const step = report.error ? manualStep(item) : null;
+    if (step) report.error = `${report.error}\nHow: run "${step}".`;
     if (item.reaped && item.reason === 'deleted-worktree') {
       console.error(
         `Dev-server cleanup was not checked for deleted worktree ${item.binding.projectRoot}; a CLI or Metro process may still be running.`
@@ -72,6 +85,15 @@ export async function runCleanupAsync(
     reports.push(report);
   }
   return reports;
+}
+
+/** The command that does by hand what a failed device action did not. */
+function manualStep({ binding: { device }, action }: Cleanup): string | null {
+  if (device.backend === 'local-ios' && (action === 'delete' || action === 'shutdown'))
+    return `xcrun simctl ${action} ${device.udid}`;
+  if (device.backend === 'local-android' && device.origin.kind === 'spawned' && action === 'kill')
+    return `kill ${device.origin.emulatorPid}`;
+  return null;
 }
 
 async function actAsync(

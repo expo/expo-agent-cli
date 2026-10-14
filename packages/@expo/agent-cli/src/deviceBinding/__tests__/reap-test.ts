@@ -180,3 +180,64 @@ it('a reaped emulator whose pid now runs another program is reported device-gone
     '(device-gone): pid 5001 is not the emulator instance of Pixel on port 5554 any more'
   );
 });
+
+it('a simulator whose delete failed is deleted by the next reap', async () => {
+  const stderr = vi.spyOn(console, 'error');
+  const tools = fakeTools({ simulators: [{ udid: 'OLD', name: 'old', state: 'Booted' }] });
+  writeBinding(foreign(), bindingFor(OTHER, 'OLD'));
+  fs.rmSync(OTHER, { recursive: true });
+  const simctl = tools.simctl;
+  let failing = true;
+  tools.simctl = async (args, options) =>
+    failing && args[0] === 'delete'
+      ? { stdout: '', stderr: 'delete failed', exitCode: 1 }
+      : simctl(args, options);
+  const first = await reapDevicesAsync(ROOT, { tools });
+  failing = false;
+  const second = await reapDevicesAsync(ROOT, { tools });
+  expect(first.reports).toMatchObject([{ id: 'OLD', released: false }]);
+  expect(second.reports).toMatchObject([{ id: 'OLD', released: true }]);
+  expect(readBindingFile(foreign())).toEqual({ kind: 'none' });
+  expect(tools.simulators).toEqual([]);
+  expect(first.reports[0]!.error).toBe(
+    'simctl delete OLD exited 1: delete failed\nHow: run "xcrun simctl delete OLD".'
+  );
+  expect(stderr.mock.calls.flat().join('\n')).not.toContain('How:');
+});
+
+it('an emulator whose kill threw is killed by the next reap', async () => {
+  const tools = fakeTools({
+    emulators: [
+      {
+        serial: 'emulator-5554',
+        state: 'device',
+        pid: 5001,
+        command: 'emulator -avd Pixel -ports 5554,5555',
+      },
+    ],
+  });
+  const file = bindingPathFor(OTHER, 'android', 'local-android');
+  writeBinding(
+    file,
+    androidBindingFor(
+      OTHER,
+      'emulator-5554',
+      { kind: 'spawned', avd: 'Pixel', port: 5554, emulatorPid: 5001 },
+      { expiresAt: '2020-01-01T00:00:00Z' }
+    )
+  );
+  const kill = tools.kill;
+  let failing = true;
+  tools.kill = (pid) => {
+    if (failing) throw new Error('kill EPERM');
+    kill(pid);
+  };
+  const first = await reapDevicesAsync(ROOT, { tools });
+  failing = false;
+  const second = await reapDevicesAsync(ROOT, { tools });
+  expect(first.reports).toMatchObject([{ id: 'emulator-5554', released: false }]);
+  expect(second.reports).toMatchObject([{ id: 'emulator-5554', released: true, shutDown: true }]);
+  expect(readBindingFile(file)).toEqual({ kind: 'none' });
+  expect(tools.killed).toEqual([5001]);
+  expect(first.reports[0]!.error).toBe('kill EPERM\nHow: run "kill 5001".');
+});

@@ -49,10 +49,11 @@ export function reapSection(
     if (!cleanup) continue;
     if (cleanup.action === 'shutdown') {
       writeBindingFile(file, { ...binding, expiresAt: tools.now().toISOString() });
+      actions.push(cleanup);
     } else {
       removeBindingFile(file);
+      actions.push({ ...cleanup, removedFile: file });
     }
-    actions.push(cleanup);
   }
   return actions;
 }

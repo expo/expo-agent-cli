@@ -172,7 +172,7 @@ export type ReleasedDevice = {
 ```
 
 - Origins. `created`: the CLI may shut down, park and delete. `spawned`: the CLI may kill the emulator it spawned. `explicit`: boot at most. `cloud` `started`: this CLI started the session or found it by tag, and may stop it; `dotenv`: adopted from `.env.eas-simulator`; a reap never stops it, `dev:stop --eas` does, as today.
-- Let go, one rule per origin, first match. The file action runs under the lock, the device action after it.
+- Let go, one rule per origin, first match. The file action runs under the lock, the device action after it. A reap's `delete` or `kill` that fails writes the binding back under the lock, unless another binding took its file, so the next reap tries again.
   - A local binding whose device the inventory does not list or lists as unavailable (its runtime was removed), or a `spawned` one whose `emulatorPid` is dead: remove the file.
   - `created` of a deleted root: remove the file, then `simctl delete`, where "not found" counts as success.
   - `created`: park, then `simctl shutdown`, where an already shut-down simulator counts as success. A reap skips the shutdown when its inventory listed `Shutdown`.
@@ -271,7 +271,7 @@ Runs inside `acquireDeviceAsync`, `acquireCloudBindingAsync` and `dev:stop`, for
 | `cloud` `started`                                    | nothing                                                               | remove the file, then stop the session                                    |
 | `cloud` `dotenv`                                     | nothing                                                               | remove the file                                                           |
 
-Each reaped device is reported on stderr and in JSON with reason `expired`, `deleted-worktree`, `device-gone` or `session-cap`.
+Each reaped device is reported on stderr and in JSON with reason `expired`, `deleted-worktree`, `device-gone` or `session-cap`. The JSON `error` of a failed device action ends with a How line that names the step by hand: `xcrun simctl delete <udid>` or `xcrun simctl shutdown <udid>` for a simulator, `kill <pid>` for an emulator instance. `dev:stop` reports the first such error as `deviceError` and exits 20; an acquisition prints the failure on stderr and goes on.
 
 ## Output and errors
 
