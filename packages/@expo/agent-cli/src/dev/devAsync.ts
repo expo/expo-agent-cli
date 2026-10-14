@@ -67,7 +67,7 @@ import {
   type WrapperCrashTool,
 } from '../utils/wrapperCrash';
 import { appReachedDevice } from './buildEvidence';
-import { explicitRequestOf } from './deviceOption';
+import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import { event as devEvent } from './events';
 import {
   forwardedStepArgs,
@@ -95,6 +95,9 @@ import { easCommandPrefix } from '../utils/easCli';
  * last step when every step succeeded.
  */
 export async function devAsync(projectRoot: string, options: DevOptions): Promise<number> {
+  if (options.device !== undefined && boundPlatform(options) == null) {
+    throw deviceNotBindableError(options);
+  }
   if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
     await assertEasProjectConfiguredAsync(projectRoot);
   }
@@ -334,6 +337,25 @@ function boundPlatform(options: DevOptions): DevicePlatform | null {
     hostBindsPlatform(platform)
     ? platform
     : null;
+}
+
+/** `--device` on a run that binds no local device, which would drop the device it names. */
+function deviceNotBindableError(options: DevOptions): CommandError {
+  const why =
+    options.platform === 'web'
+      ? '--web serves the app to a browser, which needs no device'
+      : devicesDisabled()
+        ? 'AGENT_CLI_NO_DEVICE=1 turns every device off'
+        : options.platform === 'ios'
+          ? 'only macOS runs an iOS simulator'
+          : 'this machine has no Android SDK';
+  const command = rerunDevCommand(options.platform, withoutDeviceArgs(options.callerArgv));
+  const error = new CommandError(
+    'BAD_ARGS',
+    `--device names a local device to bind, and ${why}, so nothing would use it.\nHow: remove --device, then run "${command}".`
+  );
+  error.suggestedCommand = command;
+  return error;
 }
 
 /** `--plan`'s read of the own binding: the device as `reused` when it is up or down, else null. */

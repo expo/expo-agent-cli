@@ -1575,6 +1575,28 @@ describe(devAsync, () => {
       );
     });
 
+    it.each([
+      ['--web', ['--web', '--device', 'X'], () => {}],
+      [
+        'AGENT_CLI_NO_DEVICE=1',
+        ['--ios', '--device', 'X'],
+        () => vi.mocked(devicesDisabled).mockReturnValue(true),
+      ],
+      ['--ios off macOS', ['--ios', '--device', 'X'], () => mockPlatform('linux')],
+    ] as const)(
+      `refuses --device with BAD_ARGS when the run binds no local device: %s`,
+      async (_case, argv, arrange) => {
+        mockStaleDevClientState();
+        arrange();
+
+        await expect(devAsync(projectRoot, resolveDevOptions([...argv]))).rejects.toMatchObject({
+          code: 'BAD_ARGS',
+        });
+
+        expect(probeProjectStateAsync).not.toHaveBeenCalled();
+      }
+    );
+
     describe('--plan', () => {
       it(`pins the steps to the own binding when it is up or down, and acquires nothing`, async () => {
         mockStaleDevClientState();
