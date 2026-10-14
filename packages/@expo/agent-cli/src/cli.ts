@@ -96,7 +96,7 @@ installEventLogger({
       : resolution.kind === 'command'
         ? `${PROGRAM_NAME} ${resolution.name}`
         : `${PROGRAM_NAME} ${subcommand}`,
-  version,
+  metadata: { version },
 });
 
 // Only registry-owned names enter remote telemetry. Raw arguments and local JSONL events
