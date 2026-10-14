@@ -347,6 +347,7 @@ Each accepted race costs one rerun of `dev`, never a lost build or a touched hum
 
 1. Where does the idle check run on the service, and what counts as activity?
 2. Should `--device <session-id>` with `--eas`, refused as `BAD_ARGS` today, bind an in-progress session that another tool started outside this worktree?
+3. `dev:stop`'s `devices` rows report a kept device as `released: false`; smoke's `environment.boundDevice` reports kept as `null` and a failed release as `false`. Should the two reports agree?
 
 ## Integration requirements
 
@@ -382,7 +383,7 @@ How does a worktree get an iOS simulator nobody else has, and how do the other v
 - `expo run:ios --device <udid>` carries the bound id, so a second worktree on a current build installs onto its fresh simulator.
 - `dev --detach` on a running server boots its own `Shutdown` simulator and refuses otherwise.
 - `navigate` without a local binding follows the EAS fallback rules in §EAS session binding and refuses with a `dev` hint when no session is available. With a local binding, it drives the bound device only. Without a platform flag, any `up` binding wins.
-- `smoke --ios` gets its simulator from the binding and leaves it bound.
+- `smoke --ios` gets its simulator from the binding; it releases a device it acquired itself and leaves a pre-existing binding as found (§Lifecycle smoke).
 - Android follows §Android instance.
 
 ### The module
@@ -515,7 +516,7 @@ What happens when a worktree stops, pauses or disappears, and how does a person 
 - A deleted worktree's simulator is deleted by the next reap anywhere; its emulator instance is killed.
 - A worktree with Metro running keeps its device for hours without a verb.
 - `--device` binds a named device, keeps it across `dev:stop` and the lease, and never shuts it down; `--device` over an own created simulator deletes that simulator and says so.
-- `smoke` releases its device.
+- `smoke` releases the device it acquired and leaves a pre-existing binding as found.
 - `status --json` shows the binding; `dev:stop --json` shows what it kept or released.
 - The restart follow-up `dev:stop && dev --detach` reuses the running instance, so it costs no boot and no install.
 
