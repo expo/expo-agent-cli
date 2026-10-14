@@ -1,6 +1,7 @@
 import { releaseWorktreeDevicesAsync } from '../../deviceBinding';
 import { keptDevices, unreadableBindingFiles } from '../../deviceBinding/records';
 import { readDevServerLockAsync } from '../../devLock';
+import { PROGRAM_PREFIX } from '../../programName';
 import { isPortInUseAsync } from '../portListener';
 import { resolveDevStopOptions } from '../resolveStopOptions';
 import { devStopAsync } from '../stopAsync';
@@ -212,3 +213,50 @@ it('release keeps an earlier platform released when a later one throws', async (
   ]);
   expect(report.deviceError).toBe('the registry lock stayed busy');
 });
+
+it.each([
+  [
+    "the stop's when the stop failed",
+    () => vi.mocked(readDevServerLockAsync).mockResolvedValue(lock),
+    'How: run this command again with a longer --timeout',
+    'Devices were kept',
+  ],
+  [
+    "the release's when only the release failed",
+    () =>
+      vi
+        .mocked(releaseWorktreeDevicesAsync)
+        .mockImplementation(async (_root, options) =>
+          options?.platform === 'ios'
+            ? [{ ...device, released: false, reason: 'shutdown failed' }]
+            : []
+        ),
+    `How: run "${PROGRAM_PREFIX} dev:stop --release" again.`,
+    'Some devices could not be released',
+  ],
+])(
+  'dev:stop --release ends stderr with one How line, %s',
+  async (_case, arrange, expectedHow, sentence) => {
+    arrange();
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    const kill = vi.spyOn(process, 'kill').mockImplementation(() => true);
+    const out = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const code = await devStopAsync(root, {
+        ...resolveDevStopOptions(['--release', '--no-followups']),
+        timeoutMs: 200,
+      });
+      expect(code).toBe(20);
+      const stderr = errors.mock.calls.map((call) => call.join(' ')).join('\n');
+      const how = stderr.split('\n').filter((line) => line.startsWith('How:'));
+      expect(how).toEqual([expect.stringContaining(expectedHow)]);
+      expect(stderr).toContain(sentence);
+    } finally {
+      errors.mockRestore();
+      out.mockRestore();
+      kill.mockRestore();
+      Object.defineProperty(process, 'platform', { value: host });
+    }
+  }
+);

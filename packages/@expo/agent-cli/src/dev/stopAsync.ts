@@ -243,7 +243,14 @@ export async function devStopAsync(
       printHumanReport(report);
     }
     if (exitCode !== EXIT_OK) {
-      Log.error(report.deviceError ?? explainFailure(report, options));
+      // A failed stop drops the device How line, so the stop's How is the one next action.
+      Log.error(
+        devServerOk && report.deviceError
+          ? report.deviceError
+          : [report.deviceError?.split('\n')[0], explainFailure(report, options)]
+              .filter(Boolean)
+              .join('\n')
+      );
     }
     reportFollowUps('dev:stop', report.followups, { json: options.json });
   }

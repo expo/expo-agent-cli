@@ -27,9 +27,11 @@ export async function stopDevicesAsync(
     if (options.release) {
       // A requested port may be idle while this worktree's server runs on another port.
       // Read again after stopping: a replacement server may now hold the same lock.
-      if (stop.reason === 'still-running' || (await readDevServerLockAsync(projectRoot))) {
+      if (stop.reason === 'still-running') {
         report.deviceError =
           "Devices were kept because this worktree's dev server is still running.";
+      } else if (await readDevServerLockAsync(projectRoot)) {
+        report.deviceError = `Devices were kept because this worktree's dev server is still running.\nHow: run "${PROGRAM_PREFIX} dev:stop --release" with no --port.`;
       } else if (stop.reason === 'foreign-dev-server' && stop.url != null) {
         // `url` is set only when the port answered as an Expo dev server.
         report.deviceError = `Devices were kept because a dev server this worktree did not lock answers on port ${stop.port}.\nHow: stop that dev server where it was started, then run "${PROGRAM_PREFIX} dev:stop --release" again.`;
@@ -55,7 +57,7 @@ export async function stopDevicesAsync(
             path: unreadable.file,
           }).message;
         if (report.devices.some((device) => !device.released))
-          report.deviceError ??= 'Some devices could not be released; see devices for details.';
+          report.deviceError ??= `Some devices could not be released; see devices for details.\nHow: run "${PROGRAM_PREFIX} dev:stop --release" again.`;
       }
     }
   } catch (error) {
