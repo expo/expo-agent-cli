@@ -69,23 +69,59 @@ it('release-keeps-devices-when-own-server-runs-on-another-port', async () => {
   );
 });
 
-it('release keeps devices beside a foreign server and does not blame this worktree', async () => {
-  vi.mocked(isPortInUseAsync).mockResolvedValueOnce(true);
-  const onReport = vi.fn();
-  await devStopAsync(
-    root,
-    resolveDevStopOptions(['--port', '8081', '--release', '--no-followups']),
-    {
-      print: false,
-      onReport,
+it.each([
+  [
+    'releases when no own lock is held and the listener is not a dev server',
+    '8081',
+    null,
+    false,
+    [
+      [root, { platform: 'ios' }],
+      [root, { platform: 'android' }],
+    ],
+    null,
+  ],
+  [
+    "keeps devices while this worktree's lock is on another port",
+    '8082',
+    lock,
+    false,
+    [],
+    expect.stringContaining("this worktree's dev server is still running"),
+  ],
+  [
+    'keeps devices when the listener answers as an Expo dev server',
+    '8081',
+    null,
+    true,
+    [],
+    expect.stringContaining('a dev server this worktree did not lock answers on port 8081'),
+  ],
+])(
+  'release beside a listener on --port %s',
+  async (_case, port, ownLock, answers, releases, deviceError) => {
+    vi.mocked(readDevServerLockAsync).mockResolvedValue(ownLock);
+    if (answers) {
+      globalThis.fetch = (async () =>
+        new Response('packager-status:running')) as unknown as typeof fetch;
+    } else {
+      vi.mocked(isPortInUseAsync).mockResolvedValueOnce(true);
     }
-  );
-  expect(releaseWorktreeDevicesAsync).not.toHaveBeenCalled();
-  const report = onReport.mock.calls[0]![0];
-  expect(report.reason).toBe('foreign-dev-server');
-  expect(report.deviceError).toContain('port 8081');
-  expect(report.deviceError).not.toContain("this worktree's dev server is still running");
-});
+    vi.mocked(releaseWorktreeDevicesAsync).mockImplementation(async (_root, options) =>
+      options?.platform === 'ios' ? [{ ...device, released: true, shutDown: true }] : []
+    );
+    const onReport = vi.fn();
+    await devStopAsync(
+      root,
+      resolveDevStopOptions(['--port', port, '--release', '--no-followups']),
+      { print: false, onReport }
+    );
+    expect(vi.mocked(releaseWorktreeDevicesAsync).mock.calls).toEqual(releases);
+    expect(onReport).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'foreign-dev-server', deviceError })
+    );
+  }
+);
 
 it('release-keeps-devices-when-server-is-replaced after a successful stop', async () => {
   vi.mocked(readDevServerLockAsync)

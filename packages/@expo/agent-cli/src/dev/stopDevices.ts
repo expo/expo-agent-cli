@@ -7,6 +7,7 @@ import {
 import { deviceUnavailableError } from '../deviceBinding/errors';
 import { keptDevices, unreadableBindingFiles } from '../deviceBinding/records';
 import { readDevServerLockAsync } from '../devLock';
+import { PROGRAM_PREFIX } from '../programName';
 import type { DevStopOptions } from './resolveStopOptions';
 
 export interface StoppedDevices {
@@ -17,7 +18,7 @@ export interface StoppedDevices {
 export async function stopDevicesAsync(
   projectRoot: string,
   options: DevStopOptions,
-  stop: { stopped: boolean; reason: string | null; port: number | null }
+  stop: { reason: string | null; port: number | null; url: string | null }
 ): Promise<StoppedDevices> {
   const report: StoppedDevices = { devices: [], deviceError: null };
   if (devicesDisabled()) return report;
@@ -26,14 +27,12 @@ export async function stopDevicesAsync(
     if (options.release) {
       // A requested port may be idle while this worktree's server runs on another port.
       // Read again after stopping: a replacement server may now hold the same lock.
-      if (stop.reason === 'foreign-dev-server') {
-        report.deviceError = `Devices were kept because a dev server this worktree did not start answers on port ${stop.port}.`;
-      } else if (
-        !(stop.stopped || stop.reason === 'not-running') ||
-        (await readDevServerLockAsync(projectRoot))
-      ) {
+      if (stop.reason === 'still-running' || (await readDevServerLockAsync(projectRoot))) {
         report.deviceError =
           "Devices were kept because this worktree's dev server is still running.";
+      } else if (stop.reason === 'foreign-dev-server' && stop.url != null) {
+        // `url` is set only when the port answered as an Expo dev server.
+        report.deviceError = `Devices were kept because a dev server this worktree did not lock answers on port ${stop.port}.\nHow: stop that dev server where it was started, then run "${PROGRAM_PREFIX} dev:stop --release" again.`;
       } else {
         const released: ReleasedDevice[] = [];
         for (const platform of options.platform
