@@ -5,7 +5,7 @@
 import type { LocalDeviceState } from '../device/localDevice';
 import type { PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
-import { hostPlatform } from '../smoke/suggest';
+import { defaultSmokePlatform, hostPlatform, smokeCommand } from '../smoke/suggest';
 import type { ProjectState, StartPlan } from '../project/types';
 import { localTool, EAS_REQUIREMENT, EAS_WHERE, LOCAL_WHERE } from '../toolchain/runsOn';
 import type { ToolchainStatus } from '../toolchain/types';
@@ -315,6 +315,32 @@ export function buildStartPlanFollowUps(
   /** The caller's `dev` arguments, which the command that runs the plan repeats. */
   callerArgv: readonly string[] = []
 ): FollowUp[] {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — a plan that stops on this
+  // project's running dev server has no steps, so the one follow-up is the one the run's error
+  // suggests: the server when it answers, `status` until it does, never the command that would
+  // stop in the same place. The smoke example needs a device platform, which `--web` is not: a web
+  // caller gets the project's default by the rule the run's error uses.
+  if (plan.devServerPort?.state === 'running') {
+    const { port, phase } = plan.devServerPort;
+    const smokePlatform =
+      requestedPlatform === 'ios' || requestedPlatform === 'android'
+        ? requestedPlatform
+        : defaultSmokePlatform(state.nativeDirs);
+    return [
+      phase === 'serving'
+        ? {
+            id: 'dev-server-running',
+            command: smokeCommand(smokePlatform),
+            why: `This project's dev server is already running on port ${port}, so the plan has no steps. This checks its bundle and its app; "${PROGRAM_PREFIX} dev:stop" stops it.`,
+          }
+        : {
+            id: 'dev-server-running',
+            command: `${PROGRAM_PREFIX} status`,
+            why: `This project's dev server is starting on port ${port}, so the plan has no steps. This says when it answers; "${PROGRAM_PREFIX} dev:stop" stops it.`,
+          },
+    ];
+  }
+
   const followups: FollowUp[] = [];
 
   // @ref llp/0015-backend-selection-and-config.rfc.md §The follow-ups of a chosen backend
