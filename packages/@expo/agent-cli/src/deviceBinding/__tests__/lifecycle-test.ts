@@ -1,5 +1,6 @@
 import { vol } from 'memfs';
 
+import { releaseWorktreeDevicesAsync } from '..';
 import { deviceCommand } from '../errors';
 import { EXTEND_EVERY_MS, LEASE_MS } from '../lease';
 import { withLeaseExtendedAsync } from '../renew';
@@ -14,6 +15,25 @@ beforeEach(() => {
   vol.fromJSON({ [`${ROOT}/package.json`]: '{}' });
 });
 afterEach(() => vi.useRealTimers());
+
+it('explicit-expires-keeps-file and explicit-never-shut-down', async () => {
+  const tools = fakeTools({ simulators: [{ udid: 'HUMAN', name: 'human', state: 'Booted' }] });
+  const binding = bindingFor(ROOT, 'HUMAN');
+  binding.device = {
+    backend: 'local-ios',
+    platform: 'ios',
+    udid: 'HUMAN',
+    name: 'human',
+    origin: 'explicit',
+  };
+  writeBinding(file(), binding);
+  await releaseWorktreeDevicesAsync(ROOT, { tools });
+  expect(readBindingFile(file())).toMatchObject({
+    kind: 'binding',
+    binding: { expiresAt: tools.now().toISOString() },
+  });
+  expect(tools.calls.some(([command]) => ['shutdown', 'delete'].includes(command!))).toBe(false);
+});
 
 it('timer picks up late cloud files, warns lost once, and resumes revived files', async () => {
   vi.useFakeTimers();

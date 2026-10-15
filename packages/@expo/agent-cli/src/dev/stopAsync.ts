@@ -14,8 +14,8 @@
 // [observed — `src/utils/subprocess.ts`, `src/utils/expoCli.ts` `runExpoAsync`], so the wrapper
 // takes Metro with it and releases the lock on the way out.
 //
-// The lock is also what makes the *negative* answer honest: a port that answers with no lock
-// behind it is a dev server this CLI did not start, and the report says so instead of killing it.
+// A port with no lock has no ownership proof. The lock may have been lost, so report the
+// listener and leave it running rather than claiming this CLI never started it.
 //
 // **The pid is the primary evidence that the stop worked; the port is secondary.** These answer two
 // different questions — "is the process I signalled alive?" and "does something answer 8081?" — and
@@ -42,6 +42,7 @@ import { windowsTaskkillCommand } from '../utils/windowsShim';
 import { debugEvent, event } from './events';
 import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
 import { isProcessAlive } from './processLiveness';
+import { stopDevicesAsync, type StoppedDevices } from './stopDevices';
 import type { DevStopOptions } from './resolveStopOptions';
 
 /** How often to re-check whether the dev server has gone. */
@@ -56,7 +57,7 @@ const POLL_INTERVAL_MS = 150;
 export type DevStopSkipReason =
   /** Nothing was running: no lock answered and nothing listens on the port. */
   | 'not-running'
-  /** Something listens, but no lock answers for it, so this CLI did not start it. */
+  /** Something listens, but no lock proves this project's ownership of it. */
   | 'foreign-dev-server'
   /** The signal was sent and the dev server was still there when the wait ran out. */
   | 'still-running';
@@ -87,7 +88,7 @@ export type DevStopForceRefusal =
  * @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract — one JSON object on stdout,
  * every key always present, and a fact the run does not have is null.
  */
-export interface DevStopResultJson {
+export interface DevStopResultJson extends Partial<StoppedDevices> {
   /** A dev server was running and is not running now. */
   stopped: boolean;
   /** PID that was signalled, or the listener's PID when one was found but not signalled. */
@@ -124,16 +125,17 @@ export interface DevStopResultJson {
    */
   forceRefusedBy: DevStopForceRefusal | null;
   /**
-   * The process this command signalled was still alive when it finished.
+   * Whether the reported pid is alive, even when the command refused to signal it.
+   * Null when no pid was identified and no free port established that no listener exists.
    *
-   * The **primary** evidence about the stop, and the one an agent should branch on: it is the only
-   * fact that is about the thing the signal was sent to. False beside `stopped: false` means the
-   * signal worked and something else — the lock, below — is what did not go away, so
-   * `--signal SIGKILL` is not the recovery.
+   * After a signal, this is the primary evidence about the stop. False beside `stopped: false`
+   * means the process is gone but something else — the lock, below — remains, so SIGKILL is not
+   * the recovery. On a refusal, this is an observation only; it grants no permission to signal.
    */
-  processStillRunning: boolean;
+  processStillRunning: boolean | null;
   /**
-   * Something was still answering the port when this command finished.
+   * Something was still answering or listening on the port when it was checked.
+   * Null when no target port was identified.
    *
    * Secondary evidence, reported rather than acted on. True beside `stopped: true` is the split
    * IPv4/IPv6 stack of llp/0005 §Stopping the app, or simply a second project's
@@ -141,7 +143,7 @@ export interface DevStopResultJson {
    * number it was using is in use by something else. A caller that cares which reads it here
    * instead of inferring it from an exit code that has nothing to say about it.
    */
-  portStillAnswering: boolean;
+  portStillAnswering: boolean | null;
   /** Why nothing was stopped. Null exactly when {@link stopped} is true. */
   reason: DevStopSkipReason | null;
   /** One sentence of detail for {@link reason}. Null exactly when {@link stopped} is true. */
@@ -210,6 +212,8 @@ export async function devStopAsync(
   if (options.eas) {
     report.session = await stopProjectEasSessionAsync(projectRoot);
   }
+  const devServerOk = report.stopped || report.reason === 'not-running';
+  Object.assign(report, await stopDevicesAsync(projectRoot, options, report));
   report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
 
   event('stop_done', {
@@ -225,10 +229,9 @@ export async function devStopAsync(
     reason: report.reason,
   });
 
-  const devServerOk = report.stopped || report.reason === 'not-running';
   // A session that was asked to stop and did not is a thing still running — and billing.
   const sessionOk = report.session == null || report.session.stopped || report.session.id == null;
-  const exitCode = devServerOk && sessionOk ? EXIT_OK : EXIT_OUTCOME_FAILED;
+  const exitCode = devServerOk && sessionOk && !report.deviceError ? EXIT_OK : EXIT_OUTCOME_FAILED;
   onReport?.(report);
 
   // The event above is emitted whatever happens: a caller that suppresses the report is still
@@ -240,7 +243,14 @@ export async function devStopAsync(
       printHumanReport(report);
     }
     if (exitCode !== EXIT_OK) {
-      Log.error(explainFailure(report, options));
+      // A failed stop drops the device How line, so the stop's How is the one next action.
+      Log.error(
+        devServerOk && report.deviceError
+          ? report.deviceError
+          : [report.deviceError?.split('\n')[0], explainFailure(report, options)]
+              .filter(Boolean)
+              .join('\n')
+      );
     }
     reportFollowUps('dev:stop', report.followups, { json: options.json });
   }
@@ -331,8 +341,7 @@ async function stopLockedDevServerAsync(
 }
 
 /**
- * No lock answered *for the target*. Either nothing is running, or something this CLI did not
- * start is.
+ * No lock answered *for the target*. A listener may still exist, but its ownership is unknown.
  *
  * The two are told apart by the port, and the difference matters more than it looks: killing a
  * listener nobody asked about is the one thing this command must not do by accident. So the
@@ -357,8 +366,8 @@ async function stopUnlockedDevServerAsync(
     signal: null,
     forced: false,
     forceRefusedBy: null,
-    processStillRunning: false,
-    portStillAnswering: false,
+    processStillRunning: null,
+    portStillAnswering: null,
     reason: 'not-running',
     detail: 'no dev-server lock answered for this project, and nothing was listening for it',
     waitedMs: Date.now() - startedAt,
@@ -367,7 +376,7 @@ async function stopUnlockedDevServerAsync(
 
   if (port == null) {
     base.detail =
-      'no dev-server lock answered for this project, so no dev server started by this CLI is running. Pass --port to look at a specific port for one started another way';
+      'no dev-server lock answered for this project; whether an untracked server is running is unknown. Pass --port to inspect a specific port';
     return base;
   }
 
@@ -380,6 +389,8 @@ async function stopUnlockedDevServerAsync(
   // machine would not say by whom — and only the first is "nothing was running" (F72). The bind
   // attempt is what tells them apart, and it is only needed when nothing else has already answered.
   const inUse = isDevServer || listener != null || (await isPortInUseAsync(port));
+  base.portStillAnswering = inUse;
+  base.processStillRunning = listener ? isProcessAlive(listener.pid) : inUse ? null : false;
 
   if (!inUse) {
     base.detail = `no dev-server lock answered for this project, and nothing is listening on port ${port}${lockElsewhereClause(elsewhereLock)}`;
@@ -431,7 +442,7 @@ async function stopUnlockedDevServerAsync(
         listener != null
           ? `run by pid ${listener.pid} (${listener.command})`
           : 'run by a process this machine would not name',
-        `and no lock answers for it, so it was not started by this CLI`,
+        `and no lock answers for it, so this project's ownership could not be verified`,
       ].join(' ') + lockElsewhereClause(elsewhereLock)
     : `no Expo dev server answered on port ${port}; ` +
       (listener != null
@@ -621,6 +632,11 @@ function buildFollowUps(report: DevStopResultJson): FollowUp[] {
 }
 
 function printHumanReport(report: DevStopResultJson): void {
+  for (const device of report.devices ?? []) {
+    Log.log(
+      `${device.released ? 'Released' : device.released === false ? 'Could not release' : 'Kept'} ${device.name}${device.reason ? `: ${device.reason}` : '.'}`
+    );
+  }
   const lines = [
     chalk`{bold Stopped} ${report.stopped ? chalk.green('yes') : chalk.red('no')}${
       report.forced ? chalk.dim(' · forced') : ''

@@ -113,6 +113,8 @@ describe('@expo/agent-cli dev:stop', () => {
 
     expect(Object.keys(JSON.parse(result.stdout)).sort()).toEqual([
       'detail',
+      'deviceError',
+      'devices',
       'followups',
       // Which of --force's two proofs a refusal failed on, null otherwise (F48-1).
       'forceRefusedBy',
@@ -168,7 +170,9 @@ describe('@expo/agent-cli dev:stop', () => {
         stopped: false,
         lockHeld: false,
         reason: 'foreign-dev-server',
+        portStillAnswering: true,
       });
+      if (report.pid != null) expect(report.processStillRunning).toBe(true);
       expect(report.detail).toContain('no lock answers for it');
       // Still up, which is the assertion the whole case is about.
       expect((await fetch(`${stub.url}/status`)).ok).toBe(true);

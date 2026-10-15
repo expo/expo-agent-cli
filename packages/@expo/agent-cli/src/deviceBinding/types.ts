@@ -67,6 +67,8 @@ export interface DeviceTools {
 export type AcquireAction = 'reused' | 'created' | 'spawned' | 'explicit';
 
 export interface AcquireResult {
+  /** Acquisition identity for cleanup; absent on read-only plan previews. */
+  binding?: Binding;
   device: BoundDevice;
   justBooted: boolean;
   action: AcquireAction;
@@ -96,7 +98,8 @@ export interface ReleasedDevice {
   platform: DevicePlatform;
   id: string;
   name: string;
-  released: boolean;
+  /** Null when the release was not attempted (the device was kept), false when it failed. */
+  released: boolean | null;
   shutDown: boolean;
   reason: string | null;
 }

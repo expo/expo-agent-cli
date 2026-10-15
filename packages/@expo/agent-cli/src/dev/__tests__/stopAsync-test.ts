@@ -117,6 +117,66 @@ afterEach(() => {
 });
 
 describe(devStopAsync, () => {
+  describe('observations when no stop is authorized', () => {
+    beforeEach(() => {
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
+      vi.mocked(findPortListenerAsync).mockResolvedValue(null);
+      vi.mocked(isPortInUseAsync).mockResolvedValue(false);
+      mockPort({ answering: false });
+    });
+
+    it.each([false, true])(
+      'reports a live foreign process without signalling it (force=%s)',
+      async (force) => {
+        vi.mocked(findPortListenerAsync).mockResolvedValue({ pid: 777, command: 'nginx' });
+        livePids.add(777);
+        mockPort({ answering: true });
+
+        await expect(devStopAsync(projectRoot, options({ port: 8195, force }))).resolves.toBe(
+          EXIT_OUTCOME_FAILED
+        );
+
+        expect(JSON.parse(printed())).toMatchObject({
+          stopped: false,
+          signal: null,
+          pid: 777,
+          processStillRunning: true,
+          portStillAnswering: true,
+        });
+        expect(JSON.parse(printed()).detail).not.toContain('was not started by this CLI');
+        expect(killed).toEqual([]);
+      }
+    );
+
+    it('does not invent a process state for an unnamed busy port', async () => {
+      vi.mocked(isPortInUseAsync).mockResolvedValue(true);
+      await devStopAsync(projectRoot, options({ port: 8195 }));
+      expect(JSON.parse(printed())).toMatchObject({
+        processStillRunning: null,
+        portStillAnswering: true,
+      });
+      expect(killed).toEqual([]);
+    });
+
+    it('reports unknown state when no port or lock identifies a target', async () => {
+      await devStopAsync(projectRoot, options());
+      expect(JSON.parse(printed())).toMatchObject({
+        processStillRunning: null,
+        portStillAnswering: null,
+      });
+      expect(JSON.parse(printed()).detail).not.toContain(
+        'no dev server started by this CLI is running'
+      );
+    });
+
+    it('reports a measured free port as quiet', async () => {
+      await devStopAsync(projectRoot, options({ port: 8195 }));
+      expect(JSON.parse(printed())).toMatchObject({
+        processStillRunning: false,
+        portStillAnswering: false,
+      });
+    });
+  });
   // The ordinary path. The lock names the pid, and signalling that pid is enough for the whole
   // tree because both spawn paths forward terminal signals to the `expo start` child.
   it(`should signal the pid the lock names, and report it stopped`, async () => {
@@ -150,6 +210,8 @@ describe(devStopAsync, () => {
 
     expect(Object.keys(JSON.parse(printed())).sort()).toEqual([
       'detail',
+      'deviceError',
+      'devices',
       'followups',
       'forceRefusedBy',
       'forced',

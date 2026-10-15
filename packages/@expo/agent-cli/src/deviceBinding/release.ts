@@ -29,8 +29,8 @@ export const WRITE_LOCK_WAIT_MS = 30_000;
  * `expected` restricts failed-boot cleanup to that acquisition, leaving a replacement alone.
  *
  * A `created` simulator is parked and shut down; an `explicit` device keeps its file with an
- * expired lease; a `spawned` instance loses its file and is killed; a binding whose device the
- * inventory does not list loses its file.
+ * expired lease; a `spawned` instance loses its file and is killed; a simulator the inventory does
+ * not list loses its file.
  */
 export async function releaseWorktreeDevicesAsync(
   projectRoot: string,
@@ -96,7 +96,7 @@ async function releaseIosAsync(
     platform: 'ios',
     id: udid,
     name,
-    released: true,
+    released: stopped?.ok ?? true,
     shutDown: stopped?.ok ?? false,
     reason: stopped?.reason ?? null,
   };
@@ -135,15 +135,41 @@ async function releaseAndroidAsync(
     return null;
   }
   const killed = origin.kind === 'spawned' ? killEmulatorIfOurs(tools, origin) : null;
+  const stillRunning =
+    origin.kind === 'spawned' && killed?.failed === true && tools.isPidAlive(origin.emulatorPid);
+  if (stillRunning) {
+    await restoreBindingIfGoneAsync(
+      file,
+      { ...before.binding, expiresAt: tools.now().toISOString() },
+      tools
+    );
+  }
   return {
     backend: 'local-android',
     platform: 'android',
     id: serial,
     name: origin.kind === 'spawned' ? `${origin.avd} on ${serial}` : serial,
-    released: true,
+    released: !stillRunning,
     shutDown: killed?.killed ?? false,
     reason: killed?.reason ?? null,
   };
+}
+
+/**
+ * Write back a binding whose file was removed before its device action failed, so a retry still
+ * finds the device. A file present again is a newer binding and stays.
+ */
+export async function restoreBindingIfGoneAsync(
+  file: string,
+  binding: Binding,
+  tools: DeviceTools
+): Promise<void> {
+  await withRegistryLockAsync(
+    async () => {
+      if (readBindingFile(file).kind === 'none') writeBindingFile(file, binding);
+    },
+    { waitMs: WRITE_LOCK_WAIT_MS, tools }
+  );
 }
 
 function expireLease(file: string, binding: Binding, tools: DeviceTools): void {
