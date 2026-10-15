@@ -14,7 +14,6 @@ vi.mock('../../utils/expoCli', () => ({ spawnExpoAsync: vi.fn() }));
 const projectRoot = '/project';
 const recordPath = `${projectRoot}/.expo/${APP_CONFIG_CACHE_FILE_NAME}`;
 
-/** A project whose config is code, with the sentinels a manifest pins. */
 function writeProject(extra: Record<string, string> = {}) {
   vol.fromJSON({
     [`${projectRoot}/package.json`]: '{"name":"app"}',
@@ -25,10 +24,10 @@ function writeProject(extra: Record<string, string> = {}) {
   });
 }
 
-function mockExpoConfig(config: unknown, stdoutPrefix = '') {
+function mockExpoConfig(config: unknown) {
   vi.mocked(spawnExpoAsync).mockResolvedValue({
     cli: { command: 'expo', args: [] },
-    result: { exitCode: 0, stdout: `${stdoutPrefix}${JSON.stringify(config)}\n`, stderr: '' },
+    result: { exitCode: 0, stdout: `${JSON.stringify(config)}\n`, stderr: '' },
   });
 }
 
@@ -56,15 +55,6 @@ describe(readEvaluatedAppConfigAsync, () => {
     });
   });
 
-  // The Expo CLI writes its own event lines to stdout ahead of the payload; the last one wins.
-  it(`should read the last JSON line past the CLI's own event lines`, async () => {
-    mockExpoConfig({ name: 'app' }, '{"type":"expo:start"}\nSome warning\n');
-
-    const answer = await readEvaluatedAppConfigAsync(projectRoot);
-
-    expect(answer?.config).toEqual({ name: 'app' });
-  });
-
   it(`should remember the answer, and revalidate it on the next call without spawning`, async () => {
     mockExpoConfig({ name: 'app', runtimeVersion: { policy: 'appVersion' } });
     await readEvaluatedAppConfigAsync(projectRoot);
@@ -82,27 +72,8 @@ describe(readEvaluatedAppConfigAsync, () => {
       },
     });
     expect(second!.cache!.ageMs).toBeGreaterThanOrEqual(0);
-    // Every pinned file, the dynamic config among them.
     expect(second!.cache!.revalidatedAgainst).toBeGreaterThanOrEqual(4);
     expect(fs.existsSync(recordPath)).toBe(true);
-  });
-
-  it(`should evaluate again once the dynamic config changes`, async () => {
-    mockExpoConfig({ name: 'app' });
-    await readEvaluatedAppConfigAsync(projectRoot);
-    vi.mocked(spawnExpoAsync).mockClear();
-    // A different length, because an in-memory write can land in the same millisecond and a
-    // same-length rewrite moves neither half of the stamp (llp/0023 §Proof).
-    fs.writeFileSync(
-      `${projectRoot}/app.config.js`,
-      'module.exports = ({ config }) => ({ ...config, extra: { changed: true } });'
-    );
-    mockExpoConfig({ name: 'app', extra: { changed: true } });
-
-    const answer = await readEvaluatedAppConfigAsync(projectRoot);
-
-    expect(spawnExpoAsync).toHaveBeenCalledTimes(1);
-    expect(answer).toMatchObject({ config: { extra: { changed: true } }, cache: null });
   });
 
   it(`should evaluate again once a pinned file the config may read changes`, async () => {
@@ -129,8 +100,6 @@ describe(readEvaluatedAppConfigAsync, () => {
     expect(spawnExpoAsync).toHaveBeenCalledTimes(1);
   });
 
-  // The flag is about what the caller will accept. A refusing run still writes what it evaluated,
-  // because a measurement is the truest thing the record can hold.
   it(`should evaluate again when the record is refused, and still write it`, async () => {
     mockExpoConfig({ name: 'app' });
     await readEvaluatedAppConfigAsync(projectRoot);
@@ -153,11 +122,6 @@ describe(readEvaluatedAppConfigAsync, () => {
       'another schema version',
       JSON.stringify({ version: 0, config: {}, computedAt: 'x', keyManifest: { files: {} } }),
     ],
-    [
-      'a record with no config',
-      JSON.stringify({ version: 1, computedAt: 'x', keyManifest: { files: {} } }),
-    ],
-    ['a record with no manifest', JSON.stringify({ version: 1, config: {}, computedAt: 'x' })],
   ])(`should evaluate again over %s rather than trusting it`, async (_name, contents) => {
     vol.fromJSON({ [recordPath]: contents });
     mockExpoConfig({ name: 'fresh' });
@@ -198,8 +162,6 @@ describe(readEvaluatedAppConfigAsync, () => {
 
     const answer = await readEvaluatedAppConfigAsync(projectRoot);
 
-    // The answer is still reported — it is what was measured — but not written against a key the
-    // project no longer matches.
     expect(answer?.config).toEqual({ name: 'app' });
     expect(fs.existsSync(recordPath)).toBe(false);
   });

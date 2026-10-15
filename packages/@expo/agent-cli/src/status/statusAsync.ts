@@ -724,8 +724,6 @@ async function resolveOtaSafetyAsync(
 ): Promise<OtaSafety> {
   const { resolveRuntimeVersionAsync, resolveOtaSafety } =
     require('../impact/runtimeVersion') as typeof import('../impact/runtimeVersion');
-  // The same flag that refuses the fingerprint record refuses the remembered `expo config` answer
-  // (llp/0023 §Every consumer can turn it off).
   const runtimeVersion = await resolveRuntimeVersionAsync(projectRoot, {
     cache: options.fingerprintCache,
   });

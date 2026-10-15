@@ -109,11 +109,9 @@ export interface RuntimeVersionInfo {
   /** Where it was read: `expo config --type public`, `app.json`, or null when nothing answered. */
   source: string | null;
   /**
-   * Set when an `expo config` answer came out of the project's `.expo` record rather than a
-   * subprocess this run made. Absent or null otherwise.
+   * Set when an `expo config` answer came out of the `.expo` record.
    *
-   * @ref llp/0021-honest-reports.rfc.md — a remembered evaluation must never read as a fresh one,
-   * so the check that revalidated it, how many files it covered, and how old it is ride along.
+   * @ref llp/0021-honest-reports.rfc.md
    */
   cache?: {
     computedAt: string;

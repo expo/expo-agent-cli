@@ -251,9 +251,6 @@ function otaLine(ota: OtaSafety): string {
     : ota.runtimeVersion.literal
       ? `literal ${ota.runtimeVersion.literal}`
       : 'runtimeVersion unresolved';
-  // A remembered evaluation says so, with its age: `expo config` was not run by this command, and
-  // a dynamic config can answer differently without any pinned file moving (llp/0023 §What the
-  // stamps miss).
   const cached = ota.runtimeVersion.cache
     ? `, cached ${formatAge(ota.runtimeVersion.cache.ageMs)} ago`
     : '';

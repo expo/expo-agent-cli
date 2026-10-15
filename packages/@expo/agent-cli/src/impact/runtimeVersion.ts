@@ -11,29 +11,16 @@ import { readStaticExpoConfigAsync } from '../project/appConfig';
 import { readEvaluatedAppConfigAsync } from '../project/evaluatedAppConfig';
 import type { OtaSafety, RuntimeVersionInfo } from './types';
 
-// The parser lives with the subprocess it reads; kept on this module's surface for its callers.
 export { parseLastJsonObject } from '../project/evaluatedAppConfig';
 
 /** The policies `runtimeVersion` accepts as `{ "policy": "..." }` [observed — expo config schema]. */
 const KNOWN_POLICIES = ['fingerprint', 'appVersion', 'sdkVersion', 'nativeVersion'];
 
 /**
- * Resolve the project's `runtimeVersion`, from the config the app itself would see.
+ * Resolve the project's `runtimeVersion` from the config the app sees. A static config is read as a
+ * file; a dynamic one is evaluated by `expo config` (llp/0001 §Constraints item 5).
  *
- * A **static** `app.json` / `app.config.json` is read as a file, because for it that *is* the
- * config the app sees: `expo config --type public` adds defaults and strips nothing this reads.
- * Spawning the CLI to be told what the file says was about a second on every `status`, spent to
- * learn nothing [observed — 2026-09-15].
- *
- * A **dynamic** `app.config.js` / `.ts` has to be evaluated, and `expo config --json --type public`
- * is the only way to do that without running project code inside this CLI (llp/0001 §Constraints
- * item 5). The answer is remembered under `.expo` and revalidated against the files that can move
- * it (`src/project/evaluatedAppConfig.ts`), so the second `status` in ten minutes spawns nothing.
- * This closes the follow-up llp/0004 §Implemented in v1 as, item 7 recorded: config was read from
- * static files only, so a dynamic config yielded no answer at all.
- *
- * Falls back to the static config beside a dynamic one when the subprocess fails, and reports
- * `source: null` when neither answered — which is not "no runtimeVersion", and is never read as one.
+ * `source: null` means nothing answered, which is not "no runtimeVersion".
  */
 export async function resolveRuntimeVersionAsync(
   projectRoot: string,
@@ -43,9 +30,7 @@ export async function resolveRuntimeVersionAsync(
   if (staticConfig.source && !staticConfig.dynamic) {
     return readRuntimeVersion(staticConfig.config?.runtimeVersion, staticConfig.source);
   }
-  // No app config at all is a project with no runtimeVersion, and often no Expo: a plain
-  // `package.json` reaches here through `status`, whose `expo config` would be `npx expo` fetching
-  // a package to answer a question nothing asked [observed — tier0 Windows, 300 s hang, 2026-09-16].
+  // No app config at all: spawning `expo config` here can mean `npx expo` fetching a package.
   if (!staticConfig.source && !staticConfig.dynamic) {
     return { policy: null, literal: null, source: null };
   }
