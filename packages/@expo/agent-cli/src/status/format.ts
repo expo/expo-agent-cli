@@ -54,7 +54,6 @@ export function formatStatusReport(report: StatusReport): string {
       ? [row('installed', report.installed, installedLine, report, 'installed')]
       : []),
     ...installedDetailLines(report),
-    // The per-source list, the file-level view, and the OTA verdict.
     ...changeLines(report),
     // What a section could not do, even when it had something else to say.
     ...sectionNoteLines(report),
@@ -185,16 +184,8 @@ function impactClassText(impactClass: ImpactClass): string {
 }
 
 /**
- * What changed, and whether it can ship over the air: the sources that moved, the file-level view,
- * and the OTA verdict.
- *
- * All three are recognisable by their data rather than by a flag: `changedSources` is null when no
- * diff was possible, and `ota` is null when nothing resolved the policy. So the formatter stays a
- * pure function of the report, and `--json` and the text can never disagree.
- *
- * Platforms whose lists agree are printed once, the way the impact headline groups them: the probe
- * hashes both platforms together, so the two lists differ only when the recorded builds were made at
- * different times, and the same eight rows twice would be the report padding itself.
+ * The sources that moved, the file-level view, and the OTA verdict, each printed only when its data
+ * is present. Platforms with identical source lists are printed once.
  */
 function changeLines(report: StatusReport): string[] {
   const lines: string[] = [];
@@ -293,11 +284,9 @@ function buildLine(location: PlanBuildLocation): string {
 /**
  * Whether the EAS-build line would say anything.
  *
- * Three cases, and they are the three that carry information: EAS answered for a platform — a
- * build was found, which changes what to do next, or there is none — EAS was called on this run
- * (whatever it answered, the answer is owed), or the section could not be read at all (the reason
- * is worth printing). A run where every platform was gated before the call — not linked, signed out
- * — is silent here, because the freshness rows above already carry that reason once.
+ * When EAS answered for a platform (found or none), EAS was called on this run, or the section
+ * could not be read. A run where every platform was gated before the call (not linked, signed out)
+ * is silent here: the freshness rows already carry that reason.
  */
 function hasBuildsToReport(report: StatusReport): boolean {
   if (report.builds == null) {

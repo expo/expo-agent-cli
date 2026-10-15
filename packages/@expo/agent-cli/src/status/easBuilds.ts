@@ -19,11 +19,8 @@
 // sound key for an answer about a hash it does not have. A hit costs one `readFileSync` and is as
 // true as the lookup that wrote it. See the LLP section for the argument in full.
 //
-// The network half used to be opt-in (`--explain`, until 2026-09-15). It runs on every `status`
-// now, and what keeps that affordable is what is remembered: a hit for as long as the key stands,
-// a `none` for five minutes (§EAS_NONE_CACHE_TTL_MS), and a project whose static config says it
-// is not linked to EAS is never asked at all — `eas build:list` refuses an unlinked project, and
-// this CLI can read that refusal off `app.json` for free.
+// A `none` is remembered for five minutes. A project whose static config names no EAS project is
+// never asked: `eas build:list` would refuse it.
 
 import fs from 'fs';
 import path from 'path';
@@ -46,9 +43,8 @@ export const EAS_BUILDS_FILE_NAME = 'agent-cli-eas-builds.json';
 /**
  * How long one platform's lookup may take, fingerprint run and network call together.
  *
- * Generous, because it is spent at most once per fingerprint per five minutes: the two halves
- * measured 1.24 s and 1.10–1.33 s live, so a budget under about four seconds would abandon answers
- * that were on their way. Expiring costs the platform an answer (`unknown`), never the report.
+ * Generous: the two halves measured 1.24 s and 1.10–1.33 s live, so a budget under about four
+ * seconds would abandon answers that were on their way. Expiring costs the platform an answer (`unknown`), never the report.
  */
 export const EAS_BUILD_LOOKUP_TIMEOUT_MS = 10_000;
 
@@ -118,9 +114,8 @@ export interface EasBuildsOptions {
    * project's `.expo` record.
    *
    * @see llp/0023-fingerprint-caching.rfc.md — this is the section that pays for *two* of the three
-   * fingerprints a `status` computes, so it is the one the cache helps most. A caller who refused
-   * that cache wants a measurement, so the remembered EAS answer is refused too: the flag is about
-   * what the caller will accept, not about which file the answer came out of.
+   * fingerprints a `status` computes. A caller who refused that cache wants a measurement, so the
+   * remembered EAS answer is refused too.
    */
   fingerprintCache?: boolean;
   /** The EAS project link from the static app config. Null when the project could not be read. */

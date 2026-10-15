@@ -33,10 +33,7 @@ export function resolveAssertClass(value: unknown): ImpactClass | null {
 /**
  * The EAS build `--build` names, or null.
  *
- * The flag fetches the fingerprint EAS computed for that one build — a network call the default
- * report does not make on its own — and it is made because the caller named the build. It used to
- * require `--explain` as the word for "you may spend a round trip"; there is no such word now, and
- * naming a build is the ask.
+ * Fetches the fingerprint EAS computed for that build.
  *
  * @throws {CommandError} `BAD_ARGS` for an empty value.
  */

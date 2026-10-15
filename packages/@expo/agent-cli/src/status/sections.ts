@@ -238,8 +238,8 @@ function platformFreshness(
  * The EAS axis of a platform before the build lookup has answered.
  *
  * `unknown`, never `stale`: the whole finding is that "this machine has no record of a build" was
- * being reported as the answer to a question about EAS (K7). {@link applyEasFreshness} fills this
- * in once the lookup has run; it is what a reader sees only when that section could not be read.
+ * being reported as the answer to a question about EAS (K7). {@link applyEasFreshness} replaces it
+ * once the lookup has run.
  */
 function unaskedEasFreshness(platform: NativePlatform): PlatformFreshness {
   return {

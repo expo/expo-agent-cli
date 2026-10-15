@@ -19,8 +19,7 @@ export const statusHelp: CommandHelp = {
     `--device-timeout <secs>   Seconds a phone gets to answer (default: 15)`,
     `--dev-server-url <url>    Dev server to probe (default: the project's own, then 8081-8085)`,
     `--no-followups            Leave the suggested follow-up commands out of the report`,
-    `--no-fingerprint-cache    Ask everything again — hash the project, evaluate the app config,\n` +
-      `                          ask EAS — instead of trusting the records under .expo`,
+    `--no-fingerprint-cache    Ignore the records under .expo and compute everything again`,
     `-h, --help                Usage info`,
   ],
   examples: [
@@ -68,14 +67,12 @@ export const statusHelp: CommandHelp = {
     `--device <phone>, which launches the app on that phone to ask it for its fingerprint. Exits 0`,
     `unless --assert turned it into a gate: 20 the change costs more than the class named · 22 no`,
     `class could be established · 1 the command itself was wrong.`,
-    `Every run carries the impact of the change since the last build this CLI made (js-only,`,
-    `dev-client-compatible, needs-native-build), the sources that moved, whether an update can ship`,
-    `over the air, whether EAS already has a finished build of this fingerprint, and what the app`,
-    `on a device was built from (expo-constants embeds it in debug builds from SDK 58).`,
-    `What a run learns is remembered under .expo and revalidated against the files that can move`,
-    `it — fingerprints and an evaluated app.config.js for ten minutes, an EAS "none" for five, a`,
-    `finished EAS build until the fingerprint changes — and says so, with its age. Nothing looks`,
-    `inside ios/ or android/, so the expiry is what covers a native edit.`,
+    `Reports the change since the last build this CLI made, the sources that moved, whether an`,
+    `update can ship over the air, whether EAS has a build of this fingerprint, and what the app on`,
+    `a device was built from (debug builds, SDK 58+).`,
+    `Answers are cached under .expo: fingerprints and app.config.js for ten minutes, an EAS "none"`,
+    `for five, a found EAS build until the fingerprint changes. Nothing looks inside ios/ or`,
+    `android/, so the expiry is what covers a native edit.`,
   ],
 };
 

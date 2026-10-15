@@ -259,11 +259,11 @@ declare module '2g' {
       /**
        * Whether EAS has a finished build for this fingerprint: `found`, `none` or `unknown`.
        *
-       * `unknown` when nobody could ask — a signed-out machine, a project not linked to EAS, no
-       * fingerprint — and deliberately not rounded down to `none`.
+       * `unknown` when EAS could not be asked (signed out, not linked, no fingerprint); never
+       * rounded down to `none`.
        */
       easBuilds: { ios: string | null; android: string | null };
-      /** Whether this run called EAS for at least one platform, rather than answering from the record. */
+      /** Whether this run called EAS for at least one platform. */
       easBuildsAsked: boolean;
       /**
        * Where the project fingerprint came from: `computed` or `cache`.

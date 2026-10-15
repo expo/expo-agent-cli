@@ -78,7 +78,7 @@ export interface FreshnessImpact {
   reason: string;
   /** How many fingerprint sources moved. Null when no diff was possible. */
   changedCount: number | null;
-  /** The per-source list. Null when no diff was possible — a record holding only a hash. */
+  /** The per-source list. Null when no diff was possible. */
   changedSources: ChangedSource[] | null;
 }
 
@@ -219,9 +219,7 @@ export interface FreshnessStatus {
   /**
    * Whether an update published now would reach installed builds that can run it.
    *
-   * Null when the policy could not be resolved at all — "not established", not "not safe". A
-   * static config is read as a file; a dynamic one is evaluated with `expo config --json --type
-   * public` and the answer remembered under `.expo` (`src/impact/runtimeVersion.ts`).
+   * Null when the policy could not be resolved — "not established", not "not safe".
    *
    * @see llp/0011-impact-and-freshness.rfc.md §A fingerprint change is not "OTA-unsafe"
    */
@@ -269,12 +267,7 @@ export interface PlatformBuild {
  * @see llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
  */
 export interface BuildsStatus {
-  /**
-   * Whether this run called EAS for at least one platform.
-   *
-   * False when every platform was answered from the record, or gated before the call — a signed-out
-   * machine, a project not linked to EAS, no fingerprint to ask about.
-   */
+  /** Whether this run called EAS for at least one platform. */
   askedEas: boolean;
   platforms: PlatformBuild[];
 }
@@ -533,8 +526,8 @@ export interface StatusReport {
    *
    * The third leg of the freshness question. `freshness` answers "does the app this machine built
    * still match" and `builds` answers "has anybody already built this"; this one asks the device,
-   * so it is right about a build somebody else made. On every run since 2026-09-15; null under `AGENT_CLI_NO_DEVICE`, and
-   * null with the reason in `errors.installed` when the check failed or ran out of time.
+   * so it is right about a build somebody else made. Null under `AGENT_CLI_NO_DEVICE`, and null with
+   * the reason in `errors.installed` when the check failed or ran out of time.
    */
   installed: InstalledStatus | null;
   /**

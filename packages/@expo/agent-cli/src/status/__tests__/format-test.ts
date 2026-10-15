@@ -1167,7 +1167,7 @@ describe('the eas build line', () => {
     reason: 'this machine is not signed in to Expo',
   };
 
-  it(`is left out entirely on a default run with nothing cached`, () => {
+  it(`is left out entirely when EAS was not asked and nothing was found`, () => {
     const rendered = report(
       mockReport({ builds: { askedEas: false, platforms: [notAskedAndroid] } })
     );

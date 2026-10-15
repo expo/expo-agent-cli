@@ -893,12 +893,10 @@ process.stdout.write(JSON.stringify({ hash, sources }) + '\\n');
         changedCount: 1,
       });
       expect(iosImpact(report)!.reason).toContain('autolinked native modules changed');
-      // The detail is the paid tier's; the headline carries the count and nothing else.
-      // The per-source list rides along on every run; it is the diff the headline was read from.
       expect(iosImpact(report)!.changedSources).toEqual([
         expect.objectContaining({ op: 'added', kind: 'native-module' }),
       ]);
-      // No `expo config`, because the OTA verdict is the paid tier's too.
+      // A static app.json is read as a file, so no `expo config`.
       expect(
         readStubExpoInvocations(projectRoot).some((invocation) => invocation.args[0] === 'config')
       ).toBe(false);
@@ -1069,8 +1067,6 @@ process.stdout.write(JSON.stringify({
       expect(report.freshness!.ota).toMatchObject({ safe: true });
     });
 
-    // A static config is the config the app sees, so it is read as a file: spawning the Expo CLI
-    // to be told what `app.json` says was a second spent on every run to learn nothing.
     it('reads a static app.json as a file, spawning no expo config', async () => {
       const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
 
@@ -1193,7 +1189,7 @@ process.stdout.write(JSON.stringify({
         expect(report.freshness!.ota!.runtimeVersion).toMatchObject({ cache: null });
       });
 
-      // Section isolation: the report is three costly answers, and one that cannot be had costs one line.
+      // Section isolation: an answer that cannot be had costs one line.
       it('keeps every other fact when the config subprocess fails', async () => {
         const { projectRoot, env } = await setupExplainAsync(
           { policy: 'appVersion' },
@@ -1374,10 +1370,7 @@ process.stdout.write(JSON.stringify({
       expect(result.all).toContain('not one of the classes');
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
-    // The flag that gated the per-source list, the OTA verdict and the EAS lookup is gone, with no
-    // alias — an unknown option, the way `--cloud` became one. Every run carries all three.
-    it('no longer takes --explain', async () => {
+    it('rejects --explain as an unknown option', async () => {
       const projectRoot = await setupAssertAsync(recordedWith([APP_CONFIG]));
 
       const result = await runAssertAsync(projectRoot, ['--explain']);
@@ -1386,10 +1379,8 @@ process.stdout.write(JSON.stringify({
       expect(result.all).toContain('--explain');
     });
 
-    // Naming a build is the ask: `--build` used to need `--explain` as the word for "you may spend
-    // a round trip". The comparison itself is a stub `eas` that does not answer `fingerprint:compare`,
-    // so what this pins is that the flag is taken on its own and the id is echoed (F66).
-    it('takes --build on its own, and echoes the build it was given', async () => {
+    // The stub `eas` does not answer `fingerprint:compare`, so this pins that the id is echoed (F66).
+    it('takes --build, and echoes the build it was given', async () => {
       const projectRoot = await setupAssertAsync(recordedWith([APP_CONFIG]));
       await installSharedStubEasAsync(projectRoot);
       await pinEasCliAsync(projectRoot);
@@ -1412,10 +1403,8 @@ process.stdout.write(JSON.stringify({
 
   // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
   //
-  // Three states, and one cost. The cost is the design: a remembered answer must not spawn `eas
-  // build:list`, an unlinked project must not either, and a cold run of a linked project spawns it
-  // once per platform. All of it is pinned by counting what crossed the process boundary, because a
-  // section that quietly grew a network call would pass every assertion about its *answer*.
+  // A remembered answer and an unlinked project spawn no `eas build:list`; a cold run of a linked
+  // project spawns it once per platform. Pinned by counting what crossed the process boundary.
   describe('the EAS build lookup', () => {
     /** The per-platform hashes the stub prints, which is what an EAS build carries. */
     const IOS_HASH = 'aaaa1111bbbb2222cccc3333dddd4444eeee5555';
@@ -1506,8 +1495,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       expect(result.stdout).toContain('ios: none');
     });
 
-    // Every platform gated before the call, so nothing was asked and nothing is owed: the freshness
-    // rows carry the reason once, and a line of two `unknown`s would say it a second time.
+    // The freshness rows already carry the reason; a line of two `unknown`s would repeat it.
     it('leaves the eas build line out of the human report of an unlinked project', async () => {
       const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
       const result = await executeAgentCliAsync(projectRoot, [
