@@ -157,10 +157,7 @@ export interface StatusOptions {
    * the remembered EAS answer, the evaluated app config (`--no-fingerprint-cache` clears it).
    *
    * @ref llp/0023-fingerprint-caching.rfc.md
-   * This is the flag that pays for the report's promptness: a `status` computes three fingerprints,
-   * at about a second each, and asks EAS about two of them, at about a second more — and all of it
-   * is what the previous run computed unless one of the pinned files moved. Undefined leaves the
-   * decision to `AGENT_CLI_NO_FINGERPRINT_CACHE`.
+   * Undefined leaves the decision to `AGENT_CLI_NO_FINGERPRINT_CACHE`.
    */
   fingerprintCache?: boolean;
 }
@@ -231,11 +228,8 @@ export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions
 ): Promise<StatusReport> {
-  // One file read, before anything else: whether this project is linked to EAS decides whether the
-  // EAS build lookup below runs at all (`src/status/easBuilds.ts`), and so whether the two
-  // per-platform fingerprints it needs are worth starting **now**, beside the probe's own, rather
-  // than after it. Three `fingerprint:generate` runs at once cost the wall clock one; in sequence
-  // they cost two (llp/0023 §Layer 1). The lookup joins these through the in-process memo.
+  // For a project linked to EAS, start the two per-platform fingerprints the EAS lookup needs now,
+  // beside the probe's own; the lookup joins them through the memo (llp/0023 §Layer 1).
   const easProject = await readStaticEasProjectAsync(projectRoot);
   if (easProject.projectId || easProject.dynamic) {
     for (const platform of ['ios', 'android'] as const) {
@@ -468,12 +462,9 @@ export async function collectStatusReportAsync(
   // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
   // Last, and after the parallel block rather than in it, because it consumes two of its answers:
   // the project's fingerprint is the cache key, and the auth answer is what keeps a signed-out
-  // machine from being asked the same question twice. On a warm run this is one `readFileSync`
-  // (llp/0011 §What `status` remembers of the answer); on a cold one it is the network call, and
-  // the two per-platform fingerprints it needs were started at the top of this function.
+  // machine from being asked the same question twice.
   //
-  // These three are independent of each other and all are the costly half of the report, so they
-  // run together rather than one after the other.
+  // These three are independent of each other, so they run together.
   const [builds, ota, installed] = await Promise.all([
     attemptAsync(() =>
       readEasBuildsStatusAsync(projectRoot, {
@@ -712,9 +703,7 @@ function notComparedImpact(
  * @ref llp/0011-impact-and-freshness.rfc.md §A fingerprint change is not "OTA-unsafe"
  * Deliberately not derived from the impact class: a fingerprint change answers "does the native
  * binary differ", and OTA safety is a `runtimeVersion` question. The two coincide only under
- * `policy: "fingerprint"`. Resolving the policy reads a static config as a file and evaluates a
- * dynamic one with `expo config --json --type public`, remembered under `.expo`
- * (`src/impact/runtimeVersion.ts`).
+ * `policy: "fingerprint"`.
  */
 async function resolveOtaSafetyAsync(
   projectRoot: string,
@@ -787,7 +776,7 @@ async function attemptPlanAsync(
         requestedBackend: request?.buildBackend,
         requestedTarget: request?.runTarget,
         deviceBackend: request?.buildBackend === 'eas' ? 'eas' : 'local',
-        // Every run asks EAS, on the budget of status's own lookup (llp/0035 §Decisions).
+        // On the budget of status's own lookup (llp/0035 §Decisions).
         lookUpEasBuild: (root, platform) =>
           lookUpEasSimulatorBuildAsync(root, platform, {
             fingerprintCache: options.fingerprintCache,

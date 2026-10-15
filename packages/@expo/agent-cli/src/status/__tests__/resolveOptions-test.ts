@@ -38,9 +38,7 @@ describe(resolveBuildId, () => {
     expect(resolveBuildId(undefined)).toBeNull();
   });
 
-  // Naming a build is the ask: the flag used to require `--explain` as the word for "you may spend
-  // a round trip", and there is no such word now.
-  it(`should accept an id on its own, trimmed`, () => {
+  it(`should accept an id, trimmed`, () => {
     expect(resolveBuildId('  build-1  ')).toBe('build-1');
   });
 
@@ -62,7 +60,6 @@ describe(resolveDeviceFlag, () => {
     expect(resolveDeviceFlag(undefined)).toBeNull();
   });
 
-  // The flag stands on its own: it used to need `--explain`, and there is no such word now.
   it(`returns the trimmed name`, () => {
     expect(resolveDeviceFlag('  iPhone 17 Pro  ')).toBe('iPhone 17 Pro');
   });

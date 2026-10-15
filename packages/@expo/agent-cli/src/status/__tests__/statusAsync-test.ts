@@ -26,7 +26,6 @@ import { waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { getPersistedAgentIdsAsync } from '../../skills/agents';
 import { discoverSkillsAsync } from '../../skills/discovery';
 import type { DiscoveredSkill } from '../../skills/types';
-import { readEasBuildsStatusAsync } from '../easBuilds';
 import { formatStatusReport } from '../format';
 import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
@@ -52,8 +51,7 @@ vi.mock('../../runtime/targetLiveness', () => ({
 // suite happens to run on.
 vi.mock('../../needsHuman/preflight', () => ({ readAuthPreflightAsync: vi.fn() }));
 vi.mock('../../skills/discovery', () => ({ discoverSkillsAsync: vi.fn(async () => []) }));
-// The two halves of the report that cost something: one network call and one `expo config`. Both
-// are mocked here so these tests can assert *whether they were asked*, which is the design.
+// The network call and `expo config`, mocked so these tests spawn neither.
 vi.mock('../easBuilds', () => ({
   readEasBuildsStatusAsync: vi.fn(async () => ({ askedEas: false, platforms: [] })),
 }));
@@ -449,9 +447,7 @@ describe(collectStatusReportAsync, () => {
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
   //
-  // There is no deeper mode: every run carries the per-source list, the OTA verdict and the EAS
-  // answer. What keeps that affordable is what the two costly halves remember (llp/0011, llp/0023),
-  // which their own suites cover; these pin that the report *asks* for them, and reads them.
+  // Every run carries the per-source list, the OTA verdict and the EAS answer.
   describe('what every run carries', () => {
     it(`should classify the change from the two source lists, in process`, async () => {
       // Both sides carry their sources, which is what makes the classification possible at all —
@@ -466,28 +462,6 @@ describe(collectStatusReportAsync, () => {
         fingerprintChanged: true,
         changedSources: [],
       });
-    });
-
-    it(`should resolve the OTA verdict and ask about EAS builds on every run`, async () => {
-      const report = await collectStatusReportAsync(projectRoot, options);
-
-      expect(resolveRuntimeVersionAsync).toHaveBeenCalledWith(projectRoot, { cache: undefined });
-      expect(report.freshness?.ota).toMatchObject({ safe: true });
-      expect(readEasBuildsStatusAsync).toHaveBeenCalledWith(
-        projectRoot,
-        expect.objectContaining({ projectHash: 'abcdef0123456789' })
-      );
-    });
-
-    // @ref llp/0023-fingerprint-caching.rfc.md §Every consumer can turn it off
-    it(`should hand a refused cache to the OTA read and the EAS lookup alike`, async () => {
-      await collectStatusReportAsync(projectRoot, { ...options, fingerprintCache: false });
-
-      expect(resolveRuntimeVersionAsync).toHaveBeenCalledWith(projectRoot, { cache: false });
-      expect(readEasBuildsStatusAsync).toHaveBeenCalledWith(
-        projectRoot,
-        expect.objectContaining({ fingerprintCache: false })
-      );
     });
 
     // Section isolation: three answers, and one of them failing costs one of them.
@@ -590,19 +564,6 @@ describe(collectStatusReportAsync, () => {
       });
 
       expect(report.assertion).toMatchObject({ ok: true, actual: 'js-only', exitCode: 0 });
-    });
-
-    // The gate reads the headline, and the OTA verdict rides beside it rather than deciding it.
-    it(`should carry the OTA verdict beside the verdict of the gate`, async () => {
-      decided('abcdef0123456789');
-
-      const report = await collectStatusReportAsync(projectRoot, {
-        ...options,
-        assert: 'js-only',
-      });
-
-      expect(report.assertion?.ok).toBe(true);
-      expect(report.freshness?.ota).not.toBeNull();
     });
 
     it(`should fail with 22 for a project with nothing to compare against`, async () => {
@@ -1465,12 +1426,12 @@ describe('status retains discovery results at its deadline', () => {
       abortTimers.add(timer);
       return controller.signal;
     });
-    // The EAS-link read that precedes the probes is answered at once, so the probe's budget
-    // starts where the advances below count from.
+    // Answered at once, so the probe's budget starts where the advances below count from.
     vi.spyOn(appConfig, 'readStaticEasProjectAsync').mockResolvedValue({
       projectId: null,
       source: null,
       dynamic: false,
+      unreadable: false,
     });
     vi.spyOn(devLock, 'readDevServerLockAsync').mockResolvedValue(null);
     vi.spyOn(localDevice, 'probeLocalDeviceAsync').mockResolvedValue({

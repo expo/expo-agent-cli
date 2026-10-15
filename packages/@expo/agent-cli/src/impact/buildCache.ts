@@ -23,7 +23,7 @@ import type { CachedBuild } from './types';
  * without it, run without being asked for. Twenty seconds of a command's time is a fair ceiling on a
  * nicety; a minute is not.
  *
- * The caller that asks on every run — `status` — passes a wider budget of its own
+ * `status` passes a wider budget of its own
  * (`EAS_BUILD_RUNNER_TIMEOUT_MS`, `src/status/easBuilds.ts`). A run that expires names the possible
  * download cost via {@link runnerDownloadNote}, without claiming that a retry will have a warm cache.
  */

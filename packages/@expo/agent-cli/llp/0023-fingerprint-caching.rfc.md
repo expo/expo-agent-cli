@@ -10,7 +10,7 @@
 
 ## Summary
 
-`@expo/agent-cli status --explain` (every `status`, since the flag went on 2026-09-15) computed three fingerprints, and each one cost about a second. The three are the same three the previous run computed, in a project nobody touched in between. This document is the two caches that fix that. It is also the rules that keep the report honest about which of them answered, because a cached hash is a claim about the past reported in the present tense.
+`@expo/agent-cli status` computes three fingerprints, and each one costs about a second. The three are the same three the previous run computed, in a project nobody touched in between. This document is the two caches that fix that. It is also the rules that keep the report honest about which of them answered, because a cached hash is a claim about the past reported in the present tense.
 
 Two layers, and they solve different problems:
 
