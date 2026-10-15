@@ -143,4 +143,53 @@ describe('device lifecycle across two worktrees', () => {
       ).toBeLessThanOrEqual(Date.now());
     }
   );
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Reap
+  it.skipIf(process.platform !== 'darwin')(
+    'reaps the simulator a deleted worktree booted, on the next dev:stop of another worktree',
+    async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      projects.push(projectRoot);
+      const deleted = path.join(machine, 'deleted-worktree');
+      const directory = path.join(expoHome, 'agent-cli', 'bindings');
+      await fs.promises.mkdir(directory, { recursive: true });
+      const now = new Date().toISOString();
+      fs.writeFileSync(
+        path.join(directory, 'deleted-ios-local-ios.json'),
+        JSON.stringify({
+          version: 1,
+          device: {
+            backend: 'local-ios',
+            platform: 'ios',
+            udid: SIMULATORS[0]!.udid,
+            name: SIMULATORS[0]!.name,
+            origin: 'created',
+          },
+          projectRoot: path.join(canonicalRoot(machine), 'deleted-worktree'),
+          boundAt: now,
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        })
+      );
+      expect(fs.existsSync(deleted)).toBe(false);
+
+      const stopped = await executeAgentCliAsync(projectRoot, ['dev:stop', '--release', '--json'], {
+        env: envFor(projectRoot),
+      });
+
+      expect(stopped.exitCode).toBe(0);
+      expect(JSON.parse(stopped.stdout).reaped).toEqual([
+        expect.objectContaining({
+          id: SIMULATORS[0]!.udid,
+          backend: 'local-ios',
+          released: true,
+          shutDown: true,
+          reason: 'deleted-worktree',
+          projectRoot: path.join(canonicalRoot(machine), 'deleted-worktree'),
+          devServerCleanup: 'not-checked',
+        }),
+      ]);
+      expect(readXcrun()).toContainEqual(['simctl', 'delete', SIMULATORS[0]!.udid]);
+      expect(bindings()).toEqual([]);
+    }
+  );
 });

@@ -115,6 +115,9 @@ export function recordLastBuildFingerprint(
   fingerprint: string | LastBuildFingerprint
 ): void {
   try {
+    // A long-lived runner may exit after its worktree was deleted. Advisory metadata must not
+    // recreate that directory and make the device reaper consider the worktree present again.
+    if (!fs.statSync(projectRoot).isDirectory()) return;
     const entry: LastBuildFingerprint =
       typeof fingerprint === 'string' ? { hash: fingerprint, sources: null } : fingerprint;
     const record = { ...readLastBuildRecord(projectRoot), [platform]: entry };

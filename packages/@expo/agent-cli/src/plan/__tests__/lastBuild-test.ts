@@ -63,6 +63,15 @@ describe(`${readLastBuildRecord.name} — an unreadable record`, () => {
 });
 
 describe(recordLastBuildFingerprint, () => {
+  it('does not recreate a project deleted while the build runner was active', () => {
+    vol.fromJSON({ '/project/package.json': '{}' });
+    fs.rmSync(projectRoot, { recursive: true });
+
+    recordLastBuildFingerprint(projectRoot, 'ios', 'hash-ios');
+
+    expect(fs.existsSync(projectRoot)).toBe(false);
+  });
+
   it(`should create the record in the .expo directory`, () => {
     vol.fromJSON({ '/project/package.json': '{}' });
 

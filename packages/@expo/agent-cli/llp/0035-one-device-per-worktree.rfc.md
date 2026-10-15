@@ -172,11 +172,11 @@ export type ReleasedDevice = {
 ```
 
 - Origins. `created`: the CLI may shut down, park and delete. `spawned`: the CLI may kill the emulator it spawned. `explicit`: boot at most. `cloud` `started`: this CLI started the session or found it by tag, and may stop it; `dotenv`: adopted from `.env.eas-simulator`; a reap never stops it, `dev:stop --eas` does, as today.
-- Let go, one rule per origin, first match. The file action runs under the lock, the device action after it.
+- Let go, one rule per origin, first match. The file action runs under the lock, the device action after it. A reap's `delete` or `kill` that fails writes the binding back under the lock, unless another binding took its file, so the next reap tries again.
   - A local binding whose device the inventory does not list or lists as unavailable (its runtime was removed), or a `spawned` one whose `emulatorPid` is dead: remove the file.
   - `created` of a deleted root: remove the file, then `simctl delete`, where "not found" counts as success.
   - `created`: park, then `simctl shutdown`, where an already shut-down simulator counts as success. A reap skips the shutdown when its inventory listed `Shutdown`.
-  - `spawned`: remove the file, then kill `emulatorPid` while the instance check holds: it is alive and, where `ps` exists, its arguments name `-avd <avd>` and `-ports <port>,<port+1>`. Never the binary name: the `emulator` launcher execs `qemu-system-<arch>`, so the pid stays and the name does not. A kill that throws while the pid is alive writes the binding back with an expired lease.
+  - `spawned`: remove the file, then kill `emulatorPid` while the instance check holds: it is alive and, where `ps` exists, its arguments name `-avd <avd>` and `-ports <port>,<port+1>`. Never the binary name: the `emulator` launcher execs `qemu-system-<arch>`, so the pid stays and the name does not. When the check fails, the instance has already exited, so nothing is signalled and a reap reports it `device-gone`. A kill that throws while the pid is alive writes the binding back with an expired lease.
   - `explicit`: expire the lease and keep the file, so the next `dev` reuses the named device; the device holds nothing of ours, and a reap finds the binding expired and leaves it. A deleted root removes the file. Release does not ask `adb` about an `explicit` Android serial, because `adb` does not list a phone that is off or an emulator that is stopped.
   - `dotenv`: remove the file.
   - `started`: remove the file, then `stopEasSessionAsync(<the binding's projectRoot>, id)` with main's EAS stop timeout, or under the calling worktree's root when that root is deleted, because eas-cli reads the project and the account from the directory it runs in. A missing eas-cli or a failed stop is reported with the session id; the idle timeout or the session cap ends that session.
@@ -271,7 +271,7 @@ Runs inside `acquireDeviceAsync`, `acquireCloudBindingAsync` and `dev:stop`, for
 | `cloud` `started`                                    | nothing                                                               | remove the file, then stop the session                                    |
 | `cloud` `dotenv`                                     | nothing                                                               | remove the file                                                           |
 
-Each reaped device is reported on stderr and in JSON with reason `expired`, `deleted-worktree`, `device-gone` or `session-cap`.
+Each reaped device is reported on stderr and in JSON with reason `expired`, `deleted-worktree`, `device-gone` or `session-cap`. The JSON `error` of a failed device action ends with a How line that names the step by hand: `xcrun simctl delete <udid>` or `xcrun simctl shutdown <udid>` for a simulator, `kill <pid>` for an emulator instance. `dev:stop` reports the first such error as `deviceError` and exits 20; an acquisition prints the failure on stderr and goes on.
 
 ## Output and errors
 
@@ -550,7 +550,9 @@ The report names the device in `environment.boundDevice` (`id`, `name`, `action`
 What happens to the device of a deleted or expired worktree?
 
 - `reap.ts` per §Reap, called from `acquireDeviceAsync` and `dev:stop`. The `cloud` rows wait for §EAS session binding.
+- `cleanup.ts` runs the let-go device actions after the section (`runCleanupAsync`, `deleteSimulatorAsync`); `iosAcquire.ts` holds the iOS section (`bindIosSectionAsync`) and the binding identity of §Invariant.
 - The reap events and the `cli:device_binding_reaped` reasons, per §Output and errors.
+- Reap reports identify `projectRoot` and carry `devServerCleanup: 'not-checked'`: they describe device cleanup only. Deleted-worktree output warns that CLI/Metro processes may remain. Stopping those requires separate server ownership evidence; a device binding grants none. A late last-build write does not recreate an already deleted worktree.
 
 ### `--device` on `dev`
 

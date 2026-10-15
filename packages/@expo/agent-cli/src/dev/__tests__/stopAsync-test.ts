@@ -220,6 +220,7 @@ describe(devStopAsync, () => {
       'port',
       'portStillAnswering',
       'processStillRunning',
+      'reaped',
       'reason',
       'signal',
       'stopped',
