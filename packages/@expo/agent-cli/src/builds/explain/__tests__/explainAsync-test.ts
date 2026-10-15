@@ -40,7 +40,15 @@ async function reportForAsync(fixture: string, overrides: Partial<ExplainOptions
 }
 
 /** Every top-level key, in the order the type declares them. */
-const TOP_LEVEL_KEYS = ['source', 'phases', 'failure', 'otherFailures', 'logTail', 'followups'];
+const TOP_LEVEL_KEYS = [
+  'source',
+  'phases',
+  'failure',
+  'otherFailures',
+  'errorLines',
+  'logTail',
+  'followups',
+];
 
 describe('the --json shape', () => {
   it('has the same keys for a located failure', async () => {
@@ -299,5 +307,40 @@ describe('--eas', () => {
     expect(report.followups.map((followup) => followup.command)).toContainEqual(
       expect.stringContaining('inspect:build-log --eas --ios build-1')
     );
+  });
+});
+
+// @ref llp/0012-build-explain.rfc.md §Summary — the meaningful portion travels rule or no rule.
+describe('errorLines', () => {
+  it('carries the lines the failing phase marked as errors, the matched line among them', async () => {
+    const report = await reportForAsync('xcodebuild-no-profile.log', { platform: 'ios' });
+
+    expect(report.failure).not.toBeNull();
+    expect(report.errorLines.length).toBeGreaterThan(0);
+    expect(report.errorLines.map((entry) => entry.line)).toContain(report.failure!.line);
+    const failing = report.phases.find((phase) => phase.status === 'failed')!;
+    for (const entry of report.errorLines) {
+      expect(entry.line).toBeGreaterThanOrEqual(failing.startLine);
+      expect(entry.line).toBeLessThanOrEqual(failing.endLine);
+      expect(entry.text).toMatch(/error|fail|fatal|✖|✗/i);
+    }
+  });
+
+  it('is empty, and never missing, for a log that marked nothing', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-explain-clean-'));
+    const logPath = path.join(dir, 'clean.log');
+    fs.writeFileSync(
+      logPath,
+      'Analyzing dependencies\nPod installation complete!\nBuild succeeded\n'
+    );
+    const read = await readLogFileAsync(logPath);
+
+    const report = buildExplainReport(read, {
+      ...BASE_OPTIONS,
+      source: { kind: 'file', path: logPath },
+    });
+
+    expect(report.failure).toBeNull();
+    expect(report.errorLines).toEqual([]);
   });
 });

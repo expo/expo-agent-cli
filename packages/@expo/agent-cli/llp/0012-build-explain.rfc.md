@@ -16,6 +16,7 @@ Two properties are the whole design:
 
 - Deterministic extraction, not summarization. The answer comes from a table of regular expressions that ships in this repository. No model, no API key, no network ([[0001-agentic-cli-on-expo-cli]] Shape 1). The same log always produces the same answer, and a fixture pins it.
 - Nothing is claimed that the log does not say. Every report carries the line it came from, verbatim, with its number. A rule that only matched a tool's own "I failed" line reports `confidence: "low"` and says so.
+- The meaningful portion travels whether or not a rule matched [Kudo, 2026-09-15]. `errorLines` is every line of the failing phase — the last phase, when nothing was located — that a tool marked as an error (`error:`, `e:`, `FAILED`, `fatal`, `✖`), with its number, consecutive repeats kept once, capped at twenty. It is the phase's own account of what went wrong, not an extraction: no rule is consulted for it and no line is rewritten. The human report prints it under the located failure, and in place of the raw tail when there is none.
 
 ## What ships, and what is reserved
 

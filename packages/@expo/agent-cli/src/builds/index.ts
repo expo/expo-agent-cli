@@ -54,11 +54,12 @@ export const inspectBuildLogHelp: CommandHelp = {
   json: {
     stdout: 'one object, and nothing else',
     stderr: 'progress and errors',
-    keys: ['source', 'phases', 'failure', 'otherFailures', 'logTail', 'followups'],
+    keys: ['source', 'phases', 'failure', 'otherFailures', 'errorLines', 'logTail', 'followups'],
   },
   notes: [
     `Deterministic extraction, not summarization: a capped rule table, each rule with a fixture`,
-    `and a test. Every answer carries the line it came from.`,
+    `and a test. Every answer carries the line it came from, and "errorLines" carries what the`,
+    `tools themselves marked as errors in the failing phase — rule or no rule.`,
     `Exit codes: 0 a report was produced, "no error located" included · 1 no report could be`,
     `produced · 22 what arrived is not text, most often a log still brotli-compressed.`,
     `${PROGRAM_NAME} dev writes the output of each native build it runs to .expo/dev/logs/build-<platform>.log`,

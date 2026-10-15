@@ -7,7 +7,7 @@
 
 import { type Anchor, anchorFor } from './anchors';
 import { markPhaseStatuses, phaseAllowedOnPlatform, phaseIndexForLine } from './phases';
-import type { Confidence, Failure, Phase } from './types';
+import type { Confidence, ErrorLine, Failure, Phase } from './types';
 
 /** How many lines of context a report carries when the caller names none. */
 export const DEFAULT_CONTEXT_BEFORE = 8;
@@ -26,6 +26,22 @@ export const LOG_TAIL_LINES = 40;
 
 /** How many entries `--all` may report, so a log full of one error does not become the payload. */
 export const MAX_OTHER_FAILURES = 10;
+
+/** How many error-looking lines travel in `errorLines`, so a compiler with a hundred does not become the payload. */
+export const MAX_ERROR_LINES = 20;
+
+/**
+ * What a tool prints when something went wrong, across the tools a native build runs.
+ *
+ * `error:` is clang, swiftc, Kotlin (`e:`), Metro and npm; `FAILED` / `FAILURE` is Gradle and
+ * xcodebuild's summary; `fatal` is git and the linker; `✖`/`✗` is what a bundler draws. Read as
+ * words, so `errorCode` in a JSON blob or `Errors.swift` in a path does not count.
+ */
+const ERROR_LINE =
+  /(^|[\s:[(])(error|errors|fatal|failed|failure|exception|✖|✗)(?=$|[\s:\]),]|\.(?![A-Za-z]))|^e: /i;
+
+/** Lines that name errors to say there were none, which is the opposite of an error line. */
+const NOT_AN_ERROR = /\b(0|no|zero) (errors?|failures?)\b|error-free|without errors?|errors?: 0\b/i;
 
 export interface ExtractOptions {
   /** The caller's `--ios` / `--android` hint, which rules out the other platform's rules. */
@@ -184,6 +200,47 @@ function confidenceFor(anchor: Anchor, phase: Phase['name']): Confidence {
 }
 
 /** The last lines of the log, for the payload of a report that located nothing. */
+/**
+ * The lines that read like errors in the phase the report is about.
+ *
+ * The failing phase when a failure was located, else the last phase — a build stops where it
+ * fails, so the last segment is where a log the table did not recognise says why. Consecutive
+ * repeats are kept once: Gradle prints the same `e:` line for every module that compiled the
+ * file. The order is the log's.
+ *
+ * @param maxLines the cap, {@link MAX_ERROR_LINES} by default.
+ */
+export function collectErrorLines(
+  lines: string[],
+  phases: Phase[],
+  failure: Failure | null,
+  maxLines: number = MAX_ERROR_LINES
+): ErrorLine[] {
+  const phase = failure
+    ? (phases.find((candidate) => candidate.status === 'failed') ?? phases[phases.length - 1])
+    : phases[phases.length - 1];
+  const start = phase ? phase.startLine : 1;
+  const end = phase ? phase.endLine : lines.length;
+
+  const found: ErrorLine[] = [];
+  let previous: string | null = null;
+  for (let line = start; line <= end && line <= lines.length; line++) {
+    const text = lines[line - 1]!.trimEnd();
+    if (!text || !ERROR_LINE.test(text) || NOT_AN_ERROR.test(text)) {
+      continue;
+    }
+    if (text === previous) {
+      continue;
+    }
+    previous = text;
+    found.push({ line, text });
+    if (found.length >= maxLines) {
+      break;
+    }
+  }
+  return found;
+}
+
 export function logTail(lines: string[], maxLines: number = LOG_TAIL_LINES): string {
   return lines.map(trimEnd).filter(Boolean).slice(-maxLines).join('\n');
 }
