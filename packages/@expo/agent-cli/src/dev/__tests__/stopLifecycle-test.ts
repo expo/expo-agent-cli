@@ -34,7 +34,7 @@ const device = {
   platform: 'ios' as const,
   id: 'SIM',
   name: 'sim',
-  released: false,
+  released: null,
   shutDown: false,
   reason: null,
 };
@@ -209,9 +209,48 @@ it('release keeps an earlier platform released when a later one throws', async (
   const report = onReport.mock.calls[0]![0];
   expect(report.devices).toEqual([
     expect.objectContaining({ id: 'SIM', released: true, shutDown: true }),
-    expect.objectContaining({ id: 'emulator-5554', released: false }),
+    expect.objectContaining({ id: 'emulator-5554', released: null }),
   ]);
   expect(report.deviceError).toBe('the registry lock stayed busy');
+});
+
+it('tells a device it could not release from one it kept, in JSON and on the human line', async () => {
+  const android = {
+    ...device,
+    backend: 'local-android' as const,
+    platform: 'android' as const,
+    id: 'emulator-5554',
+    name: 'emulator-5554',
+  };
+  vi.mocked(keptDevices).mockReturnValue([device, android]);
+  vi.mocked(releaseWorktreeDevicesAsync).mockImplementation(async (_root, options) =>
+    options?.platform === 'ios' ? [{ ...device, released: false, reason: 'shutdown failed' }] : []
+  );
+  const out = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  const onReport = vi.fn();
+  try {
+    await devStopAsync(root, resolveDevStopOptions(['--release', '--no-followups']), {
+      print: true,
+      onReport,
+    });
+    const report = onReport.mock.calls[0]![0];
+    expect(report.devices).toEqual([
+      expect.objectContaining({ id: 'SIM', released: false, reason: 'shutdown failed' }),
+      expect.objectContaining({ id: 'emulator-5554', released: null }),
+    ]);
+    const lines = [
+      ...out.mock.calls.map((call) => call.join(' ')),
+      ...stdout.mock.calls.map((call) => String(call[0]).trimEnd()),
+    ];
+    expect(lines).toContain('Could not release sim: shutdown failed');
+    expect(lines).toContain('Kept emulator-5554.');
+  } finally {
+    out.mockRestore();
+    stdout.mockRestore();
+    errors.mockRestore();
+  }
 });
 
 it.each([

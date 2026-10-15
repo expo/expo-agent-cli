@@ -98,7 +98,8 @@ export interface ReleasedDevice {
   platform: DevicePlatform;
   id: string;
   name: string;
-  released: boolean;
+  /** Null when the release was not attempted (the device was kept), false when it failed. */
+  released: boolean | null;
   shutDown: boolean;
   reason: string | null;
 }

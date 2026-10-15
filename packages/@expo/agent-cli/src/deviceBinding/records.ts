@@ -37,7 +37,7 @@ export function keptDevices(projectRoot: string, platform?: DevicePlatform): Rel
     .filter((entry) => entry.backend !== 'cloud' && (!platform || entry.platform === platform))
     .flatMap(({ file }) => {
       const read = readBindingFile(file);
-      return read.kind === 'binding' ? [deviceReport(read.binding)] : [];
+      return read.kind === 'binding' ? [{ ...deviceReport(read.binding), released: null }] : [];
     });
 }
 

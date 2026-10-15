@@ -634,7 +634,7 @@ function buildFollowUps(report: DevStopResultJson): FollowUp[] {
 function printHumanReport(report: DevStopResultJson): void {
   for (const device of report.devices ?? []) {
     Log.log(
-      `${device.released ? 'Released' : 'Kept'} ${device.name}${device.reason ? `: ${device.reason}` : '.'}`
+      `${device.released ? 'Released' : device.released === false ? 'Could not release' : 'Kept'} ${device.name}${device.reason ? `: ${device.reason}` : '.'}`
     );
   }
   const lines = [
