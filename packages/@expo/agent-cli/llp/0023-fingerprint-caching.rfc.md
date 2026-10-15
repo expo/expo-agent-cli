@@ -151,7 +151,7 @@ The way out sits on the line that makes the claim (`--no-fingerprint-cache`).
 
 `@expo/agent-cli status --no-fingerprint-cache` and `@expo/agent-cli dev --no-fingerprint-cache`, threaded to the probe and to the EAS build lookup. `AGENT_CLI_NO_FINGERPRINT_CACHE=1` for the paths with no flag of their own. A flag overrules it. A refusing run still writes the record. The flag is about what a caller will accept, not about what the project may remember.
 
-The same flag refuses the two other records `status` keeps beside this one, for the same reason: the remembered EAS answer (`.expo/agent-cli-eas-builds.json`, [[0011-impact-and-freshness]] §What `status` remembers of the answer) and the remembered evaluation of a dynamic app config (`.expo/agent-cli-app-config.json`, [[0011-impact-and-freshness]] §A fingerprint change is not "OTA-unsafe"). One flag, because the caller who typed it wants a measurement, and which file an answer came out of is not their concern. [decided — 2026-09-15]
+The same flag refuses the two other records `status` keeps: the EAS answer (`.expo/agent-cli-eas-builds.json`) and the evaluated app config (`.expo/agent-cli-app-config.json`), both in [[0011-impact-and-freshness]].
 
 ## What it bought
 

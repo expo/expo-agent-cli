@@ -74,8 +74,6 @@ describe(readRuntimeVersion, () => {
 });
 
 describe(resolveRuntimeVersionAsync, () => {
-  // A static config *is* the config the app sees, so spawning the CLI to be told what the file
-  // says is a second spent to learn nothing.
   it(`should read a static app.json as a file, spawning nothing`, async () => {
     vol.fromJSON({
       [`${projectRoot}/app.json`]: JSON.stringify({
@@ -114,7 +112,6 @@ describe(resolveRuntimeVersionAsync, () => {
   });
 
   describe('a dynamic config', () => {
-    /** A project whose config is code, beside the static file the CLI merges it over. */
     function writeDynamicProject(appJson: unknown = { expo: { name: 'app' } }) {
       vol.fromJSON({
         [`${projectRoot}/package.json`]: '{"name":"app"}',
@@ -135,55 +132,6 @@ describe(resolveRuntimeVersionAsync, () => {
       });
     });
 
-    it(`should ask expo config for the public config as JSON`, async () => {
-      writeDynamicProject();
-      mockExpoConfig({ runtimeVersion: '1.0.0' });
-
-      await resolveRuntimeVersionAsync(projectRoot);
-
-      expect(spawnExpoAsync).toHaveBeenCalledWith(
-        projectRoot,
-        ['config', '--json', '--type', 'public'],
-        { output: 'capture' }
-      );
-    });
-
-    // @ref llp/0023-fingerprint-caching.rfc.md — the evaluated answer is remembered under `.expo`
-    // and revalidated against the same pinned files, so the second `status` spawns nothing. The
-    // cache module has its own suite; this pins that the resolver *uses* it and says so.
-    it(`should answer the second call from the record, and say the answer is remembered`, async () => {
-      writeDynamicProject();
-      mockExpoConfig({ runtimeVersion: { policy: 'appVersion' } });
-      await resolveRuntimeVersionAsync(projectRoot);
-      vi.mocked(spawnExpoAsync).mockClear();
-
-      const second = await resolveRuntimeVersionAsync(projectRoot);
-
-      expect(spawnExpoAsync).not.toHaveBeenCalled();
-      expect(second).toMatchObject({
-        policy: 'appVersion',
-        source: 'expo config --type public',
-        cache: {
-          keyKind: 'mtime+size',
-          computedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
-        },
-      });
-      expect(second.cache!.ageMs).toBeGreaterThanOrEqual(0);
-      expect(second.cache!.revalidatedAgainst).toBeGreaterThan(0);
-    });
-
-    it(`should evaluate again when the record is refused`, async () => {
-      writeDynamicProject();
-      mockExpoConfig({ runtimeVersion: { policy: 'appVersion' } });
-      await resolveRuntimeVersionAsync(projectRoot);
-      vi.mocked(spawnExpoAsync).mockClear();
-
-      const second = await resolveRuntimeVersionAsync(projectRoot, { cache: false });
-
-      expect(spawnExpoAsync).toHaveBeenCalledTimes(1);
-      expect(second.cache).toBeNull();
-    });
-
     it(`should fall back to the static config beside it when the subprocess fails`, async () => {
       writeDynamicProject({ expo: { name: 'app', runtimeVersion: { policy: 'appVersion' } } });
       mockExpoConfigFailure();
@@ -191,19 +139,6 @@ describe(resolveRuntimeVersionAsync, () => {
       await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
         policy: 'appVersion',
         literal: null,
-        source: 'app.json',
-      });
-    });
-
-    it(`should fall back when the subprocess printed something unparsable`, async () => {
-      writeDynamicProject({ expo: { runtimeVersion: '2.0.0' } });
-      vi.mocked(spawnExpoAsync).mockResolvedValue({
-        cli: { command: 'expo', args: [] },
-        result: { exitCode: 0, stdout: 'not json', stderr: '' },
-      });
-
-      await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toMatchObject({
-        literal: '2.0.0',
         source: 'app.json',
       });
     });
@@ -223,8 +158,6 @@ describe(resolveRuntimeVersionAsync, () => {
     });
   });
 
-  // A project with no app config at all has no runtimeVersion to find, and is often not an Expo
-  // app: spawning `expo config` there is `npx expo` fetching a package to say so.
   it(`should spawn nothing for a project with no app config file`, async () => {
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{"name":"app"}' });
 

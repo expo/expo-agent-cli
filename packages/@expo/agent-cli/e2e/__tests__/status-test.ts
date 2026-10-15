@@ -81,7 +81,6 @@ type StatusReport = {
         policy: string | null;
         literal: string | null;
         source: string | null;
-        /** Set when the evaluated config came out of `.expo` rather than a subprocess (llp/0023). */
         cache?: {
           computedAt: string;
           ageMs: number;
@@ -974,13 +973,7 @@ process.stdout.write(JSON.stringify({
 }) + '\\n');
 `;
 
-    /**
-     * A project with a native change since its recorded build, and a `runtimeVersion` to judge it by.
-     *
-     * `static` writes the runtimeVersion into `app.json`, which `status` reads as a file. `dynamic`
-     * adds an `app.config.js` beside it and hands the runtimeVersion to the stub `expo config`
-     * instead, which is the one path that spawns (`src/project/evaluatedAppConfig.ts`).
-     */
+    /** `dynamic` adds an `app.config.js`, whose runtimeVersion comes from the stub `expo config`. */
     async function setupExplainAsync(
       runtimeVersion: unknown,
       { config = 'static' }: { config?: 'static' | 'dynamic' } = {}
@@ -1028,7 +1021,6 @@ process.stdout.write(JSON.stringify({
       };
     }
 
-    /** The `expo config` spawns the stub recorded. */
     function configSpawns(projectRoot: string) {
       return readStubExpoInvocations(projectRoot).filter(
         (invocation) => invocation.args[0] === 'config'
@@ -1067,8 +1059,6 @@ process.stdout.write(JSON.stringify({
       expect(report.freshness!.ota).toMatchObject({ safe: true });
     });
 
-    // A static config is the config the app sees, so it is read as a file: spawning the Expo CLI
-    // to be told what `app.json` says was a second spent on every run to learn nothing.
     it('reads a static app.json as a file, spawning no expo config even under --explain', async () => {
       const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
 
@@ -1094,9 +1084,6 @@ process.stdout.write(JSON.stringify({
     });
 
     // @ref llp/0011-impact-and-freshness.rfc.md §A fingerprint change is not "OTA-unsafe"
-    // A dynamic config has to be evaluated, and only the project's own Expo CLI may do that. The
-    // answer is remembered under `.expo` and revalidated against the pinned files, so a loop of
-    // `status` runs spawns it once (llp/0023).
     describe('a dynamic app.config.js', () => {
       it('evaluates it with expo config, only under --explain', async () => {
         const { projectRoot, env } = await setupExplainAsync(
@@ -1213,8 +1200,7 @@ process.stdout.write(JSON.stringify({
 
         expect(result.exitCode).toBe(0);
         const report: StatusReport = JSON.parse(result.stdout);
-        // The static file beside the dynamic one answered, and it names no runtimeVersion — so the
-        // verdict is unknown, never "not safe".
+        // The static fallback names no runtimeVersion, so the verdict is unknown, never "not safe".
         expect(report.freshness!.ota).toMatchObject({
           safe: null,
           runtimeVersion: { source: 'app.json' },
