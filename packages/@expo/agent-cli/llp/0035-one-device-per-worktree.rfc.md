@@ -347,7 +347,6 @@ Each accepted race costs one rerun of `dev`, never a lost build or a touched hum
 
 1. Where does the idle check run on the service, and what counts as activity?
 2. Should `--device <session-id>` with `--eas`, refused as `BAD_ARGS` today, bind an in-progress session that another tool started outside this worktree?
-3. `dev:stop`'s `devices` rows report a kept device as `released: false`; smoke's `environment.boundDevice` reports kept as `null` and a failed release as `false`. Should the two reports agree?
 
 ## Integration requirements
 

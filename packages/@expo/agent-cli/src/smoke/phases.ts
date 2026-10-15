@@ -805,7 +805,7 @@ async function releaseAsync(
           released.push({
             resource: 'device',
             target: device.id,
-            ok: device.released,
+            ok: device.released === true,
             reason: device.released ? null : (device.reason ?? 'no reason was given'),
             ms: deps.now() - at,
           });

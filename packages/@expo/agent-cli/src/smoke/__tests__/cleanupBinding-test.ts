@@ -97,7 +97,7 @@ it('cloud smoke reports no device rows for the local devices dev:stop kept', asy
     platform: 'ios' as const,
     id: 'A',
     name: 'agent-cli 0000',
-    released: false,
+    released: null,
     shutDown: false,
     reason: null,
   };
@@ -124,7 +124,7 @@ it('a release dev:stop refused gives its reason to each device it kept', async (
     platform: 'ios' as const,
     id: 'A',
     name: 'agent-cli 0000',
-    released: false,
+    released: null,
     shutDown: false,
     reason: null,
   };

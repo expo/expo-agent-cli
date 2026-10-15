@@ -546,6 +546,53 @@ describe(runSmokePhasesAsync, () => {
       ]);
     });
 
+    it('lists a device dev:stop kept as a cleanup row that is not ok, with the refusal as its reason', async () => {
+      const kept = {
+        backend: 'local-android' as const,
+        platform: 'android' as const,
+        id: 'emulator-5556',
+        name: 'emulator-5556',
+        released: null,
+        shutDown: false,
+        reason: "Devices were kept because this worktree's dev server is still running.",
+      };
+      const run = await runSmokePhasesAsync(
+        deps({
+          ...bareMachine({
+            probeDevice: async () => ({
+              deviceId: 'emulator-5556',
+              backend: 'local-ios' as const,
+              reason: null,
+            }),
+            bootDevice: vi.fn(),
+          }),
+          startDevServer: async () => ({
+            ok: true,
+            devServerUrl: 'http://127.0.0.1:8081',
+            reason: null,
+            bound: { id: 'emulator-5556', name: 'emulator-5556', action: 'spawned' as const },
+          }),
+          stopDevServer: async () => ({
+            ok: true,
+            target: 'http://127.0.0.1:8081',
+            reason: null,
+            devices: [kept],
+          }),
+        }),
+        options({ bootstrap: true, platform: 'android' })
+      );
+
+      expect(run.environment.cleanup).toContainEqual(
+        expect.objectContaining({
+          resource: 'device',
+          target: 'emulator-5556',
+          ok: false,
+          reason: kept.reason,
+        })
+      );
+      expect(run.environment.boundDevice).toMatchObject({ released: null });
+    });
+
     it('keeps the device its started dev server found bound and up before the run', async () => {
       const run = await runSmokePhasesAsync(
         deps({
