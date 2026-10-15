@@ -1,7 +1,11 @@
 import { vol } from 'memfs';
 import path from 'path';
 
-import { readStaticEasProjectAsync, readStaticExpoConfigAsync } from '../appConfig';
+import {
+  readStaticAppConfigAsync,
+  readStaticEasProjectAsync,
+  readStaticExpoConfigAsync,
+} from '../appConfig';
 
 const projectRoot = path.resolve('/project');
 
@@ -67,6 +71,18 @@ describe(readStaticEasProjectAsync, () => {
     expect(await readStaticEasProjectAsync(projectRoot)).toMatchObject({
       projectId: 'proj-1',
       source: 'app.config.json',
+    });
+  });
+});
+
+describe(readStaticAppConfigAsync, () => {
+  it(`should name no source for a static file that does not parse`, async () => {
+    writeFiles({ 'app.json': '{ not json' });
+
+    expect(await readStaticAppConfigAsync(projectRoot)).toEqual({
+      source: null,
+      plugins: [],
+      dynamic: false,
     });
   });
 });

@@ -111,6 +111,17 @@ describe(resolveRuntimeVersionAsync, () => {
     });
   });
 
+  it(`should report no source when the static config the fallback reads does not parse`, async () => {
+    mockExpoConfigFailure();
+    vol.fromJSON({ [`${projectRoot}/app.json`]: '{ not json' });
+
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+      policy: null,
+      literal: null,
+      source: null,
+    });
+  });
+
   it(`should fall back when the subprocess printed something unparsable`, async () => {
     vi.mocked(spawnExpoAsync).mockResolvedValue({
       cli: { command: 'expo', args: [] },

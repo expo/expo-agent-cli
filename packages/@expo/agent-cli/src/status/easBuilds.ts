@@ -234,7 +234,8 @@ function unlinkedReason(
   const config = easProject.source ?? 'its app config';
   // With no account name (signed in by EXPO_TOKEN alone), the command keeps a visible hole.
   const account = auth?.user ?? '<account-name>';
-  const unknownAccount = auth?.user ? '' : ' (the signed-in account is unknown; name yours)';
+  const unknownAccount =
+    !auth?.user && auth?.loggedIn === true ? ' (the signed-in account is unknown; name yours)' : '';
   return `this project is not linked to an EAS project — ${config} names no extra.eas.projectId, so EAS was not asked; link it once with "${easCommandPrefix(projectRoot)} init --account ${account} --non-interactive"${unknownAccount} (or --id <project-id> for one that exists)`;
 }
 

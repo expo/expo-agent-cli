@@ -327,6 +327,18 @@ describe(readEasBuildsStatusAsync, () => {
     expect(iosOf(status.platforms).reason).toContain('the signed-in account is unknown');
   });
 
+  it(`should not claim a session when nothing answered the auth check`, async () => {
+    const status = await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: true,
+      auth: { loggedIn: null, user: null, source: null },
+      projectHash: PROJECT_HASH,
+      easProject: { projectId: null, source: 'app.json', dynamic: false, unreadable: false },
+    });
+
+    expect(iosOf(status.platforms).reason).toContain('init --account <account-name>');
+    expect(iosOf(status.platforms).reason).not.toContain('signed-in');
+  });
+
   it(`should pass the lookup's own reason through as the unknown`, async () => {
     vi.mocked(lookUpCachedBuildAsync).mockResolvedValue({
       state: 'unknown',

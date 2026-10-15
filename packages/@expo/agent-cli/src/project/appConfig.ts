@@ -80,8 +80,9 @@ export async function readStaticExpoConfigAsync(projectRoot: string): Promise<St
 
 /** Read the config plugins declared in the project's static app config. */
 export async function readStaticAppConfigAsync(projectRoot: string): Promise<StaticAppConfig> {
-  const { source, config, dynamic } = await readStaticExpoConfigAsync(projectRoot);
-  return { source, plugins: parsePlugins(config?.plugins), dynamic };
+  const { source, config, dynamic, unreadable } = await readStaticExpoConfigAsync(projectRoot);
+  // A file that does not parse was not read, so it is not named as the source.
+  return { source: unreadable ? null : source, plugins: parsePlugins(config?.plugins), dynamic };
 }
 
 /**
