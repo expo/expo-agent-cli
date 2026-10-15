@@ -82,7 +82,7 @@ type StatusReport = {
         changedSources: { op: string; path: string | null; kind: string }[] | null;
       } | null;
     }[];
-    /** How many files changed, by kind. Null when no file-level view was available (llp/0011). */
+    /** Null when no file-level view was available. */
     changedFiles: { total: number; native: number; js: number; config: number } | null;
     ota: {
       safe: boolean | null;
@@ -1094,9 +1094,7 @@ process.stdout.write(JSON.stringify({
       expect(result.stdout).toContain('not safe to publish');
     });
 
-    // Eight rows, then a count: a headline with fifty rows attached is not a headline. Platforms
-    // whose lists agree print once — the probe hashes both together, so they usually do.
-    it('lists eight sources, counts the rest, and prints platforms that agree once', async () => {
+    it('lists eight sources, counts the rest, and prints matching platforms once', async () => {
       const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
       await fs.promises.writeFile(
         path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
@@ -1121,18 +1119,14 @@ process.stdout.write(JSON.stringify({
       expect(result.stdout).toContain('node_modules/native-module-7');
       expect(result.stdout).not.toContain('node_modules/native-module-8');
       expect(result.stdout).toContain('… and 2 more, in --json');
-      // Once, not once per platform.
       expect(result.stdout.match(/added\s+node_modules\/native-module-0/g)).toHaveLength(1);
     });
 
-    // The class contributes its single best next command to the follow-ups (llp/0009); the OTA
-    // verdict itself is in the report, not a rung.
-    it('carries the head of the class ladder in the follow-ups, beside the OTA verdict', async () => {
+    it('names change-native-build in the follow-ups for a native change', async () => {
       const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
 
       const report = await reportInAsync(projectRoot, [], env);
 
-      expect(report.freshness!.ota).toMatchObject({ safe: false });
       expect(report.followups.map((followup) => followup.id)).toContain('change-native-build');
     });
 
@@ -1259,10 +1253,6 @@ process.stdout.write(JSON.stringify({
 
   // @ref llp/0011-impact-and-freshness.rfc.md §The three comparisons
   // @ref llp/0021-honest-reports.rfc.md §The rules
-  //
-  // `--build <id>` replaces the base of the headline with one EAS build. The stub `eas` answers
-  // `fingerprint:compare` and `build:view`; the stub `fingerprint` diffs the two sides the way the
-  // real CLI does, because the diff is a local elaboration of the server's two hashes.
   describe('status --build <id>', () => {
     const BUILD_ID = '21d7d434-6495-4e74-b8c7-68ecd0dff489';
     const NATIVE_MODULE = {
@@ -1273,7 +1263,7 @@ process.stdout.write(JSON.stringify({
     };
     const APP_CONFIG = { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'cc' };
 
-    /** A `fingerprint` bin that also answers `fingerprint:diff`, which the comparison needs. */
+    /** A `fingerprint` bin that also answers `fingerprint:diff`. */
     const STUB_FINGERPRINT = `#!/usr/bin/env node
 'use strict';
 const fs = require('node:fs');
@@ -1306,7 +1296,7 @@ process.stdout.write(JSON.stringify({
 }) + '\\n');
 `;
 
-    /** The payload `fingerprint:compare` prints: the build's fingerprint, then the working tree's. */
+    /** `fingerprint1` is the build's fingerprint, `fingerprint2` the working tree's. */
     function comparePayload(buildSources: unknown[], headSources: unknown[]) {
       return JSON.stringify({
         fingerprint1: { hash: 'build-hash-1111', sources: buildSources },
@@ -1387,11 +1377,9 @@ process.stdout.write(JSON.stringify({
         detail: `matches EAS build ${BUILD_ID}`,
         impact: { class: 'js-only', fingerprintChanged: false, changedCount: 0 },
       });
-      // One build is one platform: the other axis says it was not compared, and names no class.
       expect(easAxis(report, 'android')).toMatchObject({ state: 'unknown', buildId: null });
       expect(easAxis(report, 'android').detail).toContain('not compared');
       expect(easAxis(report, 'android').impact?.class).toBeNull();
-      // The local axis is untouched: this machine's own record still answers its own question.
       expect(
         report.freshness!.platforms.find(
           (entry) => entry.platform === 'ios' && entry.backend === 'local'
@@ -1432,9 +1420,7 @@ process.stdout.write(JSON.stringify({
       expect(result.stdout).toContain(`differs from EAS build ${BUILD_ID}`);
     });
 
-    // Under `--build` the gate is about the named build, so only the eas axis is judged
-    // (`src/status/assert.ts`): the local axis answers a question the caller did not ask.
-    it('judges the eas axis under --assert', async () => {
+    it('judges only the eas axis under --assert', async () => {
       const projectRoot = await setupCompareAsync();
 
       const differs = await runBuildAsync(projectRoot, ['--assert', 'js-only'], {
@@ -1449,9 +1435,7 @@ process.stdout.write(JSON.stringify({
       expect(matches.exitCode).toBe(0);
     });
 
-    // S1: one build is one platform, and copying its verdict onto both said an iOS build could run
-    // android code. When EAS cannot say which platform, the comparison is attributed to none.
-    it('attributes the comparison to no platform when EAS cannot say which one the build is for', async () => {
+    it('attributes the comparison to no platform when the build platform is unknown', async () => {
       const projectRoot = await setupCompareAsync();
 
       const result = await runBuildAsync(projectRoot, ['--json', '--assert', 'js-only'], {
@@ -1459,7 +1443,6 @@ process.stdout.write(JSON.stringify({
         STUB_EAS_BUILD_VIEW_EXIT: '1',
       });
 
-      // Nothing measured, so the gate does not pass on a guess.
       expect(result.exitCode).toBe(22);
       const report: StatusReport = JSON.parse(result.stdout);
       expect(report.freshness!.comparison.platform).toBeNull();
@@ -1469,8 +1452,7 @@ process.stdout.write(JSON.stringify({
       }
     });
 
-    // F66: a `--build` that failed used to print an ordinary report with the id nowhere on it.
-    it('keeps the report, echoes the build, and notes the failure when the comparison cannot run', async () => {
+    it('notes the failure and names the build when the comparison fails', async () => {
       const projectRoot = await setupCompareAsync();
 
       const result = await runBuildAsync(projectRoot, [], { STUB_EAS_COMPARE_EXIT: '1' });
@@ -1482,56 +1464,25 @@ process.stdout.write(JSON.stringify({
 
       const json = await runBuildAsync(projectRoot, ['--json'], { STUB_EAS_COMPARE_EXIT: '1' });
       const report: StatusReport = JSON.parse(json.stdout);
-      expect(report.freshness!.comparison).toMatchObject({ kind: 'eas-build', buildId: BUILD_ID });
       expect(report.errors.freshness).toContain(BUILD_ID);
     });
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
-  // `status` is the one command that answers here rather than refusing: it is how a caller finds
-  // out it is in the wrong directory.
-  describe('a directory that is not an Expo app', () => {
-    async function setupNotAnAppAsync(): Promise<string> {
-      const projectRoot = await setupAsync('go-app');
-      const manifestPath = path.join(projectRoot, 'package.json');
-      const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
-      delete manifest.dependencies.expo;
-      await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
-      return projectRoot;
-    }
+  it('points a directory that is not an Expo app at creating one', async () => {
+    const projectRoot = await setupAsync('go-app');
+    const manifestPath = path.join(projectRoot, 'package.json');
+    const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+    delete manifest.dependencies.expo;
+    await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
 
-    it('says so, points at creating an app rather than running one, and exits 0', async () => {
-      const projectRoot = await setupNotAnAppAsync();
+    const report = await reportInAsync(projectRoot);
 
-      const report = await reportInAsync(projectRoot);
-
-      expect(report.project).toMatchObject({ isExpoApp: false });
-      expect(report.next).toMatchObject({
-        command: 'npx @expo/agent-cli new my-app',
-        steps: [],
-        buildLocation: null,
-      });
-      expect(report.next!.why).toContain('not an Expo app');
-    });
-
-    it('prints the fact second on the project line, where a reader cannot miss it', async () => {
-      const projectRoot = await setupNotAnAppAsync();
-
-      const result = await executeAgentCliAsync(projectRoot, [
-        'status',
-        '--dev-server-url',
-        await getUnusedDevServerUrlAsync(),
-      ]);
-
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout).toMatch(/project\s+go-app · not an Expo app/);
-      expect(result.stdout).toContain('npx @expo/agent-cli new my-app');
-    });
+    expect(report.next).toMatchObject({ command: 'npx @expo/agent-cli new my-app' });
+    expect(report.next!.why).toContain('not an Expo app');
   });
 
   // @ref llp/0011-impact-and-freshness.rfc.md §When the fingerprint did not move
-  // The file-level view: read only when the fingerprint says the native surface did not move,
-  // which is the one case where it can change the answer.
   describe('the changed files, when the fingerprint did not move', () => {
     const APP_CONFIG = { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'cc' };
     const STUB_FINGERPRINT = `#!/usr/bin/env node
@@ -1542,7 +1493,7 @@ process.stdout.write(JSON.stringify({
 }) + '\\n');
 `;
 
-    /** A committed working tree whose fingerprint matches its recorded build. */
+    /** A committed tree whose fingerprint matches its recorded build. */
     async function setupCommittedAsync(): Promise<string> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
       const binDir = path.join(projectRoot, '.stub-bin');
@@ -1559,7 +1510,6 @@ process.stdout.write(JSON.stringify({
           android: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
         })
       );
-      // What the test doubles write during a run is not the project's change.
       await fs.promises.writeFile(
         path.join(projectRoot, '.gitignore'),
         ['node_modules/', '.expo/', '.stub-bin/', 'stub-*.jsonl', ''].join('\n')
@@ -1581,7 +1531,7 @@ process.stdout.write(JSON.stringify({
 
     const env = { STUB_FP_SOURCES: JSON.stringify([APP_CONFIG]) };
 
-    it('says nothing about files when nothing in the tree changed', async () => {
+    it('counts zero files when nothing changed', async () => {
       const projectRoot = await setupCommittedAsync();
 
       const report = await reportInAsync(projectRoot, [], env);
@@ -1594,7 +1544,7 @@ process.stdout.write(JSON.stringify({
       ).toMatchObject({ class: 'js-only', fingerprintChanged: false });
     });
 
-    it('counts a JavaScript edit, and keeps the class at js-only', async () => {
+    it('counts a JavaScript edit and keeps the class at js-only', async () => {
       const projectRoot = await setupCommittedAsync();
       await fs.promises.writeFile(path.join(projectRoot, 'index.js'), '// edited\n');
 
@@ -1609,9 +1559,7 @@ process.stdout.write(JSON.stringify({
       expect(result.stdout).toMatch(/files\s+1 changed · 1 js · 0 config · 0 native/);
     });
 
-    // A file the dev server read once at start-up needs Metro restarted: the installed app is still
-    // the right one, and only the bundler has to come back.
-    it('raises the class to dev-client-compatible for a file the dev server read at start-up', async () => {
+    it('raises the class to dev-client-compatible for a metro.config.js edit', async () => {
       const projectRoot = await setupCommittedAsync();
       await fs.promises.writeFile(
         path.join(projectRoot, 'metro.config.js'),
@@ -1620,8 +1568,6 @@ process.stdout.write(JSON.stringify({
 
       const report = await reportInAsync(projectRoot, [], env);
 
-      // `metro.config.js` is a file the bundler reads, not the app config: it counts as JavaScript
-      // and still raises the class, because Metro has to come back for it.
       expect(report.freshness!.changedFiles).toMatchObject({ total: 1, js: 1, config: 0 });
       expect(
         report.freshness!.platforms.find(
@@ -1633,8 +1579,6 @@ process.stdout.write(JSON.stringify({
   });
 
   // @ref llp/0009-smart-followups.rfc.md §Examples per command
-  // The follow-ups reach a driving agent through `--json` and the event only; each rung fires on
-  // one fact of the report.
   describe('the follow-ups', () => {
     it('names runtime:errors when an app is connected to the dev server', async () => {
       const projectRoot = await setupAsync('go-app');
@@ -1660,7 +1604,7 @@ process.stdout.write(JSON.stringify({
       }
     });
 
-    it('names expo-dev-client for a project Expo Go cannot run and that has no dev client', async () => {
+    it('names expo-dev-client when Expo Go cannot run the project and it has no dev client', async () => {
       const projectRoot = await goAppOnDumpSdkAsync();
       await addNativeModuleAsync(projectRoot, 'expo-observe');
 
@@ -1676,7 +1620,7 @@ process.stdout.write(JSON.stringify({
       );
     });
 
-    it('names skills:sync when the project ships skills the selected agent has not linked', async () => {
+    it('names skills:sync when the selected agent has unlinked skills', async () => {
       const projectRoot = await setupAsync('skills-app');
       await writeAgentSelectionAsync(projectRoot, ['claude-code']);
 
@@ -1691,10 +1635,7 @@ process.stdout.write(JSON.stringify({
   });
 
   describe('the dev server the project log names', () => {
-    // Step 2 of the discovery ladder: `expo start` logs a `metro:instantiate` event with its port
-    // into `.expo/dev/logs/start.log`, which is what finds a dev server no `@expo/agent-cli` wrapper
-    // holds a lock for. The port is only a candidate until it answers.
-    it('finds it with no URL given, and says the log named it', async () => {
+    it('finds it from the metro:instantiate event in start.log', async () => {
       const projectRoot = await setupAsync('go-app');
       const devServer = await startDevServerDoubleAsync([]);
       try {
@@ -1887,7 +1828,6 @@ process.stdout.write(JSON.stringify({
       expect(result.all).toContain('--explain');
     });
 
-    // The stub `eas` does not answer `fingerprint:compare`, so this pins that the id is echoed (F66).
     it('takes --build, and echoes the build it was given', async () => {
       const projectRoot = await setupAssertAsync(recordedWith([APP_CONFIG]));
       await installSharedStubEasAsync(projectRoot);

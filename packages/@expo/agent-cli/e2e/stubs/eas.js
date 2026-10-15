@@ -47,13 +47,12 @@
 //   uses (stdout for the explanation, one `Error:` line on stderr)
 //
 // `fingerprint:compare --build-id <id>`
-// - STUB_EAS_COMPARE_JSON: the `{ fingerprint1, fingerprint2 }` payload to print verbatim (default:
-//   two equal, empty fingerprints — the build matches the working tree)
+// - STUB_EAS_COMPARE_JSON: the `{ fingerprint1, fingerprint2 }` payload to print (default: two
+//   equal, empty fingerprints)
 // - STUB_EAS_COMPARE_EXIT: a refusal, with one `Error:` line on stderr
 //
-// `build:view <id>`
-// - STUB_EAS_BUILD_VIEW_PLATFORM: the platform of the build it describes (default `IOS`)
-// - STUB_EAS_BUILD_VIEW_EXIT: a refusal — a build nobody can see, or one that does not exist
+// `build:view <id>`: an iOS build
+// - STUB_EAS_BUILD_VIEW_EXIT: a refusal, with one `Error:` line on stderr
 //
 // `simulator:availability`
 // - STUB_SIM_AVAILABLE: `false` for an account without the feature
@@ -256,9 +255,7 @@ if (command === 'fingerprint:compare') {
   if (exitCode !== 0) {
     exitWith(process.stderr, '    Error: fingerprint:compare command failed.', exitCode);
   }
-  // The recorded shape [observed — eas-cli `fingerprint:compare --build-id <id> --json`,
-  // 2026-08-26]: both whole fingerprints, `fingerprint1` the build's and `fingerprint2` the
-  // working directory's. No diff — the CLI leaves that to the caller.
+  // `fingerprint1` is the build's, `fingerprint2` the working directory's; there is no diff.
   exitWith(
     process.stdout,
     process.env.STUB_EAS_COMPARE_JSON ||
@@ -278,7 +275,7 @@ if (command === 'build:view') {
   printJson({
     id: args[1],
     status: 'FINISHED',
-    platform: process.env.STUB_EAS_BUILD_VIEW_PLATFORM || 'IOS',
+    platform: 'IOS',
     buildProfile: 'simulator',
     createdAt: '2026-08-19T17:37:12.674Z',
   });
