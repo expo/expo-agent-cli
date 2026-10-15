@@ -111,6 +111,33 @@ describe(resolveRuntimeVersionAsync, () => {
     });
   });
 
+  it(`should read app.config.json over app.json, as Expo does`, async () => {
+    vol.fromJSON({
+      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { runtimeVersion: '1.0.0' } }),
+      [`${projectRoot}/app.config.json`]: JSON.stringify({
+        expo: { runtimeVersion: { policy: 'fingerprint' } },
+      }),
+    });
+
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+      policy: 'fingerprint',
+      literal: null,
+      source: 'app.config.json',
+    });
+    expect(spawnExpoAsync).not.toHaveBeenCalled();
+  });
+
+  it(`should not read a static config that does not parse as naming no runtimeVersion`, async () => {
+    vol.fromJSON({ [`${projectRoot}/app.json`]: '{ not json' });
+    mockExpoConfigFailure();
+
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+      policy: null,
+      literal: null,
+      source: null,
+    });
+  });
+
   describe('a dynamic config', () => {
     function writeDynamicProject(appJson: unknown = { expo: { name: 'app' } }) {
       vol.fromJSON({
@@ -140,6 +167,25 @@ describe(resolveRuntimeVersionAsync, () => {
         policy: 'appVersion',
         literal: null,
         source: 'app.json',
+      });
+    });
+
+    it.each([
+      ['alone', {}],
+      ['beside an app.json', { 'app.json': JSON.stringify({ expo: { runtimeVersion: '1.0.0' } }) }],
+    ])(`should evaluate an app.config.mts %s`, async (_name, files: Record<string, string>) => {
+      vol.fromJSON({
+        [`${projectRoot}/package.json`]: '{"name":"app"}',
+        [`${projectRoot}/app.config.mts`]: 'export default {};',
+        ...Object.fromEntries(
+          Object.entries(files).map(([name, body]) => [`${projectRoot}/${name}`, body])
+        ),
+      });
+      mockExpoConfig({ name: 'app', runtimeVersion: { policy: 'appVersion' } });
+
+      await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toMatchObject({
+        policy: 'appVersion',
+        source: 'expo config --type public',
       });
     });
 
