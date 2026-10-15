@@ -136,22 +136,6 @@ it("a refusal's How runs a foreground caller's command detached, without --plan"
   });
 });
 
-it('preview refuses not-reusable as the run does while the own dev server runs', async () => {
-  const { previewExplicitDeviceAsync } = await import('../preview');
-  const tools = fakeTools({
-    simulators: [human, { udid: 'OLD', name: 'agent-cli 0000', state: 'Booted' }],
-  });
-  writeBinding(file(), bindingFor(ROOT, 'OLD'));
-  await expect(
-    previewExplicitDeviceAsync(ROOT, 'ios', named('HUMAN'), true, tools)
-  ).rejects.toMatchObject({
-    data: { reason: 'not-reusable' },
-    message: expect.stringContaining(
-      'The running dev server uses agent-cli 0000; --device names My iPhone.'
-    ),
-  });
-});
-
 it('will not orphan an own spawned emulator when asked to use another serial', async () => {
   const tools = fakeTools({
     emulators: [
@@ -206,9 +190,9 @@ it('preview reports a foreign owner without changing its expired binding or runn
   const tools = fakeTools({ simulators: [human] });
   const binding = bindingFor(OTHER, 'HUMAN', { expiresAt: '2020-01-01T00:00:00Z' });
   writeBinding(file(OTHER), binding);
-  await expect(
-    previewExplicitDeviceAsync(ROOT, 'ios', named('HUMAN'), false, tools)
-  ).rejects.toThrow('bound to the worktree /work/other');
+  await expect(previewExplicitDeviceAsync(ROOT, 'ios', named('HUMAN'), tools)).rejects.toThrow(
+    'bound to the worktree /work/other'
+  );
   expect(readBindingFile(file(OTHER))).toEqual({ kind: 'binding', binding });
   expect(readBindingFile(file())).toEqual({ kind: 'none' });
   expect(tools.calls.every(([command]) => command === 'list')).toBe(true);
@@ -224,9 +208,7 @@ it('preview says which device it binds, whose expired binding it takes, and what
   if (foreign.device.backend === 'local-ios') foreign.device.origin = 'explicit';
   writeBinding(file(), own);
   writeBinding(file(OTHER), foreign);
-  expect(
-    (await previewExplicitDeviceAsync(ROOT, 'ios', named('my iphone'), false, tools)).summary
-  ).toBe(
+  expect((await previewExplicitDeviceAsync(ROOT, 'ios', named('my iphone'), tools)).summary).toBe(
     'Will bind My iPhone (HUMAN), taken over from /work/other (lease expired); will delete agent-cli 0000 (replaced by --device).'
   );
   expect(readBindingFile(file())).toEqual({ kind: 'binding', binding: own });
@@ -264,7 +246,7 @@ it.each(['offline', 'unauthorized', 'no permissions'] as const)(
       suggestedCommand: 'npx @expo/agent-cli dev --android --device R58N123 --detach --wait-ready',
     };
     await expect(
-      previewExplicitDeviceAsync(ROOT, 'android', explicit, false, tools)
+      previewExplicitDeviceAsync(ROOT, 'android', explicit, tools)
     ).rejects.toMatchObject(refusal);
     await expect(acquireDeviceAsync(ROOT, 'android', { explicit, tools })).rejects.toMatchObject(
       refusal
@@ -285,7 +267,7 @@ it('explicit-android-needs-only-adb', async () => {
     spawnError: Object.assign(new Error('spawn emulator ENOENT'), { code: 'ENOENT' }),
   }));
   expect(
-    (await previewExplicitDeviceAsync(ROOT, 'android', named('R58N123'), false, tools)).device
+    (await previewExplicitDeviceAsync(ROOT, 'android', named('R58N123'), tools)).device
   ).toMatchObject({
     serial: 'R58N123',
     origin: { kind: 'explicit' },

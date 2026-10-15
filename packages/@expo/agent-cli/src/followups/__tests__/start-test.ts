@@ -192,6 +192,24 @@ describe(buildStartFollowUps, () => {
 });
 
 describe(buildStartPlanFollowUps, () => {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  it.each(['serving', 'starting'] as const)(
+    `offers the running dev server, not the plan, when the plan stopped on one (%s)`,
+    (phase) => {
+      const followups = buildStartPlanFollowUps(
+        mockPlan({
+          steps: [],
+          devServerPort: { port: 8081, movedFrom: null, state: 'running', phase },
+        }),
+        mockState()
+      );
+
+      expect(ids(followups)).toEqual(['dev-server-running']);
+      expect(followups[0]!.command).toBe('npx @expo/agent-cli status');
+      expect(followups[0]!.why).toContain('port 8081');
+    }
+  );
+
   it(`should offer the refusal's How command instead of a run of a plan that refuses --device`, () => {
     const followups = buildStartPlanFollowUps(
       mockPlan({
