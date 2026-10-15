@@ -6,6 +6,8 @@
 // `extract` picks the one match the report is about — so the answer a fixture pins is the answer
 // the command gives.
 
+import fs from 'node:fs';
+
 import { event } from '../../events';
 import { EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import { buildExplainFollowUps, followUpsEnabled, reportFollowUps } from '../../followups';
@@ -29,10 +31,13 @@ import { easCommandPrefix } from '../../utils/easCli';
  *   through a `CommandError` rather than through this function.
  */
 export async function explainAsync(options: ExplainOptions): Promise<void> {
+  if (options.source.kind === 'local' && !fs.existsSync(options.source.path)) {
+    throw noLocalBuildLogError(options.source);
+  }
   const read =
-    options.source.kind === 'file'
-      ? await readLogFileAsync(options.source.path)
-      : await readLogStreamAsync(process.stdin);
+    options.source.kind === 'stdin'
+      ? await readLogStreamAsync(process.stdin)
+      : await readLogFileAsync(options.source.path);
 
   if (read.lines.length === 0) {
     throw emptyLogError(options);
@@ -93,7 +98,7 @@ export function buildExplainReport(read: ReadLogResult, options: ExplainOptions)
   return {
     source: {
       kind: options.source.kind,
-      path: options.source.kind === 'file' ? options.source.path : null,
+      path: options.source.kind === 'stdin' ? null : options.source.path,
       platform: options.platform,
       bytes: read.bytes,
       lines: read.lines.length,
@@ -111,6 +116,33 @@ export function buildExplainReport(read: ReadLogResult, options: ExplainOptions)
 }
 
 /**
+ * The error for a `--local` read of a platform this project has no build log for.
+ *
+ * Its own code rather than the file reader's "no such file": the path was this CLI's choice, not
+ * the caller's, so the recovery is the command that writes it, not a typo to look for. The two
+ * ways there is no log are the two things the message names — no build was run here, or it was
+ * run on a terminal, where the output goes to the person watching and not through this process
+ * (`src/dev/buildLog.ts`).
+ */
+function noLocalBuildLogError(source: {
+  kind: 'local';
+  platform: 'ios' | 'android';
+  path: string;
+}): CommandError {
+  const dev = `${PROGRAM_PREFIX} dev --${source.platform}`;
+  const error = new CommandError(
+    'NO_LOCAL_BUILD_LOG',
+    [
+      `This project has no ${source.platform} build log to explain (${source.path}).`,
+      `Why: "${dev}" writes the output of the native build it runs to that file, and only when its output passes through it — every run without a terminal watching, a detached run included. Either no ${source.platform} build has run here through it, or the one that did was watched on a terminal.`,
+      `How: run "${dev}" (or "${dev} --detach") once and then this command again — or pipe the build's own output in: "npx expo run:${source.platform} 2>&1 | ${PROGRAM_PREFIX} inspect:build-log --${source.platform}".`,
+    ].join('\n')
+  );
+  error.suggestedCommand = dev;
+  return error;
+}
+
+/**
  * The error for a source that is not a log.
  *
  * @ref llp/0012-build-explain.rfc.md §Is this a log at all — live run S8.
@@ -125,7 +157,7 @@ export function buildExplainReport(read: ReadLogResult, options: ExplainOptions)
  * anything at all and an agent has to carry them through its own context.
  */
 function notALogError(options: ExplainOptions, controlRatio: number): CommandError {
-  const where = options.source.kind === 'file' ? options.source.path : 'the data on stdin';
+  const where = options.source.kind === 'stdin' ? 'the data on stdin' : options.source.path;
   const error = new CommandError(
     'LOG_NOT_TEXT',
     [

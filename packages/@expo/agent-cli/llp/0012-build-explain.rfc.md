@@ -19,11 +19,13 @@ Two properties are the whole design:
 
 ## What ships, and what is reserved
 
-Two input sources ship: `--file <path>` and `--stdin`. The `<build-id>` form, which would read the log of an EAS build by its id, does not. eas-cli has no `build:logs` command ([[0010-agent-conventions]] §Upstream asks).
+Three input sources ship: `--file <path>`, `--stdin`, and `--local --ios|--android` [added — Kudo, 2026-09-15]. The `<build-id>` form, which would read the log of an EAS build by its id, does not. eas-cli has no `build:logs` command ([[0010-agent-conventions]] §Upstream asks).
+
+`--local` reads the log of the last native build `@expo/agent-cli dev` ran here for one platform. `dev`'s `expo run:*` step writes every byte it printed, in arrival order, to `.expo/dev/logs/build-<platform>.log` (`src/dev/buildLog.ts`, `SubprocessOptions.logFile`), truncated per build — whenever its output passes through this process, which is every run without a terminal watching it, a detached run included. An interactive run hands the terminal to the tool and writes none; `--local` then says so and names the two ways to get a log. The platform is required, not defaulted: a project builds for two, and a default would explain a build the caller may not have meant. `source.kind` is `'local'` and `source.path` is the file.
 
 The positional argument is reserved and reported rather than rejected as a stray. `@expo/agent-cli inspect:build-log <build-id>` is the command an agent will reach for. It has a code of its own, `BUILD_ID_UNSUPPORTED`. The message says the CLI cannot fetch a build's log, why, and the two spellings that work today. `Try: npx eas build:view <id>` prints where the log files are. Fetching by id is not in v1. See [[0017-deferred-commands]].
 
-`source.kind` is `'file' | 'stdin'`. There is no `build` key.
+`source.kind` is `'file' | 'stdin' | 'local'`. There is no `build` key.
 
 Local logs are most of the value. `npx expo run:ios 2>&1 | npx @expo/agent-cli inspect:build-log --json` is the loop an agent driving a local build actually has.
 

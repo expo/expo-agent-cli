@@ -3,6 +3,7 @@
 // covers the ones `@expo/agent-cli` has to find for itself (`create-expo`, `eas`) and the two output modes
 // a command needs: hand the terminal over, or capture what the tool printed.
 import { spawn } from 'child_process';
+import fs from 'fs';
 import path from 'path';
 
 import { isPromptShaped, lastNonEmptyLine } from '../needsHuman/detect';
@@ -72,6 +73,16 @@ export interface SubprocessOptions {
    * terminal exactly as they arrive.
    */
   printFilter?: (line: string) => string | null;
+  /**
+   * A file every byte of stdout and stderr is also written to, in the order it arrived.
+   *
+   * For a run whose output somebody will read *later*: the native build `@expo/agent-cli dev` runs
+   * is what `inspect:build-log --local` explains afterwards (`src/dev/buildLog.ts`). Truncated
+   * when the child starts, created with its directory, and best-effort — a file that cannot be
+   * written costs the log, never the run. Nothing is written in `inherit` mode, where no byte
+   * passes through this process.
+   */
+  logFile?: string;
 }
 
 export interface SubprocessResult {
@@ -169,9 +180,11 @@ function spawnNowAsync(
     promptGuard,
     timeoutMs,
     printFilter,
+    logFile,
   }: SubprocessOptions = {}
 ): Promise<SubprocessResult> {
   return new Promise<SubprocessResult>((resolve) => {
+    const log = output === 'inherit' ? null : openLogFileSync(logFile);
     // `eas`, `create-expo` and `npx` all resolve to a batch shim on Windows, which needs `cmd.exe`.
     const target = resolveSpawnTarget(command, args);
     const child = spawn(target.command, target.args, {
@@ -225,6 +238,7 @@ function spawnNowAsync(
     child.stdout?.on('data', (chunk) => {
       const text = chunk.toString();
       stdout += text;
+      log?.write(text);
       guard?.sawOutput();
       if (output === 'tee') {
         toOut.write(text);
@@ -233,6 +247,7 @@ function spawnNowAsync(
     child.stderr?.on('data', (chunk) => {
       const text = chunk.toString();
       stderr += text;
+      log?.write(text);
       guard?.sawOutput();
       if (output === 'tee' || output === 'capture-stdout') {
         toErr.write(text);
@@ -252,6 +267,7 @@ function spawnNowAsync(
       // A tool that ends without a trailing newline still said what it said.
       toOut.flush();
       toErr.flush();
+      log?.close();
       for (const { signal, forward } of listeners) {
         process.off(signal, forward);
       }
@@ -287,6 +303,52 @@ function spawnNowAsync(
  * handed over one at a time — the filter's unit — and whatever the tool left without a trailing
  * newline is flushed when it exits.
  */
+/**
+ * The log file of {@link SubprocessOptions.logFile}, open for the child's whole run, or null.
+ *
+ * Synchronous writes, because the chunks arrive on the event loop in order and an async writer
+ * could reorder two streams that a reader has to see interleaved the way the tool printed them.
+ * Every failure is swallowed: this file is a convenience for a later read, and a disk that refuses
+ * it must not fail the build that is running.
+ */
+function openLogFileSync(
+  logFile: string | undefined
+): { write(text: string): void; close(): void } | null {
+  if (!logFile) {
+    return null;
+  }
+  let fd: number | null = null;
+  try {
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    fd = fs.openSync(logFile, 'w');
+  } catch {
+    return null;
+  }
+  return {
+    write(text: string) {
+      if (fd == null) {
+        return;
+      }
+      try {
+        fs.writeSync(fd, text);
+      } catch {
+        // A write that failed is a gap in the log, and the next one may succeed.
+      }
+    },
+    close() {
+      if (fd == null) {
+        return;
+      }
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // Nothing to do with a descriptor that would not close.
+      }
+      fd = null;
+    },
+  };
+}
+
 function printerFor(
   stream: NodeJS.WriteStream,
   filter: ((line: string) => string | null) | undefined

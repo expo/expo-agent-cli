@@ -22,7 +22,14 @@ export function formatExplainReport(report: ExplainReport): string {
   const row = (label: string, value: string) =>
     lines.push(`${chalk.dim(label.padEnd(LABEL_WIDTH))}${value}`);
 
-  row('log', report.source.kind === 'file' ? report.source.path! : 'stdin');
+  row(
+    'log',
+    report.source.kind === 'stdin'
+      ? 'stdin'
+      : report.source.kind === 'local'
+        ? `${report.source.path!} ${chalk.dim(`(the last ${report.source.platform ?? 'native'} build dev ran here)`)}`
+        : report.source.path!
+  );
   row('read', readLine(report));
   if (report.phases.length) {
     row('phases', phasesLine(report.phases));
