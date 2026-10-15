@@ -3,6 +3,7 @@ import os from 'os';
 import path from 'path';
 
 import { acquireDeviceAsync, devicesDisabled, inspectBindingAsync } from '../../deviceBinding';
+import { withLeaseExtendedAsync } from '../../deviceBinding/renew';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
@@ -50,6 +51,9 @@ vi.mock('../../project/fingerprint', () => ({ clearFingerprintMemo: vi.fn() }));
 vi.mock('../../project/fingerprintCache', () => ({ clearFingerprintCache: vi.fn() }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../start/startAsync', () => ({ runDevServerAsync: vi.fn() }));
+vi.mock('../../deviceBinding/renew', () => ({
+  withLeaseExtendedAsync: vi.fn((_root: string, work: () => Promise<unknown>) => work()),
+}));
 // A person at a terminal by default, which is the path these tests were written for: the plan's
 // steps inherit the terminal, and nothing about their output is this command's business. The
 // runs nobody is watching get their own block at the end of the file.
@@ -255,6 +259,17 @@ describe(devAsync, () => {
         agentSkills: true,
         output: 'inherit',
       });
+    });
+
+    // @ref llp/0035-one-device-per-worktree.rfc.md §Lease timer
+    it(`should renew the worktree's device lease around a build step`, async () => {
+      mockStaleDevClientState();
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(withLeaseExtendedAsync).toHaveBeenCalledTimes(1);
+      expect(withLeaseExtendedAsync).toHaveBeenCalledWith(projectRoot, expect.any(Function));
+      expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['prebuild', '--platform', 'ios']);
     });
   });
 

@@ -8,8 +8,11 @@ import type { BoundSerial } from './choose';
 import type { DevicePlatform, InspectCause, InspectState } from './types';
 
 /** The one command that binds a device to this worktree. */
-export function deviceCommand(platform: DevicePlatform): string {
-  return `${PROGRAM_PREFIX} dev --${platform} --detach --wait-ready`;
+export function deviceCommand(
+  platform: DevicePlatform,
+  { eas = false }: { eas?: boolean } = {}
+): string {
+  return `${PROGRAM_PREFIX} dev --${platform}${eas ? ' --eas' : ''} --detach --wait-ready`;
 }
 
 export type UnavailableReason =

@@ -4,6 +4,7 @@ import os from 'os';
 import { holdDevServerLockAsync } from '../../devLock';
 import type { DevServerLockHandle } from '../../devLock';
 import * as Log from '../../log';
+import { withLeaseExtendedAsync } from '../../deviceBinding/renew';
 import { autoSyncSkillsAsync } from '../../skills/skillsAsync';
 import { runExpoAsync, spawnExpoAsync } from '../../utils/expoCli';
 import { resolveStartOptions } from '../resolveOptions';
@@ -19,6 +20,9 @@ vi.mock('../../log');
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../skills/skillsAsync', () => ({ autoSyncSkillsAsync: vi.fn() }));
 vi.mock('../../devLock', () => ({ holdDevServerLockAsync: vi.fn() }));
+vi.mock('../../deviceBinding/renew', () => ({
+  withLeaseExtendedAsync: vi.fn((_root: string, work: () => Promise<unknown>) => work()),
+}));
 vi.mock('../../runtime/bundlerStatus', () => ({
   probeBundlerAsync: vi.fn(),
 }));
@@ -258,6 +262,18 @@ describe(runDevServerAsync, () => {
     expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['run:ios']);
     vi.advanceTimersByTime(SKILLS_SYNC_IDLE_DELAY_MS);
     expect(autoSyncSkillsAsync).toHaveBeenCalledWith(projectRoot, { silent: false });
+
+    end(0);
+    await promise;
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Lease timer
+  it(`should renew the worktree's device lease while the dev server runs`, async () => {
+    const end = mockLongRunningStart();
+    const promise = runDevServerAsync(projectRoot, ['run:ios'], { agentSkills: false });
+
+    expect(withLeaseExtendedAsync).toHaveBeenCalledWith(projectRoot, expect.any(Function));
+    expect(runExpoAsync).toHaveBeenCalledWith(projectRoot, ['run:ios']);
 
     end(0);
     await promise;
