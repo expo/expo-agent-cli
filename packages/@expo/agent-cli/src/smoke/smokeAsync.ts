@@ -20,8 +20,14 @@ import {
   deviceIdOf,
   deviceNameOf,
   devicesDisabled,
+  hostBindsPlatform,
+  inspectBindingAsync,
+  localBackendOf,
+  releaseWorktreeDevicesAsync,
+  type Binding,
   type BoundDevice,
 } from '../deviceBinding';
+import { bindingPathFor, readBindingFile } from '../deviceBinding/registry';
 import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
 import { installDevBuildAsync } from '../device/installDevBuild';
@@ -29,7 +35,6 @@ import { installExpoGoAsync } from '../device/installExpoGo';
 import { hasAppOnDeviceAsync } from '../device/hasApp';
 import { captureScreenshotAsync, defaultScreenshotPath } from '../device/screenshot';
 import { event } from '../events';
-import { EXIT_OK } from '../exitCodes';
 import { buildSmokeFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
 import { resolveDeviceAsync, type DeviceBackend } from '../navigate/device';
@@ -68,9 +73,11 @@ import {
   START_DEV_SERVER_TIMEOUT_MS,
   type SmokeDeps,
   type SmokeRun,
+  type SmokeStartResult,
 } from './phases';
 import { buildSmokeProgress } from './progress';
 import type { SmokeOptions } from './resolveOptions';
+import type { SmokeEnvironmentJson } from './types';
 
 /** How long discovery may spend on each candidate port. Short: a dev server that is up answers. */
 const DISCOVERY_TIMEOUT_MS = 800;
@@ -103,6 +110,43 @@ const TARGET_SETTLE_POLL_MS = 500;
  * @ref llp/0026-dev-owns-the-open.rfc.md
  */
 export const START_DEV_SERVER_ARGV: readonly string[] = ['--detach', '--wait-ready', '--no-open'];
+
+/**
+ * The device the detached `dev` of the start phase bound, from the worktree's binding file before
+ * and after the start. The child acquires and the parent only reads its result. A device whose
+ * binding was live and up, or whose check did not answer, before the start is `existing`: the run
+ * keeps it.
+ *
+ * @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
+ */
+export function deviceBoundByStart(
+  before: Binding | null,
+  after: Binding | null,
+  beforeUp: boolean
+): SmokeStartResult['bound'] {
+  if (after == null) {
+    return undefined;
+  }
+  const id = deviceIdOf(after.device);
+  const reused = before != null && deviceIdOf(before.device) === id;
+  const fresh = after.device.backend === 'local-android' ? 'spawned' : 'created';
+  return {
+    id,
+    name: deviceNameOf(after.device),
+    action: !reused ? fresh : beforeUp ? 'existing' : 'reused',
+  };
+}
+
+/** @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke */
+export function cleanupLeft(environment: SmokeEnvironmentJson): {
+  serverStopped: boolean;
+  deviceReleased: boolean;
+} {
+  return {
+    serverStopped: environment.cleanup.some(({ resource, ok }) => resource === 'dev-server' && ok),
+    deviceReleased: environment.boundDevice?.released === true,
+  };
+}
 
 /**
  * The port `--start` asks the dev server for, out of the dev server this run was pointed at.
@@ -197,6 +241,8 @@ function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
     // The `start-dev-server` phase is only in the list for a run that performed one, and it is
     // charged as a build when the plan compiled (@ref ./phases §BUILD_DEV_SERVER_TIMEOUT_MS).
     buildAttempted: run.buildAttempted,
+    ...cleanupLeft(run.environment),
+    port: startPortArgs(options.devServerUrl)[1] ?? null,
     // `required` is `--eas`; `fallback` is a run that would only reach a session if this machine
     // had no device, and a ladder must not put a billed session on a line the caller never asked
     // for (llp/0005 §Cloud simulator).
@@ -271,6 +317,7 @@ function explainOutcome(run: SmokeRun): string {
  * findings behind them to be forgotten.
  */
 export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
+  let bootBinding: Binding | undefined;
   // Built once and shared by every phase that reads a target, so no two phases can disagree about
   // which app this run is about (F51). Built lazily: a run that fails at the dev-server phase never
   // spawns a device tool for it.
@@ -285,6 +332,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
    * that decided there was an install to do has already resolved the target.
    */
   let installKind: SmokeTarget['installWithKind'] | null = null;
+  let keepBoundDevice = false;
   const targetAsync = () =>
     (target ??= resolveSmokeTargetAsync(projectRoot, options).then((resolved) => {
       installKind = resolved.installWithKind;
@@ -302,6 +350,14 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
    */
   const forgetTarget = () => {
     target = null;
+  };
+  const ownBinding = (): Binding | null => {
+    const bindsDevice =
+      options.cloud !== 'required' && !devicesDisabled() && hostBindsPlatform(options.platform);
+    if (!bindsDevice) return null;
+    const backend = localBackendOf(options.platform);
+    const read = readBindingFile(bindingPathFor(projectRoot, options.platform, backend));
+    return read.kind === 'binding' ? read.binding : null;
   };
 
   /**
@@ -359,6 +415,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       // needs is the sentence that tells them which it is. On stderr, because stdout carries one
       // JSON object and nothing else (llp/0006 §Output contract), and as an event too so a reader
       // of the stream sees it without parsing English.
+      keepBoundDevice = true;
       const target = await targetAsync();
       // @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken. A
       // build that would land on EAS because this machine cannot build, and that nobody asked for,
@@ -391,6 +448,12 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         // read above is about the project as it was before it.
         forgetTarget();
       }
+      const before = ownBinding();
+      const state =
+        before &&
+        (await inspectBindingAsync(projectRoot, options.platform, before.device.backend)).state;
+      const beforeUp = state === 'up' || state === 'unknown';
+      keepBoundDevice = beforeUp;
       const argv = [
         `--${options.platform}`,
         ...START_DEV_SERVER_ARGV,
@@ -437,6 +500,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         ok: found.reachable,
         devServerUrl: found.devServerUrl,
         built,
+        bound: deviceBoundByStart(before, ownBinding(), beforeUp),
         reason: found.reachable
           ? null
           : `a dev server was started and nothing answered at ${found.devServerUrl} afterwards (${found.reason ?? 'no answer'})`,
@@ -449,17 +513,36 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // lock answers for, so a cleanup can never take down something this run did not start.
     stopDevServer: async () => {
       const captured: { report: DevStopResultJson | null } = { report: null };
-      const code = await devStopAsync(projectRoot, resolveDevStopOptions(['--no-followups']), {
-        print: false,
-        onReport: (stopped) => {
-          captured.report = stopped;
+      const release = options.cloud !== 'required' && !keepBoundDevice;
+      await devStopAsync(
+        projectRoot,
+        {
+          ...resolveDevStopOptions(['--no-followups']),
+          release,
+          platform: options.platform,
         },
-      });
+        {
+          print: false,
+          onReport: (stopped) => {
+            captured.report = stopped;
+          },
+        }
+      );
       const stopped = captured.report;
+      const serverStopped =
+        stopped != null && (stopped.stopped || stopped.reason === 'not-running');
       return {
-        ok: code === EXIT_OK,
+        ok: serverStopped,
         target: stopped?.url ?? (stopped?.port == null ? null : `port ${stopped.port}`),
-        reason: code === EXIT_OK ? null : (stopped?.detail ?? 'the dev server did not stop'),
+        reason: serverStopped ? null : (stopped?.detail ?? 'the dev server did not stop'),
+        // A refused release leaves each kept row without a reason; dev:stop's refusal is that reason.
+        devices: release
+          ? stopped?.devices?.map((device) =>
+              device.released || device.reason != null || stopped.deviceError == null
+                ? device
+                : { ...device, reason: whatAndHow(stopped.deviceError) }
+            )
+          : undefined,
       };
     },
 
@@ -514,12 +597,38 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       return { ok: result.ok, target: sessionId, reason: result.reason };
     },
 
+    readBoundDevice: () => {
+      const binding = ownBinding();
+      return binding && { id: deviceIdOf(binding.device), name: deviceNameOf(binding.device) };
+    },
+
     // Local only, and that is not a gap: `--eas` names a session somebody else started and pays
     // for, and the phase that calls this never runs for one.
     //
-    // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke — the device is this worktree's bound one, reused,
-    // created or spawned by the registry and left bound; a created simulator and a read-only
-    // emulator instance have no app, so the install phase puts it there.
+    // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke — a child-owned binding is released by
+    // dev:stop; a binding acquired with a reused server is released by this hook.
+    releaseDevice: async () => {
+      if (!bootBinding) return { ok: true, target: null, reason: null };
+      const devices = await releaseWorktreeDevicesAsync(projectRoot, {
+        platform: options.platform,
+        expected: bootBinding,
+      });
+      if (devices.length === 0) {
+        return {
+          ok: false,
+          target: null,
+          reason:
+            "this worktree's binding no longer names the device this run bound, so this run released nothing",
+          devices,
+        };
+      }
+      return {
+        ok: devices.every((device) => device.released),
+        target: devices.map((device) => device.id).join(', ') || null,
+        reason: devices.find((device) => !device.released)?.reason ?? null,
+        devices,
+      };
+    },
     bootDevice: async () => {
       const platform = options.platform;
       if (devicesDisabled()) {
@@ -533,6 +642,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       }
       try {
         const acquired = await acquireDeviceAsync(projectRoot, platform);
+        bootBinding = acquired.binding;
         Log.progress(acquireLine(acquired));
         return {
           ok: true,
@@ -541,6 +651,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
           choice: choiceOf(acquired.device),
           installNeeded: acquired.action === 'created' || acquired.action === 'spawned',
           reason: null,
+          bound: { name: deviceNameOf(acquired.device), action: acquired.action },
         };
       } catch (error: unknown) {
         return {

@@ -6,6 +6,7 @@
 // formatter and the follow-ups depend on the shape rather than on the machinery that fills it.
 
 import type { ScreenshotResult } from '../device/screenshot';
+import type { AcquireAction } from '../deviceBinding';
 import type { FollowUp } from '../followups';
 import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckJson } from '../runtime/bundleCheck';
@@ -158,6 +159,25 @@ export interface SmokeCleanupJson {
   ms: number;
 }
 
+/** @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke */
+export interface SmokeBoundDeviceJson {
+  id: string;
+  name: string;
+  /**
+   * How the boot got it: `created`, `reused`, `spawned` or `explicit`. `existing` when this run
+   * acquired nothing, or its started dev server found the binding live and up, and the worktree's
+   * binding names the device the run used.
+   */
+  action: AcquireAction | 'existing';
+  /**
+   * The release at the end of the run let go of it. `false` when that release failed, `null` for
+   * an `existing` device, which this run did not bind and keeps.
+   */
+  released: boolean | null;
+  /** That release shut it down: a parked simulator, a stopped emulator instance. */
+  shutDown: boolean;
+}
+
 /**
  * What this run found, what it started, and what it put back.
  *
@@ -177,6 +197,11 @@ export interface SmokeEnvironmentJson {
    * have opened the app. `"it has Expo Go installed"`, `"it was already booted"`.
    */
   deviceChoice: string | null;
+  /**
+   * The worktree device this run bound, or the bound device it used, and what its release did.
+   * Null when the run used no device of this worktree's binding.
+   */
+  boundDevice: SmokeBoundDeviceJson | null;
   /**
    * Everything this run put back, newest first.
    *

@@ -31,6 +31,9 @@ function input(overrides: Partial<SmokeFollowUpInput> = {}): SmokeFollowUpInput 
     appMismatch: null,
     appMismatchKind: null,
     buildAttempted: false,
+    serverStopped: false,
+    deviceReleased: false,
+    port: null,
     ...overrides,
   };
 }
@@ -105,6 +108,118 @@ describe(buildSmokeFollowUps, () => {
     );
     expect(commands({ appsConnected: 0, outcome: 'inconclusive', platform: 'android' })[0]).toBe(
       'npx @expo/agent-cli navigate / --android'
+    );
+  });
+
+  // `navigate` refuses NO_BOUND_DEVICE once the run released its device, and finds no dev server
+  // once it stopped the one it started.
+  it(`answers no connected app after the run put its environment back with the start that brings it again`, () => {
+    expect(
+      commands({
+        appsConnected: 0,
+        outcome: 'inconclusive',
+        platform: 'android',
+        serverStopped: true,
+        deviceReleased: true,
+        port: '8092',
+      })
+    ).toEqual([
+      'npx @expo/agent-cli dev --android --detach --wait-ready --port 8092',
+      'npx @expo/agent-cli navigate / --android',
+      'npx @expo/agent-cli smoke --android --port 8092',
+    ]);
+  });
+
+  it(`answers a runtime that did not answer after the run put its environment back with the same start`, () => {
+    expect(
+      commands({
+        appsConnected: 1,
+        runtimeSupported: null,
+        outcome: 'inconclusive',
+        platform: 'android',
+        serverStopped: true,
+        deviceReleased: true,
+        port: '8092',
+      })
+    ).toEqual([
+      'npx @expo/agent-cli dev --android --detach --wait-ready --port 8092',
+      'npx @expo/agent-cli navigate / --android',
+      'npx @expo/agent-cli smoke --android --port 8092',
+    ]);
+  });
+
+  it(`claims no release when the run stopped its dev server and kept its device`, () => {
+    const followups = buildSmokeFollowUps(
+      input({
+        appsConnected: 0,
+        outcome: 'inconclusive',
+        serverStopped: true,
+        deviceReleased: false,
+      })
+    );
+    expect(followups[0]?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+    expect(followups[0]?.why).not.toMatch(/released/);
+  });
+
+  // A released simulator keeps its binding, so `dev --detach` reuses it beside the running server.
+  it(`binds the parked simulator again after the run released it beside a reused dev server`, () => {
+    const followups = buildSmokeFollowUps(
+      input({ appsConnected: 0, outcome: 'inconclusive', deviceReleased: true, port: '8092' })
+    );
+    expect(followups.map((followup) => followup.command)).toEqual([
+      'npx @expo/agent-cli dev --ios --detach --wait-ready --port 8092',
+      'npx @expo/agent-cli navigate / --ios',
+      'npx @expo/agent-cli smoke --ios --port 8092',
+    ]);
+    expect(followups[0]?.why).not.toMatch(/stopped the dev server/);
+  });
+
+  // A released spawned instance loses its binding, and `dev --detach` refuses `not-reusable`.
+  it(`restarts the reused dev server after the run released the emulator it spawned`, () => {
+    const followups = buildSmokeFollowUps(
+      input({
+        appsConnected: 0,
+        outcome: 'inconclusive',
+        platform: 'android',
+        deviceReleased: true,
+        port: '8092',
+      })
+    );
+    expect(followups.map((followup) => followup.command)).toEqual([
+      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --detach --wait-ready --port 8092',
+      'npx @expo/agent-cli navigate / --android',
+      'npx @expo/agent-cli smoke --android --port 8092',
+    ]);
+    expect(followups[0]?.why).not.toMatch(/stopped the dev server/);
+  });
+
+  it(`leads a passed run that released its device beside a reused dev server with the device again`, () => {
+    expect(commands({ deviceReleased: true, port: '8091' })).toEqual([
+      'npx @expo/agent-cli dev --ios --detach --wait-ready --port 8091',
+      'npx @expo/agent-cli typecheck',
+      'open /project/.expo/agent-cli/smoke.png',
+    ]);
+    expect(commands({ platform: 'android', deviceReleased: true, port: '8091' })[0]).toBe(
+      'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --detach --wait-ready --port 8091'
+    );
+  });
+
+  it(`leads a failed run that released its device beside a reused dev server with the device again`, () => {
+    expect(commands({ failing: 1, outcome: 'failed', deviceReleased: true, port: '8091' })[0]).toBe(
+      'npx @expo/agent-cli dev --ios --detach --wait-ready --port 8091'
+    );
+  });
+
+  it(`suggests no device after a passed run that stopped its own dev server`, () => {
+    expect(commands({ serverStopped: true, deviceReleased: true })).toEqual([
+      'npx @expo/agent-cli typecheck',
+      'open /project/.expo/agent-cli/smoke.png',
+    ]);
+  });
+
+  it(`keeps the caller's --port on a repeated smoke`, () => {
+    expect(commands({ appsConnected: 0, outcome: 'inconclusive', port: '8092' })).toContain(
+      'npx @expo/agent-cli smoke --ios --port 8092'
     );
   });
 

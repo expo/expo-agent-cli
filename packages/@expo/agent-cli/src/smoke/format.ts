@@ -11,7 +11,7 @@ import { bundleToJson } from '../runtime/bundleCheck';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
 import { isFailingRecord, type SmokeRun } from './phases';
 import type { SmokeOptions } from './resolveOptions';
-import type { SmokePhase, SmokeResource, SmokeResultJson } from './types';
+import type { SmokeBoundDeviceJson, SmokePhase, SmokeResource, SmokeResultJson } from './types';
 
 /** Width of the label column, matching `status` and `deploy`. */
 const LABEL_WIDTH = 12;
@@ -102,6 +102,9 @@ export function formatSmokeResult(run: SmokeRun, options: SmokeOptions): string 
   if (environment) {
     lines.push(row('environment', environment));
   }
+  if (run.environment.boundDevice) {
+    lines.push(row('device', boundDeviceLine(run.environment.boundDevice, options.platform)));
+  }
   for (const cleanup of run.environment.cleanup) {
     if (!cleanup.ok) {
       // Loud, and never folded into the verdict: the app may be perfectly fine and there is still
@@ -159,7 +162,7 @@ function environmentLine(run: SmokeRun): string | null {
   if (run.environment.devServer === 'started') {
     acts.push(`started the dev server${stoppedSuffix(run, 'dev-server')}`);
   }
-  if (run.environment.device === 'booted') {
+  if (run.environment.device === 'booted' && run.environment.boundDevice == null) {
     // Which device, **and on what grounds**: a machine has ten simulators and this run picked one
     // of them (llp/0005 §The device that can open the app).
     acts.push(
@@ -169,6 +172,25 @@ function environmentLine(run: SmokeRun): string | null {
     );
   }
   return acts.length > 0 ? acts.join(SEPARATOR) : null;
+}
+
+const ACQUIRED: Record<SmokeBoundDeviceJson['action'], string> = {
+  created: 'created for this run',
+  spawned: 'started for this run',
+  reused: 'reused from this worktree',
+  explicit: 'bound with --device',
+  existing: 'already bound',
+};
+
+/** @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke */
+function boundDeviceLine(device: SmokeBoundDeviceJson, platform: SmokeOptions['platform']): string {
+  const release =
+    device.released == null
+      ? 'kept'
+      : !device.released
+        ? chalk.yellow('NOT released')
+        : `released (${device.shutDown ? (platform === 'ios' ? 'parked' : 'shut down') : 'left running'})`;
+  return [`${device.name} (${device.id})`, ACQUIRED[device.action], release].join(SEPARATOR);
 }
 
 /** Whether the thing this run started went back, in the words the cleanup reported. */

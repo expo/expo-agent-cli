@@ -154,6 +154,8 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
     discoverDevServer: async () => discovery(),
     startDevServer: async () => ({ ok: true, devServerUrl: 'http://127.0.0.1:8081', reason: null }),
     stopDevServer: async () => ({ ok: true, target: 'http://127.0.0.1:8081', reason: null }),
+    releaseDevice: async () => ({ ok: true, target: 'SIM-BOOTED', reason: null }),
+    readBoundDevice: () => null,
     bootDevice: async () => ({
       ok: true,
       deviceId: 'SIM-BOOTED',
@@ -418,7 +420,7 @@ describe(runSmokePhasesAsync, () => {
       };
     }
 
-    it(`starts the dev server and boots a device, then puts the dev server back and keeps the device`, async () => {
+    it(`starts the dev server and boots a device, then releases the device through dev:stop`, async () => {
       const stopDevServer = vi.fn(async () => ({
         ok: true,
         target: 'http://127.0.0.1:8081',
@@ -433,9 +435,255 @@ describe(runSmokePhasesAsync, () => {
       expect(run.environment.devServer).toBe('started');
       expect(run.environment.device).toBe('booted');
       expect(stopDevServer).toHaveBeenCalled();
-      // The device is this worktree's bound one and stays bound (llp/0035): only the dev server
-      // this run started goes back.
+      // dev:stop owns the device release after its child exits; no second device cleanup.
       expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['dev-server']);
+    });
+
+    it.each([
+      ['started', {}],
+      ['reused', { discoverDevServer: async () => discovery() }],
+    ] as const)(
+      'names the device it bound and its release, after a %s dev server',
+      async (_, server) => {
+        const released = {
+          backend: 'local-ios' as const,
+          platform: 'ios' as const,
+          id: 'SIM-BOOTED',
+          name: 'agent-cli 0000',
+          released: true,
+          shutDown: true,
+          reason: null,
+        };
+        const run = await runSmokePhasesAsync(
+          deps({
+            ...bareMachine({
+              ...server,
+              bootDevice: async () => ({
+                ok: true,
+                deviceId: 'SIM-BOOTED',
+                backend: 'local-ios' as const,
+                reason: null,
+                bound: { name: 'agent-cli 0000', action: 'created' as const },
+              }),
+            }),
+            stopDevServer: async () => ({
+              ok: true,
+              target: 'http://127.0.0.1:8081',
+              reason: null,
+              devices: [released],
+            }),
+            releaseDevice: async () => ({
+              ok: true,
+              target: 'SIM-BOOTED',
+              reason: null,
+              devices: [released],
+            }),
+          }),
+          options({ bootstrap: true })
+        );
+
+        expect(run.environment.boundDevice).toEqual({
+          id: 'SIM-BOOTED',
+          name: 'agent-cli 0000',
+          action: 'created',
+          released: true,
+          shutDown: true,
+        });
+      }
+    );
+
+    it('names the device its started dev server bound, and lists the release dev:stop did', async () => {
+      const released = {
+        backend: 'local-android' as const,
+        platform: 'android' as const,
+        id: 'emulator-5556',
+        name: 'emulator-5556',
+        released: true,
+        shutDown: true,
+        reason: null,
+      };
+      const bootDevice = vi.fn();
+      const run = await runSmokePhasesAsync(
+        deps({
+          ...bareMachine({
+            probeDevice: async () => ({
+              deviceId: 'emulator-5556',
+              backend: 'local-ios' as const,
+              reason: null,
+            }),
+            bootDevice,
+          }),
+          startDevServer: async () => ({
+            ok: true,
+            devServerUrl: 'http://127.0.0.1:8081',
+            reason: null,
+            bound: { id: 'emulator-5556', name: 'emulator-5556', action: 'spawned' as const },
+          }),
+          stopDevServer: async () => ({
+            ok: true,
+            target: 'http://127.0.0.1:8081',
+            reason: null,
+            devices: [released],
+          }),
+        }),
+        options({ bootstrap: true, platform: 'android' })
+      );
+
+      expect(bootDevice).not.toHaveBeenCalled();
+      expect(run.environment.device).toBe('reused');
+      expect(run.environment.boundDevice).toEqual({
+        id: 'emulator-5556',
+        name: 'emulator-5556',
+        action: 'spawned',
+        released: true,
+        shutDown: true,
+      });
+      expect(
+        run.environment.cleanup.map(({ resource, target, ok }) => [resource, target, ok])
+      ).toEqual([
+        ['dev-server', 'http://127.0.0.1:8081', true],
+        ['device', 'emulator-5556', true],
+      ]);
+    });
+
+    it('lists a device dev:stop kept as a cleanup row that is not ok, with the refusal as its reason', async () => {
+      const kept = {
+        backend: 'local-android' as const,
+        platform: 'android' as const,
+        id: 'emulator-5556',
+        name: 'emulator-5556',
+        released: null,
+        shutDown: false,
+        reason: "Devices were kept because this worktree's dev server is still running.",
+      };
+      const run = await runSmokePhasesAsync(
+        deps({
+          ...bareMachine({
+            probeDevice: async () => ({
+              deviceId: 'emulator-5556',
+              backend: 'local-ios' as const,
+              reason: null,
+            }),
+            bootDevice: vi.fn(),
+          }),
+          startDevServer: async () => ({
+            ok: true,
+            devServerUrl: 'http://127.0.0.1:8081',
+            reason: null,
+            bound: { id: 'emulator-5556', name: 'emulator-5556', action: 'spawned' as const },
+          }),
+          stopDevServer: async () => ({
+            ok: true,
+            target: 'http://127.0.0.1:8081',
+            reason: null,
+            devices: [kept],
+          }),
+        }),
+        options({ bootstrap: true, platform: 'android' })
+      );
+
+      expect(run.environment.cleanup).toContainEqual(
+        expect.objectContaining({
+          resource: 'device',
+          target: 'emulator-5556',
+          ok: false,
+          reason: kept.reason,
+        })
+      );
+      expect(run.environment.boundDevice).toMatchObject({ released: null });
+    });
+
+    it('keeps the device its started dev server found bound and up before the run', async () => {
+      const run = await runSmokePhasesAsync(
+        deps({
+          ...bareMachine({
+            probeDevice: async () => ({
+              deviceId: 'SIM-UP',
+              backend: 'local-ios' as const,
+              reason: null,
+            }),
+          }),
+          startDevServer: async () => ({
+            ok: true,
+            devServerUrl: 'http://127.0.0.1:8081',
+            reason: null,
+            bound: { id: 'SIM-UP', name: 'agent-cli f5ce27a6', action: 'existing' as const },
+          }),
+        }),
+        options({ bootstrap: true })
+      );
+
+      expect(run.environment.boundDevice).toEqual({
+        id: 'SIM-UP',
+        name: 'agent-cli f5ce27a6',
+        action: 'existing',
+        released: null,
+        shutDown: false,
+      });
+      expect(run.environment.cleanup.map(({ resource }) => resource)).toEqual(['dev-server']);
+    });
+
+    it.each([
+      ['the device its started dev server bound, which the run releases', true, false],
+      ['a device this run did not bind', false, true],
+    ] as const)(
+      `says it left the app it installed on %s only when the device stays`,
+      async (_, bound, left) => {
+        const run = await runSmokePhasesAsync(
+          deps({
+            ...bareMachine({
+              probeDevice: async () => ({
+                deviceId: 'emulator-5556',
+                backend: 'local-android' as const,
+                reason: null,
+              }),
+            }),
+            startDevServer: async () => ({
+              ok: true,
+              devServerUrl: 'http://127.0.0.1:8081',
+              reason: null,
+              bound: bound
+                ? { id: 'emulator-5556', name: 'emulator-5556', action: 'spawned' as const }
+                : undefined,
+            }),
+            installNeededOnDevice: async () => true,
+          }),
+          options({ bootstrap: true, platform: 'android' })
+        );
+
+        const install = run.phases.find((phase) => phase.id === 'install-app')?.reason;
+        expect(install).toContain('installed the app on emulator-5556');
+        expect(install?.includes('left it there')).toBe(left);
+      }
+    );
+
+    it('releases its own boot after a reused server, without stopping that server', async () => {
+      const releaseDevice = vi.fn(async () => ({ ok: true, target: 'SIM-BOOTED', reason: null }));
+      const stopDevServer = vi.fn();
+      const run = await runSmokePhasesAsync(
+        deps({
+          ...bareMachine({ discoverDevServer: async () => discovery() }),
+          releaseDevice,
+          stopDevServer,
+        }),
+        options({ bootstrap: true })
+      );
+      expect(releaseDevice).toHaveBeenCalledTimes(1);
+      expect(stopDevServer).not.toHaveBeenCalled();
+      expect(run.environment.cleanup.map((entry) => entry.resource)).toEqual(['device']);
+    });
+
+    it('no-start binds and releases nothing', async () => {
+      const bootDevice = vi.fn();
+      const releaseDevice = vi.fn();
+      const stopDevServer = vi.fn();
+      await runSmokePhasesAsync(
+        deps({ bootDevice, releaseDevice, stopDevServer }),
+        options({ bootstrap: false })
+      );
+      expect(bootDevice).not.toHaveBeenCalled();
+      expect(releaseDevice).not.toHaveBeenCalled();
+      expect(stopDevServer).not.toHaveBeenCalled();
     });
 
     it(`leaves a dev server and a device it found, and cleans nothing up`, async () => {
@@ -451,6 +699,22 @@ describe(runSmokePhasesAsync, () => {
       // nothing needed reads as a step that was owed and not done.
       expect(statusOf(run, 'start-dev-server')).toBeUndefined();
       expect(statusOf(run, 'boot-device')).toBeUndefined();
+    });
+
+    it.each([
+      ['the device it found', 'SIM-1', { action: 'existing', released: null, shutDown: false }],
+      ['no device for a binding of another device', 'SIM-OTHER', null],
+    ] as const)(`names this worktree's binding when it reuses %s`, async (_, id, expected) => {
+      const run = await runSmokePhasesAsync(
+        deps({ readBoundDevice: () => ({ id, name: 'dogfood-explicit' }) }),
+        options({ bootstrap: true })
+      );
+
+      expect(run.environment.device).toBe('reused');
+      expect(run.environment.boundDevice).toEqual(
+        expected && { id, name: 'dogfood-explicit', ...expected }
+      );
+      expect(run.environment.cleanup).toEqual([]);
     });
 
     it(`boots nothing when the caller named the cloud as the device`, async () => {

@@ -382,7 +382,7 @@ How does a worktree get an iOS simulator nobody else has, and how do the other v
 - `expo run:ios --device <udid>` carries the bound id, so a second worktree on a current build installs onto its fresh simulator.
 - `dev --detach` on a running server boots its own `Shutdown` simulator and refuses otherwise.
 - `navigate` without a local binding follows the EAS fallback rules in §EAS session binding and refuses with a `dev` hint when no session is available. With a local binding, it drives the bound device only. Without a platform flag, any `up` binding wins.
-- `smoke --ios` gets its simulator from the binding and leaves it bound.
+- `smoke --ios` gets its simulator from the binding; it releases a device it acquired itself and leaves a pre-existing binding as found (§Lifecycle smoke).
 - Android follows §Android instance.
 
 ### The module
@@ -515,7 +515,7 @@ What happens when a worktree stops, pauses or disappears, and how does a person 
 - A deleted worktree's simulator is deleted by the next reap anywhere; its emulator instance is killed.
 - A worktree with Metro running keeps its device for hours without a verb.
 - `--device` binds a named device, keeps it across `dev:stop` and the lease, and never shuts it down; `--device` over an own created simulator deletes that simulator and says so.
-- `smoke` releases its device.
+- `smoke` releases the device it acquired and leaves a pre-existing binding as found.
 - `status --json` shows the binding; `dev:stop --json` shows what it kept or released.
 - The restart follow-up `dev:stop && dev --detach` reuses the running instance, so it costs no boot and no install.
 
@@ -542,6 +542,8 @@ How does a worktree give its device back?
 Does `smoke` leave a device behind?
 
 One release per device. A device the child bound is released by `devStopAsync`, which smoke's `stopDevServer` already calls, once the child has exited, through the internal `DevStopOptions` fields `release: true` and `platform`. A device smoke's own boot phase bound, after a reused dev server, is released by smoke's device cleanup hook with its `platform`. A `smoke --no-start` run binds nothing and releases nothing.
+
+The report names the device in `environment.boundDevice` (`id`, `name`, `action`, `released`, `shutDown`) and in a human `device` line. `action` is the boot's acquire action; for the child's device, the start phase reads the binding file before and after the start: a new binding is `created` or `spawned`, the same device is `reused`. A run that acquired nothing and used the worktree's bound device reports it as `existing` with `released: null` and the line says `kept`; `released: false` is only a failed release. Smoke leaves a device as it found it: when the binding was live and the device up before the start, or the device check did not answer, the start phase reports that device as `existing` and stops the dev server with `release: false`. Each device `dev:stop --release` let go of is a `device` row under `cleanup`. When no app connected, or the runtime did not answer, and the run stopped its dev server, the follow-ups lead with `dev --<platform> --detach --wait-ready`. Whatever the outcome, when the run released its device and the reused server still runs, the follow-ups lead with the command that binds a device again: on iOS `dev --ios --detach --wait-ready`, which reuses the parked simulator beside the running server, and on Android `dev:stop && dev --android --detach --wait-ready`, because the release removes a spawned instance's binding and `dev` refuses `not-reusable` beside a running server. All keep the caller's `--port`, as does a repeated `smoke`.
 
 ### Lifecycle reap
 

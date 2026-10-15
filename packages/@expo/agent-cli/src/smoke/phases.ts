@@ -33,14 +33,16 @@
 // (llp/0005 §The run brings its own environment): they are reported only by a run that performed
 // them, they are never charged to `--timeout`, and the ones that hold a resource register the way
 // to undo themselves *before* they do anything. `runSmokePhasesAsync` is the wrapper that runs
-// those undos, newest first, on every path out of the walk. A booted device registers none: it is
-// this worktree's bound device and stays bound after the run (llp/0035).
+// those undos, newest first, on every path out of the walk. A booted device registers its release
+// only after a reused dev server; after a started one, `dev:stop --release` releases it
+// (llp/0035 §Lifecycle smoke).
 //
 // The dependencies are injected rather than imported, so the outcome table below — which is the
 // part that can be wrong in a way no type checker sees — is testable against fakes, with no dev
 // server, no device and no clock.
 
 import type { ScreenshotResult } from '../device/screenshot';
+import type { AcquireAction, ReleasedDevice } from '../deviceBinding';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import type { DeviceBackend } from '../navigate/device';
 import type { OpenRouteResult } from '../navigate/openRoute';
@@ -77,6 +79,8 @@ export interface SmokeStartResult {
    * find out why — is most useful exactly when it failed.
    */
   built?: boolean;
+  /** The worktree device the detached `dev` bound, read from its binding file, for the report. */
+  bound?: { id: string; name: string; action: AcquireAction | 'existing' };
 }
 
 /** What booting a simulator or an emulator amounted to. */
@@ -95,6 +99,8 @@ export interface SmokeBootResult {
    * @ref llp/0005-runtime-loop-tools.rfc.md §Putting Expo Go on a simulator that has not got it
    */
   installNeeded?: boolean;
+  /** The worktree device the boot bound, for the report. */
+  bound?: { name: string; action: AcquireAction };
 }
 
 /** What putting the app on a device amounted to. Never a throw: a failed install is a result. */
@@ -119,6 +125,8 @@ export interface SmokeReleaseResult {
   target: string | null;
   /** Why it was not. Null exactly when {@link ok} is true. */
   reason: string | null;
+  /** The bound devices this release let go of. */
+  devices?: ReleasedDevice[];
 }
 
 /** What making sure there is an EAS Simulator session amounted to. */
@@ -254,9 +262,12 @@ export interface SmokeDeps {
   stopEasSession(sessionId: string): Promise<SmokeReleaseResult>;
   /**
    * Bind and boot this worktree's device for this run's platform (`acquireDeviceAsync`). The
-   * device stays bound after the run, so nothing is registered to put it back.
+   * device is released by dev:stop after a child exits, or by the boot phase's own cleanup.
    */
   bootDevice(): Promise<SmokeBootResult>;
+  releaseDevice(): Promise<SmokeReleaseResult>;
+  /** This worktree's binding for the run's platform, read only. Null when there is none. */
+  readBoundDevice(): { id: string; name: string } | null;
   /**
    * Put the app on the device this run booted, when the boot said it has not got it.
    *
@@ -714,6 +725,7 @@ export async function runSmokePhasesAsync(
     devServer: 'absent',
     device: 'absent',
     deviceChoice: null,
+    boundDevice: null,
     cleanup: [],
   };
 
@@ -731,10 +743,21 @@ export async function runSmokePhasesAsync(
     if (environment.device === 'absent' && run.deviceId != null) {
       environment.device = 'reused';
     }
-    environment.cleanup = await releaseAsync(deps, cleanups);
+    if (environment.device === 'reused' && environment.boundDevice == null) {
+      const existing = deps.readBoundDevice();
+      if (existing != null && existing.id === run.deviceId) {
+        environment.boundDevice = {
+          ...existing,
+          action: 'existing',
+          released: null,
+          shutDown: false,
+        };
+      }
+    }
+    await releaseAsync(deps, cleanups, environment);
     return { ...run, environment, durationMs: deps.now() - startedAt };
   } catch (error: unknown) {
-    environment.cleanup = await releaseAsync(deps, cleanups);
+    await releaseAsync(deps, cleanups, environment);
     throw error;
   }
 }
@@ -760,13 +783,16 @@ interface RegisteredCleanup {
  */
 async function releaseAsync(
   deps: SmokeDeps,
-  cleanups: RegisteredCleanup[]
-): Promise<SmokeCleanupJson[]> {
+  cleanups: RegisteredCleanup[],
+  environment: SmokeEnvironmentJson
+): Promise<void> {
   const released: SmokeCleanupJson[] = [];
+  const devices: ReleasedDevice[] = [];
   for (const cleanup of [...cleanups].reverse()) {
     const at = deps.now();
     try {
       const result = await cleanup.release();
+      devices.push(...(result.devices ?? []));
       released.push({
         resource: cleanup.resource,
         target: result.target ?? cleanup.target,
@@ -774,6 +800,17 @@ async function releaseAsync(
         reason: result.ok ? null : (result.reason ?? 'no reason was given'),
         ms: deps.now() - at,
       });
+      if (cleanup.resource === 'dev-server') {
+        for (const device of result.devices ?? []) {
+          released.push({
+            resource: 'device',
+            target: device.id,
+            ok: device.released === true,
+            reason: device.released ? null : (device.reason ?? 'no reason was given'),
+            ms: deps.now() - at,
+          });
+        }
+      }
     } catch (error: unknown) {
       released.push({
         resource: cleanup.resource,
@@ -784,7 +821,13 @@ async function releaseAsync(
       });
     }
   }
-  return released;
+  environment.cleanup = released;
+  const bound = environment.boundDevice;
+  const device = bound && devices.find(({ id }) => id === bound.id);
+  if (bound && device) {
+    bound.released = device.released;
+    bound.shutDown = device.shutDown;
+  }
 }
 
 /** What {@link runSmokePhasesAsync} hands the phase walk, so the walk owns none of it. */
@@ -941,6 +984,13 @@ async function runPhasesAsync(
     if (start.ok && start.devServerUrl != null) {
       started = true;
       environment.devServer = 'started';
+      environment.boundDevice = start.bound
+        ? {
+            ...start.bound,
+            released: start.bound.action === 'existing' ? null : false,
+            shutDown: false,
+          }
+        : null;
       // Discovered the same way the first look was, rather than by naming the URL the start
       // reported: naming it would make `source` say `flag` for a run whose caller passed no flag,
       // and `source` is reported precisely because `lock` and `flag` prove different things
@@ -1200,9 +1250,18 @@ async function runPhasesAsync(
       const found = await deviceAsync();
       if (found.deviceId == null) {
         const boot = await recordBootstrap('boot-device', async () => {
-          // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke — the device is this worktree's bound one and
-          // stays bound after the run, so nothing is registered to put it back.
           const result = await deps.bootDevice();
+          if (
+            result.ok &&
+            result.deviceId &&
+            !cleanups.some(({ resource }) => resource === 'dev-server')
+          ) {
+            cleanups.push({
+              resource: 'device',
+              target: result.deviceId,
+              release: () => deps.releaseDevice(),
+            });
+          }
           return result.ok && result.deviceId != null
             ? {
                 status: 'ok' as const,
@@ -1218,6 +1277,9 @@ async function runPhasesAsync(
         if (boot.ok && boot.deviceId != null) {
           environment.device = 'booted';
           environment.deviceChoice = boot.choice ?? null;
+          environment.boundDevice = boot.bound
+            ? { id: boot.deviceId, ...boot.bound, released: false, shutDown: false }
+            : null;
           probed = { deviceId: boot.deviceId, backend: boot.backend, reason: null };
           bootInstallNeeded = boot.installNeeded === true;
         } else {
@@ -1256,6 +1318,9 @@ async function runPhasesAsync(
       device.deviceId != null &&
       (bootInstallNeeded || (await deps.installNeededOnDevice(device.deviceId, device.backend)))
     ) {
+      const releasedAfterRun =
+        environment.boundDevice?.id === device.deviceId &&
+        environment.boundDevice.released !== null;
       // @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
       //
       // The build budget rather than an install budget, because this phase now covers both and the
@@ -1273,7 +1338,7 @@ async function runPhasesAsync(
                 reason: [
                   `installed ${result.version ?? 'the app'} on ${device.deviceId}`,
                   result.replaced ? `, replacing ${result.replaced}` : '',
-                  `, and left it there`,
+                  releasedAfterRun ? '' : `, and left it there`,
                 ].join(''),
                 value: result,
               }

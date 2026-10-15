@@ -389,6 +389,7 @@ describe('@expo/agent-cli smoke', () => {
         devServer: 'absent',
         device: 'absent',
         deviceChoice: null,
+        boundDevice: null,
         cleanup: [],
       });
       expect(report.phases[0]).toMatchObject({ id: 'dev-server', status: 'failed' });
@@ -744,7 +745,7 @@ describe('@expo/agent-cli smoke', () => {
   // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke
   //
   // The device a bootstrapping run boots is this worktree's own simulator, taken from the registry
-  // or created there, and it stays bound after the run. The stub `xcrun` keeps simulator state the
+  // or created there, and is released after the run. The stub `xcrun` keeps simulator state the
   // way `simctl` does, so what is asserted is the registry file and the calls that put the device up.
   describe.skipIf(process.platform !== 'darwin')('binding the device to boot', () => {
     const DEV_CLIENT_ID = 'com.example.dcapp';
@@ -808,14 +809,22 @@ describe('@expo/agent-cli smoke', () => {
         expect(binding!.device.name).toMatch(/^agent-cli [0-9a-f]{8}$/);
         expect(readXcrun()).toContainEqual(['simctl', 'bootstatus', 'E2E-CREATED-1', '-b']);
         expect(readXcrun().some((argv) => argv[1] === 'boot')).toBe(false);
-        expect(readXcrun().some((argv) => argv[1] === 'shutdown')).toBe(false);
+        expect(readXcrun()).toContainEqual(['simctl', 'shutdown', 'E2E-CREATED-1']);
+        expect(Date.parse(binding!.expiresAt)).toBeLessThanOrEqual(Date.now());
 
         const boot = report.phases.find((phase: any) => phase.id === 'boot-device');
         expect(boot).toMatchObject({ status: 'ok' });
         expect(boot.reason).not.toContain('shut it down');
-        expect(report.environment.cleanup.map((entry: any) => entry.resource)).not.toContain(
-          'device'
+        expect(report.environment.cleanup).toContainEqual(
+          expect.objectContaining({ resource: 'device', ok: true })
         );
+        expect(report.environment.boundDevice).toEqual({
+          id: 'E2E-CREATED-1',
+          name: binding!.device.name,
+          action: 'created',
+          released: true,
+          shutDown: true,
+        });
 
         // A created simulator has no app, so the install is a native build pinned to it.
         const install = report.phases.find((phase: any) => phase.id === 'install-app');
@@ -894,11 +903,11 @@ describe('@expo/agent-cli smoke', () => {
         });
         expect(report.appsConnected).toBe(1);
         expect(fs.existsSync(opened)).toBe(true);
-        expect(calls.some((argv) => argv[1] === 'shutdown')).toBe(false);
-        expect(report.environment.cleanup.map((entry: any) => entry.resource)).not.toContain(
-          'device'
+        expect(calls.slice(openAt)).toContainEqual(['simctl', 'shutdown', udid]);
+        expect(report.environment.cleanup).toContainEqual(
+          expect.objectContaining({ resource: 'device', ok: true })
         );
-        expect(readBinding(projectRoot)).toEqual(binding);
+        expect(Date.parse(binding!.expiresAt)).toBeLessThanOrEqual(Date.now());
       } finally {
         await stub.close();
       }
@@ -924,11 +933,175 @@ describe('@expo/agent-cli smoke', () => {
         expect(readXcrun().some((argv) => argv[1] === 'create')).toBe(false);
         expect(readXcrun()).toContainEqual(['simctl', 'bootstatus', 'E2E-PARKED', '-b']);
         expect(readBinding(projectRoot)).toMatchObject({ device: { udid: 'E2E-PARKED' } });
+        expect(readXcrun()).toContainEqual(['simctl', 'shutdown', 'E2E-PARKED']);
+        expect(report.environment.boundDevice).toMatchObject({
+          id: 'E2E-PARKED',
+          action: 'reused',
+          released: true,
+          shutDown: true,
+        });
         expect(report.phases.find((phase: any) => phase.id === 'boot-device')).toMatchObject({
           status: 'ok',
         });
       } finally {
         await stub.close();
+      }
+    });
+
+    it('rebinds the parked simulator next to the reused dev server when no app connected', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      await installStatefulXcrunAsync(projectRoot, {
+        simulators: [{ udid: 'E2E-PARKED', name: 'agent-cli deadbeef', state: 'Shutdown' }],
+      });
+      await bindingFixture(projectRoot, 'E2E-PARKED', 'agent-cli deadbeef');
+      await installStubNpxAsync(projectRoot);
+      const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
+
+      try {
+        const report = await runAsync(projectRoot, stub);
+
+        expect(report.appsConnected).toBe(0);
+        expect(report.environment).toMatchObject({ devServer: 'reused', device: 'booted' });
+        expect(report.environment.boundDevice).toMatchObject({ id: 'E2E-PARKED', released: true });
+        expect(report.followups[0].command).toBe(
+          'npx @expo/agent-cli dev --ios --detach --wait-ready'
+        );
+      } finally {
+        await stub.close();
+      }
+    });
+
+    it('names the bound device it found the app on, and keeps it', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const { calls: readXcrun } = await installStatefulXcrunAsync(projectRoot, {
+        simulators: [{ udid: 'E2E-BOOTED', name: 'dogfood-explicit', state: 'Booted' }],
+      });
+      await bindingFixture(projectRoot, 'E2E-BOOTED', 'dogfood-explicit');
+      const before = readBinding(projectRoot);
+      const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
+      const release = await holdLockForAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--timeout', '4s'],
+          { env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' }, reject: false }
+        );
+        const report = JSON.parse(result.stdout);
+
+        expect(report.environment).toMatchObject({ devServer: 'reused', device: 'reused' });
+        expect(report.environment.boundDevice).toEqual({
+          id: 'E2E-BOOTED',
+          name: 'dogfood-explicit',
+          action: 'existing',
+          released: null,
+          shutDown: false,
+        });
+        expect(report.environment.cleanup).toEqual([]);
+        expect(readXcrun().some((argv) => argv[1] === 'shutdown')).toBe(false);
+        expect(readBinding(projectRoot)?.device).toEqual(before?.device);
+      } finally {
+        release();
+        await stub.close();
+      }
+    });
+
+    it('names the device its started dev server bound, and the release dev:stop did', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const { calls: readXcrun } = await installStatefulXcrunAsync(projectRoot, {
+        simulators: [{ udid: 'E2E-PARKED', name: 'agent-cli deadbeef', state: 'Shutdown' }],
+      });
+      await bindingFixture(projectRoot, 'E2E-PARKED', 'agent-cli deadbeef');
+      await installStubNpxAsync(projectRoot);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-screenshot', '--port', '9353', '--timeout', '4s'],
+          {
+            env: {
+              ...stubExpoEnv(projectRoot),
+              AGENT_CLI_NO_DEVICE: '0',
+              STUB_EXPO_DELAY_MS: '30000',
+              STUB_EXPO_DEV_SERVER_PORT: '9353',
+              STUB_EXPO_LISTEN: '1',
+            },
+            reject: false,
+          }
+        );
+
+        const report = JSON.parse(result.stdout);
+        expect(report.environment.devServer).toBe('started');
+        expect(report.environment.boundDevice).toEqual({
+          id: 'E2E-PARKED',
+          name: 'agent-cli deadbeef',
+          action: 'reused',
+          released: true,
+          shutDown: true,
+        });
+        expect(report.environment.cleanup).toContainEqual(
+          expect.objectContaining({ resource: 'device', target: 'E2E-PARKED', ok: true })
+        );
+        expect(readXcrun()).toContainEqual(['simctl', 'shutdown', 'E2E-PARKED']);
+        // The run put back both the dev server and the device, so `navigate` alone has neither.
+        expect(report.outcome).toBe('inconclusive');
+        expect(report.followups.map((followup: any) => followup.command)).toEqual([
+          'npx @expo/agent-cli dev --ios --detach --wait-ready --port 9353',
+          'npx @expo/agent-cli navigate / --ios',
+          'npx @expo/agent-cli smoke --ios --port 9353',
+        ]);
+      } finally {
+        await executeAgentCliAsync(projectRoot, ['dev:stop', '--release', '--json'], {
+          env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' },
+          reject: false,
+        });
+      }
+    });
+
+    it('keeps the device that was bound and booted before its started dev server', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const { calls: readXcrun } = await installStatefulXcrunAsync(projectRoot, {
+        simulators: [{ udid: 'E2E-BOOTED', name: 'agent-cli f5ce27a6', state: 'Booted' }],
+      });
+      await bindingFixture(projectRoot, 'E2E-BOOTED', 'agent-cli f5ce27a6');
+      const before = readBinding(projectRoot);
+      await installStubNpxAsync(projectRoot);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-screenshot', '--port', '9354', '--timeout', '4s'],
+          {
+            env: {
+              ...stubExpoEnv(projectRoot),
+              AGENT_CLI_NO_DEVICE: '0',
+              STUB_EXPO_DELAY_MS: '30000',
+              STUB_EXPO_DEV_SERVER_PORT: '9354',
+              STUB_EXPO_LISTEN: '1',
+            },
+            reject: false,
+          }
+        );
+
+        const report = JSON.parse(result.stdout);
+        expect(report.environment.devServer).toBe('started');
+        expect(report.environment.boundDevice).toEqual({
+          id: 'E2E-BOOTED',
+          name: 'agent-cli f5ce27a6',
+          action: 'existing',
+          released: null,
+          shutDown: false,
+        });
+        expect(report.environment.cleanup.map((entry: any) => entry.resource)).toEqual([
+          'dev-server',
+        ]);
+        expect(readXcrun().some((argv) => argv[1] === 'shutdown')).toBe(false);
+        expect(readBinding(projectRoot)?.device).toEqual(before?.device);
+      } finally {
+        await executeAgentCliAsync(projectRoot, ['dev:stop', '--release', '--json'], {
+          env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' },
+          reject: false,
+        });
       }
     });
 
