@@ -9,7 +9,14 @@ import type { LastBuildRecord } from '../lastBuild';
 import { resetSettingsCache } from '../../settings';
 import { detectToolchainAsync } from '../../toolchain';
 import type { ToolchainProbe, ToolchainStatus } from '../../toolchain/types';
-import { resolveStartPlanAsync } from '../resolveAsync';
+import { resolveStartPlanAsync as resolve, type ResolveStartPlanOptions } from '../resolveAsync';
+
+/** The plan alone, for the rows that bind nothing. */
+const resolveStartPlanAsync = async (
+  root: string,
+  state: ProjectState,
+  options?: ResolveStartPlanOptions
+) => (await resolve(root, state, options)).plan;
 
 vi.mock('../../toolchain', async () => {
   const actual = await vi.importActual('../../toolchain');

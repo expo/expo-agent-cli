@@ -4,12 +4,11 @@
 import fs from 'fs';
 import path from 'path';
 
-import { listBootedIosSimulatorsAsync, SIMCTL_TIMEOUT_MS } from '../device/simulators';
+import { SIMCTL_TIMEOUT_MS } from '../device/simulators';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import {
   FINGERPRINT_FILE_NAME,
   parseEmbeddedFingerprint,
-  matchesDeviceFilter,
   pickBestResult,
   type InstalledAppDevice,
   type InstalledFingerprintResult,
@@ -19,12 +18,6 @@ export interface IosSimulatorReaderDependencies {
   /** Injected for tests. */
   spawnCaptureAsync?: typeof spawnCaptureAsync;
   readFile?: (filePath: string) => string;
-}
-
-export interface IosSimulatorReaderOptions extends IosSimulatorReaderDependencies {
-  expectedHash: string;
-  device?: string;
-  appId: string;
 }
 
 /** The two places the resource bundle lives: static linking, and `use_frameworks!`. */
@@ -70,23 +63,6 @@ export async function readSimulatorsAsync(
     throw lastError;
   }
   return pickBestResult(results, expectedHash);
-}
-
-/** Read the fingerprint out of the app on every booted iOS simulator, or the one `--device` names. */
-export async function readInstalledFingerprintIosSimulatorAsync({
-  expectedHash,
-  device: deviceFilter,
-  appId,
-  ...deps
-}: IosSimulatorReaderOptions): Promise<InstalledFingerprintResult> {
-  let simulators = await listBootedIosSimulatorsAsync(deps);
-  if (deviceFilter) {
-    simulators = simulators.filter((simulator) => matchesDeviceFilter(deviceFilter, simulator));
-  }
-  if (!simulators.length) {
-    return { status: 'no-device' };
-  }
-  return readSimulatorsAsync(simulators, appId, expectedHash, deps);
 }
 
 async function readSimulatorAsync(

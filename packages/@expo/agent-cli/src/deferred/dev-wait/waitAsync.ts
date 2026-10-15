@@ -266,7 +266,7 @@ async function resolveOpenOnAsync(
   if (!result.ready || result.appsConnected !== 0) {
     return 'local';
   }
-  const local = await probeLocalDeviceAsync();
+  const local = await probeLocalDeviceAsync({ projectRoot });
   // `absent` and not `unknown`: a tool that could not be started has said nothing about this
   // machine's devices, and re-aiming a suggestion on that would be the F49 mistake again.
   return local.state === 'absent' && readCloudSessionIdSync(projectRoot) != null

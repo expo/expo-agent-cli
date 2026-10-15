@@ -314,6 +314,11 @@ export async function executeAgentCliAsync(
   return result;
 }
 
+/** The Expo home every `@expo/agent-cli` run in `projectRoot` gets from `spawnAgentCli`. */
+export function expoHomeOf(projectRoot: string): string {
+  return path.join(projectRoot, '.expo-home');
+}
+
 /**
  * Spawn `node bin/cli.js <args>` without waiting for it to exit, for long-running commands
  * like `@expo/agent-cli start`. Callers are responsible for killing the process.
@@ -356,7 +361,7 @@ export function spawnAgentCli(
       // `dev` run on a developer's Mac would boot a real simulator against a stub dev server.
       AGENT_CLI_NO_DEVICE: '1',
       // Per project, so one test's Expo home state never reaches another test or the real home.
-      __UNSAFE_EXPO_HOME_DIRECTORY: `${cwd}.expo-home`,
+      __UNSAFE_EXPO_HOME_DIRECTORY: expoHomeOf(cwd),
       // Setup, `new`, install and a stale search would otherwise download docs from the network.
       AGENT_CLI_NO_DOCS_SYNC: '1',
       ...stubExpoEnv(cwd),

@@ -74,7 +74,14 @@ function read(
   device?: string
 ) {
   const listPhones = vi.fn(async () => phones);
+  // The bound simulator is the first listed one; `--device` lists and filters instead.
+  const findBoundSimulatorAsync = vi.fn(async () =>
+    simulators[0]
+      ? { simulator: { identifier: simulators[0].udid, name: simulators[0].name }, hint: null }
+      : { simulator: null, hint: 'How: run "npx @expo/agent-cli dev --ios --detach --wait-ready".' }
+  );
   const result = readInstalledFingerprintIosAsync({
+    projectRoot: '/project',
     expectedHash: 'current',
     appId,
     scheme: 'myapp',
@@ -83,9 +90,10 @@ function read(
       ...fakeSimctl(simulators),
       listConnectedIosDevicesAsync: listPhones,
       readInstalledFingerprintIosDeviceAsync: readPhones,
+      findBoundSimulatorAsync,
     },
   });
-  return { result, listPhones, readPhones };
+  return { result, listPhones, readPhones, findBoundSimulatorAsync };
 }
 
 describe(readInstalledFingerprintIosAsync, () => {
@@ -109,10 +117,22 @@ describe(readInstalledFingerprintIosAsync, () => {
     expect(readPhones).not.toHaveBeenCalled();
   });
 
-  it(`answers no-device when nothing is booted and no reachable phone is connected`, async () => {
+  // The registry's How line leads the hint, and the phone hint follows it when there is one.
+  it(`answers no-device with the dev command when nothing is bound and no reachable phone is connected`, async () => {
     const { result, readPhones } = read([], [phone({ reachable: false })]);
-    await expect(result).resolves.toEqual({ status: 'no-device' });
+    await expect(result).resolves.toEqual({
+      status: 'no-device',
+      hint: 'How: run "npx @expo/agent-cli dev --ios --detach --wait-ready".',
+    });
     expect(readPhones).not.toHaveBeenCalled();
+  });
+
+  it(`puts the dev command before the phone hint`, async () => {
+    const { result } = read([], [phone()]);
+    const answer = await result;
+    expect(answer.hint).toMatch(
+      /^How: run "npx @expo\/agent-cli dev --ios[^"]*"\. A physical iOS device/
+    );
   });
 
   it(`asks for --device instead of probing several phones`, async () => {
