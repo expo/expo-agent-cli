@@ -1429,10 +1429,22 @@ process.stdout.write(JSON.stringify({
       expect(differs.exitCode).toBe(20);
       expect(differs.stdout).toContain('the change costs needs-native-build');
 
-      const matches = await runBuildAsync(projectRoot, ['--assert', 'js-only'], {
-        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG]),
-      });
+      // A native change in the working tree: only the local axis would fail the gate. The hash the
+      // run above remembered would hide it, so it is computed again.
+      const matches = await runBuildAsync(
+        projectRoot,
+        ['--json', '--assert', 'js-only', '--no-fingerprint-cache'],
+        {
+          STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG]),
+          STUB_FP_SOURCES: JSON.stringify([APP_CONFIG, NATIVE_MODULE]),
+          STUB_FINGERPRINT_HASH: 'f'.repeat(40),
+        }
+      );
       expect(matches.exitCode).toBe(0);
+      const report: StatusReport = JSON.parse(matches.stdout);
+      expect(
+        report.freshness!.platforms.find((entry) => entry.backend === 'local')?.impact?.class
+      ).toBe('needs-native-build');
     });
 
     it('attributes the comparison to no platform when the build platform is unknown', async () => {
