@@ -3,19 +3,22 @@ import os from 'os';
 import path from 'path';
 
 import { acquireDeviceAsync, devicesDisabled, inspectBindingAsync } from '../../deviceBinding';
-import { bindingFor, fakeTools, writeBinding } from '../../deviceBinding/__tests__/fakeTools';
+import { bindingFor, writeBinding } from '../../deviceBinding/__tests__/fakeTools';
 import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
-import { deviceUnavailableError, notReusableError } from '../../deviceBinding/errors';
+import { deviceUnavailableError } from '../../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../../deviceBinding/preview';
 import { withLeaseExtendedAsync } from '../../deviceBinding/renew';
 import { readDevServerLockAsync } from '../../devLock/client';
+import type { DevServerLockInfo } from '../../devLock/types';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
 import { readLastBuildRecord, recordLastBuildFingerprint } from '../../plan/lastBuild';
+import { resolveStartPlanAsync } from '../../plan/resolveAsync';
 import { clearFingerprintMemo } from '../../project/fingerprint';
 import { clearFingerprintCache } from '../../project/fingerprintCache';
 import { probeProjectStateAsync } from '../../project/probe';
+import { probeBundlerAsync } from '../../runtime/bundlerStatus';
 import type { ProjectState } from '../../project/types';
 import { runDevServerAsync, type DevServerRun } from '../../start/startAsync';
 import { runExpoAsync, spawnExpoAsync } from '../../utils/expoCli';
@@ -52,6 +55,11 @@ vi.mock('../../plan/lastBuild', () => ({
   readLastBuildRecord: vi.fn(() => ({})),
   recordLastBuildFingerprint: vi.fn(),
 }));
+// The real resolver, watched: a run that stops on the running dev server never reaches it.
+vi.mock('../../plan/resolveAsync', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../plan/resolveAsync')>();
+  return { ...actual, resolveStartPlanAsync: vi.fn(actual.resolveStartPlanAsync) };
+});
 vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
 vi.mock('../../project/fingerprint', () => ({ clearFingerprintMemo: vi.fn() }));
 vi.mock('../../project/fingerprintCache', () => ({ clearFingerprintCache: vi.fn() }));
@@ -61,6 +69,11 @@ vi.mock('../../deviceBinding/preview', () => ({ previewExplicitDeviceAsync: vi.f
 vi.mock('../../devLock/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../devLock/client')>()),
   readDevServerLockAsync: vi.fn(async () => null),
+}));
+// The running-server stop probes the lock's URL for its wording; a unit test must not reach one.
+vi.mock('../../runtime/bundlerStatus', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../runtime/bundlerStatus')>()),
+  probeBundlerAsync: vi.fn(),
 }));
 vi.mock('../../deviceBinding/renew', () => ({
   withLeaseExtendedAsync: vi.fn((_root: string, work: () => Promise<unknown>) => work()),
@@ -178,6 +191,26 @@ function emittedFollowUpIds(): string[] {
   return emittedFollowUps().map((followup) => followup.id);
 }
 
+const notAnswering = { answering: false, projectRootMatched: null, reportedProjectRoot: null };
+
+/** This project's dev server holds its lock on `port`, and its `/status` answers in `phase`. */
+function mockRunning(phase: 'serving' | 'starting', port = 8081): DevServerLockInfo {
+  const lock: DevServerLockInfo = {
+    url: `http://127.0.0.1:${port}`,
+    port,
+    pid: 4242,
+    startedAt: '2026-10-07T00:00:00.000Z',
+    projectRoot,
+  };
+  vi.mocked(readDevServerLockAsync).mockResolvedValue(lock);
+  vi.mocked(probeBundlerAsync).mockResolvedValue(
+    phase === 'serving'
+      ? { answering: true, projectRootMatched: true, reportedProjectRoot: projectRoot }
+      : notAnswering
+  );
+  return lock;
+}
+
 /** Pin this host's LAN address, so the real-device follow-up does not depend on the machine. */
 function mockLanAddress(address: string | null) {
   vi.spyOn(os, 'networkInterfaces').mockReturnValue(
@@ -191,6 +224,7 @@ beforeEach(() => {
   vol.reset();
   mockReported.length = 0;
   vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(null);
+  vi.mocked(probeBundlerAsync).mockReset().mockResolvedValue(notAnswering);
   vi.mocked(readLastBuildRecord).mockReturnValue({});
   vi.mocked(runExpoAsync).mockResolvedValue(0);
   vi.mocked(isInteractive).mockReturnValue(true);
@@ -722,6 +756,141 @@ describe(devAsync, () => {
       await devAsync(projectRoot, resolveDevOptions(['--ios']));
 
       expect(Log.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  // One dev server per project. A run stops on the lock alone, before the project is probed and the
+  // plan is resolved, so nothing below the lock read is spent on it: no probe, no resolver, no
+  // device. Devices are off here, as in the e2e harness.
+  describe('a dev server this project already runs', () => {
+    /** The run never got as far as looking at the project. */
+    function expectNothingSpent() {
+      expect(probeProjectStateAsync).not.toHaveBeenCalled();
+      expect(resolveStartPlanAsync).not.toHaveBeenCalled();
+      expect(resolvePlannedPortAsync).not.toHaveBeenCalled();
+      expect(acquireDeviceAsync).not.toHaveBeenCalled();
+      expect(runExpoAsync).not.toHaveBeenCalled();
+      expect(runDevServerAsync).not.toHaveBeenCalled();
+    }
+
+    it(`should stop before the project is probed and before any step`, async () => {
+      mockRunning('serving');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+        exitCode: 20,
+        data: { port: 8081, pid: 4242, phase: 'serving' },
+        suggestedCommand: 'npx @expo/agent-cli smoke --ios',
+      });
+      expectNothingSpent();
+    });
+
+    it(`should stop on a server that is still starting`, async () => {
+      mockRunning('starting');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+        data: { phase: 'starting' },
+        suggestedCommand: 'npx @expo/agent-cli status',
+      });
+      expectNothingSpent();
+    });
+
+    it(`should stop a plan that builds before the toolchain is probed`, async () => {
+      mockStaleDevClientState();
+      mockRunning('serving');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+      });
+      expectNothingSpent();
+    });
+
+    // The stop precedes the resolver, which is what asks EAS for a build it may already have.
+    it(`should stop a plan on EAS before EAS is asked anything`, async () => {
+      mockRunning('serving');
+
+      await expect(
+        devAsync(projectRoot, resolveDevOptions(['--ios', '--eas']))
+      ).rejects.toMatchObject({ code: 'DEV_SERVER_RUNNING' });
+      expectNothingSpent();
+    });
+
+    it(`should say the server runs, not that the named port is taken`, async () => {
+      mockRunning('serving', 8081);
+
+      await expect(
+        devAsync(projectRoot, resolveDevOptions(['--ios', '--port', '8081']))
+      ).rejects.toMatchObject({ code: 'DEV_SERVER_RUNNING' });
+      expectNothingSpent();
+    });
+
+    it(`should suggest a device platform to a --web caller`, async () => {
+      mockPlatform('linux');
+      mockRunning('serving');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--web']))).rejects.toMatchObject({
+        suggestedCommand: 'npx @expo/agent-cli smoke --android',
+      });
+      expectNothingSpent();
+    });
+
+    // A plan still probes and resolves, because it prints the rule and the reasons.
+    it(`should print under --plan a plan with no steps`, async () => {
+      mockStaleDevClientState();
+      mockRunning('serving');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios', '--plan']))).resolves.toBe(0);
+
+      expect(resolveStartPlanAsync).toHaveBeenCalledTimes(1);
+      const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+      expect(plan.rule).toBe('dev-client-stale');
+      expect(plan.steps).toEqual([]);
+      expect(plan.reasons).toContain(
+        "This project's dev server is already running on port 8081 (pid 4242); the run stops instead of starting a second one."
+      );
+      expect(plan.devServerPort).toEqual({
+        port: 8081,
+        movedFrom: null,
+        state: 'running',
+        phase: 'serving',
+      });
+      expect(resolvePlannedPortAsync).not.toHaveBeenCalled();
+      expect(emittedFollowUpIds()).toEqual(['dev-server-running']);
+      expect(emittedFollowUps()[0]!.command).toBe('npx @expo/agent-cli smoke --ios');
+    });
+
+    // The lock alone decides the plan's shape too: a forwarded `--no-bundler` turns the last step
+    // into one that does not serve, and the plan still stops.
+    it(`should print under --plan a plan with no steps whatever the forwarded options`, async () => {
+      mockProjectState();
+      mockRunning('serving');
+
+      await expect(
+        devAsync(projectRoot, resolveDevOptions(['--ios', '--plan', '--', '--no-bundler']))
+      ).resolves.toBe(0);
+
+      const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+      expect(plan.steps).toEqual([]);
+      expect(plan.devServerPort).toMatchObject({ state: 'running', phase: 'serving' });
+      expect(emittedFollowUpIds()).toEqual(['dev-server-running']);
+    });
+
+    // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle output — the recovery preference
+    // `status` reads is the request that started the running server, never one the lock refused.
+    it(`should leave the last dev request as the run that started the server wrote it`, async () => {
+      const file = path.join(projectRoot, '.expo', 'agent-cli-last-dev.json');
+      const written =
+        '{"version":1,"platform":"ios","port":null,"buildBackend":null,"runTarget":null}\n';
+      vol.fromJSON({ [file]: written });
+      mockRunning('serving');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--android']))).rejects.toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+      });
+
+      expect(vol.readFileSync(file, 'utf8')).toBe(written);
     });
   });
 
@@ -1478,34 +1647,23 @@ describe(devAsync, () => {
       }
     );
 
+    // The stop comes before any device choice, so a named device is never matched.
     it.each(['SIM-1', 'HUMAN'])(
-      'protects the running server’s device when naming %s',
+      'stops before a named --device is matched while the server runs: %s',
       async (query) => {
         mockProjectState();
         vol.fromJSON({ '/project/package.json': '{}' });
-        vi.mocked(readDevServerLockAsync).mockResolvedValueOnce({ pid: 1 } as never);
-        const tools = fakeTools({
-          simulators: [
-            { udid: 'SIM-1', name: 'agent-cli own', state: 'Booted' },
-            { udid: 'HUMAN', name: 'My iPhone', state: 'Shutdown' },
-          ],
-        });
+        mockRunning('serving');
         const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
         writeBinding(file, bindingFor(projectRoot, 'SIM-1'));
-        const real =
-          await vi.importActual<typeof import('../../deviceBinding')>('../../deviceBinding');
-        vi.mocked(acquireDeviceAsync).mockImplementationOnce((root, platform, options) =>
-          real.acquireDeviceAsync(root, platform, { ...options, tools })
-        );
 
-        const run = devAsync(projectRoot, resolveDevOptions(['--ios', '--device', query]));
-        if (query === 'SIM-1') await expect(run).resolves.toBe(0);
-        else {
-          await expect(run).rejects.toMatchObject({ data: { reason: 'not-reusable' } });
-          expect(runDevServerAsync).not.toHaveBeenCalled();
-        }
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--ios', '--device', query]))
+        ).rejects.toMatchObject({ code: 'DEV_SERVER_RUNNING' });
+
+        expect(acquireDeviceAsync).not.toHaveBeenCalled();
+        expect(runDevServerAsync).not.toHaveBeenCalled();
         expect(readBindingFile(file)).toMatchObject({ binding: { device: { udid: 'SIM-1' } } });
-        expect(tools.calls).not.toContainEqual(['delete', 'SIM-1']);
       }
     );
 
@@ -1517,10 +1675,7 @@ describe(devAsync, () => {
         devAsync(projectRoot, resolveDevOptions(['--ios', '--local', '--', '--device', 'X']))
       ).resolves.toBe(0);
 
-      expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios', {
-        reuseOnly: false,
-        explicit: undefined,
-      });
+      expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios', { explicit: undefined });
       const [, args] = vi.mocked(runDevServerAsync).mock.calls[0]!;
       expect(args.filter((arg) => arg === '--device')).toHaveLength(1);
       expect(args).toEqual(expect.arrayContaining(['run:ios', '--device', 'SIM-1']));
@@ -1537,6 +1692,29 @@ describe(devAsync, () => {
         }),
         expect.anything()
       );
+    });
+
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+    it(`reads the lock once and acquires with nothing to reuse`, async () => {
+      mockProjectState();
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).resolves.toBe(0);
+
+      expect(readDevServerLockAsync).toHaveBeenCalledTimes(1);
+      expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios', { explicit: undefined });
+    });
+
+    it(`stops before the binding is read while the server runs`, async () => {
+      mockProjectState();
+      mockRunning('serving');
+
+      await expect(devAsync(projectRoot, resolveDevOptions(['--ios']))).rejects.toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+      });
+
+      expect(acquireDeviceAsync).not.toHaveBeenCalled();
+      expect(inspectBindingAsync).not.toHaveBeenCalled();
+      expect(runDevServerAsync).not.toHaveBeenCalled();
     });
 
     it(`binds nothing for a run that refuses its EAS route`, async () => {
@@ -1644,12 +1822,9 @@ describe(devAsync, () => {
         );
       });
 
-      it(`reads --device as the run does while this worktree's dev server runs: reuse only`, async () => {
+      it(`previews no device under --plan while the server runs`, async () => {
         mockStaleDevClientState();
-        vi.mocked(readDevServerLockAsync).mockResolvedValueOnce({ pid: 1 } as never);
-        vi.mocked(previewExplicitDeviceAsync).mockRejectedValueOnce(
-          notReusableError('ios', { bound: 'agent-cli 0000', named: 'Sim' })
-        );
+        mockRunning('serving');
 
         await expect(
           devAsync(
@@ -1658,15 +1833,13 @@ describe(devAsync, () => {
           )
         ).resolves.toBe(0);
 
-        expect(previewExplicitDeviceAsync).toHaveBeenCalledWith(
-          projectRoot,
-          'ios',
-          { query: 'Sim', rerun: ['--ios', '--local', '--plan', '--port', '8091'] },
-          true
-        );
-        expect(emittedFollowUps()).toContainEqual(
-          expect.objectContaining({ id: 'device-refusal', command: 'npx @expo/agent-cli dev:stop' })
-        );
+        expect(previewExplicitDeviceAsync).not.toHaveBeenCalled();
+        expect(inspectBindingAsync).not.toHaveBeenCalled();
+        const [plan] = vi.mocked(emitStartPlan).mock.calls[0]!;
+        expect(plan.steps).toEqual([]);
+        expect(plan.explicitDevice).toBeUndefined();
+        expect(plan.reasons).not.toContainEqual(expect.stringContaining('reuse or create'));
+        expect(emittedFollowUpIds()).toEqual(['dev-server-running']);
       });
 
       it(`offers a bind plan's run with the caller's --device and --port`, async () => {
@@ -1685,8 +1858,7 @@ describe(devAsync, () => {
         expect(previewExplicitDeviceAsync).toHaveBeenCalledWith(
           projectRoot,
           'ios',
-          expect.anything(),
-          false
+          expect.anything()
         );
         expect(emittedFollowUps().find((followup) => followup.id === 'dev')!.command).toBe(
           "npx @expo/agent-cli dev --ios --local --device 'My Sim' --port 8091 --detach --wait-ready"

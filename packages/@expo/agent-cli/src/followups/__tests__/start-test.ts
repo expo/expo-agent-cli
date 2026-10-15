@@ -192,6 +192,34 @@ describe(buildStartFollowUps, () => {
 });
 
 describe(buildStartPlanFollowUps, () => {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  // The same two the run's error suggests: the server when it answers, `status` until it does. A
+  // `--web` caller gets the project's default device platform by the rule the run's error uses: a
+  // single checked-in native folder, whatever the host.
+  it.each([
+    ['serving', 'ios', { ios: false, android: false }, 'npx @expo/agent-cli smoke --ios'],
+    ['serving', 'android', { ios: false, android: false }, 'npx @expo/agent-cli smoke --android'],
+    ['serving', 'web', { ios: false, android: true }, 'npx @expo/agent-cli smoke --android'],
+    ['serving', 'web', { ios: true, android: false }, 'npx @expo/agent-cli smoke --ios'],
+    ['starting', 'ios', { ios: false, android: false }, 'npx @expo/agent-cli status'],
+  ] as const)(
+    `offers the running dev server, not the plan, when the plan stopped on one (%s, %s, %o)`,
+    (phase, platform, nativeDirs, command) => {
+      const followups = buildStartPlanFollowUps(
+        mockPlan({
+          steps: [],
+          devServerPort: { port: 8081, movedFrom: null, state: 'running', phase },
+        }),
+        mockState({ nativeDirs }),
+        platform
+      );
+
+      expect(ids(followups)).toEqual(['dev-server-running']);
+      expect(followups[0]!.command).toBe(command);
+      expect(followups[0]!.why).toContain('port 8081');
+    }
+  );
+
   it(`should offer the refusal's How command instead of a run of a plan that refuses --device`, () => {
     const followups = buildStartPlanFollowUps(
       mockPlan({
