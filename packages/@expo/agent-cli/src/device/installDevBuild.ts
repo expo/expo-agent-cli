@@ -18,8 +18,9 @@
 //
 //   --no-bundler       this run already has a dev server, and a second Metro would be a second
 //                      answer to "which bundle is the app under test running"
-//   --device <id>      the simulator or emulator this run settled on, so the app lands where the
-//                      rest of the run is looking rather than on whatever the CLI would pick
+//   --device <id>      the simulator udid or the emulator serial this worktree bound, so the app
+//                      lands where the rest of the run is looking rather than on whatever the CLI
+//                      would pick; `run:android` matches a serial since SDK 58, the floor
 //
 // **It is not `@expo/agent-cli dev`.** That plans and starts a dev server, which is the thing this
 // run has already done; asking for it again from inside the install phase would start a second one.
@@ -31,20 +32,10 @@ import { runAdbAsync } from './adb';
 const NAME_TIMEOUT_MS = 15_000;
 
 /**
- * What `expo run:android --device` calls this device, or null when it cannot be named.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §The gate installs the app, whichever app it is
- *
- * **`--device` does not mean the same thing on the two platforms**, and the difference is not in
- * the help text in a way anybody would notice: iOS takes a *"Device name, UDID, or generic"*, and
- * Android takes a *"Device name"* and nothing else. Passing an `adb` serial to Android answers
- * `CommandError: Could not find device with name: emulator-5554` [observed — live, 2026-09-04],
- * which is what this function exists to avoid.
- *
- * The names it accepts are the ones its own device list builds
- * [reference — `@expo/cli` `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync]: an
+ * The name a person knows an Android device by, or null when it cannot be named. For display: an
  * emulator is its **AVD name**, from `adb -s <serial> emu avd name`, and a physical device is the
- * `model:` field of `adb devices -l`. So this asks the same two questions in the same order.
+ * `model:` field of `adb devices -l`, the two names `@expo/cli`'s own device list builds
+ * [reference — `src/start/platforms/android/adb.ts` §getAttachedDevicesAsync].
  */
 export async function androidDeviceNameAsync(
   serial: string,
@@ -119,8 +110,6 @@ export interface InstallDevBuildOptions {
    * asked, and then the exit code decides after all — it is the only evidence left.
    */
   verifyInstalledAsync?: () => Promise<boolean | null>;
-  /** Injected for the tests, so the Android name lookup is provable without an emulator. */
-  run?: typeof runAdbAsync;
 }
 
 /** The first line of a message, for a reason that has to fit on one. */
@@ -133,7 +122,7 @@ function firstLine(text: string): string {
  *
  * @param projectRoot the project to build. The command runs here, because `expo run:*` reads the
  * project it is standing in.
- * @param deviceId the simulator udid or `adb` serial the run chose.
+ * @param deviceId the simulator udid or `adb` serial the worktree bound.
  */
 export async function installDevBuildAsync(
   projectRoot: string,
@@ -143,23 +132,9 @@ export async function installDevBuildAsync(
     spawn = spawnCaptureAsync,
     timeoutMs = BUILD_TIMEOUT_MS,
     verifyInstalledAsync,
-    run,
   }: InstallDevBuildOptions = {}
 ): Promise<InstallDevBuildResult> {
-  // @ref ./installDevBuild §androidDeviceNameAsync — iOS takes the udid, Android takes a name.
-  // A device Android cannot name gets no `--device` at all rather than a wrong one: the command
-  // then picks the attached device itself, which on the one-device machine this is usually run on
-  // is the same device, and a wrong `--device` is a refusal.
-  const target =
-    platform === 'android' ? await androidDeviceNameAsync(deviceId, run ? { run } : {}) : deviceId;
-  // Pushed rather than spread, so `--device` stays a literal the foreign-flag sweep can see: a
-  // conditional spread hid it, and a flag this CLI writes onto another CLI's command line without
-  // the guard noticing is exactly what that guard exists to stop (llp/0002 §A flag is not shipped
-  // until it has run against the published binary).
-  const args = [`run:${platform}`, '--no-bundler'];
-  if (target != null) {
-    args.push('--device', target);
-  }
+  const args = [`run:${platform}`, '--no-bundler', '--device', deviceId];
   const command = `npx expo ${args.join(' ')}`;
 
   const built = await spawn('npx', ['expo', ...args], { cwd: projectRoot, timeoutMs });

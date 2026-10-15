@@ -59,7 +59,7 @@ The claimants of a device decide where its ownership record must live. A local d
    **Why.** The human's AVD image is never written by an agent, and the first and the fifth worktree behave the same. The cost is a cold boot and a reinstall per instance start.
 3. **Liveness is a 60 min lease, renewed by use. Nothing else.** No agent pid in the binding, no socket probe, no mtime. The `emulatorPid` of a spawned instance identifies the emulator, not the agent.
    **Why.** One source of truth. Metro renews the lease on a timer, so a Fast Refresh session never expires while Metro runs, and a crashed agent's binding is stale within 60 min. A pid in the binding would add a second source and a pid-reuse risk. The one case a pid would catch, `dev:stop --release` during a build step of the same worktree, costs one rerun of `dev` (Risk 9).
-4. **Only `dev`, with `openAppEas` and dev-wait, and `smoke` allocate. Every other verb reads the binding**, with one subprocess per binding and no network call before the EAS rung.
+4. **Only `dev`, with `openAppEas` and dev-wait, and `smoke` allocate. Every other verb reads the binding**, with one device-tool subprocess per binding and no network call before the EAS rung.
    **Why.** The agent's hottest verb must not pay for the rarest decision. `dev` is where the agent's loop starts ([[0026-dev-owns-the-open]]); `smoke` brings its own device ([[0005-runtime-loop-tools]]).
 5. **A parked simulator is an expired `created` binding, not a second record.** A living worktree keeps its parked simulator and gets it back on the next `dev`. A deleted worktree's simulator is deleted by the next reap.
    **Why.** One record type cannot disagree with itself. The worktree that paid for the native build keeps it. Disk is reclaimed when the worktree goes, with no count and no cap. Nothing takes another worktree's simulator: a `simctl create` is cheap, and the app on a foreign simulator is a foreign build anyway.
@@ -135,9 +135,16 @@ export interface DeviceTools {
   simctl: Runner;
   adb: Runner;
   emulatorList: Runner;
-  spawnEmulator(args: string[]): { pid?: number; exited: Promise<number | null>; kill(): void };
+  spawnEmulator(args: string[]): {
+    pid?: number;
+    exited: Promise<number | null>;
+    kill(): void;
+    lastOutput(): string;
+  };
   now: () => Date;
   isPidAlive: (pid: number) => boolean;
+  commandOf: (pid: number) => string | null; // '' when `ps` lists none, null where `ps` does not exist
+  kill: (pid: number) => void;
 }
 export type AcquireResult = {
   device: BoundDevice;
@@ -169,7 +176,7 @@ export type ReleasedDevice = {
   - A local binding whose device the inventory does not list or lists as unavailable (its runtime was removed), or a `spawned` one whose `emulatorPid` is dead: remove the file.
   - `created` of a deleted root: remove the file, then `simctl delete`, where "not found" counts as success.
   - `created`: park, then `simctl shutdown`, where an already shut-down simulator counts as success. A reap skips the shutdown when its inventory listed `Shutdown`.
-  - `spawned`: remove the file, then kill `emulatorPid` while it is alive and, where `ps` exists, its arguments name `-avd <avd>` and `-ports <port>,<port+1>`. Never the binary name: the `emulator` launcher execs `qemu-system-<arch>`, so the pid stays and the name does not.
+  - `spawned`: remove the file, then kill `emulatorPid` while the instance check holds: it is alive and, where `ps` exists, its arguments name `-avd <avd>` and `-ports <port>,<port+1>`. Never the binary name: the `emulator` launcher execs `qemu-system-<arch>`, so the pid stays and the name does not.
   - `explicit`: expire the lease and keep the file, so the next `dev` reuses the named device; the device holds nothing of ours, and a reap finds the binding expired and leaves it. A deleted root removes the file.
   - `dotenv`: remove the file.
   - `started`: remove the file, then `stopEasSessionAsync(<the binding's projectRoot>, id)` with main's EAS stop timeout, or under the calling worktree's root when that root is deleted, because eas-cli reads the project and the account from the directory it runs in. A missing eas-cli or a failed stop is reported with the session id; the idle timeout or the session cap ends that session.
@@ -198,7 +205,7 @@ export type ReleasedDevice = {
 Inputs: the own binding and the other worktrees' bindings, each marked stale or not; the inventory, read before the lock; `explicit`; `reuseOnly`; `now`; on Android `busyPorts`, computed by `android.ts` in the same section: the running `emulator-NNNN` serials, the Android bindings whose lease is live, and every Android binding whose `emulatorPid` is alive, because a reap kills it only after the section. The free port is the first free even one in 5554..5584. `IosInventory` holds `SimulatorEntry[]` and `newestIosRuntime: { identifier, deviceType } | null`: the newest available iOS runtime that lists a mainstream iPhone, with its highest-numbered `iPhone <n> Pro`, else `iPhone <n>`, else `iPhone <n> Pro Max`, whatever order `simctl` lists them in, because the newest runtime can list only a device no app renders on (iOS 27.1 lists iPhone Duo alone); only when no runtime has one does the newest runtime's first iPhone type apply. `AndroidInventory` holds the first AVD of `emulator -list-avds` and `runningSerials`. Outputs:
 
 ```ts
-| { kind: 'reuse'; binding }        // own binding, live or expired, device present (iOS: listed and available; Android spawned: emulatorPid alive; Android explicit: serial listed); also --device naming the own device
+| { kind: 'reuse'; binding }        // own binding, live or expired, device present (iOS: listed and available; Android spawned: the instance check; Android explicit: serial listed); also --device naming the own device
 | { kind: 'ios-create'; runtime; deviceType; name }
 | { kind: 'android-spawn'; port; avd }
 | { kind: 'explicit'; device }
@@ -222,20 +229,20 @@ Inputs: the own binding and the other worktrees' bindings, each marked stale or 
 
 **`acquireCloudBindingAsync(root, { platform, id, origin, tools? })`**: under the lock, writes or rewrites the own `cloud` binding (a reuse of the same id keeps `boundAt` and `origin`), then reaps the rows that need no inventory. The `origin` comes from the probe's reported source. Every session id a verb obtains is bound, a reuse of the bound id and a start that failed after it created the session included, so a later reap can stop that session.
 
-**`inspectBindingAsync(root, platform, backend, tools?) → Inspection`**, lock-free, no extension, no network, one subprocess at most. iOS: one `simctl list devices -j` filtered by udid. Android: `get-state`, plus `isPidAlive` for `spawned`; a `get-state` whose stderr says the device is not found counts as not listed, and any other non-zero exit is `cause: tool`. Cloud: the binding alone. The device check uses the 20 s timeout; `status` uses its own probe deadline. The inspect cache is main's probe cache with the root added to its key; `acquire` and release clear it; the rung loop never uses it. `state` is the first row that matches:
+**`inspectBindingAsync(root, platform, backend, tools?) → Inspection`**, lock-free, no extension, no network, one device-tool subprocess at most. iOS: one `simctl list devices -j` filtered by udid. Android: `get-state`, plus the instance check for a listed `spawned` binding; a `get-state` whose stderr says the device is not found counts as not listed, one that says offline, unauthorized or still authorizing counts as listed and not up, and any other non-zero exit is `cause: tool`. Cloud: the binding alone. The device check uses the 20 s timeout; `status` uses its own probe deadline. The inspect cache is main's probe cache with the root added to its key; `acquire` and release clear it; the rung loop never uses it. `state` is the first row that matches:
 
-| Condition                                                                                                      | `state`                     | Rung loop                                                                                                                          |
-| -------------------------------------------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| no own file                                                                                                    | `none`                      | next rung                                                                                                                          |
-| own file does not parse                                                                                        | `unreadable`                | refuse, exit 7                                                                                                                     |
-| the device tool cannot run (`cause: tool`)                                                                     | `unknown`                   | with a platform flag: throw the tool error at once; without one: next rung, and after the EAS rung throw the first tool error seen |
-| the device check timed out (`cause: timeout`)                                                                  | `unknown`                   | refuse, exit 22                                                                                                                    |
-| cloud: lease live                                                                                              | `recorded`                  | the EAS rung decides                                                                                                               |
-| lease expired                                                                                                  | `gone`, cause `expired`     | next rung                                                                                                                          |
-| local, device up: iOS listed `Booted`; Android `get-state` is `device` and, for `spawned`, `emulatorPid` alive | `up`                        | wins                                                                                                                               |
-| local, Android `spawned` with `emulatorPid` dead                                                               | `gone`, cause `device-gone` | next rung                                                                                                                          |
-| local, device listed                                                                                           | `not-up`                    | refuse, exit 20                                                                                                                    |
-| local, device not listed                                                                                       | `gone`, cause `device-gone` | next rung                                                                                                                          |
+| Condition                                                                                                           | `state`                     | Rung loop                                                                                                                          |
+| ------------------------------------------------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| no own file                                                                                                         | `none`                      | next rung                                                                                                                          |
+| own file does not parse                                                                                             | `unreadable`                | refuse, exit 7                                                                                                                     |
+| the device tool cannot run (`cause: tool`)                                                                          | `unknown`                   | with a platform flag: throw the tool error at once; without one: next rung, and after the EAS rung throw the first tool error seen |
+| the device check timed out (`cause: timeout`)                                                                       | `unknown`                   | refuse, exit 22                                                                                                                    |
+| cloud: lease live                                                                                                   | `recorded`                  | the EAS rung decides                                                                                                               |
+| lease expired                                                                                                       | `gone`, cause `expired`     | next rung                                                                                                                          |
+| local, device up: iOS listed `Booted`; Android `get-state` is `device` and, for `spawned`, the instance check holds | `up`                        | wins                                                                                                                               |
+| local, Android `spawned` failing the instance check                                                                 | `gone`, cause `device-gone` | next rung                                                                                                                          |
+| local, device listed                                                                                                | `not-up`                    | refuse, exit 20                                                                                                                    |
+| local, device not listed                                                                                            | `gone`, cause `device-gone` | next rung                                                                                                                          |
 
 **`useBoundDeviceAsync(inspection, tools?) → BoundDevice`**: takes an `up` inspection, extends the lease per §Lease, and returns the device; `lost` throws `gone` with cause `expired` (exit 20). It never inspects again and never boots.
 
@@ -320,8 +327,8 @@ At eas-cli 24.7.0 a `--json` start still writes the session id to `.env.eas-simu
 
 Each accepted race costs one rerun of `dev`, never a lost build or a touched human device.
 
-1. `-read-only` with `adb reverse` and install, "an emulator on a taken port exits non-zero", and the cold boot time are unverified here. The §Live gate runs before 3a to 4 merge.
-2. A pid reused by an unrelated long-lived process keeps the registry lock until a human reads the message; a reused emulator pid is never killed where `ps` exists, and on a platform without `ps` the kill can hit the wrong process. Needs pid wrap-around during days of uptime.
+1. The Android facts §Live gate verifies: a second `-read-only` instance boots beside the first and takes `adb reverse` and an install, an emulator started on a taken port exits non-zero, the launcher keeps its pid, and a cold boot plus the install fits `BOOT_DEVICE_TIMEOUT_MS`. The gate passed on SDK 58; the cold start's wall time is the cost every instance start pays (Decision 2).
+2. A pid reused by an unrelated long-lived process keeps the registry lock until a human reads the message; a reused emulator pid is never killed where `ps` exists, and on a platform without `ps` the kill can hit the wrong process. Without `ps`, `dev` and the read verbs can drive whatever answers on the serial. Needs pid wrap-around during days of uptime.
 3. eas-cli skew: a project pinned under 23.2 refuses `--tag` on the start; §EAS session binding tests the fallback.
 4. The idle-timeout semantics on the service are unread; 30 min may stop a session during a long pause.
 5. A crash or a 20 s timeout during `simctl create` leaks one `Shutdown` simulator named `agent-cli <first 8 chars>`, and a retry creates a second; nothing adopts or deletes them. Main measured a cold `simctl list` at 2.6 s, so `status`'s 2.5 s probe deadline can report `unknown` on a cold machine.
@@ -374,7 +381,7 @@ How does a worktree get an iOS simulator nobody else has, and how do the other v
 - `dev --detach` on a running server boots its own `Shutdown` simulator and refuses otherwise.
 - `navigate` without `dev` falls to the EAS rung, which until PR 5 accepts the dotenv id only, then refuses naming `dev`; with it, it drives the bound device only. Without a platform flag, any `up` binding wins.
 - `smoke --ios` gets its simulator from the binding and leaves it bound.
-- Android unchanged.
+- Android follows §Android instance.
 
 ### Commit order
 
@@ -410,9 +417,9 @@ Per §Contracts every verb honors, without `android.ts`, `cloud.ts`, `reap.ts` a
   - The `--plan` reason "will reuse or create a simulator" is added only for `--ios` without `--eas` and with devices on, so a stubbed harness's plans are unchanged.
   - `smoke`'s iOS boot skips under `AGENT_CLI_NO_DEVICE` and reports a failed boot phase; its install phase honours the boot's `installNeeded`, because a created simulator's disk holds nothing to read.
 - `withDevice(plan, device)` runs once a device is acquired, after the `--port` block, the `--plan` return and the refusals, for a serving draft (acquired in the resolver's callback) and a building one alike. It sets `--device <udid>` on every `run` and `install` step and replaces any `--device` there; on a plan with neither it is a no-op. `AppPresenceProbe.installDevice` goes for iOS. `devAsync` passes `acquired.device` through `executePlanAsync` to `openAppForRunAsync`'s local branch, which hands it to `openAppOnDeviceAsync`; its iOS probe and boot go, and it passes the device to `openRouteAsync` through a new `device?: BoundDevice` option, which skips `resolveDeviceAsync`, so the open inspects nothing twice. `report.booted` is `acquired.justBooted`.
-- The callback runs for iOS only, and on macOS only; on another host `dev --ios` binds nothing and the plan is unprobed, which is what the live-cloud suite's Linux worker relies on. Android keeps main's probe-and-boot path, its first-adb rung, its `probeLocalDeviceAsync` branch and its `installDevice` until 3b. `acquire` is skipped for `--eas`.
+- The callback runs for iOS on macOS only; on another host `dev --ios` binds nothing and the plan is unprobed, which is what the live-cloud suite's Linux worker relies on. Android acquisition, where `adb` resolves, is described in §Android instance. `acquire` is skipped for `--eas`.
 - `dev --plan` passes a callback that inspects the own binding and returns it as `reused` with `justBooted: false` when the state is `up` or `not-up`; otherwise null. For a building draft `devAsync` calls that same callback itself and pins the plan, with no probe. When the callback returned null, `devAsync` leaves the step unpinned and adds the reason "will reuse or create a simulator" to the plan, building or not.
-- `dev --detach`: the child acquires and never releases on exit. `devDetachAsync` gains an option `reuseBoundDevice`, default false, that `devAsync` passes as true and `smoke` leaves unset. With it, when the server is already running, `devDetachAsync` calls `acquireDeviceAsync` with `reuseOnly` before `reportDetached` prints, on macOS for `--ios` without `--eas` and without `AGENT_CLI_NO_DEVICE`. Linux and Windows reuse the server without acquiring an iOS simulator. A parked own simulator is booted, the boot is waited for, and the `action` line is printed on stderr before the report. Any other choice refuses `not-reusable` (exit 20), because a device created here would carry no app. The child's `DEVICE_*` and `NO_BOUND_DEVICE` errors are written to the child verdict and the parent rethrows them unchanged, per §Output and errors; `detachFailureError` keeps `DEV_DETACH_DIED` for everything else.
+- `dev --detach`: the child acquires and never releases on exit. `devDetachAsync` gains an option `reuseBoundDevice`, default false, that `devAsync` passes as true and `smoke` leaves unset. With it, when the server is already running, `devDetachAsync` calls `acquireDeviceAsync` with `reuseOnly` before `reportDetached` prints, for `--ios` on macOS and for `--android` where `adb` resolves, without `--eas` and without `AGENT_CLI_NO_DEVICE`. A host that cannot run the platform's device reuses the server without acquiring. A parked own simulator is booted, the boot is waited for, and the `action` line is printed on stderr before the report. Any other choice refuses `not-reusable` (exit 20), because a device created here would carry no app. The child's `DEVICE_*` and `NO_BOUND_DEVICE` errors are written to the child verdict and the parent rethrows them unchanged, per §Output and errors; `detachFailureError` keeps `DEV_DETACH_DIED` for everything else.
 
 ### iOS readers
 
@@ -426,7 +433,7 @@ In bootstrap mode `smoke` starts its own `dev --detach --no-open` child through 
 
 ### iOS deletions
 
-`bootSimulatorAsync`, `pickSimulator`, the iOS branch of `bootDeviceAsync` (the Android branch and `BOOT_DEVICE_TIMEOUT_MS` stay), `probeIosSimulatorAsync`, `parseBootedIosSimulator` (the plural `parseBootedIosSimulators` stays for `status --device`), the iOS `installDevice`, `NO_DEVICE` and `NO_IOS_DEVICE`. Help texts: the iOS lines that `git grep -i 'booted'` finds over `src/**/index.ts` and `runtime/stopAsync.ts`; the Android lines wait for 3b.
+`bootSimulatorAsync`, `pickSimulator`, the iOS branch of `bootDeviceAsync` (`BOOT_DEVICE_TIMEOUT_MS` stays; §Android deletions removes the rest), `probeIosSimulatorAsync`, `parseBootedIosSimulator` (the plural `parseBootedIosSimulators` stays for `status --device`), the iOS `installDevice`, `NO_DEVICE` and `NO_IOS_DEVICE`. Help texts: the iOS lines that `git grep -i 'booted'` finds over `src/**/index.ts` and `runtime/stopAsync.ts`; the Android lines wait for 3b.
 
 ### Docs
 
@@ -458,14 +465,27 @@ How does a worktree get an Android emulator nobody else has? The same question a
 
 ### Android boot
 
-Before the lock: `adb devices -l` and `emulator -list-avds`. Under the lock: `busyPorts` and the port choice per §Choice, else `no-free-port`. Then `spawnEmulator(['-avd', avd, '-ports', 'P,P+1', '-no-snapshot-save', '-read-only'])`, then one binding with serial and pid, in that order inside one section. After it: poll `sys.boot_completed` until `BOOT_DEVICE_TIMEOUT_MS`, accepted only while the child is alive and `adb devices` lists the serial; a non-zero exit or the deadline is a failed boot.
+Before the lock: `adb devices -l` and `emulator -list-avds`. Under the lock: `busyPorts` and the port choice per §Choice, else `no-free-port`. Then `spawnEmulator(['-avd', avd, '-ports', 'P,P+1', '-no-snapshot-save', '-read-only'])`, then one binding with serial and pid, in that order inside one section. After it: poll `sys.boot_completed` until `BOOT_DEVICE_TIMEOUT_MS`, accepted only while the child is alive and `adb devices` lists the serial; a non-zero exit or the deadline is a failed boot. The child's stdout and stderr go to `agent-cli-emulator-<port>.log` in the temp directory, truncated at each spawn; a child that exits during the boot fails it with that file's last line and its path.
 
 ### Wiring
 
 - `android.ts`; the `emulatorList` and `spawnEmulator` tools; the `android-spawn` choice; the boot poll with deadline and exit watcher.
 - The resolver callback and the `reuseBoundDevice` reuse of §iOS binding run for Android too. `AppPresenceProbe.installDevice` goes for Android. `withDevice` sets `--device <serial>`.
 - `openAppOnDeviceAsync`'s Android branch takes the bound device. `resolveDeviceAsync` sets `adb: resolveAdb()` on a `local-android` winner. `installDevBuild`, `askDeviceAsync` and `installedApp/android` pass the serial; `androidDeviceNameAsync` stays for display only.
-- Smoke's Android boot phase calls `acquireDeviceAsync`. `shutdownDeviceAsync` and smoke's `shutdownDevice` phase go, because every device is bound and that branch runs `emu kill` by serial (Contract 6).
+- Smoke's Android boot phase calls `acquireDeviceAsync`, and maps a `spawned` instance's AVD to `choice`, and nothing for an `explicit` serial, which the phase line already names. `shutdownDeviceAsync` and smoke's `shutdownDevice` phase go, because every device is bound and that branch runs `emu kill` by serial (Contract 6).
+- A release acts only on the binding it read. Under the lock it compares the whole acquisition (`sameBinding`: root, `boundAt`, device, and for a `spawned` instance its AVD, port and pid), and a failed boot passes the binding it wrote as `expected`, so a replacement keeps its file and its device.
+
+### Decided while building
+
+- `src/deviceBinding/emulator.ts` holds the Android tool calls (the inventory, `get-state`, the `EMULATOR_NOT_RUNNABLE` and `ADB_FAILED` errors, the host check) beside `android.ts`, which holds the port choice, the section, the boot poll and the kill; `release.ts` holds the let-go rules of both platforms, so every file stays under the budget of §Contracts every verb honors.
+- `DeviceTools` gains `commandOf(pid)` and `kill(pid)` beside the RFC's members, because the kill rule reads `ps` and signals, and a unit test must see both. `commandOf` is null where `ps` does not exist and `''` for a pid it does not list, so a reused pid is never killed, reused or reported `up` where `ps` runs.
+- `get-state` on an instance that is still booting exits non-zero with `error: device offline`. That row is `not-up`, not `unknown`: the serial is listed, the device is not up. Only `not found` is missing, and any other non-zero exit is the tool row of the RFC.
+- The host guard is `adb` resolving on disk (`resolveAdb().fromPathOnly` false); `emulator` is found beside it, so a host with neither binds nothing and `dev --android` serves for a device elsewhere.
+- The `no-free-port` How line says to stop one of the listed instances by hand. The RFC names `dev:stop --release`, which §Device lifecycle adds; the suggested-command lint refuses a flag that does not exist yet, so §Device lifecycle swaps the line.
+- The section of this PR lets go of no device: an own `spawned` binding whose pid is dead loses its file before any refusal, and a live one is reused. The `finally` that runs reaped devices' actions before a refusal lands with the reap in §Device lifecycle.
+- `status --explain --device <serial>` on Android lists through `adb devices -l` to filter and binds nothing (Contract 3); without `--device` the reader takes the bound serial and names it through `emu avd name` for display.
+- `AppPresenceProbe` loses `installDevice` on both platforms: `withDevice` pins every `run` and `install` step to the bound device, so the probe answers presence only, and a `spawned` instance is `missing` without asking, like a `created` simulator.
+- The foreign-flag sweep (`src/lint/foreignFlags.ts`) reads the registry's `tools.<runner>([...])` calls, so `-read-only`, `-ports`, `-avd`, `-list-avds`, `-b` and `-j` are pinned where they are spelled.
 
 ### Android deletions
 
@@ -474,7 +494,7 @@ Before the lock: `adb devices -l` and `emulator -list-avds`. Under the lock: `bu
 ### Android tests
 
 - A stub `emulator` that records argv, appends its serial to a state file beside the booted-state file, removes it on `SIGTERM`, and stays alive until killed. `installStubAdbAsync` lists those serials and answers `get-state` and `sys.boot_completed`. Tests kill the pids in their binding files in `afterEach`. Android device e2e skipped on win32. The dev e2e moves from `--device AVD_NAME` to the serial. A win32 lock test for the rename errors of §Lock.
-- Unit, named: `spawned-booting-is-not-up`, `get-state-not-found-is-gone`, `busy-ports-include-alive-emulators`, `kill-checks-arguments-not-binary`, `let-go-runs-before-refusal`.
+- Unit, named: `spawned-booting-is-not-up`, `get-state-not-found-is-gone`, `busy-ports-include-alive-emulators`, `kill-checks-arguments-not-binary`, `let-go-runs-before-refusal`, `release-leaves-replacement-binding`, `failed-boot-leaves-replacement-binding`, `release validates the Android pid even when its serial did not change`.
 
 ### Live gate
 

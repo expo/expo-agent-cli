@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { vol } from 'memfs';
-import { seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
+import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
 import type { RuntimeStopOptions } from '../resolveStopOptions';
@@ -276,11 +276,12 @@ describe(runtimeStopAsync, () => {
     });
   });
 
-  it(`should force-stop the app on an Android device`, async () => {
+  it(`should force-stop the app on the bound emulator instance`, async () => {
     Object.defineProperty(process, 'platform', { value: 'linux' });
+    seedAndroidBinding(projectRoot, 'emulator-5554');
     mockDevServer([]);
     mockSpawnQueue([
-      { stdout: 'List of devices attached\nemulator-5554\tdevice\n' },
+      { stdout: 'device\n' }, // adb get-state, the binding's check
       // The `pidof` F102 added, before the stop, because after it the answer is the same either way.
       { stdout: '4021\n' },
       { stdout: '' },
@@ -320,11 +321,8 @@ describe(runtimeStopAsync, () => {
         deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
       },
     ]);
-    mockSpawnQueue([
-      { stdout: 'List of devices attached\nemulator-5554\tdevice sdk_gphone64_arm64\n' },
-      { stdout: '3933\n' },
-      { stdout: '' },
-    ]);
+    seedAndroidBinding(projectRoot, 'emulator-5554');
+    mockSpawnQueue([{ stdout: 'device\n' }, { stdout: '3933\n' }, { stdout: '' }]);
 
     await expect(runtimeStopAsync(projectRoot, options({ platform: 'android' }))).resolves.toBe(0);
 

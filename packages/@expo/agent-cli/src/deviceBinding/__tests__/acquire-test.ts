@@ -260,4 +260,34 @@ describe(releaseWorktreeDevicesAsync, () => {
     expect(await releaseWorktreeDevicesAsync(ROOT, { tools })).toEqual([]);
     expect(tools.calls).toEqual([]);
   });
+
+  it('release-leaves-replacement-binding', async () => {
+    const tools = fakeTools({ simulators: [{ udid: 'OLD', name: 'old', state: 'Booted' }] });
+    writeBinding(file(), bindingFor(ROOT, 'OLD'));
+    const replacement = bindingFor(ROOT, 'NEW');
+    const simctl = tools.simctl;
+    tools.simctl = async (...args) => {
+      const result = await simctl(...args);
+      writeBinding(file(), replacement);
+      return result;
+    };
+    expect(await releaseWorktreeDevicesAsync(ROOT, { tools })).toEqual([]);
+    expect(readBindingFile(file())).toEqual({ kind: 'binding', binding: replacement });
+    expect(tools.calls.some(([command]) => command === 'shutdown')).toBe(false);
+  });
+
+  it('failed-boot-leaves-replacement-binding', async () => {
+    const tools = fakeTools({ bootFails: true });
+    const replacement = bindingFor(ROOT, 'NEW');
+    const simctl = tools.simctl;
+    tools.simctl = async (...args) => {
+      const result = await simctl(...args);
+      if (args[0][0] === 'bootstatus') writeBinding(file(), replacement);
+      return result;
+    };
+    await expect(acquireDeviceAsync(ROOT, 'ios', { tools })).rejects.toMatchObject({
+      data: { reason: 'boot-failed' },
+    });
+    expect(readBindingFile(file())).toEqual({ kind: 'binding', binding: replacement });
+  });
 });

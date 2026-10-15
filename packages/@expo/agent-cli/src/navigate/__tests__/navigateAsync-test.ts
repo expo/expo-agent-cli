@@ -1,7 +1,7 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { vol } from 'memfs';
-import { seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
+import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
 import { resetApprovedSchemes } from '../../device/approveScheme';
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
@@ -92,6 +92,8 @@ const BOOTED_SIMULATOR = JSON.stringify({
 });
 
 const ADB_DEVICES = 'List of devices attached\nemulator-5554\tdevice\n';
+/** What `adb -s <serial> get-state` prints for the bound instance, the registry's one check. */
+const EMULATOR_UP = 'device\n';
 
 const EXPO_GO_TARGET = {
   id: '1',
@@ -359,7 +361,8 @@ describe(navigateAsync, () => {
       [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
     });
     mockDevServer(null);
-    mockSpawnQueue([{ stdout: ADB_DEVICES }, { stdout: 'Starting: Intent' }]);
+    seedAndroidBinding(projectRoot, 'emulator-5554');
+    mockSpawnQueue([{ stdout: EMULATOR_UP }, { stdout: 'Starting: Intent' }]);
 
     await expect(
       navigateAsync(
@@ -533,7 +536,8 @@ describe(navigateAsync, () => {
         [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
       });
       mockDevServer(null);
-      mockSpawnQueue([{ stdout: ADB_DEVICES }, { stdout: 'Starting: Intent' }]);
+      seedAndroidBinding(projectRoot, 'emulator-5554');
+      mockSpawnQueue([{ stdout: EMULATOR_UP }, { stdout: 'Starting: Intent' }]);
 
       await navigateAsync(projectRoot, options({ devServerUrl: null, platform: 'android' }));
 
@@ -1053,6 +1057,8 @@ describe(navigateAsync, () => {
 // that lands on Expo Go's error screen, so the device tool's exit code was never evidence that the
 // app had loaded, and this command reported success for exactly that.
 describe(`${navigateAsync.name} on Android`, () => {
+  beforeEach(() => seedAndroidBinding(projectRoot, 'emulator-5554'));
+
   /** An Expo Go project whose dev server answers with the given targets, on 8081. */
   function mockExpoGoProject() {
     vol.fromJSON({
@@ -1072,7 +1078,7 @@ describe(`${navigateAsync.name} on Android`, () => {
     mockExpoGoProject();
     mockDevServer([ANDROID_TARGET]);
     mockSpawnQueue([
-      { stdout: ADB_DEVICES }, // adb devices -l
+      { stdout: EMULATOR_UP }, // adb get-state, the binding's check
       { stdout: '8081' }, //      adb reverse
       { stdout: 'Starting: Intent' }, // am start
       { stdout: '' }, //          simctl list (device index)
@@ -1102,7 +1108,7 @@ describe(`${navigateAsync.name} on Android`, () => {
     // never confirm this link (F51).
     mockDevServer([EXPO_GO_TARGET]);
     mockSpawnQueue([
-      { stdout: ADB_DEVICES },
+      { stdout: EMULATOR_UP },
       { stdout: '8081' },
       { stdout: 'Starting: Intent' },
       { stdout: '' },
@@ -1125,7 +1131,7 @@ describe(`${navigateAsync.name} on Android`, () => {
   it(`reports the attach it did not check when --no-wait-attach was passed`, async () => {
     mockExpoGoProject();
     mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue([{ stdout: ADB_DEVICES }, { stdout: '8081' }, { stdout: 'Starting: Intent' }]);
+    mockSpawnQueue([{ stdout: EMULATOR_UP }, { stdout: '8081' }, { stdout: 'Starting: Intent' }]);
 
     await expect(
       navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 0, json: true }))
@@ -1143,6 +1149,8 @@ describe(`${navigateAsync.name} on Android`, () => {
 // 22 after 90.6 s — while holding, in its own `connect` array, the launcher URL that would have
 // loaded it [observed — wave 29, `evidence/61-navigate-after-stop-android.json`].
 describe(`${navigateAsync.name} on a development build that is not loaded`, () => {
+  beforeEach(() => seedAndroidBinding(projectRoot, 'emulator-5554'));
+
   /** A project that depends on `expo-dev-client`, so the target decision is a development build. */
   function mockDevClientProject() {
     vol.fromJSON({
@@ -1205,7 +1213,7 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
       mockDevClientProject();
       mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
       mockSpawnQueue([
-        { stdout: ADB_DEVICES }, //        adb devices -l
+        { stdout: EMULATOR_UP }, //        adb get-state, the binding's check
         { stdout: '8081' }, //             adb reverse
         { stdout: 'Starting: Intent' }, //  am start — the launcher
         { stdout: '' }, //                 simctl list (device index)
@@ -1260,7 +1268,7 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     mockDevClientProject();
     mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
     mockSpawnQueue([
-      { stdout: ADB_DEVICES },
+      { stdout: EMULATOR_UP },
       { stdout: '8081' },
       { stdout: 'Starting: Intent' },
       { stdout: '' },
@@ -1290,7 +1298,7 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     mockDevClientProject();
     mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
     mockSpawnQueue([
-      { stdout: ADB_DEVICES },
+      { stdout: EMULATOR_UP },
       { stdout: '8081' },
       { stdout: 'Starting: Intent' },
       { stdout: '' },
@@ -1314,7 +1322,7 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     mockDevClientProject();
     mockDevServerConnectingAt(3, [DEV_BUILD_TARGET]);
     mockSpawnQueue([
-      { stdout: ADB_DEVICES },
+      { stdout: EMULATOR_UP },
       { stdout: '8081' },
       { stdout: 'Starting: Intent' },
       { stdout: '' },
@@ -1347,7 +1355,7 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     mockDevClientProject();
     mockDevServer([DEV_BUILD_TARGET]);
     mockSpawnQueue([
-      { stdout: ADB_DEVICES },
+      { stdout: EMULATOR_UP },
       { stdout: '8081' },
       { stdout: 'Starting: Intent' },
       { stdout: '' },
@@ -1374,7 +1382,7 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     });
     mockDevServerConnectingAt(3, [{ ...DEV_BUILD_TARGET, appId: 'host.exp.exponent' }]);
     mockSpawnQueue([
-      { stdout: ADB_DEVICES },
+      { stdout: EMULATOR_UP },
       { stdout: '8081' },
       { stdout: 'Starting: Intent' },
       { stdout: '' },
@@ -1398,7 +1406,7 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
   it(`does not launch first when nothing will be waited for`, async () => {
     mockDevClientProject();
     mockDevServer([]);
-    mockSpawnQueue([{ stdout: ADB_DEVICES }, { stdout: '8081' }, { stdout: 'Starting: Intent' }]);
+    mockSpawnQueue([{ stdout: EMULATOR_UP }, { stdout: '8081' }, { stdout: 'Starting: Intent' }]);
 
     await expect(
       navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 0, json: true }))

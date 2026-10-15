@@ -204,7 +204,7 @@ async function resolveServingDraftAsync(
   if ((requestedBackend ?? settingsBuildBackend(settings, requested)) === 'eas') {
     return { plan: draft, acquired };
   }
-  const { presence, installDevice } = await probeAppPresence(projectRoot, requested, {
+  const { presence } = await probeAppPresence(projectRoot, requested, {
     device: acquired?.device ?? null,
     action: acquired?.action ?? null,
   });
@@ -221,7 +221,7 @@ async function resolveServingDraftAsync(
   // Run again rather than patch the draft: the table is the one place a rule and its steps are
   // decided together, and a plan assembled anywhere else is a second table to keep in step.
   return {
-    plan: decideStartPlan(state, { ...planOptions, appPresence: presence, installDevice }),
+    plan: decideStartPlan(state, { ...planOptions, appPresence: presence }),
     acquired,
   };
 }
