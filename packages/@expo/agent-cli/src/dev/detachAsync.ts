@@ -28,7 +28,10 @@ import {
   acquireLine,
   devicesDisabled,
   hostBindsPlatform,
+  localBackendOf,
 } from '../deviceBinding';
+import { SIMCTL_CALL_TIMEOUT_MS } from '../deviceBinding/ios';
+import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
 import { PORT_WATCH_TIMEOUT_MS, readLastLoggedDevServerPort } from '../devLock/port';
 import { event as cliEvent } from '../events';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
@@ -139,6 +142,8 @@ export interface DevDetachResultJson {
    * @see llp/0005-runtime-loop-tools.rfc.md §Where a device reaches the dev server
    */
   tunnelUrl: string | null;
+  /** This worktree's device for the platform, or null when the run binds none. */
+  device: BindingSummary | null;
   /** How long the whole thing took, in milliseconds. */
   waitedMs: number;
   followups: FollowUp[];
@@ -275,11 +280,12 @@ export async function devDetachAsync(
     const lock = checked?.lock ?? running;
     // Reuse only reads the current tunnel; it does not wait for a new one to appear.
     const tunnelUrl = await currentTunnelUrlAsync(projectRoot, lock.url);
+    const device = await boundDeviceAsync(projectRoot, options);
     const statusAnswering =
       checked?.result.ready === true
         ? await isOwnBundlerAnsweringAsync(projectRoot, lock.url)
         : null;
-    // Read the verdict and PID after both awaits: either can outlast the running server.
+    // Read the verdict and PID after all probes: any can outlast the running server.
     await checkReuseFailureAsync(lock, statusAnswering);
     return reportDetached(projectRoot, options, {
       lock,
@@ -289,6 +295,7 @@ export async function devDetachAsync(
       startedAt,
       print,
       tunnelUrl,
+      device,
       smokePlatform,
     });
   }
@@ -409,6 +416,7 @@ export async function devDetachAsync(
   }
 
   const tunnelUrl = await waitForTunnelUrlAsync(projectRoot, options, childIsGone);
+  const device = await boundDeviceAsync(projectRoot, options);
 
   // The last thing before anything is claimed. Everything above is a fact about a moment that has
   // passed: the lock answered, the bundler answered, the tunnel wait ran — and a child that died in
@@ -476,6 +484,7 @@ export async function devDetachAsync(
     startedAt,
     print,
     tunnelUrl,
+    device,
     log,
     smokePlatform,
   });
@@ -932,6 +941,7 @@ function reportDetached(
     startedAt,
     print,
     tunnelUrl,
+    device,
     log = readDetachedLogSync(projectRoot, WHOLE_LOG),
     smokePlatform,
   }: {
@@ -942,6 +952,7 @@ function reportDetached(
     startedAt: number;
     print: boolean;
     tunnelUrl: string | null;
+    device: BindingSummary | null;
     /** The platform the `smoke` follow-up names. See {@link detachFollowUps}. */
     smokePlatform: NativePlatform;
     /**
@@ -970,6 +981,7 @@ function reportDetached(
     phase: childPhaseOf(log).phase,
     portMoved: alreadyRunning ? null : plannedPortMove(log, lock),
     tunnelUrl,
+    device,
     waitedMs: Date.now() - startedAt,
     followups: [],
   };
@@ -1001,6 +1013,28 @@ function reportDetached(
     reportFollowUps('dev', report.followups, { json: options.json });
   }
   return 0;
+}
+
+/** Read from the binding file, under the same conditions `dev` binds under. */
+async function boundDeviceAsync(
+  projectRoot: string,
+  options: DevOptions
+): Promise<BindingSummary | null> {
+  const platform = options.platform;
+  if (
+    (platform !== 'ios' && platform !== 'android') ||
+    options.deviceBackend === 'eas' ||
+    devicesDisabled() ||
+    !hostBindsPlatform(platform)
+  ) {
+    return null;
+  }
+  const backend = localBackendOf(platform);
+  return (
+    (await readBindingSummaryAsync(projectRoot, SIMCTL_CALL_TIMEOUT_MS)).find(
+      (entry) => entry.backend === backend
+    ) ?? null
+  );
 }
 
 /**
@@ -1057,6 +1091,10 @@ function printHumanReport(report: DevDetachResultJson): void {
   // the two is what a whole dogfood session was lost to [observed — 2026-08-24].
   if (report.tunnelUrl) {
     lines.push(`${label('Tunnel')}${report.tunnelUrl}`);
+  }
+  if (report.device) {
+    const { name, id, origin } = report.device;
+    lines.push(`${label('Device')}${name} (${id}) · ${origin}`);
   }
   lines.push(`${label('Took')}${report.waitedMs}ms`);
   if (report.alreadyRunning) {

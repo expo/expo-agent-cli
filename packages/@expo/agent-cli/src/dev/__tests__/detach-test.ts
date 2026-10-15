@@ -417,6 +417,7 @@ describe(detachFollowUps, () => {
       phase: 'serving',
       portMoved: null,
       tunnelUrl: null,
+      device: null,
       waitedMs: 10,
       followups: [],
       ...overrides,

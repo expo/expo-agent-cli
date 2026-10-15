@@ -12,6 +12,8 @@ import {
   hostBindsPlatform,
 } from '../../deviceBinding';
 import { deviceUnavailableError } from '../../deviceBinding/errors';
+import * as bindingSummary from '../../deviceBinding/summary';
+import { SIMCTL_CALL_TIMEOUT_MS } from '../../deviceBinding/ios';
 import { event as cliEvent } from '../../events';
 import * as Log from '../../log';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
@@ -107,6 +109,40 @@ function run() {
     { print: false }
   );
 }
+
+it.each([false, true])('detects death during the device probe (reusing=%s)', async (reusing) => {
+  vi.mocked(devicesDisabled).mockReturnValue(false);
+  vi.mocked(hostBindsPlatform).mockReturnValue(true);
+  if (reusing) {
+    vi.mocked(readDevServerLockAsync)
+      .mockReset()
+      .mockResolvedValue({
+        url: 'http://127.0.0.1:8393',
+        port: 8393,
+        pid: 4242,
+        projectRoot,
+        startedAt: new Date(0).toISOString(),
+      });
+    fs.mkdirSync(path.dirname(logFile), { recursive: true });
+    fs.writeFileSync(logFile, servingPlan);
+    vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValue(null);
+  }
+  vi.spyOn(bindingSummary, 'readBindingSummaryAsync').mockImplementationOnce(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    vi.mocked(isProcessAlive).mockReturnValue(false);
+    return [];
+  });
+
+  const result = devDetachAsync(
+    projectRoot,
+    resolveDevOptions(['--ios', '--detach', '--wait-ready', '--local', '--json'])
+  ).catch((error) => error);
+  await vi.runAllTimersAsync();
+
+  expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
+  expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
+  expect(Log.log).not.toHaveBeenCalled();
+});
 
 /** Fail a status probe after the child exits, optionally before its handoff reaches the log. */
 function diesDuringProbe(check: 'final check' | 'grace', handoffDelay: number | null) {
@@ -562,6 +598,20 @@ describe('the bound device', () => {
       (platform) => platform === 'ios' && process.platform === 'darwin'
     );
     vi.mocked(acquireDeviceAsync).mockResolvedValue(reused);
+  });
+
+  it("reads its binding with the device check's timeout, not status's probe deadline", async () => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+    const summary = vi.spyOn(bindingSummary, 'readBindingSummaryAsync').mockResolvedValue([]);
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
+        print: false,
+        reuseBoundDevice: true,
+      })
+    ).resolves.toBe(0);
+
+    expect(summary).toHaveBeenCalledWith(projectRoot, SIMCTL_CALL_TIMEOUT_MS);
   });
 
   // already-running-reuses-only

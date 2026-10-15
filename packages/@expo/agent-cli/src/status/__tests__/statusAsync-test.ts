@@ -3,6 +3,9 @@ import { vol } from 'memfs';
 
 import * as devLock from '../../devLock';
 import * as localDevice from '../../device/localDevice';
+import * as deviceBinding from '../../deviceBinding';
+import { bindingPathFor } from '../../deviceBinding/registry';
+import * as summary from '../../deviceBinding/summary';
 import { event } from '../../events';
 import * as network from '../../followups/network';
 import { lookUpBuildPlatformAsync } from '../../impact/buildCache';
@@ -11,9 +14,11 @@ import { refineWithChangedFilesAsync } from '../../impact/fromRecord';
 import { resolveRuntimeVersionAsync } from '../../impact/runtimeVersion';
 import * as Log from '../../log';
 import { readAuthPreflightAsync } from '../../needsHuman/preflight';
+import * as easBuildLookup from '../../plan/easBuildLookup';
 import { readLastBuildRecord } from '../../plan/lastBuild';
+import * as resolveAsync from '../../plan/resolveAsync';
 import { probeProjectStateAsync } from '../../project/probe';
-import type { ProjectState } from '../../project/types';
+import type { ProjectState, StartPlan } from '../../project/types';
 import { discoverDevServerAsync, type DevServerDiscovery } from '../../runtime/devServer';
 import { probeTargetLivenessAsync } from '../../runtime/targetLiveness';
 import { waitForBundlerReadyAsync } from '../../runtime/waitReady';
@@ -122,6 +127,9 @@ beforeEach(() => {
   // The connect URLs of a non-tunnelled run carry this host, and a suite that read the machine's
   // own would pass or fail by which network it is on.
   vi.spyOn(network, 'resolveLanHost').mockReturnValue('192.168.1.233');
+  // Whether `dev` binds a device here is a fact about the host; the rule must not read this one's.
+  vi.spyOn(deviceBinding, 'hostBindsPlatform').mockReturnValue(true);
+  vi.spyOn(devLock, 'readDevServerLockAsync').mockResolvedValue(null);
   vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'my-app' }) });
   mockState();
   vi.mocked(readLastBuildRecord).mockReturnValue({});
@@ -847,6 +855,7 @@ describe(printStatusAsync, () => {
       'builds',
       'devServer',
       'device',
+      'binding',
       'skills',
       'auth',
       'next',
@@ -865,6 +874,7 @@ describe(printStatusAsync, () => {
     expect(Object.keys(JSON.parse(output())).sort()).toEqual([
       'assertion',
       'auth',
+      'binding',
       'builds',
       'devServer',
       'device',
@@ -890,6 +900,7 @@ describe(printStatusAsync, () => {
     expect(Object.keys(JSON.parse(output())).sort()).toEqual([
       'assertion',
       'auth',
+      'binding',
       'builds',
       'devServer',
       'device',
@@ -1060,6 +1071,337 @@ describe(`${collectStatusReportAsync.name} and stale debugger targets`, () => {
 
     expect(report.devServer).toMatchObject({ appsConnected: 1, appsListed: 2, appsStale: 1 });
     expect(formatStatusReport(report)).toContain('1 stale target still listed');
+  });
+});
+
+describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
+  function lastRequest() {
+    vol.fromJSON({
+      '/project/.expo/agent-cli-last-dev.json': JSON.stringify({
+        version: 1,
+        platform: 'android',
+        port: 19082,
+        device: 'emulator-5556',
+        buildBackend: 'local',
+        runTarget: 'dev-build',
+      }),
+    });
+  }
+
+  it('keeps Android startup context before Metro has published a lock', async () => {
+    lastRequest();
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(report.next?.command).toBe(
+      'npx @expo/agent-cli dev --android --local --dev-client --port 19082 --device emulator-5556 --detach --wait-ready'
+    );
+    expect(report.next?.why).toContain('No android device');
+    expect(discoverDevServerAsync).toHaveBeenCalledWith(
+      'http://127.0.0.1:19082',
+      expect.anything()
+    );
+  });
+
+  it('prefers the explicit platform over the saved Android request', async () => {
+    lastRequest();
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, {
+      devServerUrl: null,
+      platform: 'ios',
+    });
+    expect(report.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+  });
+
+  it('keeps the installed-app --device out of the dev command and the saved device in it', async () => {
+    lastRequest();
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, {
+      devServerUrl: 'http://localhost:19090',
+      explain: true,
+      device: 'Pixel; echo nope',
+    });
+    expect(report.next?.command).toBe(
+      'npx @expo/agent-cli dev --android --local --dev-client --port 19090 --device emulator-5556 --detach --wait-ready'
+    );
+    expect(report.next?.steps.some((step) => step.argv.includes('19090'))).toBe(true);
+    const ios = await collectStatusReportAsync(projectRoot, {
+      devServerUrl: null,
+      platform: 'ios',
+      explain: true,
+      device: 'iPhone 15',
+    });
+    expect(ios.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+  });
+
+  it('uses a current own lock instead of an old requested port', async () => {
+    lastRequest();
+    stopDevServer();
+    vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue({
+      ...running,
+      port: 19091,
+      url: 'http://127.0.0.1:19091',
+    });
+    const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(report.next?.command).toContain('--port 19091');
+    expect(discoverDevServerAsync).toHaveBeenCalledWith(
+      'http://127.0.0.1:19091',
+      expect.anything()
+    );
+    expect(report.devServer?.source).toBe('lock');
+  });
+
+  it('does not turn a remote URL into a local Metro port', async () => {
+    lastRequest();
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, {
+      devServerUrl: 'http://example.test:19090',
+    });
+    expect(report.next?.command).not.toContain('--port');
+  });
+
+  it('does not suggest a saved port that now serves another project', async () => {
+    lastRequest();
+    vi.mocked(discoverDevServerAsync).mockResolvedValue({
+      reachable: true,
+      targets: [],
+      devServerUrl: 'http://127.0.0.1:19082',
+      source: 'default',
+      discovered: false,
+    });
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValue({
+      ready: false,
+      projectRootMatched: false,
+      reportedProjectRoot: '/other-project',
+      timedOut: false,
+      waitedMs: 1,
+    });
+    const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(report.next?.command).toContain('dev --android --local --dev-client');
+    expect(report.next?.command).not.toContain('--port');
+    expect(report.next?.steps.some((step) => step.argv.includes('19082'))).toBe(false);
+  });
+
+  it('restores the dev plan steps when rebinding replaces a navigate suggestion', async () => {
+    vi.mocked(discoverDevServerAsync).mockResolvedValue({
+      reachable: true,
+      targets: [],
+      devServerUrl,
+      source: 'default',
+      discovered: false,
+    });
+    vi.mocked(probeTargetLivenessAsync).mockResolvedValueOnce({ listed: 0, live: 0, stale: [] });
+    vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue(running);
+    const report = await collectStatusReportAsync(projectRoot, { ...options, platform: 'android' });
+    expect(report.next?.command).toContain('dev:stop &&');
+    expect(report.next?.steps.length).toBeGreaterThan(0);
+  });
+
+  it('uses a sole Android binding when there is no saved request or platform flag', async () => {
+    stopDevServer();
+    vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+      { platform: 'android', expiresAt: '2020-01-01T00:00:00.000Z' } as summary.BindingSummary,
+    ]);
+    const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(report.next?.command).toBe('npx @expo/agent-cli dev --android --detach --wait-ready');
+    expect(report.next?.why).toContain('android');
+  });
+  const iosOptions = { ...options, platform: 'ios' as const };
+  const running = {
+    projectRoot,
+    url: devServerUrl,
+    port: 8081,
+    pid: 4242,
+    startedAt: new Date(0).toISOString(),
+  };
+
+  async function planNextAsync() {
+    vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+      { platform: 'ios', expiresAt: '2999-01-01T00:00:00.000Z' } as summary.BindingSummary,
+    ]);
+    return (await collectStatusReportAsync(projectRoot, iosOptions)).next;
+  }
+
+  function stopDevServer() {
+    vi.mocked(discoverDevServerAsync).mockResolvedValue({
+      reachable: false,
+      targets: [],
+      reason: 'fetch failed',
+      devServerUrl,
+      source: 'default',
+      discovered: false,
+    });
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it.each([
+    ['ios', false],
+    ['android', false],
+    ['ios', true],
+    ['android', true],
+  ] as const)('recovers an unbound %s device (own server=%s)', async (platform, ownServer) => {
+    vi.mocked(discoverDevServerAsync).mockResolvedValue({
+      reachable: true,
+      targets: [],
+      devServerUrl,
+      source: 'default',
+      discovered: false,
+    });
+    vi.mocked(probeTargetLivenessAsync).mockResolvedValueOnce({ listed: 0, live: 0, stale: [] });
+    vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue(ownServer ? running : null);
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValueOnce({
+      ready: true,
+      projectRootMatched: ownServer,
+      reportedProjectRoot: ownServer ? projectRoot : '/other',
+      timedOut: false,
+      waitedMs: 1,
+    });
+    const report = await collectStatusReportAsync(projectRoot, { ...options, platform });
+    const restart = ownServer ? 'npx @expo/agent-cli dev:stop && ' : '';
+    expect(report.next?.command).toBe(
+      `${restart}npx @expo/agent-cli dev --${platform}${ownServer ? ' --port 8081' : ''} --detach --wait-ready`
+    );
+    expect(report.next?.why).toContain(`No ${platform} device is bound to this worktree.`);
+    if (ownServer) expect(report.next?.why).toContain('restart');
+  });
+
+  it(`detaches the plan's own dev command`, async () => {
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next?.command).toBe(
+      'npx @expo/agent-cli dev --ios --port 8081 --detach --wait-ready'
+    );
+  });
+
+  it(`keeps the plan's flags when it detaches the plan's dev command`, async () => {
+    stopDevServer();
+    const resolve = resolveAsync.resolveStartPlanAsync;
+    vi.spyOn(resolveAsync, 'resolveStartPlanAsync').mockImplementationOnce(async (...args) => {
+      const resolved = await resolve(...args);
+      const buildLocation = {
+        ...resolved.plan.buildLocation,
+        runsOn: 'eas',
+        selection: { implicit: true },
+      } as StartPlan['buildLocation'];
+      return { ...resolved, plan: { ...resolved.plan, buildLocation } };
+    });
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next?.command).toBe(
+      'npx @expo/agent-cli dev --ios --eas --port 8081 --detach --wait-ready'
+    );
+  });
+
+  it.each([false, true])('reuses an expired binding (own server=%s)', async (ownServer) => {
+    stopDevServer();
+    vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue(ownServer ? running : null);
+    vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+      {
+        platform: 'ios',
+        state: 'gone',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      } as summary.BindingSummary,
+    ]);
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next?.command).toBe(
+      'npx @expo/agent-cli dev --ios --port 8081 --detach --wait-ready'
+    );
+    expect(report.next?.why).toBe('The lease on the bound ios device expired.');
+  });
+
+  it(`keeps the plan's next while an app is connected to this project's dev server`, async () => {
+    const plan = await planNextAsync();
+    vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+      {
+        platform: 'ios',
+        state: 'gone',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      } as summary.BindingSummary,
+    ]);
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next).toEqual(plan);
+  });
+
+  it(`keeps the plan's next under AGENT_CLI_NO_DEVICE, where dev binds nothing`, async () => {
+    vi.stubEnv('AGENT_CLI_NO_DEVICE', '1');
+    const plan = await planNextAsync();
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next).toEqual(plan);
+  });
+
+  it(`keeps the plan's next on a host that cannot bind the platform`, async () => {
+    vi.mocked(deviceBinding.hostBindsPlatform).mockReturnValue(false);
+    const plan = await planNextAsync();
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next).toEqual(plan);
+  });
+
+  it(`keeps the plan's next while the project has an EAS session`, async () => {
+    vol.fromJSON({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=session-1\n' });
+    const plan = await planNextAsync();
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next).toEqual(plan);
+  });
+
+  it(`keeps the plan's next for --platform web`, async () => {
+    const report = await collectStatusReportAsync(projectRoot, { ...options, platform: 'web' });
+    expect(report.next?.why).not.toBe('No web device is bound to this worktree.');
+    expect(report.next?.command).not.toMatch(/ dev --web --detach --wait-ready$/);
+  });
+
+  it("carries a saved web request's port and flags into its dev command without detaching", async () => {
+    vol.fromJSON({
+      '/project/.expo/agent-cli-last-dev.json': JSON.stringify({
+        version: 1,
+        platform: 'web',
+        port: 19006,
+        buildBackend: 'local',
+        runTarget: 'expo-go',
+      }),
+    });
+    stopDevServer();
+    const report = await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(report.next?.command).toBe('npx @expo/agent-cli dev --web --local --go --port 19006');
+  });
+
+  it('removes an unreadable binding file before the dev command that would refuse on it', async () => {
+    stopDevServer();
+    const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
+    vol.fromJSON({ [file]: '{' });
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next?.command).toBe(
+      `rm -f '${file}' && npx @expo/agent-cli dev --ios --port 8081 --detach --wait-ready`
+    );
+    expect(report.next?.why).toBe(
+      `The binding file ${file} does not parse; a newer CLI may have written it.`
+    );
+  });
+
+  it("asks EAS for a saved --eas request's build only under --explain, with the fingerprint-cache choice", async () => {
+    const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
+    mockState({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } });
+    vol.fromJSON({
+      '/project/.expo/agent-cli-last-dev.json': JSON.stringify({
+        version: 1,
+        platform: 'ios',
+        port: null,
+        buildBackend: 'eas',
+        runTarget: null,
+      }),
+    });
+    await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+    expect(lookUp).not.toHaveBeenCalled();
+    await collectStatusReportAsync(projectRoot, {
+      devServerUrl: null,
+      explain: true,
+      fingerprintCache: false,
+      buildLookupTimeoutMs: 1_000,
+    });
+    expect(lookUp).toHaveBeenCalledWith(projectRoot, 'ios', {
+      fingerprintCache: false,
+      timeoutMs: 1_000,
+    });
   });
 });
 

@@ -10,6 +10,8 @@ import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { WebSocketServer } from 'ws';
 
+import { BOOTED_SIMULATOR, installStubAdbAsync, installStubXcrunAsync } from './installedAppStubs';
+
 import {
   installStubEasAsync as installSharedStubEasAsync,
   STUB_EAS_LOG_NAME,
@@ -165,6 +167,25 @@ async function setupAsync(fixtureName: string): Promise<string> {
   const projectRoot = await setupFixtureAsync(fixtureName);
   await installStubFingerprintAsync(projectRoot);
   return projectRoot;
+}
+
+/** Runtime follow-ups require the connected app's device to belong to this worktree. */
+async function bindDefaultDeviceAsync(projectRoot: string): Promise<Record<string, string>> {
+  if (process.platform === 'darwin') {
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+    return {};
+  }
+  return (await installStubAdbAsync(projectRoot, 'host.exp.Exponent')).env;
+}
+
+/** A host where `dev` would bind the default platform's device, and no device bound yet. */
+async function stubUnboundDeviceAsync(projectRoot: string): Promise<Record<string, string>> {
+  if (process.platform === 'darwin') {
+    await installStubXcrunAsync(projectRoot);
+    return { AGENT_CLI_NO_DEVICE: '0' };
+  }
+  const adb = await installStubAdbAsync(projectRoot, 'host.exp.Exponent', { attached: false });
+  return { ...adb.env, AGENT_CLI_NO_DEVICE: '0' };
 }
 
 /** A dev server double that answers the debugger target list, and the port it listens on. */
@@ -380,11 +401,11 @@ describe('@expo/agent-cli status', () => {
   describe('go-app — an Expo Go compatible CNG project', () => {
     it('prints one line per section', async () => {
       const projectRoot = await setupAsync('go-app');
-      const result = await executeAgentCliAsync(projectRoot, [
-        'status',
-        '--dev-server-url',
-        await getUnusedDevServerUrlAsync(),
-      ]);
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        { env: await stubUnboundDeviceAsync(projectRoot) }
+      );
 
       expect(result.exitCode).toBe(0);
       expect(result.stdout).toContain('project');
@@ -398,7 +419,9 @@ describe('@expo/agent-cli status', () => {
       expect(result.stdout).toContain('not running');
       expect(result.stdout).toContain('device');
       expect(result.stdout).toContain('next');
-      expect(result.stdout).toContain('expo-go');
+      expect(result.stdout).toContain(
+        `No ${process.platform === 'darwin' ? 'ios' : 'android'} device is bound to this worktree.`
+      );
     });
 
     it('reports every section in the JSON report', async () => {
@@ -412,6 +435,7 @@ describe('@expo/agent-cli status', () => {
         'builds',
         'devServer',
         'device',
+        'binding',
         'skills',
         'auth',
         'next',
@@ -430,7 +454,13 @@ describe('@expo/agent-cli status', () => {
       });
       expect(report.expoGo).toEqual({ compatible: true, reasonCount: 0 });
       expect(report.next?.rule).toBe('expo-go');
-      expect(report.next?.steps[0]!.argv).toEqual(['expo', 'start', '--go']);
+      expect(report.next?.steps[0]!.argv).toEqual([
+        'expo',
+        'start',
+        '--go',
+        '--port',
+        new URL(report.devServer!.url).port,
+      ]);
     });
 
     it('reports an unknown freshness when the project has no fingerprint tool', async () => {
@@ -1946,15 +1976,15 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     // is both a contradiction and a command that would fail on the busy port.
     it('sends a healthy dev server to verification instead of to a second dev server', async () => {
       const projectRoot = await setupAsync('go-app');
+      const env = await bindDefaultDeviceAsync(projectRoot);
       const stub = await startStubDevServerAsync({ projectRoot, targets: [CDP_TARGET] });
 
       try {
-        const result = await executeAgentCliAsync(projectRoot, [
-          'status',
-          '--json',
-          '--dev-server-url',
-          stub.url,
-        ]);
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['status', '--json', '--dev-server-url', stub.url],
+          { env }
+        );
 
         const report: StatusReport = JSON.parse(result.stdout);
         expect(report.next?.command).toMatch(/^npx @expo\/agent-cli smoke --(ios|android)$/);
@@ -1969,14 +1999,15 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
     it('prints the reason on the human next line', async () => {
       const projectRoot = await setupAsync('go-app');
+      const env = await bindDefaultDeviceAsync(projectRoot);
       const stub = await startStubDevServerAsync({ projectRoot, targets: [CDP_TARGET] });
 
       try {
-        const result = await executeAgentCliAsync(projectRoot, [
-          'status',
-          '--dev-server-url',
-          stub.url,
-        ]);
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['status', '--dev-server-url', stub.url],
+          { env }
+        );
 
         expect(result.stdout).toContain('@expo/agent-cli smoke');
         expect(result.stdout).not.toContain('@expo/agent-cli dev → expo-go');
@@ -1988,15 +2019,15 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     // A dev server that serves someone else is not this project's, so the plan still stands.
     it('keeps the plan when the dev server belongs to another project', async () => {
       const projectRoot = await setupAsync('go-app');
+      const env = await bindDefaultDeviceAsync(projectRoot);
       const stub = await startStubDevServerAsync({ projectRoot: '/somewhere/else', targets: [] });
 
       try {
-        const result = await executeAgentCliAsync(projectRoot, [
-          'status',
-          '--json',
-          '--dev-server-url',
-          stub.url,
-        ]);
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['status', '--json', '--dev-server-url', stub.url],
+          { env }
+        );
 
         const report: StatusReport = JSON.parse(result.stdout);
         expect(report.next?.command).toBe(
@@ -2206,7 +2237,9 @@ describe('status on a machine that cannot build', () => {
 
       const report = await reportInAsync(projectRoot);
 
-      expect(report.next!.command).toBe('npx @expo/agent-cli dev --ios --eas');
+      expect(report.next!.command).toBe(
+        `npx @expo/agent-cli dev --ios --eas --port ${new URL(report.devServer!.url).port} --detach --wait-ready`
+      );
       expect(report.next!.steps.map((step) => step.argv[0])).toContain('eas');
     }
   );

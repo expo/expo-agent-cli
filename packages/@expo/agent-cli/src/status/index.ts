@@ -56,6 +56,7 @@ export const statusHelp: CommandHelp = {
       'builds',
       'devServer',
       'device',
+      'binding',
       'skills',
       'auth',
       'next',

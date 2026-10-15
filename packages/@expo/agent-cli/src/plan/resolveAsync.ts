@@ -54,7 +54,8 @@ export interface ResolveStartPlanOptions extends DecideStartPlanOptions {
    */
   acquireDevice?: (draft: StartPlan) => Promise<AcquireResult | null>;
   /**
-   * Injected for tests: whether EAS has a finished simulator build of this fingerprint.
+   * Injected by tests, and by `status`, which asks EAS only under `--explain`: whether EAS has a
+   * finished simulator build of this fingerprint.
    *
    * @ref llp/0027-everything-on-eas.rfc.md §Reuse
    */

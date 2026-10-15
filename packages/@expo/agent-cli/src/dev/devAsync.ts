@@ -67,6 +67,7 @@ import {
   type WrapperCrashTool,
 } from '../utils/wrapperCrash';
 import { appReachedDevice } from './buildEvidence';
+import { recordLastDevRequest } from './lastRequest';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import { event as devEvent } from './events';
 import {
@@ -101,6 +102,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
     await assertEasProjectConfiguredAsync(projectRoot);
   }
+
+  recordLastDevRequest(projectRoot, options);
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
   // the child does the probe: this run's whole job is to start that child and report on it.

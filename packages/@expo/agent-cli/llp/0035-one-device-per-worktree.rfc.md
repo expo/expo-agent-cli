@@ -71,7 +71,7 @@ The claimants of a device decide where its ownership record must live. A local d
    **Why.** A device that `dev` creates must have a cleanup path. Every reader must use the binding so it drives the same device that `dev` prepared.
 9. **`dev:stop` keeps the worktree's devices; `dev:stop --release` lets go of them now.**
    **Why.** The CLI's own restart follow-up is `dev:stop && dev --detach`, and a read-only emulator instance that is killed costs a cold boot and a reinstall on the next `dev`. The lease reclaims a stopped worktree's device within 60 min anyway (Decision 3), so a release on every stop buys little. The cost is RAM held for up to an hour after a stop; `--release` is for the agent that is done.
-10. **Decided, not open.** `start --ios` keeps Expo CLI's device choice, because `dev` is the verb that binds. `dev --no-open` still binds, and may create, a simulator the user never sees, because the build step must be pinned. Local devices come before an EAS session, because a session bills by the minute. `status` never calls the network.
+10. **Decided, not open.** `start --ios` keeps Expo CLI's device choice, because `dev` is the verb that binds. `dev --no-open` still binds, and may create, a simulator the user never sees, because the build step must be pinned. Local devices come before an EAS session, because a session bills by the minute. `status` calls the network only under `--explain`.
 
 ## Invariant
 
@@ -275,7 +275,7 @@ Each reaped device is reported on stderr and in JSON with reason `expired`, `del
 
 ## Output and errors
 
-- `dev:stop` JSON always has `devices: ReleasedDevice[]` (llp/0006: every key always present). `dev:stop --release` reports what it released there; a plain `dev:stop` reports the kept bindings under the same key with `released: null`; `false` is a release that failed. `status --json` gains `binding: { platform, backend, id, name, origin, state, expiresAt }[]`, one entry per file of the worktree, cloud bindings unprobed. `status`'s next action is `dev --<platform>` when there is no binding.
+- `dev:stop` JSON always has `devices: ReleasedDevice[]` (llp/0006: every key always present). `dev:stop --release` reports what it released there; a plain `dev:stop` reports the kept bindings under the same key with `released: null`; `false` is a release that failed. `status --json` gains `binding: { platform, backend, id, name, origin, state, expiresAt }[]`, one entry per file of the worktree, cloud bindings unprobed. `status`'s next action is the `dev` command when there is no live binding; §Lifecycle output has the platform choice and the `dev:stop &&` prefix.
 - Events: `cli:device_binding_reaped { reason }` and `cli:device_registry_lock_removed { lock, pid }` from `src/deviceBinding/`; `dev:stop_session` gains `platform`; `dev:open_app_eas_flag_unsupported { flag }` from `openAppEas`.
 - A `DEVICE_UNAVAILABLE`, `DEVICE_REGISTRY_LOCKED` or `NO_BOUND_DEVICE` error the detached child raises reaches the agent unchanged, code, exit and How line, through the child verdict; today every child failure that is not needs-human is `DEV_DETACH_DIED`, whose How line reruns the same command.
 - Exit codes per [[0010-agent-conventions]], one How line each. The `dev` command is `<cli> dev --<platform> --detach --wait-ready`. The missing-device errors `NO_DEVICE`, `NO_IOS_DEVICE` and `NO_ANDROID_DEVICE` become `NO_BOUND_DEVICE`.
@@ -312,7 +312,7 @@ Each reaped device is reported on stderr and in JSON with reason `expired`, `del
 
 ## Not built
 
-The agent's pid in the binding; a take of another worktree's simulator; a cap on parked simulators; allocation from "any free booted device"; `peek` mode; capacity from cpus and RAM; mtime touch, lock token and heartbeat; a `pool.json`, a create marker, adopt-by-name; a lock-free write path; a `busy` lease result; a `StartPlan.device` or `dev --json` device field; dev-lock socket liveness; a writable first emulator; `emu kill` by serial; `--device` on `navigate`; a "still booting" inspect state; a stop of the old session on a cloud id change.
+The agent's pid in the binding; a take of another worktree's simulator; a cap on parked simulators; allocation from "any free booted device"; `peek` mode; capacity from cpus and RAM; mtime touch, lock token and heartbeat; a `pool.json`, a create marker, adopt-by-name; a lock-free write path; a `busy` lease result; a `StartPlan.device`; dev-lock socket liveness; a writable first emulator; `emu kill` by serial; `--device` on `navigate`; a "still booting" inspect state; a stop of the old session on a cloud id change.
 
 ## Answers from the EAS code
 
@@ -423,7 +423,7 @@ The iOS binding module follows §Contracts every verb honors. Failed-boot cleanu
 ### iOS readers
 
 - `resolveDeviceAsync` makes `context.projectRoot` required and calls `findBoundDeviceAsync` per §Readers; its callers in `runtime/stopAsync.ts`, `runtime/reload/reloadAsync.ts`, `runtime/reload/cloudReload.ts` and `navigate/openRoute.ts` already pass it. Android resolution follows §Android instance and the same RFC inspection states.
-- `probeLocalDeviceAsync` takes `projectRoot` in its options, keys its cache by it, and reads `inspectBindingAsync` on iOS; its callers in `status/statusAsync.ts`, `start/followUps.ts`, `deferred/dev-wait/waitAsync.ts` and `appPresence.ts` pass the root. Its `devices` lists each `up` binding as a `NavigateDevice`, because `status`'s sections and `askDeviceAsync` read it. Android bindings follow §Android instance. `noLocalDeviceAction` is unchanged: it runs only while a server is up. `status`'s next action names the `dev` command of §Output and errors where it names `dev` today, with the platform of the first binding whose state is not `up`.
+- `probeLocalDeviceAsync` takes `projectRoot` in its options, keys its cache by it, and reads `inspectBindingAsync` on iOS; its callers in `status/statusAsync.ts`, `start/followUps.ts`, `deferred/dev-wait/waitAsync.ts` and `appPresence.ts` pass the root. Its `devices` lists each `up` binding as a `NavigateDevice`, because `status`'s sections and `askDeviceAsync` read it. Android bindings follow §Android instance. `noLocalDeviceAction` is unchanged: it runs only while a server is up. `status`'s next action names the `dev` command of §Output and errors where it names `dev` today, with the platform chosen per §Lifecycle output.
 - The installed readers take `projectRoot` and call `findBoundDeviceAsync` with `extend: false`; `status --device` keeps its filter through `listBootedIosSimulatorsAsync`. `probeIosSimulatorAsync`'s callers in `dev/openApp.ts` and `device/localDevice.ts` move to the binding. Their `no-device` result keeps its name; its `hint` carries the read verb's How line first and main's connected-phone hint after it.
 
 ### iOS smoke
@@ -567,7 +567,11 @@ How does a person pick a device?
 
 How does an agent see its binding?
 
-`status --json` `binding`, per §Output and errors. With no device bound on the platform, `status`'s next action is `dev --<platform> --detach --wait-ready`, because every device verb refuses without a binding.
+Before a real `dev` startup, `.expo/agent-cli-last-dev.json` retains only its parsed platform, requested port, device, build backend and app target. A dry run does not write it. This is a recovery preference, not evidence of a live process. Status uses an explicit platform first, then the last request, then a sole bound platform, then its existing project default. A different explicit platform discards the saved request's other choices. Recovery keeps a locally named status port, the own lock's port, or the matching last requested port, unless that port is observed serving another project, and uses the shared quoted retry builder. A probe selected from the last request reports `source: 'last-request'`. Rebinding restores the dev plan's steps; rule and target remain the plan's facts.
+
+`status --json` `binding`, per §Output and errors. With no device bound on the platform, or with a binding whose lease expired, `status`'s next action is `dev --<platform> --detach --wait-ready`, plus the plan's own flags such as `--eas`, because every device verb refuses without a live binding. With an unreadable binding file on the platform, the command starts with `rm -f '<path>' &&`, the How line `dev` refuses with. With no binding and a live own dev-server lock, the command starts with `dev:stop &&` (without `--release`), because detached `dev` can only reuse a device beside a running server. An expired existing binding keeps the reuse path. While this project's dev server runs with an app connected, `status` keeps the plan's next action, and an expired lease shows only in `binding`. Where `dev` binds no device (`AGENT_CLI_NO_DEVICE=1`, iOS off macOS, Android with no `adb`), `status` keeps the plan's next action, or it would name the same `dev` command forever. A detached `dev` reads the binding before its final server-health checks, with the device check's timeout of §Entry points rather than `status`'s probe deadline, and prints one `Device <name> (<id>) · <origin>` line, where the origin is how the device came to be bound, not what this run did; `--json` carries the same binding summary under `device`, or `null` when the run binds none.
+
+`summary.ts` holds the binding summary that `status` and a detached `dev` print (`readBindingSummaryAsync`), read from the cached inspection, cloud files unprobed.
 
 ### Lifecycle tests
 
