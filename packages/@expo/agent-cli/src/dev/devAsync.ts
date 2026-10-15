@@ -5,7 +5,10 @@
 
 import type { OpenAppOnEasReport } from './openAppEas';
 import { withLeaseExtendedAsync } from '../deviceBinding/renew';
+import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
+import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
 import { outputTail } from '../deploy/parseOutput';
+import { readDevServerLockAsync } from '../devLock/client';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
 import {
   acquireDeviceAsync,
@@ -31,10 +34,10 @@ import { classifySubprocessFailure, lastNonEmptyLine } from '../needsHuman/detec
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { emitStartPlan } from '../plan/emit';
+import { rerunDevCommand } from '../plan/rerun';
 import { event as planEvent } from '../plan/events';
 import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBuild';
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
-import { isPlatformFlag } from '../plan/platformFlags';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
@@ -64,6 +67,7 @@ import {
   type WrapperCrashTool,
 } from '../utils/wrapperCrash';
 import { appReachedDevice } from './buildEvidence';
+import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import { event as devEvent } from './events';
 import {
   forwardedStepArgs,
@@ -91,6 +95,9 @@ import { easCommandPrefix } from '../utils/easCli';
  * last step when every step succeeded.
  */
 export async function devAsync(projectRoot: string, options: DevOptions): Promise<number> {
+  if (options.device !== undefined && boundPlatform(options) == null) {
+    throw deviceNotBindableError(options);
+  }
   if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
     await assertEasProjectConfiguredAsync(projectRoot);
   }
@@ -178,19 +185,23 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // refusals below, so a run that refuses creates no simulator, and `--plan` only inspects.
   const bindsHere = resolved.buildLocation != null;
   let acquired = boundEarly;
+  const implicitEas =
+    plan.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit === true;
 
   // @ref llp/0009-smart-followups.rfc.md §Examples per command
   // `--plan` stops here, so its follow-ups are about the plan itself and the plan object is the
   // whole answer.
   if (options.mode === 'plan') {
-    if (bindsHere) {
-      acquired = await acquireDevice(plan);
+    if (!implicitEas) {
+      if (bindsHere) {
+        acquired = await acquireDevice(plan);
+      }
+      plan = await withPlannedDevice(projectRoot, plan, acquired, options);
     }
-    plan = withPlannedDevice(plan, acquired, options);
     const followups = followUpsEnabled(options.followups)
       ? // The typed flag, not the resolved platform: this is the plan the caller asked for, and the
         // command that runs it has to ask for the same one (F103).
-        buildStartPlanFollowUps(plan, state, options.platform)
+        buildStartPlanFollowUps(plan, state, options.platform, options.callerArgv)
       : [];
     emitStartPlan(plan, { mode: 'plan', json: options.json, followups });
     reportFollowUps('dev', followups, { json: options.json });
@@ -200,7 +211,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken.
   // Detection may say the cloud is the only route this host leaves; it may not spend the caller's
   // EAS credits on that finding. A flag or the config is a person's own choice and runs.
-  if (plan.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit) {
+  if (implicitEas) {
     throw implicitEasRouteError(plan, options.platform);
   }
 
@@ -294,7 +305,9 @@ function deviceCallbackFor(
       return null;
     }
     if (options.mode === 'plan') {
-      return await inspectOwnDeviceAsync(projectRoot, platform);
+      return options.device === undefined
+        ? await inspectOwnDeviceAsync(projectRoot, platform)
+        : null;
     }
     if (options.port != null && draft.steps.some(isDevServerStep)) {
       const planned = await resolvePlannedPortAsync(options.port);
@@ -302,7 +315,10 @@ function deviceCallbackFor(
         throw await portDemandedError(projectRoot, options.port, options.platform);
       }
     }
-    const acquired = await acquireDeviceAsync(projectRoot, platform);
+    const acquired = await acquireDeviceAsync(projectRoot, platform, {
+      reuseOnly: (await readDevServerLockAsync(projectRoot)) != null,
+      explicit: explicitRequestOf(options.device, options.callerArgv),
+    });
     Log.progress(acquireLine(acquired));
     return acquired;
   };
@@ -323,6 +339,25 @@ function boundPlatform(options: DevOptions): DevicePlatform | null {
     : null;
 }
 
+/** `--device` on a run that binds no local device, which would drop the device it names. */
+function deviceNotBindableError(options: DevOptions): CommandError {
+  const why =
+    options.platform === 'web'
+      ? '--web serves the app to a browser, which needs no device'
+      : devicesDisabled()
+        ? 'AGENT_CLI_NO_DEVICE=1 turns every device off'
+        : options.platform === 'ios'
+          ? 'only macOS runs an iOS simulator'
+          : 'this machine has no Android SDK';
+  const command = rerunDevCommand(options.platform, withoutDeviceArgs(options.callerArgv));
+  const error = new CommandError(
+    'BAD_ARGS',
+    `--device names a local device to bind, and ${why}, so nothing would use it.\nHow: remove --device, then run "${command}".`
+  );
+  error.suggestedCommand = command;
+  return error;
+}
+
 /** `--plan`'s read of the own binding: the device as `reused` when it is up or down, else null. */
 async function inspectOwnDeviceAsync(
   projectRoot: string,
@@ -335,11 +370,38 @@ async function inspectOwnDeviceAsync(
 }
 
 /** The `--plan` view: the steps pinned to the bound device, or the reason none is pinned yet. */
-function withPlannedDevice(
+async function withPlannedDevice(
+  projectRoot: string,
   plan: StartPlan,
   acquired: AcquireResult | null,
   options: DevOptions
-): StartPlan {
+): Promise<StartPlan> {
+  const selectedPlatform = boundPlatform(options);
+  const explicit = explicitRequestOf(options.device, options.callerArgv);
+  if (selectedPlatform && explicit) {
+    try {
+      const { device, summary } = await previewExplicitDeviceAsync(
+        projectRoot,
+        selectedPlatform,
+        explicit,
+        (await readDevServerLockAsync(projectRoot)) != null
+      );
+      return {
+        ...withDevice(plan, deviceIdOf(device)),
+        explicitDevice: { refuses: false, summary },
+      };
+    } catch (error) {
+      if (!isExplicitChoiceRefusal(error)) throw error;
+      return {
+        ...plan,
+        explicitDevice: {
+          refuses: true,
+          summary: error.message.split('\n')[0]!,
+          how: error.suggestedCommand ?? null,
+        },
+      };
+    }
+  }
   if (acquired) {
     return withDevice(plan, deviceIdOf(acquired.device));
   }
@@ -606,7 +668,7 @@ async function executePlanAsync(
             askedPort,
             movedTo: retry ? readPortArg(retry.args) : null,
             exitCode: result.exitCode,
-            callerArgv: options.detachArgv,
+            callerArgv: options.callerArgv,
             platform: options.platform,
           });
         }
@@ -924,15 +986,8 @@ async function portTakenAfterRetryError(stop: {
     movedTo != null
       ? `Why: the step asked for port ${askedPort}, which was taken, and the one retry moved it to port ${movedTo}, which ${holder} bound before the dev server did.`
       : `Why: ${holder} holds port ${askedPort}, and no free port was found to retry on.`;
-  // The platform flag first, so the command reads as `dev --<platform> …` wherever it was typed.
-  const separator = stop.callerArgv.indexOf('--');
-  const rest = stop.callerArgv.filter(
-    (arg, index) => !isPlatformFlag(arg) || (separator !== -1 && index > separator)
-  );
   const onFreePort =
-    free == null
-      ? null
-      : `${PROGRAM_PREFIX} dev --${stop.platform} ${withPortArg(rest, free).join(' ')}`;
+    free == null ? null : rerunDevCommand(stop.platform, withPortArg(stop.callerArgv, free));
   const forceStop =
     answersAsDevServer && listener != null && looksLikeDevServerProcess(listener)
       ? `${PROGRAM_PREFIX} dev:stop --port ${taken} --force`

@@ -192,13 +192,67 @@ describe(buildStartFollowUps, () => {
 });
 
 describe(buildStartPlanFollowUps, () => {
+  it(`should offer the refusal's How command instead of a run of a plan that refuses --device`, () => {
+    const followups = buildStartPlanFollowUps(
+      mockPlan({
+        explicitDevice: {
+          refuses: true,
+          summary: 'agent-cli f5ce27a6 is bound to the worktree /work/other.',
+          how: 'npx @expo/agent-cli dev --ios --detach --wait-ready',
+        },
+      }),
+      mockState(),
+      'ios'
+    );
+
+    expect(ids(followups)).toEqual(['device-refusal']);
+    expect(followups[0]!.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+  });
+
+  it(`should list a refusal's How once when another follow-up carries the same command`, () => {
+    const followups = buildStartPlanFollowUps(
+      mockPlan({
+        explicitDevice: {
+          refuses: true,
+          summary: 'No device uniquely matches "x".',
+          how: 'npx @expo/agent-cli status --json',
+        },
+      }),
+      mockState({
+        expoGo: {
+          compatible: false,
+          reasons: [{ kind: 'custom-native-code', detail: 'Native module.' }],
+        },
+      }),
+      'ios'
+    );
+
+    expect(ids(followups)).toEqual(['device-refusal']);
+  });
+
+  it(`should keep the caller's --device and named --port in the command that runs a bind plan`, () => {
+    const followups = buildStartPlanFollowUps(
+      mockPlan({
+        explicitDevice: { refuses: false, summary: 'Will bind dogfood s2 (UDID-1).' },
+        devServerPort: { port: 8091, movedFrom: null, state: 'named', taken: true },
+      }),
+      mockState(),
+      'ios',
+      ['--ios', '--local', '--plan', '--device', 'dogfood s2', '--port', '8091']
+    );
+
+    expect(followups[0]!.command).toBe(
+      "npx @expo/agent-cli dev --ios --local --device 'dogfood s2' --port 8091 --detach --wait-ready"
+    );
+  });
+
   it(`should offer to run the plan that was printed`, () => {
     const followups = buildStartPlanFollowUps(mockPlan(), mockState());
 
     expect(ids(followups)).toEqual(['dev']);
     // `dev` requires a platform, so the command states the host's when the caller typed none.
     expect(followups[0]!.command).toBe(
-      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
+      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --wait-ready`
     );
   });
 
@@ -214,13 +268,15 @@ describe(buildStartPlanFollowUps, () => {
       buildStartPlanFollowUps(mockPlan(), mockState(), 'android').find(
         (followup) => followup.id === 'dev'
       )!.command
-    ).toBe('npx @expo/agent-cli dev --android');
+    ).toBe('npx @expo/agent-cli dev --android --detach --wait-ready');
 
     expect(
       buildStartPlanFollowUps(mockPlan(), mockState(), undefined).find(
         (followup) => followup.id === 'dev'
       )!.command
-    ).toBe(`npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`);
+    ).toBe(
+      `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'} --detach --wait-ready`
+    );
   });
 
   it.each(['dev-client-stale', 'bare-stale', 'needs-dev-client'])(
@@ -290,7 +346,7 @@ describe(buildStartPlanFollowUps, () => {
     });
 
     // @ref llp/0015-backend-selection-and-config.rfc.md §The follow-ups of a chosen backend
-    it(`should offer the account a cloud plan needs, rather than a route it already took`, () => {
+    it.each([[], ['--device', 'SERIAL'], ['--device=SERIAL']])('cloud run %j', (...deviceArgs) => {
       const followups = buildStartPlanFollowUps(
         mockPlan({
           rule: 'dev-client-stale',
@@ -308,10 +364,17 @@ describe(buildStartPlanFollowUps, () => {
             },
           }),
         }),
-        mockState()
+        mockState(),
+        'ios',
+        ['--ios', '--plan', '--port', '8091', ...deviceArgs]
       );
 
       expect(ids(followups)).toEqual(['eas-account', 'dev', 'build-freshness']);
+      expect(followups[1]!.command).toBe(
+        'npx @expo/agent-cli dev --ios --eas --port 8091 --detach --wait-ready'
+      );
+      if (deviceArgs.length)
+        expect(followups[1]!.why).toContain('The named local device is not used.');
       expect(followups[0]!.command).toBe('npx @expo/agent-cli whoami');
       expect(followups[0]!.why).toContain('an Expo account');
       // The plan already went to the cloud, so offering the cloud again says nothing.

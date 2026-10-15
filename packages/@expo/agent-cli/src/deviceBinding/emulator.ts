@@ -9,6 +9,7 @@ import type { SpawnCaptureResult } from '../utils/spawnCapture';
 import { firstLine } from '../utils/text';
 import type { AndroidInventory } from './choose';
 import { deviceUnavailableError } from './errors';
+import { bindingPathFor, readBindingFile } from './registry';
 import type { DeviceTools } from './types';
 
 /** The budget of every `adb` call that is not a boot wait. */
@@ -42,13 +43,57 @@ function adbFailedError(reason: string): CommandError {
   );
 }
 
+/** Skip AVD discovery for a bound USB device; the caller rechecks the binding under the lock. */
+export async function readAndroidBindingInventoryAsync(
+  projectRoot: string,
+  tools: DeviceTools,
+  explicit: boolean,
+  forceAvds: boolean
+) {
+  const file = bindingPathFor(projectRoot, 'android', 'local-android');
+  const explicitSerial = () => {
+    const read = readBindingFile(file);
+    const device = read.kind === 'binding' ? read.binding.device : null;
+    return device?.backend === 'local-android' && device.origin.kind === 'explicit'
+      ? device.serial
+      : undefined;
+  };
+  const reuseSerial = forceAvds ? undefined : explicitSerial();
+  const inventory = await readAndroidInventoryAsync(tools, { avds: !explicit, reuseSerial });
+  return {
+    inventory,
+    isCurrent: () =>
+      reuseSerial === undefined ||
+      !inventory.listedSerials.includes(reuseSerial) ||
+      explicitSerial() === reuseSerial,
+  };
+}
+
 /** The Android inventory, read before the lock. @throws the tool error, or `create-timeout`. */
-export async function readAndroidInventoryAsync(tools: DeviceTools): Promise<AndroidInventory> {
+export async function readAndroidInventoryAsync(
+  tools: DeviceTools,
+  { avds: listAvds = true, reuseSerial }: { avds?: boolean; reuseSerial?: string } = {}
+): Promise<AndroidInventory> {
   const devices = await tools.adb(['devices', '-l'], { timeoutMs: ADB_CALL_TIMEOUT_MS });
   if (devices.spawnError) {
     throw adbNotRunnableError(resolveAdb(), devices.spawnError.message);
   }
   assertAnswered(devices, 'adb devices -l', adbFailedError);
+  const runningSerials = parseAndroidDevices(devices.stdout).map((device) => device.deviceId);
+  const listedSerials = devices.stdout
+    .split('\n')
+    .slice(1)
+    .flatMap((line) => line.trim().split(/\s+/)[0] || []);
+  const unready = devices.stdout
+    .split('\n')
+    .slice(1)
+    .flatMap((line) => {
+      const [serial, word, next] = line.trim().split(/\s+/);
+      const state = word === 'no' && next === 'permissions' ? 'no permissions' : word;
+      return serial && state && state !== 'device' ? [{ serial, state }] : [];
+    });
+  if (!listAvds || (reuseSerial !== undefined && listedSerials.includes(reuseSerial)))
+    return { avd: null, runningSerials, listedSerials, unready };
   const avds = await tools.emulatorList(['-list-avds'], { timeoutMs: 60_000 });
   if (avds.spawnError) {
     throw emulatorNotRunnableError(avds.spawnError.message);
@@ -56,11 +101,9 @@ export async function readAndroidInventoryAsync(tools: DeviceTools): Promise<And
   assertAnswered(avds, 'emulator -list-avds', emulatorNotRunnableError);
   return {
     avd: parseAvds(avds.stdout)[0] ?? null,
-    runningSerials: parseAndroidDevices(devices.stdout).map((device) => device.deviceId),
-    listedSerials: devices.stdout
-      .split('\n')
-      .slice(1)
-      .flatMap((line) => line.trim().split(/\s+/)[0] || []),
+    runningSerials,
+    listedSerials,
+    unready,
   };
 }
 

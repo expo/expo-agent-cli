@@ -124,9 +124,12 @@ describe(acquireDeviceAsync, () => {
     ]);
   });
 
-  it('spawns again when the own instance is dead, on the first free port', async () => {
+  it.each(['spawned', 'explicit'] as const)('replaces missing %s', async (kind) => {
     const tools = fakeTools();
-    writeBinding(file(), androidBindingFor(ROOT, 'emulator-5556', spawned(5556, 77)));
+    writeBinding(
+      file(),
+      androidBindingFor(ROOT, 'emulator-5556', kind === 'spawned' ? spawned(5556, 77) : { kind })
+    );
 
     const result = await acquireDeviceAsync(ROOT, 'android', { tools });
 

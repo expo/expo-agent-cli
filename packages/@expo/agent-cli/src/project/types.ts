@@ -134,6 +134,13 @@ export interface StartPlan {
    * @see llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can complete
    */
   devServerPort?: DevServerPort;
+  /**
+   * What `dev --device` does to devices when this plan runs, or the refusal it will meet, with the
+   * refusal's How command. Read without writes or boots. Absent without `--device`.
+   */
+  explicitDevice?:
+    | { refuses: false; summary: string }
+    | { refuses: true; summary: string; how: string | null };
 }
 
 /**

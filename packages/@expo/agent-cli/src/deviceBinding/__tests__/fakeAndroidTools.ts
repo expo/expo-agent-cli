@@ -9,7 +9,7 @@ export const AVD = 'Pixel_9';
 export interface FakeEmulator {
   serial: string;
   /** What `adb` lists and `get-state` answers; `offline` is an instance still booting. */
-  state: 'device' | 'offline';
+  state: 'device' | 'offline' | 'unauthorized' | 'no permissions';
   /** The pid `isPidAlive` answers for. Absent for a device that is not an instance of ours. */
   pid?: number;
   /** The command line `commandOf` answers; defaults to an instance of ours on its serial's port. */

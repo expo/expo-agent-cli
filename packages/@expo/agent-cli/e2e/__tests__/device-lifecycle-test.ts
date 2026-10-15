@@ -107,6 +107,28 @@ describe('device lifecycle across two worktrees', () => {
           .sort()
       ).toEqual([first.runDevice, second.runDevice].sort());
 
+      const plan = await executeAgentCliAsync(
+        projects[1]!,
+        ['dev', '--ios', '--local', '--plan', '--device', first.runDevice!, '--json'],
+        { env: envFor(projects[1]!) }
+      );
+      expect(plan.exitCode).toBe(0);
+      expect(JSON.parse(plan.stdout)).toMatchObject({
+        explicitDevice: {
+          refuses: true,
+          summary: expect.stringContaining(`is bound to the worktree ${first.projectRoot}`),
+          how: 'npx @expo/agent-cli dev --ios --local --json --detach --wait-ready',
+        },
+        followups: expect.arrayContaining([
+          expect.objectContaining({
+            id: 'device-refusal',
+            command: 'npx @expo/agent-cli dev --ios --local --json --detach --wait-ready',
+          }),
+        ]),
+      });
+      expect(JSON.parse(plan.stdout).followups.map(({ id }: { id: string }) => id)).not.toContain(
+        'dev'
+      );
       expect(bindings()).toHaveLength(2);
 
       const kept = await executeAgentCliAsync(projects[0]!, ['dev:stop', '--json'], {

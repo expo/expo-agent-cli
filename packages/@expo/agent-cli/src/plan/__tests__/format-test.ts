@@ -51,6 +51,30 @@ describe(formatTimeClass, () => {
 });
 
 describe(formatStartPlan, () => {
+  it(`should print what --device does as its own line under the steps, above Why`, () => {
+    const lines = formatStartPlan({
+      ...plan,
+      explicitDevice: { refuses: true, summary: 'No device uniquely matches "x".', how: null },
+    })
+      .split('\n')
+      .map(strip);
+
+    const device = lines.indexOf('  Device: Will refuse — No device uniquely matches "x".');
+    expect(device).toBeGreaterThan(lines.findIndex((line) => line.includes('expo run:ios')));
+    expect(device).toBeLessThan(lines.indexOf('  Why'));
+  });
+
+  it(`should print a binding plan's summary after Device with no verb of its own`, () => {
+    const lines = formatStartPlan({
+      ...plan,
+      explicitDevice: { refuses: false, summary: 'Will bind Sim (UDID-1).' },
+    })
+      .split('\n')
+      .map(strip);
+
+    expect(lines).toContain('  Device: Will bind Sim (UDID-1).');
+  });
+
   it(`should report the rule and the target`, () => {
     expect(formatStartPlan(plan)).toMatch(/dev-client-stale/);
     expect(formatStartPlan(plan)).toMatch(/target: dev-client/);

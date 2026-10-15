@@ -3,11 +3,12 @@
 
 import { BOOT_DEVICE_TIMEOUT_MS } from '../device/bootDevice';
 import { bindAndroidSectionAsync, bootEmulatorAsync } from './android';
-import { androidToolsResolve, readAndroidInventoryAsync } from './emulator';
+import { androidToolsResolve, readAndroidBindingInventoryAsync } from './emulator';
 import { deviceUnavailableError } from './errors';
 import { clearInspectCache } from './inspect';
 import { bootSimulatorAsync, readIosInventoryAsync } from './ios';
 import { bindingIdentity, bindIosSectionAsync } from './iosAcquire';
+import { bindExplicitSection, type ExplicitRequest } from './explicit';
 import { acquireSectionAsync } from './reap';
 import { releaseWorktreeDevicesAsync } from './release';
 import { bindingPathFor, readBindingFile } from './registry';
@@ -41,17 +42,15 @@ export function devicesDisabled(): boolean {
   return process.env.AGENT_CLI_NO_DEVICE === '1';
 }
 
-/**
- * Whether this host can run the platform's local device: simulators exist on macOS only, and an
- * emulator instance needs the Android SDK's `adb` and `emulator`. Elsewhere `dev` serves for a
- * device somewhere else and binds nothing.
- */
+/** Whether local devices are supported: iOS on macOS, Android wherever `adb` resolves. */
 export function hostBindsPlatform(platform: DevicePlatform): boolean {
   return platform === 'ios' ? process.platform === 'darwin' : androidToolsResolve();
 }
 
 /** The one line a caller prints on stderr: which device the run bound, and how. */
 export function acquireLine({ device, action }: AcquireResult): string {
+  if (action === 'explicit')
+    return `Bound ${deviceNameOf(device)} (${deviceIdOf(device)}) to this worktree; it will not be shut down or deleted.`;
   if (device.backend === 'local-android') {
     const avd = device.origin.kind === 'spawned' ? ` of ${device.origin.avd}` : '';
     return action === 'spawned'
@@ -68,28 +67,29 @@ export interface AcquireDeviceOptions {
   /** Any choice but a reuse is refused `not-reusable`. */
   reuseOnly?: boolean;
   tools?: DeviceTools;
+  explicit?: ExplicitRequest;
 }
+
+type SectionOptions = { reuseOnly: boolean; tools: DeviceTools; explicit?: ExplicitRequest };
 
 /**
  * Bind this worktree's device and boot it.
  *
- * The inventory is read before the lock. Under the lock, in one section: the own binding is
- * read, the choice made and written, with `simctl create` or the emulator spawn inside the
- * section. iOS revalidates the binding against its inventory snapshot; a changed identity
- * retries outside the lock, at most twice. After the section, boot runs on every choice.
- * A failed boot lets go of the binding.
+ * Inventory is read outside the lock; binding reads, choice, writes and allocation run under it.
+ * A changed binding retries discovery outside the lock. Every choice boots after the section;
+ * a failed boot lets go of the binding.
  *
  * @throws `DEVICE_UNAVAILABLE` with `data.reason`, `DEVICE_REGISTRY_LOCKED`, or the tool error.
  */
 export async function acquireDeviceAsync(
   projectRoot: string,
   platform: DevicePlatform,
-  { reuseOnly = false, tools = defaultTools() }: AcquireDeviceOptions = {}
+  { reuseOnly = false, tools = defaultTools(), explicit }: AcquireDeviceOptions = {}
 ): Promise<AcquireResult> {
   const section =
     platform === 'ios'
-      ? await acquireIosAsync(projectRoot, { reuseOnly, tools })
-      : await acquireAndroidAsync(projectRoot, { reuseOnly, tools });
+      ? await acquireIosAsync(projectRoot, { reuseOnly, tools, explicit })
+      : await acquireAndroidAsync(projectRoot, { reuseOnly, tools, explicit });
   clearInspectCache();
   const { binding, action, boot } = section;
   const result = await boot();
@@ -109,9 +109,13 @@ interface Acquired {
 
 async function acquireIosAsync(
   projectRoot: string,
-  { reuseOnly, tools }: { reuseOnly: boolean; tools: DeviceTools }
+  { reuseOnly, tools, explicit }: SectionOptions
 ): Promise<Acquired> {
-  const { binding, wasBooted, action } = await bindIosAsync(projectRoot, reuseOnly, tools);
+  const { binding, wasBooted, action } = await bindIosAsync(projectRoot, {
+    reuseOnly,
+    tools,
+    explicit,
+  });
   const udid = deviceIdOf(binding.device);
   return {
     binding,
@@ -123,12 +127,44 @@ async function acquireIosAsync(
 
 async function acquireAndroidAsync(
   projectRoot: string,
-  { reuseOnly, tools }: { reuseOnly: boolean; tools: DeviceTools }
+  { reuseOnly, tools, explicit }: SectionOptions,
+  forceAvds = false
 ): Promise<Acquired> {
-  const inventory = await readAndroidInventoryAsync(tools);
-  const { binding, action, handle } = await acquireSectionAsync(projectRoot, tools, async () =>
-    bindAndroidSectionAsync(projectRoot, { inventory, reuseOnly, tools })
+  const { inventory, isCurrent } = await readAndroidBindingInventoryAsync(
+    projectRoot,
+    tools,
+    explicit !== undefined,
+    forceAvds
   );
+  const section = await acquireSectionAsync(projectRoot, tools, async (actions) => {
+    if (explicit === undefined) {
+      if (!isCurrent()) return null;
+      return bindAndroidSectionAsync(projectRoot, { inventory, reuseOnly, tools });
+    }
+    const candidates = inventory.runningSerials.map((serial) => ({
+      backend: 'local-android' as const,
+      platform: 'android' as const,
+      serial,
+      origin: { kind: 'explicit' as const },
+    }));
+    return {
+      ...bindExplicitSection(
+        projectRoot,
+        'android',
+        candidates,
+        explicit,
+        reuseOnly,
+        tools,
+        actions,
+        inventory.unready
+      ),
+      handle: null,
+    };
+  });
+  // Refresh the full inventory outside the lock, at most once.
+  if (section === null)
+    return acquireAndroidAsync(projectRoot, { reuseOnly, tools, explicit }, true);
+  const { binding, action, handle } = section;
   const serial = deviceIdOf(binding.device);
   return {
     binding,
@@ -163,7 +199,7 @@ function instanceWatcher(
 }
 
 /** Each inventory belongs to the binding identity observed before the device list was read. */
-async function bindIosAsync(projectRoot: string, reuseOnly: boolean, tools: DeviceTools) {
+async function bindIosAsync(projectRoot: string, { reuseOnly, tools, explicit }: SectionOptions) {
   const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const before = readBindingFile(file);
@@ -171,13 +207,38 @@ async function bindIosAsync(projectRoot: string, reuseOnly: boolean, tools: Devi
     const bound = await acquireSectionAsync(
       projectRoot,
       tools,
-      async () => {
+      async (actions) => {
         const read = readBindingFile(file);
         if (read.kind === 'unreadable') {
           throw deviceUnavailableError('unreadable', { platform: 'ios', path: file });
         }
         if (bindingIdentity(read) !== bindingIdentity(before)) return null;
-        return bindIosSectionAsync(projectRoot, { inventory, reuseOnly, tools });
+        if (explicit === undefined)
+          return bindIosSectionAsync(projectRoot, { inventory, reuseOnly, tools });
+        const candidates = inventory.simulators
+          .filter((sim) => sim.isAvailable)
+          .map((sim) => ({
+            backend: 'local-ios' as const,
+            platform: 'ios' as const,
+            udid: sim.udid,
+            name: sim.name,
+            origin: 'explicit' as const,
+          }));
+        const result = bindExplicitSection(
+          projectRoot,
+          'ios',
+          candidates,
+          explicit,
+          reuseOnly,
+          tools,
+          actions
+        );
+        return {
+          ...result,
+          wasBooted: inventory.simulators.some(
+            (sim) => sim.udid === deviceIdOf(result.binding.device) && sim.state === 'Booted'
+          ),
+        };
       },
       inventory
     );

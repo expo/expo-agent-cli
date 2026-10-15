@@ -10,6 +10,8 @@ import type { ProjectState, StartPlan } from '../project/types';
 import { localTool, EAS_REQUIREMENT, EAS_WHERE, LOCAL_WHERE } from '../toolchain/runsOn';
 import type { ToolchainStatus } from '../toolchain/types';
 import { capFollowUps, type FollowUp } from './types';
+import { rerunDevCommand } from '../plan/rerun';
+import { withoutDeviceArgs } from '../dev/deviceOption';
 import { easCommandPrefix } from '../utils/easCli';
 
 /** Where `expo start` listens when the command line names no port. */
@@ -309,10 +311,10 @@ export function buildStartPlanFollowUps(
    * ran a different plan. The *typed* flag rather than the platform the plan settled on, which is
    * the same split `decideStartPlan` keeps: printing a flag nobody typed would claim they asked.
    */
-  requestedPlatform?: PlanPlatform
+  requestedPlatform?: PlanPlatform,
+  /** The caller's `dev` arguments, which the command that runs the plan repeats. */
+  callerArgv: readonly string[] = []
 ): FollowUp[] {
-  // `dev` requires a platform, so this flag always states one.
-  const platformFlag = ` --${requestedPlatform ?? hostPlatform()}`;
   const followups: FollowUp[] = [];
 
   // @ref llp/0015-backend-selection-and-config.rfc.md §The follow-ups of a chosen backend
@@ -341,13 +343,28 @@ export function buildStartPlanFollowUps(
   // is not one a bare `dev` takes: it stops and asks for `--eas`. The line offered here is the one
   // that runs, and it says what the flag costs.
   const implicitEas = location?.runsOn === 'eas' && location.selection?.implicit === true;
-  followups.push({
-    id: 'dev',
-    command: `${PROGRAM_PREFIX} dev${platformFlag}${implicitEas ? ' --eas' : ''}`,
-    why: implicitEas
-      ? 'Runs the plan above on EAS — the build there, the app on an EAS Simulator session — which uses EAS credits, so the flag is yours to pass; without it the same command stops and says so.'
-      : 'Runs the plan above, emitting it again first so nothing runs unannounced.',
-  });
+  const runArgv = implicitEas ? withoutDeviceArgs(callerArgv) : callerArgv;
+  const device = plan.explicitDevice;
+  if (device?.refuses) {
+    if (device.how)
+      followups.push({
+        id: 'device-refusal',
+        command: device.how,
+        why: 'Running the plan above stops at the --device refusal printed under its steps; this is the next step that refusal names.',
+      });
+  } else
+    followups.push({
+      id: 'dev',
+      // `dev` requires a platform, so the command always states one.
+      command: rerunDevCommand(
+        requestedPlatform ?? hostPlatform(),
+        implicitEas ? ['--eas', ...runArgv] : runArgv
+      ),
+      why: implicitEas
+        ? 'Runs the plan above on EAS — the build there, the app on an EAS Simulator session — which uses EAS credits, so the flag is yours to pass; without it the same command stops and says so.' +
+          (runArgv.length === callerArgv.length ? '' : ' The named local device is not used.')
+        : 'Runs the plan above, emitting it again first so nothing runs unannounced.',
+    });
 
   if (BUILDING_RULES.includes(plan.rule)) {
     followups.push({
@@ -365,7 +382,12 @@ export function buildStartPlanFollowUps(
     });
   }
 
-  return capFollowUps(followups);
+  return capFollowUps(
+    followups.filter(
+      (followup, index) =>
+        followups.findIndex((first) => first.command === followup.command) === index
+    )
+  );
 }
 
 /**

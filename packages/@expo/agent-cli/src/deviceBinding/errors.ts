@@ -122,14 +122,35 @@ export function deviceUnavailableError(
   }
 }
 
-function notReusableError(platform: DevicePlatform): CommandError {
+/** A running dev server allows only a reuse; `devices` names the bound one and the one `--device` asks for. */
+export function notReusableError(
+  platform: DevicePlatform,
+  devices?: { bound: string; named: string }
+): CommandError {
   const error = refusal('DEVICE_UNAVAILABLE', 'not-reusable', EXIT_OUTCOME_FAILED, [
-    `A dev server is running and this worktree has no ${platform} device to reuse.`,
-    'Why: a device created now would carry no app, because the running server already installed nothing on it.',
+    ...(devices
+      ? [`The running dev server uses ${devices.bound}; --device names ${devices.named}.`]
+      : [
+          `A dev server is running and this worktree has no ${platform} device to reuse.`,
+          'Why: a device created now would carry no app, because the running server already installed nothing on it.',
+        ]),
     `How: run "${PROGRAM_PREFIX} dev:stop", then this command again.`,
   ]);
   error.suggestedCommand = `${PROGRAM_PREFIX} dev:stop`;
   return error;
+}
+
+const CHOICE_REFUSALS = [
+  'explicit-not-found',
+  'explicit-not-ready',
+  'explicit-bound',
+  'own-explicit-over-owned',
+  'not-reusable',
+];
+
+/** A refusal of the choice itself, which `dev --plan --device` prints; any other error fails the plan as it fails the run. */
+export function isExplicitChoiceRefusal(error: unknown): error is CommandError {
+  return error instanceof CommandError && CHOICE_REFUSALS.includes(error.data?.reason as string);
 }
 
 function portHolders(boundBy: BoundSerial[]): string {

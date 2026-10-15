@@ -459,7 +459,7 @@ describe('@expo/agent-cli dev --plan', () => {
       });
       expect(plan.reasons.join('\n')).not.toContain('does not take that route on its own');
       expect(plan.followups.map((followup) => followup.command)).toContain(
-        'npx @expo/agent-cli dev --ios'
+        'npx @expo/agent-cli dev --ios --json --detach --wait-ready'
       );
     });
 

@@ -20,6 +20,7 @@ import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
+import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
@@ -531,6 +532,8 @@ describe('a lock whose port Metro has not logged', () => {
 
 // @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
 describe('the bound device', () => {
+  const platform = process.platform;
+  afterEach(() => Object.defineProperty(process, 'platform', { value: platform }));
   const running = {
     url: 'http://127.0.0.1:8393',
     port: 8393,
@@ -719,6 +722,38 @@ describe('the bound device', () => {
       suggestedCommand: 'xcodebuild -downloadPlatform iOS',
     });
     expect(error.message).toBe(refusal.message);
+  });
+
+  it("gives the child's --device refusal the caller's flags, --detach and --wait-ready too", async () => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(null);
+    const argv = ['--ios', '--device', 'Sim', '--detach', '--wait-ready', '--port', '8092'];
+    let spawned: { args: readonly string[]; env: NodeJS.ProcessEnv } | undefined;
+    vi.mocked(spawn).mockImplementation(((
+      _command: string,
+      args: string[],
+      options: { env: NodeJS.ProcessEnv }
+    ) => {
+      spawned = { args, env: options.env };
+      const child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
+      setTimeout(() => child.emit('exit', 1, null), 50);
+      return child as unknown as ChildProcess;
+    }) as typeof spawn);
+
+    const result = devDetachAsync(projectRoot, resolveDevOptions(argv), { print: false }).catch(
+      () => null
+    );
+    await vi.runAllTimersAsync();
+    await result;
+
+    const childArgv = spawned!.args.slice(spawned!.args.indexOf('dev') + 1);
+    vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', spawned!.env.__EXPO_AGENT_CLI_DETACHED);
+    vi.stubEnv(CALLER_ARGV_ENV, spawned!.env[CALLER_ARGV_ENV]);
+    try {
+      expect(childArgv).not.toContain('--detach');
+      expect(resolveDevOptions(childArgv).callerArgv).toEqual(argv);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

@@ -3,7 +3,12 @@ import os from 'os';
 import path from 'path';
 
 import { acquireDeviceAsync, devicesDisabled, inspectBindingAsync } from '../../deviceBinding';
+import { bindingFor, fakeTools, writeBinding } from '../../deviceBinding/__tests__/fakeTools';
+import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
+import { deviceUnavailableError, notReusableError } from '../../deviceBinding/errors';
+import { previewExplicitDeviceAsync } from '../../deviceBinding/preview';
 import { withLeaseExtendedAsync } from '../../deviceBinding/renew';
+import { readDevServerLockAsync } from '../../devLock/client';
 import type { FollowUp } from '../../followups';
 import { Log } from '../../log';
 import { emitStartPlan } from '../../plan/emit';
@@ -18,6 +23,7 @@ import { isInteractive } from '../../utils/interactive';
 import { devAsync } from '../devAsync';
 import { findFreePortAsync, formatPortMove, resolvePlannedPortAsync } from '../portCollision';
 import { findPortListenerAsync } from '../portListener';
+import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 import { isExpoDevServerAsync } from '../stopAsync';
 
@@ -51,6 +57,11 @@ vi.mock('../../project/fingerprint', () => ({ clearFingerprintMemo: vi.fn() }));
 vi.mock('../../project/fingerprintCache', () => ({ clearFingerprintCache: vi.fn() }));
 vi.mock('../../utils/expoCli', () => ({ runExpoAsync: vi.fn(), spawnExpoAsync: vi.fn() }));
 vi.mock('../../start/startAsync', () => ({ runDevServerAsync: vi.fn() }));
+vi.mock('../../deviceBinding/preview', () => ({ previewExplicitDeviceAsync: vi.fn() }));
+vi.mock('../../devLock/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../devLock/client')>()),
+  readDevServerLockAsync: vi.fn(async () => null),
+}));
 vi.mock('../../deviceBinding/renew', () => ({
   withLeaseExtendedAsync: vi.fn((_root: string, work: () => Promise<unknown>) => work()),
 }));
@@ -179,6 +190,7 @@ function mockLanAddress(address: string | null) {
 beforeEach(() => {
   vol.reset();
   mockReported.length = 0;
+  vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(null);
   vi.mocked(readLastBuildRecord).mockReturnValue({});
   vi.mocked(runExpoAsync).mockResolvedValue(0);
   vi.mocked(isInteractive).mockReturnValue(true);
@@ -1068,10 +1080,10 @@ describe(devAsync, () => {
       // The port the retry lost is the one probed for its holder.
       expect(findPortListenerAsync).toHaveBeenLastCalledWith(retryPort);
       expect(error.message).toMatch(
-        /How: start on a free port with ".* dev --ios --json --port \d+"\./
+        /How: start on a free port with ".* dev --ios --json --port \d+ --detach --wait-ready"\./
       );
       expect(error.message).not.toContain('dev:stop');
-      expect(error.suggestedCommand).toMatch(/ dev --ios --json --port \d+$/);
+      expect(error.suggestedCommand).toMatch(/ dev --ios --json --port \d+ --detach --wait-ready$/);
       expect(error.message).not.toContain("CLI's own");
       expect(runDevServerAsync).toHaveBeenCalledTimes(2);
       expect(Log.log).not.toHaveBeenCalled();
@@ -1098,8 +1110,30 @@ describe(devAsync, () => {
       );
 
       expect(error.suggestedCommand).toMatch(
-        / dev --ios --clear --tunnel --json --port \d+ -- --max-workers 2$/
+        / dev --ios --clear --tunnel --json --port \d+ --detach --wait-ready -- --max-workers 2$/
       );
+    });
+
+    it(`should suggest, from a detached child, the command its parent was given`, async () => {
+      mockProjectState();
+      vi.mocked(runDevServerAsync).mockImplementation(async (_root, args) => {
+        const port = args.includes('--port') ? Number(args[args.indexOf('--port') + 1]) : 8081;
+        return devServerRun({
+          exitCode: 1,
+          stderr: PORT_TAKEN.replace(/Port \d+/, `Port ${port}`),
+        });
+      });
+      vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', '1');
+      vi.stubEnv(CALLER_ARGV_ENV, JSON.stringify(['--ios', '--detach', '--wait-ready', '--json']));
+
+      const options = resolveDevOptions(['--ios', '--json']);
+      vi.unstubAllEnvs();
+      const error = await devAsync(projectRoot, options).then(
+        () => null,
+        (thrown) => thrown
+      );
+
+      expect(error.suggestedCommand).toMatch(/ dev --ios --detach --wait-ready --json --port \d+$/);
     });
 
     // No free port to move to: `dev:stop --force` only when the holder answers as an Expo dev
@@ -1422,6 +1456,7 @@ describe(devAsync, () => {
     });
 
     afterEach(() => {
+      mockPlatform(realPlatform);
       vi.mocked(devicesDisabled).mockReturnValue(true);
     });
 
@@ -1443,6 +1478,37 @@ describe(devAsync, () => {
       }
     );
 
+    it.each(['SIM-1', 'HUMAN'])(
+      'protects the running server’s device when naming %s',
+      async (query) => {
+        mockProjectState();
+        vol.fromJSON({ '/project/package.json': '{}' });
+        vi.mocked(readDevServerLockAsync).mockResolvedValueOnce({ pid: 1 } as never);
+        const tools = fakeTools({
+          simulators: [
+            { udid: 'SIM-1', name: 'agent-cli own', state: 'Booted' },
+            { udid: 'HUMAN', name: 'My iPhone', state: 'Shutdown' },
+          ],
+        });
+        const file = bindingPathFor(projectRoot, 'ios', 'local-ios');
+        writeBinding(file, bindingFor(projectRoot, 'SIM-1'));
+        const real =
+          await vi.importActual<typeof import('../../deviceBinding')>('../../deviceBinding');
+        vi.mocked(acquireDeviceAsync).mockImplementationOnce((root, platform, options) =>
+          real.acquireDeviceAsync(root, platform, { ...options, tools })
+        );
+
+        const run = devAsync(projectRoot, resolveDevOptions(['--ios', '--device', query]));
+        if (query === 'SIM-1') await expect(run).resolves.toBe(0);
+        else {
+          await expect(run).rejects.toMatchObject({ data: { reason: 'not-reusable' } });
+          expect(runDevServerAsync).not.toHaveBeenCalled();
+        }
+        expect(readBindingFile(file)).toMatchObject({ binding: { device: { udid: 'SIM-1' } } });
+        expect(tools.calls).not.toContainEqual(['delete', 'SIM-1']);
+      }
+    );
+
     // withDevice-after-forwarded-args
     it(`binds after the refusals and pins the build step to the simulator, over a forwarded --device`, async () => {
       mockStaleDevClientState();
@@ -1451,7 +1517,10 @@ describe(devAsync, () => {
         devAsync(projectRoot, resolveDevOptions(['--ios', '--local', '--', '--device', 'X']))
       ).resolves.toBe(0);
 
-      expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios');
+      expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios', {
+        reuseOnly: false,
+        explicit: undefined,
+      });
       const [, args] = vi.mocked(runDevServerAsync).mock.calls[0]!;
       expect(args.filter((arg) => arg === '--device')).toHaveLength(1);
       expect(args).toEqual(expect.arrayContaining(['run:ios', '--device', 'SIM-1']));
@@ -1506,6 +1575,28 @@ describe(devAsync, () => {
       );
     });
 
+    it.each([
+      ['--web', ['--web', '--device', 'X'], () => {}],
+      [
+        'AGENT_CLI_NO_DEVICE=1',
+        ['--ios', '--device', 'X'],
+        () => vi.mocked(devicesDisabled).mockReturnValue(true),
+      ],
+      ['--ios off macOS', ['--ios', '--device', 'X'], () => mockPlatform('linux')],
+    ] as const)(
+      `refuses --device with BAD_ARGS when the run binds no local device: %s`,
+      async (_case, argv, arrange) => {
+        mockStaleDevClientState();
+        arrange();
+
+        await expect(devAsync(projectRoot, resolveDevOptions([...argv]))).rejects.toMatchObject({
+          code: 'BAD_ARGS',
+        });
+
+        expect(probeProjectStateAsync).not.toHaveBeenCalled();
+      }
+    );
+
     describe('--plan', () => {
       it(`pins the steps to the own binding when it is up or down, and acquires nothing`, async () => {
         mockStaleDevClientState();
@@ -1550,6 +1641,98 @@ describe(devAsync, () => {
             ]),
           }),
           expect.anything()
+        );
+      });
+
+      it(`reads --device as the run does while this worktree's dev server runs: reuse only`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(readDevServerLockAsync).mockResolvedValueOnce({ pid: 1 } as never);
+        vi.mocked(previewExplicitDeviceAsync).mockRejectedValueOnce(
+          notReusableError('ios', { bound: 'agent-cli 0000', named: 'Sim' })
+        );
+
+        await expect(
+          devAsync(
+            projectRoot,
+            resolveDevOptions(['--ios', '--local', '--plan', '--device', 'Sim', '--port', '8091'])
+          )
+        ).resolves.toBe(0);
+
+        expect(previewExplicitDeviceAsync).toHaveBeenCalledWith(
+          projectRoot,
+          'ios',
+          { query: 'Sim', rerun: ['--ios', '--local', '--plan', '--port', '8091'] },
+          true
+        );
+        expect(emittedFollowUps()).toContainEqual(
+          expect.objectContaining({ id: 'device-refusal', command: 'npx @expo/agent-cli dev:stop' })
+        );
+      });
+
+      it(`offers a bind plan's run with the caller's --device and --port`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(readDevServerLockAsync).mockResolvedValueOnce(null);
+        vi.mocked(previewExplicitDeviceAsync).mockResolvedValueOnce({
+          device: { ...device, name: 'My Sim', origin: 'explicit' },
+          summary: 'Will bind My Sim (SIM-1).',
+        });
+
+        await devAsync(
+          projectRoot,
+          resolveDevOptions(['--ios', '--local', '--plan', '--device', 'My Sim', '--port', '8091'])
+        );
+
+        expect(previewExplicitDeviceAsync).toHaveBeenCalledWith(
+          projectRoot,
+          'ios',
+          expect.anything(),
+          false
+        );
+        expect(emittedFollowUps().find((followup) => followup.id === 'dev')!.command).toBe(
+          "npx @expo/agent-cli dev --ios --local --device 'My Sim' --port 8091 --detach --wait-ready"
+        );
+      });
+
+      it(`fails --plan --device as the run does when the device tool times out`, async () => {
+        mockStaleDevClientState();
+        vi.mocked(previewExplicitDeviceAsync).mockRejectedValueOnce(
+          deviceUnavailableError('create-timeout', { platform: 'ios' })
+        );
+
+        await expect(
+          devAsync(
+            projectRoot,
+            resolveDevOptions(['--ios', '--local', '--plan', '--device', 'Sim'])
+          )
+        ).rejects.toMatchObject({ data: { reason: 'create-timeout' }, exitCode: 22 });
+
+        expect(emitStartPlan).not.toHaveBeenCalled();
+      });
+
+      it(`previews no --device for a plan whose EAS route nobody chose, and offers the --eas run without it`, async () => {
+        mockStaleDevClientState();
+        const { detectToolchainAsync } = await import('../../toolchain');
+        vi.mocked(detectToolchainAsync).mockResolvedValue({
+          platform: 'ios',
+          status: 'missing',
+          detail: 'no Xcode',
+          requirement: 'Xcode',
+          caveats: [],
+          impossible: true,
+        });
+        vi.mocked(previewExplicitDeviceAsync).mockResolvedValueOnce({
+          device: { ...device, name: 'My Sim', origin: 'explicit' },
+          summary: 'Will bind My Sim (SIM-1).',
+        });
+
+        await expect(
+          devAsync(projectRoot, resolveDevOptions(['--ios', '--plan', '--device', 'My Sim']))
+        ).resolves.toBe(0);
+
+        expect(previewExplicitDeviceAsync).not.toHaveBeenCalled();
+        expect(vi.mocked(emitStartPlan).mock.calls[0]![0]).not.toHaveProperty('explicitDevice');
+        expect(emittedFollowUps().find((followup) => followup.id === 'dev')!.command).toBe(
+          'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
         );
       });
     });

@@ -57,6 +57,7 @@ export function emitStartPlan(
     // the sort of thing it would otherwise go and shell out to find.
     buildLocation: plan.buildLocation,
     devServerPort: plan.devServerPort ?? null,
+    explicitDevice: plan.explicitDevice ?? null,
   });
   if (print === 'none') {
     return;

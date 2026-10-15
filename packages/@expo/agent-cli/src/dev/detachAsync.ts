@@ -54,6 +54,7 @@ import {
   type DetachedChildPhase,
   type DetachedChildVerdict,
 } from './childVerdict';
+import { CALLER_ARGV_ENV, explicitRequestOf } from './deviceOption';
 import { event } from './events';
 import {
   detachedLogPath,
@@ -229,7 +230,12 @@ export async function devDetachAsync(
       hostBindsPlatform(platform)
     ) {
       Log.progress(
-        acquireLine(await acquireDeviceAsync(projectRoot, platform, { reuseOnly: true }))
+        acquireLine(
+          await acquireDeviceAsync(projectRoot, platform, {
+            reuseOnly: true,
+            explicit: explicitRequestOf(options.device, options.callerArgv),
+          })
+        )
       );
     }
     const hasExited = () => !isProcessAlive(running.pid);
@@ -305,6 +311,7 @@ export async function devDetachAsync(
       ...process.env,
       __EXPO_AGENT_CLI_INTERNAL_INVOCATION: '1',
       __EXPO_AGENT_CLI_DETACHED: '1',
+      [CALLER_ARGV_ENV]: JSON.stringify(options.callerArgv),
     },
   });
   // The child owns the file now; a descriptor left open here would keep the parent alive.

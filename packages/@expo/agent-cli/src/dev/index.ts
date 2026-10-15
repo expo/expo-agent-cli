@@ -8,6 +8,7 @@ export const devRunHelp: CommandHelp = {
   command: 'dev:run',
   usage: `${PROGRAM_PREFIX} dev --ios|--android|--web`,
   options: [
+    `--device <name|id>  Bind a local simulator by name/ID or an Android device by serial`,
     `--detach            Run the dev server in the background and give the terminal back`,
     `--wait-ready        With --detach, also wait for the bundler before reporting`,
     `--plan              Print what must run to get this app on a device, then exit`,
