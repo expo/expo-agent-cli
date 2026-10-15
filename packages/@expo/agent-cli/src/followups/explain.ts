@@ -23,7 +23,8 @@ export interface ExplainFollowUpInput {
   source:
     | { kind: 'file'; path: string }
     | { kind: 'stdin' }
-    | { kind: 'local'; platform: 'ios' | 'android'; path: string };
+    | { kind: 'local'; platform: 'ios' | 'android'; path: string }
+    | { kind: 'eas'; platform: 'ios' | 'android'; buildId: string | null };
 }
 
 /** How to spell this run's log on a command line, for a rung the caller can paste. */
@@ -33,6 +34,9 @@ function sourceArgs(source: ExplainFollowUpInput['source']): string {
       return `--file ${source.path}`;
     case 'local':
       return `--local --${source.platform}`;
+    case 'eas':
+      // The id, once the fetch established one: "the last errored build" moves.
+      return `--eas --${source.platform}${source.buildId ? ` ${source.buildId}` : ''}`;
     case 'stdin':
       return '--stdin';
   }

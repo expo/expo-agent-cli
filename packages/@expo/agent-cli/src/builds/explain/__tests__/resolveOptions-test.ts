@@ -48,26 +48,60 @@ describe('the input source', () => {
   });
 });
 
-describe('the reserved build-id positional', () => {
+describe('--eas', () => {
   const BUILD_ID = '2f1c9f0e-6b1e-4a3d-9c1a-0b6f1e2d3c4a';
 
-  it('is a clear error, not a dropped argument', () => {
-    // llp/0010 §Registry rules (d): an argument a command has no place for is an error. Here it
-    // also has a *reason*, which is what separates this from a typo.
-    expect(() => resolveExplainOptions([BUILD_ID], PIPED)).toThrow(/cannot fetch a build's logs/);
+  it.each([
+    ['--ios', 'ios'],
+    ['--android', 'android'],
+  ] as const)('reads the last errored %s build when no id is given', (flag, platform) => {
+    expect(resolveExplainOptions(['--eas', flag], TERMINAL)).toMatchObject({
+      source: { kind: 'eas', platform, buildId: null },
+      platform,
+    });
   });
 
-  it('carries its own code, so an agent can branch on "not yet" rather than on "bad flag"', () => {
+  // `inspect:build-log <build-id>` is the command an agent reaches for, so the id alone is the
+  // EAS form — no `--eas` needed beside it.
+  it('reads the build the positional names, with or without --eas', () => {
+    expect(resolveExplainOptions([BUILD_ID, '--ios'], TERMINAL).source).toEqual({
+      kind: 'eas',
+      platform: 'ios',
+      buildId: BUILD_ID,
+    });
+    expect(resolveExplainOptions(['--eas', '--android', BUILD_ID], TERMINAL).source).toEqual({
+      kind: 'eas',
+      platform: 'android',
+      buildId: BUILD_ID,
+    });
+  });
+
+  it('needs a platform, and repeats the id in the line that works', () => {
     try {
       resolveExplainOptions([BUILD_ID], PIPED);
       throw new Error('expected a throw');
     } catch (error: any) {
-      expect(error.code).toBe('BUILD_ID_UNSUPPORTED');
-      expect(error.suggestedCommand).toBe(`npx --yes eas-cli@latest build:view ${BUILD_ID}`);
-      // The two forms that do work, in the line a reader acts on.
-      expect(error.message).toContain('--file');
-      expect(error.message).toContain('inspect:build-log');
+      expect(error.code).toBe('BAD_ARGS');
+      expect(error.message).toContain('--eas needs the platform');
+      expect(error.suggestedCommand).toBe(
+        `npx @expo/agent-cli inspect:build-log --eas --ios ${BUILD_ID}`
+      );
     }
+  });
+
+  it('is one source among four, refused beside another', () => {
+    expect(() => resolveExplainOptions(['--eas', '--ios', '--stdin'], PIPED)).toThrow(
+      /--stdin and --eas were passed/
+    );
+    expect(() => resolveExplainOptions(['--file', 'a.log', BUILD_ID, '--ios'], PIPED)).toThrow(
+      new RegExp(`--file a.log and the build id ${BUILD_ID} were passed`)
+    );
+  });
+
+  it('reads one build id, not two', () => {
+    expect(() => resolveExplainOptions([BUILD_ID, 'another', '--ios'], PIPED)).toThrow(
+      /2 arguments were passed/
+    );
   });
 });
 

@@ -183,3 +183,18 @@ describe('the re-run rung of a --local read', () => {
     );
   });
 });
+
+describe('the re-run rung of an --eas read', () => {
+  it('names the build by id once the fetch established one, because "the last errored build" moves', () => {
+    const followups = buildExplainFollowUps({
+      failure: null,
+      phase: null,
+      moreMayExist: true,
+      source: { kind: 'eas', platform: 'ios', buildId: 'build-1' },
+    });
+
+    expect(followups[0]!.command).toBe(
+      'npx @expo/agent-cli inspect:build-log --eas --ios build-1 --all --context 40'
+    );
+  });
+});

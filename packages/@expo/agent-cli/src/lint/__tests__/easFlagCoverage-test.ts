@@ -76,6 +76,7 @@ describe('every command that takes --eas', () => {
     expect(easCommands).toEqual([
       'dev',
       'dev:stop',
+      'inspect:build-log',
       'navigate',
       'runtime:reload',
       'runtime:stop',

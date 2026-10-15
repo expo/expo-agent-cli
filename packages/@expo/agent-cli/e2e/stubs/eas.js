@@ -46,6 +46,11 @@
 // - STUB_EAS_BUILD_LIST_EXIT / STUB_EAS_BUILD_LIST_STDOUT: a refusal, on the stream the real CLI
 //   uses (stdout for the explanation, one `Error:` line on stderr)
 //
+// `build:view <id>`
+// - STUB_EAS_BUILD_VIEW_PLATFORM: the platform of the build it describes (default `IOS`)
+// - STUB_EAS_BUILD_VIEW_LOG_FILES: a JSON array of URLs printed as `logFiles` (default none)
+// - STUB_EAS_BUILD_VIEW_EXIT: a refusal — a build nobody can see, or one that does not exist
+//
 // `simulator:availability`
 // - STUB_SIM_AVAILABLE: `false` for an account without the feature
 //
@@ -237,6 +242,32 @@ if (command === 'build:list') {
       (!profile || build.buildProfile === profile)
   );
   printJson(limit > 0 ? listed.slice(0, limit) : listed);
+  process.exit(0);
+}
+
+// ---- Builds by id -------------------------------------------------------------------------------
+
+if (command === 'build:view') {
+  const exitCode = Number(process.env.STUB_EAS_BUILD_VIEW_EXIT || 0);
+  if (exitCode !== 0) {
+    exitWith(process.stderr, `    Error: Build with ID ${args[1]} does not exist.`, exitCode);
+  }
+  let logFiles = [];
+  try {
+    logFiles = JSON.parse(process.env.STUB_EAS_BUILD_VIEW_LOG_FILES || '[]');
+  } catch {
+    logFiles = [];
+  }
+  // The recorded shape [observed — eas-cli 22.4 `build:view --json`, 2026-08-26]: one build
+  // object, its `logFiles` the signed URLs of the log files EAS kept for it.
+  printJson({
+    id: args[1],
+    status: logFiles.length ? 'ERRORED' : 'FINISHED',
+    platform: process.env.STUB_EAS_BUILD_VIEW_PLATFORM || 'IOS',
+    buildProfile: 'simulator',
+    createdAt: '2026-08-19T17:37:12.674Z',
+    logFiles,
+  });
   process.exit(0);
 }
 

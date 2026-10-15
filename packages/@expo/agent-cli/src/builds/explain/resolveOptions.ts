@@ -10,14 +10,15 @@ import { PROGRAM_NAME, PROGRAM_PREFIX } from '../../programName';
 import { parseArgsOrThrow } from '../../utils/args';
 import { CommandError } from '../../utils/errors';
 import { DEFAULT_CONTEXT_AFTER, DEFAULT_CONTEXT_BEFORE } from './extract';
-import { easCommandPrefix } from '../../utils/easCli';
 
 /** Where the log comes from. */
 export type ExplainSourceOption =
   | { kind: 'file'; path: string }
   | { kind: 'stdin' }
   /** The last native build `@expo/agent-cli dev` ran for this platform (`src/dev/buildLog.ts`). */
-  | { kind: 'local'; platform: NativePlatform; path: string };
+  | { kind: 'local'; platform: NativePlatform; path: string }
+  /** An EAS build's log, fetched by id or as the platform's last errored build (`./easLog.ts`). */
+  | { kind: 'eas'; platform: NativePlatform; buildId: string | null };
 
 export interface ExplainOptions {
   source: ExplainSourceOption;
@@ -35,6 +36,7 @@ const EXPLAIN_ARGS = {
   '--file': String,
   '--stdin': Boolean,
   '--local': Boolean,
+  '--eas': Boolean,
   '--ios': Boolean,
   '--android': Boolean,
   '--context': String,
@@ -61,9 +63,9 @@ export interface ResolveExplainContext {
 /**
  * Resolve the arguments of `@expo/agent-cli inspect:build-log`.
  *
- * @throws {CommandError} `BAD_ARGS` for two input sources, `--local` with no platform, both
- *   platform flags, the retired `--platform`, an unusable `--context`, or no input source at all
- *   on a terminal; `BUILD_ID_UNSUPPORTED` for the reserved positional.
+ * @throws {CommandError} `BAD_ARGS` for two input sources, `--local` or `--eas` with no platform,
+ *   a build id beside a source that is not EAS, both platform flags, the retired `--platform`, an
+ *   unusable `--context`, or no input source at all on a terminal.
  */
 export function resolveExplainOptions(
   argv: string[],
@@ -71,10 +73,9 @@ export function resolveExplainOptions(
 ): ExplainOptions {
   const args = parseArgsOrThrow(EXPLAIN_ARGS, argv, 'inspect:build-log');
   const positional = args._.map(String);
-
-  if (positional.length > 0) {
-    throw buildIdUnsupported(positional[0]!);
-  }
+  // A build id is the EAS form: `inspect:build-log <build-id>` is the command an agent reaches for.
+  const buildId = resolveBuildId(positional);
+  const eas = !!args['--eas'] || buildId != null;
 
   const file = args['--file'];
   const stdin = !!args['--stdin'];
@@ -83,6 +84,7 @@ export function resolveExplainOptions(
     file ? `--file ${file}` : null,
     stdin ? '--stdin' : null,
     local ? '--local' : null,
+    eas ? (buildId ? `the build id ${buildId}` : '--eas') : null,
   ].filter((flag): flag is string => flag != null);
   if (named.length > 1) {
     throw new CommandError(
@@ -90,7 +92,7 @@ export function resolveExplainOptions(
       [
         `${named.join(' and ')} were passed, and a report is about one log.`,
         `Why: reading two sources would mean either concatenating logs from different builds or silently ignoring one of them, and both produce a report that is about no single run.`,
-        `How: pass one of "--file <path>" for a saved log, "--stdin" for what is piped in, or "--local --ios|--android" for the last build ${PROGRAM_NAME} dev ran here.`,
+        `How: pass one of "--file <path>" for a saved log, "--stdin" for what is piped in, "--local --ios|--android" for the last build ${PROGRAM_NAME} dev ran here, or "--eas --ios|--android [<build-id>]" for an EAS build's.`,
       ].join('\n')
     );
   }
@@ -102,7 +104,9 @@ export function resolveExplainOptions(
   });
   const source = local
     ? resolveLocalSource(platform, projectRoot)
-    : resolveSource({ file, stdin, stdinIsTTY, cwd });
+    : eas
+      ? resolveEasSource(platform, buildId)
+      : resolveSource({ file, stdin, stdinIsTTY, cwd });
   const context = resolveContext(args['--context']);
 
   return {
@@ -114,6 +118,56 @@ export function resolveExplainOptions(
     json: !!args['--json'],
     followups: !args['--no-followups'],
   };
+}
+
+/**
+ * The one positional this command takes: an EAS build id.
+ *
+ * @throws {CommandError} `BAD_ARGS` for more than one.
+ */
+function resolveBuildId(positional: string[]): string | null {
+  if (positional.length === 0) {
+    return null;
+  }
+  if (positional.length > 1) {
+    throw new CommandError(
+      'BAD_ARGS',
+      [
+        `${positional.length} arguments were passed, and this command reads one EAS build id.`,
+        `Why: "${PROGRAM_PREFIX} inspect:build-log <build-id>" explains the log of that one EAS build; a second argument names nothing.`,
+        `How: run "${PROGRAM_PREFIX} inspect:build-log --eas --ios|--android ${positional[0]}".`,
+      ].join('\n')
+    );
+  }
+  return positional[0]!.trim() || null;
+}
+
+/**
+ * An EAS build's log: the id given, or the last errored build of the platform.
+ *
+ * The platform is required for the same reason `--local` requires it — and with an id it is
+ * checked against the build's own, because a log read under the other platform's rules would
+ * miss the failure (`./easLog.ts`).
+ *
+ * @throws {CommandError} `BAD_ARGS` with no platform.
+ */
+function resolveEasSource(
+  platform: NativePlatform | null,
+  buildId: string | null
+): ExplainOptions['source'] {
+  if (!platform) {
+    const error = new CommandError(
+      'BAD_ARGS',
+      [
+        `--eas needs the platform whose build to read: --ios or --android.`,
+        `Why: EAS builds are per platform, and the last errored build of one is not the last errored build of the other; with a build id, the flag also picks the rules the log is read under.`,
+        `How: run "${PROGRAM_PREFIX} inspect:build-log --eas --ios${buildId ? ` ${buildId}` : ''}" or "${PROGRAM_PREFIX} inspect:build-log --eas --android${buildId ? ` ${buildId}` : ''}".`,
+      ].join('\n')
+    );
+    error.suggestedCommand = `${PROGRAM_PREFIX} inspect:build-log --eas --ios${buildId ? ` ${buildId}` : ''}`;
+    throw error;
+  }
+  return { kind: 'eas', platform, buildId };
 }
 
 /**
@@ -174,7 +228,7 @@ function resolveSource({
   const error = new CommandError(
     'BAD_ARGS',
     [
-      `No log to explain: none of --file, --stdin or --local was passed, and stdin is a terminal.`,
+      `No log to explain: none of --file, --stdin, --local or --eas was passed, and stdin is a terminal.`,
       `Why: this command reads a build log and reports what failed in it. On a terminal there is nothing being piped in, so waiting on stdin would hang instead of answering.`,
       `How: run "${PROGRAM_PREFIX} inspect:build-log --local --ios" for the last build ${PROGRAM_NAME} dev ran here, "${PROGRAM_PREFIX} inspect:build-log --file <path>" for a saved log, or pipe one in: "cat build.log | ${PROGRAM_PREFIX} inspect:build-log".`,
     ].join('\n')
@@ -264,28 +318,4 @@ function badContext(value: string): CommandError {
       `How: pass "--context 12" for twelve lines each side, or "--context 8:20" for eight before and twenty after.`,
     ].join('\n')
   );
-}
-
-/**
- * The error for the positional argument this command reserves but does not read yet.
- *
- * The build-id form is the whole reason the argument is reserved rather than rejected as a stray:
- * `@expo/agent-cli inspect:build-log <build-id>` is the command an agent will reach for, and it will exist.
- * Until it does, saying so precisely — and naming the two forms that work today — is a better
- * answer than the generic "reads no positional arguments" of `positionalArgs: 'none'`, which
- * would send the reader looking for a typo instead of for the flag.
- *
- * @see llp/0010-agent-conventions.rfc.md §Upstream asks, `eas build:logs`
- */
-function buildIdUnsupported(value: string): CommandError {
-  const error = new CommandError(
-    'BUILD_ID_UNSUPPORTED',
-    [
-      `"${PROGRAM_NAME} inspect:build-log ${value}" cannot fetch a build's logs yet, so it has nothing to explain.`,
-      `Why: eas-cli has no "build:logs" command, so there is no supported way for this CLI to read an EAS build's log. The argument is reserved for when there is; it is not a typo.`,
-      `How: save the log and pass it in — "${easCommandPrefix()} build:view ${value}" prints where the log files are — then run "${PROGRAM_PREFIX} inspect:build-log --file <path>". A local build's output pipes straight in: "${PROGRAM_PREFIX} run:ios 2>&1 | ${PROGRAM_PREFIX} inspect:build-log".`,
-    ].join('\n')
-  );
-  error.suggestedCommand = `${easCommandPrefix()} build:view ${value}`;
-  return error;
 }

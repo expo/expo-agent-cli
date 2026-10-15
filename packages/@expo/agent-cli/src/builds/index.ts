@@ -14,17 +14,18 @@ import type { CommandHelp } from '../help/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import type { Command } from '../types';
 import { assertWithOptionsArgs } from '../utils/args';
-import { easCommandPrefix } from '../utils/easCli';
 
 export const inspectBuildLogHelp: CommandHelp = {
   command: 'inspect:build-log',
-  usage: `${PROGRAM_PREFIX} inspect:build-log --file <path> | --stdin | --local --ios|--android`,
+  usage: `${PROGRAM_PREFIX} inspect:build-log --file <path> | --stdin | --local | --eas [<build-id>]`,
   options: [
     `--file <path>          Read the log from this file`,
     `--stdin                Read the log from stdin. Implied when stdin is not a terminal`,
     `--local                Read the log of the last native build ${PROGRAM_NAME} dev ran here,\n` +
       `                       for the platform named. Needs --ios or --android`,
-    `--ios | --android      Which platform: the log to read under --local, a hint otherwise`,
+    `--eas [<build-id>]     Read the log of an EAS build: the id given, or the last errored\n` +
+      `                       build of the platform named. Needs --ios or --android`,
+    `--ios | --android      Which platform: the log to read under --local and --eas, a hint otherwise`,
     `--context <n[:m]>      Lines of context around the match. Default: 8 before, 20 after`,
     `--all                  Report every match, not only the failing phase's first`,
     `--json                 Print the report as JSON`,
@@ -41,12 +42,12 @@ export const inspectBuildLogHelp: CommandHelp = {
       gets: `what failed in the last iOS build ${PROGRAM_NAME} dev ran in this project`,
     },
     {
-      run: `${PROGRAM_PREFIX} inspect:build-log --stdin --json`,
-      gets: 'the same from a piped log, as one object',
+      run: `${PROGRAM_PREFIX} inspect:build-log --eas --android`,
+      gets: 'what failed in the last errored Android build on EAS, fetched from EAS',
     },
     {
-      run: `${PROGRAM_PREFIX} inspect:build-log --file build.log --all`,
-      gets: 'every rule that matched, not only the failing phase’s first',
+      run: `${PROGRAM_PREFIX} inspect:build-log --stdin --json`,
+      gets: 'the same from a piped log, as one object',
     },
   ],
   next: ['doctor', 'status'],
@@ -63,9 +64,9 @@ export const inspectBuildLogHelp: CommandHelp = {
     `${PROGRAM_NAME} dev writes the output of each native build it runs to .expo/dev/logs/build-<platform>.log`,
     `when no terminal is watching it, which is what --local reads. A build watched on a terminal`,
     `writes none: pipe its output in instead.`,
-    `"${PROGRAM_PREFIX} inspect:build-log <build-id>" is reserved and does not work yet: eas-cli has no`,
-    `build:logs, so an EAS build's log has to be saved and passed with --file. Run`,
-    `"${easCommandPrefix()} build:view" for where those files are.`,
+    `--eas asks EAS twice ("build:list" for the last errored build unless an id is given, then`,
+    `"build:view" for the build's log files), downloads the files and decodes them. A build id on`,
+    `its own means --eas: "${PROGRAM_PREFIX} inspect:build-log --ios <build-id>".`,
   ],
 };
 
