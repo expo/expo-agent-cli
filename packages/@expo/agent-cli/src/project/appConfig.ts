@@ -28,11 +28,18 @@ export interface StaticAppConfig {
   dynamic: boolean;
 }
 
-/** Static config files, in the order the Expo config resolves them. */
-const STATIC_CONFIG_FILES = ['app.json', 'app.config.json'];
+/** Static config files, in the order `@expo/config` resolves them (`getStaticConfigFilePath`). */
+const STATIC_CONFIG_FILES = ['app.config.json', 'app.json'];
 
-/** Dynamic config files, which are never evaluated here. */
-const DYNAMIC_CONFIG_FILES = ['app.config.ts', 'app.config.js', 'app.config.mjs', 'app.config.cjs'];
+/** Dynamic config files `@expo/config` resolves (`DYNAMIC_CONFIG_EXTS`), never evaluated here. */
+const DYNAMIC_CONFIG_FILES = [
+  'app.config.ts',
+  'app.config.mts',
+  'app.config.cts',
+  'app.config.mjs',
+  'app.config.cjs',
+  'app.config.js',
+];
 
 /** The static app config, as written, and whether a dynamic one exists beside it. */
 export interface StaticExpoConfig {
@@ -42,6 +49,8 @@ export interface StaticExpoConfig {
   config: Record<string, any> | null;
   /** A dynamic app config exists, so {@link config} is not what the app sees. */
   dynamic: boolean;
+  /** The static file exists but does not parse, so {@link config} is null without being absent. */
+  unreadable: boolean;
 }
 
 /** A dynamic app config is reported as present and never evaluated (llp/0001 §Constraints item 5). */
@@ -52,17 +61,21 @@ export async function readStaticExpoConfigAsync(projectRoot: string): Promise<St
     )
   ).some(Boolean);
 
+  // Expo takes the first file that exists, and does not fall back when it does not parse.
   for (const file of STATIC_CONFIG_FILES) {
-    const contents = await readJsonFileAsync<Record<string, any>>(path.join(projectRoot, file));
-    if (contents == null) {
+    if (!(await fileExistsAsync(path.join(projectRoot, file)))) {
       continue;
+    }
+    const contents = await readJsonFileAsync<Record<string, any>>(path.join(projectRoot, file));
+    if (contents == null || typeof contents !== 'object') {
+      return { source: file, config: null, dynamic, unreadable: true };
     }
     // Both `{ "expo": { ... } }` and a bare config object are valid.
     const config = (contents.expo ?? contents) as Record<string, any>;
-    return { source: file, config, dynamic };
+    return { source: file, config, dynamic, unreadable: false };
   }
 
-  return { source: null, config: null, dynamic };
+  return { source: null, config: null, dynamic, unreadable: false };
 }
 
 /** Read the config plugins declared in the project's static app config. */
@@ -84,15 +97,18 @@ export interface EasProjectLink {
   source: string | null;
   /** A dynamic app config exists, so a null {@link projectId} is not an answer. */
   dynamic: boolean;
+  /** {@link source} does not parse, so a null {@link projectId} is not an answer either. */
+  unreadable: boolean;
 }
 
 export async function readStaticEasProjectAsync(projectRoot: string): Promise<EasProjectLink> {
-  const { source, config, dynamic } = await readStaticExpoConfigAsync(projectRoot);
+  const { source, config, dynamic, unreadable } = await readStaticExpoConfigAsync(projectRoot);
   const projectId = config?.extra?.eas?.projectId;
   return {
     projectId: typeof projectId === 'string' && projectId.trim() ? projectId.trim() : null,
     source,
     dynamic,
+    unreadable,
   };
 }
 

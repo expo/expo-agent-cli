@@ -293,10 +293,38 @@ describe(readEasBuildsStatusAsync, () => {
       lookUp: true,
       auth: signedIn,
       projectHash: PROJECT_HASH,
-      easProject: { projectId: null, source: 'app.json', dynamic: false },
+      easProject: { projectId: null, source: 'app.json', dynamic: false, unreadable: false },
     });
 
     expect(iosOf(status.platforms)).toMatchObject({ state: 'found', source: 'cache' });
+  });
+
+  it(`should not ask EAS, nor name eas init, when the static config does not parse`, async () => {
+    const status = await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: true,
+      auth: signedIn,
+      projectHash: PROJECT_HASH,
+      easProject: { projectId: null, source: 'app.json', dynamic: false, unreadable: true },
+    });
+
+    expect(iosOf(status.platforms).state).toBe('unknown');
+    expect(iosOf(status.platforms).reason).toContain('app.json does not parse');
+    expect(iosOf(status.platforms).reason).not.toContain('init');
+    expect(lookUpCachedBuildAsync).not.toHaveBeenCalled();
+  });
+
+  it(`should leave the account as a hole when the signed-in account has no name`, async () => {
+    const status = await readEasBuildsStatusAsync(projectRoot, {
+      lookUp: true,
+      auth: { loggedIn: true, user: null, source: 'EXPO_TOKEN' },
+      projectHash: PROJECT_HASH,
+      easProject: { projectId: null, source: 'app.json', dynamic: false, unreadable: false },
+    });
+
+    expect(iosOf(status.platforms).reason).toContain(
+      'init --account <account-name> --non-interactive'
+    );
+    expect(iosOf(status.platforms).reason).toContain('the signed-in account is unknown');
   });
 
   it(`should pass the lookup's own reason through as the unknown`, async () => {

@@ -179,6 +179,13 @@ async function readPlatformAsync(
       `this machine is not signed in to Expo (per ${options.auth.source ?? 'the auth check'}), so EAS has nothing to answer with`
     );
   }
+  if (options.easProject?.unreadable) {
+    return unknown(
+      platform,
+      null,
+      `${options.easProject.source} does not parse, so whether this project is linked to EAS is unknown and EAS was not asked`
+    );
+  }
   if (options.easProject && !options.easProject.projectId && !options.easProject.dynamic) {
     // A dynamic config may set the id from an environment variable, so only a static one is trusted.
     return unknown(platform, null, unlinkedReason(projectRoot, options.easProject, options.auth));
@@ -225,8 +232,10 @@ function unlinkedReason(
   auth: AuthStatus | null
 ): string {
   const config = easProject.source ?? 'its app config';
-  const account = auth?.user ?? '<account>';
-  return `this project is not linked to an EAS project — ${config} names no extra.eas.projectId, so EAS was not asked; link it once with "${easCommandPrefix(projectRoot)} init --account ${account} --non-interactive" (or --id <project-id> for one that exists)`;
+  // With no account name (signed in by EXPO_TOKEN alone), the command keeps a visible hole.
+  const account = auth?.user ?? '<account-name>';
+  const unknownAccount = auth?.user ? '' : ' (the signed-in account is unknown; name yours)';
+  return `this project is not linked to an EAS project — ${config} names no extra.eas.projectId, so EAS was not asked; link it once with "${easCommandPrefix(projectRoot)} init --account ${account} --non-interactive"${unknownAccount} (or --id <project-id> for one that exists)`;
 }
 
 /** One platform's network answer: the hash that was asked about, and what came back. */
