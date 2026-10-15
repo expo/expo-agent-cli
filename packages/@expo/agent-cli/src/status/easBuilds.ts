@@ -138,10 +138,40 @@ export async function readEasBuildsStatusAsync(
   // and the two rungs it may take both touch the filesystem. It is also what lets the deadline below
   // say *why* a lookup ran out of time.
   const easCli = resolveEasCli(projectRoot);
+  // Set once `eas build:list` is spawned, whatever it answers, so a failed call still counts.
+  const asked = { eas: false };
   const platforms = await Promise.all(
-    PLATFORMS.map((platform) => readPlatformAsync(projectRoot, platform, record, options, easCli))
+    PLATFORMS.map((platform) =>
+      readPlatformAsync(projectRoot, platform, record, options, easCli, asked)
+    )
   );
-  return { askedEas: platforms.some((platform) => platform.source === 'eas'), platforms };
+  return { askedEas: asked.eas, platforms };
+}
+
+/**
+ * The platforms whose fingerprint the lookup will compute: signed in, linked, and no usable record
+ * entry. `status` starts these early; it must not start one the lookup would never wait for.
+ */
+export function platformsToFingerprintEarly(
+  projectRoot: string,
+  options: Pick<EasBuildsOptions, 'auth' | 'easProject' | 'fingerprintCache'>
+): NativePlatform[] {
+  if (options.auth?.loggedIn === false || !mayAskEas(options.easProject)) {
+    return [];
+  }
+  const record = options.fingerprintCache === false ? {} : readEasBuildsRecord(projectRoot);
+  return PLATFORMS.filter((platform) => {
+    const cached = record[platform];
+    if (!cached) {
+      return true;
+    }
+    const age = ageOf(cached.checkedAt);
+    return !cached.build && !(age != null && age <= EAS_NONE_CACHE_TTL_MS);
+  });
+}
+
+function mayAskEas(easProject: EasProjectLink | null | undefined): boolean {
+  return !easProject || (!easProject.unreadable && (!!easProject.projectId || easProject.dynamic));
 }
 
 async function readPlatformAsync(
@@ -149,7 +179,8 @@ async function readPlatformAsync(
   platform: NativePlatform,
   record: EasBuildsRecord,
   options: EasBuildsOptions,
-  easCli: EasCli | null
+  easCli: EasCli | null,
+  asked: { eas: boolean }
 ): Promise<PlatformBuild> {
   const cached = record[platform];
   if (cached && options.projectHash && cached.projectHash === options.projectHash) {
@@ -185,7 +216,7 @@ async function readPlatformAsync(
 
   const deadline = options.timeoutMs ?? easBuildLookupTimeoutMs(easCli);
   const outcome = await withDeadlineAsync(
-    lookUpPlatformAsync(projectRoot, platform, deadline, easCli, options.fingerprintCache),
+    lookUpPlatformAsync(projectRoot, platform, deadline, easCli, options.fingerprintCache, asked),
     deadline
   );
   if (!outcome) {
@@ -251,7 +282,8 @@ async function lookUpPlatformAsync(
   platform: NativePlatform,
   timeoutMs: number,
   easCli: EasCli | null,
-  fingerprintCache: boolean | undefined
+  fingerprintCache: boolean | undefined,
+  asked: { eas: boolean }
 ): Promise<LookupOutcome> {
   const fingerprint = await generateFingerprintAsync(projectRoot, {
     platform,
@@ -265,6 +297,7 @@ async function lookUpPlatformAsync(
     };
   }
 
+  asked.eas = true;
   const outcome = await lookUpCachedBuildAsync(easCli, projectRoot, platform, fingerprint.hash, {
     timeoutMs,
   });

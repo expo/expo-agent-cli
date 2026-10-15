@@ -50,7 +50,11 @@ import type { DiscoveredSkill } from '../skills/types';
 import { resolveEasCli } from '../utils/easCli';
 import { withSubprocessDeadlineAsync } from '../utils/subprocessDeadline';
 import { buildAssertStatus } from './assert';
-import { easBuildLookupTimeoutMs, readEasBuildsStatusAsync } from './easBuilds';
+import {
+  easBuildLookupTimeoutMs,
+  platformsToFingerprintEarly,
+  readEasBuildsStatusAsync,
+} from './easBuilds';
 import { formatStatusReport } from './format';
 import { readInstalledStatusAsync } from './installed';
 import {
@@ -228,14 +232,21 @@ export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions
 ): Promise<StatusReport> {
-  // For a project linked to EAS, start the two per-platform fingerprints the EAS lookup needs now,
-  // beside the probe's own; the lookup joins them through the memo (llp/0023 §Layer 1).
   const easProject = await readStaticEasProjectAsync(projectRoot);
-  if (easProject.projectId || easProject.dynamic) {
-    for (const platform of ['ios', 'android'] as const) {
+  // Start the per-platform fingerprints the EAS lookup will need beside the probe's own, once auth
+  // says the lookup will run; the lookup joins them through the memo (llp/0023 §Layer 1).
+  const readAuthAndPrestartAsync = async (): Promise<AuthStatus> => {
+    const auth = await readAuthPreflightAsync(projectRoot);
+    const early = platformsToFingerprintEarly(projectRoot, {
+      auth,
+      easProject,
+      fingerprintCache: options.fingerprintCache,
+    });
+    for (const platform of early) {
       void generateFingerprintAsync(projectRoot, { platform, cache: options.fingerprintCache });
     }
-  }
+    return auth;
+  };
 
   const saved = readLastDevRequest(projectRoot);
   const request =
@@ -245,7 +256,7 @@ export async function collectStatusReportAsync(
     attemptAsync(() => probeDevServerStatusAsync(projectRoot, options, request)),
     attemptAsync(() => readLocalDeviceStatusAsync(projectRoot, options)),
     attemptAsync(() => readSkillsStatusAsync(projectRoot)),
-    attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot)),
+    attemptAsync<AuthStatus>(readAuthAndPrestartAsync),
     attemptAsync(() =>
       readBindingSummaryAsync(projectRoot, options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS)
     ),

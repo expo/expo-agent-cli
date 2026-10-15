@@ -54,6 +54,7 @@ vi.mock('../../skills/discovery', () => ({ discoverSkillsAsync: vi.fn(async () =
 // The network call and `expo config`, mocked so these tests spawn neither.
 vi.mock('../easBuilds', () => ({
   readEasBuildsStatusAsync: vi.fn(async () => ({ askedEas: false, platforms: [] })),
+  platformsToFingerprintEarly: vi.fn(() => []),
 }));
 vi.mock('../../impact/fromRecord', async () => ({
   ...((await vi.importActual('../../impact/fromRecord')) as object),
