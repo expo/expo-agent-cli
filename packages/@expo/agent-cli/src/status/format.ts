@@ -58,10 +58,8 @@ export function formatStatusReport(report: StatusReport): string {
     // What a section could not do, even when it had something else to say.
     ...sectionNoteLines(report),
     // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
-    // Printed only when it says something, for the reason the skills line is: a default run has
-    // nothing cached and asked nobody, and `ios: unknown · android: unknown (EAS was not asked)` is
-    // two non-facts on a report of facts. The key is always in `--json`, where a key that is always
-    // present is the contract (llp/0006 §Output contract).
+    // Left off only when every platform was stopped before the call; the freshness rows already
+    // carry that reason. The key is always in `--json` (llp/0006 §Output contract).
     ...(hasBuildsToReport(report)
       ? [row('eas build', report.builds, buildsLine, report, 'builds')]
       : []),

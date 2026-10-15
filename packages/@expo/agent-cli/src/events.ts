@@ -245,7 +245,8 @@ declare module '2g' {
       localDevice: string;
       /**
        * What the app installed on a device says: `up-to-date`, `rebuild-required`, `unknown`.
-       * Null on a default run, which reads no device (llp/0004 §Reported by status).
+       * Null when the check is off (`AGENT_CLI_NO_DEVICE`) or produced no outcome (llp/0004
+       * §Reported by status).
        */
       installed: string | null;
       /**
