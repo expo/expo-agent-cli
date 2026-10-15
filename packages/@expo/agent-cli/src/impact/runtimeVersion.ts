@@ -27,8 +27,8 @@ export async function resolveRuntimeVersionAsync(
   { cache }: { cache?: boolean } = {}
 ): Promise<RuntimeVersionInfo> {
   const staticConfig = await readStaticExpoConfigAsync(projectRoot);
-  if (staticConfig.source && !staticConfig.dynamic) {
-    return readRuntimeVersion(staticConfig.config?.runtimeVersion, staticConfig.source);
+  if (staticConfig.source && staticConfig.config && !staticConfig.dynamic) {
+    return readRuntimeVersion(staticConfig.config.runtimeVersion, staticConfig.source);
   }
   // No app config at all: spawning `expo config` here can mean `npx expo` fetching a package.
   if (!staticConfig.source && !staticConfig.dynamic) {
@@ -43,10 +43,10 @@ export async function resolveRuntimeVersionAsync(
     };
   }
 
-  if (!staticConfig.source) {
+  if (!staticConfig.source || !staticConfig.config) {
     return { policy: null, literal: null, source: null };
   }
-  return readRuntimeVersion(staticConfig.config?.runtimeVersion, staticConfig.source);
+  return readRuntimeVersion(staticConfig.config.runtimeVersion, staticConfig.source);
 }
 
 /**
