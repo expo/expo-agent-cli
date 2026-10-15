@@ -13,6 +13,7 @@ import { resolveEasCli } from '../../utils/easCli';
 import {
   dropEasNoneEntry,
   EAS_BUILDS_FILE_NAME,
+  platformsToFingerprintEarly,
   readEasBuildsRecord,
   readEasBuildsStatusAsync,
   writeEasBuildsEntry,
@@ -305,7 +306,6 @@ describe(readEasBuildsStatusAsync, () => {
 
   it(`should not claim a session when nothing answered the auth check`, async () => {
     const status = await readEasBuildsStatusAsync(projectRoot, {
-      lookUp: true,
       auth: { loggedIn: null, user: null, source: null },
       projectHash: PROJECT_HASH,
       easProject: { projectId: null, source: 'app.json', dynamic: false, unreadable: false },
@@ -315,7 +315,7 @@ describe(readEasBuildsStatusAsync, () => {
     expect(iosOf(status.platforms).reason).not.toContain('signed-in');
   });
 
-  it(`should pass the lookup's own reason through as the unknown`, async () => {
+  it(`should pass the lookup's own reason through as the unknown, and count EAS as asked`, async () => {
     vi.mocked(lookUpCachedBuildAsync).mockResolvedValue({
       state: 'unknown',
       reason: 'EAS project not configured.',
@@ -331,6 +331,7 @@ describe(readEasBuildsStatusAsync, () => {
       reason: 'EAS project not configured.',
       fingerprintHash: IOS_HASH,
     });
+    expect(status.askedEas).toBe(true);
     expect(fs.existsSync(recordFile)).toBe(false);
   });
 
@@ -350,6 +351,7 @@ describe(readEasBuildsStatusAsync, () => {
       state: 'unknown',
       reason: 'no fingerprint CLI',
     });
+    expect(status.askedEas).toBe(false);
     expect(lookUpCachedBuildAsync).not.toHaveBeenCalled();
   });
 
@@ -394,6 +396,37 @@ describe(dropEasNoneEntry, () => {
     const record = readEasBuildsRecord(projectRoot);
     expect(record.ios).toBeUndefined();
     expect(record.android?.build?.id).toBe(BUILD.id);
+  });
+});
+
+describe(platformsToFingerprintEarly, () => {
+  const linked = { projectId: 'proj-1', source: 'app.json', dynamic: false, unreadable: false };
+
+  it(`should name both platforms for a linked, signed-in project with no record`, () => {
+    expect(
+      platformsToFingerprintEarly(projectRoot, { auth: signedIn, easProject: linked })
+    ).toEqual(['ios', 'android']);
+  });
+
+  it(`should name none when the lookup will not run`, () => {
+    const signedOut: AuthStatus = { loggedIn: false, user: null, source: 'eas whoami' };
+    expect(
+      platformsToFingerprintEarly(projectRoot, { auth: signedOut, easProject: linked })
+    ).toEqual([]);
+    expect(
+      platformsToFingerprintEarly(projectRoot, {
+        auth: signedIn,
+        easProject: { ...linked, projectId: null },
+      })
+    ).toEqual([]);
+  });
+
+  it(`should skip a platform the record answers`, () => {
+    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
+
+    expect(
+      platformsToFingerprintEarly(projectRoot, { auth: signedIn, easProject: linked })
+    ).toEqual(['android']);
   });
 });
 
