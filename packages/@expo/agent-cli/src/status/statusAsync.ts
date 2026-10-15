@@ -811,8 +811,6 @@ async function readProjectAsync(
   const [state, packageJson, easProject] = await Promise.all([
     probeProjectStateAsync(projectRoot, { fingerprintCache: options.fingerprintCache }),
     readProjectPackageJsonAsync(projectRoot),
-    // One file read, for the EAS build lookup below: an unlinked project is answered without a
-    // network call (`src/status/easBuilds.ts`).
     readStaticEasProjectAsync(projectRoot),
   ]);
   return { state, packageName: packageJson?.name ?? null, easProject };

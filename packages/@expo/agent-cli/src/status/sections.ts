@@ -299,8 +299,6 @@ export function applyEasFreshness(freshness: FreshnessStatus, builds: BuildsStat
     }
     if (lookup.state === 'none') {
       entry.state = 'stale';
-      // A remembered none says how old it is: a build may have finished since, and the age is the
-      // whole bound on that (`src/status/easBuilds.ts` §EAS_NONE_CACHE_TTL_MS).
       entry.detail =
         lookup.source === 'cache' && lookup.ageMs != null
           ? `EAS had no finished build for this fingerprint ${formatAge(lookup.ageMs)} ago`

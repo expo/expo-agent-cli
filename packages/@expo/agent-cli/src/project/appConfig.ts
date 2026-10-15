@@ -44,13 +44,7 @@ export interface StaticExpoConfig {
   dynamic: boolean;
 }
 
-/**
- * Read the project's static app config, whichever of the two spellings it uses.
- *
- * One file read and no evaluation: a dynamic `app.config.js`/`.ts` is reported as *present* and
- * never run (llp/0001 §Constraints item 5). Every reader of one static field goes through here, so
- * the two spellings and the `expo` nesting are decided once.
- */
+/** A dynamic app config is reported as present and never evaluated (llp/0001 §Constraints item 5). */
 export async function readStaticExpoConfigAsync(projectRoot: string): Promise<StaticExpoConfig> {
   const dynamic = (
     await Promise.all(
@@ -78,14 +72,10 @@ export async function readStaticAppConfigAsync(projectRoot: string): Promise<Sta
 }
 
 /**
- * Whether the project is linked to an EAS project, as far as its static config says.
+ * The project's `extra.eas.projectId`, as far as its static config says.
  *
  * @ref llp/0027-everything-on-eas.rfc.md §Check the EAS project before starting the environment
- * `extra.eas.projectId` is the link, and `eas init` is what writes it. The evaluated answer is
- * `assertEasProjectConfiguredAsync`, which spawns `expo config`; this is the free approximation for
- * a report that must stay instant. A **null `projectId` with `dynamic: true` proves nothing** — the
- * dynamic config may fill the id in from an environment variable — and every reader has to treat it
- * as "not seen" rather than "not there".
+ * A null `projectId` with `dynamic: true` proves nothing: the dynamic config may set the id.
  */
 export interface EasProjectLink {
   /** The `extra.eas.projectId` of the static config, or null when it names none. */
@@ -96,7 +86,6 @@ export interface EasProjectLink {
   dynamic: boolean;
 }
 
-/** Read the EAS project link out of the static app config. See {@link EasProjectLink}. */
 export async function readStaticEasProjectAsync(projectRoot: string): Promise<EasProjectLink> {
   const { source, config, dynamic } = await readStaticExpoConfigAsync(projectRoot);
   const projectId = config?.extra?.eas?.projectId;

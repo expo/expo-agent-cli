@@ -20,9 +20,8 @@
 // a hash it does not have. A hit costs one `readFileSync` and is as true as the lookup that wrote
 // it. See the LLP section for the argument in full.
 //
-// A `none` is remembered too, for a short while (§A none is remembered for five minutes), and a
-// project whose static config says it is not linked to EAS is never asked at all: `eas build:list`
-// refuses an unlinked project, and this CLI can read that refusal off `app.json` for free.
+// A `none` is remembered for five minutes. A project whose static config names no EAS project is
+// never asked: `eas build:list` would refuse it.
 
 import fs from 'fs';
 import path from 'path';
@@ -74,19 +73,10 @@ export function easBuildLookupTimeoutMs(easCli: EasCli | null): number {
 }
 
 /**
- * How long a `none` is believed before EAS is asked again.
+ * How long a `none` is believed before EAS is asked again. A build may be in the queue right now, so
+ * this stays shorter than a native build.
  *
- * @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
- * A `found` is exact for as long as the project hash it is keyed on stands: a build EAS has does not
- * stop existing. A `none` is a fact about a *moment* — the build that answers it may be in the queue
- * right now — so it used to be written nowhere, and every run of a linked project paid the network
- * call again [decided — 2026-08-26]. An agent loop runs `status` many times per minute, and paying
- * 1.3 s each time to be told "still none" is the cost this bound removes.
- *
- * Five minutes, and not the fingerprint cache's ten: what a stale `none` misdirects is a native
- * build (`stale` on the EAS axis, when a download was the answer), and five minutes is less than
- * the build the reader would otherwise start. `--no-fingerprint-cache` is the way out for a caller
- * who cannot accept even that, and the report says how old the answer is.
+ * @ref llp/0011-impact-and-freshness.rfc.md §What `status` remembers of the answer
  */
 export const EAS_NONE_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -102,12 +92,7 @@ interface CachedEntry {
   /** The per-platform hash that was actually asked about, reported so the answer can be checked. */
   fingerprintHash: string;
   checkedAt: string;
-  /**
-   * The build EAS had, or **null** when EAS answered that it has none.
-   *
-   * A null is bounded by {@link EAS_NONE_CACHE_TTL_MS} from `checkedAt`; a build is bounded by the
-   * project hash alone.
-   */
+  /** The build EAS had, or null when it had none (believed for {@link EAS_NONE_CACHE_TTL_MS}). */
   build: CachedBuild | null;
 }
 
@@ -129,23 +114,14 @@ export interface EasBuildsOptions {
   /** Overrides {@link EAS_BUILD_LOOKUP_TIMEOUT_MS}, for tests. */
   timeoutMs?: number;
   /**
-   * Whether the per-platform fingerprint below may come out of the project's `.expo` record — and
-   * whether this section's own record may answer at all.
+   * Whether the per-platform fingerprint below, and this section's own record, may come out of the
+   * project's `.expo` record.
    *
    * @see llp/0023-fingerprint-caching.rfc.md — this is the section that pays for *two* of the three
-   * fingerprints a `status --explain` used to compute, so it is the one the cache helps most. A
-   * caller who refused that cache wants a measurement, so the remembered EAS answer is refused too:
-   * the flag is about what the caller will accept, not about which file the answer came out of.
+   * fingerprints a `status --explain` used to compute, so it is the one the cache helps most.
    */
   fingerprintCache?: boolean;
-  /**
-   * Whether the project is linked to an EAS project, per its **static** app config.
-   *
-   * An unlinked project is answered without a network call: `eas build:list` refuses it with a
-   * sentence this CLI already rewrites (`classifyEasFailure`), and `app.json` says the same thing
-   * for free. A dynamic config cannot be read here, so it is asked as before — `projectId: null`
-   * with `dynamic: true` proves nothing. Null when the project could not be read at all.
-   */
+  /** The EAS project link from the static app config. Null when the project could not be read. */
   easProject?: EasProjectLink | null;
 }
 
@@ -160,7 +136,6 @@ export async function readEasBuildsStatusAsync(
   projectRoot: string,
   options: EasBuildsOptions
 ): Promise<BuildsStatus> {
-  // A refused cache is refused whole: the record is not read, so every platform is asked again.
   const record = options.fingerprintCache === false ? {} : readEasBuildsRecord(projectRoot);
   // Once for the whole section rather than once per platform: the answer cannot differ between them,
   // and the two rungs it may take both touch the filesystem. It is also what lets the deadline below
@@ -184,8 +159,6 @@ async function readPlatformAsync(
     if (cached.build) {
       return found(platform, cached.fingerprintHash, cached.build, 'cache', cached.checkedAt);
     }
-    // A remembered `none`, believed only while it is young. Older than that it is not an answer,
-    // and the run falls through to asking — or to `unknown`, on a run that may not.
     const age = ageOf(cached.checkedAt);
     if (age != null && age <= EAS_NONE_CACHE_TTL_MS) {
       return none(platform, cached.fingerprintHash, 'cache', cached.checkedAt, age);
@@ -207,9 +180,7 @@ async function readPlatformAsync(
     );
   }
   if (options.easProject && !options.easProject.projectId && !options.easProject.dynamic) {
-    // The refusal `eas build:list` would print, read off the static config instead of paid for
-    // with a network call. Only when the config is static: a dynamic one may name the id from an
-    // environment variable this CLI does not evaluate, and "not seen" is not "not there".
+    // A dynamic config may set the id from an environment variable, so only a static one is trusted.
     return unknown(platform, null, unlinkedReason(projectRoot, options.easProject, options.auth));
   }
 
@@ -238,8 +209,6 @@ async function readPlatformAsync(
   if (outcome.reason) {
     return unknown(platform, outcome.fingerprintHash, outcome.reason);
   }
-  // EAS answered and has none. Remembered, so the next few minutes of `status` runs do not pay the
-  // same network call to be told the same thing (§EAS_NONE_CACHE_TTL_MS).
   writeEasBuildsEntry(projectRoot, platform, {
     projectHash: options.projectHash,
     fingerprintHash: outcome.fingerprintHash,
@@ -249,13 +218,7 @@ async function readPlatformAsync(
   return none(platform, outcome.fingerprintHash, 'eas', checkedAt, null);
 }
 
-/**
- * The sentence for a project whose static config names no EAS project.
- *
- * The same two `eas init` forms `assertEasProjectConfiguredAsync` names, because they are the fix;
- * with the account filled in when the auth section knew it, the way `classifyEasFailure` fills in
- * the one EAS listed (llp/0027 §What EAS said).
- */
+/** Names the same `eas init` forms as `assertEasProjectConfiguredAsync`. */
 function unlinkedReason(
   projectRoot: string,
   easProject: EasProjectLink,
@@ -327,8 +290,6 @@ function found(
     buildUrl: build.buildUrl,
     source,
     checkedAt: checkedAt || null,
-    // A found build is exact for as long as its key stands, so its age is not a bound on anything
-    // and is not claimed.
     ageMs: null,
     reason: null,
   };
@@ -376,7 +337,6 @@ function unknown(
   };
 }
 
-/** How old a timestamp is, or null when it is not one this can subtract from now. */
 function ageOf(checkedAt: string): number | null {
   const age = Date.now() - Date.parse(checkedAt);
   return Number.isFinite(age) && age >= 0 ? age : null;
@@ -417,10 +377,9 @@ export function readEasBuildsRecord(projectRoot: string): EasBuildsRecord {
 /**
  * One platform's entry, or null when it cannot be trusted.
  *
- * An entry without both hashes is dropped rather than repaired: the whole value of this cache is
- * that a hit is *exact*, and an entry that cannot name what it was true for is not. A build without
- * an id is dropped for the same reason. A `none` (`build: null`) is dropped when it cannot say
- * *when* it was true, because a none with no time is a none with no bound.
+ * An entry without both hashes, or a build without an id, is dropped rather than repaired: the whole
+ * value of this cache is that a hit is *exact*. A `none` without a valid `checkedAt` is dropped too,
+ * because its age is its only bound.
  */
 function parseEntry(value: unknown): CachedEntry | null {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) {
@@ -478,12 +437,8 @@ function readString(value: unknown): string | null {
 /**
  * Record what EAS answered for one platform, keeping the other platform's entry.
  *
- * A **hit** is written against the project hash and believed for as long as that hash stands: a hit
- * only goes out of date when somebody deletes a build, and the download command says so when they
- * have. A **none** is written with the time it was true, and believed for
- * {@link EAS_NONE_CACHE_TTL_MS} — it goes out of date on the ordinary timeline of the workflow this
- * exists to serve (you start a build, it finishes fifteen minutes later), so it is not believed for
- * long, and the report says how old it is.
+ * A hit is believed while the project hash stands. A `none` is believed for
+ * {@link EAS_NONE_CACHE_TTL_MS}.
  *
  * Best-effort, like every other `.expo` record: a project whose `.expo` cannot be written loses a
  * cache, not a report.

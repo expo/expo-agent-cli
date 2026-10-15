@@ -152,7 +152,6 @@ async function plantAsync({
   racing?: boolean;
 }): Promise<Planted> {
   const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
-  // The lookup under test only runs for a project the static config says is linked to EAS.
   await linkFixtureToEasAsync(projectRoot);
   await installStubFingerprintAsync(projectRoot);
 

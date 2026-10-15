@@ -269,11 +269,10 @@ function buildLine(location: PlanBuildLocation): string {
 /**
  * Whether the EAS-build line would say anything.
  *
- * Three cases, and they are the three that carry information: EAS answered for a platform — a
- * build was found, which changes what to do next, or there is none, remembered from a run that
- * asked — the caller asked outright with `--explain` (they are owed the answer whatever it is), or
- * the section could not be read at all (the reason is worth printing). A default run with an empty
- * cache is silent here, because "nobody asked" is not a fact about the project.
+ * Three cases, and they are the three that carry information: EAS answered for a platform (found or
+ * none), the caller asked outright with `--explain`, or the section could not be read at all. A
+ * default run with an empty cache is silent here, because "nobody asked" is not a fact about the
+ * project.
  */
 function hasBuildsToReport(report: StatusReport): boolean {
   if (report.builds == null) {
@@ -305,8 +304,7 @@ function buildsLine(builds: BuildsStatus): string {
     // build made from this fingerprint" beside it twice says it three times. An `unknown` is the
     // opposite — the reason is the only thing that makes it worth a line.
     if (platform.state === 'none') {
-      // Except for a *remembered* none, whose age is the one thing a reader has to weigh it by: a
-      // build may have finished since, and this is what says how long "since" can be.
+      // A remembered none shows its age: a build may have finished since.
       const remembered =
         platform.source === 'cache' && platform.ageMs != null
           ? ` (as of ${formatAge(platform.ageMs)} ago)`

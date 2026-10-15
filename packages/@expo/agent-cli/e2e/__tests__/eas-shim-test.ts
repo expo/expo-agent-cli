@@ -77,7 +77,6 @@ async function setupWithBrokenEasAsync(
 ): Promise<string> {
   const projectRoot = await setupFixtureAsync(fixture);
   await installStubFingerprintAsync(projectRoot);
-  // The lookup under test only runs for a project the static config says is linked to EAS.
   await linkFixtureToEasAsync(projectRoot);
 
   const binDir = path.join(projectRoot, '.stub-bin');

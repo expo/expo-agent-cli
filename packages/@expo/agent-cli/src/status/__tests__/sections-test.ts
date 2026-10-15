@@ -299,8 +299,6 @@ describe(applyEasFreshness, () => {
     ).toMatchObject({ state: 'stale', detail: expect.stringContaining('no finished build') });
   });
 
-  // A remembered none says how old it is: a build may have finished since, and the age is the
-  // whole bound on that (llp/0021).
   it(`should say how old a remembered none is`, () => {
     const status = buildFreshnessStatus(mockState(), {});
 

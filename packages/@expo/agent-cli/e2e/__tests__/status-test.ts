@@ -103,7 +103,6 @@ type StatusReport = {
       buildProfile: string | null;
       buildUrl: string | null;
       source: 'cache' | 'eas' | null;
-      /** When EAS was asked, and how old a remembered `none` is (llp/0011 §The build-cache lookup). */
       checkedAt: string | null;
       ageMs: number | null;
       reason: string | null;
@@ -1290,7 +1289,6 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     /** Copy the fixture and install both stubs over the ones `setupAsync` put there. */
     async function setupWithEasAsync(
       fixture = 'dev-client-fresh-app',
-      /** Whether `app.json` names an EAS project. The lookup only runs for one that does. */
       { linked = true }: { linked?: boolean } = {}
     ): Promise<string> {
       const projectRoot = await setupAsync(fixture);
@@ -1547,10 +1545,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       expect(report.followups.map((followup) => followup.id)).toContain('cached-build');
     });
 
-    // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
-    // A `none` used to be written nowhere, so every run of a linked project paid the network call
-    // to be told the same thing. It is remembered now, for a bounded while, and the report says how
-    // old the answer is — a remembered none must never read as a fresh one (llp/0021).
+    // @ref llp/0011-impact-and-freshness.rfc.md §What `status` remembers of the answer
     it('remembers a none for a while, and says how old it is', async () => {
       const projectRoot = await setupWithEasAsync();
       await reportInAsync(projectRoot, ['--explain']);
@@ -1579,7 +1574,6 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       await reportInAsync(projectRoot, ['--explain']);
       await fs.promises.rm(path.join(projectRoot, STUB_EAS_LOG_NAME));
 
-      // Age the record rather than wait: the bound is minutes, and the test is about the rule.
       const recordPath = path.join(projectRoot, '.expo', 'agent-cli-eas-builds.json');
       const record = JSON.parse(await fs.promises.readFile(recordPath, 'utf8'));
       const old = new Date(Date.now() - 10 * 60 * 1000).toISOString();
@@ -1595,8 +1589,6 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
     });
 
     // @ref llp/0023-fingerprint-caching.rfc.md §Every consumer can turn it off
-    // The flag is about what the caller will accept, not which file the answer came out of: a
-    // caller who refused the fingerprint record is refused the remembered EAS answer too.
     it('asks EAS again under --no-fingerprint-cache, whatever the record remembers', async () => {
       const projectRoot = await setupWithEasAsync();
       await reportInAsync(projectRoot, ['--explain'], {
@@ -1612,9 +1604,6 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       expect(easCommands(projectRoot)).toContain('build:list');
     });
 
-    // The refusal `eas build:list` prints for an unlinked project, read off `app.json` for free
-    // instead of paid for with a network call. The fix it names is the one `eas init` form the
-    // account is known for (llp/0027 §Check the EAS project before starting the environment).
     it('skips the lookup for a project whose app.json names no EAS project, and names eas init', async () => {
       const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
 
@@ -1631,8 +1620,7 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
       expect(report.errors).toEqual({});
     });
 
-    // A dynamic config may fill the id in from the environment, and this CLI does not evaluate it
-    // (llp/0001 §Constraints item 5) — so "not seen" is not "not there", and EAS is asked.
+    // A dynamic config may set the id from the environment.
     it('asks EAS when the config is dynamic and the static one names no project', async () => {
       const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
       await fs.promises.writeFile(
@@ -1673,7 +1661,6 @@ process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
 
     it('computes three under --explain: the project, then one per platform', async () => {
       const projectRoot = await setupAsync('dev-client-fresh-app');
-      // The per-platform pair is computed for the EAS lookup, which only runs for a linked project.
       await linkFixtureToEasAsync(projectRoot);
 
       await reportInAsync(projectRoot, ['--explain']);
