@@ -113,7 +113,7 @@ describe('device lifecycle across two worktrees', () => {
         env: envFor(projects[0]!),
       });
       expect(JSON.parse(kept.stdout).devices).toEqual([
-        expect.objectContaining({ id: first.runDevice, released: false }),
+        expect.objectContaining({ id: first.runDevice, released: null }),
       ]);
       expect(readXcrun().some((args) => args[1] === 'shutdown')).toBe(false);
       const stopped = await executeAgentCliAsync(
