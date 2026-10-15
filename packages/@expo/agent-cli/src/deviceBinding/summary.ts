@@ -20,10 +20,13 @@ export interface BindingSummary {
   expiresAt: string;
 }
 
-/** Uses the same cached inspection as status's device section; cloud files are never probed. */
+/**
+ * Uses the same cached inspection as status's device section; cloud files are never probed. The
+ * caller names the deadline: `status` its probe deadline, a device verb the device check's timeout.
+ */
 export async function readBindingSummaryAsync(
   projectRoot: string,
-  timeoutMs = 2_500
+  timeoutMs: number
 ): Promise<BindingSummary[]> {
   const entries = await Promise.all(
     ownBindingFiles(projectRoot).map(async ({ file, platform, backend }) => {

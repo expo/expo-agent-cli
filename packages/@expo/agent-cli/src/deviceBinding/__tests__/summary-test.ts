@@ -25,7 +25,7 @@ it('reports local and cloud bindings without renewing leases, reaping, or probin
   });
   const before = [fs.readFileSync(file, 'utf8'), fs.readFileSync(cloudFile, 'utf8')];
   await inspectBindingCachedAsync(ROOT, 'ios', 'local-ios', { tools });
-  const binding = await readBindingSummaryAsync(ROOT);
+  const binding = await readBindingSummaryAsync(ROOT, 2_500);
   expect(binding).toEqual([
     {
       platform: 'ios',

@@ -13,6 +13,7 @@ import {
 } from '../../deviceBinding';
 import { deviceUnavailableError } from '../../deviceBinding/errors';
 import * as bindingSummary from '../../deviceBinding/summary';
+import { SIMCTL_CALL_TIMEOUT_MS } from '../../deviceBinding/ios';
 import { event as cliEvent } from '../../events';
 import * as Log from '../../log';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
@@ -597,6 +598,20 @@ describe('the bound device', () => {
       (platform) => platform === 'ios' && process.platform === 'darwin'
     );
     vi.mocked(acquireDeviceAsync).mockResolvedValue(reused);
+  });
+
+  it("reads its binding with the device check's timeout, not status's probe deadline", async () => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+    const summary = vi.spyOn(bindingSummary, 'readBindingSummaryAsync').mockResolvedValue([]);
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
+        print: false,
+        reuseBoundDevice: true,
+      })
+    ).resolves.toBe(0);
+
+    expect(summary).toHaveBeenCalledWith(projectRoot, SIMCTL_CALL_TIMEOUT_MS);
   });
 
   // already-running-reuses-only

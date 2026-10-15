@@ -30,6 +30,7 @@ import {
   hostBindsPlatform,
   localBackendOf,
 } from '../deviceBinding';
+import { SIMCTL_CALL_TIMEOUT_MS } from '../deviceBinding/ios';
 import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
 import { PORT_WATCH_TIMEOUT_MS, readLastLoggedDevServerPort } from '../devLock/port';
 import { event as cliEvent } from '../events';
@@ -1030,7 +1031,9 @@ async function boundDeviceAsync(
   }
   const backend = localBackendOf(platform);
   return (
-    (await readBindingSummaryAsync(projectRoot)).find((entry) => entry.backend === backend) ?? null
+    (await readBindingSummaryAsync(projectRoot, SIMCTL_CALL_TIMEOUT_MS)).find(
+      (entry) => entry.backend === backend
+    ) ?? null
   );
 }
 
