@@ -5,7 +5,6 @@ import { spawnExpoAsync } from '../../utils/expoCli';
 import {
   APP_CONFIG_CACHE_FILE_NAME,
   APP_CONFIG_CACHE_TTL_MS,
-  clearEvaluatedAppConfigCache,
   readEvaluatedAppConfigAsync,
 } from '../evaluatedAppConfig';
 
@@ -176,21 +175,5 @@ describe(readEvaluatedAppConfigAsync, () => {
     } finally {
       rename.mockRestore();
     }
-  });
-});
-
-describe(clearEvaluatedAppConfigCache, () => {
-  it(`should drop the record`, async () => {
-    mockExpoConfig({ name: 'app' });
-    await readEvaluatedAppConfigAsync(projectRoot);
-    expect(fs.existsSync(recordPath)).toBe(true);
-
-    clearEvaluatedAppConfigCache(projectRoot);
-
-    expect(fs.existsSync(recordPath)).toBe(false);
-  });
-
-  it(`should not throw for a project with no record`, () => {
-    expect(() => clearEvaluatedAppConfigCache('/nowhere')).not.toThrow();
   });
 });

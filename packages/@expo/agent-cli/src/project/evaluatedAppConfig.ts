@@ -151,12 +151,6 @@ async function writeCacheAsync(
   }
 }
 
-export function clearEvaluatedAppConfigCache(projectRoot: string): void {
-  try {
-    fs.rmSync(getRecordPath(projectRoot), { force: true });
-  } catch {}
-}
-
 function getRecordPath(projectRoot: string): string {
   return path.join(projectRoot, '.expo', APP_CONFIG_CACHE_FILE_NAME);
 }

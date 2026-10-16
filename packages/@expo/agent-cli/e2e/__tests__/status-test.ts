@@ -1141,6 +1141,7 @@ process.stdout.write(JSON.stringify({
         );
         expect(result.exitCode).toBe(0);
         expect(result.stdout).toMatch(/expo config --type public, cached \d+[smh] ago/);
+        expect(result.stdout).toContain('environment variables are not checked');
       });
 
       it('evaluates again once app.config.js changes', async () => {
