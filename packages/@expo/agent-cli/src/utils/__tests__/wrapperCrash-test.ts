@@ -99,11 +99,11 @@ describe(runnerNoiseReason, () => {
   it('says the runner failed to deliver the CLI, and never that EAS said so', () => {
     const reason = runnerNoiseReason(
       { tool: 'eas', exitCode: 1 },
-      'bunx eas-cli@latest',
+      'bunx eas-cli',
       'Resolving dependencies'
     );
 
-    expect(reason).toContain('bunx eas-cli@latest');
+    expect(reason).toContain('bunx eas-cli');
     expect(reason).toContain('failed to deliver the eas CLI');
     // The runner's line is quoted as the runner's, so a reader can see what it was without being
     // told it is an answer about their builds.

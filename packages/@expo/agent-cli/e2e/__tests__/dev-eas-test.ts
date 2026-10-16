@@ -809,13 +809,13 @@ describe('@expo/agent-cli dev --eas on a project EAS does not know', () => {
     expect(report.error.code).toBe('EAS_PROJECT_NOT_LINKED');
     expect(report.error.needsHuman).toMatchObject({
       scenario: 'eas-project-unlinked',
-      command: 'npx --yes eas-cli@latest init --account e2e-user --non-interactive',
+      command: 'npx --yes eas-cli init --account e2e-user --non-interactive',
     });
     expect(report.error.message).toContain('not linked to an EAS project');
     expect(report.error.message).not.toContain('needed an answer');
     // The fix, not the command that just failed.
     expect(report.error.suggestedCommand).toBe(
-      'npx --yes eas-cli@latest init --account e2e-user --non-interactive'
+      'npx --yes eas-cli init --account e2e-user --non-interactive'
     );
     expect(expoInvocationArgs(projectRoot)).toEqual([['config', '--json']]);
   });

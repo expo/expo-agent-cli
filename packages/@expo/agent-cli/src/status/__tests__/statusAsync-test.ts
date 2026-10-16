@@ -72,13 +72,14 @@ vi.mock('../../impact/buildCache', async () => ({
 vi.mock('../../utils/easCli', () => ({
   resolveEasCliOrThrow: vi.fn(() => ({
     command: 'npx',
-    prefixArgs: ['--yes', 'eas-cli@latest'],
-    source: 'npx --yes eas-cli@latest',
+    prefixArgs: ['--yes', 'eas-cli'],
+    source: 'npx --yes eas-cli',
     runner: 'npx',
     pinned: false,
+    global: false,
   })),
   // The spelling every printed EAS command line carries (llp/0015 §Resolving the EAS CLI).
-  easCommandPrefix: () => 'npx --yes eas-cli@latest',
+  easCommandPrefix: () => 'npx --yes eas-cli',
 }));
 vi.mock('../../impact/runtimeVersion', () => ({
   resolveRuntimeVersionAsync: vi.fn(async () => ({

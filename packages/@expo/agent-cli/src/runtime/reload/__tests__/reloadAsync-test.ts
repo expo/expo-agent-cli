@@ -870,7 +870,7 @@ describe(explainReloadFailure, () => {
   it(`hands back the command that reopens it by hand on a cloud session`, () => {
     const explained = explainReloadFailure(strandedReport(), options({ cloud: true }));
 
-    expect(explained).toContain('eas-cli@latest simulator:exec');
+    expect(explained).toContain('eas-cli simulator:exec');
     expect(explained).toContain('open host.exp.Exponent');
   });
 
@@ -878,7 +878,7 @@ describe(explainReloadFailure, () => {
     const explained = explainReloadFailure(strandedReport(), options({ cloud: false }));
 
     expect(explained).toContain('host.exp.Exponent');
-    expect(explained).not.toContain('eas-cli@latest simulator:exec');
+    expect(explained).not.toContain('eas-cli simulator:exec');
     expect(explained).toContain('npx @expo/agent-cli navigate /');
   });
 
@@ -1142,7 +1142,7 @@ describe('reloading an app on a cloud simulator session', () => {
       false,
     ],
     [
-      'npm warn exec The following package was not found and will be installed: eas-cli@latest\n',
+      'npm warn exec The following package was not found and will be installed: eas-cli\n',
       'failed to deliver the eas CLI',
       true,
     ],
@@ -1460,7 +1460,7 @@ describe('reloading an app on a cloud simulator session', () => {
     );
     const explained = vi.mocked(console.error).mock.calls.flat().join('\n');
     expect(explained).toContain('terminates the app before it launches it');
-    expect(explained).toContain('eas-cli@latest simulator:exec');
+    expect(explained).toContain('eas-cli simulator:exec');
   });
 
   it(`reaches the same one-verb relaunch when --method device names it`, async () => {

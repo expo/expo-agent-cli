@@ -17,7 +17,8 @@ import type { CachedBuild } from './types';
  * How long the lookup may take before it is abandoned, for a caller that names no budget.
  *
  * **Unchanged by the move to a package runner** [decided — 2026-08-27, wave 18]. In a project that
- * does not pin `eas-cli` the lookup runs `npx --yes eas-cli@latest`, whose first run installs the
+ * does not pin `eas-cli`, on a machine without a recent global one, the lookup runs `npx --yes
+ * eas-cli`, whose first run installs the
  * package before the query starts, and that can outlast this. The default stays anyway, because the
  * caller that takes it is `impact` — an *opportunistic* lookup decorating a report that is complete
  * without it, run without being asked for. Twenty seconds of a command's time is a fair ceiling on a

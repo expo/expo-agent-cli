@@ -233,7 +233,7 @@ describe('@expo/agent-cli navigate --eas', () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('Remote daemon is unavailable');
-    expect(result.stderr).toContain('npx --yes eas-cli@latest simulator:list --status in-progress');
+    expect(result.stderr).toContain('npx --yes eas-cli simulator:list --status in-progress');
   });
 
   // @ref llp/0005 §Cloud simulator. The controller's own
@@ -935,7 +935,7 @@ describe('an --eas command on a project EAS does not know', () => {
     expect(envelope.error.message).toContain('not linked to an EAS project');
     expect(envelope.error.message).not.toMatch(/re-run this command:\s*\./);
     expect(envelope.error.suggestedCommand).toBe(
-      'npx --yes eas-cli@latest init --account e2e-user --non-interactive'
+      'npx --yes eas-cli init --account e2e-user --non-interactive'
     );
   });
 });

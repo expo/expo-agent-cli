@@ -34,13 +34,13 @@ describe(classifyEasFailure, () => {
       ].join('\n')
     );
 
-    expect(cause?.command).toContain('npx --yes eas-cli@latest init');
+    expect(cause?.command).toContain('npx --yes eas-cli init');
     expect(cause?.why).toContain('not linked');
     // The sentence has to rule the wrong answer out, because that is the answer it replaces.
     expect(cause?.why).toContain('not about being signed in');
   });
 
-  // @ref llp/0007-deploy-and-headless.rfc.md §deploy — **F143.** `npx --yes eas-cli@latest init` on
+  // @ref llp/0007-deploy-and-headless.rfc.md §deploy — **F143.** `npx --yes eas-cli init` on
   // its own is a command that prompts, and this failure exists because the run had no terminal to
   // prompt in: handing it back is handing back the same dead end one command earlier. The runnable
   // form needs a value, and the EAS CLI's own output is where that value is.
@@ -48,7 +48,7 @@ describe(classifyEasFailure, () => {
     const cause = classifyEasFailure(UNLINKED_OUTPUT);
 
     expect(cause?.command).toBe(
-      'npx --yes eas-cli@latest init --account <account-name> --non-interactive'
+      'npx --yes eas-cli init --account <account-name> --non-interactive'
     );
     // Both forms in the How:, because linking an existing project and creating a new one are
     // different intentions and only the caller knows which one they have.
@@ -68,7 +68,7 @@ describe(classifyEasFailure, () => {
       ['EAS project not configured.', 'Accounts you can create projects in: bob'].join('\n')
     );
 
-    expect(cause?.command).toBe('npx --yes eas-cli@latest init --account bob --non-interactive');
+    expect(cause?.command).toBe('npx --yes eas-cli init --account bob --non-interactive');
   });
 
   it.each([
@@ -102,7 +102,7 @@ describe('the one-line summary', () => {
       ['EAS project not configured.', 'Accounts you can create projects in: bob'].join('\n')
     )?.summary;
     expect(summary).toContain('not linked to an EAS project');
-    expect(summary).toContain('npx --yes eas-cli@latest init --account bob --non-interactive');
+    expect(summary).toContain('npx --yes eas-cli init --account bob --non-interactive');
   });
 
   it(`leaves the account a hole when several could be meant`, () => {
@@ -206,12 +206,12 @@ describe(readEasFailure, () => {
     ],
     [
       "npx's install notice, which names the package, as the runner",
-      'npm warn exec The following package was not found and will be installed: eas-cli@latest\n',
+      'npm warn exec The following package was not found and will be installed: eas-cli\n',
       '',
       {
         kind: 'runner-only',
         runnerLine:
-          'npm warn exec The following package was not found and will be installed: eas-cli@latest',
+          'npm warn exec The following package was not found and will be installed: eas-cli',
       },
     ],
     [
@@ -225,7 +225,7 @@ describe(readEasFailure, () => {
     expect(readEasFailure({ stdout, stderr })).toEqual(expected);
   });
 
-  // `npx --yes eas-cli@latest notacommand` on an empty npm cache, npm 10.9.4: npm's deprecation
+  // `npx --yes eas-cli notacommand` on an empty npm cache, npm 10.9.4: npm's deprecation
   // warnings first, the CLI's error, then npm's update notice [observed — 2026-10-07, abridged].
   const NPX_DEPRECATED = [
     'npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory.',
@@ -307,7 +307,7 @@ describe(readEasFailure, () => {
 });
 
 describe(easFailureReason, () => {
-  const invocation = 'bunx eas-cli@latest simulator:start';
+  const invocation = 'bunx eas-cli simulator:start';
 
   it('quotes what EAS said', () => {
     expect(
@@ -315,7 +315,7 @@ describe(easFailureReason, () => {
         { exitCode: 1, stdout: '', stderr: 'Resolving dependencies\nError: quota exceeded\n' },
         invocation
       )
-    ).toBe('"bunx eas-cli@latest simulator:start" exited 1: Error: quota exceeded');
+    ).toBe('"bunx eas-cli simulator:start" exited 1: Error: quota exceeded');
   });
 
   it('says the runner did not deliver the CLI when only the runner printed', () => {
@@ -329,7 +329,7 @@ describe(easFailureReason, () => {
 
   it('says a run that printed nothing printed nothing', () => {
     expect(easFailureReason({ exitCode: null, stdout: '', stderr: '' }, invocation)).toBe(
-      '"bunx eas-cli@latest simulator:start" exited on a signal: it printed nothing'
+      '"bunx eas-cli simulator:start" exited on a signal: it printed nothing'
     );
   });
 
