@@ -16,6 +16,7 @@ import {
   installStubEasAsync as installSharedStubEasAsync,
   STUB_EAS_LOG_NAME,
   stubEasCommands,
+  writeCloudSessionFileAsync,
 } from '../stubEas';
 import {
   breakXcodeSelectAsync,
@@ -26,6 +27,7 @@ import {
   installStubBinAsync,
   installStubEasRunnerAsync,
   installStubFingerprintAsync,
+  pathEnvVars,
   readStubExpoInvocations,
   readStubFingerprintInvocations,
   linkFixtureToEasAsync,
@@ -126,6 +128,14 @@ type StatusReport = {
       ageMs: number | null;
       reason: string | null;
     }[];
+  } | null;
+  device: {
+    state: 'present' | 'absent' | 'unknown';
+    platform: string | null;
+    deviceId: string | null;
+    name: string | null;
+    devices: { platform: string; deviceId: string; name: string | null }[];
+    reason: string | null;
   } | null;
   skills: { agentIds: string[] | null; discovered: number; linked: number } | null;
   auth: {
@@ -1248,6 +1258,212 @@ process.stdout.write(JSON.stringify({
         });
         expect(report.project).not.toBeNull();
       });
+    });
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §navigate
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
+  describe('the device section, with stubbed platform tools', () => {
+    const IOS_UDID = '8B2C5D9E-1234-4F5A-9B7C-0D1E2F3A4B5C';
+
+    type ToolState = 'answers' | 'none' | 'not-runnable';
+
+    /** Stub `xcrun` and `adb`, and return the env the run needs to find them. */
+    async function stubDeviceToolsAsync(
+      projectRoot: string,
+      { ios, android }: { ios: ToolState; android: ToolState }
+    ): Promise<Record<string, string>> {
+      const { binDir } = await installStubXcrunAsync(projectRoot, {
+        simulators:
+          ios === 'none' ? [] : [{ udid: IOS_UDID, name: 'iPhone 17 Pro', state: 'Booted' }],
+      });
+      if (ios === 'not-runnable') {
+        await fs.promises.chmod(path.join(binDir, 'xcrun'), 0o000);
+      }
+
+      const adb = await installStubAdbAsync(projectRoot, 'host.exp.Exponent', {
+        attached: android !== 'none',
+      });
+      if (android === 'not-runnable') {
+        await fs.promises.chmod(path.join(adb.env.ANDROID_HOME!, 'platform-tools', 'adb'), 0o000);
+      }
+      // Without this, the PATH search skips the stub and finds the machine's own `xcrun`.
+      const pathOverride = ios === 'not-runnable' ? pathEnvVars(binDir) : {};
+      return { ...adb.env, ...pathOverride };
+    }
+
+    it('reports an attached Android device', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const env = await stubDeviceToolsAsync(projectRoot, { ios: 'none', android: 'answers' });
+
+      const report = await reportInAsync(projectRoot, [], env);
+
+      expect(report.device).toMatchObject({
+        state: 'present',
+        platform: 'android',
+        deviceId: 'emulator-5554',
+        devices: [{ platform: 'android', deviceId: 'emulator-5554' }],
+        reason: null,
+      });
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        { env }
+      );
+      expect(result.stdout).toMatch(/device\s+android emulator-5554/);
+    });
+
+    it.skipIf(process.platform !== 'darwin')(
+      'reports a booted iOS simulator by name, and every bound device',
+      async () => {
+        const projectRoot = await setupAsync('go-app');
+        const env = await stubDeviceToolsAsync(projectRoot, { ios: 'answers', android: 'answers' });
+
+        const report = await reportInAsync(projectRoot, [], env);
+
+        expect(report.device).toMatchObject({
+          state: 'present',
+          platform: 'ios',
+          deviceId: IOS_UDID,
+          name: 'iPhone 17 Pro',
+        });
+        expect(report.device!.devices).toEqual([
+          { platform: 'ios', deviceId: IOS_UDID, name: 'iPhone 17 Pro' },
+          { platform: 'android', deviceId: 'emulator-5554', name: null },
+        ]);
+
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+          { env }
+        );
+        expect(result.stdout).toContain(`ios iPhone 17 Pro (${IOS_UDID})`);
+        expect(result.stdout).toContain('android emulator-5554');
+      }
+    );
+
+    it('reports absent, and why, when no device is bound', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const env = await stubDeviceToolsAsync(projectRoot, { ios: 'none', android: 'none' });
+
+      const report = await reportInAsync(projectRoot, [], env);
+
+      expect(report.device).toMatchObject({ state: 'absent', deviceId: null, devices: [] });
+      expect(report.device!.reason).toContain(
+        'Android: no emulator instance is bound to this worktree'
+      );
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        { env }
+      );
+      expect(result.stdout).toMatch(/device\s+none/);
+    });
+
+    // Windows runs a `.cmd` shim, which no execute bit can withhold.
+    it.skipIf(process.platform === 'win32')(
+      'reports unknown, not none, when no tool could be run',
+      async () => {
+        const projectRoot = await setupAsync('go-app');
+        const env = await stubDeviceToolsAsync(projectRoot, {
+          ios: 'not-runnable',
+          android: 'not-runnable',
+        });
+
+        const report = await reportInAsync(projectRoot, [], env);
+
+        expect(report.device).toMatchObject({ state: 'unknown', deviceId: null, devices: [] });
+        expect(report.device!.reason).toContain('could not be run');
+
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+          { env }
+        );
+        expect(result.stdout).toMatch(/device\s+unknown/);
+      }
+    );
+
+    // @ref llp/0021-honest-reports.rfc.md §The rules
+    it('sends a connected app to smoke --eas when an EAS Simulator session is on record', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const env = await stubDeviceToolsAsync(projectRoot, { ios: 'none', android: 'none' });
+      await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
+      const devServer = await startDevServerDoubleAsync([CDP_TARGET]);
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['status', '--json', '--dev-server-url', devServer.url],
+          { env }
+        );
+
+        expect(result.exitCode).toBe(0);
+        const report: StatusReport = JSON.parse(result.stdout);
+        expect(report.next!.command).toBe('npx @expo/agent-cli smoke --ios --eas');
+        expect(report.next!.why).toContain('EAS Simulator session');
+      } finally {
+        await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
+      }
+    });
+  });
+
+  // @ref llp/0021-honest-reports.rfc.md §The rules
+  describe('a tunnelled dev server', () => {
+    it('names the tunnel and the URLs that open the app on it', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const devServer = await startDevServerDoubleAsync([]);
+      const startedAt = new Date(Date.now() - 5_000).toISOString();
+      const releaseLock = await holdDevLockAsync(projectRoot, {
+        url: devServer.url,
+        port: Number(new URL(devServer.url).port),
+        pid: process.pid,
+        startedAt,
+        projectRoot,
+      });
+      const logDir = path.join(projectRoot, '.expo', 'dev', 'logs');
+      await fs.promises.mkdir(logDir, { recursive: true });
+      await fs.promises.writeFile(
+        path.join(logDir, 'dev-detached.log'),
+        'Starting Metro Bundler\nWaiting on https://e2e-tunnel.boltexpo.dev\nLogs for your project will appear below.\n'
+      );
+      try {
+        const result = await executeAgentCliAsync(projectRoot, ['status', '--json']);
+
+        expect(result.exitCode).toBe(0);
+        const report: StatusReport = JSON.parse(result.stdout);
+        expect(report.devServer).toMatchObject({
+          running: true,
+          source: 'lock',
+          hostType: 'tunnel',
+          tunnelUrl: 'https://e2e-tunnel.boltexpo.dev',
+        });
+        expect(report.devServer!.openUrls).toContainEqual(
+          expect.objectContaining({ url: 'exp://e2e-tunnel.boltexpo.dev' })
+        );
+
+        const text = await executeAgentCliAsync(projectRoot, ['status']);
+        expect(text.stdout).toContain('tunnel https://e2e-tunnel.boltexpo.dev');
+        expect(text.stdout).toMatch(/open in .*: exp:\/\/e2e-tunnel\.boltexpo\.dev/);
+      } finally {
+        releaseLock();
+        await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
+      }
+    });
+
+    it('drops a logged tunnel once its dev server is gone', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const logDir = path.join(projectRoot, '.expo', 'dev', 'logs');
+      await fs.promises.mkdir(logDir, { recursive: true });
+      await fs.promises.writeFile(
+        path.join(logDir, 'dev-detached.log'),
+        'Waiting on https://stale-tunnel.boltexpo.dev\n'
+      );
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.devServer).toMatchObject({ running: false, tunnelUrl: null, openUrls: [] });
     });
   });
 
