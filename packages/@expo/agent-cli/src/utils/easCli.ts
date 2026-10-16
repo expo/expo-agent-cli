@@ -230,6 +230,7 @@ function declaresEasCli(field: unknown): boolean {
  * costs the speed and never the command.
  */
 export function findGlobalEasCli({ pathEnv }: { pathEnv?: string } = {}): string | null {
+  // Not supported on Windows (see above): the runner always answers there.
   if (process.platform === 'win32') {
     return null;
   }
