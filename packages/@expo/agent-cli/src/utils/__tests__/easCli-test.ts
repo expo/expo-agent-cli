@@ -260,6 +260,16 @@ describe(findGlobalEasCli, () => {
     ).toBe(false);
   });
 
+  it(`should never take the global rung on Windows`, () => {
+    // npm installs an `eas.cmd` shim there, and an extensionless `eas` is not something Windows can
+    // spawn, so the runner answers whatever is on PATH.
+    project({ name: 'app' });
+    globalEasCli('25.1.0');
+    mockPlatform('win32');
+
+    expect(findGlobalEasCli({ pathEnv: PATH_WITH_RUNNER })).toBeNull();
+  });
+
   it(`should answer the global install even with no runner on PATH`, () => {
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
     globalEasCli('25.1.0');

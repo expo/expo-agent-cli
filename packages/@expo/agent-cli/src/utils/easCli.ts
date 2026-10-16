@@ -24,7 +24,7 @@
 // The global rung is what wave 18 removed, for the impostor class: what answered the name `eas` was
 // whatever the machine had under it — a wrapper, a stale symlink, a shim from another tool (llp/0001
 // §Constraints). The package check is what lets it come back. A file that does not resolve to the
-// `eas-cli` package — a shell wrapper, a Volta or pnpm shim, a Windows `.cmd` — is not spawned, and
+// `eas-cli` package — a shell wrapper, a Volta or pnpm shim — is not spawned, and
 // the runner answers instead, so the cost of a shim this check cannot see through is the old speed
 // and never a stranger's bytes. The guards stay as a safety net (`utils/wrapperCrash.ts`).
 //
@@ -218,13 +218,21 @@ function declaresEasCli(field: unknown): boolean {
  * CLI prints has to mean what it says.
  *
  * The check follows the bin's symlink to the package it belongs to and reads that package's
- * `package.json` — the layout npm, Homebrew's npm, nvm and `bun add -g` all leave behind. A bin that
- * is not a symlink into an `eas-cli` package is null, whatever it would have printed.
+ * `package.json` — the layout `npm install -g` and `bun add -g` leave behind [observed — npm 11.17.0,
+ * bun 1.3.14, 2026-10-16]. A bin that is not a symlink into an `eas-cli` package is null, whatever it
+ * would have printed.
+ *
+ * Always null on Windows. npm installs an `eas.cmd` shim there, not a symlink, so the check above
+ * could never pass for a normal install; and an extensionless `eas` that did pass would be a script
+ * Windows cannot spawn (`./windowsShim.ts`). The runner answers instead.
  *
  * Sync, never spawns, and never throws: anything unreadable reads as "no global eas-cli", which
  * costs the speed and never the command.
  */
 export function findGlobalEasCli({ pathEnv }: { pathEnv?: string } = {}): string | null {
+  if (process.platform === 'win32') {
+    return null;
+  }
   const bin = findExecutableOnPath(EAS_CLI_BIN, { pathEnv });
   if (!bin) {
     return null;

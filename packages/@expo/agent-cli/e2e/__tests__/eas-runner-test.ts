@@ -383,7 +383,11 @@ describe('a machine with no eas-cli installed', () => {
 // @ref src/utils/easCli.ts §findGlobalEasCli
 // The rung above the runner: a global `eas-cli` the developer already installed answers without a
 // runner and without the registry, but only when it is the package and at 25.0.0 or newer.
-describe('a machine with a global eas-cli installed', () => {
+//
+// Not on Windows: the resolver never takes this rung there (an npm global is an `eas.cmd` shim, not
+// a symlink into the package), and the fixture's symlinked, extensionless bin is a POSIX layout.
+// `src/utils/__tests__/easCli-test.ts` pins the Windows answer.
+describe.skipIf(process.platform === 'win32')('a machine with a global eas-cli installed', () => {
   /** A bare directory, a stub `npx`, and a global `eas-cli` package whose bin is linked onto `PATH`. */
   async function plantGlobalAsync(version: string) {
     const directory = await fs.promises.realpath(
@@ -418,34 +422,28 @@ describe('a machine with a global eas-cli installed', () => {
     };
   }
 
-  it.skipIf(process.platform === 'win32')(
-    'runs the global eas directly when it is 25.0.0 or newer',
-    async () => {
-      const planted = await plantGlobalAsync('25.0.0');
+  it('runs the global eas directly when it is 25.0.0 or newer', async () => {
+    const planted = await plantGlobalAsync('25.0.0');
 
-      const result = await executeAgentCliAsync(planted.directory, ['whoami'], {
-        env: pathEnv(planted.binDir),
-        reject: false,
-      });
+    const result = await executeAgentCliAsync(planted.directory, ['whoami'], {
+      env: pathEnv(planted.binDir),
+      reject: false,
+    });
 
-      expect(result.exitCode).toBe(0);
-      expect(result.stdout).toContain('e2e-user');
-      expect(planted.runs()).toEqual({ runner: [], global: [['whoami']] });
-    }
-  );
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('e2e-user');
+    expect(planted.runs()).toEqual({ runner: [], global: [['whoami']] });
+  });
 
-  it.skipIf(process.platform === 'win32')(
-    'passes over a global eas older than 25.0.0 for the runner',
-    async () => {
-      const planted = await plantGlobalAsync('24.9.0');
+  it('passes over a global eas older than 25.0.0 for the runner', async () => {
+    const planted = await plantGlobalAsync('24.9.0');
 
-      const result = await executeAgentCliAsync(planted.directory, ['whoami'], {
-        env: pathEnv(planted.binDir),
-        reject: false,
-      });
+    const result = await executeAgentCliAsync(planted.directory, ['whoami'], {
+      env: pathEnv(planted.binDir),
+      reject: false,
+    });
 
-      expect(result.exitCode).toBe(0);
-      expect(planted.runs()).toEqual({ runner: [['--yes', 'eas-cli', 'whoami']], global: [] });
-    }
-  );
+    expect(result.exitCode).toBe(0);
+    expect(planted.runs()).toEqual({ runner: [['--yes', 'eas-cli', 'whoami']], global: [] });
+  });
 });
