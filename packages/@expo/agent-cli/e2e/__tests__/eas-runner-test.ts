@@ -17,6 +17,7 @@ import {
   executeAgentCliAsync,
   installStubBinAsync,
   installStubFingerprintAsync,
+  linkFixtureToEasAsync,
   setupFixtureAsync,
 } from '../utils';
 
@@ -151,6 +152,7 @@ async function plantAsync({
   racing?: boolean;
 }): Promise<Planted> {
   const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
+  await linkFixtureToEasAsync(projectRoot);
   await installStubFingerprintAsync(projectRoot);
 
   const binDir = path.join(projectRoot, '.stub-bin');

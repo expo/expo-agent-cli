@@ -255,6 +255,10 @@ export interface PlatformBuild {
   buildUrl: string | null;
   /** `cache` for the project's own record, `eas` for a lookup. Null when nothing answered. */
   source: 'cache' | 'eas' | null;
+  /** When EAS was asked; for a `cache` answer, the time of the original lookup. Null when nothing answered. */
+  checkedAt: string | null;
+  /** Age of a remembered `none`, in milliseconds. Null otherwise. */
+  ageMs: number | null;
   /** Why the state is not `found`. Null when it is. */
   reason: string | null;
 }

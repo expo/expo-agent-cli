@@ -1175,3 +1175,18 @@ export async function breakXcodeSelectAsync(projectRoot: string): Promise<void> 
   );
   await installStubBinAsync(binDir, 'xcode-select', stubScript);
 }
+
+/** Set `extra.eas.projectId` in the fixture's `app.json`, the way `eas init` does. */
+export async function linkFixtureToEasAsync(
+  projectRoot: string,
+  projectId = 'f52a76f7-9fc7-4b59-becd-6d84e9f129d7'
+): Promise<void> {
+  const configPath = path.join(projectRoot, 'app.json');
+  const config = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+  const expo = config.expo ?? config;
+  expo.extra = {
+    ...expo.extra,
+    eas: { ...expo.extra?.eas, projectId: expo.extra?.eas?.projectId ?? projectId },
+  };
+  await fs.promises.writeFile(configPath, JSON.stringify(config, null, 2) + '\n');
+}
