@@ -38,6 +38,7 @@ describe(readRuntimeVersion, () => {
       policy: 'appVersion',
       literal: null,
       source: 'app.json',
+      cache: null,
     });
   });
 
@@ -46,6 +47,7 @@ describe(readRuntimeVersion, () => {
       policy: null,
       literal: '1.2.0',
       source: 'app.json',
+      cache: null,
     });
   });
 
@@ -62,6 +64,7 @@ describe(readRuntimeVersion, () => {
       policy: null,
       literal: null,
       source: 'app.json',
+      cache: null,
     });
   });
 
@@ -85,6 +88,7 @@ describe(resolveRuntimeVersionAsync, () => {
       policy: 'appVersion',
       literal: null,
       source: 'app.json',
+      cache: null,
     });
     expect(spawnExpoAsync).not.toHaveBeenCalled();
   });
@@ -108,6 +112,7 @@ describe(resolveRuntimeVersionAsync, () => {
       policy: null,
       literal: null,
       source: 'app.config.json',
+      cache: null,
     });
   });
 
@@ -123,6 +128,7 @@ describe(resolveRuntimeVersionAsync, () => {
       policy: 'fingerprint',
       literal: null,
       source: 'app.config.json',
+      cache: null,
     });
     expect(spawnExpoAsync).not.toHaveBeenCalled();
   });
@@ -135,6 +141,7 @@ describe(resolveRuntimeVersionAsync, () => {
       policy: null,
       literal: null,
       source: null,
+      cache: null,
     });
   });
 
@@ -167,6 +174,7 @@ describe(resolveRuntimeVersionAsync, () => {
         policy: 'appVersion',
         literal: null,
         source: 'app.json',
+        cache: null,
       });
     });
 
@@ -200,6 +208,7 @@ describe(resolveRuntimeVersionAsync, () => {
         policy: null,
         literal: null,
         source: null,
+        cache: null,
       });
     });
   });
@@ -211,6 +220,7 @@ describe(resolveRuntimeVersionAsync, () => {
       policy: null,
       literal: null,
       source: null,
+      cache: null,
     });
     expect(spawnExpoAsync).not.toHaveBeenCalled();
   });
@@ -221,7 +231,7 @@ describe(resolveOtaSafety, () => {
     policy: string | null,
     literal: string | null = null,
     source: string | null = 'app.json'
-  ): RuntimeVersionInfo => ({ policy, literal, source });
+  ): RuntimeVersionInfo => ({ policy, literal, source, cache: null });
 
   describe('the policy decides, not the class', () => {
     it.each([

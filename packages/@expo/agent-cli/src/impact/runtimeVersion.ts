@@ -32,7 +32,7 @@ export async function resolveRuntimeVersionAsync(
   }
   // No app config at all: spawning `expo config` here can mean `npx expo` fetching a package.
   if (!staticConfig.source && !staticConfig.dynamic) {
-    return { policy: null, literal: null, source: null };
+    return { policy: null, literal: null, source: null, cache: null };
   }
 
   const evaluated = await readEvaluatedAppConfigAsync(projectRoot, { cache });
@@ -44,7 +44,7 @@ export async function resolveRuntimeVersionAsync(
   }
 
   if (!staticConfig.source || !staticConfig.config) {
-    return { policy: null, literal: null, source: null };
+    return { policy: null, literal: null, source: null, cache: null };
   }
   return readRuntimeVersion(staticConfig.config.runtimeVersion, staticConfig.source);
 }
@@ -58,17 +58,17 @@ export async function resolveRuntimeVersionAsync(
  */
 export function readRuntimeVersion(value: unknown, source: string): RuntimeVersionInfo {
   if (typeof value === 'string' && value) {
-    return { policy: null, literal: value, source };
+    return { policy: null, literal: value, source, cache: null };
   }
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const policy = (value as { policy?: unknown }).policy;
     if (typeof policy === 'string' && policy) {
-      return { policy, literal: null, source };
+      return { policy, literal: null, source, cache: null };
     }
   }
   // The config was read and named no runtimeVersion. That is a real answer — the project has no
   // runtime version configured — and it is reported with the source that said so.
-  return { policy: null, literal: null, source };
+  return { policy: null, literal: null, source, cache: null };
 }
 
 /**

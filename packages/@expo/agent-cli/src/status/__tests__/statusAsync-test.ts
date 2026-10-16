@@ -161,6 +161,7 @@ beforeEach(() => {
     policy: 'appVersion',
     literal: null,
     source: 'app.json',
+    cache: null,
   });
 });
 
