@@ -78,7 +78,7 @@ export interface FreshnessImpact {
   reason: string;
   /** How many fingerprint sources moved. Null when no diff was possible. */
   changedCount: number | null;
-  /** The per-source list. Present only under `--explain`; null otherwise. */
+  /** The per-source list. Null when no diff was possible. */
   changedSources: ChangedSource[] | null;
 }
 
@@ -130,7 +130,7 @@ export interface PlatformFreshness {
 
 /** What the impact headline was measured against. */
 export interface FreshnessComparison {
-  /** `last-build` for the project's own record, `eas-build` for `--explain --build <id>`. */
+  /** `last-build` for the project's own record, `eas-build` for `--build <id>`. */
   kind: 'last-build' | 'eas-build';
   /** What a person would call the base: `last build recorded by @expo/agent-cli`, `EAS build <id>`. */
   label: string;
@@ -219,9 +219,7 @@ export interface FreshnessStatus {
   /**
    * Whether an update published now would reach installed builds that can run it.
    *
-   * Present only under `--explain`: the `runtimeVersion` policy is resolved with an
-   * `expo config --json --type public` subprocess, which is the kind of cost the default report
-   * does not pay. Null on every other run — "not asked", not "not safe".
+   * Null when the policy could not be resolved — "not established", not "not safe".
    *
    * @see llp/0011-impact-and-freshness.rfc.md §A fingerprint change is not "OTA-unsafe"
    */
@@ -269,7 +267,7 @@ export interface PlatformBuild {
  * @see llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
  */
 export interface BuildsStatus {
-  /** Whether this run was allowed to call EAS. False on every run without `--explain`. */
+  /** Whether this run called EAS for at least one platform. */
   askedEas: boolean;
   platforms: PlatformBuild[];
 }
@@ -528,8 +526,8 @@ export interface StatusReport {
    *
    * The third leg of the freshness question. `freshness` answers "does the app this machine built
    * still match" and `builds` answers "has anybody already built this"; this one asks the device,
-   * so it is right about a build somebody else made. Under `--explain` only. Null otherwise, and
-   * null with the reason in `errors.installed` when the check failed or ran out of time.
+   * so it is right about a build somebody else made. Null under `AGENT_CLI_NO_DEVICE`, and null with
+   * the reason in `errors.installed` when the check failed or ran out of time.
    */
   installed: InstalledStatus | null;
   /**

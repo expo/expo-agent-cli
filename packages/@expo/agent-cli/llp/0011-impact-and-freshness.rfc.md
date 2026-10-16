@@ -12,7 +12,7 @@
 
 This answers the question an agent asks after every edit: do I need to build again? And the one it should ask before every release: can this be shipped over the air? Those are two questions about two different systems. A tool answering both must never derive one from the other.
 
-There is no `@expo/agent-cli impact` command. The classifier is the engine under `status`. The status UI, the `--explain` / `--assert` flags, and the exit codes of the gate live in [[0004-smart-start-and-project-state]].
+There is no `@expo/agent-cli impact` command. The classifier is the engine under `status`. The status UI, the `--assert` / `--build` flags, and the exit codes of the gate live in [[0004-smart-start-and-project-state]]. Every run carries the per-source list, the OTA verdict and the EAS lookup, cached under `.expo` (§What `status` remembers of the answer, [[0023-fingerprint-caching]]).
 
 ## Two things called impact
 
