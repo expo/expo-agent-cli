@@ -500,3 +500,17 @@ async function withDeadlineAsync<T>(work: Promise<T>, timeoutMs: number): Promis
     }
   }
 }
+
+/** Forget a remembered `none` for one platform, because this CLI is starting a build for it. */
+export function dropEasNoneEntry(projectRoot: string, platform: NativePlatform): void {
+  try {
+    const record = readEasBuildsRecord(projectRoot);
+    if (!record[platform] || record[platform]!.build) {
+      return;
+    }
+    delete record[platform];
+    fs.writeFileSync(getRecordPath(projectRoot), JSON.stringify(record, null, 2) + '\n');
+  } catch {
+    // A none that could not be dropped still expires on its own.
+  }
+}

@@ -11,6 +11,7 @@ import { lookUpCachedBuildAsync } from '../../impact/buildCache';
 import { generateFingerprintAsync } from '../../project/fingerprint';
 import { resolveEasCli } from '../../utils/easCli';
 import {
+  dropEasNoneEntry,
   EAS_BUILDS_FILE_NAME,
   EAS_NONE_CACHE_TTL_MS,
   readEasBuildsRecord,
@@ -402,6 +403,25 @@ describe(readEasBuildsStatusAsync, () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe(dropEasNoneEntry, () => {
+  it(`should drop a remembered none and keep a remembered build`, () => {
+    const checkedAt = new Date().toISOString();
+    vol.fromJSON({
+      [recordFile]: JSON.stringify({
+        ios: { projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: null, checkedAt },
+        android: { projectHash: PROJECT_HASH, fingerprintHash: 'a', build: BUILD, checkedAt },
+      }),
+    });
+
+    dropEasNoneEntry(projectRoot, 'ios');
+    dropEasNoneEntry(projectRoot, 'android');
+
+    const record = readEasBuildsRecord(projectRoot);
+    expect(record.ios).toBeUndefined();
+    expect(record.android?.build?.id).toBe(BUILD.id);
   });
 });
 

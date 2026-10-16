@@ -43,6 +43,7 @@ import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
 import { clearFingerprintMemo } from '../project/fingerprint';
 import { clearFingerprintCache } from '../project/fingerprintCache';
+import { dropEasNoneEntry } from '../status/easBuilds';
 import { probeProjectStateAsync } from '../project/probe';
 import type { PlanStep, ProjectState, StartPlan } from '../project/types';
 import { resolveStartFollowUpsAsync } from '../start/followUps';
@@ -631,6 +632,8 @@ async function executePlanAsync(
     // `eas build --profile development-simulator` against an `eas.json` without it stops at "profile
     // not found", after the upload. The write is three keys under `build`, and nothing else moves.
     if (step.id === 'eas-build' && options.deviceBackend === 'eas') {
+      // A remembered "no build" for this platform is about to be wrong.
+      dropEasNoneEntry(projectRoot, resolveEasBuildPlatform(step));
       if (ensureSimulatorProfileSync(projectRoot)) {
         devEvent('eas_json_profile_added', { profile: EAS_SIMULATOR_PROFILE });
         Log.progress(`Added the "${EAS_SIMULATOR_PROFILE}" build profile to eas.json.`);
