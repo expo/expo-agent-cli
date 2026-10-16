@@ -16,6 +16,7 @@ import {
   openUrlOnCloudSimulatorAsync,
 } from '../device/cloudSimulator';
 import { PROGRAM_PREFIX } from '../programName';
+import { DYNAMIC_CONFIG_FILES, STATIC_CONFIG_FILES } from '../project/appConfig';
 import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
@@ -43,12 +44,6 @@ import type { DeviceBackend } from './device';
  * is, so `<scheme>://` already means the index route.
  */
 const EXPO_GO_ROOT_PATH = '/--/?';
-
-/** Static config files we can read without evaluating JavaScript. */
-const STATIC_CONFIG_FILES = ['app.json', 'app.config.json'];
-
-/** Config files that require evaluating JavaScript, which we do not do. */
-const DYNAMIC_CONFIG_FILES = ['app.config.ts', 'app.config.js', 'app.config.mjs', 'app.config.cjs'];
 
 export interface ProjectSchemeConfig {
   /** First `expo.scheme` entry found in a static config file, if any. */

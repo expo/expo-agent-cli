@@ -29,10 +29,10 @@ export interface StaticAppConfig {
 }
 
 /** Static config files, in the order `@expo/config` resolves them (`getStaticConfigFilePath`). */
-const STATIC_CONFIG_FILES = ['app.config.json', 'app.json'];
+export const STATIC_CONFIG_FILES = ['app.config.json', 'app.json'];
 
 /** Dynamic config files `@expo/config` resolves (`DYNAMIC_CONFIG_EXTS`), never evaluated here. */
-const DYNAMIC_CONFIG_FILES = [
+export const DYNAMIC_CONFIG_FILES = [
   'app.config.ts',
   'app.config.mts',
   'app.config.cts',

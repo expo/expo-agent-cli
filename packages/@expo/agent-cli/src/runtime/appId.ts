@@ -14,15 +14,13 @@ import path from 'path';
 
 import type { NavigatePlatform } from '../navigate/device';
 import { EXPO_GO_APP_IDS } from '../navigate/target';
+import { STATIC_CONFIG_FILES } from '../project/appConfig';
 
 /** Expo Go's application id, per platform, for a project that has no build of its own. */
 export const EXPO_GO_APP_ID: Record<NavigatePlatform, string> = {
   ios: 'host.exp.Exponent',
   android: 'host.exp.exponent',
 };
-
-/** Static config files we can read without evaluating JavaScript. */
-const STATIC_CONFIG_FILES = ['app.json', 'app.config.json'];
 
 /**
  * The shape of an application id, and the reason it is checked here.
