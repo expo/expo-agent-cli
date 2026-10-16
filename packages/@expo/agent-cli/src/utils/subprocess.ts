@@ -390,6 +390,11 @@ function executableNames(name: string): string[] {
  * that has to *report* which binary it is about to run (`@expo/agent-cli deploy` names the `eas` it
  * found) needs the path, not just a yes.
  *
+ * An entry whose `stat` throws — a symlink loop (`ELOOP`), an unreadable directory (`EACCES`) — is
+ * skipped like an entry that does not hold the executable, the way a shell skips it, so a later
+ * entry can still answer. `throwIfNoEntry: false` covers only `ENOENT` [observed — Node 26.5,
+ * 2026-10-16].
+ *
  * @param pathEnv `PATH` to search, for tests that must not depend on the machine's own.
  * @returns the absolute path of the executable, or `null` when no entry of `PATH` holds it.
  */
@@ -403,10 +408,18 @@ export function findExecutableOnPath(
     }
     for (const fileName of executableNames(name)) {
       const candidate = path.join(dir, fileName);
-      if (fileExistsSync(candidate)) {
+      if (isFileSync(candidate)) {
         return candidate;
       }
     }
   }
   return null;
+}
+
+function isFileSync(file: string): boolean {
+  try {
+    return fileExistsSync(file);
+  } catch {
+    return false;
+  }
 }

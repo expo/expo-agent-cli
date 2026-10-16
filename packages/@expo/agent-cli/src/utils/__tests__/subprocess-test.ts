@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
+import fs from 'fs';
 import { vol } from 'memfs';
 import path from 'path';
 
@@ -285,5 +286,29 @@ describe(findExecutableOnPath, () => {
 
   it(`should return null for an empty PATH`, () => {
     expect(findExecutableOnPath('eas', { pathEnv: '' })).toBeNull();
+  });
+
+  it(`should skip an entry of PATH whose stat throws, and keep looking`, () => {
+    // A symlink loop throws ELOOP even with `throwIfNoEntry: false`; one bad entry must not abort the
+    // lookup, nor hide a later entry that does hold the executable.
+    vol.fromJSON({ '/usr/local/bin/eas': '#!/bin/sh' });
+    const realStat = fs.statSync;
+    vi.spyOn(fs, 'statSync').mockImplementation(((
+      file: fs.PathLike,
+      options?: fs.StatSyncOptions
+    ) => {
+      if (String(file).startsWith(`${path.sep}loop`)) {
+        throw Object.assign(new Error('ELOOP: too many symbolic links encountered'), {
+          code: 'ELOOP',
+        });
+      }
+      return realStat(file, options);
+    }) as typeof fs.statSync);
+
+    expect(findExecutableOnPath('eas', { pathEnv: pathOf('/loop', '/usr/local/bin') })).toBe(
+      path.join('/usr/local/bin', 'eas')
+    );
+    expect(findExecutableOnPath('eas', { pathEnv: pathOf('/loop') })).toBeNull();
+    vi.mocked(fs.statSync).mockRestore();
   });
 });

@@ -40,7 +40,7 @@ describe(classifyEasFailure, () => {
     expect(cause?.why).toContain('not about being signed in');
   });
 
-  // @ref llp/0007-deploy-and-headless.rfc.md §deploy — **F143.** `npx --yes eas-cli init` on
+  // @ref llp/0007-deploy-and-headless.rfc.md §deploy — **F143.** `npx --yes eas-cli@latest init` on
   // its own is a command that prompts, and this failure exists because the run had no terminal to
   // prompt in: handing it back is handing back the same dead end one command earlier. The runnable
   // form needs a value, and the EAS CLI's own output is where that value is.
@@ -206,12 +206,12 @@ describe(readEasFailure, () => {
     ],
     [
       "npx's install notice, which names the package, as the runner",
-      'npm warn exec The following package was not found and will be installed: eas-cli\n',
+      'npm warn exec The following package was not found and will be installed: eas-cli@latest\n',
       '',
       {
         kind: 'runner-only',
         runnerLine:
-          'npm warn exec The following package was not found and will be installed: eas-cli',
+          'npm warn exec The following package was not found and will be installed: eas-cli@latest',
       },
     ],
     [
@@ -225,7 +225,7 @@ describe(readEasFailure, () => {
     expect(readEasFailure({ stdout, stderr })).toEqual(expected);
   });
 
-  // `npx --yes eas-cli notacommand` on an empty npm cache, npm 10.9.4: npm's deprecation
+  // `npx --yes eas-cli@latest notacommand` on an empty npm cache, npm 10.9.4: npm's deprecation
   // warnings first, the CLI's error, then npm's update notice [observed — 2026-10-07, abridged].
   const NPX_DEPRECATED = [
     'npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory.',

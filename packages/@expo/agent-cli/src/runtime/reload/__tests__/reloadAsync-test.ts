@@ -1142,7 +1142,7 @@ describe('reloading an app on a cloud simulator session', () => {
       false,
     ],
     [
-      'npm warn exec The following package was not found and will be installed: eas-cli\n',
+      'npm warn exec The following package was not found and will be installed: eas-cli@latest\n',
       'failed to deliver the eas CLI',
       true,
     ],
