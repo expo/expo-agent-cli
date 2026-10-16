@@ -5,33 +5,36 @@
 // answers it before it exports; every other EAS-backed command answers it the same way, which is
 // why the resolver is here and not under `deploy/`.
 //
-// **There is one answer: the package runner.** `npx --yes eas-cli`, or `bunx eas-cli`. Not a ladder
-// of a project bin, then `PATH`, then a runner — one rung, taken every time
-// [decided, 2026-08-27]. An installed `eas-cli` was never something this CLI could expect
-// [observed — 2026-08-26: `eas unknown (no EAS CLI is installed, so nothing here
-// can ask EAS about builds)` on a machine that had simply never installed it].
+// **Three rungs, in order** [decided, Kudo, 2026-10-16]:
 //
-// Two things make one rung simpler rather than weaker, and both were measured before they were
-// relied on (llp/0015 §Resolving the EAS CLI):
+//  1. **The project's pin.** A project that declares `eas-cli` gets `<runner> eas-cli`, which the
+//     runner resolves out of `node_modules` and touches no network [observed — live, 2026-08-27],
+//     in a monorepo whose install is hoisted to the workspace root too.
+//  2. **A global `eas-cli`, when it is recent enough.** The first `eas` on `PATH`, spawned directly,
+//     but only when it resolves to a package named `eas-cli` at {@link EAS_CLI_GLOBAL_MIN_VERSION}
+//     or newer. Read from that package's `package.json`, never by spawning it. `@latest` was asking
+//     the registry on every run, and that was the slow part of every EAS-backed command [Kudo,
+//     2026-10-16]; an `eas-cli` the developer already installed answers with no network at all.
+//  3. **The package runner**, with the bare `eas-cli` spec. `bunx eas-cli@latest` asked the
+//     registry and reinstalled on every run, 14–31 s warm, where `bunx eas-cli` ran its cached copy
+//     with no request in 2.6–5.8 s. npx revalidates the packument either way (~110 ms) and reuses
+//     its cache when the version has not moved [observed — bun 1.3.14, npm 11.17.0, `--verbose` /
+//     `--loglevel=http`, 2026-10-16].
 //
-//  1. **The runners already prefer the project's own copy.** `npx --yes eas-cli` in a project that
-//     has `eas-cli` installed runs *that* version and touches no network — verified against a dead
-//     registry [observed — live, 2026-08-27]. So dropping the "project bin first" rung drops
-//     nothing: the pin still wins, including in a monorepo whose install is hoisted to the
-//     workspace root.
-//  2. **It kills the impostor class by construction.** What used to answer the name `eas` was
-//     whatever the machine had under it — a wrapper, a stale symlink, a shim from another tool
-//     (llp/0001 §Constraints) — and every call site needed a guard against reporting its bytes as
-//     the service's answer. A runner resolves a *package*, never a file on `PATH`, so a stray `eas`
-//     is not spawned at all. The guards stay as a safety net (`utils/wrapperCrash.ts`) and should
-//     now be unreachable.
+// The global rung is what wave 18 removed, for the impostor class: what answered the name `eas` was
+// whatever the machine had under it — a wrapper, a stale symlink, a shim from another tool (llp/0001
+// §Constraints). The package check is what lets it come back. A file that does not resolve to the
+// `eas-cli` package — a shell wrapper, a Volta or pnpm shim, a Windows `.cmd` — is not spawned, and
+// the runner answers instead, so the cost of a shim this check cannot see through is the old speed
+// and never a stranger's bytes. The guards stay as a safety net (`utils/wrapperCrash.ts`).
 //
-// The one cost is the first run in a project that does *not* have `eas-cli`: the runner downloads
-// it. Which caller may pay that is a caller's decision rather than this module's, and `pinned` is
-// what lets each of them make it — see llp/0015 §Resolving the EAS CLI.
+// The one cost left is the first run on a machine with no `eas-cli` anywhere: the runner downloads
+// it. Which caller may pay that is a caller's decision rather than this module's, and
+// {@link mayDownloadEasCli} is what lets each of them make it — see llp/0015 §Resolving the EAS CLI.
 
 import fs from 'fs';
 import path from 'path';
+import semver from 'semver';
 
 import { CommandError } from './errors';
 import { type Invoker } from './invoker';
@@ -40,25 +43,28 @@ import { findExecutableOnPath } from './subprocess';
 
 /** The `eas` invocation to spawn. */
 export interface EasCli {
-  /** The executable to spawn: the runner. An absolute path for `bunx`, the bare name for `npx`. */
+  /**
+   * The executable to spawn: the global `eas` by its absolute path, or the runner — an absolute path
+   * for `bunx`, the bare name for `npx`.
+   */
   command: string;
   /**
-   * What goes before the `eas` command word: the runner's own flags, then the package spec.
+   * What goes before the `eas` command word: the runner's own flags, then the package spec. Empty
+   * for a global `eas`.
    *
    * Always spread through {@link easCliArgs} rather than read directly — a call site that spawns
    * `command` with its own argv alone runs `npx build:list`, which is a different program.
    */
   prefixArgs: string[];
   /**
-   * Where the CLI came from, which is now always a description of the runner, e.g.
-   * `npx --yes eas-cli@latest`.
+   * The line a reader could paste to run the same CLI: `eas` for a global install, otherwise the
+   * runner and the spec, e.g. `npx --yes eas-cli`.
    *
-   * A string rather than the old `'project' | 'path' | 'runner'` enum: with one rung there is no
-   * rung to report, and what the reader of an event or a failure needs instead is the line they
-   * could paste. {@link easCliLabel} is the accessor; this field is what carries it into a payload.
+   * A string rather than a rung enum, because what the reader of an event or a failure needs is
+   * the line, not the rung. {@link easCliLabel} is the accessor; this field is what carries it into a payload.
    */
   source: string;
-  /** Which runner is going to run it. */
+  /** Which runner is going to run it, or would have, when {@link EasCli.global} is set. */
   runner: Invoker;
   /**
    * Whether the project declares `eas-cli`, so the runner resolves it out of `node_modules`.
@@ -69,28 +75,37 @@ export interface EasCli {
    * before anything is spawned.
    */
   pinned: boolean;
+  /**
+   * Whether this is the machine's own `eas-cli`, found on `PATH` and spawned without a runner.
+   *
+   * Never set together with `pinned`: the project's pin wins over a global install.
+   */
+  global: boolean;
 }
 
 /**
- * The package spec for a project that does **not** declare `eas-cli`.
+ * The package spec the runner is given, pinned project or not.
  *
- * `@latest` because there is no pin in this project to respect, and the newest CLI is the one that
- * knows about the newest service. It is not free: `@latest` asks the registry on every run, and on a
- * machine that cannot reach one it stalls for the length of npm's own retry ladder before failing
- * [observed — live, 2026-08-27: ~70 s against a dead registry]. Every caller therefore spawns this
- * under a deadline, and the opportunistic ones say so when it expires.
+ * The bare name, never `eas-cli@latest`. A version in the spec **defeats the pin**: `npx --yes
+ * eas-cli@latest` in a project holding 22.4.0 ran 22.6.0, where `npx --yes eas-cli` ran 22.4.0 out
+ * of `node_modules` and touched no network [observed — live, 2026-08-27]. In a project with no pin,
+ * `@latest` also made `bunx` ask the registry and reinstall on every run, where the bare name runs
+ * its cached copy (§module header). npx revalidates against the registry either way, so on a machine
+ * that cannot reach one it can still stall for the length of npm's retry ladder [observed — live,
+ * 2026-08-27: ~70 s against a dead registry]; callers keep their deadlines.
  */
-export const EAS_CLI_PACKAGE_LATEST = 'eas-cli@latest';
+export const EAS_CLI_PACKAGE = 'eas-cli';
 
 /**
- * The package spec for a project that declares `eas-cli`.
+ * The oldest global `eas-cli` this CLI will spawn instead of the runner.
  *
- * The bare name, and {@link EAS_CLI_PACKAGE_LATEST} is exactly what it must not be: a spec carrying
- * a version **defeats the pin**. `npx --yes eas-cli@latest` in a project holding 22.4.0 ran 22.6.0,
- * where `npx --yes eas-cli` ran 22.4.0 out of `node_modules` and touched no network [observed —
- * live, 2026-08-27]. A repository that pinned a version pinned it on purpose.
+ * An older global install is passed over for the runner rather than trusted to know every command
+ * and flag this CLI drives [Kudo, 2026-10-16].
  */
-export const EAS_CLI_PACKAGE_PINNED = 'eas-cli';
+export const EAS_CLI_GLOBAL_MIN_VERSION = '25.0.0';
+
+/** What a global `eas-cli` is written as and spawned under: the bin name its package declares. */
+const EAS_CLI_BIN = 'eas';
 
 /** Recovery for a runner that could not be found or spawned, before any EAS CLI could start. */
 export const EAS_RUNNER_RECOVERY =
@@ -120,18 +135,11 @@ export function easCliArgs(easCli: EasCli, args: string[]): string[] {
 }
 
 /**
- * How an invocation is written when it has to be named in output.
- *
- * The runner's **name** and its arguments, never the path the runner was found at: `bunx` is what a
- * reader would type, and `/opt/homebrew/bin/bunx eas-cli` is a line that says nothing more while
- * looking like it says something about this machine. The path is still what gets spawned.
- */
-/**
  * How an EAS CLI command line is **written** for the reader of this project's output.
  *
  * @ref llp/0015-backend-selection-and-config.rfc.md §Resolving the EAS CLI
- * The same spelling this CLI spawns: `npx --yes eas-cli@latest`, `npx --yes eas-cli` when the
- * project pins the CLI, `bunx eas-cli…` for a bun project. `npx eas` — the spelling every printed
+ * The same spelling this CLI spawns: `eas` when a recent enough `eas-cli` is installed globally,
+ * otherwise `npx --yes eas-cli`, or `bunx eas-cli` for a bun project. `npx eas` — the spelling every printed
  * line used to carry — runs nothing: there is no package called `eas` [Kudo, 2026-09-09]. A line a
  * reader is meant to run has to be one that runs, in the package manager they are already using.
  *
@@ -142,6 +150,14 @@ export function easCommandPrefix(projectRoot: string = process.cwd()): string {
   return easCliInvocation(projectRoot).source;
 }
 
+/**
+ * How an invocation is written when it has to be named in output.
+ *
+ * The runner's **name** and its arguments, never the path the runner was found at: `bunx` is what a
+ * reader would type, and `/opt/homebrew/bin/bunx eas-cli` is a line that says nothing more while
+ * looking like it says something about this machine. The path is still what gets spawned. A global
+ * install is written `eas`, for the same reason.
+ */
 export function easCliLabel(easCli: EasCli): string {
   return easCli.source;
 }
@@ -151,10 +167,12 @@ export function easCliLabel(easCli: EasCli): string {
  *
  * The question every caller with a deadline has to ask. False for a project that declares
  * `eas-cli`: the runner resolves it out of `node_modules`, and the spawn is then as cheap as running
- * the bin directly [observed — 0.26–0.45 s against 0.32–0.42 s, live, 2026-08-27].
+ * the bin directly [observed — 0.26–0.45 s against 0.32–0.42 s, live, 2026-08-27]. False for a
+ * global install, which is the bin directly. True otherwise, even though a warm runner cache answers
+ * without a download: whether the cache is warm is not something to find out before spawning.
  */
 export function mayDownloadEasCli(easCli: EasCli | null): boolean {
-  return easCli != null && !easCli.pinned;
+  return easCli != null && !easCli.pinned && !easCli.global;
 }
 
 /**
@@ -166,8 +184,8 @@ export function mayDownloadEasCli(easCli: EasCli | null): boolean {
  * installed it gets `npx --yes eas-cli`, and npx installs the declared range — which is the version
  * the project asked for either way.
  *
- * The known gap: a package that does *not* declare it while a sibling workspace does gets
- * `@latest`, and so downloads a CLI that is already on disk. That is the honest reading of "this
+ * The known gap: a package that does *not* declare it while a sibling workspace does is treated as
+ * unpinned, so it may take the global rung, or the runner's cache, rather than the sibling's copy. That is the honest reading of "this
  * project pinned a version", and the cost is one download rather than a wrong version.
  *
  * Sync, and never throws: a `package.json` that is missing, unreadable or not an object reads as
@@ -188,15 +206,64 @@ export function projectDeclaresEasCli(projectRoot: string): boolean {
 }
 
 function declaresEasCli(field: unknown): boolean {
-  return field != null && typeof field === 'object' && EAS_CLI_PACKAGE_PINNED in field;
+  return field != null && typeof field === 'object' && EAS_CLI_PACKAGE in field;
+}
+
+/**
+ * The machine's own `eas-cli`, when the first `eas` on `PATH` is one at
+ * {@link EAS_CLI_GLOBAL_MIN_VERSION} or newer; otherwise null.
+ *
+ * Only the **first** `eas`, because that is the one the reader's shell runs: a recent install
+ * further down `PATH` behind an old one is not what `eas` means on this machine, and the line this
+ * CLI prints has to mean what it says.
+ *
+ * The check follows the bin's symlink to the package it belongs to and reads that package's
+ * `package.json` — the layout npm, Homebrew's npm, nvm and `bun add -g` all leave behind. A bin that
+ * is not a symlink into an `eas-cli` package is null, whatever it would have printed.
+ *
+ * Sync, never spawns, and never throws: anything unreadable reads as "no global eas-cli", which
+ * costs the speed and never the command.
+ */
+export function findGlobalEasCli({ pathEnv }: { pathEnv?: string } = {}): string | null {
+  const bin = findExecutableOnPath(EAS_CLI_BIN, { pathEnv });
+  if (!bin) {
+    return null;
+  }
+  try {
+    const manifest = nearestPackageJson(fs.realpathSync(bin));
+    if (manifest?.name !== EAS_CLI_PACKAGE || typeof manifest.version !== 'string') {
+      return null;
+    }
+    const version = semver.valid(manifest.version);
+    return version && semver.gte(version, EAS_CLI_GLOBAL_MIN_VERSION) ? bin : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The `package.json` of the package a file is in: the first one found walking up from it. */
+function nearestPackageJson(file: string): { name?: unknown; version?: unknown } | null {
+  let dir = path.dirname(file);
+  while (true) {
+    const candidate = path.join(dir, 'package.json');
+    if (fs.existsSync(candidate)) {
+      const parsed: unknown = JSON.parse(fs.readFileSync(candidate, 'utf8'));
+      return parsed != null && typeof parsed === 'object' ? parsed : null;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      return null;
+    }
+    dir = parent;
+  }
 }
 
 /**
  * The invocation that runs the EAS CLI for a project, whether or not one is installed.
  *
- * Never consults `PATH` for an `eas`, and never reaches into `node_modules/.bin`: the runner does
- * both jobs, and does the second one better (§module header). What it does read is the project's
- * `package.json`, to choose between the pinned spec and `@latest`.
+ * The three rungs of the module header: the project's pin through the runner, then a global
+ * `eas-cli` new enough to trust, then the runner. Never reaches into `node_modules/.bin`: the runner
+ * does that job better.
  *
  * **Ungated**, so it always answers with something to spawn — for a caller whose report of a spawn
  * that failed is honest on its own, like the auth passthrough, which prints what the runner said. A
@@ -212,9 +279,20 @@ export function easCliInvocation(
 ): EasCli {
   const runner = resolvePackageRunnerForProject(projectRoot, { env, pathEnv });
   const pinned = projectDeclaresEasCli(projectRoot);
+  const globalEas = pinned ? null : findGlobalEasCli({ pathEnv });
+  if (globalEas) {
+    return {
+      command: globalEas,
+      prefixArgs: [],
+      source: EAS_CLI_BIN,
+      runner: runner.runner,
+      pinned: false,
+      global: true,
+    };
+  }
   const prefixArgs = [
     ...(runner.runner === 'npx' ? NPX_RUNNER_ARGS : BUNX_RUNNER_ARGS),
-    pinned ? EAS_CLI_PACKAGE_PINNED : EAS_CLI_PACKAGE_LATEST,
+    EAS_CLI_PACKAGE,
   ];
   return {
     command: runner.command,
@@ -222,6 +300,7 @@ export function easCliInvocation(
     source: [runner.runner, ...prefixArgs].join(' '),
     runner: runner.runner,
     pinned,
+    global: false,
   };
 }
 
@@ -242,7 +321,7 @@ export function resolveEasCli(
   { pathEnv, env }: { pathEnv?: string; env?: NodeJS.ProcessEnv } = {}
 ): EasCli | null {
   const easCli = easCliInvocation(projectRoot, { pathEnv, env });
-  if (path.isAbsolute(easCli.command)) {
+  if (easCli.global || path.isAbsolute(easCli.command)) {
     return easCli;
   }
   return findExecutableOnPath(easCli.command, { pathEnv }) ? easCli : null;

@@ -41,7 +41,7 @@ const RUNNER_DIR = (process.env.PATH ?? '/usr/local/bin').split(path.delimiter)[
  * A project that **pins** `eas-cli`, which is the only shape this preflight asks EAS about.
  *
  * The one rung is a package runner, and in a project that declares nothing that means
- * `npx --yes eas-cli@latest` — a package install to read `~/.expo/state.json`. `status` promises to
+ * `npx --yes eas-cli` — a package install to read `~/.expo/state.json`. `status` promises to
  * be instant, so it asks only where the runner resolves the CLI out of `node_modules`
  * (`src/needsHuman/preflight.ts` §askEasAsync).
  */
@@ -340,7 +340,7 @@ describe(readAuthPreflightAsync, () => {
 
     expect(spawned).toHaveBeenCalledWith(
       'npx',
-      // The bare spec, because this project pins the CLI: `eas-cli@latest` would run a different
+      // The bare spec, because this project pins the CLI: `eas-cli` would run a different
       // version and ask the registry to find out which (`src/utils/easCli.ts`).
       ['--yes', 'eas-cli', 'whoami'],
       expect.objectContaining({ timeoutMs: 1234 })

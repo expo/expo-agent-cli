@@ -101,15 +101,16 @@ export async function installStubBinAsync(
  * Install a stub **package runner** that answers for the `eas-cli` package.
  *
  * @ref llp/0015-backend-selection-and-config.rfc.md §Resolving the EAS CLI
- * Every EAS-backed command spawns `npx --yes eas-cli…` or `bunx eas-cli…`, so a suite that used to
- * plant a bin called `eas` has to plant a runner instead. Nothing under test resolves a file called
- * `eas` any more, which is the property the single rung exists for — and it means an e2e that forgot
- * this would reach the **real** npx and download the real CLI, so these stubs are also what keeps
- * the suite off the network.
+ * Every EAS-backed command spawns `npx --yes eas-cli…` or `bunx eas-cli…` unless a recent global
+ * `eas-cli` package is first on `PATH`, so a suite that used to plant a bin called `eas` plants a
+ * runner instead, plus a decoy `eas` that keeps the machine's own install from answering. An e2e
+ * that forgot this would reach the **real** npx and download the real CLI, so these stubs are also
+ * what keeps the suite off the network.
  *
  * The runner it stands in for verifies its own argv rather than ignoring it: `--yes` is stripped
- * because that flag is npm's own, and a spec that is not `eas-cli` is an error, exactly as npx would
- * treat a package it cannot find. What is left is handed to the stub `eas` script, so every existing
+ * because that flag is npm's own, and a spec that is not the bare `eas-cli` is an error — npx would
+ * treat a package it cannot find the same way, and `eas-cli@latest` is the spec this CLI stopped
+ * spawning. What is left is handed to the stub `eas` script, so every existing
  * assertion about the EAS argv keeps its meaning.
  *
  * @param binDir Directory the shims go into, which must be on the `PATH` of the command under test
@@ -136,7 +137,7 @@ ${
 // \`--yes\` is npm's own flag, and never part of what the package is asked to do.
 const rest = args[0] === '--yes' ? args.slice(1) : args;
 const spec = rest[0] || '';
-if (spec !== 'eas-cli' && spec !== 'eas-cli@latest') {
+if (spec !== 'eas-cli') {
   process.stderr.write('stub runner: no such package ' + JSON.stringify(spec) + '\\n');
   process.exit(1);
 }
@@ -151,6 +152,15 @@ process.exit(result.status === null ? 1 : result.status);
   for (const name of names) {
     await installStubBinAsync(binDir, name, runnerScript);
   }
+  // A decoy `eas` ahead of the machine's own: a global `eas-cli` new enough would otherwise be
+  // spawned in place of the stub runner (`src/utils/easCli.ts` §findGlobalEasCli). It is not a
+  // package, so the resolver passes over it, and it fails loudly if anything spawns it anyway.
+  const decoy = path.join(binDir, 'eas-decoy.js');
+  await fs.promises.writeFile(
+    decoy,
+    "process.stderr.write('decoy eas: the stub runner should have answered\\n');\nprocess.exit(127);\n"
+  );
+  await installStubBinAsync(binDir, 'eas', decoy);
 }
 
 /**

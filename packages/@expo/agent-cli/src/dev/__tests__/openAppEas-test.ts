@@ -284,7 +284,7 @@ describe(openAppOnEasAsync, () => {
 
     expect(report.opened).toBe(false);
     expect(report.reason).toContain(
-      'npx --yes eas-cli@latest build --platform ios --profile development-simulator'
+      'npx --yes eas-cli build --platform ios --profile development-simulator'
     );
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
@@ -442,7 +442,7 @@ describe(openAppOnEasAsync, () => {
     expect(report.sessionId).toBe('sess-billed');
     expect(report.started).toBe(true);
     expect(report.reason).toContain('exited 1');
-    expect(report.reason).toContain('npx --yes eas-cli@latest simulator:stop --id sess-billed');
+    expect(report.reason).toContain('npx --yes eas-cli simulator:stop --id sess-billed');
   });
 
   it('quotes a non-TTY startup timeout and preserves the created session for cleanup', async () => {

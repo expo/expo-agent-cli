@@ -126,9 +126,9 @@ describe(resolveSpawnTarget, () => {
       const originalPath = process.env.PATH;
       process.env.PATH = 'C:\\no-such-npx';
       try {
-        expect(resolveSpawnTarget('npx.cmd', ['--yes', 'eas-cli@latest'])).toEqual({
+        expect(resolveSpawnTarget('npx.cmd', ['--yes', 'eas-cli'])).toEqual({
           command: 'npx.cmd',
-          args: ['^"--yes^"', '^"eas-cli@latest^"'],
+          args: ['^"--yes^"', '^"eas-cli^"'],
           shell: true,
         });
       } finally {

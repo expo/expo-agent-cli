@@ -13,17 +13,13 @@ afterEach(() => {
 
 describe(runnerSpawnKey, () => {
   it('keys an npx spawn on the package spec, past the runner flags', () => {
-    expect(runnerSpawnKey('npx', ['--yes', 'eas-cli@latest', 'build:list', '--json'])).toBe(
-      'npx:eas-cli@latest'
-    );
+    expect(runnerSpawnKey('npx', ['--yes', 'eas-cli', 'build:list', '--json'])).toBe('npx:eas-cli');
   });
 
   it('keys a bunx spawn found at an absolute path on the same spec', () => {
     // The path is what gets spawned and says nothing about which scratch directory is shared: bun
     // keys that on the spec, so two spellings of one runner must not be two locks.
-    expect(runnerSpawnKey('/opt/homebrew/bin/bunx', ['eas-cli@latest', 'whoami'])).toBe(
-      'bunx:eas-cli@latest'
-    );
+    expect(runnerSpawnKey('/opt/homebrew/bin/bunx', ['eas-cli', 'whoami'])).toBe('bunx:eas-cli');
   });
 
   it('recognises the Windows spelling of both runners', () => {
@@ -35,7 +31,7 @@ describe(runnerSpawnKey, () => {
 
   it('gives two different package specs two different keys', () => {
     // Two specs are two scratch directories, so serializing them would cost time and buy nothing.
-    expect(runnerSpawnKey('npx', ['--yes', 'eas-cli@latest', 'whoami'])).not.toBe(
+    expect(runnerSpawnKey('npx', ['--yes', 'eas-cli', 'whoami'])).not.toBe(
       runnerSpawnKey('npx', ['--yes', 'create-expo@latest'])
     );
   });
@@ -72,8 +68,8 @@ describe(acquireRunnerLockAsync, () => {
     const { events, body } = tracker();
 
     await Promise.all([
-      withRunnerLockAsync('npx:eas-cli@latest', () => body('first', 30)),
-      withRunnerLockAsync('npx:eas-cli@latest', () => body('second', 5)),
+      withRunnerLockAsync('npx:eas-cli', () => body('first', 30)),
+      withRunnerLockAsync('npx:eas-cli', () => body('second', 5)),
     ]);
 
     // The whole finding: started milliseconds apart, the two spawns shared one scratch directory.
@@ -84,7 +80,7 @@ describe(acquireRunnerLockAsync, () => {
     const { events, body } = tracker();
 
     await Promise.all([
-      withRunnerLockAsync('npx:eas-cli@latest', () => body('eas', 30)),
+      withRunnerLockAsync('npx:eas-cli', () => body('eas', 30)),
       withRunnerLockAsync('npx:create-expo@latest', () => body('create', 5)),
     ]);
 
@@ -94,11 +90,11 @@ describe(acquireRunnerLockAsync, () => {
   it('hands the lock on when the holder throws', async () => {
     const { events, body } = tracker();
 
-    const failing = withRunnerLockAsync('npx:eas-cli@latest', async () => {
+    const failing = withRunnerLockAsync('npx:eas-cli', async () => {
       events.push('failing:start');
       throw new Error('the runner exploded');
     });
-    const waiting = withRunnerLockAsync('npx:eas-cli@latest', () => body('waiting', 1));
+    const waiting = withRunnerLockAsync('npx:eas-cli', () => body('waiting', 1));
 
     await expect(failing).rejects.toThrow('the runner exploded');
     await waiting;
@@ -106,10 +102,10 @@ describe(acquireRunnerLockAsync, () => {
   });
 
   it('reports how long a spawn waited, so the queue is not free', async () => {
-    const held = await acquireRunnerLockAsync('npx:eas-cli@latest');
+    const held = await acquireRunnerLockAsync('npx:eas-cli');
     expect(held!.queuedMs).toBe(0);
 
-    const queued = acquireRunnerLockAsync('npx:eas-cli@latest');
+    const queued = acquireRunnerLockAsync('npx:eas-cli');
     await new Promise((resolve) => setTimeout(resolve, 25));
     held!.release();
 
@@ -120,14 +116,14 @@ describe(acquireRunnerLockAsync, () => {
   });
 
   it('gives up the wait rather than hanging a command that named a deadline', async () => {
-    const held = await acquireRunnerLockAsync('npx:eas-cli@latest');
+    const held = await acquireRunnerLockAsync('npx:eas-cli');
 
-    const expired = await acquireRunnerLockAsync('npx:eas-cli@latest', { timeoutMs: 20 });
+    const expired = await acquireRunnerLockAsync('npx:eas-cli', { timeoutMs: 20 });
 
     expect(expired).toBeNull();
     // And the queue is intact: the waiter that gave up did not take the baton with it.
     held!.release();
-    const next = await acquireRunnerLockAsync('npx:eas-cli@latest', { timeoutMs: 1000 });
+    const next = await acquireRunnerLockAsync('npx:eas-cli', { timeoutMs: 1000 });
     expect(next).not.toBeNull();
     next!.release();
   });

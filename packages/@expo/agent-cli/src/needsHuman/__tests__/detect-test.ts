@@ -76,10 +76,10 @@ describe(classifySubprocessFailure, () => {
       classifySubprocessFailure(
         failure({
           stderr: SAMPLES.easNonInteractive,
-          invocation: 'npx --yes eas-cli@latest deploy',
+          invocation: 'npx --yes eas-cli deploy',
         })
       )
-    ).toMatchObject({ scenario: 'eas-prompt', command: 'npx --yes eas-cli@latest deploy' });
+    ).toMatchObject({ scenario: 'eas-prompt', command: 'npx --yes eas-cli deploy' });
   });
 
   it.each([
@@ -154,12 +154,12 @@ describe(classifySubprocessFailure, () => {
           tool: 'eas',
           exitCode: null,
           promptHang: '? Select a platform',
-          invocation: 'npx --yes eas-cli@latest deploy',
+          invocation: 'npx --yes eas-cli deploy',
         })
       )
     ).toMatchObject({
       scenario: 'eas-prompt',
-      command: 'npx --yes eas-cli@latest deploy',
+      command: 'npx --yes eas-cli deploy',
       detectedBy: 'prompt-pattern',
     });
   });
@@ -210,7 +210,7 @@ describe('an unlinked project is not a prompt', () => {
     expect(
       classifySubprocessFailure({
         tool: 'eas',
-        invocation: 'npx --yes eas-cli@latest build --platform ios',
+        invocation: 'npx --yes eas-cli build --platform ios',
         exitCode: 1,
         stdout:
           'EAS project not configured. This command cannot configure it in non-interactive mode. Run one of the following, then re-run this command:\n  eas init --account <account-name> --non-interactive\nAccounts you can create projects in: bob\n',
@@ -218,7 +218,7 @@ describe('an unlinked project is not a prompt', () => {
       })
     ).toMatchObject({
       scenario: 'eas-project-unlinked',
-      command: 'npx --yes eas-cli@latest init --account bob --non-interactive',
+      command: 'npx --yes eas-cli init --account bob --non-interactive',
       detectedBy: 'exit-signature',
     });
   });
@@ -227,7 +227,7 @@ describe('an unlinked project is not a prompt', () => {
     expect(
       classifySubprocessFailure({
         tool: 'eas',
-        invocation: 'npx --yes eas-cli@latest build --platform ios',
+        invocation: 'npx --yes eas-cli build --platform ios',
         exitCode: 1,
         stdout: '',
         stderr:

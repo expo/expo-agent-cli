@@ -63,10 +63,11 @@ beforeEach(() => {
   vol.reset();
   vi.mocked(resolveEasCli).mockReturnValue({
     command: 'npx',
-    prefixArgs: ['--yes', 'eas-cli@latest'],
-    source: 'npx --yes eas-cli@latest',
+    prefixArgs: ['--yes', 'eas-cli'],
+    source: 'npx --yes eas-cli',
     runner: 'npx',
     pinned: false,
+    global: false,
   });
   vi.mocked(generateFingerprintAsync).mockResolvedValue({ hash: IOS_HASH, sources: [] });
   vi.mocked(lookUpCachedBuildAsync).mockResolvedValue({ state: 'none' });
@@ -203,10 +204,11 @@ describe(readEasBuildsStatusAsync, () => {
     expect(lookUpCachedBuildAsync).toHaveBeenCalledWith(
       {
         command: 'npx',
-        prefixArgs: ['--yes', 'eas-cli@latest'],
-        source: 'npx --yes eas-cli@latest',
+        prefixArgs: ['--yes', 'eas-cli'],
+        source: 'npx --yes eas-cli',
         runner: 'npx',
         pinned: false,
+        global: false,
       },
       projectRoot,
       'ios',

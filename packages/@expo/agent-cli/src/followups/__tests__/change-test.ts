@@ -43,7 +43,7 @@ describe(buildChangeFollowUps, () => {
       expect(ids(followups).slice(0, 2)).toEqual(['change-native-build', 'change-eas-build']);
       expect(followups[0]!.command).toBe('npx @expo/agent-cli dev --ios');
       expect(followups[1]!.command).toBe(
-        'npx --yes eas-cli@latest build --platform ios --profile development'
+        'npx --yes eas-cli build --platform ios --profile development'
       );
     });
 
@@ -89,7 +89,7 @@ describe(buildChangeFollowUps, () => {
 
       expect(local!.why).toContain('this machine has the Android SDK');
       expect(cloud!.command).toBe(
-        'npx --yes eas-cli@latest build --platform android --profile development'
+        'npx --yes eas-cli build --platform android --profile development'
       );
     });
 
@@ -102,7 +102,7 @@ describe(buildChangeFollowUps, () => {
         `npx @expo/agent-cli dev --${process.platform === 'darwin' ? 'ios' : 'android'}`
       );
       expect(local!.why).toContain('the platform toolchain');
-      expect(cloud!.command).toBe('npx --yes eas-cli@latest build --profile development');
+      expect(cloud!.command).toBe('npx --yes eas-cli build --profile development');
     });
 
     // A build that already exists beats both routes, so it stays the only one offered: neither

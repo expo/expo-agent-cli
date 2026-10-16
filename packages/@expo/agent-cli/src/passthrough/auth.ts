@@ -49,12 +49,12 @@ export type AuthTool = 'expo' | 'eas';
  * `runner-eas` rather than `npx-eas`: which runner runs the package is the caller's, not this CLI's,
  * so naming npm in the contract would be wrong under Bun (`src/utils/packageRunner.ts`).
  *
- * `project-eas` and `path-eas` are **gone** (wave 18). The EAS side has one rung — the runner — and
- * it subsumes both: the runner resolves the project's own `eas-cli` when the project has one, and
- * resolves a *package* rather than a file, so an `eas` on `PATH` is no longer a thing that can
- * answer (`src/utils/easCli.ts`). `project-expo` stays, because the Expo side is unchanged.
+ * `project-eas` is **gone** (wave 18): the runner resolves the project's own `eas-cli` when the
+ * project has one. `global-eas` is the machine's own `eas-cli`, taken only when the first `eas` on
+ * `PATH` resolves to that package at a recent enough version (`src/utils/easCli.ts`).
+ * `project-expo` stays, because the Expo side is unchanged.
  */
-export type AuthCliSource = 'project-expo' | 'runner-eas' | 'runner-expo';
+export type AuthCliSource = 'project-expo' | 'global-eas' | 'runner-eas' | 'runner-expo';
 
 /** The invocation one auth command resolves to. */
 export interface AuthCli {
@@ -68,7 +68,7 @@ export interface AuthCli {
    * The package runner, when the CLI is one this machine does not have installed.
    *
    * Set only for `runner-eas`. It is what {@link authCliLabel} names, because a reader wants to
-   * see `bunx eas-cli@latest` rather than the absolute path the runner was found at.
+   * see `bunx eas-cli` rather than the absolute path the runner was found at.
    */
   runner?: Invoker;
 }
@@ -117,6 +117,9 @@ export async function resolveAuthCliAsync(
   // spawn. When no runner is on `PATH` the spawn fails with ENOENT, and what the runner said is a
   // truer sentence than any guess this module could make.
   const easCli = easCliInvocation(projectRoot, { pathEnv });
+  if (easCli.global) {
+    return { tool: 'eas', source: 'global-eas', command: easCli.command, prefixArgs: [] };
+  }
   return {
     tool: 'eas',
     source: 'runner-eas',
@@ -198,7 +201,7 @@ export function sessionFilePath(): string {
  *
  * A resolved binary is named by its path, because *which* `eas` ran is the fact a reader needs. A
  * package runner is named by its name, because the path it was found at says nothing the name does
- * not, and `bunx eas-cli@latest` is a line that can be pasted.
+ * not, and `bunx eas-cli` is a line that can be pasted.
  */
 export function authCliLabel({ command, prefixArgs, runner }: AuthCli): string {
   return [runner ?? command, ...prefixArgs].join(' ');

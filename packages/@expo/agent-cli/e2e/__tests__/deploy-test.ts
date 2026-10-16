@@ -159,7 +159,7 @@ fs.appendFileSync(
 );
 
 const forwarded = args[0] === '--yes' ? args.slice(1) : args;
-if (forwarded[0] !== 'eas-cli' && forwarded[0] !== 'eas-cli@latest') {
+if (forwarded[0] !== 'eas-cli') {
   process.stderr.write('stub npx: nothing here runs ' + forwarded[0] + '\\n');
   process.exit(1);
 }
@@ -604,7 +604,7 @@ describe('@expo/agent-cli deploy', () => {
 
       expect(result.exitCode).toBe(0);
       expect(readStubNpxInvocations(projectRoot)).toEqual([
-        { args: ['--yes', 'eas-cli@latest', 'deploy', '--non-interactive'], cwd: projectRoot },
+        { args: ['--yes', 'eas-cli', 'deploy', '--non-interactive'], cwd: projectRoot },
       ]);
       expect(readStubExpoInvocations(projectRoot).map(({ args }) => args)).toEqual([
         ['whoami'],

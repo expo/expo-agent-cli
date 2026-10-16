@@ -91,13 +91,14 @@ async function probeAsync(projectRoot: string, timeoutMs: number): Promise<AuthP
  * exactly the way a signed-out one does, and reading that as "signed out" would hand the user a
  * login they do not need — and, worse, would stop a command that had every right to run.
  *
- * **Only when the CLI is already here.** The resolver's one rung is a package runner, and in a
- * project that does not declare `eas-cli` that means `npx --yes eas-cli@latest` — a package install
- * to read `~/.expo/state.json`, plus a registry round trip on every later run. The two rungs *below*
+ * **Only when the CLI is already here.** Without a project pin or a recent global `eas-cli`, the
+ * resolver's answer is a package runner — `npx --yes eas-cli`, a package install to read
+ * `~/.expo/state.json` on a cold cache. The two rungs *below*
  * this one, the project's own `expo whoami` and `EXPO_TOKEN`, answer the same question from the same
  * file for free. `status` promises to be instant and this is one of its sections, so this is the one
  * EAS-backed caller that declines to spend a download: it asks only when the project pins the CLI,
- * where the runner resolves it out of `node_modules` in about a third of a second. It is the same
+ * where the runner resolves it out of `node_modules` in about a third of a second, or when a global
+ * install answers directly. It is the same
  * judgement `askProjectExpoAsync` below already makes for `expo`.
  */
 async function askEasAsync(projectRoot: string, timeoutMs: number): Promise<AuthPreflight | null> {

@@ -52,8 +52,8 @@ export const EAS_BUILD_LOOKUP_TIMEOUT_MS = 10_000;
  * How long the same lookup gets when the EAS CLI has to be **downloaded** first.
  *
  * @ref llp/0015-backend-selection-and-config.rfc.md §Resolving the EAS CLI
- * In a project that does not pin `eas-cli`, the one rung is `npx --yes eas-cli@latest`: its first
- * run installs the package before the query starts, and every run asks the registry, which no budget
+ * In a project that does not pin `eas-cli`, on a machine without a recent global one, the rung is
+ * `npx --yes eas-cli`: its first run installs the package before the query starts, which no budget
  * written for a warm CLI can cover. Two answers were possible and this section takes the *middle*
  * one [decided — 2026-08-27, wave 18]: a wider budget, still bounded, so the common case of a modest
  * install answers rather than expires — and never the minutes a cold install, or an unreachable

@@ -85,32 +85,36 @@ The last-build record ignores `eas` steps. That record answers "does the app ins
 
 ## Resolving the EAS CLI
 
-An installed `eas-cli` is not something this CLI may expect. [confirmed, Kudo, 2026-08-26] The answer is one rung, taken every time: the package runner. [confirmed, Kudo, 2026-08-27] No project bin, no `PATH`, no fallbacks.
+An installed `eas-cli` is not something this CLI may expect. [confirmed, Kudo, 2026-08-26] When one is installed and recent enough, it is the fastest answer, so it is used. [confirmed, Kudo, 2026-10-16] Three rungs, in order:
 
 ```
-project declares eas-cli   ->  <runner> eas-cli          (the pin wins)
-otherwise                  ->  <runner> eas-cli@latest
-runner                     ->  bunx, when the project uses bun; else npx --yes
+project declares eas-cli                       ->  <runner> eas-cli   (the pin wins)
+first `eas` on PATH is eas-cli >= 25.0.0       ->  eas                (spawned directly)
+otherwise                                      ->  <runner> eas-cli
+runner                                         ->  bunx, when the project uses bun; else npx --yes
 ```
 
-**What is printed is what is spawned** [Kudo, 2026-09-09]. Every EAS command line this CLI hands a reader — a `Try:`, a follow-up, a needs-human `Ask the user`, a `How:` — is written with `easCommandPrefix()` (`src/utils/easCli.ts`): the same runner and package spec the resolver above would spawn for this project, so a bun project reads `bunx eas-cli`, a pinned project `npx --yes eas-cli`, everyone else `npx --yes eas-cli@latest`. Seventy-one lines used to say `npx eas …`, which runs nothing — there is no package called `eas`. A lint (`src/lint/__tests__/easCommandSpelling-test.ts`) fails on the bare form.
+`@latest` is gone from the spec. `bunx eas-cli@latest` asked the registry and reinstalled on every run (14–31 s warm). `bunx eas-cli` ran its cached copy with no request (2.6–5.8 s). npx revalidates the packument for either spec (~110 ms). [observed — bun 1.3.14, npm 11.17.0, 2026-10-16]
 
-The runners already prefer the project's own copy, so a "project bin first" rung was doing nothing the runner does not do. A runner resolves a package and never a file on `PATH`, so a stray `eas` is not spawned at all. The impostor guards stay (`utils/wrapperCrash.ts`) because "unreachable" is a claim about today's resolver rather than about the process boundary.
+**What is printed is what is spawned** [Kudo, 2026-09-09]. Every EAS command line this CLI hands a reader — a `Try:`, a follow-up, a needs-human `Ask the user`, a `How:` — is written with `easCommandPrefix()` (`src/utils/easCli.ts`): the same invocation the resolver above would spawn for this project, so a machine with a recent global install reads `eas`, a bun project `bunx eas-cli`, everyone else `npx --yes eas-cli`. Seventy-one lines used to say `npx eas …`, which runs nothing — there is no package called `eas`. A lint (`src/lint/__tests__/easCommandSpelling-test.ts`) fails on the bare form.
+
+The runners already prefer the project's own copy, so a "project bin first" rung was doing nothing the runner does not do. The global rung is the one place a file on `PATH` is spawned, and only after the file resolves (through its symlink) to a package named `eas-cli` at 25.0.0 or newer. Only the first `eas` on `PATH` is read, because that is the one the reader's shell runs. A shell wrapper, a Volta or pnpm shim, or a Windows `.cmd` does not resolve to the package, so the runner answers instead. The impostor guards stay (`utils/wrapperCrash.ts`) as a safety net.
 
 An existing project pin is respected, but error recovery does not recommend adding `eas-cli` to the project. A missing or unspawnable runner names the runner and asks for its installation/PATH to be repaired. A download failure suggests retrying or checking registry access; a timeout alone does not prove a download was in progress. [confirmed — review of #127, 2026-10-07]
 
 Load-bearing rules of the rung:
 
-- The pin survives. Local before published, in a monorepo too. A version in the spec (`@latest`) defeats the pin, so `pinned` chooses the bare name.
-- The signal is the declaration in `package.json` rather than an installed copy. A package that does not declare it while a sibling workspace does therefore gets `@latest`.
-- `@latest` talks to the registry on every run, and stalls for the length of npm's retry ladder when it cannot reach one. Every caller spawns it under a deadline.
+- The pin survives. Local before published, in a monorepo too, and before a global install. A version in the spec (`@latest`) defeats the pin, so the spec is always the bare name.
+- The signal is the declaration in `package.json` rather than an installed copy. A package that does not declare it while a sibling workspace does is therefore treated as unpinned.
+- The global install is read from its `package.json`, never by spawning `eas --version`. The check is sync and never throws; anything unreadable means "no global install".
+- npx still talks to the registry on every run, and stalls for the length of npm's retry ladder when it cannot reach one. Every caller spawns the runner under a deadline.
 - `--yes` for npm's exec only. npx prompts before installing a package it has not seen, and a prompt is a hang. `bunx` installs without asking.
 
 `EAS_CLI_MISSING` now means no `npx` and no `bunx` on `PATH`. `npm install -g eas-cli` is gone from its advice.
 
 Subprocesses are spawned in a process group of their own and signalled as a group (`src/utils/processGroup.ts`). Killing the runner otherwise leaves the CLI it started alive, inheriting the pipes, so `'close'` never fires. Stdin is never attached. Windows has no process-group equivalent; `killProcessTree` uses `taskkill /T /F` there.
 
-Who pays the first-run cost, when the project does not declare `eas-cli`:
+Who pays the first-run cost, when the project does not declare `eas-cli` and no recent global install answers:
 
 - The auth preflight declines to pay it. It asks the EAS CLI only when the project pins it. Otherwise `status` asks the project's Expo CLI instead.
 - `status --explain` widens its budget (`EAS_BUILD_RUNNER_TIMEOUT_MS`, 45 s) when the resolved invocation may download. A pinned project keeps 10 s. It never allows the minutes a cold install or an unreachable registry can take.
@@ -120,9 +124,9 @@ One spawn of a spec at a time. A runner keeps one scratch directory per package 
 
 ## Resolving a project-local bin
 
-The EAS CLI is the one member of the family this CLI never resolves as a file. Every other one (`expo`, `tsc`, `fingerprint`, `expo-doctor`, `create-launch`) walks up from the project. `src/utils/projectBin.ts` is that walk.
+The EAS CLI is the one member of the family this CLI never resolves from `node_modules`; its only file rung is the verified global install above. Every other one (`expo`, `tsc`, `fingerprint`, `expo-doctor`, `create-launch`) walks up from the project. `src/utils/projectBin.ts` is that walk.
 
-The nearest copy wins. That is what a package manager does and what Node does. An ancestor's `node_modules` is where the manager put this package's declared dependencies. A workspace has one tree rather than one per package. A type check and a hash are only comparable at the version the project pinned. A global install is still not consulted.
+The nearest copy wins. That is what a package manager does and what Node does. An ancestor's `node_modules` is where the manager put this package's declared dependencies. A workspace has one tree rather than one per package. A type check and a hash are only comparable at the version the project pinned. A global install is still not consulted for these.
 
 The stop is the filesystem root, not the workspace root. Nothing on disk marks a workspace. A failed search says what it covered: the directory it started in, that it went up, and where it stopped.
 
