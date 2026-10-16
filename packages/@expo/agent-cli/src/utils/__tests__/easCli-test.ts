@@ -200,7 +200,7 @@ describe(findGlobalEasCli, () => {
     globalEasCli('25.0.0');
 
     expect(resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toEqual({
-      command: '/usr/local/bin/eas',
+      command: path.join('/usr/local/bin', 'eas'),
       prefixArgs: [],
       source: 'eas',
       runner: 'npx',
@@ -233,7 +233,7 @@ describe(findGlobalEasCli, () => {
 
     expect(findGlobalEasCli({ pathEnv: `/opt/old/bin${path.delimiter}/usr/local/bin` })).toBeNull();
     expect(findGlobalEasCli({ pathEnv: `/usr/local/bin${path.delimiter}/opt/old/bin` })).toBe(
-      '/usr/local/bin/eas'
+      path.join('/usr/local/bin', 'eas')
     );
   });
 
@@ -275,7 +275,7 @@ describe(findGlobalEasCli, () => {
     globalEasCli('25.1.0');
 
     expect(resolveEasCli(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toMatchObject({
-      command: '/usr/local/bin/eas',
+      command: path.join('/usr/local/bin', 'eas'),
       global: true,
     });
   });
