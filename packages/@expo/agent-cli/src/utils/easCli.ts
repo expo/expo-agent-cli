@@ -222,15 +222,11 @@ function declaresEasCli(field: unknown): boolean {
  * bun 1.3.14, 2026-10-16]. A bin that is not a symlink into an `eas-cli` package is null, whatever it
  * would have printed.
  *
- * Always null on Windows. npm installs an `eas.cmd` shim there, not a symlink, so the check above
- * could never pass for a normal install; and an extensionless `eas` that did pass would be a script
- * Windows cannot spawn (`./windowsShim.ts`). The runner answers instead.
- *
  * Sync, never spawns, and never throws: anything unreadable reads as "no global eas-cli", which
  * costs the speed and never the command.
  */
 export function findGlobalEasCli({ pathEnv }: { pathEnv?: string } = {}): string | null {
-  // Not supported on Windows (see above): the runner always answers there.
+  // Not supported on Windows: npm installs an `eas.cmd` shim there, not a symlink into the package.
   if (process.platform === 'win32') {
     return null;
   }
