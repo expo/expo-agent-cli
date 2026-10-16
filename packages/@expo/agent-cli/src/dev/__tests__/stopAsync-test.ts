@@ -606,8 +606,7 @@ describe('dev:stop --eas', () => {
     } as any);
     vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({
       ok: false,
-      reason:
-        '"npx --yes eas-cli@latest simulator:stop --id sess-1 --non-interactive" exited 1: refused',
+      reason: '"npx --yes eas-cli simulator:stop --id sess-1 --non-interactive" exited 1: refused',
     });
 
     const code = await devStopAsync(projectRoot, options({ eas: true }));

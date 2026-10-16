@@ -119,7 +119,7 @@ describe(resolveAuthCliAsync, () => {
       command: 'npx',
       // `--yes` because npx prompts before installing a package it has not seen, and this CLI never
       // attaches stdin, so the prompt would be a hang (`src/utils/easCli.ts`).
-      prefixArgs: ['--yes', 'eas-cli@latest'],
+      prefixArgs: ['--yes', 'eas-cli'],
       runner: 'npx',
     });
   });
@@ -267,20 +267,20 @@ describe(authCliLabel, () => {
         tool: 'eas',
         source: 'runner-eas',
         command: 'npx',
-        prefixArgs: ['--yes', 'eas-cli@latest'],
+        prefixArgs: ['--yes', 'eas-cli'],
         runner: 'npx',
       })
-    ).toBe('npx --yes eas-cli@latest');
+    ).toBe('npx --yes eas-cli');
     // The runner is named, not the path it was found at.
     expect(
       authCliLabel({
         tool: 'eas',
         source: 'runner-eas',
         command: '/opt/homebrew/bin/bunx',
-        prefixArgs: ['eas-cli@latest'],
+        prefixArgs: ['eas-cli'],
         runner: 'bunx',
       })
-    ).toBe('bunx eas-cli@latest');
+    ).toBe('bunx eas-cli');
     expect(
       authCliLabel({ tool: 'expo', source: 'project-expo', command: expoBin, prefixArgs: [] })
     ).toBe(expoBin);

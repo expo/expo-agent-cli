@@ -286,7 +286,7 @@ async function deployWebAsync(
 interface EasUpload {
   /** The executable that ran. */
   command: string;
-  /** How to write that invocation in a message, e.g. `npx eas-cli@latest`. */
+  /** How to write that invocation in a message, e.g. `npx --yes eas-cli` or `eas`. */
   label: string;
   /** Arguments before `deploy`, which is the package name in the runner form. */
   prefixArgs: string[];

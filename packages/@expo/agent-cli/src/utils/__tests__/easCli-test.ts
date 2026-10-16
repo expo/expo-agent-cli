@@ -1,8 +1,9 @@
 // @ref llp/0015-backend-selection-and-config.rfc.md §Resolving the EAS CLI
 //
-// One rung: the package runner, every time. These tests pin the two things that makes safe — the
-// project's pin still wins, and no file called `eas` on this machine is ever spawned — plus the one
-// failure left, which is a machine with no runner at all.
+// Three rungs: the project's pin through the runner, a recent global `eas-cli`, then the runner.
+// These tests pin what makes that safe — the project's pin still wins, and no file called `eas` is
+// spawned unless it resolves to the `eas-cli` package at a version new enough — plus the one failure
+// left, which is a machine with no runner at all.
 //
 // The claim the design rests on was measured rather than assumed [observed — live, 2026-08-27,
 // against a project holding eas-cli 22.4.0 while the registry served 22.6.0]:
@@ -11,7 +12,7 @@
 //   bunx eas-cli               -> 22.4.0, likewise
 //   npx --yes eas-cli@latest   -> 22.6.0: a version in the spec defeats the pin
 //
-// Which is why `pinned` chooses the bare spec and nothing else may.
+// Which is why the spec is always the bare name.
 
 import { vol } from 'memfs';
 import path from 'path';
@@ -20,6 +21,7 @@ import {
   easCliArgs,
   easCliInvocation,
   easCliLabel,
+  findGlobalEasCli,
   mayDownloadEasCli,
   projectDeclaresEasCli,
   resolveEasCli,
@@ -70,21 +72,24 @@ afterEach(() => {
 });
 
 describe(resolveEasCliOrThrow, () => {
-  it(`should run the published eas-cli through npx when the project declares none`, () => {
+  it(`should run eas-cli through npx, without @latest, when the project declares none`, () => {
+    // No `@latest`: it made the runner ask the registry on every run, where the bare name lets the
+    // runner reuse its cache.
     project({ name: 'app', dependencies: { expo: '~54.0.0' } });
 
     expect(resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toEqual({
       command: 'npx',
-      prefixArgs: ['--yes', 'eas-cli@latest'],
-      source: 'npx --yes eas-cli@latest',
+      prefixArgs: ['--yes', 'eas-cli'],
+      source: 'npx --yes eas-cli',
       runner: 'npx',
       pinned: false,
+      global: false,
     });
   });
 
-  it(`should drop the version from the spec when the project pins eas-cli, so the pin wins`, () => {
-    // The whole point: `eas-cli@latest` would run 22.6.0 in a project holding 22.4.0, where the
-    // bare name runs the project's own copy and touches no network.
+  it(`should keep the bare spec when the project pins eas-cli, so the pin wins`, () => {
+    // A version in the spec would run 22.6.0 in a project holding 22.4.0, where the bare name runs
+    // the project's own copy and touches no network.
     project({ name: 'app', devDependencies: { 'eas-cli': '22.4.0' } });
 
     expect(resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toEqual({
@@ -93,6 +98,7 @@ describe(resolveEasCliOrThrow, () => {
       source: 'npx --yes eas-cli',
       runner: 'npx',
       pinned: true,
+      global: false,
     });
   });
 
@@ -112,10 +118,11 @@ describe(resolveEasCliOrThrow, () => {
 
     expect(resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toEqual({
       command: path.join('/usr/local/bin', 'bunx'),
-      prefixArgs: ['eas-cli@latest'],
-      source: 'bunx eas-cli@latest',
+      prefixArgs: ['eas-cli'],
+      source: 'bunx eas-cli',
       runner: 'bunx',
       pinned: false,
+      global: false,
     });
   });
 
@@ -127,7 +134,7 @@ describe(resolveEasCliOrThrow, () => {
 
     expect(
       resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: BUNX_ENV })
-    ).toMatchObject({ runner: 'bunx', source: 'bunx eas-cli@latest' });
+    ).toMatchObject({ runner: 'bunx', source: 'bunx eas-cli' });
   });
 
   it(`should keep npx for a bun project on a machine where bunx is not reachable`, () => {
@@ -135,12 +142,12 @@ describe(resolveEasCliOrThrow, () => {
 
     expect(
       resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })
-    ).toMatchObject({ runner: 'npx', prefixArgs: ['--yes', 'eas-cli@latest'] });
+    ).toMatchObject({ runner: 'npx', prefixArgs: ['--yes', 'eas-cli'] });
   });
 
-  it(`should never spawn a file called eas, wherever this machine keeps one`, () => {
-    // The impostor class, gone by construction: a runner resolves a package, so neither of these is
-    // reachable. Before wave 18 the first won, and a shim in the second was spawned and quoted.
+  it(`should never spawn a file called eas that is not the eas-cli package`, () => {
+    // The impostor class: neither of these resolves to the `eas-cli` package, so neither is
+    // spawned. Before wave 18 the first won, and a shim in the second was spawned and quoted.
     project(
       { name: 'app' },
       {
@@ -170,6 +177,107 @@ describe(resolveEasCliOrThrow, () => {
       expect(error.message).not.toContain('npm install');
       expect(error.suggestedCommand).toBeUndefined();
     }
+  });
+});
+
+/** A global `eas-cli` the way npm leaves one: a bin symlinked into the package's own directory. */
+function globalEasCli(version: string, { name = 'eas-cli', binDir = '/usr/local/bin' } = {}) {
+  const packageDir = path.join(binDir, '..', 'lib', 'node_modules', name);
+  vol.fromJSON(
+    {
+      [`${packageDir}/package.json`]: JSON.stringify({ name, version, bin: { eas: 'bin/run' } }),
+      [`${packageDir}/bin/run`]: '#!/usr/bin/env node',
+    },
+    '/'
+  );
+  vol.mkdirSync(binDir, { recursive: true });
+  vol.symlinkSync(`${packageDir}/bin/run`, `${binDir}/eas`);
+}
+
+describe(findGlobalEasCli, () => {
+  it(`should take a global eas-cli at 25.0.0 or newer, and spawn it without a runner`, () => {
+    project({ name: 'app' });
+    globalEasCli('25.0.0');
+
+    expect(resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toEqual({
+      command: path.join('/usr/local/bin', 'eas'),
+      prefixArgs: [],
+      source: 'eas',
+      runner: 'npx',
+      pinned: false,
+      global: true,
+    });
+  });
+
+  it(`should pass over a global eas-cli older than 25.0.0 for the runner`, () => {
+    project({ name: 'app' });
+    globalEasCli('24.9.1');
+
+    expect(findGlobalEasCli({ pathEnv: PATH_WITH_RUNNER })).toBeNull();
+    expect(
+      resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })
+    ).toMatchObject({ command: 'npx', prefixArgs: ['--yes', 'eas-cli'], global: false });
+  });
+
+  it(`should pass over a bin that resolves to a package that is not eas-cli`, () => {
+    project({ name: 'app' });
+    globalEasCli('30.0.0', { name: 'not-eas-cli' });
+
+    expect(findGlobalEasCli({ pathEnv: PATH_WITH_RUNNER })).toBeNull();
+  });
+
+  it(`should read only the first eas on PATH, the one the reader's shell runs`, () => {
+    project({ name: 'app' });
+    globalEasCli('22.0.0', { binDir: '/opt/old/bin' });
+    globalEasCli('25.1.0');
+
+    expect(findGlobalEasCli({ pathEnv: `/opt/old/bin${path.delimiter}/usr/local/bin` })).toBeNull();
+    expect(findGlobalEasCli({ pathEnv: `/usr/local/bin${path.delimiter}/opt/old/bin` })).toBe(
+      path.join('/usr/local/bin', 'eas')
+    );
+  });
+
+  it(`should leave a project's pin to win over a global install`, () => {
+    project({ name: 'app', devDependencies: { 'eas-cli': '22.4.0' } });
+    globalEasCli('25.1.0');
+
+    expect(
+      resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })
+    ).toMatchObject({
+      command: 'npx',
+      prefixArgs: ['--yes', 'eas-cli'],
+      pinned: true,
+      global: false,
+    });
+  });
+
+  it(`should never count a global install as a download`, () => {
+    project({ name: 'app' });
+    globalEasCli('25.1.0');
+
+    expect(
+      mayDownloadEasCli(resolveEasCli(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV }))
+    ).toBe(false);
+  });
+
+  it(`should never take the global rung on Windows`, () => {
+    // npm installs an `eas.cmd` shim there, and an extensionless `eas` is not something Windows can
+    // spawn, so the runner answers whatever is on PATH.
+    project({ name: 'app' });
+    globalEasCli('25.1.0');
+    mockPlatform('win32');
+
+    expect(findGlobalEasCli({ pathEnv: PATH_WITH_RUNNER })).toBeNull();
+  });
+
+  it(`should answer the global install even with no runner on PATH`, () => {
+    vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
+    globalEasCli('25.1.0');
+
+    expect(resolveEasCli(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV })).toMatchObject({
+      command: path.join('/usr/local/bin', 'eas'),
+      global: true,
+    });
   });
 });
 
@@ -225,7 +333,7 @@ describe(easCliLabel, () => {
     const easCli = resolveEasCliOrThrow(projectRoot, { pathEnv: PATH_WITH_RUNNER, env: NPX_ENV });
 
     expect(easCli.command).toBe(path.join('/usr/local/bin', 'bunx'));
-    expect(easCliLabel(easCli)).toBe('bunx eas-cli@latest');
+    expect(easCliLabel(easCli)).toBe('bunx eas-cli');
   });
 });
 
@@ -237,7 +345,7 @@ describe(easCliArgs, () => {
 
     expect(easCliArgs(easCli, ['build:list', '--json'])).toEqual([
       '--yes',
-      'eas-cli@latest',
+      'eas-cli',
       'build:list',
       '--json',
     ]);

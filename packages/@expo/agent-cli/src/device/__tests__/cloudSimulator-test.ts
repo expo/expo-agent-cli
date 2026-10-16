@@ -79,7 +79,7 @@ function project(files: Record<string, string> = {}): void {
 }
 
 /** The invocation such a project resolves to: one rung, and it declares no `eas-cli` of its own. */
-const EAS_PREFIX = ['--yes', 'eas-cli@latest'];
+const EAS_PREFIX = ['--yes', 'eas-cli'];
 
 /** The argv a spawn actually receives: the runner's prefix, then the EAS argv. */
 const easArgv = (args: string[]) => [...EAS_PREFIX, ...args];
@@ -802,9 +802,10 @@ describe(openUrlOnCloudSimulatorAsync, () => {
       easCli: {
         command: 'npx',
         prefixArgs: EAS_PREFIX,
-        source: 'npx --yes eas-cli@latest',
+        source: 'npx --yes eas-cli',
         runner: 'npx',
         pinned: false,
+        global: false,
       },
     });
 
@@ -814,7 +815,7 @@ describe(openUrlOnCloudSimulatorAsync, () => {
     expect(result).toMatchObject({ exitCode: 0, stdout: 'opened', spawnError: null });
     // The reproduction line names the runner and the package, not the path npx was found at, so it
     // can be pasted on a machine that has no `eas` of its own.
-    expect(result.command.startsWith('npx --yes eas-cli@latest simulator:exec')).toBe(true);
+    expect(result.command.startsWith('npx --yes eas-cli simulator:exec')).toBe(true);
   });
 
   it(`reports a refusal rather than throwing, so the caller explains it`, async () => {
@@ -828,9 +829,10 @@ describe(openUrlOnCloudSimulatorAsync, () => {
       easCli: {
         command: 'npx',
         prefixArgs: EAS_PREFIX,
-        source: 'npx --yes eas-cli@latest',
+        source: 'npx --yes eas-cli',
         runner: 'npx',
         pinned: false,
+        global: false,
       },
     });
 
@@ -852,9 +854,10 @@ describe(captureCloudScreenshotAsync, () => {
       easCli: {
         command: 'npx',
         prefixArgs: EAS_PREFIX,
-        source: 'npx --yes eas-cli@latest',
+        source: 'npx --yes eas-cli',
         runner: 'npx',
         pinned: false,
+        global: false,
       },
     });
 
@@ -988,7 +991,7 @@ describe(cloudVerbFailedError, () => {
   it(`says the device is held rather than that the session may have ended`, () => {
     const error = cloudVerbFailedError(inUse, {
       what: 'the deep link was not opened.',
-      how: 'Check the session is still running with "npx --yes eas-cli@latest simulator:list --status in-progress" — a session can end between the moment it was listed and the moment a verb reaches it. Start a new one if it has.',
+      how: 'Check the session is still running with "npx --yes eas-cli simulator:list --status in-progress" — a session can end between the moment it was listed and the moment a verb reaches it. Start a new one if it has.',
     });
 
     expect(error.code).toBe('CLOUD_SIMULATOR_DEVICE_REFUSED');
