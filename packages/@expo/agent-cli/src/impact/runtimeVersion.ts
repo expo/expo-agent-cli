@@ -7,68 +7,46 @@
 // module leaves the runtimeVersion where it was — so an update published now reaches installed
 // builds that cannot run it, and the app crashes on a module that is not there.
 
-import path from 'path';
-
-import { readStaticAppConfigAsync } from '../project/appConfig';
-import { readJsonFileAsync } from '../project/nodeModules';
-import { spawnExpoAsync } from '../utils/expoCli';
+import { readStaticExpoConfigAsync } from '../project/appConfig';
+import { readEvaluatedAppConfigAsync } from '../project/evaluatedAppConfig';
 import type { OtaSafety, RuntimeVersionInfo } from './types';
+
+export { parseLastJsonObject } from '../project/evaluatedAppConfig';
 
 /** The policies `runtimeVersion` accepts as `{ "policy": "..." }` [observed — expo config schema]. */
 const KNOWN_POLICIES = ['fingerprint', 'appVersion', 'sdkVersion', 'nativeVersion'];
 
 /**
- * Resolve the project's `runtimeVersion`, preferring the config the app itself would see.
+ * Resolve the project's `runtimeVersion` from the config the app sees. A static config is read as a
+ * file; a dynamic one is evaluated by `expo config` (llp/0001 §Constraints item 5).
  *
- * `expo config --json --type public` evaluates a dynamic `app.config.js` with its environment,
- * which is the only way to learn the runtimeVersion of a project whose config is code. This closes
- * the follow-up llp/0004 §Implemented in v1 as, item 7 recorded: config was read from static files
- * only, so a dynamic config yielded no answer at all.
- *
- * Falls back to the static config when the subprocess fails, and reports `source: null` when
- * neither answered — which is not "no runtimeVersion", and is never read as one.
+ * `source: null` means nothing answered, which is not "no runtimeVersion".
  */
-export async function resolveRuntimeVersionAsync(projectRoot: string): Promise<RuntimeVersionInfo> {
-  const fromCli = await readFromExpoConfigAsync(projectRoot);
-  if (fromCli) {
-    return fromCli;
+export async function resolveRuntimeVersionAsync(
+  projectRoot: string,
+  { cache }: { cache?: boolean } = {}
+): Promise<RuntimeVersionInfo> {
+  const staticConfig = await readStaticExpoConfigAsync(projectRoot);
+  if (staticConfig.source && staticConfig.config && !staticConfig.dynamic) {
+    return readRuntimeVersion(staticConfig.config.runtimeVersion, staticConfig.source);
   }
-  return readFromStaticConfigAsync(projectRoot);
-}
-
-async function readFromExpoConfigAsync(projectRoot: string): Promise<RuntimeVersionInfo | null> {
-  let result;
-  try {
-    ({ result } = await spawnExpoAsync(projectRoot, ['config', '--json', '--type', 'public'], {
-      output: 'capture',
-    }));
-  } catch {
-    // `resolveExpoCli` never throws for a missing bin — it falls back to `npx` — so this only
-    // fires on something unexpected, and an unexpected failure here is still just "no answer".
-    return null;
-  }
-  if (result.exitCode !== 0 || result.spawnError) {
-    return null;
+  // No app config at all: spawning `expo config` here can mean `npx expo` fetching a package.
+  if (!staticConfig.source && !staticConfig.dynamic) {
+    return { policy: null, literal: null, source: null, cache: null };
   }
 
-  const config = parseLastJsonObject(result.stdout);
-  if (!config) {
-    return null;
-  }
-  return readRuntimeVersion(config.runtimeVersion, 'expo config --type public');
-}
-
-async function readFromStaticConfigAsync(projectRoot: string): Promise<RuntimeVersionInfo> {
-  const staticConfig = await readStaticAppConfigAsync(projectRoot);
-  if (!staticConfig.source) {
-    return { policy: null, literal: null, source: null };
+  const evaluated = await readEvaluatedAppConfigAsync(projectRoot, { cache });
+  if (evaluated) {
+    return {
+      ...readRuntimeVersion(evaluated.config.runtimeVersion, evaluated.source),
+      cache: evaluated.cache,
+    };
   }
 
-  const contents = await readJsonFileAsync<Record<string, any>>(
-    path.join(projectRoot, staticConfig.source)
-  );
-  const config = (contents?.expo ?? contents ?? {}) as { runtimeVersion?: unknown };
-  return readRuntimeVersion(config.runtimeVersion, staticConfig.source);
+  if (!staticConfig.source || !staticConfig.config) {
+    return { policy: null, literal: null, source: null, cache: null };
+  }
+  return readRuntimeVersion(staticConfig.config.runtimeVersion, staticConfig.source);
 }
 
 /**
@@ -80,17 +58,17 @@ async function readFromStaticConfigAsync(projectRoot: string): Promise<RuntimeVe
  */
 export function readRuntimeVersion(value: unknown, source: string): RuntimeVersionInfo {
   if (typeof value === 'string' && value) {
-    return { policy: null, literal: value, source };
+    return { policy: null, literal: value, source, cache: null };
   }
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     const policy = (value as { policy?: unknown }).policy;
     if (typeof policy === 'string' && policy) {
-      return { policy, literal: null, source };
+      return { policy, literal: null, source, cache: null };
     }
   }
   // The config was read and named no runtimeVersion. That is a real answer — the project has no
   // runtime version configured — and it is reported with the source that said so.
-  return { policy: null, literal: null, source };
+  return { policy: null, literal: null, source, cache: null };
 }
 
 /**
@@ -168,42 +146,4 @@ export function resolveOtaSafety(
     runtimeVersion,
     why: `The native surface is unchanged, so the installed builds can run this bundle. The runtimeVersion policy is ${name}, which is unaffected either way.`,
   };
-}
-
-/**
- * The config object on stdout.
- *
- * **The last JSON line wins**, the same rule `parseFingerprint` uses, and for the same reason: the
- * Expo CLI writes its own structured event lines to stdout ahead of the answer, so slicing from the
- * first `{` reads an event and then fails on the rest of the stream. Only if no single line parses
- * is the whole tail tried, which is what reads a pretty-printed payload spanning many lines.
- */
-export function parseLastJsonObject(output: string): Record<string, any> | null {
-  const lines = output.split('\n').reverse();
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith('{')) {
-      continue;
-    }
-    const parsed = parseObject(trimmed);
-    // An event line parses too, and it has no `runtimeVersion` — but neither does a config that
-    // names none, so the two cannot be told apart here. The *last* line is the answer either way:
-    // the CLI prints the payload last, which is the property this depends on and the stub
-    // reproduces deliberately.
-    if (parsed) {
-      return parsed;
-    }
-  }
-
-  const start = output.indexOf('{');
-  return start < 0 ? null : parseObject(output.slice(start));
-}
-
-function parseObject(value: string): Record<string, any> | null {
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
 }

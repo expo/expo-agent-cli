@@ -1092,7 +1092,12 @@ describe('the --explain detail', () => {
           platforms: [],
           ota: {
             safe: safe as boolean | null,
-            runtimeVersion: { policy: 'appVersion', literal: null, source: 'app.json' },
+            runtimeVersion: {
+              policy: 'appVersion',
+              literal: null,
+              source: 'app.json',
+              cache: null,
+            },
             why: 'The runtimeVersion policy is "appVersion".',
           },
         },
@@ -1121,7 +1126,7 @@ describe('the --explain detail', () => {
           platforms: [],
           ota: {
             safe: null,
-            runtimeVersion: { policy: null, literal: null, source: null },
+            runtimeVersion: { policy: null, literal: null, source: null, cache: null },
             why: 'Nothing could resolve the runtimeVersion.',
           },
         },

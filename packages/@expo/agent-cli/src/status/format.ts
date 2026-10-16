@@ -251,7 +251,13 @@ function otaLine(ota: OtaSafety): string {
     : ota.runtimeVersion.literal
       ? `literal ${ota.runtimeVersion.literal}`
       : 'runtimeVersion unresolved';
-  const source = ota.runtimeVersion.source ? chalk.dim(` (${ota.runtimeVersion.source})`) : '';
+  // The record pins the config's files, not the environment variables it may read.
+  const cached = ota.runtimeVersion.cache
+    ? `, cached ${formatAge(ota.runtimeVersion.cache.ageMs)} ago; environment variables are not checked, --no-fingerprint-cache evaluates again`
+    : '';
+  const source = ota.runtimeVersion.source
+    ? chalk.dim(` (${ota.runtimeVersion.source}${cached})`)
+    : '';
   return `${verdict}${SEPARATOR}${policy}${source}`;
 }
 

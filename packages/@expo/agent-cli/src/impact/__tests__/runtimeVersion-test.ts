@@ -38,6 +38,7 @@ describe(readRuntimeVersion, () => {
       policy: 'appVersion',
       literal: null,
       source: 'app.json',
+      cache: null,
     });
   });
 
@@ -46,6 +47,7 @@ describe(readRuntimeVersion, () => {
       policy: null,
       literal: '1.2.0',
       source: 'app.json',
+      cache: null,
     });
   });
 
@@ -62,6 +64,7 @@ describe(readRuntimeVersion, () => {
       policy: null,
       literal: null,
       source: 'app.json',
+      cache: null,
     });
   });
 
@@ -74,30 +77,7 @@ describe(readRuntimeVersion, () => {
 });
 
 describe(resolveRuntimeVersionAsync, () => {
-  it(`should read the runtimeVersion from the expo config subprocess`, async () => {
-    mockExpoConfig({ name: 'app', runtimeVersion: { policy: 'fingerprint' } });
-
-    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
-      policy: 'fingerprint',
-      literal: null,
-      source: 'expo config --type public',
-    });
-  });
-
-  it(`should ask expo config for the public config as JSON`, async () => {
-    mockExpoConfig({ runtimeVersion: '1.0.0' });
-
-    await resolveRuntimeVersionAsync(projectRoot);
-
-    expect(spawnExpoAsync).toHaveBeenCalledWith(
-      projectRoot,
-      ['config', '--json', '--type', 'public'],
-      { output: 'capture' }
-    );
-  });
-
-  it(`should fall back to the static config when the subprocess fails`, async () => {
-    mockExpoConfigFailure();
+  it(`should read a static app.json as a file, spawning nothing`, async () => {
     vol.fromJSON({
       [`${projectRoot}/app.json`]: JSON.stringify({
         expo: { name: 'app', runtimeVersion: { policy: 'appVersion' } },
@@ -108,55 +88,141 @@ describe(resolveRuntimeVersionAsync, () => {
       policy: 'appVersion',
       literal: null,
       source: 'app.json',
+      cache: null,
     });
-  });
-
-  it(`should report no source when the static config the fallback reads does not parse`, async () => {
-    mockExpoConfigFailure();
-    vol.fromJSON({ [`${projectRoot}/app.json`]: '{ not json' });
-
-    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
-      policy: null,
-      literal: null,
-      source: null,
-    });
-  });
-
-  it(`should fall back when the subprocess printed something unparsable`, async () => {
-    vi.mocked(spawnExpoAsync).mockResolvedValue({
-      cli: { command: 'expo', args: [] },
-      result: { exitCode: 0, stdout: 'not json', stderr: '' },
-    });
-    vol.fromJSON({
-      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { runtimeVersion: '2.0.0' } }),
-    });
-
-    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toMatchObject({
-      literal: '2.0.0',
-      source: 'app.json',
-    });
-  });
-
-  it(`should report no source when neither the subprocess nor a config file answered`, async () => {
-    mockExpoConfigFailure();
-    vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
-
-    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
-      policy: null,
-      literal: null,
-      source: null,
-    });
+    expect(spawnExpoAsync).not.toHaveBeenCalled();
   });
 
   it(`should read a bare config object without an expo key`, async () => {
-    mockExpoConfigFailure();
     vol.fromJSON({
       [`${projectRoot}/app.json`]: JSON.stringify({ name: 'app', runtimeVersion: '3.0.0' }),
     });
 
     await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toMatchObject({
       literal: '3.0.0',
+      source: 'app.json',
     });
+    expect(spawnExpoAsync).not.toHaveBeenCalled();
+  });
+
+  it(`should report the source even when a static config names no runtimeVersion`, async () => {
+    vol.fromJSON({ [`${projectRoot}/app.config.json`]: JSON.stringify({ name: 'app' }) });
+
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+      policy: null,
+      literal: null,
+      source: 'app.config.json',
+      cache: null,
+    });
+  });
+
+  it(`should read app.config.json over app.json, as Expo does`, async () => {
+    vol.fromJSON({
+      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { runtimeVersion: '1.0.0' } }),
+      [`${projectRoot}/app.config.json`]: JSON.stringify({
+        expo: { runtimeVersion: { policy: 'fingerprint' } },
+      }),
+    });
+
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+      policy: 'fingerprint',
+      literal: null,
+      source: 'app.config.json',
+      cache: null,
+    });
+    expect(spawnExpoAsync).not.toHaveBeenCalled();
+  });
+
+  it(`should not read a static config that does not parse as naming no runtimeVersion`, async () => {
+    vol.fromJSON({ [`${projectRoot}/app.json`]: '{ not json' });
+    mockExpoConfigFailure();
+
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+      policy: null,
+      literal: null,
+      source: null,
+      cache: null,
+    });
+  });
+
+  describe('a dynamic config', () => {
+    function writeDynamicProject(appJson: unknown = { expo: { name: 'app' } }) {
+      vol.fromJSON({
+        [`${projectRoot}/package.json`]: '{"name":"app"}',
+        [`${projectRoot}/app.json`]: JSON.stringify(appJson),
+        [`${projectRoot}/app.config.js`]: 'module.exports = ({ config }) => config;',
+      });
+    }
+
+    it(`should read the runtimeVersion from the expo config subprocess`, async () => {
+      writeDynamicProject();
+      mockExpoConfig({ name: 'app', runtimeVersion: { policy: 'fingerprint' } });
+
+      await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+        policy: 'fingerprint',
+        literal: null,
+        source: 'expo config --type public',
+        cache: null,
+      });
+    });
+
+    it(`should fall back to the static config beside it when the subprocess fails`, async () => {
+      writeDynamicProject({ expo: { name: 'app', runtimeVersion: { policy: 'appVersion' } } });
+      mockExpoConfigFailure();
+
+      await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+        policy: 'appVersion',
+        literal: null,
+        source: 'app.json',
+        cache: null,
+      });
+    });
+
+    it.each([
+      ['alone', {}],
+      ['beside an app.json', { 'app.json': JSON.stringify({ expo: { runtimeVersion: '1.0.0' } }) }],
+    ])(`should evaluate an app.config.mts %s`, async (_name, files: Record<string, string>) => {
+      vol.fromJSON({
+        [`${projectRoot}/package.json`]: '{"name":"app"}',
+        [`${projectRoot}/app.config.mts`]: 'export default {};',
+        ...Object.fromEntries(
+          Object.entries(files).map(([name, body]) => [`${projectRoot}/${name}`, body])
+        ),
+      });
+      mockExpoConfig({ name: 'app', runtimeVersion: { policy: 'appVersion' } });
+
+      await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toMatchObject({
+        policy: 'appVersion',
+        source: 'expo config --type public',
+      });
+    });
+
+    it(`should report no source when neither the subprocess nor a config file answered`, async () => {
+      vol.fromJSON({
+        [`${projectRoot}/package.json`]: '{}',
+        [`${projectRoot}/app.config.ts`]: 'export default {};',
+      });
+      mockExpoConfigFailure();
+
+      await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+        policy: null,
+        literal: null,
+        source: null,
+        cache: null,
+      });
+    });
+  });
+
+  it(`should spawn nothing for a project with no app config file`, async () => {
+    vol.fromJSON({ [`${projectRoot}/package.json`]: '{"name":"app"}' });
+
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+      policy: null,
+      literal: null,
+      source: null,
+      cache: null,
+    });
+    expect(spawnExpoAsync).not.toHaveBeenCalled();
   });
 });
 
@@ -165,7 +231,7 @@ describe(resolveOtaSafety, () => {
     policy: string | null,
     literal: string | null = null,
     source: string | null = 'app.json'
-  ): RuntimeVersionInfo => ({ policy, literal, source });
+  ): RuntimeVersionInfo => ({ policy, literal, source, cache: null });
 
   describe('the policy decides, not the class', () => {
     it.each([
