@@ -76,8 +76,7 @@ export interface AuthCli {
 /**
  * The package `register` falls back to, for the same reason and with a different tradeoff.
  *
- * Unpinned, where the EAS rungs' `EAS_CLI_PACKAGE` (`src/utils/easCli.ts`) carries `@latest`: `npx
- * expo` resolves to the newest
+ * The bare name, like `EAS_CLI_PACKAGE` (`src/utils/easCli.ts`): `npx expo` resolves to the newest
  * `expo` either way, and the version of an SDK downloaded to open a signup page is not a fact worth
  * asserting in a command line a reader may see.
  */
@@ -91,13 +90,12 @@ const EXPO_CLI_PACKAGE = 'expo';
  * before — which matters because `expo login` and `eas login` are not identical programs, and a
  * project that has an opinion about its Expo version should keep it.
  *
- * When the project has no `expo`, the EAS CLI answers, through the one rung this CLI has for it:
- * `npx --yes eas-cli`, or `bunx`. This module used to own a chain of its own — the project's
- * `eas-cli`, then an `eas` on `PATH` (checked with a `--version` probe, because a binary under that
- * name can be a wrapper), then the runner. **All three collapsed into the runner** (wave 18): it
- * resolves the project's own copy when there is one, and it resolves a *package*, so the `PATH`
- * candidate and the probe that guarded it have nothing left to point at
- * (`src/utils/easCli.ts`).
+ * When the project has no `expo`, the EAS CLI answers, through the rungs `src/utils/easCli.ts` owns:
+ * the project's pinned `eas-cli` through the runner, then a global `eas` spawned directly when it
+ * resolves to the `eas-cli` package at 25.0.0 or newer, then `npx --yes eas-cli` or `bunx eas-cli`.
+ * This module used to own a chain of its own, with an `eas` on `PATH` checked by a `--version`
+ * probe because a binary under that name can be a wrapper. The global rung replaces the probe with
+ * a read of the package's own `package.json`, so nothing is spawned to decide.
  *
  * Still async, and still the async one every caller awaits: the signature is the contract of a
  * forwarded command, and narrowing it to sync would churn every call site for nothing.

@@ -10,7 +10,7 @@
 //
 //   npx --yes eas-cli          -> 22.4.0, and answers against a *dead* registry (no fetch)
 //   bunx eas-cli               -> 22.4.0, likewise
-//   npx --yes eas-cli   -> 22.6.0: a version in the spec defeats the pin
+//   npx --yes eas-cli@latest   -> 22.6.0: a version in the spec defeats the pin
 //
 // Which is why the spec is always the bare name.
 

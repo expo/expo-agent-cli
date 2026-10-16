@@ -38,12 +38,12 @@ function mockWhoami(result: Partial<subprocess.SubprocessResult>) {
 const RUNNER_DIR = (process.env.PATH ?? '/usr/local/bin').split(path.delimiter)[0]!;
 
 /**
- * A project that **pins** `eas-cli`, which is the only shape this preflight asks EAS about.
+ * A project that **pins** `eas-cli`, one of the two shapes this preflight asks EAS about; the other
+ * is a recent global `eas-cli` on `PATH`.
  *
- * The one rung is a package runner, and in a project that declares nothing that means
- * `npx --yes eas-cli` — a package install to read `~/.expo/state.json`. `status` promises to
- * be instant, so it asks only where the runner resolves the CLI out of `node_modules`
- * (`src/needsHuman/preflight.ts` §askEasAsync).
+ * Without either, the answer is a package runner — `npx --yes eas-cli`, a package install to read
+ * `~/.expo/state.json` on a cold cache. `status` promises to be instant, so it asks only where no
+ * download can happen (`src/needsHuman/preflight.ts` §askEasAsync).
  */
 function withPinnedEasCli(files: Record<string, string> = {}) {
   vol.fromJSON({
@@ -340,7 +340,7 @@ describe(readAuthPreflightAsync, () => {
 
     expect(spawned).toHaveBeenCalledWith(
       'npx',
-      // The bare spec, because this project pins the CLI: `eas-cli` would run a different
+      // The bare spec, because this project pins the CLI: `eas-cli@latest` would run a different
       // version and ask the registry to find out which (`src/utils/easCli.ts`).
       ['--yes', 'eas-cli', 'whoami'],
       expect.objectContaining({ timeoutMs: 1234 })
