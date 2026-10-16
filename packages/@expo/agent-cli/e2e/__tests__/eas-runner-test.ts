@@ -384,9 +384,10 @@ describe('a machine with no eas-cli installed', () => {
 // The rung above the runner: a global `eas-cli` the developer already installed answers without a
 // runner and without the registry, but only when it is the package and at 25.0.0 or newer.
 //
-// Not on Windows: the resolver never takes this rung there (an npm global is an `eas.cmd` shim, not
-// a symlink into the package), and the fixture's symlinked, extensionless bin is a POSIX layout.
-// `src/utils/__tests__/easCli-test.ts` pins the Windows answer.
+// Skipped on Windows, where `findGlobalEasCli` is not supported: the resolver never takes this
+// rung there (an npm global is an `eas.cmd` shim, not a symlink into the package), and the
+// fixture's symlinked, extensionless bin is a POSIX layout. `src/utils/__tests__/easCli-test.ts`
+// pins the Windows answer.
 describe.skipIf(process.platform === 'win32')('a machine with a global eas-cli installed', () => {
   /** A bare directory, a stub `npx`, and a global `eas-cli` package whose bin is linked onto `PATH`. */
   async function plantGlobalAsync(version: string) {
