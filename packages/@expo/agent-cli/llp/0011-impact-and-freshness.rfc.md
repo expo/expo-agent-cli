@@ -134,9 +134,7 @@ Three decisions:
 - A policy this CLI has never heard of is `null`, and is reported verbatim.
 - `why` is always a sentence, whatever the verdict.
 
-Resolving the policy reads the config the app itself sees. A static `app.json` / `app.config.json` is read as a file. A dynamic `app.config.js` / `.ts` is evaluated by `expo config --json --type public` ([[0001-agentic-cli-on-expo-cli]] §Constraints item 5). The static file is the fallback when the subprocess fails, and `source: null` when neither answered. The Expo CLI writes event lines to stdout ahead of the answer, so the parse is "last JSON line wins".
-
-The evaluated config is remembered in `.expo/agent-cli-app-config.json`, revalidated like the fingerprint record ([[0023-fingerprint-caching]] §What a cached hash is revalidated against), with the same ten-minute expiry. The report says when the answer is cached (`runtimeVersion.cache`; `cached 2m ago` in the text), and `--no-fingerprint-cache` refuses it.
+Resolving the policy uses `expo config --json --type public`, a subprocess that evaluates the config the app itself sees. That holds for a static `app.json` too: the subprocess runs the config plugins it lists, and a plugin may set `runtimeVersion`. The answer is not cached. A dynamic config can read environment variables and `.env` files, which no file stamp sees. A project with no app config file is not evaluated, because `npx expo` could fetch a package for it. A static-config read is the fallback when the subprocess fails, and `source: null` when neither answered. The Expo CLI writes event lines to stdout ahead of the answer, so the parse is "last JSON line wins", the same rule `parseFingerprint` uses.
 
 ## Precision limits
 

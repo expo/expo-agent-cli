@@ -3,7 +3,6 @@
 // `ImpactReport` are the versioned surface of `impact --json`, pinned by a shape test.
 
 import type { FollowUp } from '../followups/types';
-import type { EvaluatedAppConfigCache } from '../project/evaluatedAppConfig';
 
 /**
  * What a change costs, in the only three sizes that mean different things to a developer.
@@ -109,12 +108,6 @@ export interface RuntimeVersionInfo {
   literal: string | null;
   /** Where it was read: `expo config --type public`, `app.json`, or null when nothing answered. */
   source: string | null;
-  /**
-   * Set when an `expo config` answer came out of the `.expo` record. Null otherwise.
-   *
-   * @ref llp/0021-honest-reports.rfc.md
-   */
-  cache: EvaluatedAppConfigCache | null;
 }
 
 /**

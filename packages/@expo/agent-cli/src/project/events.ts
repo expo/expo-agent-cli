@@ -7,8 +7,6 @@ declare module '2g' {
     /** A computed fingerprint was not cached, because the project moved while it was computed. */
     'project:fingerprint_cache_skipped': { reason: string };
     'project:fingerprint_cache_write_failed': { error: SerializedError };
-    'project:app_config_cache_skipped': { reason: string };
-    'project:app_config_cache_write_failed': { error: SerializedError };
   }
 }
 

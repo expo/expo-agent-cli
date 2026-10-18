@@ -487,7 +487,7 @@ export async function collectStatusReportAsync(
       })
     ),
     options.explain && report.freshness
-      ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!, options))
+      ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!))
       : Promise.resolve(null),
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
     // `AGENT_CLI_NO_DEVICE` is the switch `dev` uses, so a stubbed harness never hits a real device.
@@ -719,14 +719,11 @@ function notComparedImpact(
  */
 async function resolveOtaSafetyAsync(
   projectRoot: string,
-  freshness: FreshnessStatus,
-  options: StatusOptions
+  freshness: FreshnessStatus
 ): Promise<OtaSafety> {
   const { resolveRuntimeVersionAsync, resolveOtaSafety } =
     require('../impact/runtimeVersion') as typeof import('../impact/runtimeVersion');
-  const runtimeVersion = await resolveRuntimeVersionAsync(projectRoot, {
-    cache: options.fingerprintCache,
-  });
+  const runtimeVersion = await resolveRuntimeVersionAsync(projectRoot);
   // The strongest answer across the platforms, the way `impact` folds them: one platform whose
   // native surface moved is enough to decide the question for an update published now.
   const changed = freshness.platforms.reduce<boolean | null>(
