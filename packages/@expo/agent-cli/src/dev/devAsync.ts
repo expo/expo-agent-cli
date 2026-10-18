@@ -627,13 +627,15 @@ async function executePlanAsync(
       });
     };
 
+    if (step.id === 'eas-build') {
+      // A remembered "no build" for this platform is about to be wrong.
+      dropEasNoneEntry(projectRoot, resolveEasBuildPlatform(step));
+    }
     // @ref llp/0027-everything-on-eas.rfc.md §The build is a simulator build
     // Said in the plan's reasons, and done here, right before the build that names the profile:
     // `eas build --profile development-simulator` against an `eas.json` without it stops at "profile
     // not found", after the upload. The write is three keys under `build`, and nothing else moves.
     if (step.id === 'eas-build' && options.deviceBackend === 'eas') {
-      // A remembered "no build" for this platform is about to be wrong.
-      dropEasNoneEntry(projectRoot, resolveEasBuildPlatform(step));
       if (ensureSimulatorProfileSync(projectRoot)) {
         devEvent('eas_json_profile_added', { profile: EAS_SIMULATOR_PROFILE });
         Log.progress(`Added the "${EAS_SIMULATOR_PROFILE}" build profile to eas.json.`);
@@ -732,6 +734,10 @@ async function executePlanAsync(
     }
 
     recordBuildOf(projectRoot, step, state);
+    if (step.id === 'eas-build') {
+      // A `status` that ran during the build saw no finished build and saved a new "none".
+      dropEasNoneEntry(projectRoot, resolveEasBuildPlatform(step));
+    }
     if (step.id === 'eas-build' && options.deviceBackend === 'eas') {
       // The build that just finished is the newest finished one of its profile, and its id is what
       // the session installs. Asked of EAS rather than parsed out of the step, whose output went to
