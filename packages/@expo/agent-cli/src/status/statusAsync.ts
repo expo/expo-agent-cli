@@ -487,7 +487,7 @@ export async function collectStatusReportAsync(
       })
     ),
     report.freshness
-      ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!, options))
+      ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!))
       : Promise.resolve(null),
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
     // `AGENT_CLI_NO_DEVICE` is the switch `dev` uses, so a stubbed harness never hits a real device.
