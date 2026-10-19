@@ -1143,10 +1143,10 @@ process.stdout.write(JSON.stringify({
 
         expect(result.exitCode).toBe(0);
         const report: StatusReport = JSON.parse(result.stdout);
-        // The static fallback names no runtimeVersion, so the verdict is unknown, never "not safe".
+        // Nothing resolved the policy, so the verdict is unknown, never "not safe".
         expect(report.freshness!.ota).toMatchObject({
           safe: null,
-          runtimeVersion: { source: 'app.json' },
+          runtimeVersion: { source: null },
         });
         expect(report.project).not.toBeNull();
       });
