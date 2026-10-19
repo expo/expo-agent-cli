@@ -22,9 +22,9 @@ const KNOWN_POLICIES = ['fingerprint', 'appVersion', 'sdkVersion', 'nativeVersio
  * the follow-up llp/0004 §Implemented in v1 as, item 7 recorded: config was read from static files
  * only, so a dynamic config yielded no answer at all.
  *
- * Falls back to the static config when the subprocess fails, and reports `source: null` when
- * neither answered — which is not "no runtimeVersion", and is never read as one. A project with no
- * app config file is not evaluated.
+ * Reports `source: null` when the subprocess fails, which is not "no runtimeVersion" and is never
+ * read as one. The static file is not a fallback: its plugins, or a dynamic config, can change the
+ * answer. A project with no app config file is not evaluated.
  */
 export async function resolveRuntimeVersionAsync(projectRoot: string): Promise<RuntimeVersionInfo> {
   const staticConfig = await readStaticExpoConfigAsync(projectRoot);
@@ -33,14 +33,9 @@ export async function resolveRuntimeVersionAsync(projectRoot: string): Promise<R
     return { policy: null, literal: null, source: null };
   }
 
-  const fromCli = await readFromExpoConfigAsync(projectRoot);
-  if (fromCli) {
-    return fromCli;
-  }
-  if (!staticConfig.source || !staticConfig.config) {
-    return { policy: null, literal: null, source: null };
-  }
-  return readRuntimeVersion(staticConfig.config.runtimeVersion, staticConfig.source);
+  return (
+    (await readFromExpoConfigAsync(projectRoot)) ?? { policy: null, literal: null, source: null }
+  );
 }
 
 async function readFromExpoConfigAsync(projectRoot: string): Promise<RuntimeVersionInfo | null> {
@@ -126,7 +121,7 @@ export function resolveOtaSafety(
       runtimeVersion,
       why: source
         ? `${source} names no runtimeVersion, so which builds an update would reach cannot be decided here. Configure runtimeVersion before publishing an update, or check the channel on expo.dev.`
-        : `The runtimeVersion could not be resolved — neither "expo config --type public" nor a static app config answered — so whether an update published now is safe is unknown. It is not reported as safe on a guess.`,
+        : `The runtimeVersion could not be resolved: "expo config --type public" gave no answer, or the project has no app config. So whether an update published now is safe is unknown. It is not reported as safe on a guess.`,
     };
   }
 
