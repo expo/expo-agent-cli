@@ -4,7 +4,7 @@
 // `fingerprint:diff` in process, so `@expo/agent-cli status` can classify a change without spawning
 // anything. The CLI's own diff is a subprocess over two temporary files
 // (`diffFingerprintsAsync`), which is the right price under `--build <id>` — a caller who
-// asked for it — and the wrong one for a line on a report that promises to be instant.
+// asked for it — and the wrong one for a line `status` prints on every run.
 //
 // **This is a port, and the constraint of llp/0001 is intact.** Nothing is imported from
 // `@expo/fingerprint`: what is reproduced here is a set difference over two lists of

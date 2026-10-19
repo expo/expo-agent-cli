@@ -155,7 +155,7 @@ The same flag refuses the EAS answer `status` keeps (`.expo/agent-cli-eas-builds
 
 ## What it bought
 
-On a real SDK 57 Expo Router app, a warm `status --explain` is about 38% faster (roughly 1.8 s of 4.7 s). A default `status` is not faster at all. The fingerprint was never its critical path. Dev-server discovery was, and that is [[0004-smart-start-and-project-state]] §The discovery ladder. Pinning the discovery out of the way exposes the saving: about 0.9 s and 77%. The first run costs about 40 ms more, recovered on the next run.
+Measured before `--explain` was removed. On a real SDK 57 Expo Router app, a warm run that computes all three fingerprints (then `status --explain`, now every `status`) is about 38% faster (roughly 1.8 s of 4.7 s). A run that computed only the project fingerprint (then the default `status`) was not faster at all. The fingerprint was never its critical path. Dev-server discovery was, and that is [[0004-smart-start-and-project-state]] §The discovery ladder. Pinning the discovery out of the way exposes the saving: about 0.9 s and 77%. The first run costs about 40 ms more, recovered on the next run.
 
 ## Proof
 

@@ -77,7 +77,7 @@ The read is backwards compatible. A bare string reads as `{hash, sources: null}`
 
 A two-platform record is about 56 KB. No gzip, no subset, no second file. A project where this grows unreasonably loses a comparison and never a command. The record is advisory.
 
-`status --json` explicitly drops the sources. `status` promises to be instant and small. Its freshness section is a hash comparison.
+`status --json` explicitly drops the sources to keep the report small. Its freshness section is a hash comparison, and its slow answers (the fingerprints and the EAS lookup) come from the records under `.expo` while they still hold.
 
 The same sources are also in the fingerprint cache ([[0023-fingerprint-caching]]), as `{hash, sources}` per key. A warm run that kept only the hash would keep the freshness verdict and lose the diff.
 

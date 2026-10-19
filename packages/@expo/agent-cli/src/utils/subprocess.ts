@@ -56,7 +56,7 @@ export interface SubprocessOptions {
    * Kill the child after this long, whatever it is doing.
    *
    * For a question whose answer is only worth a moment — "who is this machine signed in as", asked
-   * by a command that promises to be instant. A tool that is doing the work it was asked to do
+   * by a command that keeps each answer on a short budget. A tool that is doing the work it was asked to do
    * gets no deadline. See {@link SubprocessResult.timedOut}.
    */
   timeoutMs?: number;
