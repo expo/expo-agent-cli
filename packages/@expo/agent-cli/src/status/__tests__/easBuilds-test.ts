@@ -16,9 +16,10 @@ import {
   platformsToFingerprintEarly,
   readEasBuildsRecord,
   readEasBuildsStatusAsync,
+  simulatorBuildFromBuilds,
   writeEasBuildsEntry,
 } from '../easBuilds';
-import type { AuthStatus, PlatformBuild } from '../types';
+import type { AuthStatus, BuildsStatus, PlatformBuild } from '../types';
 
 vi.mock('../../impact/buildCache', async () => ({
   lookUpCachedBuildAsync: vi.fn(),
@@ -401,32 +402,80 @@ describe(dropEasNoneEntry, () => {
 
 describe(platformsToFingerprintEarly, () => {
   const linked = { projectId: 'proj-1', source: 'app.json', dynamic: false, unreadable: false };
+  const early = (options: Partial<Parameters<typeof platformsToFingerprintEarly>[1]> = {}) =>
+    platformsToFingerprintEarly(projectRoot, {
+      auth: signedIn,
+      easProject: linked,
+      projectHash: PROJECT_HASH,
+      ...options,
+    });
 
   it(`should name both platforms for a linked, signed-in project with no record`, () => {
-    expect(
-      platformsToFingerprintEarly(projectRoot, { auth: signedIn, easProject: linked })
-    ).toEqual(['ios', 'android']);
+    expect(early()).toEqual(['ios', 'android']);
   });
 
   it(`should name none when the lookup will not run`, () => {
     const signedOut: AuthStatus = { loggedIn: false, user: null, source: 'eas whoami' };
-    expect(
-      platformsToFingerprintEarly(projectRoot, { auth: signedOut, easProject: linked })
-    ).toEqual([]);
-    expect(
-      platformsToFingerprintEarly(projectRoot, {
-        auth: signedIn,
-        easProject: { ...linked, projectId: null },
-      })
-    ).toEqual([]);
+    expect(early({ auth: signedOut })).toEqual([]);
+    expect(early({ easProject: { ...linked, projectId: null } })).toEqual([]);
   });
 
   it(`should skip a platform the record answers`, () => {
     writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
 
-    expect(
-      platformsToFingerprintEarly(projectRoot, { auth: signedIn, easProject: linked })
-    ).toEqual(['android']);
+    expect(early()).toEqual(['android']);
+  });
+
+  it(`should name a platform whose record answers an older project hash`, () => {
+    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
+
+    expect(early({ projectHash: 'a-newer-native-surface' })).toEqual(['ios', 'android']);
+  });
+
+  it(`should name every platform when the project hash is unknown`, () => {
+    writeCache({ projectHash: PROJECT_HASH, fingerprintHash: IOS_HASH, build: BUILD });
+
+    expect(early({ projectHash: null })).toEqual(['ios', 'android']);
+  });
+});
+
+describe(simulatorBuildFromBuilds, () => {
+  function builds(state: PlatformBuild['state'], buildProfile: string | null = null): BuildsStatus {
+    return {
+      askedEas: true,
+      platforms: [
+        {
+          platform: 'ios',
+          state,
+          fingerprintHash: IOS_HASH,
+          buildId: state === 'found' ? 'build-1' : null,
+          createdAt: null,
+          buildProfile,
+          buildUrl: null,
+          source: 'eas',
+          checkedAt: null,
+          ageMs: null,
+          reason: state === 'unknown' ? 'signed out' : null,
+        },
+      ],
+    };
+  }
+
+  it(`should reuse a found simulator build`, () => {
+    expect(simulatorBuildFromBuilds(builds('found', 'development-simulator'), 'ios')).toEqual({
+      id: 'build-1',
+      profile: 'development-simulator',
+    });
+  });
+
+  it(`should read none and unknown as no build`, () => {
+    expect(simulatorBuildFromBuilds(builds('none'), 'ios')).toBeNull();
+    expect(simulatorBuildFromBuilds(builds('unknown'), 'ios')).toBeNull();
+    expect(simulatorBuildFromBuilds(null, 'ios')).toBeNull();
+  });
+
+  it(`should leave a found build of another profile to the plan's own lookup`, () => {
+    expect(simulatorBuildFromBuilds(builds('found', 'development'), 'ios')).toBeUndefined();
   });
 });
 

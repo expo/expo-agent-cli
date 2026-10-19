@@ -54,6 +54,7 @@ import {
   easBuildLookupTimeoutMs,
   platformsToFingerprintEarly,
   readEasBuildsStatusAsync,
+  simulatorBuildFromBuilds,
 } from './easBuilds';
 import { formatStatusReport } from './format';
 import { readInstalledStatusAsync } from './installed';
@@ -72,6 +73,7 @@ import {
 } from './sections';
 import type {
   AuthStatus,
+  BuildsStatus,
   BuildLookupState,
   DevServerStatus,
   FreshnessImpact,
@@ -84,7 +86,7 @@ import type {
 } from './types';
 
 /**
- * How long the dev-server probe may take. Status is meant to be instant, and the common answer
+ * How long the dev-server probe may take. Each status section has a short budget, and the common answer
  * (nothing listening on the port) arrives in a millisecond, so a short ceiling only ever cuts off
  * a host that never answers.
  */
@@ -233,30 +235,32 @@ export async function collectStatusReportAsync(
   options: StatusOptions
 ): Promise<StatusReport> {
   const easProject = await readStaticEasProjectAsync(projectRoot);
-  // Start the per-platform fingerprints the EAS lookup will need beside the probe's own, once auth
-  // says the lookup will run; the lookup joins them through the memo (llp/0023 §Layer 1).
-  const readAuthAndPrestartAsync = async (): Promise<AuthStatus> => {
-    const auth = await readAuthPreflightAsync(projectRoot);
+  const projectRead = attemptAsync(() => readProjectAsync(projectRoot, options));
+  const authRead = attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot));
+  // Start the per-platform fingerprints the EAS lookup will need once auth and the project hash say
+  // it will run, while the slower probes finish; the lookup joins them through the memo (llp/0023
+  // §Layer 1). The hash is what tells a record entry for an older native surface from a usable one.
+  void Promise.all([projectRead, authRead]).then(([project, auth]) => {
     const early = platformsToFingerprintEarly(projectRoot, {
-      auth,
+      auth: 'value' in auth ? auth.value : null,
       easProject,
       fingerprintCache: options.fingerprintCache,
+      projectHash: 'value' in project ? project.value.state.fingerprint.hash : null,
     });
     for (const platform of early) {
       void generateFingerprintAsync(projectRoot, { platform, cache: options.fingerprintCache });
     }
-    return auth;
-  };
+  });
 
   const saved = readLastDevRequest(projectRoot);
   const request =
     saved && (!options.platform || options.platform === saved.platform) ? saved : null;
   const [project, devServer, device, skills, auth, binding, ownServer] = await Promise.all([
-    attemptAsync(() => readProjectAsync(projectRoot, options)),
+    projectRead,
     attemptAsync(() => probeDevServerStatusAsync(projectRoot, options, request)),
     attemptAsync(() => readLocalDeviceStatusAsync(projectRoot, options)),
     attemptAsync(() => readSkillsStatusAsync(projectRoot)),
-    attemptAsync<AuthStatus>(readAuthAndPrestartAsync),
+    authRead,
     attemptAsync(() =>
       readBindingSummaryAsync(projectRoot, options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS)
     ),
@@ -284,6 +288,20 @@ export async function collectStatusReportAsync(
   };
 
   if ('error' in binding) errors.binding = binding.error;
+
+  // One EAS lookup per run, shared by the plan below and the builds section, so the plan gets the
+  // section's record, auth gate and link gate instead of a lookup of its own on every run.
+  let buildsRead: Promise<Attempt<BuildsStatus>> | null = null;
+  const readBuildsOnceAsync = () =>
+    (buildsRead ??= attemptAsync(() =>
+      readEasBuildsStatusAsync(projectRoot, {
+        auth: 'value' in auth ? auth.value : null,
+        projectHash: report.freshness?.hash ?? null,
+        timeoutMs: options.buildLookupTimeoutMs,
+        fingerprintCache: options.fingerprintCache,
+        easProject,
+      })
+    ));
 
   // Read before the project section, because `next` depends on it: a dev server that is already
   // serving this project changes what the useful next command is (see `buildNextActionStatus`).
@@ -367,7 +385,8 @@ export async function collectStatusReportAsync(
       state,
       record,
       { ...options, platform },
-      request
+      request,
+      readBuildsOnceAsync
     );
     const recoveryPlan =
       resolvedPlan && recoveryPort != null
@@ -383,8 +402,7 @@ export async function collectStatusReportAsync(
       // reads it: `exp://` is the Expo Go form only, and a development build's connect URL takes
       // the app's own scheme (`src/navigate/connectUrl.ts`).
       devBuildScheme,
-      // A file read, not a service call: `status` promises to be instant (`src/device/
-      // cloudSimulator.ts` §readCloudSessionIdSync).
+      // A file read, not a service call (`src/device/cloudSimulator.ts` §readCloudSessionIdSync).
       readCloudSessionIdSync(projectRoot) != null,
       // @ref llp/0015-backend-selection-and-config.rfc.md §What `status` reports
       // The plan `@expo/agent-cli dev` would make *here* — the developer's config, this host and the
@@ -477,15 +495,7 @@ export async function collectStatusReportAsync(
   //
   // These three are independent of each other, so they run together.
   const [builds, ota, installed] = await Promise.all([
-    attemptAsync(() =>
-      readEasBuildsStatusAsync(projectRoot, {
-        auth: report.auth,
-        projectHash: report.freshness?.hash ?? null,
-        timeoutMs: options.buildLookupTimeoutMs,
-        fingerprintCache: options.fingerprintCache,
-        easProject,
-      })
-    ),
+    readBuildsOnceAsync(),
     report.freshness
       ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!))
       : Promise.resolve(null),
@@ -775,7 +785,8 @@ async function attemptPlanAsync(
   state: ProjectState,
   lastBuild: LastBuildRecord,
   options: StatusOptions,
-  request: LastDevRequest | null
+  request: LastDevRequest | null,
+  readBuildsAsync: () => Promise<Attempt<BuildsStatus>>
 ): Promise<StartPlan | null> {
   const { resolveStartPlanAsync } =
     require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
@@ -787,12 +798,21 @@ async function attemptPlanAsync(
         requestedBackend: request?.buildBackend,
         requestedTarget: request?.runTarget,
         deviceBackend: request?.buildBackend === 'eas' ? 'eas' : 'local',
-        // On the budget of status's own lookup (llp/0035 §Decisions).
-        lookUpEasBuild: (root, platform) =>
-          lookUpEasSimulatorBuildAsync(root, platform, {
+        lookUpEasBuild: async (root, platform) => {
+          const builds = await readBuildsAsync();
+          const reused = simulatorBuildFromBuilds(
+            'value' in builds ? builds.value : null,
+            platform
+          );
+          if (reused !== undefined) {
+            return reused;
+          }
+          // On the budget of status's own lookup (llp/0035 §Decisions).
+          return lookUpEasSimulatorBuildAsync(root, platform, {
             fingerprintCache: options.fingerprintCache,
             timeoutMs: options.buildLookupTimeoutMs ?? easBuildLookupTimeoutMs(resolveEasCli(root)),
-          }),
+          });
+        },
       })
     ).plan;
   } catch {
@@ -907,7 +927,7 @@ async function probeDevServerStatusAsync(
 /**
  * Whether this machine has a device to open the app on, within a budget status can afford.
  *
- * The probe spawns `xcrun simctl` and `adb`, and status promises to be instant, so it is raced
+ * The probe spawns `xcrun simctl` and `adb`, and each status section has a short budget, so it is raced
  * against a short deadline. The deadline expiring reports `unknown` rather than `absent` — the same
  * rule the probe itself follows, because a suggestion turned off on the strength of a slow
  * subprocess would be the mistake this exists to fix, backwards.

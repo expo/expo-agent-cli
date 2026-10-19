@@ -502,8 +502,8 @@ export function buildNextActionStatus(
   /**
    * Whether this project has an EAS Simulator session on record.
    *
-   * One `stat` of `.env.eas-simulator`, taken by the caller: `status` promises to be instant, so
-   * whether the session is still *running* — which costs an `eas` start-up — is not asked here. A
+   * One `stat` of `.env.eas-simulator`, taken by the caller. Whether the session is still *running*
+   * costs an `eas` start-up, which `status` does not spend on this line, so it is not asked here. A
    * file that names a dead session costs one `navigate --eas` that says so, which is a far
    * cheaper wrong answer than a slow report.
    *

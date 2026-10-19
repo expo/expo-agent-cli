@@ -27,9 +27,10 @@ import path from 'path';
 
 import { lookUpCachedBuildAsync, runnerDownloadNote } from '../impact/buildCache';
 import type { CachedBuild } from '../impact/types';
-import type { NativePlatform } from '../plan/types';
+import type { NativePlatform, PlanEasBuild } from '../plan/types';
 import type { EasProjectLink } from '../project/appConfig';
 import { generateFingerprintAsync } from '../project/fingerprint';
+import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { ensureDotExpoProjectDirectoryInitialized } from '../utils/dotExpo';
 import { easCommandPrefix, mayDownloadEasCli, resolveEasCli, type EasCli } from '../utils/easCli';
 import type { AuthStatus, BuildsStatus, PlatformBuild } from './types';
@@ -149,25 +150,51 @@ export async function readEasBuildsStatusAsync(
 }
 
 /**
- * The platforms whose fingerprint the lookup will compute: signed in, linked, and no usable record
- * entry. `status` starts these early; it must not start one the lookup would never wait for.
+ * The plan's question, "is there a finished simulator build?", answered from this section's answer.
+ *
+ * The section asks for the newest finished build of any profile, so `none` and a simulator-profile
+ * `found` settle it. `unknown` reads as no build, which is what the plan does when its own call
+ * fails. Only a `found` of another profile returns `undefined`: a simulator build may still exist.
+ */
+export function simulatorBuildFromBuilds(
+  builds: BuildsStatus | null,
+  platform: NativePlatform
+): PlanEasBuild | null | undefined {
+  const answer = builds?.platforms.find((entry) => entry.platform === platform);
+  if (answer?.state !== 'found' || !answer.buildId) {
+    return null;
+  }
+  return answer.buildProfile === EAS_SIMULATOR_PROFILE
+    ? { id: answer.buildId, profile: EAS_SIMULATOR_PROFILE }
+    : undefined;
+}
+
+/**
+ * The platforms whose fingerprint the lookup will compute: signed in, linked, and no record entry
+ * that answers for this project hash. `status` starts these early; it must not start one the lookup
+ * would never wait for, since an unawaited fingerprint run still holds the process open.
  */
 export function platformsToFingerprintEarly(
   projectRoot: string,
-  options: Pick<EasBuildsOptions, 'auth' | 'easProject' | 'fingerprintCache'>
+  options: Pick<EasBuildsOptions, 'auth' | 'easProject' | 'fingerprintCache' | 'projectHash'>
 ): NativePlatform[] {
   if (options.auth?.loggedIn === false || !mayAskEas(options.easProject)) {
     return [];
   }
   const record = options.fingerprintCache === false ? {} : readEasBuildsRecord(projectRoot);
-  return PLATFORMS.filter((platform) => {
-    const cached = record[platform];
-    if (!cached) {
-      return true;
-    }
-    const age = ageOf(cached.checkedAt);
-    return !cached.build && !(age != null && age <= EAS_NONE_CACHE_TTL_MS);
-  });
+  return PLATFORMS.filter((platform) => !recordAnswers(record[platform], options.projectHash));
+}
+
+/** Whether a record entry answers for this project hash, the same test the lookup applies. */
+function recordAnswers(cached: CachedEntry | undefined, projectHash: string | null): boolean {
+  if (!cached || !projectHash || cached.projectHash !== projectHash) {
+    return false;
+  }
+  if (cached.build) {
+    return true;
+  }
+  const age = ageOf(cached.checkedAt);
+  return age != null && age <= EAS_NONE_CACHE_TTL_MS;
 }
 
 function mayAskEas(easProject: EasProjectLink | null | undefined): boolean {
@@ -183,14 +210,10 @@ async function readPlatformAsync(
   asked: { eas: boolean }
 ): Promise<PlatformBuild> {
   const cached = record[platform];
-  if (cached && options.projectHash && cached.projectHash === options.projectHash) {
-    if (cached.build) {
-      return found(platform, cached.fingerprintHash, cached.build, 'cache', cached.checkedAt);
-    }
-    const age = ageOf(cached.checkedAt);
-    if (age != null && age <= EAS_NONE_CACHE_TTL_MS) {
-      return none(platform, cached.fingerprintHash, 'cache', cached.checkedAt, age);
-    }
+  if (cached && recordAnswers(cached, options.projectHash)) {
+    return cached.build
+      ? found(platform, cached.fingerprintHash, cached.build, 'cache', cached.checkedAt)
+      : none(platform, cached.fingerprintHash, 'cache', cached.checkedAt, ageOf(cached.checkedAt));
   }
 
   if (options.auth?.loggedIn === false) {

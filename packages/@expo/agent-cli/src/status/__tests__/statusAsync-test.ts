@@ -26,6 +26,7 @@ import { waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { getPersistedAgentIdsAsync } from '../../skills/agents';
 import { discoverSkillsAsync } from '../../skills/discovery';
 import type { DiscoveredSkill } from '../../skills/types';
+import { readEasBuildsStatusAsync } from '../easBuilds';
 import { formatStatusReport } from '../format';
 import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
@@ -52,7 +53,8 @@ vi.mock('../../runtime/targetLiveness', () => ({
 vi.mock('../../needsHuman/preflight', () => ({ readAuthPreflightAsync: vi.fn() }));
 vi.mock('../../skills/discovery', () => ({ discoverSkillsAsync: vi.fn(async () => []) }));
 // The network call and `expo config`, mocked so these tests spawn neither.
-vi.mock('../easBuilds', () => ({
+vi.mock('../easBuilds', async () => ({
+  ...((await vi.importActual('../easBuilds')) as object),
   readEasBuildsStatusAsync: vi.fn(async () => ({ askedEas: false, platforms: [] })),
   platformsToFingerprintEarly: vi.fn(() => []),
 }));
@@ -1308,8 +1310,7 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     );
   });
 
-  it("asks EAS for a saved --eas request's build, with the fingerprint-cache choice", async () => {
-    const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
+  function saveEasRequest() {
     mockState({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } });
     vol.fromJSON({
       '/project/.expo/agent-cli-last-dev.json': JSON.stringify({
@@ -1320,11 +1321,61 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
         runTarget: null,
       }),
     });
+  }
+
+  function buildsFound(buildProfile: string) {
+    vi.mocked(readEasBuildsStatusAsync).mockResolvedValueOnce({
+      askedEas: true,
+      platforms: [
+        {
+          platform: 'ios',
+          state: 'found',
+          fingerprintHash: 'ios-hash',
+          buildId: 'build-1',
+          createdAt: null,
+          buildProfile,
+          buildUrl: null,
+          source: 'eas',
+          checkedAt: null,
+          ageMs: null,
+          reason: null,
+        },
+      ],
+    });
+  }
+
+  it("should reuse the builds section's simulator build for a saved --eas request", async () => {
+    const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
+    saveEasRequest();
+    buildsFound('development-simulator');
+
+    await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+
+    expect(lookUp).not.toHaveBeenCalled();
+    expect(readEasBuildsStatusAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it(`should not ask EAS again when the builds section has no build`, async () => {
+    const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
+    saveEasRequest();
+
+    await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+
+    expect(lookUp).not.toHaveBeenCalled();
+    expect(readEasBuildsStatusAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it(`should ask EAS itself when the builds section found another profile`, async () => {
+    const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
+    saveEasRequest();
+    buildsFound('development');
+
     await collectStatusReportAsync(projectRoot, {
       devServerUrl: null,
       fingerprintCache: false,
       buildLookupTimeoutMs: 1_000,
     });
+
     expect(lookUp).toHaveBeenCalledWith(projectRoot, 'ios', {
       fingerprintCache: false,
       timeoutMs: 1_000,
