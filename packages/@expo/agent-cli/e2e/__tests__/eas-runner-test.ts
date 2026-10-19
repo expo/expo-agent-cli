@@ -17,6 +17,7 @@ import {
   executeAgentCliAsync,
   installStubBinAsync,
   installStubFingerprintAsync,
+  isolatedPath,
   linkFixtureToEasAsync,
   setupFixtureAsync,
 } from '../utils';
@@ -189,14 +190,9 @@ async function plantAsync({
   return { projectRoot, binDir, logFile };
 }
 
-/**
- * The `PATH` one of these commands runs with: the stub bin, and Node's own directory so the shims
- * can start a `node`. Nothing else, so the machine's own `eas` cannot answer.
- */
+/** The `PATH` one of these commands runs with: the stub bin, then {@link isolatedPath}'s decoy. */
 function pathEnv(binDir: string): Record<string, string> {
-  return {
-    PATH: [binDir, path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter),
-  };
+  return { PATH: isolatedPath([binDir]) };
 }
 
 function invocations({ logFile }: Planted): { args: string[] }[] {
@@ -386,8 +382,12 @@ describe('a machine with no eas-cli installed', () => {
 //
 // Skipped on Windows, where `findGlobalEasCli` is not supported.
 describe.skipIf(process.platform === 'win32')('a machine with a global eas-cli installed', () => {
-  /** A bare directory, a stub `npx`, and a global `eas-cli` package whose bin is linked onto `PATH`. */
-  async function plantGlobalAsync(version: string) {
+  /**
+   * A bare directory, a stub `npx`, and a global `eas-cli` package whose bin is linked onto `PATH`.
+   * The link goes in the stub bin, or with `separateGlobalBin` in its own `bin`, as npm lays out a
+   * global prefix.
+   */
+  async function plantGlobalAsync(version: string, { separateGlobalBin = false } = {}) {
     const directory = await fs.promises.realpath(
       await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-cli-eas-global-'))
     );
@@ -409,13 +409,16 @@ describe.skipIf(process.platform === 'win32')('a machine with a global eas-cli i
     const run = path.join(packageDir, 'bin', 'run');
     await fs.promises.writeFile(run, stubRunnerScript(globalLog));
     await fs.promises.chmod(run, 0o755);
-    await fs.promises.symlink(run, path.join(binDir, 'eas'));
+    const globalBinDir = separateGlobalBin ? path.join(directory, 'bin') : binDir;
+    await fs.promises.mkdir(globalBinDir, { recursive: true });
+    await fs.promises.symlink(run, path.join(globalBinDir, 'eas'));
 
     const read = (logFile: string) =>
       invocations({ projectRoot: directory, binDir, logFile }).map((entry) => entry.args);
     return {
       directory,
       binDir,
+      globalBinDir,
       runs: () => ({ runner: read(runnerLog), global: read(globalLog) }),
     };
   }
@@ -438,6 +441,22 @@ describe.skipIf(process.platform === 'win32')('a machine with a global eas-cli i
 
     const result = await executeAgentCliAsync(planted.directory, ['whoami'], {
       env: pathEnv(planted.binDir),
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(planted.runs()).toEqual({ runner: [['--yes', 'eas-cli', 'whoami']], global: [] });
+  });
+  // Under nvm, asdf/mise or the nodejs.org installer, Node's own directory is npm's global bin.
+  it("keeps a test on its stub runner when a global eas 25 sits in Node's directory", async () => {
+    const planted = await plantGlobalAsync('25.0.0', { separateGlobalBin: true });
+
+    const result = await executeAgentCliAsync(planted.directory, ['whoami'], {
+      env: {
+        PATH: isolatedPath([planted.binDir], {
+          systemDirs: [planted.globalBinDir, path.dirname(process.execPath), '/usr/bin', '/bin'],
+        }),
+      },
       reject: false,
     });
 

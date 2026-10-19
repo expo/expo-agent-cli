@@ -20,6 +20,7 @@ import {
   installStubBinAsync,
   installStubEasRunnerAsync,
   installStubFingerprintAsync,
+  isolatedPath,
   linkFixtureToEasAsync,
   setupFixtureAsync,
 } from '../utils';
@@ -220,9 +221,7 @@ process.stdout.write('e2e-user\\n');
     await installStubBinAsync(binDir, 'npx', npxStub);
 
     const result = await executeAgentCliAsync(directory, ['whoami'], {
-      env: {
-        PATH: [binDir, path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter),
-      },
+      env: { PATH: isolatedPath([binDir]) },
       reject: false,
     });
 

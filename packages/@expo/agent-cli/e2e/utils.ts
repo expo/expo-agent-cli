@@ -80,21 +80,57 @@ export async function installStubBinAsync(
   name: string,
   stubScript: string
 ): Promise<void> {
-  await fs.promises.mkdir(binDir, { recursive: true });
+  installStubBinSync(binDir, name, stubScript);
+}
+
+function installStubBinSync(binDir: string, name: string, stubScript: string): void {
+  fs.mkdirSync(binDir, { recursive: true });
 
   const shPath = path.join(binDir, name);
-  await fs.promises.writeFile(
-    shPath,
-    `#!/bin/sh\nexec "${process.execPath}" "${stubScript}" "$@"\n`
-  );
-  await fs.promises.chmod(shPath, 0o755);
+  fs.writeFileSync(shPath, `#!/bin/sh\nexec "${process.execPath}" "${stubScript}" "$@"\n`);
+  fs.chmodSync(shPath, 0o755);
 
   // Windows cannot execute either the shebang script or an extensionless file, so the `.cmd` shim
   // is the only thing a spawn there can reach.
-  await fs.promises.writeFile(
+  fs.writeFileSync(
     path.join(binDir, `${name}.cmd`),
     `@echo off\r\n"${process.execPath}" "${stubScript}" %*\r\n`
   );
+}
+
+/**
+ * Put a decoy `eas` in `binDir`, so a global `eas-cli` later on `PATH` cannot answer in place of
+ * the stubs (`src/utils/easCli.ts` §findGlobalEasCli). It is not a package, so the resolver passes
+ * over it, and it fails loudly if anything spawns it anyway.
+ */
+function installEasDecoySync(binDir: string): void {
+  fs.mkdirSync(binDir, { recursive: true });
+  const decoy = path.join(binDir, 'eas-decoy.js');
+  fs.writeFileSync(
+    decoy,
+    "process.stderr.write('decoy eas: the stub runner should have answered\\n');\nprocess.exit(127);\n"
+  );
+  installStubBinSync(binDir, 'eas', decoy);
+}
+
+let easDecoyDir: string | null = null;
+
+/**
+ * A `PATH` that reaches only `dirs`, then Node's own directory and the system bins.
+ *
+ * A decoy `eas` sits between the two. Node's directory is also npm's global bin under nvm,
+ * asdf/mise and the nodejs.org installer, so a developer's global `eas-cli` there would otherwise
+ * answer, with their own session. `systemDirs` replaces what comes after the decoy.
+ */
+export function isolatedPath(
+  dirs: string[],
+  {
+    systemDirs = [path.dirname(process.execPath), '/usr/bin', '/bin'],
+  }: { systemDirs?: string[] } = {}
+): string {
+  easDecoyDir ??= fs.mkdtempSync(path.join(os.tmpdir(), 'agent-cli-eas-decoy-'));
+  installEasDecoySync(easDecoyDir);
+  return [...dirs, easDecoyDir, ...systemDirs].join(path.delimiter);
 }
 
 /**
@@ -152,15 +188,8 @@ process.exit(result.status === null ? 1 : result.status);
   for (const name of names) {
     await installStubBinAsync(binDir, name, runnerScript);
   }
-  // A decoy `eas` ahead of the machine's own: a global `eas-cli` new enough would otherwise be
-  // spawned in place of the stub runner (`src/utils/easCli.ts` §findGlobalEasCli). It is not a
-  // package, so the resolver passes over it, and it fails loudly if anything spawns it anyway.
-  const decoy = path.join(binDir, 'eas-decoy.js');
-  await fs.promises.writeFile(
-    decoy,
-    "process.stderr.write('decoy eas: the stub runner should have answered\\n');\nprocess.exit(127);\n"
-  );
-  await installStubBinAsync(binDir, 'eas', decoy);
+  // Ahead of the machine's own `eas`, which a suite that inherits `PATH` would otherwise reach.
+  installEasDecoySync(binDir);
 }
 
 /**

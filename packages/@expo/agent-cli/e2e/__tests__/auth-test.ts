@@ -13,6 +13,7 @@ import {
   executeAgentCliAsync,
   getTemporaryPath,
   installStubBinAsync,
+  isolatedPath,
   pathEnvVars,
   setupFixtureAsync,
 } from '../utils';
@@ -117,17 +118,13 @@ function readInvocations(dir: string): StubInvocation[] {
 }
 
 /**
- * `PATH` with nothing on it that could answer as `eas` or `expo` — and the stub runner, which is
- * what every EAS-backed invocation goes through.
+ * `PATH` with the stub runner, which is what every EAS-backed invocation goes through, and
+ * {@link isolatedPath}'s decoy, so nothing else can answer as `eas`.
  */
 function isolatedEnv(dir: string): Record<string, string> {
   return {
     AUTH_LOG_DIR: dir,
-    ...pathEnvVars(
-      [path.join(dir, 'path-bin'), path.dirname(process.execPath), '/usr/bin', '/bin'].join(
-        path.delimiter
-      )
-    ),
+    ...pathEnvVars(isolatedPath([path.join(dir, 'path-bin')])),
   };
 }
 
