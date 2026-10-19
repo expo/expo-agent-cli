@@ -1340,7 +1340,11 @@ describe('@expo/agent-cli status', () => {
         const report = await reportInAsync(projectRoot, [], env);
 
         expect(report.device).toMatchObject({ state: 'unknown', deviceId: null, devices: [] });
-        expect(report.device!.reason).toContain('could not be run');
+        expect(report.device!.reason).toContain('Android: "adb" could not be run');
+        // Android alone makes the state unknown, so the iOS half needs its own check.
+        if (process.platform === 'darwin') {
+          expect(report.device!.reason).toContain('iOS: Could not run "xcrun simctl"');
+        }
 
         const result = await executeAgentCliAsync(
           projectRoot,
