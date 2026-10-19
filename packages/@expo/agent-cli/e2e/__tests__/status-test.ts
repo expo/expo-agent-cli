@@ -82,6 +82,8 @@ type StatusReport = {
         changedSources: { op: string; path: string | null; kind: string }[] | null;
       } | null;
     }[];
+    /** Null when no file-level view was available. */
+    changedFiles: { total: number; native: number; js: number; config: number } | null;
     ota: {
       safe: boolean | null;
       runtimeVersion: {
@@ -367,6 +369,64 @@ async function pinEasCliAsync(projectRoot: string): Promise<void> {
   const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
   manifest.devDependencies = { ...manifest.devDependencies, 'eas-cli': '^22.0.0' };
   await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+}
+
+/**
+ * Install a `fingerprint` bin that the test steers through env: `STUB_FINGERPRINT_HASH` and
+ * `STUB_FP_SOURCES`. The fixture's own stub always prints an empty list, so it can never move the
+ * native surface. `diff` also answers `fingerprint:diff`; `platformHashes` gives each `--platform`
+ * its own hash.
+ */
+async function installEnvFingerprintStubAsync(
+  projectRoot: string,
+  {
+    diff = false,
+    platformHashes = {},
+  }: { diff?: boolean; platformHashes?: Partial<Record<'ios' | 'android', string>> } = {}
+): Promise<void> {
+  const diffAnswer = `
+if (args[0] === 'fingerprint:diff') {
+  const base = JSON.parse(fs.readFileSync(args[1], 'utf8'));
+  const head = JSON.parse(fs.readFileSync(args[2], 'utf8'));
+  const key = (source) => source.filePath || source.id || JSON.stringify(source);
+  const before = new Map(base.sources.map((source) => [key(source), source]));
+  const after = new Map(head.sources.map((source) => [key(source), source]));
+  const items = [];
+  for (const [id, source] of after) {
+    if (!before.has(id)) {
+      items.push({ op: 'added', addedSource: source });
+    } else if (before.get(id).hash !== source.hash) {
+      items.push({ op: 'changed', beforeSource: before.get(id), afterSource: source });
+    }
+  }
+  for (const [id, source] of before) {
+    if (!after.has(id)) {
+      items.push({ op: 'removed', removedSource: source });
+    }
+  }
+  process.stdout.write(JSON.stringify(items, null, 2) + '\\n');
+  process.exit(0);
+}`;
+  const script = `#!/usr/bin/env node
+'use strict';
+const fs = require('node:fs');
+const args = process.argv.slice(2);${diff ? diffAnswer : ''}
+const platform = args.includes('--platform') ? args[args.indexOf('--platform') + 1] : null;
+const platformHashes = ${JSON.stringify(platformHashes)};
+const hash =
+  platformHashes[platform] ||
+  process.env.STUB_FINGERPRINT_HASH ||
+  ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)};
+const sources = JSON.parse(process.env.STUB_FP_SOURCES || '[]');
+process.stdout.write(JSON.stringify({ hash, sources }) + '\\n');
+`;
+  const binDir = path.join(projectRoot, '.stub-bin');
+  await fs.promises.mkdir(binDir, { recursive: true });
+  const stub = path.join(binDir, 'fingerprint-env-stub.js');
+  await fs.promises.writeFile(stub, script);
+  for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
+    await installStubBinAsync(dir, 'fingerprint', stub);
+  }
 }
 
 /**
@@ -831,29 +891,10 @@ describe('@expo/agent-cli status', () => {
       hash: 'ccdd',
     };
 
-    /**
-     * A `fingerprint` bin whose sources the test chooses.
-     *
-     * The fixture's own stub always prints an empty list, which can only ever produce an empty
-     * diff. STUB_FP_SOURCES is what lets these tests move the native surface.
-     */
-    const STUB_FINGERPRINT = `#!/usr/bin/env node
-'use strict';
-const hash = process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)};
-const sources = JSON.parse(process.env.STUB_FP_SOURCES || '[]');
-process.stdout.write(JSON.stringify({ hash, sources }) + '\\n');
-`;
-
     /** Copy the fixture, install the steerable fingerprint stub, and write the v2 build record. */
     async function setupImpactAsync(recorded: unknown): Promise<string> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
-      const binDir = path.join(projectRoot, '.stub-bin');
-      await fs.promises.mkdir(binDir, { recursive: true });
-      const stub = path.join(binDir, 'fingerprint-sources-stub.js');
-      await fs.promises.writeFile(stub, STUB_FINGERPRINT);
-      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
-        await installStubBinAsync(dir, 'fingerprint', stub);
-      }
+      await installEnvFingerprintStubAsync(projectRoot);
       await fs.promises.writeFile(
         path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
         JSON.stringify(recorded)
@@ -965,14 +1006,6 @@ process.stdout.write(JSON.stringify({ hash, sources }) + '\\n');
       hash: 'aabb',
     };
 
-    const STUB_FINGERPRINT = `#!/usr/bin/env node
-'use strict';
-process.stdout.write(JSON.stringify({
-  hash: process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)},
-  sources: JSON.parse(process.env.STUB_FP_SOURCES || '[]'),
-}) + '\\n');
-`;
-
     /** `dynamic` adds an `app.config.js`, whose runtimeVersion comes from the stub `expo config`. */
     async function setupExplainAsync(
       runtimeVersion: unknown,
@@ -982,13 +1015,7 @@ process.stdout.write(JSON.stringify({
       env: Record<string, string>;
     }> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
-      const binDir = path.join(projectRoot, '.stub-bin');
-      await fs.promises.mkdir(binDir, { recursive: true });
-      const stub = path.join(binDir, 'fingerprint-explain-stub.js');
-      await fs.promises.writeFile(stub, STUB_FINGERPRINT);
-      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
-        await installStubBinAsync(dir, 'fingerprint', stub);
-      }
+      await installEnvFingerprintStubAsync(projectRoot);
       await fs.promises.writeFile(
         path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
         JSON.stringify({ ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [] } })
@@ -1087,6 +1114,42 @@ process.stdout.write(JSON.stringify({
       expect(result.stdout).toContain('not safe to publish');
     });
 
+    it('lists eight sources, counts the rest, and prints matching platforms once', async () => {
+      const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
+      await fs.promises.writeFile(
+        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        JSON.stringify({
+          ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [] },
+          android: { hash: FIXTURE_FINGERPRINT_HASH, sources: [] },
+        })
+      );
+      const sources = Array.from({ length: 10 }, (_, index) => ({
+        ...NATIVE_MODULE,
+        filePath: `node_modules/native-module-${index}`,
+      }));
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        { env: { ...env, STUB_FP_SOURCES: JSON.stringify(sources) } }
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('ios, android: 10 sources');
+      expect(result.stdout).toContain('node_modules/native-module-7');
+      expect(result.stdout).not.toContain('node_modules/native-module-8');
+      expect(result.stdout).toContain('… and 2 more, in --json');
+      expect(result.stdout.match(/added\s+node_modules\/native-module-0/g)).toHaveLength(1);
+    });
+
+    it('names change-native-build in the follow-ups for a native change', async () => {
+      const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
+
+      const report = await reportInAsync(projectRoot, [], env);
+
+      expect(report.followups.map((followup) => followup.id)).toContain('change-native-build');
+    });
+
     // @ref llp/0011-impact-and-freshness.rfc.md §A fingerprint change is not "OTA-unsafe"
     describe('a dynamic app.config.js', () => {
       it('evaluates it with expo config', async () => {
@@ -1153,6 +1216,382 @@ process.stdout.write(JSON.stringify({
     });
   });
 
+  // @ref llp/0011-impact-and-freshness.rfc.md §The three comparisons
+  // @ref llp/0021-honest-reports.rfc.md §The rules
+  describe('status --build <id>', () => {
+    const BUILD_ID = '21d7d434-6495-4e74-b8c7-68ecd0dff489';
+    const NATIVE_MODULE = {
+      type: 'dir',
+      filePath: 'node_modules/react-native-mmkv',
+      reasons: ['rncoreAutolinkingIos'],
+      hash: 'aabb',
+    };
+    const APP_CONFIG = { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'cc' };
+
+    /** `fingerprint1` is the build's fingerprint, `fingerprint2` the working tree's. */
+    function comparePayload(buildSources: unknown[], headSources: unknown[]) {
+      return JSON.stringify({
+        fingerprint1: { hash: 'build-hash-1111', sources: buildSources },
+        fingerprint2: {
+          hash:
+            JSON.stringify(buildSources) === JSON.stringify(headSources)
+              ? 'build-hash-1111'
+              : 'head-hash-2222',
+          sources: headSources,
+        },
+      });
+    }
+
+    async function setupCompareAsync(): Promise<string> {
+      const projectRoot = await setupAsync('dev-client-fresh-app');
+      await installEnvFingerprintStubAsync(projectRoot, { diff: true });
+      await fs.promises.writeFile(
+        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        JSON.stringify({
+          ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
+          android: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
+        })
+      );
+      await installSharedStubEasAsync(projectRoot);
+      await pinEasCliAsync(projectRoot);
+      return projectRoot;
+    }
+
+    async function runBuildAsync(
+      projectRoot: string,
+      args: string[],
+      env: Record<string, string> = {}
+    ) {
+      return executeAgentCliAsync(
+        projectRoot,
+        [
+          'status',
+          '--build',
+          BUILD_ID,
+          ...args,
+          '--dev-server-url',
+          await getUnusedDevServerUrlAsync(),
+        ],
+        { env: { STUB_FP_SOURCES: JSON.stringify([APP_CONFIG]), ...env }, reject: false }
+      );
+    }
+
+    function easAxis(report: StatusReport, platform: 'ios' | 'android') {
+      return report.freshness!.platforms.find(
+        (entry) => entry.platform === platform && entry.backend === 'eas'
+      )!;
+    }
+
+    it("compares against the named build, on that build's platform only", async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const result = await runBuildAsync(projectRoot, ['--json'], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG]),
+      });
+
+      expect(result.exitCode).toBe(0);
+      const report: StatusReport = JSON.parse(result.stdout);
+      expect(report.freshness!.comparison).toEqual({
+        kind: 'eas-build',
+        label: `EAS build ${BUILD_ID}`,
+        buildId: BUILD_ID,
+        platform: 'ios',
+      });
+      expect(easAxis(report, 'ios')).toMatchObject({
+        state: 'fresh',
+        buildId: BUILD_ID,
+        detail: `matches EAS build ${BUILD_ID}`,
+        impact: { class: 'js-only', fingerprintChanged: false, changedCount: 0 },
+      });
+      expect(easAxis(report, 'android')).toMatchObject({ state: 'unknown', buildId: null });
+      expect(easAxis(report, 'android').detail).toContain('not compared');
+      expect(easAxis(report, 'android').impact?.class).toBeNull();
+      expect(
+        report.freshness!.platforms.find(
+          (entry) => entry.platform === 'ios' && entry.backend === 'local'
+        )
+      ).toMatchObject({ state: 'fresh', buildId: null });
+      expect(report.errors).toEqual({});
+    });
+
+    it('reports what differs from the named build, and what that costs', async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const result = await runBuildAsync(projectRoot, ['--json'], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG, NATIVE_MODULE]),
+      });
+
+      expect(result.exitCode).toBe(0);
+      const report: StatusReport = JSON.parse(result.stdout);
+      expect(easAxis(report, 'ios')).toMatchObject({
+        state: 'stale',
+        detail: `differs from EAS build ${BUILD_ID}`,
+        impact: { class: 'needs-native-build', fingerprintChanged: true, changedCount: 1 },
+      });
+      expect(easAxis(report, 'ios').impact!.changedSources).toEqual([
+        expect.objectContaining({ op: 'added', path: 'node_modules/react-native-mmkv' }),
+      ]);
+    });
+
+    it('says which build the headline was measured against, for a human', async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const result = await runBuildAsync(projectRoot, [], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG, NATIVE_MODULE]),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain(`vs EAS build ${BUILD_ID}`);
+      expect(result.stdout).toContain('ios (eas): needs-native-build');
+      expect(result.stdout).toContain(`differs from EAS build ${BUILD_ID}`);
+    });
+
+    it('judges only the eas axis under --assert', async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const differs = await runBuildAsync(projectRoot, ['--assert', 'js-only'], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG, NATIVE_MODULE]),
+      });
+      expect(differs.exitCode).toBe(20);
+      expect(differs.stdout).toContain('the change costs needs-native-build');
+
+      // A native change in the working tree: only the local axis would fail the gate. The hash the
+      // run above remembered would hide it, so it is computed again.
+      const matches = await runBuildAsync(
+        projectRoot,
+        ['--json', '--assert', 'js-only', '--no-fingerprint-cache'],
+        {
+          STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG]),
+          STUB_FP_SOURCES: JSON.stringify([APP_CONFIG, NATIVE_MODULE]),
+          STUB_FINGERPRINT_HASH: 'f'.repeat(40),
+        }
+      );
+      expect(matches.exitCode).toBe(0);
+      const report: StatusReport = JSON.parse(matches.stdout);
+      expect(
+        report.freshness!.platforms.find((entry) => entry.backend === 'local')?.impact?.class
+      ).toBe('needs-native-build');
+    });
+
+    it('attributes the comparison to no platform when the build platform is unknown', async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const result = await runBuildAsync(projectRoot, ['--json', '--assert', 'js-only'], {
+        STUB_EAS_COMPARE_JSON: comparePayload([APP_CONFIG], [APP_CONFIG]),
+        STUB_EAS_BUILD_VIEW_EXIT: '1',
+      });
+
+      expect(result.exitCode).toBe(22);
+      const report: StatusReport = JSON.parse(result.stdout);
+      expect(report.freshness!.comparison.platform).toBeNull();
+      for (const platform of ['ios', 'android'] as const) {
+        expect(easAxis(report, platform).detail).toContain('not compared');
+        expect(easAxis(report, platform).impact?.class).toBeNull();
+      }
+    });
+
+    it('notes the failure and names the build when the comparison fails', async () => {
+      const projectRoot = await setupCompareAsync();
+
+      const result = await runBuildAsync(projectRoot, [], { STUB_EAS_COMPARE_EXIT: '1' });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('freshness note');
+      expect(result.stdout).toContain(BUILD_ID);
+      expect(result.stdout).toContain('project     dev-client-fresh-app');
+
+      const json = await runBuildAsync(projectRoot, ['--json'], { STUB_EAS_COMPARE_EXIT: '1' });
+      expect(json.exitCode).toBe(0);
+      const report: StatusReport = JSON.parse(json.stdout);
+      expect(report.errors.freshness).toContain(BUILD_ID);
+      // F66: the comparison is named before the call, so a failed call still says which build.
+      expect(report.freshness!.comparison).toMatchObject({ kind: 'eas-build', buildId: BUILD_ID });
+    });
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
+  it('points a directory that is not an Expo app at creating one', async () => {
+    const projectRoot = await setupAsync('go-app');
+    const manifestPath = path.join(projectRoot, 'package.json');
+    const manifest = JSON.parse(await fs.promises.readFile(manifestPath, 'utf8'));
+    delete manifest.dependencies.expo;
+    await fs.promises.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+
+    const report = await reportInAsync(projectRoot);
+
+    expect(report.next).toMatchObject({ command: 'npx @expo/agent-cli new my-app' });
+    expect(report.next!.why).toContain('not an Expo app');
+    // Every other rung assumes an Expo app, so this is the only follow-up.
+    expect(report.followups.map((followup) => followup.id)).toEqual(['not-expo-app']);
+  });
+
+  // @ref llp/0011-impact-and-freshness.rfc.md §When the fingerprint did not move
+  describe('the changed files, when the fingerprint did not move', () => {
+    const APP_CONFIG = { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'cc' };
+
+    /** A committed tree whose fingerprint matches its recorded build. */
+    async function setupCommittedAsync(): Promise<string> {
+      const projectRoot = await setupAsync('dev-client-fresh-app');
+      await installEnvFingerprintStubAsync(projectRoot);
+      await fs.promises.writeFile(
+        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        JSON.stringify({
+          ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
+          android: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
+        })
+      );
+      await fs.promises.writeFile(
+        path.join(projectRoot, '.gitignore'),
+        ['node_modules/', '.expo/', '.stub-bin/', 'stub-*.jsonl', ''].join('\n')
+      );
+      await initGitRepoAsync(projectRoot);
+      git(projectRoot, ['add', '-A']);
+      git(projectRoot, [
+        '-c',
+        'user.name=e2e',
+        '-c',
+        'user.email=e2e@example.com',
+        'commit',
+        '-q',
+        '-m',
+        'init',
+      ]);
+      return projectRoot;
+    }
+
+    const env = { STUB_FP_SOURCES: JSON.stringify([APP_CONFIG]) };
+
+    it('counts zero files when nothing changed', async () => {
+      const projectRoot = await setupCommittedAsync();
+
+      const report = await reportInAsync(projectRoot, [], env);
+
+      expect(report.freshness!.changedFiles).toEqual({ total: 0, native: 0, js: 0, config: 0 });
+      expect(
+        report.freshness!.platforms.find(
+          (entry) => entry.platform === 'ios' && entry.backend === 'local'
+        )!.impact
+      ).toMatchObject({ class: 'js-only', fingerprintChanged: false });
+    });
+
+    it('counts a JavaScript edit and keeps the class at js-only', async () => {
+      const projectRoot = await setupCommittedAsync();
+      await fs.promises.writeFile(path.join(projectRoot, 'index.js'), '// edited\n');
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['status', '--dev-server-url', await getUnusedDevServerUrlAsync()],
+        { env }
+      );
+
+      expect(result.exitCode).toBe(0);
+      expect(result.stdout).toContain('ios, android: js-only');
+      expect(result.stdout).toMatch(/files\s+1 changed · 1 js · 0 config · 0 native/);
+    });
+
+    it('raises the class to dev-client-compatible for a metro.config.js edit', async () => {
+      const projectRoot = await setupCommittedAsync();
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'metro.config.js'),
+        "const { getDefaultConfig } = require('expo/metro-config');\nmodule.exports = getDefaultConfig(__dirname);\n"
+      );
+
+      const report = await reportInAsync(projectRoot, [], env);
+
+      expect(report.freshness!.changedFiles).toMatchObject({ total: 1, js: 1, config: 0 });
+      expect(
+        report.freshness!.platforms.find(
+          (entry) => entry.platform === 'ios' && entry.backend === 'local'
+        )!.impact
+      ).toMatchObject({ class: 'dev-client-compatible', fingerprintChanged: false });
+      expect(report.followups.map((followup) => followup.id)).toContain('change-restart-metro');
+    });
+  });
+
+  // @ref llp/0009-smart-followups.rfc.md §Examples per command
+  describe('the follow-ups', () => {
+    it('names runtime:errors when an app is connected to the dev server', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const devServer = await startDevServerDoubleAsync([CDP_TARGET]);
+      try {
+        const result = await executeAgentCliAsync(projectRoot, [
+          'status',
+          '--json',
+          '--dev-server-url',
+          devServer.url,
+        ]);
+
+        expect(result.exitCode).toBe(0);
+        const report: StatusReport = JSON.parse(result.stdout);
+        expect(report.followups).toContainEqual(
+          expect.objectContaining({
+            id: 'runtime-errors',
+            command: 'npx @expo/agent-cli runtime:errors',
+          })
+        );
+      } finally {
+        await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
+      }
+    });
+
+    it('names expo-dev-client when Expo Go cannot run the project and it has no dev client', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await addNativeModuleAsync(projectRoot, 'expo-observe');
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.expoGo?.compatible).toBe(false);
+      expect(report.project?.usesDevClient).toBe(false);
+      expect(report.followups).toContainEqual(
+        expect.objectContaining({
+          id: 'install-dev-client',
+          command: 'npx @expo/agent-cli install expo-dev-client',
+        })
+      );
+    });
+
+    it('names skills:sync when the selected agent has unlinked skills', async () => {
+      const projectRoot = await setupAsync('skills-app');
+      await writeAgentSelectionAsync(projectRoot, ['claude-code']);
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.skills).toMatchObject({ agentIds: ['claude-code'], linked: 0 });
+      expect(report.skills!.discovered).toBeGreaterThan(0);
+      expect(report.followups).toContainEqual(
+        expect.objectContaining({ id: 'skills-sync', command: 'npx @expo/agent-cli skills:sync' })
+      );
+    });
+  });
+
+  describe('the dev server the project log names', () => {
+    it('finds it from the metro:instantiate event in start.log', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const devServer = await startDevServerDoubleAsync([]);
+      try {
+        const port = new URL(devServer.url).port;
+        const logDir = path.join(projectRoot, '.expo', 'dev', 'logs');
+        await fs.promises.mkdir(logDir, { recursive: true });
+        await fs.promises.writeFile(
+          path.join(logDir, 'start.log'),
+          JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port: Number(port) }) + '\n'
+        );
+
+        const result = await executeAgentCliAsync(projectRoot, ['status', '--json']);
+
+        expect(result.exitCode).toBe(0);
+        const report: StatusReport = JSON.parse(result.stdout);
+        expect(report.devServer).toMatchObject({
+          running: true,
+          source: 'log',
+          url: devServer.url,
+        });
+      } finally {
+        await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
+      }
+    });
+  });
+
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
   //
   // The one path out of this command that is not 0, and the reason it does not break the exit-0
@@ -1167,23 +1606,9 @@ process.stdout.write(JSON.stringify({
     };
     const APP_CONFIG = { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'cc' };
 
-    const STUB_FINGERPRINT = `#!/usr/bin/env node
-'use strict';
-process.stdout.write(JSON.stringify({
-  hash: process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)},
-  sources: JSON.parse(process.env.STUB_FP_SOURCES || '[]'),
-}) + '\\n');
-`;
-
     async function setupAssertAsync(recorded: unknown): Promise<string> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
-      const binDir = path.join(projectRoot, '.stub-bin');
-      await fs.promises.mkdir(binDir, { recursive: true });
-      const stub = path.join(binDir, 'fingerprint-assert-stub.js');
-      await fs.promises.writeFile(stub, STUB_FINGERPRINT);
-      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
-        await installStubBinAsync(dir, 'fingerprint', stub);
-      }
+      await installEnvFingerprintStubAsync(projectRoot);
       await fs.promises.writeFile(
         path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
         JSON.stringify(recorded)
@@ -1319,7 +1744,6 @@ process.stdout.write(JSON.stringify({
       expect(result.all).toContain('--explain');
     });
 
-    // The stub `eas` does not answer `fingerprint:compare`, so this pins that the id is echoed (F66).
     it('takes --build, and echoes the build it was given', async () => {
       const projectRoot = await setupAssertAsync(recordedWith([APP_CONFIG]));
       await installSharedStubEasAsync(projectRoot);
@@ -1361,40 +1785,19 @@ process.stdout.write(JSON.stringify({
       artifacts: { buildUrl: 'https://expo.dev/artifacts/eas/abc.tar.gz' },
     };
 
-    /**
-     * A `fingerprint` bin that answers a different hash per platform, the way the real one does.
-     *
-     * This is the fact the whole design turns on, and the fixture's own stub cannot show it: the
-     * project hash covers both platforms and is not a hash any build carries. Live, on one working
-     * tree: `031f6b0c…` for the project and `8ce1acfb…` for iOS [observed — apps/observe-tester,
-     * 2026-08-26].
-     */
-    const STUB_FINGERPRINT = `#!/usr/bin/env node
-'use strict';
-const args = process.argv.slice(2);
-const platform = args.includes('--platform') ? args[args.indexOf('--platform') + 1] : null;
-const hash = platform === 'ios'
-  ? ${JSON.stringify(IOS_HASH)}
-  : platform === 'android'
-    ? ${JSON.stringify(ANDROID_HASH)}
-    : (process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)});
-process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
-`;
-
     /** Copy the fixture and install both stubs over the ones `setupAsync` put there. */
     async function setupWithEasAsync(
       fixture = 'dev-client-fresh-app',
       { linked = true }: { linked?: boolean } = {}
     ): Promise<string> {
       const projectRoot = await setupAsync(fixture);
-      const binDir = path.join(projectRoot, '.stub-bin');
-      await fs.promises.mkdir(binDir, { recursive: true });
-
-      const fingerprintStub = path.join(binDir, 'fingerprint-platform-stub.js');
-      await fs.promises.writeFile(fingerprintStub, STUB_FINGERPRINT);
-      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
-        await installStubBinAsync(dir, 'fingerprint', fingerprintStub);
-      }
+      // A different hash per platform, the way the real bin answers. This is the fact the whole
+      // design turns on: the project hash covers both platforms and is not a hash any build carries.
+      // Live, on one working tree: `031f6b0c…` for the project and `8ce1acfb…` for iOS [observed —
+      // apps/observe-tester, 2026-08-26].
+      await installEnvFingerprintStubAsync(projectRoot, {
+        platformHashes: { ios: IOS_HASH, android: ANDROID_HASH },
+      });
       // The shared stub `eas` (`e2e/stubs/eas.js`; the `STUB_EAS_*` variables below are documented
       // there), behind one runner because there is one rung; and the pin, so the EAS CLI is what
       // answers `whoami`.
