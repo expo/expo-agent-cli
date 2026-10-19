@@ -9,6 +9,7 @@ import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
 import { outputTail } from '../deploy/parseOutput';
 import { readDevServerLockAsync } from '../devLock/client';
+import type { DevServerLockInfo } from '../devLock/types';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
 import {
   acquireDeviceAsync,
@@ -40,7 +41,6 @@ import { readLastBuildRecord, recordLastBuildFingerprint } from '../plan/lastBui
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
-import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
 import { clearFingerprintMemo } from '../project/fingerprint';
 import { clearFingerprintCache } from '../project/fingerprintCache';
 import { dropEasNoneEntry } from '../status/easBuilds';
@@ -88,6 +88,11 @@ import {
   type PortCollision,
 } from './portCollision';
 import type { DevOptions } from './resolveOptions';
+import {
+  devServerRunningReason,
+  devServerRunningStopAsync,
+  runningDevServerAsync,
+} from './runningDevServer';
 import { easCommandPrefix } from '../utils/easCli';
 
 /**
@@ -104,14 +109,25 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     await assertEasProjectConfiguredAsync(projectRoot);
   }
 
-  recordLastDevRequest(projectRoot, options);
-
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
-  // the child does the probe: this run's whole job is to start that child and report on it.
+  // the child does the probe: this run's whole job is to start that child and report on it. It
+  // records the request before it reports: a reused server is a server that runs.
   if (options.detach) {
+    recordLastDevRequest(projectRoot, options);
     const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
     return await devDetachAsync(projectRoot, options, { reuseBoundDevice: true });
   }
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — one dev server per project.
+  // The lock is read once, before the project is probed. A run stops here on a live one and spends
+  // nothing below this line, the last-request record included: a request the lock refused never
+  // replaces the one that started the running server. A plan goes on, because it prints the rule
+  // and the reasons, and stops in its port block on the same lock.
+  const lock = await readDevServerLockAsync(projectRoot);
+  if (lock && options.mode !== 'plan') {
+    throw await devServerRunningStopAsync(projectRoot, lock, options.platform);
+  }
+  recordLastDevRequest(projectRoot, options);
 
   const state = await probeProjectStateAsync(projectRoot, {
     fingerprintCache: options.fingerprintCache,
@@ -119,7 +135,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it — the resolver binds the device for a
   // draft that builds nothing, before its presence probe; a draft that builds is bound below, after
   // the refusals, so no simulator is created for a run that then refuses.
-  const acquireDevice = deviceCallbackFor(projectRoot, options);
+  const acquireDevice = deviceCallbackFor(projectRoot, options, lock);
   // @ref llp/0015-backend-selection-and-config.rfc.md §The selection
   // One call that folds in everything outside the project: the developer's config, the flags they
   // typed, this host and the toolchain probe. The backend is chosen **here**, before the plan is
@@ -154,10 +170,20 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // holds the port, and exits 0 [observed — live suite, 2026-10-05].
   const serving = forwardedPlan.steps.filter(isDevServerStep).at(-1);
   let plan: StartPlan = forwardedPlan;
-  if (serving) {
+  if (lock) {
+    // Only a plan gets here with a live lock; a run stopped on it before the probe. The plan lists
+    // no steps, because the run does none, whatever the forwarded options made of the last step.
+    const running = await runningDevServerAsync(projectRoot, lock);
+    plan = {
+      ...forwardedPlan,
+      steps: [],
+      reasons: [...forwardedPlan.reasons, devServerRunningReason(running)],
+      devServerPort: { port: lock.port, movedFrom: null, state: 'running', phase: running.phase },
+    };
+  } else if (serving) {
     const planned = await resolvePlannedPortAsync(options.port);
     if (!planned.bindable && options.port != null && options.mode !== 'plan') {
-      throw await portDemandedError(projectRoot, options.port, options.platform);
+      throw await portDemandedError(options.port, options.platform);
     }
     plan = {
       ...withDevServerPort(forwardedPlan, planned.port),
@@ -174,8 +200,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     };
   }
 
-  if (dropped.length) {
-    const last = plan.steps[plan.steps.length - 1]!;
+  const last = plan.steps.at(-1);
+  if (dropped.length && last) {
     const directCommand =
       last.argv[0] === 'expo'
         ? `${PROGRAM_PREFIX} ${last.argv.slice(1).join(' ')}`
@@ -188,6 +214,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // A draft that builds is bound here, not in the resolver: after the port check above and the
   // refusals below, so a run that refuses creates no simulator, and `--plan` only inspects.
   const bindsHere = resolved.buildLocation != null;
+  const stopped = plan.devServerPort?.state === 'running';
   let acquired = boundEarly;
   const implicitEas =
     plan.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit === true;
@@ -196,7 +223,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // `--plan` stops here, so its follow-ups are about the plan itself and the plan object is the
   // whole answer.
   if (options.mode === 'plan') {
-    if (!implicitEas) {
+    // A plan that stops binds nothing, so it says nothing about a device.
+    if (!implicitEas && !stopped) {
       if (bindsHere) {
         acquired = await acquireDevice(plan);
       }
@@ -294,16 +322,22 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
  * The callback the resolver runs for a native draft, and `devAsync` runs for a draft that builds.
  *
  * @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
- * Only where this host runs the platform's device; nothing for `--eas`, whose device is a
- * session; nothing under `AGENT_CLI_NO_DEVICE`. A run first refuses a named `--port` that is
- * taken, when the draft serves, so no device is created for a run that then stops on the port.
- * `--plan` inspects the own binding and acquires nothing.
+ * Only a plan reaches this with this project's dev-server lock live, and it answers null before
+ * the binding is read: a run stopped on that lock before the probe (llp/0004 §A busy port). Then
+ * only where this host runs the platform's device; nothing for `--eas`, whose device is a session;
+ * nothing under `AGENT_CLI_NO_DEVICE`. A run then refuses a named `--port` that is taken, when the
+ * draft serves, so no device is created for a run that then stops on the port. `--plan` inspects
+ * the own binding and acquires nothing.
  */
 function deviceCallbackFor(
   projectRoot: string,
-  options: DevOptions
+  options: DevOptions,
+  lock: DevServerLockInfo | null
 ): (draft: StartPlan) => Promise<AcquireResult | null> {
   return async (draft) => {
+    if (lock) {
+      return null;
+    }
     const platform = boundPlatform(options);
     if (platform == null) {
       return null;
@@ -316,11 +350,10 @@ function deviceCallbackFor(
     if (options.port != null && draft.steps.some(isDevServerStep)) {
       const planned = await resolvePlannedPortAsync(options.port);
       if (!planned.bindable) {
-        throw await portDemandedError(projectRoot, options.port, options.platform);
+        throw await portDemandedError(options.port, options.platform);
       }
     }
     const acquired = await acquireDeviceAsync(projectRoot, platform, {
-      reuseOnly: (await readDevServerLockAsync(projectRoot)) != null,
       explicit: explicitRequestOf(options.device, options.callerArgv),
     });
     Log.progress(acquireLine(acquired));
@@ -387,8 +420,7 @@ async function withPlannedDevice(
       const { device, summary } = await previewExplicitDeviceAsync(
         projectRoot,
         selectedPlatform,
-        explicit,
-        (await readDevServerLockAsync(projectRoot)) != null
+        explicit
       );
       return {
         ...withDevice(plan, deviceIdOf(device)),
@@ -656,7 +688,7 @@ async function executePlanAsync(
         // server somewhere else would leave every command the caller had already written — and
         // every URL it had already printed — pointing at nothing.
         if (options.port != null) {
-          throw await portDemandedError(projectRoot, options.port, options.platform);
+          throw await portDemandedError(options.port, options.platform);
         }
         const askedPort = readPortArg(args) ?? defaultMetroPort();
         // One retry, and so one per plan: no plan `decideStartPlan` makes has two dev-server steps.
@@ -916,25 +948,12 @@ function warnPortMove(move: Parameters<typeof formatPortMove>[0], expected: numb
  * to do did not happen (llp/0010 §Exit codes). It never suggests the command that just failed —
  * running it again unchanged stops in the same place until the port is freed.
  */
-async function portDemandedError(
-  projectRoot: string,
-  port: number,
-  platform: PlanPlatform
-): Promise<CommandError> {
+async function portDemandedError(port: number, platform: PlanPlatform): Promise<CommandError> {
   const { findPortListenerAsync } = require('./portListener') as typeof import('./portListener');
-  const { readDevServerLockAsync } = require('../devLock') as typeof import('../devLock');
-  const [listener, lock, free, defaultPlatform] = await Promise.all([
+  const [listener, free] = await Promise.all([
     findPortListenerAsync(port),
-    readDevServerLockAsync(projectRoot),
     findFreePortAsync(port + 1),
-    defaultSmokePlatformAsync(projectRoot),
   ]);
-  // The smoke example needs a device platform, which the caller's `--web` is not.
-  const smokePlatform = platform === 'web' ? defaultPlatform : platform;
-
-  // The most useful special case: the process on that port is this project's own dev server, so
-  // there is nothing to start and nothing to fix.
-  const ours = lock != null && lock.port === port;
   const holder = listener
     ? `pid ${listener.pid}${listener.command ? ` (${listener.command})` : ''}`
     : 'a process this machine would not name';
@@ -943,18 +962,13 @@ async function portDemandedError(
     'PORT_IN_USE',
     [
       `Port ${port} is taken, so no dev server was started on it.`,
-      ours
-        ? `Why: this project's own dev server is already on port ${port}, held by ${holder}. Nothing was started, because there is already one there.`
-        : `Why: ${holder} is listening on it, and --port ${port} is a requirement rather than a preference — moving the dev server to another port would leave every URL and every command that names ${port} pointing at nothing.`,
-      ours
-        ? `How: use the dev server that is running ("${smokeCommand(smokePlatform)}" checks its bundle and its app), or stop it first with "${PROGRAM_PREFIX} dev:stop".`
-        : `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --${platform} --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
+      `Why: ${holder} is listening on it, and --port ${port} is a requirement rather than a preference — moving the dev server to another port would leave every URL and every command that names ${port} pointing at nothing.`,
+      `How: free the port with "${PROGRAM_PREFIX} dev:stop --port ${port} --force", which stops it only when it answers as an Expo dev server${listener ? ` and pid ${listener.pid} looks like one` : ''}${free == null ? '' : `, or start on a free port instead with "${PROGRAM_PREFIX} dev --${platform} --port ${free}"`}. Leaving --port out lets this command pick a free port on its own.`,
     ].join('\n')
   );
   // Never the command that just failed: it would stop in exactly the same place.
-  error.suggestedCommand = ours
-    ? smokeCommand(smokePlatform)
-    : free == null
+  error.suggestedCommand =
+    free == null
       ? `${PROGRAM_PREFIX} dev:stop --port ${port} --force`
       : `${PROGRAM_PREFIX} dev --${platform} --port ${free}`;
   error.exitCode = EXIT_OUTCOME_FAILED;

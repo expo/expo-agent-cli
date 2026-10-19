@@ -12,14 +12,14 @@ import { defaultTools } from './tools';
 import { deviceIdOf, deviceNameOf, type DevicePlatform, type DeviceTools } from './types';
 
 /**
- * A plan reads the same choice as acquisition, but never writes, boots or reaps. `reuseOnly` is
- * the run's: true while this worktree's dev server runs.
+ * A plan reads the same choice as acquisition, but never writes, boots or reaps. It has nothing to
+ * reuse: a plan beside this worktree's running dev server stops before it previews
+ * (llp/0004 §A busy port).
  */
 export async function previewExplicitDeviceAsync(
   projectRoot: string,
   platform: DevicePlatform,
   explicit: ExplicitRequest,
-  reuseOnly: boolean,
   tools: DeviceTools = defaultTools()
 ) {
   const android =
@@ -45,7 +45,7 @@ export async function previewExplicitDeviceAsync(
     platform,
     candidates,
     explicit,
-    reuseOnly,
+    false,
     tools,
     android?.unready ?? []
   );
