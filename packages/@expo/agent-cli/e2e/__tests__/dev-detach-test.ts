@@ -352,8 +352,8 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
-  // complete. Another project's Metro held `*:8081`, and `expo run:ios` with no terminal skipped its
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port.
+  // Another project's Metro held `*:8081`, and `expo run:ios` with no terminal skipped its
   // dev server, deep-linked the app to that Metro, and exited 0, so the detached run failed with no
   // lock [observed — live suite, 2026-10-05]. The port is picked before the plan runs and passed
   // as `--port` to every step that serves.

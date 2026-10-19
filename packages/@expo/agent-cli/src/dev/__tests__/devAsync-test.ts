@@ -672,8 +672,8 @@ describe(devAsync, () => {
       });
     });
 
-    // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person
-    // can complete — `expo run:*` bakes the port into the app, so it gets the named one too.
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+    // `expo run:*` bakes the port into the app, so it gets the named one too.
     it(`should pass a named port to the build step that serves`, async () => {
       mockStaleDevClientState();
 

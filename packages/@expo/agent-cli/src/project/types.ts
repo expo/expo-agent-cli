@@ -131,7 +131,7 @@ export interface StartPlan {
    * The port of the plan's dev server, and what the plan does about it. Absent from a plan `dev`
    * did not resolve a port for.
    *
-   * @see llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can complete
+   * @see llp/0004-smart-start-and-project-state.rfc.md §A busy port
    */
   devServerPort?: DevServerPort;
   /**

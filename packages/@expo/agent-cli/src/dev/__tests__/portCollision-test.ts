@@ -173,8 +173,8 @@ describe(findFreePortAsync, () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
-// complete — the sentence a person reads when the dev server is not on the port it wanted. It
+// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+// the sentence a person reads when the dev server is not on the port it wanted. It
 // carries no protocol: a `--detach` parent computes the move from the plan and the lock.
 describe(formatPortMove, () => {
   it(`says the plan moved off a busy port before anything ran`, () => {
@@ -198,8 +198,8 @@ describe(formatPortMove, () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
-// complete — the port the plan's steps are given, picked before any of them runs.
+// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+// the port the plan's steps are given, picked before any of them runs.
 describe(resolvePlannedPortAsync, () => {
   it(`keeps the preferred port when it is free`, async () => {
     const preferred = (await findFreePortAsync(49600))!;

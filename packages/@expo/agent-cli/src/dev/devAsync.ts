@@ -148,8 +148,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // passed it [observed — friction run 7, F71; live run S5].
   const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
-  // complete — the port is picked here, before the plan is printed, and set on every step that
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+  // the port is picked here, before the plan is printed, and set on every step that
   // serves. Left to `expo run:*`, a busy port skips its dev server, deep-links the app to whatever
   // holds the port, and exits 0 [observed — live suite, 2026-10-05].
   const serving = forwardedPlan.steps.filter(isDevServerStep).at(-1);

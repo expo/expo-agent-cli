@@ -123,8 +123,8 @@ describe(withPortArg, () => {
   });
 });
 
-// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
-// complete — every step that serves or compiles the port in gets the one the plan picked.
+// @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+// every step that serves or compiles the port in gets the one the plan picked.
 describe(withDevServerPort, () => {
   it(`should put the port on run:* and start, and leave the rest alone`, () => {
     const result = withDevServerPort(
