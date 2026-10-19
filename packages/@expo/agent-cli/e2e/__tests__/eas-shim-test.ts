@@ -20,6 +20,7 @@ import {
   installStubBinAsync,
   installStubEasRunnerAsync,
   installStubFingerprintAsync,
+  linkFixtureToEasAsync,
   setupFixtureAsync,
 } from '../utils';
 
@@ -76,6 +77,7 @@ async function setupWithBrokenEasAsync(
 ): Promise<string> {
   const projectRoot = await setupFixtureAsync(fixture);
   await installStubFingerprintAsync(projectRoot);
+  await linkFixtureToEasAsync(projectRoot);
 
   const binDir = path.join(projectRoot, '.stub-bin');
   await fs.promises.mkdir(binDir, { recursive: true });

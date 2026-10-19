@@ -1143,6 +1143,8 @@ describe('the eas build line', () => {
     buildProfile: 'simulator',
     buildUrl: 'https://expo.dev/artifacts/eas/abc.tar.gz',
     source: 'cache' as const,
+    checkedAt: null,
+    ageMs: null,
     reason: null,
   };
   const notAskedAndroid = {
@@ -1154,6 +1156,8 @@ describe('the eas build line', () => {
     buildProfile: null,
     buildUrl: null,
     source: null,
+    checkedAt: null,
+    ageMs: null,
     reason: 'EAS was not asked — pass --explain',
   };
 

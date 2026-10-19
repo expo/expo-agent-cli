@@ -142,6 +142,19 @@ describe(readConfiguredAppId, () => {
     expect(readConfiguredAppId(projectRoot, 'android')).toBe('com.example.android');
   });
 
+  it(`should read app.config.json before app.json, as Expo does`, () => {
+    vol.fromJSON({
+      [`${projectRoot}/app.json`]: JSON.stringify({
+        expo: { ios: { bundleIdentifier: 'com.old' } },
+      }),
+      [`${projectRoot}/app.config.json`]: JSON.stringify({
+        expo: { ios: { bundleIdentifier: 'com.new' } },
+      }),
+    });
+
+    expect(readConfiguredAppId(projectRoot, 'ios')).toBe('com.new');
+  });
+
   it(`should accept a config with no expo key`, () => {
     vol.fromJSON({
       [`${projectRoot}/app.config.json`]: JSON.stringify({

@@ -20,6 +20,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { directoryExistsAsync } from '../utils/dir';
+import { STATIC_CONFIG_FILES } from './appConfig';
 import { readJsonFileAsync } from './nodeModules';
 
 /** Extensions Metro resolves for a route module. */
@@ -181,7 +182,7 @@ async function resolveRouterRootAsync(projectRoot: string): Promise<string | nul
  * process boundary; such a project falls through to the directory defaults.
  */
 async function readConfiguredRouterRootAsync(projectRoot: string): Promise<string | null> {
-  for (const file of ['app.json', 'app.config.json']) {
+  for (const file of STATIC_CONFIG_FILES) {
     const contents = await readJsonFileAsync<Record<string, any>>(path.join(projectRoot, file));
     if (contents == null) {
       continue;

@@ -43,6 +43,7 @@ import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand } from '../smoke/suggest';
 import { clearFingerprintMemo } from '../project/fingerprint';
 import { clearFingerprintCache } from '../project/fingerprintCache';
+import { dropEasNoneEntry } from '../status/easBuilds';
 import { probeProjectStateAsync } from '../project/probe';
 import type { PlanStep, ProjectState, StartPlan } from '../project/types';
 import { resolveStartFollowUpsAsync } from '../start/followUps';
@@ -626,6 +627,10 @@ async function executePlanAsync(
       });
     };
 
+    if (step.id === 'eas-build') {
+      // A remembered "no build" for this platform is about to be wrong.
+      dropEasNoneEntry(projectRoot, resolveEasBuildPlatform(step));
+    }
     // @ref llp/0027-everything-on-eas.rfc.md §The build is a simulator build
     // Said in the plan's reasons, and done here, right before the build that names the profile:
     // `eas build --profile development-simulator` against an `eas.json` without it stops at "profile
@@ -729,6 +734,10 @@ async function executePlanAsync(
     }
 
     recordBuildOf(projectRoot, step, state);
+    if (step.id === 'eas-build') {
+      // A `status` that ran during the build saw no finished build and saved a new "none".
+      dropEasNoneEntry(projectRoot, resolveEasBuildPlatform(step));
+    }
     if (step.id === 'eas-build' && options.deviceBackend === 'eas') {
       // The build that just finished is the newest finished one of its profile, and its id is what
       // the session installs. Asked of EAS rather than parsed out of the step, whose output went to

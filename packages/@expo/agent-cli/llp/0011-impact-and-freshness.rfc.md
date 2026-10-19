@@ -101,6 +101,16 @@ The lookup answers in three states: `{ state: 'found', build }`, `{ state: 'none
 
 `--platform ios` does not isolate the iOS app config. An Android-only edit can move the iOS hash. The whole-project hash still dominates, so an unchanged project hash still implies unchanged per-platform hashes.
 
+### What `status` remembers of the answer
+
+`.expo/agent-cli-eas-builds.json` holds one entry per platform, keyed on the whole-project hash (`src/status/easBuilds.ts`). That hash dominates the per-platform hash, so a matching key means the answer still holds.
+
+- A `found` is believed while the key stands.
+- A `none` is believed for five minutes (`EAS_NONE_CACHE_TTL_MS`), because a build may finish soon after. The report shows its age (`none (as of 2m ago)`; `checkedAt` and `ageMs` in `--json`). A `none` without a valid `checkedAt` is dropped.
+- `--no-fingerprint-cache` ignores the record ([[0023-fingerprint-caching]] §Every consumer can turn it off).
+
+**An unlinked project is never asked.** When the static app config names no `extra.eas.projectId`, `status` answers `unknown` with the `eas init` command and does not call EAS. A dynamic `app.config.js` may set the id from the environment, so EAS is still asked for it.
+
 ## A fingerprint change is not "OTA-unsafe"
 
 This section is the normative one. `ota.safe` comes from the resolved `runtimeVersion` policy, and never from the class.
