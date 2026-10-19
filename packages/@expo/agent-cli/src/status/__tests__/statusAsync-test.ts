@@ -17,6 +17,7 @@ import { readAuthPreflightAsync } from '../../needsHuman/preflight';
 import * as easBuildLookup from '../../plan/easBuildLookup';
 import { readLastBuildRecord } from '../../plan/lastBuild';
 import * as resolveAsync from '../../plan/resolveAsync';
+import * as appConfig from '../../project/appConfig';
 import { probeProjectStateAsync } from '../../project/probe';
 import type { ProjectState, StartPlan } from '../../project/types';
 import { discoverDevServerAsync, type DevServerDiscovery } from '../../runtime/devServer';
@@ -51,10 +52,11 @@ vi.mock('../../runtime/targetLiveness', () => ({
 // suite happens to run on.
 vi.mock('../../needsHuman/preflight', () => ({ readAuthPreflightAsync: vi.fn() }));
 vi.mock('../../skills/discovery', () => ({ discoverSkillsAsync: vi.fn(async () => []) }));
-// The two halves of `--explain` that cost something: one network call and one `expo config`. Both
-// are mocked here so these tests can assert *whether they were asked*, which is the design.
-vi.mock('../easBuilds', () => ({
+// The network call and `expo config`, mocked so these tests spawn neither.
+vi.mock('../easBuilds', async () => ({
+  ...((await vi.importActual('../easBuilds')) as object),
   readEasBuildsStatusAsync: vi.fn(async () => ({ askedEas: false, platforms: [] })),
+  platformsToFingerprintEarly: vi.fn(() => []),
 }));
 vi.mock('../../impact/fromRecord', async () => ({
   ...((await vi.importActual('../../impact/fromRecord')) as object),
@@ -448,10 +450,9 @@ describe(collectStatusReportAsync, () => {
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
   //
-  // The design is a cost split, so these are tests about *what was spawned*. A default run must
-  // reach neither `expo config` nor the network; `--explain` reaches both.
-  describe('the cost split of --explain', () => {
-    it(`should classify the change without asking EAS or expo config`, async () => {
+  // Every run carries the per-source list, the OTA verdict and the EAS answer.
+  describe('what every run carries', () => {
+    it(`should classify the change from the two source lists, in process`, async () => {
       // Both sides carry their sources, which is what makes the classification possible at all —
       // the probe computed the head's to get its hash, and the record holds the base's.
       mockState({ fingerprint: { hash: 'abcdef0123456789', sources: [] } });
@@ -462,49 +463,15 @@ describe(collectStatusReportAsync, () => {
       expect(report.freshness?.platforms[0]!.impact).toMatchObject({
         class: 'js-only',
         fingerprintChanged: true,
+        changedSources: [],
       });
-      expect(resolveRuntimeVersionAsync).not.toHaveBeenCalled();
-      expect(readEasBuildsStatusAsync).toHaveBeenCalledWith(
-        projectRoot,
-        expect.objectContaining({ lookUp: false })
-      );
     });
 
-    it(`should leave the per-source list out of the default report`, async () => {
-      mockState({ fingerprint: { hash: 'abcdef0123456789', sources: [] } });
-      vi.mocked(readLastBuildRecord).mockReturnValue({ ios: { hash: 'older', sources: [] } });
-
-      const report = await collectStatusReportAsync(projectRoot, options);
-
-      expect(report.freshness?.platforms[0]!.impact?.changedSources).toBeNull();
-      expect(report.freshness?.ota).toBeNull();
-    });
-
-    it(`should resolve the OTA verdict and refresh the EAS answer with --explain`, async () => {
-      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
-
-      expect(resolveRuntimeVersionAsync).toHaveBeenCalledWith(projectRoot);
-      expect(report.freshness?.ota).toMatchObject({ safe: true });
-      expect(readEasBuildsStatusAsync).toHaveBeenCalledWith(
-        projectRoot,
-        expect.objectContaining({ lookUp: true })
-      );
-    });
-
-    it(`should carry the per-source list with --explain`, async () => {
-      mockState({ fingerprint: { hash: 'abcdef0123456789', sources: [] } });
-      vi.mocked(readLastBuildRecord).mockReturnValue({ ios: { hash: 'older', sources: [] } });
-
-      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
-
-      expect(report.freshness?.platforms[0]!.impact?.changedSources).toEqual([]);
-    });
-
-    // Section isolation: `--explain` is three answers, and one of them failing costs one of them.
+    // Section isolation: three answers, and one of them failing costs one of them.
     it(`should note an OTA read it could not make, and keep every other fact`, async () => {
       vi.mocked(resolveRuntimeVersionAsync).mockRejectedValue(new Error('expo config failed'));
 
-      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+      const report = await collectStatusReportAsync(projectRoot, options);
 
       expect(report.errors.freshness).toBe('expo config failed');
       expect(report.freshness?.ota).toBeNull();
@@ -515,7 +482,7 @@ describe(collectStatusReportAsync, () => {
     it(`should not resolve an OTA verdict for a project it could not probe`, async () => {
       vi.mocked(probeProjectStateAsync).mockRejectedValue(new Error('project is unreadable'));
 
-      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+      const report = await collectStatusReportAsync(projectRoot, options);
 
       expect(resolveRuntimeVersionAsync).not.toHaveBeenCalled();
       expect(report.freshness).toBeNull();
@@ -602,33 +569,6 @@ describe(collectStatusReportAsync, () => {
       expect(report.assertion).toMatchObject({ ok: true, actual: 'js-only', exitCode: 0 });
     });
 
-    // With and without `--explain`, because the gate reads the headline and the headline is free.
-    it(`should work without --explain, which is what makes it cheap enough for CI`, async () => {
-      decided('abcdef0123456789');
-
-      const report = await collectStatusReportAsync(projectRoot, {
-        ...options,
-        assert: 'js-only',
-      });
-
-      expect(resolveRuntimeVersionAsync).not.toHaveBeenCalled();
-      expect(report.assertion?.ok).toBe(true);
-    });
-
-    it(`should compose with --explain`, async () => {
-      decided('abcdef0123456789');
-
-      const report = await collectStatusReportAsync(projectRoot, {
-        ...options,
-        assert: 'js-only',
-        explain: true,
-      });
-
-      expect(resolveRuntimeVersionAsync).toHaveBeenCalled();
-      expect(report.assertion?.ok).toBe(true);
-      expect(report.freshness?.ota).not.toBeNull();
-    });
-
     it(`should fail with 22 for a project with nothing to compare against`, async () => {
       vi.mocked(readLastBuildRecord).mockReturnValue({});
 
@@ -672,7 +612,6 @@ describe(collectStatusReportAsync, () => {
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
       });
 
@@ -717,7 +656,6 @@ describe(collectStatusReportAsync, () => {
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
       });
 
@@ -736,7 +674,6 @@ describe(collectStatusReportAsync, () => {
     it(`should take the platform the caller named without asking EAS`, async () => {
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
         platform: 'android',
       });
@@ -754,7 +691,6 @@ describe(collectStatusReportAsync, () => {
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
       });
 
@@ -766,7 +702,6 @@ describe(collectStatusReportAsync, () => {
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
         assert: 'js-only',
       });
@@ -790,7 +725,6 @@ describe(collectStatusReportAsync, () => {
 
       const report = await collectStatusReportAsync(projectRoot, {
         ...options,
-        explain: true,
         buildId: 'build-1',
       });
 
@@ -1117,7 +1051,6 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     stopDevServer();
     const report = await collectStatusReportAsync(projectRoot, {
       devServerUrl: 'http://localhost:19090',
-      explain: true,
       device: 'Pixel; echo nope',
     });
     expect(report.next?.command).toBe(
@@ -1127,7 +1060,6 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     const ios = await collectStatusReportAsync(projectRoot, {
       devServerUrl: null,
       platform: 'ios',
-      explain: true,
       device: 'iPhone 15',
     });
     expect(ios.next?.command).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
@@ -1378,8 +1310,7 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     );
   });
 
-  it("asks EAS for a saved --eas request's build only under --explain, with the fingerprint-cache choice", async () => {
-    const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
+  function saveEasRequest() {
     mockState({ usesDevClient: true, expoGo: { compatible: false, reasons: [] } });
     vol.fromJSON({
       '/project/.expo/agent-cli-last-dev.json': JSON.stringify({
@@ -1390,14 +1321,61 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
         runTarget: null,
       }),
     });
+  }
+
+  function buildsFound(buildProfile: string) {
+    vi.mocked(readEasBuildsStatusAsync).mockResolvedValueOnce({
+      askedEas: true,
+      platforms: [
+        {
+          platform: 'ios',
+          state: 'found',
+          fingerprintHash: 'ios-hash',
+          buildId: 'build-1',
+          createdAt: null,
+          buildProfile,
+          buildUrl: null,
+          source: 'eas',
+          checkedAt: null,
+          ageMs: null,
+          reason: null,
+        },
+      ],
+    });
+  }
+
+  it("should reuse the builds section's simulator build for a saved --eas request", async () => {
+    const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
+    saveEasRequest();
+    buildsFound('development-simulator');
+
     await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+
     expect(lookUp).not.toHaveBeenCalled();
+    expect(readEasBuildsStatusAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it(`should not ask EAS again when the builds section has no build`, async () => {
+    const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
+    saveEasRequest();
+
+    await collectStatusReportAsync(projectRoot, { devServerUrl: null });
+
+    expect(lookUp).not.toHaveBeenCalled();
+    expect(readEasBuildsStatusAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it(`should ask EAS itself when the builds section found another profile`, async () => {
+    const lookUp = vi.spyOn(easBuildLookup, 'lookUpEasSimulatorBuildAsync').mockResolvedValue(null);
+    saveEasRequest();
+    buildsFound('development');
+
     await collectStatusReportAsync(projectRoot, {
       devServerUrl: null,
-      explain: true,
       fingerprintCache: false,
       buildLookupTimeoutMs: 1_000,
     });
+
     expect(lookUp).toHaveBeenCalledWith(projectRoot, 'ios', {
       fingerprintCache: false,
       timeoutMs: 1_000,
@@ -1416,21 +1394,17 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
     vi.mocked(readInstalledStatusAsync).mockResolvedValue(installed);
   });
 
-  it(`reads the device under --explain, and not on a default run`, async () => {
-    const brief = await collectStatusReportAsync(projectRoot, options);
-    expect(readInstalledStatusAsync).not.toHaveBeenCalled();
-    expect(brief.installed).toBeNull();
-
-    const deep = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+  it(`reads the device on a plain run, with no device named`, async () => {
+    const report = await collectStatusReportAsync(projectRoot, options);
     expect(readInstalledStatusAsync).toHaveBeenCalledWith(
       projectRoot,
       expect.objectContaining({ device: null })
     );
-    expect(deep.installed).toEqual(installed);
+    expect(report.installed).toEqual(installed);
   });
 
   it(`hands the named device through`, async () => {
-    await collectStatusReportAsync(projectRoot, { ...options, explain: true, device: 'Pixel_9' });
+    await collectStatusReportAsync(projectRoot, { ...options, device: 'Pixel_9' });
     expect(readInstalledStatusAsync).toHaveBeenCalledWith(
       projectRoot,
       expect.objectContaining({ device: 'Pixel_9' })
@@ -1441,7 +1415,7 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
   it(`reads no device when AGENT_CLI_NO_DEVICE is set`, async () => {
     vi.stubEnv('AGENT_CLI_NO_DEVICE', '1');
     try {
-      const report = await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+      const report = await collectStatusReportAsync(projectRoot, options);
       expect(readInstalledStatusAsync).not.toHaveBeenCalled();
       expect(report.installed).toBeNull();
       expect(report.errors.installed).toBeUndefined();
@@ -1451,7 +1425,7 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
   });
 
   it(`hands a phone the default answer time, or the one --device-timeout named`, async () => {
-    await collectStatusReportAsync(projectRoot, { ...options, explain: true });
+    await collectStatusReportAsync(projectRoot, options);
     expect(readInstalledStatusAsync).toHaveBeenLastCalledWith(
       projectRoot,
       expect.objectContaining({ timeoutMs: 15_000 })
@@ -1459,7 +1433,6 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
 
     await collectStatusReportAsync(projectRoot, {
       ...options,
-      explain: true,
       device: "Ada's iPhone",
       installedTimeoutMs: 45_000,
     });
@@ -1473,7 +1446,6 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
     vi.mocked(readInstalledStatusAsync).mockImplementationOnce(() => new Promise(() => {}));
     const report = await collectStatusReportAsync(projectRoot, {
       ...options,
-      explain: true,
       installedReadTimeoutMs: 10,
     });
     expect(report.installed).toBeNull();
@@ -1505,6 +1477,13 @@ describe('status retains discovery results at its deadline', () => {
       }, ms);
       abortTimers.add(timer);
       return controller.signal;
+    });
+    // Answered at once, so the probe's budget starts where the advances below count from.
+    vi.spyOn(appConfig, 'readStaticEasProjectAsync').mockResolvedValue({
+      projectId: null,
+      source: null,
+      dynamic: false,
+      unreadable: false,
     });
     vi.spyOn(devLock, 'readDevServerLockAsync').mockResolvedValue(null);
     vi.spyOn(localDevice, 'probeLocalDeviceAsync').mockResolvedValue({

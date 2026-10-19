@@ -13,12 +13,11 @@
 //    1.10–1.33 s over five live runs, hit and miss alike, against a warm CLI [observed — same
 //    session]. `status` measures ~65 ms.
 //
-// So the network half is opt-in (`--explain`) and the **cache is always read**, because the cache
-// is exact rather than approximate: the whole-project hash *dominates* the per-platform ones —
-// `--platform` filters the same source list, so an unchanged project hash implies unchanged
-// per-platform hashes — which makes the hash `status` already has a sound key for an answer about
-// a hash it does not have. A hit costs one `readFileSync` and is as true as the lookup that wrote
-// it. See the LLP section for the argument in full.
+// So the **cache is read first**, and it is exact rather than approximate: the whole-project hash
+// *dominates* the per-platform ones — `--platform` filters the same source list, so an unchanged
+// project hash implies unchanged per-platform hashes — which makes the hash `status` already has a
+// sound key for an answer about a hash it does not have. A hit costs one `readFileSync` and is as
+// true as the lookup that wrote it. See the LLP section for the argument in full.
 //
 // A `none` is remembered for five minutes. A project whose static config names no EAS project is
 // never asked: `eas build:list` would refuse it.
@@ -28,9 +27,10 @@ import path from 'path';
 
 import { lookUpCachedBuildAsync, runnerDownloadNote } from '../impact/buildCache';
 import type { CachedBuild } from '../impact/types';
-import type { NativePlatform } from '../plan/types';
+import type { NativePlatform, PlanEasBuild } from '../plan/types';
 import type { EasProjectLink } from '../project/appConfig';
 import { generateFingerprintAsync } from '../project/fingerprint';
+import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { ensureDotExpoProjectDirectoryInitialized } from '../utils/dotExpo';
 import { easCommandPrefix, mayDownloadEasCli, resolveEasCli, type EasCli } from '../utils/easCli';
 import type { AuthStatus, BuildsStatus, PlatformBuild } from './types';
@@ -44,9 +44,8 @@ export const EAS_BUILDS_FILE_NAME = 'agent-cli-eas-builds.json';
 /**
  * How long one platform's lookup may take, fingerprint run and network call together.
  *
- * Generous, because it is only ever spent by a caller who asked for it: the two halves measured
- * 1.24 s and 1.10–1.33 s live, so a budget under about four seconds would abandon answers that were
- * on their way. Expiring costs the platform an answer (`unknown`), never the report.
+ * Generous: the two halves measured 1.24 s and 1.10–1.33 s live, so a budget under about four
+ * seconds would abandon answers that were on their way. Expiring costs the platform an answer (`unknown`), never the report.
  */
 export const EAS_BUILD_LOOKUP_TIMEOUT_MS = 10_000;
 
@@ -60,7 +59,7 @@ export const EAS_BUILD_LOOKUP_TIMEOUT_MS = 10_000;
  * one [decided — 2026-08-27, wave 18]: a wider budget, still bounded, so the common case of a modest
  * install answers rather than expires — and never the minutes a cold install, or an unreachable
  * registry, can take, because `status` must not hang. A run that expires anyway says the download was
- * why, and the next run is warm. Only reached under `--explain`; a default `status` asks EAS nothing.
+ * why, and the next run is warm.
  *
  * A project that *pins* the CLI keeps the tighter budget above: the runner resolves it out of
  * `node_modules` without a network call at all.
@@ -99,8 +98,6 @@ interface CachedEntry {
 type EasBuildsRecord = Partial<Record<NativePlatform, CachedEntry>>;
 
 export interface EasBuildsOptions {
-  /** Whether this run may call EAS. False on every run without `--explain`. */
-  lookUp: boolean;
   /**
    * What the auth section answered.
    *
@@ -118,7 +115,8 @@ export interface EasBuildsOptions {
    * project's `.expo` record.
    *
    * @see llp/0023-fingerprint-caching.rfc.md — this is the section that pays for *two* of the three
-   * fingerprints a `status --explain` used to compute, so it is the one the cache helps most.
+   * fingerprints a `status` computes. A caller who refused that cache wants a measurement, so the
+   * remembered EAS answer is refused too.
    */
   fingerprintCache?: boolean;
   /** The EAS project link from the static app config. Null when the project could not be read. */
@@ -128,7 +126,7 @@ export interface EasBuildsOptions {
 /**
  * What EAS already has for this project, per platform.
  *
- * Reads the cache always and calls EAS only under `--explain`. Never throws: every way of not
+ * Reads the record first and calls EAS for what it does not answer. Never throws: every way of not
  * getting an answer is an `unknown` carrying the reason, so a section that could not be read costs
  * one line of the report and the command still exits 0.
  */
@@ -140,11 +138,67 @@ export async function readEasBuildsStatusAsync(
   // Once for the whole section rather than once per platform: the answer cannot differ between them,
   // and the two rungs it may take both touch the filesystem. It is also what lets the deadline below
   // say *why* a lookup ran out of time.
-  const easCli = options.lookUp ? resolveEasCli(projectRoot) : null;
+  const easCli = resolveEasCli(projectRoot);
+  // Set once `eas build:list` is spawned, whatever it answers, so a failed call still counts.
+  const asked = { eas: false };
   const platforms = await Promise.all(
-    PLATFORMS.map((platform) => readPlatformAsync(projectRoot, platform, record, options, easCli))
+    PLATFORMS.map((platform) =>
+      readPlatformAsync(projectRoot, platform, record, options, easCli, asked)
+    )
   );
-  return { askedEas: options.lookUp, platforms };
+  return { askedEas: asked.eas, platforms };
+}
+
+/**
+ * The plan's question, "is there a finished simulator build?", answered from this section's answer.
+ *
+ * The section asks for the newest finished build of any profile, so `none` and a simulator-profile
+ * `found` settle it. `unknown` reads as no build, which is what the plan does when its own call
+ * fails. Only a `found` of another profile returns `undefined`: a simulator build may still exist.
+ */
+export function simulatorBuildFromBuilds(
+  builds: BuildsStatus | null,
+  platform: NativePlatform
+): PlanEasBuild | null | undefined {
+  const answer = builds?.platforms.find((entry) => entry.platform === platform);
+  if (answer?.state !== 'found' || !answer.buildId) {
+    return null;
+  }
+  return answer.buildProfile === EAS_SIMULATOR_PROFILE
+    ? { id: answer.buildId, profile: EAS_SIMULATOR_PROFILE }
+    : undefined;
+}
+
+/**
+ * The platforms whose fingerprint the lookup will compute: signed in, linked, and no record entry
+ * that answers for this project hash. `status` starts these early; it must not start one the lookup
+ * would never wait for, since an unawaited fingerprint run still holds the process open.
+ */
+export function platformsToFingerprintEarly(
+  projectRoot: string,
+  options: Pick<EasBuildsOptions, 'auth' | 'easProject' | 'fingerprintCache' | 'projectHash'>
+): NativePlatform[] {
+  if (options.auth?.loggedIn === false || !mayAskEas(options.easProject)) {
+    return [];
+  }
+  const record = options.fingerprintCache === false ? {} : readEasBuildsRecord(projectRoot);
+  return PLATFORMS.filter((platform) => !recordAnswers(record[platform], options.projectHash));
+}
+
+/** Whether a record entry answers for this project hash, the same test the lookup applies. */
+function recordAnswers(cached: CachedEntry | undefined, projectHash: string | null): boolean {
+  if (!cached || !projectHash || cached.projectHash !== projectHash) {
+    return false;
+  }
+  if (cached.build) {
+    return true;
+  }
+  const age = ageOf(cached.checkedAt);
+  return age != null && age <= EAS_NONE_CACHE_TTL_MS;
+}
+
+function mayAskEas(easProject: EasProjectLink | null | undefined): boolean {
+  return !easProject || (!easProject.unreadable && (!!easProject.projectId || easProject.dynamic));
 }
 
 async function readPlatformAsync(
@@ -152,24 +206,16 @@ async function readPlatformAsync(
   platform: NativePlatform,
   record: EasBuildsRecord,
   options: EasBuildsOptions,
-  easCli: EasCli | null
+  easCli: EasCli | null,
+  asked: { eas: boolean }
 ): Promise<PlatformBuild> {
   const cached = record[platform];
-  if (cached && options.projectHash && cached.projectHash === options.projectHash) {
-    if (cached.build) {
-      return found(platform, cached.fingerprintHash, cached.build, 'cache', cached.checkedAt);
-    }
-    const age = ageOf(cached.checkedAt);
-    if (age != null && age <= EAS_NONE_CACHE_TTL_MS) {
-      return none(platform, cached.fingerprintHash, 'cache', cached.checkedAt, age);
-    }
+  if (cached && recordAnswers(cached, options.projectHash)) {
+    return cached.build
+      ? found(platform, cached.fingerprintHash, cached.build, 'cache', cached.checkedAt)
+      : none(platform, cached.fingerprintHash, 'cache', cached.checkedAt, ageOf(cached.checkedAt));
   }
 
-  if (!options.lookUp) {
-    // Short on purpose: this is the reason on every platform of every default run, and the cost it
-    // is short about is spelled out in `status --help`, which is where somebody weighing it looks.
-    return unknown(platform, null, 'EAS was not asked — pass --explain');
-  }
   if (options.auth?.loggedIn === false) {
     // The answer is already in the report. A second probe would spend a second to be told the
     // same thing, and this section must never be the reason a signed-out machine waits.
@@ -193,7 +239,7 @@ async function readPlatformAsync(
 
   const deadline = options.timeoutMs ?? easBuildLookupTimeoutMs(easCli);
   const outcome = await withDeadlineAsync(
-    lookUpPlatformAsync(projectRoot, platform, deadline, easCli, options.fingerprintCache),
+    lookUpPlatformAsync(projectRoot, platform, deadline, easCli, options.fingerprintCache, asked),
     deadline
   );
   if (!outcome) {
@@ -259,7 +305,8 @@ async function lookUpPlatformAsync(
   platform: NativePlatform,
   timeoutMs: number,
   easCli: EasCli | null,
-  fingerprintCache: boolean | undefined
+  fingerprintCache: boolean | undefined,
+  asked: { eas: boolean }
 ): Promise<LookupOutcome> {
   const fingerprint = await generateFingerprintAsync(projectRoot, {
     platform,
@@ -273,6 +320,7 @@ async function lookUpPlatformAsync(
     };
   }
 
+  asked.eas = true;
   const outcome = await lookUpCachedBuildAsync(easCli, projectRoot, platform, fingerprint.hash, {
     timeoutMs,
   });

@@ -32,7 +32,8 @@ import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
 import { readLastBuildRecord, type LastBuildRecord } from '../plan/lastBuild';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
-import { readStaticEasProjectAsync, type EasProjectLink } from '../project/appConfig';
+import { readStaticEasProjectAsync } from '../project/appConfig';
+import { generateFingerprintAsync } from '../project/fingerprint';
 import { readProjectPackageJsonAsync } from '../project/nodeModules';
 import { probeProjectStateAsync } from '../project/probe';
 import type { ProjectState, StartPlan } from '../project/types';
@@ -49,7 +50,12 @@ import type { DiscoveredSkill } from '../skills/types';
 import { resolveEasCli } from '../utils/easCli';
 import { withSubprocessDeadlineAsync } from '../utils/subprocessDeadline';
 import { buildAssertStatus } from './assert';
-import { easBuildLookupTimeoutMs, readEasBuildsStatusAsync } from './easBuilds';
+import {
+  easBuildLookupTimeoutMs,
+  platformsToFingerprintEarly,
+  readEasBuildsStatusAsync,
+  simulatorBuildFromBuilds,
+} from './easBuilds';
 import { formatStatusReport } from './format';
 import { readInstalledStatusAsync } from './installed';
 import {
@@ -67,6 +73,7 @@ import {
 } from './sections';
 import type {
   AuthStatus,
+  BuildsStatus,
   BuildLookupState,
   DevServerStatus,
   FreshnessImpact,
@@ -79,7 +86,7 @@ import type {
 } from './types';
 
 /**
- * How long the dev-server probe may take. Status is meant to be instant, and the common answer
+ * How long the dev-server probe may take. Each status section has a short budget, and the common answer
  * (nothing listening on the port) arrives in a millisecond, so a short ceiling only ever cuts off
  * a host that never answers.
  */
@@ -106,7 +113,7 @@ export const DEVICE_PROBE_TIMEOUT_MS = 2500;
 /**
  * How long the `installed` section gets, for the per-platform fingerprint and every device read
  * together. One deadline over the chain, because a hung `adb` on one device would otherwise stall
- * `status --explain` for as long as each tool's own timeout allows.
+ * `status` for as long as each tool's own timeout allows.
  */
 export const INSTALLED_READ_TIMEOUT_MS = 15_000;
 
@@ -128,18 +135,6 @@ export interface StatusOptions {
   /** `--device-timeout`: how long a phone gets to answer once the app was launched on it. */
   installedTimeoutMs?: number | null;
   /**
-   * The deep dive: `--explain`.
-   *
-   * Three things join the report, and only two of them cost anything — which is the whole design.
-   * The per-source change list is free (the headline diffs locally, so the list is a by-product)
-   * and is left out by default because a headline with fifty rows attached is not a headline. The
-   * OTA verdict spawns `expo config --json --type public`, and the EAS build lookup makes a
-   * network call; both are what a reader who typed `--explain` asked to pay for.
-   *
-   * @see llp/0004-smart-start-and-project-state.rfc.md §Status
-   */
-  explain?: boolean;
-  /**
    * Turn the report into a gate: exit `20` when the change costs more than this class (`--assert`).
    *
    * @see llp/0004-smart-start-and-project-state.rfc.md §Status
@@ -148,8 +143,8 @@ export interface StatusOptions {
   /**
    * Compare against a specific EAS build instead of the project's own record (`--build <id>`).
    *
-   * Requires `--explain`, because it fetches a fingerprint from the service. Server ground truth:
-   * it needs no local record, which is what makes it the answer for a build made in the cloud.
+   * Fetches a fingerprint from the service. Server ground truth: it needs no local record, which is
+   * what makes it the answer for a build made in the cloud.
    */
   buildId?: string | null;
   /**
@@ -164,14 +159,11 @@ export interface StatusOptions {
   /** Attach the state-aware next actions to the report, cleared by `--no-followups`. */
   followups?: boolean;
   /**
-   * Whether a fingerprint may be answered out of the project's own record (`--no-fingerprint-cache`
-   * clears it).
+   * Whether an answer may come out of the project's own records under `.expo` — the fingerprints,
+   * the remembered EAS answer, the evaluated app config (`--no-fingerprint-cache` clears it).
    *
    * @ref llp/0023-fingerprint-caching.rfc.md
-   * This is the flag that pays for the report's promptness: a default `status` computes one
-   * fingerprint and `--explain` computes three, at about a second each, and all three are the same
-   * three the previous run computed unless one of the pinned files moved. Undefined leaves the
-   * decision to `AGENT_CLI_NO_FINGERPRINT_CACHE`.
+   * Undefined leaves the decision to `AGENT_CLI_NO_FINGERPRINT_CACHE`.
    */
   fingerprintCache?: boolean;
 }
@@ -242,15 +234,33 @@ export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions
 ): Promise<StatusReport> {
+  const easProject = await readStaticEasProjectAsync(projectRoot);
+  const projectRead = attemptAsync(() => readProjectAsync(projectRoot, options));
+  const authRead = attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot));
+  // Start the per-platform fingerprints the EAS lookup will need once auth and the project hash say
+  // it will run, while the slower probes finish; the lookup joins them through the memo (llp/0023
+  // §Layer 1). The hash is what tells a record entry for an older native surface from a usable one.
+  void Promise.all([projectRead, authRead]).then(([project, auth]) => {
+    const early = platformsToFingerprintEarly(projectRoot, {
+      auth: 'value' in auth ? auth.value : null,
+      easProject,
+      fingerprintCache: options.fingerprintCache,
+      projectHash: 'value' in project ? project.value.state.fingerprint.hash : null,
+    });
+    for (const platform of early) {
+      void generateFingerprintAsync(projectRoot, { platform, cache: options.fingerprintCache });
+    }
+  });
+
   const saved = readLastDevRequest(projectRoot);
   const request =
     saved && (!options.platform || options.platform === saved.platform) ? saved : null;
   const [project, devServer, device, skills, auth, binding, ownServer] = await Promise.all([
-    attemptAsync(() => readProjectAsync(projectRoot, options)),
+    projectRead,
     attemptAsync(() => probeDevServerStatusAsync(projectRoot, options, request)),
     attemptAsync(() => readLocalDeviceStatusAsync(projectRoot, options)),
     attemptAsync(() => readSkillsStatusAsync(projectRoot)),
-    attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot)),
+    authRead,
     attemptAsync(() =>
       readBindingSummaryAsync(projectRoot, options.deviceProbeTimeoutMs ?? DEVICE_PROBE_TIMEOUT_MS)
     ),
@@ -278,6 +288,20 @@ export async function collectStatusReportAsync(
   };
 
   if ('error' in binding) errors.binding = binding.error;
+
+  // One EAS lookup per run, shared by the plan below and the builds section, so the plan gets the
+  // section's record, auth gate and link gate instead of a lookup of its own on every run.
+  let buildsRead: Promise<Attempt<BuildsStatus>> | null = null;
+  const readBuildsOnceAsync = () =>
+    (buildsRead ??= attemptAsync(() =>
+      readEasBuildsStatusAsync(projectRoot, {
+        auth: 'value' in auth ? auth.value : null,
+        projectHash: report.freshness?.hash ?? null,
+        timeoutMs: options.buildLookupTimeoutMs,
+        fingerprintCache: options.fingerprintCache,
+        easProject,
+      })
+    ));
 
   // Read before the project section, because `next` depends on it: a dev server that is already
   // serving this project changes what the useful next command is (see `buildNextActionStatus`).
@@ -315,15 +339,12 @@ export async function collectStatusReportAsync(
     // small report its contract promises (llp/0004 §Status).
     //
     // They are still *read*: the impact headline diffs them against the recorded build's, in
-    // process and for free (llp/0004 §Status). What
-    // reaches `--json` from that is the class, the count, and — only under `--explain` — the
-    // sources that actually moved, which is a handful rather than the whole surface.
+    // process and for free (llp/0004 §Status). What reaches `--json` from that is the class, the
+    // count, and the sources that actually moved, which is a handful rather than the whole surface.
     report.probe = { ...state, fingerprint: { ...state.fingerprint, sources: undefined } };
     report.project = buildProjectStatus(state, packageName);
     report.expoGo = buildExpoGoStatus(state);
-    report.freshness = buildFreshnessStatus(state, record, {
-      explain: !!options.explain,
-    });
+    report.freshness = buildFreshnessStatus(state, record);
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
     // The file-level refinement, and then — only when the caller named one — the comparison
     // against an EAS build, which replaces the headline's base. Both fold into the section that
@@ -364,7 +385,8 @@ export async function collectStatusReportAsync(
       state,
       record,
       { ...options, platform },
-      request
+      request,
+      readBuildsOnceAsync
     );
     const recoveryPlan =
       resolvedPlan && recoveryPort != null
@@ -380,8 +402,7 @@ export async function collectStatusReportAsync(
       // reads it: `exp://` is the Expo Go form only, and a development build's connect URL takes
       // the app's own scheme (`src/navigate/connectUrl.ts`).
       devBuildScheme,
-      // A file read, not a service call: `status` promises to be instant (`src/device/
-      // cloudSimulator.ts` §readCloudSessionIdSync).
+      // A file read, not a service call (`src/device/cloudSimulator.ts` §readCloudSessionIdSync).
       readCloudSessionIdSync(projectRoot) != null,
       // @ref llp/0015-backend-selection-and-config.rfc.md §What `status` reports
       // The plan `@expo/agent-cli dev` would make *here* — the developer's config, this host and the
@@ -470,28 +491,17 @@ export async function collectStatusReportAsync(
   // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
   // Last, and after the parallel block rather than in it, because it consumes two of its answers:
   // the project's fingerprint is the cache key, and the auth answer is what keeps a signed-out
-  // machine from being asked the same question twice. On a run without `--explain` this is one
-  // `readFileSync`, so the report is as instant as it was before the section existed.
+  // machine from being asked the same question twice.
   //
-  // These three are independent of each other and all are the expensive half of `--explain`, so
-  // they run together rather than one after the other.
+  // These three are independent of each other, so they run together.
   const [builds, ota, installed] = await Promise.all([
-    attemptAsync(() =>
-      readEasBuildsStatusAsync(projectRoot, {
-        lookUp: !!options.explain,
-        auth: report.auth,
-        projectHash: report.freshness?.hash ?? null,
-        timeoutMs: options.buildLookupTimeoutMs,
-        fingerprintCache: options.fingerprintCache,
-        easProject: 'value' in project ? project.value.easProject : null,
-      })
-    ),
-    options.explain && report.freshness
+    readBuildsOnceAsync(),
+    report.freshness
       ? attemptAsync(() => resolveOtaSafetyAsync(projectRoot, report.freshness!))
       : Promise.resolve(null),
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
     // `AGENT_CLI_NO_DEVICE` is the switch `dev` uses, so a stubbed harness never hits a real device.
-    options.explain && process.env.AGENT_CLI_NO_DEVICE !== '1'
+    process.env.AGENT_CLI_NO_DEVICE !== '1'
       ? attemptAsync(() => {
           const phoneTimeoutMs = options.installedTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
           // Sized for file reads. A phone probe extends it from inside, once it really launches.
@@ -714,8 +724,7 @@ function notComparedImpact(
  * @ref llp/0011-impact-and-freshness.rfc.md §A fingerprint change is not "OTA-unsafe"
  * Deliberately not derived from the impact class: a fingerprint change answers "does the native
  * binary differ", and OTA safety is a `runtimeVersion` question. The two coincide only under
- * `policy: "fingerprint"`. Resolving the policy spawns `expo config --json --type public`, which
- * is why this is on the `--explain` side of the line.
+ * `policy: "fingerprint"`.
  */
 async function resolveOtaSafetyAsync(
   projectRoot: string,
@@ -776,7 +785,8 @@ async function attemptPlanAsync(
   state: ProjectState,
   lastBuild: LastBuildRecord,
   options: StatusOptions,
-  request: LastDevRequest | null
+  request: LastDevRequest | null,
+  readBuildsAsync: () => Promise<Attempt<BuildsStatus>>
 ): Promise<StartPlan | null> {
   const { resolveStartPlanAsync } =
     require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
@@ -788,15 +798,21 @@ async function attemptPlanAsync(
         requestedBackend: request?.buildBackend,
         requestedTarget: request?.runTarget,
         deviceBackend: request?.buildBackend === 'eas' ? 'eas' : 'local',
-        // Only `--explain` asks EAS, on the budget of status's own lookup (llp/0035 §Decisions).
-        lookUpEasBuild: options.explain
-          ? (root, platform) =>
-              lookUpEasSimulatorBuildAsync(root, platform, {
-                fingerprintCache: options.fingerprintCache,
-                timeoutMs:
-                  options.buildLookupTimeoutMs ?? easBuildLookupTimeoutMs(resolveEasCli(root)),
-              })
-          : async () => null,
+        lookUpEasBuild: async (root, platform) => {
+          const builds = await readBuildsAsync();
+          const reused = simulatorBuildFromBuilds(
+            'value' in builds ? builds.value : null,
+            platform
+          );
+          if (reused !== undefined) {
+            return reused;
+          }
+          // On the budget of status's own lookup (llp/0035 §Decisions).
+          return lookUpEasSimulatorBuildAsync(root, platform, {
+            fingerprintCache: options.fingerprintCache,
+            timeoutMs: options.buildLookupTimeoutMs ?? easBuildLookupTimeoutMs(resolveEasCli(root)),
+          });
+        },
       })
     ).plan;
   } catch {
@@ -807,13 +823,12 @@ async function attemptPlanAsync(
 async function readProjectAsync(
   projectRoot: string,
   options: StatusOptions
-): Promise<{ state: ProjectState; packageName: string | null; easProject: EasProjectLink }> {
-  const [state, packageJson, easProject] = await Promise.all([
+): Promise<{ state: ProjectState; packageName: string | null }> {
+  const [state, packageJson] = await Promise.all([
     probeProjectStateAsync(projectRoot, { fingerprintCache: options.fingerprintCache }),
     readProjectPackageJsonAsync(projectRoot),
-    readStaticEasProjectAsync(projectRoot),
   ]);
-  return { state, packageName: packageJson?.name ?? null, easProject };
+  return { state, packageName: packageJson?.name ?? null };
 }
 
 /**
@@ -912,7 +927,7 @@ async function probeDevServerStatusAsync(
 /**
  * Whether this machine has a device to open the app on, within a budget status can afford.
  *
- * The probe spawns `xcrun simctl` and `adb`, and status promises to be instant, so it is raced
+ * The probe spawns `xcrun simctl` and `adb`, and each status section has a short budget, so it is raced
  * against a short deadline. The deadline expiring reports `unknown` rather than `absent` — the same
  * rule the probe itself follows, because a suggestion turned off on the strength of a slow
  * subprocess would be the mistake this exists to fix, backwards.

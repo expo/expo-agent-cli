@@ -50,8 +50,7 @@ export function buildStatusFollowUps(report: StatusReport): FollowUp[] {
   if (impactClass && !downloadable) {
     const [best] = buildChangeFollowUps({
       impactClass,
-      // The OTA rungs need a verdict, and a default run has not paid for one. `--explain` fills it
-      // in, and a run without it gets the class's own rung and no guess about publishing.
+      // Without an OTA verdict, the class's own rung and no guess about publishing.
       otaSafe: report.freshness?.ota?.safe ?? null,
       cachedBuild: null,
       platform: null,

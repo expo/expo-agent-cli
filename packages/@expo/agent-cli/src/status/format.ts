@@ -4,7 +4,7 @@
 
 import chalk from 'chalk';
 
-import type { ImpactClass, OtaSafety } from '../impact/types';
+import type { ChangedSource, ImpactClass, OtaSafety } from '../impact/types';
 import type { PlanBuildLocation } from '../toolchain/types';
 import { formatAge } from '../utils/age';
 import { renderForInvoker } from '../utils/invoker';
@@ -54,15 +54,12 @@ export function formatStatusReport(report: StatusReport): string {
       ? [row('installed', report.installed, installedLine, report, 'installed')]
       : []),
     ...installedDetailLines(report),
-    // The per-source list and the OTA verdict, under `--explain` only.
-    ...explainLines(report),
+    ...changeLines(report),
     // What a section could not do, even when it had something else to say.
     ...sectionNoteLines(report),
     // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
-    // Printed only when it says something, for the reason the skills line is: a default run has
-    // nothing cached and asked nobody, and `ios: unknown · android: unknown (EAS was not asked)` is
-    // two non-facts on a report of facts. The key is always in `--json`, where a key that is always
-    // present is the contract (llp/0006 §Output contract).
+    // Left off only when every platform was stopped before the call; the freshness rows already
+    // carry that reason. The key is always in `--json` (llp/0006 §Output contract).
     ...(hasBuildsToReport(report)
       ? [row('eas build', report.builds, buildsLine, report, 'builds')]
       : []),
@@ -96,7 +93,7 @@ export function formatStatusReport(report: StatusReport): string {
   ].join('\n');
 }
 
-/** How many changed sources are listed under `--explain` before the rest become a count. */
+/** How many changed sources are listed before the rest become a count. */
 const MAX_LISTED_SOURCES = 8;
 
 /**
@@ -185,22 +182,32 @@ function impactClassText(impactClass: ImpactClass): string {
 }
 
 /**
- * What `--explain` adds to the terminal: the sources that moved, and the OTA verdict.
- *
- * Both are recognisable by their data rather than by a flag: `changedSources` is null unless the
- * caller asked, and `ota` is null unless it was resolved. So the formatter stays a pure function of
- * the report, and `--json` and the text can never disagree about what was asked for.
+ * The sources that moved, the file-level view, and the OTA verdict, each printed only when its data
+ * is present. Platforms with identical source lists are printed once.
  */
-function explainLines(report: StatusReport): string[] {
+function changeLines(report: StatusReport): string[] {
   const lines: string[] = [];
   const indent = ' '.repeat(LABEL_WIDTH);
 
+  const grouped = new Map<string, { platforms: string[]; sources: ChangedSource[] }>();
   for (const platform of report.freshness?.platforms ?? []) {
     const sources = platform.impact?.changedSources;
     if (!sources?.length) {
       continue;
     }
-    lines.push(`${chalk.dim(`${platform.platform} changed`.padEnd(LABEL_WIDTH))}${sources.length}`);
+    const key = JSON.stringify(sources.map((source) => [source.op, source.path, source.kind]));
+    const label = platform.backend === 'eas' ? `${platform.platform} (eas)` : platform.platform;
+    const existing = grouped.get(key);
+    if (existing) {
+      existing.platforms.push(label);
+    } else {
+      grouped.set(key, { platforms: [label], sources });
+    }
+  }
+  for (const { platforms, sources } of grouped.values()) {
+    lines.push(
+      `${chalk.dim('changed'.padEnd(LABEL_WIDTH))}${platforms.join(', ')}: ${sources.length} ${pluralize(sources.length, 'source', 'sources')}`
+    );
     for (const source of sources.slice(0, MAX_LISTED_SOURCES)) {
       lines.push(
         `${indent}${chalk.dim(source.op.padEnd(8))}${source.path ?? '(unnamed)'} ${chalk.dim(`[${source.kind}]`)}`
@@ -269,10 +276,9 @@ function buildLine(location: PlanBuildLocation): string {
 /**
  * Whether the EAS-build line would say anything.
  *
- * Three cases, and they are the three that carry information: EAS answered for a platform (found or
- * none), the caller asked outright with `--explain`, or the section could not be read at all. A
- * default run with an empty cache is silent here, because "nobody asked" is not a fact about the
- * project.
+ * When EAS answered for a platform (found or none), EAS was called on this run, or the section
+ * could not be read. A run where every platform was gated before the call (not linked, signed out)
+ * is silent here: the freshness rows already carry that reason.
  */
 function hasBuildsToReport(report: StatusReport): boolean {
   if (report.builds == null) {
@@ -423,8 +429,8 @@ const SECTIONS_WITH_VALUES: readonly StatusSectionName[] = [
  * What a section could not do, for a section that printed a line anyway.
  *
  * `unavailableLine` only speaks for a section that is **null**, so a failure recorded against a
- * section that still had facts to report reached `--json` and nothing else: `status --explain
- * --build abc123` printed an ordinary report, exit 0, with the id nowhere on it, while the JSON
+ * section that still had facts to report reached `--json` and nothing else: `status --build
+ * abc123` printed an ordinary report, exit 0, with the id nowhere on it, while the JSON
  * carried the whole reason the comparison never happened [observed — friction run 7, F66].
  *
  * Printed whole, indented, and never summarized: this is the half a reader has to act on, and
@@ -488,7 +494,7 @@ function freshnessLine(freshness: FreshnessStatus): string {
   const platforms = [...new Set(freshness.platforms.map((entry) => entry.platform))];
   // @ref llp/0024-cli-ui.rfc.md §The template
   // A detail every platform shares is a fact about the *run*, not about a platform: "EAS was not
-  // asked — pass --explain" was printed on the ios row and again on the android row, which is the
+  // asked" was printed on the ios row and again on the android row, which is the
   // same sentence twice on a report whose whole shape is one fact per line. It is said once, under
   // the rows it explains. A detail only one platform has stays on that platform's row, where it is
   // the thing that tells the two apart.

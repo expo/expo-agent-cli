@@ -280,7 +280,7 @@ describe(readAuthPreflightAsync, () => {
     });
 
     // `resolveExpoCli` would fall back to a package runner, which downloads the whole SDK to read
-    // one JSON file. `status` promises to be instant.
+    // one JSON file, and a `status` section is not worth that.
     it('never reaches for a package runner when the project has no expo', async () => {
       withPinnedEasCli();
       const spawned = mockWhoami({ exitCode: 101, stderr: 'Stack backtrace:\n' });

@@ -245,7 +245,8 @@ declare module '2g' {
       localDevice: string;
       /**
        * What the app installed on a device says: `up-to-date`, `rebuild-required`, `unknown`.
-       * Null on a default run, which reads no device (llp/0004 §Reported by status).
+       * Null when the check is off (`AGENT_CLI_NO_DEVICE`) or produced no outcome (llp/0004
+       * §Reported by status).
        */
       installed: string | null;
       /**
@@ -259,11 +260,11 @@ declare module '2g' {
       /**
        * Whether EAS has a finished build for this fingerprint: `found`, `none` or `unknown`.
        *
-       * `unknown` on every run without `--explain` that had nothing cached, which is the common
-       * case and is deliberately not rounded down to `none`.
+       * `unknown` when EAS could not be asked (signed out, not linked, no fingerprint); never
+       * rounded down to `none`.
        */
       easBuilds: { ios: string | null; android: string | null };
-      /** Whether this run was allowed to call EAS, i.e. `--explain` was passed. */
+      /** Whether this run called EAS for at least one platform. */
       easBuildsAsked: boolean;
       /**
        * Where the project fingerprint came from: `computed` or `cache`.

@@ -138,7 +138,7 @@ describe(writeFingerprintCacheAsync, () => {
     expect(Object.keys(record.entries).sort()).toEqual(['all|default', 'ios|default']);
   });
 
-  // One `status --explain` computes three fingerprints and two of them finish together. Three
+  // One `status` computes three fingerprints and two of them finish together. Three
   // concurrent read-modify-writes of one file lost an entry, and sometimes truncated the file so
   // that all three were lost [observed — e2e, 2026-08-27].
   it('keeps every entry when three writes finish at once', async () => {

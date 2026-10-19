@@ -176,9 +176,9 @@ describe('the device probe', () => {
     expect(plan.rule).toBe('dev-client-fresh');
   });
 
-  // `status` resolves the plan without a requestedPlatform, and must keep doing so: its report
-  // promises to be instant, and a probe here would also make its `next` line disagree with the
-  // sections that never probe.
+  // `status` resolves the plan without a requestedPlatform, and must keep doing so: a probe here
+  // would cost every run, and would also make its `next` line disagree with the sections that
+  // never probe.
   it(`is not spent without a typed platform flag, which is how status calls this`, async () => {
     writeProject();
     const { state, lastBuild } = freshProject();

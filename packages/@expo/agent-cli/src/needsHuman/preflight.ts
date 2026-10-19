@@ -35,7 +35,7 @@ export interface AuthPreflight {
 /**
  * How long `eas whoami` may take.
  *
- * Status promises to be instant and this is one of its sections, so a CLI that is slow to start
+ * Each `status` section has a short budget and this is one of them, so a CLI that is slow to start
  * costs an "unknown" line rather than the whole report's speed.
  */
 export const AUTH_PREFLIGHT_TIMEOUT_MS = 4000;
@@ -95,7 +95,7 @@ async function probeAsync(projectRoot: string, timeoutMs: number): Promise<AuthP
  * project that does not declare `eas-cli` that means `npx --yes eas-cli@latest` — a package install
  * to read `~/.expo/state.json`, plus a registry round trip on every later run. The two rungs *below*
  * this one, the project's own `expo whoami` and `EXPO_TOKEN`, answer the same question from the same
- * file for free. `status` promises to be instant and this is one of its sections, so this is the one
+ * file for free. Each `status` section has a short budget and this is one of them, so this is the one
  * EAS-backed caller that declines to spend a download: it asks only when the project pins the CLI,
  * where the runner resolves it out of `node_modules` in about a third of a second. It is the same
  * judgement `askProjectExpoAsync` below already makes for `expo`.
@@ -128,8 +128,7 @@ async function askEasAsync(projectRoot: string, timeoutMs: number): Promise<Auth
  *
  * The project's own `expo` bin and nothing else. `resolveExpoCli` would fall back to a
  * package runner, which downloads the whole SDK to read one JSON file [observed — 2026-08-26,
- * `passthrough/auth.ts`], and `status` promises to be instant: a report is not worth a minute and a
- * network install.
+ * `passthrough/auth.ts`], and a `status` section is not worth a minute and a network install.
  *
  * "The project's own" is the walk of `src/utils/projectBin.ts`, which is what makes this rung reach
  * a workspace: npm installs a package's dependencies at the workspace root, so this used to decline

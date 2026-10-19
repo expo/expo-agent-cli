@@ -113,7 +113,7 @@ Subprocesses are spawned in a process group of their own and signalled as a grou
 Who pays the first-run cost, when the project does not declare `eas-cli`:
 
 - The auth preflight declines to pay it. It asks the EAS CLI only when the project pins it. Otherwise `status` asks the project's Expo CLI instead.
-- `status --explain` widens its budget (`EAS_BUILD_RUNNER_TIMEOUT_MS`, 45 s) when the resolved invocation may download. A pinned project keeps 10 s. It never allows the minutes a cold install or an unreachable registry can take.
+- `status` widens its budget (`EAS_BUILD_RUNNER_TIMEOUT_MS`, 45 s) when the resolved invocation may download. A pinned project keeps 10 s. It never allows the minutes a cold install or an unreachable registry can take.
 - The opportunistic build-cache lookup keeps 20 s. Nobody asked for it, and the report is complete without it.
 
 One spawn of a spec at a time. A runner keeps one scratch directory per package spec and does not queue for it. `src/utils/runnerLock.ts` serializes per spec inside the spawn layer. See [[0021-honest-reports]] §The runner is not the service.

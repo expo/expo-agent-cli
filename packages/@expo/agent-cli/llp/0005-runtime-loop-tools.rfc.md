@@ -803,5 +803,5 @@ router against a stub `xcrun` whose `devicectl` lists the fixture phones and who
 at once and posts to the callback URL it was handed from a detached child, across a real socket —
 the launch argv, the phone named in a hint and left alone, the named phone launched on and read, a
 build with no fingerprint, and a phone that answers after its time reading `no-response`. E2E on
-the macOS runner, `status-installed-test.ts`: the same through `status --explain --device`, plus
+the macOS runner, `status-installed-test.ts`: the same through `status --device`, plus
 the `--device-timeout` refusals.
