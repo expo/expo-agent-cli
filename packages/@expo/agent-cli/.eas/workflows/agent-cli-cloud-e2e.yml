@@ -14,11 +14,18 @@
 # every PR — unfiltered on purpose [decided 2026-09-05]: a path filter only sees changes on our side,
 # while EAS Simulator readiness, the Expo Go a session installs, and create-expo's scaffold all move
 # without touching this repo, and a PR is when somebody is looking. Four billed sessions per PR push.
+# In a stack of PRs it runs on the top PR only, through the trigger's `if`: the top's head holds every layer,
+# so one run covers the stack and the layers below are never billed. [decided 2026-10-19]
 name: agent-cli-cloud-e2e
 
 on:
   workflow_dispatch: {}
-  pull_request: {}
+  pull_request:
+    # A PR outside a stack has no `stack`. In a stack, position counts from the bottom, so the top is the
+    # one whose position equals the size. The check reads the webhook payload: `gh stack submit` links a
+    # PR into its stack a moment after opening it, so the first open still runs on every layer. Every push
+    # after that runs on the top only.
+    if: ${{ !github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size }}
 
 concurrency:
   cancel_in_progress: true

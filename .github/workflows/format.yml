@@ -14,7 +14,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # In a stack of PRs, the top PR holds every layer, so this runs there once. See stack-top.yml.
+  stack:
+    uses: ./.github/workflows/stack-top.yml
+
   oxfmt:
+    needs: stack
+    if: needs.stack.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
