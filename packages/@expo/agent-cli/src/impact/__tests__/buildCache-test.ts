@@ -1,7 +1,7 @@
 import { describeLookupFailure } from '../buildCache';
 
 /** How the invocation is written when it has to be named, per `easCliLabel`. */
-const INVOCATION = 'bunx eas-cli@latest';
+const INVOCATION = 'bunx eas-cli';
 
 describe(describeLookupFailure, () => {
   // @ref llp/0027-everything-on-eas.rfc.md §What EAS said
@@ -20,7 +20,7 @@ describe(describeLookupFailure, () => {
       INVOCATION
     );
     expect(reason).toContain('not linked to an EAS project');
-    expect(reason).toContain('npx --yes eas-cli@latest init --account bob --non-interactive');
+    expect(reason).toContain('npx --yes eas-cli init --account bob --non-interactive');
     expect(reason).not.toContain('Run one of the following');
   });
 

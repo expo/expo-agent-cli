@@ -13,6 +13,7 @@ import {
   executeAgentCliAsync,
   getTemporaryPath,
   installStubBinAsync,
+  isolatedPath,
   pathEnvVars,
   setupFixtureAsync,
 } from '../utils';
@@ -117,17 +118,13 @@ function readInvocations(dir: string): StubInvocation[] {
 }
 
 /**
- * `PATH` with nothing on it that could answer as `eas` or `expo` — and the stub runner, which is
- * what every EAS-backed invocation goes through.
+ * `PATH` with the stub runner, which is what every EAS-backed invocation goes through, and
+ * {@link isolatedPath}'s decoy, so nothing else can answer as `eas`.
  */
 function isolatedEnv(dir: string): Record<string, string> {
   return {
     AUTH_LOG_DIR: dir,
-    ...pathEnvVars(
-      [path.join(dir, 'path-bin'), path.dirname(process.execPath), '/usr/bin', '/bin'].join(
-        path.delimiter
-      )
-    ),
+    ...pathEnvVars(isolatedPath([path.join(dir, 'path-bin')])),
   };
 }
 
@@ -144,7 +141,7 @@ describe('auth commands outside an Expo project', () => {
 
     // `--yes` and the spec ahead of the verb. `@latest` because a bare directory declares nothing.
     expect(readInvocations(dir)).toEqual([
-      { bin: 'npx', args: ['--yes', 'eas-cli@latest', 'whoami'], cwd: expect.any(String) },
+      { bin: 'npx', args: ['--yes', 'eas-cli', 'whoami'], cwd: expect.any(String) },
     ]);
     // The answer is the EAS CLI's, on stdout, with nothing of this wrapper's mixed into it.
     expect(result.stdout).toContain('alice');
@@ -187,7 +184,7 @@ describe('auth commands outside an Expo project', () => {
       cli: expect.stringContaining('eas'),
     });
     // The flag is this CLI's, so it is not passed on to a CLI that has no such option.
-    expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli@latest', 'whoami']);
+    expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli', 'whoami']);
   });
 
   it.each([
@@ -229,7 +226,7 @@ describe('auth commands outside an Expo project', () => {
 
     await executeAgentCliAsync(dir, ['login', '--help'], { env: isolatedEnv(dir) });
 
-    expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli@latest', 'login', '--help']);
+    expect(readInvocations(dir)[0]?.args).toEqual(['--yes', 'eas-cli', 'login', '--help']);
   });
 
   // `register` is the one command that does not take the EAS fallback, because there is no
@@ -295,7 +292,7 @@ describe('auth commands outside an Expo project', () => {
 
     // One invocation, and it is the runner's. Nothing recorded a `--version`, because nothing asked.
     expect(readInvocations(dir)).toEqual([
-      { bin: 'npx', args: ['--yes', 'eas-cli@latest', 'whoami'], cwd: expect.any(String) },
+      { bin: 'npx', args: ['--yes', 'eas-cli', 'whoami'], cwd: expect.any(String) },
     ]);
   });
 });
@@ -363,9 +360,9 @@ describe('the runner that downloads a CLI this machine does not have', () => {
     });
 
     // The package spec and the command, in that order, on bun's runner rather than npm's.
-    expect(readInvocations(dir).map((run) => run.args)).toEqual([['eas-cli@latest', 'whoami']]);
+    expect(readInvocations(dir).map((run) => run.args)).toEqual([['eas-cli', 'whoami']]);
     // Named by the runner, not by the path it was found at.
-    expect(result.stderr).toContain('Using the EAS CLI (bunx eas-cli@latest)');
+    expect(result.stderr).toContain('Using the EAS CLI (bunx eas-cli)');
   });
 
   it(`should leave an npm-started CLI on npx, even with bunx sitting on PATH`, async () => {
@@ -380,7 +377,7 @@ describe('the runner that downloads a CLI this machine does not have', () => {
     // The bunx stub records itself as `eas`; the npx stub records itself as `npx`. So "bunx was not
     // reached" is "nothing under that name ran", and the run that did happen was npm's exec.
     expect(readInvocations(dir).map((run) => run.bin)).toEqual(['npx']);
-    expect(readInvocations(dir)[0]!.args).toEqual(['--yes', 'eas-cli@latest', 'whoami']);
-    expect(result.stderr).toContain('Using the EAS CLI (npx --yes eas-cli@latest)');
+    expect(readInvocations(dir)[0]!.args).toEqual(['--yes', 'eas-cli', 'whoami']);
+    expect(result.stderr).toContain('Using the EAS CLI (npx --yes eas-cli)');
   });
 });

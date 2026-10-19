@@ -13,7 +13,7 @@ describe(buildDeployFollowUps, () => {
       }),
       expect.objectContaining({
         id: 'eas-deploy-prod',
-        command: 'npx --yes eas-cli@latest deploy --prod',
+        command: 'npx --yes eas-cli deploy --prod',
       }),
     ]);
   });

@@ -383,7 +383,7 @@ describe('@expo/agent-cli dev --plan', () => {
         runsOn: 'local',
         platform: 'ios',
         requirement: 'Xcode on this machine',
-        alternativeCommand: 'npx --yes eas-cli@latest build --platform ios --profile development',
+        alternativeCommand: 'npx --yes eas-cli build --platform ios --profile development',
       });
       // The status is this host's own answer and the fixtures cannot decide it, so what is pinned
       // is that a probe ran at all and answered with one of the three words it may answer with.
@@ -528,7 +528,7 @@ describe('@expo/agent-cli dev --plan', () => {
         selection: { source: 'flag' },
       });
       expect(plan.followups[0]!.command).toBe(
-        'npx --yes eas-cli@latest build --platform ios --profile development'
+        'npx --yes eas-cli build --platform ios --profile development'
       );
     });
 

@@ -20,6 +20,7 @@ import {
   installStubBinAsync,
   installStubEasRunnerAsync,
   installStubFingerprintAsync,
+  isolatedPath,
   linkFixtureToEasAsync,
   setupFixtureAsync,
 } from '../utils';
@@ -220,9 +221,7 @@ process.stdout.write('e2e-user\\n');
     await installStubBinAsync(binDir, 'npx', npxStub);
 
     const result = await executeAgentCliAsync(directory, ['whoami'], {
-      env: {
-        PATH: [binDir, path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter),
-      },
+      env: { PATH: isolatedPath([binDir]) },
       reject: false,
     });
 
@@ -234,7 +233,7 @@ process.stdout.write('e2e-user\\n');
       .map((line) => JSON.parse(line) as { args: string[] });
     // `--yes` ahead of the package since wave 18: npx prompts before installing something it has
     // not seen, and this CLI never attaches stdin, so the prompt would be a hang.
-    expect(invocations[0]!.args).toEqual(['--yes', 'eas-cli@latest', 'whoami']);
+    expect(invocations[0]!.args).toEqual(['--yes', 'eas-cli', 'whoami']);
     expect(result.all).not.toContain('rust_begin_unwind');
   });
 });

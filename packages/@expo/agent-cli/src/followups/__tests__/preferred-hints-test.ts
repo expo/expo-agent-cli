@@ -18,7 +18,7 @@ describe('hints prefer supported agent-cli commands', () => {
     ['expo prebuild --clean --platform ios', 'prebuild --clean --platform ios'],
     ['npx expo config --type introspect --json', 'config --type introspect --json'],
     ['npx expo run:android', 'run:android'],
-    ['npx eas-cli@latest login', 'login'],
+    ['npx eas-cli login', 'login'],
   ])('maps %s without losing arguments', (input, expected) => {
     expect(advice(input)).toBe(`npx @expo/agent-cli ${expected}`);
   });

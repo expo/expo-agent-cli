@@ -24,7 +24,10 @@ import {
 } from '../compare';
 import realDiff from './fixtures/notesapp-ios-diff.json';
 
-vi.mock('../../utils/subprocess', () => ({ spawnSubprocessAsync: vi.fn() }));
+vi.mock('../../utils/subprocess', () => ({
+  spawnSubprocessAsync: vi.fn(),
+  findExecutableOnPath: () => null,
+}));
 vi.mock('../../plan/lastBuild', () => ({ readLastBuildRecord: vi.fn(() => ({})) }));
 vi.mock('../../project/fingerprint', async () => ({
   ...((await vi.importActual('../../project/fingerprint')) as object),
@@ -37,10 +40,11 @@ const projectRoot = '/project';
 // ahead of the `eas` command word (`src/utils/easCli.ts`).
 const easCli = {
   command: 'npx',
-  prefixArgs: ['--yes', 'eas-cli@latest'],
-  source: 'npx --yes eas-cli@latest',
+  prefixArgs: ['--yes', 'eas-cli'],
+  source: 'npx --yes eas-cli',
   runner: 'npx' as const,
   pinned: false,
+  global: false,
 };
 
 /** The argv a spawn actually receives: the runner's prefix, then the EAS argv. */
@@ -198,7 +202,7 @@ describe(compareWithEasBuildAsync, () => {
 
     expect(result.error).toContain('build-1');
     expect(result.error).toContain('Build not found');
-    expect(result.error).toContain('eas-cli@latest build:list');
+    expect(result.error).toContain('eas-cli build:list');
   });
 
   it.each([
@@ -527,9 +531,7 @@ describe(lookUpCachedBuildAsync, () => {
     // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — in this CLI's words, with the fix,
     // rather than the first line of that explanation with the `eas init` forms cut off.
     expect((outcome as { reason: string }).reason).toContain('not linked to an EAS project');
-    expect((outcome as { reason: string }).reason).toContain(
-      'npx --yes eas-cli@latest init --account'
-    );
+    expect((outcome as { reason: string }).reason).toContain('npx --yes eas-cli init --account');
   });
 
   // @ref src/utils/wrapperCrash.ts — the binary under the name `eas` may be a wrapper, a shim or a
@@ -546,7 +548,7 @@ describe(lookUpCachedBuildAsync, () => {
     expect(outcome).toMatchObject({ state: 'unknown' });
     // The invocation, not a path: with one rung there is no file to send a reader to, and what
     // resolves this is what `eas-cli` resolves to in the project (`utils/wrapperCrash.ts`).
-    expect((outcome as { reason: string }).reason).toContain('npx --yes eas-cli@latest');
+    expect((outcome as { reason: string }).reason).toContain('npx --yes eas-cli');
     expect((outcome as { reason: string }).reason).toContain('may not be the real CLI');
     expect((outcome as { reason: string }).reason).not.toContain('panicked');
   });

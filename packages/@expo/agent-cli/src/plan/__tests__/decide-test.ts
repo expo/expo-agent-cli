@@ -927,7 +927,7 @@ describe(decideStartPlan, () => {
       });
 
       expect(plan.steps[0]!.reason).toContain(
-        'npx --yes eas-cli@latest build:run --platform ios --latest'
+        'npx --yes eas-cli build:run --platform ios --latest'
       );
       expect(plan.steps[1]!.reason).toContain('serves nothing until the artifact is installed');
     });

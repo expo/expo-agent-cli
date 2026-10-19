@@ -148,7 +148,7 @@ describe('the spawn that makes a group possible', () => {
     const child = fakeChild({ pid: 1234 });
     vi.mocked(spawn).mockReturnValue(child as any);
 
-    const promise = spawnSubprocessAsync('npx', ['--yes', 'eas-cli@latest', 'whoami']);
+    const promise = spawnSubprocessAsync('npx', ['--yes', 'eas-cli', 'whoami']);
     child.emit('close', 0, null);
     await promise;
 

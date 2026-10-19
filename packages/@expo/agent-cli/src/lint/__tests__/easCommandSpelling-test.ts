@@ -1,5 +1,5 @@
 // @ref llp/0015-backend-selection-and-config.rfc.md §Resolving the EAS CLI
-// No printed line says `npx --yes eas-cli@latest …`. There is no package called `eas`, so that line runs nothing;
+// No printed line says `npx eas …`. There is no package called `eas`, so that line runs nothing;
 // what a reader runs is the runner and spec this CLI itself spawns, written by `easCommandPrefix()`
 // [Kudo, 2026-09-09 — seventy-one lines said it before this rule].
 
@@ -36,7 +36,13 @@ describe('the spelling of an EAS CLI command line', () => {
 
   it(`is the runner this project spawns, written by easCommandPrefix`, async () => {
     const { easCommandPrefix } = await import('../../utils/easCli');
-    // Under the unit-test environment the invoker is npx and nothing pins the CLI.
-    expect(easCommandPrefix('/nowhere')).toBe('npx --yes eas-cli@latest');
+    // Under the unit-test environment the invoker is npx and nothing pins the CLI. An empty `PATH`,
+    // because this suite reads the real disk and a global `eas-cli` there would answer `eas`.
+    vi.stubEnv('PATH', '');
+    try {
+      expect(easCommandPrefix('/nowhere')).toBe('npx --yes eas-cli');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });

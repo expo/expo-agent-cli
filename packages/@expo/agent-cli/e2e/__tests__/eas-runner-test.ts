@@ -17,6 +17,7 @@ import {
   executeAgentCliAsync,
   installStubBinAsync,
   installStubFingerprintAsync,
+  isolatedPath,
   linkFixtureToEasAsync,
   setupFixtureAsync,
 } from '../utils';
@@ -189,14 +190,9 @@ async function plantAsync({
   return { projectRoot, binDir, logFile };
 }
 
-/**
- * The `PATH` one of these commands runs with: the stub bin, and Node's own directory so the shims
- * can start a `node`. Nothing else, so the machine's own `eas` cannot answer.
- */
+/** The `PATH` one of these commands runs with: the stub bin, then {@link isolatedPath}'s decoy. */
 function pathEnv(binDir: string): Record<string, string> {
-  return {
-    PATH: [binDir, path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter),
-  };
+  return { PATH: isolatedPath([binDir]) };
 }
 
 function invocations({ logFile }: Planted): { args: string[] }[] {
@@ -211,7 +207,7 @@ function invocations({ logFile }: Planted): { args: string[] }[] {
 }
 
 describe('a machine with no eas-cli installed', () => {
-  it('asks EAS about builds through npx --yes eas-cli@latest', async () => {
+  it('asks EAS about builds through npx --yes eas-cli', async () => {
     const planted = await plantAsync({ runners: ['npx'] });
 
     const result = await executeAgentCliAsync(planted.projectRoot, ['status', '--json'], {
@@ -223,7 +219,7 @@ describe('a machine with no eas-cli installed', () => {
     expect(lookups.length).toBeGreaterThan(0);
     // `--yes` first, because npx prompts before installing a package it has not seen and this CLI
     // never attaches stdin; then the package; then the EAS command word.
-    expect(lookups[0]!.args.slice(0, 3)).toEqual(['--yes', 'eas-cli@latest', 'build:list']);
+    expect(lookups[0]!.args.slice(0, 3)).toEqual(['--yes', 'eas-cli', 'build:list']);
 
     const report = JSON.parse(result.stdout);
     // The answer a live run could not get. `none` is EAS saying there is no such build, which is a fact —
@@ -275,7 +271,7 @@ describe('a machine with no eas-cli installed', () => {
       // can serialize away — must not have its progress line reported as EAS's answer.
       const planted = await plantAsync({ runners: ['npx'], racing: true });
       // The scratch directory the stub keys on, created behind its back and never released.
-      await fs.promises.mkdir(path.join(planted.projectRoot, 'runner-eas-cli@latest'));
+      await fs.promises.mkdir(path.join(planted.projectRoot, 'runner-eas-cli'));
 
       const result = await executeAgentCliAsync(planted.projectRoot, ['status', '--json'], {
         env: pathEnv(planted.binDir),
@@ -302,7 +298,7 @@ describe('a machine with no eas-cli installed', () => {
     const lookups = invocations(planted).filter((run) => run.args.includes('build:list'));
     expect(lookups.length).toBeGreaterThan(0);
     // No `--yes`: bunx installs what it is asked for without asking, and has no such flag.
-    expect(lookups[0]!.args.slice(0, 2)).toEqual(['eas-cli@latest', 'build:list']);
+    expect(lookups[0]!.args.slice(0, 2)).toEqual(['eas-cli', 'build:list']);
   });
 
   it("keeps npx in a project whose lockfile is npm's, even when bunx is reachable", async () => {
@@ -316,7 +312,7 @@ describe('a machine with no eas-cli installed', () => {
     });
 
     const lookups = invocations(planted).filter((run) => run.args.includes('build:list'));
-    expect(lookups[0]!.args.slice(0, 3)).toEqual(['--yes', 'eas-cli@latest', 'build:list']);
+    expect(lookups[0]!.args.slice(0, 3)).toEqual(['--yes', 'eas-cli', 'build:list']);
   });
 
   // @ref src/utils/easCli.ts §resolveEasCliAsync
@@ -345,7 +341,7 @@ describe('a machine with no eas-cli installed', () => {
 
     expect(result.exitCode).toBe(0);
     const runs = invocations({ projectRoot: directory, binDir, logFile });
-    expect(runs[0]!.args).toEqual(['--yes', 'eas-cli@latest', 'whoami']);
+    expect(runs[0]!.args).toEqual(['--yes', 'eas-cli', 'whoami']);
     expect(result.all).not.toContain('rust_begin_unwind');
   });
 
@@ -377,5 +373,94 @@ describe('a machine with no eas-cli installed', () => {
     expect(report.error.message).toContain('on PATH');
     expect(report.error.message).not.toContain('install --save-dev');
     expect(report.error.suggestedCommand).toBeNull();
+  });
+});
+
+// @ref src/utils/easCli.ts §findGlobalEasCli
+// The rung above the runner: a global `eas-cli` the developer already installed answers without a
+// runner and without the registry, but only when it is the package and at 25.0.0 or newer.
+//
+// Skipped on Windows, where `findGlobalEasCli` is not supported.
+describe.skipIf(process.platform === 'win32')('a machine with a global eas-cli installed', () => {
+  /**
+   * A bare directory, a stub `npx`, and a global `eas-cli` package whose bin is linked onto `PATH`.
+   * The link goes in the stub bin, or with `separateGlobalBin` in its own `bin`, as npm lays out a
+   * global prefix.
+   */
+  async function plantGlobalAsync(version: string, { separateGlobalBin = false } = {}) {
+    const directory = await fs.promises.realpath(
+      await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-cli-eas-global-'))
+    );
+    const binDir = path.join(directory, 'path-bin');
+    const runnerLog = path.join(directory, 'runner-invocations.jsonl');
+    const globalLog = path.join(directory, 'global-invocations.jsonl');
+
+    const runnerStub = path.join(directory, 'runner-stub.js');
+    await fs.promises.writeFile(runnerStub, stubRunnerScript(runnerLog));
+    await installStubBinAsync(binDir, 'npx', runnerStub);
+
+    // The layout `npm install --global` leaves: the bin is a symlink into the package's own directory.
+    const packageDir = path.join(directory, 'lib', 'node_modules', 'eas-cli');
+    await fs.promises.mkdir(path.join(packageDir, 'bin'), { recursive: true });
+    await fs.promises.writeFile(
+      path.join(packageDir, 'package.json'),
+      JSON.stringify({ name: 'eas-cli', version, bin: { eas: 'bin/run' } })
+    );
+    const run = path.join(packageDir, 'bin', 'run');
+    await fs.promises.writeFile(run, stubRunnerScript(globalLog));
+    await fs.promises.chmod(run, 0o755);
+    const globalBinDir = separateGlobalBin ? path.join(directory, 'bin') : binDir;
+    await fs.promises.mkdir(globalBinDir, { recursive: true });
+    await fs.promises.symlink(run, path.join(globalBinDir, 'eas'));
+
+    const read = (logFile: string) =>
+      invocations({ projectRoot: directory, binDir, logFile }).map((entry) => entry.args);
+    return {
+      directory,
+      binDir,
+      globalBinDir,
+      runs: () => ({ runner: read(runnerLog), global: read(globalLog) }),
+    };
+  }
+
+  it('runs the global eas directly when it is 25.0.0 or newer', async () => {
+    const planted = await plantGlobalAsync('25.0.0');
+
+    const result = await executeAgentCliAsync(planted.directory, ['whoami'], {
+      env: pathEnv(planted.binDir),
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('e2e-user');
+    expect(planted.runs()).toEqual({ runner: [], global: [['whoami']] });
+  });
+
+  it('passes over a global eas older than 25.0.0 for the runner', async () => {
+    const planted = await plantGlobalAsync('24.9.0');
+
+    const result = await executeAgentCliAsync(planted.directory, ['whoami'], {
+      env: pathEnv(planted.binDir),
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(planted.runs()).toEqual({ runner: [['--yes', 'eas-cli', 'whoami']], global: [] });
+  });
+  // Under nvm, asdf/mise or the nodejs.org installer, Node's own directory is npm's global bin.
+  it("keeps a test on its stub runner when a global eas 25 sits in Node's directory", async () => {
+    const planted = await plantGlobalAsync('25.0.0', { separateGlobalBin: true });
+
+    const result = await executeAgentCliAsync(planted.directory, ['whoami'], {
+      env: {
+        PATH: isolatedPath([planted.binDir], {
+          systemDirs: [planted.globalBinDir, path.dirname(process.execPath), '/usr/bin', '/bin'],
+        }),
+      },
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(planted.runs()).toEqual({ runner: [['--yes', 'eas-cli', 'whoami']], global: [] });
   });
 });
