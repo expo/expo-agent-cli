@@ -74,7 +74,15 @@ describe(readRuntimeVersion, () => {
 });
 
 describe(resolveRuntimeVersionAsync, () => {
+  function writeAppJson(appJson: unknown = { expo: { name: 'app' } }) {
+    vol.fromJSON({
+      [`${projectRoot}/package.json`]: '{"name":"app"}',
+      [`${projectRoot}/app.json`]: JSON.stringify(appJson),
+    });
+  }
+
   it(`should read the runtimeVersion from the expo config subprocess`, async () => {
+    writeAppJson();
     mockExpoConfig({ name: 'app', runtimeVersion: { policy: 'fingerprint' } });
 
     await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
@@ -85,6 +93,7 @@ describe(resolveRuntimeVersionAsync, () => {
   });
 
   it(`should ask expo config for the public config as JSON`, async () => {
+    writeAppJson();
     mockExpoConfig({ runtimeVersion: '1.0.0' });
 
     await resolveRuntimeVersionAsync(projectRoot);
@@ -96,24 +105,44 @@ describe(resolveRuntimeVersionAsync, () => {
     );
   });
 
-  it(`should fall back to the static config when the subprocess fails`, async () => {
-    mockExpoConfigFailure();
-    vol.fromJSON({
-      [`${projectRoot}/app.json`]: JSON.stringify({
-        expo: { name: 'app', runtimeVersion: { policy: 'appVersion' } },
-      }),
-    });
+  it(`should evaluate a static app.json too, since its config plugins may change it`, async () => {
+    writeAppJson({ expo: { name: 'app', runtimeVersion: '1.0.0' } });
+    mockExpoConfig({ name: 'app', runtimeVersion: '2.0.0' });
 
-    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
-      policy: 'appVersion',
-      literal: null,
-      source: 'app.json',
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toMatchObject({
+      literal: '2.0.0',
+      source: 'expo config --type public',
     });
   });
 
-  it(`should report no source when the static config the fallback reads does not parse`, async () => {
+  it(`should evaluate a dynamic app.config.mts with no static config beside it`, async () => {
+    vol.fromJSON({
+      [`${projectRoot}/package.json`]: '{"name":"app"}',
+      [`${projectRoot}/app.config.mts`]: 'export default {};',
+    });
+    mockExpoConfig({ name: 'app', runtimeVersion: { policy: 'appVersion' } });
+
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toMatchObject({
+      policy: 'appVersion',
+      source: 'expo config --type public',
+    });
+  });
+
+  it(`should spawn nothing for a project with no app config file`, async () => {
+    vol.fromJSON({ [`${projectRoot}/package.json`]: '{"name":"app"}' });
+
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+      policy: null,
+      literal: null,
+      source: null,
+    });
+    expect(spawnExpoAsync).not.toHaveBeenCalled();
+  });
+
+  // A static runtimeVersion is not what the app sees when plugins or a dynamic config change it.
+  it(`should report no source when the subprocess fails, even beside a static runtimeVersion`, async () => {
+    writeAppJson({ expo: { name: 'app', runtimeVersion: { policy: 'appVersion' } } });
     mockExpoConfigFailure();
-    vol.fromJSON({ [`${projectRoot}/app.json`]: '{ not json' });
 
     await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
       policy: null,
@@ -122,24 +151,12 @@ describe(resolveRuntimeVersionAsync, () => {
     });
   });
 
-  it(`should fall back when the subprocess printed something unparsable`, async () => {
+  it(`should report no source when the subprocess printed something unparsable`, async () => {
+    writeAppJson({ expo: { runtimeVersion: '2.0.0' } });
     vi.mocked(spawnExpoAsync).mockResolvedValue({
       cli: { command: 'expo', args: [] },
       result: { exitCode: 0, stdout: 'not json', stderr: '' },
     });
-    vol.fromJSON({
-      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { runtimeVersion: '2.0.0' } }),
-    });
-
-    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toMatchObject({
-      literal: '2.0.0',
-      source: 'app.json',
-    });
-  });
-
-  it(`should report no source when neither the subprocess nor a config file answered`, async () => {
-    mockExpoConfigFailure();
-    vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
 
     await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
       policy: null,
@@ -148,14 +165,17 @@ describe(resolveRuntimeVersionAsync, () => {
     });
   });
 
-  it(`should read a bare config object without an expo key`, async () => {
-    mockExpoConfigFailure();
+  it(`should report no source when a dynamic config fails to evaluate`, async () => {
     vol.fromJSON({
-      [`${projectRoot}/app.json`]: JSON.stringify({ name: 'app', runtimeVersion: '3.0.0' }),
+      [`${projectRoot}/package.json`]: '{}',
+      [`${projectRoot}/app.config.ts`]: 'export default {};',
     });
+    mockExpoConfigFailure();
 
-    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toMatchObject({
-      literal: '3.0.0',
+    await expect(resolveRuntimeVersionAsync(projectRoot)).resolves.toEqual({
+      policy: null,
+      literal: null,
+      source: null,
     });
   });
 });

@@ -134,7 +134,7 @@ Three decisions:
 - A policy this CLI has never heard of is `null`, and is reported verbatim.
 - `why` is always a sentence, whatever the verdict.
 
-Resolving the policy uses `expo config --json --type public`, a subprocess that evaluates a dynamic `app.config.js` with its environment. A static-config read is the fallback when the subprocess fails, and `source: null` when neither answered. The Expo CLI writes its own structured event lines to stdout ahead of the answer, so the parse is "last JSON line wins", the same rule `parseFingerprint` uses.
+Resolving the policy uses `expo config --json --type public`, a subprocess that evaluates the config the app itself sees. That holds for a static `app.json` too: the subprocess runs the config plugins it lists, and a plugin may set `runtimeVersion`. The answer is not cached. A dynamic config can read environment variables and `.env` files, which no file stamp sees. A project with no app config file is not evaluated, because `npx expo` could fetch a package for it. When the subprocess fails, the answer is `source: null` and the verdict is unknown. The static file is not a fallback, for the same reasons. The Expo CLI writes event lines to stdout ahead of the answer, so the parse is "last JSON line wins", the same rule `parseFingerprint` uses.
 
 ## Precision limits
 

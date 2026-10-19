@@ -7,10 +7,7 @@
 // module leaves the runtimeVersion where it was — so an update published now reaches installed
 // builds that cannot run it, and the app crashes on a module that is not there.
 
-import path from 'path';
-
-import { readStaticAppConfigAsync } from '../project/appConfig';
-import { readJsonFileAsync } from '../project/nodeModules';
+import { readStaticExpoConfigAsync } from '../project/appConfig';
 import { spawnExpoAsync } from '../utils/expoCli';
 import type { OtaSafety, RuntimeVersionInfo } from './types';
 
@@ -25,15 +22,20 @@ const KNOWN_POLICIES = ['fingerprint', 'appVersion', 'sdkVersion', 'nativeVersio
  * the follow-up llp/0004 §Implemented in v1 as, item 7 recorded: config was read from static files
  * only, so a dynamic config yielded no answer at all.
  *
- * Falls back to the static config when the subprocess fails, and reports `source: null` when
- * neither answered — which is not "no runtimeVersion", and is never read as one.
+ * Reports `source: null` when the subprocess fails, which is not "no runtimeVersion" and is never
+ * read as one. The static file is not a fallback: its plugins, or a dynamic config, can change the
+ * answer. A project with no app config file is not evaluated.
  */
 export async function resolveRuntimeVersionAsync(projectRoot: string): Promise<RuntimeVersionInfo> {
-  const fromCli = await readFromExpoConfigAsync(projectRoot);
-  if (fromCli) {
-    return fromCli;
+  const staticConfig = await readStaticExpoConfigAsync(projectRoot);
+  // No app config at all: spawning `expo config` here can mean `npx expo` fetching a package.
+  if (!staticConfig.source && !staticConfig.dynamic) {
+    return { policy: null, literal: null, source: null };
   }
-  return readFromStaticConfigAsync(projectRoot);
+
+  return (
+    (await readFromExpoConfigAsync(projectRoot)) ?? { policy: null, literal: null, source: null }
+  );
 }
 
 async function readFromExpoConfigAsync(projectRoot: string): Promise<RuntimeVersionInfo | null> {
@@ -56,19 +58,6 @@ async function readFromExpoConfigAsync(projectRoot: string): Promise<RuntimeVers
     return null;
   }
   return readRuntimeVersion(config.runtimeVersion, 'expo config --type public');
-}
-
-async function readFromStaticConfigAsync(projectRoot: string): Promise<RuntimeVersionInfo> {
-  const staticConfig = await readStaticAppConfigAsync(projectRoot);
-  if (!staticConfig.source) {
-    return { policy: null, literal: null, source: null };
-  }
-
-  const contents = await readJsonFileAsync<Record<string, any>>(
-    path.join(projectRoot, staticConfig.source)
-  );
-  const config = (contents?.expo ?? contents ?? {}) as { runtimeVersion?: unknown };
-  return readRuntimeVersion(config.runtimeVersion, staticConfig.source);
 }
 
 /**
@@ -132,7 +121,7 @@ export function resolveOtaSafety(
       runtimeVersion,
       why: source
         ? `${source} names no runtimeVersion, so which builds an update would reach cannot be decided here. Configure runtimeVersion before publishing an update, or check the channel on expo.dev.`
-        : `The runtimeVersion could not be resolved — neither "expo config --type public" nor a static app config answered — so whether an update published now is safe is unknown. It is not reported as safe on a guess.`,
+        : `The runtimeVersion could not be resolved: "expo config --type public" gave no answer, or the project has no app config. So whether an update published now is safe is unknown. It is not reported as safe on a guess.`,
     };
   }
 
