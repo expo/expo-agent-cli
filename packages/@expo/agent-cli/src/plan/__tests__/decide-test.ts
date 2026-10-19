@@ -1,3 +1,4 @@
+import { isDevServerStep } from '../../dev/forwardedArgs';
 import type { FingerprintSource } from '../../project/fingerprint';
 import type { ProjectState } from '../../project/types';
 import type { BuildBackendChoice } from '../../toolchain/selectBackend';
@@ -801,13 +802,27 @@ describe(decideStartPlan, () => {
         { lastBuild: recorded('ios', 'abc123def4567890') },
       ],
       ['needs-dev-client', createDevClientState({ usesDevClient: false }), { platform: 'ios' }],
+      [
+        'dev-client-rebuild',
+        createDevClientState({
+          fingerprint: { hash: 'head', sources: [appConfig('a'), easJson('changed')] },
+        }),
+        {
+          platform: 'ios',
+          lastBuild: recordedWithSources('ios', 'base', [appConfig('a'), easJson('a')]),
+        },
+      ],
     ];
 
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+    // Every plan with a step has a step that serves, which is what lets a live dev-server lock stop
+    // a run before the plan is resolved.
     it.each(cases)(`should describe every step of the %s plan`, (rule, state, options) => {
       const plan = decideStartPlan(state, options);
 
       expect(plan.rule).toBe(rule);
       expect(plan.steps.length).toBeGreaterThan(0);
+      expect(plan.steps.some(isDevServerStep)).toBe(true);
       expect(plan.reasons.length).toBeGreaterThan(0);
       expect(new Set(plan.steps.map((step) => step.id)).size).toBe(plan.steps.length);
       for (const step of plan.steps) {
@@ -875,6 +890,7 @@ describe(decideStartPlan, () => {
         ['eas', 'build', '--platform', 'ios', '--profile', 'development', '--non-interactive'],
         ['expo', 'start', '--dev-client'],
       ]);
+      expect(plan.steps.some(isDevServerStep)).toBe(true);
       expect(plan.rule).toBe('dev-client-stale');
       expect(plan.target).toBe('dev-client');
     });
@@ -1119,6 +1135,7 @@ describe('the EAS device', () => {
       ],
       ['expo', 'start', '--dev-client'],
     ]);
+    expect(plan.steps.some(isDevServerStep)).toBe(true);
     expect(plan.steps[0]!.reason).toContain('a simulator build, which needs no signing');
     expect(plan.steps[0]!.reason).not.toContain('build:run');
     expect(plan.reasons.join('\n')).toContain(

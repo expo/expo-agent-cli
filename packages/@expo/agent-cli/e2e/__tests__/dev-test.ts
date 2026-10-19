@@ -184,8 +184,7 @@ describe('@expo/agent-cli dev', () => {
     // F120. The development build's connect URL was built out of a `--port` the plan then dropped
     // [observed — wave 29, live, `wave29-devclient/evidence/05-dev-build-ios.log`]. The URL is the
     // follow-up an agent acts on, so it names the port the step serves on: the port the plan
-    // named, because `expo run:*` takes `--port` too (llp/0004 §A busy port is not a step only a
-    // person can complete).
+    // named, because `expo run:*` takes `--port` too (llp/0004 §A busy port).
     it('names the port the plan will really serve on', async () => {
       const projectRoot = await setupAsync('dev-client-app');
       const result = await executeAgentCliAsync(projectRoot, [

@@ -352,8 +352,8 @@ describe('@expo/agent-cli dev --detach', () => {
     }
   });
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
-  // complete. Another project's Metro held `*:8081`, and `expo run:ios` with no terminal skipped its
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port.
+  // Another project's Metro held `*:8081`, and `expo run:ios` with no terminal skipped its
   // dev server, deep-linked the app to that Metro, and exited 0, so the detached run failed with no
   // lock [observed — live suite, 2026-10-05]. The port is picked before the plan runs and passed
   // as `--port` to every step that serves.
@@ -532,6 +532,49 @@ describe('@expo/agent-cli dev --detach', () => {
         alreadyRunning: true,
         pid: firstPid,
         port: 8397,
+      });
+    } finally {
+      await cleanUpAsync(projectRoot);
+    }
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port
+  // A second foreground server could not hold the lock, so `status` and `dev:stop` could not see it.
+  it('stops a foreground dev, and lists no steps under --plan, while the server runs', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const port = await freePortAsync();
+
+    try {
+      const first = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--wait-ready', '--json'],
+        { env: { ...detachEnv(projectRoot, port), STUB_EXPO_LISTEN: '1' } }
+      );
+      const { pid } = JSON.parse(first.stdout);
+
+      const foreground = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--json'], {
+        env: stubExpoEnv(projectRoot),
+        reject: false,
+      });
+
+      expect(foreground.exitCode, foreground.all).toBe(20);
+      expect(JSON.parse(foreground.stdout).error).toMatchObject({
+        code: 'DEV_SERVER_RUNNING',
+        data: { port, pid, phase: 'serving' },
+      });
+      const starts = readStubExpoInvocations(projectRoot).filter(({ args }) => args[0] === 'start');
+      expect(starts).toHaveLength(1);
+
+      const planned = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--plan', '--json'],
+        { env: stubExpoEnv(projectRoot) }
+      );
+
+      expect(planned.exitCode).toBe(0);
+      expect(JSON.parse(planned.stdout)).toMatchObject({
+        steps: [],
+        devServerPort: { port, state: 'running', phase: 'serving' },
       });
     } finally {
       await cleanUpAsync(projectRoot);

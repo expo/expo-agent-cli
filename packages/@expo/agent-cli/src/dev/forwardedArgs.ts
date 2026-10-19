@@ -160,8 +160,8 @@ function withoutDeviceArgs(argv: readonly string[]): string[] {
 /**
  * The same plan, with `--port` on every step that serves, and on no other step.
  *
- * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port is not a step only a person can
- * complete. An `expo run:*` that serves writes the port to `RCT_METRO_PORT` and
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port.
+ * An `expo run:*` that serves writes the port to `RCT_METRO_PORT` and
  * `-PreactNativeDevServerPort`, so the binary and its deep link name the port the dev server takes.
  * An install step with `--no-bundler` gets none: the Expo CLI refuses `--port` with `--no-bundler`,
  * and the open deep-links the app to the dev server anyway.
