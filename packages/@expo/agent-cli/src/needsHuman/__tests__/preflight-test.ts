@@ -42,8 +42,8 @@ const RUNNER_DIR = (process.env.PATH ?? '/usr/local/bin').split(path.delimiter)[
  * is a recent global `eas-cli` on `PATH`.
  *
  * Without either, the answer is a package runner — `npx --yes eas-cli`, a package install to read
- * `~/.expo/state.json` on a cold cache. `status` promises to be instant, so it asks only where no
- * download can happen (`src/needsHuman/preflight.ts` §askEasAsync).
+ * `~/.expo/state.json` on a cold cache. A `status` section is not worth that, so it asks only where
+ * no download can happen (`src/needsHuman/preflight.ts` §askEasAsync).
  */
 function withPinnedEasCli(files: Record<string, string> = {}) {
   vol.fromJSON({
