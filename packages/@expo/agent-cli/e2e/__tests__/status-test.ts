@@ -372,6 +372,64 @@ async function pinEasCliAsync(projectRoot: string): Promise<void> {
 }
 
 /**
+ * Install a `fingerprint` bin that the test steers through env: `STUB_FINGERPRINT_HASH` and
+ * `STUB_FP_SOURCES`. The fixture's own stub always prints an empty list, so it can never move the
+ * native surface. `diff` also answers `fingerprint:diff`; `platformHashes` gives each `--platform`
+ * its own hash.
+ */
+async function installEnvFingerprintStubAsync(
+  projectRoot: string,
+  {
+    diff = false,
+    platformHashes = {},
+  }: { diff?: boolean; platformHashes?: Partial<Record<'ios' | 'android', string>> } = {}
+): Promise<void> {
+  const diffAnswer = `
+if (args[0] === 'fingerprint:diff') {
+  const base = JSON.parse(fs.readFileSync(args[1], 'utf8'));
+  const head = JSON.parse(fs.readFileSync(args[2], 'utf8'));
+  const key = (source) => source.filePath || source.id || JSON.stringify(source);
+  const before = new Map(base.sources.map((source) => [key(source), source]));
+  const after = new Map(head.sources.map((source) => [key(source), source]));
+  const items = [];
+  for (const [id, source] of after) {
+    if (!before.has(id)) {
+      items.push({ op: 'added', addedSource: source });
+    } else if (before.get(id).hash !== source.hash) {
+      items.push({ op: 'changed', beforeSource: before.get(id), afterSource: source });
+    }
+  }
+  for (const [id, source] of before) {
+    if (!after.has(id)) {
+      items.push({ op: 'removed', removedSource: source });
+    }
+  }
+  process.stdout.write(JSON.stringify(items, null, 2) + '\\n');
+  process.exit(0);
+}`;
+  const script = `#!/usr/bin/env node
+'use strict';
+const fs = require('node:fs');
+const args = process.argv.slice(2);${diff ? diffAnswer : ''}
+const platform = args.includes('--platform') ? args[args.indexOf('--platform') + 1] : null;
+const platformHashes = ${JSON.stringify(platformHashes)};
+const hash =
+  platformHashes[platform] ||
+  process.env.STUB_FINGERPRINT_HASH ||
+  ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)};
+const sources = JSON.parse(process.env.STUB_FP_SOURCES || '[]');
+process.stdout.write(JSON.stringify({ hash, sources }) + '\\n');
+`;
+  const binDir = path.join(projectRoot, '.stub-bin');
+  await fs.promises.mkdir(binDir, { recursive: true });
+  const stub = path.join(binDir, 'fingerprint-env-stub.js');
+  await fs.promises.writeFile(stub, script);
+  for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
+    await installStubBinAsync(dir, 'fingerprint', stub);
+  }
+}
+
+/**
  * Install an `eas` bin that answers `whoami`, on the `PATH` the wrapper searches.
  *
  * The auth section runs a real subprocess, so without a stub the report would say whatever the
@@ -833,29 +891,10 @@ describe('@expo/agent-cli status', () => {
       hash: 'ccdd',
     };
 
-    /**
-     * A `fingerprint` bin whose sources the test chooses.
-     *
-     * The fixture's own stub always prints an empty list, which can only ever produce an empty
-     * diff. STUB_FP_SOURCES is what lets these tests move the native surface.
-     */
-    const STUB_FINGERPRINT = `#!/usr/bin/env node
-'use strict';
-const hash = process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)};
-const sources = JSON.parse(process.env.STUB_FP_SOURCES || '[]');
-process.stdout.write(JSON.stringify({ hash, sources }) + '\\n');
-`;
-
     /** Copy the fixture, install the steerable fingerprint stub, and write the v2 build record. */
     async function setupImpactAsync(recorded: unknown): Promise<string> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
-      const binDir = path.join(projectRoot, '.stub-bin');
-      await fs.promises.mkdir(binDir, { recursive: true });
-      const stub = path.join(binDir, 'fingerprint-sources-stub.js');
-      await fs.promises.writeFile(stub, STUB_FINGERPRINT);
-      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
-        await installStubBinAsync(dir, 'fingerprint', stub);
-      }
+      await installEnvFingerprintStubAsync(projectRoot);
       await fs.promises.writeFile(
         path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
         JSON.stringify(recorded)
@@ -967,14 +1006,6 @@ process.stdout.write(JSON.stringify({ hash, sources }) + '\\n');
       hash: 'aabb',
     };
 
-    const STUB_FINGERPRINT = `#!/usr/bin/env node
-'use strict';
-process.stdout.write(JSON.stringify({
-  hash: process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)},
-  sources: JSON.parse(process.env.STUB_FP_SOURCES || '[]'),
-}) + '\\n');
-`;
-
     /** `dynamic` adds an `app.config.js`, whose runtimeVersion comes from the stub `expo config`. */
     async function setupExplainAsync(
       runtimeVersion: unknown,
@@ -984,13 +1015,7 @@ process.stdout.write(JSON.stringify({
       env: Record<string, string>;
     }> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
-      const binDir = path.join(projectRoot, '.stub-bin');
-      await fs.promises.mkdir(binDir, { recursive: true });
-      const stub = path.join(binDir, 'fingerprint-explain-stub.js');
-      await fs.promises.writeFile(stub, STUB_FINGERPRINT);
-      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
-        await installStubBinAsync(dir, 'fingerprint', stub);
-      }
+      await installEnvFingerprintStubAsync(projectRoot);
       await fs.promises.writeFile(
         path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
         JSON.stringify({ ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [] } })
@@ -1203,39 +1228,6 @@ process.stdout.write(JSON.stringify({
     };
     const APP_CONFIG = { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'cc' };
 
-    /** A `fingerprint` bin that also answers `fingerprint:diff`. */
-    const STUB_FINGERPRINT = `#!/usr/bin/env node
-'use strict';
-const fs = require('node:fs');
-const args = process.argv.slice(2);
-if (args[0] === 'fingerprint:diff') {
-  const base = JSON.parse(fs.readFileSync(args[1], 'utf8'));
-  const head = JSON.parse(fs.readFileSync(args[2], 'utf8'));
-  const key = (source) => source.filePath || source.id || JSON.stringify(source);
-  const before = new Map(base.sources.map((source) => [key(source), source]));
-  const after = new Map(head.sources.map((source) => [key(source), source]));
-  const items = [];
-  for (const [id, source] of after) {
-    if (!before.has(id)) {
-      items.push({ op: 'added', addedSource: source });
-    } else if (before.get(id).hash !== source.hash) {
-      items.push({ op: 'changed', beforeSource: before.get(id), afterSource: source });
-    }
-  }
-  for (const [id, source] of before) {
-    if (!after.has(id)) {
-      items.push({ op: 'removed', removedSource: source });
-    }
-  }
-  process.stdout.write(JSON.stringify(items, null, 2) + '\\n');
-  process.exit(0);
-}
-process.stdout.write(JSON.stringify({
-  hash: process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)},
-  sources: JSON.parse(process.env.STUB_FP_SOURCES || '[]'),
-}) + '\\n');
-`;
-
     /** `fingerprint1` is the build's fingerprint, `fingerprint2` the working tree's. */
     function comparePayload(buildSources: unknown[], headSources: unknown[]) {
       return JSON.stringify({
@@ -1252,13 +1244,7 @@ process.stdout.write(JSON.stringify({
 
     async function setupCompareAsync(): Promise<string> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
-      const binDir = path.join(projectRoot, '.stub-bin');
-      await fs.promises.mkdir(binDir, { recursive: true });
-      const stub = path.join(binDir, 'fingerprint-compare-stub.js');
-      await fs.promises.writeFile(stub, STUB_FINGERPRINT);
-      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
-        await installStubBinAsync(dir, 'fingerprint', stub);
-      }
+      await installEnvFingerprintStubAsync(projectRoot, { diff: true });
       await fs.promises.writeFile(
         path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
         JSON.stringify({
@@ -1415,8 +1401,11 @@ process.stdout.write(JSON.stringify({
       expect(result.stdout).toContain('project     dev-client-fresh-app');
 
       const json = await runBuildAsync(projectRoot, ['--json'], { STUB_EAS_COMPARE_EXIT: '1' });
+      expect(json.exitCode).toBe(0);
       const report: StatusReport = JSON.parse(json.stdout);
       expect(report.errors.freshness).toContain(BUILD_ID);
+      // F66: the comparison is named before the call, so a failed call still says which build.
+      expect(report.freshness!.comparison).toMatchObject({ kind: 'eas-build', buildId: BUILD_ID });
     });
   });
 
@@ -1432,29 +1421,18 @@ process.stdout.write(JSON.stringify({
 
     expect(report.next).toMatchObject({ command: 'npx @expo/agent-cli new my-app' });
     expect(report.next!.why).toContain('not an Expo app');
+    // Every other rung assumes an Expo app, so this is the only follow-up.
+    expect(report.followups.map((followup) => followup.id)).toEqual(['not-expo-app']);
   });
 
   // @ref llp/0011-impact-and-freshness.rfc.md §When the fingerprint did not move
   describe('the changed files, when the fingerprint did not move', () => {
     const APP_CONFIG = { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'cc' };
-    const STUB_FINGERPRINT = `#!/usr/bin/env node
-'use strict';
-process.stdout.write(JSON.stringify({
-  hash: process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)},
-  sources: JSON.parse(process.env.STUB_FP_SOURCES || '[]'),
-}) + '\\n');
-`;
 
     /** A committed tree whose fingerprint matches its recorded build. */
     async function setupCommittedAsync(): Promise<string> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
-      const binDir = path.join(projectRoot, '.stub-bin');
-      await fs.promises.mkdir(binDir, { recursive: true });
-      const stub = path.join(binDir, 'fingerprint-files-stub.js');
-      await fs.promises.writeFile(stub, STUB_FINGERPRINT);
-      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
-        await installStubBinAsync(dir, 'fingerprint', stub);
-      }
+      await installEnvFingerprintStubAsync(projectRoot);
       await fs.promises.writeFile(
         path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
         JSON.stringify({
@@ -1628,23 +1606,9 @@ process.stdout.write(JSON.stringify({
     };
     const APP_CONFIG = { type: 'file', filePath: 'app.json', reasons: ['expoConfig'], hash: 'cc' };
 
-    const STUB_FINGERPRINT = `#!/usr/bin/env node
-'use strict';
-process.stdout.write(JSON.stringify({
-  hash: process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)},
-  sources: JSON.parse(process.env.STUB_FP_SOURCES || '[]'),
-}) + '\\n');
-`;
-
     async function setupAssertAsync(recorded: unknown): Promise<string> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
-      const binDir = path.join(projectRoot, '.stub-bin');
-      await fs.promises.mkdir(binDir, { recursive: true });
-      const stub = path.join(binDir, 'fingerprint-assert-stub.js');
-      await fs.promises.writeFile(stub, STUB_FINGERPRINT);
-      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
-        await installStubBinAsync(dir, 'fingerprint', stub);
-      }
+      await installEnvFingerprintStubAsync(projectRoot);
       await fs.promises.writeFile(
         path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
         JSON.stringify(recorded)
@@ -1821,40 +1785,19 @@ process.stdout.write(JSON.stringify({
       artifacts: { buildUrl: 'https://expo.dev/artifacts/eas/abc.tar.gz' },
     };
 
-    /**
-     * A `fingerprint` bin that answers a different hash per platform, the way the real one does.
-     *
-     * This is the fact the whole design turns on, and the fixture's own stub cannot show it: the
-     * project hash covers both platforms and is not a hash any build carries. Live, on one working
-     * tree: `031f6b0c…` for the project and `8ce1acfb…` for iOS [observed — apps/observe-tester,
-     * 2026-08-26].
-     */
-    const STUB_FINGERPRINT = `#!/usr/bin/env node
-'use strict';
-const args = process.argv.slice(2);
-const platform = args.includes('--platform') ? args[args.indexOf('--platform') + 1] : null;
-const hash = platform === 'ios'
-  ? ${JSON.stringify(IOS_HASH)}
-  : platform === 'android'
-    ? ${JSON.stringify(ANDROID_HASH)}
-    : (process.env.STUB_FINGERPRINT_HASH || ${JSON.stringify(FIXTURE_FINGERPRINT_HASH)});
-process.stdout.write(JSON.stringify({ hash, sources: [] }) + '\\n');
-`;
-
     /** Copy the fixture and install both stubs over the ones `setupAsync` put there. */
     async function setupWithEasAsync(
       fixture = 'dev-client-fresh-app',
       { linked = true }: { linked?: boolean } = {}
     ): Promise<string> {
       const projectRoot = await setupAsync(fixture);
-      const binDir = path.join(projectRoot, '.stub-bin');
-      await fs.promises.mkdir(binDir, { recursive: true });
-
-      const fingerprintStub = path.join(binDir, 'fingerprint-platform-stub.js');
-      await fs.promises.writeFile(fingerprintStub, STUB_FINGERPRINT);
-      for (const dir of [binDir, path.join(projectRoot, 'node_modules', '.bin')]) {
-        await installStubBinAsync(dir, 'fingerprint', fingerprintStub);
-      }
+      // A different hash per platform, the way the real bin answers. This is the fact the whole
+      // design turns on: the project hash covers both platforms and is not a hash any build carries.
+      // Live, on one working tree: `031f6b0c…` for the project and `8ce1acfb…` for iOS [observed —
+      // apps/observe-tester, 2026-08-26].
+      await installEnvFingerprintStubAsync(projectRoot, {
+        platformHashes: { ios: IOS_HASH, android: ANDROID_HASH },
+      });
       // The shared stub `eas` (`e2e/stubs/eas.js`; the `STUB_EAS_*` variables below are documented
       // there), behind one runner because there is one rung; and the pin, so the EAS CLI is what
       // answers `whoami`.
