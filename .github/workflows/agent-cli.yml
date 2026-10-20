@@ -27,11 +27,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # In a stack of PRs, the top PR holds every layer, so CI runs there once. See stack-top.yml.
   stack:
     uses: ./.github/workflows/stack-top.yml
 
-  # Tier 0 of LLP 0002: deterministic, model-free, runs on every PR (the top one, in a stack).
+  # Tier 0 of LLP 0002: deterministic, model-free, runs on every PR.
   tier0-linux:
     needs: stack
     if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
@@ -162,7 +161,7 @@ jobs:
         run: bun run test
         working-directory: packages/@expo/agent-cli
 
-  # Short real agent integration tests. Every relevant PR (the top one, in a stack) runs the entire Tier 1 suite.
+  # Short real agent integration tests. Every relevant PR runs the entire Tier 1 suite.
   # Advisory until repeated CI evidence establishes reliability; individual results stay visible.
   tier1-agent-eval:
     needs: stack

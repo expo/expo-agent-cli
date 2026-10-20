@@ -1,10 +1,5 @@
-# A stacked PR is based on the PR below it, so the top PR's head holds every layer of the stack.
-# CI runs there once for the whole stack and the layers below skip. Every other event (push,
-# dispatch, schedule) and every PR outside a stack runs as before.
-#
-# The top PR re-runs whenever a lower layer changes, because `gh stack` rebases and pushes every
-# branch above the change. A layer that becomes the top because the PR above it was closed has to
-# be re-run by hand: the decision is made live, so "Re-run all jobs" is enough.
+# The top PR of a stack holds every layer below it, so CI runs there once per stack.
+# The decision is live: a layer that became the top after a close needs "Re-run all jobs".
 name: Stack top
 
 on:
@@ -64,8 +59,7 @@ jobs:
 
           stack=$(stack_of_pr) || decide true "Could not read the stack of PR #$PR. CI runs."
 
-          # `gh stack submit` opens every PR first and links them into a stack last, so a PR that
-          # was just opened may not show its stack yet. Give the link a minute to land.
+          # gh stack submit links the stack after opening the PRs, so a fresh PR may not show it yet.
           if [ "$ACTION" = opened ]; then
             for _ in 1 2 3 4 5 6; do
               [ -n "$stack" ] && break

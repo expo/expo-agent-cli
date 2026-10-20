@@ -14,21 +14,15 @@
 # every PR — unfiltered on purpose [decided 2026-09-05]: a path filter only sees changes on our side,
 # while EAS Simulator readiness, the Expo Go a session installs, and create-expo's scaffold all move
 # without touching this repo, and a PR is when somebody is looking. Four billed sessions per PR push.
-# In a stack of PRs it runs on the top PR only, through the trigger's `if`: the top's head holds every layer,
-# so one run covers the stack and the layers below are never billed. [decided 2026-10-19]
-# A draft gets no run at open, because `gh stack submit` opens drafts before it links the stack and the
-# first open cannot tell a layer from a standalone PR. Its first run comes with its first push, or when it
-# is marked ready for review. [decided 2026-10-20]
+# In a stack only the top PR runs (the trigger's `if`). A draft gets no run at open: the stack is linked
+# after the PRs open, so its first run comes with a push or ready-for-review. [decided 2026-10-20]
 name: agent-cli-cloud-e2e
 
 on:
   workflow_dispatch: {}
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
-    # A PR outside a stack has no `stack`. In a stack, position counts from the bottom, so the top is the
-    # one whose position equals the size. At `opened` the stack is not linked yet (`gh stack submit` opens
-    # every PR first and links them last), but `draft` is: a draft gets no run at open, and a non-draft
-    # runs as before. Every later event sees the linked stack and runs on the top only.
+    # Top of stack: position equals size. No `stack` means a PR outside a stack.
     if: ${{ github.event.action == 'opened' && !github.event.pull_request.draft || github.event.action != 'opened' && (!github.event.pull_request.stack || github.event.pull_request.stack.position == github.event.pull_request.stack.size) }}
 
 concurrency:
