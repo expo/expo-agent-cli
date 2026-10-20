@@ -585,19 +585,45 @@ describe(navigateAsync, () => {
     expect(vi.mocked(console.error).mock.calls.join('\n')).toContain('did not open the deep link');
   });
 
-  it(`should explain an unresolvable scheme instead of opening anything`, async () => {
+  // A dynamic config is evaluated by the project's `expo config` (issue #84), so the one spawn
+  // here is that evaluation, and nothing reaches a device.
+  it(`should explain a dynamic config it could not evaluate instead of opening anything`, async () => {
     vol.fromJSON({
       [`${projectRoot}/app.config.js`]: 'module.exports = {};',
       [`${projectRoot}/ios/Podfile`]: '',
     });
     mockDevServer(null);
-    mockSpawnQueue([]);
+    mockSpawnQueue([{ stdout: '', exitCode: 1 }]);
 
     const error = await navigateAsync(projectRoot, options({ devServerUrl: null })).catch((e) => e);
 
     expect(error.code).toBe('DEEP_LINK_UNRESOLVED');
-    expect(error.message).toContain('app.config.js');
-    expect(spawn).not.toHaveBeenCalled();
+    expect(error.message).toContain('app.config.js, and evaluating it failed');
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(spawnedArgv(0)).toEqual(
+      expect.arrayContaining(['config', '--json', '--type', 'public'])
+    );
+    expect(openedArgv()).toEqual([]);
+  });
+
+  it(`should build the URL from the scheme a dynamic config names`, async () => {
+    vol.fromJSON({
+      [`${projectRoot}/app.config.js`]: 'module.exports = {};',
+      [`${projectRoot}/package.json`]: JSON.stringify({ name: 'demo', dependencies: {} }),
+      [`${projectRoot}/ios/Podfile`]: '',
+    });
+    mockDevServer(null);
+    mockSpawnQueue([{ stdout: JSON.stringify({ slug: 'demo', scheme: 'dynamicapp' }) }]);
+
+    await expect(
+      navigateAsync(projectRoot, options({ devServerUrl: null, printUrl: true, json: true }))
+    ).resolves.toBe(0);
+
+    expect(JSON.parse(printed())).toMatchObject({
+      url: 'dynamicapp://profile/42',
+      resolution: 'read the "scheme" field from app.config.js',
+    });
+    expect(spawn).toHaveBeenCalledTimes(1);
   });
 
   it(`should explain a missing dev server when Expo Go needs its host`, async () => {

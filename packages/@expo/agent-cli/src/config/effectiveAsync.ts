@@ -7,7 +7,7 @@
 import { event } from '../events';
 import { buildConfigEffectiveFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
-import { readStaticAppConfigAsync } from '../project/appConfig';
+import { readPluginIds, readStaticAppConfigAsync } from '../project/appConfig';
 import {
   assertFilePlatform,
   buildEffectiveConfig,
@@ -44,10 +44,16 @@ export async function printEffectiveConfigAsync(
     readStaticAppConfigAsync(projectRoot),
   ]);
 
+  // The payload keeps the `plugins` array the config declared, evaluated by the project's own CLI,
+  // so a dynamic `app.config.ts` answers here the same way `app.json` does. The static file is the
+  // fallback for an `expo` that prints no array.
+  const declaredPluginIds =
+    readPluginIds(config.plugins) ?? staticConfig.plugins.map((plugin) => plugin.id);
+
   const report = buildEffectiveConfig({
     projectRoot,
     config,
-    declaredPluginIds: staticConfig.plugins.map((plugin) => plugin.id),
+    declaredPluginIds,
     command,
     durationMs,
     platform,

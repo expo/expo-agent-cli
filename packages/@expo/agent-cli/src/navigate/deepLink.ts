@@ -2,12 +2,14 @@
 // Deep-link primitives: resolve a project's URL scheme, turn a route into a launchable URL, and
 // open that URL on a booted device.
 //
-// The scheme is read statically from the project config files. Evaluating `app.config.js` would
-// run project code inside the CLI, which the process boundary of llp/0001 §Constraints item 5
-// exists to avoid; callers pass `--scheme` explicitly in that case.
+// The scheme is read from the static config files. A dynamic `app.config.js`/`.ts` is evaluated
+// by the project's own `expo config` subprocess, never inside this process: that is the process
+// boundary of llp/0001 §Constraints. A caller that passes `--scheme` already knows the answer, and
+// then nothing is spawned.
 import fs from 'fs';
 import path from 'path';
 
+import { outputTail } from '../config/introspectAsync';
 import { adbNotRunnableError, resolveAdb, type AdbResolution } from '../device/adb';
 import { approveSchemeForUrlAsync } from '../device/approveScheme';
 import {
@@ -16,10 +18,12 @@ import {
   easCliMissingError,
   openUrlOnCloudSimulatorAsync,
 } from '../device/cloudSimulator';
+import { parseLastJsonObject } from '../impact/runtimeVersion';
 import { PROGRAM_PREFIX } from '../programName';
 import { DYNAMIC_CONFIG_FILES, STATIC_CONFIG_FILES } from '../project/appConfig';
 import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
+import { spawnExpoAsync } from '../utils/expoCli';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import type { DeviceBackend } from './device';
 
@@ -47,14 +51,22 @@ import type { DeviceBackend } from './device';
 const EXPO_GO_ROOT_PATH = '/--/?';
 
 export interface ProjectSchemeConfig {
-  /** First `expo.scheme` entry found in a static config file, if any. */
+  /** First `expo.scheme` entry found, if any. */
   scheme: string | null;
   /** `expo.slug`, falling back to `package.json` `name`. Used for `exp+<slug>://`. */
   slug: string | null;
-  /** Name of the static config file the values came from, if any. */
+  /**
+   * Name of the config file the values came from, if any: a static file, or the dynamic file once
+   * {@link resolveProjectSchemeConfigAsync} evaluated it.
+   */
   configFile: string | null;
   /** Name of a dynamic config file present in the project, if any. */
   dynamicConfigFile: string | null;
+  /**
+   * Why {@link dynamicConfigFile} could not be evaluated, when it exists and the values are the
+   * static read. Null when it was evaluated, or never asked.
+   */
+  evaluationError: string | null;
 }
 
 /**
@@ -62,7 +74,7 @@ export interface ProjectSchemeConfig {
  *
  * Reads `app.json` then `app.config.json`, accepting either an `expo` key or a bare config
  * object. Does not evaluate `app.config.js` / `app.config.ts`; when one is present its name is
- * reported so the caller can explain the gap.
+ * reported, and {@link resolveProjectSchemeConfigAsync} is the reader that evaluates it.
  */
 export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfig {
   const result: ProjectSchemeConfig = {
@@ -70,6 +82,7 @@ export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfi
     slug: null,
     configFile: null,
     dynamicConfigFile: null,
+    evaluationError: null,
   };
 
   for (const fileName of STATIC_CONFIG_FILES) {
@@ -102,6 +115,89 @@ export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfi
   }
 
   return result;
+}
+
+/** The `expo` arguments that print the config the app sees, `scheme` and `slug` included. */
+export const PUBLIC_CONFIG_ARGS = ['config', '--json', '--type', 'public'];
+
+/** How long a dynamic config gets to evaluate. The EAS preflight gives it the same. */
+const EVALUATE_CONFIG_TIMEOUT_MS = 30_000;
+
+/**
+ * Read the URL scheme and slug the app itself sees.
+ *
+ * The static read is the whole answer for a project with no dynamic config, and nothing is
+ * spawned. With an `app.config.js`/`.ts` the project's `expo config --json --type public`
+ * evaluates it, the way the OTA verdict and the EAS preflight already do, and `scheme` and `slug`
+ * come from its answer: the evaluated config is what the app registered, whatever a static file
+ * beside it says. The answer is not cached, for the reason llp/0011 gives: a dynamic config can
+ * read env vars and `.env` files that no file stamp sees.
+ *
+ * A `schemeOverride` skips the evaluation, because the flag wins over whatever the config says.
+ *
+ * A dynamic config that fails to evaluate keeps the static read and says why in
+ * `evaluationError`. The `exp+<slug>` fallback is still a scheme a development build registers,
+ * so the URL is still offered, but the caller is told it rests on a file this command could not
+ * read [observed — issue #84: a project with only `app.config.ts` was sent to
+ * `exp+<package name>://` with "no scheme field was found", which is not what happened].
+ */
+export async function resolveProjectSchemeConfigAsync(
+  projectRoot: string,
+  { schemeOverride }: { schemeOverride?: string | null } = {}
+): Promise<ProjectSchemeConfig> {
+  const config = readProjectSchemeConfig(projectRoot);
+  if (config.dynamicConfigFile == null || nonEmptyString(schemeOverride) != null) {
+    return config;
+  }
+
+  const evaluated = await evaluateSchemeConfigAsync(projectRoot);
+  if (!evaluated.ok) {
+    return { ...config, evaluationError: evaluated.error };
+  }
+  return {
+    scheme: evaluated.scheme,
+    slug: evaluated.slug ?? config.slug,
+    configFile: config.dynamicConfigFile,
+    dynamicConfigFile: config.dynamicConfigFile,
+    evaluationError: null,
+  };
+}
+
+/** `scheme` and `slug` of the config `expo config --type public` printed, or why it did not. */
+async function evaluateSchemeConfigAsync(
+  projectRoot: string
+): Promise<
+  { ok: true; scheme: string | null; slug: string | null } | { ok: false; error: string }
+> {
+  const { result } = await spawnExpoAsync(projectRoot, PUBLIC_CONFIG_ARGS, {
+    output: 'capture',
+    timeoutMs: EVALUATE_CONFIG_TIMEOUT_MS,
+  });
+  if (result.spawnError) {
+    return {
+      ok: false,
+      error: `expo config could not be started (${result.spawnError.code ?? result.spawnError.message})`,
+    };
+  }
+  if (result.timedOut) {
+    return {
+      ok: false,
+      error: `expo config did not answer within ${EVALUATE_CONFIG_TIMEOUT_MS / 1000}s`,
+    };
+  }
+  if (result.exitCode !== 0) {
+    // stderr first: a failing evaluation says why there, and stdout may still end in an event line.
+    const said = outputTail(result.stderr, 1) || outputTail(result.stdout, 1);
+    return {
+      ok: false,
+      error: `expo config exited with code ${result.exitCode}${said ? `: ${said}` : ''}`,
+    };
+  }
+  const config = parseLastJsonObject(result.stdout);
+  if (config == null) {
+    return { ok: false, error: 'expo config printed no JSON object' };
+  }
+  return { ok: true, scheme: firstScheme(config.scheme), slug: nonEmptyString(config.slug) };
 }
 
 export interface ResolveDeepLinkUrlParams {
@@ -298,30 +394,44 @@ function resolveConfigUrl(
   }
 
   if (config.slug != null) {
+    const unread =
+      config.evaluationError != null
+        ? `${config.dynamicConfigFile} could not be evaluated (${config.evaluationError}) and `
+        : '';
     return {
       ok: true,
       url: `exp+${config.slug}://${routePath}`,
-      resolution: `no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "${config.slug}"`,
+      resolution: `${unread}no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "${config.slug}"`,
       host: null,
     };
   }
 
-  const why =
-    config.dynamicConfigFile != null
-      ? `Why: this project uses ${config.dynamicConfigFile}, and this command reads the config statically instead of evaluating JavaScript.`
-      : 'Why: no "scheme" or "slug" field was found in app.json or app.config.json, and package.json has no "name" field.';
   return {
     ok: false,
     error: [
       'Cannot resolve a URL scheme for this project.',
-      why,
-      'How: pass --scheme explicitly (for example --scheme myapp), or add a "scheme" field to app.json and rebuild the app.',
+      whyUnresolvable(config),
+      'How: pass --scheme explicitly (for example --scheme myapp), or add a "scheme" field to the app config and rebuild the app.',
     ].join('\n'),
     // The one case where a person has to supply a value this CLI cannot know. The `Try:` is
     // therefore the command that *prints what the project declares* rather than a line with a
     // hole in it: `--scheme <your-app-scheme>` is not something an agent can run.
     suggestedCommand: `${PROGRAM_PREFIX} inspect:config-plugins --json`,
   };
+}
+
+/** The `Why:` of a project with no scheme, no slug and no package name, by what was read. */
+function whyUnresolvable(config: ProjectSchemeConfig): string {
+  if (config.evaluationError != null) {
+    return `Why: this project uses ${config.dynamicConfigFile}, and evaluating it failed: ${config.evaluationError}.`;
+  }
+  if (config.dynamicConfigFile != null && config.configFile === config.dynamicConfigFile) {
+    return `Why: no "scheme" or "slug" field was found in the evaluated ${config.dynamicConfigFile}, and package.json has no "name" field.`;
+  }
+  if (config.dynamicConfigFile != null) {
+    return `Why: this project uses ${config.dynamicConfigFile}, and this command reads the config statically instead of evaluating JavaScript.`;
+  }
+  return 'Why: no "scheme" or "slug" field was found in app.json or app.config.json, and package.json has no "name" field.';
 }
 
 export interface OpenUrlCommand {

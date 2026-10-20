@@ -1,14 +1,21 @@
 import { vol } from 'memfs';
 
 import { devClientConnectUrl } from '../connectUrl';
+import { spawnExpoAsync } from '../../utils/expoCli';
 import {
   buildOpenUrlCommand,
   quoteForDeviceShell,
   readProjectSchemeConfig,
   resolveDeepLinkUrl,
+  resolveProjectSchemeConfigAsync,
   type ProjectSchemeConfig,
   type ResolveDeepLinkUrlResult,
 } from '../deepLink';
+
+vi.mock('../../utils/expoCli', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/expoCli')>()),
+  spawnExpoAsync: vi.fn(),
+}));
 
 const PROJECT_ROOT = '/fixtures/project';
 
@@ -21,7 +28,14 @@ function createProjectFixture(files: Record<string, string>): string {
 }
 
 function config(overrides: Partial<ProjectSchemeConfig> = {}): ProjectSchemeConfig {
-  return { scheme: null, slug: null, configFile: null, dynamicConfigFile: null, ...overrides };
+  return {
+    scheme: null,
+    slug: null,
+    configFile: null,
+    dynamicConfigFile: null,
+    evaluationError: null,
+    ...overrides,
+  };
 }
 
 /** Assert the resolution failed and return its error message. */
@@ -57,6 +71,7 @@ describe(readProjectSchemeConfig, () => {
       slug: 'demo',
       configFile: 'app.json',
       dynamicConfigFile: null,
+      evaluationError: null,
     });
   });
 
@@ -78,6 +93,7 @@ describe(readProjectSchemeConfig, () => {
       slug: 'bare',
       configFile: 'app.json',
       dynamicConfigFile: null,
+      evaluationError: null,
     });
   });
 
@@ -91,6 +107,7 @@ describe(readProjectSchemeConfig, () => {
       slug: 'demo',
       configFile: 'app.config.json',
       dynamicConfigFile: null,
+      evaluationError: null,
     });
   });
 
@@ -104,6 +121,7 @@ describe(readProjectSchemeConfig, () => {
       slug: 'demo',
       configFile: 'app.json',
       dynamicConfigFile: null,
+      evaluationError: null,
     });
   });
 
@@ -125,6 +143,7 @@ describe(readProjectSchemeConfig, () => {
       slug: null,
       configFile: null,
       dynamicConfigFile: 'app.config.js',
+      evaluationError: null,
     });
   });
 
@@ -138,6 +157,7 @@ describe(readProjectSchemeConfig, () => {
       slug: 'from-package-json',
       configFile: null,
       dynamicConfigFile: null,
+      evaluationError: null,
     });
   });
 
@@ -149,6 +169,7 @@ describe(readProjectSchemeConfig, () => {
       slug: null,
       configFile: null,
       dynamicConfigFile: null,
+      evaluationError: null,
     });
   });
 
@@ -160,7 +181,182 @@ describe(readProjectSchemeConfig, () => {
       slug: null,
       configFile: null,
       dynamicConfigFile: null,
+      evaluationError: null,
     });
+  });
+});
+
+describe(resolveProjectSchemeConfigAsync, () => {
+  function mockExpoConfig(
+    stdout: string,
+    {
+      exitCode = 0,
+      stderr = '',
+      timedOut,
+      spawnError,
+    }: {
+      exitCode?: number | null;
+      stderr?: string;
+      timedOut?: boolean;
+      spawnError?: NodeJS.ErrnoException;
+    } = {}
+  ) {
+    vi.mocked(spawnExpoAsync).mockResolvedValue({
+      cli: { command: 'expo', args: [] },
+      result: { exitCode, stdout, stderr, timedOut, spawnError },
+    });
+  }
+
+  function createDynamicFixture(files: Record<string, string> = {}): string {
+    return createProjectFixture({
+      'app.config.ts': 'export default { scheme: "marmelade" };',
+      'package.json': JSON.stringify({ name: 'marmelade-app' }),
+      ...files,
+    });
+  }
+
+  beforeEach(() => {
+    vi.mocked(spawnExpoAsync).mockReset();
+  });
+
+  it(`should spawn nothing for a static config`, async () => {
+    const projectRoot = createProjectFixture({
+      'app.json': JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
+    });
+
+    await expect(resolveProjectSchemeConfigAsync(projectRoot)).resolves.toEqual({
+      scheme: 'demoapp',
+      slug: 'demo',
+      configFile: 'app.json',
+      dynamicConfigFile: null,
+      evaluationError: null,
+    });
+    expect(spawnExpoAsync).not.toHaveBeenCalled();
+  });
+
+  it(`should evaluate a dynamic config through expo config`, async () => {
+    const projectRoot = createDynamicFixture();
+    mockExpoConfig(JSON.stringify({ name: 'Marmelade', slug: 'marmelade', scheme: 'marmelade' }));
+
+    await expect(resolveProjectSchemeConfigAsync(projectRoot)).resolves.toEqual({
+      scheme: 'marmelade',
+      slug: 'marmelade',
+      configFile: 'app.config.ts',
+      dynamicConfigFile: 'app.config.ts',
+      evaluationError: null,
+    });
+    expect(spawnExpoAsync).toHaveBeenCalledWith(
+      projectRoot,
+      ['config', '--json', '--type', 'public'],
+      expect.objectContaining({ output: 'capture', timeoutMs: 30_000 })
+    );
+  });
+
+  it(`should take the first scheme of an array`, async () => {
+    const projectRoot = createDynamicFixture();
+    mockExpoConfig(JSON.stringify({ slug: 'demo', scheme: ['first', 'second'] }));
+
+    const config = await resolveProjectSchemeConfigAsync(projectRoot);
+
+    expect(config.scheme).toBe('first');
+  });
+
+  it(`should take the evaluated config over a static file beside it`, async () => {
+    const projectRoot = createDynamicFixture({
+      'app.json': JSON.stringify({ expo: { slug: 'static', scheme: 'staticapp' } }),
+    });
+    mockExpoConfig(JSON.stringify({ slug: 'dynamic', scheme: 'dynamicapp' }));
+
+    await expect(resolveProjectSchemeConfigAsync(projectRoot)).resolves.toEqual({
+      scheme: 'dynamicapp',
+      slug: 'dynamic',
+      configFile: 'app.config.ts',
+      dynamicConfigFile: 'app.config.ts',
+      evaluationError: null,
+    });
+  });
+
+  it(`should read the last JSON object the CLI printed`, async () => {
+    const projectRoot = createDynamicFixture();
+    mockExpoConfig('{"type":"event"}\n{"slug":"demo","scheme":"demoapp"}\n');
+
+    const config = await resolveProjectSchemeConfigAsync(projectRoot);
+
+    expect(config).toMatchObject({ scheme: 'demoapp', slug: 'demo' });
+  });
+
+  it(`should report a config that names no scheme as evaluated`, async () => {
+    const projectRoot = createDynamicFixture();
+    mockExpoConfig(JSON.stringify({ slug: 'demo' }));
+
+    await expect(resolveProjectSchemeConfigAsync(projectRoot)).resolves.toEqual({
+      scheme: null,
+      slug: 'demo',
+      configFile: 'app.config.ts',
+      dynamicConfigFile: 'app.config.ts',
+      evaluationError: null,
+    });
+  });
+
+  it(`should spawn nothing when --scheme names the scheme`, async () => {
+    const projectRoot = createDynamicFixture();
+
+    await expect(
+      resolveProjectSchemeConfigAsync(projectRoot, { schemeOverride: 'override' })
+    ).resolves.toEqual({
+      scheme: null,
+      slug: 'marmelade-app',
+      configFile: null,
+      dynamicConfigFile: 'app.config.ts',
+      evaluationError: null,
+    });
+    expect(spawnExpoAsync).not.toHaveBeenCalled();
+  });
+
+  it(`should keep the static read and say why when the evaluation fails`, async () => {
+    const projectRoot = createDynamicFixture();
+    mockExpoConfig('', {
+      exitCode: 1,
+      stderr: 'Error: Cannot resolve app config\n    at load (config.js:1:2)\n',
+    });
+
+    await expect(resolveProjectSchemeConfigAsync(projectRoot)).resolves.toEqual({
+      scheme: null,
+      slug: 'marmelade-app',
+      configFile: null,
+      dynamicConfigFile: 'app.config.ts',
+      evaluationError: 'expo config exited with code 1: Error: Cannot resolve app config',
+    });
+  });
+
+  it(`should say when the CLI could not be started`, async () => {
+    const projectRoot = createDynamicFixture();
+    mockExpoConfig('', {
+      exitCode: null,
+      spawnError: Object.assign(new Error('x'), { code: 'ENOENT' }),
+    });
+
+    const config = await resolveProjectSchemeConfigAsync(projectRoot);
+
+    expect(config.evaluationError).toBe('expo config could not be started (ENOENT)');
+  });
+
+  it(`should say when the evaluation timed out`, async () => {
+    const projectRoot = createDynamicFixture();
+    mockExpoConfig('', { exitCode: null, timedOut: true });
+
+    const config = await resolveProjectSchemeConfigAsync(projectRoot);
+
+    expect(config.evaluationError).toBe('expo config did not answer within 30s');
+  });
+
+  it(`should say when the CLI printed no config`, async () => {
+    const projectRoot = createDynamicFixture();
+    mockExpoConfig('nothing here\n');
+
+    const config = await resolveProjectSchemeConfigAsync(projectRoot);
+
+    expect(config.evaluationError).toBe('expo config printed no JSON object');
   });
 });
 
@@ -395,6 +591,67 @@ describe(resolveDeepLinkUrl, () => {
     expect(error).toContain('--scheme');
   });
 
+  it(`should name the evaluated dynamic config file as the source of the scheme`, () => {
+    const result = resolveDeepLinkUrl({
+      route: '/profile/42',
+      config: config({
+        scheme: 'marmelade',
+        slug: 'marmelade',
+        configFile: 'app.config.ts',
+        dynamicConfigFile: 'app.config.ts',
+      }),
+      isExpoGo: false,
+    });
+
+    expect(expectUrl(result)).toMatchObject({
+      url: 'marmelade://profile/42',
+      resolution: 'read the "scheme" field from app.config.ts',
+    });
+  });
+
+  it(`should say when the exp+<slug> fallback rests on a config it could not evaluate`, () => {
+    const result = resolveDeepLinkUrl({
+      route: '/profile/42',
+      config: config({
+        slug: 'marmelade',
+        dynamicConfigFile: 'app.config.ts',
+        evaluationError: 'expo config exited with code 1: boom',
+      }),
+      isExpoGo: false,
+    });
+
+    expect(expectUrl(result)).toMatchObject({
+      url: 'exp+marmelade://profile/42',
+      resolution:
+        'app.config.ts could not be evaluated (expo config exited with code 1: boom) and no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "marmelade"',
+    });
+  });
+
+  it(`should name the evaluation failure when nothing is resolvable`, () => {
+    const result = resolveDeepLinkUrl({
+      route: '/profile/42',
+      config: config({
+        dynamicConfigFile: 'app.config.ts',
+        evaluationError: 'expo config exited with code 1: boom',
+      }),
+      isExpoGo: false,
+    });
+
+    expect(expectError(result)).toContain(
+      'Why: this project uses app.config.ts, and evaluating it failed: expo config exited with code 1: boom.'
+    );
+  });
+
+  it(`should say when the evaluated config names nothing`, () => {
+    const result = resolveDeepLinkUrl({
+      route: '/profile/42',
+      config: config({ configFile: 'app.config.ts', dynamicConfigFile: 'app.config.ts' }),
+      isExpoGo: false,
+    });
+
+    expect(expectError(result)).toContain('in the evaluated app.config.ts');
+  });
+
   it(`should reject an empty route`, () => {
     const result = resolveDeepLinkUrl({ route: '   ', config: config(), isExpoGo: false });
 
@@ -535,7 +792,13 @@ describe(quoteForDeviceShell, () => {
 // `npx @expo/agent-cli navigate <route> --scheme <your-app-scheme>`, which has two holes in it and so is
 // not a command at all. Each failure carries the command that answers *it* now.
 describe('the Try: line of a URL that could not be resolved', () => {
-  const config = { scheme: null, slug: null, configFile: 'app.json', dynamicConfigFile: null };
+  const config = {
+    scheme: null,
+    slug: null,
+    configFile: 'app.json',
+    dynamicConfigFile: null,
+    evaluationError: null,
+  };
 
   it(`answers a missing dev server with the command that starts one`, () => {
     const result = resolveDeepLinkUrl({
