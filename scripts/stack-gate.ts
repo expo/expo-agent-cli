@@ -111,7 +111,10 @@ async function main(): Promise<void> {
   const input = inputFromEnv(process.env);
   const decision = input
     ? await decide(input, { fetch, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) })
-    : { run: true, reason: 'Not a pull request. CI runs.' };
+    : {
+        run: true,
+        reason: `Not a pull request (GITHUB_REPOSITORY=${process.env.GITHUB_REPOSITORY ?? ''}, PR_NUMBER=${process.env.PR_NUMBER ?? ''}). CI runs.`,
+      };
   console.error(decision.reason);
   console.log(String(decision.run));
   const { appendFile } = await import('node:fs/promises');

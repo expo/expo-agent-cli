@@ -46,13 +46,14 @@ jobs:
       - uses: eas/checkout
       - name: Decide whether this PR runs CI
         id: gate
-        env:
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          EVENT_ACTION: ${{ github.event.action }}
-        run: set-output run "$(bun scripts/stack-gate.ts || echo true)"
+        # Expressions are interpolated in `run`, not in a step's `env`.
+        run: |
+          export GITHUB_REPOSITORY='${{ github.repository }}'
+          export PR_NUMBER='${{ github.event.pull_request.number }}'
+          export PR_HEAD_REF='${{ github.event.pull_request.head.ref }}'
+          export PR_HEAD_SHA='${{ github.event.pull_request.head.sha }}'
+          export EVENT_ACTION='${{ github.event.action }}'
+          set-output run "$(bun scripts/stack-gate.ts || echo true)"
 
   cloud-e2e-expo-go-ios:
     name: live-cloud on EAS (iOS, Expo Go)
