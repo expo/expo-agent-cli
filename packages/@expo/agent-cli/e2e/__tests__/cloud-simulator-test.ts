@@ -12,6 +12,7 @@
 // that is not the CLI) each produce their own exit code and their own sentence.
 
 import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   installStubEasAsync,
@@ -937,5 +938,71 @@ describe('an --eas command on a project EAS does not know', () => {
     expect(envelope.error.suggestedCommand).toBe(
       'npx --yes eas-cli init --account e2e-user --non-interactive'
     );
+  });
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('a project whose config puts the device on EAS', () => {
+  async function setupOnEasAsync(): Promise<string> {
+    const projectRoot = await setupAsync('go-app');
+    const file = path.join(projectRoot, 'package.json');
+    const packageJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+    packageJson.expo = { ...packageJson.expo, 'agent-cli': { deviceBackend: 'eas' } };
+    await fs.promises.writeFile(file, JSON.stringify(packageJson, null, 2));
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    return projectRoot;
+  }
+
+  it(`should open the link on the session without --eas`, async () => {
+    const projectRoot = await setupOnEasAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['navigate', '/notes', '--ios', '--scheme', 'myapp', '--no-wait-attach', '--json'],
+      { reject: false }
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      deviceBackend: 'cloud',
+      deviceId: 'sess-e2e',
+    });
+  });
+
+  it(`should close the app on the session without --eas`, async () => {
+    const projectRoot = await setupOnEasAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['runtime:stop', '--app-id', 'host.exp.Exponent', '--json', '--no-followups'],
+      { reject: false }
+    );
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      deviceBackend: 'cloud',
+      deviceId: 'sess-e2e',
+    });
+  });
+
+  it(`should end the session on dev:stop without --eas`, async () => {
+    const projectRoot = await setupOnEasAsync();
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).session).toEqual({
+      id: 'sess-e2e',
+      stopped: true,
+      reason: null,
+    });
+    expect(easInvocations(projectRoot)).toContainEqual([
+      'simulator:stop',
+      '--id',
+      'sess-e2e',
+      '--non-interactive',
+    ]);
   });
 });

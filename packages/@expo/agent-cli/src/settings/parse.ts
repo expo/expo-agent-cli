@@ -8,25 +8,28 @@ import {
   EMPTY_SETTINGS,
   type BuildBackend,
   type AgentCliSettings,
+  type DeviceBackendSetting,
   type PlatformSettings,
   type RunTarget,
 } from './types';
 
 /** The keys the config has, in the order the error lists them. */
-const KEYS = ['target', 'buildBackend', 'ios', 'android'] as const;
+const KEYS = ['target', 'buildBackend', 'deviceBackend', 'ios', 'android'] as const;
 
 /** The keys a platform object has. */
-const PLATFORM_KEYS = ['buildBackend'] as const;
+const PLATFORM_KEYS = ['buildBackend', 'deviceBackend'] as const;
 
 const TARGETS: RunTarget[] = ['expo-go', 'dev-build'];
 const BACKENDS: BuildBackend[] = ['local', 'eas'];
+const DEVICE_BACKENDS: DeviceBackendSetting[] = ['local', 'eas'];
 
 /** What one line of the config means, for the `how` half of a rejection. */
 const KEY_HELP: Record<string, string> = {
   target: `"expo-go" or "dev-build" — which app the project runs in, when both would work.`,
   buildBackend: `"local" or "eas" — where a native build runs, on this machine or in the cloud.`,
-  ios: `{ "buildBackend": … } — the same choice for iOS only, overriding buildBackend.`,
-  android: `{ "buildBackend": … } — the same choice for Android only, overriding buildBackend.`,
+  deviceBackend: `"local" or "eas" — where the app runs, on a device here or on an EAS Simulator session.`,
+  ios: `{ "buildBackend": …, "deviceBackend": … } — the same choices for iOS only, overriding the top-level ones.`,
+  android: `{ "buildBackend": …, "deviceBackend": … } — the same choices for Android only, overriding the top-level ones.`,
 };
 
 /**
@@ -57,20 +60,72 @@ export function parseAgentCliSettings(raw: unknown, where: string): AgentCliSett
 
   assertKnownKeys(raw, KEYS, where);
 
-  return {
+  const settings: AgentCliSettings = {
     target: readEnum(raw, 'target', TARGETS, where),
     buildBackend: readEnum(raw, 'buildBackend', BACKENDS, where),
+    deviceBackend: readEnum(raw, 'deviceBackend', DEVICE_BACKENDS, where),
     ios: readPlatform(raw, 'ios', where),
     android: readPlatform(raw, 'android', where),
   };
+  for (const platform of ['ios', 'android'] as const) {
+    assertDeviceFitsBuild(settings, platform, where);
+  }
+  return settings;
 }
 
-/** The backend configured for one platform: the platform's own answer, else the shared one. */
+/**
+ * The build backend configured for one platform: the platform's own answer, else the shared one.
+ * A device on EAS makes the build go there too when no build backend is named.
+ */
 export function settingsBuildBackend(
   settings: AgentCliSettings,
   platform: 'ios' | 'android'
 ): BuildBackend | null {
-  return settings[platform]?.buildBackend ?? settings.buildBackend;
+  const named = settings[platform]?.buildBackend ?? settings.buildBackend;
+  return named ?? (settingsDeviceBackend(settings, platform) === 'eas' ? 'eas' : null);
+}
+
+/** The device backend configured for one platform: the platform's own answer, else the shared one. */
+export function settingsDeviceBackend(
+  settings: AgentCliSettings,
+  platform: 'ios' | 'android'
+): DeviceBackendSetting | null {
+  return settings[platform]?.deviceBackend ?? settings.deviceBackend;
+}
+
+/**
+ * Whether the config puts the device on EAS for a device command.
+ * With no platform named, both platforms must be on EAS, because either one may be the device.
+ */
+export function settingsPutDeviceOnEas(settings: AgentCliSettings, platform?: string): boolean {
+  if (platform === 'ios' || platform === 'android') {
+    return settingsDeviceBackend(settings, platform) === 'eas';
+  }
+  if (platform !== undefined) {
+    return false;
+  }
+  return (
+    settingsDeviceBackend(settings, 'ios') === 'eas' &&
+    settingsDeviceBackend(settings, 'android') === 'eas'
+  );
+}
+
+/**
+ * Where the app runs for one platform: the flag first, then the config, then this machine.
+ * `--eas` and `--local` each name both backends at once (llp/0015 §The device backend).
+ */
+export function resolveDeviceBackend(
+  flag: BuildBackend | null,
+  settings: AgentCliSettings,
+  platform: string
+): DeviceBackendSetting {
+  if (flag) {
+    return flag;
+  }
+  if (platform !== 'ios' && platform !== 'android') {
+    return 'local';
+  }
+  return settingsDeviceBackend(settings, platform) ?? 'local';
 }
 
 /** Whether anything at all was configured, for a surface that only speaks up when something was. */
@@ -78,8 +133,28 @@ export function settingsAreEmpty(settings: AgentCliSettings): boolean {
   return (
     settings.target == null &&
     settings.buildBackend == null &&
+    settings.deviceBackend == null &&
     settings.ios?.buildBackend == null &&
-    settings.android?.buildBackend == null
+    settings.ios?.deviceBackend == null &&
+    settings.android?.buildBackend == null &&
+    settings.android?.deviceBackend == null
+  );
+}
+
+/** A session installs Expo Go or a build EAS made, so a device on EAS cannot take a build made here. */
+function assertDeviceFitsBuild(
+  settings: AgentCliSettings,
+  platform: 'ios' | 'android',
+  where: string
+): void {
+  const build = settings[platform]?.buildBackend ?? settings.buildBackend;
+  if (settingsDeviceBackend(settings, platform) !== 'eas' || build !== 'local') {
+    return;
+  }
+  throw reject(
+    `${where} puts the ${platform} device on EAS (deviceBackend: "eas") and the ${platform} build on this machine (buildBackend: "local").`,
+    `Why: an EAS Simulator session installs Expo Go or a build that EAS made. It cannot install a build made on this machine, so no development build could open.`,
+    `How: remove buildBackend, or set it to "eas", for ${platform}. To run ${platform} on this machine, set deviceBackend to "local" instead.`
   );
 }
 
@@ -96,12 +171,15 @@ function readPlatform(
   if (!isPlainObject(value)) {
     throw reject(
       `${at} is ${describe(value)}, and it has to be an object.`,
-      `Why: a platform entry holds that platform's own settings, and today it holds exactly one — buildBackend.`,
+      `Why: a platform entry holds that platform's own settings: buildBackend and deviceBackend.`,
       `How: write it as { "${key}": { "buildBackend": "eas" } }, or set "buildBackend" at the top level to choose for both platforms at once.`
     );
   }
   assertKnownKeys(value, PLATFORM_KEYS, at);
-  return { buildBackend: readEnum(value, 'buildBackend', BACKENDS, at) };
+  return {
+    buildBackend: readEnum(value, 'buildBackend', BACKENDS, at),
+    deviceBackend: readEnum(value, 'deviceBackend', DEVICE_BACKENDS, at),
+  };
 }
 
 function readEnum<T extends string>(

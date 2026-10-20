@@ -7,6 +7,8 @@ import { PROGRAM_PREFIX } from '../programName';
 import { parseArgsOrThrow, strayArgumentError } from '../utils/args';
 import { resolveDevServerTarget } from './devServer';
 import { resolveDevicePlatform } from './devicePlatform';
+import { settingsPutDeviceOnEas } from '../settings/parse';
+import type { AgentCliSettings } from '../settings/types';
 
 export interface RuntimeStopOptions {
   /** Platform to stop the app on. Undefined means "whichever device is booted". */
@@ -45,6 +47,20 @@ const RUNTIME_STOP_ARGS = {
   '--json': Boolean,
   '--no-followups': Boolean,
 };
+
+/**
+ * `deviceBackend: "eas"` in the config names the session the way `--eas` does.
+ *
+ * @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+ */
+export function withConfiguredDevice(
+  options: RuntimeStopOptions,
+  settings: AgentCliSettings
+): RuntimeStopOptions {
+  return !options.cloud && settingsPutDeviceOnEas(settings, options.platform)
+    ? { ...options, cloud: true }
+    : options;
+}
 
 /**
  * Resolve the arguments of `@expo/agent-cli runtime:stop`.

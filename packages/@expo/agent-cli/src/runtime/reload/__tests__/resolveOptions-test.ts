@@ -1,4 +1,9 @@
-import { DEFAULT_RELOAD_TIMEOUT_MS, resolveReloadOptions } from '../resolveOptions';
+import { parseAgentCliSettings } from '../../../settings/parse';
+import {
+  DEFAULT_RELOAD_TIMEOUT_MS,
+  resolveReloadOptions,
+  withConfiguredDevice,
+} from '../resolveOptions';
 
 describe(resolveReloadOptions, () => {
   it(`should reload through whatever works, on whatever device is there, by default`, () => {
@@ -104,5 +109,19 @@ describe('resolveReloadOptions and the cloud backend', () => {
       platform: 'ios',
       method: 'device',
     });
+  });
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('The config puts the device on EAS', () => {
+  const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
+  const iosOnly = parseAgentCliSettings({ ios: { deviceBackend: 'eas' } }, 'config');
+
+  it(`should act on the session, as --eas does`, () => {
+    expect(withConfiguredDevice(resolveReloadOptions(['--ios']), onEas).cloud).toBe(true);
+  });
+
+  it(`should stay local for a platform the config keeps here`, () => {
+    expect(withConfiguredDevice(resolveReloadOptions(['--android']), iosOnly).cloud).toBe(false);
   });
 });

@@ -16,6 +16,9 @@ export type RunTarget =
 /** Where a native build runs. The same two words as `RunsOn`, said as a preference. */
 export type BuildBackend = 'local' | 'eas';
 
+/** Where the app runs: a device on this machine, or an EAS Simulator session. */
+export type DeviceBackendSetting = 'local' | 'eas';
+
 /** Every key of the config, all optional, `null` for "the developer said nothing". */
 export interface AgentCliSettings {
   /**
@@ -29,7 +32,12 @@ export interface AgentCliSettings {
   target: RunTarget | null;
   /** Where every native build runs, unless a platform below overrides it. */
   buildBackend: BuildBackend | null;
-  /** Per-platform overrides of {@link buildBackend}, `null` when the file names none. */
+  /**
+   * Where the app runs, unless a platform below overrides it.
+   * `eas` also puts the build on EAS, because a session installs only what EAS built.
+   */
+  deviceBackend: DeviceBackendSetting | null;
+  /** Per-platform overrides of {@link buildBackend} and {@link deviceBackend}, `null` when the file names none. */
   ios: PlatformSettings | null;
   android: PlatformSettings | null;
 }
@@ -37,12 +45,14 @@ export interface AgentCliSettings {
 /** What may be said about one platform. */
 export interface PlatformSettings {
   buildBackend: BuildBackend | null;
+  deviceBackend: DeviceBackendSetting | null;
 }
 
 /** An `AgentCliSettings` that says nothing, which is what every project without the key has. */
 export const EMPTY_SETTINGS: AgentCliSettings = {
   target: null,
   buildBackend: null,
+  deviceBackend: null,
   ios: null,
   android: null,
 };
