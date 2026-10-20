@@ -13,6 +13,7 @@
 
 ### 🎉 New features
 
+- `--local` on `smoke`, `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` beats `deviceBackend: "eas"` in the config: the device stays on this machine, and `dev:stop` leaves the session running. ([#177](https://github.com/expo/expo-agent-cli/pull/177) by [@kudo](https://github.com/kudo))
 - `deviceBackend` in `expo.agent-cli` puts the app on an EAS Simulator session, top-level or per platform. It does what `--eas` does on `dev`, `smoke`, `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop`, and builds on EAS too. ([#176](https://github.com/expo/expo-agent-cli/pull/176) by [@kudo](https://github.com/kudo))
 - EAS-backed commands no longer spawn `eas-cli@latest`. A global `eas` that resolves to the `eas-cli` package at 25.0.0 or newer is run directly, with no runner and no registry request. Without one, the runner gets the bare `eas-cli` spec, so `bunx` reuses its cached copy instead of reinstalling on every run. A project that declares `eas-cli` still runs its own copy. Printed command lines follow the same choice: `eas …` with a recent global install, otherwise `npx --yes eas-cli …` or `bunx eas-cli …`. ([#159](https://github.com/expo/expo-agent-cli/pull/159) by [@kudo](https://github.com/kudo))
 - `navigate` and `smoke` now suppress onboarding, the floating Tools button, and automatic dev-menu opening when launching a development build. Set `EXPO_NO_DEV_MENU=0` to opt out.
