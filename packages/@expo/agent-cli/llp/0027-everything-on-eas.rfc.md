@@ -9,7 +9,7 @@
 
 ## Summary
 
-`--eas` on `dev` used to mean one thing: the native build runs on EAS Build. The plan ended with an artifact on EAS and a sentence about `eas build:run` — and on an Expo Go project the flag changed nothing at all [observed — 1.0.9, 2026-09-08]. Kudo's rule [2026-09-08]: **when `--eas` is passed, everything runs on EAS — the build, the simulator, the lot.**
+`--eas` on `dev` used to mean one thing: the native build runs on EAS Build. The plan ended with an artifact on EAS and a sentence about `eas build:run` — and on an Expo Go project the flag changed nothing at all [observed — 1.0.9, 2026-09-08]. Kudo's rule [2026-09-08]: **when `--eas` is passed, everything runs on EAS — the build, the simulator, the lot.** `deviceBackend: "eas"` in the developer config takes this same route without the flag ([[0015-backend-selection-and-config]] §The device backend).
 
 So `dev --ios --eas` now ends with the app running on an EAS Simulator session:
 

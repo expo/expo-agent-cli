@@ -2,18 +2,19 @@
 
 **Type:** RFC
 **Status:** Active
-**Systems:** the plan engine (`src/plan/decide.ts`, `src/plan/resolveAsync.ts`, `src/plan/runTarget.ts`); the toolchain probe (`src/toolchain/`); the developer config (`src/settings/`); EAS CLI resolution (`src/utils/easCli.ts`, `src/utils/packageRunner.ts`, `src/utils/processGroup.ts`); project-local bin resolution (`src/utils/projectBin.ts`); `@expo/agent-cli dev`; `@expo/agent-cli status`
+**Systems:** the plan engine (`src/plan/decide.ts`, `src/plan/resolveAsync.ts`, `src/plan/runTarget.ts`); the toolchain probe (`src/toolchain/`); the developer config (`src/settings/`); EAS CLI resolution (`src/utils/easCli.ts`, `src/utils/packageRunner.ts`, `src/utils/processGroup.ts`); project-local bin resolution (`src/utils/projectBin.ts`); `@expo/agent-cli dev`; `@expo/agent-cli status`; the device commands that take `--eas` (`smoke`, `navigate`, `runtime:reload`, `runtime:stop`, `dev:stop`); the billed-spawn lint (`src/lint/__tests__/billedEasSpawn-test.ts`)
 **Author:** Kudo (drafted with Tuft agent)
 **Date:** 2026-08-26
-**Revised:** 2026-08-30 · 2026-09-08
-**Related:** [[0004-smart-start-and-project-state]], [[0008-guardrails]], [[0009-smart-followups]], [[0010-agent-conventions]], [[0011-impact-and-freshness]]
+**Revised:** 2026-08-30 · 2026-09-08 · 2026-10-21
+**Related:** [[0004-smart-start-and-project-state]], [[0005-runtime-loop-tools]], [[0008-guardrails]], [[0009-smart-followups]], [[0010-agent-conventions]], [[0011-impact-and-freshness]]
 
 ## Summary
 
 Two decisions this CLI was making badly, and one place to record what a developer wants.
 
 1. Where a build runs is part of the plan, not a footnote under it. On a host that cannot build for the target platform at all, a plan nobody should approve used to print as though they should. The selection now happens while the plan is decided, so a machine with no Xcode gets `eas build` in the steps.
-2. The developer may disagree, and there has to be somewhere to say so. One config, four keys, in `package.json` under `expo.agent-cli`.
+2. The developer may disagree, and there has to be somewhere to say so. One config, five keys, in `package.json` under `expo.agent-cli`.
+3. Where the build runs and where the device runs are two choices. The config can make each one, and only a person can choose EAS for either (§Who may spend EAS credits).
 
 [[0004-smart-start-and-project-state]]'s old claim that the plan "does not act" on where a build runs is superseded. What that document forbids is a swap of steps between the moment a plan is printed and the moment it runs. Selection happens strictly earlier than that.
 
@@ -56,6 +57,51 @@ Every choice carries two spellings of the same sentence: `why`, as `Building <wh
 What "everything on EAS" is made of on `dev` — the tunnel, the simulator profile, the session — is [[0027-everything-on-eas]].
 
 `--cloud` is removed outright, with no alias [Kudo, 2026-09-08]: a `--cloud` on any command line is the ordinary unknown-option error, which names `--help`. The surface is young enough that one name from now on is worth more than a release of two. Every printed command line — follow-ups, `Try:` lines, the `--help` — says `--eas`.
+
+## Who may spend EAS credits
+
+[confirmed, Kudo, 2026-10-21] One rule for every command:
+
+> A command starts a billed EAS action only when a person chose EAS: `--eas` on the command line, or `buildBackend: "eas"` or `deviceBackend: "eas"` in the config. A finding about this host never starts one.
+
+A billed action is one of two things: starting an EAS build (`eas build`, or a verb that queues one, `eas build:dev` and `eas workflow:run`), or starting an EAS Simulator session (`eas simulator`, `eas simulator:start`). Each one costs credits from the moment it starts.
+
+The rule is about **starting**. Using a session that is already running starts nothing new. So the `fallback` rung of `navigate` and `smoke` is allowed: with no local device, they may drive the session that `.env.eas-simulator` names ([[0005-runtime-loop-tools]] §Cloud simulator, [[0035-one-device-per-worktree]]). They never start one without `--eas` or the config.
+
+Where each command stands:
+
+| Command                                      | Billed action it can start                                                                                                                         | Who chose it                                                                                                    |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `dev`                                        | an EAS build, an EAS Simulator session                                                                                                             | `--eas`, `buildBackend`, `deviceBackend`. An implicit route stops with `EAS_ROUTE_NOT_CHOSEN` (§The selection). |
+| `smoke`                                      | an EAS build, through the `dev --detach` child that starts its dev server; an EAS Simulator session, in `start-session`, which itself never builds | `--eas`, `buildBackend`, `deviceBackend`. An implicit route fails `start-dev-server`.                           |
+| `navigate`, `runtime:reload`, `runtime:stop` | none. They use a running session or refuse.                                                                                                        | —                                                                                                               |
+| `dev:stop`                                   | none. It ends sessions.                                                                                                                            | —                                                                                                               |
+| every other command                          | none                                                                                                                                               | —                                                                                                               |
+
+Two spawn sites start a billed action: the `eas-build` step that `src/plan/decide.ts` writes, and the session start in `src/dev/openAppEas.ts`. `smoke` reaches the first one through its `dev` child, and the second one in `start-session`. A lint (`src/lint/__tests__/billedEasSpawn-test.ts`) reads the source and fails when any other file builds an argv for one of those verbs. A new site is then a visible diff, next to this rule.
+
+## The device backend
+
+[confirmed, Kudo, 2026-10-21] `buildBackend` says where a build runs. `deviceBackend` says where the app runs: a simulator, an emulator or a device on this machine (`local`), or an EAS Simulator session (`eas`). The two are separate choices, so they are separate keys. `buildBackend: "eas"` alone builds on EAS and installs the build on a local device.
+
+Resolution, per platform, highest first:
+
+1. A flag. `--eas` sets both backends to `eas`. `--local` sets both to `local`. Each flag means "everything in one place", and `--local` is always a run that spends nothing.
+2. The platform's own `deviceBackend` (`ios`, `android`).
+3. The top-level `deviceBackend`.
+4. `local`. Detection never puts a device on EAS. There is no implicit device route.
+
+`deviceBackend: "eas"` makes the build go to EAS too. A session installs Expo Go or a build that EAS has (`--expo-go` or `--build-id`), never a build made on this machine. So a platform whose `deviceBackend` is `eas` and whose `buildBackend` is unset builds on EAS. A platform that resolves to `deviceBackend: "eas"` and `buildBackend: "local"` is `BAD_AGENT_CLI_CONFIG`, because no run of it could open a development build.
+
+With `deviceBackend: "eas"`, a command does what it does with `--eas`:
+
+- `dev` tunnels the dev server, builds with the simulator profile when it must build, and opens the app on a session ([[0027-everything-on-eas]]). It refuses `--device`, `--lan`, `--localhost` and `--host lan|localhost` with `BAD_ARGS`, as `--eas` does. The message names the config key, and its How line names `--local`. `dev --web` reads no `deviceBackend`, because the web has no device.
+- `smoke`, `navigate`, `runtime:reload` and `runtime:stop` take the session as their device (`cloud: 'required'`).
+- `dev:stop` ends this project's session, as `dev:stop --eas` does, when the config puts either platform's device on EAS.
+
+These commands also take `--local`. With `--local`, they use only local devices (`cloud: 'off'`), whatever the config says. Without the config, `--local` is the same as no flag, except that `navigate` and `smoke` also drop their `fallback` rung. `dev:stop --local` leaves every session running.
+
+The config is in `package.json`, so it is shared by everyone who checks out the repository. One `deviceBackend: "eas"` makes every teammate's `dev` start a billed session. `buildBackend: "eas"` does the same for builds, and a session costs more, because a session bills by the minute. So the plan's reasons and the `dev` output say that the session comes from the config, name the file, and say how to stop it. A per-machine override is left for later.
 
 ## The plan approved is the plan run
 
@@ -146,7 +192,7 @@ No new flag names. `--go` and `--dev-client` are `expo start`'s own, already acc
 
 The key was `agentCli` until 2026-09-16. It is spelled like the package now, and like the `expo.install` and `expo.doctor` keys beside it, which read as the tool they configure. An `expo.agentCli` still in a `package.json` is an error naming the new key, not settings quietly read as absent — the silent drop §Validation exists to prevent. [confirmed, Kudo, 2026-09-16]
 
-`app.json` as a top-level `@expo/agent-cli` key is broken by design. `@expo/config`'s `reduceExpoObject` discards every top-level key when an `expo` object is present. `app.json` under `expo.extra` changes the fingerprint. A tooling preference would mark every existing development build stale. `agent-cli.config.js` was rejected for now: this config is four scalars, and `status` promises to be instant.
+`app.json` as a top-level `@expo/agent-cli` key is broken by design. `@expo/config`'s `reduceExpoObject` discards every top-level key when an `expo` object is present. `app.json` under `expo.extra` changes the fingerprint. A tooling preference would mark every existing development build stale. `agent-cli.config.js` was rejected for now: this config is a few scalars, and `status` promises to be instant.
 
 `package.json` › `expo.agent-cli` is where this repository already keeps tooling configuration (`expo.install.exclude`, `expo.doctor`, `expo.autolinking`). It is static JSON. Nothing here moves a hash or ships into the app. `package.json`'s `expo` key is not merged into the `ExpoConfig`.
 
@@ -158,18 +204,19 @@ The module is `src/settings/` rather than `src/config/`, because `src/config/` i
     "agent-cli": {
       "target": "expo-go" | "dev-build",
       "buildBackend": "local" | "eas",
-      "ios": { "buildBackend": "local" | "eas" },
-      "android": { "buildBackend": "local" | "eas" }
+      "deviceBackend": "local" | "eas",
+      "ios": { "buildBackend": "local" | "eas", "deviceBackend": "local" | "eas" },
+      "android": { "buildBackend": "local" | "eas", "deviceBackend": "local" | "eas" }
     }
   }
 }
 ```
 
-Two questions, kept orthogonal: which app, and where the build runs. The per-platform override exists because the detection it overrides is already per-platform. `target` has no per-platform form.
+Three questions, kept orthogonal: which app, where the build runs, and where the app runs. The per-platform overrides exist because the detection they override is already per-platform, and because one host can often run one platform's device and not the other's. `target` has no per-platform form.
 
 ## Validation
 
-Unknown keys and unknown values are errors, not warnings. A preference that was meant to change a plan and silently did not is a wrong plan approved as a right one. A typo gets a "looks like" line. A `package.json` that is not valid JSON is an error rather than "no config". A project with no `@expo/agent-cli` key is not an error and never warns.
+Unknown keys and unknown values are errors, not warnings. A preference that was meant to change a plan and silently did not is a wrong plan approved as a right one. A typo gets a "looks like" line. A `package.json` that is not valid JSON is an error rather than "no config". A project with no `@expo/agent-cli` key is not an error and never warns. A platform that resolves to `deviceBackend: "eas"` with `buildBackend: "local"` is an error (§The device backend).
 
 `status` is the one exception to the fatality. It catches the error, reports every other line, and exits 0, because `status` promises to be information rather than judgment.
 
@@ -189,4 +236,4 @@ A ladder must not offer a route the plan already took.
 
 ## Testing
 
-The selection is a pure function over four inputs, so its whole matrix of host × toolchain × config × flag is one table in `src/toolchain/__tests__/selectBackend-test.ts`. `hostPlatform` is a parameter rather than `process.platform`. `resolveAsync-test.ts` pins the order the four inputs are read in. `decide-test.ts` pins the steps each backend produces. End to end, `plan-test.ts` drives a stubbed `xcode-select`, an unset `ANDROID_HOME`, and a real `package.json` edit for every config case. The one thing not covered by a test is a live `eas build` step.
+`deviceBackend` resolution is a pure function too, tested per flag × top-level key × platform key in `src/settings/__tests__/parse-test.ts`, with the refused combination. Each device command has a unit test for its device backend under each config value and under `--local`. The e2e tier runs `dev`, `navigate`, `runtime:stop` and `dev:stop` with the config instead of `--eas`. The selection is a pure function over four inputs, so its whole matrix of host × toolchain × config × flag is one table in `src/toolchain/__tests__/selectBackend-test.ts`. `hostPlatform` is a parameter rather than `process.platform`. `resolveAsync-test.ts` pins the order the four inputs are read in. `decide-test.ts` pins the steps each backend produces. End to end, `plan-test.ts` drives a stubbed `xcode-select`, an unset `ANDROID_HOME`, and a real `package.json` edit for every config case. The one thing not covered by a test is a live `eas build` step.
