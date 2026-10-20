@@ -32,7 +32,7 @@ jobs:
 
   # Tier 0 of LLP 0002: deterministic, model-free, runs on every PR.
   tier0-linux:
-    needs: stack
+    needs: [stack]
     if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     steps:
@@ -73,7 +73,7 @@ jobs:
   # Both OSes run here — the win32 shards are what exercise the skills linker's directory-junction
   # path (nothing else does).
   tier0-e2e:
-    needs: stack
+    needs: [stack]
     if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
     strategy:
       fail-fast: false
@@ -106,7 +106,7 @@ jobs:
   # The stub `xcrun` (simctl and devicectl) sits first on PATH, so no real simulator or phone
   # is touched. Also run the macOS-only device-binding cases that Linux/Windows shards skip.
   tier0-e2e-macos:
-    needs: stack
+    needs: [stack]
     if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
     runs-on: macos-15
     timeout-minutes: 20
@@ -137,7 +137,7 @@ jobs:
   # The win32 e2e run — including the skills linker's directory-junction path, which nothing
   # else exercises — is sharded in `tier0-e2e` above.
   tier0-windows:
-    needs: stack
+    needs: [stack]
     if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
     runs-on: windows-2022
     timeout-minutes: 45
@@ -164,7 +164,7 @@ jobs:
   # Short real agent integration tests. Every relevant PR runs the entire Tier 1 suite.
   # Advisory until repeated CI evidence establishes reliability; individual results stay visible.
   tier1-agent-eval:
-    needs: stack
+    needs: [stack]
     if: >-
       needs.stack.outputs.run == 'true' &&
       (github.event_name == 'pull_request' ||

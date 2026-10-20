@@ -18,7 +18,7 @@ jobs:
     uses: ./.github/workflows/stack-gate.yml
 
   oxfmt:
-    needs: stack
+    needs: [stack]
     if: needs.stack.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
