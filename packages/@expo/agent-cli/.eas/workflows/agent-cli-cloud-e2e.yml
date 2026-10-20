@@ -46,7 +46,6 @@ jobs:
       - uses: eas/checkout
       - name: Decide whether this PR runs CI
         id: stack
-        # Expressions are interpolated in `run`, not in a step's `env`.
         run: |
           export GITHUB_REPOSITORY='${{ github.repository }}'
           export PR_NUMBER='${{ github.event.pull_request.number }}'
