@@ -274,3 +274,19 @@ describe('The config puts the device on EAS', () => {
     );
   });
 });
+
+describe('--local keeps the device on this machine', () => {
+  const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
+
+  it(`should win over the config`, () => {
+    expect(withConfiguredDevice(resolveSmokeOptions(['--ios', '--local']), onEas).cloud).toBe(
+      'off'
+    );
+  });
+
+  it(`should refuse --eas with --local`, () => {
+    expect(() => resolveSmokeOptions(['--ios', '--eas', '--local'])).toThrow(
+      /--eas and --local name two places/
+    );
+  });
+});

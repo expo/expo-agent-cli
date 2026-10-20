@@ -34,6 +34,7 @@ function lock(overrides: Record<string, unknown> = {}) {
 function options(overrides: Partial<DevStopOptions> = {}): DevStopOptions {
   return {
     eas: false,
+    local: false,
     port: null,
     signal: 'SIGTERM',
     force: false,

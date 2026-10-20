@@ -208,6 +208,7 @@ function options(overrides: Partial<ReloadOptions> = {}): ReloadOptions {
     route: null,
     method: 'auto',
     cloud: false,
+    local: false,
     devServerUrl: 'http://127.0.0.1:8081',
     timeoutMs: 2000,
     json: false,

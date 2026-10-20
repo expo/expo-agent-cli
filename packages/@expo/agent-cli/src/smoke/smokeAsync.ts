@@ -461,6 +461,8 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         // is tunnelled and a build the plan needs is the simulator profile on EAS Build. `--no-open`
         // above keeps the session start this run's own (`ensureEasSession`).
         ...(options.cloud === 'required' ? ['--eas'] : []),
+        // The child reads the config itself, so a local run has to say so to it.
+        ...(options.cloud === 'off' ? ['--local'] : []),
         ...startPortArgs(options.devServerUrl),
       ];
       try {
@@ -1250,7 +1252,9 @@ async function resolveSmokeTargetAsync(
         // build this names is the simulator profile on EAS and the session can install it.
         ...(options.cloud === 'required'
           ? { requestedBackend: 'eas' as const, deviceBackend: 'eas' as const }
-          : {}),
+          : options.cloud === 'off'
+            ? { requestedBackend: 'local' as const, deviceBackend: 'local' as const }
+            : {}),
       })
     ).plan;
   } catch {

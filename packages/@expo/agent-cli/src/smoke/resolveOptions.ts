@@ -10,6 +10,7 @@ import { parseArgsOrThrow, resolveDuration, strayArgumentError } from '../utils/
 import { CommandError } from '../utils/errors';
 import { settingsPutDeviceOnEas } from '../settings/parse';
 import type { AgentCliSettings } from '../settings/types';
+import { assertOneDeviceBackendFlag } from '../device/backendFlags';
 
 /** Platforms a smoke run can be performed on: the two that have a runtime to read. */
 export type SmokePlatform = 'ios' | 'android';
@@ -108,6 +109,7 @@ const SMOKE_ARGS = {
   '--ios': Boolean,
   '--android': Boolean,
   '--eas': Boolean,
+  '--local': Boolean,
   // `--start` is what this command does by default now, and it stays accepted rather than being
   // removed: it is on command lines people have already written, and it still names the truth.
   '--start': Boolean,
@@ -150,6 +152,7 @@ export function withConfiguredDevice(
  */
 export function resolveSmokeOptions(argv: string[]): SmokeOptions {
   const args = parseArgsOrThrow(SMOKE_ARGS, argv, 'smoke');
+  assertOneDeviceBackendFlag(!!args['--eas'], !!args['--local']);
 
   // @ref llp/0010-agent-conventions.rfc.md §Registry rules. The route is a flag, not a
   // positional: this command's subject is the app, and a bare word is a caller who meant --route.
@@ -208,7 +211,7 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
   return {
     route: args['--route'] ? String(args['--route']) : null,
     platform,
-    cloud: args['--eas'] ? 'required' : 'fallback',
+    cloud: args['--eas'] ? 'required' : args['--local'] ? 'off' : 'fallback',
     bootstrap,
     windowMs: resolveDuration(args['--window'], '--window', DEFAULT_SMOKE_WINDOW_MS, {
       // A window of zero catches nothing and would report an empty one as evidence, which is the

@@ -7,6 +7,7 @@ import { parseArgsOrThrow, resolveDuration, strayArgumentError } from '../utils/
 import { CommandError } from '../utils/errors';
 import { settingsPutDeviceOnEas } from '../settings/parse';
 import type { AgentCliSettings } from '../settings/types';
+import { assertOneDeviceBackendFlag } from '../device/backendFlags';
 
 /** How long to wait for the dev server to go, when `--timeout` says nothing. */
 export const DEFAULT_DEV_STOP_TIMEOUT_MS = 10_000;
@@ -30,6 +31,8 @@ export interface DevStopOptions {
    * finds it, and stopped by id.
    */
   eas: boolean;
+  /** `--local`: leave every session running, even when the config puts the device on EAS. */
+  local: boolean;
   release?: boolean;
   /** Internal: smoke releases only the platform it used. */
   platform?: 'ios' | 'android';
@@ -55,6 +58,7 @@ export interface DevStopOptions {
 
 const DEV_STOP_ARGS = {
   '--eas': Boolean,
+  '--local': Boolean,
   '--release': Boolean,
   '--port': String,
   '--signal': String,
@@ -77,7 +81,7 @@ export function withConfiguredDevice(
   const onEas = options.platform
     ? settingsPutDeviceOnEas(settings, options.platform)
     : settingsPutDeviceOnEas(settings, 'ios') || settingsPutDeviceOnEas(settings, 'android');
-  return !options.eas && onEas ? { ...options, eas: true } : options;
+  return !options.eas && !options.local && onEas ? { ...options, eas: true } : options;
 }
 
 /**
@@ -88,6 +92,7 @@ export function withConfiguredDevice(
  */
 export function resolveDevStopOptions(argv: string[]): DevStopOptions {
   const args = parseArgsOrThrow(DEV_STOP_ARGS, argv, 'dev:stop');
+  assertOneDeviceBackendFlag(!!args['--eas'], !!args['--local']);
 
   // @ref llp/0010-agent-conventions.rfc.md §Registry rules.
   if (args._.length > 0) {
@@ -106,6 +111,7 @@ export function resolveDevStopOptions(argv: string[]): DevStopOptions {
 
   return {
     eas: !!args['--eas'],
+    local: !!args['--local'],
     release: !!args['--release'],
     port: args['--port'] == null ? null : parsePort(args['--port']),
     signal,

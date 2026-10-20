@@ -11,7 +11,7 @@ export const devStopHelp: CommandHelp = {
   usage: `${PROGRAM_PREFIX} dev:stop`,
   options: [
     `--release             Release this worktree’s devices after its dev server stops`,
-    `--eas                 Also end this project's EAS Simulator session (bills until stopped)`,
+    `--eas, --local        Also end this project's EAS Simulator session (bills until stopped), or never`,
     `--port <port>         Look at this port when no lock answers for the project`,
     `--signal <signal>     SIGTERM (default), SIGINT, or SIGKILL`,
     `--force               Stop a dev server on --port that no lock answers for`,

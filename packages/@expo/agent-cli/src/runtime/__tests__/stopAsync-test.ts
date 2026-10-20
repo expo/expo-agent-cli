@@ -65,6 +65,7 @@ function options(overrides: Partial<RuntimeStopOptions> = {}): RuntimeStopOption
     devServerUrl: 'http://127.0.0.1:8081',
     platform: 'ios',
     cloud: false,
+    local: false,
     json: true,
     followups: false,
     ...overrides,

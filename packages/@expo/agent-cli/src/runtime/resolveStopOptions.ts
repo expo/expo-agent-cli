@@ -9,6 +9,7 @@ import { resolveDevServerTarget } from './devServer';
 import { resolveDevicePlatform } from './devicePlatform';
 import { settingsPutDeviceOnEas } from '../settings/parse';
 import type { AgentCliSettings } from '../settings/types';
+import { assertOneDeviceBackendFlag } from '../device/backendFlags';
 
 export interface RuntimeStopOptions {
   /** Platform to stop the app on. Undefined means "whichever device is booted". */
@@ -21,6 +22,8 @@ export interface RuntimeStopOptions {
    * the ladder and not `fallback` (llp/0005 §Cloud simulator).
    */
   cloud: boolean;
+  /** `--local`: only devices on this machine, even when the config puts the device on EAS. */
+  local: boolean;
   /** Application id to stop, which wins over everything this command could work out itself. */
   appId?: string;
   /** The `--dev-server-url` the caller named, or null when the dev server is still to be found. */
@@ -39,6 +42,7 @@ const RUNTIME_STOP_ARGS = {
   // Reading `agent-device@0.20.10` found `close <appId>`, so the flag now does what an agent that
   // learned it from `navigate` expects it to do.
   '--eas': Boolean,
+  '--local': Boolean,
   '--app-id': String,
   '--dev-server-url': String,
   // Sugar for the two flags above (llp/0005 §One preflight for the runtime family).
@@ -57,7 +61,7 @@ export function withConfiguredDevice(
   options: RuntimeStopOptions,
   settings: AgentCliSettings
 ): RuntimeStopOptions {
-  return !options.cloud && settingsPutDeviceOnEas(settings, options.platform)
+  return !options.cloud && !options.local && settingsPutDeviceOnEas(settings, options.platform)
     ? { ...options, cloud: true }
     : options;
 }
@@ -70,6 +74,7 @@ export function withConfiguredDevice(
  */
 export function resolveRuntimeStopOptions(argv: string[]): RuntimeStopOptions {
   const args = parseArgsOrThrow(RUNTIME_STOP_ARGS, argv, 'runtime:stop');
+  assertOneDeviceBackendFlag(!!args['--eas'], !!args['--local']);
 
   // @ref llp/0010-agent-conventions.rfc.md §Registry rules. `runtime:stop <bundle-id>`
   // is the natural line to type, and dropping it would stop whatever this command worked out on
@@ -85,6 +90,7 @@ export function resolveRuntimeStopOptions(argv: string[]): RuntimeStopOptions {
       bothHint: 'run the command twice, once per device.',
     }),
     cloud: !!args['--eas'],
+    local: !!args['--local'],
     appId: args['--app-id'] ? String(args['--app-id']) : undefined,
     devServerUrl: resolveDevServerTarget(args['--dev-server-url'], args['--port'], 'runtime:stop'),
     json: !!args['--json'],

@@ -4,6 +4,7 @@ import { vol } from 'memfs';
 import { bindingFor, fakeTools, writeBinding } from '../../deviceBinding/__tests__/fakeTools';
 import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import * as deviceTools from '../../deviceBinding/tools';
+import { devDetachAsync } from '../../dev/detachAsync';
 import { devStopAsync } from '../../dev/stopAsync';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps } from '../smokeAsync';
@@ -78,6 +79,20 @@ it('a start whose device check did not answer keeps the bound device on cleanup'
   expect(devStopAsync).toHaveBeenCalledWith(
     root,
     expect.objectContaining({ release: false }),
+    expect.anything()
+  );
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — the detached child
+// reads the config itself, so a local smoke has to pass --local on to it.
+it('a local smoke starts a dev server that stays on this machine', async () => {
+  vi.spyOn(deviceTools, 'defaultTools').mockReturnValue(
+    fakeTools({ simulators: [{ udid: 'A', name: 'agent-cli 0000', state: 'Booted' }] })
+  );
+  await buildSmokeDeps(root, resolveSmokeOptions(['--ios', '--local'])).startDevServer();
+  expect(devDetachAsync).toHaveBeenCalledWith(
+    root,
+    expect.objectContaining({ buildBackend: 'local', deviceBackend: 'local' }),
     expect.anything()
   );
 });

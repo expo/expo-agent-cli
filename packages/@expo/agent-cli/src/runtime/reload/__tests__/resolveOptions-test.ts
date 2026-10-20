@@ -11,6 +11,7 @@ describe(resolveReloadOptions, () => {
       route: null,
       method: 'auto',
       cloud: false,
+      local: false,
       devServerUrl: null,
       platform: undefined,
       scheme: undefined,
@@ -47,6 +48,7 @@ describe(resolveReloadOptions, () => {
     ).toEqual({
       route: '/notes',
       cloud: false,
+      local: false,
       method: 'device',
       devServerUrl: 'http://192.168.1.10:8081',
       platform: 'android',
@@ -123,5 +125,21 @@ describe('The config puts the device on EAS', () => {
 
   it(`should stay local for a platform the config keeps here`, () => {
     expect(withConfiguredDevice(resolveReloadOptions(['--android']), iosOnly).cloud).toBe(false);
+  });
+});
+
+describe('--local keeps the device on this machine', () => {
+  const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
+
+  it(`should win over the config`, () => {
+    expect(withConfiguredDevice(resolveReloadOptions(['--ios', '--local']), onEas).cloud).toBe(
+      false
+    );
+  });
+
+  it(`should refuse --eas with --local`, () => {
+    expect(() => resolveReloadOptions(['--ios', '--eas', '--local'])).toThrow(
+      /--eas and --local name two places/
+    );
   });
 });

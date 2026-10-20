@@ -2,6 +2,7 @@
 // Argument resolution for `@expo/agent-cli navigate`. Pure: argv in, options out, `CommandError` for
 // anything a user can get wrong.
 
+import { assertOneDeviceBackendFlag } from '../device/backendFlags';
 import { PROGRAM_PREFIX } from '../programName';
 import { settingsPutDeviceOnEas } from '../settings/parse';
 import type { AgentCliSettings } from '../settings/types';
@@ -44,10 +45,9 @@ export interface NavigateOptions {
   /**
    * Which device backends this run may use, decided by `--eas`.
    *
-   * `required` when the flag was passed, `fallback` otherwise — so a machine with a local device
-   * behaves exactly as it did, and one with none reaches for an EAS Simulator session instead of
-   * only being told it has no device. Never `off` here: `navigate` is the command the cloud
-   * backend exists for.
+   * `required` when the flag was passed, `off` for `--local`, `fallback` otherwise — so a machine
+   * with a local device behaves exactly as it did, and one with none reaches for an EAS Simulator
+   * session instead of only being told it has no device.
    *
    * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
    */
@@ -90,6 +90,7 @@ const NAVIGATE_ARGS = {
   // A third backend rather than a third platform, which is why it is not part of the pair above:
   // a session is iOS or Android too, and `--eas --ios` is a meaningful thing to type.
   '--eas': Boolean,
+  '--local': Boolean,
   '--dev-server-url': String,
   '--app-id': String,
   '--print-url': Boolean,
@@ -149,6 +150,7 @@ export function resolveNavigateOptions(argv: string[]): NavigateOptions {
   // The one flag pair that cannot be read as a refinement of the other: `--print-url` is the mode
   // that asks for **no** device, and `--eas` names one. A run that took both would have to
   // either open the link (ignoring `--print-url`) or not (ignoring `--eas`).
+  assertOneDeviceBackendFlag(!!args['--eas'], !!args['--local']);
   if (args['--eas'] && args['--print-url']) {
     throw new CommandError(
       'BAD_ARGS',
@@ -184,7 +186,7 @@ export function resolveNavigateOptions(argv: string[]): NavigateOptions {
     scheme: args['--scheme'] ? String(args['--scheme']) : undefined,
     appId: args['--app-id'] ? String(args['--app-id']) : undefined,
     printUrl: !!args['--print-url'],
-    cloud: args['--eas'] ? 'required' : 'fallback',
+    cloud: args['--eas'] ? 'required' : args['--local'] ? 'off' : 'fallback',
     json: !!args['--json'],
     followups: !args['--no-followups'],
     routeCheck: !args['--no-route-check'],

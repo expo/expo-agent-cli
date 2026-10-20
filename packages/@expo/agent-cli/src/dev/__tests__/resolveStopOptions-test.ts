@@ -12,6 +12,7 @@ describe(resolveDevStopOptions, () => {
   it(`should look at no port and send SIGTERM by default`, () => {
     expect(resolveDevStopOptions([])).toEqual({
       eas: false,
+      local: false,
       release: false,
       port: null,
       signal: 'SIGTERM',
@@ -37,6 +38,7 @@ describe(resolveDevStopOptions, () => {
       ])
     ).toEqual({
       eas: false,
+      local: false,
       release: false,
       port: 8170,
       signal: 'SIGKILL',
@@ -109,5 +111,19 @@ describe('The config puts the device on EAS', () => {
   it(`should leave the session alone without the config`, () => {
     const none = parseAgentCliSettings({}, 'config');
     expect(withConfiguredDevice(resolveDevStopOptions([]), none).eas).toBe(false);
+  });
+});
+
+describe('--local keeps the device on this machine', () => {
+  const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
+
+  it(`should win over the config`, () => {
+    expect(withConfiguredDevice(resolveDevStopOptions(['--local']), onEas).eas).toBe(false);
+  });
+
+  it(`should refuse --eas with --local`, () => {
+    expect(() => resolveDevStopOptions(['--eas', '--local'])).toThrow(
+      /--eas and --local name two places/
+    );
   });
 });

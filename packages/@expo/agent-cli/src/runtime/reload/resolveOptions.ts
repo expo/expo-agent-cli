@@ -11,6 +11,7 @@ import { resolveDevServerTarget } from '../devServer';
 import { resolveDevicePlatform } from '../devicePlatform';
 import { settingsPutDeviceOnEas } from '../../settings/parse';
 import type { AgentCliSettings } from '../../settings/types';
+import { assertOneDeviceBackendFlag } from '../../device/backendFlags';
 
 /**
  * How the app is made to reload.
@@ -64,6 +65,8 @@ export interface ReloadOptions {
    * reload reaches one.
    */
   cloud: boolean;
+  /** `--local`: only devices on this machine, even when the config puts the device on EAS. */
+  local: boolean;
   /** Application id to stop, for the device method. Undefined means "decide from the project". */
   appId?: string;
   /** URL scheme for the route's deep link, instead of the one in app.json. */
@@ -95,6 +98,7 @@ const RELOAD_ARGS = {
   // @ref llp/0005 §Cloud simulator. One controller verb does both halves:
   // `open <app-id> <url> --relaunch` terminates the app process and launches it on the URL.
   '--eas': Boolean,
+  '--local': Boolean,
   '--dev-server-url': String,
   // Sugar for the URL above (llp/0005 §One preflight for the runtime family).
   '--port': String,
@@ -116,7 +120,7 @@ export function withConfiguredDevice(
   options: ReloadOptions,
   settings: AgentCliSettings
 ): ReloadOptions {
-  return !options.cloud && settingsPutDeviceOnEas(settings, options.platform)
+  return !options.cloud && !options.local && settingsPutDeviceOnEas(settings, options.platform)
     ? { ...options, cloud: true }
     : options;
 }
@@ -129,6 +133,7 @@ export function withConfiguredDevice(
  */
 export function resolveReloadOptions(argv: string[]): ReloadOptions {
   const args = parseArgsOrThrow(RELOAD_ARGS, argv, 'runtime:reload');
+  assertOneDeviceBackendFlag(!!args['--eas'], !!args['--local']);
 
   // @ref llp/0010-agent-conventions.rfc.md §Registry rules. The route is a flag here,
   // not a positional, because the command's subject is the app and not a route — so a bare word is
@@ -159,6 +164,7 @@ export function resolveReloadOptions(argv: string[]): ReloadOptions {
       bothHint: 'run the command twice, once per device.',
     }),
     cloud: !!args['--eas'],
+    local: !!args['--local'],
     scheme: args['--scheme'] ? String(args['--scheme']) : undefined,
     appId: args['--app-id'] ? String(args['--app-id']) : undefined,
     timeoutMs: resolveDuration(args['--timeout'], '--timeout', DEFAULT_RELOAD_TIMEOUT_MS, {

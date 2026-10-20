@@ -985,6 +985,32 @@ describe('a project whose config puts the device on EAS', () => {
     });
   });
 
+  it(`should never reach the session with --local`, async () => {
+    const projectRoot = await setupOnEasAsync();
+
+    await executeAgentCliAsync(projectRoot, ['runtime:stop', '--ios', '--local'], {
+      reject: false,
+    });
+    await executeAgentCliAsync(
+      projectRoot,
+      ['navigate', '/notes', '--ios', '--local', '--scheme', 'myapp', '--no-wait-attach'],
+      { reject: false }
+    );
+
+    expect(easInvocations(projectRoot)).toEqual([]);
+  });
+
+  it(`should leave the session running on dev:stop --local`, async () => {
+    const projectRoot = await setupOnEasAsync();
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--local', '--json'], {
+      reject: false,
+    });
+
+    expect(JSON.parse(result.stdout).session).toBeUndefined();
+    expect(easInvocations(projectRoot)).toEqual([]);
+  });
+
   it(`should end the session on dev:stop without --eas`, async () => {
     const projectRoot = await setupOnEasAsync();
 

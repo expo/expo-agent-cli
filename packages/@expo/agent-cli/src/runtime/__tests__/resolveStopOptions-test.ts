@@ -6,6 +6,7 @@ describe(resolveRuntimeStopOptions, () => {
     expect(resolveRuntimeStopOptions([])).toEqual({
       platform: undefined,
       cloud: false,
+      local: false,
       appId: undefined,
       devServerUrl: null,
       json: false,
@@ -27,6 +28,7 @@ describe(resolveRuntimeStopOptions, () => {
     ).toEqual({
       platform: 'android',
       cloud: false,
+      local: false,
       appId: 'com.example.demo',
       devServerUrl: 'http://192.168.1.10:8081',
       json: true,
@@ -93,6 +95,22 @@ describe('The config puts the device on EAS', () => {
   it(`should stay local for a platform the config keeps here`, () => {
     expect(withConfiguredDevice(resolveRuntimeStopOptions(['--android']), iosOnly).cloud).toBe(
       false
+    );
+  });
+});
+
+describe('--local keeps the device on this machine', () => {
+  const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
+
+  it(`should win over the config`, () => {
+    expect(withConfiguredDevice(resolveRuntimeStopOptions(['--ios', '--local']), onEas).cloud).toBe(
+      false
+    );
+  });
+
+  it(`should refuse --eas with --local`, () => {
+    expect(() => resolveRuntimeStopOptions(['--ios', '--eas', '--local'])).toThrow(
+      /--eas and --local name two places/
     );
   });
 });
