@@ -6,7 +6,9 @@ import {
   DEFAULT_SMOKE_TIMEOUT_MS,
   DEFAULT_SMOKE_WINDOW_MS,
   resolveSmokeOptions,
+  withConfiguredDevice,
 } from '../resolveOptions';
+import { parseAgentCliSettings } from '../../settings/parse';
 
 const realPlatform = process.platform;
 
@@ -254,5 +256,21 @@ describe('the port --start asks for', () => {
   it(`names none for a URL with no port, and for one that is not a URL`, () => {
     expect(startPortArgs('http://127.0.0.1')).toEqual([]);
     expect(startPortArgs('not a url')).toEqual([]);
+  });
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('The config puts the device on EAS', () => {
+  const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
+  const iosOnly = parseAgentCliSettings({ ios: { deviceBackend: 'eas' } }, 'config');
+
+  it(`should require the session, as --eas does`, () => {
+    expect(withConfiguredDevice(resolveSmokeOptions(['--ios']), onEas).cloud).toBe('required');
+  });
+
+  it(`should read the platform's own key`, () => {
+    expect(withConfiguredDevice(resolveSmokeOptions(['--android']), iosOnly).cloud).toBe(
+      'fallback'
+    );
   });
 });

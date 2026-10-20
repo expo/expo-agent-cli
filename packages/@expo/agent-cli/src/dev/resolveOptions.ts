@@ -5,7 +5,14 @@ import {
 } from '../plan/platformFlags';
 import type { DeviceBackend, PlanPlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
-import type { BuildBackend, RunTarget } from '../settings/types';
+import { resolveDeviceBackend } from '../settings/parse';
+import { CONFIG_LOCATION } from '../settings/read';
+import {
+  EMPTY_SETTINGS,
+  type AgentCliSettings,
+  type BuildBackend,
+  type RunTarget,
+} from '../settings/types';
 import { CommandError } from '../utils/errors';
 import { DEFAULT_DETACH_TIMEOUT_MS } from './detachAsync';
 import { CALLER_ARGV_ENV, resolveDeviceOption, withoutDeviceArgs } from './deviceOption';
@@ -69,11 +76,13 @@ export interface DevOptions {
    * Where the app runs: a device on this machine, or an EAS Simulator session.
    *
    * @ref llp/0027-everything-on-eas.rfc.md
-   * `eas` exactly when `--eas` was passed: the one flag means "on EAS" for the build and for the
-   * device alike (llp/0015 §One flag for EAS). It also implies `--tunnel`, because a session on EAS
-   * cannot reach this machine's loopback.
+   * `eas` when `--eas` was passed, or when the config says `deviceBackend: "eas"` and no flag
+   * overrides it (llp/0015 §The device backend). It also implies `--tunnel`, because a session on
+   * EAS cannot reach this machine's loopback.
    */
   deviceBackend: DeviceBackend;
+  /** Whether {@link deviceBackend} came from a flag, from the config, or from neither. */
+  deviceBackendSource: 'flag' | 'config' | 'default';
   /**
    * Which app the caller asked the plan to aim at (`--go`, `--dev-client`), or null when neither.
    *
@@ -162,7 +171,10 @@ function callerArgvOf(argv: string[]): string[] {
  * @throws {CommandError} `BAD_ARGS` when an option belongs to neither CLI, when two options ask
  * for opposite things, or when `--port` names something that is not a port.
  */
-export function resolveDevOptions(argv: string[]): DevOptions {
+export function resolveDevOptions(
+  argv: string[],
+  settings: AgentCliSettings = EMPTY_SETTINGS
+): DevOptions {
   // First, and before any of the combination rules below: an option neither this command nor
   // `expo start` has cannot have a meaningful interaction with one that exists, and it used to be
   // forwarded — reported by the Expo CLI a step later, or dropped outright by a plan that does not
@@ -188,9 +200,18 @@ export function resolveDevOptions(argv: string[]): DevOptions {
   const port = resolvePort(argv, example);
   const device = resolveDeviceOption(argv);
   const open = !argv.includes('--no-open');
-  const deviceBackend: DeviceBackend = buildBackend === 'eas' ? 'eas' : 'local';
+  const deviceBackend: DeviceBackend = resolveDeviceBackend(
+    buildBackend,
+    settings,
+    resolvePlatformFlag(argv) ?? 'none'
+  );
+  const deviceBackendSource = buildBackend
+    ? 'flag'
+    : deviceBackend === 'eas'
+      ? 'config'
+      : 'default';
   if (deviceBackend === 'eas') {
-    assertEasRunFits(argv);
+    assertEasRunFits(argv, deviceBackendSource === 'flag' ? 'flag' : 'config');
   }
 
   return {
@@ -216,6 +237,7 @@ export function resolveDevOptions(argv: string[]): DevOptions {
     platform: resolveRequiredPlatform(argv),
     buildBackend,
     deviceBackend,
+    deviceBackendSource,
     runTarget,
     json: argv.includes('--json'),
     followups: !argv.includes('--no-followups'),
@@ -272,18 +294,23 @@ function namesTunnel(argv: readonly string[]): boolean {
 }
 
 /**
- * The combinations `--eas` has no meaning with.
+ * The combinations a device on EAS has no meaning with, whether `--eas` or the config put it there.
  *
  * @ref llp/0027-everything-on-eas.rfc.md
  * @throws {CommandError} `BAD_ARGS` for `--web`, which EAS Simulator has no device for, and for a
  * host the session cannot reach (`--lan`, `--localhost`, `--host lan|localhost`).
  */
-function assertEasRunFits(argv: string[]): void {
-  if (resolveDeviceOption(argv) !== undefined)
+function assertEasRunFits(argv: string[], source: 'flag' | 'config'): void {
+  const example = resolvePlatformFlag(argv) ?? 'ios';
+  if (resolveDeviceOption(argv) !== undefined) {
     throw new CommandError(
       'BAD_ARGS',
-      '--device selects a local device and cannot be used with --eas. How: remove --device to use EAS Simulator.'
+      source === 'flag'
+        ? '--device selects a local device and cannot be used with --eas. How: remove --device to use EAS Simulator.'
+        : `--device selects a local device, and ${CONFIG_LOCATION} puts the ${example} device on EAS (deviceBackend: "eas"). How: add --local to use a local device, or remove --device to use EAS Simulator.`
     );
+  }
+  // `--web` makes the config's device backend moot, so only the flag can collide with it.
   if (argv.includes('--web')) {
     throw opposite(
       '--eas and --web ask for two different places to run the app, so this run has no plan.',
@@ -298,8 +325,15 @@ function assertEasRunFits(argv: string[]): void {
     (host >= 0 && (argv[host + 1] === 'lan' || argv[host + 1] === 'localhost')
       ? `--host ${argv[host + 1]}`
       : null);
+  if (named && source === 'config') {
+    throw opposite(
+      `${named} names a dev server address the EAS Simulator session cannot reach, and ${CONFIG_LOCATION} puts the ${example} device on EAS (deviceBackend: "eas"), so this run has no plan.`,
+      `Why: the session runs in a datacenter, and a LAN or loopback address names this machine's network. The session needs a tunnel, which this command sets up on its own.`,
+      `How: drop ${named} to run on EAS, or add --local to run on this machine.`,
+      `${PROGRAM_PREFIX} dev --${example} --local ${named}`
+    );
+  }
   if (named) {
-    const example = resolvePlatformFlag(argv) ?? 'ios';
     throw opposite(
       `--eas and ${named} name a dev server address the EAS Simulator session cannot reach, so this run has no plan.`,
       `Why: --eas opens the app on a session in a datacenter, and a LAN or loopback address names this machine's network. The session needs a tunnel, which --eas sets up on its own.`,

@@ -113,14 +113,17 @@ export const agentCliReload: Command = async (argv) => {
   const { logCmdError } = require('../../utils/errors') as typeof import('../../utils/errors');
   const { findUpProjectRootOrAssert } =
     require('../../utils/findUp') as typeof import('../../utils/findUp');
-  const { resolveReloadOptions } = require('./resolveOptions') as typeof import('./resolveOptions');
+  const { resolveReloadOptions, withConfiguredDevice } =
+    require('./resolveOptions') as typeof import('./resolveOptions');
+  const { readAgentCliSettings } = require('../../settings') as typeof import('../../settings');
   const { reloadAsync } = require('./reloadAsync') as typeof import('./reloadAsync');
   const { EXIT_OK, exitWithCodeAsync } =
     require('../../exitCodes') as typeof import('../../exitCodes');
 
   return (async () => {
-    const options = resolveReloadOptions(argv ?? []);
+    const resolved = resolveReloadOptions(argv ?? []);
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
+    const options = withConfiguredDevice(resolved, readAgentCliSettings(projectRoot).settings);
     const code = await reloadAsync(projectRoot, options);
     if (code !== EXIT_OK) {
       // An outcome, not an error: the command has already printed everything it has to say, and

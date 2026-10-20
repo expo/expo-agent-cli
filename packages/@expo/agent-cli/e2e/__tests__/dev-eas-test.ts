@@ -785,6 +785,64 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 });
 
 // @ref llp/0027-everything-on-eas.rfc.md §What EAS said
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('@expo/agent-cli dev with deviceBackend "eas" in the config', () => {
+  it('should plan what --eas plans, and say the session comes from the config', async () => {
+    const projectRoot = await setupAsync();
+    await writeAgentCliConfigAsync(projectRoot, { deviceBackend: 'eas' });
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--plan', '--json']);
+
+    expect(result.exitCode).toBe(0);
+    const plan = JSON.parse(result.stdout);
+    expect(plan.steps.map((step: { argv: string[] }) => step.argv)).toEqual([
+      [
+        'eas',
+        'build',
+        '--platform',
+        'ios',
+        '--profile',
+        'development-simulator',
+        '--non-interactive',
+      ],
+      ['expo', 'start', '--dev-client', '--tunnel', ...PORT_ARGS],
+    ]);
+    expect(plan.reasons.join('\n')).toContain('sets deviceBackend to "eas"');
+    expect(easInvocationArgs(projectRoot)).toEqual([]);
+  });
+
+  it('should keep everything on this machine with --local', async () => {
+    const projectRoot = await setupAsync();
+    await writeAgentCliConfigAsync(projectRoot, { deviceBackend: 'eas' });
+
+    const result = await executeAgentCliAsync(projectRoot, [
+      'dev',
+      '--ios',
+      '--local',
+      '--plan',
+      '--json',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const plan = JSON.parse(result.stdout);
+    expect(plan.steps.some((step: { argv: string[] }) => step.argv[0] === 'eas')).toBe(false);
+    expect(plan.reasons.join('\n')).not.toContain('deviceBackend');
+  });
+
+  it('should refuse a device on EAS with a build on this machine, before anything runs', async () => {
+    const projectRoot = await setupAsync();
+    await writeAgentCliConfigAsync(projectRoot, { deviceBackend: 'eas', buildBackend: 'local' });
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--plan', '--json'], {
+      reject: false,
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe('BAD_AGENT_CLI_CONFIG');
+    expect(easInvocationArgs(projectRoot)).toEqual([]);
+  });
+});
+
 describe('@expo/agent-cli dev --eas on a project EAS does not know', () => {
   it('names eas init as the fix when the cloud build stops on an unlinked project', async () => {
     const projectRoot = await setupAsync();

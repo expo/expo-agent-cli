@@ -111,13 +111,15 @@ export const agentCliNavigate: Command = async (argv) => {
   // directory that holds no app rather than planning work against whatever is there.
   const { findUpExpoAppRootOrAssert } =
     require('../project/expoApp') as typeof import('../project/expoApp');
-  const { resolveNavigateOptions } =
+  const { resolveNavigateOptions, withConfiguredDevice } =
     require('./resolveOptions') as typeof import('./resolveOptions');
+  const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
   const { navigateAsync } = require('./navigateAsync') as typeof import('./navigateAsync');
 
   return (async () => {
-    const options = resolveNavigateOptions(argv ?? []);
+    const resolved = resolveNavigateOptions(argv ?? []);
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
+    const options = withConfiguredDevice(resolved, readAgentCliSettings(projectRoot).settings);
     process.exitCode = await navigateAsync(projectRoot, options);
   })().catch(logCmdError);
 };

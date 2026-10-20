@@ -791,13 +791,20 @@ async function attemptPlanAsync(
   const { resolveStartPlanAsync } =
     require('../plan/resolveAsync') as typeof import('../plan/resolveAsync');
   try {
+    const { readAgentCliSettings, resolveDeviceBackend } =
+      require('../settings') as typeof import('../settings');
+    const platform = options.platform ?? resolveDefaultPlatform(state);
     return (
       await resolveStartPlanAsync(projectRoot, state, {
-        platform: options.platform ?? resolveDefaultPlatform(state),
+        platform,
         lastBuild,
         requestedBackend: request?.buildBackend,
         requestedTarget: request?.runTarget,
-        deviceBackend: request?.buildBackend === 'eas' ? 'eas' : 'local',
+        deviceBackend: resolveDeviceBackend(
+          request?.buildBackend ?? null,
+          readAgentCliSettings(projectRoot).settings,
+          platform
+        ),
         lookUpEasBuild: async (root, platform) => {
           const builds = await readBuildsAsync();
           const reused = simulatorBuildFromBuilds(

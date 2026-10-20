@@ -1,4 +1,9 @@
-import { DEFAULT_ATTACH_TIMEOUT_MS, resolveNavigateOptions } from '../resolveOptions';
+import { parseAgentCliSettings } from '../../settings/parse';
+import {
+  DEFAULT_ATTACH_TIMEOUT_MS,
+  resolveNavigateOptions,
+  withConfiguredDevice,
+} from '../resolveOptions';
 
 describe(resolveNavigateOptions, () => {
   // Null, not 8081: an unnamed dev server is one still to be found, which is what lets the command
@@ -131,5 +136,33 @@ describe('resolveNavigateOptions and the cloud backend', () => {
 
   it(`refuses --eas with --print-url, which asks for no device at all`, () => {
     expect(() => resolveNavigateOptions(['/', '--eas', '--print-url'])).toThrow(/opposite things/);
+  });
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('The config puts the device on EAS', () => {
+  const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
+  const iosOnly = parseAgentCliSettings({ ios: { deviceBackend: 'eas' } }, 'config');
+
+  it(`should require the session, as --eas does`, () => {
+    expect(withConfiguredDevice(resolveNavigateOptions(['/', '--ios']), onEas).cloud).toBe(
+      'required'
+    );
+  });
+
+  it(`should read the platform's own key, and need both platforms when none is named`, () => {
+    expect(withConfiguredDevice(resolveNavigateOptions(['/', '--ios']), iosOnly).cloud).toBe(
+      'required'
+    );
+    expect(withConfiguredDevice(resolveNavigateOptions(['/', '--android']), iosOnly).cloud).toBe(
+      'fallback'
+    );
+    expect(withConfiguredDevice(resolveNavigateOptions(['/']), iosOnly).cloud).toBe('fallback');
+  });
+
+  it(`should leave --print-url alone, because it opens nothing`, () => {
+    expect(
+      withConfiguredDevice(resolveNavigateOptions(['/', '--ios', '--print-url']), onEas).cloud
+    ).toBe('fallback');
   });
 });

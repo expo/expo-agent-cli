@@ -8,6 +8,8 @@ import { PROGRAM_PREFIX } from '../programName';
 import { resolveDevServerTarget } from '../runtime/devServer';
 import { parseArgsOrThrow, resolveDuration, strayArgumentError } from '../utils/args';
 import { CommandError } from '../utils/errors';
+import { settingsPutDeviceOnEas } from '../settings/parse';
+import type { AgentCliSettings } from '../settings/types';
 
 /** Platforms a smoke run can be performed on: the two that have a runtime to read. */
 export type SmokePlatform = 'ios' | 'android';
@@ -125,6 +127,20 @@ const SMOKE_ARGS = {
   '--json': Boolean,
   '--no-followups': Boolean,
 };
+
+/**
+ * `deviceBackend: "eas"` in the config names the session the way `--eas` does.
+ *
+ * @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+ */
+export function withConfiguredDevice(
+  options: SmokeOptions,
+  settings: AgentCliSettings
+): SmokeOptions {
+  return options.cloud === 'fallback' && settingsPutDeviceOnEas(settings, options.platform)
+    ? { ...options, cloud: 'required' }
+    : options;
+}
 
 /**
  * Resolve the arguments of `@expo/agent-cli smoke`.
