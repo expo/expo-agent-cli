@@ -14,6 +14,8 @@
 # every PR — unfiltered on purpose [decided 2026-09-05]: a path filter only sees changes on our side,
 # while EAS Simulator readiness, the Expo Go a session installs, and create-expo's scaffold all move
 # without touching this repo, and a PR is when somebody is looking. Four billed sessions per PR push.
+# In a stack only the top PR runs: the gate job skips a PR whose head commit an open PR above it already
+# holds. [decided 2026-10-20]
 name: agent-cli-cloud-e2e
 
 on:
@@ -35,8 +37,27 @@ defaults:
     bun: 1.3.14
 
 jobs:
+  stack:
+    name: stack gate
+    runs_on: linux-medium
+    outputs:
+      run: ${{ steps.stack.outputs.run }}
+    steps:
+      - uses: eas/checkout
+      - name: Decide whether this PR runs CI
+        id: stack
+        run: |
+          export GITHUB_REPOSITORY='${{ github.repository }}'
+          export PR_NUMBER='${{ github.event.pull_request.number }}'
+          export PR_HEAD_REF='${{ github.event.pull_request.head.ref }}'
+          export PR_HEAD_SHA='${{ github.event.pull_request.head.sha }}'
+          export EVENT_ACTION='${{ github.event.action }}'
+          set-output run "$(bun scripts/stack-gate.ts || echo true)"
+
   cloud-e2e-expo-go-ios:
     name: live-cloud on EAS (iOS, Expo Go)
+    needs: [stack]
+    if: ${{ needs.stack.outputs.run == 'true' }}
     runs_on: linux-medium
     environment: production
     env:
@@ -58,6 +79,8 @@ jobs:
 
   cloud-e2e-expo-go-android:
     name: live-cloud on EAS (Android, Expo Go)
+    needs: [stack]
+    if: ${{ needs.stack.outputs.run == 'true' }}
     runs_on: linux-medium
     environment: production
     env:
@@ -79,6 +102,8 @@ jobs:
 
   cloud-e2e-dev-build-ios:
     name: live-cloud on EAS (iOS, dev build)
+    needs: [stack]
+    if: ${{ needs.stack.outputs.run == 'true' }}
     runs_on: linux-medium
     environment: production
     env:
@@ -105,6 +130,8 @@ jobs:
 
   cloud-e2e-dev-build-android:
     name: live-cloud on EAS (Android, dev build)
+    needs: [stack]
+    if: ${{ needs.stack.outputs.run == 'true' }}
     runs_on: linux-medium
     environment: production
     env:

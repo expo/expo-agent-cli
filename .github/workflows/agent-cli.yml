@@ -27,9 +27,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  stack:
+    uses: ./.github/workflows/stack-gate.yml
+
   # Tier 0 of LLP 0002: deterministic, model-free, runs on every PR.
   tier0-linux:
-    if: github.event_name != 'schedule'
+    needs: [stack]
+    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
     runs-on: ubuntu-24.04
     steps:
       - name: 👀 Checkout
@@ -69,7 +73,8 @@ jobs:
   # Both OSes run here — the win32 shards are what exercise the skills linker's directory-junction
   # path (nothing else does).
   tier0-e2e:
-    if: github.event_name != 'schedule'
+    needs: [stack]
+    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
     strategy:
       fail-fast: false
       matrix:
@@ -101,7 +106,8 @@ jobs:
   # The stub `xcrun` (simctl and devicectl) sits first on PATH, so no real simulator or phone
   # is touched. Also run the macOS-only device-binding cases that Linux/Windows shards skip.
   tier0-e2e-macos:
-    if: github.event_name != 'schedule'
+    needs: [stack]
+    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
     runs-on: macos-15
     timeout-minutes: 20
     steps:
@@ -131,7 +137,8 @@ jobs:
   # The win32 e2e run — including the skills linker's directory-junction path, which nothing
   # else exercises — is sharded in `tier0-e2e` above.
   tier0-windows:
-    if: github.event_name != 'schedule'
+    needs: [stack]
+    if: needs.stack.outputs.run == 'true' && github.event_name != 'schedule'
     runs-on: windows-2022
     timeout-minutes: 45
     steps:
@@ -157,10 +164,12 @@ jobs:
   # Short real agent integration tests. Every relevant PR runs the entire Tier 1 suite.
   # Advisory until repeated CI evidence establishes reliability; individual results stay visible.
   tier1-agent-eval:
+    needs: [stack]
     if: >-
-      github.event_name == 'pull_request' ||
+      needs.stack.outputs.run == 'true' &&
+      (github.event_name == 'pull_request' ||
       github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'schedule' && github.repository == 'expo/expo-agent-cli')
+      (github.event_name == 'schedule' && github.repository == 'expo/expo-agent-cli'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read

@@ -14,7 +14,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  stack:
+    uses: ./.github/workflows/stack-gate.yml
+
   oxfmt:
+    needs: [stack]
+    if: needs.stack.outputs.run == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
