@@ -129,7 +129,7 @@ const STACK_FRAME = /^\s*at\s/;
  * wrote — frames are a weak answer, and inventing "the CLI stopped without a message" over them
  * would be a wrong one.
  */
-function outputTail(output: string, maxLines = 10): string {
+export function outputTail(output: string, maxLines = 10): string {
   const lines = output
     .split('\n')
     .map((line) => line.trimEnd())

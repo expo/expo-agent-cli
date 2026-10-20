@@ -7,10 +7,11 @@ import {
   resolvePlatformFilter,
   type IntrospectedConfig,
 } from '../effective';
+import { readPluginIds } from '../../project/appConfig';
 import { describeMod, formatEffectiveConfig, formatModFile } from '../format';
 import fixture from './fixtures/introspect-sdk57.json';
 
-/** The plugin ids the fixture's project declares, as `readStaticAppConfigAsync` would report them. */
+/** The plugin ids the fixture's project declares, as its `app.json` spells them. */
 const DECLARED = ['expo-brownfield', 'expo-splash-screen', 'expo-build-properties'];
 
 function build(overrides: Partial<Parameters<typeof buildEffectiveConfig>[0]> = {}) {
@@ -27,6 +28,12 @@ function build(overrides: Partial<Parameters<typeof buildEffectiveConfig>[0]> = 
 }
 
 describe(buildEffectiveConfig, () => {
+  // The payload carries the `plugins` array the config declared, so a dynamic `app.config.ts`
+  // answers the declared half the same way `app.json` does (issue #84).
+  it('reads the declared plugins out of the introspected payload itself', () => {
+    expect(readPluginIds(fixture.plugins)).toEqual(DECLARED);
+  });
+
   it('reshapes the introspected mods into a per-platform payload', () => {
     const report = build();
 

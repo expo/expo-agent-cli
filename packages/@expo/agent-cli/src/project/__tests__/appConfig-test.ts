@@ -2,6 +2,7 @@ import { vol } from 'memfs';
 import path from 'path';
 
 import {
+  readPluginIds,
   readStaticAppConfigAsync,
   readStaticEasProjectAsync,
   readStaticExpoConfigAsync,
@@ -20,6 +21,28 @@ function writeFiles(files: Record<string, string>) {
     )
   );
 }
+
+describe(readPluginIds, () => {
+  it(`should read a module path and the path of a [path, options] entry`, () => {
+    expect(readPluginIds(['expo-camera', ['expo-build-properties', { ios: {} }]])).toEqual([
+      'expo-camera',
+      'expo-build-properties',
+    ]);
+  });
+
+  it(`should answer an empty list for an empty array`, () => {
+    expect(readPluginIds([])).toEqual([]);
+  });
+
+  it(`should skip an entry that names no module`, () => {
+    expect(readPluginIds(['', [''], 42, null])).toEqual([]);
+  });
+
+  it(`should answer null when the value is not an array`, () => {
+    expect(readPluginIds(undefined)).toBeNull();
+    expect(readPluginIds('expo-camera')).toBeNull();
+  });
+});
 
 describe(readStaticExpoConfigAsync, () => {
   // @expo/config resolves app.config.json before app.json.

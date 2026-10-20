@@ -57,8 +57,8 @@ import { buildConnectUrls, type ConnectUrl } from './connectUrl';
 import {
   isFullUrlRoute,
   openUrlOnDeviceAsync,
-  readProjectSchemeConfig,
   resolveDeepLinkUrl,
+  resolveProjectSchemeConfigAsync,
   type ProjectSchemeConfig,
 } from './deepLink';
 import type { BoundDevice } from '../deviceBinding';
@@ -334,7 +334,8 @@ export async function resolveRouteUrlAsync(
   const [devServer, config, nativeDirs, packageJson, routeTable, reach, expoGo] = await Promise.all(
     [
       discoverDevServerAsync(options.devServerUrl ?? undefined, { projectRoot }),
-      Promise.resolve(readProjectSchemeConfig(projectRoot)),
+      // A dynamic config costs an `expo config` run, which overlaps the discovery here.
+      resolveProjectSchemeConfigAsync(projectRoot, { schemeOverride: scheme }),
       readProjectNativeDirsAsync(projectRoot),
       readProjectPackageJsonAsync(projectRoot),
       readProjectRoutesAsync(projectRoot),
