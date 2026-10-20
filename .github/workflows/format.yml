@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   stack:
-    uses: ./.github/workflows/stack-top.yml
+    uses: ./.github/workflows/stack-gate.yml
 
   oxfmt:
     needs: stack
