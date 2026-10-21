@@ -10,7 +10,7 @@ export const devRunHelp: CommandHelp = {
   options: [
     `--device <name|id>  Bind a local simulator by name/ID or an Android device by serial`,
     `--detach            Run the dev server in the background and give the terminal back`,
-    `--wait-ready        With --detach, also wait for the bundler before reporting`,
+    `--wait-ready        With --detach, also wait for the bundler (and with --eas, the session)`,
     `--plan              Print what must run to get this app on a device, then exit`,
     `--json              Print the plan as JSON, for --plan and for a run`,
     `--port <number>     Port for the dev server, so a busy 8081 needs no answer`,

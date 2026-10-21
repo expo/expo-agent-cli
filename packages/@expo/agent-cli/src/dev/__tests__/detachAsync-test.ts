@@ -870,6 +870,45 @@ describe('the bound device', () => {
     expect(JSON.parse(printed).followups.at(-1).why).toContain('sess-1');
   });
 
+  describe('human report of a reuse beside a running dev server', () => {
+    const humanReport = () =>
+      vi
+        .mocked(Log.log)
+        .mock.calls.map(([text]) => String(text))
+        .find((text) => text.includes('Dev server'))!;
+
+    it('says which EAS session the reuse bound instead of "nothing was started"', async () => {
+      vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+      vi.mocked(reopenEasAsync).mockResolvedValue('sess-1');
+
+      await expect(
+        devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--eas']), {
+          print: true,
+          reuseBoundDevice: true,
+        })
+      ).resolves.toBe(0);
+
+      const text = humanReport();
+      expect(text).toContain(
+        'This project already had a dev server; this run bound EAS Simulator session sess-1.'
+      );
+      expect(text).not.toContain('nothing was started');
+    });
+
+    it('keeps "nothing was started" when no session was bound', async () => {
+      vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+
+      await expect(
+        devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach']), {
+          print: true,
+          reuseBoundDevice: true,
+        })
+      ).resolves.toBe(0);
+
+      expect(humanReport()).toContain('so nothing was started');
+    });
+  });
+
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
   it('names the bound EAS session in the dev:stop --eas follow-up of a fresh start', async () => {
     writeCloudBinding(projectRoot, 'ios', 'sess-bound', {
@@ -1065,5 +1104,267 @@ describe('the acquire line', () => {
     const printedAt = vi.mocked(Log.progress).mock.invocationCallOrder[0]!;
     const reportedAt = vi.mocked(cliEvent).mock.invocationCallOrder.at(-1)!;
     expect(printedAt).toBeLessThan(reportedAt);
+  });
+});
+
+/** The log of a detached `dev --eas` child: its pid on line 1, then its plan. */
+function easChildLog(pid: number, ...after: string[]): string {
+  return [
+    `Detached dev run, pid ${pid}.`,
+    'Smart start plan (rule: dev-client-stale, target: dev-client)',
+    '',
+    '  1. eas build --platform ios --profile development-simulator --non-interactive  ~many minutes  eas',
+    '     Builds the ios development build in the cloud on EAS.',
+    '  2. expo start --dev-client --tunnel --port 8082                                ~seconds',
+    '     Starts the dev server through a tunnel, for the build above.',
+    '',
+    ...after,
+    '',
+  ].join('\n');
+}
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+describe('the EAS session under --wait-ready', () => {
+  const lock = lockInfo({
+    url: 'http://127.0.0.1:8082',
+    port: 8082,
+    projectRoot,
+    startedAt: new Date(0).toISOString(),
+    easPlatform: 'ios',
+  });
+  const tunnel = {
+    url: 'https://abc.tunnel.example',
+    host: 'abc.tunnel.example',
+    hostType: 'tunnel',
+  };
+
+  beforeEach(() => {
+    vi.mocked(otherPlatformSessionAsync).mockResolvedValue(null);
+    vi.mocked(readDevServerLockAsync)
+      .mockReset()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue(lock);
+    vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValue(tunnel as any);
+    vi.mocked(spawn).mockImplementation(() => {
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.writeFileSync(logFile, easChildLog(4242, '✔ Build finished'));
+      fs.mkdirSync(path.dirname(startLog), { recursive: true });
+      fs.writeFileSync(
+        startLog,
+        JSON.stringify({ _e: 'metro:instantiate', _t: Date.now(), port: 8082 })
+      );
+      return Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() }) as any;
+    });
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  function start(argv = ['--ios', '--eas', '--detach', '--wait-ready', '--json']) {
+    return devDetachAsync(projectRoot, resolveDevOptions(argv), {
+      print: true,
+      reuseBoundDevice: true,
+    }).catch((error) => error);
+  }
+
+  function printedReport() {
+    const printed = vi
+      .mocked(Log.log)
+      .mock.calls.map(([text]) => String(text))
+      .find((text) => text.includes('"followups"'))!;
+    return JSON.parse(printed);
+  }
+
+  function bindLater(id: string, atMs: number) {
+    setTimeout(() => {
+      writeCloudBinding(projectRoot, 'ios', id, {
+        boundAt: new Date(atMs).toISOString(),
+        expiresAt: new Date(atMs + 3_600_000).toISOString(),
+      });
+    }, atMs);
+  }
+
+  it('waits for a binding made after the spawn and reports its id', async () => {
+    bindLater('sess-new', 3_000);
+
+    const result = start();
+    await vi.runAllTimersAsync();
+
+    expect(await result).toBe(0);
+    expect(Date.now()).toBeGreaterThanOrEqual(3_000);
+    expect(printedReport()).toMatchObject({ eas: { sessionId: 'sess-new' } });
+    expect(printedReport().followups.at(-1).why).toContain('sess-new');
+  });
+
+  it('prints one progress line when the wait starts and one when the session is bound', async () => {
+    bindLater('sess-new', 3_000);
+
+    const result = start();
+    await vi.runAllTimersAsync();
+    await result;
+
+    const lines = vi
+      .mocked(Log.progress)
+      .mock.calls.map((args) => args.join(' '))
+      .filter((line) => line.includes('EAS Simulator session'));
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain('sess-new');
+  });
+
+  it('does not take an ended session bound before the spawn, and reports the session the child starts', async () => {
+    writeCloudBinding(projectRoot, 'ios', 'sess-old', {
+      boundAt: new Date(-60_000).toISOString(),
+      expiresAt: new Date(3_600_000).toISOString(),
+    });
+    bindLater('sess-new', 3_000);
+
+    const result = start();
+    await vi.runAllTimersAsync();
+
+    expect(await result).toBe(0);
+    expect(Date.now()).toBeGreaterThanOrEqual(3_000);
+    expect(printedReport()).toMatchObject({ eas: { sessionId: 'sess-new' } });
+    const lines = vi
+      .mocked(Log.progress)
+      .mock.calls.map((args) => args.join(' '))
+      .filter((line) => line.includes('EAS Simulator session'));
+    expect(lines).toHaveLength(2);
+  });
+
+  it('takes the binding the child reused, which was live before the spawn, once its open finished', async () => {
+    writeCloudBinding(projectRoot, 'ios', 'sess-kept', {
+      boundAt: new Date(-60_000).toISOString(),
+      expiresAt: new Date(3_600_000).toISOString(),
+    });
+    setTimeout(
+      () => vi.mocked(readDevServerLockAsync).mockResolvedValue({ ...lock, easOpenFinished: true }),
+      2_000
+    );
+
+    const result = start();
+    await vi.runAllTimersAsync();
+
+    expect(await result).toBe(0);
+    expect(Date.now()).toBeGreaterThanOrEqual(2_000);
+    expect(printedReport()).toMatchObject({ eas: { sessionId: 'sess-kept' } });
+  });
+
+  it('exits 22 when the kept binding is there and the open does not finish', async () => {
+    vi.stubEnv('AGENT_CLI_EAS_SESSION_WAIT_MS', '2000');
+    writeCloudBinding(projectRoot, 'ios', 'sess-kept', {
+      boundAt: new Date(-60_000).toISOString(),
+      expiresAt: new Date(3_600_000).toISOString(),
+    });
+
+    const result = start();
+    await vi.runAllTimersAsync();
+
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_SESSION_PENDING', exitCode: 22 });
+  });
+
+  it('exits 22 with DEV_DETACH_SESSION_PENDING, the pid and the tunnel when the wait runs out', async () => {
+    vi.stubEnv('AGENT_CLI_EAS_SESSION_WAIT_MS', '2000');
+
+    const result = start();
+    await vi.runAllTimersAsync();
+    const error = await result;
+
+    expect(error).toMatchObject({
+      code: 'DEV_DETACH_SESSION_PENDING',
+      exitCode: 22,
+      data: { pid: 4242, url: lock.url, tunnelUrl: tunnel.url, platform: 'ios' },
+    });
+    expect(error.suggestedCommand).toMatch(/dev --ios .*--eas.*--wait-ready/);
+    expect(error.message).toContain('dev:stop --eas');
+    expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
+  });
+
+  it('waits 90 s by default', async () => {
+    const result = start();
+    await vi.runAllTimersAsync();
+
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_SESSION_PENDING' });
+    expect(Date.now()).toBeGreaterThanOrEqual(90_000);
+    expect(Date.now()).toBeLessThan(120_000);
+  });
+
+  it("reports the child's exit when it dies while the session starts", async () => {
+    setTimeout(() => vi.mocked(isProcessAlive).mockReturnValue(false), 1_000);
+
+    const result = start();
+    await vi.runAllTimersAsync();
+
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
+  });
+
+  it('does not wait without --wait-ready, and the Session row says what waits for it', async () => {
+    const result = start(['--ios', '--eas', '--detach']);
+    await vi.runAllTimersAsync();
+
+    expect(await result).toBe(0);
+    expect(Date.now()).toBeLessThan(5_000);
+    const printed = vi
+      .mocked(Log.log)
+      .mock.calls.map(([text]) => String(text))
+      .join('\n');
+    expect(printed).toMatch(/Session\s+not bound yet/);
+    expect(printed).toContain('dev --ios --eas --detach --wait-ready');
+  });
+
+  describe('beside a running EAS Metro', () => {
+    beforeEach(() => {
+      vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(lock);
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.writeFileSync(logFile, easChildLog(4242, '✔ Build finished'));
+    });
+
+    afterEach(() => expect(spawn).not.toHaveBeenCalled());
+
+    it('follows a child whose session is starting and does not reopen', async () => {
+      bindLater('sess-new', 2_000);
+
+      const result = start();
+      await vi.runAllTimersAsync();
+
+      expect(await result).toBe(0);
+      expect(reopenEasAsync).not.toHaveBeenCalled();
+      expect(printedReport()).toMatchObject({
+        alreadyRunning: true,
+        eas: { sessionId: 'sess-new' },
+      });
+    });
+
+    it('exits 22 when the followed session is not bound in time', async () => {
+      vi.stubEnv('AGENT_CLI_EAS_SESSION_WAIT_MS', '2000');
+
+      const result = start();
+      await vi.runAllTimersAsync();
+
+      expect(await result).toMatchObject({ code: 'DEV_DETACH_SESSION_PENDING', exitCode: 22 });
+      expect(reopenEasAsync).not.toHaveBeenCalled();
+    });
+
+    it('reports no session and does not reopen without --wait-ready', async () => {
+      const result = start(['--ios', '--eas', '--detach', '--json']);
+      await vi.runAllTimersAsync();
+
+      expect(await result).toBe(0);
+      expect(reopenEasAsync).not.toHaveBeenCalled();
+      expect(printedReport()).toMatchObject({ eas: { sessionId: null } });
+    });
+
+    it('reopens beside a live child whose open finished and whose binding is gone, and does not follow', async () => {
+      vi.mocked(readDevServerLockAsync).mockResolvedValue({ ...lock, easOpenFinished: true });
+      vi.setSystemTime(3 * 60_000);
+      fs.writeFileSync(logFile, easChildLog(4242));
+
+      const result = start();
+      await vi.runAllTimersAsync();
+
+      expect(await result).toBe(0);
+      expect(reopenEasAsync).toHaveBeenCalledTimes(1);
+      expect(Log.progress).not.toHaveBeenCalledWith(
+        expect.stringMatching(/^Waiting up to .* for the EAS Simulator session/)
+      );
+    });
   });
 });

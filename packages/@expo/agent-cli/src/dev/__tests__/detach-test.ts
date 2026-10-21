@@ -419,6 +419,7 @@ describe(detachFollowUps, () => {
       portMoved: null,
       tunnelUrl: null,
       device: null,
+      eas: null,
       waitedMs: 10,
       followups: [],
       ...overrides,

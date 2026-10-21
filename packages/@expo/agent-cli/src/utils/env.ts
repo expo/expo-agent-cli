@@ -82,6 +82,15 @@ class Env {
     return int('AGENT_CLI_PROMPT_TIMEOUT_MS', 20_000);
   }
 
+  /**
+   * How long `dev --eas --detach --wait-ready` waits for the EAS session binding after the bundler.
+   *
+   * @see llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+   */
+  get AGENT_CLI_EAS_SESSION_WAIT_MS() {
+    return int('AGENT_CLI_EAS_SESSION_WAIT_MS', 90_000);
+  }
+
   /** @internal Force the webcontainer environment checks to pass */
   get EXPO_FORCE_WEBCONTAINER_ENV() {
     return boolish('EXPO_FORCE_WEBCONTAINER_ENV', false);

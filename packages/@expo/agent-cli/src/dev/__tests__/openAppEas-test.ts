@@ -1210,6 +1210,57 @@ describe(easRunLifecycle, () => {
     expect(progress()).not.toContain('Finishing EAS session work');
   });
 
+  it(`resolves finished when the open returns`, async () => {
+    const eas = easRunLifecycle(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      keepSession: true,
+      onSignal: vi.fn(),
+    });
+
+    eas.open({ devServerUrl: DEV_SERVER, stillWanted: () => true, buildId: null });
+    await eas.finishAsync();
+
+    await expect(eas.finished).resolves.toBeUndefined();
+    expect(readCloudBindings(projectRoot).bindings.map(({ device }) => device.id)).toEqual([
+      started,
+    ]);
+  });
+
+  it(`resolves finished when the open failed`, async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-android', platform: 'android' })
+    );
+    const eas = easRunLifecycle(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      keepSession: true,
+      onSignal: vi.fn(),
+    });
+
+    eas.open({ devServerUrl: DEV_SERVER, stillWanted: () => true, buildId: null });
+    await eas.finishAsync();
+
+    await expect(eas.finished).resolves.toBeUndefined();
+    expect(readCloudBindings(projectRoot).bindings).toEqual([]);
+  });
+
+  it(`does not resolve finished without an open`, async () => {
+    const eas = easRunLifecycle(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      keepSession: true,
+      onSignal: vi.fn(),
+    });
+    let settled = false;
+    void eas.finished.then(() => (settled = true));
+
+    await eas.finishAsync();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(settled).toBe(false);
+  });
+
   it(`prints the whole refusal when the worktree has a session on the other platform`, async () => {
     vi.mocked(probeCloudSessionAsync).mockResolvedValue(
       cloudProbe.active({ id: 'sess-android', platform: 'android' })

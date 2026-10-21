@@ -276,6 +276,24 @@ export function parseDetachedChildPhase(rawLines: readonly string[]): DetachedCh
 }
 
 /**
+ * Line 1 of a detached child's log, printed by `devAsync` before anything else.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — it names the run that wrote
+ * the log. Only line 1 is read, so output written after it cannot fake it.
+ */
+export function detachedPidLine(pid: number): string {
+  return `Detached dev run, pid ${pid}.`;
+}
+
+const PID_LINE = /^Detached dev run, pid (\d+)\.$/;
+
+/** The pid line 1 of the child's log names, or null. */
+export function parseDetachedChildPid(lines: readonly string[]): number | null {
+  const match = PID_LINE.exec(lines[0]?.trim() ?? '');
+  return match ? Number(match[1]) : null;
+}
+
+/**
  * The `Dev server:` row of the plan table `formatStartPlan` prints: `port 8082, because 8081 is
  * taken.` Every other state of the row names no move.
  */

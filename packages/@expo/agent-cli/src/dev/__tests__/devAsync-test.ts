@@ -1940,7 +1940,12 @@ describe(devAsync, () => {
 
 // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
 describe('EAS session lifecycle of the dev-server step', () => {
-  const lifecycle = { platform: 'ios' as const, open: vi.fn(), finishAsync: vi.fn() };
+  const lifecycle = {
+    platform: 'ios' as const,
+    open: vi.fn(),
+    finishAsync: vi.fn(),
+    finished: new Promise<void>(() => {}),
+  };
   beforeEach(() => {
     mockProjectState();
     vi.mocked(easRunLifecycle).mockReturnValue(lifecycle);
@@ -1977,5 +1982,80 @@ describe('EAS session lifecycle of the dev-server step', () => {
       projectRoot,
       expect.objectContaining({ keepSession: true })
     );
+  });
+
+  it(`passes the finish of the plan's one EAS open to the lock of a port retry`, async () => {
+    let finishOpen!: () => void;
+    const opened = {
+      ...lifecycle,
+      open: vi.fn(),
+      finished: new Promise<void>((resolve) => (finishOpen = resolve)),
+    };
+    const retried = { ...lifecycle, open: vi.fn() };
+    vi.mocked(easRunLifecycle).mockReturnValueOnce(opened).mockReturnValueOnce(retried);
+    vi.mocked(resolvePlannedPortAsync).mockResolvedValueOnce({
+      port: 8180,
+      movedFrom: null,
+      bindable: true,
+    });
+    vi.mocked(runDevServerAsync)
+      .mockImplementationOnce(async (_root, _args, opts) => {
+        opts?.onDevServer?.({ url: 'http://127.0.0.1:8180', port: 8180 });
+        return devServerRun({
+          exitCode: 1,
+          stderr: [
+            'Port 8180 is running node in another window',
+            "Input is required, but 'npx expo' is in non-interactive mode.",
+            'Required input:',
+            '> Use port 8181 instead?',
+          ].join('\n'),
+        });
+      })
+      .mockImplementationOnce(async (_root, _args, opts) => {
+        opts?.onDevServer?.({ url: 'http://127.0.0.1:8181', port: 8181 });
+        return devServerRun();
+      });
+
+    await devAsync(projectRoot, resolveDevOptions(['--ios', '--eas']));
+
+    expect(opened.open).toHaveBeenCalledTimes(1);
+    expect(retried.open).not.toHaveBeenCalled();
+    const retryFinished = vi.mocked(runDevServerAsync).mock.calls[1]![2]!.easOpenFinished!;
+    let settled = false;
+    void retryFinished.then(() => (settled = true));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(false);
+
+    finishOpen();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(true);
+  });
+});
+
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+describe('a detached child', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it(`prints its pid on line 1, before the plan`, async () => {
+    mockProjectState();
+    vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', '1');
+
+    await devAsync(projectRoot, resolveDevOptions(['--ios']));
+
+    expect(vi.mocked(Log.progress).mock.calls[0]).toEqual([
+      `Detached dev run, pid ${process.pid}.`,
+    ]);
+    const printedAt = vi.mocked(Log.progress).mock.invocationCallOrder[0]!;
+    expect(printedAt).toBeLessThan(vi.mocked(emitStartPlan).mock.invocationCallOrder[0]!);
+  });
+
+  it(`prints no pid line in the foreground`, async () => {
+    mockProjectState();
+
+    await devAsync(projectRoot, resolveDevOptions(['--ios']));
+
+    expect(Log.progress).not.toHaveBeenCalledWith(expect.stringMatching(/^Detached dev run/));
   });
 });

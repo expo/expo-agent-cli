@@ -146,7 +146,14 @@ function createHandle(
   // or a signal nobody forwarded. It runs synchronously, which is all the cleanup needs.
   process.once('exit', release);
 
-  return { address, replacedStale, release, update };
+  return {
+    address,
+    replacedStale,
+    release,
+    update: (info: DevServerLockInfo) => {
+      if (!released) update(info);
+    },
+  };
 }
 
 /** Listen, and resolve with the error instead of throwing it. */

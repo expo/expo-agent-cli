@@ -75,6 +75,17 @@ describe('dev server lock', () => {
     expect(await readDevServerLockAsync(projectRoot)).toEqual(info);
   });
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  it(`answers easOpenFinished, and reads an answer without it as false`, async () => {
+    const finished = makeProjectRoot();
+    await acquireAsync({ ...lockInfo(finished, 8099), easOpenFinished: true } as DevServerLockInfo);
+    const older = makeProjectRoot();
+    await acquireAsync(lockInfo(older, 8100));
+
+    expect(await readDevServerLockAsync(finished)).toMatchObject({ easOpenFinished: true });
+    expect(await readDevServerLockAsync(older)).toMatchObject({ easOpenFinished: false });
+  });
+
   it(`stops answering once released`, async () => {
     const projectRoot = makeProjectRoot();
     const result = await acquireAsync(lockInfo(projectRoot, 8088));

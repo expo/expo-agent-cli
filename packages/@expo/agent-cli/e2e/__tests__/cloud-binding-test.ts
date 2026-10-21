@@ -412,3 +412,34 @@ it('a failed start records the billed session, and dev:stop --eas stops it', asy
   expect(stops()).toEqual([['simulator:stop', '--id', 'billed', '--non-interactive']]);
   expect(fs.existsSync(bindingFile(root))).toBe(false);
 });
+it('a re-run beside a child whose open finished reopens when the binding is gone', async () => {
+  const root = await project();
+  const run = () =>
+    executeAgentCliAsync(root, ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'], {
+      env: {
+        ...envFor(root),
+        STUB_EXPO_DEV_SERVER_PORT: '8763',
+        STUB_EXPO_LISTEN: '1',
+        STUB_EXPO_DELAY_MS: '90000',
+        STUB_EXPO_TUNNEL_HOST: 'cloud.tunnel.example',
+        STUB_EXPO_TUNNEL_DELAY_MS: '100',
+      },
+      reject: false,
+    });
+  const opens = () =>
+    readStubEasInvocations(root).filter((i) => i.executedSessionId && i.args.includes('open'));
+  const first = await run();
+  expect(first.exitCode, first.stderr).toBe(0);
+  await waitForAsync(() => fs.existsSync(bindingFile(root)), 15000);
+  const id = 'sess-e2e-started';
+  expect(readBinding(root).device).toMatchObject({ id });
+  // The start opened the app itself, through its launch URL.
+  expect(opens()).toEqual([]);
+  fs.rmSync(bindingFile(root));
+
+  const second = await run();
+  expect(second.exitCode, second.stderr).toBe(0);
+  expect(second.stderr).not.toMatch(/Waiting up to .* for the EAS Simulator session/);
+  expect(readBinding(root).device).toMatchObject({ id });
+  expect(opens().map((i) => i.executedSessionId)).toEqual([id]);
+});

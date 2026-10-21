@@ -9,6 +9,7 @@ export function lockInfo(overrides: Partial<DevServerLockInfo> = {}): DevServerL
     startedAt: '2026-08-23T00:00:00.000Z',
     projectRoot: '/project',
     easPlatform: null,
+    easOpenFinished: false,
     ...overrides,
   };
 }
