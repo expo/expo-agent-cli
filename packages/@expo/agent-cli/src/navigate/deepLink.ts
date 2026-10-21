@@ -176,7 +176,7 @@ export type ResolveDeepLinkUrlResult =
 /**
  * Build the URL to open for a route.
  *
- * Precedence: a full URL passes through unchanged, then an explicit scheme, then the Expo Go
+ * Precedence: a full URL is only percent-encoded, then an explicit scheme, then the Expo Go
  * shape, then the config scheme, then `exp+<slug>://`.
  */
 export function resolveDeepLinkUrl({
@@ -209,13 +209,13 @@ export function resolveDeepLinkUrl({
   if (isFullUrl(trimmedRoute)) {
     return {
       ok: true,
-      url: trimmedRoute,
-      resolution: 'the route was already a full URL, so it was used unchanged',
+      url: encodeFullUrl(trimmedRoute),
+      resolution: 'the route was already a full URL, so it was only percent-encoded',
       host: null,
     };
   }
 
-  const routePath = stripLeadingSlashes(trimmedRoute);
+  const routePath = encodeUrlPart(stripLeadingSlashes(trimmedRoute));
 
   const overrideScheme = nonEmptyString(schemeOverride);
   if (overrideScheme != null) {
@@ -516,6 +516,24 @@ function isFullUrl(value: string): boolean {
 
 function stripLeadingSlashes(value: string): string {
   return value.replace(/^\/+/, '');
+}
+
+// encodeURI keeps URL delimiters; the replace keeps escapes the caller already wrote.
+function encodeUrlPart(part: string): string {
+  return encodeURI(part).replace(/%25([0-9A-Fa-f]{2})/g, '%$1');
+}
+
+// The authority keeps `[` `]` so an IPv6 host such as `exp://[::1]:8081` stays a host.
+function encodeFullUrl(url: string): string {
+  return url.replace(
+    /^([a-zA-Z][a-zA-Z0-9+.-]*:)(\/\/[^/?#]*)?([\s\S]*)$/,
+    (_match, scheme: string, authority: string | undefined, rest: string) =>
+      scheme +
+      encodeUrlPart(authority ?? '')
+        .replace(/%5B/g, '[')
+        .replace(/%5D/g, ']') +
+      encodeUrlPart(rest)
+  );
 }
 
 function stripSchemeSuffix(value: string): string {
