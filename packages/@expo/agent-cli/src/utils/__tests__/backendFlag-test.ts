@@ -77,6 +77,19 @@ describe('Adding --local to printed device commands', () => {
     );
   });
 
+  it('should read a single-quoted word as one argument', () => {
+    expect(local("npx @expo/agent-cli dev --ios --device 'iPhone 16' --detach --wait-ready")).toBe(
+      "npx @expo/agent-cli dev --ios --device 'iPhone 16' --detach --wait-ready --local"
+    );
+    const flagged = "npx @expo/agent-cli dev --ios --device 'iPhone 16' --local --detach";
+    expect(local(flagged)).toBe(flagged);
+    const eas = "npx @expo/agent-cli navigate '/a b' --eas";
+    expect(local(eas)).toBe(eas);
+    expect(local(`run "npx @expo/agent-cli dev --ios --device 'iPhone 16'" again`)).toBe(
+      `run "npx @expo/agent-cli dev --ios --device 'iPhone 16' --local" again`
+    );
+  });
+
   it('should match the bare name the plan reasons use', () => {
     expect(local('Open it with "@expo/agent-cli navigate /" once a device is up.')).toBe(
       'Open it with "@expo/agent-cli navigate / --local" once a device is up.'

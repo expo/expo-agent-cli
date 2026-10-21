@@ -35,8 +35,9 @@ export function argvPassesLocal(argv: readonly string[]): boolean {
 // the plan's reasons use.
 const ESCAPED_PREFIX = `(?<![\\w/@-])(?:(?:npx|bunx)[ \\t]+)?${PROGRAM_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`;
 const COMMAND = `(?:${LOCAL_FLAG_COMMANDS.map((name) => name.replace(':', '\\:')).join('|')})`;
-// Arguments run to a quote, a backslash (a JSON-escaped quote), `&&`, a lone `--` or a dash.
-const ARGUMENT = `[ \\t]+(?!&&|--(?:\\s|$)|—)[^\\s"'\`”)\\\\]+`;
+// Arguments run to a double quote, a backslash (a JSON-escaped quote), `&&`, a lone `--` or a dash.
+// A single-quoted shell word, such as `--device 'iPhone 16'`, is one argument.
+const ARGUMENT = `[ \\t]+(?!&&|--(?:\\s|$)|—)(?:[^\\s"'\`”)\\\\]|'[^'\\n]*')+`;
 const DEVICE_COMMAND = new RegExp(
   `(${ESCAPED_PREFIX}[ \\t]+${COMMAND}(?![\\w:-]))((?:${ARGUMENT})*)`,
   'g'
