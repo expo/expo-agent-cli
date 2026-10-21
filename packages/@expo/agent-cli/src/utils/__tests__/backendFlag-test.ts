@@ -90,6 +90,15 @@ describe('Adding --local to printed device commands', () => {
     );
   });
 
+  it('should read a quote escaped inside a quoted word as part of it', () => {
+    const name = "npx @expo/agent-cli dev --ios --device 'John'\\''s iPhone'";
+    expect(local(`${name} --detach`)).toBe(`${name} --detach --local`);
+    expect(local(`${name} --local --detach`)).toBe(`${name} --local --detach`);
+    // The same line as JSON writes it.
+    const json = JSON.stringify(`${name} --local --detach`);
+    expect(local(json)).toBe(json);
+  });
+
   it('should match the bare name the plan reasons use', () => {
     expect(local('Open it with "@expo/agent-cli navigate /" once a device is up.')).toBe(
       'Open it with "@expo/agent-cli navigate / --local" once a device is up.'
