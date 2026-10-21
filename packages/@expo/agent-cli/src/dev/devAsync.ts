@@ -164,8 +164,9 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   );
   // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — a committed config
   // starts a billed session for everyone who runs this, so the plan says where the choice came from.
+  // A `--no-open` run starts no session, so it says nothing.
   const resolved =
-    options.deviceBackendSource === 'config'
+    options.deviceBackendSource === 'config' && options.open
       ? { ...resolvedPlan, reasons: [...resolvedPlan.reasons, configSessionReason()] }
       : resolvedPlan;
 
@@ -464,6 +465,10 @@ async function withPlannedDevice(
     : plan;
 }
 
+function configSessionReason(): string {
+  return `The app runs on an EAS Simulator session because ${CONFIG_LOCATION} sets deviceBackend to "eas". A session bills until it stops: "${PROGRAM_PREFIX} dev:stop" ends it, and --local runs on this machine instead.`;
+}
+
 /**
  * The stop for a plan whose EAS route nobody chose.
  *
@@ -472,10 +477,6 @@ async function withPlannedDevice(
  * enough: the platform flag, `--eas` against `--local`. The plan is not run and nothing is spawned,
  * so nothing has been billed by the time this is read.
  */
-function configSessionReason(): string {
-  return `The app runs on an EAS Simulator session because ${CONFIG_LOCATION} sets deviceBackend to "eas". A session bills until it stops: "${PROGRAM_PREFIX} dev:stop" ends it, and --local runs on this machine instead.`;
-}
-
 function implicitEasRouteError(plan: StartPlan, platform: PlanPlatform): CommandError {
   const location = plan.buildLocation!;
   const error = new CommandError(

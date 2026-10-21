@@ -811,6 +811,22 @@ describe('@expo/agent-cli dev with deviceBackend "eas" in the config', () => {
     expect(easInvocationArgs(projectRoot)).toEqual([]);
   });
 
+  it('should not say a session bills when --no-open starts none', async () => {
+    const projectRoot = await setupAsync();
+    await writeAgentCliConfigAsync(projectRoot, { deviceBackend: 'eas' });
+
+    const result = await executeAgentCliAsync(projectRoot, [
+      'dev',
+      '--ios',
+      '--no-open',
+      '--plan',
+      '--json',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout).reasons.join('\n')).not.toContain('sets deviceBackend');
+  });
+
   it('should keep everything on this machine with --local', async () => {
     const projectRoot = await setupAsync();
     await writeAgentCliConfigAsync(projectRoot, { deviceBackend: 'eas' });

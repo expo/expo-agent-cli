@@ -310,8 +310,8 @@ function assertEasRunFits(argv: string[], source: 'flag' | 'config'): void {
         : `--device selects a local device, and ${CONFIG_LOCATION} puts the ${example} device on EAS (deviceBackend: "eas"). How: add --local to use a local device, or remove --device to use EAS Simulator.`
     );
   }
-  // `--web` makes the config's device backend moot, so only the flag can collide with it.
-  if (argv.includes('--web')) {
+  // With the config, `--web` beside a native flag is a two-platform error, which the platform check reports.
+  if (source === 'flag' && argv.includes('--web')) {
     throw opposite(
       '--eas and --web ask for two different places to run the app, so this run has no plan.',
       'Why: --eas runs the app on an EAS Simulator session, which is an iOS simulator or an Android emulator in the cloud; --web serves it to a browser on this machine, which needs no build and no device.',
