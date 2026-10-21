@@ -28,19 +28,19 @@ The probe answered `present`, `missing`, or `unknown`. `missing` covered two sta
 
 `selectBuildBackend` (`src/toolchain/selectBackend.ts`) is a pure function of four facts. The precedence is the contract:
 
-| Rank | Input                                             | Wins because                             |
-| ---- | ------------------------------------------------- | ---------------------------------------- |
-| 1    | A flag on this command line (`--eas`, `--local`)  | It is the most recent thing anyone said. |
-| 2    | The project's `@expo/agent-cli` config            | The developer wrote it down on purpose.  |
-| 3    | The host cannot have the toolchain (`impossible`) | No install here would change it.         |
-| 4    | The probe found the toolchain missing             | This machine cannot, and could.          |
-| 5    | Nothing                                           | Builds run here.                         |
+| Rank | Input                                                                                           | Wins because                             |
+| ---- | ----------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| 1    | A flag on this command line (`--eas`, `--local`)                                                | It is the most recent thing anyone said. |
+| 2    | The project's `@expo/agent-cli` config: `buildBackend`, else `eas` for a `deviceBackend: "eas"` | The developer wrote it down on purpose.  |
+| 3    | The host cannot have the toolchain (`impossible`)                                               | No install here would change it.         |
+| 4    | The probe found the toolchain missing                                                           | This machine cannot, and could.          |
+| 5    | Nothing                                                                                         | Builds run here.                         |
 
 Three properties of that table are load-bearing.
 
 Detection only ever pushes a build to the cloud. There is no row that moves a build back to this machine, because "this machine has Xcode" is not a reason to prefer a local build over one the caller asked for in the cloud.
 
-**Detection names the route; it does not take it** [Kudo, 2026-09-09]. Rows 3 and 4 mark their choice `implicit`. A build on EAS and an EAS Simulator session use EAS credits, and a finding about this host is not a person deciding to spend them — on a Windows machine, `dev --ios` used to queue a cloud build with nothing but the host's inability behind it. So an implicit EAS route is _described_ and _stopped_: `dev` prints the plan under `--plan` with a reason saying it will not run as is, and a bare `dev` exits 1 with `EAS_ROUTE_NOT_CHOSEN`, naming `--eas` (which also puts the app on an EAS Simulator session, [[0027-everything-on-eas]]) and `--local`; `smoke` fails its `start-dev-server` phase with the same reason before spawning anything; `status` and the `--plan` follow-ups offer `dev --<platform> --eas`, a line that runs. Rows 1 and 2 — the flag, and `buildBackend` in the package.json config — are a person's own choice and run with no stop.
+**Detection names the route; it does not take it** [Kudo, 2026-09-09]. Rows 3 and 4 mark their choice `implicit`. A build on EAS and an EAS Simulator session use EAS credits, and a finding about this host is not a person deciding to spend them — on a Windows machine, `dev --ios` used to queue a cloud build with nothing but the host's inability behind it. So an implicit EAS route is _described_ and _stopped_: `dev` prints the plan under `--plan` with a reason saying it will not run as is, and a bare `dev` exits 1 with `EAS_ROUTE_NOT_CHOSEN`, naming `--eas` (which also puts the app on an EAS Simulator session, [[0027-everything-on-eas]]) and `--local`; `smoke` fails its `start-dev-server` phase with the same reason before spawning anything; `status` and the `--plan` follow-ups offer `dev --<platform> --eas`, a line that runs. Rows 1 and 2 — the flag, and `buildBackend` or `deviceBackend: "eas"` in the package.json config — are a person's own choice and run with no stop.
 
 `unknown` leaves the build here. A probe that could not run has established nothing, and routing a caller into a build queue over a toolchain nobody could reach is worse than the local plan they would otherwise have got.
 
@@ -95,15 +95,15 @@ Resolution, per platform, highest first:
 3. The top-level `deviceBackend`.
 4. `local`. Detection never puts a device on EAS. There is no implicit device route.
 
-`deviceBackend: "eas"` makes the build go to EAS too. A session installs Expo Go or a build that EAS has (`--expo-go` or `--build-id`), never a build made on this machine. So a platform whose `deviceBackend` is `eas` and whose `buildBackend` is unset builds on EAS. A platform that resolves to `deviceBackend: "eas"` and `buildBackend: "local"` is `BAD_AGENT_CLI_CONFIG`, because no run of it could open a development build.
+`deviceBackend: "eas"` makes the build go to EAS too. A session installs Expo Go or a build that EAS has (`--expo-go` or `--build-id`), never a build made on this machine. So for a platform whose `deviceBackend` is `eas` and whose `buildBackend` is unset, §The selection reads rank 2 as `eas`: an explicit config choice that runs, never an implicit route. A platform whose config names `buildBackend: "local"` beside `deviceBackend: "eas"` is `BAD_AGENT_CLI_CONFIG`, because no run of it could open a development build. The rank-5 default is not that case.
 
 With `deviceBackend: "eas"`, a command does what it does with `--eas`:
 
 - `dev` tunnels the dev server, builds with the simulator profile when it must build, and opens the app on a session ([[0027-everything-on-eas]]). It refuses `--device`, `--lan`, `--localhost` and `--host lan|localhost` with `BAD_ARGS`, as `--eas` does. The message names the config key, and its How line names `--local`. `dev --web` reads no `deviceBackend`, because the web has no device.
-- `smoke`, `navigate`, `runtime:reload` and `runtime:stop` take the session as their device (`cloud: 'required'`) for a platform that resolves to `eas`. `navigate` and the runtime commands may omit the platform. Then they require the session only when both platforms resolve to `eas`. With one platform on `eas`, the run stays on the local ladder, `fallback` included, so a local device of the other platform is not skipped.
+- `smoke`, `navigate`, `runtime:reload` and `runtime:stop` take the session as their device (`cloud: 'required'`) for a platform that resolves to `eas`. `navigate` and the runtime commands may omit the platform. Then they require the session only when both platforms resolve to `eas`. With one platform on `eas`, each stays on its own ladder, so a local device of the other platform is not skipped: `navigate` keeps its `fallback` rung, and `runtime:reload` and `runtime:stop` stay at `off` ([[0005-runtime-loop-tools]] §Cloud simulator).
 - `dev:stop` ends this project's session, as `dev:stop --eas` does, when the config puts either platform's device on EAS. Stopping spends nothing, so "either" is the safe side here. It also does the binding release of `dev:stop --eas` ([[0035-one-device-per-worktree]] §EAS session binding), so no binding outlives its session.
 
-These commands also take `--local`. With `--local`, they use only local devices (`cloud: 'off'`), whatever the config says. Without the config, `--local` is the same as no flag, except that `navigate` and `smoke` also drop their `fallback` rung. `dev:stop --local` leaves every session running.
+These commands also take `--local`. With `--local`, they use only local devices (`cloud: 'off'`), whatever the config says. When `deviceBackend` is unset, the device side of `--local` matches no flag, except that `navigate` and `smoke` drop their `fallback` rung. The build side does not: `dev --local`, and the `dev` child of `smoke --local`, choose a local build at rank 1 and run it, where a bare run on a host that cannot build stops with `EAS_ROUTE_NOT_CHOSEN`. `dev:stop --local` leaves every session running.
 
 The config is in `package.json`, so it is shared by everyone who checks out the repository. One `deviceBackend: "eas"` makes every teammate's `dev` start a billed session. `buildBackend: "eas"` does the same for builds, and a session costs more, because a session bills by the minute. So the plan's reasons and the `dev` output say that the session comes from the config, name the file, and say how to stop it. A per-machine override is left for later.
 
@@ -216,11 +216,11 @@ The module is `src/settings/` rather than `src/config/`, because `src/config/` i
 }
 ```
 
-Three questions, kept orthogonal: which app, where the build runs, and where the app runs. The per-platform overrides exist because the detection they override is already per-platform, and because one host can often run one platform's device and not the other's. `target` has no per-platform form.
+Three questions, in separate keys: which app, where the build runs, and where the app runs. The per-platform overrides exist because the detection they override is already per-platform, and because one host can often run one platform's device and not the other's. `target` has no per-platform form.
 
 ## Validation
 
-Unknown keys and unknown values are errors, not warnings. A preference that was meant to change a plan and silently did not is a wrong plan approved as a right one. A typo gets a "looks like" line. A `package.json` that is not valid JSON is an error rather than "no config". A project with no `@expo/agent-cli` key is not an error and never warns. A platform that resolves to `deviceBackend: "eas"` with `buildBackend: "local"` is an error (§The device backend).
+Unknown keys and unknown values are errors, not warnings. A preference that was meant to change a plan and silently did not is a wrong plan approved as a right one. A typo gets a "looks like" line. A `package.json` that is not valid JSON is an error rather than "no config". A project with no `@expo/agent-cli` key is not an error and never warns. A platform whose config names `buildBackend: "local"` beside `deviceBackend: "eas"` is an error (§The device backend).
 
 `status` is the one exception to the fatality. It catches the error, reports every other line, and exits 0, because `status` promises to be information rather than judgment.
 
