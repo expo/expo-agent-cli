@@ -77,6 +77,39 @@ describe('Adding --local to printed device commands', () => {
     );
   });
 
+  it('should match the bare name the plan reasons use', () => {
+    expect(local('Open it with "@expo/agent-cli navigate /" once a device is up.')).toBe(
+      'Open it with "@expo/agent-cli navigate / --local" once a device is up.'
+    );
+  });
+
+  it('should not match the name inside a path or a version spec', () => {
+    for (const text of [
+      'node_modules/@expo/agent-cli dev --ios',
+      'npx @expo/agent-cli@1.0.20 dev --ios',
+    ]) {
+      expect(local(text)).toBe(text);
+    }
+  });
+
+  it('should change nothing on a second pass, before a colour reset or a full stop', () => {
+    const colored = `\x1b[36mnpx @expo/agent-cli smoke --ios\x1b[39m`;
+    const once = local(colored);
+    expect(once).toBe(`\x1b[36mnpx @expo/agent-cli smoke --ios --local\x1b[39m`);
+    expect(local(once)).toBe(once);
+    const sentence = local('Run npx @expo/agent-cli runtime:reload --ios.');
+    expect(local(sentence)).toBe(sentence);
+    expect(local('\x1b[36mnpx @expo/agent-cli navigate / --eas\x1b[39m')).toBe(
+      '\x1b[36mnpx @expo/agent-cli navigate / --eas\x1b[39m'
+    );
+  });
+
+  it('should still add --local beside --localhost', () => {
+    expect(local('npx @expo/agent-cli dev --ios --localhost')).toBe(
+      'npx @expo/agent-cli dev --ios --localhost --local'
+    );
+  });
+
   it('should change nothing for a run that did not pass --local', () => {
     expect(withRunBackendFlag('npx @expo/agent-cli dev --ios', null)).toBe(
       'npx @expo/agent-cli dev --ios'

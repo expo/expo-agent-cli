@@ -1,6 +1,6 @@
 // Deferred from v1 (2026-08-26) — kept as reference, imported by nothing; see llp/0008
 //
-import { events } from '2g';
+import { events } from '../../utils/flaggedEvents';
 import type { SerializedError } from '2g';
 
 declare module '2g' {

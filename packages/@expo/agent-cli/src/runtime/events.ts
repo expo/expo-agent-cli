@@ -1,4 +1,4 @@
-import { events } from '2g';
+import { events } from '../utils/flaggedEvents';
 
 declare module '2g' {
   interface EventRegistry {

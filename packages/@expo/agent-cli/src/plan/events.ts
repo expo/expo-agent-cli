@@ -1,4 +1,4 @@
-import { events } from '2g';
+import { events } from '../utils/flaggedEvents';
 import type { SerializedError } from '2g';
 
 import type { PlanStep, ProjectTarget, StartPlan } from '../project/types';

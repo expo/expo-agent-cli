@@ -31,8 +31,9 @@ export function argvPassesLocal(argv: readonly string[]): boolean {
   return (separator < 0 ? argv : argv.slice(0, separator)).includes('--local');
 }
 
-// `bunx` too: `renderForInvoker` may have respelled the runner before the text reaches `Log`.
-const ESCAPED_PREFIX = `(?:npx|bunx)[ \\t]+${PROGRAM_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`;
+// `bunx` too, since `renderForInvoker` may have respelled the runner, and the bare name, which
+// the plan's reasons use.
+const ESCAPED_PREFIX = `(?<![\\w/@-])(?:(?:npx|bunx)[ \\t]+)?${PROGRAM_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`;
 const COMMAND = `(?:${LOCAL_FLAG_COMMANDS.map((name) => name.replace(':', '\\:')).join('|')})`;
 // Arguments run to a quote, a backslash (a JSON-escaped quote), `&&`, a lone `--` or a dash.
 const ARGUMENT = `[ \\t]+(?!&&|--(?:\\s|$)|—)[^\\s"'\`”)\\\\]+`;
@@ -47,11 +48,13 @@ export function withRunBackendFlag(text: string, flag: string | null = runFlag):
     return text;
   }
   return text.replace(DEVICE_COMMAND, (_match, command: string, args: string) => {
-    if (/(^|\s)--(local|eas)(\s|$)/.test(args)) {
+    // A second pass may meet the flag glued to a colour reset or a full stop.
+    if (/(^|\s)--(local|eas)(?![\w-])/.test(args)) {
       return command + args;
     }
-    // A sentence may end right after the command: the flag goes before its full stop or comma.
-    const trailing = /[.,;:]+$/.exec(args)?.[0] ?? '';
+    // A sentence may end right after the command, and a colour may close on it: the flag goes
+    // before the full stop and the reset.
+    const trailing = /(?:[.,;:]|\x1b\[[0-9;]*m)+$/.exec(args)?.[0] ?? '';
     return `${command}${args.slice(0, args.length - trailing.length)} ${flag}${trailing}`;
   });
 }

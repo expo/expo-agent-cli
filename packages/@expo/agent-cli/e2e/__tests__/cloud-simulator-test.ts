@@ -1039,6 +1039,21 @@ describe('a project whose config puts the device on EAS', () => {
     }
   });
 
+  it(`should print --local on the bare navigate a --local plan names in its reasons`, async () => {
+    const projectRoot = await setupOnEasAsync();
+    const eventsFile = path.join(projectRoot, 'events.jsonl');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['dev', '--ios', '--local', '--no-open', '--plan', '--json'],
+      { reject: false, env: { LOG_EVENTS: eventsFile } }
+    );
+
+    expect(result.stdout).toContain('@expo/agent-cli navigate / --local');
+    expect(result.stdout).not.toMatch(/@expo\/agent-cli navigate \/(?! --local)/);
+    expect(fs.readFileSync(eventsFile, 'utf8')).toContain('@expo/agent-cli navigate / --local');
+  });
+
   it(`should leave the session running on dev:stop --local`, async () => {
     const projectRoot = await setupOnEasAsync();
 

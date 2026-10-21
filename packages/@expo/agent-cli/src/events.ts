@@ -1,7 +1,5 @@
-import { events } from '2g';
+import { events } from './utils/flaggedEvents';
 import type { SerializedError } from '2g';
-
-import { withRunBackendFlagDeep } from './utils/backendFlag';
 
 import type { FollowUp } from './followups/types';
 import type { DevServerSource } from './runtime/devServer';
@@ -750,14 +748,5 @@ declare module '2g' {
   }
 }
 
-const cliEvents = events('cli');
-// @ref ./utils/backendFlag — the stream carries the commands an agent runs, so they keep `--local`.
-export const event: typeof cliEvents = Object.assign(
-  ((name: string, payload?: unknown) =>
-    (cliEvents as unknown as (name: string, payload?: unknown) => unknown)(
-      name,
-      withRunBackendFlagDeep(payload)
-    )) as unknown as typeof cliEvents,
-  cliEvents
-);
+export const event = events('cli');
 export const debugEvent = events.debug('cli');
