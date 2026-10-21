@@ -16,6 +16,7 @@ import {
   type CapturedDevServerLog,
 } from '../advertisedUrl';
 import { detachedLogPath } from '../logFile';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -251,6 +252,7 @@ describe('resolveDevServerReachAsync', () => {
       ...(lines ? { [detachedLogPath(projectRoot)]: lines.join('\n') + '\n' } : {}),
     });
     vi.mocked(readDevServerLockAsync).mockResolvedValue({
+      ...lockInfo(),
       url: lockUrl,
       port: 8309,
       pid: 1,

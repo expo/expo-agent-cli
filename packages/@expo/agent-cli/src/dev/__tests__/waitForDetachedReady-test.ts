@@ -1,11 +1,13 @@
 import { readDevServerLockAsync } from '../../devLock';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
 import { waitForDetachedReadyAsync } from '../waitForDetachedReady';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
 
 const lock = {
+  ...lockInfo(),
   url: 'http://127.0.0.1:8081',
   port: 8081,
   pid: 1234,

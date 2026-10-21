@@ -7,6 +7,7 @@ import { resetApprovedSchemes } from '../../device/approveScheme';
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
 import { navigateAsync } from '../navigateAsync';
 import type { NavigateOptions } from '../resolveOptions';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -242,6 +243,7 @@ describe(navigateAsync, () => {
     it(`should build the URL from the project's lock, not from 8081`, async () => {
       mockExpoGoProject();
       vi.mocked(readDevServerLockAsync).mockResolvedValue({
+        ...lockInfo(),
         url: 'http://127.0.0.1:8099',
         port: 8099,
         pid: 4242,
@@ -269,6 +271,7 @@ describe(navigateAsync, () => {
     it(`should still let --dev-server-url name the dev server exactly`, async () => {
       mockExpoGoProject();
       vi.mocked(readDevServerLockAsync).mockResolvedValue({
+        ...lockInfo(),
         url: 'http://127.0.0.1:8099',
         port: 8099,
         pid: 4242,
@@ -752,6 +755,7 @@ describe(navigateAsync, () => {
         [`${projectRoot}/.expo/dev/logs/dev-detached.log`]: `Waiting on http://${host}\n`,
       });
       vi.mocked(readDevServerLockAsync).mockResolvedValue({
+        ...lockInfo(),
         url: 'http://127.0.0.1:8081',
         port: 8081,
         pid: 4242,

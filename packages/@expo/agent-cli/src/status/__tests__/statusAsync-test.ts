@@ -33,6 +33,7 @@ import { formatStatusReport } from '../format';
 import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
 import type { StatusReport } from '../types';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 vi.mock('../installed', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../installed')>()),
@@ -1146,6 +1147,7 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
   });
   const iosOptions = { ...options, platform: 'ios' as const };
   const running = {
+    ...lockInfo(),
     projectRoot,
     url: devServerUrl,
     port: 8081,

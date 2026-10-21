@@ -23,6 +23,7 @@ import {
 } from '../reloadAsync';
 import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
+import { lockInfo } from '../../../devLock/__tests__/fakeLock';
 
 vi.mock('../../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -1335,6 +1336,7 @@ describe('reloading an app on a cloud simulator session', () => {
     writeCloudProject();
     mockDevServer([], { manifestOrigin: 'https://chx3ba8-alice-8303.exp.direct' });
     vi.mocked(readDevServerLockAsync).mockResolvedValue({
+      ...lockInfo(),
       url: 'http://127.0.0.1:8081',
       port: 8081,
       pid: 1,

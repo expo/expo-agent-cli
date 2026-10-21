@@ -30,6 +30,7 @@ import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 import { isExpoDevServerAsync } from '../stopAsync';
 import { easRunLifecycle } from '../openAppEas';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 vi.mock('../../log');
 // The machine running the tests may have its own Metro on 8081.
@@ -128,7 +129,6 @@ vi.mock('../detachAsync', async () => ({
   ...(await vi.importActual<typeof import('../detachAsync')>('../detachAsync')),
   devDetachAsync: vi.fn(async () => 0),
 }));
-
 vi.mock('../stopAsync', async () => ({
   ...(await vi.importActual<typeof import('../stopAsync')>('../stopAsync')),
   isExpoDevServerAsync: vi.fn(async () => false),
@@ -205,6 +205,7 @@ const notAnswering = { answering: false, projectRootMatched: null, reportedProje
 /** This project's dev server holds its lock on `port`, and its `/status` answers in `phase`. */
 function mockRunning(phase: 'serving' | 'starting', port = 8081): DevServerLockInfo {
   const lock: DevServerLockInfo = {
+    ...lockInfo(),
     url: `http://127.0.0.1:${port}`,
     port,
     pid: 4242,
@@ -299,6 +300,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'inherit',
+          easPlatform: null,
           onDevServer: expect.any(Function),
         }
       );
@@ -313,6 +315,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
+        easPlatform: null,
       });
     });
 
@@ -391,7 +394,12 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(
         projectRoot,
         ['start', '--go', '--port', '8082'],
-        { agentSkills: true, output: 'inherit', onDevServer: expect.any(Function) }
+        {
+          agentSkills: true,
+          output: 'inherit',
+          easPlatform: null,
+          onDevServer: expect.any(Function),
+        }
       );
       expect(runExpoAsync).not.toHaveBeenCalled();
     });
@@ -407,6 +415,7 @@ describe(devAsync, () => {
         {
           agentSkills: false,
           output: 'inherit',
+          easPlatform: null,
           onDevServer: expect.any(Function),
         }
       );
@@ -423,6 +432,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'inherit',
+          easPlatform: null,
         }
       );
     });
@@ -513,6 +523,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
+        easPlatform: null,
       });
     });
 
@@ -664,6 +675,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'inherit',
+          easPlatform: null,
           onDevServer: expect.any(Function),
         }
       );
@@ -678,6 +690,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8081'], {
         agentSkills: true,
         output: 'inherit',
+        easPlatform: null,
       });
     });
 
@@ -692,6 +705,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8082'], {
         agentSkills: true,
         output: 'inherit',
+        easPlatform: null,
       });
     });
 
@@ -709,6 +723,7 @@ describe(devAsync, () => {
       expect(runDevServerAsync).toHaveBeenCalledWith(projectRoot, ['run:ios', '--port', '8082'], {
         agentSkills: true,
         output: 'inherit',
+        easPlatform: null,
       });
       const warnings = vi.mocked(Log.warn).mock.calls.map(([line]) => String(line));
       expect(warnings.filter((line) => line.includes('the dev server uses'))).toEqual([
@@ -920,6 +935,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'inherit',
+          easPlatform: null,
         }
       );
     });
@@ -1024,6 +1040,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'inherit',
+          easPlatform: null,
           onDevServer: expect.any(Function),
         }
       );
@@ -1073,6 +1090,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'tee',
+          easPlatform: null,
           onDevServer: expect.any(Function),
         }
       );
@@ -1094,6 +1112,7 @@ describe(devAsync, () => {
         {
           agentSkills: true,
           output: 'capture',
+          easPlatform: null,
           onDevServer: expect.any(Function),
         }
       );
@@ -1946,6 +1965,8 @@ describe('EAS session lifecycle of the dev-server step', () => {
       expect.objectContaining({ devServerUrl: 'http://127.0.0.1:8081' })
     );
     expect(lifecycle.finishAsync).toHaveBeenCalledTimes(1);
+    const [, , opts] = vi.mocked(runDevServerAsync).mock.calls[0]!;
+    expect(opts!.easPlatform).toBe('ios');
   });
 
   it(`keeps the session in a detached child`, async () => {
@@ -1957,5 +1978,13 @@ describe('EAS session lifecycle of the dev-server step', () => {
       projectRoot,
       expect.objectContaining({ keepSession: true })
     );
+  });
+
+  it(`names no EAS platform on the dev-server lock of a local run`, async () => {
+    await devAsync(projectRoot, resolveDevOptions(['--ios']));
+
+    expect(easRunLifecycle).not.toHaveBeenCalled();
+    const [, , opts] = vi.mocked(runDevServerAsync).mock.calls[0]!;
+    expect(opts!.easPlatform).toBeNull();
   });
 });

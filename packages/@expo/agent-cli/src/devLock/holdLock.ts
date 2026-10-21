@@ -15,7 +15,10 @@ import {
 import { acquireDevServerLockAsync } from './server';
 import type { DevServerLockHandle, DevServerLockInfo } from './types';
 
-export type HoldDevServerLockOptions = ResolveDevServerPortOptions;
+export type HoldDevServerLockOptions = ResolveDevServerPortOptions & {
+  /** {@link DevServerLockInfo.easPlatform}; null when omitted. */
+  easPlatform?: DevServerLockInfo['easPlatform'];
+};
 
 /**
  * Publish where this project's dev server listens, and hold the address until it is released.
@@ -78,13 +81,14 @@ function lockInfo(
     pid: process.pid,
     startedAt: new Date(options.since).toISOString(),
     projectRoot,
+    easPlatform: options.easPlatform ?? null,
   };
 }
 
 /** Take the lock for a dev server on the resolved port. */
 async function publishAsync(
   projectRoot: string,
-  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning'>,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform'>,
   resolved: ResolvedDevServerPort | null
 ): Promise<DevServerLockHandle | null> {
   // Derived once, inside the try, so the catch below has an address to report without being able

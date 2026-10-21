@@ -62,7 +62,7 @@ describe(holdDevServerLockAsync, () => {
       () => readDevServerLockAsync(projectRoot),
       (info) => info != null
     );
-    expect(answer).toMatchObject({ port: 8301 });
+    expect(answer).toMatchObject({ port: 8301, easPlatform: null });
     expect(resolved).toEqual(['arg:8301']);
 
     // Metro reports later, on another port: told again, and the lock follows.
@@ -74,6 +74,26 @@ describe(holdDevServerLockAsync, () => {
       url: 'http://127.0.0.1:8302',
     });
     running = false;
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  it(`names the EAS platform of the run`, async () => {
+    const projectRoot = makeTempProject();
+
+    held.push(
+      await holdDevServerLockAsync(projectRoot, ['start', '--port', '8307'], {
+        since: Date.now(),
+        isRunning: () => true,
+        intervalMs: 10,
+        timeoutMs: 30,
+        easPlatform: 'ios',
+      })
+    );
+
+    expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
+      port: 8307,
+      easPlatform: 'ios',
+    });
   });
 
   it(`waits for the log when the arguments name no port`, async () => {

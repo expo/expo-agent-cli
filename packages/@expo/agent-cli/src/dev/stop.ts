@@ -52,6 +52,7 @@ export const devStopHelp: CommandHelp = {
       'forced',
       'forceRefusedBy',
       'processStillRunning',
+      'easPlatform',
       'portStillAnswering',
       'reason',
       'detail',

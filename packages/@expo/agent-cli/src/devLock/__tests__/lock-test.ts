@@ -11,6 +11,7 @@ import { probeDevServerLockAsync, readDevServerLockAsync } from '../client';
 import { acquireDevServerLockAsync } from '../server';
 import type { DevServerLockInfo } from '../types';
 import { cleanupTempProjects, makeTempProject as makeProjectRoot } from './tempProject';
+import { lockInfo as fakeLock } from './fakeLock';
 
 // The suite-wide `fs` mock is memfs, which the kernel cannot bind a socket inside.
 vi.unmock('fs');
@@ -18,6 +19,7 @@ vi.unmock('node:fs');
 
 function lockInfo(projectRoot: string, port: number): DevServerLockInfo {
   return {
+    ...fakeLock(),
     url: `http://127.0.0.1:${port}`,
     port,
     pid: process.pid,
@@ -52,6 +54,24 @@ describe('dev server lock', () => {
     const result = await acquireAsync(info);
 
     expect(result).toMatchObject({ status: 'acquired' });
+    expect(await readDevServerLockAsync(projectRoot)).toEqual(info);
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  it(`answers the EAS platform of the run`, async () => {
+    const projectRoot = makeProjectRoot();
+    const info: DevServerLockInfo = { ...lockInfo(projectRoot, 8097), easPlatform: 'android' };
+
+    await acquireAsync(info);
+
+    expect(await readDevServerLockAsync(projectRoot)).toEqual(info);
+  });
+
+  it(`reads an answer that names no EAS platform as a run with none`, async () => {
+    const projectRoot = makeProjectRoot();
+    const info = lockInfo(projectRoot, 8098);
+    await acquireAsync({ ...info, easPlatform: undefined as unknown as null });
+
     expect(await readDevServerLockAsync(projectRoot)).toEqual(info);
   });
 

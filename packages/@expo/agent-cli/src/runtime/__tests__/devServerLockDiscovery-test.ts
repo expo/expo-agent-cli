@@ -9,6 +9,7 @@ import { cleanupTempProjects, makeTempProject } from '../../devLock/__tests__/te
 import { acquireDevServerLockAsync } from '../../devLock/server';
 import type { DevServerLockHandle } from '../../devLock/types';
 import { discoverDevServerAsync } from '../devServer';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 // The suite-wide `fs` mock is memfs, which the kernel cannot bind a socket inside.
 vi.unmock('fs');
@@ -45,6 +46,7 @@ const held: DevServerLockHandle[] = [];
 /** Hold a lock naming `port` for the duration of the test. */
 async function holdLockAsync(projectRoot: string, port: number): Promise<void> {
   const result = await acquireDevServerLockAsync({
+    ...lockInfo(),
     url: `http://127.0.0.1:${port}`,
     port,
     pid: process.pid,
@@ -159,6 +161,7 @@ describe('discoverDevServerAsync — the project lock', () => {
     fs.writeFileSync(
       address,
       `${JSON.stringify({
+        ...lockInfo(),
         url: 'http://127.0.0.1:8090',
         port: 8090,
         pid: 1,

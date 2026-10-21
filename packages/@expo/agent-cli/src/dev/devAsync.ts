@@ -631,6 +631,8 @@ async function executePlanAsync(
       return await runDevServerAsync(projectRoot, stepArgs, {
         agentSkills: options.agentSkills,
         output,
+        // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+        easPlatform: eas?.platform ?? null,
         onDevServer: opensApp
           ? (server) => {
               if (openArmed) {

@@ -18,6 +18,7 @@ import type { DevDetachResultJson } from '../detachAsync';
 import { detachedLogPath, openDetachedLogSync, readDetachedLogSync } from '../logFile';
 import { resolveDevLogsOptions, DEFAULT_LOG_TAIL_LINES } from '../resolveLogsOptions';
 import { resolveDevOptions } from '../resolveOptions';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 const projectRoot = '/project';
 
@@ -279,6 +280,7 @@ describe(resolveDevLogsOptions, () => {
 // from the outside: a bundler that is still working, and another process answering this port.
 describe(notReadyError, () => {
   const lock = {
+    ...lockInfo(),
     url: 'http://127.0.0.1:8081',
     port: 8081,
     pid: 4242,

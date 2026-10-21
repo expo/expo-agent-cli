@@ -26,6 +26,7 @@ import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn() }));
 vi.mock('../../log');
@@ -78,6 +79,7 @@ beforeEach(() => {
   vi.mocked(readDevServerLockAsync)
     .mockResolvedValueOnce(null)
     .mockResolvedValue({
+      ...lockInfo(),
       url: 'http://127.0.0.1:8393',
       port: 8393,
       pid: 4242,
@@ -120,6 +122,7 @@ describe('--eas on the other platform', () => {
     vi.mocked(readDevServerLockAsync)
       .mockReset()
       .mockResolvedValue({
+        ...lockInfo(),
         url: 'http://127.0.0.1:8393',
         port: 8393,
         pid: 4242,
@@ -183,6 +186,7 @@ it.each([false, true])('detects death during the device probe (reusing=%s)', asy
     vi.mocked(readDevServerLockAsync)
       .mockReset()
       .mockResolvedValue({
+        ...lockInfo(),
         url: 'http://127.0.0.1:8393',
         port: 8393,
         pid: 4242,
@@ -281,6 +285,7 @@ describe('reusing a running server', () => {
     vi.mocked(readDevServerLockAsync)
       .mockReset()
       .mockResolvedValue({
+        ...lockInfo(),
         url: 'http://127.0.0.1:8393',
         port: 8393,
         pid: 4242,
@@ -417,6 +422,7 @@ it('does not wait for a verdict when the child is alive but the bundler stopped 
 it('reports the port Metro logged, not the one the lock named before a retry', async () => {
   const { event: cliEvent } = await import('../../events');
   const lock = {
+    ...lockInfo(),
     pid: 4242,
     projectRoot,
     startedAt: new Date(0).toISOString(),
@@ -436,6 +442,7 @@ it('reports the port Metro logged, not the one the lock named before a retry', a
 
 describe('readiness belongs to this worktree', () => {
   const initialLock = {
+    ...lockInfo(),
     url: 'http://127.0.0.1:8393',
     port: 8393,
     pid: 4242,
@@ -560,6 +567,7 @@ describe('readiness belongs to this worktree', () => {
 // `startedAt` (the step's spawn) bounds the wait, as the port watch is bounded.
 describe('a lock whose port Metro has not logged', () => {
   const pending = {
+    ...lockInfo(),
     url: 'http://127.0.0.1:8180',
     port: 8180,
     pid: 4242,
@@ -662,6 +670,7 @@ describe('the bound device', () => {
   const platform = process.platform;
   afterEach(() => Object.defineProperty(process, 'platform', { value: platform }));
   const running = {
+    ...lockInfo(),
     url: 'http://127.0.0.1:8393',
     port: 8393,
     pid: 4242,
@@ -955,6 +964,7 @@ describe('the acquire line', () => {
   it('is printed before the already-running report', async () => {
     mockPlatform('darwin');
     const running = {
+      ...lockInfo(),
       url: 'http://127.0.0.1:8393',
       port: 8393,
       pid: 4242,

@@ -6,6 +6,7 @@ import { PROGRAM_PREFIX } from '../../programName';
 import { isPortInUseAsync } from '../portListener';
 import { resolveDevStopOptions } from '../resolveStopOptions';
 import { devStopAsync } from '../stopAsync';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 vi.mock('../../deviceBinding', () => ({
   devicesDisabled: () => false,
@@ -27,6 +28,7 @@ vi.mock('../portListener', () => ({
 const root = '/work/app';
 const host = process.platform;
 const lock = {
+  ...lockInfo(),
   pid: 4141,
   port: 8081,
   url: 'http://127.0.0.1:8081',
