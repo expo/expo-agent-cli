@@ -9,7 +9,7 @@
 
 ## Summary
 
-`--eas` on `dev` used to mean one thing: the native build runs on EAS Build. The plan ended with an artifact on EAS and a sentence about `eas build:run` — and on an Expo Go project the flag changed nothing at all [observed — 1.0.9, 2026-09-08]. Kudo's rule [2026-09-08]: **when `--eas` is passed, everything runs on EAS — the build, the simulator, the lot.** `deviceBackend: "eas"` in the developer config takes this same route without the flag ([[0015-backend-selection-and-config]] §The device backend).
+`--eas` on `dev` used to mean one thing: the native build runs on EAS Build. The plan ended with an artifact on EAS and a sentence about `eas build:run` — and on an Expo Go project the flag changed nothing at all [observed — 1.0.9, 2026-09-08]. Kudo's rule [2026-09-08]: **when `--eas` is passed, everything runs on EAS — the build, the simulator, the lot.** For iOS and Android, `deviceBackend: "eas"` in the developer config takes the same device route without the flag. `dev --web` ignores that key ([[0015-backend-selection-and-config]] §The device backend).
 
 So `dev --ios --eas` now ends with the app running on an EAS Simulator session:
 
@@ -87,7 +87,7 @@ A `--eas` run's follow-ups are aimed at the session: `navigate / --eas`, `runtim
 
 ## dev:stop
 
-`dev:stop --eas` also ends this project's session: the one the listing reports in progress (dotenv as the tiebreaker), stopped **by id** — the bare `eas simulator:stop` ends whatever the dotenv names, which may be a session another run is driving. Reported under `session: { id, stopped, reason }`; `id: null` is a project with none, and exit 20 is a session that would not stop, because it is still billing. Without the flag the session is untouched, as before: a session costs money, and ending one is asked for by name.
+`dev:stop --eas` also ends this project's session: the one the listing reports in progress (dotenv as the tiebreaker), stopped **by id** — the bare `eas simulator:stop` ends whatever the dotenv names, which may be a session another run is driving. Reported under `session: { id, stopped, reason }`; `id: null` is a project with none, and exit 20 is a session that would not stop, because it is still billing. Without the flag the session is untouched: a session costs money, and ending one is asked for by name. `deviceBackend: "eas"` in the developer config, for either platform, is that name too, and `dev:stop --local` leaves every session running ([[0015-backend-selection-and-config]] §The device backend).
 
 ## What EAS said
 

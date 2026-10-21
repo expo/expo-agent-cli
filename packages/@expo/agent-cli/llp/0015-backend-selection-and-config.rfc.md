@@ -10,7 +10,7 @@
 
 ## Summary
 
-Two decisions this CLI was making badly, and one place to record what a developer wants.
+Three decisions about where things run, and one place to record what a developer wants.
 
 1. Where a build runs is part of the plan, not a footnote under it. On a host that cannot build for the target platform at all, a plan nobody should approve used to print as though they should. The selection now happens while the plan is decided, so a machine with no Xcode gets `eas build` in the steps.
 2. The developer may disagree, and there has to be somewhere to say so. One config, five keys, in `package.json` under `expo.agent-cli`.
@@ -62,23 +62,27 @@ What "everything on EAS" is made of on `dev` — the tunnel, the simulator profi
 
 [confirmed, Kudo, 2026-10-21] One rule for every command:
 
-> A command starts a billed EAS action only when a person chose EAS: `--eas` on the command line, or `buildBackend: "eas"` or `deviceBackend: "eas"` in the config. A finding about this host never starts one.
+> A command starts a billed EAS action only when a person chose EAS for it. An EAS build needs `--eas`, `buildBackend: "eas"` or `deviceBackend: "eas"`. An EAS Simulator session needs `--eas` or `deviceBackend: "eas"`. A finding about this host never starts either.
 
 A billed action is one of two things: starting an EAS build (`eas build`, or a verb that queues one, `eas build:dev` and `eas workflow:run`), or starting an EAS Simulator session (`eas simulator`, `eas simulator:start`). Each one costs credits from the moment it starts.
 
-The rule is about **starting**. Using a session that is already running starts nothing new. So the `fallback` rung of `navigate` and `smoke` is allowed: with no local device, they may drive the session that `.env.eas-simulator` names ([[0005-runtime-loop-tools]] §Cloud simulator, [[0035-one-device-per-worktree]]). They never start one without `--eas` or the config.
+The rule is about **starting**. Using a session that is already running starts nothing new. So the `fallback` rung of `navigate` and `smoke` is allowed: with no local device, they may drive the session that `.env.eas-simulator` names ([[0005-runtime-loop-tools]] §Cloud simulator, [[0035-one-device-per-worktree]]). They never start one without `--eas` or `deviceBackend: "eas"`.
 
 Where each command stands:
 
-| Command                                      | Billed action it can start                                                                                                                         | Who chose it                                                                                                    |
-| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `dev`                                        | an EAS build, an EAS Simulator session                                                                                                             | `--eas`, `buildBackend`, `deviceBackend`. An implicit route stops with `EAS_ROUTE_NOT_CHOSEN` (§The selection). |
-| `smoke`                                      | an EAS build, through the `dev --detach` child that starts its dev server; an EAS Simulator session, in `start-session`, which itself never builds | `--eas`, `buildBackend`, `deviceBackend`. An implicit route fails `start-dev-server`.                           |
-| `navigate`, `runtime:reload`, `runtime:stop` | none. They use a running session or refuse.                                                                                                        | —                                                                                                               |
-| `dev:stop`                                   | none. It ends sessions.                                                                                                                            | —                                                                                                               |
-| every other command                          | none                                                                                                                                               | —                                                                                                               |
+| Command                                      | Billed action it can start                                                | Who chose it                                           |
+| -------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------ |
+| `dev`                                        | an EAS build                                                              | `--eas`, `buildBackend: "eas"`, `deviceBackend: "eas"` |
+| `dev`                                        | an EAS Simulator session                                                  | `--eas`, `deviceBackend: "eas"`                        |
+| `smoke`                                      | an EAS build, through the `dev --detach` child that starts its dev server | `--eas`, `buildBackend: "eas"`, `deviceBackend: "eas"` |
+| `smoke`                                      | an EAS Simulator session, in `start-session`, which itself never builds   | `--eas`, `deviceBackend: "eas"`                        |
+| `navigate`, `runtime:reload`, `runtime:stop` | none. They use a running session or refuse.                               | —                                                      |
+| `dev:stop`                                   | none. It ends sessions.                                                   | —                                                      |
+| every other command                          | none                                                                      | —                                                      |
 
-The rule is tested by what a run does, end to end. `plan-test.ts` and `smoke-test.ts` check that an implicit route stops with the credits reason before any step runs. `cloud-simulator-test.ts` checks, through the argv the stub `eas` records, that the device commands spawn no `eas` without `--eas` or the config.
+A build key never starts a session: `buildBackend: "eas"` alone builds on EAS and installs on a local device. A device key can start both, because `deviceBackend: "eas"` also sends the build to EAS. An implicit route starts neither: `dev` stops with `EAS_ROUTE_NOT_CHOSEN` (§The selection), and `smoke` fails `start-dev-server`.
+
+The rule is tested by what a run does, end to end. `plan-test.ts` and `smoke-test.ts` check that an implicit route stops with the credits reason before any step runs. `cloud-simulator-test.ts` checks the argv the stub `eas` records: a device command without `--eas` or `deviceBackend: "eas"` starts no session and no build (`simulator`, `simulator:start`, `build`). The `fallback` rung may still spawn `simulator:list` and `simulator:exec`, to drive a session that is up.
 
 ## The device backend
 
@@ -96,8 +100,8 @@ Resolution, per platform, highest first:
 With `deviceBackend: "eas"`, a command does what it does with `--eas`:
 
 - `dev` tunnels the dev server, builds with the simulator profile when it must build, and opens the app on a session ([[0027-everything-on-eas]]). It refuses `--device`, `--lan`, `--localhost` and `--host lan|localhost` with `BAD_ARGS`, as `--eas` does. The message names the config key, and its How line names `--local`. `dev --web` reads no `deviceBackend`, because the web has no device.
-- `smoke`, `navigate`, `runtime:reload` and `runtime:stop` take the session as their device (`cloud: 'required'`).
-- `dev:stop` ends this project's session, as `dev:stop --eas` does, when the config puts either platform's device on EAS.
+- `smoke`, `navigate`, `runtime:reload` and `runtime:stop` take the session as their device (`cloud: 'required'`) for a platform that resolves to `eas`. `navigate` and the runtime commands may omit the platform. Then they require the session only when both platforms resolve to `eas`. With one platform on `eas`, the run stays on the local ladder, `fallback` included, so a local device of the other platform is not skipped.
+- `dev:stop` ends this project's session, as `dev:stop --eas` does, when the config puts either platform's device on EAS. Stopping spends nothing, so "either" is the safe side here. It also does the binding release of `dev:stop --eas` ([[0035-one-device-per-worktree]] §EAS session binding), so no binding outlives its session.
 
 These commands also take `--local`. With `--local`, they use only local devices (`cloud: 'off'`), whatever the config says. Without the config, `--local` is the same as no flag, except that `navigate` and `smoke` also drop their `fallback` rung. `dev:stop --local` leaves every session running.
 
