@@ -16,14 +16,16 @@
 import { resolveAdb, type AdbResolution } from '../device/adb';
 import {
   cloudSessionStartCommand,
-  cloudPlatformUnknownError,
-  cloudPlatformMismatchError,
-  cloudSessionUnavailableError,
-  cloudSessionUnknownError,
   probeCloudSessionAsync,
   readCloudSessionIdSync,
   type CloudSessionProbe,
 } from '../device/cloudSimulator';
+import {
+  cloudPlatformUnknownError,
+  cloudPlatformMismatchError,
+  cloudSessionUnavailableError,
+  cloudSessionUnknownError,
+} from '../device/cloudErrors';
 import { findBoundDeviceAsync, type BoundDevice } from '../deviceBinding';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';

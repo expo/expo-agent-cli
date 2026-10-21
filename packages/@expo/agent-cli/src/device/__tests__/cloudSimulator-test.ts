@@ -34,11 +34,6 @@ import {
   buildCloudStopAppArgs,
   buildSessionListArgs,
   captureCloudScreenshotAsync,
-  cloudNeedsTunnelError,
-  cloudSessionUnavailableError,
-  cloudSessionUnknownError,
-  cloudVerbFailedError,
-  cloudVerbNotSupportedError,
   isOpenInAppAlert,
   isActiveSessionStatus,
   openUrlOnCloudSimulatorAsync,
@@ -53,6 +48,13 @@ import {
   type CloudSessionInfo,
   type CloudSessionProbe,
 } from '../cloudSimulator';
+import {
+  cloudNeedsTunnelError,
+  cloudSessionUnavailableError,
+  cloudSessionUnknownError,
+  cloudVerbFailedError,
+  cloudVerbNotSupportedError,
+} from '../cloudErrors';
 
 /**
  * The runner every `eas` invocation goes through, planted where the resolver will look.
