@@ -121,6 +121,23 @@ it('two worktrees start and drive their own sessions; plain stop keeps a binding
     expect.objectContaining({ id: 'own-0', state: 'recorded' })
   );
   expect(stubEasArgs(first)).toHaveLength(beforeStatus);
+  // With Metro still running, replace an ended session through the same detach command.
+  const sessions = JSON.parse(fs.readFileSync(path.join(machine, 'sessions.json'), 'utf8'));
+  fs.writeFileSync(
+    path.join(machine, 'sessions.json'),
+    JSON.stringify(
+      sessions.map((session: { id: string }) =>
+        session.id === 'own-1' ? { ...session, status: 'STOPPED' } : session
+      )
+    )
+  );
+  const reopened = await executeAgentCliAsync(
+    second,
+    ['dev', '--ios', '--eas', '--detach', '--json'],
+    { env: { ...envFor(second), STUB_SIM_START_ID: 'replacement-1' }, reject: false }
+  );
+  expect(reopened.exitCode, reopened.stderr).toBe(0);
+  expect(readBinding(second).device).toMatchObject({ id: 'replacement-1' });
   const kept = await executeAgentCliAsync(first, ['dev:stop', '--json'], { env: envFor(first) });
   expect(JSON.parse(kept.stdout).devices).toContainEqual(
     expect.objectContaining({
@@ -132,7 +149,140 @@ it('two worktrees start and drive their own sessions; plain stop keeps a binding
   expect(fs.existsSync(bindingFile(first))).toBe(true);
   await executeAgentCliAsync(first, ['dev:stop', '--eas', '--json'], { env: envFor(first) });
   expect(fs.existsSync(bindingFile(first))).toBe(false);
-  expect(readBinding(second).device).toMatchObject({ id: 'own-1' });
+  expect(readBinding(second).device).toMatchObject({ id: 'replacement-1' });
+});
+it.each(['ios', 'android'] as const)(
+  'reconnects the preserved %s development-client session after Metro changes its tunnel',
+  async (platform) => {
+    const root = await project('dev-client-fresh-app');
+    const configPath = path.join(root, 'app.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config.expo.scheme = 'myapp';
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    await writeCloudBindingAsync(expoHome, root, { id: 'preserved-session', platform });
+    list([{ id: 'preserved-session', platform: platform.toUpperCase() }]);
+    await writeCloudSessionFileAsync(root, 'preserved-session');
+    const env = {
+      ...envFor(root),
+      STUB_SIM_START_ID: 'preserved-session',
+      STUB_EXPO_DEV_SERVER_PORT: platform === 'ios' ? '8754' : '8755',
+      STUB_EXPO_LISTEN: '1',
+      STUB_EXPO_DELAY_MS: '90000',
+      STUB_EXPO_TUNNEL_DELAY_MS: '100',
+      STUB_EAS_BUILDS: JSON.stringify([
+        {
+          id: 'matching-build',
+          platform: platform.toUpperCase(),
+          status: 'FINISHED',
+          fingerprintHash: '0f1e2d3c4b5a69788796a5b4c3d2e1f001234567',
+          buildProfile: 'development-simulator',
+        },
+      ]),
+    };
+    const devArgs = [
+      'dev',
+      `--${platform}`,
+      '--eas',
+      '--dev-client',
+      '--detach',
+      '--wait-ready',
+      '--json',
+    ];
+    const initial = await executeAgentCliAsync(root, devArgs, {
+      env: { ...env, STUB_EXPO_TUNNEL_HOST: 'old.tunnel.example' },
+      reject: false,
+    });
+    expect(initial.exitCode, initial.stderr).toBe(0);
+    await waitForAsync(() => readStubEasInvocations(root).some((i) => i.executedSessionId), 15000);
+    const initialOpens = readStubEasInvocations(root).filter((i) => i.executedSessionId);
+    expect(initialOpens).toHaveLength(1);
+    expect(initialOpens[0]!.args).toContain(
+      'myapp://?__expo_url=https%3A%2F%2Fold.tunnel.example&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1'
+    );
+    const originalBinding = readBinding(root, platform);
+    const stopped = await executeAgentCliAsync(root, ['dev:stop', '--json'], { env });
+    expect(stopped.exitCode, stopped.stderr).toBe(0);
+    expect(readBinding(root, platform).device).toMatchObject({ id: 'preserved-session' });
+    expect(JSON.parse(stopped.stdout).followups.map((f: { id: string }) => f.id)).toContain(
+      'stop-session'
+    );
+
+    const restarted = await executeAgentCliAsync(root, devArgs, {
+      env: { ...env, STUB_EXPO_TUNNEL_HOST: 'new.tunnel.example' },
+      reject: false,
+    });
+    expect(restarted.exitCode, restarted.stderr).toBe(0);
+    expect(JSON.parse(restarted.stdout).followups.at(-1).command).toContain('dev:stop --eas');
+    await waitForAsync(
+      () => readStubEasInvocations(root).filter((i) => i.executedSessionId).length === 2,
+      15000
+    );
+    const opens = readStubEasInvocations(root).filter((i) => i.executedSessionId);
+    expect(opens).toHaveLength(2);
+    expect(opens.every((i) => i.executedSessionId === 'preserved-session')).toBe(true);
+    expect(opens[1]!.args).toEqual([
+      '__controller',
+      'open',
+      'myapp://?__expo_url=https%3A%2F%2Fnew.tunnel.example&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
+      '--platform',
+      platform,
+    ]);
+    expect(stubEasArgs(root).filter((args) => args[0] === 'simulator')).toHaveLength(0);
+    expect(readBinding(root, platform)).toMatchObject({
+      device: originalBinding.device,
+      boundAt: originalBinding.boundAt,
+    });
+  }
+);
+
+it('reopens an ended session using the matching EAS build when the native project is fresh', async () => {
+  const root = await project('dev-client-fresh-app');
+  const started = await executeAgentCliAsync(
+    root,
+    ['dev', '--ios', '--eas', '--no-open', '--detach', '--wait-ready', '--json'],
+    {
+      env: {
+        ...envFor(root),
+        STUB_EXPO_DEV_SERVER_PORT: '8753',
+        STUB_EXPO_LISTEN: '1',
+        STUB_EXPO_DELAY_MS: '90000',
+        STUB_EXPO_TUNNEL_HOST: 'cloud.tunnel.example',
+        STUB_EXPO_TUNNEL_DELAY_MS: '100',
+      },
+      reject: false,
+    }
+  );
+  expect(started.exitCode, started.stderr).toBe(0);
+  await writeCloudBindingAsync(expoHome, root, { id: 'ended' });
+  list([{ id: 'ended', status: 'STOPPED' }]);
+  await writeCloudSessionFileAsync(root, 'ended');
+  const reopened = await executeAgentCliAsync(
+    root,
+    ['dev', '--ios', '--eas', '--detach', '--json'],
+    {
+      env: {
+        ...envFor(root),
+        STUB_SIM_START_ID: 'replacement',
+        STUB_EAS_BUILDS: JSON.stringify([
+          {
+            id: 'matching-build',
+            platform: 'IOS',
+            status: 'FINISHED',
+            fingerprintHash: '0f1e2d3c4b5a69788796a5b4c3d2e1f001234567',
+            buildProfile: 'development-simulator',
+          },
+        ]),
+      },
+      reject: false,
+    }
+  );
+  expect(reopened.exitCode, reopened.stderr).toBe(0);
+  expect(readBinding(root).device).toMatchObject({ id: 'replacement', origin: 'started' });
+  const args = stubEasArgs(root);
+  expect(args.find((a) => a[0] === 'simulator')).toEqual(
+    expect.arrayContaining(['--build-id', 'matching-build'])
+  );
+  expect(args.some((a) => a[0] === 'build')).toBe(false);
 });
 it('an expired binding only permits a fresh dotenv session', async () => {
   const root = await project();

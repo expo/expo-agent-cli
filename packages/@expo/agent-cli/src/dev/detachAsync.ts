@@ -21,6 +21,7 @@
 import type { PlanPlatform } from '../plan/types';
 import { otherPlatformSessionError } from '../device/cloudErrors';
 import { otherPlatformSessionAsync } from './openAppEas';
+import { reopenEasAsync } from './reopenEas';
 import { spawn } from 'child_process';
 import fs from 'fs';
 
@@ -229,23 +230,6 @@ export async function devDetachAsync(
   // lock, so nothing would be able to find it or stop it afterwards.
   const running = await readDevServerLockAsync(projectRoot);
   if (running) {
-    const platform = options.platform;
-    if (
-      reuseBoundDevice &&
-      (platform === 'ios' || platform === 'android') &&
-      options.deviceBackend !== 'eas' &&
-      !devicesDisabled() &&
-      hostBindsPlatform(platform)
-    ) {
-      Log.progress(
-        acquireLine(
-          await acquireDeviceAsync(projectRoot, platform, {
-            reuseOnly: true,
-            explicit: explicitRequestOf(options.device, options.callerArgv),
-          })
-        )
-      );
-    }
     const hasExited = () => !isProcessAlive(running.pid);
     async function checkReuseFailureAsync(
       lock: DevServerLockInfo,
@@ -265,6 +249,8 @@ export async function devDetachAsync(
       }
     }
 
+    // Health first: no session is opened next to a server that is dying or not ready.
+    if (!options.waitReady) await checkReuseFailureAsync(running);
     const checked = options.waitReady
       ? await waitForDetachedReadyAsync(projectRoot, running, {
           timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
@@ -285,6 +271,9 @@ export async function devDetachAsync(
     const lock = checked?.lock ?? running;
     // Reuse only reads the current tunnel; it does not wait for a new one to appear.
     const tunnelUrl = await currentTunnelUrlAsync(projectRoot, lock.url);
+    const easSessionId = reuseBoundDevice
+      ? await reuseDeviceOnRunningServerAsync(projectRoot, options, lock.url, tunnelUrl)
+      : null;
     const device = await boundDeviceAsync(projectRoot, options);
     const statusAnswering =
       checked?.result.ready === true
@@ -295,7 +284,7 @@ export async function devDetachAsync(
     return reportDetached(projectRoot, options, {
       lock,
       alreadyRunning: true,
-      eas: detachEas(projectRoot, options),
+      eas: easOpenPlatform(options) ? { sessionId: easSessionId } : null,
       ready: checked?.result.ready ?? null,
       projectRootMatched: checked?.result.projectRootMatched ?? null,
       startedAt,
@@ -307,7 +296,7 @@ export async function devDetachAsync(
   }
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree — the refusal is the
-  // exit code.
+  // exit code. Spawn path only: on a running server the reopen above throws the same refusal.
   const easPlatform = easOpenPlatform(options);
   const other = easPlatform ? await otherPlatformSessionAsync(projectRoot, easPlatform) : null;
   if (easPlatform && other)
@@ -1046,6 +1035,38 @@ function reportDetached(
     reportFollowUps('dev', report.followups, { json: options.json });
   }
   return 0;
+}
+
+/**
+ * Put this worktree's device on a running server: the EAS session, through the reopen, or the
+ * local device, reuse only. Returns the EAS session id, or null.
+ */
+// @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
+async function reuseDeviceOnRunningServerAsync(
+  projectRoot: string,
+  options: DevOptions,
+  devServerUrl: string,
+  tunnelUrl: string | null
+): Promise<string | null> {
+  if (options.deviceBackend === 'eas') {
+    return await reopenEasAsync(projectRoot, options, devServerUrl, tunnelUrl);
+  }
+  const platform = options.platform;
+  if (
+    (platform === 'ios' || platform === 'android') &&
+    !devicesDisabled() &&
+    hostBindsPlatform(platform)
+  ) {
+    Log.progress(
+      acquireLine(
+        await acquireDeviceAsync(projectRoot, platform, {
+          reuseOnly: true,
+          explicit: explicitRequestOf(options.device, options.callerArgv),
+        })
+      )
+    );
+  }
+  return null;
 }
 
 /** Read from the binding file, under the same conditions `dev` binds under. */
