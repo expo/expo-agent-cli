@@ -374,6 +374,12 @@ describe(buildStopFollowUps, () => {
     };
   }
 
+  it(`carries --local into navigate after a --local stop`, () => {
+    expect(buildStopFollowUps(report(), { local: true })[0]!.command).toBe(
+      'npx @expo/agent-cli navigate / --ios --local'
+    );
+  });
+
   it(`says the app is stopped when this command is what stopped it`, () => {
     expect(buildStopFollowUps(report())[0]!.why).toContain('The app is stopped');
   });

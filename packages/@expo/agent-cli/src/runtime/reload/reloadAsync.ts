@@ -675,6 +675,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
           deviceId: device?.deviceId ?? null,
           route,
           adbPath: device?.adb?.bin,
+          local: options.local,
         })
       : [];
 

@@ -247,6 +247,7 @@ function buildFollowUps(run: SmokeRun, options: SmokeOptions) {
     // had no device, and a ladder must not put a billed session on a line the caller never asked
     // for (llp/0005 §Cloud simulator).
     cloud: options.cloud === 'required',
+    local: options.cloud === 'off',
   });
 }
 

@@ -18,6 +18,8 @@ export interface ReloadFollowUpInput {
    * went over the dev server and never resolved a device means.
    */
   backend?: DeviceBackend;
+  /** `--local`: the reload kept the device on this machine over the config, so `navigate` does too. */
+  local?: boolean;
   /**
    * Platform this reload was about, or null when nothing named one.
    *
@@ -48,6 +50,7 @@ export function buildReloadFollowUps({
   deviceId,
   route,
   adbPath = 'adb',
+  local = false,
 }: ReloadFollowUpInput): FollowUp[] {
   const flag = platform == null ? '' : ` --${platform}`;
   const on = backend ?? (platform === 'android' ? 'local-android' : 'local-ios');
@@ -81,7 +84,7 @@ export function buildReloadFollowUps({
       id: 'navigate',
       // The backend the reload used, carried on: `navigate /` without it looks for a device on
       // this machine, which is the machine a cloud run has none on.
-      command: `${PROGRAM_PREFIX} navigate /${flag}${on === 'cloud' ? ' --eas' : ''}`,
+      command: `${PROGRAM_PREFIX} navigate /${flag}${on === 'cloud' ? ' --eas' : local ? ' --local' : ''}`,
       why: 'The app resumed on the route it was launched with; this puts it back on the root route.',
     });
   }

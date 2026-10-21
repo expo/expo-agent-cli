@@ -176,7 +176,9 @@ export async function runtimeStopAsync(
     followups: [],
   };
   report.followups =
-    result.ok && followUpsEnabled(options.followups) ? buildStopFollowUps(report) : [];
+    result.ok && followUpsEnabled(options.followups)
+      ? buildStopFollowUps(report, { local: options.local })
+      : [];
 
   event('stop_app_done', {
     stopped: report.stopped,
@@ -242,7 +244,10 @@ export async function runtimeStopAsync(
  * Exported for its own test: the one branch that matters is the three-way on `wasRunning`, and the
  * `null` arm is only reachable on a cloud session.
  */
-export function buildStopFollowUps(report: RuntimeStopResultJson): FollowUp[] {
+export function buildStopFollowUps(
+  report: RuntimeStopResultJson,
+  { local = false }: { local?: boolean } = {}
+): FollowUp[] {
   // A mismatch gets the corrected command and nothing else. The old list led with `navigate /`
   // here, which starts an app while the one the caller meant to stop is still running — advice
   // built on the assumption that the requested id was the right one (friction run 4, F42).
@@ -263,7 +268,7 @@ export function buildStopFollowUps(report: RuntimeStopResultJson): FollowUp[] {
   // host defaults to — the iOS simulator, on a Mac, after a stop on the emulator. A cloud session
   // needs no platform beside `--eas`, which already names the one device it has.
   const onCloud = report.deviceBackend === 'cloud';
-  const flag = onCloud ? ' --eas' : ` --${report.platform}`;
+  const flag = onCloud ? ' --eas' : ` --${report.platform}${local ? ' --local' : ''}`;
   return [
     {
       id: 'navigate',

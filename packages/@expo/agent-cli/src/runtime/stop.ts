@@ -11,7 +11,8 @@ export const runtimeStopHelp: CommandHelp = {
   options: [
     `--ios, --platform ios   Stop the app on the booted iOS simulator`,
     `--android               Stop the app on the attached Android device`,
-    `--eas, --local          Stop the app on this project's EAS Simulator session, or only here`,
+    `--eas                   Stop the app on this project's EAS Simulator session`,
+    `--local                 Use only a device on this machine, over deviceBackend in the config`,
     `--app-id <id>           Application id to stop, instead of the one this works out`,
     `--dev-server-url <url>  Dev server to ask which app is running (default: the project's own)`,
     `--port <number>         Dev server on this port, short for --dev-server-url`,

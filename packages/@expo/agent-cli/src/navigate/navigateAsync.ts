@@ -210,6 +210,7 @@ export async function navigateAsync(
           platform: opened.platform,
           deviceId: opened.deviceId,
           adbPath: opened.adbPath ?? undefined,
+          local: options.cloud === 'off',
         })
       : [];
 

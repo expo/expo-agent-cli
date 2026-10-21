@@ -521,3 +521,23 @@ describe(`${buildSmokeFollowUps.name} after a build that failed`, () => {
     );
   });
 });
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('Following a --local smoke', () => {
+  it('should carry --local on every device command it suggests', () => {
+    const suggested = commands({ local: true, outcome: 'failed', devServerFound: false });
+    const device = suggested.filter((command) =>
+      /@expo\/agent-cli (dev|smoke|navigate|runtime:reload) /.test(command)
+    );
+    expect(device.length).toBeGreaterThan(0);
+    for (const command of device) {
+      expect(command).toContain('--local');
+    }
+  });
+
+  it('should add no --local to a run that did not pass it', () => {
+    expect(commands({ outcome: 'failed', devServerFound: false }).join('\n')).not.toContain(
+      '--local'
+    );
+  });
+});

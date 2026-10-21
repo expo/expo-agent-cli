@@ -95,6 +95,11 @@ export interface SmokeFollowUpInput {
    */
   cloud: boolean;
   /**
+   * `--local`: this run kept the device on this machine over the config, so every suggested
+   * command that reads `deviceBackend` says so too (llp/0015 §The device backend).
+   */
+  local?: boolean;
+  /**
    * This run stopped the dev server it started, so `navigate` finds no dev server.
    *
    * @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
@@ -115,7 +120,8 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   // Every command that takes `--eas` keeps it, so a suggested run is the run the caller asked
   // for. The commands that do not take it — `dev --detach`, `typecheck`, `status`,
   // `runtime:errors` — are unaffected: none of them is about a device.
-  const onCloud = input.cloud ? ' --eas' : '';
+  const onCloud = input.cloud ? ' --eas' : input.local ? ' --local' : '';
+  const onLocal = input.local ? ' --local' : '';
   // The flag first, so a reader sees what the command is about before what it opens.
   const onPort = input.port == null ? '' : ` --port ${input.port}`;
   const same = ` --${input.platform}${sameRoute}${onCloud}${onPort}`;
@@ -182,7 +188,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
     return capFollowUps([
       {
         id: 'dev-build',
-        command: `${PROGRAM_PREFIX} dev --${input.platform}`,
+        command: `${PROGRAM_PREFIX} dev --${input.platform}${onLocal}`,
         why: 'This project needs a development build to run at all, and that is the command that makes one and starts the dev server for it. Expo Go cannot load its native code, so no reading taken through Expo Go is about this project.',
       },
       {
@@ -219,7 +225,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
         : []),
       {
         id: 'dev-detach',
-        command: `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready`,
+        command: `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready${onLocal}`,
         why: input.bootstrap
           ? 'This run tried to start a dev server and could not, so starting one on its own reports what stops it — and leaves it running rather than taking it away again.'
           : 'Nothing answered as a dev server, and --no-start made this run attach-only. That starts one and gives the terminal back.',
@@ -265,7 +271,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   }
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke
-  const start = `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready${onPort}`;
+  const start = `${PROGRAM_PREFIX} dev --${input.platform} --detach --wait-ready${onLocal}${onPort}`;
   const deviceBack: FollowUp[] =
     !input.deviceReleased || input.serverStopped || input.cloud
       ? []

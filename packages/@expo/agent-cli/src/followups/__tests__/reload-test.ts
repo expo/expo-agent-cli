@@ -48,3 +48,18 @@ describe(`${buildReloadFollowUps.name} and the session's platform`, () => {
     expect(commands).toContain('npx @expo/agent-cli navigate / --ios --eas');
   });
 });
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('Following a --local reload', () => {
+  it('should carry --local into navigate', () => {
+    const followups = buildReloadFollowUps({
+      platform: 'ios',
+      deviceId: null,
+      route: null,
+      local: true,
+    });
+    expect(followups.map((followup) => followup.command)).toContain(
+      'npx @expo/agent-cli navigate / --ios --local'
+    );
+  });
+});

@@ -11,6 +11,8 @@ import { capFollowUps, type FollowUp } from './types';
 import { easCommandPrefix } from '../utils/easCli';
 
 export interface NavigateFollowUpInput {
+  /** `--local`: the link was opened on this machine over the config, so `smoke` stays here too. */
+  local?: boolean;
   /**
    * Which device layer opened the link.
    *
@@ -122,6 +124,7 @@ export function buildNavigateFollowUps({
   platform,
   deviceId,
   adbPath = 'adb',
+  local = false,
 }: NavigateFollowUpInput): FollowUp[] {
   const on = backend ?? (platform === 'ios' ? 'local-ios' : 'local-android');
   return capFollowUps([
@@ -154,7 +157,7 @@ export function buildNavigateFollowUps({
         // screenshot phase waits on the honest neighbouring fact — two reads of the dev server's
         // target list naming the same ids (F57) — and then captures the screen itself.
         (platform === 'android'
-          ? `wait with "${PROGRAM_PREFIX} smoke --android", which waits for the app and captures the screen itself — this runtime has no debugger, so "runtime:tree" cannot answer there. Otherwise the picture is of the splash.`
+          ? `wait with "${PROGRAM_PREFIX} smoke --android${local ? ' --local' : ''}", which waits for the app and captures the screen itself — this runtime has no debugger, so "runtime:tree" cannot answer there. Otherwise the picture is of the splash.`
           : `run "${PROGRAM_PREFIX} runtime:tree" first and capture once it lists the screen — otherwise the picture is of the splash.`),
     },
     {
