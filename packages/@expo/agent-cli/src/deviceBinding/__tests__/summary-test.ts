@@ -4,6 +4,7 @@ import { vol } from 'memfs';
 import { clearInspectCache, inspectBindingCachedAsync } from '../inspect';
 import { bindingPathFor } from '../registry';
 import { readBindingSummaryAsync } from '../summary';
+import { writeCloudBinding } from './fakeCloudBinding';
 import { bindingFor, fakeTools, writeBinding } from './fakeTools';
 
 const ROOT = '/work/app';
@@ -18,11 +19,7 @@ it('reports local and cloud bindings without renewing leases, reaping, or probin
   const file = bindingPathFor(ROOT, 'ios', 'local-ios');
   const cloudFile = bindingPathFor(ROOT, 'android', 'cloud');
   writeBinding(file, bindingFor(ROOT, 'SIM'));
-  writeBinding(cloudFile, {
-    ...bindingFor(ROOT, 'unused'),
-    expiresAt: '2999-01-01T00:00:00Z',
-    device: { backend: 'cloud', platform: 'android', id: 'session', origin: 'started' },
-  });
+  writeCloudBinding(ROOT, 'android', 'session', { expiresAt: '2999-01-01T00:00:00Z' });
   const before = [fs.readFileSync(file, 'utf8'), fs.readFileSync(cloudFile, 'utf8')];
   await inspectBindingCachedAsync(ROOT, 'ios', 'local-ios', { tools });
   const binding = await readBindingSummaryAsync(ROOT, 2_500);

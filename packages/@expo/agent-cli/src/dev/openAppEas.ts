@@ -21,11 +21,19 @@
 // Never throws: `dev`'s server outlives a failed open, the same as for a local device.
 
 import path from 'path';
+import {
+  acquireCloudBindingAsync,
+  claimCloudBindingsAsync,
+  readCloudBindings,
+  type CloudBinding,
+} from '../deviceBinding/cloud';
+import { stopEasSessionAsync } from '../device/eas';
 
 import {
   probeCloudSessionAsync,
+  readCloudSessionIdSync,
+  CLOUD_SESSION_ENV_FILE,
   CLOUD_SESSION_TIMEOUT_MS,
-  type CloudPlatform,
 } from '../device/cloudSimulator';
 import * as Log from '../log';
 import { openRouteAsync, resolveRouteUrlAsync } from '../navigate/openRoute';
@@ -141,6 +149,8 @@ export function buildSessionStartArgs({
     '--non-interactive',
     '--name',
     name,
+    '--max-idle-time-minutes',
+    '30',
   ];
 }
 
@@ -238,6 +248,87 @@ export async function ensureEasSessionAsync(
   projectRoot: string,
   options: EnsureEasSessionOptions
 ): Promise<EnsureEasSessionReport> {
+  const startedAt = new Date();
+  const session = await ensureSessionAsync(projectRoot, options);
+  if (session.sessionId) {
+    let binding: CloudBinding;
+    try {
+      binding = await acquireCloudBindingAsync(projectRoot, {
+        platform: options.platform,
+        id: session.sessionId,
+        origin: session.started ? 'started' : 'dotenv',
+        start: session.started
+          ? { at: startedAt, dotenvId: () => readCloudSessionIdSync(projectRoot) }
+          : undefined,
+      });
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      if (!session.started)
+        return {
+          ...session,
+          ok: false,
+          reason: `EAS session ${session.sessionId} could not be recorded: ${why}`,
+        };
+      return await releaseUnrecordedStartAsync(projectRoot, session, session.sessionId, why);
+    }
+    if (binding.device.id !== session.sessionId)
+      return {
+        ...session,
+        ok: false,
+        sessionId: null,
+        started: false,
+        reason: `another run in this worktree started EAS session ${binding.device.id} at the same time, and ${CLOUD_SESSION_ENV_FILE} names it, so this run ended its own session ${session.sessionId} ("${easCommandPrefix()} simulator:stop --id ${session.sessionId}" ends it if that failed); run this again to use ${binding.device.id}`,
+      };
+  }
+  return session;
+}
+
+/**
+ * A session this run started and could not bind. Stopped at once, unless a binding in this
+ * worktree records it: another run may have selected it through the dotenv and bound it.
+ */
+// @ref llp/0035-one-device-per-worktree.rfc.md §Session binding — a session no binding records belongs to no run
+async function releaseUnrecordedStartAsync(
+  projectRoot: string,
+  session: EnsureEasSessionReport,
+  sessionId: string,
+  why: string
+): Promise<EnsureEasSessionReport> {
+  let recorded: boolean;
+  try {
+    recorded = readCloudBindings(projectRoot).bindings.some(
+      ({ device }) => device.id === sessionId
+    );
+  } catch {
+    recorded = true;
+  }
+  if (recorded)
+    return {
+      ...session,
+      ok: false,
+      started: false,
+      reason: `this run started EAS session ${sessionId} and could not record it (${why}); another run in this worktree may drive it, so it stays. "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`,
+    };
+  const stopped = await stopEasSessionAsync(projectRoot, sessionId);
+  return stopped.ok
+    ? {
+        ...session,
+        ok: false,
+        sessionId: null,
+        started: false,
+        reason: `this run started EAS session ${sessionId}, could not record it (${why}), and stopped it`,
+      }
+    : {
+        ...session,
+        ok: false,
+        reason: `EAS session ${sessionId} could not be recorded (${why}) or stopped (${stopped.reason}); "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`,
+      };
+}
+
+async function ensureSessionAsync(
+  projectRoot: string,
+  options: EnsureEasSessionOptions
+): Promise<EnsureEasSessionReport> {
   const { platform } = options;
   const stillWanted = options.stillWanted ?? (() => true);
   const failed = (
@@ -265,10 +356,23 @@ export async function ensureEasSessionAsync(
       'no "eas" is in node_modules/.bin or on PATH, and no package runner ("npx" or "bunx") is on PATH to download one, so no EAS Simulator session could be reached'
     );
   }
+  let claim: { boundIds: string[]; unreadable: string | null };
+  try {
+    claim = await claimCloudBindingsAsync(projectRoot, platform);
+  } catch (error) {
+    return failed(
+      `the device registry could not be read, so no session was started: ${error instanceof Error ? firstLine(error.message) : String(error)}`
+    );
+  }
+  if (claim.unreadable)
+    return failed(
+      `the EAS binding at ${claim.unreadable} cannot be read, so no session was started; remove that file after "${PROGRAM_PREFIX} dev:stop --eas"`
+    );
   const probe = await probeCloudSessionAsync({
     projectRoot,
     easCli,
-    platform: platform as CloudPlatform,
+    platform,
+    boundIds: claim.boundIds,
     timeoutMs: CLOUD_SESSION_TIMEOUT_MS,
   });
   if (probe.state === 'active' && probe.session.platform === platform) {
@@ -368,10 +472,21 @@ export async function ensureEasSessionAsync(
         : `The session bills until "${PROGRAM_PREFIX} dev:stop --eas".`
     }`
   );
-  const result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), {
+  const spawnOptions = {
     cwd: projectRoot,
     timeoutMs: options.waits?.sessionStartMs ?? EAS_SESSION_START_TIMEOUT_MS,
-  });
+  };
+  let result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, args), spawnOptions);
+  if (
+    result.exitCode !== 0 &&
+    !readSessionId(`${result.stdout}\n${result.stderr}`) &&
+    /Nonexistent flags?:[^\n]*--max-idle-time-minutes\b/i.test(result.stderr)
+  ) {
+    event('open_app_eas_flag_unsupported', { flag: '--max-idle-time-minutes' });
+    const index = args.indexOf('--max-idle-time-minutes');
+    const retry = [...args.slice(0, index), ...args.slice(index + 2)];
+    result = await spawnCaptureAsync(easCli.command, easCliArgs(easCli, retry), spawnOptions);
+  }
   const output = `${result.stdout}\n${result.stderr}`;
   const sessionId = readSessionId(output);
   const sessionUrl = readSessionUrl(output);
@@ -388,10 +503,24 @@ export async function ensureEasSessionAsync(
           ? ` — the session ${sessionId} was created before it failed and may be billing; "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`
           : ''
       }`,
-      { tunnelHost, openUrl, sessionId, sessionUrl, started: sessionId != null }
+      {
+        tunnelHost,
+        openUrl,
+        sessionId,
+        sessionUrl,
+        started: sessionId != null,
+      }
     );
   }
-  return { ok: true, sessionId, started: true, tunnelHost, openUrl, sessionUrl, reason: null };
+  return {
+    ok: true,
+    sessionId,
+    started: true,
+    tunnelHost,
+    openUrl,
+    sessionUrl,
+    reason: null,
+  };
 }
 
 export async function openAppOnEasAsync(

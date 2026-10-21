@@ -3,6 +3,7 @@ import { vol } from 'memfs';
 
 import { inspectBindingAsync, useBoundDeviceAsync } from '../inspect';
 import { bindingPathFor, readBindingFile } from '../registry';
+import { writeCloudBinding } from './fakeCloudBinding';
 import { bindingFor, fakeTools, writeBinding } from './fakeTools';
 
 const ROOT = '/work/app';
@@ -85,10 +86,7 @@ describe(inspectBindingAsync, () => {
 
   it('reports a cloud binding as recorded without a subprocess', async () => {
     const tools = fakeTools();
-    writeBinding(bindingPathFor(ROOT, 'ios', 'cloud'), {
-      ...bindingFor(ROOT, 'unused'),
-      device: { backend: 'cloud', platform: 'ios', id: 'session-1', origin: 'started' },
-    });
+    writeCloudBinding(ROOT, 'ios', 'session-1');
 
     expect(await inspectBindingAsync(ROOT, 'ios', 'cloud', tools)).toMatchObject({
       state: 'recorded',

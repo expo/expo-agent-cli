@@ -661,14 +661,13 @@ The backend is `eas simulator:<verb>` subprocesses (`src/device/cloudSimulator.t
 
 A cloud device is a session the service says is running, not a file on disk [confirmed, Kudo, 2026-08-26]. `eas simulator:list`, with the statuses of [[0035-one-device-per-worktree]] §Session discovery, is the probe. MCP need not write `.env.eas-simulator`. `simulator:start --json` and `--out-config-type env` do not write it either. The file outlives the session it names. Direct GraphQL to `api.expo.dev` is rejected: it reads another CLI's credential store. `eas` is the program that owns that token, so `eas` is the program that spends it.
 
-The device ladder (`navigate` and `smoke`) asks the service. The suggestion ladders (`status.next`, the `start` and `dev` banner) keep the `stat` on the dotenv. They promise to be instant.
+The device ladder (`navigate` and `smoke`) asks the service. The suggestion ladders (`status.next`, the `start` and `dev` banner) make no network call: `status.next` keeps the `stat` on the dotenv, and the banners read the cloud bindings of this worktree ([[0035-one-device-per-worktree]] §Session binding). They promise to be instant.
 
-Which session, when there is more than one, is deterministic:
+Which session, when there is more than one, is deterministic. The rule is [[0035-one-device-per-worktree]] §Session binding. In short:
 
-1. Only `type: agent-device` is a candidate. An `argent`, `appium`, or `serve-sim` session has no agent-device daemon. A project whose only live session is one of those is told that. A pending session is a candidate only when `.env.eas-simulator` names it ([[0035-one-device-per-worktree]] §Session discovery).
-2. The session `.env.eas-simulator` names, when it is among the candidates. The file is a poor existence proof and a good preference.
-3. The platform the caller asked for.
-4. The most recently created, `createdAt` descending, `id` ascending as the tiebreaker.
+1. A candidate is a live `type: agent-device` session whose id is bound to this worktree or is the id in `.env.eas-simulator`. An `argent`, `appium`, or `serve-sim` session has no agent-device daemon. A project whose only live sessions are of another type is told that.
+2. The order is the requested platform, then a bound id, then the dotenv id, then the newest `createdAt` (`id` ascending breaks a tie).
+3. A live session that is not a candidate is never selected.
 
 The chosen id is reported on the `Device` line, as `deviceId` in `--json`, and on the `cli:navigate` event.
 
@@ -682,13 +681,13 @@ A cloud simulator requires a tunnel. `exp://127.0.0.1:<port>` names the loopback
 
 The ways there is no session are separate errors. `unknown` is a tool that did not answer and has said nothing about the world.
 
-| State                                   | Error                                                                                         |
-| --------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `inactive`                              | `NO_CLOUD_SIMULATOR_SESSION`, saying the dotenv's id is not among the live sessions           |
-| `none`, live sessions of the wrong type | `NO_CLOUD_SIMULATOR_SESSION`, naming the types that are up                                    |
-| `none`, feature available               | `NO_CLOUD_SIMULATOR_SESSION`, naming `simulator:start` and that it bills until stopped        |
-| `none`, feature off                     | `CLOUD_SIMULATOR_UNAVAILABLE`, with the waitlist URL, plus the local device and `--print-url` |
-| `unknown`                               | `CLOUD_SIMULATOR_SESSION_UNKNOWN`, naming `simulator:list` and never `simulator:start`        |
+| State                                   | Error                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `inactive`                              | `NO_CLOUD_SIMULATOR_SESSION`, saying the bound id or the dotenv id is not among the live sessions |
+| `none`, live sessions of the wrong type | `NO_CLOUD_SIMULATOR_SESSION`, naming the types that are up                                        |
+| `none`, feature available               | `NO_CLOUD_SIMULATOR_SESSION`, naming `simulator:start` and that it bills until stopped            |
+| `none`, feature off                     | `CLOUD_SIMULATOR_UNAVAILABLE`, with the waitlist URL, plus the local device and `--print-url`     |
+| `unknown`                               | `CLOUD_SIMULATOR_SESSION_UNKNOWN`, naming `simulator:list` and never `simulator:start`            |
 
 Availability is asked only when the listing came back empty of usable sessions. "Start one" for a session that could not be ruled out starts a second billed session.
 

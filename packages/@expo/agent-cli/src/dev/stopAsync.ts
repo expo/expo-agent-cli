@@ -270,8 +270,13 @@ async function stopProjectEasSessionAsync(
 ): Promise<NonNullable<DevStopResultJson['session']>> {
   const { isLive, probeCloudSessionAsync } =
     require('../device/cloudSimulator') as typeof import('../device/cloudSimulator');
+  const { liveCloudBindings, releaseCloudBindingAsync } =
+    require('../deviceBinding/cloud') as typeof import('../deviceBinding/cloud');
   const { stopEasSessionAsync } = require('../device/eas') as typeof import('../device/eas');
-  const probe = await probeCloudSessionAsync({ projectRoot });
+  const probe = await probeCloudSessionAsync({
+    projectRoot,
+    boundIds: liveCloudBindings(projectRoot).map(({ device }) => device.id),
+  });
   if (!isLive(probe)) {
     return {
       id: null,
@@ -280,6 +285,7 @@ async function stopProjectEasSessionAsync(
     };
   }
   const result = await stopEasSessionAsync(projectRoot, probe.session.id);
+  if (result.ok) await releaseCloudBindingAsync(projectRoot, probe.session.id);
   debugEvent('stop_session', { sessionId: probe.session.id, ok: result.ok });
   return { id: probe.session.id, stopped: result.ok, reason: result.reason };
 }

@@ -107,7 +107,7 @@ export const DRIVABLE_SESSION_TYPE = 'agent-device';
  *
  * `simulator:list` defaults to 10 and caps at 100 [observed — `build/commands/simulator/list.js`].
  * This is the page size. `probeCloudSessionAsync` follows `pageInfo` to the last page, because a
- * session missing from page 1 is not an ended one.
+ * bound session missing from page 1 is not an ended one.
  */
 export const CLOUD_SESSION_LIST_LIMIT = 25;
 
@@ -469,6 +469,8 @@ export interface CloudSessionSelection {
   candidates: CloudSessionInfo[];
   /** Live sessions dropped for having a controller this CLI does not speak to. */
   wrongType: CloudSessionInfo[];
+  /** Live or pending drivable sessions that neither a bound id nor the dotenv id names. */
+  unbound: CloudSessionInfo[];
 }
 
 /**
@@ -477,13 +479,9 @@ export interface CloudSessionSelection {
  * Pure and total, because "which session did it use" must not depend on the order the service
  * returned or on the second the command was run (llp/0005 §Cloud simulator). The rule, in order:
  *
- * 1. only live `agent-device` sessions are candidates, and a pending one only when
- *    `.env.eas-simulator` names it: with no bindings, it is the only pending session this worktree
- *    can call its own;
- * 2. the one the dotenv names, unless that session is pending on a platform other than the one
- *    asked — the file is a bad existence proof and a good preference, because it is the session
- *    this project started;
- * 3. the platform the caller asked for;
+ * 1. only live `agent-device` sessions named by an own binding or the dotenv are candidates;
+ * 2. the platform the caller asked for;
+ * 3. a bound id before the dotenv id;
  * 4. the most recently created, `id` ascending as the final tiebreaker so two sessions created in
  *    the same millisecond still order the same way on every run.
  *
@@ -496,29 +494,36 @@ export function selectCloudSession(
   {
     preferredId = null,
     platform = null,
-  }: { preferredId?: string | null; platform?: CloudPlatform | null } = {}
+    boundIds = [],
+  }: {
+    preferredId?: string | null;
+    platform?: CloudPlatform | null;
+    boundIds?: readonly string[];
+  } = {}
 ): CloudSessionSelection {
   const live = sessions.filter((session) => sessionPhase(session.status) != null);
-  const up = (session: CloudSessionInfo) => sessionPhase(session.status) === 'up';
-  const wrongType = live.filter((session) => !isDrivableSession(session) && up(session));
-  const candidates = live.filter(
-    (session) =>
-      isDrivableSession(session) &&
-      (up(session) || (preferredId != null && session.id === preferredId))
-  );
-  const own = (session: CloudSessionInfo) =>
-    session.id === preferredId &&
-    (up(session) || platform == null || session.platform === platform);
-
-  const ranked = [...candidates].sort(
-    (a, b) =>
-      rank(own(b)) - rank(own(a)) ||
-      (platform == null ? 0 : rank(b.platform === platform) - rank(a.platform === platform)) ||
-      (b.createdAt ?? '').localeCompare(a.createdAt ?? '') ||
-      a.id.localeCompare(b.id)
-  );
-
-  return { selected: ranked[0] ?? null, candidates: ranked, wrongType };
+  const drivable = live.filter(isDrivableSession);
+  const eligible = (session: CloudSessionInfo) =>
+    boundIds.includes(session.id) || session.id === preferredId;
+  const candidates = drivable.filter(eligible).sort((a, b) => {
+    const wanted =
+      platform == null ? 0 : rank(b.platform === platform) - rank(a.platform === platform);
+    if (wanted) return wanted;
+    const bound = rank(boundIds.includes(b.id)) - rank(boundIds.includes(a.id));
+    if (bound) return bound;
+    const preferred = rank(b.id === preferredId) - rank(a.id === preferredId);
+    if (preferred) return preferred;
+    return (b.createdAt ?? '').localeCompare(a.createdAt ?? '') || a.id.localeCompare(b.id);
+  });
+  const selected = candidates[0] ?? null;
+  return {
+    selected,
+    candidates,
+    unbound: drivable.filter((session) => !eligible(session)),
+    wrongType: live.filter(
+      (session) => !isDrivableSession(session) && sessionPhase(session.status) === 'up'
+    ),
+  };
 }
 
 function rank(value: boolean): number {
@@ -559,8 +564,8 @@ export function parseAvailabilityJson(stdout: string): CloudAvailability {
  *
  * - `active`: the selected session is up and can be driven.
  * - `queued`: the selected session is listed in a pending status (new, queued, starting).
- * - `inactive`: the dotenv names a session, and the service does not list it as live.
- * - `none`: the service lists nothing this CLI can drive.
+ * - `inactive`: this worktree names a session, and the service does not list it as live.
+ * - `none`: the service lists nothing this CLI can drive for this worktree.
  * - `unavailable`: the account does not have EAS Simulator.
  * - `unknown`: nothing could be established: no EAS CLI, an unreadable answer, or a binary that is
  *   not it.
@@ -580,6 +585,8 @@ export type CloudSessionProbe =
        * and unhelpful, and the reader is one `simulator:start` away from a device this CLI can drive.
        */
       wrongTypeCount: number;
+      /** Live or pending drivable sessions that neither a binding of this worktree nor the dotenv names. */
+      unboundCount: number;
     }
   | {
       state: 'unavailable';
@@ -689,8 +696,13 @@ export async function probeCloudSessionAsync({
   projectRoot,
   easCli,
   platform = null,
+  boundIds,
   timeoutMs = CLOUD_SESSION_TIMEOUT_MS,
-}: CloudRunOptions & { platform?: CloudPlatform | null }): Promise<CloudSessionProbe> {
+}: CloudRunOptions & {
+  platform?: CloudPlatform | null;
+  /** The cloud session ids this worktree's bindings name. */
+  boundIds: readonly string[];
+}): Promise<CloudSessionProbe> {
   const cli = easCli ?? resolveEasCli(projectRoot);
   if (!cli) {
     // The resolver's third rung downloads the published CLI, so reaching here means this machine has
@@ -731,15 +743,32 @@ export async function probeCloudSessionAsync({
     after = next;
   }
 
-  const { selected, candidates, wrongType } = selectCloudSession(sessions, {
+  const { selected, candidates, wrongType, unbound } = selectCloudSession(sessions, {
     preferredId,
     platform,
+    boundIds,
   });
   if (selected) {
     const state = sessionPhase(selected.status) === 'up' ? 'active' : 'queued';
     return { state, session: selected, candidateCount: candidates.length };
   }
 
+  if (boundIds.length) {
+    return {
+      state: 'inactive',
+      sessionId: boundIds[0]!,
+      reason: 'the bound EAS session is no longer listed as active or queued',
+    };
+  }
+  if (unbound.length) {
+    return {
+      state: 'none',
+      reason:
+        'the live or pending EAS sessions of this project belong to other worktrees, so none is selected',
+      wrongTypeCount: wrongType.length,
+      unboundCount: unbound.length,
+    };
+  }
   return await noUsableSessionAsync({
     cli,
     projectRoot,
@@ -825,6 +854,7 @@ async function noUsableSessionAsync({
     return {
       state: 'none',
       wrongTypeCount: wrongType.length,
+      unboundCount: 0,
       reason: `this project has ${wrongType.length} running EAS Simulator session${
         wrongType.length === 1 ? '' : 's'
       } (${types.join(', ')}) and none of them is a "${DRIVABLE_SESSION_TYPE}" session, which is the only kind this CLI can send a device verb to`,
@@ -843,6 +873,7 @@ async function noUsableSessionAsync({
   return {
     state: 'none',
     wrongTypeCount: 0,
+    unboundCount: 0,
     reason: 'the service lists no running EAS Simulator session for this project',
   };
 }

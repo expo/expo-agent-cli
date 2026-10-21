@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  cloudBindingFile,
   installStubEasAsync,
   writeCloudSessionFileAsync,
   readStubEasInvocations,
@@ -19,6 +20,7 @@ import {
 } from '../stubEas';
 import {
   executeAgentCliAsync,
+  expoHomeOf,
   spawnAgentCli,
   collectOutput,
   waitForExitAsync,
@@ -428,6 +430,11 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     });
   }
 
+  /** The cloud binding a run in `projectRoot` writes for its iOS session. */
+  function sessionBindingFile(projectRoot: string): string {
+    return cloudBindingFile(expoHomeOf(projectRoot), fs.realpathSync(projectRoot));
+  }
+
   /** Give the fixture a scheme, which a development build's launch URL is built from. */
   async function writeSchemeAsync(projectRoot: string, scheme: string): Promise<void> {
     const file = path.join(projectRoot, 'app.json');
@@ -596,6 +603,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       'sess-e2e-started',
       '--non-interactive',
     ]);
+    expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(false);
   });
 
   it.skipIf(process.platform === 'win32').each(['ready', 'starting', 'reused', 'failed'] as const)(
@@ -635,6 +643,9 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
             10000
           )
         ).toBe(true);
+        if (state === 'ready' || state === 'reused') {
+          expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(true);
+        }
         child.kill('SIGINT');
         await exited;
         const stops = easInvocationArgs(projectRoot).filter((args) => args[0] === 'simulator:stop');
@@ -643,6 +654,8 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
             ? []
             : [['simulator:stop', '--id', 'sess-e2e-started', '--non-interactive']]
         );
+        // A session this run started is released with its binding; a reused one stays bound.
+        expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(state === 'reused');
       } finally {
         await killAsync(child);
       }

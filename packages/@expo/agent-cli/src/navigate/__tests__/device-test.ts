@@ -379,7 +379,13 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     );
 
     expect(error.code).toBe('NO_BOUND_DEVICE');
-    expect(error.message).toContain('running EAS Simulator session');
+    expect(error.message).toContain('No android device is bound');
+    // The unbound session is counted as another worktree's, not as a session on record.
+    expect(error.message).toContain(
+      'Or: this project has 1 live or pending EAS Simulator session that this worktree did not start'
+    );
+    expect(error.message).not.toContain('cannot drive');
+    expect(error.message).not.toContain('session on record');
     expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
   });
 
