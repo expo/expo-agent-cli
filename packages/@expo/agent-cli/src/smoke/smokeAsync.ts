@@ -592,7 +592,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         devServerUrl,
         buildId: build?.id ?? null,
         sessionName: `${path.basename(projectRoot)} — agent-cli smoke`,
-        cleanupAfterRun: true,
+        keepSession: false,
       });
       return smokeSessionResult(result);
     },

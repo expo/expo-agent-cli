@@ -29,6 +29,7 @@ import { findPortListenerAsync } from '../portListener';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { resolveDevOptions } from '../resolveOptions';
 import { isExpoDevServerAsync } from '../stopAsync';
+import { easRunLifecycle } from '../openAppEas';
 
 vi.mock('../../log');
 // The machine running the tests may have its own Metro on 8081.
@@ -48,6 +49,9 @@ vi.mock('../../needsHuman/easProject', () => ({ assertEasProjectConfiguredAsync:
 vi.mock('../openApp', () => ({
   openAppOnDeviceAsync: vi.fn(),
   openAppFailureLine: vi.fn((platform: string, reason: string) => `${platform}: ${reason}`),
+}));
+vi.mock('../openAppEas', () => ({
+  easRunLifecycle: vi.fn(),
 }));
 vi.mock('../../plan/emit', () => ({ emitStartPlan: vi.fn() }));
 vi.mock('../../plan/events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
@@ -1913,5 +1917,45 @@ describe(devAsync, () => {
         );
       });
     });
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+describe('EAS session lifecycle of the dev-server step', () => {
+  const lifecycle = { platform: 'ios' as const, open: vi.fn(), finishAsync: vi.fn() };
+  beforeEach(() => {
+    mockProjectState();
+    vi.mocked(easRunLifecycle).mockReturnValue(lifecycle);
+    vi.mocked(runDevServerAsync).mockImplementation(async (_root, _args, opts) => {
+      opts?.onDevServer?.({ url: 'http://127.0.0.1:8081', port: 8081 });
+      return devServerRun();
+    });
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it(`opens on EAS once Metro is up, then finishes the session work, for a foreground run`, async () => {
+    await devAsync(projectRoot, resolveDevOptions(['--ios', '--eas']));
+
+    expect(easRunLifecycle).toHaveBeenCalledWith(
+      projectRoot,
+      expect.objectContaining({ platform: 'ios', keepSession: false })
+    );
+    expect(lifecycle.open).toHaveBeenCalledWith(
+      expect.objectContaining({ devServerUrl: 'http://127.0.0.1:8081' })
+    );
+    expect(lifecycle.finishAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it(`keeps the session in a detached child`, async () => {
+    vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', '1');
+
+    await devAsync(projectRoot, resolveDevOptions(['--ios', '--eas']));
+
+    expect(easRunLifecycle).toHaveBeenCalledWith(
+      projectRoot,
+      expect.objectContaining({ keepSession: true })
+    );
   });
 });

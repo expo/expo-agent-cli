@@ -2,9 +2,13 @@
 import fs from 'fs';
 import * as Log from '../../log';
 import simulatorFailures from '../../__fixtures__/eas/simulator-failures.json';
-import { probeCloudSessionAsync, readCloudSessionIdSync } from '../../device/cloudSimulator';
+import {
+  probeCloudSessionAsync,
+  readCloudSessionIdSync,
+  type CloudSessionProbe,
+} from '../../device/cloudSimulator';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
-import { acquireCloudBindingAsync } from '../../deviceBinding/cloud';
+import { acquireCloudBindingAsync, readCloudBindings } from '../../deviceBinding/cloud';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { registryDirectory } from '../../deviceBinding/registry';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
@@ -14,6 +18,7 @@ import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import {
   buildLatestSimulatorBuildArgs,
   buildSessionStartArgs,
+  easRunLifecycle,
   findLatestSimulatorBuildIdAsync,
   openAppOnEasAsync,
   otherPlatformSessionAsync,
@@ -255,6 +260,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
 
     expect(report).toEqual({
@@ -287,6 +293,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: false,
       devServerUrl: DEV_SERVER,
       buildId: 'build-1',
+      keepSession: true,
     });
 
     const args = vi.mocked(spawnCaptureAsync).mock.calls[0]![1];
@@ -302,6 +309,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: false,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
 
     expect(report.opened).toBe(false);
@@ -325,6 +333,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
 
     expect(report).toMatchObject({ opened: true, sessionId: 'sess-up', started: false });
@@ -358,6 +367,7 @@ describe(openAppOnEasAsync, () => {
         expoGo: true,
         devServerUrl: DEV_SERVER,
         buildId: null,
+        keepSession: true,
       });
       await vi.advanceTimersByTimeAsync(0);
       expect(openRouteAsync).not.toHaveBeenCalled();
@@ -382,6 +392,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
       waits: { tunnelMs: 1 },
     });
 
@@ -402,6 +413,7 @@ describe(openAppOnEasAsync, () => {
         expoGo: true,
         devServerUrl: DEV_SERVER,
         buildId: null,
+        keepSession: true,
       });
 
       expect(report).toMatchObject({ opened: false, started: false, sessionId: null });
@@ -429,6 +441,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
       waits: { tunnelMs: 1 },
     });
 
@@ -446,6 +459,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
       stillWanted: () => false,
     });
     expect(report.reason).toContain('dev server stopped');
@@ -465,6 +479,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
 
     expect(report.opened).toBe(false);
@@ -485,6 +500,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
     expect(report).toMatchObject({ opened: false, started: true, sessionId: 'sess-billed' });
     expect(report.reason).toContain('exited 1: ✖ Timed out');
@@ -526,6 +542,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
 
     expect(report.opened).toBe(false);
@@ -541,6 +558,7 @@ describe(openAppOnEasAsync, () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
     expect(report.reason).toContain('no package runner');
   });
@@ -557,7 +575,7 @@ describe('the session half on its own', () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
-      cleanupAfterRun: true,
+      keepSession: false,
     });
     const messages = vi
       .mocked(Log.progress)
@@ -634,6 +652,7 @@ describe('the session half on its own', () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
     expect(report).toMatchObject({ ok: true, sessionId: 'sess-up', started: false, openUrl: null });
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
@@ -658,6 +677,7 @@ describe('the session half on its own', () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
     expect(probeCloudSessionAsync).toHaveBeenCalledWith(
       expect.objectContaining({ boundIds: ['OLD'] })
@@ -687,6 +707,7 @@ describe('the session half on its own', () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
       waits: { tunnelMs: 1 },
     });
 
@@ -707,6 +728,7 @@ describe('the session half on its own', () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
     expect(report).toMatchObject({ ok: false });
     expect(report.reason).toContain('cannot be read');
@@ -733,6 +755,7 @@ describe('the session half on its own', () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
     expect(report).toMatchObject({ ok: false, sessionId: null, started: false });
     expect(report.reason).toContain('session A');
@@ -752,6 +775,7 @@ describe('the session half on its own', () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     } as const;
     const stopCalls = () =>
       vi.mocked(spawnCaptureAsync).mock.calls.filter(([, args]) => args.includes('simulator:stop'));
@@ -798,12 +822,85 @@ describe('the session half on its own', () => {
     });
   });
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  describe('a session start that returns after Metro stopped', () => {
+    const root = '/project/late-app';
+    const id = '11111111-2222-3333-4444-555555555555';
+    let wanted: boolean;
+    const options = {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+      keepSession: true,
+      stillWanted: () => wanted,
+    } as const;
+    const bound = async () => {
+      const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
+      return readBindingFile(bindingPathFor(root, 'ios', 'cloud')).kind === 'binding';
+    };
+    const listingAfterStart = (probe: CloudSessionProbe) =>
+      vi
+        .mocked(probeCloudSessionAsync)
+        .mockResolvedValueOnce(cloudProbe.none())
+        .mockResolvedValueOnce(probe);
+
+    beforeEach(() => {
+      wanted = true;
+      vi.mocked(spawnCaptureAsync).mockImplementation((async () => {
+        wanted = false;
+        return { stdout: `Simulator session created (id: ${id})`, stderr: '', exitCode: 0 };
+      }) as any);
+    });
+
+    it(`binds nothing when the listing no longer shows the session`, async () => {
+      listingAfterStart(cloudProbe.inactive(id));
+      const report = await ensureEasSessionAsync(root, options);
+      expect(probeCloudSessionAsync).toHaveBeenLastCalledWith(
+        expect.objectContaining({ boundIds: [id] })
+      );
+      expect(report).toMatchObject({ ok: false });
+      expect(report.reason).toContain('nothing is bound');
+      expect(await bound()).toBe(false);
+    });
+
+    it(`binds the session when the listing cannot be read`, async () => {
+      listingAfterStart(cloudProbe.unknown());
+      const report = await ensureEasSessionAsync(root, options);
+      expect(report).toMatchObject({ ok: true, sessionId: id });
+      expect(await bound()).toBe(true);
+    });
+
+    it(`binds the session when the listing still shows it`, async () => {
+      listingAfterStart(cloudProbe.queued({ id, platform: 'ios' }));
+      const report = await ensureEasSessionAsync(root, options);
+      expect(report).toMatchObject({ ok: true, sessionId: id });
+      expect(await bound()).toBe(true);
+    });
+
+    it(`lists nothing more while the run is still wanted`, async () => {
+      vi.mocked(spawnCaptureAsync).mockResolvedValue({
+        stdout: `Simulator session created (id: ${id})`,
+        stderr: '',
+        exitCode: 0,
+      } as any);
+      const report = await ensureEasSessionAsync(root, options);
+      expect(report).toMatchObject({ ok: true, sessionId: id });
+      expect(probeCloudSessionAsync).toHaveBeenCalledTimes(1);
+      expect(
+        vi.mocked(spawnCaptureAsync).mock.calls.some(([, args]) => args.includes('simulator:list'))
+      ).toBe(false);
+      expect(await bound()).toBe(true);
+    });
+  });
+
   it(`takes the session name a caller gives it`, async () => {
     await ensureEasSessionAsync(projectRoot, {
       platform: 'ios',
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
       sessionName: 'my-app — agent-cli smoke',
     });
     const args = vi.mocked(spawnCaptureAsync).mock.calls[0]![1];
@@ -817,6 +914,7 @@ describe('worktree session ownership', () => {
     expoGo: true,
     devServerUrl: DEV_SERVER,
     buildId: null,
+    keepSession: true,
   };
   it('a failed listing never starts a billed session', async () => {
     vi.mocked(probeCloudSessionAsync).mockResolvedValue(
@@ -906,6 +1004,7 @@ describe(otherPlatformSessionAsync, () => {
       expoGo: true,
       devServerUrl: DEV_SERVER,
       buildId: null,
+      keepSession: true,
     });
     expect(report.refusal).toMatchObject({
       code: 'CLOUD_SIMULATOR_PLATFORM_MISMATCH',
@@ -919,5 +1018,87 @@ describe(otherPlatformSessionAsync, () => {
     vi.mocked(readCloudSessionIdSync).mockReturnValue(null);
     vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.unknown());
     await expect(otherPlatformSessionAsync(projectRoot, 'android')).resolves.toBeNull();
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+describe(easRunLifecycle, () => {
+  const started = '11111111-2222-3333-4444-555555555555';
+  const progress = () =>
+    vi
+      .mocked(Log.progress)
+      .mock.calls.map(([line]) => String(line))
+      .join('\n');
+
+  async function runAsync(keepSession: boolean, open = true) {
+    const onSignal = vi.fn();
+    const eas = easRunLifecycle(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      keepSession,
+      onSignal,
+    });
+    expect(eas.platform).toBe('ios');
+    expect(process.listeners('SIGINT')).toContain(onSignal);
+    if (open) eas.open({ devServerUrl: DEV_SERVER, stillWanted: () => true, buildId: null });
+    await eas.finishAsync();
+    expect(process.listeners('SIGINT')).not.toContain(onSignal);
+    expect(process.listeners('SIGTERM')).not.toContain(onSignal);
+    return readCloudBindings(projectRoot).bindings.map(({ device }) => device.id);
+  }
+
+  it(`stops and releases the session a foreground run started`, async () => {
+    expect(await runAsync(false)).toEqual([]);
+
+    const stop = vi.mocked(spawnCaptureAsync).mock.calls[1]![1];
+    expect(stop).toEqual(expect.arrayContaining(['simulator:stop', started]));
+    expect(progress()).toContain('This run stops the session when the dev server exits');
+    expect(progress()).toContain(`Stopped EAS Simulator session ${started}`);
+  });
+
+  it(`warns with the stop command, and keeps the binding, when the stop fails`, async () => {
+    vi.mocked(spawnCaptureAsync).mockImplementation((async (_command: string, args: string[]) =>
+      args.includes('simulator:stop')
+        ? { stdout: '', stderr: 'boom', exitCode: 1, spawnError: null }
+        : {
+            stdout: `Simulator session created (id: ${started})`,
+            stderr: '',
+            exitCode: 0,
+            spawnError: null,
+          }) as any);
+
+    expect(await runAsync(false)).toEqual([started]);
+
+    const warning = String(vi.mocked(Log.warn).mock.calls.at(-1)![0]);
+    expect(warning).toMatch(new RegExp(`^Could not stop EAS Simulator session ${started}: `));
+    expect(warning).toContain(`simulator:stop --id ${started}" ends it.`);
+  });
+
+  it(`keeps the session and its binding when a detached child started it`, async () => {
+    expect(await runAsync(true)).toEqual([started]);
+
+    expect(spawnCaptureAsync).toHaveBeenCalledTimes(1);
+    expect(progress()).toContain('It bills until');
+  });
+
+  it(`waits for nothing when the open never ran`, async () => {
+    expect(await runAsync(false, false)).toEqual([]);
+
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+    expect(progress()).not.toContain('Finishing EAS session work');
+  });
+
+  it(`prints the whole refusal when the worktree has a session on the other platform`, async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-android', platform: 'android' })
+    );
+
+    await runAsync(false);
+
+    const warning = String(vi.mocked(Log.warn).mock.calls[0]![0]);
+    expect(warning).toMatch(/^--ios names a platform/);
+    expect(warning).toContain('How: ');
+    // Next to the running dev server, the session is reused with navigate, not a second dev.
+    expect(warning).toContain('navigate / --eas --android');
   });
 });

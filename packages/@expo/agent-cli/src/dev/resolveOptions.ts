@@ -143,6 +143,11 @@ export interface DevOptions {
   detachArgv: string[];
   /** The command line the caller typed, which a How line repeats; a detached child's parent gives it. */
   callerArgv: string[];
+  /**
+   * This run is the child of a `dev --detach`. It keeps the EAS session it starts when Metro exits
+   * (llp/0035 §Preserved sessions).
+   */
+  detachedChild: boolean;
 }
 
 /** The platform of the EAS session this run opens the app on, or null when it opens none on EAS. */
@@ -155,10 +160,10 @@ export function easOpenPlatform(options: DevOptions): 'ios' | 'android' | null {
 }
 
 /** Read once, and removed so the child's own subprocesses never inherit it. */
-function callerArgvOf(argv: string[]): string[] {
+function callerArgvOf(argv: string[], detachedChild: boolean): string[] {
   const value = process.env[CALLER_ARGV_ENV];
   delete process.env[CALLER_ARGV_ENV];
-  if (process.env.__EXPO_AGENT_CLI_DETACHED !== '1' || value === undefined) return argv;
+  if (!detachedChild || value === undefined) return argv;
   try {
     const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed) && parsed.every((arg) => typeof arg === 'string') ? parsed : argv;
@@ -219,6 +224,7 @@ export function resolveDevOptions(
     : deviceBackend === 'eas'
       ? 'config'
       : 'default';
+  const detachedChild = process.env.__EXPO_AGENT_CLI_DETACHED === '1';
   if (deviceBackend === 'eas') {
     assertEasRunFits(argv, deviceBackendSource === 'flag' ? 'flag' : 'config');
   }
@@ -259,7 +265,8 @@ export function resolveDevOptions(
     // The child's argv is built from the same list, so a flag added to this command reaches the
     // detached run without a second place to remember.
     detachArgv: argv,
-    callerArgv: callerArgvOf(argv),
+    callerArgv: callerArgvOf(argv, detachedChild),
+    detachedChild,
   };
 }
 

@@ -587,7 +587,7 @@ Before a real `dev` startup, `.expo/agent-cli-last-dev.json` retains only its pa
 
 ## EAS session binding
 
-An EAS session belongs to the worktree that started it. Extends the binding and lifecycle rules in this RFC and §Device lifecycle to EAS sessions. The parts are §Session guard, §Session discovery, §Session binding, §Session cleanup and §One session per worktree. §Recovery by tag is not built.
+An EAS session belongs to the worktree that started it. Extends the binding and lifecycle rules in this RFC and §Device lifecycle to EAS sessions. The parts are §Session guard, §Session discovery, §Session binding, §Session cleanup, §One session per worktree and §Preserved sessions. §Recovery by tag is not built.
 
 How does a worktree keep to its own EAS session, and how does that session survive a lost registry?
 
@@ -598,6 +598,7 @@ How does a worktree keep to its own EAS session, and how does that session survi
 - An EAS device command runs only on the session it selected.
 - Discovery sees every pending and in-progress session on every page. A failed listing starts no session, and a queued session on the requested platform is never replaced by a new start.
 - Two worktrees get two sessions; `navigate --eas` uses its own; `dev:stop --eas` ends this worktree's sessions; a deleted worktree's `started` session is stopped from another worktree, a `dotenv` one only removed; `dev --eas` reaps too; a start on one platform refuses while this worktree has a live session on another.
+- A plain `dev:stop` keeps the session of a detached `dev --eas` and its binding.
 - A lost registry leaves its session unbound. `dev:stop --eas` and the dotenv id still reach it. Recovery by tag is §Recovery by tag, which is not built.
 - The live suite is green on a Mac with two worktrees.
 
@@ -641,7 +642,7 @@ Which EAS session belongs to this worktree?
 - `dev --eas` and the start branch of `smoke --eas` first renew, under the registry lock, the lease of this platform's expired binding, so a reap in another worktree cannot stop that session; they then count the binding as bound and reuse a live session. An unreadable binding file of this platform refuses before the probe, and no session starts. `navigate` still refuses an expired binding.
 - Binding points. `ensureEasSessionAsync` calls `acquireCloudBindingAsync` whenever it has a session id. `openAppEas` and smoke's start branch go through it, and smoke's reuse branch calls `acquireCloudBindingAsync` itself. That includes a reuse of the bound id and a start that failed after it created the session, so a later reap can stop that session. A reuse of a `started` binding keeps its `origin` and `boundAt`. A binding that cannot be written fails the open. A session this run started and could not bind belongs to no run, so the open stops it at once through `releaseStartedSessionAsync`, unless a binding in this worktree records its id with origin `dotenv`: another run selected it through the dotenv and bound it. The check and the stop decision are one registry section; a lock that cannot be taken keeps the session.
 - The cloud rung writes nothing but the lease of the selected binding. An unreadable binding refuses. A queued session is `not-up` and is never replaced by a new start. An expired binding is `gone` with cause `expired`, unless the dotenv names a different live session. A bound id that the listing shows in no live state is `gone`. The How line of `gone` (§Readers) is `dev --<platform> --eas --detach`.
-- `dev --eas` binds, and stops the session that it started when Metro exits, through `releaseStartedSessionAsync`.
+- `dev --eas` binds. The foreground `dev --eas` stops the session that it started at exit, through `releaseStartedSessionAsync`.
 - `--max-idle-time-minutes 30` on the session start, with the "Nonexistent flag" retry of §EAS, for the reason given there. The retry runs only when no session id was read. The event `dev:open_app_eas_flag_unsupported { flag }` records a retry. `smoke --eas` binds in both its start and its reuse branch. Smoke looks up the build of this fingerprint first; with none, it reuses a live session of the platform or fails with its own reason, and never starts one. Smoke stops its own session through `releaseStartedSessionAsync`.
 - The start follow-ups and `status` read the own cloud bindings with a live lease, with no network call. They do not read the dotenv file. `status` maps an installed row that found no local device, while a live binding records a session of its platform, to `reason: 'cloud-session'` with no commands, in `collectStatusReportAsync`, so `--json` and the text agree. The device line lists the cloud sessions after the local fact, also when the device section is unavailable. dev-wait does not read the bindings.
 - Tests: cloud-test (a reuse keeps the origin and `boundAt`, two starts at once keep the session the dotenv names, an expired cloud inspection writes nothing); the selection cases of cloudBinding-test and cloudSimulator-test; the binding, claim, race, unrecorded-start and idle-flag cases of openAppEas-test; the cloud binding cases of the status format-test. E2E (cloud-binding-test), on the stub's shared `STUB_SIM_STORE` with a repeatable `--status`: two worktrees, an expired binding, a queued or stopped bound session.
@@ -667,6 +668,16 @@ What happens when a worktree asks for a session of the other platform?
 
 - One drivable session per worktree. eas-cli keeps the connection of one session in `.env.eas-simulator`, only a session start writes it, and `simulator:exec` drives only the session it names (§Session guard). So `ensureEasSessionAsync` starts no session when the probe selects a live or queued session of this worktree on another platform, bound or named only by the dotenv. The open fails, binds nothing, stops nothing, and names `dev:stop --eas`. Its How line names the command that uses the session: `navigate / --eas --<its platform>` beside a running dev server, where `dev --eas --detach` would only report the server, and `dev --<its platform> --eas --detach` in the detach pre-check, before any server exists. Smoke's phase reason is the refusal's What and How lines, so it names `dev:stop --eas`. A detached run asks the same question in `devDetachAsync` before it spawns the child, so the refusal is its exit code. It asks the service only when a binding or the dotenv points at a session on another platform. Two starts at once on two platforms can still bind two sessions; the guard refuses the one the dotenv does not name, and `CLOUD_SESSION_MISMATCH` then suggests `dev:stop --eas`.
 - Tests: the other-platform gate cases of openAppEas-test; the detached other-platform refusal of detachAsync-test; the platform-mismatch How line of navigate device-test. E2E (cloud-binding-test): a platform binding over the dotenv of the other platform.
+
+### Preserved sessions
+
+**Status:** built.
+
+What happens to an EAS session when its Metro stops?
+
+- The detached `dev --eas` child keeps its session and binding when Metro exits. So a plain `dev:stop` keeps both, and `dev:stop --eas` owns their cleanup. The foreground `dev --eas` still stops the session that it started. The detached report's last follow-up is `dev:stop --eas`, with the id of this platform's bound session when there is one. On a first start the child binds after the report, so the follow-up names no id. A detached `dev --eas` that fails after it spawned the child names `dev:stop --eas` in its How line.
+- A session start that returns after Metro stopped is bound only when the listing still shows the session, or cannot be read.
+- Tests: the bound session in the fresh-start follow-up, and the `dev:stop --eas` How line of a not-ready run (detachAsync-test). E2E (cloud-binding-test): plain `dev:stop` keeps the binding.
 
 ### Recovery by tag
 

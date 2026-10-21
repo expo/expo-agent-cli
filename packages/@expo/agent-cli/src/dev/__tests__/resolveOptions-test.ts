@@ -23,6 +23,7 @@ describe(resolveDevOptions, () => {
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       callerArgv: expect.any(Array),
+      detachedChild: false,
       // Read and not forwarded: `dev` sets `--port` on every step that serves.
       port: 8082,
     });
@@ -47,6 +48,7 @@ describe(resolveDevOptions, () => {
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       callerArgv: expect.any(Array),
+      detachedChild: false,
       port: null,
     });
   });
@@ -74,6 +76,7 @@ describe(resolveDevOptions, () => {
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       callerArgv: expect.any(Array),
+      detachedChild: false,
       port: 8082,
     });
   });
@@ -214,6 +217,7 @@ describe(resolveDevOptions, () => {
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       callerArgv: expect.any(Array),
+      detachedChild: false,
       port: null,
     });
   });
@@ -241,6 +245,7 @@ describe(resolveDevOptions, () => {
       detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       callerArgv: expect.any(Array),
+      detachedChild: false,
       port: null,
     });
   });
@@ -452,5 +457,13 @@ describe('the caller argv of a detached child', () => {
     vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', '');
     vi.stubEnv(CALLER_ARGV_ENV, JSON.stringify(caller));
     expect(resolveDevOptions(child).callerArgv).toEqual(child);
+  });
+
+  it.each([
+    ['1', true],
+    ['', false],
+  ])('resolves detachedChild once from the variable (%j)', (value, detachedChild) => {
+    vi.stubEnv('__EXPO_AGENT_CLI_DETACHED', value);
+    expect(resolveDevOptions(child).detachedChild).toBe(detachedChild);
   });
 });
