@@ -1,6 +1,8 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke
 // @ref llp/0035-one-device-per-worktree.rfc.md §Wiring
 // Smoke binds and releases only its own platform through the registry.
+import { vol } from 'memfs';
+
 import {
   acquireDeviceAsync,
   deviceIdOf,
@@ -8,6 +10,15 @@ import {
   releaseWorktreeDevicesAsync,
 } from '../../deviceBinding';
 import { androidBindingFor, bindingFor } from '../../deviceBinding/__tests__/fakeTools';
+import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
+import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
+import { fetchAdvertisedUrlAsync } from '../../dev/advertisedUrl';
+import { probeCloudSessionAsync } from '../../device/cloudSimulator';
+import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
+import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
+import { PROGRAM_PREFIX } from '../../programName';
+import { resolveEasCli } from '../../utils/easCli';
+import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps, cleanupLeft, deviceBoundByStart } from '../smokeAsync';
 import type { SmokeEnvironmentJson } from '../types';
@@ -18,6 +29,19 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
   acquireDeviceAsync: vi.fn(),
   releaseWorktreeDevicesAsync: vi.fn(async () => []),
 }));
+
+vi.mock('../../device/cloudSimulator', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../device/cloudSimulator')>()),
+  probeCloudSessionAsync: vi.fn(),
+}));
+vi.mock('../../plan/easBuildLookup', () => ({ lookUpEasSimulatorBuildAsync: vi.fn() }));
+vi.mock('../../dev/advertisedUrl', () => ({ fetchAdvertisedUrlAsync: vi.fn() }));
+vi.mock('../../utils/easCli', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../utils/easCli')>()),
+  resolveEasCli: vi.fn(),
+}));
+vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
+vi.mock('../../utils/gitExclude', () => ({ ensureGitExcludedAsync: vi.fn() }));
 
 const projectRoot = '/project';
 
@@ -251,5 +275,73 @@ describe(cleanupLeft, () => {
         })
       )
     ).toEqual({ serverStopped: false, deviceReleased: false });
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Session binding
+describe('ensureEasSession with no EAS build to install', () => {
+  const eas = () => buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios', '--eas']));
+  const file = bindingPathFor(projectRoot, 'ios', 'cloud');
+
+  beforeEach(() => {
+    vol.reset();
+    vi.mocked(lookUpEasSimulatorBuildAsync).mockResolvedValue(null);
+    vi.mocked(resolveEasCli).mockReturnValue({
+      command: 'eas',
+      prefixArgs: [],
+      source: 'eas',
+    } as any);
+  });
+
+  it(`reuses an expired binding's live session and renews its lease`, async () => {
+    writeCloudBinding(projectRoot, 'ios', 'OLD', {
+      boundAt: new Date(Date.now() - 90 * 60_000).toISOString(),
+      expiresAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+    });
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'OLD', platform: 'ios' })
+    );
+
+    const result = await eas().ensureEasSession('http://127.0.0.1:8081');
+
+    expect(result).toEqual({ ok: true, sessionId: 'OLD', started: false, reason: null });
+    expect(probeCloudSessionAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ boundIds: ['OLD'] })
+    );
+    const read = readBindingFile(file);
+    expect(read.kind === 'binding' && Date.parse(read.binding.expiresAt) > Date.now()).toBe(true);
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+
+  it(`refuses an unreadable binding file and starts nothing`, async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'garbage');
+
+    const result = await eas().ensureEasSession('http://127.0.0.1:8081');
+
+    expect(result).toMatchObject({ ok: false, sessionId: null, started: false });
+    expect(result.reason).toContain('cannot be read');
+    expect(probeCloudSessionAsync).not.toHaveBeenCalled();
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+
+  it(`starts no session when none is up, with smoke's reason and no tunnel wait`, async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.none());
+
+    const result = await eas().ensureEasSession('http://127.0.0.1:8081');
+
+    expect(result).toEqual({
+      ok: false,
+      sessionId: null,
+      started: false,
+      reason: `no EAS Simulator session is up, and EAS has no finished "development-simulator" build of this project's ios fingerprint to start one with — "${PROGRAM_PREFIX} dev --ios --eas" builds it and starts the session; this gate compiles nothing`,
+    });
+    expect(lookUpEasSimulatorBuildAsync).toHaveBeenCalledTimes(1);
+    // No tunnel wait: the build lookup comes before it.
+    expect(fetchAdvertisedUrlAsync).not.toHaveBeenCalled();
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+    expect(readBindingFile(file)).toEqual({ kind: 'none' });
   });
 });

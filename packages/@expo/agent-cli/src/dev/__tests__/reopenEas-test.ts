@@ -1,5 +1,6 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
 import { otherPlatformSessionError } from '../../device/cloudErrors';
+import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
 import { resolveStartPlanAsync } from '../../plan/resolveAsync';
 import { openAppOnEasAsync } from '../openAppEas';
 import { reopenEasAsync } from '../reopenEas';
@@ -45,7 +46,7 @@ it(`refuses at once next to a Metro with no tunnel`, async () => {
   expect(openAppOnEasAsync).not.toHaveBeenCalled();
 });
 
-it(`hands the plan's build to the open`, async () => {
+it(`hands the plan's build to the open and looks up no build itself`, async () => {
   await expect(reopenEasAsync(projectRoot, options, DEV_SERVER, TUNNEL)).resolves.toBe('sess-1');
 
   expect(openAppOnEasAsync).toHaveBeenCalledWith(projectRoot, {
@@ -53,8 +54,10 @@ it(`hands the plan's build to the open`, async () => {
     expoGo: false,
     devServerUrl: DEV_SERVER,
     buildId: null,
+    fingerprintCache: true,
     keepSession: true,
   });
+  expect(lookUpEasSimulatorBuildAsync).not.toHaveBeenCalled();
 });
 
 it(`throws the one-session refusal unchanged`, async () => {

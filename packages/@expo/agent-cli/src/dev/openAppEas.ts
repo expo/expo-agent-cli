@@ -44,6 +44,7 @@ import {
 import { otherPlatformSessionError } from '../device/cloudErrors';
 import * as Log from '../log';
 import { openRouteAsync, resolveRouteUrlAsync } from '../navigate/openRoute';
+import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import type { NativePlatform } from '../plan/types';
 import { PROGRAM_PREFIX } from '../programName';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
@@ -83,10 +84,13 @@ export interface EnsureEasSessionOptions {
   /** Where the dev server this run started listens, on this machine. */
   devServerUrl: string;
   /**
-   * The EAS build the session installs, for a development build. Null for Expo Go, and null when
-   * the run built one and could not name it — which is reported rather than guessed around.
+   * The EAS build the session installs, for a development build. Null for Expo Go. For a
+   * development build, null makes a new session look up the finished simulator build of this
+   * fingerprint.
    */
   buildId: string | null;
+  /** Whether that lookup may read the per-platform fingerprint out of the project's record. */
+  fingerprintCache?: boolean;
   /** Whether the work is still worth performing, checked between the slow stages. */
   stillWanted?: () => boolean;
   /** What the session is called on expo.dev, for a person scanning the list later. */
@@ -97,6 +101,8 @@ export interface EnsureEasSessionOptions {
    * (llp/0035 §Preserved sessions). Only the progress line reads it here.
    */
   keepSession: boolean;
+  /** The reason a development build with no build to install fails with, before any tunnel wait. */
+  noBuildReason?: string;
   /** Injected for tests. */
   waits?: { tunnelMs?: number; sessionStartMs?: number };
 }
@@ -525,7 +531,26 @@ async function ensureSessionAsync(
     return failed('the dev server stopped before a session was started');
   }
 
-  // 2. The tunnel, which a session about to be started is pointed at. Asked of the dev server
+  // 2. The app a new session installs. A development build with no id is looked up here, after the
+  //    reuse above and before the tunnel wait: only a new session pays for the lookup, and a run
+  //    with no build fails without waiting for a tunnel it would not use.
+  const buildId = options.expoGo
+    ? null
+    : (options.buildId ??
+      (
+        await lookUpEasSimulatorBuildAsync(projectRoot, platform, {
+          fingerprintCache: options.fingerprintCache,
+        })
+      )?.id ??
+      null);
+  if (!options.expoGo && !buildId) {
+    return failed(
+      options.noBuildReason ??
+        `no EAS build to install on a new session: nothing named a finished "${EAS_SIMULATOR_PROFILE}" build of this project for ${platform}. Build one with "${easCommandPrefix()} build --platform ${platform} --profile ${EAS_SIMULATOR_PROFILE}" and run this again.`
+    );
+  }
+
+  // 3. The tunnel, which a session about to be started is pointed at. Asked of the dev server
   //    itself: its manifest names the origin a device uses.
   const tunnelHost = await waitForTunnelHostAsync(options, stillWanted);
   event('open_app_eas_tunnel', { platform, host: tunnelHost });
@@ -538,7 +563,7 @@ async function ensureSessionAsync(
     );
   }
 
-  // 3. The URL the app opens on the session, in the form the app it is takes: `exp://<host>` for
+  // 4. The URL the app opens on the session, in the form the app it is takes: `exp://<host>` for
   //    Expo Go, `<scheme>://?__expo_url=…` for a development build. Resolved the
   //    way `navigate` resolves it, so the two commands never disagree about the link.
   let openUrl: string;
@@ -554,16 +579,8 @@ async function ensureSessionAsync(
     return failed('the dev server stopped before a session was started', { tunnelHost, openUrl });
   }
 
-  // 4. No usable session: start one, with the app and the URL on the command line.
-  if (!options.expoGo && !options.buildId) {
-    return failed(
-      `no EAS build to install on a new session: nothing named a finished "${EAS_SIMULATOR_PROFILE}" build of this project for ${platform}. Build one with "${easCommandPrefix()} build --platform ${platform} --profile ${EAS_SIMULATOR_PROFILE}" and run this again.`,
-      { tunnelHost, openUrl }
-    );
-  }
-  const app = options.expoGo
-    ? ({ expoGo: true } as const)
-    : ({ expoGo: false, buildId: options.buildId! } as const);
+  // 5. No usable session: start one, with the app and the URL on the command line.
+  const app = buildId ? ({ expoGo: false, buildId } as const) : ({ expoGo: true } as const);
   const args = buildSessionStartArgs({
     platform,
     app,
@@ -573,11 +590,11 @@ async function ensureSessionAsync(
   event('open_app_eas_session_start', {
     platform,
     app: options.expoGo ? 'expo-go' : 'dev-build',
-    buildId: options.expoGo ? null : options.buildId,
+    buildId,
   });
   Log.progress(
     `Starting an EAS Simulator session (${platform}) with ${
-      options.expoGo ? 'the Expo Go this SDK ships' : `build ${options.buildId}`
+      options.expoGo ? 'the Expo Go this SDK ships' : `build ${buildId}`
     } — a few minutes, nothing is stuck. ${
       options.keepSession
         ? `The session bills until "${PROGRAM_PREFIX} dev:stop --eas".`
@@ -800,11 +817,13 @@ export function easRunLifecycle(
   {
     platform,
     expoGo,
+    fingerprintCache,
     keepSession,
     onSignal,
   }: {
     platform: NativePlatform;
     expoGo: boolean;
+    fingerprintCache?: boolean;
     keepSession: boolean;
     onSignal: () => void;
   }
@@ -820,6 +839,7 @@ export function easRunLifecycle(
         expoGo,
         devServerUrl,
         buildId,
+        fingerprintCache,
         stillWanted,
         keepSession,
       });
