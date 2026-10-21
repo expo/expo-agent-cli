@@ -19,6 +19,7 @@ import * as Log from '../../log';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
 import { logCmdError, type CommandError } from '../../utils/errors';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
+import { otherPlatformSessionAsync } from '../openAppEas';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
@@ -36,6 +37,10 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
   devicesDisabled: vi.fn(() => true),
   hostBindsPlatform: vi.fn(() => false),
   acquireDeviceAsync: vi.fn(),
+}));
+vi.mock('../openAppEas', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../openAppEas')>()),
+  otherPlatformSessionAsync: vi.fn(),
 }));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
 vi.mock('../processLiveness', () => ({ isProcessAlive: vi.fn() }));
@@ -100,6 +105,75 @@ afterEach(() => {
   vi.useRealTimers();
   vi.resetAllMocks();
   vol.reset();
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree
+describe('--eas on the other platform', () => {
+  const detach = () =>
+    devDetachAsync(projectRoot, resolveDevOptions(['--android', '--eas', '--detach']), {
+      print: false,
+      reuseBoundDevice: true,
+    });
+
+  it('refuses before the spawn when this worktree has a session on the other platform', async () => {
+    vi.mocked(otherPlatformSessionAsync).mockResolvedValue({ sessionId: 's-ios', platform: 'ios' });
+
+    const error = await detach().catch((e) => e);
+
+    expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
+    expect(error.suggestedCommand).toContain('dev:stop --eas');
+    expect(error.data).toMatchObject({ sessionId: 's-ios' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('refuses when the other session reports no platform', async () => {
+    vi.mocked(otherPlatformSessionAsync).mockResolvedValue({ sessionId: 's-x', platform: null });
+
+    const error = await detach().catch((e) => e);
+
+    expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
+    expect(error.data).toEqual({ sessionId: 's-x', platform: null });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('asks nothing when a dev server runs', async () => {
+    vi.mocked(readDevServerLockAsync)
+      .mockReset()
+      .mockResolvedValue({
+        url: 'http://127.0.0.1:8393',
+        port: 8393,
+        pid: 4242,
+        projectRoot,
+        startedAt: new Date(0).toISOString(),
+      });
+
+    await expect(detach()).resolves.toBe(0);
+
+    expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
+  });
+
+  it('spawns the child when nothing points at another platform', async () => {
+    vi.mocked(otherPlatformSessionAsync).mockResolvedValue(null);
+
+    const result = detach();
+    await vi.runAllTimersAsync();
+    await expect(result).resolves.toBe(0);
+
+    expect(otherPlatformSessionAsync).toHaveBeenCalledWith(projectRoot, 'android');
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks nothing for a run that opens no app', async () => {
+    const result = devDetachAsync(
+      projectRoot,
+      resolveDevOptions(['--android', '--eas', '--detach', '--no-open']),
+      { print: false }
+    );
+    await vi.runAllTimersAsync();
+    await expect(result).resolves.toBe(0);
+
+    expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
+  });
 });
 
 function run() {

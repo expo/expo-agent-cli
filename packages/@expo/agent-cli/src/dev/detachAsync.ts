@@ -19,6 +19,8 @@
 // nobody can find, because only one of them can hold the lock that names it.
 
 import type { PlanPlatform } from '../plan/types';
+import { otherPlatformSessionError } from '../device/cloudErrors';
+import { otherPlatformSessionAsync } from './openAppEas';
 import { spawn } from 'child_process';
 import fs from 'fs';
 
@@ -66,7 +68,7 @@ import {
   type DetachedLogRead,
 } from './logFile';
 import { isProcessAlive } from './processLiveness';
-import type { DevOptions } from './resolveOptions';
+import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { waitForDetachedReadyAsync } from './waitForDetachedReady';
 
 /** A dev server that is not on the port the caller expected. */
@@ -299,6 +301,16 @@ export async function devDetachAsync(
       smokePlatform,
     });
   }
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree — the refusal is the
+  // exit code.
+  const easPlatform = easOpenPlatform(options);
+  const other = easPlatform ? await otherPlatformSessionAsync(projectRoot, easPlatform) : null;
+  if (easPlatform && other)
+    throw otherPlatformSessionError(other.platform, {
+      wanted: easPlatform,
+      sessionId: other.sessionId,
+    });
 
   const { logFile, fd } = openDetachedLogSync(projectRoot);
   const { command, args } = buildDetachSpawn(resolveBinPath(), options.detachArgv);

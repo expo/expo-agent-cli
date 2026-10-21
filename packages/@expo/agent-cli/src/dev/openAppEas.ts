@@ -23,8 +23,10 @@
 import path from 'path';
 import {
   acquireCloudBindingAsync,
+  claimable,
   claimCloudBindingsAsync,
   restoreRenewedLeaseAsync,
+  readCloudBindings,
   type CloudBinding,
 } from '../deviceBinding/cloud';
 import { releaseStartedSessionAsync } from '../deviceBinding/cloudRelease';
@@ -36,7 +38,10 @@ import {
   readCloudSessionIdSync,
   CLOUD_SESSION_ENV_FILE,
   CLOUD_SESSION_TIMEOUT_MS,
+  type CloudPlatform,
+  type CloudSessionProbe,
 } from '../device/cloudSimulator';
+import { otherPlatformSessionError } from '../device/cloudErrors';
 import * as Log from '../log';
 import { openRouteAsync, resolveRouteUrlAsync } from '../navigate/openRoute';
 import type { NativePlatform } from '../plan/types';
@@ -46,6 +51,7 @@ import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/ea
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { ensureGitExcludedAsync } from '../utils/gitExclude';
 import { easFailureReason } from '../utils/easFailure';
+import type { CommandError } from '../utils/errors';
 import { firstLine } from '../utils/text';
 import { parseCachedBuild } from '../impact/buildCache';
 import { fetchAdvertisedUrlAsync } from './advertisedUrl';
@@ -107,6 +113,8 @@ export interface EnsureEasSessionReport {
   sessionUrl: string | null;
   /** Why there is no session. Null exactly when {@link ok} is true. */
   reason: string | null;
+  /** The one-session-per-worktree refusal, when {@link reason} is that refusal. */
+  refusal?: CommandError;
   /** What the bind reported about keeping {@link CLOUD_SESSION_ENV_FILE} out of git. */
   gitExclude?: 'added' | 'tracked' | 'overridden';
 }
@@ -126,6 +134,8 @@ export interface OpenAppOnEasReport {
   sessionUrl: string | null;
   /** Why the app was not opened. Null exactly when {@link opened} is true. */
   reason: string | null;
+  /** The one-session-per-worktree refusal, when {@link reason} is that refusal. */
+  refusal?: CommandError;
 }
 
 /** The argv of the session start, pure and exported so the test table pins it. */
@@ -352,6 +362,49 @@ async function releaseUnrecordedStartAsync(
   };
 }
 
+/** @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree */
+export function otherPlatformSession(
+  probe: CloudSessionProbe,
+  platform: NativePlatform
+): { sessionId: string; platform: CloudPlatform | null } | null {
+  return isLive(probe) && probe.session.platform !== platform
+    ? { sessionId: probe.session.id, platform: probe.session.platform }
+    : null;
+}
+
+/**
+ * The session on another platform that would refuse a `dev --<platform> --eas`, asked before a
+ * detached run starts its dev server. Read-only. Null when no binding and no dotenv point at
+ * another platform, or when discovery is unsure: the child then decides. A session that reports no
+ * platform counts, as it does for the refusal in `ensureSessionAsync`.
+ */
+export async function otherPlatformSessionAsync(
+  projectRoot: string,
+  platform: NativePlatform
+): Promise<{ sessionId: string; platform: CloudPlatform | null } | null> {
+  const bindings = claimable(readCloudBindings(projectRoot).bindings, platform, new Date());
+  const ids = bindings.map(({ device }) => device.id);
+  const askedIds = bindings.flatMap(({ device }) =>
+    device.platform === platform ? [device.id] : []
+  );
+  const dotenvId = readCloudSessionIdSync(projectRoot);
+  if (ids.length === askedIds.length && (dotenvId == null || askedIds.includes(dotenvId))) {
+    return null;
+  }
+  const easCli = resolveEasCli(projectRoot);
+  if (!easCli) {
+    return null;
+  }
+  const probe = await probeCloudSessionAsync({
+    projectRoot,
+    easCli,
+    platform,
+    boundIds: ids,
+    timeoutMs: CLOUD_SESSION_TIMEOUT_MS,
+  });
+  return otherPlatformSession(probe, platform);
+}
+
 async function ensureSessionAsync(
   projectRoot: string,
   options: EnsureEasSessionOptions
@@ -424,6 +477,14 @@ async function ensureSessionAsync(
       `EAS Simulator session ${probe.session.id} is not up yet${probe.session.status ? ` (status ${probe.session.status})` : ''}; run this again in a minute`,
       { sessionId: probe.session.id }
     );
+  const other = otherPlatformSession(probe, platform);
+  if (other) {
+    const refusal = otherPlatformSessionError(other.platform, {
+      wanted: platform,
+      sessionId: other.sessionId,
+    });
+    return failed(firstLine(refusal.message), { refusal });
+  }
   if (!stillWanted()) {
     return failed('the dev server stopped before a session was started');
   }
@@ -566,6 +627,7 @@ export async function openAppOnEasAsync(
     started: session.started,
     tunnelHost: session.tunnelHost,
     sessionUrl: session.sessionUrl,
+    refusal: session.refusal,
   };
   if (!session.ok) {
     return { ...base, opened: false, reason: session.reason ?? 'no session was reached' };

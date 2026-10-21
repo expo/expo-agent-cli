@@ -103,6 +103,11 @@ export function cloudSessionUnknownError(
     : error;
 }
 
+/** "an iOS" or "an Android", for prose that names a session's platform. */
+export function platformLabel(platform: CloudPlatform): string {
+  return platform === 'ios' ? 'an iOS' : 'an Android';
+}
+
 /** The failure for a `--ios`/`--android` that names the platform the session is not. */
 export function cloudPlatformMismatchError(
   wanted: CloudPlatform,
@@ -114,10 +119,35 @@ export function cloudPlatformMismatchError(
     [
       `--${wanted} names a platform the cloud simulator session is not, so nothing was opened.`,
       `Why: an EAS Simulator session is created for one platform and keeps it for its whole life${sessionId ? ` — session ${sessionId} is ${session}` : ''}. There is no second device in it to switch to.`,
-      `How: run this command with --${session} (or with no platform flag, which takes the session's own), or start a ${wanted} session and run it again.`,
+      `How: run this command with --${session} (or with no platform flag, which takes the session's own). A worktree drives one EAS session: "${PROGRAM_PREFIX} dev:stop --eas" ends ${sessionId ? `session ${sessionId}` : 'it'} and the dev server, then "${PROGRAM_PREFIX} dev --${wanted} --eas" starts ${platformLabel(wanted)} one.`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} navigate / --eas --${session}`;
+  return error;
+}
+
+/**
+ * The refusal of a `dev --<wanted> --eas` while this worktree has a live or queued session that is
+ * not on `wanted`. `platform` is that session's platform, null when the service did not report it.
+ */
+// @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree
+export function otherPlatformSessionError(
+  platform: CloudPlatform | null,
+  { wanted, sessionId }: { wanted: CloudPlatform; sessionId: string }
+): CommandError {
+  const stop = `"${PROGRAM_PREFIX} dev:stop --eas" ends session ${sessionId} and the dev server; then "${PROGRAM_PREFIX} dev --${wanted} --eas --detach" starts ${platformLabel(wanted)} one.`;
+  const error = new CommandError(
+    'CLOUD_SIMULATOR_PLATFORM_MISMATCH',
+    [
+      `--${wanted} names a platform this worktree's EAS Simulator session is not, so no session was started or opened.`,
+      `Why: a worktree drives one EAS session, and session ${sessionId} ${platform ? `is ${platformLabel(platform)} session` : 'did not report its platform'}. "simulator:exec" drives only the session ${CLOUD_SESSION_ENV_FILE} names, so a second session would leave ${sessionId} undrivable while it bills.`,
+      platform
+        ? `How: run "${PROGRAM_PREFIX} dev --${platform} --eas --detach" to use session ${sessionId}. Or ${stop}`
+        : `How: ${stop}`,
+    ].join('\n')
+  );
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev:stop --eas`;
+  error.data = { sessionId, platform };
   return error;
 }
 

@@ -1115,8 +1115,7 @@ describe(openUrlOnCloudSimulatorAsync, () => {
       code: 'CLOUD_SESSION_MISMATCH',
       data: { selectedSessionId: 'sess-1', loadedSessionId: 'sess-2' },
     });
-    expect(error.message).toContain('If session sess-2 is still running');
-    expect(error.suggestedCommand).toBeUndefined();
+    expect(error.suggestedCommand).toEqual(expect.stringContaining('dev:stop --eas'));
   });
 
   it(`reports no loaded id when the guard's line names none`, async () => {

@@ -1496,7 +1496,10 @@ async function openAppOnEasForRunAsync(
         }`
       );
     } else if (stillWanted()) {
-      Log.warn(openAppOnEasFailureLine(platform, report.reason ?? 'no reason was given'));
+      Log.warn(
+        report.refusal?.message ??
+          openAppOnEasFailureLine(platform, report.reason ?? 'no reason was given')
+      );
     }
     return report;
   } catch (error: unknown) {

@@ -587,7 +587,7 @@ Before a real `dev` startup, `.expo/agent-cli-last-dev.json` retains only its pa
 
 ## EAS session binding
 
-An EAS session belongs to the worktree that started it. Extends the binding and lifecycle rules in this RFC and §Device lifecycle to EAS sessions. The parts are §Session guard, §Session discovery, §Session binding and §Session cleanup. §Recovery by tag is not built.
+An EAS session belongs to the worktree that started it. Extends the binding and lifecycle rules in this RFC and §Device lifecycle to EAS sessions. The parts are §Session guard, §Session discovery, §Session binding, §Session cleanup and §One session per worktree. §Recovery by tag is not built.
 
 How does a worktree keep to its own EAS session, and how does that session survive a lost registry?
 
@@ -597,7 +597,7 @@ How does a worktree keep to its own EAS session, and how does that session survi
 
 - An EAS device command runs only on the session it selected.
 - Discovery sees every pending and in-progress session on every page. A failed listing starts no session, and a queued session on the requested platform is never replaced by a new start.
-- Two worktrees get two sessions; `navigate --eas` uses its own; `dev:stop --eas` ends this worktree's sessions; a deleted worktree's `started` session is stopped from another worktree, a `dotenv` one only removed; `dev --eas` reaps too.
+- Two worktrees get two sessions; `navigate --eas` uses its own; `dev:stop --eas` ends this worktree's sessions; a deleted worktree's `started` session is stopped from another worktree, a `dotenv` one only removed; `dev --eas` reaps too; a start on one platform refuses while this worktree has a live session on another.
 - A lost registry leaves its session unbound. `dev:stop --eas` and the dotenv id still reach it. Recovery by tag is §Recovery by tag, which is not built.
 - The live suite is green on a Mac with two worktrees.
 
@@ -609,7 +609,7 @@ Does an EAS device command run only on the session it selected?
 
 - Every cloud device verb takes the selected session id (`CloudVerbOptions.sessionId`) and carries it to execution. `navigate`, `runtime:reload`, `runtime:stop` and the screenshot pass the id of the device they resolved, which is the probe's id.
 - `simulator:exec` loads `.env.eas-simulator` and starts its child locally with that environment. The child is a guard (`src/device/cloudCommand.ts`), not the controller. The guard compares the loaded `EAS_SIMULATOR_SESSION_ID` with the selected id. When they match, it starts the controller with the same environment. When the id is missing or different, it exits 20 and starts nothing. The guard checks the environment that the controller gets, not an earlier read of the file. A dotenv that another run replaces during the command cannot change the session the controller drives.
-- A mismatch is `CLOUD_SESSION_MISMATCH`. The guard prints the id that EAS loaded after its marker, on one stderr line. The message names the selected session and that id (`data.selectedSessionId`, `data.loadedSessionId`). No command writes the connection of an existing session back to the file, so the message never tells the caller to restore or edit it. `sessionId` is required; an empty id is a bug in this CLI and starts no process.
+- A mismatch is `CLOUD_SESSION_MISMATCH`. The guard prints the id that EAS loaded after its marker, on one stderr line. The message names the selected session and that id (`data.selectedSessionId`, `data.loadedSessionId`). No command writes the connection of an existing session back to the file, so the message never tells the caller to restore or edit it. `sessionId` is required; an empty id is a bug in this CLI and starts no process. From §One session per worktree on, the suggested command is `dev:stop --eas`, which ends only this worktree's sessions.
 - The guard program is one line, because `cmd.exe` reads a newline as the end of a command when the `npx.cmd` shim forwards the argument on Windows. The session id and the controller target are two separate arguments. The target is resolved for the caller's platform (`resolveSpawnTarget`), with the Windows batch-file escapes. It crosses the outer shim as base64 JSON, and the guard decodes it, so the outer shell cannot consume the escapes for the inner spawn.
 - The screenshot degrades and never throws. It reports the same message, with its How line, as the reason for no picture.
 - The `command` of a report is the logical argv, `eas simulator:exec npx agent-device@latest …`, not the guard.
@@ -658,6 +658,15 @@ Who cleans up this worktree's EAS sessions?
 - Reap. A `dotenv` binding of a deleted or expired worktree is removed and never stopped. A `started` one is stopped under the binding's root, or under the caller's root when the binding's root is deleted. A `started` one past the session cap is removed with no stop call.
 - The reap line that stops the session of a deleted worktree says why another worktree stops it: "Stopped EAS Simulator session <id> of worktree <path>: that worktree no longer exists, so no other command can stop it." Without the path and the reason, a caller reads the line as a stop of another agent's session. The JSON report keeps the reason code `deleted-worktree`, and the dev-server cleanup line stays.
 - Tests: cloud-test (the reap roots, a `dotenv` binding is never stopped, the session cap, a claim renews an expired own binding, so a reap in another worktree stops nothing, the release order, a failed stop writes its binding back, the deleted-worktree reap line with its path, and the reason codes); stopCloudSessions-test; smoke's stop keeps the binding of a failed stop (smokeDeps-test); the follow-ups and the session `platform` of stopAsync-test. E2E (cloud-binding-test): `dev:stop --eas` removes only its own binding, and a failed stop keeps the binding.
+
+### One session per worktree
+
+**Status:** built.
+
+What happens when a worktree asks for a session of the other platform?
+
+- One drivable session per worktree. eas-cli keeps the connection of one session in `.env.eas-simulator`, only a session start writes it, and `simulator:exec` drives only the session it names (§Session guard). So `ensureEasSessionAsync` starts no session when the probe selects a live or queued session of this worktree on another platform, bound or named only by the dotenv. The open fails, binds nothing, stops nothing, and names `dev:stop --eas`. A detached run asks the same question in `devDetachAsync` before it spawns the child, so the refusal is its exit code. It asks the service only when a binding or the dotenv points at a session on another platform. Two starts at once on two platforms can still bind two sessions; the guard refuses the one the dotenv does not name, and `CLOUD_SESSION_MISMATCH` then suggests `dev:stop --eas`.
+- Tests: the other-platform gate cases of openAppEas-test; the detached other-platform refusal of detachAsync-test; the platform-mismatch How line of navigate device-test. E2E (cloud-binding-test): a platform binding over the dotenv of the other platform.
 
 ### Recovery by tag
 

@@ -997,10 +997,11 @@ export function cloudSessionMismatchError(
     [
       `EAS session ${selected} cannot be driven from this worktree, so no device command ran.`,
       `Why: "simulator:exec" drives only the session that ${CLOUD_SESSION_ENV_FILE} names, and it names ${loaded ? `session ${loaded}` : 'no session'}. Only a session start writes that file.`,
-      `How: ${loaded ? `If session ${loaded} is still running, it is the only session this worktree can drive. ` : ''}"${easCommandPrefix()} simulator:list" lists the sessions of this account. End session ${selected} with "${easCommandPrefix()} simulator:stop --id ${selected}" only if this worktree started it. Do not edit ${CLOUD_SESSION_ENV_FILE}: its session id and credentials belong together.`,
+      `How: "${PROGRAM_PREFIX} dev:stop --eas" ends every EAS session of this worktree and its dev server; then "${PROGRAM_PREFIX} dev --<platform> --eas" starts a session this worktree can drive. Do not edit ${CLOUD_SESSION_ENV_FILE}: its session id and credentials belong together.`,
     ].join('\n')
   );
   error.data = { selectedSessionId: selected, loadedSessionId: loaded };
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev:stop --eas`;
   return error;
 }
 
