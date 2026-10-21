@@ -214,7 +214,9 @@ export async function devStopAsync(
   }
   const devServerOk = report.stopped || report.reason === 'not-running';
   Object.assign(report, await stopDevicesAsync(projectRoot, options, report));
-  report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
+  report.followups = followUpsEnabled(options.followups)
+    ? buildFollowUps(report, options.local)
+    : [];
 
   event('stop_done', {
     stopped: report.stopped,
@@ -598,7 +600,9 @@ export function looksLikeDevServerProcess(listener: PortListener): boolean {
   return /\b(node|expo|metro|bun|deno)\b/i.test(listener.command);
 }
 
-function buildFollowUps(report: DevStopResultJson): FollowUp[] {
+function buildFollowUps(report: DevStopResultJson, local: boolean): FollowUp[] {
+  // `--local` left the session running over the config, so neither line may end or start one.
+  const onLocal = local ? ' --local' : '';
   if (report.stopped) {
     const followups: FollowUp[] = [];
     // First, because it contradicts the line above it: the dev server stopped and the port is
@@ -608,13 +612,13 @@ function buildFollowUps(report: DevStopResultJson): FollowUp[] {
     if (report.portStillAnswering && report.port != null) {
       followups.push({
         id: 'dev-stop-port',
-        command: `${PROGRAM_PREFIX} dev:stop --port ${report.port}`,
+        command: `${PROGRAM_PREFIX} dev:stop --port ${report.port}${onLocal}`,
         why: `Port ${report.port} still answers, and it is not the process that was just stopped. This asks what is on it and names the pid.`,
       });
     }
     followups.push({
       id: 'dev',
-      command: devCommand(hostPlatform()),
+      command: `${devCommand(hostPlatform())}${onLocal}`,
       why: 'The dev server is stopped, so this is what starts one again when the app is needed.',
     });
     return followups;

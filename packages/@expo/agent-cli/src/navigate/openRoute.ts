@@ -140,6 +140,8 @@ export interface OpenRouteOptions {
    * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
    */
   cloud?: CloudPreference;
+  /** `--local`: the run stays on this machine over the config, so every printed command says so. */
+  local?: boolean;
   /**
    * The device `dev` already bound and booted for this run, so the open inspects nothing twice.
    *
@@ -366,7 +368,7 @@ export async function resolveRouteUrlAsync(
   // URL a phase of this run found reaches discovery as `flag` too, and blaming a flag nobody passed
   // sends a reader to check an argument they never wrote (F96).
   if (devServer.source === 'flag' && isCallerNamedDevServer(options) && !devServer.reachable) {
-    throw unreachableNamedDevServerError(devServerUrl, devServer.reason, platform);
+    throw unreachableNamedDevServerError(devServerUrl, devServer.reason, platform, options.local);
   }
 
   const usesDevClient = await isInstalledDependencyAsync(
@@ -411,6 +413,7 @@ export async function resolveRouteUrlAsync(
     // The flag the caller typed, so the commands this recovers into ask for the same platform
     // this run was asked for (F142).
     platform,
+    local: options.local,
   });
   if (!resolved.ok) {
     const error = new CommandError('DEEP_LINK_UNRESOLVED', resolved.error);
@@ -474,6 +477,7 @@ export async function openRouteAsync(
         url: resolved.url,
         devServerRunning: resolved.devServerReachable,
         cloud: options.cloud,
+        local: options.local,
         projectRoot,
       });
 
@@ -1130,10 +1134,11 @@ async function resolveStuckAppIdAsync(
 function unreachableNamedDevServerError(
   devServerUrl: string,
   reason: string | undefined,
-  platform?: NavigatePlatform
+  platform?: NavigatePlatform,
+  local = false
 ): CommandError {
   // Stated even when the caller named none: `dev` requires one now.
-  const platformFlag = ` --${platform ?? hostPlatform()}`;
+  const platformFlag = ` --${platform ?? hostPlatform()}${local ? ' --local' : ''}`;
   const error = new CommandError(
     'DEEP_LINK_UNRESOLVED',
     [

@@ -285,6 +285,22 @@ describe(devStopAsync, () => {
       expect(printed()).toContain('npx @expo/agent-cli dev:stop --port 8081');
     });
 
+    // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+    it(`should keep --local on both follow-ups of a --local stop`, async () => {
+      vi.mocked(readDevServerLockAsync)
+        .mockResolvedValueOnce(lock() as never)
+        .mockResolvedValue(null as never);
+      mockPort({ answering: true });
+
+      await devStopAsync(
+        projectRoot,
+        options({ timeoutMs: 200, json: false, followups: true, local: true })
+      );
+
+      expect(printed()).toContain('npx @expo/agent-cli dev:stop --port 8081 --local');
+      expect(printed()).toMatch(/npx @expo\/agent-cli dev --\w+ --local/);
+    });
+
     // The other half of "the pid is primary": the signal worked, and what did not go away is the
     // project's own lock. `--signal SIGKILL` has nothing left to signal, so it must not be offered.
     it(`should not offer SIGKILL when the pid is gone and the lock still answers`, async () => {

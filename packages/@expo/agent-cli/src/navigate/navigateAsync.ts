@@ -198,6 +198,7 @@ export async function navigateAsync(
     routeCheck: options.routeCheck,
     confirmAttachMs: options.attachTimeoutMs,
     cloud: options.cloud,
+    local: options.cloud === 'off',
   });
 
   // @ref llp/0009-smart-followups.rfc.md §Examples per command — `navigate`. Only a link the
@@ -521,7 +522,7 @@ function attachNotConfirmed(opened: OpenRouteResult, options: NavigateOptions): 
         : '';
   const look = cloud
     ? `${PROGRAM_PREFIX} smoke --platform ${opened.platform} --eas --no-route-check`
-    : `${PROGRAM_PREFIX} smoke --platform ${opened.platform} --no-route-check`;
+    : `${PROGRAM_PREFIX} smoke --platform ${opened.platform}${options.cloud === 'off' ? ' --local' : ''} --no-route-check`;
 
   return [
     chalk.red(

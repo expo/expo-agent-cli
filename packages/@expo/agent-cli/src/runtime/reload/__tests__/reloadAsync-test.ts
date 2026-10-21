@@ -883,6 +883,27 @@ describe(explainReloadFailure, () => {
     expect(explained).toContain('npx @expo/agent-cli navigate /');
   });
 
+  it(`keeps --local on every device command after a --local reload`, () => {
+    const explained = explainReloadFailure(strandedReport(), options({ local: true }));
+    const commands = [
+      ...explained.matchAll(/"(npx @expo\/agent-cli (?:dev|navigate|smoke|runtime:reload)[^"]*)"/g),
+    ].map((match) => match[1]!);
+    expect(commands.length).toBeGreaterThan(0);
+    for (const command of commands) {
+      expect(command).toContain('--local');
+    }
+    expect(explained).not.toContain('--eas');
+  });
+
+  it(`names no --eas for a local relaunch that nothing observed`, () => {
+    const report = { ...strandedReport(), method: 'device' as const };
+
+    expect(explainReloadFailure(report, options({ cloud: false }))).not.toContain('--eas');
+    expect(explainReloadFailure(report, options({ local: true }))).toContain(
+      'smoke --ios --local --no-route-check'
+    );
+  });
+
   it(`says nothing about a stopped app when the fallback never stopped one`, () => {
     const report = strandedReport();
     report.attempts = [report.attempts[0]!];

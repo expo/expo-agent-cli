@@ -797,6 +797,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       try {
         const device = await resolveDeviceAsync(options.platform, {
           cloud: options.cloud,
+          local: options.cloud === 'off',
           projectRoot,
         });
         return { deviceId: device.deviceId, backend: device.backend, reason: null };
@@ -827,6 +828,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         routeCheck: options.routeCheck,
         command: 'smoke',
         cloud: options.cloud,
+        local: options.cloud === 'off',
         // @ref llp/0005-runtime-loop-tools.rfc.md §Loading the app is not navigating it. The
         // budget is what turns this open into a *load*: F123's launcher-first ladder is gated on
         // it, so without one a cold development build was handed `<scheme>://<route>` — the link
@@ -886,6 +888,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       try {
         const device = await resolveDeviceAsync(options.platform, {
           cloud: options.cloud,
+          local: options.cloud === 'off',
           projectRoot,
         });
         // @ref llp/0005-runtime-loop-tools.rfc.md §Android — both local backends now, because both

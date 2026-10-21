@@ -135,7 +135,11 @@ export async function resolveDeviceAsync(
     return await resolveCloudDeviceAsync(platform, context);
   }
 
-  const found = await findBoundDeviceAsync(context.projectRoot, { platform, extend: true });
+  const found = await findBoundDeviceAsync(context.projectRoot, {
+    platform,
+    extend: true,
+    local: context.local,
+  });
   if (found.device) {
     const device = navigateDeviceOf(found.device);
     debugEvent('device_resolved', { platform: device.platform, deviceId: device.deviceId });
@@ -179,6 +183,8 @@ export interface ResolveDeviceContext {
   devServerRunning?: boolean;
   /** Whether the cloud backend is on this run's ladder. Defaults to `off`. */
   cloud?: CloudPreference;
+  /** `--local`: a refusal's How line binds a device with `--local` too, over the config. */
+  local?: boolean;
   /** The worktree whose bindings, and whose session, are looked for. */
   projectRoot: string;
 }

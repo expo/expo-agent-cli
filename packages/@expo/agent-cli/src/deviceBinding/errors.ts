@@ -10,9 +10,10 @@ import type { DevicePlatform, InspectCause, InspectState } from './types';
 /** The one command that binds a device to this worktree. */
 export function deviceCommand(
   platform: DevicePlatform,
-  { eas = false }: { eas?: boolean } = {}
+  { eas = false, local = false }: { eas?: boolean; local?: boolean } = {}
 ): string {
-  return `${PROGRAM_PREFIX} dev --${platform}${eas ? ' --eas' : ''} --detach --wait-ready`;
+  const backend = eas ? ' --eas' : local ? ' --local' : '';
+  return `${PROGRAM_PREFIX} dev --${platform}${backend} --detach --wait-ready`;
 }
 
 export type UnavailableReason =
@@ -31,9 +32,14 @@ const RERUN = 'run the command again';
 /** The refusal of a read verb: no device is bound, or the bound one cannot be driven now. */
 export function noBoundDeviceError(
   state: Exclude<InspectState, 'recorded' | 'up'>,
-  { platform, cause, path }: { platform: DevicePlatform; cause?: InspectCause; path?: string }
+  {
+    platform,
+    cause,
+    path,
+    local = false,
+  }: { platform: DevicePlatform; cause?: InspectCause; path?: string; local?: boolean }
 ): CommandError {
-  const command = deviceCommand(platform);
+  const command = deviceCommand(platform, { local });
   if (state === 'unreadable') {
     return refusal('NO_BOUND_DEVICE', 'unreadable', EXIT_NEEDS_HUMAN, [
       `The binding file ${path} does not parse; a newer CLI may have written it.`,

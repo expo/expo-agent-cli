@@ -394,3 +394,22 @@ describe(`${preflightRuntimeAsync.name} on a dev server nobody named`, () => {
     expect(error.message).not.toContain('the one you named');
   });
 });
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe(`${reachTheAppLadder.name} after --local`, () => {
+  it.each(['no-dev-server', 'no-app'] as const)(
+    'should carry --local on every device command for %s',
+    (state) => {
+      const ladder = reachTheAppLadder({ state, cloud: false, local: true, platform: 'ios' });
+      const commands = [
+        ...ladder.matchAll(/"(npx @expo\/agent-cli (?:dev|navigate|smoke) [^"]*)"/g),
+      ]
+        .map((match) => match[1]!)
+        .filter((command) => !command.includes('--print-url'));
+      expect(commands.length).toBeGreaterThan(0);
+      for (const command of commands) {
+        expect(command).toContain('--local');
+      }
+    }
+  );
+});

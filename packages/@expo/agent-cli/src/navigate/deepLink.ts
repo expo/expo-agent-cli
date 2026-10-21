@@ -104,6 +104,8 @@ export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfi
 }
 
 export interface ResolveDeepLinkUrlParams {
+  /** `--local`: the commands the failures name keep it, so the config does not move them to EAS. */
+  local?: boolean;
   /** Route path (`/profile/42`) or a full URL (`myapp://profile/42`). */
   route: string;
   /** Scheme supplied with `--scheme`, which wins over anything detected. */
@@ -186,12 +188,13 @@ export function resolveDeepLinkUrl({
   devServerUrl,
   reachHost,
   platform,
+  local = false,
 }: ResolveDeepLinkUrlParams): ResolveDeepLinkUrlResult {
   // Carried onto every command the failures below name, and onto nothing else: the URL is the same
   // URL whichever device opens it (F142).
   // Stated even when the caller named none: `dev` requires one, and a suggestion is text the
   // caller reads and can change (llp/0005 §Which platform is the caller's to say).
-  const platformFlag = ` --${platform ?? hostPlatform()}`;
+  const platformFlag = ` --${platform ?? hostPlatform()}${local ? ' --local' : ''}`;
   const trimmedRoute = route.trim();
   if (trimmedRoute.length === 0) {
     return {

@@ -102,7 +102,8 @@ export function clearInspectCache(): void {
  */
 export async function useBoundDeviceAsync(
   inspection: Inspection,
-  tools: DeviceTools = defaultTools()
+  tools: DeviceTools = defaultTools(),
+  { local = false }: { local?: boolean } = {}
 ): Promise<BoundDevice> {
   const binding = inspection.binding;
   if (inspection.state !== 'up' || binding == null) {
@@ -125,7 +126,7 @@ export async function useBoundDeviceAsync(
     return binding.device;
   }
   if (outcome === 'lost') {
-    throw noBoundDeviceError('gone', { platform, cause: 'expired', path: inspection.path });
+    throw noBoundDeviceError('gone', { platform, cause: 'expired', path: inspection.path, local });
   }
   return binding.device;
 }

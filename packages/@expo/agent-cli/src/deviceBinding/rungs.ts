@@ -19,6 +19,8 @@ export interface FindBoundDeviceOptions {
   extend: boolean;
   tools?: DeviceTools;
   hostPlatform?: NodeJS.Platform;
+  /** `--local`: the How line of a refusal binds a device with `--local` too, over the config. */
+  local?: boolean;
 }
 
 export type BoundDeviceSearch =
@@ -47,6 +49,7 @@ export async function findBoundDeviceAsync(
     extend,
     tools = defaultTools(),
     hostPlatform = process.platform,
+    local = false,
   }: FindBoundDeviceOptions
 ): Promise<BoundDeviceSearch> {
   const platforms: DevicePlatform[] = platform
@@ -66,18 +69,19 @@ export async function findBoundDeviceAsync(
       rung.inspection.binding!.boundAt > best.inspection.binding!.boundAt ? rung : best
     );
     const device = extend
-      ? await useBoundDeviceAsync(winner.inspection, tools)
+      ? await useBoundDeviceAsync(winner.inspection, tools, { local })
       : winner.inspection.binding!.device;
     return { device, refusal: null, toolError: null };
   }
-  return refuse(rungs, platform, hostPlatform);
+  return refuse(rungs, platform, hostPlatform, local);
 }
 
 /** The refusal of the first state that is not `none`; a tool error is thrown only with a flag. */
 function refuse(
   rungs: Rung[],
   platform: DevicePlatform | undefined,
-  hostPlatform: NodeJS.Platform
+  hostPlatform: NodeJS.Platform,
+  local: boolean
 ): BoundDeviceSearch {
   let toolError: CommandError | null = null;
   let refusal: CommandError | null = null;
@@ -94,7 +98,7 @@ function refuse(
     }
     const error = noBoundDeviceError(
       inspection.state as 'unreadable' | 'unknown' | 'not-up' | 'gone',
-      { platform: rungPlatform, cause: inspection.cause, path: inspection.path }
+      { platform: rungPlatform, cause: inspection.cause, path: inspection.path, local }
     );
     if (inspection.state === 'gone') {
       refusal ??= error;
@@ -104,6 +108,7 @@ function refuse(
   }
   refusal ??= noBoundDeviceError('none', {
     platform: platform ?? (hostPlatform === 'darwin' ? 'ios' : 'android'),
+    local,
   });
   return { device: null, refusal, toolError };
 }

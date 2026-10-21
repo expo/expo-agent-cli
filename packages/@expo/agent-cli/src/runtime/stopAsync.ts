@@ -102,6 +102,7 @@ export async function runtimeStopAsync(
   // handed a paid device it did not ask for.
   const device = await resolveDeviceAsync(options.platform, {
     cloud: options.cloud ? 'required' : 'off',
+    local: options.local,
     projectRoot,
   });
 
@@ -121,6 +122,7 @@ export async function runtimeStopAsync(
       need: 'optional',
       devServerUrl: options.devServerUrl ?? null,
       cloud: options.cloud,
+      local: options.local,
       platform: device.platform,
     },
     { projectRoot }
@@ -224,7 +226,7 @@ export async function runtimeStopAsync(
       [
         chalk.red(`Nothing was stopped: ${resolved.appId} was not running, and ${connected} is.`),
         `Why: --app-id names the app to stop and outranks every other piece of evidence, so it was used as given — and ${result.command} found no process under it. Meanwhile the dev server at ${devServer.devServerUrl} reports ${connectedAppIds.length === 1 ? 'a debugger target' : `${connectedAppIds.length} debugger targets`} for ${connected}, which ${connectedAppIds.length === 1 ? 'is' : 'are'} still running. This is exit 20 rather than 0 because the app you can see on the device is untouched: the requested state holds only for an id nothing was using.`,
-        `How: run "${PROGRAM_PREFIX} runtime:stop --app-id ${connectedAppIds[0]}" to stop what is actually running, or leave --app-id out entirely — without it this command reads the id off the dev server. If you did mean ${resolved.appId}, it is already not running and there is nothing to do.`,
+        `How: run "${PROGRAM_PREFIX} runtime:stop --app-id ${connectedAppIds[0]}${stopBackendFlag(report, options.local)}" to stop what is actually running, or leave --app-id out entirely — without it this command reads the id off the dev server. If you did mean ${resolved.appId}, it is already not running and there is nothing to do.`,
       ].join('\n')
     );
     reportFollowUps('runtime:stop', report.followups, { json: options.json });
@@ -244,6 +246,12 @@ export async function runtimeStopAsync(
  * Exported for its own test: the one branch that matters is the three-way on `wasRunning`, and the
  * `null` arm is only reachable on a cloud session.
  */
+function stopBackendFlag(report: RuntimeStopResultJson, local: boolean): string {
+  return report.deviceBackend === 'cloud'
+    ? ' --eas'
+    : ` --${report.platform}${local ? ' --local' : ''}`;
+}
+
 export function buildStopFollowUps(
   report: RuntimeStopResultJson,
   { local = false }: { local?: boolean } = {}
@@ -256,7 +264,7 @@ export function buildStopFollowUps(
   // host defaults to — the iOS simulator, on a Mac, after a stop on the emulator. A cloud session
   // needs no platform beside `--eas`, which already names the one device it has.
   const onCloud = report.deviceBackend === 'cloud';
-  const flag = onCloud ? ' --eas' : ` --${report.platform}${local ? ' --local' : ''}`;
+  const flag = stopBackendFlag(report, local);
   // A mismatch gets the corrected command and nothing else. The old list led with `navigate /`
   // here, which starts an app while the one the caller meant to stop is still running — advice
   // built on the assumption that the requested id was the right one (friction run 4, F42).

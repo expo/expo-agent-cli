@@ -135,6 +135,8 @@ export interface RuntimePreflightOptions {
    * that drops `--tunnel` starts a dev server the session cannot reach.
    */
   cloud?: boolean;
+  /** `--local`: every command in the ladder keeps it, so the config does not move it to EAS. */
+  local?: boolean;
   /**
    * How long to keep asking while the target list is empty, in milliseconds.
    *
@@ -174,6 +176,7 @@ export async function preflightRuntimeAsync(
     devServerUrl,
     platform,
     cloud = false,
+    local = false,
     retryMs,
     deviceIndex: knownDeviceIndex,
   }: RuntimePreflightOptions,
@@ -229,6 +232,7 @@ export async function preflightRuntimeAsync(
       reason: unreachableReason,
       named,
       cloud,
+      local,
       platform,
       reloadable: need === 'dev-server',
     });
@@ -260,14 +264,20 @@ export async function preflightRuntimeAsync(
   }
 
   if (targets.length === 0) {
-    throw noAppConnectedError({ devServerUrl: url, retryMs: retryBudgetMs, cloud, platform });
+    throw noAppConnectedError({
+      devServerUrl: url,
+      retryMs: retryBudgetMs,
+      cloud,
+      local,
+      platform,
+    });
   }
 
   // Only a command that *requires* a runtime refuses on an empty scope. For `reload` an empty scope
   // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
   // seventh and eighth calls a success.
   if (scoped && scoped.matched.length === 0) {
-    throw noAppOnPlatformError(url, platform!, scoped, cloud);
+    throw noAppOnPlatformError(url, platform!, scoped, cloud, local);
   }
   return connection;
 }
@@ -283,24 +293,26 @@ export async function preflightRuntimeAsync(
 export function reachTheAppLadder({
   state,
   cloud,
+  local = false,
   platform,
 }: {
   state: 'no-dev-server' | 'no-app';
   cloud: boolean;
+  local?: boolean;
   platform?: NavigatePlatform;
 }): string {
   // Carried onto every command in the ladder that takes it as a device flag. `dev` takes `--eas` as
   // its build backend and not as a device (llp/0015 §One flag for EAS), so it is not put there;
   // what a cloud session needs from a dev server is a tunnel, because a datacenter cannot reach
   // this loopback.
-  const cloudFlag = cloud ? ' --eas' : '';
+  const cloudFlag = cloud ? ' --eas' : local ? ' --local' : '';
   // `dev` and `navigate` both take it, and `dev` requires it now, so a platform is always stated.
   const platformFlag = ` --${platform ?? hostPlatform()}`;
   const navigate = `${PROGRAM_PREFIX} navigate /${platformFlag}${cloudFlag}`;
   // `dev` takes the platform too, and dropping it here was F142's sibling: a bare `dev` asks the
   // plan engine to pick a platform, and on a Mac it picks iOS — so the first rung of the ladder out
   // of "no android app is connected" started a dev server for the other one.
-  const dev = `${PROGRAM_PREFIX} dev --detach${cloud ? ' --tunnel' : ''}${platformFlag}`;
+  const dev = `${PROGRAM_PREFIX} dev --detach${cloud ? ' --tunnel' : ''}${platformFlag}${local ? ' --local' : ''}`;
 
   if (state === 'no-dev-server') {
     return `start one with "${dev}" in the project root and open the app with "${navigate}", then run this command again.`;
@@ -338,6 +350,7 @@ export function noDevServerError({
   reason,
   named,
   cloud = false,
+  local = false,
   platform,
   reloadable = false,
 }: {
@@ -345,6 +358,7 @@ export function noDevServerError({
   reason: string | null;
   named: boolean;
   cloud?: boolean;
+  local?: boolean;
   platform?: NavigatePlatform;
   /** The command reloads the app, which is what makes a missing dev server actively harmful. */
   reloadable?: boolean;
@@ -358,12 +372,12 @@ export function noDevServerError({
           ? ' A reload makes the app fetch its bundle again, and without a dev server that fetch has nowhere to go — the app would be left on a loading screen rather than on the fixed code.'
           : ''
       }`,
-      `How: ${reachTheAppLadder({ state: 'no-dev-server', cloud, platform })} ${howToNameTheDevServer(named)}`,
+      `How: ${reachTheAppLadder({ state: 'no-dev-server', cloud, local, platform })} ${howToNameTheDevServer(named)}`,
     ].join('\n')
   );
   // The same command the How: names. They disagreed — `npx expo start` in one and `npx @expo/agent-cli dev`
   // in the other — which is one failure telling a reader two things [observed — friction run 5].
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev --detach${cloud ? ' --tunnel' : ''} --${platform ?? hostPlatform()}`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev --detach${cloud ? ' --tunnel' : ''} --${platform ?? hostPlatform()}${local ? ' --local' : ''}`;
   return withData(error, { devServerUrl, devServerReachable: false, platform });
 }
 
@@ -381,11 +395,13 @@ export function noAppConnectedError({
   devServerUrl,
   retryMs = 0,
   cloud = false,
+  local = false,
   platform,
 }: {
   devServerUrl: string;
   retryMs?: number;
   cloud?: boolean;
+  local?: boolean;
   platform?: NavigatePlatform;
 }): CommandError {
   const error = new CommandError(
@@ -396,12 +412,12 @@ export function noAppConnectedError({
       // Not "press i in the dev server's terminal": a dev server this CLI started with --detach has
       // no terminal to press a key in, and a driving agent has no keyboard for one that has
       // [friction run 5, F48-5]. `navigate` is the command that does the same thing.
-      `How: ${reachTheAppLadder({ state: 'no-app', cloud, platform })} If the app was mid-reload, running this command again is the whole recovery.`,
+      `How: ${reachTheAppLadder({ state: 'no-app', cloud, local, platform })} If the app was mid-reload, running this command again is the whole recovery.`,
     ].join('\n')
   );
   // 22 rather than 1: the CLI worked and could not *conclude*, which is what this band is for.
   error.exitCode = EXIT_OUTCOME_TIMEOUT;
-  error.suggestedCommand = `${PROGRAM_PREFIX} navigate /${platform == null ? '' : ` --${platform}`}${cloud ? ' --eas' : ''}`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} navigate /${platform == null ? '' : ` --${platform}`}${cloud ? ' --eas' : local ? ' --local' : ''}`;
   return withData(error, { devServerUrl, devServerReachable: true, platform });
 }
 
@@ -417,8 +433,10 @@ function noAppOnPlatformError(
   devServerUrl: string,
   platform: NavigatePlatform,
   scoped: { otherPlatform: { platform: NavigatePlatform }[]; undetermined: unknown[] },
-  cloud: boolean
+  cloud: boolean,
+  local: boolean
 ): CommandError {
+  const backendFlag = cloud ? ' --eas' : local ? ' --local' : '';
   const others = scoped.otherPlatform.map((entry) => entry.platform);
   const uniqueOthers = [...new Set(others)];
 
@@ -428,7 +446,7 @@ function noAppOnPlatformError(
       ? [
           `No ${platform} app is connected to the Expo dev server at ${devServerUrl}, so there is nothing on ${platform} to read.`,
           `Why: its debugger target list names ${others.length} app${others.length === 1 ? '' : 's'}, and ${others.length === 1 ? 'it is' : 'they are'} on ${uniqueOthers.join(' and ')}${scoped.undetermined.length > 0 ? `, plus ${scoped.undetermined.length} whose platform nothing in the target names` : ''}. Reading one of those would answer a question about ${uniqueOthers[0]} while reporting it as ${platform}.`,
-          `How: open the app on ${platform} with "${PROGRAM_PREFIX} navigate / --${platform}${cloud ? ' --eas' : ''}", then run this command again. Drop --${platform} to read whichever app is connected.`,
+          `How: open the app on ${platform} with "${PROGRAM_PREFIX} navigate / --${platform}${backendFlag}", then run this command again. Drop --${platform} to read whichever app is connected.`,
         ].join('\n')
       : [
           `No app connected to the Expo dev server at ${devServerUrl} could be shown to be running on ${platform}.`,
@@ -438,7 +456,7 @@ function noAppOnPlatformError(
   );
   error.suggestedCommand =
     uniqueOthers.length > 0
-      ? `${PROGRAM_PREFIX} navigate / --${platform}${cloud ? ' --eas' : ''}`
+      ? `${PROGRAM_PREFIX} navigate / --${platform}${backendFlag}`
       : `${PROGRAM_PREFIX} status --json`;
   return withData(error, {
     devServerUrl,

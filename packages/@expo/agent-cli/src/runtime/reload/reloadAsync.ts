@@ -321,6 +321,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
         devServerUrl: options.devServerUrl,
         platform: options.platform,
         cloud: options.cloud,
+        local: options.local,
       },
       { projectRoot }
     ),
@@ -1270,6 +1271,7 @@ async function reloadOnDeviceAsync(
     // minute, and a machine with nothing booted is told it has nothing.
     device = await resolveDeviceAsync(options.platform, {
       cloud: options.cloud ? 'required' : 'off',
+      local: options.local,
       projectRoot,
     });
   } catch (error: unknown) {
@@ -1388,6 +1390,7 @@ async function openRouteAsync(
   });
 
   const resolved = resolveDeepLinkUrl({
+    local: options.local,
     route: options.route ?? '/',
     schemeOverride: options.scheme,
     config,
@@ -1406,6 +1409,7 @@ async function openRouteAsync(
     known ??
     (await resolveDeviceAsync(options.platform, {
       cloud: options.cloud ? 'required' : 'off',
+      local: options.local,
       projectRoot,
     }));
   const result = await openUrlOnDeviceAsync({
@@ -1610,7 +1614,7 @@ function explainStrandedApp(report: ReloadResultJson, options: ReloadOptions): s
       : `The app was left closed: the device fallback stopped ${appId} and the relaunch was refused, so nothing is running on the device now.`,
     options.cloud
       ? `To reopen it by hand, run "${easCommandPrefix()} simulator:exec npx ${AGENT_DEVICE_SPEC} open ${appId}" — opening the application id rather than a deep link avoids the "Open in Expo Go?" dialog that nothing can answer on a cloud device. "${PROGRAM_PREFIX} dev:stop --eas" ends the session and its billing.`
-      : `Run "${PROGRAM_PREFIX} navigate /" to open it again.`,
+      : `Run "${PROGRAM_PREFIX} navigate /${options.local ? ' --local' : ''}" to open it again.`,
   ];
 }
 
@@ -1621,7 +1625,9 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
   const smokePlatform =
     statedSmokePlatform((report.platform as PlanPlatform | null) ?? options.platform) ??
     (process.platform === 'darwin' ? 'ios' : 'android');
-  const smokeBase = `${smokeCommand(smokePlatform)}${options.cloud ? ' --eas' : ''}`;
+  // `--local` too: with `deviceBackend: "eas"` in the config, a line without it goes to the session.
+  const onLocal = options.local ? ' --local' : '';
+  const smokeBase = `${smokeCommand(smokePlatform)}${options.cloud ? ' --eas' : onLocal}`;
 
   // The refusal comes first, because nothing was attempted: an attempts list that is empty for
   // this reason must not read as "no method worked" (friction run 4, F38).
@@ -1662,7 +1668,7 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
         `The app was ${report.method === 'device' ? 'relaunched' : 'asked to reload itself'}${options.cloud ? ' on the cloud simulator' : ''}, and nothing was observed to confirm it reloaded.`
       ),
       `Why: two observations were watched for ${options.timeoutMs}ms and neither happened. The dev server listed no debugger target it had not listed before (${report.devServerUrl}/json/list named ${report.appsConnected}), which a cloud simulator often never does — an app has run this project on one with that list empty throughout. And ${report.bundlesAfterReload.reason ?? 'the dev server served no bundle after the relaunch'}. So the app may be running the new code invisibly, or it may not have come back.`,
-      `How: look at the screen — "${smokeCommand(smokePlatform)} --eas --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach --tunnel" so its output is recorded.` : ''}`.trim(),
+      `How: look at the screen — "${smokeBase} --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach${options.cloud ? ' --tunnel' : onLocal}" so its output is recorded.` : ''}`.trim(),
     ].join('\n');
   }
   if (!report.reloaded) {
@@ -1676,8 +1682,8 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
       // *not* running, and printing it for a connected app is how a reader was sent to start a
       // second copy of an app this command could see all along.
       report.appsConnected > 0
-        ? `How: the app is connected — ${report.devServerUrl}/json/list names ${report.appsConnected === 1 ? 'it' : `${report.appsConnected} of them`} — so this is not a missing app, it is a runtime the broadcast could not reach. Editing a file the app has loaded is the cheapest way in: the dev server pushes that on its own. The two deliberate methods are "${PROGRAM_PREFIX} runtime:reload --method runtime", which asks the app's own expo.reloadAppAsync to do it and on Expo Go closes the app instead, and "${PROGRAM_PREFIX} runtime:reload --method device", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
-        : `How: open the app on a device or simulator first ("${PROGRAM_PREFIX} navigate /"), then run this command again. A reload needs an app that is already running: it replaces the JavaScript in one, it does not start one.`,
+        ? `How: the app is connected — ${report.devServerUrl}/json/list names ${report.appsConnected === 1 ? 'it' : `${report.appsConnected} of them`} — so this is not a missing app, it is a runtime the broadcast could not reach. Editing a file the app has loaded is the cheapest way in: the dev server pushes that on its own. The two deliberate methods are "${PROGRAM_PREFIX} runtime:reload --method runtime${onLocal}", which asks the app's own expo.reloadAppAsync to do it and on Expo Go closes the app instead, and "${PROGRAM_PREFIX} runtime:reload --method device${onLocal}", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
+        : `How: open the app on a device or simulator first ("${PROGRAM_PREFIX} navigate /${onLocal}"), then run this command again. A reload needs an app that is already running: it replaces the JavaScript in one, it does not start one.`,
     ].join('\n');
   }
   // Two shapes of "not back", and they are told apart by what the target list says. An empty list
@@ -1689,7 +1695,7 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
         `The app reloaded, but it had not reconnected to the dev server ${options.timeoutMs}ms later.`
       ),
       `Why: its debugger target list (${report.devServerUrl}/json/list) was empty, so no app is running this project's JavaScript — the app either closed or is still loading a cold bundle, which can take longer than this wait.`,
-      `How: run "${smokeBase}" to wait for the bundle and the app together, or run this command again with a longer --timeout. If the app is not on screen, "${PROGRAM_PREFIX} navigate /" opens it. Nothing is known to be wrong; the wait ran out first.`,
+      `How: run "${smokeBase}" to wait for the bundle and the app together, or run this command again with a longer --timeout. If the app is not on screen, "${PROGRAM_PREFIX} navigate /${onLocal}" opens it. Nothing is known to be wrong; the wait ran out first.`,
     ].join('\n');
   }
   return [

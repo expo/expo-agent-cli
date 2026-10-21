@@ -81,3 +81,20 @@ describe('exit codes per reason', () => {
     expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --android --detach --wait-ready');
   });
 });
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('A refusal after --local', () => {
+  it('should bind a device with --local in its How line', () => {
+    const error = noBoundDeviceError('none', { platform: 'android', local: true });
+    expect(error.suggestedCommand).toBe(
+      'npx @expo/agent-cli dev --android --local --detach --wait-ready'
+    );
+    expect(error.message).toContain('dev --android --local --detach --wait-ready');
+  });
+
+  it('should add no --local without it', () => {
+    expect(noBoundDeviceError('none', { platform: 'ios' }).suggestedCommand).not.toContain(
+      '--local'
+    );
+  });
+});
