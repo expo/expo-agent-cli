@@ -661,7 +661,7 @@ The backend is `eas simulator:<verb>` subprocesses (`src/device/cloudSimulator.t
 
 A cloud device is a session the service says is running, not a file on disk [confirmed, Kudo, 2026-08-26]. `eas simulator:list`, with the statuses of [[0035-one-device-per-worktree]] §Session discovery, is the probe. MCP need not write `.env.eas-simulator`. `simulator:start --json` and `--out-config-type env` do not write it either. The file outlives the session it names. Direct GraphQL to `api.expo.dev` is rejected: it reads another CLI's credential store. `eas` is the program that owns that token, so `eas` is the program that spends it.
 
-The device ladder (`navigate` and `smoke`) asks the service. The suggestion ladders (`status.next`, the `start` and `dev` banner) make no network call: `status.next` keeps the `stat` on the dotenv, and the banners read the cloud bindings of this worktree ([[0035-one-device-per-worktree]] §Session binding). They promise to be instant.
+The device ladder (`navigate` and `smoke`) asks the service. The suggestion ladders (`status.next`, the `start` and `dev` banner) read the cloud bindings of this worktree with no network call ([[0035-one-device-per-worktree]] §Session binding). They promise to be instant.
 
 Which session, when there is more than one, is deterministic. The rule is [[0035-one-device-per-worktree]] §Session binding. In short:
 

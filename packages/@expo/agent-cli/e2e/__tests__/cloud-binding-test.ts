@@ -10,6 +10,7 @@ import {
   installStubEasAsync,
   readStubEasInvocations,
   stubEasArgs,
+  writeCloudBindingAsync,
   writeCloudSessionFileAsync,
 } from '../stubEas';
 import {
@@ -58,6 +59,20 @@ function bindingFile(root: string, platform = 'ios') {
 }
 function readBinding(root: string, platform = 'ios'): Binding {
   return JSON.parse(fs.readFileSync(bindingFile(root, platform), 'utf8'));
+}
+function list(sessions: { id: string; platform?: string; status?: string }[]) {
+  fs.writeFileSync(
+    path.join(machine, 'sessions.json'),
+    JSON.stringify(
+      sessions.map((s) => ({
+        type: 'agent-device',
+        platform: 'IOS',
+        status: 'IN_PROGRESS',
+        createdAt: new Date().toISOString(),
+        ...s,
+      }))
+    )
+  );
 }
 function navigate(root: string, args: string[] = []) {
   return executeAgentCliAsync(
@@ -109,6 +124,31 @@ it('two worktrees start and drive their own sessions; EAS stop removes only its 
   expect(fs.existsSync(bindingFile(first))).toBe(false);
   expect(readBinding(second).device).toMatchObject({ id: 'own-1' });
 });
+it.each(['B', 'A', null])(
+  'an expired binding only permits a fresh dotenv session (%s)',
+  async (id) => {
+    const root = await project();
+    await writeCloudBindingAsync(expoHome, root, { id: 'A' });
+    const expired = { ...readBinding(root), expiresAt: '2000-01-01T00:00:00.000Z' };
+    const before = JSON.stringify(expired);
+    fs.writeFileSync(bindingFile(root), before);
+    list([{ id: 'A' }, { id: 'B' }]);
+    if (id) await writeCloudSessionFileAsync(root, id);
+    const result = await navigate(root, ['--ios']);
+    expect(result.exitCode, result.stderr).toBe(id === 'B' ? 0 : 20);
+    if (id === 'B') {
+      expect(JSON.parse(result.stdout).deviceId).toBe('B');
+    } else {
+      expect(JSON.parse(result.stdout).error.code).toBe('NO_BOUND_DEVICE');
+    }
+    expect(
+      readStubEasInvocations(root)
+        .filter((i) => i.executedSessionId)
+        .map((i) => i.executedSessionId)
+    ).toEqual(id === 'B' ? ['B'] : []);
+    expect(fs.readFileSync(bindingFile(root), 'utf8')).toBe(before);
+  }
+);
 it('round-trips guarded cloud target argv and refuses before running on a session mismatch', async () => {
   const root = await project();
   const sessionId = 'argv-session';
@@ -148,3 +188,18 @@ it('round-trips guarded cloud target argv and refuses before running on a sessio
   expect(refused.stderr).toContain(`${CLOUD_SESSION_MISMATCH} ${sessionId}`);
   expect(refused.stdout).toBe('');
 });
+it.each(['NEW', 'STOPPED'])(
+  'a %s bound session refuses without rewriting its binding',
+  async (status) => {
+    const root = await project();
+    await writeCloudBindingAsync(expoHome, root, { id: 'A' });
+    list([{ id: 'A', status }, { id: 'foreign' }]);
+    await writeCloudSessionFileAsync(root, 'A');
+    const before = fs.readFileSync(bindingFile(root), 'utf8');
+    const result = await navigate(root, ['--ios']);
+    expect(result.exitCode, result.stderr + result.stdout).toBe(20);
+    expect(JSON.parse(result.stdout).error.code).toBe('NO_BOUND_DEVICE');
+    expect(fs.readFileSync(bindingFile(root), 'utf8')).toBe(before);
+    expect(stubEasArgs(root).map((a) => a[0])).toEqual(['simulator:list']);
+  }
+);

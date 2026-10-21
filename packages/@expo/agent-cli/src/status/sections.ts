@@ -5,6 +5,7 @@
 import path from 'path';
 
 import { isTunnelCurrent, type DevServerReach } from '../dev/advertisedUrl';
+import type { CloudPlatform } from '../device/cloudSimulator';
 import type { LocalDeviceProbe } from '../device/localDevice';
 import { resolveLanHost } from '../followups/network';
 import { classifyAgainstRecordedBuild, type RecordedImpact } from '../impact/fromRecord';
@@ -500,16 +501,16 @@ export function buildNextActionStatus(
   device: LocalDeviceStatus | null = null,
   scheme: string | null = null,
   /**
-   * Whether this project has an EAS Simulator session on record.
+   * The platform of the EAS Simulator session this worktree has a live binding for, or null.
    *
-   * One `stat` of `.env.eas-simulator`, taken by the caller. Whether the session is still *running*
-   * costs an `eas` start-up, which `status` does not spend on this line, so it is not asked here. A
-   * file that names a dead session costs one `navigate --eas` that says so, which is a far
-   * cheaper wrong answer than a slow report.
+   * Taken by the caller from the recorded bindings. Whether the session is still *running* costs an
+   * `eas` start-up, which `status` does not spend on this line, so it is not asked here. A binding
+   * for a dead session costs one `navigate --eas` that says so, which is a far cheaper wrong answer
+   * than a slow report.
    *
    * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
    */
-  cloudSession: boolean = false,
+  cloudSession: CloudPlatform | null = null,
   /**
    * The plan `@expo/agent-cli dev` would make here, backend and all.
    *
@@ -571,8 +572,8 @@ function verifyAction(
   device: LocalDeviceStatus | null,
   state: ProjectState,
   scheme: string | null,
-  /** Whether this project has an EAS Simulator session on record. See the caller's parameter. */
-  cloudSession: boolean
+  /** The platform of the EAS Simulator session on record, or null. See the caller's parameter. */
+  cloudSession: CloudPlatform | null
 ): { command: string; why: string } | null {
   if (!devServer?.running || devServer.projectRootMatched === false) {
     return null;
@@ -587,14 +588,13 @@ function verifyAction(
   // `!== 'present'` rather than `=== 'absent'`: with a session on record, a probe that could not
   // run is not a reason to name the local path — the caller has told this project where its device
   // is, and that is stronger evidence than a missing `simctl`.
-  const cloudLoop = cloudSession && device?.state !== 'present';
+  const cloudLoop = cloudSession != null && device?.state !== 'present';
 
   if (devServer.appsConnected > 0) {
     return cloudLoop
       ? {
-          // An EAS Simulator session is iOS (`resolveDeviceAsync`'s cloud fallback asks for iOS and
-          // nothing else), so the platform here is a fact about the session rather than a choice.
-          command: `${smokeCommand('ios')} --eas`,
+          // The platform is a fact about the recorded session rather than a choice.
+          command: `${smokeCommand(cloudSession)} --eas`,
           why: 'a dev server is running with an app connected and this project has an EAS Simulator session, so the gate runs against that session — a plain "smoke" would look for a simulator on this machine',
         }
       : {

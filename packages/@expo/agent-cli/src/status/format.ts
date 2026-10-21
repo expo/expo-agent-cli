@@ -66,7 +66,7 @@ export function formatStatusReport(report: StatusReport): string {
     row('dev server', report.devServer, devServerLine, report, 'devServer'),
     // Under the dev server it points at, because that is the address it was built from.
     ...(report.devServer ? openUrlLines(report.devServer) : []),
-    row('device', report.device, deviceLine, report, 'device'),
+    deviceRow(report),
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
     // The one section that can have nothing to say at all. A project whose dependencies ship no
     // skills, read by somebody who has selected no agent, produced `no agent selected · no skills
@@ -683,6 +683,20 @@ function deviceLine(device: LocalDeviceStatus): string {
     chalk.yellow('unknown'),
     chalk.dim(device.reason ?? 'no platform tool could answer'),
   ].join(SEPARATOR);
+}
+
+/**
+ * The local devices, then this worktree's EAS sessions. The sessions come from the bindings, not
+ * from the device probe, so they show whatever the probe found, an unavailable section included.
+ */
+function deviceRow(report: StatusReport): string {
+  const sessions = (report.binding ?? [])
+    .filter((entry) => entry.backend === 'cloud')
+    .map(
+      (entry) =>
+        `${chalk.green(`cloud ${entry.platform}`)} ${entry.id}${SEPARATOR}${chalk.dim(`EAS Simulator session, ${entry.state === 'recorded' ? 'recorded, not checked' : entry.state}`)}`
+    );
+  return [row('device', report.device, deviceLine, report, 'device'), ...sessions].join(SEPARATOR);
 }
 
 /**

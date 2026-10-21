@@ -16,6 +16,7 @@ import {
   installStubEasAsync as installSharedStubEasAsync,
   STUB_EAS_LOG_NAME,
   stubEasCommands,
+  writeCloudBindingAsync,
   writeCloudSessionFileAsync,
 } from '../stubEas';
 import {
@@ -23,6 +24,7 @@ import {
   clearStubFingerprintInvocations,
   documentedJsonKeys,
   executeAgentCliAsync,
+  expoHomeOf,
   holdDevLockAsync,
   installStubBinAsync,
   installStubEasRunnerAsync,
@@ -1360,6 +1362,10 @@ describe('@expo/agent-cli status', () => {
       const projectRoot = await setupAsync('go-app');
       const env = await stubDeviceToolsAsync(projectRoot, { ios: 'none', android: 'none' });
       await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
+      await writeCloudBindingAsync(expoHomeOf(projectRoot), fs.realpathSync(projectRoot), {
+        id: 'sess-e2e',
+        origin: 'dotenv',
+      });
       const devServer = await startDevServerDoubleAsync([CDP_TARGET]);
       try {
         const result = await executeAgentCliAsync(

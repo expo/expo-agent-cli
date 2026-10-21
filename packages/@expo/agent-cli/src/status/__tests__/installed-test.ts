@@ -2,7 +2,7 @@
 // The `installed` section is the one part of `status` that reads a device, so what is pinned here
 // is which platforms it asks, that it names no device the caller did not, and the section's shape.
 import { checkInstalledAppAsync } from '../../installedApp/installedAppAsync';
-import { readInstalledStatusAsync } from '../installed';
+import { readInstalledStatusAsync, withCloudSessions } from '../installed';
 
 vi.mock('../../installedApp/installedAppAsync', () => ({ checkInstalledAppAsync: vi.fn() }));
 
@@ -82,5 +82,51 @@ describe(readInstalledStatusAsync, () => {
         },
       ],
     });
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Session binding
+describe(withCloudSessions, () => {
+  const noDevice = (platform: 'ios' | 'android') => ({
+    platform,
+    status: 'unknown' as const,
+    reason: 'no-device',
+    recommendation: 'No device is booted.',
+    commands: [`npx @expo/agent-cli dev --${platform}`],
+    deviceName: null,
+    installedHash: null,
+    currentHash: null,
+  });
+
+  it(`marks the no-device row of the session's own platform only`, () => {
+    const status = withCloudSessions(
+      { outcome: 'unknown', platforms: [noDevice('ios'), noDevice('android')] },
+      [{ platform: 'android', id: 'sess-1' }]
+    );
+
+    expect(status.platforms).toEqual([
+      noDevice('ios'),
+      {
+        ...noDevice('android'),
+        reason: 'cloud-session',
+        recommendation:
+          'not checked; this check reads local devices, and the app runs on EAS Simulator session sess-1',
+        commands: [],
+      },
+    ]);
+  });
+
+  it(`keeps a row that read a local device`, () => {
+    const stale = {
+      ...noDevice('ios'),
+      status: 'rebuild-required' as const,
+      reason: 'hash-mismatch',
+    };
+
+    expect(
+      withCloudSessions({ outcome: 'rebuild-required', platforms: [stale] }, [
+        { platform: 'ios', id: 'sess-1' },
+      ]).platforms
+    ).toEqual([stale]);
   });
 });

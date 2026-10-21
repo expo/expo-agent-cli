@@ -18,7 +18,6 @@ import { unreadableBindingFiles } from '../deviceBinding/records';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
-import { readCloudSessionIdSync } from '../device/cloudSimulator';
 import { probeLocalDeviceAsync } from '../device/localDevice';
 import { event } from '../events';
 import { exitWithCodeAsync } from '../exitCodes';
@@ -57,7 +56,7 @@ import {
   simulatorBuildFromBuilds,
 } from './easBuilds';
 import { formatStatusReport } from './format';
-import { readInstalledStatusAsync } from './installed';
+import { readInstalledStatusAsync, withCloudSessions } from './installed';
 import {
   applyEasFreshness,
   applyOpenUrls,
@@ -288,6 +287,11 @@ export async function collectStatusReportAsync(
   };
 
   if ('error' in binding) errors.binding = binding.error;
+  // Recorded evidence only: a live cloud binding, never a `gone` one. Status makes no session
+  // service call. The device line alone keeps `gone` rows.
+  const cloud = (report.binding ?? []).filter(
+    (entry) => entry.backend === 'cloud' && entry.state === 'recorded'
+  );
 
   // One EAS lookup per run, shared by the plan below and the builds section, so the plan gets the
   // section's record, auth gate and link gate instead of a lookup of its own on every run.
@@ -392,6 +396,8 @@ export async function collectStatusReportAsync(
       deviceBackend,
       readBuildsOnceAsync
     );
+    const cloudPlatform =
+      (cloud.find((entry) => entry.platform === platform) ?? cloud[0])?.platform ?? null;
     const recoveryPlan =
       resolvedPlan && recoveryPort != null
         ? withDevServerPort(resolvedPlan, recoveryPort)
@@ -406,8 +412,7 @@ export async function collectStatusReportAsync(
       // reads it: `exp://` is the Expo Go form only, and a development build's connect URL takes
       // the app's own scheme (`src/navigate/connectUrl.ts`).
       devBuildScheme,
-      // A file read, not a service call (`src/device/cloudSimulator.ts` §readCloudSessionIdSync).
-      readCloudSessionIdSync(projectRoot) != null,
+      cloudPlatform,
       // @ref llp/0015-backend-selection-and-config.rfc.md §What `status` reports
       // The plan `@expo/agent-cli dev` would make *here* — the developer's config, this host and the
       // toolchain probe folded in — rather than the one the project's state alone implies. The two
@@ -422,7 +427,7 @@ export async function collectStatusReportAsync(
       null,
       report.device,
       devBuildScheme,
-      false,
+      null,
       recoveryPlan
     );
     const backend = request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null);
@@ -455,7 +460,7 @@ export async function collectStatusReportAsync(
         report.devServer.appsConnected > 0 &&
         report.devServer.projectRootMatched !== false
       ) &&
-      !readCloudSessionIdSync(projectRoot) &&
+      cloud.length === 0 &&
       deviceBackend !== 'eas' &&
       !devicesDisabled() &&
       hostBindsPlatform(platform)
@@ -526,7 +531,7 @@ export async function collectStatusReportAsync(
   ]);
 
   if (installed && 'value' in installed) {
-    report.installed = installed.value;
+    report.installed = withCloudSessions(installed.value, cloud);
   } else if (installed) {
     errors.installed = installed.error;
   }

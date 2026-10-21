@@ -6,6 +6,7 @@ import path from 'path';
 import { parseBootedIosSimulators } from '../../device/simulators';
 import { bindingPathFor } from '../../deviceBinding/registry';
 import type { Binding } from '../../deviceBinding';
+import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { resolveDeviceAsync } from '../device';
 
 const realPlatform = process.platform;
@@ -466,6 +467,48 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
 
     expect(error.message).toContain('EAS Simulator session on record');
     expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
+  });
+
+  it(`opens on a bound session when the dotenv names none`, async () => {
+    mockPlatform('linux');
+    cloudProject(null);
+    writeCloudBinding(projectRoot, 'ios', 'sess-1', { expiresAt: '2999-01-01T00:00:00.000Z' });
+    mockSpawnQueue([{ stdout: liveSession }]);
+
+    await expect(
+      resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot })
+    ).resolves.toMatchObject({ backend: 'cloud', platform: 'ios', deviceId: 'sess-1' });
+  });
+
+  // An expired binding still takes the EAS rung, so the reader learns the session expired.
+  it(`refuses an expired-only binding as expired, not with the local refusal`, async () => {
+    mockPlatform('linux');
+    cloudProject(null);
+    writeCloudBinding(projectRoot, 'ios', 'sess-1', { expiresAt: '2000-01-01T00:00:00.000Z' });
+    mockSpawnQueue(noSessions);
+
+    const error = await resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(spawn).toHaveBeenCalled();
+    expect(error.code).toBe('NO_BOUND_DEVICE');
+    expect(error.message).toContain('The bound ios EAS session is expired.');
+    expect(error.suggestedCommand).toBe(
+      'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
+    );
+  });
+
+  it(`answers a platform mismatch in fallback mode when the own session is on the other platform`, async () => {
+    mockPlatform('linux');
+    cloudProject('sess-1');
+    mockSpawnQueue([{ stdout: liveSession }]);
+
+    const error = await resolveDeviceAsync('android', { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
   });
 
   it(`keeps the route URL above the How line of the refusal`, async () => {

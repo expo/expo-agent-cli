@@ -45,6 +45,30 @@ export async function readInstalledStatusAsync(
   };
 }
 
+/**
+ * Mark the rows that found no local device while this worktree records an EAS session for that
+ * platform: the check reads local devices only, so it did not check the app on the session. Status
+ * makes no session service call, so the session is recorded, not confirmed.
+ */
+export function withCloudSessions(
+  installed: InstalledStatus,
+  sessions: readonly { platform: string; id: string }[]
+): InstalledStatus {
+  return {
+    ...installed,
+    platforms: installed.platforms.map((entry) => {
+      const session = sessions.find(({ platform }) => platform === entry.platform);
+      if (entry.reason !== 'no-device' || !session) return entry;
+      return {
+        ...entry,
+        reason: 'cloud-session',
+        recommendation: `not checked; this check reads local devices, and the app runs on EAS Simulator session ${session.id}`,
+        commands: [],
+      };
+    }),
+  };
+}
+
 function toPlatformStatus(
   platform: InstalledAppPlatform,
   check: PlatformCheck | undefined
