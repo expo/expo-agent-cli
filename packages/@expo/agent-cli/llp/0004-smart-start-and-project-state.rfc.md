@@ -450,7 +450,9 @@ own and gives the terminal back. `@expo/agent-cli dev:logs` reads what it printe
 then `unref()`. The wrapper is what takes the lock. A detached server that published no
 lock would be a process nothing could find, wait on, or stop. The lock names its port
 and pid. `dev:stop` signals that pid. The detached wrapper forwards `SIGTERM` to its
-`expo` child exactly as the foreground one does.
+`expo` child exactly as the foreground one does. With no lock, `dev:stop` looks where
+`status` looks and names the port, the pid and the command that stops a server whose
+`/status` names this project, `dev:stop --port <n> --force`. It does not stop that server.
 
 Three flags are stripped from the child's command line. `--detach` would detach a
 detached run forever. `--wait-ready` names a wait the parent performs. `--json` would

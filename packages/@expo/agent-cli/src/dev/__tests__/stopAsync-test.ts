@@ -1,5 +1,7 @@
 import { isDevServerLockHeldAsync, readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
+import { discoverDevServerAsync } from '../../runtime/devServer';
+import { readReportedProjectRootAsync } from '../../runtime/projectRootHeader';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
 import { PROGRAM_PREFIX } from '../../programName';
@@ -28,6 +30,14 @@ vi.mock('../../devLock', () => {
     ),
   };
 });
+vi.mock('../../runtime/devServer', async (importActual) => ({
+  ...(await importActual<typeof import('../../runtime/devServer')>()),
+  discoverDevServerAsync: vi.fn(),
+}));
+vi.mock('../../runtime/projectRootHeader', async (importActual) => ({
+  ...(await importActual<typeof import('../../runtime/projectRootHeader')>()),
+  readReportedProjectRootAsync: vi.fn(async () => ({ kind: 'no-header' })),
+}));
 vi.mock('../portListener', () => ({
   findPortListenerAsync: vi.fn(async () => null),
   isPortInUseAsync: vi.fn(async () => false),
@@ -96,6 +106,14 @@ beforeEach(() => {
   vi.mocked(isDevServerLockHeldAsync).mockImplementation(
     async (root) => (await readDevServerLockAsync(root)) != null
   );
+  vi.mocked(discoverDevServerAsync).mockResolvedValue({
+    reachable: false,
+    targets: [],
+    devServerUrl: 'http://127.0.0.1:8081',
+    source: 'default',
+    discovered: false,
+  });
+  vi.mocked(readReportedProjectRootAsync).mockResolvedValue({ kind: 'no-header' });
   mockPlatform('darwin');
   originalFetch = globalThis.fetch;
   killed = [];
@@ -241,6 +259,7 @@ describe(devStopAsync, () => {
       'reason',
       'signal',
       'stopped',
+      'suggestedCommand',
       'url',
       'waitedMs',
     ]);
@@ -466,6 +485,61 @@ describe(devStopAsync, () => {
     await devStopAsync(projectRoot, options());
 
     expect(JSON.parse(printed()).detail).toContain('--port');
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a dev child killed with
+  // SIGKILL leaves Metro running with no lock. `status` finds it by the scan; dev:stop names it.
+  describe('no lock, and the scan finds a dev server', () => {
+    beforeEach(() => {
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
+      vi.mocked(discoverDevServerAsync).mockResolvedValue({
+        reachable: true,
+        targets: [],
+        devServerUrl: 'http://127.0.0.1:8082',
+        source: 'scan',
+        discovered: true,
+      });
+      vi.mocked(findPortListenerAsync).mockResolvedValue({ pid: 9191, command: 'node' });
+      livePids.add(9191);
+      mockPort({ answering: true });
+    });
+
+    it(`should name the port, the pid and the stop command when it serves this project`, async () => {
+      vi.mocked(readReportedProjectRootAsync).mockResolvedValue({
+        kind: 'header',
+        root: projectRoot,
+      });
+
+      await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OUTCOME_FAILED);
+
+      expect(killed).toEqual([]);
+      const report = JSON.parse(printed());
+      expect(report).toMatchObject({
+        stopped: false,
+        port: 8082,
+        pid: 9191,
+        lockHeld: false,
+        reason: 'foreign-dev-server',
+        suggestedCommand: 'npx @expo/agent-cli dev:stop --port 8082 --force',
+      });
+      expect(report.detail).toContain('8082');
+      expect(report.detail).toContain('9191');
+      expect(printedErrors()).toContain('npx @expo/agent-cli dev:stop --port 8082 --force');
+    });
+
+    it.each([
+      ['names another project', { kind: 'header', root: '/other' }],
+      ['names no project', { kind: 'no-header' }],
+    ] as const)(`should name nothing when its /status %s`, async (_, reported) => {
+      vi.mocked(readReportedProjectRootAsync).mockResolvedValue(reported);
+
+      await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OK);
+
+      expect(killed).toEqual([]);
+      const report = JSON.parse(printed());
+      expect(report).toMatchObject({ port: null, pid: null, suggestedCommand: null });
+      expect(report.detail).toContain('--port');
+    });
   });
 
   // @ref llp/0021-honest-reports.rfc.md §How they show up — friction run 7,
@@ -924,6 +998,7 @@ describe(buildFollowUps, () => {
     easPlatform: null,
     reason: null,
     detail: null,
+    suggestedCommand: null,
     waitedMs: 0,
     followups: [],
     ...overrides,

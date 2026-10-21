@@ -56,6 +56,7 @@ export const devStopHelp: CommandHelp = {
       'portStillAnswering',
       'reason',
       'detail',
+      'suggestedCommand',
       'session',
       'devices',
       'reaped',

@@ -44,6 +44,8 @@ import { easStopFollowUp } from '../followups/start';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import { devCommand, hostPlatform } from '../smoke/suggest';
+import { discoverDevServerAsync } from '../runtime/devServer';
+import { matchProjectRoot, readReportedProjectRootAsync } from '../runtime/projectRootHeader';
 import { PACKAGER_STATUS_READY } from '../runtime/waitReady';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { windowsTaskkillCommand } from '../utils/windowsShim';
@@ -177,6 +179,13 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
   reason: DevStopSkipReason | null;
   /** One sentence of detail for {@link reason}. Null exactly when {@link stopped} is true. */
   detail: string | null;
+  /**
+   * The command that stops the dev server this run found and did not stop, or null.
+   *
+   * Set when no lock answered and the dev server `status` would find serves this project: the
+   * lock is gone, so `--force` is the only proof left.
+   */
+  suggestedCommand: string | null;
   /** How long the whole stop took, in milliseconds. */
   waitedMs: number;
   followups: FollowUp[];
@@ -234,7 +243,10 @@ export async function devStopAsync(
   const { report, finishing } =
     lock != null && lockOwnsTarget
       ? await stopLockedDevServerAsync(lock, options, startedAt)
-      : { report: await stopUnlockedDevServerAsync(options, startedAt, lock), finishing: false };
+      : {
+          report: await stopUnlockedDevServerAsync(projectRoot, options, startedAt, lock),
+          finishing: false,
+        };
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
@@ -305,6 +317,7 @@ async function stopLockedDevServerAsync(
     easPlatform: lock.easPlatform,
     reason: null,
     detail: null,
+    suggestedCommand: null,
     waitedMs: 0,
     followups: [],
   };
@@ -358,6 +371,7 @@ async function stopLockedDevServerAsync(
  * port, and acting on it is F60.
  */
 async function stopUnlockedDevServerAsync(
+  projectRoot: string,
   options: DevStopOptions,
   startedAt: number,
   elsewhereLock: DevServerLockInfo | null = null
@@ -377,11 +391,33 @@ async function stopUnlockedDevServerAsync(
     portStillAnswering: null,
     reason: 'not-running',
     detail: 'no dev-server lock answered for this project, and nothing was listening for it',
+    suggestedCommand: null,
     waitedMs: Date.now() - startedAt,
     followups: [],
   };
 
   if (port == null) {
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a dev child killed with
+    // SIGKILL leaves its Metro running with no lock. `status` finds it by the discovery ladder,
+    // so this looks there too, and names it rather than stopping it.
+    const orphan = await findProjectDevServerAsync(projectRoot);
+    if (orphan != null) {
+      const listener = await findPortListenerAsync(orphan.port);
+      base.reason = 'foreign-dev-server';
+      base.port = orphan.port;
+      base.url = orphan.url;
+      base.pid = listener?.pid ?? null;
+      base.portStillAnswering = true;
+      base.processStillRunning = listener ? isProcessAlive(listener.pid) : null;
+      base.suggestedCommand = `${PROGRAM_PREFIX} dev:stop --port ${orphan.port} --force`;
+      base.detail = `no dev-server lock answered for this project, but its dev server answers on port ${orphan.port}, ${
+        listener != null
+          ? `run by pid ${listener.pid} (${listener.command})`
+          : 'run by a process this machine would not name'
+      }. No run owns it, so it was not stopped`;
+      base.waitedMs = Date.now() - startedAt;
+      return base;
+    }
     base.detail =
       'no dev-server lock answered for this project; whether an untracked server is running is unknown. Pass --port to inspect a specific port';
     return base;
@@ -458,6 +494,26 @@ async function stopUnlockedDevServerAsync(
       lockElsewhereClause(elsewhereLock);
   base.waitedMs = Date.now() - startedAt;
   return base;
+}
+
+/**
+ * The dev server `status` would find for this project, when its `/status` names this project.
+ *
+ * A server that names no project is accepted by `status` and not here: this one is offered to
+ * `--force`, so the header is the proof.
+ */
+async function findProjectDevServerAsync(
+  projectRoot: string
+): Promise<{ port: number; url: string } | null> {
+  const found = await discoverDevServerAsync(undefined, { projectRoot, statusTimeoutMs: 1500 });
+  if (!found.reachable) {
+    return null;
+  }
+  const reported = await readReportedProjectRootAsync(found.devServerUrl, 1500);
+  if (reported.kind !== 'header' || matchProjectRoot(reported.root, projectRoot) !== true) {
+    return null;
+  }
+  return { port: Number(new URL(found.devServerUrl).port), url: found.devServerUrl };
 }
 
 /**
@@ -655,6 +711,15 @@ export function buildFollowUps(report: DevStopResultJson, finishing = false): Fo
     return followups;
   }
   if (report.reason === 'foreign-dev-server') {
+    if (report.suggestedCommand != null) {
+      return [
+        {
+          id: 'dev-stop-force',
+          command: report.suggestedCommand,
+          why: 'This project’s dev server is running with no run that owns it. This stops it.',
+        },
+      ];
+    }
     return [
       {
         id: 'status',
@@ -772,6 +837,13 @@ function explainFailure(report: DevStopResultJson, options: DevStopOptions): str
     // the difference between "someone else's dev server" and "not a dev server at all". They need
     // different advice: `--force` can stop the first and will always decline the second.
     const answeredAsDevServer = report.url != null;
+    if (report.suggestedCommand != null) {
+      return [
+        chalk.red(`This project's dev server on port ${report.port} was not stopped.`),
+        `Why: ${report.detail}.`,
+        `How: run "${report.suggestedCommand}".`,
+      ].join('\n');
+    }
     return [
       chalk.red(
         answeredAsDevServer

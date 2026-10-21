@@ -136,6 +136,7 @@ describe('@expo/agent-cli dev:stop', () => {
       'reason',
       'signal',
       'stopped',
+      'suggestedCommand',
       'url',
       'waitedMs',
     ]);
