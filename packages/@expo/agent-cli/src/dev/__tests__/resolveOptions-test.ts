@@ -382,6 +382,12 @@ describe('The config puts the device on EAS', () => {
     expect(resolveDevOptions(['--web'], onEas).deviceBackend).toBe('local');
   });
 
+  it(`should report two platforms, not --eas, for a native flag beside --web`, () => {
+    expect(() => resolveDevOptions(['--ios', '--web'], onEas)).toThrow(
+      /--ios and --web name two platforms/
+    );
+  });
+
   it(`should refuse --device and name --local`, () => {
     expect(() => resolveDevOptions(['--ios', '--device', 'SIM'], onEas)).toThrow(
       /deviceBackend: "eas".*add --local/
