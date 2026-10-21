@@ -80,13 +80,13 @@ Where each command stands:
 | `dev:stop`                                   | none. It ends sessions.                                                   | —                                                      |
 | every other command                          | none                                                                      | —                                                      |
 
-A build key never starts a session: `buildBackend: "eas"` alone builds on EAS and installs on a local device. A device key can start both, because `deviceBackend: "eas"` also sends the build to EAS. An implicit route starts neither: `dev` stops with `EAS_ROUTE_NOT_CHOSEN` (§The selection), and `smoke` fails `start-dev-server`.
+A build key never starts a session: `buildBackend: "eas"` alone builds on EAS and leaves the artifact for a local device. It installs nothing (§What the EAS route is made of). A device key can start both, because `deviceBackend: "eas"` also sends the build to EAS. An implicit route starts neither: `dev` stops with `EAS_ROUTE_NOT_CHOSEN` (§The selection), and `smoke` fails `start-dev-server`.
 
 The rule is tested by what a run does, end to end. `plan-test.ts` and `smoke-test.ts` check that an implicit route stops with the credits reason before any step runs. `cloud-simulator-test.ts` checks the argv the stub `eas` records: a device command without `--eas` or `deviceBackend: "eas"` starts no session and no build (`simulator`, `simulator:start`, `build`). The `fallback` rung may still spawn `simulator:list` and `simulator:exec`, to drive a session that is up.
 
 ## The device backend
 
-[confirmed, Kudo, 2026-10-21] `buildBackend` says where a build runs. `deviceBackend` says where the app runs: a simulator, an emulator or a device on this machine (`local`), or an EAS Simulator session (`eas`). The two are separate choices, so they are separate keys. `buildBackend: "eas"` alone builds on EAS and installs the build on a local device.
+[confirmed, Kudo, 2026-10-21] `buildBackend` says where a build runs. `deviceBackend` says where the app runs: a simulator, an emulator or a device on this machine (`local`), or an EAS Simulator session (`eas`). The two are separate choices, so they are separate keys. `buildBackend: "eas"` alone builds on EAS and leaves the artifact for a local device: the plan names `eas build:run` and does not install it, and no session starts (§What the EAS route is made of).
 
 Resolution, per platform, highest first:
 
