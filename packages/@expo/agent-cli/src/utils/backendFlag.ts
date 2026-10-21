@@ -6,7 +6,7 @@
 // rather than a rule every builder has to remember. Unlike it, it also rewrites the JSON and the
 // events, because the flag changes what the command does, not how it is spelled.
 
-import { PROGRAM_PREFIX } from '../programName';
+import { PROGRAM_NAME } from '../programName';
 
 /** The commands that read `deviceBackend` and take `--local`. */
 export const LOCAL_FLAG_COMMANDS = [
@@ -31,7 +31,8 @@ export function argvPassesLocal(argv: readonly string[]): boolean {
   return (separator < 0 ? argv : argv.slice(0, separator)).includes('--local');
 }
 
-const ESCAPED_PREFIX = PROGRAM_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// `bunx` too: `renderForInvoker` may have respelled the runner before the text reaches `Log`.
+const ESCAPED_PREFIX = `(?:npx|bunx)[ \\t]+${PROGRAM_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`;
 const COMMAND = `(?:${LOCAL_FLAG_COMMANDS.map((name) => name.replace(':', '\\:')).join('|')})`;
 // Arguments run to a quote, a backslash (a JSON-escaped quote), `&&`, a lone `--` or a dash.
 const ARGUMENT = `[ \\t]+(?!&&|--(?:\\s|$)|—)[^\\s"'\`”)\\\\]+`;
@@ -42,7 +43,7 @@ const DEVICE_COMMAND = new RegExp(
 
 /** Append the run's backend flag to each device command in `text` that names no backend. */
 export function withRunBackendFlag(text: string, flag: string | null = runFlag): string {
-  if (flag == null || !text.includes(PROGRAM_PREFIX)) {
+  if (flag == null || !text.includes(PROGRAM_NAME)) {
     return text;
   }
   return text.replace(DEVICE_COMMAND, (_match, command: string, args: string) => {

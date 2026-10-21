@@ -14,6 +14,7 @@
 // substitution is for the terminal, which is the one place the mismatch is read as an instruction.
 
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
+import { withRunBackendFlag } from './backendFlag';
 
 /** How the caller reached this CLI, in the spelling their project uses. */
 export type Invoker = 'npx' | 'bunx';
@@ -93,5 +94,7 @@ const WRITTEN_AS = new RegExp(
  * case where the two spellings name the same thing.
  */
 export function renderForInvoker(text: string, invoker: Invoker = currentInvoker()): string {
-  return invoker === 'npx' ? text : text.replace(WRITTEN_AS, `bunx ${PROGRAM_NAME}`);
+  // The backend flag first, so a caller that pads the rendered command pads its whole length.
+  const flagged = withRunBackendFlag(text);
+  return invoker === 'npx' ? flagged : flagged.replace(WRITTEN_AS, `bunx ${PROGRAM_NAME}`);
 }

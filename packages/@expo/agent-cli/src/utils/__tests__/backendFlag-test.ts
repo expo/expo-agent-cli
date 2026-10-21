@@ -71,6 +71,12 @@ describe('Adding --local to printed device commands', () => {
     );
   });
 
+  it('should match the bunx spelling as well', () => {
+    expect(local('Try: bunx @expo/agent-cli navigate / --ios')).toBe(
+      'Try: bunx @expo/agent-cli navigate / --ios --local'
+    );
+  });
+
   it('should change nothing for a run that did not pass --local', () => {
     expect(withRunBackendFlag('npx @expo/agent-cli dev --ios', null)).toBe(
       'npx @expo/agent-cli dev --ios'

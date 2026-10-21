@@ -1012,14 +1012,25 @@ describe('a project whose config puts the device on EAS', () => {
       projectRoot,
     });
     try {
+      const eventsFile = path.join(projectRoot, 'events.jsonl');
       const result = await executeAgentCliAsync(
         projectRoot,
         ['dev', '--ios', '--local', '--plan', '--json'],
-        { reject: false }
+        { reject: false, env: { LOG_EVENTS: eventsFile } }
       );
 
       const followups = JSON.parse(result.stdout).followups as { command: string }[];
       expect(followups.map((followup) => followup.command)).toContain(
+        'npx @expo/agent-cli smoke --ios --local'
+      );
+      // The event stream is what a driving agent reads, so it carries the flag too.
+      const events = fs
+        .readFileSync(eventsFile, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      const streamed = events.find((entry) => entry._e === 'cli:followups');
+      expect(streamed.followups.map((followup: { command: string }) => followup.command)).toContain(
         'npx @expo/agent-cli smoke --ios --local'
       );
     } finally {

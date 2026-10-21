@@ -1,5 +1,6 @@
 import { event } from '../../events';
 import * as Log from '../../log';
+import { setRunBackendFlag } from '../../utils/backendFlag';
 import { resetInvokerCache } from '../../utils/invoker';
 import { formatFollowUps } from '../format';
 import { followUpsEnabled, reportFollowUps } from '../report';
@@ -144,5 +145,33 @@ describe(`${formatFollowUps.name} — the runner in use`, () => {
     resetInvokerCache();
 
     expect(formatFollowUps(followups)).toContain('npx @expo/agent-cli runtime:errors');
+  });
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe(`${formatFollowUps.name} after --local`, () => {
+  const device: FollowUp[] = [
+    { id: 'smoke', command: 'npx @expo/agent-cli smoke --ios', why: 'Checks the app.' },
+    { id: 'logs', command: 'npx @expo/agent-cli dev:logs', why: 'Reads the log.' },
+  ];
+
+  afterEach(() => {
+    setRunBackendFlag(null);
+    delete process.env.npm_config_user_agent;
+    resetInvokerCache();
+  });
+
+  it(`should add --local under Bun too, before the column is padded`, () => {
+    process.env.npm_config_user_agent = 'bun/1.3.14 npm/? node/v24.3.0 darwin arm64';
+    resetInvokerCache();
+    setRunBackendFlag('--local');
+
+    const lines = formatFollowUps(device)
+      .split('\n')
+      .filter((line) => line.includes('—'));
+
+    expect(lines[0]).toContain('bunx @expo/agent-cli smoke --ios --local');
+    expect(lines[1]).toContain('bunx @expo/agent-cli dev:logs ');
+    expect(lines[0]!.indexOf('—')).toBe(lines[1]!.indexOf('—'));
   });
 });
