@@ -5,7 +5,7 @@
 import { spawn } from 'child_process';
 import path from 'path';
 
-import { isPromptShaped, lastNonEmptyLine } from '../needsHuman/detect';
+import { isPromptShaped, lastNonEmptyLine } from '../needsHuman/promptShape';
 import { fileExistsSync } from './dir';
 import { env } from './env';
 import { killProcessTree, USE_PROCESS_GROUP } from './processGroup';
