@@ -3,8 +3,9 @@ import path from 'path';
 import { vol } from 'memfs';
 
 import { acquireDeviceAsync } from '..';
-import { reapDevicesAsync } from '../reap';
+import { deletedWorktreeSessions, reapDevicesAsync } from '../reap';
 import { bindingPathFor, readBindingFile } from '../registry';
+import { writeCloudBinding } from './fakeCloudBinding';
 import { androidBindingFor, bindingFor, fakeTools, writeBinding } from './fakeTools';
 
 const host = process.platform;
@@ -240,4 +241,43 @@ it('an emulator whose kill threw is killed by the next reap', async () => {
   expect(readBindingFile(file)).toEqual({ kind: 'none' });
   expect(tools.killed).toEqual([5001]);
   expect(first.reports[0]!.error).toBe('kill EPERM\nHow: run "kill 5001".');
+});
+
+it('a later reap of a session stopped by hand stops it again with no error and forgets it', async () => {
+  const stderr = vi.spyOn(console, 'error');
+  const tools = fakeTools();
+  writeCloudBinding(OTHER, 'ios', 'A');
+  fs.rmSync(OTHER, { recursive: true });
+  // `eas simulator:stop --id` by hand leaves the binding file; the service call it makes,
+  // `ensureDeviceRunSessionStopped`, answers a stopped session as stopped.
+  const stopped = await tools.stopCloud(ROOT, 'A');
+  const first = await reapDevicesAsync(ROOT, { tools });
+  const second = await reapDevicesAsync(ROOT, { tools });
+  expect(stopped).toEqual({ ok: true, reason: null });
+  expect(first).toMatchObject({ error: null, reports: [{ id: 'A', released: true }] });
+  expect(first.reports[0]!.error).toBeUndefined();
+  expect(second).toEqual({ reports: [], error: null });
+  expect(stderr.mock.calls.flat().join('\n')).not.toContain('Could not release');
+});
+
+describe('deletedWorktreeSessions', () => {
+  const now = new Date('2026-10-08T10:00:00.000Z');
+  const GONE = '/work/gone';
+
+  it('names the started session of a deleted worktree, which the reap stops', () => {
+    vol.mkdirSync(GONE, { recursive: true });
+    const binding = writeCloudBinding(GONE, 'android', 'A');
+    fs.rmSync(GONE, { recursive: true });
+    expect(deletedWorktreeSessions(ROOT, now)).toEqual([binding]);
+  });
+
+  it('skips its own, a live root, a dotenv origin and a session past the cap', () => {
+    writeCloudBinding(ROOT, 'ios', 'OWN');
+    writeCloudBinding(OTHER, 'ios', 'LIVE-ROOT');
+    vol.mkdirSync(GONE, { recursive: true });
+    writeCloudBinding(GONE, 'ios', 'DOTENV', { origin: 'dotenv' });
+    writeCloudBinding(GONE, 'android', 'CAPPED', { boundAt: '2026-10-08T07:00:00.000Z' });
+    fs.rmSync(GONE, { recursive: true });
+    expect(deletedWorktreeSessions(ROOT, now)).toEqual([]);
+  });
 });

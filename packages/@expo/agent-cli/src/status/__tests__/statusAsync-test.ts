@@ -1,11 +1,17 @@
 import fs from 'fs';
 import { vol } from 'memfs';
+import { stripVTControlCharacters } from 'node:util';
+import path from 'path';
+import { CLOUD_SESSION_ENV_FILE } from '../../device/cloudSimulator';
 
+import { detachedPidLine } from '../../dev/childVerdict';
+import { detachedLogPath } from '../../dev/logFile';
 import { resetSettingsCache } from '../../settings';
 
 import * as devLock from '../../devLock';
 import * as localDevice from '../../device/localDevice';
 import * as deviceBinding from '../../deviceBinding';
+import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { bindingPathFor } from '../../deviceBinding/registry';
 import * as summary from '../../deviceBinding/summary';
 import { event } from '../../events';
@@ -34,6 +40,7 @@ import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
 import type { StatusReport } from '../types';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import { buildStatusFollowUps } from '../../followups';
 
 vi.mock('../installed', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../installed')>()),
@@ -798,6 +805,7 @@ describe(printStatusAsync, () => {
       'devServer',
       'device',
       'binding',
+      'orphanSessions',
       'skills',
       'auth',
       'next',
@@ -826,6 +834,7 @@ describe(printStatusAsync, () => {
       'freshness',
       'installed',
       'next',
+      'orphanSessions',
       'probe',
       'project',
       'skills',
@@ -852,6 +861,7 @@ describe(printStatusAsync, () => {
       'freshness',
       'installed',
       'next',
+      'orphanSessions',
       'probe',
       'project',
       'skills',
@@ -1207,6 +1217,109 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     if (ownServer) expect(report.next?.why).toContain('restart');
   });
 
+  describe('beside a dev server that runs an EAS Simulator session', () => {
+    function easServer(platform: 'ios' | 'android') {
+      vi.mocked(discoverDevServerAsync).mockResolvedValue({
+        reachable: true,
+        targets: [],
+        devServerUrl,
+        source: 'default',
+        discovered: false,
+      });
+      vi.mocked(probeTargetLivenessAsync).mockResolvedValueOnce({ listed: 0, live: 0, stale: [] });
+      vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue({
+        ...running,
+        easPlatform: platform,
+      });
+    }
+
+    it.each(['ios', 'android'] as const)(
+      'waits for the %s session instead of a restart',
+      async (platform) => {
+        easServer(platform);
+        const report = await collectStatusReportAsync(projectRoot, { ...options, platform });
+        // No --port: the re-run finds the running Metro through its lock, which names the port.
+        expect(report.next?.command).toBe(
+          `npx @expo/agent-cli dev --${platform} --eas --detach --wait-ready`
+        );
+        expect(report.next?.why).toContain('No restart is needed.');
+        expect(report.next?.why).not.toContain('must restart');
+      }
+    );
+
+    it('says the session is starting while the detached child starts it', async () => {
+      easServer('ios');
+      vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue({
+        ...running,
+        easPlatform: 'ios',
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+      });
+      fs.mkdirSync(path.dirname(detachedLogPath(projectRoot)), { recursive: true });
+      fs.writeFileSync(detachedLogPath(projectRoot), `${detachedPidLine(process.pid)}\n`);
+      const report = await collectStatusReportAsync(projectRoot, iosOptions);
+      expect(report.next?.command).not.toContain('dev:stop');
+      expect(report.next?.why).toContain('is starting');
+    });
+
+    describe('with an app connected', () => {
+      function androidEasServerWithApp() {
+        vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue({
+          ...running,
+          easPlatform: 'android',
+        });
+      }
+
+      it('and no binding, next binds the session again and is not smoke', async () => {
+        androidEasServerWithApp();
+        const report = await collectStatusReportAsync(projectRoot, {
+          ...options,
+          platform: 'android',
+        });
+        expect(report.devServer?.appsConnected).toBeGreaterThan(0);
+        expect(report.next?.command).toBe(
+          'npx @expo/agent-cli dev --android --eas --detach --wait-ready'
+        );
+        expect(report.next?.why).toContain('No restart is needed.');
+      });
+
+      it('and no binding and no platform flag or request, next binds the session of the lock', async () => {
+        androidEasServerWithApp();
+        const report = await collectStatusReportAsync(projectRoot, options);
+        expect(report.next?.command).toBe(
+          'npx @expo/agent-cli dev --android --eas --detach --wait-ready'
+        );
+        expect(report.next?.command).not.toContain('smoke');
+      });
+
+      it('and a live EAS binding, next stays smoke --android --eas', async () => {
+        androidEasServerWithApp();
+        writeCloudBinding(projectRoot, 'android', 'sess-live', {
+          expiresAt: '2999-01-01T00:00:00.000Z',
+        });
+        const report = await collectStatusReportAsync(projectRoot, {
+          ...options,
+          platform: 'android',
+        });
+        expect(report.next?.command).toMatch(/smoke --android --eas/);
+      });
+    });
+
+    it('beside an expired own session binding, says the lease expired and not that it starts', async () => {
+      easServer('ios');
+      writeCloudBinding(projectRoot, 'ios', 'sess-old', {
+        boundAt: '2025-12-31T00:00:00.000Z',
+        expiresAt: '2026-01-01T00:00:00.000Z',
+      });
+      const report = await collectStatusReportAsync(projectRoot, iosOptions);
+      expect(report.next?.command).toBe(
+        'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
+      );
+      expect(report.next?.why).toContain('sess-old expired');
+      expect(report.next?.why).not.toContain('is starting');
+    });
+  });
+
   it(`detaches the plan's own dev command`, async () => {
     stopDevServer();
     const report = await collectStatusReportAsync(projectRoot, iosOptions);
@@ -1473,6 +1586,41 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
 
     const [row] = report.installed!.platforms;
     expect(row).toMatchObject({ reason: 'cloud-session', commands: [] });
+  });
+
+  // @ref llp/0021-honest-reports.rfc.md §How they show up
+  it(`names dev --eas, and an expired lease, when the own EAS session binding expired`, async () => {
+    vi.mocked(readInstalledStatusAsync).mockResolvedValue({
+      outcome: 'unknown',
+      platforms: [
+        {
+          platform: 'ios',
+          status: 'unknown',
+          reason: 'no-device',
+          recommendation: 'No simulator is booted.',
+          commands: ['npx @expo/agent-cli dev --ios --detach --wait-ready'],
+          deviceName: null,
+          installedHash: null,
+          currentHash: null,
+        },
+      ],
+    });
+    writeCloudBinding(projectRoot, 'ios', 'sess-1', {
+      boundAt: '2019-12-31T00:00:00.000Z',
+      expiresAt: '2020-01-01T00:00:00.000Z',
+    });
+
+    const report = await collectStatusReportAsync(projectRoot, { ...options, platform: 'ios' });
+
+    const command = 'npx @expo/agent-cli dev --ios --eas --detach --wait-ready';
+    expect(report.next?.command).toBe(command);
+    expect(report.next?.why).toContain('sess-1');
+    const [row] = report.installed!.platforms;
+    expect(row).toMatchObject({ reason: 'cloud-session', commands: [command] });
+    const text = stripVTControlCharacters(formatStatusReport(report));
+    expect(text).toContain('EAS Simulator session, lease expired');
+    expect(text).not.toContain('EAS Simulator session, gone');
+    expect(text).not.toContain('No simulator is booted.');
   });
 
   it(`hands the named device through`, async () => {
@@ -1750,5 +1898,62 @@ describe('status retains discovery results at its deadline', () => {
       appsListed: 0,
     });
     expectProbeTimersCleared();
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
+describe('the EAS session of a deleted worktree', () => {
+  const gone = '/gone-worktree';
+  function orphan(id = 'sess-orphan') {
+    vol.mkdirSync(gone, { recursive: true });
+    writeCloudBinding(gone, 'ios', id, {
+      boundAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    fs.rmSync(gone, { recursive: true });
+  }
+
+  it('is named with its path, and plain dev:stop stops it', async () => {
+    orphan();
+    const report = await collectStatusReportAsync(projectRoot, options);
+    const command = 'npx @expo/agent-cli dev:stop';
+    expect(report.orphanSessions).toEqual([
+      { platform: 'ios', id: 'sess-orphan', projectRoot: gone, command },
+    ]);
+    expect(report.next?.command).not.toBe(command);
+    expect(buildStatusFollowUps(report)[0]).toMatchObject({ command });
+    const text = stripVTControlCharacters(formatStatusReport(report));
+    expect(text).toContain(
+      `1 EAS session of a deleted worktree is recorded, not checked: sess-orphan (${gone}). It may still bill. ${command} stops it.`
+    );
+  });
+
+  it('names plain dev:stop when this worktree has its own session or dotenv', async () => {
+    orphan();
+    writeCloudBinding(projectRoot, 'android', 'sess-own', {
+      boundAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+    fs.writeFileSync(path.join(projectRoot, CLOUD_SESSION_ENV_FILE), 'EAS_SESSION=sess-own\n');
+    const report = await collectStatusReportAsync(projectRoot, options);
+    expect(report.orphanSessions?.[0]?.command).toBe('npx @expo/agent-cli dev:stop');
+    const text = stripVTControlCharacters(formatStatusReport(report));
+    expect(text).toContain('npx @expo/agent-cli dev:stop stops it.');
+    expect(text).not.toContain('The record stays');
+  });
+
+  it('names simulator:stop --id when this worktree runs a dev server', async () => {
+    orphan();
+    vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue(lockInfo({ port: 8081 }));
+    const report = await collectStatusReportAsync(projectRoot, options);
+    expect(report.orphanSessions?.[0]?.command).toBe(
+      'npx --yes eas-cli simulator:stop --id sess-orphan'
+    );
+  });
+
+  it('is empty when no deleted worktree has a session', async () => {
+    const report = await collectStatusReportAsync(projectRoot, options);
+    expect(report.orphanSessions).toEqual([]);
+    expect(stripVTControlCharacters(formatStatusReport(report))).not.toContain('deleted worktree');
   });
 });

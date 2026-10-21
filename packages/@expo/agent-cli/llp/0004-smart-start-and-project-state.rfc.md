@@ -520,7 +520,8 @@ plan is still compiling. Exit 22 (`DEV_DETACH_SESSION_PENDING`) when `--wait-rea
 runs out before the session is bound ([[0035-one-device-per-worktree]] §Preserved sessions). 22 means: run
 the same command again. The command has no `--port` that the caller did not type: a
 re-run finds the run through its log and the lock, and the lock names its port.
-`dev:logs` exits 0 for a log and 1 (`NO_DEV_LOG`) when the
+For the same reason `status` does not add `--port` to a re-run that follows this
+project's own running EAS dev server. `dev:logs` exits 0 for a log and 1 (`NO_DEV_LOG`) when the
 project has none.
 
 ## A busy port

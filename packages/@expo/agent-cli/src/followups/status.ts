@@ -28,6 +28,17 @@ export function buildStatusFollowUps(report: StatusReport): FollowUp[] {
 
   const followups: FollowUp[] = [];
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
+  // First, because the session may bill while nothing else here would stop it.
+  const orphans = report.orphanSessions ?? [];
+  if (orphans.length) {
+    followups.push({
+      id: 'stop-orphan-session',
+      command: [...new Set(orphans.map(({ command }) => command))].join(' && '),
+      why: `The worktree that bound EAS session ${orphans.map(({ id }) => id).join(', ')} no longer exists, so no command run there can stop it.`,
+    });
+  }
+
   // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
   // First, because it is the one rung that removes a fifteen-minute step: a platform whose recorded
   // build no longer matches would otherwise be rebuilt, and EAS already has the app that rebuild

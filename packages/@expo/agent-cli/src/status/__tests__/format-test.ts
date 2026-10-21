@@ -1417,11 +1417,11 @@ describe('the build line', () => {
       expect(rendered).toContain('unavailable · cloud ios sess-1');
     });
 
-    it(`keeps a gone session on the device line and keeps the local advice`, () => {
+    it(`keeps a gone session on the device line as an expired lease, and renders the advice it holds`, () => {
       const rendered = report(noDevice({ binding: [cloudRow('ios', 'gone')] }));
 
       expect(rendered).toContain('cloud ios sess-1');
-      expect(rendered).toContain('EAS Simulator session, gone');
+      expect(rendered).toContain('EAS Simulator session, lease expired');
       expect(rendered).not.toContain('the app runs on EAS Simulator session');
       expect(rendered).toContain('ios: No simulator is booted.');
       expect(rendered).toContain('npx @expo/agent-cli dev --ios');
@@ -1459,5 +1459,56 @@ describe('the build line', () => {
       expect(rendered).toContain('ios: No simulator is booted.');
       expect(rendered).toContain('npx @expo/agent-cli dev --ios');
     });
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
+describe('the EAS sessions of deleted worktrees', () => {
+  const orphan = (id: string, projectRoot: string, command: string) => ({
+    platform: 'ios' as const,
+    id,
+    projectRoot,
+    command,
+  });
+
+  it('names one session, its path, and the command that stops it', () => {
+    const rendered = report(
+      mockReport({
+        orphanSessions: [orphan('A', '/gone/a', 'npx @expo/agent-cli dev:stop')],
+      })
+    );
+    expect(rendered).toContain(
+      '1 EAS session of a deleted worktree is recorded, not checked: A (/gone/a). It may still bill. npx @expo/agent-cli dev:stop stops it.'
+    );
+    expect(rendered).not.toContain('The record stays');
+  });
+
+  it('names each stop by id once for two sessions', () => {
+    const rendered = report(
+      mockReport({
+        orphanSessions: [
+          orphan('A', '/gone/a', 'npx --yes eas-cli simulator:stop --id A'),
+          orphan('B', '/gone/b', 'npx --yes eas-cli simulator:stop --id B'),
+        ],
+      })
+    );
+    expect(rendered).toContain(
+      '2 EAS sessions of deleted worktrees are recorded, not checked: A (/gone/a), B (/gone/b). They may still bill. npx --yes eas-cli simulator:stop --id A && npx --yes eas-cli simulator:stop --id B stops them.'
+    );
+  });
+
+  it('says the record stays beside a dev server of this worktree', () => {
+    const rendered = report(
+      mockReport({
+        orphanSessions: [orphan('A', '/gone/a', 'npx --yes eas-cli simulator:stop --id A')],
+      })
+    );
+    expect(rendered).toContain(
+      'npx --yes eas-cli simulator:stop --id A stops it. The record stays until the next dev or dev:stop.'
+    );
+  });
+
+  it('prints nothing when there is none', () => {
+    expect(report(mockReport({ orphanSessions: [] }))).not.toContain('deleted worktree');
   });
 });

@@ -15,6 +15,7 @@ import {
 } from './registry';
 import { WRITE_LOCK_WAIT_MS } from './release';
 import { defaultTools } from './tools';
+import type { CloudBinding } from './cloud';
 import type { Binding, DeviceTools } from './types';
 
 /** The longest an EAS Simulator session runs; a binding older than this names an ended session. */
@@ -27,6 +28,33 @@ function rootDeleted(root: string): boolean {
   } catch (error) {
     return (error as NodeJS.ErrnoException).code === 'ENOENT';
   }
+}
+
+function pastSessionCap(binding: Binding, now: Date): boolean {
+  return now.getTime() - Date.parse(binding.boundAt) > EAS_SESSION_CAP_MS;
+}
+
+/**
+ * The cloud bindings of deleted worktrees whose session the reap stops. Reads files only: no `eas`
+ * call and no registry lock, so `status` can name them.
+ */
+export function deletedWorktreeSessions(projectRoot: string, now: Date): CloudBinding[] {
+  const own = new Set(ownBindingFiles(projectRoot).map(({ file }) => file));
+  return [...listBindingFiles('ios', 'cloud'), ...listBindingFiles('android', 'cloud')].flatMap(
+    (file) => {
+      if (own.has(file)) return [];
+      const read = readBindingFile(file);
+      if (read.kind !== 'binding') return [];
+      const { binding } = read;
+      const { device } = binding;
+      return device.backend === 'cloud' &&
+        device.origin !== 'dotenv' &&
+        rootDeleted(binding.projectRoot) &&
+        !pastSessionCap(binding, now)
+        ? [{ ...binding, device }]
+        : [];
+    }
+  );
 }
 
 /** Called under the registry lock, after the caller's write. No device subprocesses here. */
@@ -97,8 +125,7 @@ function chooseCleanup(
   }
   if (device.backend === 'cloud') {
     if (device.origin === 'dotenv') return result('forget');
-    if (tools.now().getTime() - Date.parse(binding.boundAt) > EAS_SESSION_CAP_MS)
-      return result('forget', 'session-cap');
+    if (pastSessionCap(binding, tools.now())) return result('forget', 'session-cap');
     return {
       binding,
       action: 'stop-cloud',

@@ -53,6 +53,7 @@ export const statusHelp: CommandHelp = {
       'devServer',
       'device',
       'binding',
+      'orphanSessions',
       'skills',
       'auth',
       'next',
