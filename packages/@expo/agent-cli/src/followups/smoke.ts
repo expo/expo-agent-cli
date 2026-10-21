@@ -117,9 +117,9 @@ export interface SmokeFollowUpInput {
 
 export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   const sameRoute = input.route == null ? '' : ` --route ${input.route}`;
-  // Every command that takes `--eas` keeps it, so a suggested run is the run the caller asked
-  // for. The commands that do not take it — `dev --detach`, `typecheck`, `status`,
-  // `runtime:errors` — are unaffected: none of them is about a device.
+  // Every device command keeps the backend flag, so a suggested run is the run the caller asked
+  // for: `--eas`, or `--local` over the config, which `dev` reads too. `typecheck`, `status` and
+  // `runtime:errors` are not about a device.
   const onCloud = input.cloud ? ' --eas' : input.local ? ' --local' : '';
   const onLocal = input.local ? ' --local' : '';
   // The flag first, so a reader sees what the command is about before what it opens.
@@ -158,7 +158,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
           // `expo run:<platform>` for a development build. So a run that reached this was told to
           // change nothing, and the fix is the run without that flag rather than a separate `dev`.
           id: 'smoke-installs-it',
-          command: `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}`,
+          command: `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}${onLocal}`,
           why: '--no-start told this run to change nothing, so it could not put the app on the device. A run without it installs what is missing — Expo Go by download, a development build by building it — and then reads the app.',
         },
         {
@@ -175,7 +175,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
           id: 'smoke-install-expo-go',
           // Deliberately without `--no-start`, whether or not the caller passed it: the point of
           // the suggestion is the install, and `--no-start` is what forbids it.
-          command: `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}`,
+          command: `${PROGRAM_PREFIX} smoke --${input.platform}${sameRoute}${onLocal}`,
           why: 'The Expo Go on the device is built from another SDK, so it is not the app this project runs. A run allowed to bring its own environment installs the release this SDK ships and reads that instead.',
         },
         {
@@ -286,7 +286,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
         : [
             {
               id: 'dev-restart',
-              command: `${PROGRAM_PREFIX} dev:stop && ${start}`,
+              command: `${PROGRAM_PREFIX} dev:stop${onLocal} && ${start}`,
               why: "This run released the emulator it bound, which removes a spawned instance's binding, and the dev server it found still runs without a device, which dev refuses to bind a new device to. This restarts the dev server, which binds a device, and keeps both running.",
             },
           ];
@@ -309,7 +309,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
         : deviceBack),
       {
         id: 'navigate',
-        command: `${PROGRAM_PREFIX} navigate ${input.route ?? '/'} --${input.platform}`,
+        command: `${PROGRAM_PREFIX} navigate ${input.route ?? '/'} --${input.platform}${onLocal}`,
         why: 'Opens the app on the device the command above bound, once its dev server is ready.',
       },
       {
@@ -362,7 +362,7 @@ export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
         : [
             {
               id: 'smoke-other-platform',
-              command: `${PROGRAM_PREFIX} smoke --${otherPlatform}${sameRoute}`,
+              command: `${PROGRAM_PREFIX} smoke --${otherPlatform}${sameRoute}${onLocal}`,
               why: `Expo Go on ${otherPlatform === 'ios' ? 'iOS' : 'Android'} was measured to answer the debugger, so the same gate has a runtime to read there [observed — 2026-08-25].`,
             },
           ]),

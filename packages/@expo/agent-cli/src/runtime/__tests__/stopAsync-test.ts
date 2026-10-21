@@ -175,7 +175,7 @@ describe(runtimeStopAsync, () => {
 
     const followups = JSON.parse(printed()).followups;
     expect(followups[0].command).toBe(
-      'npx @expo/agent-cli runtime:stop --app-id host.exp.Exponent'
+      'npx @expo/agent-cli runtime:stop --app-id host.exp.Exponent --ios'
     );
     // The old list led with `navigate /`, which starts an app while another one is still running.
     expect(followups.map((followup: { id: string }) => followup.id)).not.toContain('navigate');
@@ -373,6 +373,16 @@ describe(buildStopFollowUps, () => {
       ...overrides,
     };
   }
+
+  it(`carries the platform and --local into the corrected stop of a mismatch`, () => {
+    const followups = buildStopFollowUps(
+      report({ appIdMismatch: true, connectedAppIds: ['com.example.app'] }),
+      { local: true }
+    );
+    expect(followups.map((followup) => followup.command)).toEqual([
+      'npx @expo/agent-cli runtime:stop --app-id com.example.app --ios --local',
+    ]);
+  });
 
   it(`carries --local into navigate after a --local stop`, () => {
     expect(buildStopFollowUps(report(), { local: true })[0]!.command).toBe(

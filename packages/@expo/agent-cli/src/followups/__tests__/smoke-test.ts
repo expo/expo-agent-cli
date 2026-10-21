@@ -535,6 +535,40 @@ describe('Following a --local smoke', () => {
     }
   });
 
+  it.each<[string, Partial<SmokeFollowUpInput>]>([
+    ['a missing app', { appMismatch: 'not installed', appMismatchKind: 'app-not-installed' }],
+    ['a wrong Expo Go', { appMismatch: 'wrong Expo Go', appMismatchKind: 'expo-go-version' }],
+    ['a project Expo Go cannot run', { appMismatch: 'needs a dev build' }],
+    [
+      'a released Android device beside a stopped server',
+      {
+        appsConnected: 0,
+        outcome: 'inconclusive',
+        platform: 'android',
+        serverStopped: true,
+        deviceReleased: true,
+      },
+    ],
+    [
+      'a released Android device beside a running server',
+      { appsConnected: 0, outcome: 'inconclusive', platform: 'android', deviceReleased: true },
+    ],
+    ['a runtime with no debugger', { platform: 'android', runtimeSupported: false }],
+  ])('should carry --local on every device command after %s', (_, overrides) => {
+    const suggested = commands({ local: true, ...overrides });
+    const device = suggested.flatMap((command) =>
+      command
+        .split(' && ')
+        .filter((part) =>
+          /@expo\/agent-cli (dev|dev:stop|smoke|navigate|runtime:reload)( |$)/.test(part)
+        )
+    );
+    expect(device.length).toBeGreaterThan(0);
+    for (const command of device) {
+      expect(command).toContain('--local');
+    }
+  });
+
   it('should add no --local to a run that did not pass it', () => {
     expect(commands({ outcome: 'failed', devServerFound: false }).join('\n')).not.toContain(
       '--local'

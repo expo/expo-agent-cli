@@ -248,18 +248,6 @@ export function buildStopFollowUps(
   report: RuntimeStopResultJson,
   { local = false }: { local?: boolean } = {}
 ): FollowUp[] {
-  // A mismatch gets the corrected command and nothing else. The old list led with `navigate /`
-  // here, which starts an app while the one the caller meant to stop is still running — advice
-  // built on the assumption that the requested id was the right one (friction run 4, F42).
-  if (report.appIdMismatch) {
-    return [
-      {
-        id: 'stop-connected-app',
-        command: `${PROGRAM_PREFIX} runtime:stop --app-id ${report.connectedAppIds[0]}`,
-        why: `${report.bundleId} was not running, so nothing was stopped. ${report.connectedAppIds[0]} is the app connected to the dev server, and this is the same command aimed at it.`,
-      },
-    ];
-  }
   // `--eas` is carried through: the app was stopped on the session, and `navigate /` without the
   // flag would look for a device on this machine — which is the machine that has none.
   //
@@ -269,6 +257,18 @@ export function buildStopFollowUps(
   // needs no platform beside `--eas`, which already names the one device it has.
   const onCloud = report.deviceBackend === 'cloud';
   const flag = onCloud ? ' --eas' : ` --${report.platform}${local ? ' --local' : ''}`;
+  // A mismatch gets the corrected command and nothing else. The old list led with `navigate /`
+  // here, which starts an app while the one the caller meant to stop is still running — advice
+  // built on the assumption that the requested id was the right one (friction run 4, F42).
+  if (report.appIdMismatch) {
+    return [
+      {
+        id: 'stop-connected-app',
+        command: `${PROGRAM_PREFIX} runtime:stop --app-id ${report.connectedAppIds[0]}${flag}`,
+        why: `${report.bundleId} was not running, so nothing was stopped. ${report.connectedAppIds[0]} is the app connected to the dev server, and this is the same command aimed at it.`,
+      },
+    ];
+  }
   return [
     {
       id: 'navigate',
