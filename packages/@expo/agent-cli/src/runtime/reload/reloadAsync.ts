@@ -348,6 +348,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     throw routeNotFoundError(route, routeTable, {
       platform: options.platform,
       command: 'runtime:reload',
+      local: options.local,
     });
   }
 

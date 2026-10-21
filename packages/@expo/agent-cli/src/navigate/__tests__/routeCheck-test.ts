@@ -61,6 +61,13 @@ describe(routeNotFoundError, () => {
     expect(message).not.toContain('/page-39');
   });
 
+  it(`should keep --local in the corrected command`, () => {
+    expect(
+      routeNotFoundError('/note', table(['/', '/notes']), { platform: 'ios', local: true })
+        .suggestedCommand
+    ).toBe('npx @expo/agent-cli navigate /notes --local');
+  });
+
   it(`should fall back to the root route when nothing is close`, () => {
     expect(routeNotFoundError('/zzzzzzzzzz', table(['/', '/notes'])).suggestedCommand).toBe(
       'npx @expo/agent-cli navigate /'

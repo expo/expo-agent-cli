@@ -1,5 +1,10 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Output and errors
-import { deviceUnavailableError, noBoundDeviceError, registryLockedError } from '../errors';
+import {
+  deviceUnavailableError,
+  noBoundDeviceError,
+  notReusableError,
+  registryLockedError,
+} from '../errors';
 
 // exit-codes-per-reason
 describe('exit codes per reason', () => {
@@ -90,6 +95,12 @@ describe('A refusal after --local', () => {
       'npx @expo/agent-cli dev --android --local --detach --wait-ready'
     );
     expect(error.message).toContain('dev --android --local --detach --wait-ready');
+  });
+
+  it('should stop the dev server with --local, so the session is left running', () => {
+    expect(notReusableError('ios', undefined, { local: true }).suggestedCommand).toBe(
+      'npx @expo/agent-cli dev:stop --local'
+    );
   });
 
   it('should add no --local without it', () => {

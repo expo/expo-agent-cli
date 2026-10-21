@@ -608,8 +608,10 @@ async function executePlanAsync(
     let stepRunning = false;
     const runStep = async (stepArgs: string[]) => {
       if (!devServerStep) {
-        return await withLeaseExtendedAsync(projectRoot, () =>
-          runStepAsync(projectRoot, step, stepArgs, output)
+        return await withLeaseExtendedAsync(
+          projectRoot,
+          () => runStepAsync(projectRoot, step, stepArgs, output),
+          ...(options.buildBackend === 'local' ? [{ local: true }] : [])
         );
       }
       stepRunning = true;
@@ -625,6 +627,7 @@ async function executePlanAsync(
       }
       return await runDevServerAsync(projectRoot, stepArgs, {
         agentSkills: options.agentSkills,
+        ...(options.buildBackend === 'local' ? { local: true } : {}),
         output,
         onDevServer: opensApp
           ? (server) => {

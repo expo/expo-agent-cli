@@ -25,6 +25,8 @@ export async function stopDevicesAsync(
 ): Promise<StoppedDevices> {
   const report: StoppedDevices = { devices: [], reaped: [], deviceError: null };
   if (devicesDisabled()) return report;
+  // `--local` left the session running over the config, so the retry must too.
+  const onLocal = options.local ? ' --local' : '';
   report.devices = keptDevices(projectRoot, options.platform);
   try {
     if (options.release) {
@@ -34,10 +36,10 @@ export async function stopDevicesAsync(
         report.deviceError =
           "Devices were kept because this worktree's dev server is still running.";
       } else if (await readDevServerLockAsync(projectRoot)) {
-        report.deviceError = `Devices were kept because this worktree's dev server is still running.\nHow: run "${PROGRAM_PREFIX} dev:stop --release" with no --port.`;
+        report.deviceError = `Devices were kept because this worktree's dev server is still running.\nHow: run "${PROGRAM_PREFIX} dev:stop --release${onLocal}" with no --port.`;
       } else if (stop.reason === 'foreign-dev-server' && stop.url != null) {
         // `url` is set only when the port answered as an Expo dev server.
-        report.deviceError = `Devices were kept because a dev server this worktree did not lock answers on port ${stop.port}.\nHow: stop that dev server where it was started, then run "${PROGRAM_PREFIX} dev:stop --release" again.`;
+        report.deviceError = `Devices were kept because a dev server this worktree did not lock answers on port ${stop.port}.\nHow: stop that dev server where it was started, then run "${PROGRAM_PREFIX} dev:stop --release${onLocal}" again.`;
       } else {
         const released: ReleasedDevice[] = [];
         for (const platform of options.platform
@@ -60,7 +62,7 @@ export async function stopDevicesAsync(
             path: unreadable.file,
           }).message;
         if (report.devices.some((device) => device.released === false))
-          report.deviceError ??= `Some devices could not be released; see devices for details.\nHow: run "${PROGRAM_PREFIX} dev:stop --release" again.`;
+          report.deviceError ??= `Some devices could not be released; see devices for details.\nHow: run "${PROGRAM_PREFIX} dev:stop --release${onLocal}" again.`;
       }
     }
   } catch (error) {

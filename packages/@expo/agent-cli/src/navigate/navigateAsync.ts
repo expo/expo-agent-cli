@@ -380,6 +380,7 @@ async function printRouteUrlAsync(projectRoot: string, options: NavigateOptions)
         url: resolved.url,
         hostType: resolved.hostType,
         connect: resolved.connect,
+        local: options.cloud === 'off',
       })
     : [];
 

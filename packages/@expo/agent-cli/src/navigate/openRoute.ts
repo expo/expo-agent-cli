@@ -357,7 +357,11 @@ export async function resolveRouteUrlAsync(
   });
   debugEvent('route_checked', routeCheck);
   if (routeCheck.ok === false) {
-    throw routeNotFoundError(route, routeTable, { platform, command: options.command });
+    throw routeNotFoundError(route, routeTable, {
+      platform,
+      command: options.command,
+      local: options.local,
+    });
   }
 
   // A named dev server that does not answer is a mistake worth stopping on, and the only case where

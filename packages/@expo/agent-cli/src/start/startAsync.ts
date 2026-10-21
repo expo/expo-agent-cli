@@ -78,8 +78,11 @@ export async function runDevServerAsync(
     agentSkills,
     output = 'inherit',
     onDevServer,
+    local = false,
   }: {
     agentSkills: boolean;
+    /** `--local`, for the lease warning's rebind line. */
+    local?: boolean;
     output?: SubprocessOutput;
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
@@ -114,8 +117,10 @@ export async function runDevServerAsync(
       onDevServer?.(server);
     }
   };
-  const run = withLeaseExtendedAsync(projectRoot, () =>
-    spawnDevServerAsync(projectRoot, args, output)
+  const run = withLeaseExtendedAsync(
+    projectRoot,
+    () => spawnDevServerAsync(projectRoot, args, output),
+    ...(local ? [{ local }] : [])
   ).finally(() => {
     running = false;
   });

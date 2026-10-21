@@ -136,7 +136,11 @@ export type RouteCommand = keyof typeof ROUTE_COMMANDS;
 export function routeNotFoundError(
   route: string,
   table: ProjectRouteTable,
-  { platform, command = 'navigate' }: { platform?: string; command?: RouteCommand } = {}
+  {
+    platform,
+    command = 'navigate',
+    local = false,
+  }: { platform?: string; command?: RouteCommand; local?: boolean } = {}
 ): CommandError {
   const routes = table.routes.map((entry) => entry.route);
   const shown = routes.slice(0, MAX_LISTED_ROUTES);
@@ -154,7 +158,8 @@ export function routeNotFoundError(
       `How: ${nearest != null ? `did you mean "${nearest}"? ` : ''}The routes this project has are: ${listing}. A route you have just added has to exist as a file before it can be opened. Pass --no-route-check to open the link without this check.`,
     ].join('\n')
   );
-  error.suggestedCommand = ROUTE_COMMANDS[command](nearest ?? '/', platform);
+  // `--local` is kept, or the corrected command would follow `deviceBackend` to a session.
+  error.suggestedCommand = `${ROUTE_COMMANDS[command](nearest ?? '/', platform)}${local ? ' --local' : ''}`;
   return error;
 }
 

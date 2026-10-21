@@ -91,7 +91,8 @@ export function chooseExplicitDevice(
   if (reuseOnly)
     throw notReusableError(
       platform,
-      own ? { bound: deviceNameOf(own.device), named: deviceNameOf(device) } : undefined
+      own ? { bound: deviceNameOf(own.device), named: deviceNameOf(device) } : undefined,
+      { local: rerun.includes('--local') }
     );
   if (own?.device.backend === 'local-android' && own.device.origin.kind === 'spawned')
     throw explicitError('own-explicit-over-owned', own.device.serial, platform, { rerun });
@@ -215,7 +216,7 @@ function refusalText(
     };
   }
   if (reason === 'own-explicit-over-owned') {
-    const how = `${PROGRAM_PREFIX} dev:stop --release`;
+    const how = `${PROGRAM_PREFIX} dev:stop --release${rerun.includes('--local') ? ' --local' : ''}`;
     return {
       what: `This worktree runs the emulator instance ${name}.`,
       how,

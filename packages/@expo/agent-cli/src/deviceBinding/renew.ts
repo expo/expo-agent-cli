@@ -13,7 +13,13 @@ export async function withLeaseExtendedAsync<T>(
   {
     tools = defaultTools(),
     warn = console.error,
-  }: { tools?: DeviceTools; warn?: (message: string) => void } = {}
+    local = false,
+  }: {
+    tools?: DeviceTools;
+    warn?: (message: string) => void;
+    /** `--local`: the rebind line keeps it, so the config does not move the device to EAS. */
+    local?: boolean;
+  } = {}
 ): Promise<T> {
   if (process.env.AGENT_CLI_NO_DEVICE === '1') return work();
   const states = new Map<string, 'extended' | 'lost'>();
@@ -27,7 +33,7 @@ export async function withLeaseExtendedAsync<T>(
         });
         if (state === 'lost' && states.get(file) === 'extended') {
           warn(
-            `The ${platform} device lease expired or disappeared. Run "${deviceCommand(platform, { eas: backend === 'cloud' })}" to bind it again.`
+            `The ${platform} device lease expired or disappeared. Run "${deviceCommand(platform, { eas: backend === 'cloud', local })}" to bind it again.`
           );
         }
         states.set(file, state);

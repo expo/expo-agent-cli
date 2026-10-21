@@ -37,6 +37,8 @@ export interface NavigateFollowUpInput {
 }
 
 export interface PrintUrlFollowUpInput {
+  /** `--local`: the dev server this suggests stays on this machine over the config. */
+  local?: boolean;
   /** The URL that was resolved for the route. */
   url: string;
   /** What kind of host the URL carries: `tunnel`, `lan`, `localhost`, or null. */
@@ -72,6 +74,7 @@ export function buildPrintUrlFollowUps({
   hostType,
   connect = [],
   platform,
+  local = false,
 }: PrintUrlFollowUpInput): FollowUp[] {
   const followups: FollowUp[] = [];
 
@@ -101,7 +104,7 @@ export function buildPrintUrlFollowUps({
   if (hostType === 'localhost' || hostType === 'lan') {
     followups.push({
       id: 'tunnel-for-reach',
-      command: `${PROGRAM_PREFIX} dev --${platform ?? hostPlatform()} --detach --tunnel`,
+      command: `${PROGRAM_PREFIX} dev --${platform ?? hostPlatform()}${local ? ' --local' : ''} --detach --tunnel`,
       why: `The dev server is only reachable from ${
         hostType === 'localhost' ? 'this machine' : 'this network'
       }, so a device anywhere else cannot load that URL; a tunnel serves the same dev server from any network.`,
