@@ -18,6 +18,7 @@ import { EXIT_OK } from './exitCodes';
 import * as Log from './log';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from './programName';
 import { configureColor } from './utils/color';
+import { argvPassesLocal, LOCAL_FLAG_COMMANDS, setRunBackendFlag } from './utils/backendFlag';
 import { argvRequestsJson, setJsonRequested } from './utils/jsonMode';
 
 // Dogfood tunnel v2 throughout the process tree, including detached dev servers.
@@ -84,6 +85,17 @@ if (
 // `commandRegistry.ts` owns which names exist: its own commands, the actions of its groups, and
 // the fixed set of `expo` commands it forwards. A name in none of them is an error, not a forward.
 const resolution = subcommand == null ? null : resolveCommand(subcommand, commandArgs);
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — before anything prints.
+if (
+  resolution?.kind === 'command' &&
+  (LOCAL_FLAG_COMMANDS as readonly string[]).includes(
+    resolution.name === 'dev:run' ? 'dev' : resolution.name
+  ) &&
+  argvPassesLocal(commandArgs)
+) {
+  setRunBackendFlag('--local');
+}
 
 // Set up event logger output before any console output, so agents driving `@expo/agent-cli` read
 // JSONL events instead of scraping the terminal. The canonical name of the command is logged,

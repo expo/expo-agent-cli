@@ -1,5 +1,7 @@
 import chalk from 'chalk';
 
+import { withRunBackendFlag } from './utils/backendFlag';
+
 // NOTE(@kitten): LogRespectingTerminal in instantiateMetro regressed on fatal errors and
 // logs may be swallowed before exiting. We redirect them to a direct write when we're about to exit
 let isExiting = false;
@@ -12,7 +14,8 @@ export function timeEnd(label?: string): void {
   console.timeEnd(label);
 }
 
-export function error(...message: string[]): void {
+export function error(...raw: string[]): void {
+  const message = raw.map((value) => withRunBackendFlag(value));
   if (isExiting) {
     // `console.error` may be patched to route through an async stderr queue
     // (see LogRespectingTerminal in instantiateMetro.ts). On the exit path
@@ -30,7 +33,8 @@ export function exception(e: Error): void {
   error(chalk.red(e.toString()) + (env.EXPO_DEBUG ? '\n' + chalk.gray(e.stack) : ''));
 }
 
-export function warn(...message: string[]): void {
+export function warn(...raw: string[]): void {
+  const message = raw.map((value) => withRunBackendFlag(value));
   if (isExiting) {
     process.stderr.write(message.map((value) => chalk.yellow(value)).join(' ') + '\n');
     return;
@@ -60,7 +64,8 @@ export function resetStdoutTracking(): void {
   wroteToStdout = false;
 }
 
-export function log(...message: string[]): void {
+export function log(...raw: string[]): void {
+  const message = raw.map((value) => withRunBackendFlag(value));
   wroteToStdout = true;
   if (isExiting) {
     process.stdout.write(message.join(' ') + '\n');
@@ -82,7 +87,7 @@ export function log(...message: string[]): void {
  * look different.
  */
 export function progress(...message: string[]): void {
-  process.stderr.write(message.join(' ') + '\n');
+  process.stderr.write(withRunBackendFlag(message.join(' ')) + '\n');
 }
 
 /** @deprecated use `debug` package with the `expo:` prefix instead.  */

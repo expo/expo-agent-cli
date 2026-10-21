@@ -1000,6 +1000,34 @@ describe('a project whose config puts the device on EAS', () => {
     expect(easInvocations(projectRoot)).toEqual([]);
   });
 
+  // A line no builder threads `--local` through: the print-time rewrite is what adds it.
+  it(`should print --local on the smoke a --local plan suggests beside a running dev server`, async () => {
+    const projectRoot = await setupOnEasAsync();
+    const stub = await startStubDevServerAsync({ targets: [], projectRoot });
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: stub.url,
+      port: stub.port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--local', '--plan', '--json'],
+        { reject: false }
+      );
+
+      const followups = JSON.parse(result.stdout).followups as { command: string }[];
+      expect(followups.map((followup) => followup.command)).toContain(
+        'npx @expo/agent-cli smoke --ios --local'
+      );
+    } finally {
+      await releaseLock();
+      await stub.close();
+    }
+  });
+
   it(`should leave the session running on dev:stop --local`, async () => {
     const projectRoot = await setupOnEasAsync();
 

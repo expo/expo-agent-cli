@@ -845,6 +845,30 @@ describe('@expo/agent-cli dev with deviceBackend "eas" in the config', () => {
     expect(plan.reasons.join('\n')).not.toContain('deviceBackend');
   });
 
+  it('should print --local on every device command a --local run suggests', async () => {
+    const projectRoot = await setupAsync();
+    await writeAgentCliConfigAsync(projectRoot, { deviceBackend: 'eas' });
+
+    const result = await executeAgentCliAsync(projectRoot, [
+      'dev',
+      '--ios',
+      '--local',
+      '--plan',
+      '--json',
+    ]);
+
+    expect(result.exitCode).toBe(0);
+    const commands = [
+      ...result.stdout.matchAll(
+        /npx @expo\/agent-cli (?:dev|dev:stop|smoke|navigate|runtime:reload|runtime:stop)(?![\w:-])[^"\\]*/g
+      ),
+    ].map((match) => match[0]);
+    expect(commands.length).toBeGreaterThan(0);
+    for (const command of commands) {
+      expect(command).toMatch(/--local|--eas/);
+    }
+  });
+
   it('should refuse a device on EAS with a build on this machine, before anything runs', async () => {
     const projectRoot = await setupAsync();
     await writeAgentCliConfigAsync(projectRoot, { deviceBackend: 'eas', buildBackend: 'local' });
