@@ -27,11 +27,8 @@ import {
   type Binding,
   type BoundDevice,
 } from '../deviceBinding';
-import {
-  acquireCloudBindingAsync,
-  liveCloudBindings,
-  releaseCloudBindingAsync,
-} from '../deviceBinding/cloud';
+import { acquireCloudBindingAsync, liveCloudBindings } from '../deviceBinding/cloud';
+import { releaseStartedSessionAsync } from '../deviceBinding/cloudRelease';
 import { bindingPathFor, readBindingFile } from '../deviceBinding/registry';
 import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
@@ -603,10 +600,10 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       };
     },
     stopEasSession: async (sessionId) => {
-      const { stopEasSessionAsync } = require('../device/eas') as typeof import('../device/eas');
-      const result = await stopEasSessionAsync(projectRoot, sessionId);
-      if (result.ok) await releaseCloudBindingAsync(projectRoot, sessionId);
-      return { ok: result.ok, target: sessionId, reason: result.reason };
+      const release = await releaseStartedSessionAsync(projectRoot, sessionId, 'smoke');
+      return release.outcome === 'stopped'
+        ? { ok: true, target: sessionId, reason: null }
+        : { ok: false, target: sessionId, reason: release.reason };
     },
 
     readBoundDevice: () => {

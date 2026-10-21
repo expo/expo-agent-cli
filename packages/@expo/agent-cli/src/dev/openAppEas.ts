@@ -25,10 +25,10 @@ import {
   acquireCloudBindingAsync,
   claimCloudBindingsAsync,
   restoreRenewedLeaseAsync,
-  readCloudBindings,
   type CloudBinding,
 } from '../deviceBinding/cloud';
-import { stopEasSessionAsync } from '../device/eas';
+import { releaseStartedSessionAsync } from '../deviceBinding/cloudRelease';
+import { cloudStopCommand } from '../deviceBinding/cleanup';
 
 import {
   isLive,
@@ -282,7 +282,7 @@ export async function ensureEasSessionAsync(
         ok: false,
         sessionId: null,
         started: false,
-        reason: `another run in this worktree started EAS session ${binding.device.id} at the same time, and ${CLOUD_SESSION_ENV_FILE} names it, so this run ended its own session ${session.sessionId} ("${easCommandPrefix()} simulator:stop --id ${session.sessionId}" ends it if that failed); run this again to use ${binding.device.id}`,
+        reason: `another run in this worktree started EAS session ${binding.device.id} at the same time, and ${CLOUD_SESSION_ENV_FILE} names it, so this run ended its own session ${session.sessionId} ("${cloudStopCommand(session.sessionId)}" ends it if that failed); run this again to use ${binding.device.id}`,
       };
     const gitExclude = await excludeCloudSessionEnvFromGitAsync(projectRoot);
     if (gitExclude) {
@@ -329,35 +329,27 @@ async function releaseUnrecordedStartAsync(
   sessionId: string,
   why: string
 ): Promise<EnsureEasSessionReport> {
-  let recorded: boolean;
-  try {
-    recorded = readCloudBindings(projectRoot).bindings.some(
-      ({ device }) => device.id === sessionId
-    );
-  } catch {
-    recorded = true;
-  }
-  if (recorded)
+  const release = await releaseStartedSessionAsync(projectRoot, sessionId, 'dev');
+  if (release.outcome === 'stopped')
+    return {
+      ...session,
+      ok: false,
+      sessionId: null,
+      started: false,
+      reason: `this run started EAS session ${sessionId}, could not record it (${why}), and stopped it`,
+    };
+  if (release.outcome === 'kept')
     return {
       ...session,
       ok: false,
       started: false,
-      reason: `this run started EAS session ${sessionId} and could not record it (${why}); another run in this worktree may drive it, so it stays. "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`,
+      reason: `this run started EAS session ${sessionId} and could not record it (${why}); ${release.reason}`,
     };
-  const stopped = await stopEasSessionAsync(projectRoot, sessionId);
-  return stopped.ok
-    ? {
-        ...session,
-        ok: false,
-        sessionId: null,
-        started: false,
-        reason: `this run started EAS session ${sessionId}, could not record it (${why}), and stopped it`,
-      }
-    : {
-        ...session,
-        ok: false,
-        reason: `EAS session ${sessionId} could not be recorded (${why}) or stopped (${stopped.reason}); "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`,
-      };
+  return {
+    ...session,
+    ok: false,
+    reason: `EAS session ${sessionId} could not be recorded (${why}) or stopped: ${release.reason}`,
+  };
 }
 
 async function ensureSessionAsync(
@@ -539,7 +531,7 @@ async function ensureSessionAsync(
     return failed(
       `${easFailureReason(result, `${easCliLabel(easCli)} ${args.join(' ')}`)}${
         sessionId
-          ? ` — the session ${sessionId} was created before it failed and may be billing; "${easCommandPrefix()} simulator:stop --id ${sessionId}" ends it`
+          ? ` — the session ${sessionId} was created before it failed and may be billing; "${cloudStopCommand(sessionId)}" ends it`
           : ''
       }`,
       {

@@ -1,6 +1,8 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke
 // @ref llp/0035-one-device-per-worktree.rfc.md §Wiring
 // Smoke binds and releases only its own platform through the registry.
+import { vol } from 'memfs';
+
 import {
   acquireDeviceAsync,
   deviceIdOf,
@@ -8,6 +10,9 @@ import {
   releaseWorktreeDevicesAsync,
 } from '../../deviceBinding';
 import { androidBindingFor, bindingFor } from '../../deviceBinding/__tests__/fakeTools';
+import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
+import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
+import { stopEasSessionAsync } from '../../device/eas';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps, cleanupLeft, deviceBoundByStart } from '../smokeAsync';
 import type { SmokeEnvironmentJson } from '../types';
@@ -17,6 +22,11 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),
   acquireDeviceAsync: vi.fn(),
   releaseWorktreeDevicesAsync: vi.fn(async () => []),
+}));
+
+vi.mock('../../device/eas', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../device/eas')>()),
+  stopEasSessionAsync: vi.fn(),
 }));
 
 const projectRoot = '/project';
@@ -251,5 +261,21 @@ describe(cleanupLeft, () => {
         })
       )
     ).toEqual({ serverStopped: false, deviceReleased: false });
+  });
+});
+
+describe('stopEasSession', () => {
+  const file = bindingPathFor(projectRoot, 'ios', 'cloud');
+  const stop = () =>
+    buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios', '--eas'])).stopEasSession('S');
+  beforeEach(() => vol.reset());
+
+  it(`stops the session and removes its binding`, async () => {
+    writeCloudBinding(projectRoot, 'ios', 'S');
+    vi.mocked(stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
+
+    expect(await stop()).toEqual({ ok: true, target: 'S', reason: null });
+    expect(stopEasSessionAsync).toHaveBeenCalledWith(projectRoot, 'S');
+    expect(readBindingFile(file)).toEqual({ kind: 'none' });
   });
 });
