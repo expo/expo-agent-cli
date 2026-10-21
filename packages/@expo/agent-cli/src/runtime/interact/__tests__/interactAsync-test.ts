@@ -490,7 +490,7 @@ describe('the entry bundle gate', () => {
 
   /** A dev server with one app attached whose entry bundle builds, or does not. */
   function mockBundle(compiles: boolean): Mock {
-    const fetchMock = vi.fn(async (input: any, init?: any) => {
+    const fetchMock = vi.fn(async (input: any) => {
       const url = String(input);
       if (url.includes('/json/list')) {
         return { ok: true, json: async () => [TARGET] } as any;

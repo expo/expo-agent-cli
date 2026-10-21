@@ -339,7 +339,7 @@ export async function navigateAsync(
   // the device may still be loading a cold bundle, and it may be sitting on an error screen. What
   // it is not is a success, which is what exit 0 said here [friction run 6, F50].
   if (opened.attach.confirmed === false) {
-    Log.error(attachNotConfirmed(opened, options));
+    Log.error(attachNotConfirmed(opened));
     reportFollowUps('navigate', followups, { json });
     return EXIT_OUTCOME_TIMEOUT;
   }
@@ -501,7 +501,7 @@ function reachLine(hostType: string | null): string {
  * reason: `--platform ios` is a local flag, and a host that reached for a cloud session may have no
  * local device to run it against.
  */
-function attachNotConfirmed(opened: OpenRouteResult, options: NavigateOptions): string {
+function attachNotConfirmed(opened: OpenRouteResult): string {
   const reverseClause =
     opened.reverse?.ran && opened.reverse.ok === false
       ? ` The port forward this link needs did not go in either (${opened.reverse.reason}), so the app had no route back to this machine at all.`

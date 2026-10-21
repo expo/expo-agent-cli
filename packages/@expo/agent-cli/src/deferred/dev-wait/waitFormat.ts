@@ -9,7 +9,6 @@ import chalk from 'chalk';
 
 import type { FollowUp } from '../../followups';
 import type {
-  BundleCheckError,
   BundleCheckPlatform,
   BundleCheckResult,
   BundlePlatformSource,

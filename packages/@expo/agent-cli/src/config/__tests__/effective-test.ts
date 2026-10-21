@@ -80,7 +80,7 @@ describe(buildEffectiveConfig, () => {
     });
     // Sorted, so two runs of the same project produce the same list.
     expect(plugins.map((plugin) => plugin.name)).toEqual(
-      [...plugins.map((plugin) => plugin.name)].sort()
+      plugins.map((plugin) => plugin.name).sort()
     );
   });
 

@@ -121,7 +121,7 @@ if (
 }
 
 if (args['--version']) {
-  console.log(version);
+  Log.log(version);
   process.exit(EXIT_OK);
 }
 

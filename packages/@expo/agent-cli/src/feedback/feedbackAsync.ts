@@ -9,6 +9,7 @@ import { randomBytes } from 'crypto';
 import path from 'path';
 import { detectSandbox } from 'sandbox-cli-detector';
 
+import { Log } from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import { readJsonFileSync, resolvePackageRootSync } from '../project/nodeModules';
 import { env, isTelemetryDisabled } from '../utils/env';
@@ -272,7 +273,7 @@ export async function sendFeedbackAsync({
 }): Promise<boolean> {
   validateFeedback(feedback);
   if (isTelemetryDisabled()) {
-    console.error(TELEMETRY_DISABLED_MESSAGE);
+    Log.error(TELEMETRY_DISABLED_MESSAGE);
     return false;
   }
 

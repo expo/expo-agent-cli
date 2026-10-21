@@ -1,4 +1,5 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Lease
+import { Log } from '../log';
 import { deviceCommand } from './errors';
 import { extendLeaseAsync, EXTEND_EVERY_MS } from './lease';
 import { ownBindingFiles } from './records';
@@ -12,7 +13,7 @@ export async function withLeaseExtendedAsync<T>(
   work: () => Promise<T>,
   {
     tools = defaultTools(),
-    warn = console.error,
+    warn = Log.error,
   }: { tools?: DeviceTools; warn?: (message: string) => void } = {}
 ): Promise<T> {
   if (process.env.AGENT_CLI_NO_DEVICE === '1') return work();

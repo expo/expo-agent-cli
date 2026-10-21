@@ -501,7 +501,6 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
         (options.method === 'auto' && ((commandSocketClients ?? 0) === 0 || broadcastUnproved)));
     if (relaunchRung && options.cloud) {
       const cloud = await reloadOnCloudSimulatorAsync(projectRoot, options, {
-        devServerUrl,
         targetAppIds: before.targets.map((target) => target.appId).filter(Boolean),
       });
       attempts.push(withRelaunchCost(cloud.attempt, observedApps, { climbed: broadcastUnproved }));
