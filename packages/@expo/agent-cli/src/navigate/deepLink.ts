@@ -12,6 +12,7 @@ import { adbNotRunnableError, resolveAdb, type AdbResolution } from '../device/a
 import { approveSchemeForUrlAsync } from '../device/approveScheme';
 import {
   buildCloudOpenUrlArgs,
+  cloudExecArgs,
   easCliMissingError,
   openUrlOnCloudSimulatorAsync,
 } from '../device/cloudSimulator';
@@ -374,7 +375,7 @@ export function buildOpenUrlCommand({
   launchActivity,
 }: BuildOpenUrlCommandParams): OpenUrlCommand {
   if (backend === 'cloud') {
-    const args = buildCloudOpenUrlArgs({ url, platform });
+    const args = cloudExecArgs(buildCloudOpenUrlArgs({ url, platform }));
     return { bin: 'eas', args, display: ['eas', ...args].join(' ') };
   }
   const command: OpenUrlCommand =
@@ -436,6 +437,7 @@ export async function openUrlOnDeviceAsync(
     }
     const result = await openUrlOnCloudSimulatorAsync({
       projectRoot: params.projectRoot,
+      sessionId: params.deviceId,
       url: params.url,
       platform: params.platform,
     });

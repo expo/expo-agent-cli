@@ -17,6 +17,7 @@ import {
   type ReloadResultJson,
 } from '../reloadAsync';
 import type { ReloadOptions } from '../resolveOptions';
+import { unwrapGuardedExec } from '../../../device/cloudCommand';
 
 vi.mock('../../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -1125,9 +1126,12 @@ describe('reloading an app on a cloud simulator session', () => {
 
   /** The argv of every `eas` this run spawned, as one string per spawn. */
   function spawnedCommands(): string[] {
-    return vi
-      .mocked(spawn)
-      .mock.calls.map(([bin, args]) => [bin, ...((args as string[]) ?? [])].join(' '));
+    return vi.mocked(spawn).mock.calls.map(([bin, args]) => {
+      const argv = (args as string[]) ?? [];
+      const target = unwrapGuardedExec(argv);
+      if (target) return [target.command, ...target.args].join(' ');
+      return [bin, ...argv].join(' ');
+    });
   }
 
   it.each([

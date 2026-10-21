@@ -19,6 +19,11 @@ import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
+import {
+  CLOUD_SESSION_GUARD_EXIT,
+  CLOUD_SESSION_MISMATCH,
+  guardedCloudArgs,
+} from '../cloudCommand';
 import recordedAvailability from '../../__fixtures__/eas/simulator-availability.json';
 import { isNeedsHumanError } from '../../utils/errors';
 import {
@@ -29,6 +34,7 @@ import {
   DRIVABLE_SESSION_TYPE,
   buildAvailabilityArgs,
   buildCloudAlertArgs,
+  cloudExecArgs,
   buildCloudOpenUrlArgs,
   buildCloudScreenshotArgs,
   buildCloudStopAppArgs,
@@ -222,14 +228,16 @@ describe('the argv of every eas simulator invocation', () => {
   it(`opens a URL through simulator:exec and the controller's open verb`, () => {
     expect(
       buildCloudOpenUrlArgs({ url: 'exp://tunnel.example/--/notes', platform: 'ios' })
-    ).toEqual([
+    ).toEqual(['open', 'exp://tunnel.example/--/notes', '--platform', 'ios']);
+  });
+
+  it(`runs a controller verb through simulator:exec and the pinned controller package`, () => {
+    expect(cloudExecArgs(['close', 'app'])).toEqual([
       'simulator:exec',
       'npx',
       AGENT_DEVICE_SPEC,
-      'open',
-      'exp://tunnel.example/--/notes',
-      '--platform',
-      'ios',
+      'close',
+      'app',
     ]);
   });
 
@@ -255,9 +263,6 @@ describe('the argv of every eas simulator invocation', () => {
         relaunch: true,
       })
     ).toEqual([
-      'simulator:exec',
-      'npx',
-      AGENT_DEVICE_SPEC,
       'open',
       'host.exp.Exponent',
       'exp://tunnel.example/--/?',
@@ -273,17 +278,7 @@ describe('the argv of every eas simulator invocation', () => {
   it(`binds the verb to a named controller session when one is given`, () => {
     expect(
       buildCloudOpenUrlArgs({ url: 'exp://x/--/?', platform: 'ios', session: 'default' })
-    ).toEqual([
-      'simulator:exec',
-      'npx',
-      AGENT_DEVICE_SPEC,
-      'open',
-      'exp://x/--/?',
-      '--platform',
-      'ios',
-      '--session',
-      'default',
-    ]);
+    ).toEqual(['open', 'exp://x/--/?', '--platform', 'ios', '--session', 'default']);
   });
 
   // The controller downloads the image to a local path, so there is nothing to redirect — and no
@@ -291,13 +286,7 @@ describe('the argv of every eas simulator invocation', () => {
   it(`screenshots to a local path, with no redirect and no platform flag`, () => {
     const args = buildCloudScreenshotArgs({ filePath: '/project/.expo/agent-cli/shot.png' });
 
-    expect(args).toEqual([
-      'simulator:exec',
-      'npx',
-      AGENT_DEVICE_SPEC,
-      'screenshot',
-      '/project/.expo/agent-cli/shot.png',
-    ]);
+    expect(args).toEqual(['screenshot', '/project/.expo/agent-cli/shot.png']);
     expect(args).not.toContain('--platform');
     expect(args.join(' ')).not.toContain('>');
   });
@@ -308,13 +297,7 @@ describe('the argv of every eas simulator invocation', () => {
   it(`closes the named app, and never the simulator`, () => {
     const args = buildCloudStopAppArgs({ appId: 'host.exp.Exponent' });
 
-    expect(args).toEqual([
-      'simulator:exec',
-      'npx',
-      AGENT_DEVICE_SPEC,
-      'close',
-      'host.exp.Exponent',
-    ]);
+    expect(args).toEqual(['close', 'host.exp.Exponent']);
     expect(args).not.toContain('--shutdown');
     expect(args).not.toContain('simulator:stop');
   });
@@ -352,20 +335,8 @@ describe('the argv of every eas simulator invocation', () => {
   // [observed — `agent-device@latest help alert`, 2026-08-27]. No `--platform`, for the reason the
   // screenshot verb takes none — the flag is documented on `open`/`install`/`apps` and nowhere else.
   it(`reads and answers a platform alert through the controller's own subcommands`, () => {
-    expect(buildCloudAlertArgs({ action: 'get' })).toEqual([
-      'simulator:exec',
-      'npx',
-      AGENT_DEVICE_SPEC,
-      'alert',
-      'get',
-    ]);
-    expect(buildCloudAlertArgs({ action: 'accept' })).toEqual([
-      'simulator:exec',
-      'npx',
-      AGENT_DEVICE_SPEC,
-      'alert',
-      'accept',
-    ]);
+    expect(buildCloudAlertArgs({ action: 'get' })).toEqual(['alert', 'get']);
+    expect(buildCloudAlertArgs({ action: 'accept' })).toEqual(['alert', 'accept']);
     expect(buildCloudAlertArgs({ action: 'get' })).not.toContain('--platform');
   });
 });
@@ -799,6 +770,7 @@ describe(openUrlOnCloudSimulatorAsync, () => {
 
     const result = await openUrlOnCloudSimulatorAsync({
       projectRoot: '/project',
+      sessionId: 'sess-1',
       url: 'exp://tunnel.example/--/?',
       platform: 'ios',
       easCli: {
@@ -812,7 +784,14 @@ describe(openUrlOnCloudSimulatorAsync, () => {
     });
 
     expect(spawned[0]!.args).toEqual(
-      easArgv(buildCloudOpenUrlArgs({ url: 'exp://tunnel.example/--/?', platform: 'ios' }))
+      easArgv(
+        guardedCloudArgs(
+          cloudExecArgs(
+            buildCloudOpenUrlArgs({ url: 'exp://tunnel.example/--/?', platform: 'ios' })
+          ),
+          'sess-1'
+        )
+      )
     );
     expect(result).toMatchObject({ exitCode: 0, stdout: 'opened', spawnError: null });
     // The reproduction line names the runner and the package, not the path npx was found at, so it
@@ -826,6 +805,7 @@ describe(openUrlOnCloudSimulatorAsync, () => {
 
     const result = await openUrlOnCloudSimulatorAsync({
       projectRoot: '/project',
+      sessionId: 'sess-1',
       url: 'exp://tunnel.example/--/?',
       platform: 'ios',
       easCli: {
@@ -841,6 +821,55 @@ describe(openUrlOnCloudSimulatorAsync, () => {
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('Remote daemon');
   });
+
+  const openOnSess1 = () =>
+    openUrlOnCloudSimulatorAsync({
+      projectRoot: '/project',
+      sessionId: 'sess-1',
+      url: 'exp://tunnel.example/--/?',
+      platform: 'ios',
+    });
+
+  it(`throws CLOUD_SESSION_MISMATCH with both ids when the guard refuses with its exit code`, async () => {
+    project();
+    mockEas({ exitCode: CLOUD_SESSION_GUARD_EXIT, stderr: `${CLOUD_SESSION_MISMATCH} sess-2\n` });
+
+    const error = await openOnSess1().catch((e) => e);
+    expect(error).toMatchObject({
+      code: 'CLOUD_SESSION_MISMATCH',
+      data: { selectedSessionId: 'sess-1', loadedSessionId: 'sess-2' },
+    });
+    expect(error.message).toContain('If session sess-2 is still running');
+    expect(error.suggestedCommand).toBeUndefined();
+  });
+
+  it(`reports no loaded id when the guard's line names none`, async () => {
+    project();
+    mockEas({ exitCode: CLOUD_SESSION_GUARD_EXIT, stderr: CLOUD_SESSION_MISMATCH });
+
+    await expect(openOnSess1()).rejects.toMatchObject({
+      code: 'CLOUD_SESSION_MISMATCH',
+      data: { selectedSessionId: 'sess-1', loadedSessionId: null },
+    });
+  });
+
+  it(`returns the result when exit 20 carries the sentinel inside another line`, async () => {
+    project();
+    mockEas({ exitCode: CLOUD_SESSION_GUARD_EXIT, stderr: `x ${CLOUD_SESSION_MISMATCH}` });
+
+    const result = await openOnSess1();
+
+    expect(result.exitCode).toBe(CLOUD_SESSION_GUARD_EXIT);
+  });
+
+  it(`returns the result when the sentinel is printed by something other than the guard`, async () => {
+    project();
+    mockEas({ exitCode: 1, stderr: `app said ${CLOUD_SESSION_MISMATCH}` });
+
+    const result = await openOnSess1();
+
+    expect(result.exitCode).toBe(1);
+  });
 });
 
 describe(captureCloudScreenshotAsync, () => {
@@ -852,6 +881,7 @@ describe(captureCloudScreenshotAsync, () => {
 
     await captureCloudScreenshotAsync({
       projectRoot: '/project',
+      sessionId: 'sess-1',
       filePath: '/project/.expo/agent-cli/shot.png',
       easCli: {
         command: 'npx',
@@ -864,7 +894,14 @@ describe(captureCloudScreenshotAsync, () => {
     });
 
     expect(spawned[0]!.args).toEqual(
-      easArgv(buildCloudScreenshotArgs({ filePath: '/project/.expo/agent-cli/shot.png' }))
+      easArgv(
+        guardedCloudArgs(
+          cloudExecArgs(
+            buildCloudScreenshotArgs({ filePath: '/project/.expo/agent-cli/shot.png' })
+          ),
+          'sess-1'
+        )
+      )
     );
   });
 });

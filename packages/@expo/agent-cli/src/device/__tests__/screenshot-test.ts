@@ -14,6 +14,11 @@ import { EventEmitter } from 'events';
 import fs from 'fs';
 import { vol } from 'memfs';
 import path from 'path';
+import {
+  CLOUD_SESSION_GUARD_EXIT,
+  CLOUD_SESSION_MISMATCH,
+  unwrapGuardedExec,
+} from '../cloudCommand';
 
 import {
   buildScreenshotCommand,
@@ -129,7 +134,8 @@ function mockTool(tool: StubTool): void {
         fs.writeSync(options.stdio[1], tool.toStdout, 0, tool.toStdout.length);
       }
       if (tool.toFile) {
-        fs.writeFileSync(args[args.length - 1]!, tool.toFile);
+        const controllerArgs = unwrapGuardedExec(args)?.args ?? args;
+        fs.writeFileSync(controllerArgs.at(-1)!, tool.toFile);
       }
       if (tool.stderr) {
         child.stderr.emit('data', tool.stderr);
@@ -328,5 +334,21 @@ describe(`${captureScreenshotAsync.name} on a cloud simulator`, () => {
 
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('Remote daemon is unavailable');
+  });
+
+  it(`reports a guard refusal as no picture, and does not throw`, async () => {
+    mockTool({ exitCode: CLOUD_SESSION_GUARD_EXIT, stderr: `${CLOUD_SESSION_MISMATCH}\n` });
+
+    const result = await captureScreenshotAsync({
+      backend: 'cloud',
+      projectRoot: '/project',
+      platform: 'ios',
+      deviceId: 'sess-1',
+      filePath: '/project/.expo/agent-cli/cloud.png',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('cannot be driven from this worktree');
+    expect(result.reason).toContain('How: ');
   });
 });
