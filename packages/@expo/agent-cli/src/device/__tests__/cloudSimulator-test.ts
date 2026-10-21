@@ -27,9 +27,9 @@ import {
 import recordedAvailability from '../../__fixtures__/eas/simulator-availability.json';
 import { isNeedsHumanError } from '../../utils/errors';
 import {
-  ACTIVE_SESSION_STATUS,
   AGENT_DEVICE_SPEC,
   CLOUD_SESSION_LIST_LIMIT,
+  CLOUD_SESSION_MAX_PAGES,
   CLOUD_SIMULATOR_WAITLIST_URL,
   DRIVABLE_SESSION_TYPE,
   buildAvailabilityArgs,
@@ -41,7 +41,6 @@ import {
   buildSessionListArgs,
   captureCloudScreenshotAsync,
   isOpenInAppAlert,
-  isActiveSessionStatus,
   openUrlOnCloudSimulatorAsync,
   parseAvailabilityJson,
   parseSessionIdFromEnvFile,
@@ -52,7 +51,6 @@ import {
   selectCloudSession,
   type CloudRunResult,
   type CloudSessionInfo,
-  type CloudSessionProbe,
 } from '../cloudSimulator';
 import {
   cloudNeedsTunnelError,
@@ -61,6 +59,7 @@ import {
   cloudVerbFailedError,
   cloudVerbNotSupportedError,
 } from '../cloudErrors';
+import { LIVE_SESSION_STATUSES, sessionPhase } from '../cloudSessionList';
 
 /**
  * The runner every `eas` invocation goes through, planted where the resolver will look.
@@ -139,7 +138,7 @@ function mockEas({
 /** One session row, in the shape `simulator:list --json` prints [observed — eas-cli@22.2.0]. */
 function sessionRow({
   id = 'sess-1',
-  status = ACTIVE_SESSION_STATUS,
+  status = LIVE_SESSION_STATUSES['in-progress'],
   platform = 'IOS',
   type = DRIVABLE_SESSION_TYPE,
   name = 'Checkout flow screenshots',
@@ -187,7 +186,9 @@ describe('the payloads the service really sent', () => {
         createdAt: '2026-08-26T09:56:35.286Z',
       },
     ]);
-    expect(selectCloudSession(sessions!).selected?.id).toBe('01a03d80-0556-7d22-98df-f415d9392b98');
+    expect(selectCloudSession(sessions!, {}).selected?.id).toBe(
+      '01a03d80-0556-7d22-98df-f415d9392b98'
+    );
   });
 
   // `[]` and not null: the service answered, and what it answered is "nothing is running". The two
@@ -205,7 +206,7 @@ describe('the payloads the service really sent', () => {
     const sessions = parseSessionListJson(recorded('simulator-list-stopped.json'));
 
     expect(sessions![0]!.status).toBe('STOPPED');
-    expect(isActiveSessionStatus(sessions![0]!.status)).toBe(false);
+    expect(sessionPhase(sessions![0]!.status)).not.toBe('up');
     expect(selectCloudSession(sessions!).selected).toBeNull();
   });
 
@@ -215,7 +216,7 @@ describe('the payloads the service really sent', () => {
     const [live] = parseSessionListJson(recorded('simulator-list-in-progress.json'))!;
     const older = { ...live!, id: 'older', createdAt: '2026-08-26T08:00:00.000Z' };
 
-    expect(selectCloudSession([older, live!]).selected?.id).toBe(live!.id);
+    expect(selectCloudSession([older, live!], {}).selected?.id).toBe(live!.id);
   });
 });
 
@@ -312,6 +313,12 @@ describe('the argv of every eas simulator invocation', () => {
       'simulator:list',
       '--status',
       'in-progress',
+      '--status',
+      'new',
+      '--status',
+      'queued',
+      '--status',
+      'starting',
       '--limit',
       String(CLOUD_SESSION_LIST_LIMIT),
       '--json',
@@ -406,7 +413,7 @@ describe(parseSessionListJson, () => {
     expect(parseSessionListJson(listJson(sessionRow()))).toEqual([
       {
         id: 'sess-1',
-        status: ACTIVE_SESSION_STATUS,
+        status: LIVE_SESSION_STATUSES['in-progress'],
         platform: 'ios',
         type: DRIVABLE_SESSION_TYPE,
         name: 'Checkout flow screenshots',
@@ -427,7 +434,9 @@ describe(parseSessionListJson, () => {
   });
 
   it(`drops a row that names no session, because there is nothing to drive`, () => {
-    expect(parseSessionListJson(listJson({ status: ACTIVE_SESSION_STATUS }))).toEqual([]);
+    expect(
+      parseSessionListJson(listJson({ status: LIVE_SESSION_STATUSES['in-progress'] }))
+    ).toEqual([]);
   });
 
   // A shape this cannot read must not become "there are no sessions": that would send a caller to
@@ -457,6 +466,18 @@ describe(selectCloudSession, () => {
     expect(selectCloudSession([ios]).selected?.id).toBe('ios-1');
   });
 
+  // With no platform asked for, a session with no platform must not outrank the dotenv id.
+  it(`prefers the dotenv id over a session with no platform when no platform is asked for`, () => {
+    const sessions = parseSessionListJson(
+      listJson(
+        sessionRow({ id: 'mine', createdAt: '2026-08-26T10:05:00.000Z' }),
+        sessionRow({ id: 'other', platform: 'WEB', createdAt: '2026-08-26T09:00:00.000Z' })
+      )
+    )!;
+
+    expect(selectCloudSession(sessions, { preferredId: 'mine' }).selected?.id).toBe('mine');
+  });
+
   // Only `agent-device` answers `simulator:exec npx agent-device`. A `serve-sim` session is a
   // browser preview, and driving it is not a thing that would work.
   it(`never picks a session whose controller this CLI does not speak to`, () => {
@@ -465,6 +486,11 @@ describe(selectCloudSession, () => {
 
     expect(selection.selected).toBeNull();
     expect(selection.wrongType.map((session) => session.id)).toEqual(['srv-1']);
+  });
+
+  it(`does not count a pending session it cannot drive as a running one`, () => {
+    const queued: CloudSessionInfo = { ...ios, id: 'srv-1', type: 'serve-sim', status: 'QUEUED' };
+    expect(selectCloudSession([queued]).wrongType).toEqual([]);
   });
 
   it(`never picks a session the service does not report as running`, () => {
@@ -484,6 +510,44 @@ describe(selectCloudSession, () => {
 
   // A session on the other platform still comes back: the caller raises the mismatch, which says a
   // session exists and is not the one asked for. "No session" would have hidden it.
+  it(`a pending dotenv session on the other platform does not hide an up session on the asked one`, () => {
+    const queuedAndroid = { ...android, id: 'sess-a', status: 'QUEUED' };
+    const iosUp = { ...ios, id: 'sess-b' };
+
+    expect(
+      selectCloudSession([queuedAndroid, iosUp], { preferredId: 'sess-a', platform: 'ios' })
+        .selected?.id
+    ).toBe('sess-b');
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Session discovery — a pending session is a candidate only when the dotenv names it
+  describe(`the dotenv session against a foreign one on the asked platform`, () => {
+    const own = { ...ios, id: 'own-ios' };
+    const foreign = { ...android, id: 'foreign-and' };
+    it.each([
+      ['up', 'queued', 'IN_PROGRESS', 'QUEUED'],
+      ['up', 'up', 'IN_PROGRESS', 'IN_PROGRESS'],
+      ['queued', 'queued', 'QUEUED', 'QUEUED'],
+    ])(
+      `picks the dotenv session (%s) over a foreign %s one`,
+      (_o, _f, ownStatus, foreignStatus) => {
+        const sessions = [
+          { ...own, status: ownStatus },
+          { ...foreign, status: foreignStatus },
+        ];
+        expect(
+          selectCloudSession(sessions, { preferredId: 'own-ios', platform: 'android' }).selected?.id
+        ).toBe('own-ios');
+      }
+    );
+
+    it(`picks no pending session the dotenv does not name`, () => {
+      expect(
+        selectCloudSession([{ ...foreign, status: 'QUEUED' }], { platform: 'android' }).selected
+      ).toBeNull();
+    });
+  });
+
   it(`still answers with the other platform's session when it is all there is`, () => {
     expect(selectCloudSession([android], { platform: 'ios' }).selected?.id).toBe('and-1');
   });
@@ -534,14 +598,22 @@ describe(readControllerError, () => {
   });
 });
 
-describe(isActiveSessionStatus, () => {
-  it.each([ACTIVE_SESSION_STATUS, 'in_progress'])(`is active for %s`, (status) => {
-    expect(isActiveSessionStatus(status)).toBe(true);
+describe(sessionPhase, () => {
+  it.each([
+    [LIVE_SESSION_STATUSES['in-progress'], 'up'],
+    ['in_progress', 'up'],
+    [' queued ', 'pending'],
+    ['NEW', 'pending'],
+    ['STARTING', 'pending'],
+    ['STOPPED', null],
+    [null, null],
+  ] as const)(`reads %s as %s`, (status, phase) => {
+    expect(sessionPhase(status)).toBe(phase);
   });
 
-  it.each(['FINISHED', 'CANCELED', 'ERRORED', null])(`is not active for %s`, (status) => {
-    expect(isActiveSessionStatus(status)).toBe(false);
-  });
+  it.each(Object.values(LIVE_SESSION_STATUSES))(`gives every listed status %s a phase`, (s) =>
+    expect(sessionPhase(s)).not.toBeNull()
+  );
 });
 
 describe(parseAvailabilityJson, () => {
@@ -605,11 +677,8 @@ describe(probeCloudSessionAsync, () => {
 
     expect(probe).toMatchObject({
       state: 'active',
-      sessionId: 'sess-1',
-      platform: 'ios',
-      sessionName: 'Checkout flow screenshots',
+      session: { id: 'sess-1', platform: 'ios', name: 'Checkout flow screenshots' },
       candidateCount: 1,
-      reason: null,
     });
     expect(spawned).toHaveLength(1);
     expect(spawned[0]!.args).toEqual(easArgv(buildSessionListArgs()));
@@ -626,7 +695,7 @@ describe(probeCloudSessionAsync, () => {
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
 
-    expect(probe).toMatchObject({ state: 'active', sessionId: 'sess-2', candidateCount: 2 });
+    expect(probe).toMatchObject({ state: 'active', session: { id: 'sess-2' }, candidateCount: 2 });
   });
 
   it(`prefers a session on the platform the caller asked for`, async () => {
@@ -638,9 +707,15 @@ describe(probeCloudSessionAsync, () => {
       ),
     });
 
-    const probe = await probeCloudSessionAsync({ projectRoot: '/project', platform: 'android' });
+    const probe = await probeCloudSessionAsync({
+      projectRoot: '/project',
+      platform: 'android',
+    });
 
-    expect(probe).toMatchObject({ state: 'active', sessionId: 'and-1', platform: 'android' });
+    expect(probe).toMatchObject({
+      state: 'active',
+      session: { id: 'and-1', platform: 'android' },
+    });
   });
 
   // The file outlives the session it names, so a stale one has to be called stale rather than
@@ -651,9 +726,23 @@ describe(probeCloudSessionAsync, () => {
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
 
-    expect(probe.state).toBe('inactive');
-    expect(probe.sessionId).toBe('sess-1');
-    expect(probe.reason).toContain('has ended');
+    expect(probe).toMatchObject({
+      state: 'inactive',
+      sessionId: 'sess-1',
+      reason: expect.stringContaining('has ended'),
+    });
+  });
+
+  it(`is inactive for a stale dotenv when only a pending session of another type is listed`, async () => {
+    project({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=sess-1\n' });
+    mockEas({ stdout: listJson(sessionRow({ id: 'srv-1', type: 'serve-sim', status: 'QUEUED' })) });
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
+
+    expect(probe).toMatchObject({
+      state: 'inactive',
+      reason: expect.stringContaining('has ended'),
+    });
   });
 
   // "No session" for a running `serve-sim` would send a reader to start a second billed one next
@@ -664,9 +753,12 @@ describe(probeCloudSessionAsync, () => {
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
 
-    expect(probe.state).toBe('none');
-    expect(probe.reason).toContain('serve-sim');
-    expect(probe.reason).toContain(DRIVABLE_SESSION_TYPE);
+    expect(probe).toMatchObject({
+      state: 'none',
+      wrongTypeCount: 1,
+      reason: expect.stringContaining('serve-sim'),
+    });
+    expect(probe).toMatchObject({ reason: expect.stringContaining(DRIVABLE_SESSION_TYPE) });
   });
 
   it(`is none with nothing running, and only then asks the read-only availability question`, async () => {
@@ -689,7 +781,11 @@ describe(probeCloudSessionAsync, () => {
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
 
-    expect(probe).toMatchObject({ state: 'none', sessionId: null, available: true });
+    expect(probe).toEqual({
+      state: 'none',
+      wrongTypeCount: 0,
+      reason: 'the service lists no running EAS Simulator session for this project',
+    });
     expect(spawned.map((run) => run.args)).toEqual([
       easArgv(buildSessionListArgs()),
       easArgv(buildAvailabilityArgs()),
@@ -719,10 +815,11 @@ describe(probeCloudSessionAsync, () => {
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
 
-    expect(probe.state).toBe('none');
-    expect(probe.available).toBe(false);
-    expect(probe.waitlistUrl).toBe(CLOUD_SIMULATOR_WAITLIST_URL);
-    expect(probe.reason).toContain('not enabled on this account');
+    expect(probe).toMatchObject({
+      state: 'unavailable',
+      waitlistUrl: CLOUD_SIMULATOR_WAITLIST_URL,
+      reason: expect.stringContaining('not enabled on this account'),
+    });
   });
 
   // A binary that is not the EAS CLI has said nothing about the sessions (`wrapperCrash.ts`), and
@@ -733,8 +830,10 @@ describe(probeCloudSessionAsync, () => {
 
     const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
 
-    expect(probe.state).toBe('unknown');
-    expect(probe.reason).toContain('may not be the EAS CLI');
+    expect(probe).toMatchObject({
+      state: 'unknown',
+      reason: expect.stringContaining('may not be the EAS CLI'),
+    });
   });
 
   it(`is unknown when there is no eas binary to ask, and spawns nothing`, async () => {
@@ -751,11 +850,128 @@ describe(probeCloudSessionAsync, () => {
     expect(['unknown', 'none']).toContain(probe.state);
   });
 
+  it(`finds the dotenv session on a later page instead of calling it ended`, async () => {
+    project({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=sess-1\n' });
+    let call = 0;
+    spawned = [];
+    vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
+      spawned.push({ command, args });
+      const answer =
+        call++ === 0
+          ? JSON.stringify({
+              sessions: [sessionRow({ id: 'other-1' })],
+              pageInfo: { hasNextPage: true, endCursor: 'c1' },
+            })
+          : listJson(sessionRow({ id: 'sess-1' }));
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => {
+        child.stdout.emit('data', answer);
+        child.emit('close', 0, null);
+      });
+      return child as any;
+    }) as any);
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
+
+    expect(probe).toMatchObject({ state: 'active', session: { id: 'sess-1' } });
+    expect(spawned.map((run) => run.args)).toEqual([
+      easArgv(buildSessionListArgs()),
+      easArgv(buildSessionListArgs({ after: 'c1' })),
+    ]);
+  });
+
+  it(`gives up as unknown when the pages never end`, async () => {
+    project();
+    mockEas({
+      stdout: JSON.stringify({
+        sessions: [sessionRow({ id: 'other-1' })],
+        pageInfo: { hasNextPage: true, endCursor: 'c1' },
+      }),
+    });
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
+
+    expect(probe.state).toBe('unknown');
+    expect(spawned).toHaveLength(CLOUD_SESSION_MAX_PAGES);
+  });
+
+  it(`is unknown when a page says there is more and names no cursor`, async () => {
+    project();
+    mockEas({
+      stdout: JSON.stringify({
+        sessions: [sessionRow({ id: 'other-1' })],
+        pageInfo: { hasNextPage: true, endCursor: null },
+      }),
+    });
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
+
+    expect(probe.state).toBe('unknown');
+    expect(spawned).toHaveLength(1);
+  });
+
+  it(`is unknown, with the failure, when a later page fails`, async () => {
+    project();
+    let call = 0;
+    spawned = [];
+    vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
+      spawned.push({ command, args });
+      const first = call++ === 0;
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => {
+        if (first)
+          child.stdout.emit(
+            'data',
+            JSON.stringify({
+              sessions: [sessionRow({ id: 'other-1' })],
+              pageInfo: { hasNextPage: true, endCursor: 'c1' },
+            })
+          );
+        else
+          child.stderr.emit(
+            'data',
+            'An Expo user account is required to proceed. Log in with eas login'
+          );
+        child.emit('close', first ? 0 : 1, null);
+      });
+      return child as any;
+    }) as any);
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
+
+    expect(probe).toMatchObject({ state: 'unknown', failure: { exitCode: 1 } });
+  });
+
   it(`is unknown for an answer whose JSON it cannot read`, async () => {
     project({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=sess-1\n' });
     mockEas({ stdout: '<html>login</html>' });
 
     expect((await probeCloudSessionAsync({ projectRoot: '/project' })).state).toBe('unknown');
+  });
+
+  it.each(['QUEUED', 'STARTING'])(`is queued for a %s session`, async (status) => {
+    project({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=sess-1\n' });
+    mockEas({ stdout: listJson(sessionRow({ status })) });
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
+
+    expect(probe).toMatchObject({ state: 'queued', session: { id: 'sess-1', status } });
+  });
+
+  it(`is not queued for a pending session the dotenv does not name`, async () => {
+    project();
+    mockEas({ stdout: listJson(sessionRow({ status: 'QUEUED' })) });
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project' });
+
+    expect(probe.state).not.toBe('queued');
+    expect(probe.state).not.toBe('active');
   });
 });
 
@@ -909,19 +1125,12 @@ describe(captureCloudScreenshotAsync, () => {
 // ---- The failures ------------------------------------------------------------------------------
 
 describe(cloudSessionUnavailableError, () => {
-  const probe: CloudSessionProbe = {
+  const probe = {
     state: 'none',
-    sessionId: null,
-    platform: null,
-    status: null,
-    sessionName: null,
-    candidateCount: 0,
-    otherSessionCount: 0,
-    available: null,
-    waitlistUrl: null,
-    failure: null,
+    wrongTypeCount: 0,
+    unboundCount: 0,
     reason: 'the service lists no running EAS Simulator session for this project',
-  };
+  } as const;
 
   it(`names the command that starts a session, and says it bills until stopped`, () => {
     const error = cloudSessionUnavailableError(probe);
@@ -933,9 +1142,27 @@ describe(cloudSessionUnavailableError, () => {
     expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --eas');
   });
 
+  // The probe treats a pending session as live, so the advice lists the pending statuses too.
+  it(`advises the listing the probe runs, and ends each sentence once`, () => {
+    const error = cloudSessionUnavailableError({
+      state: 'none',
+      wrongTypeCount: 0,
+      reason: 'the service lists no running EAS Simulator session for this project',
+    });
+
+    expect(error.message).toContain(
+      'simulator:list --status in-progress --status new --status queued --status starting"'
+    );
+    expect(error.message).not.toContain('..');
+  });
+
   // An account that cannot have the feature must never be told to start a session.
   it(`offers the local device and --print-url when the account has no access`, () => {
-    const error = cloudSessionUnavailableError({ ...probe, available: false });
+    const error = cloudSessionUnavailableError({
+      state: 'unavailable',
+      waitlistUrl: CLOUD_SIMULATOR_WAITLIST_URL,
+      reason: 'EAS Simulator is not enabled on this account',
+    });
 
     expect(error.code).toBe('CLOUD_SIMULATOR_UNAVAILABLE');
     expect(error.message).not.toContain('simulator:start');
@@ -1080,13 +1307,6 @@ describe(`${cloudSessionUnknownError.name} and the signed-out account`, () => {
   const probe = {
     state: 'unknown' as const,
     sessionId: 'sess-1',
-    platform: null,
-    status: null,
-    sessionName: null,
-    candidateCount: 0,
-    otherSessionCount: 0,
-    available: null,
-    waitlistUrl: null,
     reason: 'the EAS CLI would not answer',
   };
 

@@ -1,7 +1,10 @@
 // @ref llp/0027-everything-on-eas.rfc.md §The open is a session
+import fs from 'fs';
 import * as Log from '../../log';
 import simulatorFailures from '../../__fixtures__/eas/simulator-failures.json';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
+import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
+import { registryDirectory } from '../../deviceBinding/registry';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { resolveEasCli } from '../../utils/easCli';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
@@ -63,14 +66,11 @@ function mockConnectUrls() {
 }
 
 function mockNoSession() {
-  vi.mocked(probeCloudSessionAsync).mockResolvedValue({
-    state: 'none',
-    sessionId: null,
-    platform: null,
-  } as any);
+  vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.none());
 }
 
 beforeEach(() => {
+  fs.rmSync(registryDirectory(), { recursive: true, force: true });
   vi.mocked(resolveEasCli).mockReturnValue(EAS_CLI);
   mockTunnel('abc.tunnel.example');
   mockConnectUrls();
@@ -290,11 +290,9 @@ describe(openAppOnEasAsync, () => {
   });
 
   it(`reuses a session this project already has on the platform, through the same open navigate runs`, async () => {
-    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
-      state: 'active',
-      sessionId: 'sess-up',
-      platform: 'ios',
-    } as any);
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-up', platform: 'ios' })
+    );
     vi.mocked(openRouteAsync).mockResolvedValue({
       exitCode: 0,
       command: 'eas simulator:exec',
@@ -320,11 +318,9 @@ describe(openAppOnEasAsync, () => {
   it(`waits for the tunnel before it sends the deep link to a session that is up`, async () => {
     vi.useFakeTimers();
     try {
-      vi.mocked(probeCloudSessionAsync).mockResolvedValue({
-        state: 'active',
-        sessionId: 'sess-up',
-        platform: 'ios',
-      } as any);
+      vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+        cloudProbe.active({ id: 'sess-up', platform: 'ios' })
+      );
       vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValueOnce(null).mockResolvedValue({
         url: 'https://abc.tunnel.example',
         host: 'abc.tunnel.example',
@@ -354,11 +350,9 @@ describe(openAppOnEasAsync, () => {
   });
 
   it(`sends no deep link to a session that is up when no tunnel comes`, async () => {
-    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
-      state: 'active',
-      sessionId: 'sess-up',
-      platform: 'ios',
-    } as any);
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-up', platform: 'ios' })
+    );
     mockTunnel(null);
 
     const report = await openAppOnEasAsync(projectRoot, {
@@ -375,11 +369,9 @@ describe(openAppOnEasAsync, () => {
   });
 
   it(`starts a new session when the one up is the other platform`, async () => {
-    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
-      state: 'active',
-      sessionId: 'sess-android',
-      platform: 'android',
-    } as any);
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-android', platform: 'android' })
+    );
 
     const report = await openAppOnEasAsync(projectRoot, {
       platform: 'ios',
@@ -593,11 +585,9 @@ describe('the session half on its own', () => {
   });
 
   it(`names the session it reused, with the URL it would open, and starts nothing`, async () => {
-    vi.mocked(probeCloudSessionAsync).mockResolvedValue({
-      state: 'active',
-      sessionId: 'sess-up',
-      platform: 'ios',
-    } as any);
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-up', platform: 'ios' })
+    );
     const report = await ensureEasSessionAsync(projectRoot, {
       platform: 'ios',
       expoGo: true,
@@ -621,5 +611,35 @@ describe('the session half on its own', () => {
     });
     const args = vi.mocked(spawnCaptureAsync).mock.calls[0]![1];
     expect(args[args.indexOf('--name') + 1]).toBe('my-app — agent-cli smoke');
+  });
+});
+
+describe('worktree session ownership', () => {
+  const options = {
+    platform: 'ios' as const,
+    expoGo: true,
+    devServerUrl: DEV_SERVER,
+    buildId: null,
+  };
+  it('a failed listing never starts a billed session', async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.unknown({ reason: 'listing timed out' })
+    );
+    const report = await openAppOnEasAsync(projectRoot, options);
+    expect(report).toMatchObject({ opened: false, reason: 'listing timed out' });
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+  it('a queued session is retained without a replacement start', async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.queued({ id: 'queued', platform: 'ios' })
+    );
+    expect(await openAppOnEasAsync(projectRoot, options)).toMatchObject({
+      opened: false,
+      sessionId: 'queued',
+      reason: expect.stringContaining(
+        'session queued is not up yet (status QUEUED); run this again in a minute'
+      ),
+    });
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
 });

@@ -21,8 +21,8 @@ import {
   type CloudSessionProbe,
 } from '../device/cloudSimulator';
 import {
-  cloudPlatformUnknownError,
   cloudPlatformMismatchError,
+  cloudPlatformUnknownError,
   cloudSessionUnavailableError,
   cloudSessionUnknownError,
 } from '../device/cloudErrors';
@@ -76,42 +76,55 @@ export function navigateDeviceOf(device: BoundDevice): NavigateDevice {
 }
 
 /**
- * Look for a cloud simulator session this project can drive. Never throws: no session is an answer.
+ * Look for the cloud simulator session this worktree can drive. Never throws for no session: no
+ * session is an answer.
  *
- * **The service answers this, not the filesystem.** The first cut of this rung was gated on
- * `.env.eas-simulator` existing, which is cheaper and wrong in both directions: the file outlives
- * the session it names, and a session started by MCP, by another terminal, or by a
- * `simulator:start --json` never writes it. So the rung spawns one `eas simulator:list`, and the
- * cost of that is paid here on purpose — this is about to open a link on a device, and llp/0005
- * §Cloud simulator is where the split between this ladder and the instant suggestion ladders is
- * argued.
+ * **The service answers this, not the filesystem.** One `eas simulator:list`, because this is
+ * about to open a link on a device (llp/0005 §Cloud simulator).
  *
- * `platform` is passed through as a **preference** for picking between several live sessions, not
- * as a filter: the caller compares afterwards, so a session on the other platform is reported as
- * one rather than hidden behind "no session".
+ * `platform` is a **preference** for picking between several sessions, not a filter: the caller
+ * compares afterwards, so a session on the other platform is reported as one rather than hidden
+ * behind "no session".
  *
- * @see src/device/cloudSimulator.ts — where the argv lives, and how much of it has been verified.
+ * @throws {CommandError} for a queued session: it is listed and not up yet.
  */
 export async function probeCloudDeviceAsync(
   projectRoot: string,
   { platform = null }: { platform?: NavigatePlatform | null } = {}
-): Promise<{ device: NavigateDevice | null; probe: CloudSessionProbe }> {
-  const probe = await probeCloudSessionAsync({ projectRoot, platform });
-  if (probe.state !== 'active' || probe.platform == null || probe.sessionId == null) {
+): Promise<{
+  device: NavigateDevice | null;
+  probe: Exclude<CloudSessionProbe, { state: 'queued' }>;
+}> {
+  const probe = await probeCloudSessionAsync({
+    projectRoot,
+    platform,
+  });
+  // A queued session is listed and not up yet. Say so, rather than "no session".
+  if (probe.state === 'queued') {
+    const { session } = probe;
+    if (platform != null && session.platform != null && session.platform !== platform) {
+      throw cloudPlatformMismatchError(platform, session.platform, session.id);
+    }
+    throw new CommandError(
+      'NO_CLOUD_SIMULATOR_SESSION',
+      `EAS Simulator session ${session.id} is not up yet${session.status ? ` (status ${session.status})` : ''}.\nHow: run this command again in a minute.`
+    );
+  }
+  if (probe.state !== 'active' || probe.session.platform == null) {
     // A live session whose platform could not be read is not a device this can be handed: the URL
     // shape differs per platform. The caller raises `cloudPlatformUnknownError` for it.
     return { device: null, probe };
   }
 
-  debugEvent('device_resolved', { platform: probe.platform, deviceId: probe.sessionId });
+  debugEvent('device_resolved', { platform: probe.session.platform, deviceId: probe.session.id });
   return {
     device: {
       backend: 'cloud',
-      platform: probe.platform,
-      deviceId: probe.sessionId,
+      platform: probe.session.platform,
+      deviceId: probe.session.id,
       // The session's own `--name` when it has one, because a project with several sessions up has
       // just had one chosen for it, and the name is what says which (llp/0005 §Cloud simulator).
-      name: probe.sessionName ?? 'EAS Simulator session',
+      name: probe.session.name ?? 'EAS Simulator session',
     },
     probe,
   };
@@ -188,8 +201,8 @@ export interface ResolveDeviceContext {
 /**
  * The cloud rung of the ladder, taken after the local rungs passed.
  *
- * Until llp/0035 §EAS session binding binds sessions, the fallback accepts the dotenv id only, never the newest
- * session: a worktree with no binding must not drive another worktree's session.
+ * The fallback accepts the dotenv id only, never the newest session: a worktree must not drive
+ * another worktree's session.
  *
  * A session on the **other** platform is not this run's device: `--ios` named iOS, and an Android
  * session cannot open an iOS link. It is still reported, through the probe, so the failure can say
@@ -234,20 +247,20 @@ async function resolveCloudDeviceAsync(
     return device;
   }
 
-  if (probe.state === 'active' && probe.sessionId != null) {
+  if (probe.state === 'active') {
     // The session is up and did not say what it is. A caller that named a platform has answered
     // that itself; one that did not is asked, rather than having a URL shape guessed for it.
     if (platform == null) {
-      throw cloudPlatformUnknownError(probe.sessionId);
+      throw cloudPlatformUnknownError(probe.session.id);
     }
     return {
       backend: 'cloud',
       platform,
-      deviceId: probe.sessionId,
+      deviceId: probe.session.id,
       name: 'EAS Simulator session',
     };
   }
-  if (probe.state === 'unknown' || probe.state === 'active') {
+  if (probe.state === 'unknown') {
     throw cloudSessionUnknownError(probe);
   }
   throw cloudSessionUnavailableError(probe);
@@ -305,18 +318,25 @@ function cloudSessionLine(probe: CloudSessionProbe | null): string | null {
   if (probe.state === 'none') {
     // A live session of a type this CLI cannot drive is still worth naming: "no device found" next
     // to a running `serve-sim` is true and leaves the reader one command short of a device.
-    return probe.otherSessionCount > 0
-      ? `Or: this project has ${probe.otherSessionCount} running EAS Simulator session${
-          probe.otherSessionCount === 1 ? '' : 's'
-        } this CLI cannot drive — ${probe.reason ?? 'none of them is an agent-device session'}. Start one it can with "${cloudSessionStartCommand()}" and pass --eas.`
-      : null;
+    const lines = [];
+    if (probe.wrongTypeCount > 0)
+      lines.push(
+        `Or: this project has ${countOf(probe.wrongTypeCount, 'running EAS Simulator session')} this CLI cannot drive — none of them is an agent-device session. Start one it can with "${cloudSessionStartCommand()}" and pass --eas.`
+      );
+    return lines.length ? lines.join('\n') : null;
   }
-  if (probe.state === 'active') {
+  if (probe.state === 'active' || probe.state === 'queued') {
     // Reached when the session is live and is for the *other* platform, is not this worktree's
     // dotenv session, or reported none.
     return `Or: this project has a running EAS Simulator session${
-      probe.platform ? ` (${probe.platform})` : ''
+      probe.session.platform ? ` (${probe.session.platform})` : ''
     }, and it is not the device this run asked for. Run this command again with --eas and no platform flag to use it.`;
   }
-  return `Or: this project has an EAS Simulator session on record and it is not usable — ${probe.reason ?? 'the service did not report it as running'}. Start a new one with "${cloudSessionStartCommand()}" and pass --eas.`;
+  // An account without the feature has no session on record to name.
+  if (probe.state === 'unavailable') return null;
+  return `Or: this project has an EAS Simulator session on record and it is not usable — ${probe.reason}. Start a new one with "${cloudSessionStartCommand()}" and pass --eas.`;
+}
+
+function countOf(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
 }

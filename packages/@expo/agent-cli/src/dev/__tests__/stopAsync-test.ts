@@ -4,6 +4,7 @@ import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
 import { devStopAsync, looksLikeDevServerProcess } from '../stopAsync';
 import type { MockInstance } from 'vitest';
+import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -568,11 +569,9 @@ describe('dev:stop --eas', () => {
   });
 
   it(`ends the session in progress by id, and says so beside the dev server`, async () => {
-    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue({
-      state: 'active',
-      sessionId: 'sess-1',
-      platform: 'ios',
-    } as any);
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-1', platform: 'ios' })
+    );
     vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
 
     const code = await devStopAsync(projectRoot, options({ eas: true }));
@@ -584,12 +583,9 @@ describe('dev:stop --eas', () => {
   });
 
   it(`reports no session as an answer, and exits 0`, async () => {
-    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue({
-      state: 'none',
-      sessionId: null,
-      platform: null,
-      reason: 'nothing listed',
-    } as any);
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.none({ reason: 'nothing listed' })
+    );
 
     const code = await devStopAsync(projectRoot, options({ eas: true }));
 
@@ -599,11 +595,9 @@ describe('dev:stop --eas', () => {
   });
 
   it(`exits 20 when the session would not stop — it is still billing`, async () => {
-    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue({
-      state: 'active',
-      sessionId: 'sess-1',
-      platform: 'ios',
-    } as any);
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-1', platform: 'ios' })
+    );
     vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({
       ok: false,
       reason: '"npx --yes eas-cli simulator:stop --id sess-1 --non-interactive" exited 1: refused',

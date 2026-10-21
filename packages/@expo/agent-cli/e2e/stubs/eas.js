@@ -411,15 +411,20 @@ if (command === 'simulator:list') {
   if (exitCode !== 0) {
     exitWith(process.stderr, process.env.STUB_SIM_STDERR || 'Session not found', exitCode);
   }
-  const wanted = valueOf('--status');
-  const remembered = rememberedSessions().filter(
-    (session) => !wanted || same(session.status, wanted.replace('-', '_'))
+  const wanted = args.flatMap((arg, index) =>
+    arg === '--status' ? [args[index + 1].replace('-', '_')] : []
   );
+  const remembered = rememberedSessions();
   const sessions = [
     ...remembered,
     ...(process.env.STUB_SIM_SESSIONS === '0' ? [] : [stubSession()]),
   ];
-  printJson({ sessions, pageInfo: { hasNextPage: false } });
+  printJson({
+    sessions: sessions.filter(
+      (session) => !wanted.length || wanted.some((status) => same(session.status, status))
+    ),
+    pageInfo: { hasNextPage: false },
+  });
   process.exit(0);
 }
 

@@ -271,11 +271,11 @@ export async function ensureEasSessionAsync(
     platform: platform as CloudPlatform,
     timeoutMs: CLOUD_SESSION_TIMEOUT_MS,
   });
-  if (probe.state === 'active' && probe.platform === platform && probe.sessionId) {
-    event('open_app_eas_session_reused', { platform, sessionId: probe.sessionId });
+  if (probe.state === 'active' && probe.session.platform === platform) {
+    event('open_app_eas_session_reused', { platform, sessionId: probe.session.id });
     return {
       ok: true,
-      sessionId: probe.sessionId,
+      sessionId: probe.session.id,
       started: false,
       tunnelHost: null,
       openUrl: null,
@@ -283,6 +283,12 @@ export async function ensureEasSessionAsync(
       reason: null,
     };
   }
+  if (probe.state === 'unknown' || probe.state === 'unavailable') return failed(probe.reason);
+  if (probe.state === 'queued' && probe.session.platform === platform)
+    return failed(
+      `EAS Simulator session ${probe.session.id} is not up yet${probe.session.status ? ` (status ${probe.session.status})` : ''}; run this again in a minute`,
+      { sessionId: probe.session.id }
+    );
   if (!stillWanted()) {
     return failed('the dev server stopped before a session was started');
   }

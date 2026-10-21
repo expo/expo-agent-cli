@@ -330,7 +330,7 @@ Each accepted race costs one rerun of `dev`, never a lost build or a touched hum
 
 1. The Android facts §Live gate verifies: a second `-read-only` instance boots beside the first and takes `adb reverse` and an install, an emulator started on a taken port exits non-zero, the launcher keeps its pid, and a cold boot plus the install fits `BOOT_DEVICE_TIMEOUT_MS`. The gate passed on SDK 58; the cold start's wall time is the cost every instance start pays (Decision 2).
 2. A pid reused by an unrelated long-lived process keeps the registry lock until a human reads the message; a reused emulator pid is never killed where `ps` exists, and on a platform without `ps` the kill can hit the wrong process. Without `ps`, `dev` and the read verbs can drive whatever answers on the serial. Needs pid wrap-around during days of uptime.
-3. eas-cli skew: a project pinned under 23.2 refuses `--tag` on the start; §Recovery by tag (not built) must test the fallback.
+3. eas-cli skew: a project pinned under 23.2 refuses `--tag` on the start; §Recovery by tag (not built) must test the fallback. A pinned eas-cli that rejects `--status queued` (24.8.0 and older) makes the listing fail, so the probe is `unknown` and no session starts.
 4. The idle-timeout semantics on the service are unread; 30 min may stop a session during a long pause.
 5. A crash or a 20 s timeout during `simctl create` leaks one `Shutdown` simulator named `agent-cli <first 8 chars>`, and a retry creates a second; nothing adopts or deletes them. Main measured a cold `simctl list` at 2.6 s, so `status`'s 2.5 s probe deadline can report `unknown` on a cold machine.
 6. In bootstrap mode, `smoke` on a development-build project compiles onto the worktree's simulator instead of a simulator that already has the app.
@@ -584,15 +584,16 @@ Before a real `dev` startup, `.expo/agent-cli-last-dev.json` retains only its pa
 
 ## EAS session binding
 
-An EAS session belongs to the worktree that started it. Extends the binding and lifecycle rules in this RFC and §Device lifecycle to EAS sessions. Its first part is §Session guard. §Recovery by tag is not built.
+An EAS session belongs to the worktree that started it. Extends the binding and lifecycle rules in this RFC and §Device lifecycle to EAS sessions. The parts are §Session guard and §Session discovery. §Recovery by tag is not built.
 
 How does a worktree keep to its own EAS session, and how does that session survive a lost registry?
 
-**Status:** §Session guard is built. A session is not bound to a worktree, and §Recovery by tag is not built.
+**Status:** §Session guard and §Session discovery are built. A session is not bound to a worktree, and §Recovery by tag is not built.
 
 ### State after EAS binding
 
 - An EAS device command runs only on the session it selected.
+- Discovery sees every pending and in-progress session on every page. A failed listing starts no session, and a queued session on the requested platform is never replaced by a new start.
 
 ### Session guard
 
@@ -608,6 +609,19 @@ Does an EAS device command run only on the session it selected?
 - The `command` of a report is the logical argv, `eas simulator:exec npx agent-device@latest …`, not the guard.
 - This CLI writes no credentials.
 - Tests: a mismatched connection exits before the controller starts, and the controller gets the loaded environment (cloudBinding-test); the guarded argv of the open and the screenshot (cloudSimulator-test); an e2e round trip of a target argv with spaces, quotes, `^`, `%`, `&`, Unicode and a newline through the stub runner, and its refusal on a mismatch (cloud-binding-test). The stub `eas` loads the connection file as EAS does and runs the real guard.
+
+### Session discovery
+
+**Status:** built.
+
+Does discovery see every live session, and does doubt start no session?
+
+- `simulator:list` asks for every pending status (`new`, `queued`, `starting`) and `in-progress`. EAS reports a pending session with any of the three pending statuses.
+- The probe follows `--after <endCursor>` while `pageInfo.hasNextPage` is true, because a session that is not on page 1 has not ended. A later page that fails or cannot be read, or a page that lists more pages and names no cursor, gives `unknown`. After `CLOUD_SESSION_MAX_PAGES` (10) pages with more pages listed, the probe gives `unknown`, so a cursor that does not advance cannot loop.
+- `ensureEasSessionAsync` starts no session when the probe is `unknown` or the account has no EAS Simulator. A queued session that the dotenv names, on the requested platform, is never replaced by a new start; the open fails and asks for a retry in a minute.
+- `navigate --eas` on a queued session says that the session is not up yet. A queued session on another platform than the one asked answers a platform mismatch. `dev:stop --eas` stops a queued session.
+- A pinned eas-cli that refuses `--status queued` (24.8.0 and older) fails the listing, so the probe is `unknown` and no session starts (Risk 3).
+- Tests: the listing argv, a session on page 2, pages that do not end, a page with no cursor, a queued and a starting session, a pending session the dotenv does not name, the dotenv session against a foreign one on the asked platform (cloudSimulator-test); a queued session on the other platform (navigate device-test); a failed listing and a queued session start nothing (openAppEas-test).
 
 ### Recovery by tag
 

@@ -24,6 +24,7 @@ import {
   isOpenInAppAlert,
   openUrlOnCloudSimulatorAsync,
   readCloudAlertAsync,
+  cloudSessionListCommand,
   readControllerError,
 } from '../device/cloudSimulator';
 import { cloudNeedsTunnelError, cloudVerbFailedError } from '../device/cloudErrors';
@@ -77,7 +78,6 @@ import {
   type RouteCommand,
 } from './routeCheck';
 import { decideExpoGoTarget } from './target';
-import { easCommandPrefix } from '../utils/easCli';
 
 export interface OpenRouteOptions {
   /** Route as the caller wrote it. */
@@ -630,7 +630,7 @@ async function openUrlOnBackendAsync(
   if (result.spawnError || result.exitCode !== 0) {
     throw cloudVerbFailedError(result, {
       what: `${url} was not opened on the cloud simulator.`,
-      how: `Check the session is still running with "${easCommandPrefix()} simulator:list --status in-progress" — a session can end between the moment it was listed and the moment a verb reaches it. Start a new one if it has.`,
+      how: `Check the session is still running with "${cloudSessionListCommand()}" — a session can end between the moment it was listed and the moment a verb reaches it. Start a new one if it has.`,
     });
   }
   return {

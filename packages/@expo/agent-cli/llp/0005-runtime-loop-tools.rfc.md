@@ -659,13 +659,13 @@ The order in `resolveDeviceAsync`:
 
 The backend is `eas simulator:<verb>` subprocesses (`src/device/cloudSimulator.ts`), per [[0001-agentic-cli-on-expo-cli]] constraint 5. Device verbs go through `eas simulator:exec npx agent-device@latest …`. `AGENT_DEVICE_SPEC` is that decision in one constant. `simulator:exec` loads the connection environment and starts its child locally; `agent-device` uses that environment to reach the cloud daemon [observed — installed eas-cli 24.10.0, `build/commands/simulator/exec.js`, 2026-10-09]. The session guard of [[0035-one-device-per-worktree]] §Session guard therefore resolves the controller command for the caller's platform, including Windows batch-file escaping. The logical argv is pinned by a test table (`src/device/__tests__/cloudSimulator-test.ts`). Enum values come back as raw GraphQL enums (`IN_PROGRESS`, `IOS`) while `type` is the flag spelling (`agent-device`). `startedAt` and `finishedAt` are absent rather than null when they do not apply.
 
-A cloud device is a session the service says is running, not a file on disk [confirmed, Kudo, 2026-08-26]. `eas simulator:list --status in-progress` is the probe. MCP need not write `.env.eas-simulator`. `simulator:start --json` and `--out-config-type env` do not write it either. The file outlives the session it names. Direct GraphQL to `api.expo.dev` is rejected: it reads another CLI's credential store. `eas` is the program that owns that token, so `eas` is the program that spends it.
+A cloud device is a session the service says is running, not a file on disk [confirmed, Kudo, 2026-08-26]. `eas simulator:list`, with the statuses of [[0035-one-device-per-worktree]] §Session discovery, is the probe. MCP need not write `.env.eas-simulator`. `simulator:start --json` and `--out-config-type env` do not write it either. The file outlives the session it names. Direct GraphQL to `api.expo.dev` is rejected: it reads another CLI's credential store. `eas` is the program that owns that token, so `eas` is the program that spends it.
 
 The device ladder (`navigate` and `smoke`) asks the service. The suggestion ladders (`status.next`, the `start` and `dev` banner) keep the `stat` on the dotenv. They promise to be instant.
 
 Which session, when there is more than one, is deterministic:
 
-1. Only `type: agent-device` is a candidate. An `argent`, `appium`, or `serve-sim` session has no agent-device daemon. A project whose only live session is one of those is told that.
+1. Only `type: agent-device` is a candidate. An `argent`, `appium`, or `serve-sim` session has no agent-device daemon. A project whose only live session is one of those is told that. A pending session is a candidate only when `.env.eas-simulator` names it ([[0035-one-device-per-worktree]] §Session discovery).
 2. The session `.env.eas-simulator` names, when it is among the candidates. The file is a poor existence proof and a good preference.
 3. The platform the caller asked for.
 4. The most recently created, `createdAt` descending, `id` ascending as the tiebreaker.
