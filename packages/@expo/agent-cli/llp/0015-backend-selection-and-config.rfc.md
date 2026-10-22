@@ -64,48 +64,32 @@ What "everything on EAS" is made of on `dev` — the tunnel, the simulator profi
 
 > A command starts a billed EAS action only when a person chose EAS for it. An EAS build needs `--eas`, `buildBackend: "eas"` or `deviceBackend: "eas"`. An EAS Simulator session needs `--eas` or `deviceBackend: "eas"`. A finding about this host never starts either.
 
-A billed action is one of two things: starting an EAS build (`eas build`, or a verb that queues one, `eas build:dev` and `eas workflow:run`), or starting an EAS Simulator session (`eas simulator`, `eas simulator:start`). Each one costs credits from the moment it starts.
+A billed action is starting an EAS build (`eas build`, or a verb that queues one) or starting an EAS Simulator session (`eas simulator`). Each one costs credits from the moment it starts.
 
-The rule is about **starting**. Using a session that is already running starts nothing new. So the `fallback` rung of `navigate` and `smoke` is allowed: with no local device, they may drive the session that `.env.eas-simulator` names ([[0005-runtime-loop-tools]] §Cloud simulator, [[0035-one-device-per-worktree]]). They never start one without `--eas` or `deviceBackend: "eas"`.
-
-Where each command stands:
-
-| Command                                      | Billed action it can start                                                | Who chose it                                           |
-| -------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------ |
-| `dev`                                        | an EAS build                                                              | `--eas`, `buildBackend: "eas"`, `deviceBackend: "eas"` |
-| `dev`                                        | an EAS Simulator session                                                  | `--eas`, `deviceBackend: "eas"`                        |
-| `smoke`                                      | an EAS build, through the `dev --detach` child that starts its dev server | `--eas`, `buildBackend: "eas"`, `deviceBackend: "eas"` |
-| `smoke`                                      | an EAS Simulator session, in `start-session`, which itself never builds   | `--eas`, `deviceBackend: "eas"`                        |
-| `navigate`, `runtime:reload`, `runtime:stop` | none. They use a running session or refuse.                               | —                                                      |
-| `dev:stop`                                   | none. It ends this project's session with `--eas`.                        | —                                                      |
-| every other command                          | none                                                                      | —                                                      |
-
-A build key never starts a session: `buildBackend: "eas"` alone builds on EAS and leaves the artifact for a local device. It installs nothing (§What the EAS route is made of). A device key can start both, because `deviceBackend: "eas"` also sends the build to EAS. An implicit route starts neither: `dev` stops with `EAS_ROUTE_NOT_CHOSEN` (§The selection), and `smoke` fails `start-dev-server`.
-
-The rule is tested by what a run does, end to end. `plan-test.ts` and `smoke-test.ts` check that an implicit route stops with the credits reason before any step runs. `cloud-simulator-test.ts` checks the argv the stub `eas` records: a device command without `--eas` or `deviceBackend: "eas"` starts no session and no build (`simulator`, `simulator:start`, `build`). The `fallback` rung may still spawn `simulator:list` and `simulator:exec`, to drive a session that is up.
+The rule is about **starting**. Using a session that is already running starts nothing new, so a command may drive a session that is up without a flag. An implicit route starts nothing: `dev` stops with `EAS_ROUTE_NOT_CHOSEN` (§The selection).
 
 ## The device backend
 
-[confirmed, Kudo, 2026-10-21] `buildBackend` says where a build runs. `deviceBackend` says where the app runs: a simulator, an emulator or a device on this machine (`local`), or an EAS Simulator session (`eas`). The two are separate choices, so they are separate keys. `buildBackend: "eas"` alone builds on EAS and leaves the artifact for a local device: the plan names `eas build:run` and does not install it, and no session starts (§What the EAS route is made of).
+[confirmed, Kudo, 2026-10-21] `buildBackend` says where a build runs. `deviceBackend` says where the app runs: on this machine (`local`), or on an EAS Simulator session (`eas`). They are separate keys. `buildBackend: "eas"` alone builds on EAS and starts no session (§What the EAS route is made of).
 
 Resolution, per platform, highest first:
 
-1. A flag. `--eas` sets both backends to `eas`. On `dev`, `--local` sets both to `local`, and is a run that spends nothing.
+1. A flag. `--eas` sets both backends to `eas`. On `dev`, `--local` sets both to `local`.
 2. The platform's own `deviceBackend` (`ios`, `android`).
 3. The top-level `deviceBackend`.
-4. `local`. Detection never puts a device on EAS. There is no implicit device route.
+4. `local`. Detection never puts a device on EAS.
 
-`deviceBackend: "eas"` makes the build go to EAS too. A session installs Expo Go or a build that EAS has (`--expo-go` or `--build-id`), never a build made on this machine. So for a platform whose `deviceBackend` is `eas` and whose `buildBackend` is unset, §The selection reads rank 2 as `eas`: an explicit config choice that runs, never an implicit route. A platform whose config names `buildBackend: "local"` beside `deviceBackend: "eas"` is `BAD_AGENT_CLI_CONFIG`, because no run of it could open a development build. The rank-5 default is not that case.
+A session installs Expo Go or a build that EAS made, never a build made on this machine. So `deviceBackend: "eas"` sends the build to EAS too: with `buildBackend` unset, §The selection reads rank 2 as `eas`, an explicit choice that runs. A config that names `buildBackend: "local"` beside `deviceBackend: "eas"` for one platform is `BAD_AGENT_CLI_CONFIG`.
 
-**Only what starts an environment reads it** [Kudo, 2026-10-22]. A config read by every device command would make every printed command depend on the flags of the run that printed it: after `dev --local`, a suggested bare `navigate /` would follow the config to a session. So:
+**Only what starts an environment reads it** [Kudo, 2026-10-22]. A config read by every device command would make every printed command depend on the flags of the run that printed it. So:
 
-- `dev` reads `deviceBackend`. With `eas`, it does what `--eas` does: it tunnels the dev server, builds with the simulator profile when it must build, and opens the app on a session ([[0027-everything-on-eas]]). It refuses `--device`, `--lan`, `--localhost` and `--host lan|localhost` with `BAD_ARGS`, as `--eas` does. The message names the config key, and its How line names `--local`. `dev --web` reads no `deviceBackend`, because the web has no device.
-- `smoke` reads it only when it starts the dev server itself, which it decides after discovery finds none. With `eas`, it then does what `smoke --eas` does: the `dev` child is the EAS one, and `start-session` reuses or starts the session. When discovery finds a dev server, `smoke` uses what runs, on the ladder it has without a flag.
-- `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` read no config. `navigate` keeps its `fallback` rung. `runtime:reload` and `runtime:stop` reach a session only with `--eas`, and `dev:stop` ends one only with `--eas` ([[0005-runtime-loop-tools]] §Cloud simulator, [[0027-everything-on-eas]] §dev:stop). When [[0035-one-device-per-worktree]] §EAS session binding lands, they follow the session the worktree bound.
+- `dev` reads it. With `eas`, it does what `--eas` does ([[0027-everything-on-eas]]), and it refuses what `--eas` refuses, naming the config and `--local`. The web has no device, so `dev --web` ignores it.
+- `smoke` reads it only when it starts its own dev server. Then it does what `smoke --eas` does. Beside a dev server that runs, it uses what runs.
+- No other command reads it. `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` keep the rules of [[0005-runtime-loop-tools]] §Cloud simulator and [[0027-everything-on-eas]] §dev:stop. When [[0035-one-device-per-worktree]] §EAS session binding lands, they follow the session the worktree bound.
 
-On a run whose device is on EAS, by `--eas` or the config, the device commands `dev` prints name `--eas`: the follow-ups (`navigate / --eas`, `dev:stop --eas`, and `smoke --<platform> --eas` after `--detach`), the `smoke` and `navigate` of the How line when this project's dev server already runs, and the `navigate / --eas` that a plan names when it opens nothing, with `--no-open` or with no platform named. That How line's `dev:stop` stays plain on purpose: it stops the dev server so that the `dev` it asks for runs again, and that `dev` reuses the session. A `dev` it prints repeats the caller's flags. A bare `smoke --<platform>` that a local run prints follows the `smoke` rule above: beside a running dev server it uses what runs, and with none it reads the config.
+A command `dev` suggests should reach the device this run used. So on a run whose device is on EAS, by `--eas` or the config, `dev`'s follow-ups name `--eas` on the device commands they suggest. The one exception is a `dev:stop` that asks for the same `dev` again, because that `dev` reuses the session.
 
-The config is in `package.json`, so it is shared by everyone who checks out the repository. One `deviceBackend: "eas"` makes every teammate's `dev` start a billed session. `buildBackend: "eas"` does the same for builds, and a session costs more, because a session bills by the minute. So the plan's reasons and the `dev` output say that the session comes from the config, name the file, and say how to stop it. A per-machine override is left for later.
+The config is in `package.json`, so everyone who checks out the repository shares it, and one `deviceBackend: "eas"` makes every teammate's `dev` start a billed session. So `dev` says when the session comes from the config, and how to stop it. A per-machine override is left for later.
 
 ## The plan approved is the plan run
 
@@ -240,4 +224,4 @@ A ladder must not offer a route the plan already took.
 
 ## Testing
 
-`deviceBackend` resolution is a pure function too, tested per flag × top-level key × platform key in `src/settings/__tests__/parse-test.ts`, with the refused combination. `dev` and `smoke` have unit tests for the device backend under each config value, and `smoke` for a running dev server. The e2e tier runs `dev` with the config instead of `--eas`, and checks that `navigate`, `runtime:stop` and `dev:stop` reach no session from the config. The selection is a pure function over four inputs, so its whole matrix of host × toolchain × config × flag is one table in `src/toolchain/__tests__/selectBackend-test.ts`. `hostPlatform` is a parameter rather than `process.platform`. `resolveAsync-test.ts` pins the order the four inputs are read in. `decide-test.ts` pins the steps each backend produces. End to end, `plan-test.ts` drives a stubbed `xcode-select`, an unset `ANDROID_HOME`, and a real `package.json` edit for every config case. The one thing not covered by a test is a live `eas build` step.
+`deviceBackend` resolution is a pure function too, tested per flag and key, with the refused combination. The rules of §Who may spend EAS credits and §The device backend are tested by what a run does, end to end. The selection is a pure function over four inputs, so its whole matrix of host × toolchain × config × flag is one table in `src/toolchain/__tests__/selectBackend-test.ts`. `hostPlatform` is a parameter rather than `process.platform`. `resolveAsync-test.ts` pins the order the four inputs are read in. `decide-test.ts` pins the steps each backend produces. End to end, `plan-test.ts` drives a stubbed `xcode-select`, an unset `ANDROID_HOME`, and a real `package.json` edit for every config case. The one thing not covered by a test is a live `eas build` step.
