@@ -24,6 +24,7 @@ describe(resolveSmokeOptions, () => {
       route: null,
       platform: 'ios',
       cloud: 'fallback',
+      configuredEas: false,
       bootstrap: true,
       windowMs: DEFAULT_SMOKE_WINDOW_MS,
       timeoutMs: DEFAULT_SMOKE_START_TIMEOUT_MS,
@@ -263,32 +264,25 @@ describe('the port --start asks for', () => {
 describe('The config puts the device on EAS', () => {
   const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
   const iosOnly = parseAgentCliSettings({ ios: { deviceBackend: 'eas' } }, 'config');
-  const starts = { devServerRunning: false };
 
-  it(`should require the session for a run that starts its dev server, as --eas does`, () => {
-    expect(withConfiguredDevice(resolveSmokeOptions(['--ios']), onEas, starts).cloud).toBe(
-      'required'
-    );
+  it(`should mark the run, and leave the choice to the start of the dev server`, () => {
+    const options = withConfiguredDevice(resolveSmokeOptions(['--ios']), onEas);
+    expect(options.configuredEas).toBe(true);
+    expect(options.cloud).toBe('fallback');
   });
 
   it(`should read the platform's own key`, () => {
-    expect(withConfiguredDevice(resolveSmokeOptions(['--android']), iosOnly, starts).cloud).toBe(
-      'fallback'
+    expect(withConfiguredDevice(resolveSmokeOptions(['--android']), iosOnly).configuredEas).toBe(
+      false
     );
   });
 
-  it(`should use what runs beside a running dev server`, () => {
+  it(`should read no config for a run that starts nothing, or that named --eas`, () => {
     expect(
-      withConfiguredDevice(resolveSmokeOptions(['--ios']), onEas, { devServerRunning: true }).cloud
-    ).toBe('fallback');
-  });
-
-  it(`should read no config for a run that starts nothing`, () => {
-    expect(
-      withConfiguredDevice(resolveSmokeOptions(['--ios', '--no-start']), onEas, starts).cloud
-    ).toBe('fallback');
-    expect(
-      withConfiguredDevice(resolveSmokeOptions(['--ios', '--port', '8090']), onEas, starts).cloud
-    ).toBe('fallback');
+      withConfiguredDevice(resolveSmokeOptions(['--ios', '--no-start']), onEas).configuredEas
+    ).toBe(false);
+    expect(withConfiguredDevice(resolveSmokeOptions(['--ios', '--eas']), onEas).configuredEas).toBe(
+      false
+    );
   });
 });

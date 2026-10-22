@@ -986,7 +986,7 @@ function reportDetached(
     followups: [],
   };
   report.followups = followUpsEnabled(options.followups)
-    ? detachFollowUps(report, smokePlatform)
+    ? detachFollowUps(report, smokePlatform, { eas: options.deviceBackend === 'eas' })
     : [];
 
   cliEvent('dev_detach', {
@@ -1113,13 +1113,16 @@ function printHumanReport(report: DevDetachResultJson): void {
  */
 export function detachFollowUps(
   report: DevDetachResultJson,
-  smokePlatform: NativePlatform
+  smokePlatform: NativePlatform,
+  { eas = false }: { eas?: boolean } = {}
 ): FollowUp[] {
+  // On an EAS device run, the gate drives the session and the stop ends it (llp/0027 §Stop hints).
+  const onEas = eas ? ' --eas' : '';
   const followups: FollowUp[] = [];
   if (report.ready == null) {
     followups.push({
       id: 'smoke',
-      command: smokeCommand(smokePlatform),
+      command: `${smokeCommand(smokePlatform)}${onEas}`,
       why: 'The dev server is up, but nothing has said whether its bundler finished, whether this project compiles, or whether the app comes up on it.',
     });
   }
@@ -1132,8 +1135,10 @@ export function detachFollowUps(
   }
   followups.push({
     id: 'dev-stop',
-    command: `${PROGRAM_PREFIX} dev:stop`,
-    why: 'A detached dev server outlives this shell, so this is what ends it.',
+    command: `${PROGRAM_PREFIX} dev:stop${onEas}`,
+    why: eas
+      ? 'A detached dev server outlives this shell, and the EAS Simulator session bills until it ends, so this ends both.'
+      : 'A detached dev server outlives this shell, so this is what ends it.',
   });
   return followups;
 }

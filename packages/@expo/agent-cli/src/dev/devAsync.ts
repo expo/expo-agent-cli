@@ -126,7 +126,9 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // and the reasons, and stops in its port block on the same lock.
   const lock = await readDevServerLockAsync(projectRoot);
   if (lock && options.mode !== 'plan') {
-    throw await devServerRunningStopAsync(projectRoot, lock, options.platform);
+    throw await devServerRunningStopAsync(projectRoot, lock, options.platform, {
+      eas: options.deviceBackend === 'eas',
+    });
   }
   recordLastDevRequest(projectRoot, options);
 

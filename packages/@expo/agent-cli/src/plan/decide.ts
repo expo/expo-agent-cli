@@ -335,8 +335,8 @@ function startExpoGoStep(options: DecideStartPlanOptions): PlanStep {
       : opensOn
         ? `Serves the project to Expo Go, which needs no native build. The app is then opened on ${plainDeviceNoun(opensOn)}; one is booted, and Expo Go installed, when missing.`
         : options.open === false
-          ? `Serves the project to Expo Go, which needs no native build. --no-open: nothing is opened, so open the app yourself — "${PROGRAM_NAME} navigate /" does.`
-          : `Serves the project to Expo Go, which needs no native build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android.`
+          ? `Serves the project to Expo Go, which needs no native build. --no-open: nothing is opened, so open the app yourself — "${navigateCommand(options)}" does.`
+          : `Serves the project to Expo Go, which needs no native build. It opens nothing on its own — run "${navigateCommand(options)}" once it is up, or pass --ios or --android.`
   );
 }
 
@@ -351,8 +351,8 @@ function startDevClientStep(reason: string, options: DecideStartPlanOptions = {}
       : opensOn
         ? `Starts the dev server; the development build is then opened on ${plainDeviceNoun(opensOn)}, booting one when none is up. ${reason}`
         : options.open === false
-          ? `Starts the dev server for the existing development build. --no-open: nothing is opened, so open the app yourself — "${PROGRAM_NAME} navigate /" does. ${reason}`
-          : `Starts the dev server for the existing development build. It opens nothing on its own — run "${PROGRAM_NAME} navigate /" once it is up, or pass --ios or --android. ${reason}`
+          ? `Starts the dev server for the existing development build. --no-open: nothing is opened, so open the app yourself — "${navigateCommand(options)}" does. ${reason}`
+          : `Starts the dev server for the existing development build. It opens nothing on its own — run "${navigateCommand(options)}" once it is up, or pass --ios or --android. ${reason}`
   );
 }
 
@@ -610,15 +610,21 @@ function resolveNativePlatform(
  *
  * @param actsOnPlatform Whether a step of this plan builds for, or opens the app on, the platform.
  */
+/** The `navigate` a plan names for an app it does not open, on the device this run's app runs on. */
+function navigateCommand(options: DecideStartPlanOptions): string {
+  return `${PROGRAM_NAME} navigate /${options.deviceBackend === 'eas' ? ' --eas' : ''}`;
+}
+
 function describeTargetPlatform(
   platform: NativePlatform,
-  { requestedPlatform }: DecideStartPlanOptions,
+  options: DecideStartPlanOptions,
   actsOnPlatform: boolean
 ): string {
+  const { requestedPlatform } = options;
   if (requestedPlatform === platform) {
     return actsOnPlatform
       ? `Target platform: ${platform}, named on the command line.`
-      : `Target platform: ${platform}, named on the command line. --no-open leaves the app unopened — run "${PROGRAM_NAME} navigate /" once the dev server is up.`;
+      : `Target platform: ${platform}, named on the command line. --no-open leaves the app unopened — run "${navigateCommand(options)}" once the dev server is up.`;
   }
   return actsOnPlatform
     ? `No platform was named; this host suggests ${platform}, and the plan builds for it.`

@@ -56,6 +56,11 @@ export interface SmokeOptions {
    */
   cloud: CloudPreference;
   /**
+   * The config puts this platform's device on EAS. Read only when the run starts its own dev
+   * server: then the phases move it to the EAS route, `cloud: 'required'` (llp/0015 §The device backend).
+   */
+  configuredEas: boolean;
+  /**
    * Whether this run brings its own environment: start a dev server when there is none, boot a
    * device when there is none, and put both back afterwards. Cleared by `--no-start`.
    *
@@ -129,22 +134,22 @@ const SMOKE_ARGS = {
 };
 
 /**
- * `deviceBackend: "eas"` in the config names the session the way `--eas` does, for a run that
- * starts its own dev server. Beside a running one, the run uses what runs.
+ * Whether `deviceBackend: "eas"` in the config applies to this run, once the phases know it starts
+ * its own dev server. A flag wins, and a run that may not start one never reads it.
  *
  * @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
  */
 export function withConfiguredDevice(
   options: SmokeOptions,
-  settings: AgentCliSettings,
-  { devServerRunning }: { devServerRunning: boolean }
+  settings: AgentCliSettings
 ): SmokeOptions {
-  const startsDevServer = options.bootstrap && options.devServerUrl == null && !devServerRunning;
-  return startsDevServer &&
-    options.cloud === 'fallback' &&
-    settingsDeviceBackend(settings, options.platform) === 'eas'
-    ? { ...options, cloud: 'required' }
-    : options;
+  return {
+    ...options,
+    configuredEas:
+      options.bootstrap &&
+      options.cloud === 'fallback' &&
+      settingsDeviceBackend(settings, options.platform) === 'eas',
+  };
 }
 
 /**
@@ -214,6 +219,7 @@ export function resolveSmokeOptions(argv: string[]): SmokeOptions {
     route: args['--route'] ? String(args['--route']) : null,
     platform,
     cloud: args['--eas'] ? 'required' : 'fallback',
+    configuredEas: false,
     bootstrap,
     windowMs: resolveDuration(args['--window'], '--window', DEFAULT_SMOKE_WINDOW_MS, {
       // A window of zero catches nothing and would report an empty one as evidence, which is the

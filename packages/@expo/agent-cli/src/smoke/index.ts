@@ -119,16 +119,13 @@ export const agentCliSmoke: Command = async (argv) => {
   const { resolveSmokeOptions, withConfiguredDevice } =
     require('./resolveOptions') as typeof import('./resolveOptions');
   const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
-  const { readDevServerLockAsync } = require('../devLock') as typeof import('../devLock');
 
   return (async () => {
     const resolved = resolveSmokeOptions(argv ?? []);
     // Asserting, unlike `dev:wait`: this command reads the project's routes and writes its
     // screenshot under the project's `.expo`, so there is no useful run outside one.
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
-    const options = withConfiguredDevice(resolved, readAgentCliSettings(projectRoot).settings, {
-      devServerRunning: (await readDevServerLockAsync(projectRoot)) != null,
-    });
+    const options = withConfiguredDevice(resolved, readAgentCliSettings(projectRoot).settings);
 
     const { smokeAsync } = require('./smokeAsync') as typeof import('./smokeAsync');
     const code = await smokeAsync(projectRoot, options);

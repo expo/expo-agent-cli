@@ -98,6 +98,13 @@ describe(devServerRunningError, () => {
     });
   });
 
+  // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+  it(`points a run whose device is on EAS at the session`, () => {
+    const error = devServerRunningError(serving, 'ios', { eas: true });
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli smoke --ios --eas');
+    expect(error.message).toContain('"npx @expo/agent-cli navigate / --eas" opens a route');
+  });
+
   it(`says what runs, and on which port`, () => {
     expect(devServerRunningError(serving, 'ios').message).toMatch(
       /^This project's dev server is already running on port 8081 \(pid 4242\), so nothing was started\.\nWhy: .*\nHow: /
