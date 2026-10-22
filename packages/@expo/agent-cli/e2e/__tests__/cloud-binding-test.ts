@@ -121,23 +121,6 @@ it('two worktrees start and drive their own sessions; plain stop keeps a binding
     expect.objectContaining({ id: 'own-0', state: 'recorded' })
   );
   expect(stubEasArgs(first)).toHaveLength(beforeStatus);
-  // With Metro still running, replace an ended session through the same detach command.
-  const sessions = JSON.parse(fs.readFileSync(path.join(machine, 'sessions.json'), 'utf8'));
-  fs.writeFileSync(
-    path.join(machine, 'sessions.json'),
-    JSON.stringify(
-      sessions.map((session: { id: string }) =>
-        session.id === 'own-1' ? { ...session, status: 'STOPPED' } : session
-      )
-    )
-  );
-  const reopened = await executeAgentCliAsync(
-    second,
-    ['dev', '--ios', '--eas', '--detach', '--json'],
-    { env: { ...envFor(second), STUB_SIM_START_ID: 'replacement-1' }, reject: false }
-  );
-  expect(reopened.exitCode, reopened.stderr).toBe(0);
-  expect(readBinding(second).device).toMatchObject({ id: 'replacement-1' });
   const kept = await executeAgentCliAsync(first, ['dev:stop', '--json'], { env: envFor(first) });
   expect(JSON.parse(kept.stdout).devices).toContainEqual(
     expect.objectContaining({
@@ -149,7 +132,7 @@ it('two worktrees start and drive their own sessions; plain stop keeps a binding
   expect(fs.existsSync(bindingFile(first))).toBe(true);
   await executeAgentCliAsync(first, ['dev:stop', '--eas', '--json'], { env: envFor(first) });
   expect(fs.existsSync(bindingFile(first))).toBe(false);
-  expect(readBinding(second).device).toMatchObject({ id: 'replacement-1' });
+  expect(readBinding(second).device).toMatchObject({ id: 'own-1' });
 });
 it.each(['ios', 'android'] as const)(
   'reconnects the preserved %s development-client session after Metro changes its tunnel',

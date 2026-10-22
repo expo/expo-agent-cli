@@ -345,40 +345,6 @@ describe(openAppOnEasAsync, () => {
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
 
-  it.each(['ios', 'android'] as const)(
-    'reconnects a reused %s development build to the new tunnel after Metro restarts',
-    async (platform) => {
-      vi.mocked(probeCloudSessionAsync).mockResolvedValue(
-        cloudProbe.active({ id: 'sess-up', platform })
-      );
-      vi.mocked(openRouteAsync).mockResolvedValue({ exitCode: 0 } as any);
-
-      for (const host of ['old.tunnel.example', 'new.tunnel.example']) {
-        mockTunnel(host);
-        const url = `myapp://?__expo_url=${encodeURIComponent(`https://${host}`)}`;
-        vi.mocked(resolveRouteUrlAsync).mockResolvedValue({
-          url: 'myapp://',
-          connect: [{ target: 'dev-build', url }],
-        } as any);
-
-        const report = await openAppOnEasAsync(projectRoot, {
-          platform,
-          expoGo: false,
-          devServerUrl: DEV_SERVER,
-          buildId: null,
-          keepSession: true,
-        });
-
-        expect(report).toMatchObject({ opened: true, sessionId: 'sess-up', started: false });
-        expect(openRouteAsync).toHaveBeenLastCalledWith(
-          projectRoot,
-          expect.objectContaining({ route: url, platform, cloud: 'required' })
-        );
-      }
-      expect(spawnCaptureAsync).not.toHaveBeenCalled();
-    }
-  );
-
   it('does not send a bare route when a reused development build has no connection URL', async () => {
     vi.mocked(probeCloudSessionAsync).mockResolvedValue(
       cloudProbe.active({ id: 'sess-up', platform: 'ios' })

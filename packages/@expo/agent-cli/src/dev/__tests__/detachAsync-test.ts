@@ -120,24 +120,6 @@ describe('--eas on the other platform', () => {
       reuseBoundDevice: true,
     });
 
-  it('leaves the question to the reopen when a dev server runs', async () => {
-    vi.mocked(readDevServerLockAsync)
-      .mockReset()
-      .mockResolvedValue({
-        ...lockInfo(),
-        url: 'http://127.0.0.1:8393',
-        port: 8393,
-        pid: 4242,
-        projectRoot,
-        startedAt: new Date(0).toISOString(),
-      });
-
-    await expect(detach()).resolves.toBe(0);
-
-    expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
-    expect(reopenEasAsync).toHaveBeenCalledTimes(1);
-  });
-
   it('refuses with the dev --detach reuse command, since no server runs yet', async () => {
     vi.mocked(otherPlatformSessionAsync).mockResolvedValue({
       platform: 'ios',
@@ -721,10 +703,20 @@ describe('the bound device', () => {
   it('boots the parked simulator on a running server, reuse only, before the report', async () => {
     vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
     const { event: cliEvent } = await import('../../events');
+    const summary = {
+      platform: 'ios' as const,
+      backend: 'local-ios' as const,
+      id: 'SIM-1',
+      name: 'agent-cli 0000',
+      origin: 'created',
+      state: 'up' as const,
+      expiresAt: new Date(3_600_000).toISOString(),
+    };
+    vi.spyOn(bindingSummary, 'readBindingSummaryAsync').mockResolvedValue([summary as any]);
 
     await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
-        print: false,
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local', '--json']), {
+        print: true,
         reuseBoundDevice: true,
       })
     ).resolves.toBe(0);
@@ -735,6 +727,14 @@ describe('the bound device', () => {
       'dev_detach',
       expect.objectContaining({ alreadyRunning: true })
     );
+    const printed = vi
+      .mocked(Log.log)
+      .mock.calls.map(([text]) => String(text))
+      .find((text) => text.includes('"device"'))!;
+    expect(JSON.parse(printed)).toMatchObject({
+      alreadyRunning: true,
+      device: { id: 'SIM-1', backend: 'local-ios' },
+    });
   });
 
   it('relays the refusal of a running server with nothing to reuse', async () => {
@@ -794,7 +794,6 @@ describe('the bound device', () => {
       ['--android', '--detach', '--local'],
       { reuseBoundDevice: true },
     ],
-    ['for --eas', ['--ios', '--detach', '--eas'], { reuseBoundDevice: true }],
   ])('binds nothing on a running server %s', async (_case, argv, extra) => {
     vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
 
@@ -803,13 +802,6 @@ describe('the bound device', () => {
     ).resolves.toBe(0);
 
     expect(acquireDeviceAsync).not.toHaveBeenCalled();
-    if (argv.includes('--eas'))
-      expect(reopenEasAsync).toHaveBeenCalledWith(
-        projectRoot,
-        expect.objectContaining({ deviceBackend: 'eas' }),
-        running.url,
-        null
-      );
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
@@ -834,7 +826,7 @@ describe('the bound device', () => {
     }
   );
 
-  it('passes the running tunnel to the reopen', async () => {
+  it('leaves the question to the reopen and passes it the running tunnel', async () => {
     vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
     vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValue({
       url: 'https://abc.tunnel.example',
@@ -849,43 +841,14 @@ describe('the bound device', () => {
       })
     ).resolves.toBe(0);
 
+    expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
+    expect(reopenEasAsync).toHaveBeenCalledTimes(1);
     expect(reopenEasAsync).toHaveBeenCalledWith(
       projectRoot,
-      expect.anything(),
+      expect.objectContaining({ deviceBackend: 'eas' }),
       running.url,
       'https://abc.tunnel.example'
     );
-  });
-
-  it('reports the reused local device of a running server', async () => {
-    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
-    const summary = {
-      platform: 'ios' as const,
-      backend: 'local-ios' as const,
-      id: 'SIM-1',
-      name: 'agent-cli 0000',
-      origin: 'created',
-      state: 'up' as const,
-      expiresAt: new Date(3_600_000).toISOString(),
-    };
-    vi.spyOn(bindingSummary, 'readBindingSummaryAsync').mockResolvedValue([summary as any]);
-
-    await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local', '--json']), {
-        print: true,
-        reuseBoundDevice: true,
-      })
-    ).resolves.toBe(0);
-
-    expect(acquireDeviceAsync).toHaveBeenCalledWith(projectRoot, 'ios', { reuseOnly: true });
-    const printed = vi
-      .mocked(Log.log)
-      .mock.calls.map(([text]) => String(text))
-      .find((text) => text.includes('"device"'))!;
-    expect(JSON.parse(printed)).toMatchObject({
-      alreadyRunning: true,
-      device: { id: 'SIM-1', backend: 'local-ios' },
-    });
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
