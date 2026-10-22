@@ -92,15 +92,13 @@ export const agentCliRuntimeStop: Command = async (argv) => {
   const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
-  const { resolveRuntimeStopOptions, withConfiguredDevice } =
+  const { resolveRuntimeStopOptions } =
     require('./resolveStopOptions') as typeof import('./resolveStopOptions');
-  const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
   const { runtimeStopAsync } = require('./stopAsync') as typeof import('./stopAsync');
 
   return (async () => {
-    const resolved = resolveRuntimeStopOptions(argv ?? []);
+    const options = resolveRuntimeStopOptions(argv ?? []);
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
-    const options = withConfiguredDevice(resolved, readAgentCliSettings(projectRoot).settings);
     process.exitCode = await runtimeStopAsync(projectRoot, options);
   })().catch(logCmdError);
 };

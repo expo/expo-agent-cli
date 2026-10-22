@@ -466,7 +466,7 @@ async function withPlannedDevice(
 }
 
 function configSessionReason(): string {
-  return `The app runs on an EAS Simulator session because ${CONFIG_LOCATION} sets deviceBackend to "eas". A session bills until it stops: "${PROGRAM_PREFIX} dev:stop" ends it, and --local runs on this machine instead.`;
+  return `The app runs on an EAS Simulator session because ${CONFIG_LOCATION} sets deviceBackend to "eas". A session bills until it stops: "${PROGRAM_PREFIX} dev:stop --eas" ends it, and --local runs on this machine instead.`;
 }
 
 /**

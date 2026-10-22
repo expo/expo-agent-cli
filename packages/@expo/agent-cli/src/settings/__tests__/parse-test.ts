@@ -6,7 +6,6 @@ import {
   settingsAreEmpty,
   settingsBuildBackend,
   settingsDeviceBackend,
-  settingsPutDeviceOnEas,
 } from '../parse';
 import { EMPTY_SETTINGS } from '../types';
 
@@ -94,13 +93,6 @@ describe('resolving the device backend for one platform', () => {
 
   it(`keeps the web local, because it has no device`, () => {
     expect(resolveDeviceBackend(null, parse({ deviceBackend: 'eas' }), 'web')).toBe('local');
-    expect(settingsPutDeviceOnEas(parse({ deviceBackend: 'eas' }), 'web')).toBe(false);
-  });
-
-  it(`puts a device command with no platform on EAS only when both platforms are`, () => {
-    expect(settingsPutDeviceOnEas(parse({ deviceBackend: 'eas' }))).toBe(true);
-    expect(settingsPutDeviceOnEas(parse({ ios: { deviceBackend: 'eas' } }))).toBe(false);
-    expect(settingsPutDeviceOnEas(parse({ ios: { deviceBackend: 'eas' } }), 'ios')).toBe(true);
   });
 });
 

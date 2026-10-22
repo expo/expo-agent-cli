@@ -953,56 +953,23 @@ describe('a project whose config puts the device on EAS', () => {
     return projectRoot;
   }
 
-  it(`should open the link on the session without --eas`, async () => {
+  // The config moves what `dev` starts, not where these commands look (llp/0015 §The device backend).
+  it(`should not reach the session from the config on runtime:stop`, async () => {
     const projectRoot = await setupOnEasAsync();
 
-    const result = await executeAgentCliAsync(
-      projectRoot,
-      ['navigate', '/notes', '--ios', '--scheme', 'myapp', '--no-wait-attach', '--json'],
-      { reject: false }
-    );
+    await executeAgentCliAsync(projectRoot, ['runtime:stop', '--ios'], { reject: false });
 
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      deviceBackend: 'cloud',
-      deviceId: 'sess-e2e',
-    });
+    expect(easInvocations(projectRoot)).toEqual([]);
   });
 
-  it(`should close the app on the session without --eas`, async () => {
-    const projectRoot = await setupOnEasAsync();
-
-    const result = await executeAgentCliAsync(
-      projectRoot,
-      ['runtime:stop', '--app-id', 'host.exp.Exponent', '--json', '--no-followups'],
-      { reject: false }
-    );
-
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      deviceBackend: 'cloud',
-      deviceId: 'sess-e2e',
-    });
-  });
-
-  it(`should end the session on dev:stop without --eas`, async () => {
+  it(`should leave the session running on a plain dev:stop`, async () => {
     const projectRoot = await setupOnEasAsync();
 
     const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
       reject: false,
     });
 
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout).session).toEqual({
-      id: 'sess-e2e',
-      stopped: true,
-      reason: null,
-    });
-    expect(easInvocations(projectRoot)).toContainEqual([
-      'simulator:stop',
-      '--id',
-      'sess-e2e',
-      '--non-interactive',
-    ]);
+    expect(JSON.parse(result.stdout).session).toBeUndefined();
+    expect(easInvocations(projectRoot)).toEqual([]);
   });
 });

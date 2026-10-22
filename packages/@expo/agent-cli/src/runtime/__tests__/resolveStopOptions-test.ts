@@ -1,5 +1,4 @@
-import { parseAgentCliSettings } from '../../settings/parse';
-import { resolveRuntimeStopOptions, withConfiguredDevice } from '../resolveStopOptions';
+import { resolveRuntimeStopOptions } from '../resolveStopOptions';
 
 describe(resolveRuntimeStopOptions, () => {
   it(`should leave the device and the app to be worked out`, () => {
@@ -78,21 +77,5 @@ describe('resolveRuntimeStopOptions and the cloud backend', () => {
       cloud: true,
       platform: 'android',
     });
-  });
-});
-
-// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
-describe('The config puts the device on EAS', () => {
-  const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
-  const iosOnly = parseAgentCliSettings({ ios: { deviceBackend: 'eas' } }, 'config');
-
-  it(`should act on the session, as --eas does`, () => {
-    expect(withConfiguredDevice(resolveRuntimeStopOptions(['--ios']), onEas).cloud).toBe(true);
-  });
-
-  it(`should stay local for a platform the config keeps here`, () => {
-    expect(withConfiguredDevice(resolveRuntimeStopOptions(['--android']), iosOnly).cloud).toBe(
-      false
-    );
   });
 });

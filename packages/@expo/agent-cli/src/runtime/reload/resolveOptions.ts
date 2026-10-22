@@ -9,8 +9,6 @@ import { parseArgsOrThrow, resolveDuration, strayArgumentError } from '../../uti
 import { CommandError } from '../../utils/errors';
 import { resolveDevServerTarget } from '../devServer';
 import { resolveDevicePlatform } from '../devicePlatform';
-import { settingsPutDeviceOnEas } from '../../settings/parse';
-import type { AgentCliSettings } from '../../settings/types';
 
 /**
  * How the app is made to reload.
@@ -106,20 +104,6 @@ const RELOAD_ARGS = {
   '--no-route-check': Boolean,
   '--no-bundle-check': Boolean,
 };
-
-/**
- * `deviceBackend: "eas"` in the config names the session the way `--eas` does.
- *
- * @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
- */
-export function withConfiguredDevice(
-  options: ReloadOptions,
-  settings: AgentCliSettings
-): ReloadOptions {
-  return !options.cloud && settingsPutDeviceOnEas(settings, options.platform)
-    ? { ...options, cloud: true }
-    : options;
-}
 
 /**
  * Resolve the arguments of `@expo/agent-cli runtime:reload`.

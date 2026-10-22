@@ -5,8 +5,6 @@
 import { PROGRAM_PREFIX } from '../programName';
 import { parseArgsOrThrow, resolveDuration, strayArgumentError } from '../utils/args';
 import { CommandError } from '../utils/errors';
-import { settingsPutDeviceOnEas } from '../settings/parse';
-import type { AgentCliSettings } from '../settings/types';
 
 /** How long to wait for the dev server to go, when `--timeout` says nothing. */
 export const DEFAULT_DEV_STOP_TIMEOUT_MS = 10_000;
@@ -64,21 +62,6 @@ const DEV_STOP_ARGS = {
   '--no-followups': Boolean,
   '-p': '--port',
 };
-
-/**
- * A config that puts either platform's device on EAS makes `dev:stop` end the session, as `--eas` does.
- *
- * @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
- */
-export function withConfiguredDevice(
-  options: DevStopOptions,
-  settings: AgentCliSettings
-): DevStopOptions {
-  const onEas = options.platform
-    ? settingsPutDeviceOnEas(settings, options.platform)
-    : settingsPutDeviceOnEas(settings, 'ios') || settingsPutDeviceOnEas(settings, 'android');
-  return !options.eas && onEas ? { ...options, eas: true } : options;
-}
 
 /**
  * Resolve the arguments of `@expo/agent-cli dev:stop`.

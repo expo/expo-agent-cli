@@ -263,14 +263,32 @@ describe('the port --start asks for', () => {
 describe('The config puts the device on EAS', () => {
   const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
   const iosOnly = parseAgentCliSettings({ ios: { deviceBackend: 'eas' } }, 'config');
+  const starts = { devServerRunning: false };
 
-  it(`should require the session, as --eas does`, () => {
-    expect(withConfiguredDevice(resolveSmokeOptions(['--ios']), onEas).cloud).toBe('required');
+  it(`should require the session for a run that starts its dev server, as --eas does`, () => {
+    expect(withConfiguredDevice(resolveSmokeOptions(['--ios']), onEas, starts).cloud).toBe(
+      'required'
+    );
   });
 
   it(`should read the platform's own key`, () => {
-    expect(withConfiguredDevice(resolveSmokeOptions(['--android']), iosOnly).cloud).toBe(
+    expect(withConfiguredDevice(resolveSmokeOptions(['--android']), iosOnly, starts).cloud).toBe(
       'fallback'
     );
+  });
+
+  it(`should use what runs beside a running dev server`, () => {
+    expect(
+      withConfiguredDevice(resolveSmokeOptions(['--ios']), onEas, { devServerRunning: true }).cloud
+    ).toBe('fallback');
+  });
+
+  it(`should read no config for a run that starts nothing`, () => {
+    expect(
+      withConfiguredDevice(resolveSmokeOptions(['--ios', '--no-start']), onEas, starts).cloud
+    ).toBe('fallback');
+    expect(
+      withConfiguredDevice(resolveSmokeOptions(['--ios', '--port', '8090']), onEas, starts).cloud
+    ).toBe('fallback');
   });
 });

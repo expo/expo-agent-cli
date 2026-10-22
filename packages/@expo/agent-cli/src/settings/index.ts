@@ -8,7 +8,6 @@ export {
   settingsAreEmpty,
   settingsBuildBackend,
   settingsDeviceBackend,
-  settingsPutDeviceOnEas,
 } from './parse';
 export {
   readAgentCliSettings,

@@ -1,9 +1,7 @@
-import { parseAgentCliSettings } from '../../settings/parse';
 import {
   DEFAULT_DEV_STOP_TIMEOUT_MS,
   DEV_STOP_SIGNALS,
   resolveDevStopOptions,
-  withConfiguredDevice,
 } from '../resolveStopOptions';
 
 describe(resolveDevStopOptions, () => {
@@ -90,24 +88,5 @@ describe('--eas', () => {
   it(`asks for the EAS Simulator session to be ended too`, () => {
     expect(resolveDevStopOptions(['--eas']).eas).toBe(true);
     expect(resolveDevStopOptions([]).eas).toBe(false);
-  });
-});
-
-// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
-describe('The config puts the device on EAS', () => {
-  const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
-  const iosOnly = parseAgentCliSettings({ ios: { deviceBackend: 'eas' } }, 'config');
-
-  it(`should end the session, as --eas does`, () => {
-    expect(withConfiguredDevice(resolveDevStopOptions([]), onEas).eas).toBe(true);
-  });
-
-  it(`should end the session when either platform's device is on EAS`, () => {
-    expect(withConfiguredDevice(resolveDevStopOptions([]), iosOnly).eas).toBe(true);
-  });
-
-  it(`should leave the session alone without the config`, () => {
-    const none = parseAgentCliSettings({}, 'config');
-    expect(withConfiguredDevice(resolveDevStopOptions([]), none).eas).toBe(false);
   });
 });

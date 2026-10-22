@@ -3,8 +3,6 @@
 // anything a user can get wrong.
 
 import { PROGRAM_PREFIX } from '../programName';
-import { settingsPutDeviceOnEas } from '../settings/parse';
-import type { AgentCliSettings } from '../settings/types';
 import { resolveDevServerUrlFlag } from '../runtime/devServer';
 import { parseArgsOrThrow, resolveDuration } from '../utils/args';
 import { CommandError } from '../utils/errors';
@@ -99,22 +97,6 @@ const NAVIGATE_ARGS = {
   '--no-followups': Boolean,
   '--no-route-check': Boolean,
 };
-
-/**
- * `deviceBackend: "eas"` in the config names the session the way `--eas` does.
- *
- * @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
- */
-export function withConfiguredDevice(
-  options: NavigateOptions,
-  settings: AgentCliSettings
-): NavigateOptions {
-  return options.cloud === 'fallback' &&
-    !options.printUrl &&
-    settingsPutDeviceOnEas(settings, options.platform)
-    ? { ...options, cloud: 'required' }
-    : options;
-}
 
 /**
  * Resolve the arguments of `@expo/agent-cli navigate <route>`.

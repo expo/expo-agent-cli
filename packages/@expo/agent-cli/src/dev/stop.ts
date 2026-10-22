@@ -102,15 +102,13 @@ export const agentCliDevStop: Command = async (argv) => {
   const { logCmdError } = require('../utils/errors') as typeof import('../utils/errors');
   const { findUpProjectRootOrAssert } =
     require('../utils/findUp') as typeof import('../utils/findUp');
-  const { resolveDevStopOptions, withConfiguredDevice } =
+  const { resolveDevStopOptions } =
     require('./resolveStopOptions') as typeof import('./resolveStopOptions');
-  const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
   const { EXIT_OK, exitWithCodeAsync } = require('../exitCodes') as typeof import('../exitCodes');
 
   return (async () => {
-    const resolved = resolveDevStopOptions(argv ?? []);
+    const options = resolveDevStopOptions(argv ?? []);
     const projectRoot = findUpProjectRootOrAssert(process.cwd());
-    const options = withConfiguredDevice(resolved, readAgentCliSettings(projectRoot).settings);
     const { devStopAsync } = require('./stopAsync') as typeof import('./stopAsync');
     const code = await devStopAsync(projectRoot, options);
     if (code !== EXIT_OK) {

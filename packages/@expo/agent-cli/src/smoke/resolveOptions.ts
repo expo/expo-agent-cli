@@ -8,7 +8,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { resolveDevServerTarget } from '../runtime/devServer';
 import { parseArgsOrThrow, resolveDuration, strayArgumentError } from '../utils/args';
 import { CommandError } from '../utils/errors';
-import { settingsPutDeviceOnEas } from '../settings/parse';
+import { settingsDeviceBackend } from '../settings/parse';
 import type { AgentCliSettings } from '../settings/types';
 
 /** Platforms a smoke run can be performed on: the two that have a runtime to read. */
@@ -129,15 +129,20 @@ const SMOKE_ARGS = {
 };
 
 /**
- * `deviceBackend: "eas"` in the config names the session the way `--eas` does.
+ * `deviceBackend: "eas"` in the config names the session the way `--eas` does, for a run that
+ * starts its own dev server. Beside a running one, the run uses what runs.
  *
  * @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
  */
 export function withConfiguredDevice(
   options: SmokeOptions,
-  settings: AgentCliSettings
+  settings: AgentCliSettings,
+  { devServerRunning }: { devServerRunning: boolean }
 ): SmokeOptions {
-  return options.cloud === 'fallback' && settingsPutDeviceOnEas(settings, options.platform)
+  const startsDevServer = options.bootstrap && options.devServerUrl == null && !devServerRunning;
+  return startsDevServer &&
+    options.cloud === 'fallback' &&
+    settingsDeviceBackend(settings, options.platform) === 'eas'
     ? { ...options, cloud: 'required' }
     : options;
 }

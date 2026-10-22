@@ -94,23 +94,6 @@ export function settingsDeviceBackend(
 }
 
 /**
- * Whether the config puts the device on EAS for a device command.
- * With no platform named, both platforms must be on EAS, because either one may be the device.
- */
-export function settingsPutDeviceOnEas(settings: AgentCliSettings, platform?: string): boolean {
-  if (platform === 'ios' || platform === 'android') {
-    return settingsDeviceBackend(settings, platform) === 'eas';
-  }
-  if (platform !== undefined) {
-    return false;
-  }
-  return (
-    settingsDeviceBackend(settings, 'ios') === 'eas' &&
-    settingsDeviceBackend(settings, 'android') === 'eas'
-  );
-}
-
-/**
  * Where the app runs for one platform: the flag first, then the config, then this machine.
  * `--eas` and `--local` each name both backends at once (llp/0015 §The device backend).
  */
