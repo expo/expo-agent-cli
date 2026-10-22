@@ -24,7 +24,7 @@
 //     the *source* of the URL differs by platform and everything after it does not. Asking for JSON
 //     and reading the HTML answer as a parse failure is what left `--platform web` reporting
 //     `checked: true, ok: null` with a `SyntaxError` for a reason [observed — friction run 2].
-//  2. A **HEAD** of that exact URL. HEAD builds the bundle and reports the real status without
+//  2. A **HEAD** of the path and query of that URL, on the dev server it was given. HEAD builds the bundle and reports the real status without
 //     sending the 8 MB body [observed — Metro treats it as a normal request and only annotates it
 //     as a prefetch]; the body is only fetched when the status says something went wrong. The URL
 //     is used byte for byte, because every query parameter is part of Metro's graph id and changing
@@ -490,9 +490,11 @@ async function readManifestBundleUrlAsync(
 
   // The dev server answers with a path-relative URL when the request carried a `Forwarded` header
   // [observed — `ManifestMiddleware.toPathRelativeUrl`], so it is resolved rather than trusted to
-  // be absolute.
+  // be absolute. Only its path and query are kept and the dev server's origin is used, because a
+  // `--tunnel` manifest names the tunnel host (llp/0010).
   try {
-    return { url: new URL(launchAsset.url, manifestUrl).toString() };
+    const asset = new URL(launchAsset.url, manifestUrl);
+    return { url: new URL(`${asset.pathname}${asset.search}`, manifestUrl).toString() };
   } catch {
     return {
       url: null,

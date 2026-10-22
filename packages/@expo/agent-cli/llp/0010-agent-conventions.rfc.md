@@ -80,7 +80,7 @@ A command that reports on the app does not gate on what it reported. `runtime:er
 
 `runtime:stop` and `dev:stop`: already in the asked-for state is success, exit 0. `wasRunning` and `reason: "not-running"` keep the fact itself readable. A device tool that refused is 1. A foreign dev server is 20.
 
-The entry-bundle check (`src/runtime/bundleCheck.ts`) is what `smoke`, `runtime:reload`, and `dev --detach --wait-ready` call. A broken bundle is 20. A cold first build that does not finish inside `--timeout` is 22. `unknown` is not `broken`. `bundle.checked` is exactly `bundle.ok != null`. The `dev:wait` command itself is deferred ([[0017-deferred-commands]]).
+The entry-bundle check (`src/runtime/bundleCheck.ts`) is what `smoke`, `runtime:reload`, and `dev --detach --wait-ready` call. A broken bundle is 20. A cold first build that does not finish inside `--timeout` is 22. `unknown` is not `broken`. `bundle.checked` is exactly `bundle.ok != null`. The check asks the dev server it was given for the manifest and the bundle. Its HEAD goes to that server, with the path and query of `launchAsset.url`, because a `--tunnel` manifest names the tunnel host [observed — EAS Simulator iOS, 2026-10-22: one HEAD through the tunnel stalled the debugger socket of the app for over 10 s]. The `dev:wait` command itself is deferred ([[0017-deferred-commands]]).
 
 ## Needs-human protocol
 

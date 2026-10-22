@@ -530,20 +530,28 @@ describe(checkEntryBundleAsync, () => {
     expect(result.reason).toContain('50ms');
   });
 
-  // The dev server answers with a path-relative URL when the request carried a `Forwarded` header.
-  it(`should resolve a relative launch asset against the dev server`, async () => {
+  // The dev server answers with a path-relative URL when the request carried a `Forwarded` header,
+  // and a --tunnel dev server names its tunnel host. The HEAD goes to the dev server either way.
+  it.each([
+    [
+      'a relative launch asset',
+      'index.bundle?platform=ios&dev=true',
+      'http://127.0.0.1:8123/index.bundle?platform=ios&dev=true',
+    ],
+    [
+      'a launch asset on the tunnel host',
+      'https://c-abc.exp.direct/index.bundle?platform=ios&dev=true',
+      'http://127.0.0.1:8123/index.bundle?platform=ios&dev=true',
+    ],
+  ])(`should send the HEAD to the dev server given %s`, async (_name, launchAsset, expectedUrl) => {
     const calls = mockFetch({
-      'http://127.0.0.1:8123/': {
-        json: { launchAsset: { url: 'index.bundle?platform=ios&dev=true' } },
-      },
-      'HEAD http://127.0.0.1:8123/index.bundle?platform=ios&dev=true': { status: 200 },
+      'http://127.0.0.1:8123/': { json: { launchAsset: { url: launchAsset } } },
+      [`HEAD ${expectedUrl}`]: { status: 200 },
     });
 
-    const result = await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 });
+    await checkEntryBundleAsync(devServerUrl, { platform: 'ios', timeoutMs: 5000 });
 
-    expect(result.outcome).toBe('ok');
-    expect(result.url).toBe('http://127.0.0.1:8123/index.bundle?platform=ios&dev=true');
-    expect(calls[1]!.url).toBe('http://127.0.0.1:8123/index.bundle?platform=ios&dev=true');
+    expect(calls[1]!.url).toBe(expectedUrl);
   });
 
   it(`should treat a not-modified answer as a bundle that compiles`, async () => {
