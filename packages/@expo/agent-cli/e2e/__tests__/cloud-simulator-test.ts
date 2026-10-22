@@ -962,6 +962,21 @@ describe('a project whose config puts the device on EAS', () => {
     expect(easInvocations(projectRoot)).toEqual([]);
   });
 
+  it(`should start no session from the config on navigate`, async () => {
+    const projectRoot = await setupOnEasAsync();
+
+    await executeAgentCliAsync(
+      projectRoot,
+      ['navigate', '/notes', '--ios', '--scheme', 'myapp', '--no-wait-attach', '--json'],
+      { reject: false }
+    );
+
+    // The fallback rung may list and drive the session that is up; it never starts one.
+    const verbs = easInvocations(projectRoot).map((argv) => argv[0]);
+    expect(verbs).not.toContain('simulator');
+    expect(verbs).not.toContain('simulator:start');
+  });
+
   it(`should leave the session running on a plain dev:stop`, async () => {
     const projectRoot = await setupOnEasAsync();
 
