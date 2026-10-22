@@ -645,7 +645,7 @@ _Renamed 2026-09-08:_ the flag this section calls `--cloud` is **`--eas`** now, 
 
 Device resolution has a third backend: a simulator that runs on EAS [confirmed, Kudo, 2026-08-26]. `@expo/agent-cli navigate --cloud` drives it. A machine with no local device reaches for it as a fallback on `navigate` and `smoke`. `runtime:stop` and `runtime:reload` take `--cloud` and reach for it only when named, so a session that happens to be up never quietly bills a run that a local device would have served.
 
-The developer config does not move these commands [Kudo, 2026-10-22]. `deviceBackend` is read by the commands that start an environment, `dev` and `smoke` ([[0015-backend-selection-and-config]] §The device backend). `runtime:stop` and `runtime:reload` still reach a session only when `--eas` names it.
+The developer config does not move `navigate`, `runtime:reload` or `runtime:stop` [Kudo, 2026-10-22]. `runtime:stop` and `runtime:reload` still reach a session only when `--eas` names it. `smoke` reads `deviceBackend` only when it starts the dev server itself ([[0015-backend-selection-and-config]] §The device backend).
 
 `NavigateDevice` gains `backend: 'local-ios' | 'local-android' | 'cloud'`. It is reported rather than inferred from `platform`. An EAS session runs iOS too. It rides in `--json` as `deviceBackend`.
 
