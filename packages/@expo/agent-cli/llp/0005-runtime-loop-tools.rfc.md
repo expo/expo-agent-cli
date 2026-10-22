@@ -597,7 +597,7 @@ So a **connection-level** failure is retried, once a second, until the budget ru
 
 The test that should have caught this existed and did not, which is worth more than the fix. `reports an unreachable dev server instead of throwing` pointed at **port 1** — and `undici` rejects port 1 as `bad port` before it opens a socket, so the case never exercised a refused connection at all. It is now four cases against a real server that starts listening a second and a half late: the retry that finds it, the budget that expires without it, the caller's `signal` that ends the loop early, and the hostname that must not be waited out.
 
-The bootstrap is not charged to `--timeout`. A cold simulator takes about a minute. A cold first bundle takes longer. Each act has a budget of its own: 120 s for the dev server, 120 s for an iOS boot, 240 s for an Android one. This run pays for the cold it caused. First compile (`FIRST_BUNDLE_TIMEOUT_MS`, 3 min) when it started that dev server. First launch and attach (`APP_ATTACH_TIMEOUT_MS`, 2 min) when it started the dev server or booted the device. That attach budget is taken once and shared by the open and the `app` phase wait, so a cold run that never attaches answers after two minutes rather than four. First readable runtime (`RUNTIME_READY_TIMEOUT_MS`, 30 s) when it opened the app. `--timeout` bounds the reads.
+The bootstrap is not charged to `--timeout`. A cold simulator takes about a minute. A cold first bundle takes longer. Each act has a budget of its own: 120 s for the dev server, 120 s for an iOS boot, 240 s for an Android one. This run pays for the cold it caused. First compile (`FIRST_BUNDLE_TIMEOUT_MS`, 3 min) when it started that dev server. First launch and attach (`APP_ATTACH_TIMEOUT_MS`, 2 min) when it started the dev server or booted the device. That attach budget is taken once and shared by the open and the `app` phase wait, so a cold run that never attaches answers after two minutes rather than four. First readable runtime (`RUNTIME_READY_TIMEOUT_MS`, 15 s) when it opened the app. `--timeout` bounds the reads.
 
 ### The device that can open the app
 
@@ -638,6 +638,14 @@ On Android, `am force-stop` exits 0 whether or not the app was running. `stopApp
 Follow-ups keep the platform flag the run had. `navigate --android`'s screenshot line names `npx @expo/agent-cli smoke --android`. `status` lists every local device (`LocalDeviceStatus.devices`).
 
 On a local iOS simulator, every `simctl openurl` of a development-build scheme raises a springboard confirmation, `Open in "<app>"?`, on every call. The four gates that let `navigate --cloud` answer the dialog start with "only on `--cloud`". Whether that gate should be about the device rather than about the flag is open. With the dialog answered by hand, the iOS development build behaves like the Android one.
+
+### A reloading runtime answers like one with no debugger
+
+A development build on Android also answers `Runtime.evaluate` with `-32601`, for about 1.5 s after a reload, on the same target id, until its new runtime exists [observed — EAS Simulator Android session, SDK 58 development build, a `Page.reload` then one `Runtime.evaluate` of `1` every ~350 ms: four `-32601`, then `ok` at 1.9 s, 2026-10-22]. The target list does not change in that gap, so the settle does not cover it. One `-32601` is therefore not a verdict on an app this run moved. `smoke` asks again for 5 s after the first `-32601` and only then reports a runtime with no debugger. An app that nothing moved is still asked once. The `it.each` `reads a reloaded app that answers …` enforces the grace and that it does not shorten the runtime-ready wait. The `it.each` `asks a runtime with no debugger in …` enforces its end.
+
+Expo Go for Android pays the grace in full. Every run that reloads or opens the app moves it, and a reload is the default, so almost every `smoke --android` on Expo Go pays about 5 s before its verdict.
+
+Rejected: Expo Go for Android's `Log.entryAdded` announcement that the engine "does not support debugging" (§Android) as the discriminator. It could end the wait at once for Expo Go, but the runtime phase asks `Runtime.evaluate` and does not read the log window. A second source for one verdict costs more than about 5 s per run.
 
 ## Cloud simulator
 

@@ -566,9 +566,9 @@ export const APP_ATTACH_TIMEOUT_MS = 120_000;
  * tapapp` on a simulator this run booted].
  *
  * Waiting is not a softer verdict. The question the phase asks is "can this runtime be read at
- * all", and a runtime that answers at eight seconds *can* be. What does not change: a runtime with
- * no debugger has **decided** and is asked once, and a wait that ends with no answer reports the
- * runtime's own reason exactly as it did before.
+ * all", and a runtime that answers at eight seconds *can* be. A runtime with no debugger is asked
+ * for {@link RUNTIME_UNSUPPORTED_GRACE_MS} (5 s) after its first "method not found", and a wait that
+ * ends with no answer reports the runtime's own reason exactly as it did before.
  */
 export const RUNTIME_READY_TIMEOUT_MS = 15_000;
 
@@ -588,6 +588,17 @@ export const RELOAD_TIMEOUT_MS = 10_000;
 
 /** How often the runtime is asked again while that wait runs. */
 const RUNTIME_READY_POLL_MS = 500;
+
+/**
+ * How long, from its first "method not found" to `Runtime.evaluate`, a moved app may go on answering
+ * that way before the answer counts as a runtime with no debugger.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §A reloading runtime answers like one with no debugger.
+ * A development build on Android answers `-32601` for about 1.5 s after a reload, on the same
+ * target id [observed — EAS Simulator Android session, SDK 58 development build, 2026-10-22]. Expo
+ * Go for Android answers it for ever, so this grace is its whole extra cost.
+ */
+export const RUNTIME_UNSUPPORTED_GRACE_MS = 5_000;
 
 /**
  * How long the run gives a dev server to come up, out of a budget of its own.
@@ -1833,12 +1844,14 @@ async function runPhasesAsync(
    */
   const evaluateUntilReadableAsync = async (): Promise<SmokeEvaluateResult> => {
     const deadline = deps.now() + (appMovedByThisRun ? RUNTIME_READY_TIMEOUT_MS : 0);
+    let unsupportedSince: number | null = null;
     for (;;) {
       const result = await deps.evaluate(devServerUrl);
-      // Both of these are decided. `unsupported` is llp/0005-runtime-loop-tools.rfc.md §Android — a runtime with no
-      // debugger will not grow one, and asking it again for thirty seconds would turn the one
-      // case this command exists to report into a hang.
-      if (result.ok || result.unsupported || deps.now() >= deadline) {
+      const now = deps.now();
+      // `unsupported` is decided only after the grace: a runtime with no debugger (llp/0005
+      // §Android) will not grow one, but a reloading one answers the same way until it is back.
+      const unsupportedFor = result.unsupported ? now - (unsupportedSince ??= now) : 0;
+      if (result.ok || now >= deadline || unsupportedFor >= RUNTIME_UNSUPPORTED_GRACE_MS) {
         return result;
       }
       await new Promise((resolve) => setTimeout(resolve, RUNTIME_READY_POLL_MS));

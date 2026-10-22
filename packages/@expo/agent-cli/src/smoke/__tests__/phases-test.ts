@@ -18,9 +18,11 @@ import {
   APP_ATTACH_TIMEOUT_MS,
   APP_SETTLE_MS,
   FIRST_BUNDLE_TIMEOUT_MS,
+  RUNTIME_UNSUPPORTED_GRACE_MS,
   runSmokePhasesAsync,
   smokeExitCode,
   type SmokeDeps,
+  type SmokeEvaluateResult,
   type SmokeRun,
 } from '../phases';
 import { silentProgress } from '../progress';
@@ -218,6 +220,12 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
 /** One phase's status, by id, so a case reads as a table row. */
 function statusOf(run: SmokeRun, id: SmokePhaseId): SmokePhaseStatus | undefined {
   return run.phases.find((phase) => phase.id === id)?.status;
+}
+
+/** A clock that moves `ms` forward on every read. */
+function steppingClock(ms: number): () => number {
+  let clock = 0;
+  return () => (clock += ms);
 }
 
 describe(runSmokePhasesAsync, () => {
@@ -1260,30 +1268,79 @@ describe(runSmokePhasesAsync, () => {
       );
     });
 
-    // @ref llp/0005-runtime-loop-tools.rfc.md §Android. A runtime with no debugger has *decided*, and asking it again
-    // for thirty seconds would turn the one case this command exists to report into a hang.
-    it(`asks a runtime with no debugger exactly once`, async () => {
-      let tries = 0;
-      const run = await runSmokePhasesAsync(
-        deps({
-          probeDevice: async () => ({
-            deviceId: 'SIM-BOOTED',
-            backend: 'local-ios' as const,
-            reason: null,
+    /**
+     * A run whose app answers by the clock, which steps 1 s per answer. Timers are fake, so the
+     * 500 ms polls cost nothing.
+     */
+    async function runAnsweringBy(
+      answerAt: (ms: number) => SmokeEvaluateResult,
+      runOptions: SmokeOptions = options()
+    ) {
+      vi.useFakeTimers();
+      try {
+        let clock = 0;
+        let tries = 0;
+        const running = runSmokePhasesAsync(
+          deps({
+            now: () => clock,
+            evaluate: async () => {
+              tries += 1;
+              clock += 1_000;
+              return answerAt(clock);
+            },
           }),
-          waitForAppConnection: vi
-            .fn()
-            .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
-            .mockResolvedValue({ appsConnected: 1, timedOut: false, waitedMs: 1 }),
-          evaluate: async () => {
-            tries += 1;
-            return { ok: false, unsupported: true, reason: 'method not found' };
-          },
-        }),
-        options({ bootstrap: true })
-      );
+          runOptions
+        );
+        await vi.runAllTimersAsync();
+        return { run: await running, tries };
+      } finally {
+        vi.useRealTimers();
+      }
+    }
 
-      expect(tries).toBe(1);
+    const readable: SmokeEvaluateResult = { ok: true, unsupported: false, reason: null };
+    const noTarget: SmokeEvaluateResult = {
+      ok: false,
+      unsupported: false,
+      reason: 'No target found.',
+    };
+    const methodNotFound: SmokeEvaluateResult = {
+      ok: false,
+      unsupported: true,
+      reason: 'method not found',
+    };
+
+    // @ref llp/0005-runtime-loop-tools.rfc.md §A reloading runtime answers like one with no debugger.
+    // A development build on Android answers `Runtime.evaluate` with `-32601` for about 1.5 s after
+    // a reload, on the same target id, until its new runtime exists. One read in that gap is not
+    // Expo Go's permanent `-32601`. The grace counts from the first "method not found", and it
+    // does not shorten the wait for a runtime that is not there yet.
+    it.each([
+      ['"method not found" until 2 s', (ms: number) => (ms < 3_000 ? methodNotFound : readable)],
+      ['"No target found." until 8 s', (ms: number) => (ms < 9_000 ? noTarget : readable)],
+      [
+        '"No target found." until 6 s, then "method not found"',
+        (ms: number) => (ms < 7_000 ? noTarget : ms < 8_000 ? methodNotFound : readable),
+      ],
+    ])(`reads a reloaded app that answers %s`, async (_answers, answerAt) => {
+      const { run } = await runAnsweringBy(answerAt);
+
+      expect(statusOf(run, 'runtime')).toBe('ok');
+      expect(run.runtimeSupported).toBe(true);
+      expect(run.outcome).toBe('passed');
+    });
+
+    // @ref llp/0005-runtime-loop-tools.rfc.md §Android. A runtime with no debugger keeps its answer,
+    // so a moved app is asked for the grace after its first "method not found", never for the
+    // whole runtime-ready wait, and an app that nothing moved is asked once.
+    it.each([
+      ['an app this run reloaded', RUNTIME_UNSUPPORTED_GRACE_MS / 1_000 + 1, options()],
+      ['an app nothing moved', 1, options({ reload: false })],
+    ])(`asks a runtime with no debugger in %s %i time(s)`, async (_app, expected, runOptions) => {
+      const { run, tries } = await runAnsweringBy(() => methodNotFound, runOptions);
+
+      expect(tries).toBe(expected);
+      expect(statusOf(run, 'runtime')).toBe('inconclusive');
       expect(run.runtimeSupported).toBe(false);
     });
 
@@ -1769,6 +1826,7 @@ describe(runSmokePhasesAsync, () => {
             reason: 'the runtime answered Runtime.evaluate with "method not found"',
           }),
           collectErrors: async () => ({ ok: true, records: [], reason: null }),
+          now: steppingClock(RUNTIME_UNSUPPORTED_GRACE_MS),
         }),
         options({ platform: 'android' })
       );
@@ -1786,6 +1844,7 @@ describe(runSmokePhasesAsync, () => {
         deps({
           evaluate: async () => ({ ok: false, unsupported: true, reason: 'method not found' }),
           collectErrors: async () => ({ ok: true, records: [record()], reason: null }),
+          now: steppingClock(RUNTIME_UNSUPPORTED_GRACE_MS),
         }),
         options()
       );
@@ -1916,7 +1975,13 @@ describe(smokeExitCode, () => {
     [{ collectErrors: async () => ({ ok: true, records: [record()], reason: null }) }, 20],
     [{ checkEntryBundle: async () => bundle({ outcome: 'broken' }) }, 20],
     [{ discoverDevServer: async () => discovery({ reachable: false }) }, 20],
-    [{ evaluate: async () => ({ ok: false, unsupported: true, reason: 'method not found' }) }, 22],
+    [
+      {
+        evaluate: async () => ({ ok: false, unsupported: true, reason: 'method not found' }),
+        now: steppingClock(RUNTIME_UNSUPPORTED_GRACE_MS),
+      },
+      22,
+    ],
     [{ checkEntryBundle: async () => bundle({ outcome: 'timeout' }) }, 22],
     [
       {
