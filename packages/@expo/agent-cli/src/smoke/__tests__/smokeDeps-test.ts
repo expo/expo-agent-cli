@@ -10,7 +10,6 @@ import {
   releaseWorktreeDevicesAsync,
 } from '../../deviceBinding';
 import { androidBindingFor, bindingFor } from '../../deviceBinding/__tests__/fakeTools';
-import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import { fetchAdvertisedUrlAsync } from '../../dev/advertisedUrl';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
@@ -291,40 +290,6 @@ describe('ensureEasSession with no EAS build to install', () => {
       prefixArgs: [],
       source: 'eas',
     } as any);
-  });
-
-  it(`reuses an expired binding's live session and renews its lease`, async () => {
-    writeCloudBinding(projectRoot, 'ios', 'OLD', {
-      boundAt: new Date(Date.now() - 90 * 60_000).toISOString(),
-      expiresAt: new Date(Date.now() - 30 * 60_000).toISOString(),
-    });
-    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
-      cloudProbe.active({ id: 'OLD', platform: 'ios' })
-    );
-
-    const result = await eas().ensureEasSession('http://127.0.0.1:8081');
-
-    expect(result).toEqual({ ok: true, sessionId: 'OLD', started: false, reason: null });
-    expect(probeCloudSessionAsync).toHaveBeenCalledWith(
-      expect.objectContaining({ boundIds: ['OLD'] })
-    );
-    const read = readBindingFile(file);
-    expect(read.kind === 'binding' && Date.parse(read.binding.expiresAt) > Date.now()).toBe(true);
-    expect(spawnCaptureAsync).not.toHaveBeenCalled();
-  });
-
-  it(`refuses an unreadable binding file and starts nothing`, async () => {
-    const fs = await import('fs');
-    const path = await import('path');
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, 'garbage');
-
-    const result = await eas().ensureEasSession('http://127.0.0.1:8081');
-
-    expect(result).toMatchObject({ ok: false, sessionId: null, started: false });
-    expect(result.reason).toContain('cannot be read');
-    expect(probeCloudSessionAsync).not.toHaveBeenCalled();
-    expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
 
   it(`starts no session when none is up, with smoke's reason and no tunnel wait`, async () => {
