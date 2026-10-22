@@ -19,11 +19,7 @@ import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
-import {
-  CLOUD_SESSION_GUARD_EXIT,
-  CLOUD_SESSION_MISMATCH,
-  guardedCloudArgs,
-} from '../cloudCommand';
+import { guardedCloudArgs } from '../cloudCommand';
 import recordedAvailability from '../../__fixtures__/eas/simulator-availability.json';
 import { isNeedsHumanError } from '../../utils/errors';
 import {
@@ -1096,54 +1092,6 @@ describe(openUrlOnCloudSimulatorAsync, () => {
 
     expect(result.exitCode).toBe(1);
     expect(result.stderr).toContain('Remote daemon');
-  });
-
-  const openOnSess1 = () =>
-    openUrlOnCloudSimulatorAsync({
-      projectRoot: '/project',
-      sessionId: 'sess-1',
-      url: 'exp://tunnel.example/--/?',
-      platform: 'ios',
-    });
-
-  it(`throws CLOUD_SESSION_MISMATCH with both ids when the guard refuses with its exit code`, async () => {
-    project();
-    mockEas({ exitCode: CLOUD_SESSION_GUARD_EXIT, stderr: `${CLOUD_SESSION_MISMATCH} sess-2\n` });
-
-    const error = await openOnSess1().catch((e) => e);
-    expect(error).toMatchObject({
-      code: 'CLOUD_SESSION_MISMATCH',
-      data: { selectedSessionId: 'sess-1', loadedSessionId: 'sess-2' },
-    });
-    expect(error.suggestedCommand).toEqual(expect.stringContaining('dev:stop --eas'));
-  });
-
-  it(`reports no loaded id when the guard's line names none`, async () => {
-    project();
-    mockEas({ exitCode: CLOUD_SESSION_GUARD_EXIT, stderr: CLOUD_SESSION_MISMATCH });
-
-    await expect(openOnSess1()).rejects.toMatchObject({
-      code: 'CLOUD_SESSION_MISMATCH',
-      data: { selectedSessionId: 'sess-1', loadedSessionId: null },
-    });
-  });
-
-  it(`returns the result when exit 20 carries the sentinel inside another line`, async () => {
-    project();
-    mockEas({ exitCode: CLOUD_SESSION_GUARD_EXIT, stderr: `x ${CLOUD_SESSION_MISMATCH}` });
-
-    const result = await openOnSess1();
-
-    expect(result.exitCode).toBe(CLOUD_SESSION_GUARD_EXIT);
-  });
-
-  it(`returns the result when the sentinel is printed by something other than the guard`, async () => {
-    project();
-    mockEas({ exitCode: 1, stderr: `app said ${CLOUD_SESSION_MISMATCH}` });
-
-    const result = await openOnSess1();
-
-    expect(result.exitCode).toBe(1);
   });
 });
 

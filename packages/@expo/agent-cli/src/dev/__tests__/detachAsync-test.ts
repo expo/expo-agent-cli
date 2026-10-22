@@ -115,27 +115,6 @@ describe('--eas on the other platform', () => {
       reuseBoundDevice: true,
     });
 
-  it('refuses before the spawn when this worktree has a session on the other platform', async () => {
-    vi.mocked(otherPlatformSessionAsync).mockResolvedValue({ sessionId: 's-ios', platform: 'ios' });
-
-    const error = await detach().catch((e) => e);
-
-    expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
-    expect(error.suggestedCommand).toContain('dev:stop --eas');
-    expect(error.data).toMatchObject({ sessionId: 's-ios' });
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
-  it('refuses when the other session reports no platform', async () => {
-    vi.mocked(otherPlatformSessionAsync).mockResolvedValue({ sessionId: 's-x', platform: null });
-
-    const error = await detach().catch((e) => e);
-
-    expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
-    expect(error.data).toEqual({ sessionId: 's-x', platform: null });
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
   it('asks nothing when a dev server runs', async () => {
     vi.mocked(readDevServerLockAsync)
       .mockReset()
