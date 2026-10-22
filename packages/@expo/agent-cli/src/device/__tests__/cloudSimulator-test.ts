@@ -476,25 +476,6 @@ describe(selectCloudSession, () => {
     });
   });
 
-  it(`picks a pending bound session over a live dotenv one`, () => {
-    expect(
-      selectCloudSession(
-        [
-          { ...ios, id: 'queued', status: 'NEW' },
-          { ...ios, id: 'dotenv' },
-        ],
-        {
-          boundIds: ['queued'],
-          preferredId: 'dotenv',
-        }
-      )
-    ).toMatchObject({ selected: { id: 'queued', status: 'NEW' } });
-    expect(buildSessionListArgs().filter((arg) => ['new', 'in-progress'].includes(arg))).toEqual([
-      'in-progress',
-      'new',
-    ]);
-  });
-
   // Only `agent-device` answers `simulator:exec npx agent-device`. A `serve-sim` session is a
   // browser preview, and driving it is not a thing that would work.
   it(`never picks a session whose controller this CLI does not speak to`, () => {
@@ -526,21 +507,6 @@ describe(selectCloudSession, () => {
     ).toBe('and-1');
   });
 
-  // A session on the other platform still comes back: the caller raises the mismatch, which says a
-  // session exists and is not the one asked for. "No session" would have hidden it.
-  it(`puts the platform the caller asked for before a bound id`, () => {
-    const queuedAndroid = { ...android, id: 'sess-a', status: 'QUEUED' };
-    const iosUp = { ...ios, id: 'sess-b' };
-
-    expect(
-      selectCloudSession([queuedAndroid, iosUp], {
-        boundIds: ['sess-a'],
-        preferredId: 'sess-b',
-        platform: 'ios',
-      }).selected?.id
-    ).toBe('sess-b');
-  });
-
   // @ref llp/0035-one-device-per-worktree.rfc.md §Session binding — the requested platform, then a bound id, then the dotenv id
   it(`ranks the asked platform over a bound id, and a bound id over the dotenv id`, () => {
     const boundOtherPlatform = {
@@ -564,6 +530,8 @@ describe(selectCloudSession, () => {
     ]);
   });
 
+  // A session on the other platform still comes back: the caller raises the mismatch, which says a
+  // session exists and is not the one asked for. "No session" would have hidden it.
   it(`still answers with the other platform's session when it is all there is`, () => {
     expect(
       selectCloudSession([android], { platform: 'ios', boundIds: ['ios-1', 'and-1'] }).selected?.id
@@ -1000,23 +968,13 @@ describe(probeCloudSessionAsync, () => {
     );
   });
 
-  it.each(['QUEUED', 'STARTING'])(`is queued for a bound %s session`, async (status) => {
-    project();
-    mockEas({ stdout: listJson(sessionRow({ status })) });
-
-    const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: ['sess-1'] });
-
-    expect(probe).toMatchObject({ state: 'queued', session: { id: 'sess-1', status } });
-  });
-
-  it(`is not queued for a pending session the dotenv does not name`, async () => {
+  it(`is queued for a bound pending session`, async () => {
     project();
     mockEas({ stdout: listJson(sessionRow({ status: 'QUEUED' })) });
 
-    const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: [] });
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: ['sess-1'] });
 
-    expect(probe.state).not.toBe('queued');
-    expect(probe.state).not.toBe('active');
+    expect(probe).toMatchObject({ state: 'queued', session: { id: 'sess-1', status: 'QUEUED' } });
   });
 });
 

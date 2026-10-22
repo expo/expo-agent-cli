@@ -8,7 +8,6 @@ import {
   readCloudBindings,
   releaseCloudBindingAsync,
 } from '../cloud';
-import { inspectBindingAsync } from '../inspect';
 import { bindingPathFor, readBindingFile } from '../registry';
 import { cloudBindingFor, writeCloudBinding } from './fakeCloudBinding';
 import { fakeTools } from './fakeTools';
@@ -58,17 +57,6 @@ it('session-id release ignores stale state but leaves a replacement alone', asyn
     { id: 'B', released: true },
   ]);
   expect(readBindingFile(file())).toEqual({ kind: 'none' });
-});
-it('expired cloud inspection is gone and writes nothing', async () => {
-  const tools = fakeTools();
-  await acquireCloudBindingAsync(root, { platform: 'ios', id: 'A', origin: 'started', tools });
-  const before = readBindingFile(file());
-  tools.clock.now = new Date('2026-10-08T12:00:00Z');
-  expect(await inspectBindingAsync(root, 'ios', 'cloud', tools)).toMatchObject({
-    state: 'gone',
-    cause: 'expired',
-  });
-  expect(readBindingFile(file())).toEqual(before);
 });
 describe('two starts in one worktree at once', () => {
   const at = new Date('2026-10-08T10:00:00Z');

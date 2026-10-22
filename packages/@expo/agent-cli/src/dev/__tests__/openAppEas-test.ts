@@ -448,6 +448,10 @@ describe(openAppOnEasAsync, () => {
     expect(report.started).toBe(true);
     expect(report.reason).toContain('exited 1');
     expect(report.reason).toContain('npx --yes eas-cli simulator:stop --id sess-billed');
+    const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
+    expect(readBindingFile(bindingPathFor(projectRoot, 'ios', 'cloud'))).toMatchObject({
+      binding: { device: { id: 'sess-billed', origin: 'started' } },
+    });
   });
 
   it('quotes a non-TTY startup timeout and preserves the created session for cleanup', async () => {
@@ -782,18 +786,6 @@ describe('worktree session ownership', () => {
       ),
     });
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
-  });
-  it('records a session created before a failed start', async () => {
-    const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
-    vi.mocked(spawnCaptureAsync).mockResolvedValue({
-      stdout: 'Simulator session created (id: billed)',
-      stderr: 'failed readiness',
-      exitCode: 1,
-    });
-    await openAppOnEasAsync(projectRoot, options);
-    expect(readBindingFile(bindingPathFor(projectRoot, 'ios', 'cloud'))).toMatchObject({
-      binding: { device: { id: 'billed', origin: 'started' } },
-    });
   });
   it('retries only an unsupported idle flag before a creation receipt', async () => {
     vi.mocked(spawnCaptureAsync).mockResolvedValueOnce({
