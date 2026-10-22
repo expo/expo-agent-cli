@@ -242,14 +242,15 @@ describe(navigateAsync, () => {
 
     it(`should build the URL from the project's lock, not from 8081`, async () => {
       mockExpoGoProject();
-      vi.mocked(readDevServerLockAsync).mockResolvedValue({
-        ...lockInfo(),
-        url: 'http://127.0.0.1:8099',
-        port: 8099,
-        pid: 4242,
-        startedAt: '2026-08-23T00:00:00.000Z',
-        projectRoot,
-      });
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(
+        lockInfo({
+          url: 'http://127.0.0.1:8099',
+          port: 8099,
+          pid: 4242,
+          startedAt: '2026-08-23T00:00:00.000Z',
+          projectRoot,
+        })
+      );
       // Both ports answer, and 8081 is another project's: the lock is what tells them apart.
       mockDevServersAt({
         'http://127.0.0.1:8099': [EXPO_GO_TARGET],
@@ -270,14 +271,15 @@ describe(navigateAsync, () => {
 
     it(`should still let --dev-server-url name the dev server exactly`, async () => {
       mockExpoGoProject();
-      vi.mocked(readDevServerLockAsync).mockResolvedValue({
-        ...lockInfo(),
-        url: 'http://127.0.0.1:8099',
-        port: 8099,
-        pid: 4242,
-        startedAt: '2026-08-23T00:00:00.000Z',
-        projectRoot,
-      });
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(
+        lockInfo({
+          url: 'http://127.0.0.1:8099',
+          port: 8099,
+          pid: 4242,
+          startedAt: '2026-08-23T00:00:00.000Z',
+          projectRoot,
+        })
+      );
       mockDevServersAt({ 'http://127.0.0.1:8123': [EXPO_GO_TARGET] });
       mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
@@ -754,15 +756,16 @@ describe(navigateAsync, () => {
       vol.fromJSON({
         [`${projectRoot}/.expo/dev/logs/dev-detached.log`]: `Waiting on http://${host}\n`,
       });
-      vi.mocked(readDevServerLockAsync).mockResolvedValue({
-        ...lockInfo(),
-        url: 'http://127.0.0.1:8081',
-        port: 8081,
-        pid: 4242,
-        // Before the log memfs just wrote, which is what proves the log is this run's.
-        startedAt: '2020-01-01T00:00:00.000Z',
-        projectRoot,
-      });
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(
+        lockInfo({
+          url: 'http://127.0.0.1:8081',
+          port: 8081,
+          pid: 4242,
+          // Before the log memfs just wrote, which is what proves the log is this run's.
+          startedAt: '2020-01-01T00:00:00.000Z',
+          projectRoot,
+        })
+      );
     }
 
     // The whole point: no device is looked for, so nothing is spawned.

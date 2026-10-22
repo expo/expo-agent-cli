@@ -1146,14 +1146,13 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     expect(report.next?.why).toContain('android');
   });
   const iosOptions = { ...options, platform: 'ios' as const };
-  const running = {
-    ...lockInfo(),
+  const running = lockInfo({
     projectRoot,
     url: devServerUrl,
     port: 8081,
     pid: 4242,
     startedAt: new Date(0).toISOString(),
-  };
+  });
 
   async function planNextAsync() {
     vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([

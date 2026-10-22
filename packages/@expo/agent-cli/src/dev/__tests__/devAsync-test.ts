@@ -204,14 +204,13 @@ const notAnswering = { answering: false, projectRootMatched: null, reportedProje
 
 /** This project's dev server holds its lock on `port`, and its `/status` answers in `phase`. */
 function mockRunning(phase: 'serving' | 'starting', port = 8081): DevServerLockInfo {
-  const lock: DevServerLockInfo = {
-    ...lockInfo(),
+  const lock: DevServerLockInfo = lockInfo({
     url: `http://127.0.0.1:${port}`,
     port,
     pid: 4242,
     startedAt: '2026-10-07T00:00:00.000Z',
     projectRoot,
-  };
+  });
   vi.mocked(readDevServerLockAsync).mockResolvedValue(lock);
   vi.mocked(probeBundlerAsync).mockResolvedValue(
     phase === 'serving'
@@ -1978,13 +1977,5 @@ describe('EAS session lifecycle of the dev-server step', () => {
       projectRoot,
       expect.objectContaining({ keepSession: true })
     );
-  });
-
-  it(`names no EAS platform on the dev-server lock of a local run`, async () => {
-    await devAsync(projectRoot, resolveDevOptions(['--ios']));
-
-    expect(easRunLifecycle).not.toHaveBeenCalled();
-    const [, , opts] = vi.mocked(runDevServerAsync).mock.calls[0]!;
-    expect(opts!.easPlatform).toBeNull();
   });
 });

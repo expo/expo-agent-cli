@@ -1335,14 +1335,15 @@ describe('reloading an app on a cloud simulator session', () => {
   it(`takes the host from the manifest when no flag named a dev server`, async () => {
     writeCloudProject();
     mockDevServer([], { manifestOrigin: 'https://chx3ba8-alice-8303.exp.direct' });
-    vi.mocked(readDevServerLockAsync).mockResolvedValue({
-      ...lockInfo(),
-      url: 'http://127.0.0.1:8081',
-      port: 8081,
-      pid: 1,
-      startedAt: '2026-08-27T09:00:00.000Z',
-      projectRoot,
-    });
+    vi.mocked(readDevServerLockAsync).mockResolvedValue(
+      lockInfo({
+        url: 'http://127.0.0.1:8081',
+        port: 8081,
+        pid: 1,
+        startedAt: '2026-08-27T09:00:00.000Z',
+        projectRoot,
+      })
+    );
     mockConnect(fakeSocket([{}]).socket);
     mockSpawnQueue(
       [{ stdout: SESSION_LISTING }, { stdout: '{"success":true}' }, { stdout: '{"success":true}' }],

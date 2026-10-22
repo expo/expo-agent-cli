@@ -16,6 +16,7 @@ import { readCloudBindings } from '../../deviceBinding/cloud';
 import { bindingPathFor } from '../../deviceBinding/registry';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import type { DevServerLockInfo } from '../../devLock/types';
 
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -32,16 +33,8 @@ function mockPlatform(value: typeof process.platform) {
   Object.defineProperty(process, 'platform', { value });
 }
 
-function lock(overrides: Record<string, unknown> = {}) {
-  return {
-    ...lockInfo(),
-    url: 'http://127.0.0.1:8081',
-    port: 8081,
-    pid: 4242,
-    startedAt: '2026-08-23T00:00:00.000Z',
-    projectRoot,
-    ...overrides,
-  };
+function lock(overrides: Partial<DevServerLockInfo> = {}) {
+  return lockInfo(overrides);
 }
 
 function options(overrides: Partial<DevStopOptions> = {}): DevStopOptions {
@@ -326,37 +319,18 @@ describe(devStopAsync, () => {
       livePids.add(4242);
       signalKills = false;
 
-      await expect(devStopAsync(projectRoot, options({ timeoutMs: 200 }))).resolves.toBe(
-        EXIT_OUTCOME_FAILED
-      );
-      expect(JSON.parse(printed())).toMatchObject({
+      await expect(
+        devStopAsync(projectRoot, options({ timeoutMs: 200, followups: true }))
+      ).resolves.toBe(EXIT_OUTCOME_FAILED);
+      const report = JSON.parse(printed());
+      expect(report).toMatchObject({
         stopped: false,
         processStillRunning: true,
         reason: 'still-running',
+        easPlatform: null,
       });
+      expect(report.followups).toEqual([]);
       expect(printedErrors()).toContain('SIGKILL');
-    });
-
-    // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a detached `dev --eas`
-    // whose Metro stopped waits for its session start to return the id it binds. SIGKILL there
-    // loses that id, so a released lock and a free port are a stop, not a refusal.
-    it(`should report a dev --eas run stopped, without SIGKILL, when its process released its lock and the port is free`, async () => {
-      vi.mocked(readDevServerLockAsync)
-        .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
-        .mockResolvedValue(null as never);
-      mockPort({ answering: false });
-      livePids.add(4242);
-      signalKills = false;
-
-      await expect(devStopAsync(projectRoot, options({ timeoutMs: 200 }))).resolves.toBe(EXIT_OK);
-      expect(JSON.parse(printed())).toMatchObject({
-        stopped: true,
-        processStillRunning: true,
-        portStillAnswering: false,
-        reason: null,
-        detail: null,
-      });
-      expect(printedErrors()).not.toContain('SIGKILL');
     });
 
     describe('the finishing grace period', () => {
@@ -402,41 +376,15 @@ describe(devStopAsync, () => {
       livePids.add(4242);
       signalKills = false;
 
-      await devStopAsync(projectRoot, options({ timeoutMs: 200, followups: true }));
+      await expect(
+        devStopAsync(projectRoot, options({ timeoutMs: 200, followups: true }))
+      ).resolves.toBe(EXIT_OK);
 
       const report = JSON.parse(printed());
+      expect(report).toMatchObject({ stopped: true, processStillRunning: true });
       expect(report.easPlatform).toBe('android');
       expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['stop-session', 'dev']);
       expect(report.followups[1].command).toBe(`${PROGRAM_PREFIX} dev --android --eas`);
-    });
-
-    it(`should name no EAS stop for a live pid when the lock names no EAS platform`, async () => {
-      vi.mocked(readDevServerLockAsync)
-        .mockResolvedValueOnce(lock() as never)
-        .mockResolvedValue(null as never);
-      mockPort({ answering: false });
-      livePids.add(4242);
-      signalKills = false;
-
-      await devStopAsync(projectRoot, options({ timeoutMs: 200, followups: true }));
-
-      const report = JSON.parse(printed());
-      expect(report).toMatchObject({ easPlatform: null, reason: 'still-running' });
-      expect(report.followups).toEqual([]);
-    });
-
-    it(`should not call a live pid finishing when the lock names no EAS platform`, async () => {
-      vi.mocked(readDevServerLockAsync)
-        .mockResolvedValueOnce(lock() as never)
-        .mockResolvedValue(null as never);
-      mockPort({ answering: false });
-      livePids.add(4242);
-      signalKills = false;
-
-      await devStopAsync(projectRoot, options({ timeoutMs: 200, json: false, followups: true }));
-
-      expect(printed()).not.toContain('finishing its exit work');
-      expect(printedErrors()).toContain('SIGKILL');
     });
 
     it(`should say the stopped dev --eas run's process is finishing its exit work`, async () => {
@@ -1013,6 +961,7 @@ describe(buildFollowUps, () => {
     const followups = buildFollowUps(result(input), finishing);
 
     expect(followups.map((f) => f.id)).toEqual(ids);
+    if (finishing && ids[0] === 'stop-session') expect(followups[0]!.why).toContain('pid 1234');
     if (platformFlag !== undefined) {
       expect(followups.find((f) => f.id === 'dev')?.command ?? null).toBe(
         platformFlag && `${PROGRAM_PREFIX} dev ${platformFlag} --eas`
@@ -1054,17 +1003,5 @@ describe(buildFollowUps, () => {
 
     expect(followups[0]!.why).toContain('The stop of EAS Simulator session A failed: refused.');
     expect(followups[0]!.why).not.toContain('not checked');
-  });
-
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the process may still bind
-  // the session its start returns, after this report.
-  it(`names dev:stop --eas when the stopped dev --eas run's process is still finishing`, () => {
-    const followups = buildFollowUps(
-      result({ processStillRunning: true, easPlatform: 'ios' }),
-      true
-    );
-
-    expect(followups.map((f) => f.id)).toEqual(['stop-session', 'dev']);
-    expect(followups[0]!.why).toContain('pid 1234');
   });
 });

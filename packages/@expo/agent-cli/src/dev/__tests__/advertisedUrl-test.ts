@@ -251,14 +251,15 @@ describe('resolveDevServerReachAsync', () => {
       [`${projectRoot}/package.json`]: '{}',
       ...(lines ? { [detachedLogPath(projectRoot)]: lines.join('\n') + '\n' } : {}),
     });
-    vi.mocked(readDevServerLockAsync).mockResolvedValue({
-      ...lockInfo(),
-      url: lockUrl,
-      port: 8309,
-      pid: 1,
-      startedAt,
-      projectRoot,
-    });
+    vi.mocked(readDevServerLockAsync).mockResolvedValue(
+      lockInfo({
+        url: lockUrl,
+        port: 8309,
+        pid: 1,
+        startedAt,
+        projectRoot,
+      })
+    );
   }
 
   afterEach(() => {

@@ -27,14 +27,13 @@ vi.mock('../portListener', () => ({
 
 const root = '/work/app';
 const host = process.platform;
-const lock = {
-  ...lockInfo(),
+const lock = lockInfo({
   pid: 4141,
   port: 8081,
   url: 'http://127.0.0.1:8081',
   projectRoot: root,
   startedAt: '2026-10-08T10:00:00Z',
-};
+});
 const device = {
   backend: 'local-ios' as const,
   platform: 'ios' as const,
