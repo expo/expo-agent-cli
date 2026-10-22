@@ -85,7 +85,8 @@ A session installs Expo Go or a build that EAS made, never a build made on this 
 
 - `dev` reads it. With `eas`, it does what `--eas` does ([[0027-everything-on-eas]]), and it refuses what `--eas` refuses, naming the config and `--local`. The web has no device, so `dev --web` ignores it.
 - `smoke` reads it only when it starts its own dev server. Then it does what `smoke --eas` does. Beside a dev server that runs, it uses what runs.
-- No other command reads it. `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` keep the rules of [[0005-runtime-loop-tools]] §Cloud simulator and [[0027-everything-on-eas]] §dev:stop. When [[0035-one-device-per-worktree]] §EAS session binding lands, they follow the session the worktree bound.
+- `status` reads it to report the plan `dev` would run (§What `status` reports). That read starts nothing.
+- `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` do not read it. They keep the rules of [[0005-runtime-loop-tools]] §Cloud simulator and [[0027-everything-on-eas]] §dev:stop. When [[0035-one-device-per-worktree]] §EAS session binding lands, they follow the session the worktree bound.
 
 A command `dev` suggests should reach the device this run used. So on a run whose device is on EAS, by `--eas` or the config, `dev`'s follow-ups name `--eas` on the device commands they suggest. The one exception is a `dev:stop` that asks for the same `dev` again, because that `dev` reuses the session.
 
