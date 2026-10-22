@@ -463,6 +463,12 @@ for that port. A server that names another project's root, or none, still needs
 `--force`. When the process cannot be named or is not a dev server's, nothing is
 signalled, the reason is `untracked-dev-server`, and the exit is 20.
 
+The captured log of an untracked server may be an earlier run's, so `status` does not
+take its tunnel from the log. It asks the manifest of the server that answered
+(`resolveDevServerReachAsync(projectRoot, devServerUrl)`). A manifest that names a tunnel
+is the tunnel. Otherwise the line says `tunnel unknown`, `tunnelUrl` is null, and no
+development-build link is built on a tunnel nobody confirmed.
+
 Three flags are stripped from the child's command line. `--detach` would detach a
 detached run forever. `--wait-ready` names a wait the parent performs. `--json` would
 print an object nobody reads and switch the plan's subprocess output to `capture`, which

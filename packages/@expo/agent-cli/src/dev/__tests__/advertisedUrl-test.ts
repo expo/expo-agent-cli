@@ -300,6 +300,33 @@ describe('resolveDevServerReachAsync', () => {
     });
   });
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — with no lock, the log
+  // may be an earlier run's. Only the running dev server's own manifest confirms its tunnel.
+  describe('no lock answers', () => {
+    beforeEach(() => {
+      writeProject(TUNNELLED_LOG);
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null);
+    });
+
+    it(`takes the tunnel from the manifest of the dev server that answered`, async () => {
+      mockManifest('https://real-orphan.on.expo.app');
+
+      await expect(resolveDevServerReachAsync(projectRoot, lockUrl)).resolves.toMatchObject({
+        advertised: { host: 'real-orphan.on.expo.app', hostType: 'tunnel' },
+        tunnelUnconfirmed: false,
+      });
+    });
+
+    it(`marks the log's tunnel unconfirmed when the manifest does not name one`, async () => {
+      mockManifest(null);
+
+      await expect(resolveDevServerReachAsync(projectRoot, lockUrl)).resolves.toMatchObject({
+        advertised: { hostType: 'tunnel' },
+        tunnelUnconfirmed: true,
+      });
+    });
+  });
+
   it(`still answers from the manifest when the log named nothing (S3)`, async () => {
     writeProject(['Starting Metro Bundler']);
     mockManifest('https://chx3ba8-alice-8303.exp.direct');

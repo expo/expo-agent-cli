@@ -146,6 +146,11 @@ export interface DevServerReach {
   running: boolean;
   /** Why {@link advertised} is null, for a report that has to explain itself. */
   reason: string | null;
+  /**
+   * The log names a tunnel, and neither a lock nor the running dev server's manifest confirms it
+   * is that server's: the log may be an earlier run's. The tunnel is unknown.
+   */
+  tunnelUnconfirmed?: boolean;
 }
 
 /**
@@ -206,13 +211,33 @@ export function resolveDevServerReach(
   };
 }
 
-/** {@link resolveDevServerReach} over this project's lock and its captured log. */
-export async function resolveDevServerReachAsync(projectRoot: string): Promise<DevServerReach> {
+/**
+ * {@link resolveDevServerReach} over this project's lock and its captured log.
+ *
+ * @param devServerUrl the dev server that answered, for a caller that found one with no lock (a
+ * dev server whose CLI process ended). Its manifest is the only thing that confirms its tunnel.
+ */
+export async function resolveDevServerReachAsync(
+  projectRoot: string,
+  devServerUrl?: string
+): Promise<DevServerReach> {
   const [lock, captured] = await Promise.all([
     readDevServerLockAsync(projectRoot),
     Promise.resolve(readDevServerLogSync(projectRoot)),
   ]);
   const fromLog = resolveDevServerReach(captured, lock);
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  if (lock == null && devServerUrl != null && fromLog.advertised?.hostType === 'tunnel') {
+    const fromServer = await fetchAdvertisedUrlAsync(devServerUrl);
+    return fromServer?.hostType === 'tunnel'
+      ? { advertised: fromServer, running: false, reason: null, tunnelUnconfirmed: false }
+      : {
+          ...fromLog,
+          reason:
+            'no lock ties the captured log to the dev server that answered, and its manifest named no tunnel',
+          tunnelUnconfirmed: true,
+        };
+  }
   if (lock == null || fromLog.advertised?.hostType === 'tunnel') {
     // A log that already names a host a device off this machine can use is the best answer there
     // is: it is the dev server's own account of the run, and a second request cannot improve on it.

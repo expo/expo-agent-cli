@@ -858,6 +858,26 @@ describe(formatStatusReport, () => {
       expect(line(value, 'dev server')).toContain('tunnel http://abc.boltexpo.dev');
     });
 
+    it(`says the tunnel is unknown when it could not be confirmed`, () => {
+      const value = mockReport({
+        devServer: {
+          url: 'http://127.0.0.1:8081',
+          running: true,
+          appsConnected: 0,
+          source: 'default',
+          ready: true,
+          projectRootMatched: true,
+          hostType: 'tunnel',
+          tunnelUrl: null,
+          openUrls: [],
+          appsListed: 0,
+          appsStale: 0,
+        },
+      });
+
+      expect(line(value, 'dev server')).toContain('tunnel unknown');
+    });
+
     // @ref llp/0021-honest-reports.rfc.md §The rules
     // K7(c) and K8: the line a tunnelled `expo start` prints for itself is
     // `exp+app://<tunnel host>`, which opens the launcher rather than the app and which no HTTP

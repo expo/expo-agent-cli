@@ -624,7 +624,11 @@ function devServerLine(devServer: DevServerStatus): string {
  * `hostType` rides along in `--json` for a reader that wants all three.
  */
 function reachFact(devServer: DevServerStatus): string | null {
-  return devServer.tunnelUrl ? `${chalk.green('tunnel')} ${devServer.tunnelUrl}` : null;
+  if (devServer.tunnelUrl) {
+    return `${chalk.green('tunnel')} ${devServer.tunnelUrl}`;
+  }
+  // A tunnel the captured log names and the running dev server did not confirm (N2-63).
+  return devServer.hostType === 'tunnel' ? chalk.yellow('tunnel unknown') : null;
 }
 
 /**
