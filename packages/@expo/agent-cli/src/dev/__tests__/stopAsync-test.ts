@@ -555,6 +555,37 @@ describe(devStopAsync, () => {
       expect(report.detail).toContain('its CLI process ended');
     });
 
+    // A foreground `dev --port 8095` writes no log; `status` finds it by the last request's port.
+    it(`should look at the port of the last dev request first, as status does`, async () => {
+      vol.fromJSON({
+        [`${projectRoot}/.expo/agent-cli-last-dev.json`]: JSON.stringify({
+          version: 1,
+          platform: 'web',
+          port: 8095,
+          buildBackend: null,
+          runTarget: null,
+        }),
+      });
+      vi.mocked(discoverDevServerAsync).mockImplementation(async (url) =>
+        url === 'http://127.0.0.1:8095'
+          ? { reachable: true, targets: [], devServerUrl: url, source: 'flag', discovered: false }
+          : {
+              reachable: false,
+              targets: [],
+              devServerUrl: '',
+              source: 'default',
+              discovered: false,
+            }
+      );
+      vi.mocked(probeBundlerAsync).mockImplementation(async (url) =>
+        projectRootMatch(url === 'http://127.0.0.1:8095' ? true : null)
+      );
+
+      await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OK);
+
+      expect(JSON.parse(printed())).toMatchObject({ stopped: true, untracked: true, port: 8095 });
+    });
+
     it.each([
       ['names another project', false],
       ['names no project', null],

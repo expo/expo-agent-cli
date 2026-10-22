@@ -453,7 +453,10 @@ and pid. `dev:stop` signals that pid. The detached wrapper forwards `SIGTERM` to
 `expo` child exactly as the foreground one does.
 
 A dev child killed with `SIGKILL` leaves its Metro running with no lock: an untracked dev
-server. With no lock, `dev:stop` looks where `status` looks (the discovery ladder). The
+server. With no lock, `dev:stop` looks where `status` looks: the port of the last `dev`
+request, then the discovery ladder. A foreground run on a named port writes no log, so
+the ladder alone does not find it. `dev` records its own request before it looks, so it
+also looks at the port of the request before it and at its own `--port`. The
 server is this project's when its `/status` names this project's root, by the check
 `status` reports as `projectRootMatched` (`waitForBundlerReadyAsync` and
 `matchProjectRoot`, read through `src/dev/untrackedDevServer.ts`). `dev:stop` stops that

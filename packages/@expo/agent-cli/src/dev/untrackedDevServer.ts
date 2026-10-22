@@ -4,6 +4,7 @@
 
 import { probeBundlerAsync } from '../runtime/bundlerStatus';
 import { discoverDevServerAsync } from '../runtime/devServer';
+import { readLastDevRequest } from './lastRequest';
 import { findPortListenerAsync } from './portListener';
 
 /** How long the ownership read and each scan read may take. */
@@ -32,10 +33,29 @@ export async function servesThisProjectAsync(url: string, projectRoot: string): 
 /**
  * The dev server `status` finds for this project, when no lock answers for it and it names this
  * project. Callers read the lock first.
+ *
+ * `status` looks at the port of the last `dev` request before the ladder, and so does this: a
+ * foreground run on a named port writes no log the ladder could read.
+ *
+ * @param ports more ports to look at first: `dev` records its own request before it looks, so it
+ * passes the port of the request before it, and the port it was given.
  */
 export async function findUntrackedDevServerAsync(
-  projectRoot: string
+  projectRoot: string,
+  ports: (number | null | undefined)[] = []
 ): Promise<UntrackedDevServer | null> {
+  const candidates = [...ports, readLastDevRequest(projectRoot)?.port].filter(
+    (port): port is number => port != null
+  );
+  for (const port of new Set(candidates)) {
+    const url = `http://127.0.0.1:${port}`;
+    const probe = await discoverDevServerAsync(url, {
+      signal: AbortSignal.timeout(OWNERSHIP_READ_TIMEOUT_MS),
+    });
+    if (probe.reachable && (await servesThisProjectAsync(url, projectRoot))) {
+      return withListenerAsync(port, url);
+    }
+  }
   const found = await discoverDevServerAsync(undefined, {
     projectRoot,
     statusTimeoutMs: OWNERSHIP_READ_TIMEOUT_MS,
@@ -46,9 +66,12 @@ export async function findUntrackedDevServerAsync(
   if (!(await servesThisProjectAsync(found.devServerUrl, projectRoot))) {
     return null;
   }
-  const port = Number(new URL(found.devServerUrl).port);
+  return withListenerAsync(Number(new URL(found.devServerUrl).port), found.devServerUrl);
+}
+
+async function withListenerAsync(port: number, url: string): Promise<UntrackedDevServer> {
   const listener = await findPortListenerAsync(port);
-  return { port, url: found.devServerUrl, pid: listener?.pid ?? null };
+  return { port, url, pid: listener?.pid ?? null };
 }
 
 /** One sentence that names the server and why no run owns it. */

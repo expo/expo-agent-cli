@@ -70,7 +70,7 @@ import {
 } from '../utils/wrapperCrash';
 import { appReachedDevice } from './buildEvidence';
 import { detachedPidLine } from './childVerdict';
-import { recordLastDevRequest } from './lastRequest';
+import { readLastDevRequest, recordLastDevRequest } from './lastRequest';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import { event as devEvent } from './events';
 import {
@@ -143,6 +143,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
       eas: options.deviceBackend === 'eas',
     });
   }
+  // Read before it is replaced: an untracked dev server is looked for on its port too.
+  const previousRequestPort = readLastDevRequest(projectRoot)?.port;
   recordLastDevRequest(projectRoot, options);
 
   const state = await probeProjectStateAsync(projectRoot, {
@@ -191,7 +193,13 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // passed it [observed — friction run 7, F71; live run S5].
   const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
 
-  let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options);
+  let plan = await planDevServerPortAsync(
+    projectRoot,
+    lock,
+    forwardedPlan,
+    options,
+    previousRequestPort
+  );
   warnDroppedExpoArgs(plan, dropped);
 
   // A draft that builds is bound here, not in the resolver: after the port check above and the
@@ -324,7 +332,8 @@ async function planDevServerPortAsync(
   projectRoot: string,
   lock: DevServerLockInfo | null,
   forwardedPlan: StartPlan,
-  options: DevOptions
+  options: DevOptions,
+  previousRequestPort: number | null | undefined
 ): Promise<StartPlan> {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
   // the port is picked here, before the plan is printed, and set on every step that
@@ -346,7 +355,10 @@ async function planDevServerPortAsync(
     // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — this project's dev server
     // with no lock is replaced: nothing can follow, reuse or stop it through a lock, and a second
     // one on the next port would leave two Metros for one project.
-    const untracked = await findUntrackedDevServerAsync(projectRoot);
+    const untracked = await findUntrackedDevServerAsync(projectRoot, [
+      previousRequestPort,
+      options.port,
+    ]);
     const takesUntrackedPort =
       untracked != null && (options.port == null || options.port === untracked.port);
     if (untracked && options.mode !== 'plan') {
