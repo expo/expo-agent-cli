@@ -81,16 +81,16 @@ Resolution, per platform, highest first:
 
 A session installs Expo Go or a build that EAS made, never a build made on this machine. So `deviceBackend: "eas"` sends the build to EAS too: with `buildBackend` unset, §The selection reads rank 2 as `eas`, an explicit choice that runs. A config that names `buildBackend: "local"` beside `deviceBackend: "eas"` for one platform is `BAD_AGENT_CLI_CONFIG`.
 
-**Only what starts an environment reads it** [Kudo, 2026-10-22]. A config read by every device command would make every printed command depend on the flags of the run that printed it. So:
+**The commands that start an environment act on it** [Kudo, 2026-10-22]. A config that the other device commands acted on would make a printed command depend on the flags of the run that printed it. So:
 
 - `dev` reads it. With `eas`, it does what `--eas` does ([[0027-everything-on-eas]]), and it refuses what `--eas` refuses, naming the config and `--local`. The web has no device, so `dev --web` ignores it.
-- `smoke` reads it only when it starts its own dev server. Then it does what `smoke --eas` does. Beside a dev server that runs, it uses what runs.
-- `status` reads it to report the plan `dev` would run (§What `status` reports). That read starts nothing.
+- `smoke` applies it only when it starts its own dev server. Then it does what `smoke --eas` does. Beside a dev server that runs, it uses what runs.
+- `status` reads it to report the plan `dev` would run (§What `status` reports). That read starts no build and no session.
 - `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` do not read it. They keep the rules of [[0005-runtime-loop-tools]] §Cloud simulator and [[0027-everything-on-eas]] §dev:stop. When [[0035-one-device-per-worktree]] §EAS session binding lands, they follow the session the worktree bound.
 
 A command `dev` suggests should reach the device this run used. So on a run whose device is on EAS, by `--eas` or the config, `dev`'s follow-ups name `--eas` on the device commands they suggest. The one exception is a `dev:stop` that asks for the same `dev` again, because that `dev` reuses the session.
 
-The config is in `package.json`, so everyone who checks out the repository shares it, and one `deviceBackend: "eas"` makes every teammate's `dev` start a billed session. So `dev` says when the session comes from the config, and how to stop it. A per-machine override is left for later.
+The config is in `package.json`, so everyone who checks out the repository shares it, and one `deviceBackend: "eas"` makes a teammate's `dev` start a billed session. So `dev` says when the session comes from the config, and how to stop it. A per-machine override is left for later.
 
 ## The plan approved is the plan run
 
