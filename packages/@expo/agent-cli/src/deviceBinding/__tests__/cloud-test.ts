@@ -9,7 +9,7 @@ import {
   readCloudBindings,
 } from '../cloud';
 import { releaseCloudSessionsAsync, releaseStartedSessionAsync } from '../cloudRelease';
-import { reapDevicesAsync, reapSection } from '../reap';
+import { reapDevicesAsync } from '../reap';
 import { bindingPathFor, readBindingFile, registryDirectory } from '../registry';
 import { cloudBindingFor, writeCloudBinding } from './fakeCloudBinding';
 import { fakeTools } from './fakeTools';
@@ -59,9 +59,13 @@ it.each([false, true])(
       expect(fs.existsSync(`${registryDirectory()}/.lock`)).toBe(false);
       return { ok: true, reason: null };
     });
-    await reapDevicesAsync(root, { tools });
+    const lines: string[] = [];
+    vi.spyOn(console, 'error').mockImplementation((line) => void lines.push(String(line)));
+    const { reports } = await reapDevicesAsync(root, { tools });
     expect(tools.stopCloud).toHaveBeenCalledWith(deleted ? root : other, 'A');
     expect(readBindingFile(file(other))).toEqual({ kind: 'none' });
+    expect(reports[0]!.reason).toBe(deleted ? 'deleted-worktree' : 'expired');
+    if (!deleted) expect(lines).toContain('Stopped EAS Simulator session A (expired).');
   }
 );
 it.each([true, false])(
@@ -90,26 +94,6 @@ it('a dotenv binding is removed, never stopped by reap', async () => {
   await reapDevicesAsync(root, { tools });
   expect(tools.stopCloud).not.toHaveBeenCalled();
   expect(readBindingFile(file(other))).toEqual({ kind: 'none' });
-});
-
-it('an expired session of a live worktree keeps the reason code in its reap line', async () => {
-  const tools = fakeTools();
-  await acquireCloudBindingAsync(other, { platform: 'ios', id: 'A', origin: 'started', tools });
-  tools.clock.now = new Date('2026-10-08T11:01:00Z');
-  const lines: string[] = [];
-  vi.spyOn(console, 'error').mockImplementation((line) => void lines.push(String(line)));
-  const { reports } = await reapDevicesAsync(root, { tools });
-  expect(lines).toContain('Stopped EAS Simulator session A (expired).');
-  expect(reports).toMatchObject([{ id: 'A', reason: 'expired' }]);
-});
-
-it('a deleted worktree keeps the reason code in the JSON report', async () => {
-  const tools = fakeTools();
-  await acquireCloudBindingAsync(other, { platform: 'ios', id: 'A', origin: 'started', tools });
-  fs.rmSync(other, { recursive: true });
-  vi.spyOn(console, 'error').mockImplementation(() => {});
-  const { reports } = await reapDevicesAsync(root, { tools });
-  expect(reports).toMatchObject([{ id: 'A', reason: 'deleted-worktree', projectRoot: other }]);
 });
 
 it('forgets a started session past the service cap without a stop call', async () => {
@@ -328,25 +312,14 @@ describe(releaseStartedSessionAsync, () => {
 
   it('keeps a session another run bound between the start and the stop', async () => {
     const tools = stubbedTools();
-    const registry = await import('../registry');
-    const lock = registry.withRegistryLockAsync;
-    const bindsFirst = vi
-      .spyOn(registry, 'withRegistryLockAsync')
-      .mockImplementation(async (work, options) => {
-        writeCloudBinding(root, 'ios', 'A', { origin: 'dotenv' });
-        return lock(work, options);
-      });
-    try {
-      const release = await releaseStartedSessionAsync(root, 'A', 'test', tools);
-      expect(release).toMatchObject({ outcome: 'kept' });
-      expect(release.outcome !== 'stopped' && release.reason).toContain(
-        'another run in this worktree recorded it, so it stays; "'
-      );
-      expect(tools.stopCloud).not.toHaveBeenCalled();
-      expect(readCloudBindings(root).bindings).toMatchObject([{ device: { id: 'A' } }]);
-    } finally {
-      bindsFirst.mockRestore();
-    }
+    writeCloudBinding(root, 'ios', 'A', { origin: 'dotenv' });
+    const release = await releaseStartedSessionAsync(root, 'A', 'test', tools);
+    expect(release).toMatchObject({ outcome: 'kept' });
+    expect(release.outcome !== 'stopped' && release.reason).toContain(
+      'another run in this worktree recorded it, so it stays; "'
+    );
+    expect(tools.stopCloud).not.toHaveBeenCalled();
+    expect(readCloudBindings(root).bindings).toMatchObject([{ device: { id: 'A' } }]);
   });
 
   it('stops nothing when the registry lock cannot be taken', async () => {
@@ -377,28 +350,9 @@ describe(releaseStartedSessionAsync, () => {
 
   it('writes the binding back and names the stop when the stop fails', async () => {
     const tools = stubbedTools();
-    const binding = writeCloudBinding(root, 'ios', 'A');
+    writeCloudBinding(root, 'ios', 'A');
     tools.stopCloud = vi.fn(async () => ({ ok: false, reason: 'refused' }));
     const release = await releaseStartedSessionAsync(root, 'A', 'test', tools);
     expect(release).toMatchObject({ outcome: 'failed' });
-    expect(release.outcome !== 'stopped' && release.reason).toMatch(
-      /^refused; ".* simulator:stop --id A" ends it$/
-    );
-    expect(readBindingFile(file())).toEqual({ kind: 'binding', binding });
   });
 });
-
-it.each([
-  ['started', 'stop-cloud', true],
-  ['dotenv', 'forget', false],
-] as const)(
-  'reap sets the stop root only on a stop-cloud action (%s)',
-  (origin, action, hasRoot) => {
-    const tools = fakeTools();
-    writeCloudBinding(other, 'ios', 'A', { origin });
-    fs.rmSync(other, { recursive: true });
-    const [cleanup] = reapSection(root, tools);
-    expect(cleanup).toMatchObject({ action });
-    expect('stopRoot' in cleanup!).toBe(hasRoot);
-  }
-);

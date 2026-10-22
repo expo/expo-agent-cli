@@ -13,6 +13,7 @@ import type { MockInstance } from 'vitest';
 import { vol } from 'memfs';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { readCloudBindings } from '../../deviceBinding/cloud';
+import { bindingPathFor } from '../../deviceBinding/registry';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 
 vi.mock('../../devLock', () => ({
@@ -714,6 +715,21 @@ describe('dev:stop --eas', () => {
     expect(eas().stopEasSessionAsync).toHaveBeenCalledTimes(1);
     expect(eas().stopEasSessionAsync).toHaveBeenCalledWith(projectRoot, 'sess-orphan');
     expect(readCloudBindings(projectRoot).bindings).toMatchObject([{ device: { id: 'sess-own' } }]);
+  });
+
+  it(`names an unreadable cloud binding file`, async () => {
+    vol.reset();
+    vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
+    const file = bindingPathFor(projectRoot, 'android', 'cloud');
+    require('node:fs').mkdirSync(require('node:path').dirname(file), { recursive: true });
+    require('node:fs').writeFileSync(file, 'garbage');
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(cloudProbe.none({ reason: 'x' }));
+
+    await devStopAsync(projectRoot, options({ eas: true }));
+
+    const { deviceError } = JSON.parse(printed());
+    expect(deviceError).toContain(`The binding file ${file} does not parse`);
+    expect(deviceError).toContain(`How: run "rm -f '${file}'"`);
   });
 
   it(`asks nothing about a session without the flag`, async () => {
