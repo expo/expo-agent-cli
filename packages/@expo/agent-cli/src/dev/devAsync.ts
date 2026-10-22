@@ -95,6 +95,12 @@ import {
   devServerRunningStopAsync,
   runningDevServerAsync,
 } from './runningDevServer';
+import { devStopAsync, type DevStopResultJson } from './stopAsync';
+import {
+  findUntrackedDevServerAsync,
+  untrackedDevServerClause,
+  type UntrackedDevServer,
+} from './untrackedDevServer';
 import { easCommandPrefix } from '../utils/easCli';
 import { CONFIG_LOCATION } from '../settings/read';
 
@@ -337,7 +343,19 @@ async function planDevServerPortAsync(
       devServerPort: { port: lock.port, movedFrom: null, state: 'running', phase: running.phase },
     };
   } else if (serving) {
-    const planned = await resolvePlannedPortAsync(options.port);
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — this project's dev server
+    // with no lock is replaced: nothing can follow, reuse or stop it through a lock, and a second
+    // one on the next port would leave two Metros for one project.
+    const untracked = await findUntrackedDevServerAsync(projectRoot);
+    const takesUntrackedPort =
+      untracked != null && (options.port == null || options.port === untracked.port);
+    if (untracked && options.mode !== 'plan') {
+      await stopUntrackedDevServerAsync(projectRoot, untracked, takesUntrackedPort);
+    }
+    const planned =
+      takesUntrackedPort && options.mode === 'plan'
+        ? { port: untracked.port, movedFrom: null, bindable: true }
+        : await resolvePlannedPortAsync(options.port);
     if (!planned.bindable && options.port != null && options.mode !== 'plan') {
       throw await portDemandedError(options.port, options.platform);
     }
@@ -345,10 +363,17 @@ async function planDevServerPortAsync(
       ...withDevServerPort(forwardedPlan, planned.port),
       // A port the plan probed is only the port that was free when the plan was printed. A named
       // `--port` is not picked, so nothing is said about it.
-      reasons:
-        options.mode === 'plan' && options.port == null
-          ? [...forwardedPlan.reasons, 'The dev server port is picked again when the plan runs.']
-          : forwardedPlan.reasons,
+      reasons: [
+        ...forwardedPlan.reasons,
+        ...(options.mode === 'plan' && untracked
+          ? [
+              `${untrackedDevServerClause(untracked)}. The run stops it${takesUntrackedPort ? ` and takes port ${untracked.port}` : ''}.`,
+            ]
+          : []),
+        ...(options.mode === 'plan' && options.port == null && !takesUntrackedPort
+          ? ['The dev server port is picked again when the plan runs.']
+          : []),
+      ],
       devServerPort:
         options.port != null
           ? { port: planned.port, movedFrom: null, state: 'named', taken: !planned.bindable }
@@ -433,6 +458,51 @@ function boundPlatform(options: DevOptions): DevicePlatform | null {
     hostBindsPlatform(platform)
     ? platform
     : null;
+}
+
+/**
+ * Stop this project's dev server that no lock answers for, by the proof `dev:stop` uses, and say so.
+ *
+ * @throws {CommandError} `UNTRACKED_DEV_SERVER`, an outcome, when it is still there.
+ */
+async function stopUntrackedDevServerAsync(
+  projectRoot: string,
+  untracked: UntrackedDevServer,
+  takesPort: boolean
+): Promise<void> {
+  let report: DevStopResultJson | null = null;
+  const exitCode = await devStopAsync(
+    projectRoot,
+    {
+      eas: false,
+      port: untracked.port,
+      signal: 'SIGTERM',
+      force: false,
+      timeoutMs: 10_000,
+      json: false,
+      followups: false,
+    },
+    { print: false, onReport: (stopped) => (report = stopped) }
+  );
+  if (exitCode === 0) {
+    Log.warn(
+      `${untrackedDevServerClause(untracked)}. It was stopped${takesPort ? `, and this run takes port ${untracked.port}` : ''}.`
+    );
+    return;
+  }
+  const command = `${PROGRAM_PREFIX} dev:stop --port ${untracked.port} --force`;
+  const error = new CommandError(
+    'UNTRACKED_DEV_SERVER',
+    [
+      `${untrackedDevServerClause(untracked)}, and it could not be stopped, so nothing was started.`,
+      `Why: ${(report as DevStopResultJson | null)?.detail ?? 'dev:stop reported no detail'}.`,
+      `How: run "${command}", then run this command again.`,
+    ].join('\n')
+  );
+  error.suggestedCommand = command;
+  error.exitCode = EXIT_OUTCOME_FAILED;
+  error.data = { port: untracked.port, pid: untracked.pid };
+  throw error;
 }
 
 /** `--device` on a run that binds no local device, which would drop the device it names. */

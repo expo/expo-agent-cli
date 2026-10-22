@@ -627,6 +627,18 @@ app to whatever holds the port, and exits 0.
 A busy port with no live lock of this project behind it is busy whoever holds it, an
 `npx expo start` run outside this CLI included: the plan moves to the next free port.
 
+One exception: this project's untracked dev server (§Daemonization). Before the port is
+resolved, `dev` looks where `status` looks. A server whose `/status` names this project
+is stopped by `dev:stop`'s own check, without `--force`, and the run takes its port. It
+is not reused, as a locked server is: no lock names its pid, so nothing can follow it,
+wait on it, or stop it, and its tunnel is not known. It is not left beside a second
+server either, because that is two servers for one project. Stopping it and taking its
+port is the nearest thing to the lock rule: one project, one dev server, held by a lock.
+A warning names the port and the pid. Under `--plan` nothing is stopped: a reason names
+the server and says the run stops it, and `devServerPort` is its port. When the stop
+fails, the run stops with `UNTRACKED_DEV_SERVER`, exit 20, and recovers into
+`dev:stop --port <n> --force`.
+
 A server on a port is this project's unless `/status` names another project root in the
 `X-React-Native-Project-Root` header. No header, or a root that contains this project (a
 monorepo `metro.config.js` sets `projectRoot` to the workspace root), is this project's
