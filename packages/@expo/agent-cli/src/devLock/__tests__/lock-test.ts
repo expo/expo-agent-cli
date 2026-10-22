@@ -58,32 +58,29 @@ describe('dev server lock', () => {
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-  it(`answers the EAS platform of the run`, async () => {
+  it(`answers the EAS platform of the run and easOpenFinished`, async () => {
     const projectRoot = makeProjectRoot();
-    const info: DevServerLockInfo = { ...lockInfo(projectRoot, 8097), easPlatform: 'android' };
+    const info: DevServerLockInfo = {
+      ...lockInfo(projectRoot, 8097),
+      easPlatform: 'android',
+      easOpenFinished: true,
+    };
 
     await acquireAsync(info);
 
     expect(await readDevServerLockAsync(projectRoot)).toEqual(info);
   });
 
-  it(`reads an answer that names no EAS platform as a run with none`, async () => {
+  it(`reads an answer that names no EAS platform and no easOpenFinished as a run with none`, async () => {
     const projectRoot = makeProjectRoot();
     const info = lockInfo(projectRoot, 8098);
-    await acquireAsync({ ...info, easPlatform: undefined as unknown as null });
+    await acquireAsync({
+      ...info,
+      easPlatform: undefined,
+      easOpenFinished: undefined,
+    } as unknown as DevServerLockInfo);
 
     expect(await readDevServerLockAsync(projectRoot)).toEqual(info);
-  });
-
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-  it(`answers easOpenFinished, and reads an answer without it as false`, async () => {
-    const finished = makeProjectRoot();
-    await acquireAsync({ ...lockInfo(finished, 8099), easOpenFinished: true } as DevServerLockInfo);
-    const older = makeProjectRoot();
-    await acquireAsync(lockInfo(older, 8100));
-
-    expect(await readDevServerLockAsync(finished)).toMatchObject({ easOpenFinished: true });
-    expect(await readDevServerLockAsync(older)).toMatchObject({ easOpenFinished: false });
   });
 
   it(`stops answering once released`, async () => {
