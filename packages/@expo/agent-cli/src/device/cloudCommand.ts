@@ -51,8 +51,7 @@ export function guardedCloudArgs(args: string[], sessionId: string): string[] {
 /**
  * The controller target inside a guarded `simulator:exec` argv, or null when `argv` holds none.
  * The argv may start with an EAS runner prefix. The guard program is the `-e` argument and the
- * base64 target is last. `e2e/stubs/eas.js` holds a plain-JS copy of this rule, and
- * `src/device/__tests__/cloudCommand-test.ts` pins both.
+ * base64 target is last. `e2e/stubs/eas.js` holds a plain-JS copy of this rule.
  */
 export function unwrapGuardedExec(argv: string[]): { command: string; args: string[] } | null {
   const exec = argv.indexOf('simulator:exec');

@@ -503,7 +503,7 @@ if (command === 'simulator:stop') {
 
 if (command === 'simulator:exec') {
   // Plain-JS copy of `unwrapGuardedExec` in src/device/cloudCommand.ts: a guarded argv has `-e` at
-  // index 2. src/device/__tests__/cloudCommand-test.ts pins both.
+  // index 2.
   if (!controller && args[2] === '-e') {
     // Execute the real guard and its prepared target unchanged after loading the same connection
     // file as EAS. The npx stub routes agent-device to this file as __controller, after cmd.exe has
