@@ -113,15 +113,23 @@ const PRELUDE = `
     return found;
   }
   /**
-   * React Navigation's own \`Screen\`, which is where "which screen is the user looking at" is
-   * answerable. React itself does not know: with native tabs the switching happens natively and
-   * every \`Offscreen\` fiber still reports \`mode: "visible"\` (llp/0018-interaction-commands.rfc.md §Must not lose).
+   * The navigator's screen fiber, the only place that knows which screen the user is looking at.
+   * @ref llp/0018-interaction-commands.rfc.md §Eight shipped decisions 2
    */
   function screenOf(f) {
-    if (nameOf(f) !== 'Screen') return null;
+    var component = nameOf(f);
+    if (component !== 'Screen' && component !== 'SceneView') return null;
     var p = propsOf(f);
-    if (!p || typeof p.isFocused !== 'boolean' || typeof p.name !== 'string') return null;
-    return { name: p.name, focused: p.isFocused };
+    if (!p) return null;
+    // expo-router native tabs: Screen with isFocused and name.
+    if (typeof p.isFocused === 'boolean' && typeof p.name === 'string') {
+      return { name: p.name, focused: p.isFocused };
+    }
+    // React Navigation Screen (JS tabs, drawer) / SceneView (native stack): focused and route.
+    if (typeof p.focused === 'boolean' && p.route && typeof p.route.name === 'string') {
+      return { name: p.route.name, focused: p.focused };
+    }
+    return null;
   }
 
   var roots = [];
