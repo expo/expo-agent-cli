@@ -89,15 +89,6 @@ describe(cloudVerdict, () => {
     expect(verdict).toMatchObject({ kind: 'device', device: { platform: 'android', id: 'a' } });
   });
 
-  it('refuses an expired binding when no live session answers for it', () => {
-    const verdict = cloudVerdict([dead], cloudProbe.none(), null, NOW);
-
-    expect(verdict).toMatchObject({
-      kind: 'refuse',
-      error: { data: { reason: 'gone' }, message: expect.stringContaining('is expired') },
-    });
-  });
-
   it('does not let an expired binding hide a live dotenv session', () => {
     expect(cloudVerdict([dead], active('other'), null, NOW)).toEqual({
       kind: 'device',

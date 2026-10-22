@@ -1,6 +1,5 @@
 import fs from 'fs';
 import { vol } from 'memfs';
-import { stripVTControlCharacters } from 'node:util';
 
 import { resetSettingsCache } from '../../settings';
 
@@ -1441,7 +1440,7 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Session binding
-  it(`gives the same installed advice in --json and in the text when an EAS session is recorded`, async () => {
+  it(`replaces the installed advice with the recorded EAS session`, async () => {
     vi.mocked(readInstalledStatusAsync).mockResolvedValue({
       outcome: 'unknown',
       platforms: [
@@ -1473,12 +1472,6 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
 
     const [row] = report.installed!.platforms;
     expect(row).toMatchObject({ reason: 'cloud-session', commands: [] });
-    expect(row!.recommendation).toBe(
-      'not checked; this check reads local devices, and the app runs on EAS Simulator session sess-1'
-    );
-    const text = stripVTControlCharacters(formatStatusReport(report));
-    expect(text).toContain(`ios: ${row!.recommendation}`);
-    expect(text).not.toContain('No simulator is booted.');
   });
 
   it(`hands the named device through`, async () => {

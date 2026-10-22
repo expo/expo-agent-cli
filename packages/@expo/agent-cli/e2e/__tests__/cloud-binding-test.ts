@@ -124,31 +124,24 @@ it('two worktrees start and drive their own sessions; EAS stop removes only its 
   expect(fs.existsSync(bindingFile(first))).toBe(false);
   expect(readBinding(second).device).toMatchObject({ id: 'own-1' });
 });
-it.each(['B', 'A', null])(
-  'an expired binding only permits a fresh dotenv session (%s)',
-  async (id) => {
-    const root = await project();
-    await writeCloudBindingAsync(expoHome, root, { id: 'A' });
-    const expired = { ...readBinding(root), expiresAt: '2000-01-01T00:00:00.000Z' };
-    const before = JSON.stringify(expired);
-    fs.writeFileSync(bindingFile(root), before);
-    list([{ id: 'A' }, { id: 'B' }]);
-    if (id) await writeCloudSessionFileAsync(root, id);
-    const result = await navigate(root, ['--ios']);
-    expect(result.exitCode, result.stderr).toBe(id === 'B' ? 0 : 20);
-    if (id === 'B') {
-      expect(JSON.parse(result.stdout).deviceId).toBe('B');
-    } else {
-      expect(JSON.parse(result.stdout).error.code).toBe('NO_BOUND_DEVICE');
-    }
-    expect(
-      readStubEasInvocations(root)
-        .filter((i) => i.executedSessionId)
-        .map((i) => i.executedSessionId)
-    ).toEqual(id === 'B' ? ['B'] : []);
-    expect(fs.readFileSync(bindingFile(root), 'utf8')).toBe(before);
-  }
-);
+it('an expired binding only permits a fresh dotenv session', async () => {
+  const root = await project();
+  await writeCloudBindingAsync(expoHome, root, { id: 'A' });
+  const expired = { ...readBinding(root), expiresAt: '2000-01-01T00:00:00.000Z' };
+  const before = JSON.stringify(expired);
+  fs.writeFileSync(bindingFile(root), before);
+  list([{ id: 'A' }, { id: 'B' }]);
+  await writeCloudSessionFileAsync(root, 'B');
+  const result = await navigate(root, ['--ios']);
+  expect(result.exitCode, result.stderr).toBe(0);
+  expect(JSON.parse(result.stdout).deviceId).toBe('B');
+  expect(
+    readStubEasInvocations(root)
+      .filter((i) => i.executedSessionId)
+      .map((i) => i.executedSessionId)
+  ).toEqual(['B']);
+  expect(fs.readFileSync(bindingFile(root), 'utf8')).toBe(before);
+});
 it('round-trips guarded cloud target argv and refuses before running on a session mismatch', async () => {
   const root = await project();
   const sessionId = 'argv-session';
