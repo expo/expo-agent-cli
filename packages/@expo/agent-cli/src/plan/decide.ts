@@ -628,7 +628,7 @@ function describeTargetPlatform(
   }
   return actsOnPlatform
     ? `No platform was named; this host suggests ${platform}, and the plan builds for it.`
-    : `No platform was named; this host suggests ${platform}, and the plan opens nothing on it — pass --ios or --android, or run "${PROGRAM_NAME} navigate /" once the dev server is up.`;
+    : `No platform was named; this host suggests ${platform}, and the plan opens nothing on it — pass --ios or --android, or run "${navigateCommand(options)}" once the dev server is up.`;
 }
 
 function describeSdk(state: ProjectState): string {
