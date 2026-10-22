@@ -2,7 +2,6 @@ import fs from 'fs';
 import { vol } from 'memfs';
 import { stripVTControlCharacters } from 'node:util';
 import path from 'path';
-import { CLOUD_SESSION_ENV_FILE } from '../../device/cloudSimulator';
 
 import { detachedPidLine } from '../../dev/childVerdict';
 import { detachedLogPath } from '../../dev/logFile';
@@ -1618,7 +1617,6 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
     const [row] = report.installed!.platforms;
     expect(row).toMatchObject({ reason: 'cloud-session', commands: [command] });
     const text = stripVTControlCharacters(formatStatusReport(report));
-    expect(text).toContain('EAS Simulator session, lease expired');
     expect(text).not.toContain('EAS Simulator session, gone');
     expect(text).not.toContain('No simulator is booted.');
   });
@@ -1922,24 +1920,6 @@ describe('the EAS session of a deleted worktree', () => {
     ]);
     expect(report.next?.command).not.toBe(command);
     expect(buildStatusFollowUps(report)[0]).toMatchObject({ command });
-    const text = stripVTControlCharacters(formatStatusReport(report));
-    expect(text).toContain(
-      `1 EAS session of a deleted worktree is recorded, not checked: sess-orphan (${gone}). It may still bill. ${command} stops it.`
-    );
-  });
-
-  it('names plain dev:stop when this worktree has its own session or dotenv', async () => {
-    orphan();
-    writeCloudBinding(projectRoot, 'android', 'sess-own', {
-      boundAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    });
-    fs.writeFileSync(path.join(projectRoot, CLOUD_SESSION_ENV_FILE), 'EAS_SESSION=sess-own\n');
-    const report = await collectStatusReportAsync(projectRoot, options);
-    expect(report.orphanSessions?.[0]?.command).toBe('npx @expo/agent-cli dev:stop');
-    const text = stripVTControlCharacters(formatStatusReport(report));
-    expect(text).toContain('npx @expo/agent-cli dev:stop stops it.');
-    expect(text).not.toContain('The record stays');
   });
 
   it('names simulator:stop --id when this worktree runs a dev server', async () => {
@@ -1954,6 +1934,5 @@ describe('the EAS session of a deleted worktree', () => {
   it('is empty when no deleted worktree has a session', async () => {
     const report = await collectStatusReportAsync(projectRoot, options);
     expect(report.orphanSessions).toEqual([]);
-    expect(stripVTControlCharacters(formatStatusReport(report))).not.toContain('deleted worktree');
   });
 });

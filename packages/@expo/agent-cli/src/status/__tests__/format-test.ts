@@ -1493,18 +1493,7 @@ describe('the EAS sessions of deleted worktrees', () => {
       })
     );
     expect(rendered).toContain(
-      '2 EAS sessions of deleted worktrees are recorded, not checked: A (/gone/a), B (/gone/b). They may still bill. npx --yes eas-cli simulator:stop --id A && npx --yes eas-cli simulator:stop --id B stops them.'
-    );
-  });
-
-  it('says the record stays beside a dev server of this worktree', () => {
-    const rendered = report(
-      mockReport({
-        orphanSessions: [orphan('A', '/gone/a', 'npx --yes eas-cli simulator:stop --id A')],
-      })
-    );
-    expect(rendered).toContain(
-      'npx --yes eas-cli simulator:stop --id A stops it. The record stays until the next dev or dev:stop.'
+      '2 EAS sessions of deleted worktrees are recorded, not checked: A (/gone/a), B (/gone/b). They may still bill. npx --yes eas-cli simulator:stop --id A && npx --yes eas-cli simulator:stop --id B stops them. The record stays until the next dev or dev:stop.'
     );
   });
 
