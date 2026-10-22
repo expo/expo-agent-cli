@@ -83,12 +83,12 @@ A session installs Expo Go or a build that EAS made, never a build made on this 
 
 **The commands that start an environment act on it** [Kudo, 2026-10-22]. A config that the other device commands acted on would make a printed command depend on the flags of the run that printed it. So:
 
-- `dev` reads it. With `eas`, it does what `--eas` does ([[0027-everything-on-eas]]), and it refuses what `--eas` refuses, naming the config and `--local`. The web has no device, so `dev --web` ignores it.
-- `smoke` applies it only when it starts its own dev server. Then it does what `smoke --eas` does. Beside a dev server that runs, it uses what runs.
+- `dev` reads it. With `eas`, it takes the `--eas` route ([[0027-everything-on-eas]]). It refuses `--device` and a LAN or loopback host, as `--eas` does, and the refusal names the config and `--local`. The web has no device, so `dev --web` ignores the key.
+- `smoke` applies it only when it starts its own dev server. Then the run takes the `--eas` route: the `dev` child is the EAS one, and `start-session` reuses or starts the session. Beside a dev server that runs, it uses what runs.
 - `status` reads it to report the plan `dev` would run (§What `status` reports). That read starts no build and no session.
-- `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` do not read it. They keep the rules of [[0005-runtime-loop-tools]] §Cloud simulator and [[0027-everything-on-eas]] §dev:stop. When [[0035-one-device-per-worktree]] §EAS session binding lands, they follow the session the worktree bound.
+- `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` do not read it. They keep the rules of [[0005-runtime-loop-tools]] §Cloud simulator and [[0027-everything-on-eas]] §dev:stop. How they find a session that a worktree bound is [[0035-one-device-per-worktree]] §EAS session binding.
 
-A command `dev` suggests should reach the device this run used. So on a run whose device is on EAS, by `--eas` or the config, `dev`'s follow-ups name `--eas` on the device commands they suggest. The one exception is a `dev:stop` that asks for the same `dev` again, because that `dev` reuses the session.
+A command `dev` suggests should reach the device this run used. So on a run whose device is on EAS, by `--eas` or the config, `dev`'s follow-ups name `--eas` on the device commands they suggest. When `dev` stops because this project's dev server already runs, its How line keeps a plain `dev:stop`: that line asks for the same `dev` again, and that `dev` reuses the session.
 
 The config is in `package.json`, so everyone who checks out the repository shares it, and one `deviceBackend: "eas"` makes a teammate's `dev` start a billed session. So `dev` says when the session comes from the config, and how to stop it. A per-machine override is left for later.
 
