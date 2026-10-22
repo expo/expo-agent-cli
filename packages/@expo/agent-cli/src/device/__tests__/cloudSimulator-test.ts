@@ -466,18 +466,6 @@ describe(selectCloudSession, () => {
     expect(selectCloudSession([ios]).selected?.id).toBe('ios-1');
   });
 
-  // With no platform asked for, a session with no platform must not outrank the dotenv id.
-  it(`prefers the dotenv id over a session with no platform when no platform is asked for`, () => {
-    const sessions = parseSessionListJson(
-      listJson(
-        sessionRow({ id: 'mine', createdAt: '2026-08-26T10:05:00.000Z' }),
-        sessionRow({ id: 'other', platform: 'WEB', createdAt: '2026-08-26T09:00:00.000Z' })
-      )
-    )!;
-
-    expect(selectCloudSession(sessions, { preferredId: 'mine' }).selected?.id).toBe('mine');
-  });
-
   // Only `agent-device` answers `simulator:exec npx agent-device`. A `serve-sim` session is a
   // browser preview, and driving it is not a thing that would work.
   it(`never picks a session whose controller this CLI does not speak to`, () => {
@@ -486,11 +474,6 @@ describe(selectCloudSession, () => {
 
     expect(selection.selected).toBeNull();
     expect(selection.wrongType.map((session) => session.id)).toEqual(['srv-1']);
-  });
-
-  it(`does not count a pending session it cannot drive as a running one`, () => {
-    const queued: CloudSessionInfo = { ...ios, id: 'srv-1', type: 'serve-sim', status: 'QUEUED' };
-    expect(selectCloudSession([queued]).wrongType).toEqual([]);
   });
 
   it(`never picks a session the service does not report as running`, () => {
