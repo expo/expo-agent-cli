@@ -145,7 +145,7 @@ Flags beat `package.json`. `package.json` beats detection. Unknown keys are erro
 
 `target` is `expo-go` or `dev-build`. `buildBackend` says where a build runs: `local` or `eas`. `deviceBackend` says where the app runs: `local`, or `eas` for an EAS Simulator session. An `ios` or `android` key overrides either backend for that platform.
 
-`deviceBackend: "eas"` does what `--eas` does on `dev`, and on `smoke` when it starts its own dev server. It also builds on EAS, because a session can only install a build EAS made, so `buildBackend: "local"` with it is an error. `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` do not read it: they use what runs, and reach a session through `--eas`. The config is committed, so everyone who runs `dev` in the repo starts a billed session. `dev --local` keeps the build and the app on this machine.
+`deviceBackend: "eas"` makes `dev` take the `--eas` route, and `smoke` too when it starts its own dev server. It also builds on EAS, because a session can only install a build EAS made, so `buildBackend: "local"` with it is an error. `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` do not read it: they use what runs, and reach a session through `--eas`. The config is committed, so everyone who runs `dev` in the repo starts a billed session. `dev --local` keeps the build and the app on this machine.
 
 ## Notes
 
