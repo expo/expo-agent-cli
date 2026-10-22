@@ -23,11 +23,19 @@ export default {
     ],
     // Output goes through src/log.ts, which tracks stdout for the --json envelope.
     'no-console': 'error',
+    'max-lines': ['error', { max: 800, skipBlankLines: true, skipComments: true }],
+    'max-lines-per-function': ['error', { max: 100, skipBlankLines: true, skipComments: true }],
+    'max-depth': ['error', 4],
   },
   overrides: [
     {
       files: ['src/log.ts', '**/__tests__/**', 'e2e/**', 'e2e-live/**', 'evals/**', 'scripts/**'],
       rules: { 'no-console': 'off' },
+    },
+    {
+      // Tests are table-driven and long by design; size limits apply to shipped code.
+      files: ['**/__tests__/**', 'e2e/**', 'e2e-live/**', 'evals/**', 'scripts/**'],
+      rules: { 'max-lines': 'off', 'max-lines-per-function': 'off', 'max-depth': 'off' },
     },
   ],
 };
