@@ -247,7 +247,9 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     const followups = followUpsEnabled(options.followups)
       ? // The typed flag, not the resolved platform: this is the plan the caller asked for, and the
         // command that runs it has to ask for the same one (F103).
-        buildStartPlanFollowUps(plan, state, options.platform, options.callerArgv)
+        buildStartPlanFollowUps(plan, state, options.platform, options.callerArgv, {
+          eas: options.deviceBackend === 'eas',
+        })
       : [];
     emitStartPlan(plan, { mode: 'plan', json: options.json, followups });
     reportFollowUps('dev', followups, { json: options.json });

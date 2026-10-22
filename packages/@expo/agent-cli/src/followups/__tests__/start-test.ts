@@ -220,6 +220,22 @@ describe(buildStartPlanFollowUps, () => {
     }
   );
 
+  // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+  it(`should point the gate at the session when the run's device is on EAS`, () => {
+    const followups = buildStartPlanFollowUps(
+      mockPlan({
+        steps: [],
+        devServerPort: { port: 8081, movedFrom: null, state: 'running', phase: 'serving' },
+      }),
+      mockState(),
+      'ios',
+      [],
+      { eas: true }
+    );
+
+    expect(followups[0]!.command).toBe('npx @expo/agent-cli smoke --ios --eas');
+  });
+
   it(`should offer the refusal's How command instead of a run of a plan that refuses --device`, () => {
     const followups = buildStartPlanFollowUps(
       mockPlan({

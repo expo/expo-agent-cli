@@ -313,7 +313,9 @@ export function buildStartPlanFollowUps(
    */
   requestedPlatform?: PlanPlatform,
   /** The caller's `dev` arguments, which the command that runs the plan repeats. */
-  callerArgv: readonly string[] = []
+  callerArgv: readonly string[] = [],
+  /** The run's device is on EAS, by `--eas` or the config, so the gate reads the session. */
+  { eas = false }: { eas?: boolean } = {}
 ): FollowUp[] {
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — a plan that stops on this
   // project's running dev server has no steps, so the one follow-up is the one the run's error
@@ -330,7 +332,7 @@ export function buildStartPlanFollowUps(
       phase === 'serving'
         ? {
             id: 'dev-server-running',
-            command: smokeCommand(smokePlatform),
+            command: `${smokeCommand(smokePlatform)}${eas ? ' --eas' : ''}`,
             why: `This project's dev server is already running on port ${port}, so the plan has no steps. This checks its bundle and its app; "${PROGRAM_PREFIX} dev:stop" stops it.`,
           }
         : {
