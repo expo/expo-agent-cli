@@ -1,7 +1,7 @@
 import { isDevServerLockHeldAsync, readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
 import { discoverDevServerAsync } from '../../runtime/devServer';
-import { readReportedProjectRootAsync } from '../../runtime/projectRootHeader';
+import { probeBundlerAsync } from '../../runtime/bundlerStatus';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
 import { PROGRAM_PREFIX } from '../../programName';
@@ -34,9 +34,8 @@ vi.mock('../../runtime/devServer', async (importActual) => ({
   ...(await importActual<typeof import('../../runtime/devServer')>()),
   discoverDevServerAsync: vi.fn(),
 }));
-vi.mock('../../runtime/projectRootHeader', async (importActual) => ({
-  ...(await importActual<typeof import('../../runtime/projectRootHeader')>()),
-  readReportedProjectRootAsync: vi.fn(async () => ({ kind: 'no-header' })),
+vi.mock('../../runtime/bundlerStatus', () => ({
+  probeBundlerAsync: vi.fn(),
 }));
 vi.mock('../portListener', () => ({
   findPortListenerAsync: vi.fn(async () => null),
@@ -86,6 +85,11 @@ function printedErrors(): string {
   return vi.mocked(console.error).mock.calls.flat().join('\n');
 }
 
+/** What `status` reads as `projectRootMatched` for a dev server that answers. */
+function projectRootMatch(projectRootMatched: boolean | null) {
+  return { answering: true, projectRootMatched, reportedProjectRoot: null };
+}
+
 let originalFetch: typeof fetch | undefined;
 let killed: { pid: number; signal: string }[] = [];
 let killSpy: MockInstance;
@@ -113,7 +117,7 @@ beforeEach(() => {
     source: 'default',
     discovered: false,
   });
-  vi.mocked(readReportedProjectRootAsync).mockResolvedValue({ kind: 'no-header' });
+  vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(null));
   mockPlatform('darwin');
   originalFetch = globalThis.fetch;
   killed = [];
@@ -259,7 +263,7 @@ describe(devStopAsync, () => {
       'reason',
       'signal',
       'stopped',
-      'suggestedCommand',
+      'untracked',
       'url',
       'waitedMs',
     ]);
@@ -488,7 +492,8 @@ describe(devStopAsync, () => {
   });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a dev child killed with
-  // SIGKILL leaves Metro running with no lock. `status` finds it by the scan; dev:stop names it.
+  // SIGKILL leaves Metro running with no lock. `status` finds it by the scan and matches its project
+  // root; dev:stop finds it the same way and stops it.
   describe('no lock, and the scan finds a dev server', () => {
     beforeEach(() => {
       vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
@@ -504,11 +509,38 @@ describe(devStopAsync, () => {
       mockPort({ answering: true });
     });
 
-    it(`should name the port, the pid and the stop command when it serves this project`, async () => {
-      vi.mocked(readReportedProjectRootAsync).mockResolvedValue({
-        kind: 'header',
-        root: projectRoot,
+    it(`should stop it without --force when status matches it to this project`, async () => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(true));
+
+      await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OK);
+
+      expect(probeBundlerAsync).toHaveBeenCalledWith(
+        'http://127.0.0.1:8082',
+        expect.objectContaining({ projectRoot })
+      );
+      expect(killed).toEqual([{ pid: 9191, signal: 'SIGTERM' }]);
+      expect(JSON.parse(printed())).toMatchObject({
+        stopped: true,
+        untracked: true,
+        forced: false,
+        port: 8082,
+        pid: 9191,
+        lockHeld: false,
+        reason: null,
       });
+    });
+
+    it(`should say the stopped server had no lock`, async () => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(true));
+
+      await devStopAsync(projectRoot, options({ json: false }));
+
+      expect(printed()).toContain("This project's dev server had no lock: its CLI process ended.");
+    });
+
+    it(`should name it and signal nothing when this machine will not name its process`, async () => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(true));
+      vi.mocked(findPortListenerAsync).mockResolvedValue(null);
 
       await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OUTCOME_FAILED);
 
@@ -516,29 +548,60 @@ describe(devStopAsync, () => {
       const report = JSON.parse(printed());
       expect(report).toMatchObject({
         stopped: false,
+        untracked: true,
         port: 8082,
-        pid: 9191,
-        lockHeld: false,
-        reason: 'foreign-dev-server',
-        suggestedCommand: 'npx @expo/agent-cli dev:stop --port 8082 --force',
+        reason: 'untracked-dev-server',
       });
-      expect(report.detail).toContain('8082');
-      expect(report.detail).toContain('9191');
-      expect(printedErrors()).toContain('npx @expo/agent-cli dev:stop --port 8082 --force');
+      expect(report.detail).toContain('its CLI process ended');
     });
 
     it.each([
-      ['names another project', { kind: 'header', root: '/other' }],
-      ['names no project', { kind: 'no-header' }],
-    ] as const)(`should name nothing when its /status %s`, async (_, reported) => {
-      vi.mocked(readReportedProjectRootAsync).mockResolvedValue(reported);
+      ['names another project', false],
+      ['names no project', null],
+    ] as const)(`should name nothing when its /status %s`, async (_, matched) => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(matched));
 
       await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OK);
 
       expect(killed).toEqual([]);
       const report = JSON.parse(printed());
-      expect(report).toMatchObject({ port: null, pid: null, suggestedCommand: null });
+      expect(report).toMatchObject({ port: null, pid: null, untracked: false });
       expect(report.detail).toContain('--port');
+    });
+  });
+
+  // The same proof when the caller names the port: a dev server status matches to this project
+  // stops without --force, and another project's still needs it.
+  describe('--port with no lock', () => {
+    beforeEach(() => {
+      vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
+      vi.mocked(findPortListenerAsync).mockResolvedValue({ pid: 9191, command: 'node' });
+      livePids.add(9191);
+      mockPort({ answering: true });
+    });
+
+    it(`should stop this project's dev server without --force`, async () => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(true));
+
+      await expect(devStopAsync(projectRoot, options({ port: 8081 }))).resolves.toBe(EXIT_OK);
+
+      expect(killed).toEqual([{ pid: 9191, signal: 'SIGTERM' }]);
+      expect(JSON.parse(printed())).toMatchObject({ stopped: true, untracked: true, port: 8081 });
+    });
+
+    it(`should still refuse another project's dev server without --force`, async () => {
+      vi.mocked(probeBundlerAsync).mockResolvedValue(projectRootMatch(false));
+
+      await expect(devStopAsync(projectRoot, options({ port: 8081 }))).resolves.toBe(
+        EXIT_OUTCOME_FAILED
+      );
+
+      expect(killed).toEqual([]);
+      expect(JSON.parse(printed())).toMatchObject({
+        stopped: false,
+        untracked: false,
+        reason: 'foreign-dev-server',
+      });
     });
   });
 
@@ -998,7 +1061,7 @@ describe(buildFollowUps, () => {
     easPlatform: null,
     reason: null,
     detail: null,
-    suggestedCommand: null,
+    untracked: false,
     waitedMs: 0,
     followups: [],
     ...overrides,

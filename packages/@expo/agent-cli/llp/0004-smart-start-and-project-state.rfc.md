@@ -450,9 +450,18 @@ own and gives the terminal back. `@expo/agent-cli dev:logs` reads what it printe
 then `unref()`. The wrapper is what takes the lock. A detached server that published no
 lock would be a process nothing could find, wait on, or stop. The lock names its port
 and pid. `dev:stop` signals that pid. The detached wrapper forwards `SIGTERM` to its
-`expo` child exactly as the foreground one does. With no lock, `dev:stop` looks where
-`status` looks and names the port, the pid and the command that stops a server whose
-`/status` names this project, `dev:stop --port <n> --force`. It does not stop that server.
+`expo` child exactly as the foreground one does.
+
+A dev child killed with `SIGKILL` leaves its Metro running with no lock: an untracked dev
+server. With no lock, `dev:stop` looks where `status` looks (the discovery ladder). The
+server is this project's when its `/status` names this project's root, by the check
+`status` reports as `projectRootMatched` (`waitForBundlerReadyAsync` and
+`matchProjectRoot`, read through `src/dev/untrackedDevServer.ts`). `dev:stop` stops that
+server without `--force`, by the same two proofs `--force` needs about the port and the
+process, and reports `untracked: true`. `--port <n>` with no lock reads the same check
+for that port. A server that names another project's root, or none, still needs
+`--force`. When the process cannot be named or is not a dev server's, nothing is
+signalled, the reason is `untracked-dev-server`, and the exit is 20.
 
 Three flags are stripped from the child's command line. `--detach` would detach a
 detached run forever. `--wait-ready` names a wait the parent performs. `--json` would
