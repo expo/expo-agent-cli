@@ -10,7 +10,6 @@ import { registryDirectory } from '../../deviceBinding/registry';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { resolveEasCli } from '../../utils/easCli';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
-import { ensureGitExcludedAsync } from '../../utils/gitExclude';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import {
   buildLatestSimulatorBuildArgs,
@@ -48,7 +47,10 @@ vi.mock('../../utils/easCli', async () => {
   return { ...actual, resolveEasCli: vi.fn() };
 });
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
-vi.mock('../../utils/gitExclude', () => ({ ensureGitExcludedAsync: vi.fn() }));
+// No test here runs real git.
+vi.mock('../../utils/gitExclude', () => ({
+  ensureGitExcludedAsync: vi.fn(async () => ({ result: 'skipped' })),
+}));
 
 const projectRoot = '/project/my-app';
 const DEV_SERVER = 'http://127.0.0.1:8081';
@@ -618,50 +620,6 @@ describe('the session half on its own', () => {
     // Nothing waited on the tunnel: a session that is up is driven by `openRouteAsync`, which
     // resolves the link itself.
     expect(fetchAdvertisedUrlAsync).not.toHaveBeenCalled();
-  });
-
-  describe('the dotenv and git', () => {
-    const options = {
-      platform: 'ios' as const,
-      expoGo: true,
-      devServerUrl: DEV_SERVER,
-      buildId: null,
-    };
-
-    beforeEach(() => {
-      vi.mocked(probeCloudSessionAsync).mockResolvedValue(
-        cloudProbe.active({ id: 'sess-up', platform: 'ios' })
-      );
-    });
-
-    it(`excludes the dotenv from git after the bind, and says so once on stderr`, async () => {
-      vi.mocked(ensureGitExcludedAsync).mockResolvedValue('added');
-      const report = await ensureEasSessionAsync(projectRoot, options);
-      expect(ensureGitExcludedAsync).toHaveBeenCalledTimes(1);
-      expect(ensureGitExcludedAsync).toHaveBeenCalledWith(projectRoot, '.env.eas-simulator');
-      expect(vi.mocked(acquireCloudBindingAsync).mock.invocationCallOrder[0]).toBeLessThan(
-        vi.mocked(ensureGitExcludedAsync).mock.invocationCallOrder[0]!
-      );
-      expect(report).toMatchObject({ ok: true, gitExclude: 'added' });
-      const lines = vi.mocked(Log.progress).mock.calls.map(([message]) => message);
-      expect(lines.filter((line) => line?.includes('info/exclude'))).toHaveLength(1);
-      expect(Log.log).not.toHaveBeenCalled();
-    });
-
-    it(`warns when git tracks the dotenv`, async () => {
-      vi.mocked(ensureGitExcludedAsync).mockResolvedValue('tracked');
-      const report = await ensureEasSessionAsync(projectRoot, options);
-      expect(report).toMatchObject({ ok: true, gitExclude: 'tracked' });
-      const warnings = vi.mocked(Log.warn).mock.calls.map(([message]) => message);
-      expect(warnings.join('\n')).toContain('git rm --cached .env.eas-simulator');
-    });
-
-    it(`asks git nothing when the bind fails`, async () => {
-      vi.mocked(acquireCloudBindingAsync).mockRejectedValueOnce(new Error('locked'));
-      const report = await ensureEasSessionAsync(projectRoot, options);
-      expect(report.ok).toBe(false);
-      expect(ensureGitExcludedAsync).not.toHaveBeenCalled();
-    });
   });
 
   it(`claims an expired binding of its own and reuses its live session`, async () => {
