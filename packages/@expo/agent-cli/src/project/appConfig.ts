@@ -1,12 +1,13 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md
-// Reading the config plugins of a project from its static app config.
+// Reading the app config of a project from its static files.
 //
-// Only `app.json` and `app.config.json` are read. A dynamic `app.config.js`/`.ts` would have to
-// be evaluated to learn its plugins, which runs project code inside the CLI — the process
-// boundary of llp/0001 §Constraints item 5 exists to avoid exactly that. For a project with only
-// a dynamic config, `plugins` is empty and `dynamic` is true, so callers can report the plugin
-// answer as unknown instead of as "no plugins". Resolving those plugins is a job for an
-// `expo config` subprocess, tracked as follow-up work.
+// Only `app.json` and `app.config.json` are read here. A dynamic `app.config.js`/`.ts` would have
+// to be evaluated to learn what it says, which runs project code inside the CLI — the process
+// boundary of llp/0001 §Constraints exists to avoid exactly that. For a project with only a
+// dynamic config, `plugins` is empty and `dynamic` is true, so callers can report the plugin
+// answer as unknown instead of as "no plugins". The config the app itself sees comes from an
+// `expo config` subprocess: `inspect:config-plugins` reads its plugins out of the introspect
+// payload, and `navigate` evaluates the scheme the same way (`src/navigate/deepLink.ts`).
 import path from 'path';
 
 import { fileExistsAsync } from '../utils/dir';
@@ -115,17 +116,30 @@ export async function readStaticEasProjectAsync(projectRoot: string): Promise<Ea
 
 /** Normalize the `plugins` array, whose entries are a module path or `[path, options]`. */
 function parsePlugins(plugins: unknown): AppConfigPlugin[] {
+  return (readPluginIds(plugins) ?? []).map((id) => ({
+    id,
+    packageName: parsePackageNameFromModulePath(id),
+  }));
+}
+
+/**
+ * The ids of a `plugins` array as the config spells them, or null when the value is not an array.
+ *
+ * Null rather than an empty list, because the two mean different things to a caller with a
+ * fallback: an evaluated config that names no plugins has answered, and one that carries no
+ * `plugins` key has not.
+ */
+export function readPluginIds(plugins: unknown): string[] | null {
   if (!Array.isArray(plugins)) {
-    return [];
+    return null;
   }
 
-  const parsed: AppConfigPlugin[] = [];
+  const ids: string[] = [];
   for (const entry of plugins) {
     const id = typeof entry === 'string' ? entry : Array.isArray(entry) ? entry[0] : null;
-    if (typeof id !== 'string' || !id) {
-      continue;
+    if (typeof id === 'string' && id) {
+      ids.push(id);
     }
-    parsed.push({ id, packageName: parsePackageNameFromModulePath(id) });
   }
-  return parsed;
+  return ids;
 }

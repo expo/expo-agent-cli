@@ -12,6 +12,7 @@ import path from 'node:path';
 import {
   executeAgentCliAsync,
   holdDevLockAsync,
+  readStubExpoInvocations,
   setupFixtureAsync,
   startStubDevServerAsync,
   stubExpoEnv,
@@ -384,5 +385,131 @@ describe('@expo/agent-cli navigate', () => {
     expect(error.suggestedCommand).toContain('--ios');
     // The `Try:` line is what an agent acts on, so the flag has to be on the stream too.
     expect(result.stderr).toContain('--ios');
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server — issue #84. A
+// project whose only config is `app.config.ts` was sent to `exp+<package name>://` with "no scheme
+// field was found", which was not what happened: the file was never read. The scheme now comes
+// from the config `@expo/config` evaluates after the project's env files are loaded, the way
+// `expo config` reads it, and a static config is never evaluated. The config files here are real
+// and so is their evaluation; the `expo` bin stays a stub, and it is never asked for the config.
+describe('@expo/agent-cli navigate with a dynamic app config', () => {
+  const PRINT_URL = ['navigate', '/profile/42', '--ios', '--json', '--print-url'];
+  /** Reads the variable the `.env` sets, and leaves a marker so a run that evaluated it shows. */
+  const APP_CONFIG_JS = [
+    "require('node:fs').writeFileSync(require('node:path').join(__dirname, 'evaluated.marker'), '');",
+    'module.exports = ({ config }) => ({',
+    '  ...config,',
+    "  scheme: process.env.APP_VARIANT ? `marmelade-${process.env.APP_VARIANT}` : 'marmelade',",
+    '});',
+    '',
+  ].join('\n');
+  /** The issue's own shape: TypeScript, which Node strips or `typescript` transpiles. */
+  const APP_CONFIG_TS = [
+    "const scheme: string = 'marmelade';",
+    "export default { name: 'Marmelade', slug: 'marmelade', scheme, plugins: ['expo-font'] };",
+    '',
+  ].join('\n');
+
+  /** `dev-client-app` with its `app.json` replaced by a dynamic config. */
+  async function setupDynamicAsync(
+    files: Record<string, string> = { 'app.config.js': APP_CONFIG_JS }
+  ): Promise<string> {
+    const projectRoot = await setupFixtureAsync('dev-client-app');
+    await fs.promises.rm(path.join(projectRoot, 'app.json'));
+    for (const [name, contents] of Object.entries(files)) {
+      await fs.promises.writeFile(path.join(projectRoot, name), contents);
+    }
+    return projectRoot;
+  }
+
+  function wasEvaluated(projectRoot: string): boolean {
+    return fs.existsSync(path.join(projectRoot, 'evaluated.marker'));
+  }
+
+  /** The stub `expo` bin's `config` invocations, which the evaluation never makes. */
+  function expoConfigCalls(projectRoot: string) {
+    return readStubExpoInvocations(projectRoot).filter((call) => call.args[0] === 'config');
+  }
+
+  it('reads the scheme the evaluated config names, with the project env files loaded', async () => {
+    const projectRoot = await setupDynamicAsync({
+      'app.config.js': APP_CONFIG_JS,
+      '.env': 'APP_VARIANT=dev\n',
+    });
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      [...PRINT_URL, '--app-id', 'dev.marmelade.app'],
+      { env: stubExpoEnv(projectRoot) }
+    );
+    const report: NavigateReport = JSON.parse(result.stdout);
+
+    expect(report.url).toBe('marmelade-dev://profile/42');
+    expect(report.resolution).toBe('read the "scheme" field from app.config.js');
+    expect(expoConfigCalls(projectRoot)).toEqual([]);
+  });
+
+  it('evaluates an app.config.ts', async () => {
+    const projectRoot = await setupDynamicAsync({ 'app.config.ts': APP_CONFIG_TS });
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      [...PRINT_URL, '--app-id', 'dev.marmelade.app'],
+      { env: stubExpoEnv(projectRoot) }
+    );
+    const report: NavigateReport = JSON.parse(result.stdout);
+
+    expect(report.url).toBe('marmelade://profile/42');
+    expect(report.resolution).toBe('read the "scheme" field from app.config.ts');
+  });
+
+  it('keeps the static read and says so when the config cannot be evaluated', async () => {
+    const projectRoot = await setupDynamicAsync({
+      'app.config.js':
+        "module.exports = () => { throw new Error('Cannot resolve app config'); };\n",
+    });
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      [...PRINT_URL, '--app-id', 'dev.marmelade.app'],
+      { env: stubExpoEnv(projectRoot) }
+    );
+    const report: NavigateReport = JSON.parse(result.stdout);
+
+    // The package name, because that is all the static read has for this project.
+    expect(report.url).toBe('exp+dev-client-app://profile/42');
+    expect(report.resolution).toBe(
+      'app.config.js could not be evaluated (Cannot resolve app config) and no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "dev-client-app"'
+    );
+  });
+
+  it('evaluates nothing when --scheme names the scheme', async () => {
+    const projectRoot = await setupDynamicAsync();
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      [...PRINT_URL, '--scheme', 'demoapp', '--app-id', 'dev.marmelade.app'],
+      { env: stubExpoEnv(projectRoot) }
+    );
+    const report: NavigateReport = JSON.parse(result.stdout);
+
+    expect(report.url).toBe('demoapp://profile/42');
+    expect(wasEvaluated(projectRoot)).toBe(false);
+  });
+
+  it('evaluates nothing for a static app config', async () => {
+    const projectRoot = await setupFixtureAsync('dev-client-app');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      [...PRINT_URL, '--app-id', 'com.example.demo'],
+      { env: stubExpoEnv(projectRoot) }
+    );
+    const report: NavigateReport = JSON.parse(result.stdout);
+
+    expect(report.url).toBe('exp+dev-client-app://profile/42');
+    expect(expoConfigCalls(projectRoot)).toEqual([]);
   });
 });
