@@ -909,6 +909,18 @@ export function openUrlOnCloudSimulatorAsync({
 }
 
 /**
+ * Open the app id on the cloud simulator, so the controller has a session to photograph. No
+ * `--relaunch`: that flag terminates the app, and an app already on the screen must stay as it is.
+ */
+export function openAppOnCloudSimulatorAsync({
+  appId,
+  platform,
+  ...options
+}: CloudVerbOptions & { appId: string; platform: CloudPlatform }): Promise<CloudRunResult> {
+  return runCloudVerbAsync(['open', appId, '--platform', platform], options);
+}
+
+/**
  * End one app on the cloud simulator, leaving the session up.
  *
  * The cloud form of `simctl terminate` and `am force-stop`. Never throws for a verb that ran and

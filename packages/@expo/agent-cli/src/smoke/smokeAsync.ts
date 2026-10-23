@@ -1122,12 +1122,13 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       }
     },
 
-    captureScreenshot: (deviceId, backend: DeviceBackend | null) =>
+    captureScreenshot: async (deviceId, backend: DeviceBackend | null) =>
       captureScreenshotAsync({
         platform: options.platform,
         deviceId,
         backend: backend ?? undefined,
         projectRoot,
+        appId: backend === 'cloud' ? ((await targetAsync()).appId ?? undefined) : undefined,
         filePath: options.screenshotPath ?? defaultScreenshotPath(projectRoot),
       }),
 
