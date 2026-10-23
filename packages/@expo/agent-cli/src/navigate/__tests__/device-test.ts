@@ -383,6 +383,60 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
   });
 
+  it(`answers a platform mismatch, not a foreign session, when the dotenv session is up on the other platform`, async () => {
+    mockPlatform('linux');
+    cloudProject('own-ios');
+    mockSpawnQueue([
+      {
+        stdout: listing(
+          {
+            id: 'own-ios',
+            status: 'IN_PROGRESS',
+            platform: 'IOS',
+            type: 'agent-device',
+            createdAt: '2026-08-26T10:00:00.000Z',
+          },
+          {
+            id: 'foreign',
+            status: 'QUEUED',
+            platform: 'ANDROID',
+            type: 'agent-device',
+            createdAt: '2026-08-26T11:00:00.000Z',
+          }
+        ),
+      },
+    ]);
+
+    const error = await resolveDeviceAsync('android', { cloud: 'required', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
+    expect(error.message).not.toContain('foreign');
+  });
+
+  it(`answers a platform mismatch for a queued session on the other platform`, async () => {
+    mockPlatform('linux');
+    cloudProject('sess-a');
+    mockSpawnQueue([
+      {
+        stdout: listing({
+          id: 'sess-a',
+          status: 'QUEUED',
+          platform: 'ANDROID',
+          type: 'agent-device',
+          createdAt: '2026-08-26T10:00:00.000Z',
+        }),
+      },
+    ]);
+
+    const error = await resolveDeviceAsync('ios', { cloud: 'required', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
+  });
+
   it(`still reports no device when the service lists nothing`, async () => {
     mockPlatform('linux');
     cloudProject('sess-1');
@@ -457,6 +511,7 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(error.message).toContain('--ios');
   });
 
+  // `--eas` asks the service even with no binding and no dotenv: the reader named the backend.
   it(`names how to start a session when --eas finds none`, async () => {
     cloudProject(null);
     mockSpawnQueue(noSessions);
@@ -465,6 +520,7 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
       (e) => e
     );
 
+    expect(spawn).toHaveBeenCalled();
     expect(error.code).toBe('NO_CLOUD_SIMULATOR_SESSION');
     expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
   });

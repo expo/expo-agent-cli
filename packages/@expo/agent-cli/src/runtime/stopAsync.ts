@@ -20,7 +20,7 @@ import { stopAppOnDeviceAsync } from './appProcess';
 import { debugEvent, event } from './events';
 import { preflightRuntimeAsync } from './preflight';
 import type { RuntimeStopOptions } from './resolveStopOptions';
-import { easCommandPrefix } from '../utils/easCli';
+import { cloudSessionListCommand } from '../device/cloudSimulator';
 
 /**
  * Machine shape of `@expo/agent-cli runtime:stop --json`.
@@ -208,7 +208,7 @@ export async function runtimeStopAsync(
         // A cloud session is checked with the CLI that owns it (llp/0005 §Cloud simulator).
         `How: check that ${resolved.appId} is the app you meant — ${resolved.reason} — and pass --app-id to name another. ${
           device.backend === 'cloud'
-            ? `Check that the session is still running with "${easCommandPrefix()} simulator:list --status in-progress".`
+            ? `Check that the session is still running with "${cloudSessionListCommand()}".`
             : `Check that the bound ${device.platform === 'ios' ? 'simulator' : 'emulator'} is up with "${PROGRAM_PREFIX} status", or bind one again with "${PROGRAM_PREFIX} dev --${device.platform} --detach --wait-ready".`
         }`,
       ].join('\n')

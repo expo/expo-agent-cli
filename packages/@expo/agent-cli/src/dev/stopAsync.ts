@@ -268,23 +268,20 @@ export async function devStopAsync(
 async function stopProjectEasSessionAsync(
   projectRoot: string
 ): Promise<NonNullable<DevStopResultJson['session']>> {
-  const { probeCloudSessionAsync } =
+  const { isLive, probeCloudSessionAsync } =
     require('../device/cloudSimulator') as typeof import('../device/cloudSimulator');
   const { stopEasSessionAsync } = require('../device/eas') as typeof import('../device/eas');
   const probe = await probeCloudSessionAsync({ projectRoot });
-  if (probe.state !== 'active' || probe.sessionId == null) {
+  if (!isLive(probe)) {
     return {
       id: null,
       stopped: false,
-      reason:
-        probe.state === 'none' || probe.state === 'inactive'
-          ? null
-          : (probe.reason ?? 'whether this project has a session could not be established'),
+      reason: probe.state === 'none' || probe.state === 'inactive' ? null : probe.reason,
     };
   }
-  const result = await stopEasSessionAsync(projectRoot, probe.sessionId);
-  debugEvent('stop_session', { sessionId: probe.sessionId, ok: result.ok });
-  return { id: probe.sessionId, stopped: result.ok, reason: result.reason };
+  const result = await stopEasSessionAsync(projectRoot, probe.session.id);
+  debugEvent('stop_session', { sessionId: probe.session.id, ok: result.ok });
+  return { id: probe.session.id, stopped: result.ok, reason: result.reason };
 }
 
 /** The ordinary path: a lock answers, so the pid to signal is known and so is what it owns. */

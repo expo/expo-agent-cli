@@ -566,8 +566,8 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
           projectRoot,
           platform: options.platform,
         });
-        if (probe.state === 'active' && probe.platform === options.platform && probe.sessionId) {
-          return { ok: true, sessionId: probe.sessionId, started: false, reason: null };
+        if (probe.state === 'active' && probe.session.platform === options.platform) {
+          return { ok: true, sessionId: probe.session.id, started: false, reason: null };
         }
         return {
           ok: false,

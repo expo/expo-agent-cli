@@ -1,10 +1,9 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
 // The failures of the cloud backend, one builder for each way a cloud simulator run can fail.
 
-import { classifySubprocessFailure } from '../needsHuman/detect';
 import { needsHumanErrorFrom } from '../needsHuman/error';
 import { PROGRAM_PREFIX } from '../programName';
-import { EAS_RUNNER_RECOVERY, easCommandPrefix } from '../utils/easCli';
+import { EAS_RUNNER_RECOVERY } from '../utils/easCli';
 import { classifyEasFailure } from '../utils/easFailure';
 import { CommandError } from '../utils/errors';
 import {
@@ -14,8 +13,9 @@ import {
 } from '../utils/wrapperCrash';
 import {
   CLOUD_SESSION_ENV_FILE,
-  CLOUD_SIMULATOR_WAITLIST_URL,
+  cloudSessionListCommand,
   cloudSessionStartCommand,
+  easNeedsHuman,
   readControllerError,
   type CloudPlatform,
   type CloudRunResult,
@@ -30,18 +30,20 @@ import {
  * told to start a session it cannot have, and a session that has *ended* is named by its id so the
  * reader knows the file on disk is stale rather than wrong.
  */
-export function cloudSessionUnavailableError(probe: CloudSessionProbe): CommandError {
+export function cloudSessionUnavailableError(
+  probe: Extract<CloudSessionProbe, { state: 'inactive' | 'none' | 'unavailable' }>
+): CommandError {
   const start = cloudSessionStartCommand();
 
-  if (probe.available === false) {
+  if (probe.state === 'unavailable') {
     const error = new CommandError(
       'CLOUD_SIMULATOR_UNAVAILABLE',
       [
         'EAS Simulator is not enabled on this account, so there is no cloud simulator to open the link on.',
-        `Why: ${probe.reason ?? 'the availability check answered that the feature is off for this account'}. It is a limited-access EAS feature that is still rolling out, so it is not a thing this command can turn on.`,
+        `Why: ${probe.reason}. It is a limited-access EAS feature that is still rolling out, so it is not a thing this command can turn on.`,
         // The URL comes from the service when it sends one, so a refusal ends in where access comes
         // from rather than only in "no".
-        `How: ask for access at ${probe.waitlistUrl ?? CLOUD_SIMULATOR_WAITLIST_URL}. Until then, open the link on a local device — boot a simulator or attach a device and run this command again — or hand the URL to whatever can open it with "${PROGRAM_PREFIX} navigate <route> --print-url".`,
+        `How: ask for access at ${probe.waitlistUrl}. Until then, open the link on a local device — boot a simulator or attach a device and run this command again — or hand the URL to whatever can open it with "${PROGRAM_PREFIX} navigate <route> --print-url".`,
       ].join('\n')
     );
     error.suggestedCommand = `${PROGRAM_PREFIX} navigate / --print-url`;
@@ -52,8 +54,8 @@ export function cloudSessionUnavailableError(probe: CloudSessionProbe): CommandE
     'NO_CLOUD_SIMULATOR_SESSION',
     [
       'No EAS Simulator session this CLI can drive is running for this project, so there is no cloud simulator to open the link on.',
-      `Why: ${probe.reason ?? 'the service listed no running session'}. A cloud simulator is a session that is started, driven and stopped — unlike a local simulator, there is nothing to find that somebody else left booted.`,
-      `How: start the app with "${start}". Once it opens, run this command again in another terminal. This starts a tunnelled dev server and selects Expo Go or a development build for the project. End the dev server and session with "${PROGRAM_PREFIX} dev:stop --eas" when done. To see this project's sessions, "${easCommandPrefix()} simulator:list --status in-progress" lists them with their ids. To open the link elsewhere, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL.`,
+      `Why: ${probe.reason}. A cloud simulator is a session that is started, driven and stopped — unlike a local simulator, there is nothing to find that somebody else left booted.`,
+      `How: start the app with "${start}". Once it opens, run this command again in another terminal. This starts a tunnelled dev server and selects Expo Go or a development build for the project. End the dev server and session with "${PROGRAM_PREFIX} dev:stop --eas" when done. To see this project's sessions, "${cloudSessionListCommand()}" lists them with their ids. To open the link elsewhere, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL.`,
     ].join('\n')
   );
   error.suggestedCommand = start;
@@ -69,7 +71,9 @@ export function cloudSessionUnavailableError(probe: CloudSessionProbe): CommandE
  * the same distinction `DeviceProbe.toolError` draws for `adb` (F49) — a tool that did not answer
  * has said nothing about the world.
  */
-export function cloudSessionUnknownError(probe: CloudSessionProbe): CommandError {
+export function cloudSessionUnknownError(
+  probe: Extract<CloudSessionProbe, { state: 'unknown' }>
+): CommandError {
   // @ref llp/0027-everything-on-eas.rfc.md §What EAS said — when the listing failed on a sentence
   // this CLI recognises, the `How:` is the fix rather than "run the listing yourself".
   const cause = probe.failure
@@ -79,30 +83,21 @@ export function cloudSessionUnknownError(probe: CloudSessionProbe): CommandError
     'CLOUD_SIMULATOR_SESSION_UNKNOWN',
     [
       'Whether this project has a running EAS Simulator session could not be established, so nothing was opened on one.',
-      `Why: ${probe.reason ?? 'the EAS CLI gave no answer this command could read'}. ${
+      `Why: ${probe.reason}. ${
         probe.sessionId
           ? `${CLOUD_SESSION_ENV_FILE} names session ${probe.sessionId}, and whether that session is still up is exactly what could not be read — so this is not being reported as "no session", which would be an instruction to start a second billed one.`
           : 'What this project has running could not be listed, so "no session" would be a guess, and acting on it would start a second billed one next to any that is up.'
       }`,
       cause
         ? `How: ${cause.how}`
-        : `How: run "${easCommandPrefix()} simulator:list --status in-progress" to see what the CLI says, and check that the "eas" being run is the EAS CLI. Then run this command again, or open the URL elsewhere with "${PROGRAM_PREFIX} navigate <route> --print-url".`,
+        : `How: run "${cloudSessionListCommand()}" to see what the CLI says, and check that the "eas" being run is the EAS CLI. Then run this command again, or open the URL elsewhere with "${PROGRAM_PREFIX} navigate <route> --print-url".`,
     ].join('\n')
   );
-  error.suggestedCommand =
-    cause?.command ?? `${easCommandPrefix()} simulator:list --status in-progress`;
+  error.suggestedCommand = cause?.command ?? cloudSessionListCommand();
 
   // The same layer-3 hand-off a device verb does. A signed-out account stops the *question* about
   // the session exactly as it stops the answer, and both are a login rather than a broken CLI.
-  const needsHuman =
-    probe.failure &&
-    classifySubprocessFailure({
-      tool: 'eas',
-      invocation: probe.failure.command,
-      exitCode: probe.failure.exitCode,
-      stdout: probe.failure.stdout,
-      stderr: probe.failure.stderr,
-    });
+  const needsHuman = probe.failure && easNeedsHuman(probe.failure);
   return needsHuman
     ? needsHumanErrorFrom(needsHuman, { code: error.code, message: error.message })
     : error;
@@ -117,7 +112,7 @@ export function cloudPlatformMismatchError(
   const error = new CommandError(
     'CLOUD_SIMULATOR_PLATFORM_MISMATCH',
     [
-      `--${wanted} names a platform the running cloud simulator is not, so nothing was opened.`,
+      `--${wanted} names a platform the cloud simulator session is not, so nothing was opened.`,
       `Why: an EAS Simulator session is created for one platform and keeps it for its whole life${sessionId ? ` — session ${sessionId} is ${session}` : ''}. There is no second device in it to switch to.`,
       `How: run this command with --${session} (or with no platform flag, which takes the session's own), or start a ${wanted} session and run it again.`,
     ].join('\n')
@@ -167,6 +162,41 @@ export function cloudNeedsTunnelError(
 }
 
 /**
+ * The controller session named in a `DEVICE_IN_USE` message, or null when it named none.
+ *
+ * `Device is already in use by session "default".` [observed — live, 2026-08-26]. Exported because
+ * two callers need it: the advice below, and the cloud reload — which binds its verb to that session
+ * and retries, rather than telling a reader to do it (`src/runtime/reload/cloudReload.ts`).
+ */
+export function readHeldSessionName(message: string): string | null {
+  return /session\s+["']([^"']+)["']/.exec(message)?.[1] ?? null;
+}
+
+/**
+ * What to do about a device the controller says is already in use.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live run S14.
+ *
+ * `DEVICE_IN_USE` is the one controller refusal whose remedy is in its own message: it names the
+ * session that holds the device. The general advice for a refused verb — "a session can end between
+ * the moment it was listed and the moment a verb reaches it; start a new one if it has" — is the
+ * opposite of the truth here, and acting on it bills a second machine and leaves this one held.
+ *
+ * The session name is read out of the controller's sentence rather than assumed: the observed one is
+ * `Device is already in use by session "default".` [observed — live, 2026-08-26], and a message that
+ * stops carrying a name falls back to advice that names none.
+ */
+function heldDeviceHow(message: string): string {
+  const session = readHeldSessionName(message);
+  return [
+    session
+      ? `The device is held by the session named ${JSON.stringify(session)}, so bind this verb to that session — the controller takes --session ${session} — or wait for whatever is holding it to let go.`
+      : `The device is held by another session, so bind this verb to the session that holds it (the controller takes --session <name>), or wait for it to let go.`,
+    `Do not start a second session: that bills another machine and leaves this one held. "${cloudSessionListCommand()}" shows which sessions are up.`,
+  ].join(' ');
+}
+
+/**
  * The failure for a device verb that ran and did not work.
  *
  * Four things folded into one place, because all of them are about a subprocess this CLI cannot
@@ -182,41 +212,6 @@ export function cloudNeedsTunnelError(
  * scheme no app on it had registered; sending that reader to `--help` would have had them checking
  * a command that was already correct.
  */
-/**
- * What to do about a device the controller says is already in use.
- *
- * @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live run S14.
- *
- * `DEVICE_IN_USE` is the one controller refusal whose remedy is in its own message: it names the
- * session that holds the device. The general advice for a refused verb — "a session can end between
- * the moment it was listed and the moment a verb reaches it; start a new one if it has" — is the
- * opposite of the truth here, and acting on it bills a second machine and leaves this one held.
- *
- * The session name is read out of the controller's sentence rather than assumed: the observed one is
- * `Device is already in use by session "default".` [observed — live, 2026-08-26], and a message that
- * stops carrying a name falls back to advice that names none.
- */
-/**
- * The controller session named in a `DEVICE_IN_USE` message, or null when it named none.
- *
- * `Device is already in use by session "default".` [observed — live, 2026-08-26]. Exported because
- * two callers need it: the advice below, and the cloud reload — which binds its verb to that session
- * and retries, rather than telling a reader to do it (`src/runtime/reload/cloudReload.ts`).
- */
-export function readHeldSessionName(message: string): string | null {
-  return /session\s+["']([^"']+)["']/.exec(message)?.[1] ?? null;
-}
-
-function heldDeviceHow(message: string): string {
-  const session = readHeldSessionName(message);
-  return [
-    session
-      ? `The device is held by the session named ${JSON.stringify(session)}, so bind this verb to that session — the controller takes --session ${session} — or wait for whatever is holding it to let go.`
-      : `The device is held by another session, so bind this verb to the session that holds it (the controller takes --session <name>), or wait for it to let go.`,
-    `Do not start a second session: that bills another machine and leaves this one held. "${easCommandPrefix()} simulator:list --status in-progress" shows which sessions are up.`,
-  ].join(' ');
-}
-
 export function cloudVerbFailedError(
   result: CloudRunResult,
   { what, how }: { what: string; how: string }
@@ -249,7 +244,7 @@ export function cloudVerbFailedError(
     );
     // The listing either way: for a session that may have ended it is how to find out, and for a
     // held device it is how to see which session is holding it. Neither starts anything.
-    error.suggestedCommand = `${easCommandPrefix()} simulator:list --status in-progress`;
+    error.suggestedCommand = cloudSessionListCommand();
     return error;
   }
 
@@ -274,13 +269,7 @@ export function cloudVerbFailedError(
 
   // Layer 3 of the needs-human protocol: a signed-out account is a step only a person can complete,
   // and it moves the run into exit 7 rather than reporting a broken command (llp/0010).
-  const needsHuman = classifySubprocessFailure({
-    tool: 'eas',
-    invocation: result.command,
-    exitCode: result.exitCode,
-    stdout: result.stdout,
-    stderr: result.stderr,
-  });
+  const needsHuman = easNeedsHuman(result);
   return needsHuman
     ? needsHumanErrorFrom(needsHuman, { code: error.code, message: error.message })
     : error;
