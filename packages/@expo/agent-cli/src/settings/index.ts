@@ -1,8 +1,14 @@
 // @ref llp/0015-backend-selection-and-config.rfc.md
-// The developer's own preferences: which app the project runs in, and where its native builds run.
+// The developer's own preferences: which app the project runs in, where its native builds run, and where the app runs.
 // One file (`package.json` › `expo.agent-cli`), one parser, one resolver per question.
 
-export { parseAgentCliSettings, settingsAreEmpty, settingsBuildBackend } from './parse';
+export {
+  parseAgentCliSettings,
+  resolveDeviceBackend,
+  settingsAreEmpty,
+  settingsBuildBackend,
+  settingsDeviceBackend,
+} from './parse';
 export {
   readAgentCliSettings,
   resetSettingsCache,
@@ -15,6 +21,7 @@ export {
   NO_SETTINGS,
   type BuildBackend,
   type AgentCliSettings,
+  type DeviceBackendSetting,
   type LoadedSettings,
   type PlatformSettings,
   type RunTarget,

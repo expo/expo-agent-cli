@@ -31,7 +31,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
 import { readLastBuildRecord, type LastBuildRecord } from '../plan/lastBuild';
-import type { NativePlatform, PlanPlatform } from '../plan/types';
+import type { DeviceBackend, NativePlatform, PlanPlatform } from '../plan/types';
 import { readStaticEasProjectAsync } from '../project/appConfig';
 import { generateFingerprintAsync } from '../project/fingerprint';
 import { readProjectPackageJsonAsync } from '../project/nodeModules';
@@ -380,12 +380,16 @@ export async function collectStatusReportAsync(
       requestedPort === localPortOf(report.devServer.url)
         ? null
         : requestedPort;
+    // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — where `dev` would put
+    // the app, read once: the plan reports it, and a device on EAS needs no local binding.
+    const deviceBackend = configuredDeviceBackend(projectRoot, request, platform);
     const resolvedPlan = await attemptPlanAsync(
       projectRoot,
       state,
       record,
       { ...options, platform },
       request,
+      deviceBackend,
       readBuildsOnceAsync
     );
     const recoveryPlan =
@@ -452,6 +456,7 @@ export async function collectStatusReportAsync(
         report.devServer.projectRootMatched !== false
       ) &&
       !readCloudSessionIdSync(projectRoot) &&
+      deviceBackend !== 'eas' &&
       !devicesDisabled() &&
       hostBindsPlatform(platform)
     ) {
@@ -780,12 +785,32 @@ function localPortOf(url: string): number | null {
  * fallback is the plan the project's own state implies, which is what `buildNextActionStatus`
  * makes of a null.
  */
+/** The device backend of the last `dev` request, then the config. A config that does not parse is reported elsewhere. */
+function configuredDeviceBackend(
+  projectRoot: string,
+  request: LastDevRequest | null,
+  platform: string
+): DeviceBackend {
+  const { readAgentCliSettings, resolveDeviceBackend } =
+    require('../settings') as typeof import('../settings');
+  try {
+    return resolveDeviceBackend(
+      request?.buildBackend ?? null,
+      readAgentCliSettings(projectRoot).settings,
+      platform
+    );
+  } catch {
+    return request?.buildBackend === 'eas' ? 'eas' : 'local';
+  }
+}
+
 async function attemptPlanAsync(
   projectRoot: string,
   state: ProjectState,
   lastBuild: LastBuildRecord,
   options: StatusOptions,
   request: LastDevRequest | null,
+  deviceBackend: DeviceBackend,
   readBuildsAsync: () => Promise<Attempt<BuildsStatus>>
 ): Promise<StartPlan | null> {
   const { resolveStartPlanAsync } =
@@ -797,7 +822,7 @@ async function attemptPlanAsync(
         lastBuild,
         requestedBackend: request?.buildBackend,
         requestedTarget: request?.runTarget,
-        deviceBackend: request?.buildBackend === 'eas' ? 'eas' : 'local',
+        deviceBackend,
         lookUpEasBuild: async (root, platform) => {
           const builds = await readBuildsAsync();
           const reused = simulatorBuildFromBuilds(

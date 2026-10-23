@@ -1120,6 +1120,18 @@ describe('the EAS device', () => {
     deviceBackend: 'eas' as const,
   };
 
+  // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+  it.each([
+    ['--no-open leaves the app to the caller', { ...eas, open: false }],
+    ['no platform was named', { platform: 'ios' as const, deviceBackend: 'eas' as const }],
+  ])(`names navigate with --eas when %s`, (_, options) => {
+    const plan = decideStartPlan(createState(), options);
+
+    const text = [...plan.steps.map((step) => step.reason), ...plan.reasons].join('\n');
+    expect(text).toContain('navigate / --eas');
+    expect(text).not.toMatch(/navigate \/(?! --eas)/);
+  });
+
   it(`builds with the simulator dev-client profile, never the device one`, () => {
     const plan = decideStartPlan(createDevClientState(), { ...eas, buildBackend: backend('eas') });
 

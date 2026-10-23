@@ -32,6 +32,7 @@ function options(overrides: Partial<SmokeOptions> = {}): SmokeOptions {
     route: null,
     platform: 'ios',
     cloud: 'fallback',
+    configuredEas: false,
     // Off by default *in this table*, and on by default in the command: almost every case below is
     // about a machine that already has a dev server and a device, and a helper that bootstrapped
     // would make each of them assert the absence of a start it never needed.
@@ -3290,6 +3291,39 @@ describe('the start-session phase, on --eas', () => {
     );
     expect(statusOf(run, 'app')).toBe('skipped');
     expect(run.environment.device).toBe('failed');
+  });
+
+  // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+  it(`moves a config EAS run to the session only when it starts the dev server`, async () => {
+    const ensureEasSession = vi.fn(async () => ({
+      ok: true,
+      sessionId: 'sess-new',
+      started: true,
+      reason: null,
+    }));
+    let looks = 0;
+    const discoverDevServer = async () => discovery({ reachable: looks++ > 0 });
+    const startDevServer = vi.fn(async () => ({
+      ok: true,
+      devServerUrl: 'http://127.0.0.1:8081',
+      built: false,
+      reason: null,
+    }));
+    const starting = options({ bootstrap: true, configuredEas: true });
+    const run = await runSmokePhasesAsync(
+      cloudDeps({ ensureEasSession, discoverDevServer, startDevServer }),
+      starting
+    );
+    expect(startDevServer).toHaveBeenCalled();
+    expect(starting.cloud).toBe('required');
+    expect(statusOf(run, 'start-session')).toBe('ok');
+
+    ensureEasSession.mockClear();
+    const reusing = options({ bootstrap: true, configuredEas: true });
+    const reused = await runSmokePhasesAsync(deps({ ensureEasSession }), reusing);
+    expect(reusing.cloud).toBe('fallback');
+    expect(statusOf(reused, 'start-session')).toBeUndefined();
+    expect(ensureEasSession).not.toHaveBeenCalled();
   });
 
   it(`has no such phase on a run that may not bring its own environment, or on a local device`, async () => {

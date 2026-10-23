@@ -72,8 +72,8 @@ export const devRunHelp: CommandHelp = {
     `A cloud build (eas build) runs on EAS and needs an Expo account; when this machine cannot build,`,
     `the plan is the cloud one and says why. --eas also puts the app on EAS: a tunnelled dev server,`,
     `a development-simulator build when needed, and an EAS Simulator session (bills until stopped).`,
-    `The project can choose, in package.json under expo.agent-cli: buildBackend (local or eas,`,
-    `optionally per platform) and target (expo-go or dev-build). A flag beats the config.`,
+    `The project can choose, in package.json under expo.agent-cli: buildBackend, deviceBackend`,
+    `(local or eas, per platform too) and target. deviceBackend "eas" acts like --eas; a flag wins.`,
     `The options of expo start are accepted and passed on. For expo start with nothing decided`,
     `for you, run "${PROGRAM_PREFIX} start" instead.`,
   ],
@@ -113,7 +113,8 @@ export const agentCliDev: Command = async (argv) => {
 
   return (async () => {
     const projectRoot = findUpExpoAppRootOrAssert(process.cwd());
-    const options = resolveDevOptions(argv ?? []);
+    const { readAgentCliSettings } = require('../settings') as typeof import('../settings');
+    const options = resolveDevOptions(argv ?? [], readAgentCliSettings(projectRoot).settings);
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status — Renamed: the
     // plan-first engine is `@expo/agent-cli dev`, and `@expo/agent-cli start` is the plain `expo start` wrapper.

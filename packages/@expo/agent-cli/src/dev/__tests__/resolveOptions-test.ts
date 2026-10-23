@@ -1,5 +1,6 @@
 import { DEFAULT_DETACH_TIMEOUT_MS } from '../detachAsync';
 import { CALLER_ARGV_ENV } from '../deviceOption';
+import { parseAgentCliSettings } from '../../settings/parse';
 import { resolveDevOptions } from '../resolveOptions';
 
 describe(resolveDevOptions, () => {
@@ -11,6 +12,7 @@ describe(resolveDevOptions, () => {
       platform: 'web',
       buildBackend: null,
       deviceBackend: 'local',
+      deviceBackendSource: 'default',
       runTarget: null,
       json: false,
       fingerprintCache: true,
@@ -34,6 +36,7 @@ describe(resolveDevOptions, () => {
       platform: 'ios',
       buildBackend: null,
       deviceBackend: 'local',
+      deviceBackendSource: 'default',
       runTarget: null,
       json: false,
       fingerprintCache: true,
@@ -60,6 +63,7 @@ describe(resolveDevOptions, () => {
       platform: 'ios',
       buildBackend: null,
       deviceBackend: 'local',
+      deviceBackendSource: 'default',
       runTarget: null,
       json: false,
       fingerprintCache: true,
@@ -199,6 +203,7 @@ describe(resolveDevOptions, () => {
       platform: 'android',
       buildBackend: null,
       deviceBackend: 'local',
+      deviceBackendSource: 'default',
       runTarget: null,
       json: true,
       fingerprintCache: true,
@@ -225,6 +230,7 @@ describe(resolveDevOptions, () => {
       platform: 'web',
       buildBackend: null,
       deviceBackend: 'local',
+      deviceBackendSource: 'default',
       runTarget: null,
       json: false,
       fingerprintCache: true,
@@ -338,6 +344,60 @@ describe('--eas puts the device on EAS', () => {
     const options = resolveDevOptions(['--ios', '--eas', '--detach']);
     expect(options.detachArgv).toEqual(['--ios', '--eas', '--detach']);
     expect(options.expoArgs).toEqual(['--tunnel']);
+  });
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('The config puts the device on EAS', () => {
+  const onEas = parseAgentCliSettings({ deviceBackend: 'eas' }, 'config');
+
+  it(`should put the device on EAS and imply --tunnel, as --eas does`, () => {
+    const options = resolveDevOptions(['--ios'], onEas);
+    expect(options.deviceBackend).toBe('eas');
+    expect(options.deviceBackendSource).toBe('config');
+    expect(options.expoArgs).toEqual(['--tunnel']);
+  });
+
+  it(`should leave the build backend to the plan, which reads the config itself`, () => {
+    expect(resolveDevOptions(['--ios'], onEas).buildBackend).toBeNull();
+  });
+
+  it(`should read the platform's own key over the shared one`, () => {
+    const settings = parseAgentCliSettings(
+      { deviceBackend: 'eas', android: { deviceBackend: 'local' } },
+      'config'
+    );
+    expect(resolveDevOptions(['--ios'], settings).deviceBackend).toBe('eas');
+    expect(resolveDevOptions(['--android'], settings).deviceBackend).toBe('local');
+  });
+
+  it(`should keep the device local when --local is passed`, () => {
+    const options = resolveDevOptions(['--ios', '--local'], onEas);
+    expect(options.deviceBackend).toBe('local');
+    expect(options.deviceBackendSource).toBe('flag');
+    expect(options.expoArgs).toEqual([]);
+  });
+
+  it(`should serve --web here, because the web has no device`, () => {
+    expect(resolveDevOptions(['--web'], onEas).deviceBackend).toBe('local');
+  });
+
+  it(`should report two platforms, not --eas, for a native flag beside --web`, () => {
+    expect(() => resolveDevOptions(['--ios', '--web'], onEas)).toThrow(
+      /--ios and --web name two platforms/
+    );
+  });
+
+  it(`should refuse --device and name --local`, () => {
+    expect(() => resolveDevOptions(['--ios', '--device', 'SIM'], onEas)).toThrow(
+      /deviceBackend: "eas".*add --local/
+    );
+  });
+
+  it(`should refuse a LAN host and name the config`, () => {
+    expect(() => resolveDevOptions(['--ios', '--lan'], onEas)).toThrow(
+      /--lan names a dev server address .*\(deviceBackend: "eas"\)/
+    );
   });
 });
 

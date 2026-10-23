@@ -143,11 +143,13 @@ Flags beat `package.json`. `package.json` beats detection. Unknown keys are erro
 }
 ```
 
-`target` is `expo-go` or `dev-build`. `buildBackend` is `local` or `eas`. An `ios` or `android` key overrides the backend for that platform.
+`target` is `expo-go` or `dev-build`. `buildBackend` says where a build runs: `local` or `eas`. `deviceBackend` says where the app runs: `local`, or `eas` for an EAS Simulator session. An `ios` or `android` key overrides either backend for that platform.
+
+`deviceBackend: "eas"` makes `dev` take the `--eas` route, and `smoke` too when it starts its own dev server. It also builds on EAS, because a session can only install a build EAS made, so `buildBackend: "local"` with it is an error. `navigate`, `runtime:reload`, `runtime:stop` and `dev:stop` do not read it: they use what runs, and reach a session through `--eas`. The config is committed, so everyone who runs `dev` in the repo starts a billed session. `dev --local` keeps the build and the app on this machine.
 
 ## Notes
 
-- A machine that cannot build locally (no Xcode, no Android SDK, a Windows host asked for iOS) is never routed to EAS on its own: `dev` and `smoke` stop and name `--eas`, because an EAS build and an EAS Simulator session use EAS credits. Pass `--eas`, or set `buildBackend: "eas"` in the config, to take that route.
+- A machine that cannot build locally (no Xcode, no Android SDK, a Windows host asked for iOS) is never routed to EAS on its own: `dev` and `smoke` stop and name `--eas`, because an EAS build and an EAS Simulator session use EAS credits. Pass `--eas`, or set `buildBackend` or `deviceBackend` to `"eas"` in the config, to take that route.
 - `smoke --ios --eas` gates the app on this project's EAS Simulator session: it reuses the session in progress, or starts one with Expo Go or the finished EAS build of this fingerprint and ends it afterwards (`start-session` phase). It never builds; a development build with nothing finished on EAS is a failure naming `dev --ios --eas`. `dev:stop --eas` ends the session too.
 - `dev --ios --eas` runs everything on EAS: the dev server is tunnelled, a build (when one is needed) is the `development-simulator` profile on EAS Build — added to `eas.json` when missing, skipped when EAS already has a finished build of this fingerprint — and the app is opened on this project's EAS Simulator session, which is started with Expo Go or that build when none is up. A session bills until `npx --yes eas-cli simulator:stop`. `--eas` on `smoke`, `navigate`, `runtime:reload` and `runtime:stop` names that session as the device.
 - Expo Go on Android has no debugger. Use a development build to drive the app there.

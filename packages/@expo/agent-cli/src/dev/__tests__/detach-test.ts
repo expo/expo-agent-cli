@@ -437,6 +437,15 @@ describe(detachFollowUps, () => {
     expect(first?.command).toBe('npx @expo/agent-cli smoke --ios');
   });
 
+  // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+  it(`names --eas on the gate and the stop of a run whose device is on EAS`, () => {
+    const commands = detachFollowUps(report({ ready: null }), 'ios', { eas: true }).map(
+      (followup) => followup.command
+    );
+    expect(commands).toContain('npx @expo/agent-cli smoke --ios --eas');
+    expect(commands).toContain('npx @expo/agent-cli dev:stop --eas');
+  });
+
   it(`drops the smoke rung once the bundler has answered`, () => {
     expect(detachFollowUps(report({ ready: true }), 'ios').map((f) => f.id)).not.toContain('smoke');
   });

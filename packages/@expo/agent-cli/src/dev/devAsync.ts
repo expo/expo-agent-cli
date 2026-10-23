@@ -94,6 +94,7 @@ import {
   runningDevServerAsync,
 } from './runningDevServer';
 import { easCommandPrefix } from '../utils/easCli';
+import { CONFIG_LOCATION } from '../settings/read';
 
 /**
  * Probe the project, emit the plan, and run it.
@@ -125,7 +126,9 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // and the reasons, and stops in its port block on the same lock.
   const lock = await readDevServerLockAsync(projectRoot);
   if (lock && options.mode !== 'plan') {
-    throw await devServerRunningStopAsync(projectRoot, lock, options.platform);
+    throw await devServerRunningStopAsync(projectRoot, lock, options.platform, {
+      eas: options.deviceBackend === 'eas',
+    });
   }
   recordLastDevRequest(projectRoot, options);
 
@@ -141,22 +144,33 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // typed, this host and the toolchain probe. The backend is chosen **here**, before the plan is
   // printed, so the steps an agent approves are the steps that run — never swapped mid-run
   // (llp/0008 §Plan-with-cost dry run).
-  const { plan: resolved, acquired: boundEarly } = await resolveStartPlanAsync(projectRoot, state, {
-    acquireDevice,
-    // The caller's own flag, which the resolver requires: the plan builds for this platform and
-    // `expo start` opens the app on it — booting a simulator or an emulator when none is up, the
-    // same way `expo run:ios` and `expo run:android` do.
-    platform: options.platform,
-    requestedPlatform: options.platform,
-    open: options.open,
-    lastBuild: readLastBuildRecord(projectRoot),
-    requestedBackend: options.buildBackend,
-    requestedTarget: options.runTarget,
-    // @ref llp/0027-everything-on-eas.rfc.md — `--eas` puts the device on EAS too, which changes
-    // the build profile, adds the tunnel, and lets the resolver ask EAS for a build it already has.
-    deviceBackend: options.deviceBackend,
-    fingerprintCache: options.fingerprintCache,
-  });
+  const { plan: resolvedPlan, acquired: boundEarly } = await resolveStartPlanAsync(
+    projectRoot,
+    state,
+    {
+      acquireDevice,
+      // The caller's own flag, which the resolver requires: the plan builds for this platform and
+      // `expo start` opens the app on it — booting a simulator or an emulator when none is up, the
+      // same way `expo run:ios` and `expo run:android` do.
+      platform: options.platform,
+      requestedPlatform: options.platform,
+      open: options.open,
+      lastBuild: readLastBuildRecord(projectRoot),
+      requestedBackend: options.buildBackend,
+      requestedTarget: options.runTarget,
+      // @ref llp/0027-everything-on-eas.rfc.md — `--eas` puts the device on EAS too, which changes
+      // the build profile, adds the tunnel, and lets the resolver ask EAS for a build it already has.
+      deviceBackend: options.deviceBackend,
+      fingerprintCache: options.fingerprintCache,
+    }
+  );
+  // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — a committed config
+  // starts a billed session for everyone who runs this, so the plan says where the choice came from.
+  // A `--no-open` run starts no session, so it says nothing.
+  const resolved =
+    options.deviceBackendSource === 'config' && options.open
+      ? { ...resolvedPlan, reasons: [...resolvedPlan.reasons, configSessionReason()] }
+      : resolvedPlan;
 
   // @ref llp/0015-backend-selection-and-config.rfc.md §The plan approved is the plan run
   // Here, before anything is printed. The options a caller typed for `expo start` used to be folded
@@ -233,7 +247,9 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
     const followups = followUpsEnabled(options.followups)
       ? // The typed flag, not the resolved platform: this is the plan the caller asked for, and the
         // command that runs it has to ask for the same one (F103).
-        buildStartPlanFollowUps(plan, state, options.platform, options.callerArgv)
+        buildStartPlanFollowUps(plan, state, options.platform, options.callerArgv, {
+          eas: options.deviceBackend === 'eas',
+        })
       : [];
     emitStartPlan(plan, { mode: 'plan', json: options.json, followups });
     reportFollowUps('dev', followups, { json: options.json });
@@ -451,6 +467,10 @@ async function withPlannedDevice(
         ],
       }
     : plan;
+}
+
+function configSessionReason(): string {
+  return `The app runs on an EAS Simulator session because ${CONFIG_LOCATION} sets deviceBackend to "eas". A session bills until it stops: "${PROGRAM_PREFIX} dev:stop --eas" ends it, and --local runs on this machine instead.`;
 }
 
 /**

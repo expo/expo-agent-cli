@@ -13,6 +13,7 @@ function options(overrides: Partial<SmokeOptions> = {}): SmokeOptions {
     route: null,
     platform: 'ios',
     cloud: 'fallback',
+    configuredEas: false,
     bootstrap: true,
     windowMs: 3_000,
     timeoutMs: 60_000,

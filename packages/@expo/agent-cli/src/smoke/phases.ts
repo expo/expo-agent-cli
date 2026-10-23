@@ -966,6 +966,12 @@ async function runPhasesAsync(
   if (discovery.reachable) {
     environment.devServer = 'reused';
   } else if (options.bootstrap) {
+    // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — this run starts the
+    // dev server, so the config's EAS device applies. Set on the shared options, because the deps
+    // read it when they start the child and the session.
+    if (options.configuredEas && options.cloud === 'fallback') {
+      options.cloud = 'required';
+    }
     // @ref ./phases §RegisteredCleanup — registered **before** the start, so a start that got
     // halfway is still put back: a detached child that published its lock and then died in the
     // readiness wait is a dev server this run is responsible for, and one it never saw succeed.

@@ -33,12 +33,13 @@ export async function runningDevServerAsync(
 export async function devServerRunningStopAsync(
   projectRoot: string,
   lock: DevServerLockInfo,
-  platform: PlanPlatform
+  platform: PlanPlatform,
+  { eas = false }: { eas?: boolean } = {}
 ): Promise<CommandError> {
   const running = await runningDevServerAsync(projectRoot, lock);
   const smokePlatform =
     platform === 'web' ? await defaultSmokePlatformAsync(projectRoot) : platform;
-  return devServerRunningError(running, smokePlatform);
+  return devServerRunningError(running, smokePlatform, { eas });
 }
 
 /** One sentence for the plan's `Why` list, when the run stops instead of starting a second server. */
@@ -55,16 +56,20 @@ export function devServerRunningReason({ lock, phase }: RunningDevServer): strin
  */
 export function devServerRunningError(
   { lock, phase }: RunningDevServer,
-  smokePlatform: NativePlatform
+  smokePlatform: NativePlatform,
+  { eas = false }: { eas?: boolean } = {}
 ): CommandError {
   const { port, pid } = lock;
+  // A run whose device is on EAS reads the running server on the session.
+  const smoke = `${smokeCommand(smokePlatform)}${eas ? ' --eas' : ''}`;
+  const navigate = `${PROGRAM_PREFIX} navigate /${eas ? ' --eas' : ''}`;
   const stopAndRetry = `or stop it with "${PROGRAM_PREFIX} dev:stop" and run this command again.`;
   const lines =
     phase === 'serving'
       ? [
           `This project's dev server is already running on port ${port} (pid ${pid}), so nothing was started.`,
           `Why: one project has one dev server. A second one could not hold this project's lock, so "${PROGRAM_PREFIX} status" and "${PROGRAM_PREFIX} dev:stop" could not see it.`,
-          `How: use the running server ("${smokeCommand(smokePlatform)}" checks its bundle and its app, "${PROGRAM_PREFIX} navigate /" opens a route), ${stopAndRetry}`,
+          `How: use the running server ("${smoke}" checks its bundle and its app, "${navigate}" opens a route), ${stopAndRetry}`,
         ]
       : [
           `This project's dev server is starting on port ${port} (pid ${pid}), so nothing was started.`,
@@ -72,8 +77,7 @@ export function devServerRunningError(
           `How: wait for it ("${PROGRAM_PREFIX} status" says when it answers), ${stopAndRetry}`,
         ];
   const error = new CommandError('DEV_SERVER_RUNNING', lines.join('\n'));
-  error.suggestedCommand =
-    phase === 'serving' ? smokeCommand(smokePlatform) : `${PROGRAM_PREFIX} status`;
+  error.suggestedCommand = phase === 'serving' ? smoke : `${PROGRAM_PREFIX} status`;
   error.exitCode = EXIT_OUTCOME_FAILED;
   error.data = { port, pid, phase };
   return error;

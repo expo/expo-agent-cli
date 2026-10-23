@@ -12,6 +12,7 @@
 // that is not the CLI) each produce their own exit code and their own sentence.
 
 import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   installStubEasAsync,
@@ -937,5 +938,53 @@ describe('an --eas command on a project EAS does not know', () => {
     expect(envelope.error.suggestedCommand).toBe(
       'npx --yes eas-cli init --account e2e-user --non-interactive'
     );
+  });
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('a project whose config puts the device on EAS', () => {
+  async function setupOnEasAsync(): Promise<string> {
+    const projectRoot = await setupAsync('go-app');
+    const file = path.join(projectRoot, 'package.json');
+    const packageJson = JSON.parse(await fs.promises.readFile(file, 'utf8'));
+    packageJson.expo = { ...packageJson.expo, 'agent-cli': { deviceBackend: 'eas' } };
+    await fs.promises.writeFile(file, JSON.stringify(packageJson, null, 2));
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    return projectRoot;
+  }
+
+  // The config moves what `dev` starts, not where these commands look (llp/0015 §The device backend).
+  it(`should not reach the session from the config on runtime:stop`, async () => {
+    const projectRoot = await setupOnEasAsync();
+
+    await executeAgentCliAsync(projectRoot, ['runtime:stop', '--ios'], { reject: false });
+
+    expect(easInvocations(projectRoot)).toEqual([]);
+  });
+
+  it(`should start no session from the config on navigate`, async () => {
+    const projectRoot = await setupOnEasAsync();
+
+    await executeAgentCliAsync(
+      projectRoot,
+      ['navigate', '/notes', '--ios', '--scheme', 'myapp', '--no-wait-attach', '--json'],
+      { reject: false }
+    );
+
+    // The fallback rung may list and drive the session that is up; it never starts one.
+    const verbs = easInvocations(projectRoot).map((argv) => argv[0]);
+    expect(verbs).not.toContain('simulator');
+    expect(verbs).not.toContain('simulator:start');
+  });
+
+  it(`should leave the session running on a plain dev:stop`, async () => {
+    const projectRoot = await setupOnEasAsync();
+
+    const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+      reject: false,
+    });
+
+    expect(JSON.parse(result.stdout).session).toBeUndefined();
+    expect(easInvocations(projectRoot)).toEqual([]);
   });
 });

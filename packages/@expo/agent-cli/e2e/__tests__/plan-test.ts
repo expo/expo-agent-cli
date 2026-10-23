@@ -664,7 +664,7 @@ describe('@expo/agent-cli dev --plan', () => {
 
       expect(result.exitCode).not.toBe(0);
       expect(result.all).toContain('does not know: "backend"');
-      expect(result.all).toContain('"target", "buildBackend", "ios", "android"');
+      expect(result.all).toContain('"target", "buildBackend", "deviceBackend", "ios", "android"');
       expect(readStubExpoInvocations(projectRoot)).toEqual([]);
     });
 

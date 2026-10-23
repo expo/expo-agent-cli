@@ -1,6 +1,12 @@
 // @ref llp/0015-backend-selection-and-config.rfc.md §Validation
 // Every value the config takes, and every value it refuses. Pure: no file, no project.
-import { parseAgentCliSettings, settingsAreEmpty, settingsBuildBackend } from '../parse';
+import {
+  parseAgentCliSettings,
+  resolveDeviceBackend,
+  settingsAreEmpty,
+  settingsBuildBackend,
+  settingsDeviceBackend,
+} from '../parse';
 import { EMPTY_SETTINGS } from '../types';
 
 const WHERE = '"expo.agent-cli" in package.json';
@@ -33,12 +39,17 @@ describe('the values the config takes', () => {
 
   it(`accepts a per-platform buildBackend`, () => {
     const settings = parse({ buildBackend: 'local', ios: { buildBackend: 'eas' } });
-    expect(settings.ios).toEqual({ buildBackend: 'eas' });
+    expect(settings.ios).toEqual({ buildBackend: 'eas', deviceBackend: null });
     expect(settings.android).toBeNull();
+  });
+
+  it.each(['local', 'eas'])(`accepts deviceBackend: %s`, (deviceBackend) => {
+    expect(parse({ deviceBackend }).deviceBackend).toBe(deviceBackend);
   });
 
   it(`is not empty once anything is set`, () => {
     expect(settingsAreEmpty(parse({ android: { buildBackend: 'eas' } }))).toBe(false);
+    expect(settingsAreEmpty(parse({ ios: { deviceBackend: 'eas' } }))).toBe(false);
   });
 });
 
@@ -56,6 +67,32 @@ describe('resolving the backend for one platform', () => {
 
   it(`treats a platform entry that names no backend as saying nothing`, () => {
     expect(settingsBuildBackend(parse({ buildBackend: 'eas', ios: {} }), 'ios')).toBe('eas');
+  });
+});
+
+// @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
+describe('resolving the device backend for one platform', () => {
+  it(`prefers the platform's own answer over the shared one`, () => {
+    const settings = parse({ deviceBackend: 'eas', android: { deviceBackend: 'local' } });
+    expect(settingsDeviceBackend(settings, 'ios')).toBe('eas');
+    expect(settingsDeviceBackend(settings, 'android')).toBe('local');
+  });
+
+  it(`puts the build on EAS when the device is there and no build backend is named`, () => {
+    expect(settingsBuildBackend(parse({ deviceBackend: 'eas' }), 'ios')).toBe('eas');
+    expect(settingsBuildBackend(parse({ ios: { deviceBackend: 'eas' } }), 'android')).toBeNull();
+  });
+
+  it(`lets a flag name both backends over the config`, () => {
+    const settings = parse({ deviceBackend: 'eas' });
+    expect(resolveDeviceBackend('local', settings, 'ios')).toBe('local');
+    expect(resolveDeviceBackend('eas', parse({}), 'ios')).toBe('eas');
+    expect(resolveDeviceBackend(null, settings, 'ios')).toBe('eas');
+    expect(resolveDeviceBackend(null, parse({}), 'ios')).toBe('local');
+  });
+
+  it(`keeps the web local, because it has no device`, () => {
+    expect(resolveDeviceBackend(null, parse({ deviceBackend: 'eas' }), 'web')).toBe('local');
   });
 });
 
@@ -81,7 +118,9 @@ describe('what the config refuses', () => {
   });
 
   it(`lists the keys this version takes`, () => {
-    expect(() => parse({ nope: 1 })).toThrow(/"target", "buildBackend", "ios", "android"/);
+    expect(() => parse({ nope: 1 })).toThrow(
+      /"target", "buildBackend", "deviceBackend", "ios", "android"/
+    );
   });
 
   it(`refuses a value outside the set, and lists the set`, () => {
@@ -100,6 +139,18 @@ describe('what the config refuses', () => {
     expect(() => parse({ ios: { target: 'dev-build' } })).toThrow(
       /› ios names a key this version of @expo\/agent-cli does not know: "target"/
     );
+  });
+
+  it(`refuses a device on EAS with a build on this machine, for the platform that has both`, () => {
+    expect(() => parse({ deviceBackend: 'eas', buildBackend: 'local' })).toThrow(
+      /puts the ios device on EAS .* and the ios build on this machine/
+    );
+    expect(() => parse({ deviceBackend: 'eas', android: { buildBackend: 'local' } })).toThrow(
+      /the android build on this machine/
+    );
+    expect(() =>
+      parse({ buildBackend: 'local', ios: { deviceBackend: 'eas', buildBackend: 'eas' } })
+    ).not.toThrow();
   });
 
   it(`carries the BAD_AGENT_CLI_CONFIG code and no suggested command`, () => {

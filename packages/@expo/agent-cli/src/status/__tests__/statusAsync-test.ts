@@ -1,6 +1,8 @@
 import fs from 'fs';
 import { vol } from 'memfs';
 
+import { resetSettingsCache } from '../../settings';
+
 import * as devLock from '../../devLock';
 import * as localDevice from '../../device/localDevice';
 import * as deviceBinding from '../../deviceBinding';
@@ -127,6 +129,7 @@ function mockState(overrides: Partial<ProjectState> = {}): ProjectState {
 
 beforeEach(() => {
   vol.reset();
+  resetSettingsCache();
   // The connect URLs of a non-tunnelled run carry this host, and a suite that read the machine's
   // own would pass or fail by which network it is on.
   vi.spyOn(network, 'resolveLanHost').mockReturnValue('192.168.1.233');
@@ -1275,6 +1278,35 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     const plan = await planNextAsync();
     const report = await collectStatusReportAsync(projectRoot, iosOptions);
     expect(report.next).toEqual(plan);
+  });
+
+  // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — the same state as an
+  // unbound device above, except that `dev` would put the app on an EAS session.
+  it(`asks for no local device when the config puts the device on EAS`, async () => {
+    vol.fromJSON({
+      '/project/package.json': JSON.stringify({
+        name: 'my-app',
+        expo: { 'agent-cli': { deviceBackend: 'eas' } },
+      }),
+    });
+    vi.mocked(discoverDevServerAsync).mockResolvedValue({
+      reachable: true,
+      targets: [],
+      devServerUrl,
+      source: 'default',
+      discovered: false,
+    });
+    vi.mocked(probeTargetLivenessAsync).mockResolvedValueOnce({ listed: 0, live: 0, stale: [] });
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValueOnce({
+      ready: true,
+      projectRootMatched: false,
+      reportedProjectRoot: '/other',
+      timedOut: false,
+      waitedMs: 1,
+    });
+    const report = await collectStatusReportAsync(projectRoot, iosOptions);
+    expect(report.next?.why ?? '').not.toContain('No ios device is bound to this worktree.');
+    expect(report.next?.command).not.toMatch(/ --detach --wait-ready$/);
   });
 
   it(`keeps the plan's next for --platform web`, async () => {
