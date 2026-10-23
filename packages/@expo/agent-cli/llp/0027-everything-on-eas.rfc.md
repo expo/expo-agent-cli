@@ -126,7 +126,7 @@ The creation message identifies a new session. An overwrite warning naming a pre
 
 EAS's `--open-url` launches the app, but does not create an `agent-device` controller session. A fresh smoke run must still perform its normal app open even if Metro already lists a debugger target. That open binds the controller before observation and screenshots; it also uses the existing rule that an app opened by this run needs no additional reload. A reused session with an attached app keeps the existing reload check. [observed — SDK 57 on EAS iOS, 2026-09-09: without the controller open, screenshot exited `SESSION_NOT_FOUND: No active session. Run open first.`]
 
-The cloud screenshot needs that same controller session. When it fails with `SESSION_NOT_FOUND`, smoke runs `agent-device open <app-id> --platform <p>` through the guarded `simulator:exec` path and retries the screenshot once. The open has no `--relaunch`, so it never terminates the app. [not observed: whether `open <app-id>` leaves the screen of a foreground app as it was.]
+The cloud screenshot needs that same controller session. When it fails with `SESSION_NOT_FOUND`, smoke runs `agent-device open <app-id> --platform <p>` through the guarded `simulator:exec` path and retries the screenshot once. The open has no `--relaunch`, so it never terminates the app. [not observed: whether `open <app-id>` leaves the screen of a foreground app as it was.] A skipped screenshot quotes the controller's `Error (CODE)` line and its `Hint`, and never the EAS CLI update banner.
 
 ### Stop hints
 

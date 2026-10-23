@@ -418,4 +418,40 @@ describe(`${captureScreenshotAsync.name} on a cloud simulator`, () => {
       expect(calls).toEqual(expectedCalls);
     });
   });
+
+  const BANNER =
+    '★ eas-cli@25.3.0 is now available.\nTo upgrade, run npm install -g eas-cli.\nProceeding with outdated version.\n';
+
+  it.each([
+    [
+      "the controller's error and hint",
+      `${BANNER}Error (SESSION_NOT_FOUND): No active session. Run open first.\nHint: Run open first.\n`,
+      'Error (SESSION_NOT_FOUND): No active session. Run open first. Hint: Run open first.',
+    ],
+    [
+      'the first line after the eas-cli banner',
+      `${BANNER}Remote daemon is unavailable\n`,
+      'Remote daemon is unavailable',
+    ],
+  ])('gives %s as the reason, never the eas-cli banner', async (_name, stderr, expected) => {
+    vi.mocked(spawn).mockImplementation((() => {
+      const child = Object.assign(new EventEmitter(), { stderr: new EventEmitter() });
+      process.nextTick(() => {
+        child.stderr.emit('data', stderr);
+        child.emit('close', 1, null);
+      });
+      return child as any;
+    }) as any);
+
+    const result = await captureScreenshotAsync({
+      backend: 'cloud',
+      projectRoot: '/project',
+      platform: 'ios',
+      deviceId: 'sess-1',
+      filePath: '/project/.expo/agent-cli/cloud.png',
+    });
+
+    expect(result.reason).toContain(`: ${expected}`);
+    expect(result.reason).not.toContain('is now available');
+  });
 });

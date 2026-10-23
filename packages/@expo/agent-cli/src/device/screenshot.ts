@@ -220,7 +220,7 @@ export async function captureScreenshotAsync({
     return {
       ...base,
       reason: `"${command.display}" exited ${run.exitCode ?? 'on a signal'}${
-        run.stderr.trim() ? `: ${firstLine(run.stderr)}` : ''
+        run.stderr.trim() ? `: ${failureLine(run.stderr)}` : ''
       }`,
     };
   }
@@ -389,8 +389,21 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function firstLine(text: string): string {
-  return text.trim().split('\n')[0]!;
+const EAS_NOTICE =
+  /is now available|To upgrade|npm install -g eas-cli|Proceeding with outdated version/;
+
+/**
+ * The line that says why a tool failed. The controller's `Error (CODE)` line and its `Hint` come
+ * first; the EAS CLI's update banner never does.
+ */
+function failureLine(text: string): string {
+  const lines = text.trim().split('\n');
+  const error = lines.find((line) => /^\s*Error \([A-Z_]+\):/.test(line));
+  if (error) {
+    const hint = lines.find((line) => /^\s*Hint:/.test(line));
+    return hint ? `${error.trim()} ${hint.trim()}` : error.trim();
+  }
+  return (lines.find((line) => line.trim() && !EAS_NOTICE.test(line)) ?? lines[0]!).trim();
 }
 
 /**
