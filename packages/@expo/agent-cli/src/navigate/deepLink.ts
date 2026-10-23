@@ -3,13 +3,13 @@
 // open that URL on a booted device.
 //
 // The scheme is read from the static config files. A dynamic `app.config.js`/`.ts` is evaluated
-// by the project's own `expo config` subprocess, never inside this process: that is the process
-// boundary of llp/0001 §Constraints. A caller that passes `--scheme` already knows the answer, and
-// then nothing is spawned.
+// by the project's own `expo/config` in a child process, with its env files loaded
+// (`evaluateExpoConfigAsync`), never inside this process: that is the process boundary of
+// llp/0001 §Constraints. A caller that passes `--scheme` already knows the answer, and then
+// nothing is spawned.
 import fs from 'fs';
 import path from 'path';
 
-import { outputTail } from '../config/introspectAsync';
 import { adbNotRunnableError, resolveAdb, type AdbResolution } from '../device/adb';
 import { approveSchemeForUrlAsync } from '../device/approveScheme';
 import {
@@ -18,12 +18,11 @@ import {
   easCliMissingError,
   openUrlOnCloudSimulatorAsync,
 } from '../device/cloudSimulator';
-import { parseLastJsonObject } from '../impact/runtimeVersion';
 import { PROGRAM_PREFIX } from '../programName';
 import { DYNAMIC_CONFIG_FILES, STATIC_CONFIG_FILES } from '../project/appConfig';
+import { evaluateExpoConfigAsync } from '../project/evaluatedConfig';
 import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
-import { spawnExpoAsync } from '../utils/expoCli';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import type { DeviceBackend } from './device';
 
@@ -117,21 +116,15 @@ export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfi
   return result;
 }
 
-/** The `expo` arguments that print the config the app sees, `scheme` and `slug` included. */
-export const PUBLIC_CONFIG_ARGS = ['config', '--json', '--type', 'public'];
-
-/** How long a dynamic config gets to evaluate. The EAS preflight gives it the same. */
-const EVALUATE_CONFIG_TIMEOUT_MS = 30_000;
-
 /**
  * Read the URL scheme and slug the app itself sees.
  *
  * The static read is the whole answer for a project with no dynamic config, and nothing is
- * spawned. With an `app.config.js`/`.ts` the project's `expo config --json --type public`
- * evaluates it, the way the OTA verdict and the EAS preflight already do, and `scheme` and `slug`
- * come from its answer: the evaluated config is what the app registered, whatever a static file
- * beside it says. The answer is not cached, for the reason llp/0011 gives: a dynamic config can
- * read env vars and `.env` files that no file stamp sees.
+ * spawned. With an `app.config.js`/`.ts` the project's own `expo/config` evaluates it in a child
+ * process, with the env files the app would see loaded first (`evaluateExpoConfigAsync`), and
+ * `scheme` and `slug` come from its answer: the evaluated config is what the app registered,
+ * whatever a static file beside it says. The answer is not cached, for the reason llp/0011 gives:
+ * a dynamic config can read env vars and `.env` files that no file stamp sees.
  *
  * A `schemeOverride` skips the evaluation, because the flag wins over whatever the config says.
  *
@@ -163,41 +156,25 @@ export async function resolveProjectSchemeConfigAsync(
   };
 }
 
-/** `scheme` and `slug` of the config `expo config --type public` printed, or why it did not. */
+/** `scheme` and `slug` of the config the project's `expo/config` evaluated, or why it did not. */
 async function evaluateSchemeConfigAsync(
   projectRoot: string
 ): Promise<
   { ok: true; scheme: string | null; slug: string | null } | { ok: false; error: string }
 > {
-  const { result } = await spawnExpoAsync(projectRoot, PUBLIC_CONFIG_ARGS, {
-    output: 'capture',
-    timeoutMs: EVALUATE_CONFIG_TIMEOUT_MS,
+  // The dev loop: the scheme of the app `expo start` serves, with the env files it reads.
+  const evaluated = await evaluateExpoConfigAsync(projectRoot, {
+    mode: 'development',
+    isPublicConfig: true,
   });
-  if (result.spawnError) {
-    return {
-      ok: false,
-      error: `expo config could not be started (${result.spawnError.code ?? result.spawnError.message})`,
-    };
+  if (!evaluated.ok) {
+    return evaluated;
   }
-  if (result.timedOut) {
-    return {
-      ok: false,
-      error: `expo config did not answer within ${EVALUATE_CONFIG_TIMEOUT_MS / 1000}s`,
-    };
-  }
-  if (result.exitCode !== 0) {
-    // stderr first: a failing evaluation says why there, and stdout may still end in an event line.
-    const said = outputTail(result.stderr, 1) || outputTail(result.stdout, 1);
-    return {
-      ok: false,
-      error: `expo config exited with code ${result.exitCode}${said ? `: ${said}` : ''}`,
-    };
-  }
-  const config = parseLastJsonObject(result.stdout);
-  if (config == null) {
-    return { ok: false, error: 'expo config printed no JSON object' };
-  }
-  return { ok: true, scheme: firstScheme(config.scheme), slug: nonEmptyString(config.slug) };
+  return {
+    ok: true,
+    scheme: firstScheme(evaluated.exp.scheme),
+    slug: nonEmptyString(evaluated.exp.slug),
+  };
 }
 
 export interface ResolveDeepLinkUrlParams {

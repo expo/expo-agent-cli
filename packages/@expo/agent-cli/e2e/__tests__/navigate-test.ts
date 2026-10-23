@@ -11,7 +11,6 @@ import path from 'node:path';
 
 import {
   executeAgentCliAsync,
-  getTemporaryPath,
   holdDevLockAsync,
   readStubExpoInvocations,
   setupFixtureAsync,
@@ -392,93 +391,77 @@ describe('@expo/agent-cli navigate', () => {
 // @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server — issue #84. A
 // project whose only config is `app.config.ts` was sent to `exp+<package name>://` with "no scheme
 // field was found", which was not what happened: the file was never read. The scheme now comes
-// from the project's own `expo config --type public`, and a static config still spawns nothing.
+// from the project's own `expo/config`, run in a child with the project's env files loaded, and a
+// static config still spawns nothing. The stub `expo/config` of the fixture evaluates the file.
 describe('@expo/agent-cli navigate with a dynamic app config', () => {
   const PRINT_URL = ['navigate', '/profile/42', '--ios', '--json', '--print-url'];
+  const APP_CONFIG =
+    "module.exports = ({ config }) => ({ ...config, scheme: process.env.APP_VARIANT ? `marmelade-${process.env.APP_VARIANT}` : 'marmelade' });\n";
 
-  /** `dev-client-app` with its `app.json` replaced by an `app.config.js` the stub answers for. */
-  async function setupDynamicAsync(
-    config: Record<string, unknown>
-  ): Promise<{ projectRoot: string; env: Record<string, string> }> {
+  /** `dev-client-app` with its `app.json` replaced by an `app.config.js`, and a `.env` beside it. */
+  async function setupDynamicAsync({ dotenv }: { dotenv?: string } = {}): Promise<string> {
     const projectRoot = await setupFixtureAsync('dev-client-app');
     await fs.promises.rm(path.join(projectRoot, 'app.json'));
-    await fs.promises.writeFile(
-      path.join(projectRoot, 'app.config.js'),
-      `module.exports = ${JSON.stringify(config)};\n`
-    );
-    // Outside the project, so nothing under test can read it as a project file.
-    const payloadPath = path.join(getTemporaryPath(), 'stub-expo-config.json');
-    await fs.promises.mkdir(path.dirname(payloadPath), { recursive: true });
-    await fs.promises.writeFile(payloadPath, JSON.stringify(config));
-    return {
-      projectRoot,
-      env: { ...stubExpoEnv(projectRoot), STUB_EXPO_CONFIG_JSON: payloadPath },
-    };
+    await fs.promises.writeFile(path.join(projectRoot, 'app.config.js'), APP_CONFIG);
+    if (dotenv != null) {
+      await fs.promises.writeFile(path.join(projectRoot, '.env'), dotenv);
+    }
+    return projectRoot;
   }
 
-  function configInvocations(projectRoot: string) {
-    return readStubExpoInvocations(projectRoot).filter((call) => call.args[0] === 'config');
+  function configCalls(projectRoot: string) {
+    return readStubExpoInvocations(projectRoot).filter((call) => call.args[0] === 'expo/config');
   }
 
-  it('reads the scheme the evaluated config names', async () => {
-    const { projectRoot, env } = await setupDynamicAsync({
-      name: 'Marmelade',
-      slug: 'marmelade',
-      scheme: 'marmelade',
-    });
+  it('reads the scheme the evaluated config names, with the project env files loaded', async () => {
+    const projectRoot = await setupDynamicAsync({ dotenv: 'APP_VARIANT=dev\n' });
 
     const result = await executeAgentCliAsync(
       projectRoot,
       [...PRINT_URL, '--app-id', 'dev.marmelade.app'],
-      { env }
+      { env: stubExpoEnv(projectRoot) }
     );
     const report: NavigateReport = JSON.parse(result.stdout);
 
-    expect(report.url).toBe('marmelade://profile/42');
+    expect(report.url).toBe('marmelade-dev://profile/42');
     expect(report.resolution).toBe('read the "scheme" field from app.config.js');
-    expect(configInvocations(projectRoot)).toEqual([
-      expect.objectContaining({ args: ['config', '--json', '--type', 'public'], ci: '1' }),
+    expect(configCalls(projectRoot)).toEqual([
+      expect.objectContaining({
+        args: ['expo/config', 'getConfig', '--skipSDKVersionRequirement', '--isPublicConfig'],
+        nodeEnv: 'development',
+      }),
     ]);
   });
 
   it('keeps the static read and says so when the config cannot be evaluated', async () => {
-    const { projectRoot, env } = await setupDynamicAsync({ slug: 'marmelade' });
+    const projectRoot = await setupDynamicAsync();
 
     const result = await executeAgentCliAsync(
       projectRoot,
       [...PRINT_URL, '--app-id', 'dev.marmelade.app'],
-      {
-        env: {
-          ...env,
-          STUB_EXPO_EXIT_CODE: '1',
-          STUB_EXPO_STDERR: 'Error: Cannot resolve app config',
-        },
-      }
+      { env: { ...stubExpoEnv(projectRoot), STUB_EXPO_CONFIG_ERROR: 'Cannot resolve app config' } }
     );
     const report: NavigateReport = JSON.parse(result.stdout);
 
     // The package name, because that is all the static read has for this project.
     expect(report.url).toBe('exp+dev-client-app://profile/42');
     expect(report.resolution).toBe(
-      'app.config.js could not be evaluated (expo config exited with code 1: Error: Cannot resolve app config) and no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "dev-client-app"'
+      'app.config.js could not be evaluated (Error: Cannot resolve app config) and no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "dev-client-app"'
     );
   });
 
   it('spawns nothing when --scheme names the scheme', async () => {
-    const { projectRoot, env } = await setupDynamicAsync({
-      slug: 'marmelade',
-      scheme: 'marmelade',
-    });
+    const projectRoot = await setupDynamicAsync();
 
     const result = await executeAgentCliAsync(
       projectRoot,
       [...PRINT_URL, '--scheme', 'demoapp', '--app-id', 'dev.marmelade.app'],
-      { env }
+      { env: stubExpoEnv(projectRoot) }
     );
     const report: NavigateReport = JSON.parse(result.stdout);
 
     expect(report.url).toBe('demoapp://profile/42');
-    expect(configInvocations(projectRoot)).toEqual([]);
+    expect(configCalls(projectRoot)).toEqual([]);
   });
 
   it('spawns nothing for a static app config', async () => {
@@ -492,6 +475,6 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
     const report: NavigateReport = JSON.parse(result.stdout);
 
     expect(report.url).toBe('exp+dev-client-app://profile/42');
-    expect(configInvocations(projectRoot)).toEqual([]);
+    expect(configCalls(projectRoot)).toEqual([]);
   });
 });
