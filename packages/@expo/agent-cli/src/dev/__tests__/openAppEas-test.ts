@@ -774,7 +774,7 @@ describe('the session half on its own', () => {
       expect(stopCalls()).toHaveLength(0);
       expect(report).toMatchObject({ ok: false, started: false, sessionId: started });
       expect(report.reason).toContain('another run in this worktree recorded it, so it stays');
-      expect(report.reason).toContain(`simulator:stop --id ${started}`);
+      expect(report.reason).not.toContain('simulator:stop');
     });
   });
 

@@ -315,8 +315,8 @@ describe(releaseStartedSessionAsync, () => {
     writeCloudBinding(root, 'ios', 'A', { origin: 'dotenv' });
     const release = await releaseStartedSessionAsync(root, 'A', 'test', tools);
     expect(release).toMatchObject({ outcome: 'kept' });
-    expect(release.outcome !== 'stopped' && release.reason).toContain(
-      'another run in this worktree recorded it, so it stays; "'
+    expect(release.outcome !== 'stopped' && release.reason).toBe(
+      'another run in this worktree recorded it, so it stays'
     );
     expect(tools.stopCloud).not.toHaveBeenCalled();
     expect(readCloudBindings(root).bindings).toMatchObject([{ device: { id: 'A' } }]);
@@ -332,6 +332,7 @@ describe(releaseStartedSessionAsync, () => {
       const release = await releaseStartedSessionAsync(root, 'A', 'test', tools);
       expect(release).toMatchObject({ outcome: 'kept' });
       expect(release.outcome !== 'stopped' && release.reason).toContain('lock wait timed out');
+      expect(release.outcome !== 'stopped' && release.reason).not.toContain('simulator:stop');
       expect(tools.stopCloud).not.toHaveBeenCalled();
     } finally {
       locked.mockRestore();

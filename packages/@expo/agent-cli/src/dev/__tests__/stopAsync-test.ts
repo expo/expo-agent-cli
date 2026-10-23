@@ -717,6 +717,65 @@ describe('dev:stop --eas', () => {
     expect(readCloudBindings(projectRoot).bindings).toMatchObject([{ device: { id: 'sess-own' } }]);
   });
 
+  it(`keeps a failed listing on session.reason and exits 0 when there is nothing to stop`, async () => {
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.unknown({ reason: 'no Expo account is signed in' })
+    );
+
+    const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+    expect(code).toBe(EXIT_OK);
+    const report = JSON.parse(printed());
+    expect(report.session).toMatchObject({ id: null, reason: 'no Expo account is signed in' });
+    expect(report.deviceError).toBeNull();
+  });
+
+  it(`keeps the reason of an unavailable account on session.reason`, async () => {
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(cloudProbe.unavailable());
+
+    const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+    expect(code).toBe(EXIT_OK);
+    expect(JSON.parse(printed()).session.reason).toContain('not enabled on this account');
+  });
+
+  it(`exits 0 when every bound session stopped though the listing failed`, async () => {
+    writeCloudBinding(projectRoot, 'android', 'sess-2');
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.unknown({ reason: 'listing failed' })
+    );
+    vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
+
+    const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+    expect(code).toBe(EXIT_OK);
+    const report = JSON.parse(printed());
+    expect(report.devices).toMatchObject([{ id: 'sess-2', released: true }]);
+    expect(report.session.reason).toBe('listing failed');
+  });
+
+  it(`reports a stopped session whose binding stayed as kept, with the lock error`, async () => {
+    writeCloudBinding(projectRoot, 'android', 'sess-2');
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(cloudProbe.none({ reason: 'x' }));
+    vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
+    const registry =
+      require('../../deviceBinding/registry') as typeof import('../../deviceBinding/registry');
+    const locked = vi
+      .spyOn(registry, 'withRegistryLockAsync')
+      .mockRejectedValue(new Error('lock wait timed out'));
+    const code = await devStopAsync(projectRoot, options({ eas: true, followups: true })).finally(
+      () => locked.mockRestore()
+    );
+
+    expect(code).toBe(EXIT_OUTCOME_FAILED);
+    const report = JSON.parse(printed());
+    expect(report.devices).toMatchObject([
+      { id: 'sess-2', released: null, shutDown: true, reason: 'lock wait timed out' },
+    ]);
+    expect(report.followups.map((f: { why: string }) => f.why).join('\n')).toContain('sess-2');
+    expect(readCloudBindings(projectRoot).bindings).toMatchObject([{ device: { id: 'sess-2' } }]);
+  });
+
   it(`names an unreadable cloud binding file`, async () => {
     vol.reset();
     vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });

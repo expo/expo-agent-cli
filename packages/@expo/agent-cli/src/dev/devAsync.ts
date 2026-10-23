@@ -666,6 +666,8 @@ async function executePlanAsync(
                 Log.progress(
                   `Stopped EAS Simulator session ${session.sessionId}, created by this run.`
                 );
+              } else if (release.outcome === 'kept') {
+                Log.progress(`Kept EAS Simulator session ${session.sessionId}: ${release.reason}.`);
               } else {
                 Log.warn(
                   `Could not stop EAS Simulator session ${session.sessionId}: ${release.reason}.`

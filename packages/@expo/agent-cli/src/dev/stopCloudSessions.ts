@@ -21,10 +21,10 @@ export async function stopCloudSessionsAsync(projectRoot: string) {
   let session = {
     id: primary?.id ?? null,
     stopped: false,
-    reason: probe.state === 'unknown' ? probe.reason : null,
+    reason: probe.state === 'unknown' || probe.state === 'unavailable' ? probe.reason : null,
     platform: primary?.platform ?? null,
   };
-  let deviceError = probe.state === 'unknown' ? probe.reason : null;
+  let deviceError: string | null = null;
   const devices: ReleasedDevice[] = [];
   const { releases, lockError } = await releaseCloudSessionsAsync(
     projectRoot,
@@ -40,7 +40,13 @@ export async function stopCloudSessionsAsync(projectRoot: string) {
     if (!ok) deviceError ??= reason ?? `Could not stop EAS session ${id}`;
     if (id === primary?.id) session = { id, stopped: ok, reason, platform };
     else if (binding)
-      devices.push({ ...deviceReport(binding), released: ok, shutDown: ok, reason });
+      devices.push({
+        ...deviceReport(binding),
+        // A lock that was not taken removed nothing: the stop worked and the binding stays.
+        released: ok && lockError ? null : ok,
+        shutDown: ok,
+        reason: ok && lockError ? lockError : reason,
+      });
   }
   deviceError ??= lockError;
   if (unreadable[0]) deviceError ??= deviceUnavailableError('unreadable', unreadable[0]).message;

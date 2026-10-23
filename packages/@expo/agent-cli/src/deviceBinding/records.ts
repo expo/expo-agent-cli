@@ -1,4 +1,5 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Records
+import { PROGRAM_PREFIX } from '../programName';
 import { bindingPathFor, readBindingFile } from './registry';
 import {
   deviceIdOf,
@@ -54,6 +55,6 @@ export function unreadableBindingFiles(projectRoot: string, platform?: DevicePla
 
 function backendReason(binding: Binding): string | null {
   return binding.device.backend === 'cloud'
-    ? 'recorded, not checked; use dev:stop --eas to stop it'
+    ? `recorded, not checked; use ${PROGRAM_PREFIX} dev:stop --eas to stop it`
     : null;
 }

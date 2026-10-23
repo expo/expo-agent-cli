@@ -117,8 +117,7 @@ export async function releaseStartedSessionAsync(
   } finally {
     clearInspectCache();
   }
-  if ('kept' in section)
-    return { outcome: 'kept', reason: endsIt(`${section.kept}, so it stays`, id) };
+  if ('kept' in section) return { outcome: 'kept', reason: `${section.kept}, so it stays` };
   const result = await stopReleasedAsync(projectRoot, id, reason, tools, section.removed);
   return result.ok
     ? { outcome: 'stopped' }
