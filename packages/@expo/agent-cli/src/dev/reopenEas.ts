@@ -1,6 +1,5 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — an existing Metro can get a fresh session.
 import { resolveStartPlanAsync } from '../plan/resolveAsync';
-import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { readLastBuildRecord } from '../plan/lastBuild';
 import { probeProjectStateAsync } from '../project/probe';
 import { PROGRAM_PREFIX } from '../programName';
@@ -36,20 +35,12 @@ export async function reopenEasAsync(
     lastBuild: readLastBuildRecord(projectRoot),
     fingerprintCache: options.fingerprintCache,
   });
-  const expoGo = plan.target === 'expo-go';
-  // A fresh last-build record skips the planner's EAS lookup, but a new session needs a build ID.
-  const easBuild =
-    plan.easBuild ??
-    (expoGo
-      ? null
-      : await lookUpEasSimulatorBuildAsync(projectRoot, platform, {
-          fingerprintCache: options.fingerprintCache,
-        }));
   const result = await openAppOnEasAsync(projectRoot, {
     platform,
-    expoGo,
+    expoGo: plan.target === 'expo-go',
     devServerUrl,
-    buildId: easBuild?.id ?? null,
+    buildId: plan.easBuild?.id ?? null,
+    fingerprintCache: options.fingerprintCache,
     keepSession: true,
   });
   if (result.refusal) throw result.refusal;

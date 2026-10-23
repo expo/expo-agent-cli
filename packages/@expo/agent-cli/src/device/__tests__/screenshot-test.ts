@@ -351,4 +351,107 @@ describe(`${captureScreenshotAsync.name} on a cloud simulator`, () => {
     expect(result.reason).toContain('cannot be driven from this worktree');
     expect(result.reason).toContain('How: ');
   });
+
+  // @ref llp/0027-everything-on-eas.rfc.md §Attach the controller after a smoke session starts
+  describe('when the controller has no session', () => {
+    const PICTURE = Buffer.concat([PNG_HEADER, Buffer.from('bytes')]);
+    const FILE = '/project/.expo/agent-cli/cloud.png';
+    const SHOT = ['agent-device@latest', 'screenshot', FILE];
+    const OPEN = ['agent-device@latest', 'open', 'host.exp.Exponent', '--platform', 'ios'];
+    const NO_SESSION = {
+      exitCode: 1,
+      stderr: 'Error (SESSION_NOT_FOUND): No active session. Run open first.\n',
+    };
+    type Step = { exitCode: number; stderr?: string; toFile?: Buffer };
+
+    /** Answers each spawn from the next step, and records the controller argv. */
+    function mockSequence(steps: Step[]): string[][] {
+      const calls: string[][] = [];
+      vi.mocked(spawn).mockImplementation(((_command: string, args: string[]) => {
+        const controllerArgs = unwrapGuardedExec(args)?.args ?? args;
+        calls.push(controllerArgs);
+        const step = steps[calls.length - 1] ?? { exitCode: 1, stderr: 'unexpected extra call' };
+        const child = Object.assign(new EventEmitter(), { stderr: new EventEmitter() });
+        process.nextTick(() => {
+          if (step.toFile) fs.writeFileSync(controllerArgs.at(-1)!, step.toFile);
+          if (step.stderr) child.stderr.emit('data', step.stderr);
+          child.emit('close', step.exitCode, null);
+        });
+        return child as any;
+      }) as any);
+      return calls;
+    }
+
+    it.each<[string, Step[], boolean, string[][]]>([
+      [
+        'opens the app id without --relaunch and takes the picture again',
+        [NO_SESSION, { exitCode: 0 }, { exitCode: 0, toFile: PICTURE }],
+        true,
+        [SHOT, OPEN, SHOT],
+      ],
+      ['tries twice at most', [NO_SESSION, { exitCode: 0 }, NO_SESSION], false, [SHOT, OPEN, SHOT]],
+      [
+        'stops when the open fails',
+        [NO_SESSION, { exitCode: 1, stderr: 'boom\n' }],
+        false,
+        [SHOT, OPEN],
+      ],
+      [
+        'opens nothing for another failure',
+        [{ exitCode: 1, stderr: 'Error (COMMAND_FAILED): boom\n' }],
+        false,
+        [SHOT],
+      ],
+    ])('%s', async (_name, steps, ok, expectedCalls) => {
+      const calls = mockSequence(steps);
+
+      const result = await captureScreenshotAsync({
+        backend: 'cloud',
+        projectRoot: '/project',
+        platform: 'ios',
+        deviceId: 'sess-1',
+        appId: 'host.exp.Exponent',
+        filePath: FILE,
+      });
+
+      expect(result.ok).toBe(ok);
+      expect(calls).toEqual(expectedCalls);
+    });
+  });
+
+  const BANNER =
+    '★ eas-cli@25.3.0 is now available.\nTo upgrade, run npm install -g eas-cli.\nProceeding with outdated version.\n';
+
+  it.each([
+    [
+      "the controller's error and hint",
+      `${BANNER}Error (SESSION_NOT_FOUND): No active session. Run open first.\nHint: Run open first.\n`,
+      'Error (SESSION_NOT_FOUND): No active session. Run open first. Hint: Run open first.',
+    ],
+    [
+      'the first line after the eas-cli banner',
+      `${BANNER}Remote daemon is unavailable\n`,
+      'Remote daemon is unavailable',
+    ],
+  ])('gives %s as the reason, never the eas-cli banner', async (_name, stderr, expected) => {
+    vi.mocked(spawn).mockImplementation((() => {
+      const child = Object.assign(new EventEmitter(), { stderr: new EventEmitter() });
+      process.nextTick(() => {
+        child.stderr.emit('data', stderr);
+        child.emit('close', 1, null);
+      });
+      return child as any;
+    }) as any);
+
+    const result = await captureScreenshotAsync({
+      backend: 'cloud',
+      projectRoot: '/project',
+      platform: 'ios',
+      deviceId: 'sess-1',
+      filePath: '/project/.expo/agent-cli/cloud.png',
+    });
+
+    expect(result.reason).toContain(`: ${expected}`);
+    expect(result.reason).not.toContain('is now available');
+  });
 });

@@ -8,7 +8,6 @@ import { resolveDevOptions } from '../resolveOptions';
 vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn(async () => ({})) }));
 vi.mock('../../plan/lastBuild', () => ({ readLastBuildRecord: vi.fn(() => ({})) }));
 vi.mock('../../plan/resolveAsync', () => ({ resolveStartPlanAsync: vi.fn() }));
-vi.mock('../../plan/easBuildLookup', () => ({ lookUpEasSimulatorBuildAsync: vi.fn() }));
 vi.mock('../openAppEas', () => ({ openAppOnEasAsync: vi.fn() }));
 
 const projectRoot = '/project';
@@ -53,6 +52,7 @@ it(`hands the plan's build to the open`, async () => {
     expoGo: false,
     devServerUrl: DEV_SERVER,
     buildId: null,
+    fingerprintCache: true,
     keepSession: true,
   });
 });

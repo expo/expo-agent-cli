@@ -16,6 +16,7 @@ import { resolveEasCli } from '../../utils/easCli';
 import { ensureGitExcludedAsync } from '../../utils/gitExclude';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
+import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
 import {
   buildLatestSimulatorBuildArgs,
   buildSessionStartArgs,
@@ -58,6 +59,7 @@ vi.mock('../../utils/easCli', async () => {
   return { ...actual, resolveEasCli: vi.fn() };
 });
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
+vi.mock('../../plan/easBuildLookup', () => ({ lookUpEasSimulatorBuildAsync: vi.fn() }));
 // No test here runs real git.
 vi.mock('../../utils/gitExclude', () => ({
   ensureGitExcludedAsync: vi.fn(async () => ({ result: 'skipped' })),
@@ -317,7 +319,50 @@ describe(openAppOnEasAsync, () => {
     expect(report.reason).toContain(
       'npx --yes eas-cli build --platform ios --profile development-simulator'
     );
+    expect(lookUpEasSimulatorBuildAsync).toHaveBeenCalledTimes(1);
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+
+  it(`looks up the build of a development build with no id only when it starts a session`, async () => {
+    vi.mocked(lookUpEasSimulatorBuildAsync).mockResolvedValue({
+      id: 'found-build',
+      profile: 'development-simulator',
+    });
+
+    await openAppOnEasAsync(projectRoot, {
+      platform: 'android',
+      expoGo: false,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+      keepSession: true,
+      fingerprintCache: false,
+    });
+
+    expect(lookUpEasSimulatorBuildAsync).toHaveBeenCalledWith(projectRoot, 'android', {
+      fingerprintCache: false,
+    });
+    const args = vi.mocked(spawnCaptureAsync).mock.calls[0]![1];
+    expect(args[args.indexOf('--build-id') + 1]).toBe('found-build');
+  });
+
+  it.each([
+    ['a named build', { expoGo: false, buildId: 'build-1' }, 'none'],
+    ['Expo Go', { expoGo: true, buildId: null }, 'none'],
+    ['a reused session', { expoGo: false, buildId: null }, 'active'],
+  ] as const)(`looks up no build for %s`, async (_case, app, state) => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      state === 'active' ? cloudProbe.active({ id: 'sess-up', platform: 'ios' }) : cloudProbe.none()
+    );
+    vi.mocked(openRouteAsync).mockResolvedValue({ exitCode: 0, command: 'x' } as any);
+
+    await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      devServerUrl: DEV_SERVER,
+      keepSession: true,
+      ...app,
+    });
+
+    expect(lookUpEasSimulatorBuildAsync).not.toHaveBeenCalled();
   });
 
   it(`reuses a session this project already has on the platform, through the same open navigate runs`, async () => {

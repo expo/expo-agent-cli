@@ -82,7 +82,7 @@ A `--eas` run's follow-ups are aimed at the session: `navigate / --eas`, `runtim
 
 - Its dev server starts through `dev --<platform> --detach --wait-ready --no-open --eas`, so it is tunnelled and a build the plan needs is the simulator profile on EAS Build. `--no-open` keeps the session this run's own act.
 - Its plan is resolved with `deviceBackend: 'eas'`, so the build it names — and the `installWith` it prints — are `dev --eas`'s.
-- A new conditional bootstrap phase, **`start-session`**, where the boot would be: `ensureEasSessionAsync` with the app the plan names. Expo Go starts with `--expo-go`; a development build needs a finished `development-simulator` build of this fingerprint on EAS (`lookUpEasSimulatorBuildAsync`) — and **the gate never compiles one**. No build is a failed phase whose reason names `dev --<platform> --eas`, and the run stops where a run with no device stops. A session this run started is a registered cleanup (`resource: 'session'`) and is ended by id when the run ends through `releaseStartedSessionAsync`; one that was already up is left running.
+- A new conditional bootstrap phase, **`start-session`**, where the boot would be: `ensureEasSessionAsync` with the app the plan names. Expo Go starts with `--expo-go`; a development build needs a finished `development-simulator` build of this fingerprint on EAS (`lookUpEasSimulatorBuildAsync`, looked up only when no session is up, before the tunnel wait) — and **the gate never compiles one**. No build is a failed phase whose reason names `dev --<platform> --eas`, and the run stops where a run with no device stops. A session this run started is a registered cleanup (`resource: 'session'`) and is ended by id when the run ends through `releaseStartedSessionAsync`; one that was already up is left running.
 - `probeDevice` then finds the session by [[0035-one-device-per-worktree]] §Session binding, and the `app`, `reload`, `route` and `screenshot` phases drive it.
 
 ## dev:stop
@@ -125,6 +125,8 @@ The creation message identifies a new session. An overwrite warning naming a pre
 ### Attach the controller after a smoke session starts
 
 EAS's `--open-url` launches the app, but does not create an `agent-device` controller session. A fresh smoke run must still perform its normal app open even if Metro already lists a debugger target. That open binds the controller before observation and screenshots; it also uses the existing rule that an app opened by this run needs no additional reload. A reused session with an attached app keeps the existing reload check. [observed — SDK 57 on EAS iOS, 2026-09-09: without the controller open, screenshot exited `SESSION_NOT_FOUND: No active session. Run open first.`]
+
+The cloud screenshot needs that same controller session. When it fails with `SESSION_NOT_FOUND`, smoke runs `agent-device open <app-id> --platform <p>` through the guarded `simulator:exec` path and retries the screenshot once. The open has no `--relaunch`, so it never terminates the app. [not observed: whether `open <app-id>` leaves the screen of a foreground app as it was.] A skipped screenshot quotes the controller's `Error (CODE)` line and its `Hint`, and never the EAS CLI update banner.
 
 ### Stop hints
 

@@ -622,6 +622,7 @@ async function executePlanAsync(
         ? easRunLifecycle(projectRoot, {
             platform: easPlatform,
             expoGo: plan.target === 'expo-go',
+            fingerprintCache: options.fingerprintCache,
             keepSession: options.detachedChild,
             onSignal: () => {
               stepRunning = false;

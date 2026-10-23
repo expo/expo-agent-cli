@@ -28,10 +28,8 @@ import {
   type Binding,
   type BoundDevice,
 } from '../deviceBinding';
-import { acquireCloudBindingAsync, liveCloudBindings } from '../deviceBinding/cloud';
 import { releaseStartedSessionAsync } from '../deviceBinding/cloudRelease';
 import { bindingPathFor, readBindingFile } from '../deviceBinding/registry';
-import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
 import { installDevBuildAsync } from '../device/installDevBuild';
 import { installExpoGoAsync } from '../device/installExpoGo';
@@ -557,42 +555,16 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     ensureEasSession: async (devServerUrl) => {
       const { ensureEasSessionAsync } =
         require('../dev/openAppEas') as typeof import('../dev/openAppEas');
-      const { lookUpEasSimulatorBuildAsync } =
-        require('../plan/easBuildLookup') as typeof import('../plan/easBuildLookup');
       const target = await targetAsync();
-      const expoGo = target.installWithKind === 'expo-go';
-      const build = expoGo
-        ? null
-        : await lookUpEasSimulatorBuildAsync(projectRoot, options.platform);
-      if (!expoGo && build == null) {
-        // Asked before the session, so a session is never started for an app it cannot have.
-        const probe = await probeCloudSessionAsync({
-          projectRoot,
-          platform: options.platform,
-          boundIds: liveCloudBindings(projectRoot).map(({ device }) => device.id),
-        });
-        if (probe.state === 'active' && probe.session.platform === options.platform) {
-          await acquireCloudBindingAsync(projectRoot, {
-            platform: options.platform,
-            id: probe.session.id,
-            origin: 'dotenv',
-          });
-          return { ok: true, sessionId: probe.session.id, started: false, reason: null };
-        }
-        return {
-          ok: false,
-          sessionId: null,
-          started: false,
-          reason: `no EAS Simulator session is up, and EAS has no finished "${EAS_SIMULATOR_PROFILE}" build of this project's ${options.platform} fingerprint to start one with — "${PROGRAM_PREFIX} dev --${options.platform} --eas" builds it and starts the session; this gate compiles nothing`,
-        };
-      }
       const result = await ensureEasSessionAsync(projectRoot, {
         platform: options.platform,
-        expoGo,
+        expoGo: target.installWithKind === 'expo-go',
         devServerUrl,
-        buildId: build?.id ?? null,
+        // A new session looks up the build of this fingerprint, and is never started without one.
+        buildId: null,
         sessionName: `${path.basename(projectRoot)} — agent-cli smoke`,
         keepSession: false,
+        noBuildReason: `no EAS Simulator session is up, and EAS has no finished "${EAS_SIMULATOR_PROFILE}" build of this project's ${options.platform} fingerprint to start one with — "${PROGRAM_PREFIX} dev --${options.platform} --eas" builds it and starts the session; this gate compiles nothing`,
       });
       return smokeSessionResult(result);
     },
@@ -1150,12 +1122,13 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       }
     },
 
-    captureScreenshot: (deviceId, backend: DeviceBackend | null) =>
+    captureScreenshot: async (deviceId, backend: DeviceBackend | null) =>
       captureScreenshotAsync({
         platform: options.platform,
         deviceId,
         backend: backend ?? undefined,
         projectRoot,
+        appId: backend === 'cloud' ? ((await targetAsync()).appId ?? undefined) : undefined,
         filePath: options.screenshotPath ?? defaultScreenshotPath(projectRoot),
       }),
 

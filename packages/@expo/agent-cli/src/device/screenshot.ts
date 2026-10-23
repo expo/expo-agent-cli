@@ -27,7 +27,8 @@ import {
   CloudSessionMismatchError,
   cloudExecArgs,
   captureCloudScreenshotAsync,
-  type CloudRunResult,
+  openAppOnCloudSimulatorAsync,
+  readControllerError,
 } from './cloudSimulator';
 
 /** Platforms a screenshot can be taken on: the two with a device tool this CLI already spawns. */
@@ -112,6 +113,11 @@ export interface CaptureScreenshotParams extends BuildScreenshotCommandParams {
   /** How long the device tool gets, in milliseconds. */
   timeoutMs?: number;
   /**
+   * The application id to open when the cloud controller has no session yet, or undefined to
+   * report that failure as it is. Used only by the `cloud` backend.
+   */
+  appId?: string;
+  /**
    * Which device layer to photograph. Defaults to the local tool for {@link platform}.
    *
    * `cloud` takes the picture through the EAS Simulator session's controller, which **downloads**
@@ -152,6 +158,7 @@ export async function captureScreenshotAsync({
   filePath,
   backend,
   projectRoot,
+  appId,
   timeoutMs = backend === 'cloud' ? CLOUD_SCREENSHOT_TIMEOUT_MS : SCREENSHOT_TIMEOUT_MS,
   // Resolved here when the caller has none, so this never spawns a bare `adb` on a machine whose
   // SDK is where the SDK normally is (F49). Never for the cloud backend, which has no `adb`.
@@ -195,7 +202,7 @@ export async function captureScreenshotAsync({
   }
 
   const run = cloud
-    ? await runCloudScreenshotAsync(projectRoot!, filePath, timeoutMs, deviceId)
+    ? await runCloudScreenshotAsync(projectRoot!, filePath, timeoutMs, deviceId, appId, platform)
     : await runScreenshotAsync(command, filePath, timeoutMs);
   if ('refusal' in run) {
     return { ...base, reason: run.refusal.split('\n').join(' ') };
@@ -213,7 +220,7 @@ export async function captureScreenshotAsync({
     return {
       ...base,
       reason: `"${command.display}" exited ${run.exitCode ?? 'on a signal'}${
-        run.stderr.trim() ? `: ${firstLine(run.stderr)}` : ''
+        run.stderr.trim() ? `: ${failureLine(run.stderr)}` : ''
       }`,
     };
   }
@@ -259,22 +266,43 @@ async function runCloudScreenshotAsync(
   projectRoot: string,
   filePath: string,
   timeoutMs: number,
-  sessionId: string
+  sessionId: string,
+  appId: string | undefined,
+  platform: ScreenshotPlatform
 ): Promise<{ refusal: string } | { exitCode: number | null; stderr: string; spawnError?: string }> {
-  let result: CloudRunResult;
+  const options = { projectRoot, timeoutMs, sessionId };
   try {
-    result = await captureCloudScreenshotAsync({ projectRoot, filePath, timeoutMs, sessionId });
+    let result = await captureCloudScreenshotAsync({ ...options, filePath });
+    // @ref llp/0027-everything-on-eas.rfc.md §Attach the controller after a smoke session starts
+    if (
+      appId &&
+      result.exitCode !== 0 &&
+      !result.spawnError &&
+      readControllerError(`${result.stderr}\n${result.stdout}`)?.code === 'SESSION_NOT_FOUND'
+    ) {
+      const opened = await openAppOnCloudSimulatorAsync({ ...options, appId, platform });
+      if (opened.exitCode !== 0 || opened.spawnError) {
+        return {
+          exitCode: opened.exitCode,
+          stderr: `opening ${appId} to bind the controller failed: ${
+            opened.spawnError ?? (opened.stderr.trim() || opened.stdout.trim())
+          }`,
+          spawnError: opened.spawnError ?? undefined,
+        };
+      }
+      result = await captureCloudScreenshotAsync({ ...options, filePath });
+    }
+    return {
+      exitCode: result.exitCode,
+      // Both streams, because the EAS CLI reports a dead session on either one and the reason line
+      // below is all a reader gets of it.
+      stderr: result.stderr.trim() || result.stdout.trim(),
+      spawnError: result.spawnError ?? undefined,
+    };
   } catch (error) {
     if (error instanceof CloudSessionMismatchError) return { refusal: error.message };
     throw error;
   }
-  return {
-    exitCode: result.exitCode,
-    // Both streams, because the EAS CLI reports a dead session on either one and the reason line
-    // below is all a reader gets of it.
-    stderr: result.stderr.trim() || result.stdout.trim(),
-    spawnError: result.spawnError ?? undefined,
-  };
 }
 
 /** Whether the first bytes of a file are a PNG header. */
@@ -361,8 +389,21 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function firstLine(text: string): string {
-  return text.trim().split('\n')[0]!;
+const EAS_NOTICE =
+  /is now available|To upgrade|npm install -g eas-cli|Proceeding with outdated version/;
+
+/**
+ * The line that says why a tool failed. The controller's `Error (CODE)` line and its `Hint` come
+ * first; the EAS CLI's update banner never does.
+ */
+function failureLine(text: string): string {
+  const lines = text.trim().split('\n');
+  const error = lines.find((line) => /^\s*Error \([A-Z_]+\):/.test(line));
+  if (error) {
+    const hint = lines.find((line) => /^\s*Hint:/.test(line));
+    return hint ? `${error.trim()} ${hint.trim()}` : error.trim();
+  }
+  return (lines.find((line) => line.trim() && !EAS_NOTICE.test(line)) ?? lines[0]!).trim();
 }
 
 /**
