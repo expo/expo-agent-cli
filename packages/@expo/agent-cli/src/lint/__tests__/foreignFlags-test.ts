@@ -138,9 +138,10 @@ describe('the flags this CLI writes onto a command line', () => {
     // [observed — live, 2026-09-16: `npx --yes create-expo@latest <dir> --yes --no-install`
     // with `--template blank-typescript` and `--example with-router` both scaffolded and exited 0].
     //
-    // `--json` and `--type` in `src/navigate/deepLink.ts` are `expo config --json --type public`,
-    // the argv `src/impact/runtimeVersion.ts` already writes and every `status` runs; `navigate`
-    // evaluates a dynamic config's scheme with it (issue #84).
+    // `--mode`, `--public` and `--skip-plugins` in `src/project/evaluatedConfig.ts` are this CLI's
+    // own: the argv of its config loader (`build/configLoader`), run under `node`. A third place
+    // the CLI invokes itself, left in for the same reason as the other two. The navigate e2e runs
+    // the built loader (issue #84).
     expect(sweep.foreignFlags.map(({ flag, file }) => `${flag}  ${file}`).sort())
       .toMatchInlineSnapshot(`
         [
@@ -156,7 +157,7 @@ describe('the flags this CLI writes onto a command line', () => {
           "--json  src/docs/autoSync.ts",
           "--json  src/impact/runtimeVersion.ts",
           "--json  src/install/resolveOptions.ts",
-          "--json  src/navigate/deepLink.ts",
+          "--mode  src/project/evaluatedConfig.ts",
           "--no-bundler  src/device/installDevBuild.ts",
           "--no-followups  src/docs/autoSync.ts",
           "--no-install  src/new/createExpo.ts",
@@ -169,11 +170,12 @@ describe('the flags this CLI writes onto a command line', () => {
           "--preset  src/project/fingerprint.ts",
           "--pretty  src/typecheck/checkAsync.ts",
           "--project  src/deploy/launchCli.ts",
+          "--public  src/project/evaluatedConfig.ts",
           "--sdk  src/docs/autoSync.ts",
+          "--skip-plugins  src/project/evaluatedConfig.ts",
           "--template  src/new/createExpo.ts",
           "--type  src/config/introspectAsync.ts",
           "--type  src/impact/runtimeVersion.ts",
-          "--type  src/navigate/deepLink.ts",
           "--verbose  src/doctor/checkAsync.ts",
           "--wait-ready  src/smoke/smokeAsync.ts",
           "--yes  src/device/expoGoVersion.ts",

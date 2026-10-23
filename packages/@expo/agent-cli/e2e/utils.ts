@@ -270,6 +270,8 @@ export type StubExpoInvocation = {
   ci: string | null;
   /** Whether the subprocess had a TTY on stdout, which is the other half of that decision. */
   isTTY: boolean;
+  /** `NODE_ENV` as the stub `expo/config` saw it; only that double records it. */
+  nodeEnv?: string | null;
 };
 
 /** Read every invocation of the stub `expo` bin recorded for a project. */

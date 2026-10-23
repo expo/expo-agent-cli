@@ -28,8 +28,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "ncc build ./src/cli.ts -o build/cli/ && ncc build ./src/telemetry/worker.ts -o build/telemetry/",
-    "build:prod": "ncc build ./src/cli.ts -o build/cli/ --minify --no-cache --no-source-map-register && ncc build ./src/telemetry/worker.ts -o build/telemetry/ --minify --no-cache --no-source-map-register",
+    "build": "ncc build ./src/cli.ts -o build/cli/ && ncc build ./src/telemetry/worker.ts -o build/telemetry/ && ncc build ./src/project/configLoader.ts -o build/configLoader/",
+    "build:prod": "ncc build ./src/cli.ts -o build/cli/ --minify --no-cache --no-source-map-register && ncc build ./src/telemetry/worker.ts -o build/telemetry/ --minify --no-cache --no-source-map-register && ncc build ./src/project/configLoader.ts -o build/configLoader/ --minify --no-cache --no-source-map-register",
     "clean": "expo-module clean",
     "lint": "oxlint --config oxlint.config.mjs .",
     "format": "oxfmt",
@@ -55,7 +55,8 @@
     "2g": "1.0.1",
     "@clack/prompts": "1.7.0",
     "@expo/agent-eval-vitest": "0.0.2",
-    "@expo/config": "~57.0.9",
+    "@expo/config": "^58.0.7",
+    "@expo/env": "^2.5.3",
     "@expo/package-manager": "^1.13.1",
     "@types/getenv": "^1.0.0",
     "@types/node": "^22.14.0",

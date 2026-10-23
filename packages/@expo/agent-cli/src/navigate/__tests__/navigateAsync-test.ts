@@ -2,6 +2,9 @@ import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
+import path from 'path';
+
+import { mockConfigLoader } from '../../project/__tests__/fakeConfigLoader';
 
 import { resetApprovedSchemes } from '../../device/approveScheme';
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
@@ -585,45 +588,57 @@ describe(navigateAsync, () => {
     expect(vi.mocked(console.error).mock.calls.join('\n')).toContain('did not open the deep link');
   });
 
-  // A dynamic config is evaluated by the project's `expo config` (issue #84), so the one spawn
-  // here is that evaluation, and nothing reaches a device.
-  it(`should explain a dynamic config it could not evaluate instead of opening anything`, async () => {
-    vol.fromJSON({
-      [`${projectRoot}/app.config.js`]: 'module.exports = {};',
-      [`${projectRoot}/ios/Podfile`]: '',
+  // A dynamic config is evaluated by the project's own `expo/config` in a child process (issue
+  // #84), so the one spawn here is that loader, and nothing reaches a device. The project is the
+  // e2e fixture, because resolving `expo/config` goes through Node's own loader.
+  describe('a dynamic config', () => {
+    const DYNAMIC_ROOT = path.resolve(__dirname, '../../../e2e/fixtures/go-app');
+
+    it(`should explain a config it could not evaluate instead of opening anything`, async () => {
+      vol.fromJSON({ 'app.config.js': 'module.exports = {};', 'ios/Podfile': '' }, DYNAMIC_ROOT);
+      mockDevServer(null);
+      mockConfigLoader({ exitCode: 1, stderr: 'Error: boom\n' });
+
+      const error = await navigateAsync(DYNAMIC_ROOT, options({ devServerUrl: null })).catch(
+        (e) => e
+      );
+
+      expect(error.code).toBe('DEEP_LINK_UNRESOLVED');
+      expect(error.message).toContain('app.config.js, and evaluating it failed: Error: boom');
+      expect(spawn).toHaveBeenCalledTimes(1);
+      expect(openedArgv()).toEqual([]);
     });
-    mockDevServer(null);
-    mockSpawnQueue([{ stdout: '', exitCode: 1 }]);
 
-    const error = await navigateAsync(projectRoot, options({ devServerUrl: null })).catch((e) => e);
+    it(`should build the URL from the scheme the evaluated config names`, async () => {
+      vol.fromJSON(
+        {
+          'app.config.js': 'module.exports = {};',
+          'package.json': JSON.stringify({ name: 'demo', dependencies: {} }),
+          'ios/Podfile': '',
+        },
+        DYNAMIC_ROOT
+      );
+      mockDevServer(null);
+      mockConfigLoader({
+        messages: [
+          JSON.stringify({
+            exp: { slug: 'demo', scheme: 'dynamicapp' },
+            staticConfigPath: null,
+            dynamicConfigPath: path.join(DYNAMIC_ROOT, 'app.config.js'),
+          }),
+        ],
+      });
 
-    expect(error.code).toBe('DEEP_LINK_UNRESOLVED');
-    expect(error.message).toContain('app.config.js, and evaluating it failed');
-    expect(spawn).toHaveBeenCalledTimes(1);
-    expect(spawnedArgv(0)).toEqual(
-      expect.arrayContaining(['config', '--json', '--type', 'public'])
-    );
-    expect(openedArgv()).toEqual([]);
-  });
+      await expect(
+        navigateAsync(DYNAMIC_ROOT, options({ devServerUrl: null, printUrl: true, json: true }))
+      ).resolves.toBe(0);
 
-  it(`should build the URL from the scheme a dynamic config names`, async () => {
-    vol.fromJSON({
-      [`${projectRoot}/app.config.js`]: 'module.exports = {};',
-      [`${projectRoot}/package.json`]: JSON.stringify({ name: 'demo', dependencies: {} }),
-      [`${projectRoot}/ios/Podfile`]: '',
+      expect(JSON.parse(printed())).toMatchObject({
+        url: 'dynamicapp://profile/42',
+        resolution: 'read the "scheme" field from app.config.js',
+      });
+      expect(spawn).toHaveBeenCalledTimes(1);
     });
-    mockDevServer(null);
-    mockSpawnQueue([{ stdout: JSON.stringify({ slug: 'demo', scheme: 'dynamicapp' }) }]);
-
-    await expect(
-      navigateAsync(projectRoot, options({ devServerUrl: null, printUrl: true, json: true }))
-    ).resolves.toBe(0);
-
-    expect(JSON.parse(printed())).toMatchObject({
-      url: 'dynamicapp://profile/42',
-      resolution: 'read the "scheme" field from app.config.js',
-    });
-    expect(spawn).toHaveBeenCalledTimes(1);
   });
 
   it(`should explain a missing dev server when Expo Go needs its host`, async () => {
