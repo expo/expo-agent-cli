@@ -37,20 +37,19 @@
 // the app was stranded.
 
 import {
-  cloudNeedsTunnelError,
   openUrlOnCloudSimulatorAsync,
   readControllerError,
-  readHeldSessionName,
   type CloudPlatform,
   type CloudRunResult,
 } from '../../device/cloudSimulator';
+import { cloudNeedsTunnelError, readHeldSessionName } from '../../device/cloudErrors';
 import { resolveDeviceAsync, type NavigateDevice } from '../../navigate/device';
 import { hostPlatform } from '../../smoke/suggest';
 import { easFailureReason, readEasFailure } from '../../utils/easFailure';
 import { resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { readConfiguredAppId, resolveAppId } from '../appId';
 import { debugEvent } from './events';
-import type { ReloadAttempt } from './reloadAsync';
+import type { ReloadAttempt } from './attempt';
 import type { ReloadOptions } from './resolveOptions';
 
 /** What one cloud reload amounted to. */

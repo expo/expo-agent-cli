@@ -21,13 +21,12 @@ import {
 import {
   AGENT_DEVICE_SPEC,
   acceptCloudAlertAsync,
-  cloudNeedsTunnelError,
-  cloudVerbFailedError,
   isOpenInAppAlert,
   openUrlOnCloudSimulatorAsync,
   readCloudAlertAsync,
   readControllerError,
 } from '../device/cloudSimulator';
+import { cloudNeedsTunnelError, cloudVerbFailedError } from '../device/cloudErrors';
 import { event as cliEvent } from '../events';
 import { PROGRAM_PREFIX } from '../programName';
 import { hostPlatform } from '../smoke/suggest';
