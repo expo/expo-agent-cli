@@ -11,6 +11,7 @@ import chalk from 'chalk';
 import path from 'path';
 
 import { devDetachAsync } from '../dev/detachAsync';
+import type { EnsureEasSessionReport } from '../dev/openAppEas';
 import { resolveDevOptions } from '../dev/resolveOptions';
 import { resolveDevStopOptions } from '../dev/resolveStopOptions';
 import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
@@ -75,6 +76,7 @@ import {
   START_DEV_SERVER_TIMEOUT_MS,
   type SmokeDeps,
   type SmokeRun,
+  type SmokeSessionResult,
   type SmokeStartResult,
 } from './phases';
 import { buildSmokeProgress } from './progress';
@@ -592,12 +594,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         sessionName: `${path.basename(projectRoot)} — agent-cli smoke`,
         cleanupAfterRun: true,
       });
-      return {
-        ok: result.ok,
-        sessionId: result.sessionId,
-        started: result.started,
-        reason: result.reason,
-      };
+      return smokeSessionResult(result);
     },
     stopEasSession: async (sessionId) => {
       const release = await releaseStartedSessionAsync(projectRoot, sessionId, 'smoke');
@@ -1297,6 +1294,18 @@ function choiceOf(device: BoundDevice): string | null {
     return deviceNameOf(device);
   }
   return device.origin.kind === 'spawned' ? device.origin.avd : null;
+}
+
+/** The phase result of a session start; a refusal gives its What and How, not only its first line. */
+export function smokeSessionResult(
+  result: Pick<EnsureEasSessionReport, 'ok' | 'sessionId' | 'started' | 'reason' | 'refusal'>
+): SmokeSessionResult {
+  return {
+    ok: result.ok,
+    sessionId: result.sessionId,
+    started: result.started,
+    reason: result.refusal ? whatAndHow(result.refusal.message) : result.reason,
+  };
 }
 
 /** A refusal's What and its How line, as one phase reason; the Why in between is dropped. */

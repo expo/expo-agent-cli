@@ -411,7 +411,7 @@ describe(openAppOnEasAsync, () => {
       });
       expect(report.reason).toBe(report.refusal!.message.split('\n')[0]);
       expect(report.refusal!.message).toContain('session sess-android is an Android session');
-      expect(report.refusal!.message).toContain('dev --android --eas --detach');
+      expect(report.refusal!.message).toContain('navigate / --eas --android');
       expect(report.refusal!.message).toContain('dev --ios --eas --detach');
       expect(report.refusal!.message).toContain('dev:stop --eas');
       expect(spawnCaptureAsync).not.toHaveBeenCalled();

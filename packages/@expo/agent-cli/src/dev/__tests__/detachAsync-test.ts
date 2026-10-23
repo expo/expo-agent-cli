@@ -131,6 +131,18 @@ describe('--eas on the other platform', () => {
     expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
   });
 
+  it('refuses with the dev --detach reuse command, since no server runs yet', async () => {
+    vi.mocked(otherPlatformSessionAsync).mockResolvedValue({
+      platform: 'ios',
+      sessionId: 'sess-ios',
+    });
+
+    await expect(detach()).rejects.toMatchObject({
+      code: 'CLOUD_SIMULATOR_PLATFORM_MISMATCH',
+      message: expect.stringContaining('dev --ios --eas --detach'),
+    });
+  });
+
   it('spawns the child when nothing points at another platform', async () => {
     vi.mocked(otherPlatformSessionAsync).mockResolvedValue(null);
 

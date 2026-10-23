@@ -310,6 +310,7 @@ export async function devDetachAsync(
     throw otherPlatformSessionError(other.platform, {
       wanted: easPlatform,
       sessionId: other.sessionId,
+      devServerRunning: false,
     });
 
   const { logFile, fd } = openDetachedLogSync(projectRoot);

@@ -482,6 +482,7 @@ async function ensureSessionAsync(
     const refusal = otherPlatformSessionError(other.platform, {
       wanted: platform,
       sessionId: other.sessionId,
+      devServerRunning: true,
     });
     return failed(firstLine(refusal.message), { refusal });
   }
