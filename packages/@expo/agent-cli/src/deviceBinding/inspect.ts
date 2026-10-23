@@ -4,7 +4,7 @@
 
 import * as Log from '../log';
 import { getEmulatorStateAsync, instanceGone } from './emulator';
-import { noBoundDeviceError } from './errors';
+import { cloudBindingError, noBoundDeviceError } from './errors';
 import { listSimulatorAsync, SIMCTL_CALL_TIMEOUT_MS } from './ios';
 import { extendLeaseAsync, isExpired } from './lease';
 import { bindingPathFor, readBindingFile } from './registry';
@@ -138,6 +138,7 @@ export async function extendBoundLeaseAsync(
     return;
   }
   if (outcome === 'lost') {
+    if (backend === 'cloud') throw cloudBindingError(platform, 'expired');
     throw noBoundDeviceError('gone', { platform, cause: 'expired', path });
   }
 }

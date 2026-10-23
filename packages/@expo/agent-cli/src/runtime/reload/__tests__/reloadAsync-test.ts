@@ -1053,7 +1053,7 @@ describe('an app the command socket cannot see', () => {
       (attempt: { method: string }) => attempt.method === 'device'
     );
     expect(device.reason).toContain('EAS Simulator session sess-42');
-    expect(device.reason).toContain('runtime:reload --eas');
+    expect(device.reason).toContain('runtime:reload --android --eas');
     expect(device.reason).not.toMatch(/expired/);
   });
 

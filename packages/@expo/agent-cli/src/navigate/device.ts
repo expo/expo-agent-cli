@@ -169,12 +169,21 @@ async function cloudFallbackAsync(
   if (context.cloud !== 'fallback') {
     return null;
   }
-  // No dotenv id and no binding: nothing to ask the service about.
-  const sessionId = readCloudSessionIdSync(context.projectRoot);
-  if (sessionId == null && readCloudBindings(context.projectRoot).bindings.length === 0) {
+  // No dotenv id, no binding and no unreadable file of this platform: nothing to ask about.
+  const snapshot = readCloudBindings(context.projectRoot);
+  const unreadable = snapshot.unreadable.some(
+    (entry) => platform == null || entry.platform === platform
+  );
+  if (
+    readCloudSessionIdSync(context.projectRoot) == null &&
+    snapshot.bindings.length === 0 &&
+    !unreadable
+  ) {
     return null;
   }
-  return deviceRung(await cloudRungAsync(context.projectRoot, platform ?? null, 'fallback'));
+  return deviceRung(
+    await cloudRungAsync(context.projectRoot, platform ?? null, 'fallback', undefined, snapshot)
+  );
 }
 
 /**

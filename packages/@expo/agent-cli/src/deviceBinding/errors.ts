@@ -34,9 +34,14 @@ const RERUN = 'run the command again';
 /** The refusal of a read verb: no device is bound, or the bound one cannot be driven now. */
 export function noBoundDeviceError(
   state: Exclude<InspectState, 'recorded' | 'up'>,
-  { platform, cause, path }: { platform: DevicePlatform; cause?: InspectCause; path?: string }
+  {
+    platform,
+    cause,
+    path,
+    eas,
+  }: { platform: DevicePlatform; cause?: InspectCause; path?: string; eas?: boolean }
 ): CommandError {
-  const command = deviceCommand(platform);
+  const command = deviceCommand(platform, { eas });
   if (state === 'unreadable') {
     return refusal('NO_BOUND_DEVICE', 'unreadable', EXIT_NEEDS_HUMAN, [
       `The binding file ${path} does not parse; a newer CLI may have written it.`,

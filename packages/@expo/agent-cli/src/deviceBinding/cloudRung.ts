@@ -9,7 +9,7 @@ import {
   type CloudSessionProbe,
   type LiveCloudSessionProbe,
 } from '../device/cloudSimulator';
-import { live, readCloudBindings, type CloudBinding } from './cloud';
+import { claimable, live, readCloudBindings, type CloudBinding } from './cloud';
 import {
   cloudBindingError,
   cloudSessionQueuedError,
@@ -21,6 +21,9 @@ import { isExpired } from './lease';
 import { bindingPathFor } from './registry';
 import { defaultTools } from './tools';
 import type { DeviceTools } from './types';
+
+/** One read of this worktree's cloud binding files, which a caller can pass on to the rung. */
+export type CloudSnapshot = ReturnType<typeof readCloudBindings>;
 
 /** The session the rung settled on. */
 export interface CloudRungDevice {
@@ -62,30 +65,32 @@ export async function cloudRungAsync(
   projectRoot: string,
   platform: CloudPlatform | null,
   use: 'fallback',
-  tools?: DeviceTools
+  tools?: DeviceTools,
+  snapshot?: CloudSnapshot
 ): Promise<CloudRung<CloudSessionProbe>>;
 export async function cloudRungAsync(
   projectRoot: string,
   platform: CloudPlatform | null,
   use: 'required',
-  tools?: DeviceTools
+  tools?: DeviceTools,
+  snapshot?: CloudSnapshot
 ): Promise<CloudRung>;
 export async function cloudRungAsync(
   projectRoot: string,
   platform: CloudPlatform | null,
   use: CloudRungUse,
-  tools: DeviceTools = defaultTools()
+  tools: DeviceTools = defaultTools(),
+  snapshot: CloudSnapshot = readCloudBindings(projectRoot)
 ): Promise<CloudRung<CloudSessionProbe>> {
-  const snapshot = readCloudBindings(projectRoot);
   const now = tools.now();
   const unreadable = snapshot.unreadable.find(
     (entry) => platform == null || entry.platform === platform
   );
-  if (unreadable) throw noBoundDeviceError('unreadable', unreadable);
+  if (unreadable) throw noBoundDeviceError('unreadable', { ...unreadable, eas: true });
   const probe = await probeCloudSessionAsync({
     projectRoot,
     platform,
-    boundIds: live(snapshot.bindings, now).map(({ device }) => device.id),
+    boundIds: boundIdsFor(snapshot.bindings, platform, now),
   });
   const verdict = cloudVerdict(snapshot.bindings, probe, platform, now, use);
   if (verdict.kind === 'refuse') throw verdict.error;
@@ -108,44 +113,10 @@ export function cloudVerdict(
 ): CloudVerdict<CloudSessionProbe> {
   const records = bindings.filter(({ device }) => platform == null || device.platform === platform);
   if (probe.state === 'queued' || probe.state === 'active') {
-    const { session } = probe;
-    if (use === 'fallback' && notUsableHere(probe, platform)) return { kind: 'none', probe };
-    // A session is created for one platform and keeps it, so a flag that names the other one is
-    // answered with the mismatch, whether the session is up or still pending.
-    if (platform != null && session.platform != null && session.platform !== platform) {
-      return {
-        kind: 'refuse',
-        error: cloudPlatformMismatchError(platform, session.platform, session.id),
-      };
-    }
-    const sessionPlatform = session.platform ?? platform;
-    if (probe.state === 'queued') {
-      return {
-        kind: 'refuse',
-        error: cloudSessionQueuedError({ ...session, platform: sessionPlatform }),
-      };
-    }
-    // The URL shape differs per platform, so a session that reported none, read with no flag that
-    // names one, is not a device this rung can hand out.
-    if (sessionPlatform == null) {
-      return { kind: 'refuse', error: cloudPlatformUnknownError(session.id) };
-    }
-    const record = bindings.find(({ device }) => device.id === session.id) ?? null;
-    if (record && isExpired(record, now)) {
-      return refuse(record, 'expired');
-    }
-    return {
-      kind: 'device',
-      device: {
-        platform: sessionPlatform,
-        id: session.id,
-        // The session's own `--name` when it has one, because a project with several sessions up
-        // has just had one chosen for it, and the name is what says which (llp/0005 §Cloud simulator).
-        name: session.name ?? 'EAS Simulator session',
-      },
-      extend: record,
-    };
+    return sessionVerdict(bindings, probe, platform, now, use);
   }
+  // A probe that could not list sessions says nothing about the lease, and the caller raises it.
+  if (probe.state === 'unknown' || probe.state === 'unavailable') return { kind: 'none', probe };
   // An expired binding must not hide a different, live session named by dotenv: that case is
   // `active` above.
   const expired = records.find((binding) => isExpired(binding, now));
@@ -153,10 +124,80 @@ export function cloudVerdict(
     return refuse(expired, 'expired');
   }
   if (probe.state === 'inactive') {
-    const ended = records.find(({ device }) => device.id === probe.sessionId);
+    const ended = unlistedBinding(records, probe.sessionId, now);
     if (ended) return refuse(ended, 'ended');
   }
   return { kind: 'none', probe };
+}
+
+/** The ids of the live bindings, this platform's first (`claimable`), because a probe that lists none names the first. */
+function boundIdsFor(
+  bindings: CloudBinding[],
+  platform: CloudPlatform | null,
+  now: Date
+): string[] {
+  const ordered = platform == null ? bindings : claimable(bindings, platform, now);
+  return live(ordered, now).map(({ device }) => device.id);
+}
+
+/** The verdict for a selected session, queued or up. */
+function sessionVerdict(
+  bindings: CloudBinding[],
+  probe: LiveCloudSessionProbe,
+  platform: CloudPlatform | null,
+  now: Date,
+  use: CloudRungUse
+): CloudVerdict<CloudSessionProbe> {
+  const { session } = probe;
+  if (use === 'fallback' && notUsableHere(probe, platform)) return { kind: 'none', probe };
+  // A session is created for one platform and keeps it, so a flag that names the other one is
+  // answered with the mismatch, whether the session is up or still pending.
+  if (platform != null && session.platform != null && session.platform !== platform) {
+    return {
+      kind: 'refuse',
+      error: cloudPlatformMismatchError(platform, session.platform, session.id),
+    };
+  }
+  const sessionPlatform = session.platform ?? platform;
+  if (probe.state === 'queued') {
+    return {
+      kind: 'refuse',
+      error: cloudSessionQueuedError({ ...session, platform: sessionPlatform }),
+    };
+  }
+  // The URL shape differs per platform, so a session that reported none, read with no flag that
+  // names one, is not a device this rung can hand out.
+  if (sessionPlatform == null) {
+    return { kind: 'refuse', error: cloudPlatformUnknownError(session.id) };
+  }
+  const record = bindings.find(({ device }) => device.id === session.id) ?? null;
+  if (record && isExpired(record, now)) {
+    return refuse(record, 'expired');
+  }
+  return {
+    kind: 'device',
+    device: {
+      platform: sessionPlatform,
+      id: session.id,
+      // The session's own `--name` when it has one, because a project with several sessions up
+      // has just had one chosen for it, and the name is what says which (llp/0005 §Cloud simulator).
+      name: session.name ?? 'EAS Simulator session',
+    },
+    extend: record,
+  };
+}
+
+/**
+ * The live binding the probe did not select, so it is not up. The listing selects a live binding of
+ * the platform asked, so a probe that names an id of another platform still means this one's ended.
+ */
+function unlistedBinding(
+  records: CloudBinding[],
+  sessionId: string,
+  now: Date
+): CloudBinding | undefined {
+  const open = live(records, now);
+  return open.find(({ device }) => device.id === sessionId) ?? open[0];
 }
 
 /** A session the fallback rung names next to the local refusal: still pending, or another platform. */

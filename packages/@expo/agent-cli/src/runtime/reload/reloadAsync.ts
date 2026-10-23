@@ -1253,7 +1253,7 @@ async function reloadOnDeviceAsync(
         method: 'device',
         ok: false,
         reason: session
-          ? `this worktree's device is ${session.device.platform} EAS Simulator session ${session.device.id}; the relaunch acts on it only with --eas: run "${PROGRAM_PREFIX} runtime:reload --eas"`
+          ? `this worktree's device is ${session.device.platform} EAS Simulator session ${session.device.id}; the relaunch acts on it only with --eas: run "${PROGRAM_PREFIX} runtime:reload --${session.device.platform} --eas"`
           : error instanceof Error
             ? error.message.split('\n')[0]!
             : String(error),

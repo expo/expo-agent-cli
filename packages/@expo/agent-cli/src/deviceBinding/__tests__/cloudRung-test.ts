@@ -1,5 +1,6 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Readers
 import { vol } from 'memfs';
+import path from 'path';
 
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
@@ -123,6 +124,24 @@ describe(cloudVerdict, () => {
     });
   });
 
+  it.each([
+    ['unknown', cloudProbe.unknown()],
+    ['unavailable', cloudProbe.unavailable()],
+  ])('hands back an %s probe as no device, even when the only binding expired', (_state, probe) => {
+    expect(cloudVerdict([dead], probe, 'ios', NOW)).toEqual({ kind: 'none', probe });
+  });
+
+  it('refuses ended for the platform asked, when the probe named the other platform first', () => {
+    const ios = cloudBindingFor(ROOT, 'ios', 'sess-ios');
+    const android = cloudBindingFor(ROOT, 'android', 'sess-and');
+    const verdict = cloudVerdict([ios, android], cloudProbe.inactive('sess-ios'), 'android', NOW);
+
+    expect(verdict).toMatchObject({
+      kind: 'refuse',
+      error: { message: expect.stringContaining('The bound android EAS session is ended.') },
+    });
+  });
+
   it('extends the binding that names the active session', () => {
     expect(cloudVerdict([live], active('sess-1'), null, NOW)).toEqual({
       kind: 'device',
@@ -189,6 +208,41 @@ describe(cloudRungAsync, () => {
     expect(error.message).toContain(file('android'));
     expect(error.message).toContain('dev --android');
     expect(probeCloudSessionAsync).not.toHaveBeenCalled();
+  });
+
+  it('lists the bindings of the platform asked first in the probe', async () => {
+    writeCloudBinding(ROOT, 'ios', 'sess-ios');
+    writeCloudBinding(ROOT, 'android', 'sess-and');
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.none());
+
+    await cloudRungAsync(ROOT, 'android', 'required', fakeTools());
+
+    expect(probeCloudSessionAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ boundIds: ['sess-and', 'sess-ios'] })
+    );
+  });
+
+  it('names the eas bind command for an unreadable binding file', async () => {
+    vol.mkdirSync(path.dirname(file('ios')), { recursive: true });
+    vol.writeFileSync(file('ios'), '{');
+
+    const error = await cloudRungAsync(ROOT, 'ios', 'required', fakeTools()).catch((e) => e);
+
+    expect(error.exitCode).toBe(7);
+    expect(error.message).toContain('dev --ios --eas --detach --wait-ready');
+  });
+
+  it('names the cloud wording when the lease is lost to a rebind during the extension', async () => {
+    writeCloudBinding(ROOT, 'ios', 'sess-1');
+    vi.mocked(probeCloudSessionAsync).mockImplementation(async () => {
+      writeCloudBinding(ROOT, 'ios', 'sess-2');
+      return active('sess-1');
+    });
+
+    const error = await cloudRungAsync(ROOT, 'ios', 'required', fakeTools()).catch((e) => e);
+
+    expect(error.message).toContain('The bound ios EAS session is expired.');
+    expect(error.message).toContain('dev --ios --eas --detach --wait-ready');
   });
 
   it('refuses a binding file that is expired, with the eas bind command', async () => {

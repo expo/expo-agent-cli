@@ -493,6 +493,39 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     );
   });
 
+  function writeUnreadableCloudFile(): void {
+    const file = bindingPathFor(projectRoot, 'ios', 'cloud');
+    vol.mkdirSync(path.dirname(file), { recursive: true });
+    vol.writeFileSync(file, '{');
+  }
+
+  // The unreadable file is in no list of bindings, so a gate that counts bindings skips the rung.
+  it(`refuses an unreadable cloud binding file, with no dotenv id and no binding`, async () => {
+    mockPlatform('linux');
+    cloudProject(null);
+    writeUnreadableCloudFile();
+
+    const error = await resolveDeviceAsync('ios', { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.code).toBe('NO_BOUND_DEVICE');
+    expect(error.message).toContain('does not parse');
+    expect(error.message).toContain('dev --ios --eas --detach --wait-ready');
+  });
+
+  it(`keeps the local refusal when only the other platform has an unreadable cloud file`, async () => {
+    mockPlatform('linux');
+    cloudProject(null);
+    writeUnreadableCloudFile();
+
+    const error = await resolveDeviceAsync('android', { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.message).not.toContain('does not parse');
+  });
+
   it(`keeps the route URL above the How line of the refusal`, async () => {
     mockPlatform('linux');
     cloudProject('sess-1');
