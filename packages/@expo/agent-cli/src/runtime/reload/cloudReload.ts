@@ -72,7 +72,7 @@ export interface CloudReloadResult {
 export async function reloadOnCloudSimulatorAsync(
   projectRoot: string,
   options: ReloadOptions,
-  { devServerUrl, targetAppIds }: { devServerUrl: string; targetAppIds: string[] }
+  { targetAppIds }: { targetAppIds: string[] }
 ): Promise<CloudReloadResult> {
   // The same resolution `navigate --eas` runs, which is the one that has been seen to open an app
   // on a live session [observed — 2026-08-26, exit 0]. `routeCheck: false` because the caller
