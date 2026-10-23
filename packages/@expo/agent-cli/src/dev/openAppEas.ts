@@ -721,6 +721,7 @@ async function resolveEasOpenUrlAsync(
     platform: options.platform,
     devServerUrl: options.devServerUrl,
     devServerUrlSource: 'discovered',
+    tunnelHost,
     routeCheck: false,
     command: 'navigate',
   });
@@ -731,15 +732,13 @@ async function resolveEasOpenUrlAsync(
       `no URL to point ${options.expoGo ? 'Expo Go' : 'the development build'} at this dev server could be built — ${resolved.resolution}`
     );
   }
-  // Full URL routes bypass openRoute's host check. Refuse a resolver fallback to LAN/loopback or
-  // a stale host if the tunnel changed between the manifest poll and connection URL resolution.
+  // Full URL routes bypass openRoute's host check. Refuse a resolver fallback to LAN or loopback,
+  // or any other host than the tunnel just read from the manifest.
   const serverUrl = options.expoGo
     ? connect.url
     : new URL(connect.url).searchParams.get('__expo_url');
   if (!serverUrl || new URL(serverUrl).host !== tunnelHost) {
-    throw new Error(
-      'the connection URL does not point at the current tunnel — retry once the tunnel is ready'
-    );
+    throw new Error('the connection URL does not point at the current tunnel');
   }
   return connect.url;
 }

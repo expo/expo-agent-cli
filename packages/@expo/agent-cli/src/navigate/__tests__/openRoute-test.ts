@@ -4,7 +4,7 @@
 // caller's own or a finding of the run holding them. Everything else in `openRoute.ts` needs a dev
 // server, a device and a project; this does not, and it is the branch that was wrong.
 
-import { isCallerNamedDevServer } from '../openRoute';
+import { currentTunnelHost, isCallerNamedDevServer } from '../openRoute';
 
 describe(isCallerNamedDevServer, () => {
   it(`should treat a URL with no source as the caller's, which is the safe reading`, () => {
@@ -32,5 +32,30 @@ describe(isCallerNamedDevServer, () => {
   it(`should say no when there is no URL at all, whatever the source says`, () => {
     expect(isCallerNamedDevServer({ devServerUrl: null })).toBe(false);
     expect(isCallerNamedDevServer({ devServerUrl: null, devServerUrlSource: 'flag' })).toBe(false);
+  });
+});
+
+describe(currentTunnelHost, () => {
+  const logReach = {
+    running: true,
+    advertised: {
+      url: 'https://old.tunnel.example',
+      host: 'old.tunnel.example',
+      hostType: 'tunnel',
+    },
+  } as any;
+
+  it('uses the tunnel host the caller just observed over the log host', () => {
+    expect(currentTunnelHost({ tunnelHost: 'new.tunnel.example' }, logReach)).toBe(
+      'new.tunnel.example'
+    );
+  });
+
+  it('falls back to the current tunnel of the log', () => {
+    expect(currentTunnelHost({}, logReach)).toBe('old.tunnel.example');
+  });
+
+  it('returns null for a log that is not a current tunnel', () => {
+    expect(currentTunnelHost({}, { ...logReach, running: false })).toBeNull();
   });
 });

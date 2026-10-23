@@ -365,6 +365,27 @@ describe(openAppOnEasAsync, () => {
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
 
+  it('builds a reused session link from the tunnel host just read from the manifest', async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-up', platform: 'ios' })
+    );
+    vi.mocked(openRouteAsync).mockResolvedValue({
+      exitCode: 0,
+      command: 'eas simulator:exec',
+    } as any);
+    await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: false,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+      keepSession: true,
+    });
+    expect(resolveRouteUrlAsync).toHaveBeenCalledWith(
+      projectRoot,
+      expect.objectContaining({ tunnelHost: 'abc.tunnel.example' })
+    );
+  });
+
   it.each(['http://127.0.0.1:8081', 'http://192.168.1.2:8081', 'https://old.tunnel.example'])(
     'refuses a reused development-client URL pointing at %s instead of the current tunnel',
     async (origin) => {
@@ -388,6 +409,7 @@ describe(openAppOnEasAsync, () => {
       });
       expect(report.opened).toBe(false);
       expect(report.reason).toContain('does not point at the current tunnel');
+      expect(report.reason).not.toContain('retry');
       expect(openRouteAsync).not.toHaveBeenCalled();
       expect(spawnCaptureAsync).not.toHaveBeenCalled();
     }
