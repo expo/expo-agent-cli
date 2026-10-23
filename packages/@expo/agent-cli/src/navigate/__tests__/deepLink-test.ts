@@ -1,10 +1,8 @@
 import { vol } from 'memfs';
 
 import { devClientConnectUrl } from '../connectUrl';
-import { spawn } from 'child_process';
-import path from 'path';
+import { getConfig } from '@expo/config';
 
-import { mockConfigLoader } from '../../project/__tests__/fakeConfigLoader';
 import {
   buildOpenUrlCommand,
   quoteForDeviceShell,
@@ -16,6 +14,8 @@ import {
 } from '../deepLink';
 
 const PROJECT_ROOT = '/fixtures/project';
+
+vi.mock('@expo/config', () => ({ getConfig: vi.fn() }));
 
 /** Create a project fixture in memory from a map of file name to contents. */
 function createProjectFixture(files: Record<string, string>): string {
@@ -185,37 +185,28 @@ describe(readProjectSchemeConfig, () => {
 });
 
 describe(resolveProjectSchemeConfigAsync, () => {
-  /**
-   * A project that resolves `expo/config`: the e2e fixture, whose stub `expo` package ships one.
-   * The config files themselves are planted in memory at the same path.
-   */
-  const DYNAMIC_ROOT = path.resolve(__dirname, '../../../e2e/fixtures/go-app');
-
   function createDynamicFixture(files: Record<string, string> = {}): string {
-    vol.fromJSON(
-      {
-        'app.config.ts': 'export default { scheme: "marmelade" };',
-        'package.json': JSON.stringify({ name: 'marmelade-app' }),
-        ...files,
-      },
-      DYNAMIC_ROOT
-    );
-    return DYNAMIC_ROOT;
-  }
-
-  function evaluated(exp: Record<string, unknown>): string {
-    return JSON.stringify({
-      exp,
-      staticConfigPath: null,
-      dynamicConfigPath: path.join(DYNAMIC_ROOT, 'app.config.ts'),
+    return createProjectFixture({
+      'app.config.ts': 'export default { scheme: "marmelade" };',
+      'package.json': JSON.stringify({ name: 'marmelade-app' }),
+      ...files,
     });
   }
 
+  function mockEvaluated(exp: Record<string, unknown>) {
+    vi.mocked(getConfig).mockReturnValue({
+      exp,
+      pkg: {},
+      staticConfigPath: null,
+      dynamicConfigPath: `${PROJECT_ROOT}/app.config.ts`,
+    } as never);
+  }
+
   beforeEach(() => {
-    vi.mocked(spawn).mockReset();
+    vi.mocked(getConfig).mockReset();
   });
 
-  it(`should spawn nothing for a static config`, async () => {
+  it(`should evaluate nothing for a static config`, async () => {
     const projectRoot = createProjectFixture({
       'app.json': JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
     });
@@ -227,10 +218,10 @@ describe(resolveProjectSchemeConfigAsync, () => {
       dynamicConfigFile: null,
       evaluationError: null,
     });
-    expect(spawn).not.toHaveBeenCalled();
+    expect(getConfig).not.toHaveBeenCalled();
   });
 
-  it(`should spawn nothing when --scheme names the scheme`, async () => {
+  it(`should evaluate nothing when --scheme names the scheme`, async () => {
     const projectRoot = createDynamicFixture();
 
     await expect(
@@ -242,16 +233,14 @@ describe(resolveProjectSchemeConfigAsync, () => {
       dynamicConfigFile: 'app.config.ts',
       evaluationError: null,
     });
-    expect(spawn).not.toHaveBeenCalled();
+    expect(getConfig).not.toHaveBeenCalled();
   });
 
   it(`should take scheme and slug from the evaluated config, over a static file beside it`, async () => {
     const projectRoot = createDynamicFixture({
       'app.json': JSON.stringify({ expo: { slug: 'static', scheme: 'staticapp' } }),
     });
-    mockConfigLoader({
-      messages: [evaluated({ slug: 'marmelade', scheme: ['marmelade', 'second'] })],
-    });
+    mockEvaluated({ slug: 'marmelade', scheme: ['marmelade', 'second'] });
 
     await expect(resolveProjectSchemeConfigAsync(projectRoot)).resolves.toEqual({
       scheme: 'marmelade',
@@ -260,12 +249,17 @@ describe(resolveProjectSchemeConfigAsync, () => {
       dynamicConfigFile: 'app.config.ts',
       evaluationError: null,
     });
-    expect(spawn).toHaveBeenCalledTimes(1);
+    // The public config, without its plugins: scheme and slug are declared fields.
+    expect(getConfig).toHaveBeenCalledWith(projectRoot, {
+      skipSDKVersionRequirement: true,
+      isPublicConfig: true,
+      skipPlugins: true,
+    });
   });
 
   it(`should report a config that names no scheme as evaluated`, async () => {
     const projectRoot = createDynamicFixture();
-    mockConfigLoader({ messages: [evaluated({ slug: 'demo' })] });
+    mockEvaluated({ slug: 'demo' });
 
     await expect(resolveProjectSchemeConfigAsync(projectRoot)).resolves.toEqual({
       scheme: null,
@@ -278,9 +272,8 @@ describe(resolveProjectSchemeConfigAsync, () => {
 
   it(`should keep the static read and say why when the evaluation fails`, async () => {
     const projectRoot = createDynamicFixture();
-    mockConfigLoader({
-      exitCode: 1,
-      stderr: 'Error: Cannot resolve app config\n    at load (config.js:1:2)\n',
+    vi.mocked(getConfig).mockImplementation(() => {
+      throw new Error('Cannot resolve app config');
     });
 
     await expect(resolveProjectSchemeConfigAsync(projectRoot)).resolves.toEqual({
@@ -288,7 +281,7 @@ describe(resolveProjectSchemeConfigAsync, () => {
       slug: 'marmelade-app',
       configFile: null,
       dynamicConfigFile: 'app.config.ts',
-      evaluationError: 'Error: Cannot resolve app config',
+      evaluationError: 'Cannot resolve app config',
     });
   });
 });
@@ -516,7 +509,7 @@ describe(resolveDeepLinkUrl, () => {
       config: config({
         slug: 'marmelade',
         dynamicConfigFile: 'app.config.ts',
-        evaluationError: 'Error: boom',
+        evaluationError: 'boom',
       }),
       isExpoGo: false,
     });
@@ -524,7 +517,7 @@ describe(resolveDeepLinkUrl, () => {
     expect(expectUrl(result)).toMatchObject({
       url: 'exp+marmelade://profile/42',
       resolution:
-        'app.config.ts could not be evaluated (Error: boom) and no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "marmelade"',
+        'app.config.ts could not be evaluated (boom) and no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "marmelade"',
     });
   });
 
@@ -533,13 +526,13 @@ describe(resolveDeepLinkUrl, () => {
       route: '/profile/42',
       config: config({
         dynamicConfigFile: 'app.config.ts',
-        evaluationError: 'Error: boom',
+        evaluationError: 'boom',
       }),
       isExpoGo: false,
     });
 
     expect(expectError(result)).toContain(
-      'Why: this project uses app.config.ts, and evaluating it failed: Error: boom.'
+      'Why: this project uses app.config.ts, and evaluating it failed: boom.'
     );
   });
 

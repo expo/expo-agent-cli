@@ -1,132 +1,103 @@
-import { spawn } from 'child_process';
-import path from 'path';
+import { getConfig } from '@expo/config';
+import { vol } from 'memfs';
 
-import { evaluateExpoConfigAsync } from '../evaluatedConfig';
-import { lastSpawn, mockConfigLoader } from './fakeConfigLoader';
+import { evaluateExpoConfig } from '../evaluatedConfig';
 
-/**
- * A project that resolves `expo/config`: the e2e fixture, whose stub `expo` package ships a
- * `config.js`. Resolution goes through Node's own loader, so it needs a real directory.
- */
-const PROJECT_ROOT = path.resolve(__dirname, '../../../e2e/fixtures/go-app');
+vi.mock('@expo/config', () => ({ getConfig: vi.fn() }));
 
-const CONFIG = {
-  exp: { slug: 'demo', scheme: 'demoapp' },
-  staticConfigPath: null,
-  dynamicConfigPath: `${PROJECT_ROOT}/app.config.ts`,
-};
+const projectRoot = '/project';
+
+function mockConfig(
+  exp: Record<string, unknown>,
+  files: Partial<{ static: string; dynamic: string }> = {}
+) {
+  vi.mocked(getConfig).mockReturnValue({
+    exp,
+    pkg: {},
+    rootConfig: {},
+    staticConfigPath: files.static ? `${projectRoot}/${files.static}` : null,
+    dynamicConfigPath: files.dynamic ? `${projectRoot}/${files.dynamic}` : null,
+    hasUnusedStaticConfig: false,
+  } as never);
+}
 
 beforeEach(() => {
-  vi.mocked(spawn).mockReset();
+  vol.reset();
+  vi.mocked(getConfig).mockReset();
+  delete process.env.NODE_ENV;
+  delete process.env.BABEL_ENV;
 });
 
-describe(evaluateExpoConfigAsync, () => {
-  it(`should spawn nothing for a project that cannot resolve expo/config`, async () => {
-    await expect(
-      evaluateExpoConfigAsync('/no/such/project', { mode: 'development' })
-    ).resolves.toEqual({
-      ok: false,
-      error: 'expo/config is not installed in the project',
-    });
-    expect(spawn).not.toHaveBeenCalled();
-  });
+describe(evaluateExpoConfig, () => {
+  it(`should evaluate with the options expo config uses, for the mode the caller names`, () => {
+    mockConfig({ slug: 'demo', scheme: 'demoapp' }, { dynamic: 'app.config.ts' });
 
-  it(`should run the loader with node, in the project, in the mode the caller names`, async () => {
-    mockConfigLoader({ messages: [JSON.stringify(CONFIG)] });
-
-    const result = await evaluateExpoConfigAsync(PROJECT_ROOT, {
-      mode: 'development',
+    const result = evaluateExpoConfig(projectRoot, {
+      mode: 'production',
       isPublicConfig: true,
+      skipPlugins: true,
     });
 
     expect(result).toEqual({
       ok: true,
-      exp: CONFIG.exp,
+      exp: { slug: 'demo', scheme: 'demoapp' },
       staticConfigFile: null,
       dynamicConfigFile: 'app.config.ts',
     });
-    const { command, args, options } = lastSpawn();
-    expect(command).toBe(process.execPath);
-    expect(args[0]).toMatch(/[/\\]configLoader[/\\]index\.js$/);
-    expect(args.slice(1)).toEqual([PROJECT_ROOT, '--mode', 'development', '--public']);
-    expect(options).toMatchObject({
-      cwd: PROJECT_ROOT,
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-      env: expect.objectContaining({ NODE_ENV: 'development', __EXPO_CONFIG_MODE: 'development' }),
-    });
-    // This process keeps its own environment: the mode is set on the child's copy only.
-    expect(process.env.__EXPO_CONFIG_MODE).toBeUndefined();
-  });
-
-  // A release flow such as `deploy` reads the config a production build sees.
-  it(`should evaluate in production mode when the caller says so, and pass --skip-plugins through`, async () => {
-    mockConfigLoader({ messages: [JSON.stringify(CONFIG)] });
-
-    await evaluateExpoConfigAsync(PROJECT_ROOT, { mode: 'production', skipPlugins: true });
-
-    const { args, options } = lastSpawn();
-    expect(args.slice(1)).toEqual([PROJECT_ROOT, '--mode', 'production', '--skip-plugins']);
-    expect(options.env).toMatchObject({ NODE_ENV: 'production', __EXPO_CONFIG_MODE: 'production' });
-  });
-
-  it.each([
-    {
-      name: 'the config throws',
-      run: {
-        exitCode: 1,
-        stderr: 'Error: Cannot resolve app config\n    at load (config.js:1:2)\n',
-      },
-      error: 'Error: Cannot resolve app config',
-    },
-    {
-      name: 'the loader exits without a word',
-      run: { exitCode: 1 },
-      error: 'expo/config exited with code 1',
-    },
-    {
-      name: 'node could not be started',
-      run: { spawnError: Object.assign(new Error('spawn node ENOENT'), { code: 'ENOENT' }) },
-      error: 'node could not be started (ENOENT)',
-    },
-    {
-      name: 'the loader sends nothing',
-      run: { exitCode: 0 },
-      error: 'expo/config printed no config',
-    },
-    {
-      name: 'the loader sends something that is not a config',
-      run: { messages: ['{"hello":1}'] },
-      error: 'expo/config printed no config',
-    },
-  ])(`should answer ok: false when $name`, async ({ run, error }) => {
-    mockConfigLoader(run);
-
-    await expect(evaluateExpoConfigAsync(PROJECT_ROOT, { mode: 'development' })).resolves.toEqual({
-      ok: false,
-      error,
+    expect(getConfig).toHaveBeenCalledWith(projectRoot, {
+      skipSDKVersionRequirement: true,
+      isPublicConfig: true,
+      skipPlugins: true,
     });
   });
 
-  it(`should kill a loader that outlives its budget and say so`, async () => {
-    vi.useFakeTimers();
+  // The env files are loaded for the evaluation only: what `expo start` would serve is this
+  // process's own environment, and a later subprocess inherits that one.
+  it(`should set the mode for the evaluation and put the environment back afterwards`, () => {
+    process.env.BABEL_ENV = 'inherited';
+    let seen: { NODE_ENV?: string; BABEL_ENV?: string } = {};
+    vi.mocked(getConfig).mockImplementation(() => {
+      seen = { NODE_ENV: process.env.NODE_ENV, BABEL_ENV: process.env.BABEL_ENV };
+      return { exp: {}, pkg: {}, staticConfigPath: null, dynamicConfigPath: null } as never;
+    });
+
+    evaluateExpoConfig(projectRoot, { mode: 'development' });
+
+    expect(seen).toEqual({ NODE_ENV: 'development', BABEL_ENV: undefined });
+    expect(process.env.NODE_ENV).toBeUndefined();
+    expect(process.env.BABEL_ENV).toBe('inherited');
+    expect(process.env.__EXPO_ENV_LOADED).toBeUndefined();
+  });
+
+  // Project code runs here, and a `--json` run owns stdout (llp/0006 §Output contract).
+  it(`should send what the config prints to stderr`, () => {
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     try {
-      const { kill } = mockConfigLoader({ hang: true });
-      const pending = evaluateExpoConfigAsync(PROJECT_ROOT, {
-        mode: 'development',
-        timeoutMs: 5_000,
+      vi.mocked(getConfig).mockImplementation(() => {
+        process.stdout.write('hello from app.config.js\n');
+        return { exp: {}, pkg: {}, staticConfigPath: null, dynamicConfigPath: null } as never;
       });
-      await vi.advanceTimersByTimeAsync(5_000);
-      // The kill lands as a close with a signal, which is what the real child reports.
-      expect(kill).toHaveBeenCalledWith('SIGKILL');
-      const calls = vi.mocked(spawn).mock.results;
-      (calls[calls.length - 1]!.value as NodeJS.EventEmitter).emit('close', null, 'SIGKILL');
 
-      await expect(pending).resolves.toEqual({
-        ok: false,
-        error: 'expo/config did not answer within 5s',
-      });
+      evaluateExpoConfig(projectRoot, { mode: 'development' });
+
+      expect(stderr).toHaveBeenCalledWith('hello from app.config.js\n');
+      expect(stdout).not.toHaveBeenCalled();
     } finally {
-      vi.useRealTimers();
+      stdout.mockRestore();
+      stderr.mockRestore();
     }
+  });
+
+  it(`should answer ok: false with the first line of what the config threw`, () => {
+    vi.mocked(getConfig).mockImplementation(() => {
+      throw new Error('Cannot resolve app config\n  at app.config.ts:3');
+    });
+
+    expect(evaluateExpoConfig(projectRoot, { mode: 'development' })).toEqual({
+      ok: false,
+      error: 'Cannot resolve app config',
+    });
+    expect(process.env.NODE_ENV).toBeUndefined();
   });
 });
