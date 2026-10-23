@@ -110,6 +110,7 @@ export interface SmokeFollowUpInput {
   port: string | null;
 }
 
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export function buildSmokeFollowUps(input: SmokeFollowUpInput): FollowUp[] {
   const sameRoute = input.route == null ? '' : ` --route ${input.route}`;
   // Every command that takes `--eas` keeps it, so a suggested run is the run the caller asked

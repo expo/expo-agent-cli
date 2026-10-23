@@ -228,43 +228,66 @@ export function resolveDeepLinkUrl({
   }
 
   if (isExpoGo) {
-    // The tunnel host first: it is the one address every device can use, and the only one a cloud
-    // simulator can.
-    const tunnelHost = nonEmptyString(reachHost);
-    const host = tunnelHost ?? (devServerUrl != null ? hostFromUrl(devServerUrl) : null);
-    if (host == null) {
-      return {
-        ok: false,
-        error: [
-          'Cannot build an Expo Go URL because the dev server URL is unknown.',
-          'Why: Expo Go deep links have the shape exp://<host>/--/<route>, so they need the running dev server host.',
-          `How: start the dev server with \`${PROGRAM_PREFIX} dev --detach${platformFlag}\` and run this command again, or pass --scheme to target a development build instead.`,
-        ].join('\n'),
-        // The How: and the Try: named different commands here, which is a failure telling a reader
-        // two things [observed — friction run 5]. Both are the one action that fixes this, and both
-        // keep the platform the caller named (F142).
-        suggestedCommand: `${PROGRAM_PREFIX} dev --detach${platformFlag}`,
-      };
-    }
-    const where = tunnelHost
-      ? `tunnel host ${host}, which is the one address a device off this machine can reach`
-      : `dev server host ${host}`;
-    if (routePath.length === 0) {
-      return {
-        ok: true,
-        url: `exp://${host}${EXPO_GO_ROOT_PATH}`,
-        resolution: `target app is Expo Go and the route is the root route, so the exp:// shape was used with a query marker that survives the Expo Go link handler, with ${where}`,
-        host,
-      };
-    }
+    return resolveExpoGoUrl({ routePath, devServerUrl, reachHost, platformFlag });
+  }
+
+  return resolveConfigUrl(routePath, config);
+}
+
+/** Build the Expo Go `exp://` URL, or the failure when no host is known. */
+function resolveExpoGoUrl({
+  routePath,
+  devServerUrl,
+  reachHost,
+  platformFlag,
+}: {
+  routePath: string;
+  devServerUrl: string | null | undefined;
+  reachHost: string | null | undefined;
+  platformFlag: string;
+}): ResolveDeepLinkUrlResult {
+  // The tunnel host first: it is the one address every device can use, and the only one a cloud
+  // simulator can.
+  const tunnelHost = nonEmptyString(reachHost);
+  const host = tunnelHost ?? (devServerUrl != null ? hostFromUrl(devServerUrl) : null);
+  if (host == null) {
+    return {
+      ok: false,
+      error: [
+        'Cannot build an Expo Go URL because the dev server URL is unknown.',
+        'Why: Expo Go deep links have the shape exp://<host>/--/<route>, so they need the running dev server host.',
+        `How: start the dev server with \`${PROGRAM_PREFIX} dev --detach${platformFlag}\` and run this command again, or pass --scheme to target a development build instead.`,
+      ].join('\n'),
+      // The How: and the Try: named different commands here, which is a failure telling a reader
+      // two things [observed — friction run 5]. Both are the one action that fixes this, and both
+      // keep the platform the caller named (F142).
+      suggestedCommand: `${PROGRAM_PREFIX} dev --detach${platformFlag}`,
+    };
+  }
+  const where = tunnelHost
+    ? `tunnel host ${host}, which is the one address a device off this machine can reach`
+    : `dev server host ${host}`;
+  if (routePath.length === 0) {
     return {
       ok: true,
-      url: `exp://${host}/--/${routePath}`,
-      resolution: `target app is Expo Go, so the exp:// shape was used with ${where}`,
+      url: `exp://${host}${EXPO_GO_ROOT_PATH}`,
+      resolution: `target app is Expo Go and the route is the root route, so the exp:// shape was used with a query marker that survives the Expo Go link handler, with ${where}`,
       host,
     };
   }
+  return {
+    ok: true,
+    url: `exp://${host}/--/${routePath}`,
+    resolution: `target app is Expo Go, so the exp:// shape was used with ${where}`,
+    host,
+  };
+}
 
+/** Build the URL from the project config: `scheme`, then `exp+<slug>`, else the failure. */
+function resolveConfigUrl(
+  routePath: string,
+  config: ResolveDeepLinkUrlParams['config']
+): ResolveDeepLinkUrlResult {
   if (config.scheme != null) {
     return {
       ok: true,

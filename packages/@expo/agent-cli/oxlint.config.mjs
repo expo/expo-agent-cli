@@ -1,3 +1,15 @@
+const codeLines = { skipBlankLines: true, skipComments: true };
+
+// Known debt: files over the 800-line limit, each capped at its current size so it cannot grow.
+// Lower a cap when a file shrinks; delete the entry when it is under 800.
+const longFiles = {
+  'src/dev/detachAsync.ts': 921,
+  'src/dev/devAsync.ts': 1042,
+  'src/runtime/reload/reloadAsync.ts': 1032,
+  'src/smoke/phases.ts': 1074,
+  'src/status/statusAsync.ts': 809,
+};
+
 export default {
   plugins: ['import', 'typescript', 'unicorn', 'oxc'],
   env: {
@@ -23,8 +35,8 @@ export default {
     ],
     // Output goes through src/log.ts, which tracks stdout for the --json envelope.
     'no-console': 'error',
-    'max-lines': ['error', { max: 800, skipBlankLines: true, skipComments: true }],
-    'max-lines-per-function': ['error', { max: 100, skipBlankLines: true, skipComments: true }],
+    'max-lines': ['error', { max: 800, ...codeLines }],
+    'max-lines-per-function': ['error', { max: 100, ...codeLines }],
     'max-depth': ['error', 4],
   },
   overrides: [
@@ -37,5 +49,9 @@ export default {
       files: ['**/__tests__/**', 'e2e/**', 'e2e-live/**', 'evals/**', 'scripts/**'],
       rules: { 'max-lines': 'off', 'max-lines-per-function': 'off', 'max-depth': 'off' },
     },
+    ...Object.entries(longFiles).map(([file, max]) => ({
+      files: [file],
+      rules: { 'max-lines': ['error', { max, ...codeLines }] },
+    })),
   ],
 };

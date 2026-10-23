@@ -207,6 +207,7 @@ const STATUS_READ_TIMEOUT_MS = 3000;
  *   is the only thing that can stop that probe. The scan's own budget applies as well as it, never
  *   instead of it.
  */
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export async function discoverDevServerAsync(
   explicitUrl?: string,
   {

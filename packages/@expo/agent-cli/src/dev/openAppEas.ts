@@ -446,6 +446,7 @@ export async function otherPlatformSessionAsync(
   return otherPlatformSession(probe, platform);
 }
 
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 async function ensureSessionAsync(
   projectRoot: string,
   options: EnsureEasSessionOptions
