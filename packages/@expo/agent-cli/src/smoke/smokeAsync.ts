@@ -318,6 +318,7 @@ function explainOutcome(run: SmokeRun): string {
  * "is the bundle broken" or "which URL does this route deep-link to" is a second place for the
  * findings behind them to be forgotten.
  */
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): SmokeDeps {
   let bootBinding: Binding | undefined;
   // Built once and shared by every phase that reads a target, so no two phases can disagree about

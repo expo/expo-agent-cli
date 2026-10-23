@@ -174,6 +174,33 @@ export function evaluateUnsupportedError(devServerUrl: string): CommandError {
   return error;
 }
 
+/** The platforms, other than the requested one, that have an app on the dev server. */
+function otherPlatformsOf(
+  targets: Parameters<typeof scopeTargets>[0],
+  platform: NativePlatform | null | undefined,
+  deviceIndex: Parameters<typeof scopeTargets>[2] | null | undefined
+): NativePlatform[] {
+  if (platform == null) {
+    return [];
+  }
+  const { otherPlatform } = scopeTargets(targets, platform, deviceIndex ?? EMPTY_DEVICE_INDEX);
+  return [...new Set(otherPlatform.map((entry) => entry.platform))].sort();
+}
+
+/** The error for a debugger window that could not be read. */
+function runtimeErrorsFailedError(devServerUrl: string, error: unknown): CommandError {
+  const failure = new CommandError(
+    'RUNTIME_ERRORS_FAILED',
+    [
+      `Could not read runtime errors from the app (dev server ${devServerUrl}).`,
+      `Why: ${error instanceof Error ? error.message : String(error)}`,
+      `How: run "${PROGRAM_PREFIX} dev:logs" to check for bundling errors that can prevent the runtime from opening. If the app was reloading, "${PROGRAM_PREFIX} runtime:reload" waits for it to come back and exits 0 only when it has.`,
+    ].join('\n')
+  );
+  failure.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
+  return failure;
+}
+
 /** Listen for runtime errors from the running app over a window and print what arrived. */
 export async function runtimeErrorsAsync(
   options: RuntimeErrorsOptions,
@@ -202,18 +229,11 @@ export async function runtimeErrorsAsync(
   // @ref ../dev/logErrors — F105. Which *other* platforms have an app on this dev server, because
   // the log fallback below cannot tell their lines from this one's and a caveat that does not say so
   // is the overclaim. Computed from the read the preflight already made, so it costs nothing.
-  const otherPlatformsConnected =
-    options.platform == null
-      ? []
-      : [
-          ...new Set(
-            scopeTargets(
-              connection.targets,
-              options.platform,
-              deviceIndex ?? EMPTY_DEVICE_INDEX
-            ).otherPlatform.map((entry) => entry.platform)
-          ),
-        ].sort();
+  const otherPlatformsConnected = otherPlatformsOf(
+    connection.targets,
+    options.platform,
+    deviceIndex
+  );
 
   // Marked before the window opens, so the log read below is bounded the same way the debugger
   // window is: a log is cumulative, and reporting all of it as "what happened while I watched"
@@ -231,16 +251,7 @@ export async function runtimeErrorsAsync(
   try {
     errors = await collector.collectAsync();
   } catch (error: unknown) {
-    const failure = new CommandError(
-      'RUNTIME_ERRORS_FAILED',
-      [
-        `Could not read runtime errors from the app (dev server ${devServerUrl}).`,
-        `Why: ${error instanceof Error ? error.message : String(error)}`,
-        `How: run "${PROGRAM_PREFIX} dev:logs" to check for bundling errors that can prevent the runtime from opening. If the app was reloading, "${PROGRAM_PREFIX} runtime:reload" waits for it to come back and exits 0 only when it has.`,
-      ].join('\n')
-    );
-    failure.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
-    throw failure;
+    throw runtimeErrorsFailedError(devServerUrl, error);
   }
 
   errors = await symbolicateRuntimeErrorsAsync(errors, devServerUrl, context.projectRoot ?? null);

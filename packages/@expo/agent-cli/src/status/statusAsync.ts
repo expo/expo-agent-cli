@@ -247,6 +247,7 @@ function readOrphanSessions(
  * wrapped on its own: an unreadable project still reports a running dev server, and a dependency
  * graph the skill discovery cannot walk still reports the project.
  */
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions

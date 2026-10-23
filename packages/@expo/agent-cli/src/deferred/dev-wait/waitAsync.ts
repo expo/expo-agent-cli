@@ -50,6 +50,7 @@ const DISCOVERY_TIMEOUT_MS = 800;
  * @throws {CommandError} `NO_DEV_SERVER` when nothing answered, which is the one case where there
  * was nothing to wait on and so nothing to report.
  */
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export async function devWaitAsync(projectRoot: string, options: DevWaitOptions): Promise<number> {
   const startedAt = Date.now();
   const discovery = await discoverDevServerAsync(options.devServerUrl ?? undefined, {

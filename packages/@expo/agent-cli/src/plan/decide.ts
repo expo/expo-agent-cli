@@ -40,6 +40,7 @@ const HASH_DISPLAY_LENGTH = 8;
  * @param state Facts gathered by the project-state probe.
  * @param options Target platform and the recorded build fingerprints, supplied by the caller.
  */
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export function decideStartPlan(
   state: ProjectState,
   options: DecideStartPlanOptions = {}

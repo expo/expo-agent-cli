@@ -214,117 +214,15 @@ export async function navigateAsync(
       : [];
 
   if (json) {
-    const report: NavigateResultJson = {
-      route: opened.route,
-      url: opened.url,
-      devServerUrl: opened.devServerUrl,
-      devServerSource: opened.devServerSource,
-      resolution: opened.resolution,
-      target: opened.target,
-      hostType: opened.hostType,
-      connect: opened.connect,
-      printUrl: false,
-      deviceBackend: opened.deviceBackend,
-      platform: opened.platform,
-      deviceId: opened.deviceId,
-      appId: opened.appId,
-      command: opened.command,
-      exitCode: opened.exitCode,
-      launch: opened.launch,
-      routeCheck: opened.routeCheck,
-      reversedPort: opened.reverse?.ok ? opened.reverse.port : null,
-      attached: opened.attach.confirmed,
-      attachWaitedMs: opened.attach.waitedMs,
-      attachRecovered: opened.attach.recovered,
-      attachAlert: opened.attach.alert,
-      followups,
-    };
     // The object is the whole of stdout, so the output can be piped into a parser. The failure
     // below still explains itself, on stderr.
-    Log.log(JSON.stringify(report, null, 2));
+    Log.log(JSON.stringify(buildNavigateReport(opened, followups), null, 2));
   } else {
-    // The backend, not only the platform: `Device ios <udid>` reads as a simulator on this desk,
-    // and a run that drove an EAS session has to say so on the line a reader scans.
-    const deviceLabel = opened.deviceName
-      ? `${opened.deviceName} (${opened.deviceId})`
-      : opened.deviceId;
-    const deviceLine =
-      opened.deviceBackend === 'cloud'
-        ? chalk`{bold Device} cloud ${opened.platform} ${deviceLabel}{dim  · an EAS Simulator session, not a device on this machine}`
-        : chalk`{bold Device} ${opened.platform} ${deviceLabel}`;
-    Log.log(
-      [
-        chalk`{bold URL} ${opened.url}`,
-        chalk`{dim  ${opened.resolution}}`,
-        chalk`{dim  target: ${opened.target}}`,
-        chalk`{bold Dev server} ${opened.devServerUrl}{dim  · via ${opened.devServerSource}}`,
-        deviceLine,
-        // Always a line when a reverse was needed, whether or not it worked: the absence of one is
-        // not something a reader can notice, and this is the step F50 was missing entirely.
-        ...(opened.reverse?.ran
-          ? [
-              chalk`{bold Port} ${
-                opened.reverse.ok
-                  ? chalk.green(`reversed tcp:${opened.reverse.port}`)
-                  : chalk.red(`not reversed · ${opened.reverse.reason}`)
-              }{dim  · ${opened.reverse.command}}`,
-            ]
-          : []),
-        chalk`{dim  ${opened.command}}`,
-        // Above `App`, in the order the two links went out. Without this line the report names one
-        // URL for a run that delivered two, and the reader cannot tell a navigation from a cold
-        // load — which is the difference between "the app moved" and "the app started" (F123).
-        ...(opened.launch
-          ? [
-              chalk`{bold Launch} ${opened.launch.url}`,
-              chalk`{dim  the app was not loaded, so the dev launcher URL was opened first · ${
-                opened.launch.exitCode === 0
-                  ? opened.launch.attached
-                    ? `it attached after ${opened.launch.waitedMs}ms`
-                    : `nothing attached within ${opened.launch.waitedMs}ms`
-                  : `the device refused it (exit ${opened.launch.exitCode ?? 'on a signal'})`
-              }}`,
-            ]
-          : []),
-        chalk`{bold App} ${
-          opened.attach.confirmed === true
-            ? chalk.green('attached') +
-              chalk.dim(
-                ` · ${opened.attach.targets} ${opened.platform} debugger ${
-                  opened.attach.targets === 1 ? 'target' : 'targets'
-                } after ${opened.attach.waitedMs}ms${
-                  opened.attach.recovered ? ', after a restart' : ''
-                }`
-              )
-            : opened.attach.confirmed === false
-              ? chalk.red('not attached') + chalk.dim(` · ${opened.attach.reason}`)
-              : chalk.dim(`not checked · ${opened.attach.reason}`)
-        }`,
-        chalk`{bold Route} ${
-          opened.routeCheck.ok
-            ? `${opened.routeCheck.matched}${chalk.dim(
-                ` · 1 of ${opened.routeCheck.routeCount} routes in this project${
-                  opened.routeCheck.matched === route ? '' : ', matched as a pattern'
-                }`
-              )}`
-            : chalk.dim(`not checked · ${opened.routeCheck.reason}`)
-        }`,
-      ].join('\n')
-    );
+    Log.log(formatNavigateSummary(opened, route));
   }
 
   if (opened.exitCode !== 0) {
-    Log.error(
-      [
-        chalk.red(
-          `The device did not open the deep link (${opened.command} exited with ${opened.exitCode ?? 'a signal'}).`
-        ),
-        `Why: ${opened.stderr.trim() || opened.stdout.trim() || 'the device tool reported no output.'}`,
-        opened.isExpoGo
-          ? `How: make sure Expo Go is installed on this device and the dev server at ${opened.devServerUrl} is running, then run this command again.`
-          : `How: make sure the app is installed on this device and its scheme matches ${opened.url.split('://')[0]}://. Rebuild the app after changing the "scheme" field, then run this command again.`,
-      ].join('\n')
-    );
+    Log.error(openRefusedMessage(opened));
     return 1;
   }
 
@@ -347,6 +245,118 @@ export async function navigateAsync(
   // Last, so the `Suggested next:` section is the last thing in the terminal, after what the device said.
   reportFollowUps('navigate', followups, { json });
   return 0;
+}
+
+/** The `--json` object for a run, with every key present. */
+function buildNavigateReport(opened: OpenRouteResult, followups: FollowUp[]): NavigateResultJson {
+  return {
+    route: opened.route,
+    url: opened.url,
+    devServerUrl: opened.devServerUrl,
+    devServerSource: opened.devServerSource,
+    resolution: opened.resolution,
+    target: opened.target,
+    hostType: opened.hostType,
+    connect: opened.connect,
+    printUrl: false,
+    deviceBackend: opened.deviceBackend,
+    platform: opened.platform,
+    deviceId: opened.deviceId,
+    appId: opened.appId,
+    command: opened.command,
+    exitCode: opened.exitCode,
+    launch: opened.launch,
+    routeCheck: opened.routeCheck,
+    reversedPort: opened.reverse?.ok ? opened.reverse.port : null,
+    attached: opened.attach.confirmed,
+    attachWaitedMs: opened.attach.waitedMs,
+    attachRecovered: opened.attach.recovered,
+    attachAlert: opened.attach.alert,
+    followups,
+  };
+}
+
+/** The human summary of a run: one line per fact, for stdout. */
+function formatNavigateSummary(opened: OpenRouteResult, route: string): string {
+  // The backend, not only the platform: `Device ios <udid>` reads as a simulator on this desk,
+  // and a run that drove an EAS session has to say so on the line a reader scans.
+  const deviceLabel = opened.deviceName
+    ? `${opened.deviceName} (${opened.deviceId})`
+    : opened.deviceId;
+  const deviceLine =
+    opened.deviceBackend === 'cloud'
+      ? chalk`{bold Device} cloud ${opened.platform} ${deviceLabel}{dim  · an EAS Simulator session, not a device on this machine}`
+      : chalk`{bold Device} ${opened.platform} ${deviceLabel}`;
+  return [
+    chalk`{bold URL} ${opened.url}`,
+    chalk`{dim  ${opened.resolution}}`,
+    chalk`{dim  target: ${opened.target}}`,
+    chalk`{bold Dev server} ${opened.devServerUrl}{dim  · via ${opened.devServerSource}}`,
+    deviceLine,
+    // Always a line when a reverse was needed, whether or not it worked: the absence of one is
+    // not something a reader can notice, and this is the step F50 was missing entirely.
+    ...(opened.reverse?.ran
+      ? [
+          chalk`{bold Port} ${
+            opened.reverse.ok
+              ? chalk.green(`reversed tcp:${opened.reverse.port}`)
+              : chalk.red(`not reversed · ${opened.reverse.reason}`)
+          }{dim  · ${opened.reverse.command}}`,
+        ]
+      : []),
+    chalk`{dim  ${opened.command}}`,
+    // Above `App`, in the order the two links went out. Without this line the report names one
+    // URL for a run that delivered two, and the reader cannot tell a navigation from a cold
+    // load — which is the difference between "the app moved" and "the app started" (F123).
+    ...(opened.launch
+      ? [
+          chalk`{bold Launch} ${opened.launch.url}`,
+          chalk`{dim  the app was not loaded, so the dev launcher URL was opened first · ${
+            opened.launch.exitCode === 0
+              ? opened.launch.attached
+                ? `it attached after ${opened.launch.waitedMs}ms`
+                : `nothing attached within ${opened.launch.waitedMs}ms`
+              : `the device refused it (exit ${opened.launch.exitCode ?? 'on a signal'})`
+          }}`,
+        ]
+      : []),
+    chalk`{bold App} ${
+      opened.attach.confirmed === true
+        ? chalk.green('attached') +
+          chalk.dim(
+            ` · ${opened.attach.targets} ${opened.platform} debugger ${
+              opened.attach.targets === 1 ? 'target' : 'targets'
+            } after ${opened.attach.waitedMs}ms${
+              opened.attach.recovered ? ', after a restart' : ''
+            }`
+          )
+        : opened.attach.confirmed === false
+          ? chalk.red('not attached') + chalk.dim(` · ${opened.attach.reason}`)
+          : chalk.dim(`not checked · ${opened.attach.reason}`)
+    }`,
+    chalk`{bold Route} ${
+      opened.routeCheck.ok
+        ? `${opened.routeCheck.matched}${chalk.dim(
+            ` · 1 of ${opened.routeCheck.routeCount} routes in this project${
+              opened.routeCheck.matched === route ? '' : ', matched as a pattern'
+            }`
+          )}`
+        : chalk.dim(`not checked · ${opened.routeCheck.reason}`)
+    }`,
+  ].join('\n');
+}
+
+/** The what/why/how message for a device that refused the deep link. */
+function openRefusedMessage(opened: OpenRouteResult): string {
+  return [
+    chalk.red(
+      `The device did not open the deep link (${opened.command} exited with ${opened.exitCode ?? 'a signal'}).`
+    ),
+    `Why: ${opened.stderr.trim() || opened.stdout.trim() || 'the device tool reported no output.'}`,
+    opened.isExpoGo
+      ? `How: make sure Expo Go is installed on this device and the dev server at ${opened.devServerUrl} is running, then run this command again.`
+      : `How: make sure the app is installed on this device and its scheme matches ${opened.url.split('://')[0]}://. Rebuild the app after changing the "scheme" field, then run this command again.`,
+  ].join('\n');
 }
 
 /**
