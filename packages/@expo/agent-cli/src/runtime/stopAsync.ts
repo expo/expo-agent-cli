@@ -178,20 +178,7 @@ export async function runtimeStopAsync(
   report.followups =
     result.ok && followUpsEnabled(options.followups) ? buildStopFollowUps(report) : [];
 
-  event('stop_app_done', {
-    stopped: report.stopped,
-    wasRunning: report.wasRunning ?? null,
-    appIdMismatch: report.appIdMismatch,
-  });
-  cliEvent('runtime_stop', {
-    stopped: report.stopped,
-    wasRunning: report.wasRunning,
-    platform: report.platform,
-    deviceBackend: report.deviceBackend,
-    deviceId: report.deviceId,
-    bundleId: report.bundleId,
-    appIdMismatch: report.appIdMismatch,
-  });
+  reportStopEvents(report);
 
   if (options.json) {
     Log.log(JSON.stringify(report, null, 2));
@@ -200,19 +187,7 @@ export async function runtimeStopAsync(
   }
 
   if (!result.ok) {
-    Log.error(
-      [
-        chalk.red(`The device did not stop ${resolved.appId} (${result.command}).`),
-        `Why: ${result.reason}.`,
-        // `simctl` and `adb` are commands about *this machine*, and the device may not be on it.
-        // A cloud session is checked with the CLI that owns it (llp/0005 §Cloud simulator).
-        `How: check that ${resolved.appId} is the app you meant — ${resolved.reason} — and pass --app-id to name another. ${
-          device.backend === 'cloud'
-            ? `Check that the session is still running with "${cloudSessionListCommand()}".`
-            : `Check that the bound ${device.platform === 'ios' ? 'simulator' : 'emulator'} is up with "${PROGRAM_PREFIX} status", or bind one again with "${PROGRAM_PREFIX} dev --${device.platform} --detach --wait-ready".`
-        }`,
-      ].join('\n')
-    );
+    Log.error(buildStopFailureMessage(result, resolved, device));
     return 1;
   }
 
@@ -231,6 +206,43 @@ export async function runtimeStopAsync(
 
   reportFollowUps('runtime:stop', report.followups, { json: options.json });
   return 0;
+}
+
+/** Record the finished stop in the debug log and the CLI event stream. */
+function reportStopEvents(report: RuntimeStopResultJson): void {
+  event('stop_app_done', {
+    stopped: report.stopped,
+    wasRunning: report.wasRunning ?? null,
+    appIdMismatch: report.appIdMismatch,
+  });
+  cliEvent('runtime_stop', {
+    stopped: report.stopped,
+    wasRunning: report.wasRunning,
+    platform: report.platform,
+    deviceBackend: report.deviceBackend,
+    deviceId: report.deviceId,
+    bundleId: report.bundleId,
+    appIdMismatch: report.appIdMismatch,
+  });
+}
+
+/** The error text for a device that refused to stop the app. */
+function buildStopFailureMessage(
+  result: Awaited<ReturnType<typeof stopAppOnDeviceAsync>>,
+  resolved: ReturnType<typeof resolveAppId>,
+  device: Awaited<ReturnType<typeof resolveDeviceAsync>>
+): string {
+  return [
+    chalk.red(`The device did not stop ${resolved.appId} (${result.command}).`),
+    `Why: ${result.reason}.`,
+    // `simctl` and `adb` are commands about *this machine*, and the device may not be on it.
+    // A cloud session is checked with the CLI that owns it (llp/0005 §Cloud simulator).
+    `How: check that ${resolved.appId} is the app you meant — ${resolved.reason} — and pass --app-id to name another. ${
+      device.backend === 'cloud'
+        ? `Check that the session is still running with "${cloudSessionListCommand()}".`
+        : `Check that the bound ${device.platform === 'ios' ? 'simulator' : 'emulator'} is up with "${PROGRAM_PREFIX} status", or bind one again with "${PROGRAM_PREFIX} dev --${device.platform} --detach --wait-ready".`
+    }`,
+  ].join('\n');
 }
 
 /**

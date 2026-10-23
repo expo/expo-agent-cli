@@ -840,6 +840,7 @@ interface SmokeRunContext {
 }
 
 /** The phases themselves. Everything it starts is registered with the context first. */
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 async function runPhasesAsync(
   deps: SmokeDeps,
   options: SmokeOptions,

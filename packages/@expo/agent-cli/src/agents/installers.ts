@@ -74,6 +74,7 @@ export function displayInstallCommand(command: InstallCommand): string {
 }
 
 /** Inspection failures stop this target; they never mean that nothing is installed. */
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export async function installAgentAsync(plan: AgentInstallPlan): Promise<PluginSetupResult> {
   const result = (
     status: PluginSetupResult['status'],
@@ -213,23 +214,7 @@ export async function installAgentAsync(plan: AgentInstallPlan): Promise<PluginS
           `Standalone Expo skills already exist at ${standalone}. Keep them or remove them with their installer before adding a second copy through a plugin.`
         );
 
-      let commands = plan.commands;
-      if (plan.provider === 'codex') {
-        const marketplaces = rows(
-          object(
-            await inspect({ command: 'codex', args: ['plugin', 'marketplace', 'list', '--json'] })
-          ).marketplaces
-        );
-        const existing = marketplaces.find((entry) => entry.name === 'expo-plugins');
-        if (existing) {
-          const source = object(existing.marketplaceSource).source;
-          if (!isExpoSource(source))
-            throw new Error(
-              'The expo-plugins marketplace has a different or unknown source. Resolve it in Codex before continuing.'
-            );
-          commands = commands.slice(1);
-        }
-      }
+      const commands = await codexCommandsAsync(plan, inspect);
       for (const command of commands) await run(command);
       const verified = await inspect({ command, args: ['plugin', 'list', '--json'] });
       const verifiedPlugins =
@@ -260,6 +245,25 @@ export async function installAgentAsync(plan: AgentInstallPlan): Promise<PluginS
   } catch (error) {
     return result('failed', error instanceof Error ? error.message : String(error));
   }
+}
+
+async function codexCommandsAsync(
+  plan: AgentInstallPlan,
+  inspect: (command: InstallCommand) => Promise<unknown>
+): Promise<InstallCommand[]> {
+  if (plan.provider !== 'codex') return plan.commands;
+  const marketplaces = rows(
+    object(await inspect({ command: 'codex', args: ['plugin', 'marketplace', 'list', '--json'] }))
+      .marketplaces
+  );
+  const existing = marketplaces.find((entry) => entry.name === 'expo-plugins');
+  if (!existing) return plan.commands;
+  const source = object(existing.marketplaceSource).source;
+  if (!isExpoSource(source))
+    throw new Error(
+      'The expo-plugins marketplace has a different or unknown source. Resolve it in Codex before continuing.'
+    );
+  return plan.commands.slice(1);
 }
 
 function rows(value: unknown, key = 'name'): Record<string, unknown>[] {

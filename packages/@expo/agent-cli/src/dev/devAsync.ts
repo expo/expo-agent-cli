@@ -185,60 +185,15 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // passed it [observed — friction run 7, F71; live run S5].
   const { plan: forwardedPlan, dropped } = withForwardedExpoArgs(resolved, options.expoArgs);
 
-  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
-  // the port is picked here, before the plan is printed, and set on every step that
-  // serves. Left to `expo run:*`, a busy port skips its dev server, deep-links the app to whatever
-  // holds the port, and exits 0 [observed — live suite, 2026-10-05].
-  const serving = forwardedPlan.steps.filter(isDevServerStep).at(-1);
-  let plan: StartPlan = forwardedPlan;
-  if (lock) {
-    // Only a plan gets here with a live lock; a run stopped on it before the probe. The plan lists
-    // no steps, because the run does none, whatever the forwarded options made of the last step.
-    const running = await runningDevServerAsync(projectRoot, lock);
-    plan = {
-      ...forwardedPlan,
-      steps: [],
-      reasons: [...forwardedPlan.reasons, devServerRunningReason(running)],
-      devServerPort: { port: lock.port, movedFrom: null, state: 'running', phase: running.phase },
-    };
-  } else if (serving) {
-    const planned = await resolvePlannedPortAsync(options.port);
-    if (!planned.bindable && options.port != null && options.mode !== 'plan') {
-      throw await portDemandedError(options.port, options.platform);
-    }
-    plan = {
-      ...withDevServerPort(forwardedPlan, planned.port),
-      // A port the plan probed is only the port that was free when the plan was printed. A named
-      // `--port` is not picked, so nothing is said about it.
-      reasons:
-        options.mode === 'plan' && options.port == null
-          ? [...forwardedPlan.reasons, 'The dev server port is picked again when the plan runs.']
-          : forwardedPlan.reasons,
-      devServerPort:
-        options.port != null
-          ? { port: planned.port, movedFrom: null, state: 'named', taken: !planned.bindable }
-          : { port: planned.port, movedFrom: planned.movedFrom, state: 'picked' },
-    };
-  }
-
-  const last = plan.steps.at(-1);
-  if (dropped.length && last) {
-    const directCommand =
-      last.argv[0] === 'expo'
-        ? `${PROGRAM_PREFIX} ${last.argv.slice(1).join(' ')}`
-        : `npx ${last.argv.join(' ')}`;
-    Log.warn(
-      `The plan ends with "${last.argv.join(' ')}" instead of "expo start", so these options were not passed on: ${dropped.join(' ')}. Run "${PROGRAM_PREFIX} start ${dropped.join(' ')}" once the app is installed, or pass them to "${directCommand}" yourself.`
-    );
-  }
+  let plan = await planDevServerPortAsync(projectRoot, lock, forwardedPlan, options);
+  warnDroppedExpoArgs(plan, dropped);
 
   // A draft that builds is bound here, not in the resolver: after the port check above and the
   // refusals below, so a run that refuses creates no simulator, and `--plan` only inspects.
   const bindsHere = resolved.buildLocation != null;
   const stopped = plan.devServerPort?.state === 'running';
   let acquired = boundEarly;
-  const implicitEas =
-    plan.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit === true;
+  const implicitEas = isImplicitEas(plan);
 
   // @ref llp/0009-smart-followups.rfc.md §Examples per command
   // `--plan` stops here, so its follow-ups are about the plan itself and the plan object is the
@@ -251,15 +206,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
       }
       plan = await withPlannedDevice(projectRoot, plan, acquired, options);
     }
-    const followups = followUpsEnabled(options.followups)
-      ? // The typed flag, not the resolved platform: this is the plan the caller asked for, and the
-        // command that runs it has to ask for the same one (F103).
-        buildStartPlanFollowUps(plan, state, options.platform, options.callerArgv, {
-          eas: options.deviceBackend === 'eas',
-        })
-      : [];
-    emitStartPlan(plan, { mode: 'plan', json: options.json, followups });
-    reportFollowUps('dev', followups, { json: options.json });
+    emitPlanOnly(plan, state, options);
     return 0;
   }
 
@@ -331,14 +278,103 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   }
 
   if (options.json) {
-    // One object, when the run is over and there is something true to say about it.
-    const ran = planAsRun(plan, run);
-    const followups = await resolveRunFollowUpsAsync(projectRoot, ran, options, run.devServer);
-    reportFollowUps('dev', followups, { json: true });
-    Log.log(JSON.stringify({ ...ran, followups }, null, 2));
+    await reportRunResultAsync(projectRoot, plan, run, options);
   }
 
   return run.exitCode;
+}
+
+/** Print the `--plan` result with its follow-ups. */
+function emitPlanOnly(plan: StartPlan, state: ProjectState, options: DevOptions): void {
+  const followups = followUpsEnabled(options.followups)
+    ? // The typed flag, not the resolved platform: this is the plan the caller asked for, and the
+      // command that runs it has to ask for the same one (F103).
+      buildStartPlanFollowUps(plan, state, options.platform, options.callerArgv, {
+        eas: options.deviceBackend === 'eas',
+      })
+    : [];
+  emitStartPlan(plan, { mode: 'plan', json: options.json, followups });
+  reportFollowUps('dev', followups, { json: options.json });
+}
+
+/** In `--json` mode, print the one object for a finished run. */
+async function reportRunResultAsync(
+  projectRoot: string,
+  plan: StartPlan,
+  run: PlanRun,
+  options: DevOptions
+): Promise<void> {
+  // One object, when the run is over and there is something true to say about it.
+  const ran = planAsRun(plan, run);
+  const followups = await resolveRunFollowUpsAsync(projectRoot, ran, options, run.devServer);
+  reportFollowUps('dev', followups, { json: true });
+  Log.log(JSON.stringify({ ...ran, followups }, null, 2));
+}
+
+/**
+ * Pick the dev server port and set it on every step that serves. With a live lock, list no steps.
+ */
+async function planDevServerPortAsync(
+  projectRoot: string,
+  lock: DevServerLockInfo | null,
+  forwardedPlan: StartPlan,
+  options: DevOptions
+): Promise<StartPlan> {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port —
+  // the port is picked here, before the plan is printed, and set on every step that
+  // serves. Left to `expo run:*`, a busy port skips its dev server, deep-links the app to whatever
+  // holds the port, and exits 0 [observed — live suite, 2026-10-05].
+  const serving = forwardedPlan.steps.filter(isDevServerStep).at(-1);
+  let plan: StartPlan = forwardedPlan;
+  if (lock) {
+    // Only a plan gets here with a live lock; a run stopped on it before the probe. The plan lists
+    // no steps, because the run does none, whatever the forwarded options made of the last step.
+    const running = await runningDevServerAsync(projectRoot, lock);
+    plan = {
+      ...forwardedPlan,
+      steps: [],
+      reasons: [...forwardedPlan.reasons, devServerRunningReason(running)],
+      devServerPort: { port: lock.port, movedFrom: null, state: 'running', phase: running.phase },
+    };
+  } else if (serving) {
+    const planned = await resolvePlannedPortAsync(options.port);
+    if (!planned.bindable && options.port != null && options.mode !== 'plan') {
+      throw await portDemandedError(options.port, options.platform);
+    }
+    plan = {
+      ...withDevServerPort(forwardedPlan, planned.port),
+      // A port the plan probed is only the port that was free when the plan was printed. A named
+      // `--port` is not picked, so nothing is said about it.
+      reasons:
+        options.mode === 'plan' && options.port == null
+          ? [...forwardedPlan.reasons, 'The dev server port is picked again when the plan runs.']
+          : forwardedPlan.reasons,
+      devServerPort:
+        options.port != null
+          ? { port: planned.port, movedFrom: null, state: 'named', taken: !planned.bindable }
+          : { port: planned.port, movedFrom: planned.movedFrom, state: 'picked' },
+    };
+  }
+  return plan;
+}
+
+/** Warn that the last step is not `expo start`, so the forwarded options were not passed on. */
+function warnDroppedExpoArgs(plan: StartPlan, dropped: string[]): void {
+  const last = plan.steps.at(-1);
+  if (dropped.length && last) {
+    const directCommand =
+      last.argv[0] === 'expo'
+        ? `${PROGRAM_PREFIX} ${last.argv.slice(1).join(' ')}`
+        : `npx ${last.argv.join(' ')}`;
+    Log.warn(
+      `The plan ends with "${last.argv.join(' ')}" instead of "expo start", so these options were not passed on: ${dropped.join(' ')}. Run "${PROGRAM_PREFIX} start ${dropped.join(' ')}" once the app is installed, or pass them to "${directCommand}" yourself.`
+    );
+  }
+}
+
+/** True when the plan builds on EAS only because detection found no other route. */
+function isImplicitEas(plan: StartPlan): boolean {
+  return plan.buildLocation?.runsOn === 'eas' && plan.buildLocation.selection?.implicit === true;
 }
 
 /**
@@ -585,6 +621,7 @@ interface PlanRun {
   serving: { index: number; args: string[] } | null;
 }
 
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 async function executePlanAsync(
   projectRoot: string,
   plan: StartPlan,
