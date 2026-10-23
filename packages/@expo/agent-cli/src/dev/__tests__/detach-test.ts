@@ -439,7 +439,7 @@ describe(detachFollowUps, () => {
 
   // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend
   it(`names --eas on the gate and the stop of a run whose device is on EAS`, () => {
-    const commands = detachFollowUps(report({ ready: null }), 'ios', { eas: true }).map(
+    const commands = detachFollowUps(report({ ready: null }), 'ios', { sessionId: null }).map(
       (followup) => followup.command
     );
     expect(commands).toContain('npx @expo/agent-cli smoke --ios --eas');
@@ -448,5 +448,40 @@ describe(detachFollowUps, () => {
 
   it(`drops the smoke rung once the bundler has answered`, () => {
     expect(detachFollowUps(report({ ready: true }), 'ios').map((f) => f.id)).not.toContain('smoke');
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  describe('on EAS', () => {
+    it(`ends with dev:stop --eas, which names the session it reached`, () => {
+      const last = detachFollowUps(report(), 'ios', { sessionId: 'sess-1' }).at(-1);
+      expect(last).toMatchObject({
+        id: 'dev-stop',
+        command: 'npx @expo/agent-cli dev:stop --eas',
+      });
+      expect(last?.why).toContain('sess-1');
+    });
+
+    it(`points at dev:logs when no session was reached yet`, () => {
+      const last = detachFollowUps(report(), 'ios', { sessionId: null }).at(-1);
+      expect(last?.command).toBe('npx @expo/agent-cli dev:stop --eas');
+      expect(last?.why).toContain('dev:logs');
+    });
+
+    it(`smokes on EAS while readiness is unknown`, () => {
+      const [first] = detachFollowUps(report({ ready: null }), 'ios', { sessionId: null });
+      expect(first?.command).toBe('npx @expo/agent-cli smoke --ios --eas');
+    });
+
+    it(`is unchanged without EAS`, () => {
+      expect(detachFollowUps(report({ ready: null }), 'ios')).toEqual([
+        expect.objectContaining({ id: 'smoke', command: 'npx @expo/agent-cli smoke --ios' }),
+        expect.objectContaining({ id: 'dev-logs' }),
+        {
+          id: 'dev-stop',
+          command: 'npx @expo/agent-cli dev:stop',
+          why: 'A detached dev server outlives this shell, so this is what ends it.',
+        },
+      ]);
+    });
   });
 });

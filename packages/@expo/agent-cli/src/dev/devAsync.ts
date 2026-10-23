@@ -3,8 +3,7 @@
 // (unless `--plan` stopped us) run its steps as subprocesses. The plain `expo start` wrapper is
 // `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
 
-import type { OpenAppOnEasReport } from './openAppEas';
-import { releaseStartedSessionAsync } from '../deviceBinding/cloudRelease';
+import { easRunLifecycle } from './openAppEas';
 import { withLeaseExtendedAsync } from '../deviceBinding/renew';
 import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
@@ -88,7 +87,7 @@ import {
   resolvePlannedPortAsync,
   type PortCollision,
 } from './portCollision';
-import type { DevOptions } from './resolveOptions';
+import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import {
   devServerRunningReason,
   devServerRunningStopAsync,
@@ -618,16 +617,17 @@ async function executePlanAsync(
         );
       }
       stepRunning = true;
-      let openTask: Promise<OpenAppOnEasReport | null> | undefined;
-      const ownsEasLifecycle = options.deviceBackend === 'eas' && opensApp;
-      const interrupted = () => {
-        stepRunning = false;
-      };
-      // Keep signal handling installed until the in-flight open and exact-ID cleanup finish.
-      if (ownsEasLifecycle) {
-        process.on('SIGINT', interrupted);
-        process.on('SIGTERM', interrupted);
-      }
+      const easPlatform = opensApp ? easOpenPlatform(options) : null;
+      const eas = easPlatform
+        ? easRunLifecycle(projectRoot, {
+            platform: easPlatform,
+            expoGo: plan.target === 'expo-go',
+            keepSession: options.detachedChild,
+            onSignal: () => {
+              stepRunning = false;
+            },
+          })
+        : null;
       return await runDevServerAsync(projectRoot, stepArgs, {
         agentSkills: options.agentSkills,
         output,
@@ -637,50 +637,23 @@ async function executePlanAsync(
                 return;
               }
               openArmed = true;
-              // Open alongside Metro. A failed open must not stop it; the EAS receipt is
-              // awaited at shutdown so an in-flight creation cannot escape cleanup.
-              openTask = openAppForRunAsync(
-                projectRoot,
-                plan,
-                options,
-                server.url,
-                () => stepRunning,
-                easBuildId,
-                acquired
-              );
+              // Open alongside Metro. A failed open must not stop it.
+              const stillWanted = () => stepRunning;
+              if (eas) eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
+              else
+                void openAppForRunAsync(
+                  projectRoot,
+                  plan,
+                  options,
+                  server.url,
+                  stillWanted,
+                  acquired
+                );
             }
           : undefined,
       }).finally(async () => {
         stepRunning = false;
-        try {
-          if (ownsEasLifecycle && openTask) {
-            Log.progress('Finishing EAS session work before exiting.');
-            const session = await openTask;
-            if (session?.started && session.sessionId) {
-              const release = await releaseStartedSessionAsync(
-                projectRoot,
-                session.sessionId,
-                'dev'
-              );
-              if (release.outcome === 'stopped') {
-                Log.progress(
-                  `Stopped EAS Simulator session ${session.sessionId}, created by this run.`
-                );
-              } else if (release.outcome === 'kept') {
-                Log.progress(`Kept EAS Simulator session ${session.sessionId}: ${release.reason}.`);
-              } else {
-                Log.warn(
-                  `Could not stop EAS Simulator session ${session.sessionId}: ${release.reason}.`
-                );
-              }
-            }
-          }
-        } finally {
-          if (ownsEasLifecycle) {
-            process.off('SIGINT', interrupted);
-            process.off('SIGTERM', interrupted);
-          }
-        }
+        await eas?.finishAsync();
       });
     };
 
@@ -1416,20 +1389,9 @@ async function openAppForRunAsync(
   options: DevOptions,
   devServerUrl: string,
   stillWanted: () => boolean,
-  easBuildId: string | null = null,
-  acquired: AcquireResult | null = null
-): Promise<OpenAppOnEasReport | null> {
+  acquired: AcquireResult | null
+): Promise<void> {
   const platform = options.platform as NativePlatform;
-  if (options.deviceBackend === 'eas') {
-    return await openAppOnEasForRunAsync(
-      projectRoot,
-      plan,
-      platform,
-      devServerUrl,
-      stillWanted,
-      easBuildId
-    );
-  }
   const { openAppOnDeviceAsync, openAppFailureLine } =
     require('./openApp') as typeof import('./openApp');
   try {
@@ -1457,58 +1419,6 @@ async function openAppForRunAsync(
       `The app was not opened: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`
     );
   }
-  return null;
-}
-
-/**
- * Open the app on an EAS Simulator session for a running dev server, and say what happened.
- *
- * @ref llp/0027-everything-on-eas.rfc.md §The open is a session
- * The same contract as the local open: never throws, never stops the server, and a session that
- * was started says so with the command that stops it — it bills until then.
- */
-async function openAppOnEasForRunAsync(
-  projectRoot: string,
-  plan: StartPlan,
-  platform: NativePlatform,
-  devServerUrl: string,
-  stillWanted: () => boolean,
-  easBuildId: string | null
-): Promise<OpenAppOnEasReport | null> {
-  const { openAppOnEasAsync, openAppOnEasFailureLine } =
-    require('./openAppEas') as typeof import('./openAppEas');
-  try {
-    const report = await openAppOnEasAsync(projectRoot, {
-      platform,
-      expoGo: plan.target === 'expo-go',
-      devServerUrl,
-      buildId: easBuildId,
-      stillWanted,
-    });
-    if (report.opened && stillWanted()) {
-      Log.progress(
-        `Opened the app on EAS Simulator session ${report.sessionId ?? '(id unknown)'}${
-          report.started ? ', started by this run' : ', which was already up'
-        }.${report.sessionUrl ? ` Watch it at ${report.sessionUrl}.` : ''} ${
-          report.started
-            ? `This run stops the session when the dev server exits. Use Ctrl-C or "${PROGRAM_PREFIX} dev:stop --eas".`
-            : `It bills until "${PROGRAM_PREFIX} dev:stop --eas".`
-        }`
-      );
-    } else if (stillWanted()) {
-      Log.warn(
-        report.refusal?.message ??
-          openAppOnEasFailureLine(platform, report.reason ?? 'no reason was given')
-      );
-    }
-    return report;
-  } catch (error: unknown) {
-    // `openAppOnEasAsync` promises not to throw; this guard is for the promise breaking.
-    Log.warn(
-      `The app was not opened on EAS: ${error instanceof Error ? error.message.split('\n', 1)[0] : String(error)}`
-    );
-  }
-  return null;
 }
 
 /** The platform an `eas build` step builds for, read off its argv. */

@@ -91,8 +91,12 @@ export interface EnsureEasSessionOptions {
   stillWanted?: () => boolean;
   /** What the session is called on expo.dev, for a person scanning the list later. */
   sessionName?: string;
-  /** The caller owns cleanup, as smoke does. */
-  cleanupAfterRun?: boolean;
+  /**
+   * Whether a session this run starts outlives it: true for a detached `dev` and a reopen, false
+   * for smoke and a foreground `dev`, which stop it through `releaseStartedSessionAsync`
+   * (llp/0035 §Preserved sessions). Only the progress line reads it here.
+   */
+  keepSession: boolean;
   /** Injected for tests. */
   waits?: { tunnelMs?: number; sessionStartMs?: number };
 }
@@ -265,6 +269,17 @@ export async function ensureEasSessionAsync(
 ): Promise<EnsureEasSessionReport> {
   const startedAt = new Date();
   const session = await ensureSessionAsync(projectRoot, options);
+  if (
+    session.sessionId &&
+    session.started &&
+    options.stillWanted?.() === false &&
+    (await endedBeforeBindAsync(projectRoot, options.platform, session.sessionId))
+  ) {
+    const reason = `Session ${session.sessionId} ended before it was recorded; nothing is bound.`;
+    Log.log(reason);
+    const gitExclude = await excludeCloudSessionEnvFromGitAsync(projectRoot);
+    return { ...session, ok: false, reason, ...(gitExclude && { gitExclude }) };
+  }
   if (session.sessionId) {
     let binding: CloudBinding;
     try {
@@ -326,6 +341,26 @@ async function excludeCloudSessionEnvFromGitAsync(
     return excluded.result;
   }
   return undefined;
+}
+
+/**
+ * Whether a listing that can be read no longer shows a session this run started after Metro
+ * stopped: a concurrent `dev:stop --eas` may have ended it. A listing that cannot be read keeps it.
+ */
+// @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+async function endedBeforeBindAsync(
+  projectRoot: string,
+  platform: NativePlatform,
+  sessionId: string
+): Promise<boolean> {
+  const probe = await probeCloudSessionAsync({
+    projectRoot,
+    platform,
+    boundIds: [sessionId],
+    timeoutMs: CLOUD_SESSION_TIMEOUT_MS,
+  });
+  if (probe.state === 'unknown' || probe.state === 'unavailable') return false;
+  return !(isLive(probe) && probe.session.id === sessionId);
 }
 
 /**
@@ -560,9 +595,9 @@ async function ensureSessionAsync(
     `Starting an EAS Simulator session (${platform}) with ${
       options.expoGo ? 'the Expo Go this SDK ships' : `build ${options.buildId}`
     } — a few minutes, nothing is stuck. ${
-      options.cleanupAfterRun
-        ? 'This run will stop the session afterwards.'
-        : `The session bills until "${PROGRAM_PREFIX} dev:stop --eas".`
+      options.keepSession
+        ? `The session bills until "${PROGRAM_PREFIX} dev:stop --eas".`
+        : 'This run will stop the session afterwards.'
     }`
   );
   const spawnOptions = {
@@ -715,4 +750,113 @@ async function waitForTunnelHostAsync(
 /** The one line `dev` says about an open on EAS that did not happen, with the door that still works. */
 export function openAppOnEasFailureLine(platform: NativePlatform, reason: string): string {
   return `The app was not opened on an EAS Simulator session: ${reason}. The dev server is up; once a session is, "${PROGRAM_PREFIX} navigate / --eas --${platform}" opens the app on it.`;
+}
+
+/** The EAS session work of one dev-server step that opens the app. */
+export interface EasRunLifecycle {
+  /** The EAS platform the dev-server lock records for this run. */
+  platform: NativePlatform;
+  /** Opens the app alongside Metro. A failed open never stops Metro. */
+  open(run: { devServerUrl: string; stillWanted: () => boolean; buildId: string | null }): void;
+  /**
+   * Waits for the open, so an in-flight session start cannot escape cleanup. Then stops and
+   * releases a session this run started, unless the run keeps it.
+   */
+  finishAsync(): Promise<void>;
+}
+
+/**
+ * The EAS session lifecycle of one dev-server step. A foreground `dev` stops the session it started
+ * when Metro exits; a detached child keeps it for the worktree. The signal handlers stay installed
+ * until {@link EasRunLifecycle.finishAsync} returns.
+ */
+// @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+export function easRunLifecycle(
+  projectRoot: string,
+  {
+    platform,
+    expoGo,
+    keepSession,
+    onSignal,
+  }: {
+    platform: NativePlatform;
+    expoGo: boolean;
+    keepSession: boolean;
+    onSignal: () => void;
+  }
+): EasRunLifecycle {
+  let task: Promise<OpenAppOnEasReport | null> | undefined;
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+  return {
+    platform,
+    open({ devServerUrl, stillWanted, buildId }) {
+      task = openAppOnEasForRunAsync(projectRoot, {
+        platform,
+        expoGo,
+        devServerUrl,
+        buildId,
+        stillWanted,
+        keepSession,
+      });
+    },
+    async finishAsync() {
+      try {
+        if (!task) return;
+        Log.progress('Finishing EAS session work before exiting.');
+        const session = await task;
+        if (keepSession || !session?.started || !session.sessionId) return;
+        const release = await releaseStartedSessionAsync(projectRoot, session.sessionId, 'dev');
+        if (release.outcome === 'stopped')
+          Log.progress(`Stopped EAS Simulator session ${session.sessionId}, created by this run.`);
+        else if (release.outcome === 'kept')
+          Log.progress(`Kept EAS Simulator session ${session.sessionId}: ${release.reason}.`);
+        else
+          Log.warn(`Could not stop EAS Simulator session ${session.sessionId}: ${release.reason}.`);
+      } finally {
+        process.off('SIGINT', onSignal);
+        process.off('SIGTERM', onSignal);
+      }
+    },
+  };
+}
+
+/**
+ * Open the app on an EAS Simulator session for a running dev server, and say what happened.
+ *
+ * @ref llp/0027-everything-on-eas.rfc.md §The open is a session
+ * The same contract as the local open: never throws, never stops the server, and a session that
+ * was started says so with the command that stops it — it bills until then.
+ */
+async function openAppOnEasForRunAsync(
+  projectRoot: string,
+  options: OpenAppOnEasOptions & { stillWanted: () => boolean }
+): Promise<OpenAppOnEasReport | null> {
+  const { platform, stillWanted } = options;
+  try {
+    const report = await openAppOnEasAsync(projectRoot, options);
+    if (report.opened && stillWanted()) {
+      Log.progress(
+        `Opened the app on EAS Simulator session ${report.sessionId ?? '(id unknown)'}${
+          report.started ? ', started by this run' : ', which was already up'
+        }.${report.sessionUrl ? ` Watch it at ${report.sessionUrl}.` : ''} ${
+          report.started && !options.keepSession
+            ? `This run stops the session when the dev server exits. Use Ctrl-C or "${PROGRAM_PREFIX} dev:stop --eas".`
+            : `It bills until "${PROGRAM_PREFIX} dev:stop --eas".`
+        }`
+      );
+    } else if (stillWanted()) {
+      Log.warn(
+        report.refusal?.message ??
+          openAppOnEasFailureLine(platform, report.reason ?? 'no reason was given')
+      );
+    }
+    return report;
+  } catch (error: unknown) {
+    // `openAppOnEasAsync` promises not to throw; this guard is for the promise breaking.
+    Log.warn(
+      `The app was not opened on EAS: ${error instanceof Error ? firstLine(error.message) : String(error)}`
+    );
+  }
+  return null;
 }

@@ -33,6 +33,7 @@ import {
   localBackendOf,
 } from '../deviceBinding';
 import { SIMCTL_CALL_TIMEOUT_MS } from '../deviceBinding/ios';
+import { liveCloudBindings } from '../deviceBinding/cloud';
 import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
 import { PORT_WATCH_TIMEOUT_MS, readLastLoggedDevServerPort } from '../devLock/port';
 import { event as cliEvent } from '../events';
@@ -259,6 +260,7 @@ export async function devDetachAsync(
           verdict: stopped?.verdict ?? null,
           childExit: null,
           platform: options.platform,
+          eas: detachEas(projectRoot, options),
         });
       }
     }
@@ -276,7 +278,8 @@ export async function devDetachAsync(
         detachedLogPath(projectRoot),
         checked.result,
         readChildPhaseSync(projectRoot),
-        options.platform
+        options.platform,
+        detachEas(projectRoot, options)
       );
     }
     const lock = checked?.lock ?? running;
@@ -292,6 +295,7 @@ export async function devDetachAsync(
     return reportDetached(projectRoot, options, {
       lock,
       alreadyRunning: true,
+      eas: detachEas(projectRoot, options),
       ready: checked?.result.ready ?? null,
       projectRootMatched: checked?.result.projectRootMatched ?? null,
       startedAt,
@@ -419,12 +423,20 @@ export async function devDetachAsync(
           verdict: stopped.verdict,
           childExit,
           platform: options.platform,
+          eas: detachEas(projectRoot, options),
         });
       }
       // @ref ./childVerdict.ts §parseDetachedChildPhase — F125. The child's own log says which half
       // of its plan it is in, and a plan that is compiling has not started a dev server for this
       // report to describe.
-      throw notReadyError(lock, logFile, result, readChildPhaseSync(projectRoot), options.platform);
+      throw notReadyError(
+        lock,
+        logFile,
+        result,
+        readChildPhaseSync(projectRoot),
+        options.platform,
+        detachEas(projectRoot, options)
+      );
     }
   }
 
@@ -486,12 +498,14 @@ export async function devDetachAsync(
       verdict,
       childExit,
       platform: options.platform,
+      eas: detachEas(projectRoot, options),
     });
   }
 
   return reportDetached(projectRoot, options, {
     lock,
     alreadyRunning: false,
+    eas: detachEas(projectRoot, options),
     ready,
     projectRootMatched,
     startedAt,
@@ -820,6 +834,7 @@ function detachFailureError(
     verdict,
     childExit,
     platform,
+    eas,
   }: {
     projectRoot: string;
     lock: DevServerLockInfo;
@@ -827,6 +842,7 @@ function detachFailureError(
     verdict: DetachedChildVerdict | null;
     childExit: { code: number | null; signal: NodeJS.Signals | null } | null;
     platform: PlanPlatform;
+    eas: DetachEas | null;
   }
 ): CommandError {
   const relayed = relayedDeviceError(verdict);
@@ -848,6 +864,7 @@ function detachFailureError(
       : new CommandError('DEV_DETACH_NEEDS_HUMAN', message);
   }
 
+  const easFlag = eas ? ' --eas' : '';
   const error = new CommandError(
     kind === 'child-exited' ? 'DEV_DETACH_DIED' : 'DEV_DETACH_NOT_ANSWERING',
     [
@@ -861,7 +878,7 @@ function detachFailureError(
           } before this command could report it.`
         : `The dev server on ${lock.url} stopped answering before this command could report it.`,
       `Why: a detached run is two processes, and only this one is being read. The bundler answered while the other one was starting, and it is not there now — so "ready" would be a claim about a moment that has passed.`,
-      `How: read what it printed with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}), fix what it names, and start it again with "${PROGRAM_PREFIX} dev --${platform} --detach --wait-ready". Running "${PROGRAM_PREFIX} dev --${platform}" in this terminal shows the same start in the foreground, which is the quickest way to watch it fail.${logTail(projectRoot)}`,
+      `How: read what it printed with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}), fix what it names, and start it again with "${PROGRAM_PREFIX} dev --${platform}${easFlag} --detach --wait-ready". Running "${PROGRAM_PREFIX} dev --${platform}${easFlag}" in this terminal shows the same start in the foreground, which is the quickest way to watch it fail.${eas ? ` ${easKeptSentence(eas)}` : ''}${logTail(projectRoot)}`,
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_FAILED;
@@ -957,9 +974,12 @@ function reportDetached(
     device,
     log = readDetachedLogSync(projectRoot, WHOLE_LOG),
     smokePlatform,
+    eas,
   }: {
     lock: DevServerLockInfo;
     alreadyRunning: boolean;
+    /** Set when this run opens the app on EAS; `sessionId` when the command reached a session. */
+    eas: DetachEas | null;
     ready: boolean | null;
     projectRootMatched: boolean | null;
     startedAt: number;
@@ -999,7 +1019,7 @@ function reportDetached(
     followups: [],
   };
   report.followups = followUpsEnabled(options.followups)
-    ? detachFollowUps(report, smokePlatform, { eas: options.deviceBackend === 'eas' })
+    ? detachFollowUps(report, smokePlatform, eas)
     : [];
 
   cliEvent('dev_detach', {
@@ -1127,7 +1147,7 @@ function printHumanReport(report: DevDetachResultJson): void {
 export function detachFollowUps(
   report: DevDetachResultJson,
   smokePlatform: NativePlatform,
-  { eas = false }: { eas?: boolean } = {}
+  eas: DetachEas | null = null
 ): FollowUp[] {
   // On an EAS device run, the gate drives the session and the stop ends it (llp/0027 §Stop hints).
   const onEas = eas ? ' --eas' : '';
@@ -1146,14 +1166,52 @@ export function detachFollowUps(
       why: 'The dev server writes to a file now rather than to this terminal, and this is what reads it back.',
     });
   }
-  followups.push({
-    id: 'dev-stop',
-    command: `${PROGRAM_PREFIX} dev:stop${onEas}`,
-    why: eas
-      ? 'A detached dev server outlives this shell, and the EAS Simulator session bills until it ends, so this ends both.'
-      : 'A detached dev server outlives this shell, so this is what ends it.',
-  });
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  followups.push(
+    eas
+      ? {
+          id: 'dev-stop',
+          command: `${PROGRAM_PREFIX} dev:stop --eas`,
+          why: eas.sessionId
+            ? `A detached dev server outlives this shell, and EAS Simulator session ${eas.sessionId} stays bound to this worktree after a plain dev:stop; this ends both.`
+            : `A detached dev server outlives this shell, and the EAS Simulator session it opens stays bound to this worktree after a plain dev:stop; this ends both. "${PROGRAM_PREFIX} dev:logs" names the session.`,
+        }
+      : {
+          id: 'dev-stop',
+          command: `${PROGRAM_PREFIX} dev:stop`,
+          why: 'A detached dev server outlives this shell, so this is what ends it.',
+        }
+  );
   return followups;
+}
+
+type DetachEas = { sessionId: string | null };
+
+/** The EAS session a detached `dev --eas` keeps bound, read from this worktree's bindings. */
+function detachEas(projectRoot: string, options: DevOptions): DetachEas | null {
+  if (!easOpenPlatform(options)) {
+    return null;
+  }
+  const bound = liveCloudBindings(projectRoot).find(
+    ({ device }) => device.platform === options.platform
+  );
+  return { sessionId: bound?.device.id ?? null };
+}
+
+function easSessionName(eas: DetachEas): string {
+  return eas.sessionId
+    ? `EAS Simulator session ${eas.sessionId}`
+    : 'the EAS Simulator session it may have started';
+}
+
+/** The How sentence for a failed detached `dev --eas`: plain `dev:stop` keeps its session. */
+function easStopSentence(eas: DetachEas): string {
+  return `Stop it with "${PROGRAM_PREFIX} dev:stop --eas", which also ends ${easSessionName(eas)}; a plain dev:stop keeps that session bound and billing.`;
+}
+
+/** The How sentence for a detached `dev --eas` whose dev server failed: the bound session stays. */
+function easKeptSentence(eas: DetachEas): string {
+  return `To end ${easSessionName(eas)}, run "${PROGRAM_PREFIX} dev:stop --eas"; a plain dev:stop keeps that session bound and billing.`;
 }
 
 /**
@@ -1250,7 +1308,8 @@ export function notReadyError(
   logFile: string,
   result: BundlerReadyResult,
   phase: DetachedChildPhase = { phase: 'serving', step: null, opensPlatform: false },
-  platform: PlanPlatform | null = null
+  platform: PlanPlatform | null = null,
+  eas: DetachEas | null = null
 ): CommandError {
   // @ref llp/0021-honest-reports.rfc.md §The rules — F125. A plan whose
   // dev-server step is `expo run:*` holds the lock while a compiler runs, so every sentence below
@@ -1258,7 +1317,7 @@ export function notReadyError(
   // is still running" would describe Gradle. The wording follows the phase, and nothing else here
   // changes: the wait really did give up, and the exit code is the same.
   if (phase.phase === 'building') {
-    return stillBuildingError(lock, logFile, result, phase, platform);
+    return stillBuildingError(lock, logFile, result, phase, platform, eas);
   }
 
   const strangerAnswered = result.projectRootMatched === false;
@@ -1282,7 +1341,7 @@ export function notReadyError(
       // is `dev:logs`, which answers the same question ("what is the bundler doing") and is
       // runnable as written. `smoke` stays in the prose with its flags shown, because it is the
       // better answer for a reader who knows which device they have.
-      `How: read ${logFile} with "${PROGRAM_PREFIX} dev:logs", which says what the bundler is doing. "${PROGRAM_PREFIX} smoke --ios" or "--android" then reports whether this project compiles and runs on that device. Stop it with "${PROGRAM_PREFIX} dev:stop".`,
+      `How: read ${logFile} with "${PROGRAM_PREFIX} dev:logs", which says what the bundler is doing. "${PROGRAM_PREFIX} smoke --ios" or "--android" then reports whether this project compiles and runs on that device. ${eas ? easStopSentence(eas) : `Stop it with "${PROGRAM_PREFIX} dev:stop".`}`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} dev:logs`;
@@ -1304,7 +1363,8 @@ function stillBuildingError(
   logFile: string,
   result: BundlerReadyResult,
   phase: DetachedChildPhase,
-  platform: PlanPlatform | null
+  platform: PlanPlatform | null,
+  eas: DetachEas | null
 ): CommandError {
   const step = phase.step ?? 'the build step';
   // The run's own platform when the caller had it, else read off the step row — the line below
@@ -1315,7 +1375,7 @@ function stillBuildingError(
     [
       `No dev server is listening on ${lock.url} yet: the plan is still building, at "${step}" (pid ${lock.pid}), and --wait-ready gave up after ${result.waitedMs}ms.`,
       `Why: "${step}" is one command that builds the app, installs it, and only then starts the dev server. The port above is published when that step *starts*, so it names where the dev server will be rather than where one is — and a local build takes many minutes, which is longer than this wait. The build has not failed and it has not stopped; it is still going, in the process this command started.`,
-      `How: watch it with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}) and run "${PROGRAM_PREFIX} status" when it is done — the dev server answers on ${lock.url} the moment the build finishes. Stop the build with "${PROGRAM_PREFIX} dev:stop". To avoid the wait entirely, build once with "${PROGRAM_PREFIX} dev --${flag}" in a terminal: a recorded build makes the next detached run a dev server rather than a compiler.`,
+      `How: watch it with "${PROGRAM_PREFIX} dev:logs" (the file is ${logFile}) and run "${PROGRAM_PREFIX} status" when it is done — the dev server answers on ${lock.url} the moment the build finishes. ${eas ? easStopSentence(eas) : `Stop the build with "${PROGRAM_PREFIX} dev:stop".`} To avoid the wait entirely, build once with "${PROGRAM_PREFIX} dev --${flag}" in a terminal: a recorded build makes the next detached run a dev server rather than a compiler.`,
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_FAILED;

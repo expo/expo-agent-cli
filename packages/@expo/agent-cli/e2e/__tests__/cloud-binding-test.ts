@@ -82,7 +82,7 @@ function navigate(root: string, args: string[] = []) {
     { env: envFor(root), reject: false }
   );
 }
-it('two worktrees start and drive their own sessions; EAS stop removes only its own binding', async () => {
+it('two worktrees start and drive their own sessions; plain stop keeps a binding and EAS stop removes it', async () => {
   const first = await project();
   const second = await project();
   for (const [index, root] of [first, second].entries()) {
@@ -121,6 +121,15 @@ it('two worktrees start and drive their own sessions; EAS stop removes only its 
     expect.objectContaining({ id: 'own-0', state: 'recorded' })
   );
   expect(stubEasArgs(first)).toHaveLength(beforeStatus);
+  const kept = await executeAgentCliAsync(first, ['dev:stop', '--json'], { env: envFor(first) });
+  expect(JSON.parse(kept.stdout).devices).toContainEqual(
+    expect.objectContaining({
+      id: 'own-0',
+      released: null,
+      reason: expect.stringContaining('recorded, not checked'),
+    })
+  );
+  expect(fs.existsSync(bindingFile(first))).toBe(true);
   await executeAgentCliAsync(first, ['dev:stop', '--eas', '--json'], { env: envFor(first) });
   expect(fs.existsSync(bindingFile(first))).toBe(false);
   expect(readBinding(second).device).toMatchObject({ id: 'own-1' });

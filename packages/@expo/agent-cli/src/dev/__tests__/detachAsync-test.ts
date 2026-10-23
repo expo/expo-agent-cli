@@ -12,6 +12,7 @@ import {
   hostBindsPlatform,
 } from '../../deviceBinding';
 import { deviceUnavailableError } from '../../deviceBinding/errors';
+import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import * as bindingSummary from '../../deviceBinding/summary';
 import { SIMCTL_CALL_TIMEOUT_MS } from '../../deviceBinding/ios';
 import { event as cliEvent } from '../../events';
@@ -38,11 +39,11 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
   hostBindsPlatform: vi.fn(() => false),
   acquireDeviceAsync: vi.fn(),
 }));
+vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
 vi.mock('../openAppEas', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../openAppEas')>()),
   otherPlatformSessionAsync: vi.fn(),
 }));
-vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
 vi.mock('../processLiveness', () => ({ isProcessAlive: vi.fn() }));
 vi.mock('../events', () => ({ event: vi.fn() }));
 vi.mock('../../events', () => ({ event: vi.fn() }));
@@ -628,6 +629,31 @@ describe('a lock whose port Metro has not logged', () => {
 
     expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
     expect(Date.now()).toBeLessThan(20_000);
+    expect((await result).message).not.toContain('dev --ios --eas');
+  });
+
+  it('keeps --eas in the restart commands and names the kept session when the child exits', async () => {
+    writeCloudBinding(projectRoot, 'ios', 'sess-bound', {
+      boundAt: new Date(0).toISOString(),
+      expiresAt: new Date(3_600_000).toISOString(),
+    });
+    vi.mocked(isProcessAlive).mockReturnValue(false);
+
+    const result = devDetachAsync(
+      projectRoot,
+      resolveDevOptions(['--ios', '--detach', '--eas', '--json']),
+      { print: false }
+    ).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(1000);
+    child.emit('exit', 1, null);
+    await vi.runAllTimersAsync();
+
+    const error = await result;
+    expect(error).toMatchObject({ code: 'DEV_DETACH_DIED', exitCode: 20 });
+    expect(error.message).toContain('dev --ios --eas --detach --wait-ready');
+    expect(error.message).toContain('dev --ios --eas" in this terminal');
+    expect(error.message).toContain('To end EAS Simulator session sess-bound');
+    expect(error.message).not.toContain('Stop it with');
   });
 });
 
@@ -765,6 +791,43 @@ describe('the bound device', () => {
     ).resolves.toBe(0);
 
     expect(acquireDeviceAsync).not.toHaveBeenCalled();
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  it('names the bound EAS session in the dev:stop --eas follow-up of a fresh start', async () => {
+    writeCloudBinding(projectRoot, 'ios', 'sess-bound', {
+      boundAt: new Date(0).toISOString(),
+      expiresAt: new Date(3_600_000).toISOString(),
+    });
+
+    const result = devDetachAsync(
+      projectRoot,
+      resolveDevOptions(['--ios', '--detach', '--eas', '--json']),
+      { print: true }
+    );
+    await vi.runAllTimersAsync();
+    await expect(result).resolves.toBe(0);
+
+    const printed = vi
+      .mocked(Log.log)
+      .mock.calls.map(([text]) => String(text))
+      .find((text) => text.includes('"followups"'))!;
+    const last = JSON.parse(printed).followups.at(-1);
+    expect(last.why).toContain('sess-bound');
+  });
+
+  it('names dev:stop --eas when the bundler of an EAS run never answers', async () => {
+    vi.mocked(waitForBundlerReadyAsync).mockResolvedValue(readiness(false));
+
+    const result = devDetachAsync(
+      projectRoot,
+      resolveDevOptions(['--ios', '--detach', '--eas', '--wait-ready', '--json']),
+      { print: false }
+    ).catch((error) => error);
+    await vi.runAllTimersAsync();
+
+    expect(await result).toMatchObject({ code: 'DEV_DETACH_NOT_READY' });
+    expect((await result).message).toContain('dev:stop --eas');
   });
 
   it('reuses the worktree emulator on a running server when Android tools are available', async () => {
