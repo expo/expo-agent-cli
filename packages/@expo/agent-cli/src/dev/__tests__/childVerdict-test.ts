@@ -12,7 +12,9 @@ import {
   type CommandError,
 } from '../../utils/errors';
 import {
+  detachedPidLine,
   parseDetachedChildPhase,
+  parseDetachedChildPid,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
   stepOpensPlatform,
@@ -230,6 +232,18 @@ describe(parseDetachedChildPhase, () => {
       step: 'expo start --go --ios --port 9201',
       opensPlatform: false,
     });
+  });
+});
+
+describe('parseDetachedChildPid', () => {
+  it(`reads the pid the child printed on line 1`, () => {
+    expect(parseDetachedChildPid([detachedPidLine(4242), 'Smart start plan'])).toBe(4242);
+  });
+
+  // App output reaches the same log after Metro starts, so only line 1 counts.
+  it(`ignores a pid line anywhere but line 1`, () => {
+    expect(parseDetachedChildPid(['Smart start plan', detachedPidLine(4242)])).toBeNull();
+    expect(parseDetachedChildPid([])).toBeNull();
   });
 });
 

@@ -80,11 +80,14 @@ export async function runDevServerAsync(
     output = 'inherit',
     onDevServer,
     easPlatform = null,
+    easOpenFinished,
   }: {
     agentSkills: boolean;
     output?: SubprocessOutput;
     /** The platform of the EAS session this run opens the app on, named on the lock. */
     easPlatform?: DevServerLockInfo['easPlatform'];
+    /** Settles when the run's EAS open returns, so the lock says that the open finished. */
+    easOpenFinished?: Promise<unknown>;
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
      * port the arguments name.
@@ -127,6 +130,7 @@ export async function runDevServerAsync(
     since: startedAt,
     isRunning: () => running,
     easPlatform,
+    easOpenFinished,
     // Wakes the port watch the moment the dev server is gone, so a start that fails immediately
     // is not held up waiting for a port that will never be reported.
     stopped: run.then(

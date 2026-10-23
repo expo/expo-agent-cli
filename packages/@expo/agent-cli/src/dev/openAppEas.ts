@@ -799,6 +799,8 @@ export interface EasRunLifecycle {
   platform: NativePlatform;
   /** Opens the app alongside Metro. A failed open never stops Metro. */
   open(run: { devServerUrl: string; stillWanted: () => boolean; buildId: string | null }): void;
+  /** Resolves when the open returns, bound or failed. Never resolves without an open. */
+  finished: Promise<void>;
   /**
    * Waits for the open, so an in-flight session start cannot escape cleanup. Then stops and
    * releases a session this run started, unless the run keeps it.
@@ -829,10 +831,13 @@ export function easRunLifecycle(
   }
 ): EasRunLifecycle {
   let task: Promise<OpenAppOnEasReport | null> | undefined;
+  let markFinished!: () => void;
+  const finished = new Promise<void>((resolve) => (markFinished = resolve));
   process.on('SIGINT', onSignal);
   process.on('SIGTERM', onSignal);
   return {
     platform,
+    finished,
     open({ devServerUrl, stillWanted, buildId }) {
       task = openAppOnEasForRunAsync(projectRoot, {
         platform,
@@ -843,6 +848,7 @@ export function easRunLifecycle(
         stillWanted,
         keepSession,
       });
+      void task.finally(markFinished);
     },
     async finishAsync() {
       try {

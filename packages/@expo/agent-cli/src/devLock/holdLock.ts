@@ -18,6 +18,8 @@ import type { DevServerLockHandle, DevServerLockInfo } from './types';
 export type HoldDevServerLockOptions = ResolveDevServerPortOptions & {
   /** {@link DevServerLockInfo.easPlatform}; null when omitted. */
   easPlatform?: DevServerLockInfo['easPlatform'];
+  /** Settles when the run's EAS open returns; the lock then answers `easOpenFinished: true`. */
+  easOpenFinished?: Promise<unknown>;
 };
 
 /**
@@ -42,20 +44,31 @@ export async function holdDevServerLockAsync(
   args: string[],
   options: HoldDevServerLockOptions
 ): Promise<DevServerLockHandle | null> {
+  let easOpenFinished = false;
+  let port = 0;
+  // Attached after the publish: a settled promise still calls back, so an open that returned
+  // first is not lost.
+  const publishAndWatchAsync = async (resolved: ResolvedDevServerPort | null) => {
+    if (resolved) port = resolved.port;
+    const lock = await publishAsync(projectRoot, options, resolved, easOpenFinished);
+    const finish = () => {
+      easOpenFinished = true;
+      lock?.update(lockInfo(projectRoot, options, port, true));
+    };
+    options.easOpenFinished?.then(finish, finish);
+    return lock;
+  };
+
   const named = readPortArg(args);
   const servesAnotherProject =
     options.servesAnotherProject ?? ((port) => servesAnotherProjectAsync(projectRoot, port));
   if (named == null || (await servesAnotherProject(named))) {
-    return await publishAsync(
-      projectRoot,
-      options,
-      await resolveDevServerPortAsync(projectRoot, args, options)
-    );
+    return await publishAndWatchAsync(await resolveDevServerPortAsync(projectRoot, args, options));
   }
 
   const resolved: ResolvedDevServerPort = { port: named, source: 'arg' };
   options.onResolved?.(resolved);
-  const lock = await publishAsync(projectRoot, options, resolved);
+  const lock = await publishAndWatchAsync(resolved);
   const watched = await resolveDevServerPortAsync(projectRoot, args, {
     ...options,
     onResolved: undefined,
@@ -63,7 +76,8 @@ export async function holdDevServerLockAsync(
   if (watched?.source === 'log') {
     options.onResolved?.(watched);
     if (watched.port !== named) {
-      lock?.update(lockInfo(projectRoot, options, watched.port));
+      port = watched.port;
+      lock?.update(lockInfo(projectRoot, options, port, easOpenFinished));
     }
   }
   return lock;
@@ -73,7 +87,8 @@ export async function holdDevServerLockAsync(
 function lockInfo(
   projectRoot: string,
   options: HoldDevServerLockOptions,
-  port: number
+  port: number,
+  easOpenFinished: boolean
 ): DevServerLockInfo {
   return {
     url: `http://127.0.0.1:${port}`,
@@ -82,6 +97,7 @@ function lockInfo(
     startedAt: new Date(options.since).toISOString(),
     projectRoot,
     easPlatform: options.easPlatform ?? null,
+    easOpenFinished,
   };
 }
 
@@ -89,7 +105,8 @@ function lockInfo(
 async function publishAsync(
   projectRoot: string,
   options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform'>,
-  resolved: ResolvedDevServerPort | null
+  resolved: ResolvedDevServerPort | null,
+  easOpenFinished: boolean
 ): Promise<DevServerLockHandle | null> {
   // Derived once, inside the try, so the catch below has an address to report without being able
   // to fail deriving one — a `catch` that can throw is not a safety net.
@@ -110,7 +127,9 @@ async function publishAsync(
       return null;
     }
 
-    const result = await acquireDevServerLockAsync(lockInfo(projectRoot, options, port));
+    const result = await acquireDevServerLockAsync(
+      lockInfo(projectRoot, options, port, easOpenFinished)
+    );
 
     switch (result.status) {
       case 'acquired': {

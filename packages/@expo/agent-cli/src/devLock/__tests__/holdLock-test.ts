@@ -77,22 +77,40 @@ describe(holdDevServerLockAsync, () => {
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
-  it(`names the EAS platform of the run`, async () => {
+  it(`answers easOpenFinished once the EAS open settles, and keeps it across the port update from the log`, async () => {
     const projectRoot = makeTempProject();
+    let finishOpen!: () => void;
+    const easOpenFinished = new Promise<void>((resolve) => (finishOpen = resolve));
 
-    held.push(
-      await holdDevServerLockAsync(projectRoot, ['start', '--port', '8307'], {
-        since: Date.now(),
-        isRunning: () => true,
-        intervalMs: 10,
-        timeoutMs: 30,
-        easPlatform: 'ios',
-      })
-    );
-
-    expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
-      port: 8307,
+    const lock = holdDevServerLockAsync(projectRoot, ['start', '--port', '8308'], {
+      since: Date.now(),
+      isRunning: () => true,
+      intervalMs: 10,
       easPlatform: 'ios',
+      easOpenFinished,
+    }).then((handle) => (held.push(handle), handle));
+
+    expect(
+      await eventuallyAsync(
+        () => readDevServerLockAsync(projectRoot),
+        (info) => info != null
+      )
+    ).toMatchObject({ port: 8308, easOpenFinished: false });
+
+    finishOpen();
+    expect(
+      await eventuallyAsync(
+        () => readDevServerLockAsync(projectRoot),
+        (info) => info?.easOpenFinished === true
+      )
+    ).toMatchObject({ port: 8308, easOpenFinished: true });
+
+    logPort(projectRoot, 8309);
+    await lock;
+    expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
+      port: 8309,
+      easPlatform: 'ios',
+      easOpenFinished: true,
     });
   });
 

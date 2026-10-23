@@ -61,6 +61,11 @@ import {
   type DetachedChildPhase,
   type DetachedChildVerdict,
 } from './childVerdict';
+import {
+  childStartsSessionSync,
+  knownSessionIdSync,
+  waitForEasSessionAsync,
+} from './detachEasProgress';
 import { CALLER_ARGV_ENV, explicitRequestOf } from './deviceOption';
 import { event } from './events';
 import {
@@ -148,6 +153,11 @@ export interface DevDetachResultJson {
   tunnelUrl: string | null;
   /** This worktree's device for the platform, or null when the run binds none. */
   device: BindingSummary | null;
+  /**
+   * The EAS session of a run that opens the app on EAS, or null for any other run. `sessionId` is
+   * null while no session is bound; `--wait-ready` waits for it (llp/0035 §Preserved sessions).
+   */
+  eas: { sessionId: string | null } | null;
   /** How long the whole thing took, in milliseconds. */
   waitedMs: number;
   followups: FollowUp[];
@@ -271,9 +281,26 @@ export async function devDetachAsync(
     const lock = checked?.lock ?? running;
     // Reuse only reads the current tunnel; it does not wait for a new one to appear.
     const tunnelUrl = await currentTunnelUrlAsync(projectRoot, lock.url);
-    const easSessionId = reuseBoundDevice
-      ? await reuseDeviceOnRunningServerAsync(projectRoot, options, lock.url, tunnelUrl)
-      : null;
+    // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a child still starting
+    // its session is followed: a reopen would start a second one, or exit 1 on a queued one.
+    const sessionPlatform = reuseBoundDevice ? easOpenPlatform(options) : null;
+    const followsSession =
+      sessionPlatform != null && childStartsSessionSync(projectRoot, lock, sessionPlatform);
+    const easSessionId = followsSession
+      ? options.waitReady
+        ? await waitForEasSessionAsync(projectRoot, {
+            platform: sessionPlatform,
+            lock,
+            tunnelUrl,
+            since: Date.parse(lock.startedAt),
+            knownId: knownSessionIdSync(projectRoot, sessionPlatform),
+            hasExited,
+            callerArgv: options.callerArgv,
+          })
+        : null
+      : reuseBoundDevice
+        ? await reuseDeviceOnRunningServerAsync(projectRoot, options, lock.url, tunnelUrl)
+        : null;
     const device = await boundDeviceAsync(projectRoot, options);
     const statusAnswering =
       checked?.result.ready === true
@@ -305,6 +332,8 @@ export async function devDetachAsync(
       sessionId: other.sessionId,
       devServerRunning: false,
     });
+  // The session bound before the spawn, expired or not, is the one the child reuses and renews.
+  const keptSessionId = easPlatform ? knownSessionIdSync(projectRoot, easPlatform) : null;
 
   const { logFile, fd } = openDetachedLogSync(projectRoot);
   const { command, args } = buildDetachSpawn(resolveBinPath(), options.detachArgv);
@@ -491,10 +520,38 @@ export async function devDetachAsync(
     });
   }
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — with `--eas`, ready is the
+  // session binding as well as the bundler.
+  let eas = detachEas(projectRoot, options);
+  if (easPlatform && ready === true) {
+    const sessionId = await waitForEasSessionAsync(projectRoot, {
+      platform: easPlatform,
+      lock,
+      tunnelUrl,
+      since: startedAt,
+      knownId: keptSessionId,
+      hasExited: childIsGone,
+      callerArgv: options.callerArgv,
+    });
+    if (sessionId == null) {
+      const stopped = await waitFailureAsync(projectRoot, true);
+      throw detachFailureError(stopped?.failure ?? 'child-exited', {
+        projectRoot,
+        lock,
+        logFile,
+        verdict: stopped?.verdict ?? null,
+        childExit,
+        platform: options.platform,
+        eas,
+      });
+    }
+    eas = { sessionId };
+  }
+
   return reportDetached(projectRoot, options, {
     lock,
     alreadyRunning: false,
-    eas: detachEas(projectRoot, options),
+    eas,
     ready,
     projectRootMatched,
     startedAt,
@@ -1004,6 +1061,7 @@ function reportDetached(
     portMoved: alreadyRunning ? null : plannedPortMove(log, lock),
     tunnelUrl,
     device,
+    eas,
     waitedMs: Date.now() - startedAt,
     followups: [],
   };
@@ -1030,7 +1088,7 @@ function reportDetached(
     if (options.json) {
       Log.log(JSON.stringify(report, null, 2));
     } else {
-      printHumanReport(report);
+      printHumanReport(report, options.platform);
     }
     reportFollowUps('dev', report.followups, { json: options.json });
   }
@@ -1116,7 +1174,7 @@ function plannedPortMove(log: DetachedLogRead | null, lock: DevServerLockInfo): 
   return lock.port === expected ? null : { from: expected, to: lock.port };
 }
 
-function printHumanReport(report: DevDetachResultJson): void {
+function printHumanReport(report: DevDetachResultJson, platform: PlanPlatform): void {
   const label = (name: string) => name.padEnd(13);
   // @ref llp/0004 §Implemented in v1 — F125. The URL stays on this line
   // because it is the one the dev server will answer on, and the words after it stop it being read
@@ -1150,10 +1208,22 @@ function printHumanReport(report: DevDetachResultJson): void {
     const { name, id, origin } = report.device;
     lines.push(`${label('Device')}${name} (${id}) · ${origin}`);
   }
+  if (report.eas) {
+    lines.push(
+      `${label('Session')}${
+        report.eas.sessionId
+          ? `${report.eas.sessionId} · bound to this worktree`
+          : `not bound yet · "${PROGRAM_PREFIX} dev --${platform} --eas --detach --wait-ready" waits for it`
+      }`
+    );
+  }
   lines.push(`${label('Took')}${report.waitedMs}ms`);
   if (report.alreadyRunning) {
+    const lead = report.eas?.sessionId
+      ? `This project already had a dev server; this run bound EAS Simulator session ${report.eas.sessionId}.`
+      : 'This project already had a dev server, so nothing was started.';
     lines.push(
-      ` This project already had a dev server, so nothing was started. One detached dev server per project: a second one could not hold the lock, and nothing would be able to find or stop it.`
+      ` ${lead} One detached dev server per project: a second one could not hold the lock, and nothing would be able to find or stop it.`
     );
   }
   Log.log(lines.join('\n'));

@@ -406,8 +406,11 @@ on `sun_path` gets the same digest scheme under the temporary directory. Both si
 that choice from the path length alone.
 
 Protocol. The server writes one JSON line (`url`, `port`, `pid`, `startedAt`,
-`projectRoot`, `easPlatform`) on connection and ends it. `easPlatform` is the platform of
-the EAS session the run opens the app on, or null; a reader treats a line without it as null. A reader connects with a ~250 ms timeout and
+`projectRoot`, `easPlatform`, `easOpenFinished`) on connection and ends it. `easPlatform` is the platform of
+the EAS session the run opens the app on, or null; a reader treats a line without it as null. `easOpenFinished` is true once
+the run's EAS open returned, bound or failed. It is false before that and for a run with no EAS open. When the open
+returns, the server answers each later connection with the flag set, and a port update keeps it. A reader treats a line
+without it as false. A reader connects with a ~250 ms timeout and
 reads to the close. A refused connection or a timeout is "no dev server".
 
 Acquisition. `EADDRINUSE` on posix means either a live owner or an orphaned socket file.
@@ -497,6 +500,13 @@ A `--wait-ready` failure of a building plan recovers into
 up. `dev --detach --json` carries `phase`. See [[0021-honest-reports]] for the window
 after a `--wait-ready` claim when the step also opens the app.
 
+The child prints `Detached dev run, pid <n>.` as line 1 of its log, before anything
+else. Only line 1 is read, so later output cannot fake it. A re-run reads it to tell
+whether the run that holds the lock is the run that wrote the log
+([[0035-one-device-per-worktree]] §Preserved sessions).
+
+Tests: childVerdict-test (the pid on line 1 only) and devAsync-test (the pid line).
+
 A build is recorded when the app reaches the device, whatever the launch then does
 (`src/dev/buildEvidence.ts`). The install line is what is read (`› Installing …` from
 `@expo/cli`). A step that failed still has its output read. Two cases are not recorded:
@@ -506,7 +516,11 @@ nothing is captured.
 Exit codes. `dev --detach` exits 0 when a dev server is up, whether it started one or
 found one. Exit 1 when the child never published a lock, and 1 when `--wait-ready` gave
 up. In that last case the server is still running, which the message says, unless the
-plan is still compiling. `dev:logs` exits 0 for a log and 1 (`NO_DEV_LOG`) when the
+plan is still compiling. Exit 22 (`DEV_DETACH_SESSION_PENDING`) when `--wait-ready --eas`
+runs out before the session is bound ([[0035-one-device-per-worktree]] §Preserved sessions). 22 means: run
+the same command again. The command has no `--port` that the caller did not type: a
+re-run finds the run through its log and the lock, and the lock names its port.
+`dev:logs` exits 0 for a log and 1 (`NO_DEV_LOG`) when the
 project has none.
 
 ## A busy port

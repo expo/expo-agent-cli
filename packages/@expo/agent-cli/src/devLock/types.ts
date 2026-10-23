@@ -24,6 +24,11 @@ export interface DevServerLockInfo {
    * session.
    */
   easPlatform: 'ios' | 'android' | null;
+  /**
+   * Whether this run's EAS open returned, bound or failed. False before that, and for a run with
+   * no EAS open.
+   */
+  easOpenFinished: boolean;
 }
 
 /** A held lock. Releasing it frees the address for the next dev server of this project. */

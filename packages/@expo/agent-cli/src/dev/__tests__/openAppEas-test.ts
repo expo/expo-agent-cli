@@ -1162,8 +1162,12 @@ describe(easRunLifecycle, () => {
     });
     expect(eas.platform).toBe('ios');
     expect(process.listeners('SIGINT')).toContain(onSignal);
+    let settled = false;
+    void eas.finished.then(() => (settled = true));
     if (open) eas.open({ devServerUrl: DEV_SERVER, stillWanted: () => true, buildId: null });
     await eas.finishAsync();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(settled).toBe(open);
     expect(process.listeners('SIGINT')).not.toContain(onSignal);
     expect(process.listeners('SIGTERM')).not.toContain(onSignal);
     return readCloudBindings(projectRoot).bindings.map(({ device }) => device.id);
@@ -1208,6 +1212,24 @@ describe(easRunLifecycle, () => {
 
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
     expect(progress()).not.toContain('Finishing EAS session work');
+  });
+
+  it(`resolves finished when the open failed`, async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-android', platform: 'android' })
+    );
+    const eas = easRunLifecycle(projectRoot, {
+      platform: 'ios',
+      expoGo: true,
+      keepSession: true,
+      onSignal: vi.fn(),
+    });
+
+    eas.open({ devServerUrl: DEV_SERVER, stillWanted: () => true, buildId: null });
+    await eas.finishAsync();
+
+    await expect(eas.finished).resolves.toBeUndefined();
+    expect(readCloudBindings(projectRoot).bindings).toEqual([]);
   });
 
   it(`prints the whole refusal when the worktree has a session on the other platform`, async () => {

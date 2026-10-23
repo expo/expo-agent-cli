@@ -68,6 +68,7 @@ import {
   type WrapperCrashTool,
 } from '../utils/wrapperCrash';
 import { appReachedDevice } from './buildEvidence';
+import { detachedPidLine } from './childVerdict';
 import { recordLastDevRequest } from './lastRequest';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import { event as devEvent } from './events';
@@ -103,6 +104,11 @@ import { CONFIG_LOCATION } from '../settings/read';
  * last step when every step succeeded.
  */
 export async function devAsync(projectRoot: string, options: DevOptions): Promise<number> {
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — line 1 of the detached
+  // log, so a parent can tell which run wrote it.
+  if (options.detachedChild) {
+    Log.progress(detachedPidLine(process.pid));
+  }
   if (options.device !== undefined && boundPlatform(options) == null) {
     throw deviceNotBindableError(options);
   }
@@ -591,6 +597,10 @@ async function executePlanAsync(
   // @ref llp/0026-dev-owns-the-open.rfc.md — the open is armed once per plan, whatever the port
   // retry does: the second bind is the same dev server, not a second app to open.
   let openArmed = false;
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the one EAS open of the
+  // plan, said on the lock of every dev-server step: a port retry takes a new lock.
+  let markEasOpenFinished!: () => void;
+  const easOpenFinished = new Promise<void>((resolve) => (markEasOpenFinished = resolve));
   // @ref llp/0027-everything-on-eas.rfc.md §The open is a session — the EAS build the session
   // installs: the one the plan found, or the one this run's `eas build` step makes below.
   let easBuildId: string | null = plan.easBuild?.id ?? null;
@@ -634,6 +644,7 @@ async function executePlanAsync(
         output,
         // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
         easPlatform: eas?.platform ?? null,
+        easOpenFinished: eas ? easOpenFinished : undefined,
         onDevServer: opensApp
           ? (server) => {
               if (openArmed) {
@@ -642,8 +653,10 @@ async function executePlanAsync(
               openArmed = true;
               // Open alongside Metro. A failed open must not stop it.
               const stillWanted = () => stepRunning;
-              if (eas) eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
-              else
+              if (eas) {
+                eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
+                void eas.finished.then(markEasOpenFinished);
+              } else
                 void openAppForRunAsync(
                   projectRoot,
                   plan,
