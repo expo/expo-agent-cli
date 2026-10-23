@@ -3,10 +3,9 @@
 // open that URL on a booted device.
 //
 // The scheme is read from the static config files. A dynamic `app.config.js`/`.ts` is evaluated
-// by the project's own `expo/config` in a child process, with its env files loaded
-// (`evaluateExpoConfigAsync`), never inside this process: that is the process boundary of
-// llp/0001 §Constraints. A caller that passes `--scheme` already knows the answer, and then
-// nothing is spawned.
+// with `@expo/config` after the project's env files are loaded (`evaluateExpoConfig`), the way
+// `expo config` reads it. A caller that passes `--scheme` already knows the answer, and then
+// nothing is evaluated.
 import fs from 'fs';
 import path from 'path';
 
@@ -20,7 +19,7 @@ import {
 } from '../device/cloudSimulator';
 import { PROGRAM_PREFIX } from '../programName';
 import { DYNAMIC_CONFIG_FILES, STATIC_CONFIG_FILES } from '../project/appConfig';
-import { evaluateExpoConfigAsync } from '../project/evaluatedConfig';
+import { evaluateExpoConfig } from '../project/evaluatedConfig';
 import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
@@ -120,11 +119,11 @@ export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfi
  * Read the URL scheme and slug the app itself sees.
  *
  * The static read is the whole answer for a project with no dynamic config, and nothing is
- * spawned. With an `app.config.js`/`.ts` the project's own `expo/config` evaluates it in a child
- * process, with the env files the app would see loaded first (`evaluateExpoConfigAsync`), and
- * `scheme` and `slug` come from its answer: the evaluated config is what the app registered,
- * whatever a static file beside it says. The answer is not cached, for the reason llp/0011 gives:
- * a dynamic config can read env vars and `.env` files that no file stamp sees.
+ * evaluated. With an `app.config.js`/`.ts`, `@expo/config` evaluates it after the project's env
+ * files are loaded (`evaluateExpoConfig`), and `scheme` and `slug` come from its answer: the
+ * evaluated config is what the app registered, whatever a static file beside it says. The answer
+ * is not cached, for the reason llp/0011 gives: a dynamic config can read env vars and `.env`
+ * files that no file stamp sees.
  *
  * A `schemeOverride` skips the evaluation, because the flag wins over whatever the config says.
  *
@@ -143,7 +142,7 @@ export async function resolveProjectSchemeConfigAsync(
     return config;
   }
 
-  const evaluated = await evaluateSchemeConfigAsync(projectRoot);
+  const evaluated = evaluateSchemeConfig(projectRoot);
   if (!evaluated.ok) {
     return { ...config, evaluationError: evaluated.error };
   }
@@ -156,16 +155,16 @@ export async function resolveProjectSchemeConfigAsync(
   };
 }
 
-/** `scheme` and `slug` of the config the project's `expo/config` evaluated, or why it did not. */
-async function evaluateSchemeConfigAsync(
+/** `scheme` and `slug` of the evaluated config, or why it could not be evaluated. */
+function evaluateSchemeConfig(
   projectRoot: string
-): Promise<
-  { ok: true; scheme: string | null; slug: string | null } | { ok: false; error: string }
-> {
-  // The dev loop: the scheme of the app `expo start` serves, with the env files it reads.
-  const evaluated = await evaluateExpoConfigAsync(projectRoot, {
+): { ok: true; scheme: string | null; slug: string | null } | { ok: false; error: string } {
+  // The dev loop: the scheme of the app `expo start` serves, with the env files it reads. The
+  // scheme and slug are declared fields, so the config plugins are not run for them.
+  const evaluated = evaluateExpoConfig(projectRoot, {
     mode: 'development',
     isPublicConfig: true,
+    skipPlugins: true,
   });
   if (!evaluated.ok) {
     return evaluated;
