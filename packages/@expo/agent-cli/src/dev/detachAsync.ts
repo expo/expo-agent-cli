@@ -61,7 +61,11 @@ import {
   type DetachedChildPhase,
   type DetachedChildVerdict,
 } from './childVerdict';
-import { childStartsSessionSync, waitForEasSessionAsync } from './detachEasProgress';
+import {
+  childStartsSessionSync,
+  knownSessionIdSync,
+  waitForEasSessionAsync,
+} from './detachEasProgress';
 import { CALLER_ARGV_ENV, explicitRequestOf } from './deviceOption';
 import { event } from './events';
 import {
@@ -289,7 +293,7 @@ export async function devDetachAsync(
             lock,
             tunnelUrl,
             since: Date.parse(lock.startedAt),
-            knownId: null,
+            knownId: knownSessionIdSync(projectRoot, sessionPlatform),
             hasExited,
             callerArgv: options.callerArgv,
           })
@@ -328,8 +332,8 @@ export async function devDetachAsync(
       sessionId: other.sessionId,
       devServerRunning: false,
     });
-  // The session that is live before the spawn is the one the child reuses.
-  const keptSessionId = detachEas(projectRoot, options)?.sessionId ?? null;
+  // The session bound before the spawn, expired or not, is the one the child reuses and renews.
+  const keptSessionId = easPlatform ? knownSessionIdSync(projectRoot, easPlatform) : null;
 
   const { logFile, fd } = openDetachedLogSync(projectRoot);
   const { command, args } = buildDetachSpawn(resolveBinPath(), options.detachArgv);

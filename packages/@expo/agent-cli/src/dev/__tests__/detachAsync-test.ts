@@ -1218,6 +1218,48 @@ describe('the EAS session under --wait-ready', () => {
     expect(printedReport()).toMatchObject({ eas: { sessionId: 'sess-kept' } });
   });
 
+  function renewLater(id: string, atMs: number) {
+    setTimeout(() => {
+      writeCloudBinding(projectRoot, 'ios', id, {
+        boundAt: new Date(-60_000).toISOString(),
+        expiresAt: new Date(atMs + 3_600_000).toISOString(),
+      });
+      vi.mocked(readDevServerLockAsync).mockResolvedValue({ ...lock, easOpenFinished: true });
+    }, atMs);
+  }
+
+  it('takes the expired binding the child renewed in place once its open finished', async () => {
+    writeCloudBinding(projectRoot, 'ios', 'sess-kept', {
+      boundAt: new Date(-60_000).toISOString(),
+      expiresAt: new Date(-1_000).toISOString(),
+    });
+    renewLater('sess-kept', 2_000);
+
+    const result = start();
+    await vi.runAllTimersAsync();
+
+    expect(await result).toBe(0);
+    expect(Date.now()).toBeLessThan(10_000);
+    expect(printedReport()).toMatchObject({ eas: { sessionId: 'sess-kept' } });
+  });
+
+  it('stops the wait when the open finished and no binding is live, and says the same command reopens', async () => {
+    setTimeout(
+      () => vi.mocked(readDevServerLockAsync).mockResolvedValue({ ...lock, easOpenFinished: true }),
+      2_000
+    );
+
+    const result = start();
+    await vi.runAllTimersAsync();
+    const error = await result;
+
+    expect(error).toMatchObject({ code: 'DEV_DETACH_SESSION_PENDING', exitCode: 22 });
+    expect(Date.now()).toBeLessThan(10_000);
+    expect(error.message).toContain('already returned without a session binding');
+    expect(error.message).toContain('reopens');
+    expect(error.message).not.toContain('keeps going');
+  });
+
   it('exits 22 with DEV_DETACH_SESSION_PENDING, the pid and the tunnel when the wait runs out', async () => {
     const result = start();
     await vi.runAllTimersAsync();
@@ -1279,6 +1321,22 @@ describe('the EAS session under --wait-ready', () => {
         alreadyRunning: true,
         eas: { sessionId: 'sess-new' },
       });
+    });
+
+    it('follows a child that renews the expired binding from before its lock', async () => {
+      writeCloudBinding(projectRoot, 'ios', 'sess-kept', {
+        boundAt: new Date(-60_000).toISOString(),
+        expiresAt: new Date(-1_000).toISOString(),
+      });
+      renewLater('sess-kept', 2_000);
+
+      const result = start();
+      await vi.runAllTimersAsync();
+
+      expect(await result).toBe(0);
+      expect(Date.now()).toBeLessThan(10_000);
+      expect(reopenEasAsync).not.toHaveBeenCalled();
+      expect(printedReport()).toMatchObject({ eas: { sessionId: 'sess-kept' } });
     });
 
     it('reports no session and does not reopen without --wait-ready', async () => {

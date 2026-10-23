@@ -40,6 +40,17 @@ function boundSessionIdSync(
 }
 
 /**
+ * The id of this worktree's cloud binding for the platform at any age, expired or not: the session
+ * a child's open reuses, and renews in place when its lease ended. The wait takes it as `knownId`.
+ */
+export function knownSessionIdSync(projectRoot: string, platform: NativePlatform): string | null {
+  const binding = readCloudBindings(projectRoot).bindings.find(
+    ({ device }) => device.platform === platform
+  );
+  return binding?.device.id ?? null;
+}
+
+/**
  * Whether the detached child that holds this lock is still starting its session, so a re-run
  * follows it instead of reopening: its lock names the platform and does not say that its EAS open
  * finished, line 1 of the log names its pid, it is alive and inside its start window, and no
@@ -99,13 +110,14 @@ export async function waitForEasSessionAsync(
   }
 ): Promise<string | null> {
   // The kept binding counts once the child's lock says its open finished, bound or failed.
-  const bound = async () => {
-    const current = knownId == null ? null : await readDevServerLockAsync(projectRoot);
+  const check = async () => {
+    const current = await readDevServerLockAsync(projectRoot);
     const openFinished = current?.pid === lock.pid && current.easOpenFinished === true;
-    return boundSessionIdSync(projectRoot, platform, {
+    const id = boundSessionIdSync(projectRoot, platform, {
       since,
       knownId: openFinished ? knownId : null,
     });
+    return { id, openFinished };
   };
   const first = boundSessionIdSync(projectRoot, platform, { since, knownId: null });
   if (first) return first;
@@ -115,16 +127,23 @@ export async function waitForEasSessionAsync(
   Log.progress(
     `Waiting up to ${Math.round(timeoutMs / 1000)} s for the EAS Simulator session of the detached run (pid ${lock.pid}). A start takes a few minutes.`
   );
+  let openReturned = false;
   for (;;) {
     await new Promise((resolve) =>
       setTimeout(resolve, Math.max(0, Math.min(EAS_SESSION_POLL_MS, deadline - Date.now())))
     );
-    const id = await bound();
+    // The child binds inside its open, before it sets the flag: a finished open without a binding
+    // binds none later.
+    const { id, openFinished } = await check();
     if (id) {
       Log.progress(`EAS Simulator session ${id} is bound to this worktree.`);
       return id;
     }
     if (hasExited()) return null;
+    if (openFinished) {
+      openReturned = true;
+      break;
+    }
     if (Date.now() >= deadline) break;
   }
 
@@ -134,8 +153,15 @@ export async function waitForEasSessionAsync(
     'DEV_DETACH_SESSION_PENDING',
     [
       `The dev server is up on ${lock.url}${tunnelUrl ? ` (tunnel ${tunnelUrl})` : ''}, and its EAS Simulator session is not bound after ${waitedS} s.`,
-      `Why: the detached run (pid ${lock.pid}) starts the session after the dev server, and a start takes a few minutes. The run keeps going and binds the session to this worktree when it is up. The session bills from its start.`,
-      `How: run "${rerun}" again. It waits for this run's session and starts no second one. "${PROGRAM_PREFIX} dev:logs" shows the start. "${PROGRAM_PREFIX} dev:stop --eas" stops the dev server and the session.`,
+      ...(openReturned
+        ? [
+            `Why: the open of the detached run (pid ${lock.pid}) already returned without a session binding, so that run binds none later.`,
+            `How: run "${rerun}" again. It reopens the session. "${PROGRAM_PREFIX} dev:logs" shows the open. "${PROGRAM_PREFIX} dev:stop --eas" stops the dev server and the session.`,
+          ]
+        : [
+            `Why: the detached run (pid ${lock.pid}) starts the session after the dev server, and a start takes a few minutes. The run keeps going and binds the session to this worktree when it is up. The session bills from its start.`,
+            `How: run "${rerun}" again. It waits for this run's session and starts no second one. "${PROGRAM_PREFIX} dev:logs" shows the start. "${PROGRAM_PREFIX} dev:stop --eas" stops the dev server and the session.`,
+          ]),
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_TIMEOUT;
