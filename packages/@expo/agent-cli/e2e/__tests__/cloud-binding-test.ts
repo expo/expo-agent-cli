@@ -198,3 +198,41 @@ it.each([
   expect(fs.readFileSync(bindingFile(root), 'utf8')).toBe(before);
   expect(stubEasArgs(root).map((a) => a[0])).toEqual(easCalls);
 });
+it('an explicit stop failure keeps the binding for retry', async () => {
+  const root = await project();
+  await writeCloudBindingAsync(expoHome, root, { id: 'A' });
+  list([{ id: 'A' }]);
+  const result = await executeAgentCliAsync(root, ['dev:stop', '--eas', '--json'], {
+    env: { ...envFor(root), STUB_SIM_STOP_EXIT: '1' },
+    reject: false,
+  });
+  expect(result.exitCode).not.toBe(0);
+  expect(readBinding(root).device).toMatchObject({ id: 'A' });
+});
+it('a failed start records the billed session, and dev:stop --eas stops it', async () => {
+  const root = await project();
+  const result = await executeAgentCliAsync(root, ['dev', '--ios', '--eas', '--detach', '--json'], {
+    env: {
+      ...envFor(root),
+      STUB_SIM_START_EXIT: '1',
+      STUB_SIM_START_ID: 'billed',
+      STUB_EXPO_DEV_SERVER_PORT: '8761',
+      STUB_EXPO_LISTEN: '1',
+      STUB_EXPO_DELAY_MS: '90000',
+      STUB_EXPO_TUNNEL_HOST: 'cloud.tunnel.example',
+      STUB_EXPO_TUNNEL_DELAY_MS: '100',
+    },
+    reject: false,
+  });
+  expect(result.exitCode, result.stderr).toBe(0);
+  await waitForAsync(() => fs.existsSync(bindingFile(root)), 15000);
+  expect(readBinding(root).device).toMatchObject({ id: 'billed', origin: 'started' });
+  expect(fs.readFileSync(path.join(root, '.env.eas-simulator'), 'utf8')).toContain(
+    "EAS_SIMULATOR_SESSION_ID='billed'"
+  );
+  const stops = () => stubEasArgs(root).filter((args) => args[0] === 'simulator:stop');
+  expect(stops()).toEqual([]);
+  await executeAgentCliAsync(root, ['dev:stop', '--eas', '--json'], { env: envFor(root) });
+  expect(stops()).toEqual([['simulator:stop', '--id', 'billed', '--non-interactive']]);
+  expect(fs.existsSync(bindingFile(root))).toBe(false);
+});

@@ -897,7 +897,12 @@ describe('@expo/agent-cli dev:stop --eas', () => {
 
     expect(result.exitCode).toBe(0);
     const report = JSON.parse(result.stdout);
-    expect(report.session).toEqual({ id: 'sess-e2e', stopped: true, reason: null });
+    expect(report.session).toEqual({
+      id: 'sess-e2e',
+      stopped: true,
+      reason: null,
+      platform: 'ios',
+    });
     expect(easInvocations(projectRoot)).toContainEqual([
       'simulator:stop',
       '--id',
@@ -915,7 +920,12 @@ describe('@expo/agent-cli dev:stop --eas', () => {
     });
 
     expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout).session).toEqual({ id: null, stopped: false, reason: null });
+    expect(JSON.parse(result.stdout).session).toEqual({
+      id: null,
+      stopped: false,
+      reason: null,
+      platform: null,
+    });
     expect(easInvocations(projectRoot).some((argv) => argv[0] === 'simulator:stop')).toBe(false);
   });
 

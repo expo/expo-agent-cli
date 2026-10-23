@@ -2,9 +2,19 @@ import { readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
-import { devStopAsync, looksLikeDevServerProcess } from '../stopAsync';
+import { PROGRAM_PREFIX } from '../../programName';
+import {
+  buildFollowUps,
+  devStopAsync,
+  looksLikeDevServerProcess,
+  type DevStopResultJson,
+} from '../stopAsync';
 import type { MockInstance } from 'vitest';
+import { vol } from 'memfs';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
+import { readCloudBindings } from '../../deviceBinding/cloud';
+import { bindingPathFor } from '../../deviceBinding/registry';
+import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -304,6 +314,25 @@ describe(devStopAsync, () => {
       expect(printedErrors()).not.toContain('which the process cannot decline');
       expect(printedErrors()).toContain('npx @expo/agent-cli status --json');
     });
+
+    it(`should report a live pid as still running when it released its lock and the port is free`, async () => {
+      vi.mocked(readDevServerLockAsync)
+        .mockResolvedValueOnce(lock() as never)
+        .mockResolvedValue(null as never);
+      mockPort({ answering: false });
+      livePids.add(4242);
+      signalKills = false;
+
+      await expect(devStopAsync(projectRoot, options({ timeoutMs: 200 }))).resolves.toBe(
+        EXIT_OUTCOME_FAILED
+      );
+      expect(JSON.parse(printed())).toMatchObject({
+        stopped: false,
+        processStillRunning: true,
+        reason: 'still-running',
+      });
+      expect(printedErrors()).toContain('SIGKILL');
+    });
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Exit codes. The end state the caller asked for is the
@@ -579,7 +608,7 @@ describe('dev:stop --eas', () => {
     expect(code).toBe(EXIT_OK);
     expect(eas().stopEasSessionAsync).toHaveBeenCalledWith(projectRoot, 'sess-1');
     const report = JSON.parse(printed());
-    expect(report.session).toEqual({ id: 'sess-1', stopped: true, reason: null });
+    expect(report.session).toEqual({ id: 'sess-1', stopped: true, reason: null, platform: 'ios' });
   });
 
   it(`reports no session as an answer, and exits 0`, async () => {
@@ -591,7 +620,12 @@ describe('dev:stop --eas', () => {
 
     expect(code).toBe(EXIT_OK);
     expect(eas().stopEasSessionAsync).not.toHaveBeenCalled();
-    expect(JSON.parse(printed()).session).toEqual({ id: null, stopped: false, reason: null });
+    expect(JSON.parse(printed()).session).toEqual({
+      id: null,
+      stopped: false,
+      reason: null,
+      platform: null,
+    });
   });
 
   it(`exits 20 when the session would not stop — it is still billing`, async () => {
@@ -609,9 +643,277 @@ describe('dev:stop --eas', () => {
     expect(JSON.parse(printed()).session).toMatchObject({ id: 'sess-1', stopped: false });
   });
 
+  describe('with a cloud binding on another platform', () => {
+    beforeEach(() => {
+      vol.reset();
+      vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
+      writeCloudBinding(projectRoot, 'android', 'sess-2');
+      vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
+        cloudProbe.active({ id: 'sess-1', platform: 'ios' })
+      );
+      vi.mocked(eas().stopEasSessionAsync).mockImplementation(async (_root, id) =>
+        id === 'sess-2' ? { ok: false, reason: 'refused' } : { ok: true, reason: null }
+      );
+    });
+
+    it(`reports the failed stop as a device row and as the device error`, async () => {
+      const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+      expect(code).toBe(EXIT_OUTCOME_FAILED);
+      const report = JSON.parse(printed());
+      expect(report.session).toEqual({
+        id: 'sess-1',
+        stopped: true,
+        reason: null,
+        platform: 'ios',
+      });
+      expect(report.devices).toEqual([
+        {
+          backend: 'cloud',
+          platform: 'android',
+          id: 'sess-2',
+          name: 'sess-2',
+          released: false,
+          shutDown: false,
+          reason: 'refused; "npx --yes eas-cli simulator:stop --id sess-2" ends it',
+        },
+      ]);
+      expect(report.deviceError).toBe(
+        'refused; "npx --yes eas-cli simulator:stop --id sess-2" ends it'
+      );
+      expect(readCloudBindings(projectRoot).bindings).toMatchObject([{ device: { id: 'sess-2' } }]);
+    });
+
+    it(`prints one line per cloud row`, async () => {
+      await devStopAsync(projectRoot, options({ eas: true, json: false }));
+
+      expect(printed()).toContain(
+        'Could not release sess-2: refused; "npx --yes eas-cli simulator:stop --id sess-2" ends it'
+      );
+      expect(printedErrors()).toBe(
+        'refused; "npx --yes eas-cli simulator:stop --id sess-2" ends it'
+      );
+    });
+  });
+
+  it(`plain dev:stop reaps a deleted worktree's session and keeps this worktree's own cloud binding`, async () => {
+    const gone = '/gone-worktree';
+    vol.reset();
+    vol.fromJSON({ [`${projectRoot}/package.json`]: '{}', [`${gone}/package.json`]: '{}' });
+    const lease = {
+      boundAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    };
+    writeCloudBinding(gone, 'ios', 'sess-orphan', lease);
+    writeCloudBinding(projectRoot, 'android', 'sess-own', lease);
+    require('node:fs').rmSync(gone, { recursive: true });
+    vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
+
+    const code = await devStopAsync(projectRoot, options());
+
+    expect(code).toBe(EXIT_OK);
+    expect(eas().stopEasSessionAsync).toHaveBeenCalledTimes(1);
+    expect(eas().stopEasSessionAsync).toHaveBeenCalledWith(projectRoot, 'sess-orphan');
+    expect(readCloudBindings(projectRoot).bindings).toMatchObject([{ device: { id: 'sess-own' } }]);
+  });
+
+  it(`keeps a failed listing on session.reason and exits 0 when there is nothing to stop`, async () => {
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.unknown({ reason: 'no Expo account is signed in' })
+    );
+
+    const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+    expect(code).toBe(EXIT_OK);
+    const report = JSON.parse(printed());
+    expect(report.session).toMatchObject({ id: null, reason: 'no Expo account is signed in' });
+    expect(report.deviceError).toBeNull();
+  });
+
+  it(`keeps the reason of an unavailable account on session.reason`, async () => {
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(cloudProbe.unavailable());
+
+    const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+    expect(code).toBe(EXIT_OK);
+    expect(JSON.parse(printed()).session.reason).toContain('not enabled on this account');
+  });
+
+  it(`exits 0 when every bound session stopped though the listing failed`, async () => {
+    writeCloudBinding(projectRoot, 'android', 'sess-2');
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.unknown({ reason: 'listing failed' })
+    );
+    vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
+
+    const code = await devStopAsync(projectRoot, options({ eas: true }));
+
+    expect(code).toBe(EXIT_OK);
+    const report = JSON.parse(printed());
+    expect(report.devices).toMatchObject([{ id: 'sess-2', released: true }]);
+    expect(report.session.reason).toBe('listing failed');
+  });
+
+  it(`reports a stopped session whose binding stayed as kept, with the lock error`, async () => {
+    writeCloudBinding(projectRoot, 'android', 'sess-2');
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(cloudProbe.none({ reason: 'x' }));
+    vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
+    const registry =
+      require('../../deviceBinding/registry') as typeof import('../../deviceBinding/registry');
+    const locked = vi
+      .spyOn(registry, 'withRegistryLockAsync')
+      .mockRejectedValue(new Error('lock wait timed out'));
+    const code = await devStopAsync(projectRoot, options({ eas: true, followups: true })).finally(
+      () => locked.mockRestore()
+    );
+
+    expect(code).toBe(EXIT_OUTCOME_FAILED);
+    const report = JSON.parse(printed());
+    expect(report.devices).toMatchObject([
+      { id: 'sess-2', released: null, shutDown: true, reason: 'lock wait timed out' },
+    ]);
+    expect(report.followups.map((f: { why: string }) => f.why).join('\n')).toContain('sess-2');
+    expect(readCloudBindings(projectRoot).bindings).toMatchObject([{ device: { id: 'sess-2' } }]);
+  });
+
+  it(`names an unreadable cloud binding file`, async () => {
+    vol.reset();
+    vol.fromJSON({ [`${projectRoot}/package.json`]: '{}' });
+    const file = bindingPathFor(projectRoot, 'android', 'cloud');
+    require('node:fs').mkdirSync(require('node:path').dirname(file), { recursive: true });
+    require('node:fs').writeFileSync(file, 'garbage');
+    vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(cloudProbe.none({ reason: 'x' }));
+
+    await devStopAsync(projectRoot, options({ eas: true }));
+
+    const { deviceError } = JSON.parse(printed());
+    expect(deviceError).toContain(`The binding file ${file} does not parse`);
+    expect(deviceError).toContain(`How: run "rm -f '${file}'"`);
+  });
+
   it(`asks nothing about a session without the flag`, async () => {
     await devStopAsync(projectRoot, options());
     expect(cloud().probeCloudSessionAsync).not.toHaveBeenCalled();
     expect(JSON.parse(printed()).session).toBeUndefined();
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
+describe(buildFollowUps, () => {
+  const result = (overrides: Partial<DevStopResultJson>): DevStopResultJson => ({
+    stopped: true,
+    pid: 1234,
+    port: 8081,
+    url: 'http://127.0.0.1:8081',
+    lockHeld: true,
+    signal: 'SIGTERM',
+    forced: false,
+    forceRefusedBy: null,
+    processStillRunning: false,
+    portStillAnswering: false,
+    reason: null,
+    detail: null,
+    waitedMs: 0,
+    followups: [],
+    ...overrides,
+  });
+  const cloud = (released: boolean | null) => ({
+    backend: 'cloud' as const,
+    platform: 'android' as const,
+    id: 'sess-1',
+    name: 'sess-1',
+    released,
+    shutDown: false,
+    reason: null,
+  });
+
+  it.each<[string, Partial<DevStopResultJson>, string[], string | null | undefined]>([
+    [
+      'a kept cloud session, on its platform',
+      { devices: [cloud(null)] },
+      ['stop-session', 'dev'],
+      '--android',
+    ],
+    ['a released cloud session', { devices: [cloud(true)] }, ['dev'], '--android'],
+    [
+      'nothing running and a kept cloud session',
+      { stopped: false, reason: 'not-running', devices: [cloud(null)] },
+      ['stop-session'],
+      null,
+    ],
+    [
+      "a failed stop of the probe's session",
+      { devices: [], session: { id: 'A', stopped: false, reason: 'x', platform: null } },
+      ['stop-session', 'dev'],
+      undefined,
+    ],
+    [
+      'no session on record',
+      { devices: [], session: { id: null, stopped: false, reason: 'unknown', platform: null } },
+      ['dev'],
+      undefined,
+    ],
+    [
+      "the probe's session stopped, on its platform",
+      { devices: [], session: { id: 'A', stopped: true, reason: null, platform: 'android' } },
+      ['dev'],
+      '--android',
+    ],
+    [
+      'nothing running and this run stopped the session',
+      {
+        stopped: false,
+        reason: 'not-running',
+        devices: [],
+        session: { id: 's', stopped: true, reason: null, platform: 'ios' },
+      },
+      ['dev'],
+      '--ios',
+    ],
+  ])('names the follow-ups after %s', (_name, input, ids, platformFlag) => {
+    const followups = buildFollowUps(result(input));
+
+    expect(followups.map((f) => f.id)).toEqual(ids);
+    if (platformFlag !== undefined) {
+      expect(followups.find((f) => f.id === 'dev')?.command ?? null).toBe(
+        platformFlag && `${PROGRAM_PREFIX} dev ${platformFlag} --eas`
+      );
+    }
+  });
+
+  it(`does not say the dev server is stopped when no dev-server lock answered`, () => {
+    const followups = buildFollowUps(
+      result({
+        stopped: false,
+        reason: 'not-running',
+        devices: [],
+        session: { id: 's', stopped: true, reason: null, platform: 'ios' },
+      })
+    );
+
+    expect(followups.find((f) => f.id === 'dev')?.why).toBe(
+      'The EAS session is stopped, and no dev-server lock answered for this project. This starts a dev server and a session again when the app is needed.'
+    );
+  });
+
+  it(`says the stop failed, not that it was not checked, for a cloud session whose stop failed`, () => {
+    const followups = buildFollowUps(
+      result({ devices: [{ ...cloud(false), reason: 'refused\nHow: retry' }] })
+    );
+
+    expect(followups.map((f) => f.id)).toEqual(['stop-session', 'dev']);
+    expect(followups[0]!.why).toBe(
+      'The stop of EAS Simulator session sess-1 failed: refused. If it still runs, it bills until this ends it.'
+    );
+    expect(buildFollowUps(result({ devices: [cloud(null)] }))[0]!.why).toContain('was not checked');
+  });
+
+  it(`says the stop failed for the probe's session whose stop failed`, () => {
+    const followups = buildFollowUps(
+      result({ session: { id: 'A', stopped: false, reason: 'refused', platform: 'ios' } })
+    );
+
+    expect(followups[0]!.why).toContain('The stop of EAS Simulator session A failed: refused.');
+    expect(followups[0]!.why).not.toContain('not checked');
   });
 });

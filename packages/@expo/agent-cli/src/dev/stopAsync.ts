@@ -27,12 +27,16 @@
 // `still-running` — exit 20 — about a process that was already gone, with a `How:` line offering
 // `--signal SIGKILL` for a pid nothing could signal.
 
+import { stopCloudSessionsAsync } from './stopCloudSessions';
 import chalk from 'chalk';
 
+import type { CloudPlatform } from '../device/cloudSimulator';
+import type { ReleasedDevice } from '../deviceBinding';
 import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
 import { event as cliEvent } from '../events';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
+import { easStopFollowUp } from '../followups/start';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import { devCommand, hostPlatform } from '../smoke/suggest';
@@ -102,9 +106,15 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
    *
    * @ref llp/0027-everything-on-eas.rfc.md §dev:stop
    * `stopped: false` with an `id` is a session that is still billing, and the reason says why the
-   * stop did not take; `id: null` is a project with no session in progress on record.
+   * stop did not take; `id: null` is a project with no session in progress on record. `platform`
+   * is the session's platform, null when the run does not know it.
    */
-  session?: { id: string | null; stopped: boolean; reason: string | null } | null;
+  session?: {
+    id: string | null;
+    stopped: boolean;
+    reason: string | null;
+    platform: CloudPlatform | null;
+  } | null;
   /**
    * Whether a lock answered for **the target**: this CLI's dev server or a stranger's.
    *
@@ -209,11 +219,10 @@ export async function devStopAsync(
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
-  if (options.eas) {
-    report.session = await stopProjectEasSessionAsync(projectRoot);
-  }
+  const cloud = options.eas ? await stopCloudSessionsAsync(projectRoot) : null;
+  if (cloud) report.session = cloud.session;
   const devServerOk = report.stopped || report.reason === 'not-running';
-  Object.assign(report, await stopDevicesAsync(projectRoot, options, report));
+  Object.assign(report, await stopDevicesAsync(projectRoot, options, report, cloud));
   report.followups = followUpsEnabled(options.followups) ? buildFollowUps(report) : [];
 
   event('stop_done', {
@@ -255,39 +264,6 @@ export async function devStopAsync(
     reportFollowUps('dev:stop', report.followups, { json: options.json });
   }
   return exitCode;
-}
-
-/**
- * End this project's EAS Simulator session, when it has one in progress.
- *
- * @ref llp/0027-everything-on-eas.rfc.md §dev:stop
- * Found the way every `--eas` command finds it — the service's listing, with the dotenv as the
- * tiebreaker — and stopped **by id**: the bare `eas simulator:stop` ends whatever the dotenv names,
- * which may be a session another run is driving. No session is an answer, not a failure.
- */
-async function stopProjectEasSessionAsync(
-  projectRoot: string
-): Promise<NonNullable<DevStopResultJson['session']>> {
-  const { isLive, probeCloudSessionAsync } =
-    require('../device/cloudSimulator') as typeof import('../device/cloudSimulator');
-  const { liveCloudBindings, releaseCloudBindingAsync } =
-    require('../deviceBinding/cloud') as typeof import('../deviceBinding/cloud');
-  const { stopEasSessionAsync } = require('../device/eas') as typeof import('../device/eas');
-  const probe = await probeCloudSessionAsync({
-    projectRoot,
-    boundIds: liveCloudBindings(projectRoot).map(({ device }) => device.id),
-  });
-  if (!isLive(probe)) {
-    return {
-      id: null,
-      stopped: false,
-      reason: probe.state === 'none' || probe.state === 'inactive' ? null : probe.reason,
-    };
-  }
-  const result = await stopEasSessionAsync(projectRoot, probe.session.id);
-  if (result.ok) await releaseCloudBindingAsync(projectRoot, probe.session.id);
-  debugEvent('stop_session', { sessionId: probe.session.id, ok: result.ok });
-  return { id: probe.session.id, stopped: result.ok, reason: result.reason };
 }
 
 /** The ordinary path: a lock answers, so the pid to signal is known and so is what it owns. */
@@ -601,7 +577,10 @@ export function looksLikeDevServerProcess(listener: PortListener): boolean {
   return /\b(node|expo|metro|bun|deno)\b/i.test(listener.command);
 }
 
-function buildFollowUps(report: DevStopResultJson): FollowUp[] {
+export function buildFollowUps(report: DevStopResultJson): FollowUp[] {
+  const cloudRows = report.devices?.filter((d) => d.backend === 'cloud') ?? [];
+  const kept = keptSessionFollowUp(report, cloudRows);
+  const keptSession = kept ? [kept] : [];
   if (report.stopped) {
     const followups: FollowUp[] = [];
     // First, because it contradicts the line above it: the dev server stopped and the port is
@@ -615,9 +594,12 @@ function buildFollowUps(report: DevStopResultJson): FollowUp[] {
         why: `Port ${report.port} still answers, and it is not the process that was just stopped. This asks what is on it and names the pid.`,
       });
     }
-    followups.push({
+    // The platform of a session this worktree has or had: a kept session is reused by the next
+    // dev --eas.
+    const easPlatform = report.session?.platform ?? cloudRows[0]?.platform ?? null;
+    followups.push(...keptSession, {
       id: 'dev',
-      command: devCommand(hostPlatform()),
+      command: easPlatform ? devCommand(easPlatform, '--eas') : devCommand(hostPlatform()),
       why: 'The dev server is stopped, so this is what starts one again when the app is needed.',
     });
     return followups;
@@ -631,7 +613,38 @@ function buildFollowUps(report: DevStopResultJson): FollowUp[] {
       },
     ];
   }
-  return [];
+  if (report.reason === 'not-running' && report.session?.stopped && report.session.platform) {
+    return [
+      ...keptSession,
+      {
+        id: 'dev',
+        command: devCommand(report.session.platform, '--eas'),
+        why: 'The EAS session is stopped, and no dev-server lock answered for this project. This starts a dev server and a session again when the app is needed.',
+      },
+    ];
+  }
+  return keptSession;
+}
+
+/** The `dev:stop --eas` follow-up for a session that may still bill, or null. */
+function keptSessionFollowUp(
+  report: DevStopResultJson,
+  cloudRows: ReleasedDevice[]
+): FollowUp | null {
+  const failedStop =
+    report.session?.id && !report.session.stopped
+      ? { id: report.session.id, reason: report.session.reason }
+      : cloudRows.find((d) => d.released === false);
+  if (failedStop)
+    return easStopFollowUp(
+      `The stop of EAS Simulator session ${failedStop.id} failed${failedStop.reason ? `: ${failedStop.reason.split('\n')[0]}` : ''}. If it still runs, it bills until this ends it.`
+    );
+  const unchecked = cloudRows.find((d) => d.released == null);
+  if (unchecked)
+    return easStopFollowUp(
+      `EAS Simulator session ${unchecked.id} is recorded for this worktree and was not checked. If it still runs, it bills until this ends it.`
+    );
+  return null;
 }
 
 function printHumanReport(report: DevStopResultJson): void {

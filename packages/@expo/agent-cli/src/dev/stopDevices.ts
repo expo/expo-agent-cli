@@ -18,14 +18,38 @@ export interface StoppedDevices {
   deviceError: string | null;
 }
 
+/**
+ * @param cloud what `dev:stop --eas` did to this worktree's EAS sessions. Its rows replace the
+ * recorded cloud rows, and its error comes after the local devices' error.
+ */
 export async function stopDevicesAsync(
+  projectRoot: string,
+  options: DevStopOptions,
+  stop: { reason: string | null; port: number | null; url: string | null },
+  cloud: Pick<StoppedDevices, 'devices' | 'deviceError'> | null = null
+): Promise<StoppedDevices> {
+  const report = await stopLocalDevicesAsync(projectRoot, options, stop);
+  if (cloud) {
+    report.devices.push(...cloud.devices);
+    report.deviceError ??= cloud.deviceError;
+  } else if (!devicesDisabled()) {
+    report.devices.push(
+      ...keptDevices(projectRoot, options.platform).filter((device) => device.backend === 'cloud')
+    );
+  }
+  return report;
+}
+
+async function stopLocalDevicesAsync(
   projectRoot: string,
   options: DevStopOptions,
   stop: { reason: string | null; port: number | null; url: string | null }
 ): Promise<StoppedDevices> {
   const report: StoppedDevices = { devices: [], reaped: [], deviceError: null };
   if (devicesDisabled()) return report;
-  report.devices = keptDevices(projectRoot, options.platform);
+  const kept = () =>
+    keptDevices(projectRoot, options.platform).filter((device) => device.backend !== 'cloud');
+  report.devices = kept();
   try {
     if (options.release) {
       // A requested port may be idle while this worktree's server runs on another port.
@@ -49,8 +73,9 @@ export async function stopDevicesAsync(
             report.deviceError ??= error instanceof Error ? error.message : String(error);
           }
         }
-        const remaining = keptDevices(projectRoot, options.platform).filter(
-          (kept) => !released.some((done) => done.id === kept.id && done.platform === kept.platform)
+        const remaining = kept().filter(
+          (device) =>
+            !released.some((done) => done.id === device.id && done.platform === device.platform)
         );
         report.devices = [...released, ...remaining];
         const [unreadable] = unreadableBindingFiles(projectRoot, options.platform);

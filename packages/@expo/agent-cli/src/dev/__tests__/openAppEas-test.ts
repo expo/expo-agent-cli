@@ -765,7 +765,7 @@ describe('the session half on its own', () => {
       expect(report.reason).toContain(`simulator:stop --id ${started}`);
     });
 
-    it(`keeps it when another run in this worktree recorded it`, async () => {
+    it(`keeps it when another run in this worktree bound it before the stop`, async () => {
       vi.mocked(acquireCloudBindingAsync).mockImplementation(async () => {
         writeCloudBinding(projectRoot, 'ios', started, { origin: 'dotenv' });
         throw new Error('lock wait timed out');
@@ -773,7 +773,8 @@ describe('the session half on its own', () => {
       const report = await ensureEasSessionAsync(projectRoot, options);
       expect(stopCalls()).toHaveLength(0);
       expect(report).toMatchObject({ ok: false, started: false, sessionId: started });
-      expect(report.reason).toContain('may drive it');
+      expect(report.reason).toContain('another run in this worktree recorded it, so it stays');
+      expect(report.reason).not.toContain('simulator:stop');
     });
   });
 

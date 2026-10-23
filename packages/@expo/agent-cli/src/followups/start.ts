@@ -150,11 +150,9 @@ export function buildStartFollowUps(input: StartFollowUpInput): FollowUp[] {
     return capFollowUps([
       ...openApp,
       runtimeErrors,
-      {
-        id: 'stop-session',
-        command: `${PROGRAM_PREFIX} dev:stop --eas`,
-        why: "Stops this project's dev server and EAS Simulator session, ending its billing.",
-      },
+      easStopFollowUp(
+        "Stops this project's dev server and EAS Simulator session, ending its billing."
+      ),
     ]);
   }
 
@@ -444,4 +442,8 @@ function readPortArgument(expoArgs: string[]): string | undefined {
     }
   }
   return undefined;
+}
+
+export function easStopFollowUp(why: string): FollowUp {
+  return { id: 'stop-session', command: `${PROGRAM_PREFIX} dev:stop --eas`, why };
 }

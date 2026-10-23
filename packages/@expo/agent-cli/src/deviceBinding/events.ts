@@ -7,6 +7,8 @@ declare module '2g' {
     'cli:device_registry_lock_removed': { lock: string; pid: number };
     /** A stale binding of another worktree was let go of. */
     'cli:device_binding_reaped': { reason: string };
+    /** This worktree asked EAS to stop one of its sessions. */
+    'cli:device_cloud_session_released': { sessionId: string; reason: string; ok: boolean };
   }
 }
 

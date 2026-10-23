@@ -500,6 +500,8 @@ if (command === 'simulator' || command === 'simulator:start') {
 }
 
 if (command === 'simulator:stop') {
+  if (process.env.STUB_SIM_STOP_EXIT)
+    exitWith(process.stderr, 'Stop refused', Number(process.env.STUB_SIM_STOP_EXIT));
   const id = valueOf('--id') || loadSessionEnv({ ...process.env }).EAS_SIMULATOR_SESSION_ID;
   writeRememberedSessions(
     rememberedSessions().map((session) =>

@@ -5,17 +5,15 @@ import { deviceUnavailableError } from './errors';
 import { clearInspectCache } from './inspect';
 import { isExpired, leaseFrom } from './lease';
 import { acquireSectionAsync } from './reap';
-import { deviceReport, ownBindingFiles } from './records';
 import {
   bindingPathFor,
   readBindingFile,
-  removeBindingFile,
   withRegistryLockAsync,
   writeBindingFile,
 } from './registry';
 import { WRITE_LOCK_WAIT_MS } from './release';
 import { defaultTools } from './tools';
-import type { Binding, BoundDevice, DevicePlatform, DeviceTools, ReleasedDevice } from './types';
+import type { Binding, BoundDevice, DevicePlatform, DeviceTools } from './types';
 
 export type CloudDevice = Extract<BoundDevice, { backend: 'cloud' }>;
 export type CloudBinding = Binding & { device: CloudDevice };
@@ -198,36 +196,10 @@ export async function acquireCloudBindingAsync(
 }
 
 function concurrentStop(binding: CloudBinding): Cleanup {
-  return { binding, action: 'stop-cloud', reason: 'concurrent-start' };
-}
-
-/** Stop callers remove only the session they actually stopped, regardless of lease age. */
-export async function releaseCloudBindingAsync(
-  projectRoot: string,
-  sessionId: string,
-  tools = defaultTools()
-): Promise<ReleasedDevice[]> {
-  try {
-    return await withRegistryLockAsync(
-      async () => {
-        const released: ReleasedDevice[] = [];
-        for (const { file, backend } of ownBindingFiles(projectRoot)) {
-          if (backend !== 'cloud') continue;
-          const read = readBindingFile(file);
-          if (
-            read.kind !== 'binding' ||
-            read.binding.device.backend !== 'cloud' ||
-            read.binding.device.id !== sessionId
-          )
-            continue;
-          removeBindingFile(file);
-          released.push({ ...deviceReport(read.binding), released: true, shutDown: true });
-        }
-        return released;
-      },
-      { waitMs: WRITE_LOCK_WAIT_MS, tools }
-    );
-  } finally {
-    clearInspectCache();
-  }
+  return {
+    binding,
+    action: 'stop-cloud',
+    stopRoot: binding.projectRoot,
+    reason: 'concurrent-start',
+  };
 }

@@ -17,6 +17,9 @@ import { WRITE_LOCK_WAIT_MS } from './release';
 import { defaultTools } from './tools';
 import type { Binding, DeviceTools } from './types';
 
+/** The longest an EAS Simulator session runs; a binding older than this names an ended session. */
+const EAS_SESSION_CAP_MS = 115 * 60_000;
+
 function rootDeleted(root: string): boolean {
   try {
     fs.lstatSync(root);
@@ -37,6 +40,8 @@ export function reapSection(
   const files = [
     ...listBindingFiles('ios', 'local-ios'),
     ...listBindingFiles('android', 'local-android'),
+    ...listBindingFiles('ios', 'cloud'),
+    ...listBindingFiles('android', 'cloud'),
   ];
   for (const file of files) {
     if (own.has(file)) continue;
@@ -45,7 +50,7 @@ export function reapSection(
     const binding = read.binding;
     const deleted = rootDeleted(binding.projectRoot);
     if (!deleted && !isExpired(binding, tools.now())) continue;
-    const cleanup = chooseCleanup(binding, deleted, tools, inventory);
+    const cleanup = chooseCleanup(binding, deleted, projectRoot, tools, inventory);
     if (!cleanup) continue;
     if (cleanup.action === 'shutdown') {
       writeBindingFile(file, { ...binding, expiresAt: tools.now().toISOString() });
@@ -58,17 +63,22 @@ export function reapSection(
   return actions;
 }
 
+/** @param callerRoot the worktree reaping; a deleted worktree's session is stopped from it. */
 function chooseCleanup(
   binding: Binding,
   deleted: boolean,
+  callerRoot: string,
   tools: DeviceTools,
   inventory?: IosInventory
 ): Cleanup | null {
   const { device } = binding;
-  const result = (
-    action: Cleanup['action'],
-    reason = deleted ? 'deleted-worktree' : 'expired'
-  ): Cleanup => ({ binding, action, reason, reaped: true });
+  const reason = deleted ? 'deleted-worktree' : 'expired';
+  const result = (action: Exclude<Cleanup['action'], 'stop-cloud'>, why = reason): Cleanup => ({
+    binding,
+    action,
+    reason: why,
+    reaped: true,
+  });
   if (device.backend === 'local-ios') {
     const listed = inventory?.simulators.find(
       ({ udid, isAvailable }) => udid === device.udid && isAvailable
@@ -84,6 +94,18 @@ function chooseCleanup(
         ? result('kill')
         : result('forget', 'device-gone');
     if (deleted) return result('forget');
+  }
+  if (device.backend === 'cloud') {
+    if (device.origin === 'dotenv') return result('forget');
+    if (tools.now().getTime() - Date.parse(binding.boundAt) > EAS_SESSION_CAP_MS)
+      return result('forget', 'session-cap');
+    return {
+      binding,
+      action: 'stop-cloud',
+      stopRoot: deleted ? callerRoot : binding.projectRoot,
+      reason,
+      reaped: true,
+    };
   }
   return null;
 }
