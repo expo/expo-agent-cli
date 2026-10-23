@@ -13,6 +13,7 @@
 // names it, so a session that happens to be up never quietly bills a run a local device would have
 // served.
 
+import { liveCloudBindings } from '../deviceBinding/cloud';
 import { resolveAdb, type AdbResolution } from '../device/adb';
 import {
   cloudSessionStartCommand,
@@ -79,8 +80,9 @@ export function navigateDeviceOf(device: BoundDevice): NavigateDevice {
  * Look for the cloud simulator session this worktree can drive. Never throws for no session: no
  * session is an answer.
  *
- * **The service answers this, not the filesystem.** One `eas simulator:list`, because this is
- * about to open a link on a device (llp/0005 §Cloud simulator).
+ * **The service answers this, not the filesystem.** One `eas simulator:list`, with the ids of this
+ * worktree's live bindings, because this is about to open a link on a device (llp/0005 §Cloud
+ * simulator).
  *
  * `platform` is a **preference** for picking between several sessions, not a filter: the caller
  * compares afterwards, so a session on the other platform is reported as one rather than hidden
@@ -98,6 +100,7 @@ export async function probeCloudDeviceAsync(
   const probe = await probeCloudSessionAsync({
     projectRoot,
     platform,
+    boundIds: liveCloudBindings(projectRoot).map(({ device }) => device.id),
   });
   // A queued session is listed and not up yet. Say so, rather than "no session".
   if (probe.state === 'queued') {
@@ -322,6 +325,10 @@ function cloudSessionLine(probe: CloudSessionProbe | null): string | null {
     if (probe.wrongTypeCount > 0)
       lines.push(
         `Or: this project has ${countOf(probe.wrongTypeCount, 'running EAS Simulator session')} this CLI cannot drive — none of them is an agent-device session. Start one it can with "${cloudSessionStartCommand()}" and pass --eas.`
+      );
+    if (probe.unboundCount > 0)
+      lines.push(
+        `Or: this project has ${countOf(probe.unboundCount, 'live or pending EAS Simulator session')} that this worktree did not start, so none is selected. Start one for this worktree with "${cloudSessionStartCommand()}" and pass --eas.`
       );
     return lines.length ? lines.join('\n') : null;
   }

@@ -1109,6 +1109,7 @@ describe('reloading an app on a cloud simulator session', () => {
       // A package runner has to be findable for any `eas` to be spawned at all
       // (`src/utils/easCli.ts` — one rung, and it is the runner).
       ...NPX_FILES,
+      [path.join(projectRoot, '.env.eas-simulator')]: 'EAS_SIMULATOR_SESSION_ID=session-1\n',
       [detachedLogPath(projectRoot)]: log.join('\n') + '\n',
     });
     resetPackageRunnerCache();

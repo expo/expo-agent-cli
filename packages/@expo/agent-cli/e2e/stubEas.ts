@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { unwrapGuardedExec } from '../src/device/cloudCommand';
+import { digestForRoot } from '../src/deviceBinding/registry';
 import { installStubEasRunnerAsync, linkFixtureToEasAsync } from './utils';
 
 /** Where the stub `eas` records what it was asked to do, one JSON line per run, under the cwd. */
@@ -115,5 +116,40 @@ export async function writeCloudSessionFileAsync(
     path.join(projectRoot, '.env.eas-simulator'),
     '# Do not commit this file.\n# Do not modify these values manually. They are managed by eas-cli.\n# It holds configuration only for the current simulator session.\n\n' +
       `AGENT_DEVICE_DAEMON_BASE_URL='https://stub-daemon.example'\nAGENT_DEVICE_DAEMON_AUTH_TOKEN='stub-token'\nEAS_SIMULATOR_SESSION_ID='${sessionId}'\n`
+  );
+}
+
+/** The cloud binding file of `projectRoot` on `platform` under `expoHome`. */
+export function cloudBindingFile(expoHome: string, projectRoot: string, platform = 'ios'): string {
+  return path.join(
+    expoHome,
+    'agent-cli',
+    'bindings',
+    `${digestForRoot(projectRoot)}-${platform}-cloud.json`
+  );
+}
+
+/** Bind an EAS Simulator session to `projectRoot`, as `acquireCloudBindingAsync` writes it. */
+export async function writeCloudBindingAsync(
+  expoHome: string,
+  projectRoot: string,
+  {
+    id,
+    platform = 'ios',
+    origin = 'started',
+    expiresAt = new Date(Date.now() + 3600000).toISOString(),
+  }: { id: string; platform?: 'ios' | 'android'; origin?: 'started' | 'dotenv'; expiresAt?: string }
+): Promise<void> {
+  const file = cloudBindingFile(expoHome, projectRoot, platform);
+  await fs.promises.mkdir(path.dirname(file), { recursive: true });
+  await fs.promises.writeFile(
+    file,
+    JSON.stringify({
+      version: 1,
+      projectRoot,
+      device: { backend: 'cloud', platform, id, origin },
+      boundAt: new Date().toISOString(),
+      expiresAt,
+    })
   );
 }

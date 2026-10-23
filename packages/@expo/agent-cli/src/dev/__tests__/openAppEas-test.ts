@@ -4,6 +4,8 @@ import * as Log from '../../log';
 import simulatorFailures from '../../__fixtures__/eas/simulator-failures.json';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
+import { acquireCloudBindingAsync } from '../../deviceBinding/cloud';
+import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { registryDirectory } from '../../deviceBinding/registry';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { resolveEasCli } from '../../utils/easCli';
@@ -26,6 +28,15 @@ vi.mock('../../device/cloudSimulator', async () => {
     '../../device/cloudSimulator'
   );
   return { ...actual, probeCloudSessionAsync: vi.fn() };
+});
+vi.mock('../../deviceBinding/cloud', async () => {
+  const actual = await vi.importActual<typeof import('../../deviceBinding/cloud')>(
+    '../../deviceBinding/cloud'
+  );
+  return {
+    ...actual,
+    acquireCloudBindingAsync: vi.fn(actual.acquireCloudBindingAsync),
+  };
 });
 vi.mock('../../navigate/openRoute', () => ({
   openRouteAsync: vi.fn(),
@@ -109,6 +120,8 @@ describe(buildSessionStartArgs, () => {
       '--non-interactive',
       '--name',
       'my-app — agent-cli dev',
+      '--max-idle-time-minutes',
+      '30',
     ]);
   });
 
@@ -435,6 +448,10 @@ describe(openAppOnEasAsync, () => {
     expect(report.started).toBe(true);
     expect(report.reason).toContain('exited 1');
     expect(report.reason).toContain('npx --yes eas-cli simulator:stop --id sess-billed');
+    const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
+    expect(readBindingFile(bindingPathFor(projectRoot, 'ios', 'cloud'))).toMatchObject({
+      binding: { device: { id: 'sess-billed', origin: 'started' } },
+    });
   });
 
   it('quotes a non-TTY startup timeout and preserves the created session for cleanup', async () => {
@@ -601,6 +618,161 @@ describe('the session half on its own', () => {
     expect(fetchAdvertisedUrlAsync).not.toHaveBeenCalled();
   });
 
+  it(`claims an expired binding of its own and reuses its live session`, async () => {
+    const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
+    const root = '/project/claim-app';
+    const file = bindingPathFor(root, 'ios', 'cloud');
+    writeCloudBinding(root, 'ios', 'OLD', {
+      boundAt: new Date(Date.now() - 90 * 60_000).toISOString(),
+      expiresAt: new Date(Date.now() - 30 * 60_000).toISOString(),
+    });
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'OLD', platform: 'ios' })
+    );
+    const report = await ensureEasSessionAsync(root, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+    expect(probeCloudSessionAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ boundIds: ['OLD'] })
+    );
+    expect(report).toMatchObject({ ok: true, started: false, sessionId: 'OLD' });
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+    const read = readBindingFile(file);
+    expect(read.kind === 'binding' && Date.parse(read.binding.expiresAt) > Date.now()).toBe(true);
+  });
+
+  // The renewal before the probe protects a live session from a reap. A session the listing does
+  // not show is not one, so a failed open must not leave its binding renewed for another hour.
+  it(`puts back the lease it renewed when the probe does not list that session`, async () => {
+    const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
+    const root = '/project/stale-claim-app';
+    const file = bindingPathFor(root, 'ios', 'cloud');
+    const expiresAt = new Date(Date.now() - 30 * 60_000).toISOString();
+    writeCloudBinding(root, 'ios', 'OLD', {
+      boundAt: new Date(Date.now() - 90 * 60_000).toISOString(),
+      expiresAt,
+    });
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.inactive('OLD'));
+    mockTunnel(null);
+
+    const report = await ensureEasSessionAsync(root, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+      waits: { tunnelMs: 1 },
+    });
+
+    expect(report.ok).toBe(false);
+    const read = readBindingFile(file);
+    expect(read.kind === 'binding' && read.binding.expiresAt).toBe(expiresAt);
+  });
+
+  it(`refuses an unreadable binding before it probes or starts a session`, async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const { bindingPathFor } = await import('../../deviceBinding/registry');
+    const file = bindingPathFor('/project/garbage-app', 'ios', 'cloud');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'garbage');
+    const report = await ensureEasSessionAsync('/project/garbage-app', {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+    expect(report).toMatchObject({ ok: false });
+    expect(report.reason).toContain('cannot be read');
+    expect(probeCloudSessionAsync).not.toHaveBeenCalled();
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+
+  it(`ends its own session when a concurrent start in this worktree owns the dotenv`, async () => {
+    const fs = await import('fs');
+    const { acquireCloudBindingAsync } = await import('../../deviceBinding/cloud');
+    const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
+    const root = '/project/race-app';
+    fs.mkdirSync(root, { recursive: true });
+    vi.mocked(spawnCaptureAsync).mockImplementation((async (_command: string, args: string[]) => {
+      if (args.includes('simulator')) {
+        await acquireCloudBindingAsync(root, { platform: 'ios', id: 'A', origin: 'started' });
+        fs.writeFileSync(`${root}/.env.eas-simulator`, 'EAS_SIMULATOR_SESSION_ID=A\n');
+        return { stdout: 'Simulator session created (id: B)', stderr: '', exitCode: 0 };
+      }
+      return { stdout: '', stderr: '', exitCode: 0 };
+    }) as any);
+    const report = await ensureEasSessionAsync(root, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+    expect(report).toMatchObject({ ok: false, sessionId: null, started: false });
+    expect(report.reason).toContain('session A');
+    expect(readBindingFile(bindingPathFor(root, 'ios', 'cloud'))).toMatchObject({
+      binding: { device: { id: 'A' } },
+    });
+    expect(
+      vi.mocked(spawnCaptureAsync).mock.calls.some(([, args]) => args.includes('simulator:stop'))
+    ).toBe(true);
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Session binding — a session no binding records belongs to no run
+  describe('a session this run started and could not record', () => {
+    const started = '11111111-2222-3333-4444-555555555555';
+    const options = {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    } as const;
+    const stopCalls = () =>
+      vi.mocked(spawnCaptureAsync).mock.calls.filter(([, args]) => args.includes('simulator:stop'));
+
+    beforeEach(() => {
+      vi.mocked(acquireCloudBindingAsync).mockRejectedValue(new Error('lock wait timed out'));
+    });
+
+    it(`stops it when no binding in this worktree records it`, async () => {
+      const report = await ensureEasSessionAsync(projectRoot, options);
+      expect(stopCalls()).toHaveLength(1);
+      expect(stopCalls()[0]![1]).toEqual(
+        expect.arrayContaining(['simulator:stop', '--id', started])
+      );
+      expect(report).toMatchObject({ ok: false, started: false, sessionId: null });
+      expect(report.reason).toContain('stopped it');
+    });
+
+    it(`keeps it started, and names the stop, when the stop fails`, async () => {
+      vi.mocked(spawnCaptureAsync).mockImplementation((async (_command: string, args: string[]) =>
+        args.includes('simulator:stop')
+          ? { stdout: '', stderr: 'boom', exitCode: 1, spawnError: null }
+          : {
+              stdout: `Simulator session created (id: ${started})`,
+              stderr: '',
+              exitCode: 0,
+              spawnError: null,
+            }) as any);
+      const report = await ensureEasSessionAsync(projectRoot, options);
+      expect(report).toMatchObject({ ok: false, started: true, sessionId: started });
+      expect(report.reason).toContain(`simulator:stop --id ${started}`);
+    });
+
+    it(`keeps it when another run in this worktree recorded it`, async () => {
+      vi.mocked(acquireCloudBindingAsync).mockImplementation(async () => {
+        writeCloudBinding(projectRoot, 'ios', started, { origin: 'dotenv' });
+        throw new Error('lock wait timed out');
+      });
+      const report = await ensureEasSessionAsync(projectRoot, options);
+      expect(stopCalls()).toHaveLength(0);
+      expect(report).toMatchObject({ ok: false, started: false, sessionId: started });
+      expect(report.reason).toContain('may drive it');
+    });
+  });
+
   it(`takes the session name a caller gives it`, async () => {
     await ensureEasSessionAsync(projectRoot, {
       platform: 'ios',
@@ -629,7 +801,7 @@ describe('worktree session ownership', () => {
     expect(report).toMatchObject({ opened: false, reason: 'listing timed out' });
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
-  it('a queued session is retained without a replacement start', async () => {
+  it('a queued bound session is retained without a replacement start', async () => {
     vi.mocked(probeCloudSessionAsync).mockResolvedValue(
       cloudProbe.queued({ id: 'queued', platform: 'ios' })
     );
@@ -641,5 +813,27 @@ describe('worktree session ownership', () => {
       ),
     });
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+  it('retries only an unsupported idle flag before a creation receipt', async () => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValueOnce({
+      stdout: '',
+      stderr: 'Nonexistent flag: --max-idle-time-minutes',
+      exitCode: 2,
+    });
+    expect(await openAppOnEasAsync(projectRoot, options)).toMatchObject({ opened: true });
+    expect(spawnCaptureAsync).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(spawnCaptureAsync).mock.calls[1]![1]).not.toContain('--max-idle-time-minutes');
+  });
+  it('does not retry a flag error once a session was created', async () => {
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: 'Simulator session created (id: billed)',
+      stderr: 'Nonexistent flag: --max-idle-time-minutes',
+      exitCode: 2,
+    });
+    expect(await openAppOnEasAsync(projectRoot, options)).toMatchObject({
+      opened: false,
+      sessionId: 'billed',
+    });
+    expect(spawnCaptureAsync).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,5 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Records
+import { easCommandPrefix } from '../utils/easCli';
 import { firstLine } from '../utils/text';
 import { killEmulatorIfOurs } from './android';
 import { event } from './events';
@@ -9,7 +10,7 @@ import type { Binding, DeviceTools, ReleasedDevice } from './types';
 
 export type Cleanup = {
   binding: Binding;
-  action: 'forget' | 'shutdown' | 'delete' | 'kill';
+  action: 'forget' | 'shutdown' | 'delete' | 'kill' | 'stop-cloud';
   reason: string;
   reaped?: boolean;
   /** The binding file the section removed; a failed device action writes the binding back to it. */
@@ -71,7 +72,7 @@ export async function runCleanupAsync(
     report.reason = reason;
     const detail = report.error ?? gone;
     console.error(
-      `${report.error ? 'Could not release' : item.action === 'delete' ? 'Deleted' : 'Released'} ${report.name} (${reason})${detail ? `: ${detail}` : '.'}`
+      `${report.error ? 'Could not release' : doneVerb(item)} ${report.name} (${reason})${detail ? `: ${detail}` : '.'}`
     );
     // The How line rides on the error dev:stop prints, not on the progress line above.
     const step = report.error ? manualStep(item) : null;
@@ -87,8 +88,16 @@ export async function runCleanupAsync(
   return reports;
 }
 
+function doneVerb({ action }: Cleanup): string {
+  if (action === 'delete') return 'Deleted';
+  if (action === 'stop-cloud') return 'Stopped EAS Simulator session';
+  return 'Released';
+}
+
 /** The command that does by hand what a failed device action did not. */
 function manualStep({ binding: { device }, action }: Cleanup): string | null {
+  if (device.backend === 'cloud' && action === 'stop-cloud')
+    return `${easCommandPrefix()} simulator:stop --id ${device.id}`;
   if (device.backend === 'local-ios' && (action === 'delete' || action === 'shutdown'))
     return `xcrun simctl ${action} ${device.udid}`;
   if (device.backend === 'local-android' && device.origin.kind === 'spawned' && action === 'kill')
@@ -97,7 +106,7 @@ function manualStep({ binding: { device }, action }: Cleanup): string | null {
 }
 
 async function actAsync(
-  { binding: { device }, action }: Cleanup,
+  { binding: { device, projectRoot }, action }: Cleanup,
   tools: DeviceTools
 ): Promise<{
   ok: boolean;
@@ -106,6 +115,8 @@ async function actAsync(
   /** Why a `kill` signalled nothing: the instance had already exited. */
   gone?: string | null;
 }> {
+  if (device.backend === 'cloud' && action === 'stop-cloud')
+    return tools.stopCloud(projectRoot, device.id);
   if (device.backend === 'local-ios' && action === 'delete')
     return deleteSimulatorAsync(tools, device.udid);
   if (device.backend === 'local-ios' && action === 'shutdown')

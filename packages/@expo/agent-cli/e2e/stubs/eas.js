@@ -58,6 +58,7 @@
 // - STUB_SIM_AVAILABLE: `false` for an account without the feature
 //
 // `simulator:list` / `simulator:get`
+// - STUB_SIM_STORE: shared session JSON file for several worktrees on the same EAS project
 // - STUB_SIM_SESSIONS: `0` for a project with nothing running (apart from sessions this stub
 //   started under the cwd, below)
 // - STUB_SIM_ID / STUB_SIM_STATUS / STUB_SIM_PLATFORM / STUB_SIM_TYPE: the one listed session
@@ -302,14 +303,19 @@ if (command === 'build:view') {
 /** The sessions this stub started under this cwd, newest first. */
 function rememberedSessions() {
   try {
-    return JSON.parse(fs.readFileSync(path.join(cwd, SESSIONS_NAME), 'utf8'));
+    return JSON.parse(
+      fs.readFileSync(process.env.STUB_SIM_STORE || path.join(cwd, SESSIONS_NAME), 'utf8')
+    );
   } catch {
     return [];
   }
 }
 
 function writeRememberedSessions(sessions) {
-  fs.writeFileSync(path.join(cwd, SESSIONS_NAME), JSON.stringify(sessions));
+  fs.writeFileSync(
+    process.env.STUB_SIM_STORE || path.join(cwd, SESSIONS_NAME),
+    JSON.stringify(sessions)
+  );
 }
 
 /** The session the environment describes, which `simulator:list` and `simulator:get` answer with. */

@@ -4,6 +4,7 @@
 // `@expo/agent-cli start`, whose dev-server runner and follow-ups this reuses.
 
 import type { OpenAppOnEasReport } from './openAppEas';
+import { releaseCloudBindingAsync } from '../deviceBinding/cloud';
 import { withLeaseExtendedAsync } from '../deviceBinding/renew';
 import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
@@ -660,6 +661,7 @@ async function executePlanAsync(
                 require('../device/eas') as typeof import('../device/eas');
               const stopped = await stopEasSessionAsync(projectRoot, session.sessionId);
               if (stopped.ok) {
+                await releaseCloudBindingAsync(projectRoot, session.sessionId);
                 Log.progress(
                   `Stopped EAS Simulator session ${session.sessionId}, created by this run.`
                 );

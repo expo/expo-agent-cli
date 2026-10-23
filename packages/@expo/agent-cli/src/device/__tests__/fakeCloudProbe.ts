@@ -38,13 +38,16 @@ export const cloudProbe = {
   none: ({
     reason = 'the service lists no running EAS Simulator session for this project',
     wrongTypeCount = 0,
+    unboundCount = 0,
   }: {
     reason?: string;
     wrongTypeCount?: number;
+    unboundCount?: number;
   } = {}): CloudSessionProbe => ({
     state: 'none',
     reason,
     wrongTypeCount,
+    unboundCount,
   }),
   unavailable: (
     waitlistUrl = CLOUD_SIMULATOR_WAITLIST_URL,

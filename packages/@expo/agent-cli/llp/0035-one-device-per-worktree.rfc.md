@@ -87,10 +87,10 @@ A created simulator boots, shuts down or is deleted, and a spawned emulator is k
 6. A recorded emulator pid is killed only after its file is removed. Never `emu kill` by serial.
 7. `explicit` devices are booted at most, never shut down or deleted.
 8. Every process that runs Metro or a build step on a bound device extends the lease, and on `lost` it writes nothing for that binding.
-9. The EAS probe considers only sessions this worktree bound, its dotenv id, and sessions tagged with its digest.
+9. The EAS probe considers only sessions this worktree bound and its dotenv id.
 10. `src/deviceBinding/` imports nothing from `navigate`, `smoke`, `dev` or `installedApp`; a unit test enforces it.
 
-Files and budgets: `types.ts`, `registry.ts` (read, write, lock), `lease.ts`, `choose.ts` (pure), `inspect.ts` (the inspect table, the cache, `useBoundDeviceAsync`, `ownCloudIdsAsync`), `rungs.ts` (`findBoundDeviceAsync`, the rung loop of §Readers), `ios.ts` (the `simctl` calls), `errors.ts`, `events.ts`, `tools.ts` (`defaultTools`), `index.ts` (`acquireDeviceAsync`, `releaseWorktreeDevicesAsync`, re-exports); `reap.ts`, `android.ts`, `cloud.ts` and the other files are named by the section that adds them. Every file under 250 lines, no function over 60, the iOS and Android boots in their own functions.
+Files and budgets: `types.ts`, `registry.ts` (read, write, lock), `lease.ts`, `choose.ts` (pure), `inspect.ts` (the inspect table, the cache, `useBoundDeviceAsync`), `rungs.ts` (`findBoundDeviceAsync`, the rung loop of §Readers), `ios.ts` (the `simctl` calls), `errors.ts`, `events.ts`, `tools.ts` (`defaultTools`), `index.ts` (`acquireDeviceAsync`, `releaseWorktreeDevicesAsync`, re-exports); `reap.ts`, `android.ts`, `cloud.ts` (with `readCloudBindings`, `live` and `claimable`) and the other files are named by the section that adds them. Every file under 250 lines, no function over 60, the iOS and Android boots in their own functions.
 
 ## Records
 
@@ -171,7 +171,7 @@ export type ReleasedDevice = {
 };
 ```
 
-- Origins. `created`: the CLI may shut down, park and delete. `spawned`: the CLI may kill the emulator it spawned. `explicit`: boot at most. `cloud` `started`: this CLI started the session or found it by tag, and may stop it; `dotenv`: adopted from `.env.eas-simulator`; a reap never stops it, `dev:stop --eas` does, as today.
+- Origins. `created`: the CLI may shut down, park and delete. `spawned`: the CLI may kill the emulator it spawned. `explicit`: boot at most. `cloud` `started`: this CLI started the session, and may stop it; `dotenv`: adopted from `.env.eas-simulator`; a reap never stops it, `dev:stop --eas` does.
 - Let go, one rule per origin, first match. The file action runs under the lock, the device action after it. A reap's `delete` or `kill` that fails writes the binding back under the lock, unless another binding took its file, so the next reap tries again.
   - A local binding whose device the inventory does not list or lists as unavailable (its runtime was removed), or a `spawned` one whose `emulatorPid` is dead: remove the file.
   - `created` of a deleted root: remove the file, then `simctl delete`, where "not found" counts as success.
@@ -227,7 +227,7 @@ Inputs: the own binding and the other worktrees' bindings, each marked stale or 
 | `android-spawn` | spawn detached, then write serial and pid, in that order (no pid: refuse `spawn-failed`) |
 | `explicit`      | write the binding                                                                        |
 
-**`acquireCloudBindingAsync(root, { platform, id, origin, tools? })`**: under the lock, writes or rewrites the own `cloud` binding (a reuse of the same id keeps `boundAt` and `origin`), then reaps the rows that need no inventory. The `origin` comes from the probe's reported source. Every session id a verb obtains is bound, a reuse of the bound id and a start that failed after it created the session included, so a later reap can stop that session.
+**`acquireCloudBindingAsync(root, { platform, id, origin, start?, tools? })`**: under the lock, writes or rewrites the own `cloud` binding (a reuse of the same id keeps `boundAt` and `origin`), then reaps the rows that need no inventory. `origin` is `started` for a session this run started, else `dotenv`. Every session id a verb obtains is bound, a reuse of the bound id and a start that failed after it created the session included, so a later reap can stop that session. `dev --eas` refuses an unreadable binding file before it starts a session. A start passes the time it began. If the file holds a different session bound after that time, two starts ran at once in this worktree. Only the session that `.env.eas-simulator` names can be driven (§Session guard), so the bind keeps that session and stops the other one: the replaced `started` session, or its own. A run that stops its own session reports failure and names the session that stays.
 
 **`inspectBindingAsync(root, platform, backend, tools?) → Inspection`**, lock-free, no extension, no network, one device-tool subprocess at most. iOS: one `simctl list devices -j` filtered by udid. Android: `get-state`, plus the instance check for a listed `spawned` binding; a `get-state` whose stderr says the device is not found counts as not listed, one that says offline, unauthorized or still authorizing counts as listed and not up, and any other non-zero exit is `cause: tool`. Cloud: the binding alone. The device check uses the 20 s timeout; `status` uses its own probe deadline. The inspect cache is main's probe cache with the root added to its key; `acquire` and release clear it; the rung loop never uses it. `state` is the first row that matches:
 
@@ -246,13 +246,15 @@ Inputs: the own binding and the other worktrees' bindings, each marked stale or 
 
 **`useBoundDeviceAsync(inspection, tools?) → BoundDevice`**: takes an `up` inspection, extends the lease per §Lease, and returns the device; `lost` throws `gone` with cause `expired` (exit 20). It never inspects again and never boots.
 
-**`releaseWorktreeDevicesAsync(root, { platform?, expected?, sessionId? }) → ReleasedDevice[]`**, never reaps. `expected` restricts a failed-boot cleanup to the binding that run acquired, so a replacement binding is left alone. Without `sessionId`: lets go of the local bindings, or only `platform`'s when given. Under the lock it acts only when the file still holds the binding it read: the same root, `boundAt` and device; an extended `expiresAt` is the same binding. With `sessionId`: removes the cloud binding that names that id, live or expired. Callers of the local release: `dev:stop --release`, after the server stop or when no server ran; smoke's cleanup. Callers of the `sessionId` release: every stop of a session this worktree bound, that is the foreground `dev --eas` exit, `dev:stop --eas` and `smoke --eas`, with no `--release` needed, because a stopped session leaves nothing to keep. The foreground `dev` exit and the detached child touch no local binding; the lease expires on its own.
+**`releaseWorktreeDevicesAsync(root, { platform?, expected? }) → ReleasedDevice[]`**, never reaps. `expected` restricts a failed-boot cleanup to the binding that run acquired, so a replacement binding is left alone. It lets go of the local bindings, or only `platform`'s when given. Under the lock it acts only when the file still holds the binding it read: the same root, `boundAt` and device; an extended `expiresAt` is the same binding. Callers: `dev:stop --release`, after the server stop or when no server ran; smoke's cleanup. The foreground `dev` exit and the detached child touch no local binding; the lease expires on its own.
+
+**`releaseCloudBindingAsync(root, sessionId)`**, never reaps. Under the lock it removes the own cloud binding that names the id, at any lease age, and leaves a binding that names another id. Callers: `dev:stop --eas`, the foreground `dev --eas` exit and `smoke --eas`, each after its stop succeeded. They need no `--release`, because a stopped session leaves nothing to keep.
 
 ## Readers
 
 - Rung order. With a platform flag and no `--eas`: that platform's local binding. With no platform flag: both local platforms are inspected, iOS on macOS only, and any `up` wins; when both are `up`, the binding with the newer `boundAt` wins, so after `dev --android` on a worktree whose simulator is still up the agent drives the instance it just asked for. When no platform is `up`, the first state that is not `none`, in iOS, Android order, decides per the inspect table's last column: iOS `gone` and Android `not-up` is a refusal naming Android; iOS `gone` and Android `none` goes to the EAS rung. When every local rung passed, verbs that fall back to EAS (`navigate` and `smoke` in `fallback` mode) run the EAS rung; `runtime:stop` and `runtime:reload` do not. With `--eas` the local rungs are skipped. A tool error seen on any rung is thrown after the EAS rung; else the refusal reports the first non-`none` state seen, with its How line; with only `none` states it names the platform of the flag, else iOS on macOS and Android elsewhere. The loop is `findBoundDeviceAsync(root, { platform?, extend })` in `rungs.ts`; it has no `eas` option, because `resolveDeviceAsync`'s `cloud: 'required'` short-circuit handles `--eas` before the loop. It calls `inspectBindingAsync` per platform, fresh, and with `extend` calls `useBoundDeviceAsync` once, on the winner. `resolveDeviceAsync` calls it with `extend: true` and sets `adb: resolveAdb()` on a `local-android` winner, so `openRoute`'s `adb reverse` still runs.
 - The installed readers (`src/installedApp/`) call `findBoundDeviceAsync` once per platform with `extend: false`, because `status` never writes.
-- The EAS rung is one probe call: `probeCloudSessionAsync({ boundIds })`. `ownCloudIdsAsync(root)` returns the ids of the own `cloud` bindings whose state is `recorded`; every probe caller uses it. When the selected id is an own binding's, the verb extends it per §Lease. When the listing shows a bound id as queued, the rung refuses `not-up` ("the bound session is still queued", How line: run the command again in a minute). When the listing shows it in no live state, the rung refuses `gone` with cause `device-gone` and writes nothing (Contract 1); its How line is the `dev` command with `--eas`, which on a running server opens a session through `openAppEas` and rewrites the binding (§EAS session binding).
+- The EAS rung is one probe call: `probeCloudSessionAsync({ boundIds })`. It gives the ids of the live bindings (`liveCloudBindings`); every probe caller gives `boundIds`. When the selected id is an own binding's, the verb extends it per §Lease. When the listing shows a bound id as queued, the rung refuses `not-up` ("the bound session is still queued", How line: run the command again in a minute). When the listing shows it in no live state, the rung refuses `gone` with cause `device-gone` and writes nothing (Contract 1); its How line is the `dev` command with `--eas`, which on a running server opens a session through `openAppEas` and rewrites the binding (§EAS session binding).
 - `probeLocalDeviceAsync({ projectRoot, ... })` maps the states of both platforms, with its cache keyed by root: any `up` is `present`; else any `unreadable` or `unknown` is main's `unknown`; else `absent`, with the first state seen as the reason. `status`, the start follow-ups and dev-wait fold it into their suggestion ladders.
 
 ## Reap
@@ -306,9 +308,9 @@ Each reaped device is reported on stderr and in JSON with reason `expired`, `del
 
 ## EAS
 
-- Pending §EAS session binding: `probeCloudSessionAsync` calls the pure `selectCloudSession`, which takes `boundIds`. A session is a candidate only when the service lists it as queued or in progress and its id is in `boundIds`, is the dotenv id, or carries the tag `agent-cli:<digest>`; a queued bound session is reported as such, never replaced by a new start. Unbound in-progress sessions come back as `unbound` for the report. The probe reports which source the selected id came from.
-- The session start passes `--max-idle-time-minutes 30` and `--tag agent-cli:<digest>`. When the start exits non-zero with oclif's "Nonexistent flag" on stderr and no session id was read, it retries once without the flag that was refused. A session found by tag is recorded as `started`. The idle timeout ships with the bound-only selection, because a start that an agent's tool timeout kills before it returns an id leaves a session with no binding, which the bound-only probe never reuses.
-- `dev:stop --eas` stops the probe's session, bound or dotenv, and then each other `cloud` binding's session of this worktree, and removes each stopped session's binding with the `sessionId` release; it needs no `--release`. A plain `dev:stop` keeps `cloud` bindings and reports each as recorded, not checked.
+- Per §Session binding: `probeCloudSessionAsync` calls the pure `selectCloudSession`, which takes `boundIds`. A session is a candidate only when the service lists it as queued or in progress and its id is in `boundIds` or is the dotenv id; a queued bound session is reported as such, never replaced by a new start. Unbound in-progress sessions come back as `unbound` for the report.
+- The session start passes `--max-idle-time-minutes 30`. When the start exits non-zero with oclif's "Nonexistent flag" on stderr and no session id was read, it retries once without the flag that was refused. The idle timeout limits the cost of a session that has no binding: a start that an agent's tool timeout kills before it returns an id leaves a session with no binding, which the probe never reuses.
+- `dev:stop --eas` stops the probe's session, bound or dotenv, and removes the stopped session's binding with `releaseCloudBindingAsync`; it needs no `--release`.
 
 ## Not built
 
@@ -550,7 +552,7 @@ The report names the device in `environment.boundDevice` (`id`, `name`, `action`
 
 What happens to the device of a deleted or expired worktree?
 
-- `reap.ts` per §Reap, called from `acquireDeviceAsync` and `dev:stop`. The `cloud` rows wait for §EAS session binding.
+- `reap.ts` per §Reap, called from `acquireDeviceAsync` and `dev:stop`. It has no `cloud` rows.
 - `cleanup.ts` runs the let-go device actions after the section (`runCleanupAsync`, `deleteSimulatorAsync`); `iosAcquire.ts` holds the iOS section (`bindIosSectionAsync`) and the binding identity of §Invariant.
 - The reap events and the `cli:device_binding_reaped` reasons, per §Output and errors.
 - Reap reports identify `projectRoot` and carry `devServerCleanup: 'not-checked'`: they describe device cleanup only. Deleted-worktree output warns that CLI/Metro processes may remain. Stopping those requires separate server ownership evidence; a device binding grants none. A late last-build write does not recreate an already deleted worktree.
@@ -584,16 +586,19 @@ Before a real `dev` startup, `.expo/agent-cli-last-dev.json` retains only its pa
 
 ## EAS session binding
 
-An EAS session belongs to the worktree that started it. Extends the binding and lifecycle rules in this RFC and §Device lifecycle to EAS sessions. The parts are §Session guard and §Session discovery. §Recovery by tag is not built.
+An EAS session belongs to the worktree that started it. Extends the binding and lifecycle rules in this RFC and §Device lifecycle to EAS sessions. The parts are §Session guard, §Session discovery and §Session binding. §Recovery by tag is not built.
 
 How does a worktree keep to its own EAS session, and how does that session survive a lost registry?
 
-**Status:** §Session guard and §Session discovery are built. A session is not bound to a worktree, and §Recovery by tag is not built.
+**Status:** built, except §Recovery by tag.
 
 ### State after EAS binding
 
 - An EAS device command runs only on the session it selected.
 - Discovery sees every pending and in-progress session on every page. A failed listing starts no session, and a queued session on the requested platform is never replaced by a new start.
+- Two worktrees get two sessions; `navigate --eas` uses its own; `dev:stop --eas` ends the probe's session and removes its binding.
+- A lost registry leaves its session unbound. `dev:stop --eas` and the dotenv id still reach it. Recovery by tag is §Recovery by tag, which is not built.
+- The live suite is green on a Mac with two worktrees.
 
 ### Session guard
 
@@ -618,10 +623,26 @@ Does discovery see every live session, and does doubt start no session?
 
 - `simulator:list` asks for every pending status (`new`, `queued`, `starting`) and `in-progress`. EAS reports a pending session with any of the three pending statuses.
 - The probe follows `--after <endCursor>` while `pageInfo.hasNextPage` is true, because a session that is not on page 1 has not ended. A later page that fails or cannot be read, or a page that lists more pages and names no cursor, gives `unknown`. After `CLOUD_SESSION_MAX_PAGES` (10) pages with more pages listed, the probe gives `unknown`, so a cursor that does not advance cannot loop.
-- `ensureEasSessionAsync` starts no session when the probe is `unknown` or the account has no EAS Simulator. A queued session that the dotenv names, on the requested platform, is never replaced by a new start; the open fails and asks for a retry in a minute.
+- `ensureEasSessionAsync` starts no session when the probe is `unknown` or the account has no EAS Simulator. A queued session that a binding or the dotenv names, on the requested platform, is never replaced by a new start; the open fails and asks for a retry in a minute.
 - `navigate --eas` on a queued session says that the session is not up yet. A queued session on another platform than the one asked answers a platform mismatch. `dev:stop --eas` stops a queued session.
 - A pinned eas-cli that refuses `--status queued` (24.8.0 and older) fails the listing, so the probe is `unknown` and no session starts (Risk 3).
 - Tests: the listing argv, a session on page 2, pages that do not end, a page with no cursor, a queued and a starting session, a pending session the dotenv does not name, the dotenv session against a foreign one on the asked platform (cloudSimulator-test); a queued session on the other platform (navigate device-test); a failed listing and a queued session start nothing (openAppEas-test).
+
+### Session binding
+
+**Status:** built.
+
+Which EAS session belongs to this worktree?
+
+- `cloud.ts` holds `readCloudBindings`, `live`, `claimable`, `claimCloudBindingsAsync`, and the `acquireCloudBindingAsync` and `releaseCloudBindingAsync` of §Entry points; the cloud rows of the inspect table; the `stop-cloud` action of `cleanup.ts`, which the two-starts rule of `acquireCloudBindingAsync` uses.
+- `selectCloudSession(boundIds)` and the `unbound` result per §EAS, without the tag rung. A candidate is a live `agent-device` session whose id is bound or is the dotenv id. The live states are the pending statuses and `in-progress`. The order is: the requested platform, then a bound id, then the dotenv id, then the newest `createdAt` (`id` ascending breaks a tie). A selected pending session gives the probe state `queued`. A selected in-progress session gives `active`. A pending session on another platform than the one asked answers a platform mismatch. A bound id that the listing shows in no live state gives `inactive`, after the availability check, so an account without EAS Simulator still answers `unavailable`. Live sessions that are not candidates give `unbound`, and the probe selects none of them. Readers of `candidateCount` are checked.
+- Every probe caller gives `boundIds`. The rung loop, `dev:stop --eas` and smoke's reuse branch give the ids of the live bindings. `ensureEasSessionAsync`, which `dev --eas` and smoke's start branch use, gives the ids of `claimCloudBindingsAsync`: this platform's bindings at any age and the other platform's live ones (`claimable`). This platform's ids come first. The claim renews this platform's expired lease under the lock before the probe, so a reap cannot stop a session that is still alive while the listing runs; when the probe does not select that session, `restoreRenewedLeaseAsync` writes the previous lease end back, so a failed open does not keep a dead binding live.
+- `dev --eas` and the start branch of `smoke --eas` first renew, under the registry lock, the lease of this platform's expired binding, so a reap in another worktree cannot stop that session; they then count the binding as bound and reuse a live session. An unreadable binding file of this platform refuses before the probe, and no session starts.
+- Binding points. `ensureEasSessionAsync` calls `acquireCloudBindingAsync` whenever it has a session id. `openAppEas` and smoke's start branch go through it, and smoke's reuse branch calls `acquireCloudBindingAsync` itself. That includes a reuse of the bound id and a start that failed after it created the session, so `dev:stop --eas` can find that session. A reuse of a `started` binding keeps its `origin` and `boundAt`. A binding that cannot be written fails the open. A session this run started and could not bind belongs to no run, so the open stops it at once, unless a binding in this worktree records its id: another run may drive it. A binding file that cannot be read keeps the session.
+- `dev --eas` binds, and stops the session that it started when Metro exits; a stop that took removes its binding.
+- `--max-idle-time-minutes 30` on the session start, with the "Nonexistent flag" retry of §EAS, for the reason given there. The retry runs only when no session id was read. The event `dev:open_app_eas_flag_unsupported { flag }` records a retry. `smoke --eas` binds in both its start and its reuse branch. Smoke looks up the build of this fingerprint first; with none, it reuses a live session of the platform or fails with its own reason, and never starts one. Smoke stops its own session; a stop that took removes its binding.
+- The start follow-ups read the own cloud bindings with a live lease, with no network call. They do not read the dotenv file. dev-wait does not read the bindings.
+- Tests: cloud-test (a reuse keeps the origin and `boundAt`, two starts at once keep the session the dotenv names, an expired cloud inspection writes nothing); the selection cases of cloudBinding-test and cloudSimulator-test; the binding, claim, race, unrecorded-start and idle-flag cases of openAppEas-test. E2E (cloud-binding-test), on the stub's shared `STUB_SIM_STORE` with a repeatable `--status`: two worktrees, an expired binding, a queued or stopped bound session.
 
 ### Recovery by tag
 

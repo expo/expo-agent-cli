@@ -161,18 +161,13 @@ describe('@expo/agent-cli navigate --eas', () => {
     ]);
   });
 
-  // The listing finds the session, and no connection settings name it, so the guard refuses.
-  it(`refuses a listed session that no connection settings name`, async () => {
+  // A listing alone does not authorize driving another worktree's session.
+  it(`refuses an unbound session even when it is the only session listed`, async () => {
     const projectRoot = await setupAsync('go-app');
-
     const result = await navigateCloud(projectRoot);
-
     expect(result.exitCode).toBe(1);
-    expect(result.stderr).toContain('sess-e2e cannot be driven from this worktree');
-    expect(result.stderr).toContain('names no session');
-    expect(easInvocations(projectRoot).map((args) => args.slice(0, 3))).toEqual([
-      ['simulator:list', '--status', 'in-progress'],
-    ]);
+    expect(result.stderr).toContain('other worktrees');
+    expect(easInvocations(projectRoot).map((args) => args[0])).toEqual(['simulator:list']);
   });
 
   // A running `serve-sim` session has no agent-device daemon in it. Saying "no session" would send

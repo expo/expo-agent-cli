@@ -5,6 +5,7 @@ import { deviceCommand } from '../errors';
 import { EXTEND_EVERY_MS, LEASE_MS } from '../lease';
 import { withLeaseExtendedAsync } from '../renew';
 import { bindingPathFor, readBindingFile } from '../registry';
+import { writeCloudBinding } from './fakeCloudBinding';
 import { bindingFor, fakeTools, writeBinding } from './fakeTools';
 
 const ROOT = '/work/app';
@@ -49,16 +50,7 @@ it('timer picks up late cloud files, warns lost once, and resumes revived files'
     { tools, warn }
   );
   const cloudFile = bindingPathFor(ROOT, 'android', 'cloud');
-  const cloud = {
-    ...bindingFor(ROOT, 'unused'),
-    device: {
-      backend: 'cloud' as const,
-      platform: 'android' as const,
-      id: 'session',
-      origin: 'started' as const,
-    },
-  };
-  writeBinding(cloudFile, cloud);
+  const cloud = writeCloudBinding(ROOT, 'android', 'session');
   tools.clock.now = new Date(tools.now().getTime() + EXTEND_EVERY_MS);
   await vi.advanceTimersByTimeAsync(EXTEND_EVERY_MS);
   expect(readBindingFile(cloudFile)).toMatchObject({
@@ -92,10 +84,7 @@ it('a lost lease names the dev command, with --eas for a cloud file', async () =
   const tools = fakeTools();
   const warn = vi.fn();
   writeBinding(file(), bindingFor(ROOT, 'SIM'));
-  writeBinding(bindingPathFor(ROOT, 'android', 'cloud'), {
-    ...bindingFor(ROOT, 'unused'),
-    device: { backend: 'cloud', platform: 'android', id: 'session', origin: 'started' },
-  });
+  writeCloudBinding(ROOT, 'android', 'session');
   let finish!: () => void;
   const work = withLeaseExtendedAsync(
     ROOT,

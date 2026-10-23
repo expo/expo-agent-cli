@@ -27,6 +27,11 @@ import {
   type Binding,
   type BoundDevice,
 } from '../deviceBinding';
+import {
+  acquireCloudBindingAsync,
+  liveCloudBindings,
+  releaseCloudBindingAsync,
+} from '../deviceBinding/cloud';
 import { bindingPathFor, readBindingFile } from '../deviceBinding/registry';
 import { probeCloudSessionAsync } from '../device/cloudSimulator';
 import { checkExpoGoVersionAsync } from '../device/expoGoVersion';
@@ -565,8 +570,14 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         const probe = await probeCloudSessionAsync({
           projectRoot,
           platform: options.platform,
+          boundIds: liveCloudBindings(projectRoot).map(({ device }) => device.id),
         });
         if (probe.state === 'active' && probe.session.platform === options.platform) {
+          await acquireCloudBindingAsync(projectRoot, {
+            platform: options.platform,
+            id: probe.session.id,
+            origin: 'dotenv',
+          });
           return { ok: true, sessionId: probe.session.id, started: false, reason: null };
         }
         return {
@@ -594,6 +605,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     stopEasSession: async (sessionId) => {
       const { stopEasSessionAsync } = require('../device/eas') as typeof import('../device/eas');
       const result = await stopEasSessionAsync(projectRoot, sessionId);
+      if (result.ok) await releaseCloudBindingAsync(projectRoot, sessionId);
       return { ok: result.ok, target: sessionId, reason: result.reason };
     },
 

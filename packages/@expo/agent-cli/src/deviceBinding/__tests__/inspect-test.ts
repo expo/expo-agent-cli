@@ -3,6 +3,7 @@ import { vol } from 'memfs';
 
 import { inspectBindingAsync, useBoundDeviceAsync } from '../inspect';
 import { bindingPathFor, readBindingFile } from '../registry';
+import { writeCloudBinding } from './fakeCloudBinding';
 import { bindingFor, fakeTools, writeBinding } from './fakeTools';
 
 const ROOT = '/work/app';
@@ -83,17 +84,22 @@ describe(inspectBindingAsync, () => {
     expect(tools.calls).toEqual([['list', 'devices', '-j']]);
   });
 
-  it('reports a cloud binding as recorded without a subprocess', async () => {
+  it.each([
+    ['reports a cloud binding as recorded without a subprocess', {}, { state: 'recorded' }],
+    [
+      'reports an expired cloud binding as gone and writes nothing',
+      { expiresAt: '2026-10-08T09:59:59.000Z' },
+      { state: 'gone', cause: 'expired' },
+    ],
+  ])('%s', async (_title, binding, expected) => {
     const tools = fakeTools();
-    writeBinding(bindingPathFor(ROOT, 'ios', 'cloud'), {
-      ...bindingFor(ROOT, 'unused'),
-      device: { backend: 'cloud', platform: 'ios', id: 'session-1', origin: 'started' },
-    });
+    writeCloudBinding(ROOT, 'ios', 'session-1', binding);
+    const cloudFile = bindingPathFor(ROOT, 'ios', 'cloud');
+    const before = readBindingFile(cloudFile);
 
-    expect(await inspectBindingAsync(ROOT, 'ios', 'cloud', tools)).toMatchObject({
-      state: 'recorded',
-    });
+    expect(await inspectBindingAsync(ROOT, 'ios', 'cloud', tools)).toMatchObject(expected);
     expect(tools.calls).toEqual([]);
+    expect(readBindingFile(cloudFile)).toEqual(before);
   });
 });
 
