@@ -480,13 +480,26 @@ export async function collectStatusReportAsync(
           : devCommand;
     const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
     const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > Date.now());
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+    const orphanSession =
+      ownServer == null && report.devServer?.running && report.devServer.projectRootMatched === true
+        ? (cloud.find((entry) => entry.origin === 'started' && entry.platform === platform) ??
+          cloud.find((entry) => entry.origin === 'started'))
+        : undefined;
     const expiredSession =
       cloud.length === 0 && !liveBound
         ? expiredCloud.find((entry) => entry.platform === platform)
         : undefined;
     // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
     const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-    if (expiredSession) {
+    if (orphanSession) {
+      report.devServer!.ownerEnded = true;
+      report.next = {
+        ...devNext,
+        command: `${PROGRAM_PREFIX} dev:stop --eas`,
+        why: `the run that started this dev server and EAS session ${orphanSession.id} ended; this stops both`,
+      };
+    } else if (expiredSession) {
       // @ref llp/0021-honest-reports.rfc.md §How they show up
       report.next = {
         ...devNext,

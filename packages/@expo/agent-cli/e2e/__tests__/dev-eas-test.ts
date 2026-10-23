@@ -662,6 +662,55 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   );
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  it.skipIf(process.platform === 'win32')(
+    'after a SIGKILL, status names dev:stop --eas, which stops the dev server and the session',
+    async () => {
+      const projectRoot = await setupAsync('go-app');
+      const env = easRunEnv(projectRoot, 8589);
+      const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas'], { env });
+      const output = collectOutput(child);
+      try {
+        expect(
+          await waitForAsync(
+            () => output.stderr.includes('Opened the app on EAS Simulator session'),
+            10000
+          )
+        ).toBe(true);
+        const exited = new Promise((resolve) => child.once('exit', resolve));
+        process.kill(child.pid!, 'SIGKILL');
+        await exited;
+
+        const status = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
+          env,
+        });
+        const report = JSON.parse(status.stdout);
+        expect(report.devServer).toMatchObject({ running: true, ownerEnded: true });
+        expect(report.next.command).toBe('npx @expo/agent-cli dev:stop --eas');
+
+        const stop = await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+          env,
+          reject: false,
+        });
+        expect(JSON.parse(stop.stdout)).toMatchObject({ stopped: true, port: 8589 });
+        expect(easInvocationArgs(projectRoot)).toContainEqual([
+          'simulator:stop',
+          '--id',
+          'sess-e2e-started',
+          '--non-interactive',
+        ]);
+        await expect(fetch('http://127.0.0.1:8589/status')).rejects.toThrow();
+      } finally {
+        try {
+          process.kill(-child.pid!, 'SIGKILL');
+        } catch {
+          // The group is already gone.
+        }
+      }
+    },
+    60_000
+  );
+
   it('starts a session running Expo Go for a project Expo Go can run, and builds nothing', async () => {
     const projectRoot = await setupAsync('go-app');
 

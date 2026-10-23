@@ -611,6 +611,9 @@ function devServerLine(devServer: DevServerStatus): string {
   if (reach) {
     facts.push(reach);
   }
+  if (devServer.ownerEnded) {
+    facts.push(chalk.yellow('its CLI process ended, so nothing owns it'));
+  }
   return facts.join(SEPARATOR);
 }
 

@@ -309,6 +309,13 @@ export interface DevServerStatus {
    */
   projectRootMatched: boolean | null;
   /**
+   * True when no lock answers for this project's dev server and a live `started` cloud binding
+   * exists: the CLI run that started both ended, and nothing owns the server.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+   */
+  ownerEnded?: true;
+  /**
    * How a device **off this machine** reaches this dev server, per what the dev server printed.
    *
    * `localhost` and `lan` say the URL above is the only address there is, and neither is usable
