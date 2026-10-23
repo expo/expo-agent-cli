@@ -32,15 +32,17 @@ export function buildStatusFollowUps(report: StatusReport): FollowUp[] {
   // First, because the session may bill while nothing else here would stop it.
   const orphans = report.orphanSessions ?? [];
   if (orphans.length) {
+    const manyRoots = new Set(orphans.map(({ projectRoot }) => projectRoot)).size > 1;
+    const manyIds = new Set(orphans.map(({ id }) => id)).size > 1;
     followups.push({
       id: 'stop-orphan-session',
       command: [...new Set(orphans.map(({ command }) => command))].join(' && '),
-      why: `The worktree that bound EAS session ${orphans.map(({ id }) => id).join(', ')} no longer exists, so no command run there can stop it.`,
+      why: `The ${manyRoots ? 'worktrees' : 'worktree'} that bound EAS ${manyIds ? 'sessions' : 'session'} ${orphans.map(({ id }) => id).join(', ')} ${manyRoots ? 'no longer exist' : 'no longer exists'}, so no command run there can stop ${manyIds ? 'them' : 'it'}.`,
     });
   }
 
   // @ref llp/0011-impact-and-freshness.rfc.md §The build-cache lookup
-  // First, because it is the one rung that removes a fifteen-minute step: a platform whose recorded
+  // Next after a billing orphan, or first without one, because it is the one rung that removes a fifteen-minute step: a platform whose recorded
   // build no longer matches would otherwise be rebuilt, and EAS already has the app that rebuild
   // would produce. Only when *this* project's freshness says so — a fresh platform has the right
   // app installed already, and downloading it again would be work for nothing.

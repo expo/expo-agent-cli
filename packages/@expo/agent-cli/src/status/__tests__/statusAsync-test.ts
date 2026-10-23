@@ -4,7 +4,9 @@ import { stripVTControlCharacters } from 'node:util';
 import path from 'path';
 
 import { detachedPidLine } from '../../dev/childVerdict';
+import { recordLastDevRequest } from '../../dev/lastRequest';
 import { detachedLogPath } from '../../dev/logFile';
+import { resolveDevOptions } from '../../dev/resolveOptions';
 import { resetSettingsCache } from '../../settings';
 
 import * as devLock from '../../devLock';
@@ -1302,6 +1304,64 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
         });
         expect(report.next?.command).toMatch(/smoke --android --eas/);
       });
+    });
+
+    it('beside a remembered request for the other platform, never stops the EAS server', async () => {
+      easServer('android');
+      recordLastDevRequest(projectRoot, resolveDevOptions(['--ios']));
+      const report = await collectStatusReportAsync(projectRoot, options);
+      expect(report.next?.command).toBe(
+        'npx @expo/agent-cli dev --android --eas --detach --wait-ready'
+      );
+    });
+
+    it('beside a caller who names the other platform, never stops the EAS server', async () => {
+      easServer('android');
+      const report = await collectStatusReportAsync(projectRoot, iosOptions);
+      expect(report.next?.command).not.toContain('dev:stop');
+    });
+
+    it('on a host that binds no device, still binds the session of the lock', async () => {
+      vi.stubEnv('AGENT_CLI_NO_DEVICE', '1');
+      easServer('ios');
+      const report = await collectStatusReportAsync(projectRoot, iosOptions);
+      expect(report.next?.command).toBe(
+        'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
+      );
+      expect(report.next?.why).toContain('No restart is needed.');
+    });
+
+    it('names no --port for an explicit server URL on another port', async () => {
+      easServer('ios');
+      const report = await collectStatusReportAsync(projectRoot, {
+        devServerUrl: 'http://127.0.0.1:9000',
+        platform: 'ios',
+      });
+      expect(report.next?.command).toBe(
+        'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
+      );
+    });
+
+    it('with an expired own session row and a live local binding, does not say the lease expired', async () => {
+      stopDevServer();
+      vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+        {
+          platform: 'ios',
+          backend: 'cloud',
+          state: 'gone',
+          id: 'sess-old',
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          platform: 'ios',
+          backend: 'local',
+          state: 'recorded',
+          expiresAt: '2999-01-01T00:00:00.000Z',
+        },
+      ] as summary.BindingSummary[]);
+      const report = await collectStatusReportAsync(projectRoot, iosOptions);
+      expect(report.next?.why ?? '').not.toContain('expired');
+      expect(report.next?.command).not.toContain('--eas');
     });
 
     it('beside an expired own session binding, says the lease expired and not that it starts', async () => {

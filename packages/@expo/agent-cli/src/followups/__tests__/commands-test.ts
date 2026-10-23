@@ -78,6 +78,48 @@ function mockReport(overrides: Partial<StatusReport> = {}): StatusReport {
 }
 
 describe(buildStatusFollowUps, () => {
+  it('names a deleted worktree and its session in the singular', () => {
+    const [followup] = buildStatusFollowUps(
+      mockReport({
+        orphanSessions: [
+          {
+            platform: 'ios',
+            id: 'A',
+            projectRoot: '/gone/a',
+            command: 'npx @expo/agent-cli dev:stop',
+          },
+        ],
+      })
+    );
+    expect(followup!.why).toBe(
+      'The worktree that bound EAS session A no longer exists, so no command run there can stop it.'
+    );
+  });
+
+  it('names deleted worktrees and their sessions in the plural', () => {
+    const [followup] = buildStatusFollowUps(
+      mockReport({
+        orphanSessions: [
+          {
+            platform: 'ios',
+            id: 'A',
+            projectRoot: '/gone/a',
+            command: 'npx @expo/agent-cli dev:stop',
+          },
+          {
+            platform: 'android',
+            id: 'B',
+            projectRoot: '/gone/b',
+            command: 'npx @expo/agent-cli dev:stop',
+          },
+        ],
+      })
+    );
+    expect(followup!.why).toBe(
+      'The worktrees that bound EAS sessions A, B no longer exist, so no command run there can stop them.'
+    );
+  });
+
   it(`should offer nothing for a project with nothing to act on`, () => {
     expect(buildStatusFollowUps(mockReport())).toEqual([]);
   });

@@ -402,8 +402,8 @@ export async function collectStatusReportAsync(
     const boundPlatforms = [...new Set((report.binding ?? []).map((entry) => entry.platform))];
     const platform =
       options.platform ??
-      request?.platform ??
       ownServer?.easPlatform ??
+      request?.platform ??
       (boundPlatforms.length === 1 ? boundPlatforms[0]! : resolveDefaultPlatform(state));
     const requestedPort =
       options.devServerUrl != null
@@ -481,8 +481,13 @@ export async function collectStatusReportAsync(
           ? `${PROGRAM_PREFIX} dev --web${devArgs.map((arg) => ` ${arg}`).join('')}`
           : devCommand;
     const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
+    const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > Date.now());
     const expiredSession =
-      cloud.length === 0 ? expiredCloud.find((entry) => entry.platform === platform) : undefined;
+      cloud.length === 0 && !liveBound
+        ? expiredCloud.find((entry) => entry.platform === platform)
+        : undefined;
+    // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
+    const easServer = ownServer?.easPlatform === platform ? ownServer : null;
     if (expiredSession) {
       // @ref llp/0021-honest-reports.rfc.md §How they show up
       report.next = {
@@ -494,7 +499,7 @@ export async function collectStatusReportAsync(
       state.isExpoApp &&
       platform !== 'web' &&
       'value' in binding &&
-      !bound.some((entry) => Date.parse(entry.expiresAt) > Date.now()) &&
+      !liveBound &&
       // An app on an own EAS server can load from Metro while the session is not bound.
       !(
         report.devServer?.running &&
@@ -503,24 +508,19 @@ export async function collectStatusReportAsync(
         ownServer?.easPlatform !== platform
       ) &&
       cloud.length === 0 &&
-      deviceBackend !== 'eas' &&
-      !devicesDisabled() &&
-      hostBindsPlatform(platform)
+      // `dev --eas` binds a cloud session and needs no local device tools. A project whose
+      // config puts this platform on EAS gets no local-device step.
+      (easServer != null ||
+        (deviceBackend !== 'eas' && !devicesDisabled() && hostBindsPlatform(platform)))
     ) {
       // @ref llp/0021-honest-reports.rfc.md §How they show up
-      // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
-      const easServer = ownServer?.easPlatform === platform ? ownServer : null;
       // Detached dev can only reuse beside an own server; an expired binding can still be reused.
-      const restart = easServer == null && bound.length === 0 && ownServer != null;
+      // A server that runs an EAS session is never stopped, for any platform.
+      const restart = ownServer != null && ownServer.easPlatform == null && bound.length === 0;
       const [unreadable] = unreadableBindingFiles(projectRoot, platform);
       // A re-run finds the running EAS Metro through its lock, which names its port: no --port.
       const command = easServer
-        ? rerunDevCommand(platform, [
-            '--eas',
-            ...(recoveryPort === easServer.port
-              ? withoutPortArgs(devArgs.slice(backend ? 1 : 0))
-              : devArgs.slice(backend ? 1 : 0)),
-          ])
+        ? rerunDevCommand(platform, ['--eas', ...withoutPortArgs(devArgs.slice(backend ? 1 : 0))])
         : restart
           ? `${PROGRAM_PREFIX} dev:stop && ${devCommand}`
           : devCommand;
