@@ -1509,6 +1509,36 @@ describe('@expo/agent-cli smoke', () => {
         await stub.close();
       }
     });
+
+    // @ref llp/0035-one-device-per-worktree.rfc.md §Lifecycle smoke — issue #171. `--no-start`
+    // binds nothing, so a worktree with no binding gets no screenshot, even beside a booted
+    // simulator with the app on it. The skip then has to say how to bind one: the registry's
+    // refusal names the `dev` command, and the probe used to keep its first line only.
+    it('names the dev command that binds a device when there is none to photograph', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
+      const release = await holdLockForAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-start', '--no-reload', '--timeout', '6s'],
+          { env: pathEnvVars(path.join(projectRoot, '.no-bin')), reject: false }
+        );
+
+        const report = JSON.parse(result.stdout);
+        expect(report.appsConnected).toBe(1);
+        const screenshot = report.phases.find((phase: any) => phase.id === 'screenshot');
+        expect(screenshot.status).toBe('skipped');
+        expect(screenshot.reason).toContain('No ios device is bound to this worktree.');
+        expect(screenshot.reason).toContain(
+          'How: run "npx @expo/agent-cli dev --ios --detach --wait-ready", then this command again.'
+        );
+      } finally {
+        release();
+        await stub.close();
+      }
+    });
   });
 
   // @ref llp/0006-agent-native-cli-surface.rfc.md §Output contract — the property the flag exists
