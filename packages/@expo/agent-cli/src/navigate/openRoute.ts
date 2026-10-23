@@ -106,6 +106,12 @@ export interface OpenRouteOptions {
    * @see llp/0021-honest-reports.rfc.md §The rules
    */
   devServerUrlSource?: 'flag' | 'discovered';
+  /**
+   * A tunnel host the caller has just read from the dev server's manifest.
+   *
+   * It wins over the host in the captured log, which can name an earlier tunnel of the same run.
+   */
+  tunnelHost?: string | null;
   /** Check the route against the project's routes first, cleared by `--no-route-check`. */
   routeCheck: boolean;
   /**
@@ -300,6 +306,17 @@ export interface AlertCheck {
   reason: string;
 }
 
+/** The tunnel host a device link uses: the one the caller just observed, else the log's current one. */
+export function currentTunnelHost(
+  options: { tunnelHost?: string | null },
+  reach: DevServerReach
+): string | null {
+  if (options.tunnelHost) {
+    return options.tunnelHost;
+  }
+  return isTunnelCurrent(reach) ? (reach.advertised?.host ?? null) : null;
+}
+
 /**
  * Resolve a deep link for a route and open it on a device.
  *
@@ -398,7 +415,7 @@ export async function resolveRouteUrlAsync(
 
   // Only a tunnel that is *current* changes the URL: a host read out of a log whose dev server has
   // since stopped is worse than the LAN address, because it looks like it should work.
-  const tunnelHost = isTunnelCurrent(reach) ? (reach.advertised?.host ?? null) : null;
+  const tunnelHost = currentTunnelHost(options, reach);
 
   const resolved = resolveDeepLinkUrl({
     route,

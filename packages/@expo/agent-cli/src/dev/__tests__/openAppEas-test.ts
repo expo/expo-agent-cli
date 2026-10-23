@@ -345,6 +345,76 @@ describe(openAppOnEasAsync, () => {
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
   });
 
+  it('does not send a bare route when a reused development build has no connection URL', async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-up', platform: 'ios' })
+    );
+    vi.mocked(resolveRouteUrlAsync).mockResolvedValue({ connect: [], resolution: 'scheme' } as any);
+
+    const report = await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: false,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+      keepSession: true,
+    });
+
+    expect(report).toMatchObject({ opened: false, sessionId: 'sess-up', started: false });
+    expect(report.reason).toContain('no URL to point the development build at this dev server');
+    expect(openRouteAsync).not.toHaveBeenCalled();
+    expect(spawnCaptureAsync).not.toHaveBeenCalled();
+  });
+
+  it('builds a reused session link from the tunnel host just read from the manifest', async () => {
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'sess-up', platform: 'ios' })
+    );
+    vi.mocked(openRouteAsync).mockResolvedValue({
+      exitCode: 0,
+      command: 'eas simulator:exec',
+    } as any);
+    await openAppOnEasAsync(projectRoot, {
+      platform: 'ios',
+      expoGo: false,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+      keepSession: true,
+    });
+    expect(resolveRouteUrlAsync).toHaveBeenCalledWith(
+      projectRoot,
+      expect.objectContaining({ tunnelHost: 'abc.tunnel.example' })
+    );
+  });
+
+  it.each(['http://127.0.0.1:8081', 'http://192.168.1.2:8081', 'https://old.tunnel.example'])(
+    'refuses a reused development-client URL pointing at %s instead of the current tunnel',
+    async (origin) => {
+      vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+        cloudProbe.active({ id: 'sess-up', platform: 'ios' })
+      );
+      vi.mocked(resolveRouteUrlAsync).mockResolvedValue({
+        connect: [
+          {
+            target: 'dev-build',
+            url: `myapp://?__expo_url=${encodeURIComponent(origin)}`,
+          },
+        ],
+      } as any);
+      const report = await openAppOnEasAsync(projectRoot, {
+        platform: 'ios',
+        expoGo: false,
+        devServerUrl: DEV_SERVER,
+        buildId: null,
+        keepSession: true,
+      });
+      expect(report.opened).toBe(false);
+      expect(report.reason).toContain('does not point at the current tunnel');
+      expect(report.reason).not.toContain('retry');
+      expect(openRouteAsync).not.toHaveBeenCalled();
+      expect(spawnCaptureAsync).not.toHaveBeenCalled();
+    }
+  );
+
   // The tunnel comes up after Metro answers. A deep link sent before it names the loopback, which a
   // session on EAS cannot load.
   it(`waits for the tunnel before it sends the deep link to a session that is up`, async () => {

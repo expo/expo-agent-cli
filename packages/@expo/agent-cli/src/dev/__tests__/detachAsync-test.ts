@@ -21,6 +21,7 @@ import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime
 import { logCmdError, type CommandError } from '../../utils/errors';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { otherPlatformSessionAsync } from '../openAppEas';
+import { reopenEasAsync } from '../reopenEas';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
 import { detachedLogPath } from '../logFile';
 import { isProcessAlive } from '../processLiveness';
@@ -41,6 +42,7 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
   acquireDeviceAsync: vi.fn(),
 }));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
+vi.mock('../reopenEas', () => ({ reopenEasAsync: vi.fn() }));
 vi.mock('../openAppEas', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../openAppEas')>()),
   otherPlatformSessionAsync: vi.fn(),
@@ -117,23 +119,6 @@ describe('--eas on the other platform', () => {
       print: false,
       reuseBoundDevice: true,
     });
-
-  it('asks nothing when a dev server runs', async () => {
-    vi.mocked(readDevServerLockAsync)
-      .mockReset()
-      .mockResolvedValue({
-        ...lockInfo(),
-        url: 'http://127.0.0.1:8393',
-        port: 8393,
-        pid: 4242,
-        projectRoot,
-        startedAt: new Date(0).toISOString(),
-      });
-
-    await expect(detach()).resolves.toBe(0);
-
-    expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
-  });
 
   it('refuses with the dev --detach reuse command, since no server runs yet', async () => {
     vi.mocked(otherPlatformSessionAsync).mockResolvedValue({
@@ -718,10 +703,20 @@ describe('the bound device', () => {
   it('boots the parked simulator on a running server, reuse only, before the report', async () => {
     vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
     const { event: cliEvent } = await import('../../events');
+    const summary = {
+      platform: 'ios' as const,
+      backend: 'local-ios' as const,
+      id: 'SIM-1',
+      name: 'agent-cli 0000',
+      origin: 'created',
+      state: 'up' as const,
+      expiresAt: new Date(3_600_000).toISOString(),
+    };
+    vi.spyOn(bindingSummary, 'readBindingSummaryAsync').mockResolvedValue([summary as any]);
 
     await expect(
-      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local']), {
-        print: false,
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--local', '--json']), {
+        print: true,
         reuseBoundDevice: true,
       })
     ).resolves.toBe(0);
@@ -732,6 +727,14 @@ describe('the bound device', () => {
       'dev_detach',
       expect.objectContaining({ alreadyRunning: true })
     );
+    const printed = vi
+      .mocked(Log.log)
+      .mock.calls.map(([text]) => String(text))
+      .find((text) => text.includes('"device"'))!;
+    expect(JSON.parse(printed)).toMatchObject({
+      alreadyRunning: true,
+      device: { id: 'SIM-1', backend: 'local-ios' },
+    });
   });
 
   it('relays the refusal of a running server with nothing to reuse', async () => {
@@ -791,7 +794,6 @@ describe('the bound device', () => {
       ['--android', '--detach', '--local'],
       { reuseBoundDevice: true },
     ],
-    ['for --eas', ['--ios', '--detach', '--eas'], { reuseBoundDevice: true }],
   ])('binds nothing on a running server %s', async (_case, argv, extra) => {
     vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
 
@@ -800,6 +802,72 @@ describe('the bound device', () => {
     ).resolves.toBe(0);
 
     expect(acquireDeviceAsync).not.toHaveBeenCalled();
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  it.each([true, false])(
+    'opens no session next to a running server that died (waitReady=%s)',
+    async (waitReady) => {
+      vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+      vi.mocked(isProcessAlive).mockReturnValue(false);
+      vi.mocked(waitForBundlerReadyAsync).mockResolvedValue(readiness(false));
+      fs.mkdirSync(path.dirname(logFile), { recursive: true });
+      fs.writeFileSync(logFile, servingPlan);
+
+      const result = devDetachAsync(
+        projectRoot,
+        { ...resolveDevOptions(['--ios', '--detach', '--eas']), waitReady },
+        { print: false, reuseBoundDevice: true }
+      ).catch((error) => error);
+      await vi.runAllTimersAsync();
+
+      expect(await result).toMatchObject({ code: 'DEV_DETACH_DIED' });
+      expect(reopenEasAsync).not.toHaveBeenCalled();
+    }
+  );
+
+  it('leaves the question to the reopen and passes it the running tunnel', async () => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+    vi.mocked(fetchAdvertisedUrlAsync).mockResolvedValue({
+      url: 'https://abc.tunnel.example',
+      host: 'abc.tunnel.example',
+      hostType: 'tunnel',
+    });
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--eas']), {
+        print: false,
+        reuseBoundDevice: true,
+      })
+    ).resolves.toBe(0);
+
+    expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
+    expect(reopenEasAsync).toHaveBeenCalledTimes(1);
+    expect(reopenEasAsync).toHaveBeenCalledWith(
+      projectRoot,
+      expect.objectContaining({ deviceBackend: 'eas' }),
+      running.url,
+      'https://abc.tunnel.example'
+    );
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  it('names the reopened EAS session in the dev:stop --eas follow-up', async () => {
+    vi.mocked(readDevServerLockAsync).mockReset().mockResolvedValue(running);
+    vi.mocked(reopenEasAsync).mockResolvedValue('sess-1');
+
+    await expect(
+      devDetachAsync(projectRoot, resolveDevOptions(['--ios', '--detach', '--eas', '--json']), {
+        print: true,
+        reuseBoundDevice: true,
+      })
+    ).resolves.toBe(0);
+
+    const printed = vi
+      .mocked(Log.log)
+      .mock.calls.map(([text]) => String(text))
+      .find((text) => text.includes('"followups"'))!;
+    expect(JSON.parse(printed).followups.at(-1).why).toContain('sess-1');
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
