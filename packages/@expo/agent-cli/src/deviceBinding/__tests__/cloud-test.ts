@@ -145,4 +145,17 @@ describe(claimable, () => {
     ]);
     expect(live(bindings, now).map(({ device }) => device.id)).toEqual(['live-android']);
   });
+
+  // The probe names the first bound id when none is listed, so the asked platform's comes first.
+  it('puts the asked platform first', () => {
+    expect(claimable(bindings, 'android', now).map(({ device }) => device.id)).toEqual([
+      'expired-android',
+      'live-android',
+    ]);
+    const mixed = [cloudBindingFor(root, 'ios', 'live-ios'), cloudBindingFor(root, 'android', 'a')];
+    expect(claimable(mixed, 'android', now).map(({ device }) => device.id)).toEqual([
+      'a',
+      'live-ios',
+    ]);
+  });
 });

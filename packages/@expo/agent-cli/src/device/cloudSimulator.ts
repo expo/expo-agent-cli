@@ -753,14 +753,7 @@ export async function probeCloudSessionAsync({
     return { state, session: selected, candidateCount: candidates.length };
   }
 
-  if (boundIds.length) {
-    return {
-      state: 'inactive',
-      sessionId: boundIds[0]!,
-      reason: 'the bound EAS session is no longer listed as active or queued',
-    };
-  }
-  if (unbound.length) {
+  if (unbound.length && !boundIds.length) {
     return {
       state: 'none',
       reason:
@@ -774,6 +767,7 @@ export async function probeCloudSessionAsync({
     projectRoot,
     timeoutMs,
     preferredId,
+    boundId: boundIds[0] ?? null,
     wrongType,
   });
 }
@@ -818,12 +812,15 @@ async function noUsableSessionAsync({
   projectRoot,
   timeoutMs,
   preferredId,
+  boundId,
   wrongType,
 }: {
   cli: EasCli;
   projectRoot: string;
   timeoutMs: number;
   preferredId: string | null;
+  /** A bound id the listing does not show: ended, once the account is known to have the feature. */
+  boundId: string | null;
   wrongType: CloudSessionInfo[];
 }): Promise<CloudSessionProbe> {
   const availability = await runEasAsync(cli, buildAvailabilityArgs(), { projectRoot, timeoutMs });
@@ -843,6 +840,13 @@ async function noUsableSessionAsync({
       waitlistUrl: waitlistUrl ?? CLOUD_SIMULATOR_WAITLIST_URL,
       reason:
         'EAS Simulator is not enabled on this account, so no session can be started for this project',
+    };
+  }
+  if (boundId != null) {
+    return {
+      state: 'inactive',
+      sessionId: boundId,
+      reason: 'the bound EAS session is no longer listed as active or queued',
     };
   }
   // A live session of a type this CLI cannot drive is not "no session". Naming the types is what

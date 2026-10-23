@@ -729,6 +729,63 @@ describe(probeCloudSessionAsync, () => {
 
   // The file outlives the session it names, so a stale one has to be called stale rather than
   // reported as an answer.
+  // A bound id the listing no longer shows still has to learn whether the account has the feature:
+  // "your session ended" next to an account that cannot start a new one sends a start that fails.
+  it(`asks for availability before calling a bound session ended`, async () => {
+    project();
+    let call = 0;
+    spawned = [];
+    vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
+      spawned.push({ command, args });
+      const answer =
+        call++ === 0
+          ? listJson()
+          : `{"available": false, "waitlistUrl": "${CLOUD_SIMULATOR_WAITLIST_URL}"}`;
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => {
+        child.stdout.emit('data', answer);
+        child.emit('close', 0, null);
+      });
+      return child as any;
+    }) as any);
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: ['gone'] });
+
+    expect(probe).toMatchObject({ state: 'unavailable' });
+    expect(spawned.map(({ args }) => args)).toEqual([
+      easArgv(buildSessionListArgs()),
+      easArgv(buildAvailabilityArgs()),
+    ]);
+  });
+
+  it(`calls a bound session that the listing no longer shows ended, once the account has the feature`, async () => {
+    project();
+    let call = 0;
+    vi.mocked(spawn).mockImplementation((() => {
+      const answer = call++ === 0 ? listJson() : '{"available": true}';
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => {
+        child.stdout.emit('data', answer);
+        child.emit('close', 0, null);
+      });
+      return child as any;
+    }) as any);
+
+    const probe = await probeCloudSessionAsync({ projectRoot: '/project', boundIds: ['gone'] });
+
+    expect(probe).toMatchObject({
+      state: 'inactive',
+      sessionId: 'gone',
+      reason: 'the bound EAS session is no longer listed as active or queued',
+    });
+  });
+
   it(`is inactive when the dotenv names a session the service does not list`, async () => {
     project({ '/project/.env.eas-simulator': 'EAS_SIMULATOR_SESSION_ID=sess-1\n' });
     mockEas({ stdout: listJson() });

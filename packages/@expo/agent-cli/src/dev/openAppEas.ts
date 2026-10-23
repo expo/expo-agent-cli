@@ -24,12 +24,14 @@ import path from 'path';
 import {
   acquireCloudBindingAsync,
   claimCloudBindingsAsync,
+  restoreRenewedLeaseAsync,
   readCloudBindings,
   type CloudBinding,
 } from '../deviceBinding/cloud';
 import { stopEasSessionAsync } from '../device/eas';
 
 import {
+  isLive,
   probeCloudSessionAsync,
   readCloudSessionIdSync,
   CLOUD_SESSION_ENV_FILE,
@@ -356,7 +358,7 @@ async function ensureSessionAsync(
       'no "eas" is in node_modules/.bin or on PATH, and no package runner ("npx" or "bunx") is on PATH to download one, so no EAS Simulator session could be reached'
     );
   }
-  let claim: { boundIds: string[]; unreadable: string | null };
+  let claim: Awaited<ReturnType<typeof claimCloudBindingsAsync>>;
   try {
     claim = await claimCloudBindingsAsync(projectRoot, platform);
   } catch (error) {
@@ -375,6 +377,10 @@ async function ensureSessionAsync(
     boundIds: claim.boundIds,
     timeoutMs: CLOUD_SESSION_TIMEOUT_MS,
   });
+  // The renewal kept a reap off a session that may still be alive. One the listing does not show
+  // is not, so its binding keeps the lease it had.
+  if (claim.renewed && !(isLive(probe) && probe.session.id === claim.renewed.id))
+    await restoreRenewedLeaseAsync(claim.renewed);
   if (probe.state === 'active' && probe.session.platform === platform) {
     event('open_app_eas_session_reused', { platform, sessionId: probe.session.id });
     return {

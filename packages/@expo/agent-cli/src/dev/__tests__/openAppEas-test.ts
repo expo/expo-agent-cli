@@ -644,6 +644,33 @@ describe('the session half on its own', () => {
     expect(read.kind === 'binding' && Date.parse(read.binding.expiresAt) > Date.now()).toBe(true);
   });
 
+  // The renewal before the probe protects a live session from a reap. A session the listing does
+  // not show is not one, so a failed open must not leave its binding renewed for another hour.
+  it(`puts back the lease it renewed when the probe does not list that session`, async () => {
+    const { bindingPathFor, readBindingFile } = await import('../../deviceBinding/registry');
+    const root = '/project/stale-claim-app';
+    const file = bindingPathFor(root, 'ios', 'cloud');
+    const expiresAt = new Date(Date.now() - 30 * 60_000).toISOString();
+    writeCloudBinding(root, 'ios', 'OLD', {
+      boundAt: new Date(Date.now() - 90 * 60_000).toISOString(),
+      expiresAt,
+    });
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.inactive('OLD'));
+    mockTunnel(null);
+
+    const report = await ensureEasSessionAsync(root, {
+      platform: 'ios',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+      waits: { tunnelMs: 1 },
+    });
+
+    expect(report.ok).toBe(false);
+    const read = readBindingFile(file);
+    expect(read.kind === 'binding' && read.binding.expiresAt).toBe(expiresAt);
+  });
+
   it(`refuses an unreadable binding before it probes or starts a session`, async () => {
     const fs = await import('fs');
     const path = await import('path');

@@ -49,43 +49,100 @@ export function liveCloudBindings(projectRoot: string, now = new Date()): CloudB
   return live(readCloudBindings(projectRoot).bindings, now);
 }
 
-/** The bindings a `dev --<platform> --eas` counts: this platform's at any age, the other's live. */
+/**
+ * The bindings a `dev --<platform> --eas` counts: this platform's at any age, the other's live.
+ * This platform's come first, because a probe that lists none of them names the first.
+ */
 export function claimable(
   bindings: CloudBinding[],
   platform: DevicePlatform,
   now: Date
 ): CloudBinding[] {
-  return bindings.filter(
-    (binding) => binding.device.platform === platform || !isExpired(binding, now)
+  const asked = bindings.filter((binding) => binding.device.platform === platform);
+  const other = bindings.filter(
+    (binding) => binding.device.platform !== platform && !isExpired(binding, now)
   );
+  return [...asked, ...other];
+}
+
+/** An expired lease the claim renewed: the file, its session, and both lease ends. */
+export interface RenewedLease {
+  file: string;
+  id: string;
+  previous: string;
+  renewed: string;
 }
 
 /**
  * This worktree's bound cloud session ids, for a `dev --eas` probe. Renews this platform's
  * expired lease under the registry lock first, so a reap in another worktree cannot stop that
- * session while the probe runs.
+ * session while the probe runs. `renewed` names that renewal, so a probe that does not list the
+ * session can undo it ({@link restoreRenewedLeaseAsync}).
  */
 export async function claimCloudBindingsAsync(
   projectRoot: string,
   platform: DevicePlatform,
   tools: DeviceTools = defaultTools()
-): Promise<{ boundIds: string[]; unreadable: string | null }> {
+): Promise<{ boundIds: string[]; unreadable: string | null; renewed: RenewedLease | null }> {
   try {
     return await withRegistryLockAsync(
       async () => {
         const file = bindingPathFor(projectRoot, platform, 'cloud');
         const read = readBindingFile(file);
-        if (read.kind === 'unreadable') return { boundIds: [], unreadable: file };
-        if (read.kind === 'binding' && isExpired(read.binding, tools.now()))
-          writeBindingFile(file, { ...read.binding, expiresAt: leaseFrom(tools.now()).expiresAt });
+        if (read.kind === 'unreadable') return { boundIds: [], unreadable: file, renewed: null };
+        let renewed: RenewedLease | null = null;
+        if (
+          read.kind === 'binding' &&
+          isCloudBinding(read.binding) &&
+          isExpired(read.binding, tools.now())
+        ) {
+          const { expiresAt } = leaseFrom(tools.now());
+          writeBindingFile(file, { ...read.binding, expiresAt });
+          renewed = {
+            file,
+            id: read.binding.device.id,
+            previous: read.binding.expiresAt,
+            renewed: expiresAt,
+          };
+        }
         const { bindings } = readCloudBindings(projectRoot);
         return {
           boundIds: claimable(bindings, platform, tools.now()).map(({ device }) => device.id),
           unreadable: null,
+          renewed,
         };
       },
       { waitMs: WRITE_LOCK_WAIT_MS, tools }
     );
+  } finally {
+    clearInspectCache();
+  }
+}
+
+/**
+ * Put back the lease end a claim renewed, when the probe did not list that session. Only while the
+ * file still holds that session with the renewed end, so a write by another run stays. Never throws.
+ */
+export async function restoreRenewedLeaseAsync(
+  lease: RenewedLease,
+  tools: DeviceTools = defaultTools()
+): Promise<void> {
+  try {
+    await withRegistryLockAsync(
+      async () => {
+        const read = readBindingFile(lease.file);
+        if (
+          read.kind === 'binding' &&
+          isCloudBinding(read.binding) &&
+          read.binding.device.id === lease.id &&
+          read.binding.expiresAt === lease.renewed
+        )
+          writeBindingFile(lease.file, { ...read.binding, expiresAt: lease.previous });
+      },
+      { waitMs: WRITE_LOCK_WAIT_MS, tools }
+    );
+  } catch {
+    // A lock that cannot be taken leaves the renewal; it ends in one lease.
   } finally {
     clearInspectCache();
   }
