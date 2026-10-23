@@ -86,9 +86,6 @@ export interface PortMove {
   to: number;
 }
 
-/** How long the parent waits for the detached child to publish its lock. */
-export const DEFAULT_DETACH_TIMEOUT_MS = 120_000;
-
 /** How often the lock is asked while the parent waits for it. */
 const LOCK_POLL_INTERVAL_MS = 200;
 

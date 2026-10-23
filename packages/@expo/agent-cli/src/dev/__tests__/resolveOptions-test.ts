@@ -1,4 +1,4 @@
-import { DEFAULT_DETACH_TIMEOUT_MS } from '../detachAsync';
+import { DEFAULT_DETACH_TIMEOUT_MS } from '../resolveOptions';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { parseAgentCliSettings } from '../../settings/parse';
 import { resolveDevOptions } from '../resolveOptions';
