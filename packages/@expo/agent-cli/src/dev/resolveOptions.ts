@@ -14,10 +14,12 @@ import {
   type RunTarget,
 } from '../settings/types';
 import { CommandError } from '../utils/errors';
-import { DEFAULT_DETACH_TIMEOUT_MS } from './detachAsync';
 import { CALLER_ARGV_ENV, resolveDeviceOption, withoutDeviceArgs } from './deviceOption';
 import { withoutPortArgs } from './forwardedArgs';
 import { assertKnownDevFlags } from './knownFlags';
+
+/** How long the parent waits for the detached child to publish its lock. */
+export const DEFAULT_DETACH_TIMEOUT_MS = 120_000;
 
 /**
  * Flags that `@expo/agent-cli dev` handles itself and does not forward to the `expo` CLI.

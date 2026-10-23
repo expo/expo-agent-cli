@@ -31,9 +31,10 @@ import {
   type FollowUp,
 } from '../followups';
 import { Log } from '../log';
-import { classifySubprocessFailure, lastNonEmptyLine } from '../needsHuman/detect';
+import { classifySubprocessFailure } from '../needsHuman/detect';
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
 import { needsHumanErrorFrom } from '../needsHuman/error';
+import { lastNonEmptyLine } from '../needsHuman/promptShape';
 import { emitStartPlan } from '../plan/emit';
 import { rerunDevCommand } from '../plan/rerun';
 import { event as planEvent } from '../plan/events';
