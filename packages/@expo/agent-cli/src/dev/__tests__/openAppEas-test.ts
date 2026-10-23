@@ -47,6 +47,10 @@ vi.mock('../../utils/easCli', async () => {
   return { ...actual, resolveEasCli: vi.fn() };
 });
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
+// No test here runs real git.
+vi.mock('../../utils/gitExclude', () => ({
+  ensureGitExcludedAsync: vi.fn(async () => ({ result: 'skipped' })),
+}));
 
 const projectRoot = '/project/my-app';
 const DEV_SERVER = 'http://127.0.0.1:8081';

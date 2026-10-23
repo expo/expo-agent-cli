@@ -44,6 +44,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { EAS_SIMULATOR_PROFILE } from '../toolchain/runsOn';
 import { easCliArgs, easCliLabel, resolveEasCli, type EasCli } from '../utils/easCli';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
+import { ensureGitExcludedAsync } from '../utils/gitExclude';
 import { easFailureReason } from '../utils/easFailure';
 import { firstLine } from '../utils/text';
 import { parseCachedBuild } from '../impact/buildCache';
@@ -106,6 +107,8 @@ export interface EnsureEasSessionReport {
   sessionUrl: string | null;
   /** Why there is no session. Null exactly when {@link ok} is true. */
   reason: string | null;
+  /** What the bind reported about keeping {@link CLOUD_SESSION_ENV_FILE} out of git. */
+  gitExclude?: 'added' | 'tracked' | 'overridden';
 }
 
 export type OpenAppOnEasOptions = EnsureEasSessionOptions;
@@ -281,8 +284,38 @@ export async function ensureEasSessionAsync(
         started: false,
         reason: `another run in this worktree started EAS session ${binding.device.id} at the same time, and ${CLOUD_SESSION_ENV_FILE} names it, so this run ended its own session ${session.sessionId} ("${easCommandPrefix()} simulator:stop --id ${session.sessionId}" ends it if that failed); run this again to use ${binding.device.id}`,
       };
+    const gitExclude = await excludeCloudSessionEnvFromGitAsync(projectRoot);
+    if (gitExclude) {
+      return { ...session, gitExclude };
+    }
   }
   return session;
+}
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §EAS
+async function excludeCloudSessionEnvFromGitAsync(
+  projectRoot: string
+): Promise<EnsureEasSessionReport['gitExclude']> {
+  const excluded = await ensureGitExcludedAsync(projectRoot, CLOUD_SESSION_ENV_FILE);
+  if (excluded.result === 'overridden') {
+    Log.warn(
+      `git does not ignore ${CLOUD_SESSION_ENV_FILE}, which holds this session's auth token: the rule ${excluded.rule} un-ignores it. Remove that rule, or "git add" can commit the token.`
+    );
+    return excluded.result;
+  }
+  if (excluded.result === 'added') {
+    Log.progress(
+      `Added ${CLOUD_SESSION_ENV_FILE} to git's info/exclude: it holds this session's auth token.`
+    );
+    return excluded.result;
+  }
+  if (excluded.result === 'tracked') {
+    Log.warn(
+      `git tracks ${CLOUD_SESSION_ENV_FILE}, which holds this session's auth token. Run "git rm --cached ${CLOUD_SESSION_ENV_FILE}" and list it in .gitignore.`
+    );
+    return excluded.result;
+  }
+  return undefined;
 }
 
 /**
