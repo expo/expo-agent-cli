@@ -19,7 +19,15 @@ vi.mock('../../deviceBinding/records', () => ({
 vi.mock('../../deviceBinding/reap', () => ({
   reapDevicesAsync: vi.fn(async () => ({ reports: [], error: null })),
 }));
-vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn(async () => null) }));
+vi.mock('../../devLock', () => {
+  const readDevServerLockAsync = vi.fn(async (_projectRoot: string): Promise<unknown> => null);
+  return {
+    readDevServerLockAsync,
+    isDevServerLockHeldAsync: vi.fn(
+      async (projectRoot: string) => (await readDevServerLockAsync(projectRoot)) != null
+    ),
+  };
+});
 vi.mock('../portListener', () => ({
   isPortInUseAsync: vi.fn(async () => false),
   findPortListenerAsync: vi.fn(async () => null),

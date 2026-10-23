@@ -69,6 +69,17 @@ export async function readDevServerLockAsync(
 }
 
 /**
+ * Whether a live process holds this project's lock, answered or not.
+ *
+ * Unlike {@link readDevServerLockAsync}, a holder that accepts the connection and stays silent
+ * counts as held: only a connect that fails or ends is a release.
+ */
+export async function isDevServerLockHeldAsync(projectRoot: string): Promise<boolean> {
+  const { address } = lockAddressFor(projectRoot);
+  return (await probeDevServerLockAsync(address)).connected;
+}
+
+/**
  * Connect to a lock address and read what it answers.
  *
  * Split out from {@link readDevServerLockAsync} because acquisition needs the two halves apart:

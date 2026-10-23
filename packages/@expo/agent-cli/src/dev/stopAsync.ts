@@ -32,7 +32,11 @@ import chalk from 'chalk';
 
 import type { CloudPlatform } from '../device/cloudSimulator';
 import type { ReleasedDevice } from '../deviceBinding';
-import { readDevServerLockAsync, type DevServerLockInfo } from '../devLock';
+import {
+  isDevServerLockHeldAsync,
+  readDevServerLockAsync,
+  type DevServerLockInfo,
+} from '../devLock';
 import { event as cliEvent } from '../events';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
@@ -538,7 +542,7 @@ async function waitForStopAsync(lock: DevServerLockInfo, timeoutMs: number): Pro
   const deadline = startedAt + timeoutMs;
   for (;;) {
     const [lockGone, portFree] = await Promise.all([
-      readDevServerLockAsync(lock.projectRoot).then((info) => info == null),
+      isDevServerLockHeldAsync(lock.projectRoot).then((held) => !held),
       isPortFreeAsync(lock.port),
     ]);
     const processGone = !isProcessAlive(lock.pid);
@@ -576,15 +580,16 @@ async function waitForForcedStopAsync(
   }
 }
 
-/** Whether nothing answers an HTTP request on the port. */
+/** Whether nothing listens on the port: a refused connection, not a slow answer. */
 async function isPortFreeAsync(port: number): Promise<boolean> {
   try {
     await fetch(`http://127.0.0.1:${port}/status`, {
       signal: AbortSignal.timeout(400),
     });
     return false;
-  } catch {
-    return true;
+  } catch (error: unknown) {
+    // A listener that does not answer in time is still a listener.
+    return !(error instanceof Error && error.name === 'TimeoutError');
   }
 }
 

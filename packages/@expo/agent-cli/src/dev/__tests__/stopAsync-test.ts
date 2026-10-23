@@ -1,4 +1,4 @@
-import { readDevServerLockAsync } from '../../devLock';
+import { isDevServerLockHeldAsync, readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
@@ -18,9 +18,16 @@ import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBindin
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import type { DevServerLockInfo } from '../../devLock/types';
 
-vi.mock('../../devLock', () => ({
-  readDevServerLockAsync: vi.fn(async () => null),
-}));
+vi.mock('../../devLock', () => {
+  const readDevServerLockAsync = vi.fn(async (_projectRoot: string): Promise<unknown> => null);
+  return {
+    readDevServerLockAsync,
+    // Held when the mocked read answers, so a test sets one answer for both.
+    isDevServerLockHeldAsync: vi.fn(
+      async (projectRoot: string) => (await readDevServerLockAsync(projectRoot)) != null
+    ),
+  };
+});
 vi.mock('../portListener', () => ({
   findPortListenerAsync: vi.fn(async () => null),
   isPortInUseAsync: vi.fn(async () => false),
@@ -86,6 +93,9 @@ let livePids = new Set<number>();
 let signalKills = true;
 
 beforeEach(() => {
+  vi.mocked(isDevServerLockHeldAsync).mockImplementation(
+    async (root) => (await readDevServerLockAsync(root)) != null
+  );
   mockPlatform('darwin');
   originalFetch = globalThis.fetch;
   killed = [];
@@ -331,6 +341,39 @@ describe(devStopAsync, () => {
       });
       expect(report.followups).toEqual([]);
       expect(printedErrors()).toContain('SIGKILL');
+    });
+
+    it(`should not call a silent lock holder or a slow /status a finished dev --eas run`, async () => {
+      vi.mocked(readDevServerLockAsync)
+        .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
+        .mockResolvedValue(null as never);
+      vi.mocked(isDevServerLockHeldAsync).mockResolvedValue(true);
+      globalThis.fetch = (async () => {
+        throw new DOMException('timed out', 'TimeoutError');
+      }) as unknown as typeof fetch;
+      livePids.add(4242);
+      signalKills = false;
+
+      await expect(devStopAsync(projectRoot, options({ timeoutMs: 2_500 }))).resolves.toBe(
+        EXIT_OUTCOME_FAILED
+      );
+      expect(JSON.parse(printed())).toMatchObject({ stopped: false, reason: 'still-running' });
+    });
+
+    it(`should not call a slow /status a free port for a finishing dev --eas run`, async () => {
+      vi.mocked(readDevServerLockAsync)
+        .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
+        .mockResolvedValue(null as never);
+      globalThis.fetch = (async () => {
+        throw new DOMException('timed out', 'TimeoutError');
+      }) as unknown as typeof fetch;
+      livePids.add(4242);
+      signalKills = false;
+
+      await expect(devStopAsync(projectRoot, options({ timeoutMs: 2_500 }))).resolves.toBe(
+        EXIT_OUTCOME_FAILED
+      );
+      expect(JSON.parse(printed())).toMatchObject({ stopped: false });
     });
 
     describe('the finishing grace period', () => {

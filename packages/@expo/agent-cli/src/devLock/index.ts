@@ -11,6 +11,7 @@ export type { DevLockAddress } from './address';
 export {
   DEV_LOCK_CONNECT_TIMEOUT_MS,
   probeDevServerLockAsync,
+  isDevServerLockHeldAsync,
   readDevServerLockAsync,
 } from './client';
 export type { DevLockProbe } from './client';
