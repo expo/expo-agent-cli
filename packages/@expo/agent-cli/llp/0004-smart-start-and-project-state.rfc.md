@@ -406,7 +406,8 @@ on `sun_path` gets the same digest scheme under the temporary directory. Both si
 that choice from the path length alone.
 
 Protocol. The server writes one JSON line (`url`, `port`, `pid`, `startedAt`,
-`projectRoot`) on connection and ends it. A reader connects with a ~250 ms timeout and
+`projectRoot`, `easPlatform`) on connection and ends it. `easPlatform` is the platform of
+the EAS session the run opens the app on, or null; a reader treats a line without it as null. A reader connects with a ~250 ms timeout and
 reads to the close. A refused connection or a timeout is "no dev server".
 
 Acquisition. `EADDRINUSE` on posix means either a live owner or an orphaned socket file.

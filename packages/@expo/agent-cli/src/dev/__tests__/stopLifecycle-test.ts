@@ -6,6 +6,7 @@ import { PROGRAM_PREFIX } from '../../programName';
 import { isPortInUseAsync } from '../portListener';
 import { resolveDevStopOptions } from '../resolveStopOptions';
 import { devStopAsync } from '../stopAsync';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 vi.mock('../../deviceBinding', () => ({
   devicesDisabled: () => false,
@@ -18,7 +19,15 @@ vi.mock('../../deviceBinding/records', () => ({
 vi.mock('../../deviceBinding/reap', () => ({
   reapDevicesAsync: vi.fn(async () => ({ reports: [], error: null })),
 }));
-vi.mock('../../devLock', () => ({ readDevServerLockAsync: vi.fn(async () => null) }));
+vi.mock('../../devLock', () => {
+  const readDevServerLockAsync = vi.fn(async (_projectRoot: string): Promise<unknown> => null);
+  return {
+    readDevServerLockAsync,
+    isDevServerLockHeldAsync: vi.fn(
+      async (projectRoot: string) => (await readDevServerLockAsync(projectRoot)) != null
+    ),
+  };
+});
 vi.mock('../portListener', () => ({
   isPortInUseAsync: vi.fn(async () => false),
   findPortListenerAsync: vi.fn(async () => null),
@@ -26,13 +35,13 @@ vi.mock('../portListener', () => ({
 
 const root = '/work/app';
 const host = process.platform;
-const lock = {
+const lock = lockInfo({
   pid: 4141,
   port: 8081,
   url: 'http://127.0.0.1:8081',
   projectRoot: root,
   startedAt: '2026-10-08T10:00:00Z',
-};
+});
 const device = {
   backend: 'local-ios' as const,
   platform: 'ios' as const,

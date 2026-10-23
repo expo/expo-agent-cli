@@ -10,17 +10,18 @@ import {
   runningDevServerAsync,
   type RunningDevServer,
 } from '../runningDevServer';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 const projectRoot = '/workspace/apps/my-app';
 
 function lockOn(port: number): DevServerLockInfo {
-  return {
+  return lockInfo({
     url: `http://127.0.0.1:${port}`,
     port,
     pid: 4242,
     startedAt: '2026-10-07T00:00:00.000Z',
     projectRoot,
-  };
+  });
 }
 
 describe(runningDevServerAsync, () => {

@@ -18,6 +18,7 @@ import type { DevDetachResultJson } from '../detachAsync';
 import { detachedLogPath, openDetachedLogSync, readDetachedLogSync } from '../logFile';
 import { resolveDevLogsOptions, DEFAULT_LOG_TAIL_LINES } from '../resolveLogsOptions';
 import { resolveDevOptions } from '../resolveOptions';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 const projectRoot = '/project';
 
@@ -278,13 +279,13 @@ describe(resolveDevLogsOptions, () => {
 // F48-10. `--wait-ready` gives up for two different reasons, and the reader cannot tell them apart
 // from the outside: a bundler that is still working, and another process answering this port.
 describe(notReadyError, () => {
-  const lock = {
+  const lock = lockInfo({
     url: 'http://127.0.0.1:8081',
     port: 8081,
     pid: 4242,
     startedAt: '2026-08-25T00:00:00.000Z',
     projectRoot,
-  };
+  });
 
   function readyResult(overrides: Partial<BundlerReadyResult> = {}): BundlerReadyResult {
     return {

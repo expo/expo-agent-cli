@@ -115,6 +115,8 @@ describe('@expo/agent-cli dev:stop', () => {
       'detail',
       'deviceError',
       'devices',
+      // The EAS platform the stopped run's lock named, null otherwise (llp/0035 §Preserved sessions).
+      'easPlatform',
       'followups',
       // Which of --force's two proofs a refusal failed on, null otherwise (F48-1).
       'forceRefusedBy',

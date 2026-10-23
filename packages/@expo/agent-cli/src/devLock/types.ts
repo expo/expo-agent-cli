@@ -19,6 +19,11 @@ export interface DevServerLockInfo {
   startedAt: string;
   /** Project the dev server was started for, as the lock holder resolved it. */
   projectRoot: string;
+  /**
+   * The platform of the EAS session this run opens the app on; null when the run opens no EAS
+   * session.
+   */
+  easPlatform: 'ios' | 'android' | null;
 }
 
 /** A held lock. Releasing it frees the address for the next dev server of this project. */

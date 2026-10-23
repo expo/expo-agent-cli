@@ -33,6 +33,7 @@ import { formatStatusReport } from '../format';
 import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
 import type { StatusReport } from '../types';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 vi.mock('../installed', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../installed')>()),
@@ -1145,13 +1146,13 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     expect(report.next?.why).toContain('android');
   });
   const iosOptions = { ...options, platform: 'ios' as const };
-  const running = {
+  const running = lockInfo({
     projectRoot,
     url: devServerUrl,
     port: 8081,
     pid: 4242,
     startedAt: new Date(0).toISOString(),
-  };
+  });
 
   async function planNextAsync() {
     vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([

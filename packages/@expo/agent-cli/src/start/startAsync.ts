@@ -1,6 +1,7 @@
 import { withLeaseExtendedAsync } from '../deviceBinding/renew';
 import { holdDevServerLockAsync } from '../devLock';
 import type { ResolvedDevServerPort } from '../devLock/port';
+import type { DevServerLockInfo } from '../devLock/types';
 import { dependsOnDevClientSync, reportFollowUps } from '../followups';
 import { probeBundlerAsync } from '../runtime/bundlerStatus';
 import { autoSyncSkillsAsync } from '../skills/skillsAsync';
@@ -78,9 +79,12 @@ export async function runDevServerAsync(
     agentSkills,
     output = 'inherit',
     onDevServer,
+    easPlatform = null,
   }: {
     agentSkills: boolean;
     output?: SubprocessOutput;
+    /** The platform of the EAS session this run opens the app on, named on the lock. */
+    easPlatform?: DevServerLockInfo['easPlatform'];
     /**
      * Told once, the moment the dev server reports where it listens, or `/status` answers on the
      * port the arguments name.
@@ -122,6 +126,7 @@ export async function runDevServerAsync(
   const lock = holdDevServerLockAsync(projectRoot, args, {
     since: startedAt,
     isRunning: () => running,
+    easPlatform,
     // Wakes the port watch the moment the dev server is gone, so a start that fails immediately
     // is not held up waiting for a port that will never be reported.
     stopped: run.then(

@@ -342,7 +342,29 @@ describe(runDevServerAsync, () => {
       expect(holdDevServerLockAsync).toHaveBeenCalledWith(
         projectRoot,
         ['start', '--port', '8082'],
-        expect.objectContaining({ since: expect.any(Number), isRunning: expect.any(Function) })
+        expect.objectContaining({
+          since: expect.any(Number),
+          isRunning: expect.any(Function),
+          easPlatform: null,
+        })
+      );
+
+      end(0);
+      await promise;
+    });
+
+    // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+    it(`should name the EAS platform of the run on the lock`, async () => {
+      const end = mockLongRunningStart();
+      const promise = runDevServerAsync(projectRoot, ['start', '--port', '8082'], {
+        agentSkills: false,
+        easPlatform: 'android',
+      });
+
+      expect(holdDevServerLockAsync).toHaveBeenCalledWith(
+        projectRoot,
+        ['start', '--port', '8082'],
+        expect.objectContaining({ easPlatform: 'android' })
       );
 
       end(0);

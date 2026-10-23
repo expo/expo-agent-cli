@@ -1,4 +1,4 @@
-import { readDevServerLockAsync } from '../../devLock';
+import { isDevServerLockHeldAsync, readDevServerLockAsync } from '../../devLock';
 import { EXIT_OK, EXIT_OUTCOME_FAILED } from '../../exitCodes';
 import { findPortListenerAsync, isPortInUseAsync } from '../portListener';
 import type { DevStopOptions } from '../resolveStopOptions';
@@ -15,10 +15,19 @@ import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { readCloudBindings } from '../../deviceBinding/cloud';
 import { bindingPathFor } from '../../deviceBinding/registry';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
+import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import type { DevServerLockInfo } from '../../devLock/types';
 
-vi.mock('../../devLock', () => ({
-  readDevServerLockAsync: vi.fn(async () => null),
-}));
+vi.mock('../../devLock', () => {
+  const readDevServerLockAsync = vi.fn(async (_projectRoot: string): Promise<unknown> => null);
+  return {
+    readDevServerLockAsync,
+    // Held when the mocked read answers, so a test sets one answer for both.
+    isDevServerLockHeldAsync: vi.fn(
+      async (projectRoot: string) => (await readDevServerLockAsync(projectRoot)) != null
+    ),
+  };
+});
 vi.mock('../portListener', () => ({
   findPortListenerAsync: vi.fn(async () => null),
   isPortInUseAsync: vi.fn(async () => false),
@@ -31,15 +40,8 @@ function mockPlatform(value: typeof process.platform) {
   Object.defineProperty(process, 'platform', { value });
 }
 
-function lock(overrides: Record<string, unknown> = {}) {
-  return {
-    url: 'http://127.0.0.1:8081',
-    port: 8081,
-    pid: 4242,
-    startedAt: '2026-08-23T00:00:00.000Z',
-    projectRoot,
-    ...overrides,
-  };
+function lock(overrides: Partial<DevServerLockInfo> = {}) {
+  return lockInfo(overrides);
 }
 
 function options(overrides: Partial<DevStopOptions> = {}): DevStopOptions {
@@ -91,6 +93,9 @@ let livePids = new Set<number>();
 let signalKills = true;
 
 beforeEach(() => {
+  vi.mocked(isDevServerLockHeldAsync).mockImplementation(
+    async (root) => (await readDevServerLockAsync(root)) != null
+  );
   mockPlatform('darwin');
   originalFetch = globalThis.fetch;
   killed = [];
@@ -223,6 +228,7 @@ describe(devStopAsync, () => {
       'detail',
       'deviceError',
       'devices',
+      'easPlatform',
       'followups',
       'forceRefusedBy',
       'forced',
@@ -323,15 +329,119 @@ describe(devStopAsync, () => {
       livePids.add(4242);
       signalKills = false;
 
-      await expect(devStopAsync(projectRoot, options({ timeoutMs: 200 }))).resolves.toBe(
-        EXIT_OUTCOME_FAILED
-      );
-      expect(JSON.parse(printed())).toMatchObject({
+      await expect(
+        devStopAsync(projectRoot, options({ timeoutMs: 200, followups: true }))
+      ).resolves.toBe(EXIT_OUTCOME_FAILED);
+      const report = JSON.parse(printed());
+      expect(report).toMatchObject({
         stopped: false,
         processStillRunning: true,
         reason: 'still-running',
+        easPlatform: null,
       });
+      expect(report.followups).toEqual([]);
       expect(printedErrors()).toContain('SIGKILL');
+    });
+
+    it(`should not call a silent lock holder or a slow /status a finished dev --eas run`, async () => {
+      vi.mocked(readDevServerLockAsync)
+        .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
+        .mockResolvedValue(null as never);
+      vi.mocked(isDevServerLockHeldAsync).mockResolvedValue(true);
+      globalThis.fetch = (async () => {
+        throw new DOMException('timed out', 'TimeoutError');
+      }) as unknown as typeof fetch;
+      livePids.add(4242);
+      signalKills = false;
+
+      await expect(devStopAsync(projectRoot, options({ timeoutMs: 2_500 }))).resolves.toBe(
+        EXIT_OUTCOME_FAILED
+      );
+      expect(JSON.parse(printed())).toMatchObject({ stopped: false, reason: 'still-running' });
+    });
+
+    it(`should not call a slow /status a free port for a finishing dev --eas run`, async () => {
+      vi.mocked(readDevServerLockAsync)
+        .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
+        .mockResolvedValue(null as never);
+      globalThis.fetch = (async () => {
+        throw new DOMException('timed out', 'TimeoutError');
+      }) as unknown as typeof fetch;
+      livePids.add(4242);
+      signalKills = false;
+
+      await expect(devStopAsync(projectRoot, options({ timeoutMs: 2_500 }))).resolves.toBe(
+        EXIT_OUTCOME_FAILED
+      );
+      expect(JSON.parse(printed())).toMatchObject({ stopped: false });
+    });
+
+    describe('the finishing grace period', () => {
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ['setTimeout', 'Date'] });
+        vi.mocked(readDevServerLockAsync)
+          .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
+          .mockResolvedValue(null as never);
+        mockPort({ answering: false });
+        livePids.add(4242);
+        signalKills = false;
+      });
+      afterEach(() => vi.useRealTimers());
+
+      it(`should end the wait of a finishing dev --eas run after the grace period, not the timeout`, async () => {
+        const code = devStopAsync(projectRoot, options({ timeoutMs: 60_000 }));
+        await vi.advanceTimersByTimeAsync(3_000);
+
+        await expect(code).resolves.toBe(EXIT_OK);
+        const report = JSON.parse(printed());
+        expect(report).toMatchObject({ stopped: true, processStillRunning: true });
+        expect(report.waitedMs).toBeGreaterThanOrEqual(2_000);
+        expect(report.waitedMs).toBeLessThan(3_000);
+      });
+
+      it(`should report a dev --eas process that exits inside the grace period as gone`, async () => {
+        setTimeout(() => livePids.delete(4242), 500);
+        const code = devStopAsync(projectRoot, options({ timeoutMs: 60_000 }));
+        await vi.advanceTimersByTimeAsync(3_000);
+
+        await expect(code).resolves.toBe(EXIT_OK);
+        const report = JSON.parse(printed());
+        expect(report).toMatchObject({ stopped: true, processStillRunning: false });
+        expect(report.waitedMs).toBeLessThan(2_000);
+      });
+    });
+
+    it(`should keep the run's EAS platform and --eas on the next dev while the process finishes`, async () => {
+      vi.mocked(readDevServerLockAsync)
+        .mockResolvedValueOnce(lock({ easPlatform: 'android' }) as never)
+        .mockResolvedValue(null as never);
+      mockPort({ answering: false });
+      livePids.add(4242);
+      signalKills = false;
+
+      await expect(
+        devStopAsync(projectRoot, options({ timeoutMs: 200, followups: true }))
+      ).resolves.toBe(EXIT_OK);
+
+      const report = JSON.parse(printed());
+      expect(report).toMatchObject({ stopped: true, processStillRunning: true });
+      expect(report.easPlatform).toBe('android');
+      expect(report.followups.map((f: { id: string }) => f.id)).toEqual(['stop-session', 'dev']);
+      expect(report.followups[1].command).toBe(`${PROGRAM_PREFIX} dev --android --eas`);
+    });
+
+    it(`should say the stopped dev --eas run's process is finishing its exit work`, async () => {
+      vi.mocked(readDevServerLockAsync)
+        .mockResolvedValueOnce(lock({ easPlatform: 'ios' }) as never)
+        .mockResolvedValue(null as never);
+      mockPort({ answering: false });
+      livePids.add(4242);
+      signalKills = false;
+
+      await devStopAsync(projectRoot, options({ timeoutMs: 200, json: false, followups: true }));
+
+      expect(printed()).toContain('finishing its exit work');
+      expect(printed()).not.toContain('SIGKILL');
     });
   });
 
@@ -811,6 +921,7 @@ describe(buildFollowUps, () => {
     forceRefusedBy: null,
     processStillRunning: false,
     portStillAnswering: false,
+    easPlatform: null,
     reason: null,
     detail: null,
     waitedMs: 0,
@@ -827,7 +938,7 @@ describe(buildFollowUps, () => {
     reason: null,
   });
 
-  it.each<[string, Partial<DevStopResultJson>, string[], string | null | undefined]>([
+  it.each<[string, Partial<DevStopResultJson>, string[], string | null | undefined, boolean?]>([
     [
       'a kept cloud session, on its platform',
       { devices: [cloud(null)] },
@@ -870,10 +981,30 @@ describe(buildFollowUps, () => {
       ['dev'],
       '--ios',
     ],
-  ])('names the follow-ups after %s', (_name, input, ids, platformFlag) => {
-    const followups = buildFollowUps(result(input));
+    ['a live pid of a run with no EAS platform', { processStillRunning: true }, ['dev'], undefined],
+    [
+      'a finishing dev --eas process, on its EAS platform',
+      { processStillRunning: true, easPlatform: 'android' },
+      ['stop-session', 'dev'],
+      '--android',
+      true,
+    ],
+    [
+      'a finishing dev --eas process when dev:stop --eas already ran',
+      {
+        processStillRunning: true,
+        easPlatform: 'ios',
+        session: { id: 'sess-1', stopped: true, reason: null, platform: 'ios' },
+      },
+      ['dev'],
+      undefined,
+      true,
+    ],
+  ])('names the follow-ups after %s', (_name, input, ids, platformFlag, finishing) => {
+    const followups = buildFollowUps(result(input), finishing);
 
     expect(followups.map((f) => f.id)).toEqual(ids);
+    if (finishing && ids[0] === 'stop-session') expect(followups[0]!.why).toContain('pid 1234');
     if (platformFlag !== undefined) {
       expect(followups.find((f) => f.id === 'dev')?.command ?? null).toBe(
         platformFlag && `${PROGRAM_PREFIX} dev ${platformFlag} --eas`
