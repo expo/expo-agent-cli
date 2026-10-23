@@ -496,6 +496,19 @@ export interface InstalledStatus {
   platforms: InstalledPlatformStatus[];
 }
 
+/**
+ * A session the reap would stop: its worktree is deleted, so no command run there can stop it.
+ * Read from the binding file only, so it is recorded, not checked (llp/0035 §Session cleanup).
+ */
+export interface OrphanSessionStatus {
+  platform: 'ios' | 'android';
+  id: string;
+  /** The deleted worktree that bound it. */
+  projectRoot: string;
+  /** Plain `dev:stop`, or `eas simulator:stop --id` while this worktree's own dev server runs. */
+  command: string;
+}
+
 /** Sections of the report, in the order they print. */
 export type StatusSectionName =
   | 'binding'
@@ -518,6 +531,7 @@ export type StatusSectionName =
  */
 export interface StatusReport {
   binding?: BindingSummary[];
+  orphanSessions?: OrphanSessionStatus[];
   project: ProjectStatus | null;
   expoGo: ExpoGoStatus | null;
   freshness: FreshnessStatus | null;

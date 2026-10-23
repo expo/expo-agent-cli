@@ -67,6 +67,7 @@ export function formatStatusReport(report: StatusReport): string {
     // Under the dev server it points at, because that is the address it was built from.
     ...(report.devServer ? openUrlLines(report.devServer) : []),
     deviceRow(report),
+    ...orphanSessionLines(report),
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status
     // The one section that can have nothing to say at all. A project whose dependencies ship no
     // skills, read by somebody who has selected no agent, produced `no agent selected · no skills
@@ -694,9 +695,29 @@ function deviceRow(report: StatusReport): string {
     .filter((entry) => entry.backend === 'cloud')
     .map(
       (entry) =>
-        `${chalk.green(`cloud ${entry.platform}`)} ${entry.id}${SEPARATOR}${chalk.dim(`EAS Simulator session, ${entry.state === 'recorded' ? 'recorded, not checked' : entry.state}`)}`
+        `${chalk.green(`cloud ${entry.platform}`)} ${entry.id}${SEPARATOR}${chalk.dim(`EAS Simulator session, ${entry.state === 'recorded' ? 'recorded, not checked' : entry.state === 'gone' ? 'lease expired' : entry.state}`)}`
     );
   return [row('device', report.device, deviceLine, report, 'device'), ...sessions].join(SEPARATOR);
+}
+
+/**
+ * The sessions of deleted worktrees, read from their binding files with no session call
+ * (llp/0035 §Session cleanup). Commands are rendered for the runner in use, as `next` is.
+ */
+function orphanSessionLines(report: StatusReport): string[] {
+  const sessions = report.orphanSessions ?? [];
+  if (!sessions.length) return [];
+  const one = sessions.length === 1;
+  const listed = sessions.map(({ id, projectRoot }) => `${id} (${projectRoot})`).join(', ');
+  const command = [...new Set(sessions.map((session) => renderForInvoker(session.command)))].join(
+    ' && '
+  );
+  // `simulator:stop` leaves the binding file, so the next reap still names the session.
+  const record = sessions.some((session) => session.command.includes('simulator:stop'))
+    ? ' The record stays until the next dev or dev:stop.'
+    : '';
+  const text = `${sessions.length} EAS ${one ? 'session of a deleted worktree is' : 'sessions of deleted worktrees are'} recorded, not checked: ${listed}. ${one ? 'It' : 'They'} may still bill. ${command} ${one ? 'stops it' : 'stops them'}.${record}`;
+  return [`${chalk.dim('billing'.padEnd(LABEL_WIDTH))}${chalk.yellow(text)}`];
 }
 
 /**

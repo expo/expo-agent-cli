@@ -522,6 +522,7 @@ describe('@expo/agent-cli status', () => {
         'devServer',
         'device',
         'binding',
+        'orphanSessions',
         'skills',
         'auth',
         'next',

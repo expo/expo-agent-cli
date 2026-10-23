@@ -1,6 +1,8 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Reported by status
 // This only shapes the answer; `status` decides when the check runs.
 
+import { deviceCommand } from '../deviceBinding/errors';
+import type { InspectState } from '../deviceBinding/types';
 import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
 import { checkInstalledAppAsync, type PlatformCheck } from '../installedApp/installedAppAsync';
 import { hostPlatforms, type InstalledAppPlatform } from '../installedApp/options';
@@ -48,17 +50,26 @@ export async function readInstalledStatusAsync(
 /**
  * Mark the rows that found no local device while this worktree records an EAS session for that
  * platform: the check reads local devices only, so it did not check the app on the session. Status
- * makes no session service call, so the session is recorded, not confirmed.
+ * makes no session service call, so the session is recorded, not confirmed. A binding whose lease
+ * expired (`gone`) names `dev --eas`, which binds a session again.
  */
 export function withCloudSessions(
   installed: InstalledStatus,
-  sessions: readonly { platform: string; id: string }[]
+  sessions: readonly { platform: string; id: string; state?: InspectState }[]
 ): InstalledStatus {
   return {
     ...installed,
     platforms: installed.platforms.map((entry) => {
       const session = sessions.find(({ platform }) => platform === entry.platform);
       if (entry.reason !== 'no-device' || !session) return entry;
+      if (session.state === 'gone') {
+        return {
+          ...entry,
+          reason: 'cloud-session',
+          recommendation: `not checked; this check reads local devices, and the lease on EAS Simulator session ${session.id} expired`,
+          commands: [deviceCommand(entry.platform, { eas: true })],
+        };
+      }
       return {
         ...entry,
         reason: 'cloud-session',
