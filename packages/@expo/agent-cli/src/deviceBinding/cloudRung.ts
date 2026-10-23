@@ -32,28 +32,50 @@ export interface CloudRungDevice {
 /** A probe that selected no session: what a caller names when the rung has no device. */
 export type NoDeviceProbe = Exclude<CloudSessionProbe, LiveCloudSessionProbe>;
 
-export type CloudRung =
-  | { kind: 'device'; device: CloudRungDevice }
-  | { kind: 'none'; probe: NoDeviceProbe };
+/**
+ * How the caller reaches the rung. `required`: the caller named the cloud (`--eas`), so a session it
+ * cannot use is refused. `fallback`: the last rung of a plain read verb, so a pending session or one
+ * on another platform than the flag is no device here; the caller names it next to its own refusal.
+ */
+export type CloudRungUse = 'required' | 'fallback';
 
-export type CloudVerdict =
+/** `P` is the probe a rung with no device hands back: only a fallback rung hands back a live one. */
+export type CloudRung<P extends CloudSessionProbe = NoDeviceProbe> =
+  | { kind: 'device'; device: CloudRungDevice }
+  | { kind: 'none'; probe: P };
+
+export type CloudVerdict<P extends CloudSessionProbe = NoDeviceProbe> =
   /** `extend` is the binding that names the session; null when only the dotenv names it. */
   | { kind: 'device'; device: CloudRungDevice; extend: CloudBinding | null }
   | { kind: 'refuse'; error: CommandError }
-  | { kind: 'none'; probe: NoDeviceProbe };
+  | { kind: 'none'; probe: P };
 
 /**
  * Settle the cloud rung for `platform` (any platform when null).
  *
  * @throws {CommandError} when a binding file cannot be read, when a recorded session is expired,
  * queued or ended, when the session is on the other platform or did not report one, and when the
- * lease of the selected binding was lost.
+ * lease of the selected binding was lost. With `use: 'fallback'`, a queued session and one on the
+ * other platform are no device instead.
  */
 export async function cloudRungAsync(
   projectRoot: string,
   platform: CloudPlatform | null,
+  use: 'fallback',
+  tools?: DeviceTools
+): Promise<CloudRung<CloudSessionProbe>>;
+export async function cloudRungAsync(
+  projectRoot: string,
+  platform: CloudPlatform | null,
+  use: 'required',
+  tools?: DeviceTools
+): Promise<CloudRung>;
+export async function cloudRungAsync(
+  projectRoot: string,
+  platform: CloudPlatform | null,
+  use: CloudRungUse,
   tools: DeviceTools = defaultTools()
-): Promise<CloudRung> {
+): Promise<CloudRung<CloudSessionProbe>> {
   const snapshot = readCloudBindings(projectRoot);
   const now = tools.now();
   const unreadable = snapshot.unreadable.find(
@@ -65,7 +87,7 @@ export async function cloudRungAsync(
     platform,
     boundIds: live(snapshot.bindings, now).map(({ device }) => device.id),
   });
-  const verdict = cloudVerdict(snapshot.bindings, probe, platform, now);
+  const verdict = cloudVerdict(snapshot.bindings, probe, platform, now, use);
   if (verdict.kind === 'refuse') throw verdict.error;
   if (verdict.kind === 'none') return verdict;
   const binding = verdict.extend;
@@ -81,13 +103,13 @@ export function cloudVerdict(
   bindings: CloudBinding[],
   probe: CloudSessionProbe,
   platform: CloudPlatform | null,
-  now: Date
-): CloudVerdict {
-  const records = bindings.filter(
-    (binding) => platform == null || binding.device.platform === platform
-  );
+  now: Date,
+  use: CloudRungUse = 'required'
+): CloudVerdict<CloudSessionProbe> {
+  const records = bindings.filter(({ device }) => platform == null || device.platform === platform);
   if (probe.state === 'queued' || probe.state === 'active') {
     const { session } = probe;
+    if (use === 'fallback' && notUsableHere(probe, platform)) return { kind: 'none', probe };
     // A session is created for one platform and keeps it, so a flag that names the other one is
     // answered with the mismatch, whether the session is up or still pending.
     if (platform != null && session.platform != null && session.platform !== platform) {
@@ -137,6 +159,15 @@ export function cloudVerdict(
   return { kind: 'none', probe };
 }
 
-function refuse(binding: CloudBinding, fault: 'expired' | 'ended'): CloudVerdict {
+/** A session the fallback rung names next to the local refusal: still pending, or another platform. */
+function notUsableHere(probe: LiveCloudSessionProbe, platform: CloudPlatform | null): boolean {
+  const { session } = probe;
+  return (
+    probe.state === 'queued' ||
+    (platform != null && session.platform != null && session.platform !== platform)
+  );
+}
+
+function refuse(binding: CloudBinding, fault: 'expired' | 'ended'): CloudVerdict<never> {
   return { kind: 'refuse', error: cloudBindingError(binding.device.platform, fault) };
 }

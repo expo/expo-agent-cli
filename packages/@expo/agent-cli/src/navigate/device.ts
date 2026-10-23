@@ -14,9 +14,13 @@
 // served.
 
 import { readCloudBindings } from '../deviceBinding/cloud';
-import { cloudRungAsync, type NoDeviceProbe } from '../deviceBinding/cloudRung';
+import { cloudRungAsync, type CloudRung, type NoDeviceProbe } from '../deviceBinding/cloudRung';
 import { resolveAdb, type AdbResolution } from '../device/adb';
-import { cloudSessionStartCommand, readCloudSessionIdSync } from '../device/cloudSimulator';
+import {
+  cloudSessionStartCommand,
+  readCloudSessionIdSync,
+  type CloudSessionProbe,
+} from '../device/cloudSimulator';
 import { cloudSessionUnavailableError, cloudSessionUnknownError } from '../device/cloudErrors';
 import { findBoundDeviceAsync, type BoundDevice } from '../deviceBinding';
 import { PROGRAM_PREFIX } from '../programName';
@@ -67,16 +71,12 @@ export function navigateDeviceOf(device: BoundDevice): NavigateDevice {
   }
 }
 
-type CloudDeviceRung =
+type CloudDeviceRung<P extends CloudSessionProbe = NoDeviceProbe> =
   | { kind: 'device'; device: NavigateDevice }
-  | { kind: 'none'; probe: NoDeviceProbe };
+  | { kind: 'none'; probe: P };
 
 /** The cloud rung, with its session as a deep-link device. */
-async function cloudRungDeviceAsync(
-  projectRoot: string,
-  platform: NavigatePlatform | undefined
-): Promise<CloudDeviceRung> {
-  const rung = await cloudRungAsync(projectRoot, platform ?? null);
+function deviceRung<P extends CloudSessionProbe>(rung: CloudRung<P>): CloudDeviceRung<P> {
   if (rung.kind === 'none') return rung;
   const { platform: devicePlatform, id, name } = rung.device;
   debugEvent('device_resolved', { platform: devicePlatform, deviceId: id });
@@ -165,7 +165,7 @@ export interface ResolveDeviceContext {
 async function cloudFallbackAsync(
   platform: NavigatePlatform | undefined,
   context: ResolveDeviceContext
-): Promise<CloudDeviceRung | null> {
+): Promise<CloudDeviceRung<CloudSessionProbe> | null> {
   if (context.cloud !== 'fallback') {
     return null;
   }
@@ -174,7 +174,7 @@ async function cloudFallbackAsync(
   if (sessionId == null && readCloudBindings(context.projectRoot).bindings.length === 0) {
     return null;
   }
-  return await cloudRungDeviceAsync(context.projectRoot, platform);
+  return deviceRung(await cloudRungAsync(context.projectRoot, platform ?? null, 'fallback'));
 }
 
 /**
@@ -187,7 +187,7 @@ async function resolveCloudDeviceAsync(
   platform: NavigatePlatform | undefined,
   context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
-  const rung = await cloudRungDeviceAsync(context.projectRoot, platform);
+  const rung = deviceRung(await cloudRungAsync(context.projectRoot, platform ?? null, 'required'));
   if (rung.kind === 'device') {
     return rung.device;
   }
@@ -212,7 +212,7 @@ async function resolveCloudDeviceAsync(
 function withOtherDoors(
   refusal: CommandError,
   context: ResolveDeviceContext,
-  cloudProbe: NoDeviceProbe | null
+  cloudProbe: CloudSessionProbe | null
 ): CommandError {
   const lines = refusal.message.split('\n');
   // The How line stays last (llp/0035 §Output and errors), so the doors go in above it.
@@ -242,9 +242,22 @@ function withOtherDoors(
 }
 
 /** The `Or:` line for a cloud session this project has on record and this run could not use. */
-function cloudSessionLine(probe: NoDeviceProbe | null): string | null {
+function cloudSessionLine(probe: CloudSessionProbe | null): string | null {
   if (probe == null) {
     return null;
+  }
+  // Reached from the fallback rung: this worktree's session exists and this run could not use it.
+  if (probe.state === 'queued') {
+    return `Or: this worktree's EAS Simulator session ${probe.session.id} is ${
+      probe.session.platform ? `${probe.session.platform} and ` : ''
+    }not up yet${
+      probe.session.status ? ` (status ${probe.session.status})` : ''
+    }. Run this command again in a minute.`;
+  }
+  if (probe.state === 'active') {
+    return `Or: this worktree's EAS Simulator session ${probe.session.id} is ${
+      probe.session.platform ?? 'on another platform'
+    }, not the device this run asked for. Run this command again with --eas and no platform flag to use it.`;
   }
   if (probe.state === 'none') {
     // A live session of a type this CLI cannot drive is still worth naming: "no device found" next

@@ -47,7 +47,7 @@ it('warns and goes on when the registry is locked', async () => {
   );
   const tools = { ...fakeTools(), isPidAlive: () => true };
 
-  const pending = cloudRungAsync(root, 'ios', tools);
+  const pending = cloudRungAsync(root, 'ios', 'required', tools);
   await vi.advanceTimersByTimeAsync(6_000);
   const rung = await pending;
 

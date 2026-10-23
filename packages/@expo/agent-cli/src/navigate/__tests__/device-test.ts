@@ -402,6 +402,54 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(error.code).toBe('NO_BOUND_DEVICE');
   });
 
+  const queuedSession = listing({
+    id: 'sess-1',
+    status: 'QUEUED',
+    platform: 'IOS',
+    type: 'agent-device',
+    createdAt: '2026-08-26T10:00:00.000Z',
+  });
+
+  // A plain read verb falls back to the cloud quietly: a pending session, or one on the other
+  // platform, is named next to the local refusal and never replaces it (llp/0035 §Readers).
+  it(`keeps the local refusal and names a session that is not up yet`, async () => {
+    mockPlatform('linux');
+    cloudProject('sess-1');
+    mockSpawnQueue([{ stdout: queuedSession }]);
+
+    const error = await resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.code).toBe('NO_BOUND_DEVICE');
+    expect(error.message).toContain(
+      "Or: this worktree's EAS Simulator session sess-1 is ios and not up yet (status QUEUED). Run this command again in a minute."
+    );
+    expect(error.message).not.toContain('running EAS Simulator session');
+    expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
+  });
+
+  it.each([
+    ['up', liveSession],
+    ['pending', queuedSession],
+  ])(
+    `keeps the local refusal for a platform flag the %s session is not`,
+    async (_state, stdout) => {
+      mockPlatform('linux');
+      cloudProject('sess-1');
+      mockSpawnQueue([{ stdout }]);
+
+      const error = await resolveDeviceAsync('android', { cloud: 'fallback', projectRoot }).catch(
+        (e) => e
+      );
+
+      expect(error.code).toBe('NO_BOUND_DEVICE');
+      expect(error.message).toContain('No android device is bound');
+      expect(error.message).toContain("Or: this worktree's EAS Simulator session sess-1 is ios");
+      expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
+    }
+  );
+
   it(`names a session that is on record and not running, in the failure`, async () => {
     mockPlatform('linux');
     cloudProject('sess-1');

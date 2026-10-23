@@ -48,6 +48,22 @@ describe(cloudVerdict, () => {
     });
   });
 
+  // The fallback rung of a plain read verb: a session this run cannot use is a door, not a refusal.
+  it('hands a queued session back as no device in the fallback, not as a refusal', () => {
+    const probe = cloudProbe.queued({ id: 'sess-1', platform: 'ios' });
+
+    expect(cloudVerdict([live], probe, null, NOW, 'fallback')).toEqual({ kind: 'none', probe });
+  });
+
+  it('hands a session on another platform than the flag back as no device in the fallback', () => {
+    const probe = active('sess-1', 'ios');
+
+    expect(cloudVerdict([live], probe, 'android', NOW, 'fallback')).toEqual({
+      kind: 'none',
+      probe,
+    });
+  });
+
   it('names no platform for a queued session that reported none, read with no flag', () => {
     const verdict = cloudVerdict([], cloudProbe.queued({ id: 'q' }), null, NOW);
 
@@ -151,7 +167,7 @@ describe(cloudRungAsync, () => {
     writeCloudBinding(ROOT, 'ios', 'sess-1');
     vi.mocked(probeCloudSessionAsync).mockResolvedValue(active('sess-1'));
 
-    const rung = await cloudRungAsync(ROOT, 'ios', fakeTools());
+    const rung = await cloudRungAsync(ROOT, 'ios', 'required', fakeTools());
 
     expect(rung).toEqual({
       kind: 'device',
@@ -167,7 +183,7 @@ describe(cloudRungAsync, () => {
     writeCloudBinding(ROOT, 'ios', 'sess-1');
     vol.writeFileSync(file('android'), '{');
 
-    const error = await cloudRungAsync(ROOT, null, fakeTools()).catch((e) => e);
+    const error = await cloudRungAsync(ROOT, null, 'required', fakeTools()).catch((e) => e);
 
     expect(error.code).toBe('NO_BOUND_DEVICE');
     expect(error.message).toContain(file('android'));
@@ -179,7 +195,7 @@ describe(cloudRungAsync, () => {
     writeCloudBinding(ROOT, 'android', 'sess-9', expired);
     vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.none());
 
-    const error = await cloudRungAsync(ROOT, 'android', fakeTools()).catch((e) => e);
+    const error = await cloudRungAsync(ROOT, 'android', 'required', fakeTools()).catch((e) => e);
 
     expect(error.message).toContain('The bound android EAS session is expired.');
     expect(error.suggestedCommand).toBe(
@@ -194,7 +210,7 @@ describe(cloudRungAsync, () => {
       return active('sess-1');
     });
 
-    const error = await cloudRungAsync(ROOT, 'ios', fakeTools()).catch((e) => e);
+    const error = await cloudRungAsync(ROOT, 'ios', 'required', fakeTools()).catch((e) => e);
 
     expect(error.code).toBe('NO_BOUND_DEVICE');
     expect(error.data).toEqual({ reason: 'gone' });
