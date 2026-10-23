@@ -696,6 +696,27 @@ describe('dev:stop --eas', () => {
     });
   });
 
+  it(`plain dev:stop reaps a deleted worktree's session and keeps this worktree's own cloud binding`, async () => {
+    const gone = '/gone-worktree';
+    vol.reset();
+    vol.fromJSON({ [`${projectRoot}/package.json`]: '{}', [`${gone}/package.json`]: '{}' });
+    const lease = {
+      boundAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    };
+    writeCloudBinding(gone, 'ios', 'sess-orphan', lease);
+    writeCloudBinding(projectRoot, 'android', 'sess-own', lease);
+    require('node:fs').rmSync(gone, { recursive: true });
+    vi.mocked(eas().stopEasSessionAsync).mockResolvedValue({ ok: true, reason: null });
+
+    const code = await devStopAsync(projectRoot, options());
+
+    expect(code).toBe(EXIT_OK);
+    expect(eas().stopEasSessionAsync).toHaveBeenCalledTimes(1);
+    expect(eas().stopEasSessionAsync).toHaveBeenCalledWith(projectRoot, 'sess-orphan');
+    expect(readCloudBindings(projectRoot).bindings).toMatchObject([{ device: { id: 'sess-own' } }]);
+  });
+
   it(`keeps a failed listing on session.reason and exits 0 when there is nothing to stop`, async () => {
     vi.mocked(cloud().probeCloudSessionAsync).mockResolvedValue(
       cloudProbe.unknown({ reason: 'no Expo account is signed in' })

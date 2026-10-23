@@ -13,6 +13,7 @@ import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBindin
 import { registryDirectory } from '../../deviceBinding/registry';
 import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
 import { resolveEasCli } from '../../utils/easCli';
+import { ensureGitExcludedAsync } from '../../utils/gitExclude';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import {
@@ -862,6 +863,12 @@ describe('the session half on its own', () => {
       expect(report).toMatchObject({ ok: false });
       expect(report.reason).toContain('nothing is bound');
       expect(await bound()).toBe(false);
+    });
+
+    it(`still keeps the env file the start wrote out of git`, async () => {
+      listingAfterStart(cloudProbe.inactive(id));
+      await ensureEasSessionAsync(root, options);
+      expect(ensureGitExcludedAsync).toHaveBeenCalledWith(root, '.env.eas-simulator');
     });
 
     it(`binds the session when the listing cannot be read`, async () => {

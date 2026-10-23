@@ -277,7 +277,8 @@ export async function ensureEasSessionAsync(
   ) {
     const reason = `Session ${session.sessionId} ended before it was recorded; nothing is bound.`;
     Log.log(reason);
-    return { ...session, ok: false, reason };
+    const gitExclude = await excludeCloudSessionEnvFromGitAsync(projectRoot);
+    return { ...session, ok: false, reason, ...(gitExclude && { gitExclude }) };
   }
   if (session.sessionId) {
     let binding: CloudBinding;
