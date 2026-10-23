@@ -88,7 +88,7 @@ class Env {
    * @see llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
    */
   get AGENT_CLI_EAS_SESSION_WAIT_MS() {
-    return int('AGENT_CLI_EAS_SESSION_WAIT_MS', 90_000);
+    return int('AGENT_CLI_EAS_SESSION_WAIT_MS', 180_000);
   }
 
   /** @internal Force the webcontainer environment checks to pass */

@@ -1231,8 +1231,8 @@ describe('the EAS session under --wait-ready', () => {
     expect(error.suggestedCommand).toMatch(/dev --ios .*--eas.*--wait-ready/);
     expect(error.message).toContain('dev:stop --eas');
     expect(cliEvent).not.toHaveBeenCalledWith('dev_detach', expect.anything());
-    expect(Date.now()).toBeGreaterThanOrEqual(90_000);
-    expect(Date.now()).toBeLessThan(120_000);
+    expect(Date.now()).toBeGreaterThanOrEqual(180_000);
+    expect(Date.now()).toBeLessThan(210_000);
   });
 
   it("reports the child's exit when it dies while the session starts", async () => {
