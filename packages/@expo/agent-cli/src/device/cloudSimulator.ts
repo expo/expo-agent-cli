@@ -28,6 +28,7 @@
 // of that decision, in one place.
 
 import fs from 'fs';
+import { guardedCloudArgs, guardRefusal } from './cloudCommand';
 import path from 'path';
 
 import { classifySubprocessFailure } from '../needsHuman/detect';
@@ -43,6 +44,7 @@ import { easFailureReason } from '../utils/easFailure';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { looksLikeWrapperCrash } from '../utils/wrapperCrash';
+import { easCommandPrefix } from '../utils/easCli';
 
 /** Platforms an EAS Simulator session can run. The same two the local backends drive. */
 export type CloudPlatform = 'ios' | 'android';
@@ -83,6 +85,11 @@ export const CLOUD_SESSION_ID_VAR = 'EAS_SIMULATOR_SESSION_ID';
  * with it; a pin here would be a version this CLI has never tested either.
  */
 export const AGENT_DEVICE_SPEC = 'agent-device@latest';
+
+/** The `eas` argv that runs one controller verb (`['open', url]`) on the session's device. */
+export function cloudExecArgs(controllerArgv: string[]): string[] {
+  return ['simulator:exec', 'npx', AGENT_DEVICE_SPEC, ...controllerArgv];
+}
 
 /**
  * The session status the EAS CLI reports for a session that is up.
@@ -215,9 +222,6 @@ export function buildCloudOpenUrlArgs({
   session?: string;
 }): string[] {
   return [
-    'simulator:exec',
-    'npx',
-    AGENT_DEVICE_SPEC,
     'open',
     ...(appId ? [appId] : []),
     url,
@@ -247,7 +251,7 @@ export function buildCloudOpenUrlArgs({
  * out loud in the caller's reason string rather than worked around here.
  */
 export function buildCloudScreenshotArgs({ filePath }: { filePath: string }): string[] {
-  return ['simulator:exec', 'npx', AGENT_DEVICE_SPEC, 'screenshot', filePath];
+  return ['screenshot', filePath];
 }
 
 /**
@@ -272,7 +276,7 @@ export function buildCloudAlertArgs({
 }: {
   action: 'get' | 'accept' | 'dismiss';
 }): string[] {
-  return ['simulator:exec', 'npx', AGENT_DEVICE_SPEC, 'alert', action];
+  return ['alert', action];
 }
 
 /**
@@ -306,12 +310,12 @@ export function isOpenInAppAlert(output: string, appLabel: string): boolean {
 }
 
 /** Read the alert on the session's device. Exit 1 with "alert not found" when there is none. */
-export function readCloudAlertAsync(options: CloudRunOptions): Promise<CloudRunResult> {
+export function readCloudAlertAsync(options: CloudVerbOptions): Promise<CloudRunResult> {
   return runCloudVerbAsync(buildCloudAlertArgs({ action: 'get' }), options);
 }
 
 /** Answer the alert on the session's device with its default accept action. */
-export function acceptCloudAlertAsync(options: CloudRunOptions): Promise<CloudRunResult> {
+export function acceptCloudAlertAsync(options: CloudVerbOptions): Promise<CloudRunResult> {
   return runCloudVerbAsync(buildCloudAlertArgs({ action: 'accept' }), options);
 }
 
@@ -339,7 +343,7 @@ export function acceptCloudAlertAsync(options: CloudRunOptions): Promise<CloudRu
  * binding on `open`/`install`/`apps` rather than on this verb.
  */
 export function buildCloudStopAppArgs({ appId }: { appId: string }): string[] {
-  return ['simulator:exec', 'npx', AGENT_DEVICE_SPEC, 'close', appId];
+  return ['close', appId];
 }
 
 /**
@@ -645,6 +649,8 @@ export interface CloudRunOptions {
   timeoutMs?: number;
 }
 
+export type CloudVerbOptions = CloudRunOptions & { sessionId: string };
+
 /** What one `eas simulator:*` run amounted to. */
 export interface CloudRunResult {
   /** The command as a person would type it, for reproducing the step by hand. */
@@ -852,7 +858,7 @@ export function openUrlOnCloudSimulatorAsync({
   relaunch,
   session,
   ...options
-}: CloudRunOptions & {
+}: CloudVerbOptions & {
   url: string;
   platform: CloudPlatform;
   appId?: string;
@@ -875,7 +881,7 @@ export function openUrlOnCloudSimulatorAsync({
 export function stopAppOnCloudSimulatorAsync({
   appId,
   ...options
-}: CloudRunOptions & { appId: string }): Promise<CloudRunResult> {
+}: CloudVerbOptions & { appId: string }): Promise<CloudRunResult> {
   return runCloudVerbAsync(buildCloudStopAppArgs({ appId }), options);
 }
 
@@ -883,25 +889,37 @@ export function stopAppOnCloudSimulatorAsync({
 export function captureCloudScreenshotAsync({
   filePath,
   ...options
-}: CloudRunOptions & { filePath: string }): Promise<CloudRunResult> {
+}: CloudVerbOptions & { filePath: string }): Promise<CloudRunResult> {
   return runCloudVerbAsync(buildCloudScreenshotArgs({ filePath }), options);
 }
 
 async function runCloudVerbAsync(
-  args: string[],
-  { projectRoot, easCli, timeoutMs = CLOUD_VERB_TIMEOUT_MS }: CloudRunOptions
+  controllerArgv: string[],
+  { projectRoot, easCli, sessionId, timeoutMs = CLOUD_VERB_TIMEOUT_MS }: CloudVerbOptions
 ): Promise<CloudRunResult> {
   const cli = easCli ?? resolveEasCli(projectRoot);
   if (!cli) {
     throw easCliMissingError();
   }
-  return await runEasAsync(cli, args, { projectRoot, timeoutMs });
+  const args = cloudExecArgs(controllerArgv);
+  const result = await runEasAsync(cli, guardedCloudArgs(args, sessionId), {
+    projectRoot,
+    timeoutMs,
+    display: args,
+  });
+  const refusal = guardRefusal(result);
+  if (refusal) throw cloudSessionMismatchError(sessionId, refusal.loadedId);
+  return result;
 }
 
 async function runEasAsync(
   cli: EasCli,
   args: string[],
-  { projectRoot, timeoutMs }: { projectRoot: string; timeoutMs: number }
+  {
+    projectRoot,
+    timeoutMs,
+    display = args,
+  }: { projectRoot: string; timeoutMs: number; display?: string[] }
 ): Promise<CloudRunResult> {
   const { stdout, stderr, exitCode, spawnError } = await spawnCaptureAsync(
     cli.command,
@@ -915,7 +933,7 @@ async function runEasAsync(
     // How a person would reproduce the step. The runner and the package spec, not a bare `eas`:
     // that used to be the honest short form of a resolved binary, and is now the name of a command
     // the machine may not have (`src/utils/easCli.ts`).
-    command: [easCliLabel(cli), ...args].join(' '),
+    command: [easCliLabel(cli), ...display].join(' '),
     stdout,
     stderr,
     exitCode,
@@ -925,6 +943,31 @@ async function runEasAsync(
 }
 
 // ---- The failures ----------------------------------------------------------------------------
+
+/**
+ * The guard refused: EAS loaded another session than the selected one.
+ * Callers that degrade, such as the screenshot, test for this class instead of a code string.
+ *
+ * @ref llp/0035-one-device-per-worktree.rfc.md §Session guard
+ */
+export class CloudSessionMismatchError extends CommandError {}
+
+/** @ref llp/0035-one-device-per-worktree.rfc.md §Session guard */
+export function cloudSessionMismatchError(
+  selected: string,
+  loaded: string | null
+): CloudSessionMismatchError {
+  const error = new CloudSessionMismatchError(
+    'CLOUD_SESSION_MISMATCH',
+    [
+      `EAS session ${selected} cannot be driven from this worktree, so no device command ran.`,
+      `Why: "simulator:exec" drives only the session that ${CLOUD_SESSION_ENV_FILE} names, and it names ${loaded ? `session ${loaded}` : 'no session'}. Only a session start writes that file.`,
+      `How: ${loaded ? `If session ${loaded} is still running, it is the only session this worktree can drive. ` : ''}"${easCommandPrefix()} simulator:list" lists the sessions of this account. End session ${selected} with "${easCommandPrefix()} simulator:stop --id ${selected}" only if this worktree started it. Do not edit ${CLOUD_SESSION_ENV_FILE}: its session id and credentials belong together.`,
+    ].join('\n')
+  );
+  error.data = { selectedSessionId: selected, loadedSessionId: loaded };
+  return error;
+}
 
 /** The failure for a cloud run on a machine with no reachable package runner. */
 export function easCliMissingError(): CommandError {

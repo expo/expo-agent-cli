@@ -13,6 +13,7 @@ import path from 'node:path';
 
 import {
   installStubEasAsync,
+  writeCloudSessionFileAsync,
   readStubEasInvocations,
   stubEasArgs as easInvocationArgs,
 } from '../stubEas';
@@ -578,7 +579,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
       // The stub wrote the dotenv the real command writes, so every later `--eas` finds the session.
       expect(
         await fs.promises.readFile(path.join(projectRoot, '.env.eas-simulator'), 'utf8')
-      ).toContain('EAS_SIMULATOR_SESSION_ID=sess-e2e-started');
+      ).toContain("EAS_SIMULATOR_SESSION_ID='sess-e2e-started'");
     } finally {
       await cleanUpAsync(projectRoot);
     }
@@ -610,6 +611,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
               )
             : script,
       });
+      if (state === 'reused') await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
       const child = spawnAgentCli(projectRoot, ['dev', '--ios', '--eas'], {
         env: {
           ...easRunEnv(projectRoot, 8588),
@@ -676,6 +678,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
 
   it('reuses the session this project already has, and opens the app on it instead of starting one', async () => {
     const projectRoot = await setupAsync('go-app');
+    await writeCloudSessionFileAsync(projectRoot, 'sess-e2e');
 
     try {
       const result = await executeAgentCliAsync(

@@ -330,7 +330,7 @@ Each accepted race costs one rerun of `dev`, never a lost build or a touched hum
 
 1. The Android facts §Live gate verifies: a second `-read-only` instance boots beside the first and takes `adb reverse` and an install, an emulator started on a taken port exits non-zero, the launcher keeps its pid, and a cold boot plus the install fits `BOOT_DEVICE_TIMEOUT_MS`. The gate passed on SDK 58; the cold start's wall time is the cost every instance start pays (Decision 2).
 2. A pid reused by an unrelated long-lived process keeps the registry lock until a human reads the message; a reused emulator pid is never killed where `ps` exists, and on a platform without `ps` the kill can hit the wrong process. Without `ps`, `dev` and the read verbs can drive whatever answers on the serial. Needs pid wrap-around during days of uptime.
-3. eas-cli skew: a project pinned under 23.2 refuses `--tag` on the start; §EAS session binding tests the fallback.
+3. eas-cli skew: a project pinned under 23.2 refuses `--tag` on the start; §Recovery by tag (not built) must test the fallback.
 4. The idle-timeout semantics on the service are unread; 30 min may stop a session during a long pause.
 5. A crash or a 20 s timeout during `simctl create` leaks one `Shutdown` simulator named `agent-cli <first 8 chars>`, and a retry creates a second; nothing adopts or deletes them. Main measured a cold `simctl list` at 2.6 s, so `status`'s 2.5 s probe deadline can report `unknown` on a cold machine.
 6. In bootstrap mode, `smoke` on a development-build project compiles onto the worktree's simulator instead of a simulator that already has the app.
@@ -584,32 +584,39 @@ Before a real `dev` startup, `.expo/agent-cli-last-dev.json` retains only its pa
 
 ## EAS session binding
 
-An EAS session belongs to the worktree that started it. Extends the binding and lifecycle rules in this RFC and §Device lifecycle to EAS sessions. Tag recovery builds on worktree session binding.
+An EAS session belongs to the worktree that started it. Extends the binding and lifecycle rules in this RFC and §Device lifecycle to EAS sessions. Its first part is §Session guard. §Recovery by tag is not built.
 
 How does a worktree keep to its own EAS session, and how does that session survive a lost registry?
 
-**Status:** not built. Until it ships, the EAS fallback asks the service only when the dotenv names a session (§How `dev` uses it), and the cloud rows of the inspect and reap tables are unused.
+**Status:** §Session guard is built. A session is not bound to a worktree, and §Recovery by tag is not built.
 
 ### State after EAS binding
 
-- Two worktrees get two sessions; `navigate --eas` uses its own; `dev:stop --eas` ends this worktree's sessions; a deleted worktree's `started` session is stopped from another worktree, a `dotenv` one only removed; `dev --eas` reaps too.
-- A lost registry recovers its session by tag; the live suite is green on a Mac with two worktrees.
+- An EAS device command runs only on the session it selected.
 
-### Session binding
+### Session guard
 
-- `cloud.ts`; `acquireCloudBindingAsync` and the `sessionId` release of §Entry points; the cloud rows of the inspect and reap tables.
-- `selectCloudSession(boundIds)` and the `unbound` result per §EAS, without the tag rung. Readers of `candidateCount` are checked. `ensureEasSessionAsync` returns the source of the selected id with its `sessionId`.
-- `ownCloudIdsAsync(root)` serves every probe caller: the rung loop, `ensureEasSessionAsync`, smoke's reuse branch and `stopProjectEasSessionAsync`.
-- Binding points. `openAppEas`, dev-wait and both of smoke's EAS branches call `acquireCloudBindingAsync` whenever `ensureEasSessionAsync` or a direct probe returns a session id. That includes a reuse of the bound id and a start that failed after it created the session, so a later reap can stop that session. dev-wait binds the session it finds and chooses no device.
-- `dev --eas` binds; the foreground `dev --eas` stops its session at exit as today and then releases with `sessionId`. `dev --eas --detach` on a running server runs `openAppEas`, which reuses the bound session or starts one and binds it; this is the How line of the `gone` cloud refusal (§Readers), raised when the listing shows the bound id in no live state; a queued bound session is `not-up` and is never replaced by a new start.
-- `--max-idle-time-minutes 30` on the session start, with the "Nonexistent flag" retry of §EAS, for the reason given there. `smoke --eas` binds in both its start and its reuse branch and, after its own stop succeeds, releases with `sessionId`.
-- `dev:stop --eas` stops the probe's session, bound or dotenv, and then each other `cloud` binding's session of this worktree. It calls the `sessionId` release for each stop that succeeded. The JSON `session` reports the probe's id and `devices` the rest. A plain `dev:stop` keeps `cloud` bindings and reports each as "recorded, not checked" ([[0021-honest-reports]]), with `dev:stop --eas` as the next step. `dev:stop_session` gains `platform`.
-- Three readers switch from the dotenv file to the `recorded` state of the own cloud binding, with no network call: dev-wait's cloud fallback, the start follow-ups, and `status`.
-- Tests: the rejected branch's `stubEas.ts` and `stubs/eas.js` `STUB_SIM_STORE` with repeatable `--status`, paging dropped, and its e2e cases, including "plain `dev:stop` keeps it". Unit, named: `session-id-release-skips-stale-check`, `start-failure-with-session-binds`, `dotenv-removed-not-stopped`, `select-bound-only`, `cloud-expired-is-gone`, `unlisted-bound-id-is-gone`, `queued-bound-id-is-not-up`, `cloud-rung-writes-nothing`, `reap-stops-under-binding-root`, `idle-flag-retry-on-nonexistent-flag`.
+**Status:** built.
+
+Does an EAS device command run only on the session it selected?
+
+- Every cloud device verb takes the selected session id (`CloudVerbOptions.sessionId`) and carries it to execution. `navigate`, `runtime:reload`, `runtime:stop` and the screenshot pass the id of the device they resolved, which is the probe's id.
+- `simulator:exec` loads `.env.eas-simulator` and starts its child locally with that environment. The child is a guard (`src/device/cloudCommand.ts`), not the controller. The guard compares the loaded `EAS_SIMULATOR_SESSION_ID` with the selected id. When they match, it starts the controller with the same environment. When the id is missing or different, it exits 20 and starts nothing. The guard checks the environment that the controller gets, not an earlier read of the file. A dotenv that another run replaces during the command cannot change the session the controller drives.
+- A mismatch is `CLOUD_SESSION_MISMATCH`. The guard prints the id that EAS loaded after its marker, on one stderr line. The message names the selected session and that id (`data.selectedSessionId`, `data.loadedSessionId`). No command writes the connection of an existing session back to the file, so the message never tells the caller to restore or edit it. `sessionId` is required; an empty id is a bug in this CLI and starts no process.
+- The guard program is one line, because `cmd.exe` reads a newline as the end of a command when the `npx.cmd` shim forwards the argument on Windows. The session id and the controller target are two separate arguments. The target is resolved for the caller's platform (`resolveSpawnTarget`), with the Windows batch-file escapes. It crosses the outer shim as base64 JSON, and the guard decodes it, so the outer shell cannot consume the escapes for the inner spawn.
+- The screenshot degrades and never throws. It reports the same message, with its How line, as the reason for no picture.
+- The `command` of a report is the logical argv, `eas simulator:exec npx agent-device@latest …`, not the guard.
+- This CLI writes no credentials.
+- Tests: a mismatched connection exits before the controller starts, and the controller gets the loaded environment (cloudBinding-test); the guarded argv of the open and the screenshot (cloudSimulator-test); an e2e round trip of a target argv with spaces, quotes, `^`, `%`, `&`, Unicode and a newline through the stub runner, and its refusal on a mismatch (cloud-binding-test). The stub `eas` loads the connection file as EAS does and runs the real guard.
 
 ### Recovery by tag
 
-- `--tag agent-cli:<digest>` on the session start, with the same "Nonexistent flag" retry. Any other failure is reported as today, because a start can create a session and still exit non-zero. The event `dev:open_app_eas_flag_unsupported { flag }` records a retry.
+**Status:** not built.
+
+The session start passes no `--tag`, and no selection rule reads a tag. A registry that is lost leaves its session unbound; `dev:stop --eas` and the dotenv id still reach it. The tag rule below is the design for this section only.
+
+- Selection adds a rung: a live `agent-device` session that carries the tag `agent-cli:<digest>` is a candidate, and a session found by tag is recorded as `started`.
+- `--tag agent-cli:<digest>` on the session start, with the same "Nonexistent flag" retry and event. Any other failure is reported as it is, because a start can create a session and still exit non-zero.
 - The tag field in `CloudSessionInfo`, named from a recorded `simulator:list --json` fixture that carries a tag. The tag match reads that one listing, with no second `eas` call.
 - The runbook and a live test trimmed to the acceptance lists. `live-cloud` starts its session with `eas` directly, so the dotenv source stays and a reap never stops a `dotenv` session (§Records).
 - Tests, named: `tag-matches-on-one-listing`, `tag-retry-only-on-nonexistent-flag`, with a stub version switch for the eas-cli skew (Risk 3).

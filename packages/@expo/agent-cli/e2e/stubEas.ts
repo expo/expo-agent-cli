@@ -9,6 +9,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { unwrapGuardedExec } from '../src/device/cloudCommand';
 import { installStubEasRunnerAsync, linkFixtureToEasAsync } from './utils';
 
 /** Where the stub `eas` records what it was asked to do, one JSON line per run, under the cwd. */
@@ -23,6 +24,7 @@ export interface StubEasInvocation {
   cwd: string;
   /** `CI` as the CLI under test passed it on, or null when it did not set one. */
   ci: string | null;
+  executedSessionId?: string;
 }
 
 /**
@@ -54,7 +56,11 @@ export async function installStubEasAsync(
   } else {
     await fs.promises.writeFile(scriptPath, script);
   }
-  await installStubEasRunnerAsync(binDir, scriptPath, { names, logFile });
+  await installStubEasRunnerAsync(binDir, scriptPath, {
+    names,
+    logFile,
+    agentDeviceController: true,
+  });
   return { binDir, scriptPath };
 }
 
@@ -71,9 +77,17 @@ export function readStubEasInvocations(projectRoot: string): StubEasInvocation[]
     .map((line) => JSON.parse(line) as StubEasInvocation);
 }
 
-/** The argv of every recorded stub `eas` invocation, in order. */
+/** Logical EAS commands and controller verbs; raw guard invocations remain available above. */
 export function stubEasArgs(projectRoot: string): string[][] {
-  return readStubEasInvocations(projectRoot).map((invocation) => invocation.args);
+  // The guard launch is transport detail. Its controller's invocation is the operation tests mean.
+  return readStubEasInvocations(projectRoot)
+    .filter(({ args }) => args[0] === '__controller' || !unwrapGuardedExec(args))
+    .map(({ args }) => {
+      if (args[0] === '__controller') {
+        return ['simulator:exec', 'npx', 'agent-device@latest', ...args.slice(1)];
+      }
+      return args;
+    });
 }
 
 /** The first word of every recorded stub `eas` invocation — the verbs, in order. */
@@ -89,8 +103,9 @@ export function resetStubEasInvocations(projectRoot: string): void {
 /**
  * Write the dotenv `eas-cli` manages, which is how a project names its EAS Simulator session.
  *
- * The shape is the real command's [observed — eas-cli 23.2 `simulator/env.ts`], token included,
- * because `simulator:exec` loads this file to reach the controller.
+ * The text is the real command's [observed — eas-cli 25.0.0 `simulator/env.js`
+ * `writeSimulatorEnvAsync`, `commands/simulator/index.js` 354-358], token included, because
+ * `simulator:exec` loads this file to reach the controller.
  */
 export async function writeCloudSessionFileAsync(
   projectRoot: string,
@@ -98,6 +113,7 @@ export async function writeCloudSessionFileAsync(
 ): Promise<void> {
   await fs.promises.writeFile(
     path.join(projectRoot, '.env.eas-simulator'),
-    `# managed by eas-cli\nAGENT_DEVICE_DAEMON_BASE_URL=https://stub-daemon.example\nAGENT_DEVICE_DAEMON_AUTH_TOKEN=stub-token\nEAS_SIMULATOR_SESSION_ID=${sessionId}\n`
+    '# Do not commit this file.\n# Do not modify these values manually. They are managed by eas-cli.\n# It holds configuration only for the current simulator session.\n\n' +
+      `AGENT_DEVICE_DAEMON_BASE_URL='https://stub-daemon.example'\nAGENT_DEVICE_DAEMON_AUTH_TOKEN='stub-token'\nEAS_SIMULATOR_SESSION_ID='${sessionId}'\n`
   );
 }

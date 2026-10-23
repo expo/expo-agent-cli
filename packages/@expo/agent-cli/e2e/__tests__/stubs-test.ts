@@ -297,27 +297,68 @@ describe('the shared stub eas', () => {
     expect(result.stderr).toContain('Build finished');
   });
 
-  it('writes the session dotenv on simulator:start, and only when --json is not passed', () => {
+  it('writes the session dotenv on simulator:start the way eas-cli 25 does, --json or not', () => {
     const plain = eas(['simulator:start', '--platform', 'ios', '--expo-go', '--non-interactive']);
     expect(plain.code).toBe(0);
     const dotenv = path.join(cwd, '.env.eas-simulator');
-    expect(fs.readFileSync(dotenv, 'utf8')).toContain('EAS_SIMULATOR_SESSION_ID=sess-e2e-started');
-    expect(plain.stderr).toContain('Simulator session created (id: sess-e2e-started)');
+    expect(fs.readFileSync(dotenv, 'utf8')).toBe(
+      '# Do not commit this file.\n# Do not modify these values manually. They are managed by eas-cli.\n# It holds configuration only for the current simulator session.\n\n' +
+        "AGENT_DEVICE_DAEMON_BASE_URL='https://stub-daemon.example'\nAGENT_DEVICE_DAEMON_AUTH_TOKEN='stub-token'\nEAS_SIMULATOR_SESSION_ID='sess-e2e-started'\n"
+    );
+    expect(plain.stderr).toContain(
+      'Simulator session created (id: sess-e2e-started, saved to .env.eas-simulator)'
+    );
 
     fs.rmSync(dotenv);
     const json = eas(['simulator', '--platform', 'ios', '--build-id', 'build-e2e', '--json'], {
       STUB_SIM_START_ID: 'sess-json',
     });
     expect(json.code).toBe(0);
-    expect(fs.existsSync(dotenv)).toBe(false);
+    expect(fs.readFileSync(dotenv, 'utf8')).toContain("EAS_SIMULATOR_SESSION_ID='sess-json'");
     expect(JSON.parse(json.stdout)).toMatchObject({ id: 'sess-json', type: 'agent-device' });
   });
 
-  it('names the session it billed when the start never became ready', () => {
+  it('names the session it billed when the start never became ready, in its output and the dotenv', () => {
     const result = eas(['simulator:start', '--platform', 'ios'], { STUB_SIM_START_EXIT: '1' });
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain('(id: sess-e2e-started)');
+    expect(result.stderr).toContain('(id: sess-e2e-started, saved to .env.eas-simulator)');
     expect(result.stderr).toContain('Timed out');
+    expect(fs.readFileSync(path.join(cwd, '.env.eas-simulator'), 'utf8')).toMatch(
+      /\n\nEAS_SIMULATOR_SESSION_ID='sess-e2e-started'\n$/
+    );
+    const listed = JSON.parse(eas(['simulator:list', '--json'], { STUB_SIM_SESSIONS: '0' }).stdout);
+    expect(listed.sessions).toMatchObject([{ id: 'sess-e2e-started', status: 'STOPPED' }]);
+  });
+
+  it('resets the dotenv on simulator:stop only when it names the stopped id', () => {
+    eas(['simulator:start', '--platform', 'ios', '--expo-go']);
+    const dotenv = path.join(cwd, '.env.eas-simulator');
+    eas(['simulator:stop', '--id', 'sess-other']);
+    expect(fs.readFileSync(dotenv, 'utf8')).toContain(
+      "EAS_SIMULATOR_SESSION_ID='sess-e2e-started'"
+    );
+
+    // A bare stop reads the quoted id.
+    expect(eas(['simulator:stop']).stdout).toContain('(id: sess-e2e-started)');
+    expect(fs.readFileSync(dotenv, 'utf8')).toMatch(/current simulator session\.\n\n$/);
+  });
+
+  it('keeps an inherited session id in simulator:exec when the dotenv names none', () => {
+    const exec = () =>
+      eas(
+        [
+          'simulator:exec',
+          process.execPath,
+          '-e',
+          'process.stdout.write(process.env.EAS_SIMULATOR_SESSION_ID ?? "")',
+        ],
+        { EAS_SIMULATOR_SESSION_ID: 'sess-inherited' }
+      ).stdout;
+    expect(exec()).toBe('sess-inherited');
+    eas(['simulator:start', '--platform', 'ios', '--expo-go']);
+    expect(exec()).toBe('sess-e2e-started');
+    eas(['simulator:stop', '--id', 'sess-e2e-started']);
+    expect(exec()).toBe('sess-inherited');
   });
 
   it('writes the real eas.json on build:configure — a device profile, and no simulator one', () => {

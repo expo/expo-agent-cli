@@ -11,6 +11,7 @@
 import { resolveAdb, type AdbResolution } from '../device/adb';
 import {
   buildCloudStopAppArgs,
+  cloudExecArgs,
   readControllerError,
   stopAppOnCloudSimulatorAsync,
 } from '../device/cloudSimulator';
@@ -58,7 +59,7 @@ export function buildStopAppCommand({
   backend,
 }: StopAppParams): StopAppCommand {
   if (backend === 'cloud') {
-    const args = buildCloudStopAppArgs({ appId });
+    const args = cloudExecArgs(buildCloudStopAppArgs({ appId }));
     return { bin: 'eas', args, display: ['eas', ...args].join(' ') };
   }
   const command: StopAppCommand =
@@ -247,6 +248,7 @@ async function stopAppOnCloudAsync(params: StopAppParams): Promise<StopAppResult
 
   const result = await stopAppOnCloudSimulatorAsync({
     projectRoot: params.projectRoot,
+    sessionId: params.deviceId,
     appId: params.appId,
   });
   if (result.spawnError) {

@@ -22,7 +22,13 @@ import path from 'path';
 import type { DeviceBackend } from '../navigate/device';
 import { resolveSpawnTarget } from '../utils/windowsShim';
 import { resolveAdb, type AdbResolution } from './adb';
-import { buildCloudScreenshotArgs, captureCloudScreenshotAsync } from './cloudSimulator';
+import {
+  buildCloudScreenshotArgs,
+  CloudSessionMismatchError,
+  cloudExecArgs,
+  captureCloudScreenshotAsync,
+  type CloudRunResult,
+} from './cloudSimulator';
 
 /** Platforms a screenshot can be taken on: the two with a device tool this CLI already spawns. */
 export type ScreenshotPlatform = 'ios' | 'android';
@@ -189,8 +195,11 @@ export async function captureScreenshotAsync({
   }
 
   const run = cloud
-    ? await runCloudScreenshotAsync(projectRoot!, filePath, timeoutMs)
+    ? await runCloudScreenshotAsync(projectRoot!, filePath, timeoutMs, deviceId)
     : await runScreenshotAsync(command, filePath, timeoutMs);
+  if ('refusal' in run) {
+    return { ...base, reason: run.refusal.split('\n').join(' ') };
+  }
   if (run.spawnError) {
     return {
       ...base,
@@ -234,7 +243,7 @@ export async function captureScreenshotAsync({
  * never reached for it.
  */
 function cloudScreenshotCommand(filePath: string): ScreenshotCommand {
-  const args = buildCloudScreenshotArgs({ filePath });
+  const args = cloudExecArgs(buildCloudScreenshotArgs({ filePath }));
   return { bin: 'eas', args, output: 'file', display: `eas ${args.join(' ')}` };
 }
 
@@ -249,9 +258,16 @@ function cloudScreenshotCommand(filePath: string): ScreenshotCommand {
 async function runCloudScreenshotAsync(
   projectRoot: string,
   filePath: string,
-  timeoutMs: number
-): Promise<{ exitCode: number | null; stderr: string; spawnError?: string }> {
-  const result = await captureCloudScreenshotAsync({ projectRoot, filePath, timeoutMs });
+  timeoutMs: number,
+  sessionId: string
+): Promise<{ refusal: string } | { exitCode: number | null; stderr: string; spawnError?: string }> {
+  let result: CloudRunResult;
+  try {
+    result = await captureCloudScreenshotAsync({ projectRoot, filePath, timeoutMs, sessionId });
+  } catch (error) {
+    if (error instanceof CloudSessionMismatchError) return { refusal: error.message };
+    throw error;
+  }
   return {
     exitCode: result.exitCode,
     // Both streams, because the EAS CLI reports a dead session on either one and the reason line

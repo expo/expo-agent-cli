@@ -141,18 +141,18 @@ describe('@expo/agent-cli navigate --eas', () => {
     ]);
   });
 
-  // The dotenv is no longer the gate: a session somebody else started — by MCP, or in another
-  // terminal — is this project's session, and the service is what says so.
-  it(`finds a session the service lists even with no dotenv on disk`, async () => {
+  // The listing finds the session, and no connection settings name it, so the guard refuses.
+  it(`refuses a listed session that no connection settings name`, async () => {
     const projectRoot = await setupAsync('go-app');
 
     const result = await navigateCloud(projectRoot);
 
-    expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      deviceBackend: 'cloud',
-      deviceId: 'sess-e2e',
-    });
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain('sess-e2e cannot be driven from this worktree');
+    expect(result.stderr).toContain('names no session');
+    expect(easInvocations(projectRoot).map((args) => args.slice(0, 3))).toEqual([
+      ['simulator:list', '--status', 'in-progress'],
+    ]);
   });
 
   // A running `serve-sim` session has no agent-device daemon in it. Saying "no session" would send

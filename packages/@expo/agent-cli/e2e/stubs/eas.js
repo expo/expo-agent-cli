@@ -64,17 +64,25 @@
 //   (defaults `sess-e2e`, `IN_PROGRESS`, `IOS`, `agent-device`)
 // - STUB_SIM_GET_EXIT / STUB_SIM_STDERR: a refusal, with the real CLI's wording on stderr
 //
+// `.env.eas-simulator` is handled the way eas-cli 25.0.0 handles it (`build/simulator/env.js`):
+// written as the header and `KEY='value'` lines (`writeSimulatorEnvAsync`), read with dotenv
+// quoting (`loadSimulatorEnvAsync`), and reset to the header by a stop of the id it names
+// (`resetSimulatorEnvAsync`).
+//
 // `simulator` / `simulator:start`
-// - STUB_SIM_START_EXIT / STUB_SIM_START_STDERR: a session that never became ready
-// - STUB_SIM_START_ID: the id of the session it creates (default `sess-e2e-started`). Without
-//   `--json` it writes `.env.eas-simulator`, the way the real command does; with `--json` it does
-//   not, and prints the object the real command prints instead. A started session is
-//   **remembered** in `stub-eas-sessions.json` under the cwd: `simulator:list` lists it as in
-//   progress until `simulator:stop --id <id>` marks it stopped — the service's own memory, so a
-//   run that starts a session and then looks for it finds it
+// - STUB_SIM_START_EXIT / STUB_SIM_START_STDERR: a session that never became ready. Without
+//   `--json` the dotenv names the billed id, which the real command writes right after the create
+//   mutation (`commands/simulator/index.js` 276-281) and leaves after a failed wait; the session is
+//   remembered as stopped
+// - STUB_SIM_START_ID: the id of the session it creates (default `sess-e2e-started`). A ready
+//   session writes the full dotenv, `--json` or not (index.js 354-358); `--json` prints the object
+//   the real command prints. A started session is **remembered** in `stub-eas-sessions.json` under
+//   the cwd: `simulator:list` lists it as in progress until `simulator:stop --id <id>` marks it
+//   stopped — the service's own memory, so a run that starts a session and then looks for it finds it
 //
 // `simulator:stop`
-// - marks the `--id` session stopped in that file; a bare stop marks whatever `.env.eas-simulator` names
+// - marks the `--id` session stopped in that file; a bare stop marks whatever `.env.eas-simulator`
+//   names. The dotenv is reset when it names the stopped id (`commands/simulator/stop.js` 33-48)
 //
 // `simulator:exec`
 // - STUB_SIM_EXEC_EXIT / STUB_SIM_STDERR: a verb the session refused
@@ -90,13 +98,20 @@ const LOG_NAME = 'stub-eas-invocations.jsonl';
 const SESSIONS_NAME = 'stub-eas-sessions.json';
 /** Where a finished `build` is remembered for `build:list`, under the cwd. */
 const BUILDS_NAME = 'stub-eas-builds.json';
-const args = process.argv.slice(2);
+let args = process.argv.slice(2);
+const controller = args[0] === '__controller';
+if (controller) args = ['simulator:exec', ...args.slice(1)];
 const cwd = process.cwd();
 
 try {
   fs.appendFileSync(
     path.join(cwd, LOG_NAME),
-    JSON.stringify({ args, cwd, ci: process.env.CI ?? null }) + '\n'
+    JSON.stringify({
+      args: controller ? ['__controller', ...args.slice(1)] : args,
+      cwd,
+      ci: process.env.CI ?? null,
+      executedSessionId: controller ? process.env.EAS_SIMULATOR_SESSION_ID : undefined,
+    }) + '\n'
   );
 } catch {
   // A log that cannot be written costs the assertion, not the run under test.
@@ -309,21 +324,76 @@ function stubSession() {
   };
 }
 
-/** What the real command writes into `.env.eas-simulator` for an agent-device session. */
-function writeSessionEnv(sessionId) {
+const DOTENV = path.join(cwd, '.env.eas-simulator');
+/** `SIMULATOR_DOTENV_FILE_HEADER` (env.js 25). */
+const DOTENV_HEADER =
+  '# Do not commit this file.\n# Do not modify these values manually. They are managed by eas-cli.\n# It holds configuration only for the current simulator session.\n\n';
+/** The agent-device keys `loadSimulatorEnvAsync` takes from the file together, or deletes (env.js 37-50). */
+const SESSION_KEYS = [
+  'EAS_SIMULATOR_SESSION_ID',
+  'AGENT_DEVICE_DAEMON_BASE_URL',
+  'AGENT_DEVICE_DAEMON_AUTH_TOKEN',
+];
+
+/** `writeSimulatorEnvAsync` (env.js 69-77). */
+function writeSessionEnv(variables) {
   fs.writeFileSync(
-    path.join(cwd, '.env.eas-simulator'),
-    [
-      '# Do not commit this file.',
-      '# Do not modify these values manually. They are managed by eas-cli.',
-      '# It holds configuration only for the current simulator session.',
-      '',
-      'AGENT_DEVICE_DAEMON_BASE_URL=https://stub-daemon.example',
-      'AGENT_DEVICE_DAEMON_AUTH_TOKEN=stub-token',
-      `EAS_SIMULATOR_SESSION_ID=${sessionId}`,
-      '',
-    ].join('\n')
+    DOTENV,
+    DOTENV_HEADER +
+      Object.entries(variables)
+        .map(([key, value]) => `${key}='${value}'`)
+        .join('\n') +
+      '\n'
   );
+}
+
+/** The dotenv's variables with dotenv quoting stripped, quoted or not; null without a file. */
+function readSessionEnv() {
+  let text;
+  try {
+    text = fs.readFileSync(DOTENV, 'utf8');
+  } catch {
+    return null;
+  }
+  const variables = {};
+  for (const line of text.split('\n')) {
+    const match = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+    if (match) variables[match[1]] = /^(['"`])(.*)\1$/.exec(match[2])?.[2] ?? match[2];
+  }
+  return variables;
+}
+
+/** `loadSimulatorEnvAsync` (env.js 29-68) over `env`: no file, or no id in it, keeps what is inherited. */
+function loadSessionEnv(env) {
+  const file = readSessionEnv() ?? {};
+  if (file.EAS_SIMULATOR_SESSION_ID) {
+    for (const key of SESSION_KEYS) {
+      if (file[key] === undefined) delete env[key];
+      else env[key] = file[key];
+    }
+  }
+  for (const [key, value] of Object.entries(file)) env[key] ??= value;
+  return env;
+}
+
+function rememberSession(id, status) {
+  writeRememberedSessions([
+    {
+      id,
+      name: valueOf('--name') ?? 'stub session',
+      type: valueOf('--type') || 'agent-device',
+      status,
+      platform: (valueOf('--platform') || 'ios').toUpperCase(),
+      createdAt: new Date().toISOString(),
+      // What the session was started with, so a test can read the app off the listing too.
+      app: has('--expo-go')
+        ? 'expo-go'
+        : valueOf('--build-id')
+          ? `build:${valueOf('--build-id')}`
+          : null,
+    },
+    ...rememberedSessions(),
+  ]);
 }
 
 if (command === 'simulator:availability') {
@@ -373,10 +443,15 @@ if (command === 'simulator:get') {
 if (command === 'simulator' || command === 'simulator:start') {
   const exitCode = Number(process.env.STUB_SIM_START_EXIT || 0);
   const id = process.env.STUB_SIM_START_ID || 'sess-e2e-started';
+  const json = has('--json');
+  // Only the id-only write right after the create mutation is gated on `--json` (index.js 276).
+  const saved = json ? '' : ', saved to .env.eas-simulator';
   if (exitCode !== 0) {
     // The session is created before the wait for readiness, so a start that fails still names the
-    // id it billed [observed — expo-ci, 2026-09-06].
-    process.stderr.write(`Simulator session created (id: ${id})\n`);
+    // id it billed [observed — expo-ci, 2026-09-06], and the dotenv keeps naming it.
+    if (!json) writeSessionEnv({ EAS_SIMULATOR_SESSION_ID: id });
+    rememberSession(id, 'STOPPED');
+    process.stderr.write(`Simulator session created (id: ${id}${saved})\n`);
     exitWith(
       process.stderr,
       process.env.STUB_SIM_START_STDERR ||
@@ -384,30 +459,14 @@ if (command === 'simulator' || command === 'simulator:start') {
       exitCode
     );
   }
-  const json = has('--json');
-  if (!json) {
-    // `--json` suppresses the dotenv write [observed — eas-cli 23.2 `simulator/index.ts`].
-    writeSessionEnv(id);
-  }
-  writeRememberedSessions([
-    {
-      id,
-      name: valueOf('--name') ?? 'stub session',
-      type: valueOf('--type') || 'agent-device',
-      status: 'IN_PROGRESS',
-      platform: (valueOf('--platform') || 'ios').toUpperCase(),
-      createdAt: new Date().toISOString(),
-      // What the session was started with, so a test can read the app off the listing too.
-      app: has('--expo-go')
-        ? 'expo-go'
-        : valueOf('--build-id')
-          ? `build:${valueOf('--build-id')}`
-          : null,
-    },
-    ...rememberedSessions(),
-  ]);
+  writeSessionEnv({
+    AGENT_DEVICE_DAEMON_BASE_URL: 'https://stub-daemon.example',
+    AGENT_DEVICE_DAEMON_AUTH_TOKEN: 'stub-token',
+    EAS_SIMULATOR_SESSION_ID: id,
+  });
+  rememberSession(id, 'IN_PROGRESS');
   process.stderr.write(
-    `Simulator session created (id: ${id}) https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/${id}\n`
+    `Simulator session created (id: ${id}${saved}) https://expo.dev/accounts/e2e-user/projects/e2e/simulator-sessions/${id}\n`
   );
   if (json) {
     printJson({
@@ -430,26 +489,33 @@ if (command === 'simulator' || command === 'simulator:start') {
 }
 
 if (command === 'simulator:stop') {
-  const id =
-    valueOf('--id') ??
-    (() => {
-      try {
-        return /EAS_SIMULATOR_SESSION_ID=(\S+)/.exec(
-          fs.readFileSync(path.join(cwd, '.env.eas-simulator'), 'utf8')
-        )?.[1];
-      } catch {
-        return undefined;
-      }
-    })();
+  const id = valueOf('--id') || loadSessionEnv({ ...process.env }).EAS_SIMULATOR_SESSION_ID;
   writeRememberedSessions(
     rememberedSessions().map((session) =>
       session.id === id ? { ...session, status: 'STOPPED' } : session
     )
   );
+  if (id && readSessionEnv()?.EAS_SIMULATOR_SESSION_ID === id) {
+    fs.writeFileSync(DOTENV, DOTENV_HEADER);
+  }
   exitWith(process.stdout, `Simulator session stopped${id ? ` (id: ${id})` : ''}`, 0);
 }
 
 if (command === 'simulator:exec') {
+  // Plain-JS copy of `unwrapGuardedExec` in src/device/cloudCommand.ts: a guarded argv has `-e` at
+  // index 2.
+  if (!controller && args[2] === '-e') {
+    // Execute the real guard and its prepared target unchanged after loading the same connection
+    // file as EAS. The npx stub routes agent-device to this file as __controller, after cmd.exe has
+    // decoded the Windows shim arguments just as it would for the real package runner.
+    const env = loadSessionEnv({ ...process.env });
+    const result = require('node:child_process').spawnSync(args[1], args.slice(2), {
+      env,
+      stdio: 'inherit',
+    });
+    if (result.error) process.stderr.write(result.error.message + '\n');
+    process.exit(result.status ?? 1);
+  }
   const exitCode = Number(process.env.STUB_SIM_EXEC_EXIT || 0);
   if (exitCode !== 0) {
     exitWith(
