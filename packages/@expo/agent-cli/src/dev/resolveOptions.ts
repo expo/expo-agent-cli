@@ -145,6 +145,15 @@ export interface DevOptions {
   callerArgv: string[];
 }
 
+/** The platform of the EAS session this run opens the app on, or null when it opens none on EAS. */
+export function easOpenPlatform(options: DevOptions): 'ios' | 'android' | null {
+  return options.deviceBackend === 'eas' &&
+    options.open &&
+    (options.platform === 'ios' || options.platform === 'android')
+    ? options.platform
+    : null;
+}
+
 /** Read once, and removed so the child's own subprocesses never inherit it. */
 function callerArgvOf(argv: string[]): string[] {
   const value = process.env[CALLER_ARGV_ENV];

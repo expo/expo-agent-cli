@@ -573,6 +573,8 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
 
     expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
     expect(error.message).toContain('--ios');
+    expect(error.message).toContain('dev:stop --eas');
+    expect(error.message).not.toContain('or start a');
   });
 
   // `--eas` asks the service even with no binding and no dotenv: the reader named the backend.

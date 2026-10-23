@@ -2,7 +2,7 @@
 import fs from 'fs';
 import * as Log from '../../log';
 import simulatorFailures from '../../__fixtures__/eas/simulator-failures.json';
-import { probeCloudSessionAsync } from '../../device/cloudSimulator';
+import { probeCloudSessionAsync, readCloudSessionIdSync } from '../../device/cloudSimulator';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { acquireCloudBindingAsync } from '../../deviceBinding/cloud';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
@@ -16,6 +16,7 @@ import {
   buildSessionStartArgs,
   findLatestSimulatorBuildIdAsync,
   openAppOnEasAsync,
+  otherPlatformSessionAsync,
   readSessionId,
   readSessionUrl,
 } from '../openAppEas';
@@ -27,7 +28,11 @@ vi.mock('../../device/cloudSimulator', async () => {
   const actual = await vi.importActual<typeof import('../../device/cloudSimulator')>(
     '../../device/cloudSimulator'
   );
-  return { ...actual, probeCloudSessionAsync: vi.fn() };
+  return {
+    ...actual,
+    probeCloudSessionAsync: vi.fn(),
+    readCloudSessionIdSync: vi.fn(actual.readCloudSessionIdSync),
+  };
 });
 vi.mock('../../deviceBinding/cloud', async () => {
   const actual = await vi.importActual<typeof import('../../deviceBinding/cloud')>(
@@ -385,21 +390,36 @@ describe(openAppOnEasAsync, () => {
     expect(openRouteAsync).not.toHaveBeenCalled();
   });
 
-  it(`starts a new session when the one up is the other platform`, async () => {
-    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
-      cloudProbe.active({ id: 'sess-android', platform: 'android' })
-    );
+  it.each(['active', 'queued'] as const)(
+    `refuses a start while this worktree has a %s session on the other platform`,
+    async (state) => {
+      vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+        cloudProbe[state]({ id: 'sess-android', platform: 'android' })
+      );
 
-    const report = await openAppOnEasAsync(projectRoot, {
-      platform: 'ios',
-      expoGo: true,
-      devServerUrl: DEV_SERVER,
-      buildId: null,
-    });
+      const report = await openAppOnEasAsync(projectRoot, {
+        platform: 'ios',
+        expoGo: true,
+        devServerUrl: DEV_SERVER,
+        buildId: null,
+      });
 
-    expect(report.started).toBe(true);
-    expect(openRouteAsync).not.toHaveBeenCalled();
-  });
+      expect(report).toMatchObject({ opened: false, started: false, sessionId: null });
+      expect(report.refusal).toMatchObject({
+        code: 'CLOUD_SIMULATOR_PLATFORM_MISMATCH',
+        data: { sessionId: 'sess-android', platform: 'android' },
+      });
+      expect(report.reason).toBe(report.refusal!.message.split('\n')[0]);
+      expect(report.refusal!.message).toContain('session sess-android is an Android session');
+      expect(report.refusal!.message).toContain('navigate / --eas --android');
+      expect(report.refusal!.message).toContain('dev --ios --eas --detach');
+      expect(report.refusal!.message).toContain('dev:stop --eas');
+      expect(spawnCaptureAsync).not.toHaveBeenCalled();
+      expect(openRouteAsync).not.toHaveBeenCalled();
+      const { bindingPathFor } = await import('../../deviceBinding/registry');
+      expect(fs.existsSync(bindingPathFor(projectRoot, 'ios', 'cloud'))).toBe(false);
+    }
+  );
 
   it(`gives up when the dev server advertises no tunnel inside the wait, and says why`, async () => {
     mockTunnel(null);
@@ -840,5 +860,64 @@ describe('worktree session ownership', () => {
       sessionId: 'billed',
     });
     expect(spawnCaptureAsync).toHaveBeenCalledTimes(1);
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree
+describe(otherPlatformSessionAsync, () => {
+  it(`asks nothing when this worktree has no binding and no dotenv`, async () => {
+    vi.mocked(readCloudSessionIdSync).mockReturnValue(null);
+    await expect(otherPlatformSessionAsync(projectRoot, 'android')).resolves.toBeNull();
+    expect(probeCloudSessionAsync).not.toHaveBeenCalled();
+  });
+
+  it(`asks nothing when the only binding and the dotenv are on the asked platform`, async () => {
+    writeCloudBinding(projectRoot, 'android', 'a1');
+    vi.mocked(readCloudSessionIdSync).mockReturnValue('a1');
+    await expect(otherPlatformSessionAsync(projectRoot, 'android')).resolves.toBeNull();
+    expect(probeCloudSessionAsync).not.toHaveBeenCalled();
+  });
+
+  it(`names a live session of a binding on the other platform`, async () => {
+    writeCloudBinding(projectRoot, 'ios', 'i1', { expiresAt: '2999-01-01T00:00:00.000Z' });
+    vi.mocked(readCloudSessionIdSync).mockReturnValue(null);
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'i1', platform: 'ios' })
+    );
+    await expect(otherPlatformSessionAsync(projectRoot, 'android')).resolves.toEqual({
+      sessionId: 'i1',
+      platform: 'ios',
+    });
+    expect(probeCloudSessionAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ boundIds: ['i1'], platform: 'android' })
+    );
+  });
+
+  it(`names a session that reports no platform, as the open refuses it`, async () => {
+    vi.mocked(readCloudSessionIdSync).mockReturnValue('x1');
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.active({ id: 'x1' }));
+    await expect(otherPlatformSessionAsync(projectRoot, 'android')).resolves.toEqual({
+      sessionId: 'x1',
+      platform: null,
+    });
+
+    const report = await openAppOnEasAsync(projectRoot, {
+      platform: 'android',
+      expoGo: true,
+      devServerUrl: DEV_SERVER,
+      buildId: null,
+    });
+    expect(report.refusal).toMatchObject({
+      code: 'CLOUD_SIMULATOR_PLATFORM_MISMATCH',
+      data: { sessionId: 'x1', platform: null },
+    });
+    expect(report.refusal!.message).toContain('did not report its platform');
+  });
+
+  it(`leaves the answer to the child when discovery is unsure`, async () => {
+    writeCloudBinding(projectRoot, 'ios', 'i1', { expiresAt: '2999-01-01T00:00:00.000Z' });
+    vi.mocked(readCloudSessionIdSync).mockReturnValue(null);
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.unknown());
+    await expect(otherPlatformSessionAsync(projectRoot, 'android')).resolves.toBeNull();
   });
 });

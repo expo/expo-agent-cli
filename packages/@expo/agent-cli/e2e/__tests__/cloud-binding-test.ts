@@ -1,7 +1,7 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §EAS session binding
 import fs from 'node:fs';
 import path from 'node:path';
-import { CLOUD_SESSION_MISMATCH, guardedCloudArgs } from '../../src/device/cloudCommand';
+import { guardedCloudArgs } from '../../src/device/cloudCommand';
 import type { Binding } from '../../src/deviceBinding/types';
 import { easCliArgs, resolveEasCli } from '../../src/utils/easCli';
 import { spawnSubprocessAsync } from '../../src/utils/subprocess';
@@ -17,6 +17,7 @@ import {
   executeAgentCliAsync,
   getTemporaryPath,
   installStubFingerprintAsync,
+  readStubExpoInvocations,
   setupFixtureAsync,
   stubExpoEnv,
   waitForAsync,
@@ -142,7 +143,48 @@ it('an expired binding only permits a fresh dotenv session', async () => {
   ).toEqual(['B']);
   expect(fs.readFileSync(bindingFile(root), 'utf8')).toBe(before);
 });
-it('round-trips guarded cloud target argv and refuses before running on a session mismatch', async () => {
+it('a session the dotenv does not name is refused with dev:stop --eas, which ends both', async () => {
+  const root = await project();
+  await writeCloudBindingAsync(expoHome, root, { id: 'ios-A' });
+  await writeCloudBindingAsync(expoHome, root, { id: 'android-B', platform: 'android' });
+  list([{ id: 'ios-A' }, { id: 'android-B', platform: 'ANDROID' }]);
+  await writeCloudSessionFileAsync(root, 'android-B');
+  const refused = await navigate(root, ['--ios']);
+  expect(refused.exitCode).not.toBe(0);
+  const { error } = JSON.parse(refused.stdout);
+  expect(error.code).toBe('CLOUD_SESSION_MISMATCH');
+  expect(error.suggestedCommand).toContain('dev:stop --eas');
+  expect(error.data).toEqual({ selectedSessionId: 'ios-A', loadedSessionId: 'android-B' });
+  expect(readStubEasInvocations(root).filter((i) => i.executedSessionId)).toEqual([]);
+  await executeAgentCliAsync(root, ['dev:stop', '--eas', '--json'], { env: envFor(root) });
+  expect(fs.existsSync(bindingFile(root))).toBe(false);
+  expect(fs.existsSync(bindingFile(root, 'android'))).toBe(false);
+  const stops = stubEasArgs(root)
+    .filter((args) => args[0] === 'simulator:stop')
+    .flat();
+  expect(stops).toEqual(expect.arrayContaining(['ios-A', 'android-B']));
+  expect(fs.readFileSync(path.join(root, '.env.eas-simulator'), 'utf8')).not.toContain('=');
+});
+it('a start for the other platform beside a bound session refuses and spawns nothing', async () => {
+  const root = await project();
+  await writeCloudBindingAsync(expoHome, root, { id: 's-ios' });
+  list([{ id: 's-ios' }]);
+  const result = await executeAgentCliAsync(
+    root,
+    ['dev', '--android', '--eas', '--detach', '--json'],
+    {
+      env: envFor(root),
+      reject: false,
+    }
+  );
+  expect(result.exitCode).not.toBe(0);
+  const { error } = JSON.parse(result.stdout);
+  expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
+  expect(error.suggestedCommand).toContain('dev:stop --eas');
+  expect(stubEasArgs(root).map((args) => args[0])).not.toContain('simulator');
+  expect(readStubExpoInvocations(root).map((i) => i.args[0])).not.toContain('start');
+});
+it('round-trips guarded cloud target argv', async () => {
   const root = await project();
   const sessionId = 'argv-session';
   await writeCloudSessionFileAsync(root, sessionId);
@@ -165,21 +207,13 @@ it('round-trips guarded cloud target argv and refuses before running on a sessio
     'process.stdout.write(JSON.stringify(process.argv.slice(1)))',
     ...targetArgs,
   ];
-  const runGuarded = (expectedSessionId: string) =>
-    spawnSubprocessAsync(
-      easCli!.command,
-      easCliArgs(easCli!, guardedCloudArgs(['simulator:exec', ...target], expectedSessionId)),
-      { cwd: root, env }
-    );
-
-  const accepted = await runGuarded(sessionId);
+  const accepted = await spawnSubprocessAsync(
+    easCli!.command,
+    easCliArgs(easCli!, guardedCloudArgs(['simulator:exec', ...target], sessionId)),
+    { cwd: root, env }
+  );
   expect(accepted.exitCode, accepted.stderr).toBe(0);
   expect(JSON.parse(accepted.stdout)).toEqual(targetArgs);
-
-  const refused = await runGuarded('another-session');
-  expect(refused.exitCode).toBe(20);
-  expect(refused.stderr).toContain(`${CLOUD_SESSION_MISMATCH} ${sessionId}`);
-  expect(refused.stdout).toBe('');
 });
 // A STOPPED session is no longer listed as usable, so the probe asks for availability before it
 // calls the session ended. Both calls are reads.

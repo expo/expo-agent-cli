@@ -120,6 +120,11 @@ vi.mock('../portListener', async () => ({
   ...(await vi.importActual<typeof import('../portListener')>('../portListener')),
   findPortListenerAsync: vi.fn(async () => null),
 }));
+vi.mock('../detachAsync', async () => ({
+  ...(await vi.importActual<typeof import('../detachAsync')>('../detachAsync')),
+  devDetachAsync: vi.fn(async () => 0),
+}));
+
 vi.mock('../stopAsync', async () => ({
   ...(await vi.importActual<typeof import('../stopAsync')>('../stopAsync')),
   isExpoDevServerAsync: vi.fn(async () => false),
