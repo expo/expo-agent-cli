@@ -1358,4 +1358,106 @@ describe('the build line', () => {
     // The project still needs a cloud build; a healthy dev server does not change that.
     expect(rendered).toContain('eas');
   });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Session binding
+  describe('a cloud binding', () => {
+    const noDevice = (overrides: Partial<StatusReport> = {}) =>
+      mockReport({
+        device: {
+          state: 'absent',
+          platform: null,
+          deviceId: null,
+          name: null,
+          devices: [],
+          reason: 'iOS: no simulator is bound',
+        },
+        installed: {
+          outcome: 'unknown',
+          platforms: [
+            {
+              platform: 'ios',
+              status: 'unknown',
+              reason: 'no-device',
+              recommendation: 'No simulator is booted.',
+              commands: ['npx @expo/agent-cli dev --ios'],
+              deviceName: null,
+              installedHash: null,
+              currentHash: null,
+            },
+          ],
+        },
+        ...overrides,
+      });
+
+    const cloudRow = (
+      platform: 'ios' | 'android',
+      state: 'recorded' | 'gone'
+    ): NonNullable<StatusReport['binding']>[number] => ({
+      platform,
+      backend: 'cloud',
+      id: 'sess-1',
+      name: 'sess-1',
+      origin: 'started',
+      state,
+      expiresAt: '2026-10-20T12:00:00.000Z',
+    });
+
+    it(`follows the local fact on the device line`, () => {
+      const rendered = report(noDevice({ binding: [cloudRow('ios', 'recorded')] }));
+
+      expect(rendered).toContain(
+        'none · iOS: no simulator is bound · cloud ios sess-1 · EAS Simulator session, recorded, not checked'
+      );
+    });
+
+    it(`is on the device line when the device section is unavailable`, () => {
+      const rendered = report(noDevice({ device: null, binding: [cloudRow('ios', 'recorded')] }));
+
+      expect(line(noDevice({ device: null }), 'device')).toContain('unavailable');
+      expect(rendered).toContain('unavailable · cloud ios sess-1');
+    });
+
+    it(`keeps a gone session on the device line and keeps the local advice`, () => {
+      const rendered = report(noDevice({ binding: [cloudRow('ios', 'gone')] }));
+
+      expect(rendered).toContain('cloud ios sess-1');
+      expect(rendered).toContain('EAS Simulator session, gone');
+      expect(rendered).not.toContain('the app runs on EAS Simulator session');
+      expect(rendered).toContain('ios: No simulator is booted.');
+      expect(rendered).toContain('npx @expo/agent-cli dev --ios');
+    });
+
+    it(`renders an installed row the report marked for a session, with no command`, () => {
+      const base = noDevice();
+      const rendered = report({
+        ...base,
+        installed: {
+          outcome: 'unknown',
+          platforms: [
+            {
+              ...base.installed!.platforms[0]!,
+              reason: 'cloud-session',
+              recommendation:
+                'not checked; this check reads local devices, and the app runs on EAS Simulator session sess-1',
+              commands: [],
+            },
+          ],
+        },
+        binding: [cloudRow('ios', 'recorded')],
+      });
+
+      expect(rendered).toContain(
+        'ios: not checked; this check reads local devices, and the app runs on EAS Simulator session sess-1'
+      );
+      expect(rendered).not.toContain('npx @expo/agent-cli dev --ios');
+    });
+
+    it(`changes nothing when there is none`, () => {
+      const rendered = report(noDevice());
+
+      expect(rendered).toContain('none · iOS: no simulator is bound');
+      expect(rendered).toContain('ios: No simulator is booted.');
+      expect(rendered).toContain('npx @expo/agent-cli dev --ios');
+    });
+  });
 });

@@ -2,7 +2,12 @@ import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import fs from 'fs';
 import { vol } from 'memfs';
-import { seedIosBinding } from '../../../deviceBinding/__tests__/fakeTools';
+import {
+  bindingFor,
+  seedIosBinding,
+  writeBinding,
+} from '../../../deviceBinding/__tests__/fakeTools';
+import { bindingPathFor } from '../../../deviceBinding/registry';
 import path from 'path';
 
 import { detachedLogPath } from '../../../dev/logFile';
@@ -1024,6 +1029,32 @@ describe('an app the command socket cannot see', () => {
     // And what the other one costs on Expo Go, said where the caller is deciding.
     expect(explained).toContain('--method runtime');
     expect(explained).toContain('closes the app');
+  });
+
+  it(`runtime:reload without --eas on a worktree bound to an EAS session names --eas, not an expired local binding`, async () => {
+    writeProject();
+    writeBinding(
+      bindingPathFor(projectRoot, 'ios', 'local-ios'),
+      bindingFor(projectRoot, 'IOS-1', { expiresAt: '2000-01-01T00:00:00.000Z' })
+    );
+    writeBinding(bindingPathFor(projectRoot, 'android', 'cloud'), {
+      version: 1,
+      device: { backend: 'cloud', platform: 'android', id: 'sess-42', origin: 'started' },
+      projectRoot,
+      boundAt: '2026-10-21T06:00:00.000Z',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    });
+    mockDevServer([EXPO_GO_TARGET]);
+    mockConnect(fakeSocket([{}]).socket);
+    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }]);
+
+    await reloadAsync(projectRoot, options({ json: true, timeoutMs: 300 }));
+    const device = JSON.parse(printed()).attempts.find(
+      (attempt: { method: string }) => attempt.method === 'device'
+    );
+    expect(device.reason).toContain('EAS Simulator session sess-42');
+    expect(device.reason).toContain('runtime:reload --android --eas');
+    expect(device.reason).not.toMatch(/expired/);
   });
 
   it(`still force-stops it when --method device says so`, async () => {

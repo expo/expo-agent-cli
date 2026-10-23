@@ -34,7 +34,10 @@ import { readInstalledStatusAsync } from '../installed';
 import { collectStatusReportAsync, printStatusAsync } from '../statusAsync';
 import type { StatusReport } from '../types';
 
-vi.mock('../installed', () => ({ readInstalledStatusAsync: vi.fn(async () => null) }));
+vi.mock('../installed', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../installed')>()),
+  readInstalledStatusAsync: vi.fn(async () => ({ outcome: 'unknown' as const, platforms: [] })),
+}));
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
@@ -882,7 +885,7 @@ describe(printStatusAsync, () => {
       openUrl: 'exp://192.168.1.233:8081',
       // No binding on either platform, which the registry answers without a device tool.
       localDevice: 'absent',
-      installed: null,
+      installed: 'unknown',
       freshness: { ios: 'stale', android: 'stale' },
       // The section builder is mocked out here; its own suite covers what it answers.
       easBuilds: { ios: null, android: null },
@@ -1434,6 +1437,41 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
       expect.objectContaining({ device: null })
     );
     expect(report.installed).toEqual(installed);
+  });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Session binding
+  it(`replaces the installed advice with the recorded EAS session`, async () => {
+    vi.mocked(readInstalledStatusAsync).mockResolvedValue({
+      outcome: 'unknown',
+      platforms: [
+        {
+          platform: 'ios',
+          status: 'unknown',
+          reason: 'no-device',
+          recommendation: 'No simulator is booted.',
+          commands: ['npx @expo/agent-cli dev --ios'],
+          deviceName: null,
+          installedHash: null,
+          currentHash: null,
+        },
+      ],
+    });
+    vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+      {
+        platform: 'ios',
+        backend: 'cloud',
+        id: 'sess-1',
+        name: 'sess-1',
+        origin: 'started',
+        state: 'recorded',
+        expiresAt: '2999-01-01T00:00:00.000Z',
+      },
+    ]);
+
+    const report = await collectStatusReportAsync(projectRoot, options);
+
+    const [row] = report.installed!.platforms;
+    expect(row).toMatchObject({ reason: 'cloud-session', commands: [] });
   });
 
   it(`hands the named device through`, async () => {

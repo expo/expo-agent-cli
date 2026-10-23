@@ -13,20 +13,15 @@
 // names it, so a session that happens to be up never quietly bills a run a local device would have
 // served.
 
-import { liveCloudBindings } from '../deviceBinding/cloud';
+import { readCloudBindings } from '../deviceBinding/cloud';
+import { cloudRungAsync, type CloudRung, type NoDeviceProbe } from '../deviceBinding/cloudRung';
 import { resolveAdb, type AdbResolution } from '../device/adb';
 import {
   cloudSessionStartCommand,
-  probeCloudSessionAsync,
   readCloudSessionIdSync,
   type CloudSessionProbe,
 } from '../device/cloudSimulator';
-import {
-  cloudPlatformMismatchError,
-  cloudPlatformUnknownError,
-  cloudSessionUnavailableError,
-  cloudSessionUnknownError,
-} from '../device/cloudErrors';
+import { cloudSessionUnavailableError, cloudSessionUnknownError } from '../device/cloudErrors';
 import { findBoundDeviceAsync, type BoundDevice } from '../deviceBinding';
 import { PROGRAM_PREFIX } from '../programName';
 import { CommandError } from '../utils/errors';
@@ -76,60 +71,18 @@ export function navigateDeviceOf(device: BoundDevice): NavigateDevice {
   }
 }
 
-/**
- * Look for the cloud simulator session this worktree can drive. Never throws for no session: no
- * session is an answer.
- *
- * **The service answers this, not the filesystem.** One `eas simulator:list`, with the ids of this
- * worktree's live bindings, because this is about to open a link on a device (llp/0005 §Cloud
- * simulator).
- *
- * `platform` is a **preference** for picking between several sessions, not a filter: the caller
- * compares afterwards, so a session on the other platform is reported as one rather than hidden
- * behind "no session".
- *
- * @throws {CommandError} for a queued session: it is listed and not up yet.
- */
-export async function probeCloudDeviceAsync(
-  projectRoot: string,
-  { platform = null }: { platform?: NavigatePlatform | null } = {}
-): Promise<{
-  device: NavigateDevice | null;
-  probe: Exclude<CloudSessionProbe, { state: 'queued' }>;
-}> {
-  const probe = await probeCloudSessionAsync({
-    projectRoot,
-    platform,
-    boundIds: liveCloudBindings(projectRoot).map(({ device }) => device.id),
-  });
-  // A queued session is listed and not up yet. Say so, rather than "no session".
-  if (probe.state === 'queued') {
-    const { session } = probe;
-    if (platform != null && session.platform != null && session.platform !== platform) {
-      throw cloudPlatformMismatchError(platform, session.platform, session.id);
-    }
-    throw new CommandError(
-      'NO_CLOUD_SIMULATOR_SESSION',
-      `EAS Simulator session ${session.id} is not up yet${session.status ? ` (status ${session.status})` : ''}.\nHow: run this command again in a minute.`
-    );
-  }
-  if (probe.state !== 'active' || probe.session.platform == null) {
-    // A live session whose platform could not be read is not a device this can be handed: the URL
-    // shape differs per platform. The caller raises `cloudPlatformUnknownError` for it.
-    return { device: null, probe };
-  }
+type CloudDeviceRung<P extends CloudSessionProbe = NoDeviceProbe> =
+  | { kind: 'device'; device: NavigateDevice }
+  | { kind: 'none'; probe: P };
 
-  debugEvent('device_resolved', { platform: probe.session.platform, deviceId: probe.session.id });
+/** The cloud rung, with its session as a deep-link device. */
+function deviceRung<P extends CloudSessionProbe>(rung: CloudRung<P>): CloudDeviceRung<P> {
+  if (rung.kind === 'none') return rung;
+  const { platform: devicePlatform, id, name } = rung.device;
+  debugEvent('device_resolved', { platform: devicePlatform, deviceId: id });
   return {
-    device: {
-      backend: 'cloud',
-      platform: probe.session.platform,
-      deviceId: probe.session.id,
-      // The session's own `--name` when it has one, because a project with several sessions up has
-      // just had one chosen for it, and the name is what says which (llp/0005 §Cloud simulator).
-      name: probe.session.name ?? 'EAS Simulator session',
-    },
-    probe,
+    kind: 'device',
+    device: { backend: 'cloud', platform: devicePlatform, deviceId: id, name },
   };
 }
 
@@ -164,13 +117,13 @@ export async function resolveDeviceAsync(
   // start is exactly the machine this backend is for, and a session that is up answers the question
   // whichever platform tool is missing.
   const cloud = await cloudFallbackAsync(platform, context);
-  if (cloud.device) {
+  if (cloud?.kind === 'device') {
     return cloud.device;
   }
   if (found.toolError) {
     throw found.toolError;
   }
-  throw withOtherDoors(found.refusal, context, cloud.probe);
+  throw withOtherDoors(found.refusal, context, cloud?.probe ?? null);
 }
 
 /** How much of the ladder a caller wants: whether the cloud backend is on it, and how. */
@@ -202,33 +155,35 @@ export interface ResolveDeviceContext {
 }
 
 /**
- * The cloud rung of the ladder, taken after the local rungs passed.
+ * The cloud rung of the ladder, taken after the local rungs passed. Null when the rung was not
+ * taken.
  *
- * The fallback accepts the dotenv id only, never the newest session: a worktree must not drive
- * another worktree's session.
- *
- * A session on the **other** platform is not this run's device: `--ios` named iOS, and an Android
- * session cannot open an iOS link. It is still reported, through the probe, so the failure can say
- * that a session exists and is not the one that was asked for.
+ * The fallback accepts this worktree's bindings or its dotenv connection. Unbound sessions
+ * are reported without becoming candidates. A binding at any age takes the rung, so an expired
+ * one is refused as expired rather than hidden behind the local refusal.
  */
 async function cloudFallbackAsync(
   platform: NavigatePlatform | undefined,
   context: ResolveDeviceContext
-): Promise<{ device: NavigateDevice | null; probe: CloudSessionProbe | null }> {
+): Promise<CloudDeviceRung<CloudSessionProbe> | null> {
   if (context.cloud !== 'fallback') {
-    return { device: null, probe: null };
+    return null;
   }
-  // No dotenv id, no session this worktree may drive: nothing to ask the service about.
-  const sessionId = readCloudSessionIdSync(context.projectRoot);
-  if (sessionId == null) {
-    return { device: null, probe: null };
+  // No dotenv id, no binding and no unreadable file of this platform: nothing to ask about.
+  const snapshot = readCloudBindings(context.projectRoot);
+  const unreadable = snapshot.unreadable.some(
+    (entry) => platform == null || entry.platform === platform
+  );
+  if (
+    readCloudSessionIdSync(context.projectRoot) == null &&
+    snapshot.bindings.length === 0 &&
+    !unreadable
+  ) {
+    return null;
   }
-  const { device, probe } = await probeCloudDeviceAsync(context.projectRoot, { platform });
-  const usable =
-    device != null &&
-    device.deviceId === sessionId &&
-    (platform == null || device.platform === platform);
-  return { device: usable ? device : null, probe };
+  return deviceRung(
+    await cloudRungAsync(context.projectRoot, platform ?? null, 'fallback', undefined, snapshot)
+  );
 }
 
 /**
@@ -241,32 +196,14 @@ async function resolveCloudDeviceAsync(
   platform: NavigatePlatform | undefined,
   context: ResolveDeviceContext
 ): Promise<NavigateDevice> {
-  const { device, probe } = await probeCloudDeviceAsync(context.projectRoot, { platform });
-
-  if (device) {
-    if (platform != null && device.platform !== platform) {
-      throw cloudPlatformMismatchError(platform, device.platform, device.deviceId);
-    }
-    return device;
+  const rung = deviceRung(await cloudRungAsync(context.projectRoot, platform ?? null, 'required'));
+  if (rung.kind === 'device') {
+    return rung.device;
   }
-
-  if (probe.state === 'active') {
-    // The session is up and did not say what it is. A caller that named a platform has answered
-    // that itself; one that did not is asked, rather than having a URL shape guessed for it.
-    if (platform == null) {
-      throw cloudPlatformUnknownError(probe.session.id);
-    }
-    return {
-      backend: 'cloud',
-      platform,
-      deviceId: probe.session.id,
-      name: 'EAS Simulator session',
-    };
+  if (rung.probe.state === 'unknown') {
+    throw cloudSessionUnknownError(rung.probe);
   }
-  if (probe.state === 'unknown') {
-    throw cloudSessionUnknownError(probe);
-  }
-  throw cloudSessionUnavailableError(probe);
+  throw cloudSessionUnavailableError(rung.probe);
 }
 
 /**
@@ -318,6 +255,19 @@ function cloudSessionLine(probe: CloudSessionProbe | null): string | null {
   if (probe == null) {
     return null;
   }
+  // Reached from the fallback rung: this worktree's session exists and this run could not use it.
+  if (probe.state === 'queued') {
+    return `Or: this worktree's EAS Simulator session ${probe.session.id} is ${
+      probe.session.platform ? `${probe.session.platform} and ` : ''
+    }not up yet${
+      probe.session.status ? ` (status ${probe.session.status})` : ''
+    }. Run this command again in a minute.`;
+  }
+  if (probe.state === 'active') {
+    return `Or: this worktree's EAS Simulator session ${probe.session.id} is ${
+      probe.session.platform ?? 'on another platform'
+    }, not the device this run asked for. Run this command again with --eas and no platform flag to use it.`;
+  }
   if (probe.state === 'none') {
     // A live session of a type this CLI cannot drive is still worth naming: "no device found" next
     // to a running `serve-sim` is true and leaves the reader one command short of a device.
@@ -331,13 +281,6 @@ function cloudSessionLine(probe: CloudSessionProbe | null): string | null {
         `Or: this project has ${countOf(probe.unboundCount, 'live or pending EAS Simulator session')} that this worktree did not start, so none is selected. Start one for this worktree with "${cloudSessionStartCommand()}" and pass --eas.`
       );
     return lines.length ? lines.join('\n') : null;
-  }
-  if (probe.state === 'active' || probe.state === 'queued') {
-    // Reached when the session is live and is for the *other* platform, is not this worktree's
-    // dotenv session, or reported none.
-    return `Or: this project has a running EAS Simulator session${
-      probe.session.platform ? ` (${probe.session.platform})` : ''
-    }, and it is not the device this run asked for. Run this command again with --eas and no platform flag to use it.`;
   }
   // An account without the feature has no session on record to name.
   if (probe.state === 'unavailable') return null;

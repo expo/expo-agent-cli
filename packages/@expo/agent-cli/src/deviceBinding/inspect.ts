@@ -4,7 +4,7 @@
 
 import * as Log from '../log';
 import { getEmulatorStateAsync, instanceGone } from './emulator';
-import { noBoundDeviceError } from './errors';
+import { cloudBindingError, noBoundDeviceError } from './errors';
 import { listSimulatorAsync, SIMCTL_CALL_TIMEOUT_MS } from './ios';
 import { extendLeaseAsync, isExpired } from './lease';
 import { bindingPathFor, readBindingFile } from './registry';
@@ -108,6 +108,19 @@ export async function useBoundDeviceAsync(
   if (inspection.state !== 'up' || binding == null) {
     throw new Error(`useBoundDeviceAsync needs an up inspection, not ${inspection.state}`);
   }
+  await extendBoundLeaseAsync(binding, inspection.path, tools);
+  return binding.device;
+}
+
+/**
+ * Extend the lease of the binding a read verb drives. A locked registry warns and goes on; `lost`,
+ * a rebind to another device included, throws `gone` with cause `expired`.
+ */
+export async function extendBoundLeaseAsync(
+  binding: Binding,
+  path: string,
+  tools: DeviceTools
+): Promise<void> {
   const { platform, backend } = binding.device;
   let outcome: 'extended' | 'lost';
   try {
@@ -122,12 +135,12 @@ export async function useBoundDeviceAsync(
     Log.warn(
       `The device registry is locked, so the lease on ${deviceLabel(binding.device)} was not extended.`
     );
-    return binding.device;
+    return;
   }
   if (outcome === 'lost') {
-    throw noBoundDeviceError('gone', { platform, cause: 'expired', path: inspection.path });
+    if (backend === 'cloud') throw cloudBindingError(platform, 'expired');
+    throw noBoundDeviceError('gone', { platform, cause: 'expired', path });
   }
-  return binding.device;
 }
 
 function deviceLabel(device: BoundDevice): string {

@@ -964,7 +964,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       devServer,
       absentDevice,
       null,
-      true
+      'ios'
     );
 
     expect(next.command).toBe('npx @expo/agent-cli navigate / --eas');
@@ -979,7 +979,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       devServer,
       absentDevice,
       null,
-      false
+      null
     );
 
     expect(next.command).not.toContain('--eas');
@@ -998,11 +998,27 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       withApp,
       absentDevice,
       null,
-      true
+      'ios'
     );
 
     expect(next.command).toBe('npx @expo/agent-cli smoke --ios --eas');
     expect(next.why).toContain('EAS Simulator session');
+  });
+
+  it(`names the platform of an Android session in the gate`, () => {
+    const withApp = { ...(devServer as object), appsConnected: 1 } as never;
+
+    const next = buildNextActionStatus(
+      state,
+      {} as never,
+      'android',
+      withApp,
+      absentDevice,
+      null,
+      'android'
+    );
+
+    expect(next.command).toBe('npx @expo/agent-cli smoke --android --eas');
   });
 
   it(`keeps the plain gate when the app is on this machine`, () => {
@@ -1022,7 +1038,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       withApp,
       presentDevice,
       null,
-      true
+      'ios'
     );
 
     expect(next.command).toBe('npx @expo/agent-cli smoke --ios');
@@ -1046,7 +1062,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       devServer,
       unknownDevice,
       null,
-      true
+      'ios'
     );
 
     expect(next.command).toBe('npx @expo/agent-cli navigate / --eas');
@@ -1071,7 +1087,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       devServer,
       unknownDevice,
       null,
-      false
+      null
     );
 
     expect(next.command).toBe('npx @expo/agent-cli navigate /');

@@ -7,6 +7,9 @@ import { CommandError } from '../utils/errors';
 import type { BoundSerial } from './choose';
 import type { DevicePlatform, InspectCause, InspectState } from './types';
 
+/** Re-exported so a binding module types a refusal without its own edge to the error module. */
+export type { CommandError };
+
 /** The one command that binds a device to this worktree. */
 export function deviceCommand(
   platform: DevicePlatform,
@@ -31,9 +34,14 @@ const RERUN = 'run the command again';
 /** The refusal of a read verb: no device is bound, or the bound one cannot be driven now. */
 export function noBoundDeviceError(
   state: Exclude<InspectState, 'recorded' | 'up'>,
-  { platform, cause, path }: { platform: DevicePlatform; cause?: InspectCause; path?: string }
+  {
+    platform,
+    cause,
+    path,
+    eas,
+  }: { platform: DevicePlatform; cause?: InspectCause; path?: string; eas?: boolean }
 ): CommandError {
-  const command = deviceCommand(platform);
+  const command = deviceCommand(platform, { eas });
   if (state === 'unreadable') {
     return refusal('NO_BOUND_DEVICE', 'unreadable', EXIT_NEEDS_HUMAN, [
       `The binding file ${path} does not parse; a newer CLI may have written it.`,
@@ -183,5 +191,48 @@ function refusal(code: string, reason: string, exitCode: number, lines: string[]
   const error = new CommandError(code, lines.join('\n'));
   error.exitCode = exitCode;
   error.data = { reason };
+  return error;
+}
+
+export type CloudBindingFault = 'expired' | 'ended';
+
+/** A recorded EAS session that a read verb cannot drive. */
+export function cloudBindingError(
+  platform: DevicePlatform,
+  fault: CloudBindingFault
+): CommandError {
+  const command = deviceCommand(platform, { eas: true });
+  const error = new CommandError(
+    'NO_BOUND_DEVICE',
+    [
+      `The bound ${platform} EAS session is ${fault}.`,
+      `How: run "${command}" to bind a session again.`,
+    ].join('\n')
+  );
+  error.exitCode = EXIT_OUTCOME_FAILED;
+  error.data = { reason: 'gone' };
+  error.suggestedCommand = command;
+  return error;
+}
+
+/** The EAS session this worktree drives is listed and pending. The platform is null when unknown. */
+export function cloudSessionQueuedError({
+  id,
+  platform,
+  status,
+}: {
+  id: string;
+  platform: DevicePlatform | null;
+  status: string | null;
+}): CommandError {
+  const error = new CommandError(
+    'NO_BOUND_DEVICE',
+    [
+      `The ${platform ? `${platform} ` : ''}EAS session ${id} is not up yet${status ? ` (status ${status})` : ''}.`,
+      'How: retry in a minute.',
+    ].join('\n')
+  );
+  error.exitCode = EXIT_OUTCOME_FAILED;
+  error.data = { reason: 'not-up' };
   return error;
 }

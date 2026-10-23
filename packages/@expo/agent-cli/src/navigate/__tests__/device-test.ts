@@ -6,6 +6,7 @@ import path from 'path';
 import { parseBootedIosSimulators } from '../../device/simulators';
 import { bindingPathFor } from '../../deviceBinding/registry';
 import type { Binding } from '../../deviceBinding';
+import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { resolveDeviceAsync } from '../device';
 
 const realPlatform = process.platform;
@@ -389,60 +390,6 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
   });
 
-  it(`answers a platform mismatch, not a foreign session, when the dotenv session is up on the other platform`, async () => {
-    mockPlatform('linux');
-    cloudProject('own-ios');
-    mockSpawnQueue([
-      {
-        stdout: listing(
-          {
-            id: 'own-ios',
-            status: 'IN_PROGRESS',
-            platform: 'IOS',
-            type: 'agent-device',
-            createdAt: '2026-08-26T10:00:00.000Z',
-          },
-          {
-            id: 'foreign',
-            status: 'QUEUED',
-            platform: 'ANDROID',
-            type: 'agent-device',
-            createdAt: '2026-08-26T11:00:00.000Z',
-          }
-        ),
-      },
-    ]);
-
-    const error = await resolveDeviceAsync('android', { cloud: 'required', projectRoot }).catch(
-      (e) => e
-    );
-
-    expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
-    expect(error.message).not.toContain('foreign');
-  });
-
-  it(`answers a platform mismatch for a queued session on the other platform`, async () => {
-    mockPlatform('linux');
-    cloudProject('sess-a');
-    mockSpawnQueue([
-      {
-        stdout: listing({
-          id: 'sess-a',
-          status: 'QUEUED',
-          platform: 'ANDROID',
-          type: 'agent-device',
-          createdAt: '2026-08-26T10:00:00.000Z',
-        }),
-      },
-    ]);
-
-    const error = await resolveDeviceAsync('ios', { cloud: 'required', projectRoot }).catch(
-      (e) => e
-    );
-
-    expect(error.code).toBe('CLOUD_SIMULATOR_PLATFORM_MISMATCH');
-  });
-
   it(`still reports no device when the service lists nothing`, async () => {
     mockPlatform('linux');
     cloudProject('sess-1');
@@ -455,6 +402,54 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
     expect(error.code).toBe('NO_BOUND_DEVICE');
   });
 
+  const queuedSession = listing({
+    id: 'sess-1',
+    status: 'QUEUED',
+    platform: 'IOS',
+    type: 'agent-device',
+    createdAt: '2026-08-26T10:00:00.000Z',
+  });
+
+  // A plain read verb falls back to the cloud quietly: a pending session, or one on the other
+  // platform, is named next to the local refusal and never replaces it (llp/0035 §Readers).
+  it(`keeps the local refusal and names a session that is not up yet`, async () => {
+    mockPlatform('linux');
+    cloudProject('sess-1');
+    mockSpawnQueue([{ stdout: queuedSession }]);
+
+    const error = await resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.code).toBe('NO_BOUND_DEVICE');
+    expect(error.message).toContain(
+      "Or: this worktree's EAS Simulator session sess-1 is ios and not up yet (status QUEUED). Run this command again in a minute."
+    );
+    expect(error.message).not.toContain('running EAS Simulator session');
+    expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
+  });
+
+  it.each([
+    ['up', liveSession],
+    ['pending', queuedSession],
+  ])(
+    `keeps the local refusal for a platform flag the %s session is not`,
+    async (_state, stdout) => {
+      mockPlatform('linux');
+      cloudProject('sess-1');
+      mockSpawnQueue([{ stdout }]);
+
+      const error = await resolveDeviceAsync('android', { cloud: 'fallback', projectRoot }).catch(
+        (e) => e
+      );
+
+      expect(error.code).toBe('NO_BOUND_DEVICE');
+      expect(error.message).toContain('No android device is bound');
+      expect(error.message).toContain("Or: this worktree's EAS Simulator session sess-1 is ios");
+      expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
+    }
+  );
+
   it(`names a session that is on record and not running, in the failure`, async () => {
     mockPlatform('linux');
     cloudProject('sess-1');
@@ -466,6 +461,69 @@ describe(`${resolveDeviceAsync.name} with the cloud backend`, () => {
 
     expect(error.message).toContain('EAS Simulator session on record');
     expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
+  });
+
+  it(`opens on a bound session when the dotenv names none`, async () => {
+    mockPlatform('linux');
+    cloudProject(null);
+    writeCloudBinding(projectRoot, 'ios', 'sess-1', { expiresAt: '2999-01-01T00:00:00.000Z' });
+    mockSpawnQueue([{ stdout: liveSession }]);
+
+    await expect(
+      resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot })
+    ).resolves.toMatchObject({ backend: 'cloud', platform: 'ios', deviceId: 'sess-1' });
+  });
+
+  // An expired binding still takes the EAS rung, so the reader learns the session expired.
+  it(`refuses an expired-only binding as expired, not with the local refusal`, async () => {
+    mockPlatform('linux');
+    cloudProject(null);
+    writeCloudBinding(projectRoot, 'ios', 'sess-1', { expiresAt: '2000-01-01T00:00:00.000Z' });
+    mockSpawnQueue(noSessions);
+
+    const error = await resolveDeviceAsync(undefined, { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(spawn).toHaveBeenCalled();
+    expect(error.code).toBe('NO_BOUND_DEVICE');
+    expect(error.message).toContain('The bound ios EAS session is expired.');
+    expect(error.suggestedCommand).toBe(
+      'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
+    );
+  });
+
+  function writeUnreadableCloudFile(): void {
+    const file = bindingPathFor(projectRoot, 'ios', 'cloud');
+    vol.mkdirSync(path.dirname(file), { recursive: true });
+    vol.writeFileSync(file, '{');
+  }
+
+  // The unreadable file is in no list of bindings, so a gate that counts bindings skips the rung.
+  it(`refuses an unreadable cloud binding file, with no dotenv id and no binding`, async () => {
+    mockPlatform('linux');
+    cloudProject(null);
+    writeUnreadableCloudFile();
+
+    const error = await resolveDeviceAsync('ios', { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.code).toBe('NO_BOUND_DEVICE');
+    expect(error.message).toContain('does not parse');
+    expect(error.message).toContain('dev --ios --eas --detach --wait-ready');
+  });
+
+  it(`keeps the local refusal when only the other platform has an unreadable cloud file`, async () => {
+    mockPlatform('linux');
+    cloudProject(null);
+    writeUnreadableCloudFile();
+
+    const error = await resolveDeviceAsync('android', { cloud: 'fallback', projectRoot }).catch(
+      (e) => e
+    );
+
+    expect(error.message).not.toContain('does not parse');
   });
 
   it(`keeps the route URL above the How line of the refusal`, async () => {

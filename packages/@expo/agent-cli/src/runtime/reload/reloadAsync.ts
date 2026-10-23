@@ -19,6 +19,7 @@ import chalk from 'chalk';
 
 import { isTunnelCurrent, resolveDevServerReachAsync } from '../../dev/advertisedUrl';
 import { AGENT_DEVICE_SPEC } from '../../device/cloudSimulator';
+import { liveCloudBindings } from '../../deviceBinding/cloud';
 import { event as cliEvent } from '../../events';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import {
@@ -1240,11 +1241,22 @@ async function reloadOnDeviceAsync(
       projectRoot,
     });
   } catch (error: unknown) {
+    // Without --eas the local rungs answer for a worktree whose device is an EAS session, so their
+    // refusal (an expired local lease, say) names the wrong device. Name the session instead.
+    const session = options.cloud
+      ? undefined
+      : liveCloudBindings(projectRoot).find(
+          (binding) => options.platform == null || binding.device.platform === options.platform
+        );
     return {
       attempt: {
         method: 'device',
         ok: false,
-        reason: error instanceof Error ? error.message.split('\n')[0]! : String(error),
+        reason: session
+          ? `this worktree's device is ${session.device.platform} EAS Simulator session ${session.device.id}; the relaunch acts on it only with --eas: run "${PROGRAM_PREFIX} runtime:reload --${session.device.platform} --eas"`
+          : error instanceof Error
+            ? error.message.split('\n')[0]!
+            : String(error),
         leftAppStopped: null,
       },
       device: null,

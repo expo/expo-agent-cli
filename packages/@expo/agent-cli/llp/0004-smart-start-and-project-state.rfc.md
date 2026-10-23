@@ -721,12 +721,14 @@ device tool is spawned ([[0001-agentic-cli-on-expo-cli]] §Constraints).
 
 One verdict per platform:
 
-| Reason                                                                                                                                                       | Status             | `commands`                 |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------ | -------------------------- |
-| `hash-match`                                                                                                                                                 | `up-to-date`       | none                       |
-| `hash-mismatch`                                                                                                                                              | `rebuild-required` | `expo run:<platform>`      |
-| `fingerprint-version-mismatch`                                                                                                                               | `unknown`          | none                       |
-| `embed-unsupported`, `no-device`, `app-not-installed`, `no-embedded-fingerprint`, `no-response`, `app-id-unknown`, `fingerprint-unavailable`, `check-failed` | `unknown`          | as the recommendation says |
+| Reason                                                                                                                                                                        | Status             | `commands`                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ | -------------------------- |
+| `hash-match`                                                                                                                                                                  | `up-to-date`       | none                       |
+| `hash-mismatch`                                                                                                                                                               | `rebuild-required` | `expo run:<platform>`      |
+| `fingerprint-version-mismatch`                                                                                                                                                | `unknown`          | none                       |
+| `embed-unsupported`, `no-device`, `app-not-installed`, `no-embedded-fingerprint`, `no-response`, `app-id-unknown`, `fingerprint-unavailable`, `check-failed`, `cloud-session` | `unknown`          | as the recommendation says |
+
+The reason `cloud-session` has no commands. Its recommendation reads "not checked; this check reads local devices, and the app runs on EAS Simulator session <id>".
 
 An equal hash is a match whatever produced it. Two hashes that differ are only comparable when the
 same `@expo/fingerprint` version produced both: reason tags and hashing change between versions, so
