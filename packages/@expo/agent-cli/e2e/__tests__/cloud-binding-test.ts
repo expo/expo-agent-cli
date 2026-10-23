@@ -181,18 +181,20 @@ it('round-trips guarded cloud target argv and refuses before running on a sessio
   expect(refused.stderr).toContain(`${CLOUD_SESSION_MISMATCH} ${sessionId}`);
   expect(refused.stdout).toBe('');
 });
-it.each(['NEW', 'STOPPED'])(
-  'a %s bound session refuses without rewriting its binding',
-  async (status) => {
-    const root = await project();
-    await writeCloudBindingAsync(expoHome, root, { id: 'A' });
-    list([{ id: 'A', status }, { id: 'foreign' }]);
-    await writeCloudSessionFileAsync(root, 'A');
-    const before = fs.readFileSync(bindingFile(root), 'utf8');
-    const result = await navigate(root, ['--ios']);
-    expect(result.exitCode, result.stderr + result.stdout).toBe(20);
-    expect(JSON.parse(result.stdout).error.code).toBe('NO_BOUND_DEVICE');
-    expect(fs.readFileSync(bindingFile(root), 'utf8')).toBe(before);
-    expect(stubEasArgs(root).map((a) => a[0])).toEqual(['simulator:list']);
-  }
-);
+// A STOPPED session is no longer listed as usable, so the probe asks for availability before it
+// calls the session ended. Both calls are reads.
+it.each([
+  ['NEW', ['simulator:list']],
+  ['STOPPED', ['simulator:list', 'simulator:availability']],
+])('a %s bound session refuses without rewriting its binding', async (status, easCalls) => {
+  const root = await project();
+  await writeCloudBindingAsync(expoHome, root, { id: 'A' });
+  list([{ id: 'A', status }, { id: 'foreign' }]);
+  await writeCloudSessionFileAsync(root, 'A');
+  const before = fs.readFileSync(bindingFile(root), 'utf8');
+  const result = await navigate(root, ['--ios']);
+  expect(result.exitCode, result.stderr + result.stdout).toBe(20);
+  expect(JSON.parse(result.stdout).error.code).toBe('NO_BOUND_DEVICE');
+  expect(fs.readFileSync(bindingFile(root), 'utf8')).toBe(before);
+  expect(stubEasArgs(root).map((a) => a[0])).toEqual(easCalls);
+});
