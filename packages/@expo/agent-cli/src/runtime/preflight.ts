@@ -44,10 +44,14 @@ import {
   type DevServerSource,
 } from './devServer';
 import {
-  buildDeviceNameIndexIfNeededAsync,
-  scopeTargets,
-  type DeviceNameIndex,
-} from './targetPlatform';
+  deviceFactsForScopeAsync,
+  NO_DEVICE_FACTS,
+  placeTargets,
+  scopeOfPlatformFlag,
+  type DeviceFacts,
+  type PlacedTargets,
+  type RunScope,
+} from './runScope';
 
 /**
  * Where a runtime command was run, when it was run in a project.
@@ -97,8 +101,10 @@ export interface RuntimeConnection {
    * its report still has to say that the iOS one is there.
    */
   appTargets: CdpTarget[];
-  /** What this machine's device tools reported, when a platform had to be resolved. */
-  deviceIndex?: DeviceNameIndex;
+  /** Which targets this command reads, as the caller decided it. */
+  scope: RunScope;
+  /** What this machine's device tools reported, for placing {@link targets} in {@link scope}. */
+  facts: DeviceFacts;
   /** The platform the caller named, or undefined. */
   platform?: NavigatePlatform;
 }
@@ -152,11 +158,11 @@ export interface RuntimePreflightOptions {
   /**
    * What this machine's device tools reported, instead of asking them.
    *
-   * Commands never pass one — reading it from the targets that were just listed is the point of the
-   * preflight. It is here for a caller that already has the index, and for the tests, which must
+   * Commands never pass them — reading them for the targets that were just listed is the point of
+   * the preflight. They are here for a caller that already has them, and for the tests, which must
    * not spawn `simctl` and `adb` to ask about a platform.
    */
-  deviceIndex?: DeviceNameIndex;
+  facts?: DeviceFacts;
 }
 
 /** How often the target list is re-read while the grace period runs. */
@@ -175,7 +181,7 @@ export async function preflightRuntimeAsync(
     platform,
     cloud = false,
     retryMs,
-    deviceIndex: knownDeviceIndex,
+    facts: knownFacts,
   }: RuntimePreflightOptions,
   context: RuntimeContext = {}
 ): Promise<RuntimeConnection> {
@@ -188,6 +194,7 @@ export async function preflightRuntimeAsync(
     projectRoot: context.projectRoot ?? undefined,
   });
   const url = normalizeDevServerUrl(discovery.devServerUrl);
+  const scope = scopeOfPlatformFlag(platform);
 
   let reachable = discovery.reachable;
   let targets = discovery.targets;
@@ -217,6 +224,8 @@ export async function preflightRuntimeAsync(
     unreachableReason: reachable ? null : unreachableReason,
     targets,
     appTargets: targets,
+    scope,
+    facts: knownFacts ?? NO_DEVICE_FACTS,
     platform,
   };
 
@@ -234,14 +243,11 @@ export async function preflightRuntimeAsync(
     });
   }
 
-  // The device index is built from the list that was already read, so the platform this command was
+  // The device facts are read for the list that was already read, so the platform this command was
   // told about is the platform of the app it reads — the two steps cannot disagree about which app
-  // that is (F51, F53). It costs a subprocess only when a target's platform cannot be read off its
+  // that is (F51, F53). They cost a subprocess only when a target's platform cannot be read off its
   // application id or its device name, which for Expo Go is never.
-  const deviceIndex =
-    platform == null
-      ? undefined
-      : (knownDeviceIndex ?? (await buildDeviceNameIndexIfNeededAsync(targets)));
+  const facts = knownFacts ?? (await deviceFactsForScopeAsync(targets, scope));
 
   // Scoped for **every** caller that named a platform, whatever it needs, and that is F101. This
   // used to sit below the `need` branch, so `appTargets` — documented as the list a command may read
@@ -250,10 +256,8 @@ export async function preflightRuntimeAsync(
   // which was the iOS one, and force-stopped a package that is not installed on Android while
   // reporting `stopped: true, wasRunning: true`. Reading the other platform's app is F51 whether or
   // not the command also required one to exist.
-  const scoped = platform == null ? null : scopeTargets(targets, platform, deviceIndex!);
-  const connection: RuntimeConnection = scoped
-    ? { ...base, appTargets: scoped.matched, deviceIndex }
-    : base;
+  const placed = placeTargets(targets, scope, facts);
+  const connection: RuntimeConnection = { ...base, appTargets: placed.read, facts };
 
   if (need !== 'debugger-target') {
     return connection;
@@ -266,8 +270,8 @@ export async function preflightRuntimeAsync(
   // Only a command that *requires* a runtime refuses on an empty scope. For `reload` an empty scope
   // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
   // seventh and eighth calls a success.
-  if (scoped && scoped.matched.length === 0) {
-    throw noAppOnPlatformError(url, platform!, scoped, cloud);
+  if (platform != null && placed.read.length === 0) {
+    throw noAppOnPlatformError(url, platform, placed, cloud);
   }
   return connection;
 }
@@ -416,7 +420,7 @@ export function noAppConnectedError({
 function noAppOnPlatformError(
   devServerUrl: string,
   platform: NavigatePlatform,
-  scoped: { otherPlatform: { platform: NavigatePlatform }[]; undetermined: unknown[] },
+  scoped: Pick<PlacedTargets, 'otherPlatform' | 'undetermined'>,
   cloud: boolean
 ): CommandError {
   const others = scoped.otherPlatform.map((entry) => entry.platform);

@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
-import { parseBootedIosSimulators } from '../../device/simulators';
+import { parseBootedIosSimulators, parseBootedSimulators } from '../../device/simulators';
 import { bindingPathFor } from '../../deviceBinding/registry';
 import type { Binding } from '../../deviceBinding';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
@@ -119,6 +119,16 @@ describe(parseBootedIosSimulators, () => {
   it(`should list nothing for output that is not simctl JSON`, () => {
     expect(parseBootedIosSimulators('not json')).toEqual([]);
     expect(parseBootedIosSimulators('')).toEqual([]);
+  });
+});
+
+describe(parseBootedSimulators, () => {
+  it(`should list every booted runtime, so a watch simulator is not mistaken for something else`, () => {
+    expect(parseBootedSimulators(BOOTED_SIMCTL_JSON).map((simulator) => simulator.name)).toEqual([
+      'Apple Watch',
+      'iPhone 17',
+      'iPad',
+    ]);
   });
 });
 

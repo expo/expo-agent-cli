@@ -86,6 +86,23 @@ export function parseSimulators(stdout: string): SimulatorEntry[] {
 
 /** Every booted iOS simulator in `simctl list devices booted -j`, in the order `simctl` lists them. */
 export function parseBootedIosSimulators(stdout: string): { udid: string; name: string }[] {
+  return parseBooted(stdout, (runtime) => runtime.includes('.iOS-'));
+}
+
+/**
+ * Every booted simulator in `simctl list devices booted -j`, of every runtime.
+ *
+ * Not only iOS: a target on a watchOS simulator is on one of this machine's simulators, and it would
+ * otherwise fall through to a platform rule that knows less.
+ */
+export function parseBootedSimulators(stdout: string): { udid: string; name: string }[] {
+  return parseBooted(stdout, () => true);
+}
+
+function parseBooted(
+  stdout: string,
+  keepRuntime: (runtime: string) => boolean
+): { udid: string; name: string }[] {
   let parsed: { devices?: Record<string, { udid?: string; name?: string }[]> };
   try {
     parsed = JSON.parse(stdout);
@@ -95,7 +112,7 @@ export function parseBootedIosSimulators(stdout: string): { udid: string; name: 
 
   const simulators: { udid: string; name: string }[] = [];
   for (const [runtime, devices] of Object.entries(parsed.devices ?? {})) {
-    if (!runtime.includes('.iOS-') || !Array.isArray(devices)) {
+    if (!keepRuntime(runtime) || !Array.isArray(devices)) {
       continue;
     }
     for (const device of devices) {
