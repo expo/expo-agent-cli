@@ -82,6 +82,13 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
   let appsConnected: number | null = countsApps ? discovery.targets.length : null;
   let timedOut = readiness.timedOut;
   const remainingMs = () => Math.max(0, options.timeoutMs - (Date.now() - startedAt));
+  // Scoped when the caller named a native platform: `--require-app --platform android` used to be
+  // satisfied by the iOS simulator attached to the same dev server (F51). The flags only, on
+  // purpose: this command waits for the dev server, and reads no binding and no bound device.
+  const scope = scopeOfFlags({
+    platform: options.platformExplicit && options.platform !== 'web' ? options.platform : null,
+    eas: false,
+  });
 
   // The one question that is about the project rather than about the dev server, and the reason
   // the whole command was reporting green on a build an agent had just broken. Skipped for a dev
@@ -90,12 +97,11 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
   // @ref llp/0005-runtime-loop-tools.rfc.md §Android — friction run 6, F53. Which platform to build
   // for is a question about the *app*, and this command used to answer it with a fixed default: an
   // Android-only break with an iOS app also attached was reported as "compiles for ios".
+  // Web has no debugger target and so no run scope: a named web is checked as named.
   const { platforms: bundlePlatforms, source: bundlePlatformSource } =
-    await resolveBundleCheckPlatformsAsync(
-      options.platformExplicit ? options.platform : null,
-      discovery.targets,
-      options.platform
-    );
+    options.platformExplicit && options.platform === 'web'
+      ? { platforms: ['web' as const], source: 'flag' as const }
+      : await resolveBundleCheckPlatformsAsync(scope, discovery.targets, options.platform);
 
   const bundles: BundleCheckResult[] = [];
   if (options.bundleCheck && readiness.ready && readiness.projectRootMatched !== false) {
@@ -128,12 +134,7 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
   if (options.requireApp && readiness.ready && bundle?.outcome !== 'broken' && !timedOut) {
     const attached = await waitForAppConnectionAsync(discovery.devServerUrl, {
       timeoutMs: remainingMs(),
-      // Scoped when the caller named a native platform: `--require-app --platform android` used to
-      // be satisfied by the iOS simulator attached to the same dev server (F51).
-      scope: scopeOfFlags({
-        platform: options.platformExplicit && options.platform !== 'web' ? options.platform : null,
-        eas: false,
-      }),
+      scope,
     });
     appsConnected = attached.appsConnected;
     timedOut = attached.timedOut;
