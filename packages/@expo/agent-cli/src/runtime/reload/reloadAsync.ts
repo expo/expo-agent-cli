@@ -254,6 +254,8 @@ export interface ReloadResultJson {
    * run that had never asked which app it was reloading read exactly like an answer.
    */
   bundlePlatformSource: BundlePlatformSource;
+  /** Which apps this run read: the flags, or the device bound to this worktree (llp/0035 §Readers). */
+  scope: RuntimeConnection['scope'];
   /** Apps the reload does not count or check, such as another worktree's (llp/0005 §Target owner). */
   skippedApps: SkippedApp[];
   /** Route the app was sent to afterwards, or null when none was asked for. */
@@ -328,12 +330,10 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   // screen it is already showing — and the old command reported `Reloaded yes` for exactly that.
   const remainingMs = () => Math.max(0, options.timeoutMs - (Date.now() - startedAt));
 
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Android — friction run 6, F53. Which platform to build
-  // for is a question about the app being reloaded, and this used to answer it with a host-free
-  // default: with an Android-only break and both apps attached, a `runtime:reload` with no flag
-  // checked the **iOS** bundle, passed, and reloaded the Android app onto the broken one.
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Android — F53. The platform to build for is the app's:
+  // the scope's, which a flag or the bound device names, else the connected apps'.
   const { platforms: bundlePlatforms, source: bundlePlatformSource } =
-    await resolveBundleCheckPlatformsAsync(options.platform ?? null, devServer.appTargets);
+    await resolveBundleCheckPlatformsAsync(devServer.scope, devServer.appTargets);
   const bundles: BundleCheckResult[] = [];
   if (options.bundleCheck) {
     for (const platform of bundlePlatforms) {
@@ -547,9 +547,8 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
           timeoutMs: remainingMs(),
           knownTargetIds,
           bundleMark,
-          // The flag the caller typed, never the resolved default: `null` here means "nobody said",
-          // and `waitForNewBundleAsync` counts every platform for it (F126).
-          platform: options.platform ?? null,
+          // The scope's platform, never the resolved default: null counts every platform (F126).
+          platform: devServer.scope.platform?.value ?? null,
         })
       : { appsConnected: observedApps, freshTargets: 0, timedOut: false, waitedMs: 0 };
 
@@ -682,6 +681,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     },
     bundlePlatforms: bundles.map((entry) => entry.platform),
     bundlePlatformSource,
+    scope: devServer.scope,
     skippedApps: skippedAppsOf(placeTargets(devServer.targets, devServer.scope, devServer.facts)),
     route,
     routeCheck,

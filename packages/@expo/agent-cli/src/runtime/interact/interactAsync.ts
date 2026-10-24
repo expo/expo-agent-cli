@@ -150,10 +150,7 @@ async function openAppAsync(
 
   let bundle: BundleCheckResult | null = null;
   if (wantBundleCheck) {
-    const { platforms } = await resolveBundleCheckPlatformsAsync(
-      options.platform ?? null,
-      appTargets
-    );
+    const { platforms } = await resolveBundleCheckPlatformsAsync(scope, appTargets);
     const results: BundleCheckResult[] = [];
     for (const platform of platforms) {
       results.push(

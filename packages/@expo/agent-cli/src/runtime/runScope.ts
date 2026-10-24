@@ -7,6 +7,7 @@
 // one function that combines them, so every runtime read places a target the same way.
 
 import type { LiveIosBinding } from '../deviceBinding/records';
+import type { BoundDevice } from '../deviceBinding/types';
 import type { NavigateDevice, NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
 import { platformOfTarget } from './targetPlatform';
@@ -29,13 +30,17 @@ export const NO_DEVICE_FACTS: DeviceFacts = { booted: [], androidModels: [], ios
 
 /** The decision of which targets this run reads, made once by the caller. */
 export interface RunScope {
-  /** The platform this run reads, and what named it; null reads every platform. */
-  platform: { value: NavigatePlatform; by: 'flag' } | null;
+  /**
+   * The platform this run reads, and what named it: a flag, or the device bound to this worktree
+   * (llp/0035 §Readers). Null reads every platform.
+   */
+  platform: { value: NavigatePlatform; by: 'flag' | 'bound-device' } | null;
   /**
    * The device this run reads. `eas-flag` is a run with `--eas` and a platform, or a `navigate`
-   * that resolved to an EAS Simulator session: the session of that platform is the device.
+   * that resolved to an EAS Simulator session: the session of that platform is the device. `bound`
+   * is the device bound to this worktree, which scoped a read with no flag.
    */
-  device: { kind: 'any' } | { kind: 'eas-flag' };
+  device: { kind: 'any' } | { kind: 'eas-flag' } | { kind: 'bound'; device: BoundDevice };
 }
 
 /** The scope a command's flags give: the platform flag, and `--eas` when a platform names a session. */
@@ -57,15 +62,44 @@ export function scopeOfDevice(device: Pick<NavigateDevice, 'backend' | 'platform
   return scopeOfFlags({ platform: device.platform, eas: device.backend === 'cloud' });
 }
 
+/** The scope of the device bound to this worktree: its platform, and the device itself. */
+export function scopeOfBoundDevice(device: BoundDevice): RunScope {
+  return {
+    platform: { value: device.platform, by: 'bound-device' },
+    device: { kind: 'bound', device },
+  };
+}
+
+/** Whether this scope's device is an EAS Simulator session: named by `--eas`, or bound. */
+export function readsEasSession(scope: RunScope): boolean {
+  return (
+    scope.device.kind === 'eas-flag' ||
+    (scope.device.kind === 'bound' && scope.device.device.backend === 'cloud')
+  );
+}
+
+/** The one name of a bound device, for the scope line on stderr. */
+export function describeBoundDevice(device: BoundDevice): string {
+  switch (device.backend) {
+    case 'local-ios':
+      return `the iOS simulator "${device.name}"`;
+    case 'local-android':
+      return `the Android device ${device.serial}`;
+    case 'cloud':
+      return `the EAS Simulator session ${device.id}`;
+  }
+}
+
 /** Where one target falls for one scope. */
 export type Placement =
   | { group: 'read' }
   | { group: 'other-platform'; platform: NavigatePlatform }
   | { group: 'undetermined' }
-  | { group: 'other-worktree'; projectRoots: string[] };
+  | { group: 'other-worktree'; projectRoots: string[] }
+  | { group: 'other-device' };
 
-/** The placements of a target this run sees and skips on purpose, whatever the scope. */
-export type SkipPlacement = Extract<Placement, { group: 'other-worktree' }>;
+/** The placements of a target this run sees and skips on purpose. */
+export type SkipPlacement = Extract<Placement, { group: 'other-worktree' | 'other-device' }>;
 
 /** A skipped app, as a report names it. */
 export type SkippedApp = { deviceName: string } & SkipPlacement;
@@ -78,7 +112,7 @@ export interface PlacedTargets {
   otherPlatform: { target: CdpTarget; platform: NavigatePlatform }[];
   /** Targets whose platform nothing decided, in a platform scope. Never read. */
   undetermined: CdpTarget[];
-  /** Targets out of every scope, such as another worktree's app. Never read. */
+  /** Targets this run skips: another worktree's app, or an app on another device. Never read. */
   skipped: { target: CdpTarget; placement: SkipPlacement }[];
 }
 
@@ -96,6 +130,8 @@ export function describeSkippedApps(apps: readonly SkippedApp[]): string {
     switch (app.group) {
       case 'other-worktree':
         return `"${app.deviceName}" runs on a simulator another worktree bound (${app.projectRoots.join(', ')})`;
+      case 'other-device':
+        return `"${app.deviceName}" is not the device bound to this worktree`;
     }
   });
   return `Skipped ${apps.length} app${apps.length === 1 ? '' : 's'}: ${each.join('; ')}.`;
@@ -137,10 +173,17 @@ function placeTarget(
     return { group: 'read' };
   }
   const { platform } = platformOfTarget(target, facts);
-  if (platform === scope.platform.value) {
-    return { group: 'read' };
+  if (platform != null && platform !== scope.platform.value) {
+    return { group: 'other-platform', platform };
   }
-  return platform == null ? { group: 'undetermined' } : { group: 'other-platform', platform };
+  // A local simulator's targets carry its name. A local Android target carries only the model,
+  // and a cloud session's the cloud device's, so those scope the platform and not the device.
+  if (scope.device.kind === 'bound' && scope.device.device.backend === 'local-ios') {
+    return target.deviceName === scope.device.device.name
+      ? { group: 'read' }
+      : { group: 'other-device' };
+  }
+  return platform == null ? { group: 'undetermined' } : { group: 'read' };
 }
 
 /**
@@ -152,8 +195,8 @@ function placeTarget(
  * One rule needs the whole list, so it lives here and not in `platformOfTarget`: on an EAS
  * Simulator iOS session, exactly one undetermined target is the session's app. Its device name is
  * the cloud simulator's model, which no local tool reports, and a development build's app id is
- * often the same on both platforms. The run named the session, so the one target nothing on this
- * machine claims is its app. Two such targets stay undetermined: nothing says which one is the
+ * often the same on both platforms. The run named the session, or this worktree bound it, so the
+ * one target nothing on this machine claims is its app. Two such targets stay undetermined: nothing says which one is the
  * session's. An Android session needs no rule, because its device name shape places it. A target
  * on another worktree's simulator is skipped in every scope, so it never takes that slot.
  */
@@ -176,12 +219,13 @@ export function placeTargets(
         placed.undetermined.push(target);
         break;
       case 'other-worktree':
+      case 'other-device':
         placed.skipped.push({ target, placement });
         break;
     }
   }
   const [only, ...more] = placed.undetermined;
-  if (scope.device.kind === 'eas-flag' && scope.platform?.value === 'ios' && only && !more.length) {
+  if (readsEasSession(scope) && scope.platform?.value === 'ios' && only && !more.length) {
     return {
       ...placed,
       read: targets.filter((target) => target === only || placed.read.includes(target)),

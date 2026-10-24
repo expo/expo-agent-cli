@@ -1,5 +1,6 @@
 import type { CdpTarget } from '../cdpClient';
-import { placeTargets, scopeOfFlags } from '../runScope';
+import type { BoundDevice } from '../../deviceBinding/types';
+import { placeTargets, scopeOfBoundDevice, scopeOfFlags } from '../runScope';
 import { makeDeviceFacts } from './runScopeFixtures';
 
 /** One dev server with an iOS simulator and an Android emulator attached [captured — 2026-08-25]. */
@@ -206,5 +207,68 @@ describe('placeTargets and the worktree that bound the simulator', () => {
 
     expect(placed.read).toEqual(read);
     expect(placed.skipped.map((entry) => entry.target)).toEqual([targets[0]]);
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Readers
+// The device bound to this worktree is the scope of a read with no flag. A local Android target
+// carries only the model, so an Android device scopes the platform; a local simulator's targets
+// carry its name, so a simulator scopes the device too.
+describe('placeTargets on the device bound to this worktree', () => {
+  const onOwn = { appId: 'host.exp.Exponent', deviceName: 'iPhone 17 Pro' } as CdpTarget;
+  const onOther = { appId: 'host.exp.Exponent', deviceName: 'iPhone 16' } as CdpTarget;
+  const onSession = { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17' } as CdpTarget;
+
+  it.each([
+    {
+      name: 'a local simulator reads only the target that carries its name',
+      device: {
+        backend: 'local-ios',
+        platform: 'ios',
+        udid: 'SIM-OWN',
+        name: 'iPhone 17 Pro',
+        origin: 'created',
+      } as BoundDevice,
+      targets: [onOther, onOwn, android],
+      read: [onOwn],
+      otherPlatform: [{ target: android, platform: 'android' }],
+      undetermined: [],
+      skipped: [{ target: onOther, placement: { group: 'other-device' } }],
+    },
+    {
+      name: 'a local Android device reads every target of its platform',
+      device: {
+        backend: 'local-android',
+        platform: 'android',
+        serial: 'emulator-5554',
+        origin: { kind: 'explicit' },
+      } as BoundDevice,
+      targets: [ios, android, unknown],
+      read: [android],
+      otherPlatform: [{ target: ios, platform: 'ios' }],
+      undetermined: [unknown],
+      skipped: [],
+    },
+    {
+      name: 'an EAS Simulator iOS session reads its one unclaimed target',
+      device: {
+        backend: 'cloud',
+        platform: 'ios',
+        id: '01a15bf1',
+        origin: 'started',
+      } as BoundDevice,
+      targets: [onSession, android],
+      read: [onSession],
+      otherPlatform: [{ target: android, platform: 'android' }],
+      undetermined: [],
+      skipped: [],
+    },
+  ])('$name', ({ device, targets, read, otherPlatform, undetermined, skipped }) => {
+    expect(placeTargets(targets, scopeOfBoundDevice(device), makeDeviceFacts())).toEqual({
+      read,
+      otherPlatform,
+      undetermined,
+      skipped,
+    });
   });
 });
