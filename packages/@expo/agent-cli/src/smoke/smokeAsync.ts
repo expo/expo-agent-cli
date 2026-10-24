@@ -59,7 +59,7 @@ import {
 } from '../runtime/reload/reloadAsync';
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
 import {
-  deviceFactsIfNeededAsync,
+  deviceFactsForScopeAsync,
   placeTargets,
   scopeOfFlags,
   type DeviceFacts,
@@ -363,36 +363,30 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
   };
 
   /**
-   * What this machine's device tools reported, kept for as long as it still answers.
+   * What this machine's device tools and the registry reported, kept while the target list is the
+   * one they were read for.
    * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say — F51, F152.
    *
-   * The facts exist to place a target whose own fields name no platform, and they are read by
-   * spawning `xcrun` and `adb`, so they are asked for exactly when their answer could change the
-   * outcome (`deviceFactsIfNeededAsync`). **A gate asks that question before the app it is waiting
-   * for exists**, and a cached "nothing to place" is then an answer about an empty list: the first
-   * probe of this run finds no targets, `NO_DEVICE_FACTS` is cached, and the development build that
-   * attaches a moment later — whose app id is the project's own and whose device name is a
-   * simulator's — cannot be placed by it. Every later wait counted zero, so `smoke --ios` spent
-   * its budget and reported "no app had attached" about a dev build that had [observed — the e2e
-   * "opens the dev-client loading link before the route link", 55.8 s of 60 s, 2026-09-06].
-   *
-   * So the cache is kept only while it still places what is listed **now**. An empty list places
-   * vacuously and costs nothing, which is the case the laziness was for; a list the cache cannot
-   * read is the case it was never an answer to. The scope is read at call time: a config's EAS
-   * device sets `options.cloud` after these deps are built.
+   * The facts are read by spawning `xcrun` and `adb` exactly when their answer could change a
+   * placement (`deviceFactsForScopeAsync`). **A gate asks that question before the app it is
+   * waiting for exists**, and facts cached for that empty list answered nothing about the
+   * development build that attached a moment later: every later wait counted zero, and
+   * `smoke --ios` reported "no app had attached" about a dev build that had [observed — the e2e
+   * "opens the dev-client loading link before the route link", 55.8 s of 60 s, 2026-09-06]. The
+   * same cache would read another worktree's app (llp/0005 §Target owner). So a new list is read
+   * again. The scope is read at call time: a config's EAS device sets `options.cloud` after these
+   * deps are built.
    */
   const scope = () =>
     scopeOfFlags({ platform: options.platform, eas: options.cloud === 'required' });
-  let deviceFacts: DeviceFacts | null = null;
+  let cached: { key: string; facts: DeviceFacts } | null = null;
   const factsAsync = async (devServerUrl: string): Promise<DeviceFacts> => {
-    const probe = await probeDevServerAsync(devServerUrl);
-    const placesEverything =
-      deviceFacts != null &&
-      placeTargets(probe.targets, scope(), deviceFacts).undetermined.length === 0;
-    if (placesEverything) {
-      return deviceFacts!;
+    const { targets } = await probeDevServerAsync(devServerUrl);
+    const key = JSON.stringify([scope(), targets.map((target) => [target.id, target.deviceName])]);
+    if (cached?.key !== key) {
+      cached = { key, facts: await deviceFactsForScopeAsync(targets, scope(), projectRoot) };
     }
-    return (deviceFacts = await deviceFactsIfNeededAsync(probe.targets));
+    return cached.facts;
   };
 
   return {

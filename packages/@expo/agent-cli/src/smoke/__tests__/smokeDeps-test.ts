@@ -9,13 +9,18 @@ import {
   deviceNameOf,
   releaseWorktreeDevicesAsync,
 } from '../../deviceBinding';
-import { androidBindingFor, bindingFor } from '../../deviceBinding/__tests__/fakeTools';
+import {
+  androidBindingFor,
+  bindingFor,
+  seedIosBinding,
+} from '../../deviceBinding/__tests__/fakeTools';
 import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import { fetchAdvertisedUrlAsync } from '../../dev/advertisedUrl';
 import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
 import { PROGRAM_PREFIX } from '../../programName';
+import { describeSkippedApps } from '../../runtime/runScope';
 import { resolveEasCli } from '../../utils/easCli';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { resolveSmokeOptions } from '../resolveOptions';
@@ -348,5 +353,50 @@ describe('evaluate on an EAS Simulator iOS session', () => {
     // The target is in scope, so the selector probes it and finds no socket there. Out of scope,
     // the reason is "No app connected to the dev server could be shown to be running on ios".
     expect(result.reason).toBe('No target found.');
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+// Smoke runs in a project, so its reads skip another worktree's app as the runtime reads do. The
+// first read finds no app, as a gate's first read does; the facts it read must not decide the next.
+describe('evaluate beside an app of another worktree', () => {
+  const realFetch = globalThis.fetch;
+  const CLONE = 'agent-cli c4ed0a60';
+  const ON_CLONE = {
+    id: '1',
+    appId: 'host.exp.Exponent',
+    deviceName: CLONE,
+    webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=1&page=1',
+  };
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vol.reset();
+  });
+
+  it(`skips that app, and names the worktree that bound its simulator`, async () => {
+    vol.fromJSON({ [`${projectRoot}/package.json`]: '{}', '/wt/legend/package.json': '{}' });
+    seedIosBinding('/wt/legend', 'SIM-LEGEND', CLONE);
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: JSON.stringify({ devices: { 'iOS-26-0': [{ udid: 'SIM-LEGEND', name: CLONE }] } }),
+      stderr: '',
+      exitCode: 0,
+    });
+    let listed: unknown[] = [];
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => listed,
+    })) as unknown as typeof fetch;
+    const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios']));
+    await deps.evaluate('http://127.0.0.1:8081');
+    listed = [ON_CLONE];
+
+    const result = await deps.evaluate('http://127.0.0.1:8081');
+
+    expect(result.reason).toContain(
+      describeSkippedApps([
+        { deviceName: CLONE, group: 'other-worktree', projectRoots: ['/wt/legend'] },
+      ])
+    );
   });
 });

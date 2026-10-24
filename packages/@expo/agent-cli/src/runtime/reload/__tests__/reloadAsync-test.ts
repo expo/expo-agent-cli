@@ -21,6 +21,7 @@ import {
   reloadOverDevServerAsync,
   type ReloadResultJson,
 } from '../reloadAsync';
+import { scopeOfFlags } from '../../runScope';
 import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
@@ -362,6 +363,7 @@ describe(reloadAsync, () => {
       'reloaded',
       'route',
       'routeCheck',
+      'scope',
       'skippedApps',
       'url',
       'verifiedBy',
@@ -844,6 +846,49 @@ describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => 
       { deviceName: CLONE, group: 'other-worktree', projectRoots: ['/wt/legend'] },
     ]);
   });
+
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Readers — DF24: the iOS bundle was checked for
+  // a worktree bound to an Android EAS session.
+  it(`checks the platform of the device bound to this worktree, and reports the scope`, async () => {
+    fs.rmSync(bindingPathFor(projectRoot, 'ios', 'local-ios'));
+    writeBinding(bindingPathFor(projectRoot, 'android', 'cloud'), {
+      version: 1,
+      device: { backend: 'cloud', platform: 'android', id: '01a15bf1', origin: 'started' },
+      projectRoot,
+      boundAt: '2026-10-21T00:50:00.000Z',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    });
+    const ON_SESSION = {
+      ...ANDROID_TARGET,
+      appId: 'dev.vonovak.cyclable',
+      deviceName: 'sdk_gphone64_x86_64 - 15 - API 35',
+    };
+    const platformsAsked: string[] = [];
+    const server = mockDevServer([EXPO_GO_TARGET, ON_SESSION]);
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (input: unknown, init?: any) => {
+      const header = init?.headers?.['expo-platform'];
+      if (header) {
+        platformsAsked.push(String(header));
+      }
+      return await (inner as any)(input, init);
+    }) as unknown as typeof fetch;
+    const { socket } = fakeSocket(
+      [{ 'socket#1': 'role=android' }, { 'socket#4': 'role=android' }],
+      () => server.listing([EXPO_GO_TARGET, { ...ON_SESSION, id: 'android-2' }])
+    );
+    mockConnect(socket);
+
+    await reloadAsync(projectRoot, options({ json: true }));
+
+    const report = JSON.parse(printed());
+    expect(platformsAsked).toEqual(['android']);
+    expect(report.bundlePlatformSource).toBe('bound-device');
+    expect(report.scope).toMatchObject({
+      platform: { value: 'android', by: 'bound-device' },
+      device: { kind: 'bound', device: { backend: 'cloud', id: '01a15bf1' } },
+    });
+  });
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live
@@ -876,6 +921,7 @@ describe(explainReloadFailure, () => {
       bundlesAfterReload: { observed: null, count: 0, line: null, reason: null },
       bundlePlatforms: ['ios'],
       bundlePlatformSource: 'flag',
+      scope: scopeOfFlags({ platform: 'ios', eas: false }),
       skippedApps: [],
       route: null,
       routeCheck: {

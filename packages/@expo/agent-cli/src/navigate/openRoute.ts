@@ -397,7 +397,7 @@ export async function resolveRouteUrlAsync(
   // Scoped to the platform that was named, for the reason every other reading command is (F51):
   // a dev server with an iOS simulator already attached would otherwise decide an `--android` run's
   // target app from the simulator's registration. Nothing on the named platform leaves the decision
-  // to the project's shape. No bindings: navigate does not skip apps (llp/0005 §Target owner).
+  // to the project's shape. The flags only, on purpose: no bindings and no bound device (llp/0005).
   const scope = scopeOfFlags({ platform, eas: options.cloud === 'required' });
   const decisionTargets = placeTargets(
     devServer.targets,

@@ -4,7 +4,12 @@
 
 import { vol } from 'memfs';
 
-import { bindingFor, seedIosBinding, writeBinding } from '../../deviceBinding/__tests__/fakeTools';
+import {
+  bindingFor,
+  seedAndroidBinding,
+  seedIosBinding,
+  writeBinding,
+} from '../../deviceBinding/__tests__/fakeTools';
 import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import { EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import * as Log from '../../log';
@@ -15,19 +20,29 @@ import { describeSkippedApps } from '../runScope';
 import { makeDeviceFacts } from './runScopeFixtures';
 
 vi.mock('../../log');
-// `xcrun simctl list devices booted -j` answers with these; every other tool fails to run.
+// `xcrun simctl list devices` answers with these booted simulators, and `adb get-state` with an
+// emulator that is up; every other tool fails to run.
 let bootedSimulators: { udid: string; name: string }[] = [];
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 beforeEach(() => {
   bootedSimulators = [];
-  vi.mocked(spawnCaptureAsync).mockImplementation(async (bin: string) =>
+  vi.mocked(spawnCaptureAsync).mockImplementation(async (bin: string, args: string[] = []) =>
     bin === 'xcrun'
       ? {
-          stdout: JSON.stringify({ devices: { 'iOS-26-0': bootedSimulators } }),
+          stdout: JSON.stringify({
+            devices: {
+              'com.apple.CoreSimulator.SimRuntime.iOS-26-0': bootedSimulators.map((simulator) => ({
+                ...simulator,
+                state: 'Booted',
+              })),
+            },
+          }),
           stderr: '',
           exitCode: 0,
         }
-      : { stdout: '', stderr: '', exitCode: 1 }
+      : args.includes('get-state')
+        ? { stdout: 'device\n', stderr: '', exitCode: 0 }
+        : { stdout: '', stderr: '', exitCode: 1 }
   );
 });
 
@@ -474,5 +489,110 @@ describe(`${preflightRuntimeAsync.name} beside an app of another worktree`, () =
     expect(readBindingFile(ownFile)).toMatchObject({
       binding: { expiresAt: '2999-01-01T00:00:00.000Z' },
     });
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Readers
+// With no platform flag and more than one app on the dev server, the device bound to this worktree
+// is the scope: its platform, and on a local simulator only that simulator's app. A flag wins.
+describe(`${preflightRuntimeAsync.name} with two apps and a device bound to this worktree`, () => {
+  const OWN_ROOT = '/wt/mapfilter';
+  const ON_OWN = { ...TARGET, id: '3', deviceName: 'iPhone 17 Pro' };
+  const ON_OTHER = { ...TARGET, id: '4', deviceName: 'iPhone 16' };
+  const ON_SESSION = {
+    ...ANDROID_TARGET,
+    id: '5',
+    appId: 'dev.vonovak.cyclable',
+    deviceName: 'sdk_gphone64_x86_64 - 15 - API 35',
+  };
+  const realPlatform = process.platform;
+
+  beforeEach(() => {
+    vol.fromJSON({ [`${OWN_ROOT}/package.json`]: '{}' });
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    bootedSimulators = [
+      { udid: 'SIM-OWN', name: 'iPhone 17 Pro' },
+      { udid: 'SIM-16', name: 'iPhone 16' },
+    ];
+  });
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: realPlatform });
+    vol.reset();
+  });
+
+  it.each([
+    {
+      name: 'no flag reads the platform of the Android device it names',
+      bind: () => seedAndroidBinding(OWN_ROOT, 'emulator-5554'),
+      flag: undefined,
+      targets: [TARGET, ANDROID_TARGET],
+      platform: { value: 'android', by: 'bound-device' },
+      appTargets: [ANDROID_TARGET],
+      line: 'Scoped to android: the Android device emulator-5554, the device bound to this worktree.',
+    },
+    {
+      name: 'no flag reads the platform of the EAS Simulator session it names',
+      bind: () =>
+        writeBinding(bindingPathFor(OWN_ROOT, 'android', 'cloud'), {
+          version: 1,
+          device: { backend: 'cloud', platform: 'android', id: '01a15bf1', origin: 'started' },
+          projectRoot: OWN_ROOT,
+          boundAt: '2026-10-21T00:50:00.000Z',
+          expiresAt: '2999-01-01T00:00:00.000Z',
+        }),
+      flag: undefined,
+      targets: [TARGET, ON_SESSION],
+      platform: { value: 'android', by: 'bound-device' },
+      appTargets: [ON_SESSION],
+      line: 'Scoped to android: the EAS Simulator session 01a15bf1, the device bound to this worktree.',
+    },
+    {
+      name: 'no flag reads only the app on the simulator it names',
+      bind: () => seedIosBinding(OWN_ROOT, 'SIM-OWN', 'iPhone 17 Pro'),
+      flag: undefined,
+      targets: [ON_OTHER, ON_OWN, ANDROID_TARGET],
+      platform: { value: 'ios', by: 'bound-device' },
+      appTargets: [ON_OWN],
+      line: 'Scoped to ios: the iOS simulator "iPhone 17 Pro", the device bound to this worktree.',
+    },
+    {
+      name: '--ios reads the platform the flag names',
+      bind: () => seedAndroidBinding(OWN_ROOT, 'emulator-5554'),
+      flag: 'ios' as const,
+      targets: [TARGET, ANDROID_TARGET],
+      platform: { value: 'ios', by: 'flag' },
+      appTargets: [TARGET],
+      line: null,
+    },
+  ])('$name', async ({ bind, flag, targets, platform, appTargets, line }) => {
+    bind();
+    mockDevServer(targets);
+
+    const connection = await preflightRuntimeAsync(
+      { need: 'debugger-target', devServerUrl, platform: flag, retryMs: 0 },
+      { projectRoot: OWN_ROOT }
+    );
+
+    expect(connection.scope.platform).toEqual(platform);
+    expect(connection.appTargets).toEqual(appTargets);
+    const scopeLines = vi
+      .mocked(Log.progress)
+      .mock.calls.flat()
+      .filter((text) => String(text).startsWith('Scoped to'));
+    expect(scopeLines).toEqual(line == null ? [] : [line]);
+  });
+
+  // No flag set the platform, so the refusal names the flag that reads the other app.
+  it(`should name the other platform's flag when no app is on the bound device's platform`, async () => {
+    seedAndroidBinding(OWN_ROOT, 'emulator-5554');
+    mockDevServer([ON_OWN, ON_OTHER]);
+
+    const error = await preflightRuntimeAsync(
+      { need: 'debugger-target', devServerUrl, retryMs: 0 },
+      { projectRoot: OWN_ROOT }
+    ).catch((e) => e);
+
+    expect(error.message).toContain('No android app is connected');
+    expect(error.message).toContain('Pass --ios to read the other app instead.');
   });
 });
