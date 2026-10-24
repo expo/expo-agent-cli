@@ -264,7 +264,9 @@ describe('placeTargets on the device bound to this worktree', () => {
       skipped: [],
     },
   ])('$name', ({ device, targets, read, otherPlatform, undetermined, skipped }) => {
-    expect(placeTargets(targets, scopeOfBoundDevice(device), makeDeviceFacts())).toEqual({
+    expect(
+      placeTargets(targets, scopeOfBoundDevice(device, 'bound-device'), makeDeviceFacts())
+    ).toEqual({
       read,
       otherPlatform,
       undetermined,
