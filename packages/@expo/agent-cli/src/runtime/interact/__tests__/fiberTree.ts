@@ -76,11 +76,32 @@ export function buildFiber(spec: FiberSpec, parent: FakeFiber | null = null): Fa
   return fiber;
 }
 
-/** A React Navigation `Screen` fiber, which is where "which screen is on screen" is answerable. */
-export function screen(name: string, focused: boolean, children: FiberSpec[] = []): FiberSpec {
+/** An expo-router native tabs `Screen` fiber: `isFocused` and `name`, one per tab. */
+export function nativeTabsScreen(
+  name: string,
+  focused: boolean,
+  children: FiberSpec[] = []
+): FiberSpec {
   return {
     name: 'Screen',
     props: { name, isFocused: focused, routeKey: `${name}-key` },
+    children,
+  };
+}
+
+/**
+ * A React Navigation screen fiber: `Screen` (JS tabs, drawer) or `SceneView` (native stack), with
+ * `focused` and `route`, not `isFocused`.
+ */
+export function routerScreen(
+  component: 'Screen' | 'SceneView',
+  routeName: string,
+  focused: boolean,
+  children: FiberSpec[] = []
+): FiberSpec {
+  return {
+    name: component,
+    props: { focused, route: { key: `${routeName}-key`, name: routeName } },
     children,
   };
 }

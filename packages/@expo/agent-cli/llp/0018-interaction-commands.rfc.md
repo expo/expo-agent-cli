@@ -92,7 +92,14 @@ this section.
 2. Focus is "no unfocused `Screen` ancestor", not "the one focused `Screen`". A nested
    navigator has two focused `Screen` fibers, one inside the other. A node is off the
    focused screen when any `Screen` ancestor of it is unfocused. `focusedScreen` reports
-   the deepest focused `Screen` whose ancestors are all focused.
+   the deepest focused `Screen` whose ancestors are all focused. A screen fiber has one of
+   two shapes in `expo-router` 58: expo-router native tabs render a `Screen` with
+   `isFocused` and `name`; React Navigation renders a `Screen` (JS tabs, drawer) or a
+   `SceneView` (native stack) with `focused` and `route`. So focus is read on the native
+   stack, JS tabs, drawer and native tabs (test: "the focus filter in an expo-router 58
+   app"). JS stack, JS top tabs and headless `ui` tabs are not covered yet: they report
+   `focusedScreen: null` and the whole tree (test: "reports no focused screen and the whole
+   tree under the JS stack").
 
 3. `runtime:type` takes `--index` and `--force`. It matches the same way `tap` does, so
    it meets `ambiguous` the same way. `editable={false}` is what a `TextInput` uses for
