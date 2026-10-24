@@ -5,6 +5,7 @@
 import { EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import { APP_RECONNECT_GRACE_MS } from '../devServer';
 import { preflightRuntimeAsync, reachTheAppLadder } from '../preflight';
+import { makeDeviceFacts } from './runScopeFixtures';
 
 const TARGET = {
   id: '1',
@@ -367,7 +368,7 @@ describe(`${preflightRuntimeAsync.name} scoped to a platform`, () => {
       devServerUrl,
       platform: 'android',
       // Empty on purpose: the device tools have nothing to say about this device either.
-      deviceIndex: { iosNames: [], androidModels: [] },
+      facts: makeDeviceFacts(),
     }).catch((e) => e);
 
     expect(error.code).toBe('NO_APP_CONNECTED');

@@ -13,14 +13,16 @@
 // that the dev server that answered belongs to this project — the caveat `discoverDevServerAsync`
 // documents but cannot close.
 
-import type { NavigatePlatform } from '../navigate/device';
 import { normalizeDevServerUrl, probeDevServerAsync } from './devServer';
 import { decodeProjectRoot, matchProjectRoot, PROJECT_ROOT_HEADER } from './projectRootHeader';
 import {
-  buildDeviceNameIndexIfNeededAsync,
-  scopeTargets,
-  type DeviceNameIndex,
-} from './targetPlatform';
+  deviceFactsIfNeededAsync,
+  NO_DEVICE_FACTS,
+  placeTargets,
+  scopeOfPlatformFlag,
+  type DeviceFacts,
+  type RunScope,
+} from './runScope';
 
 /** The body `GET /status` answers with once the bundler has finished. */
 export const PACKAGER_STATUS_READY = 'packager-status:running';
@@ -253,15 +255,15 @@ export interface WaitForAppConnectionOptions {
   /** How long to wait between two target-list reads. */
   intervalMs?: number;
   /**
-   * Count only apps on this platform, instead of every app attached.
+   * Count only apps this scope reads, instead of every app attached. Unset reads every app.
    *
    * The fix for friction run 6's F51: with an iOS simulator and an Android emulator on one dev
    * server, `--android` waits used to be satisfied by the simulator, and every phase after them
    * read the wrong runtime.
    */
-  platform?: NavigatePlatform;
-  /** What this machine's device tools reported, for {@link platform}. */
-  deviceIndex?: DeviceNameIndex;
+  scope?: RunScope;
+  /** What this machine's device tools reported, for {@link scope}. Read here when unset. */
+  facts?: DeviceFacts;
 }
 
 export interface AppConnectionResult {
@@ -295,30 +297,34 @@ export interface AppConnectionResult {
  */
 export async function waitForAppConnectionAsync(
   devServerUrl: string,
-  { timeoutMs, intervalMs = 250, platform, deviceIndex }: WaitForAppConnectionOptions
+  {
+    timeoutMs,
+    intervalMs = 250,
+    scope = scopeOfPlatformFlag(null),
+    facts: knownFacts,
+  }: WaitForAppConnectionOptions
 ): Promise<AppConnectionResult> {
   const startedAt = Date.now();
   const deadline = startedAt + timeoutMs;
   // Read once, before the loop: what is attached changes during the wait, what this machine has
   // does not, and asking the device tools on every poll would be a subprocess every 250 ms.
-  const index =
-    platform == null
-      ? null
-      : (deviceIndex ??
-        (await buildDeviceNameIndexIfNeededAsync(
-          (await probeDevServerAsync(devServerUrl)).targets
-        )));
+  const facts =
+    knownFacts ??
+    (scope.platform == null
+      ? NO_DEVICE_FACTS
+      : await deviceFactsIfNeededAsync((await probeDevServerAsync(devServerUrl)).targets));
 
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
-    const scoped = platform == null ? null : scopeTargets(probe.targets, platform, index!);
-    const counted = scoped ? scoped.matched.length : probe.targets.length;
-    const extra = scoped
-      ? {
-          otherPlatformApps: scoped.otherPlatform.length,
-          undeterminedApps: scoped.undetermined.length,
-        }
-      : {};
+    const placed = placeTargets(probe.targets, scope, facts);
+    const counted = placed.read.length;
+    const extra =
+      scope.platform != null
+        ? {
+            otherPlatformApps: placed.otherPlatform.length,
+            undeterminedApps: placed.undetermined.length,
+          }
+        : {};
 
     if (counted > 0) {
       return {

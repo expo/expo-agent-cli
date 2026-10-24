@@ -10,6 +10,7 @@ import {
 import { runtimeErrorsAsync, runtimeEvalAsync } from '../runtimeAsync';
 import { CdpRuntimeErrorCollector } from '../runtimeErrorCollector';
 import { UNTRUSTED_OUTPUT_BEGIN } from '../untrusted';
+import { READ_EVERY_TARGET } from './runScopeFixtures';
 
 // The real error class and the real code are kept: the command branches on both.
 vi.mock('../cdpClient', async () => ({
@@ -81,7 +82,7 @@ describe(runtimeEvalAsync, () => {
 
     await expect(runtimeEvalAsync(evalOptions)).resolves.toBe(0);
 
-    expect(CdpClient).toHaveBeenCalledWith({ metroUrl: devServerUrl });
+    expect(CdpClient).toHaveBeenCalledWith({ ...READ_EVERY_TARGET, metroUrl: devServerUrl });
     expect(evaluateAsync).toHaveBeenCalledWith('globalThis.count', {
       awaitPromise: true,
       timeoutMs: 5000,
@@ -293,6 +294,7 @@ describe(runtimeErrorsAsync, () => {
     await expect(runtimeErrorsAsync(errorsOptions)).resolves.toBe(0);
 
     expect(CdpRuntimeErrorCollector).toHaveBeenCalledWith({
+      ...READ_EVERY_TARGET,
       metroUrl: devServerUrl,
       durationMs: 2000,
       // The reconnect grace period, so the command the CLI names straight after a reload does not

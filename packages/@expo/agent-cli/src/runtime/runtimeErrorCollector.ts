@@ -184,8 +184,8 @@ export class CdpRuntimeErrorCollector {
 
     // @ref llp/0005-runtime-loop-tools.rfc.md §Android — F100.
     // Every `CdpClientOptions` key is forwarded, and that is the point: this used to name the four
-    // it wanted and so silently dropped `platform` and `deviceIndex`, which both callers pass. The
-    // result was `runtime:errors --android` reading the iOS runtime and reporting it as Android's —
+    // it wanted and so silently dropped the platform scope, which both callers pass. The result was
+    // `runtime:errors --android` reading the iOS runtime and reporting it as Android's —
     // not by accident, but because the default selector ranks a runtime that answers above one that
     // answers `-32601`, and Expo Go for Android is the second kind. A rest spread cannot go stale
     // the next time an option is added to the client.

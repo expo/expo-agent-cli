@@ -1153,18 +1153,17 @@ async function reloadOverRuntimeAsync(
 
   const { CdpClient, isMethodNotFoundError } =
     require('../cdpClient') as typeof import('../cdpClient');
-  const { buildDeviceNameIndexIfNeededAsync } =
-    require('../targetPlatform') as typeof import('../targetPlatform');
+  const { deviceFactsIfNeededAsync, NO_DEVICE_FACTS, scopeOfPlatformFlag } =
+    require('../runScope') as typeof import('../runScope');
 
   let client: import('../cdpClient').CdpClient;
   try {
-    const deviceIndex =
-      options.platform == null
-        ? undefined
-        : await buildDeviceNameIndexIfNeededAsync(
-            (await probeDevServerAsync(devServerUrl)).targets
-          );
-    client = new CdpClient({ metroUrl: devServerUrl, platform: options.platform, deviceIndex });
+    const scope = scopeOfPlatformFlag(options.platform);
+    const facts =
+      scope.platform == null
+        ? NO_DEVICE_FACTS
+        : await deviceFactsIfNeededAsync((await probeDevServerAsync(devServerUrl)).targets);
+    client = new CdpClient({ metroUrl: devServerUrl, scope, facts });
   } catch (error: unknown) {
     return failed(
       `could not open a debugger connection to the app: ${error instanceof Error ? firstLine(error.message) : String(error)}`

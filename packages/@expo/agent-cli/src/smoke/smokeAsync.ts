@@ -40,7 +40,7 @@ import { buildSmokeFollowUps, followUpsEnabled, reportFollowUps } from '../follo
 import * as Log from '../log';
 import { resolveDeviceAsync, type DeviceBackend } from '../navigate/device';
 import { openRouteAsync } from '../navigate/openRoute';
-import { EXPO_GO_APP_IDS } from '../navigate/target';
+import { isExpoGoAppId } from '../navigate/target';
 import { assertEasProjectConfiguredAsync } from '../needsHuman/easProject';
 import { PROGRAM_PREFIX } from '../programName';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../project/expoGo';
@@ -60,11 +60,11 @@ import {
 } from '../runtime/reload/reloadAsync';
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
 import {
-  buildDeviceNameIndexIfNeededAsync,
-  platformOfTarget,
-  scopeTargets,
-  type DeviceNameIndex,
-} from '../runtime/targetPlatform';
+  deviceFactsIfNeededAsync,
+  placeTargets,
+  scopeOfPlatformFlag,
+  type DeviceFacts,
+} from '../runtime/runScope';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { formatSmokeResult, smokeResultToJson } from './format';
 import {
@@ -369,31 +369,32 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
    *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say — F51, F152.
    *
-   * The index exists to place a target whose own fields name no platform, and it is built by
-   * spawning `xcrun` and `adb`, so it is asked for exactly when its answer could change the
-   * outcome (`buildDeviceNameIndexIfNeededAsync`). **A gate asks that question before the app it is
-   * waiting for exists**, and a cached "nothing to place" is then an answer about an empty list:
-   * the first probe of this run finds no targets, `EMPTY_DEVICE_INDEX` is cached, and the
-   * development build that attaches a moment later — whose app id is the project's own and whose
-   * device name is a simulator's — cannot be placed by it. Every wait after that counted zero, so
-   * `smoke --ios` against a development build spent its whole budget and reported "no app had
-   * attached" about an app that had [observed — `smoke-test.ts` "opens the dev-client loading link
-   * before the route link", 55.8 s of a 60 s budget with the app listed throughout, 2026-09-06].
+   * The facts exist to place a target whose own fields name no platform, and they are read by
+   * spawning `xcrun` and `adb`, so they are asked for exactly when their answer could change the
+   * outcome (`deviceFactsIfNeededAsync`). **A gate asks that question before the app it is waiting
+   * for exists**, and a cached "nothing to place" is then an answer about an empty list: the first
+   * probe of this run finds no targets, `NO_DEVICE_FACTS` is cached, and the development build that
+   * attaches a moment later — whose app id is the project's own and whose device name is a
+   * simulator's — cannot be placed by it. Every wait after that counted zero, so `smoke --ios`
+   * against a development build spent its whole budget and reported "no app had attached" about an
+   * app that had [observed — `smoke-test.ts` "opens the dev-client loading link before the route
+   * link", 55.8 s of a 60 s budget with the app listed throughout, 2026-09-06].
    *
    * So the cache is kept only while it still places what is listed **now**. An empty list places
    * vacuously and costs nothing, which is the case the laziness was for; a list the cache cannot
    * read is the case it was never an answer to.
    */
-  let deviceIndex: DeviceNameIndex | null = null;
-  const indexAsync = async (devServerUrl: string): Promise<DeviceNameIndex> => {
+  const scope = scopeOfPlatformFlag(options.platform);
+  let deviceFacts: DeviceFacts | null = null;
+  const factsAsync = async (devServerUrl: string): Promise<DeviceFacts> => {
     const probe = await probeDevServerAsync(devServerUrl);
     const placesEverything =
-      deviceIndex != null &&
-      probe.targets.every((target) => platformOfTarget(target, deviceIndex!).platform != null);
+      deviceFacts != null &&
+      placeTargets(probe.targets, scope, deviceFacts).undetermined.length === 0;
     if (placesEverything) {
-      return deviceIndex!;
+      return deviceFacts!;
     }
-    return (deviceIndex = await buildDeviceNameIndexIfNeededAsync(probe.targets));
+    return (deviceFacts = await deviceFactsIfNeededAsync(probe.targets));
   };
 
   return {
@@ -759,8 +760,8 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     waitForAppConnection: async (devServerUrl, timeoutMs) =>
       waitForAppConnectionAsync(devServerUrl, {
         timeoutMs,
-        platform: options.platform,
-        deviceIndex: await indexAsync(devServerUrl),
+        scope,
+        facts: await factsAsync(devServerUrl),
       }),
 
     // The same ladder `navigate` walks, through the same function — local device first, then this
@@ -826,13 +827,10 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     checkAppFitsProject: async (devServerUrl) => {
       const nothing = { mismatch: null, kind: null, note: null };
       const probe = await probeDevServerAsync(devServerUrl);
-      // `matched` only, never `undetermined`: a target whose platform nothing decided must not earn
-      // this run's verdict either way (@ref src/runtime/targetPlatform §scopeTargets). Erring that
-      // way keeps the check from turning an unreadable target into a refusal.
-      const scoped = scopeTargets(probe.targets, options.platform, await indexAsync(devServerUrl));
-      const expoGo = scoped.matched
-        .map((target) => target.appId)
-        .find((appId): appId is string => appId != null && EXPO_GO_APP_IDS.includes(appId));
+      // `read` only: a target nothing placed must not earn this run's verdict either way (@ref
+      // src/runtime/runScope §placeTargets), so an unreadable target never becomes a refusal.
+      const placed = placeTargets(probe.targets, scope, await factsAsync(devServerUrl));
+      const expoGo = placed.read.map((target) => target.appId).find(isExpoGoAppId);
       // Everything below is about Expo Go. A development build is this project's own app and its
       // version is the project's own business, so there is nothing here to ask about it.
       if (expoGo == null) {
@@ -1056,8 +1054,8 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       try {
         await new CdpClient({
           metroUrl: devServerUrl,
-          platform: options.platform,
-          deviceIndex: await indexAsync(devServerUrl),
+          scope,
+          facts: await factsAsync(devServerUrl),
         }).evaluateAsync(LIVENESS_EXPRESSION, {
           awaitPromise: false,
           timeoutMs: LIVENESS_TIMEOUT_MS,
@@ -1086,8 +1084,8 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         const records = await new CdpRuntimeErrorCollector({
           metroUrl: devServerUrl,
           durationMs: windowMs,
-          platform: options.platform,
-          deviceIndex: await indexAsync(devServerUrl),
+          scope,
+          facts: await factsAsync(devServerUrl),
         }).collectAsync();
         return { ok: true, records, reason: null };
       } catch (error: unknown) {

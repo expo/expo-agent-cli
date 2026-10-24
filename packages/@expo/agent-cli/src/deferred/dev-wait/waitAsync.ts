@@ -25,6 +25,7 @@ import {
 } from '../../runtime/bundleCheck';
 import { howToNameTheDevServer } from '../../runtime/devServer';
 import { discoverDevServerAsync } from '../../runtime/discoverDevServer';
+import { scopeOfPlatformFlag } from '../../runtime/runScope';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { CommandError } from '../../utils/errors';
 import { buildDevWaitFollowUps } from './followups';
@@ -129,8 +130,9 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
       timeoutMs: remainingMs(),
       // Scoped when the caller named a native platform: `--require-app --platform android` used to
       // be satisfied by the iOS simulator attached to the same dev server (F51).
-      platform:
-        options.platformExplicit && options.platform !== 'web' ? options.platform : undefined,
+      scope: scopeOfPlatformFlag(
+        options.platformExplicit && options.platform !== 'web' ? options.platform : null
+      ),
     });
     appsConnected = attached.appsConnected;
     timedOut = attached.timedOut;

@@ -15,6 +15,7 @@ import {
 } from '../cdpClient';
 import { MockWebSocket } from './MockWebSocket';
 import LIVE from './fixtures/live-promise-frames.json';
+import { READ_EVERY_TARGET } from './runScopeFixtures';
 
 const TARGET = {
   id: '1',
@@ -29,6 +30,7 @@ const TARGET = {
 
 function createClient(responder: (request: any, socket: MockWebSocket) => void): CdpClient {
   return new CdpClient({
+    ...READ_EVERY_TARGET,
     metroUrl: 'http://localhost:8081',
     targetSelector: async () => TARGET,
     createWebSocket: (url) => new MockWebSocket(url, responder) as unknown as WebSocketImpl,
@@ -213,7 +215,7 @@ describe('CdpClient.evaluateAsync', () => {
       json: async () => [],
     })) as unknown as typeof fetch;
 
-    const client = new CdpClient({ metroUrl: 'http://localhost:8081' });
+    const client = new CdpClient({ ...READ_EVERY_TARGET, metroUrl: 'http://localhost:8081' });
     await expect(client.evaluateAsync('1')).rejects.toThrow(/Failed to fetch debugger targets/);
   });
 
@@ -223,7 +225,7 @@ describe('CdpClient.evaluateAsync', () => {
       json: async () => [],
     })) as unknown as typeof fetch;
 
-    const client = new CdpClient({ metroUrl: 'http://localhost:8081' });
+    const client = new CdpClient({ ...READ_EVERY_TARGET, metroUrl: 'http://localhost:8081' });
     await expect(client.evaluateAsync('1')).rejects.toThrow(/No target found/);
   });
 
@@ -239,6 +241,7 @@ describe('CdpClient.evaluateAsync', () => {
     })) as unknown as typeof fetch;
 
     const client = new CdpClient({
+      ...READ_EVERY_TARGET,
       metroUrl: 'http://localhost:8081',
       targetSelector: async (targets) => targets[0] ?? null,
       createWebSocket: (url) =>
@@ -262,7 +265,11 @@ describe('CdpClient.evaluateAsync', () => {
       json: async () => [],
     })) as unknown as typeof fetch;
 
-    const client = new CdpClient({ metroUrl: 'http://localhost:8081', targetRetryMs: 300 });
+    const client = new CdpClient({
+      ...READ_EVERY_TARGET,
+      metroUrl: 'http://localhost:8081',
+      targetRetryMs: 300,
+    });
     await expect(client.evaluateAsync('1')).rejects.toThrow(/No target found/);
   });
 });

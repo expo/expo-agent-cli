@@ -36,7 +36,7 @@ import {
   relativizeFrame,
   symbolicateFramesAsync,
 } from './symbolicate';
-import { EMPTY_DEVICE_INDEX, scopeTargets } from './targetPlatform';
+import { placeTargets } from './runScope';
 
 // The family's shared type, re-exported from where it was first defined so that the commands and
 // the modules that call them keep importing it from one place (`./preflight` owns it now, because
@@ -55,9 +55,9 @@ export async function runtimeEvalAsync(
 ): Promise<number> {
   const { expression, timeoutMs, awaitPromise, json } = options;
   // One preflight, one read of the target list (`./preflight`): the dev server, the app and the
-  // platform index come back together, so the platform this command was told about is the platform
+  // device facts come back together, so the platform this command was told about is the platform
   // of the app it reads and the two steps cannot disagree about which app that is (F51).
-  const { devServerUrl, deviceIndex } = await preflightRuntimeAsync(
+  const { devServerUrl, scope, facts } = await preflightRuntimeAsync(
     { need: 'debugger-target', devServerUrl: options.devServerUrl, platform: options.platform },
     context
   );
@@ -66,8 +66,8 @@ export async function runtimeEvalAsync(
   try {
     result = await new CdpClient({
       metroUrl: devServerUrl,
-      platform: options.platform,
-      deviceIndex,
+      scope,
+      facts,
     }).evaluateAsync(expression, {
       awaitPromise,
       timeoutMs,
@@ -176,14 +176,11 @@ export function evaluateUnsupportedError(devServerUrl: string): CommandError {
 
 /** The platforms, other than the requested one, that have an app on the dev server. */
 function otherPlatformsOf(
-  targets: Parameters<typeof scopeTargets>[0],
-  platform: NativePlatform | null | undefined,
-  deviceIndex: Parameters<typeof scopeTargets>[2] | null | undefined
+  targets: Parameters<typeof placeTargets>[0],
+  scope: Parameters<typeof placeTargets>[1],
+  facts: Parameters<typeof placeTargets>[2]
 ): NativePlatform[] {
-  if (platform == null) {
-    return [];
-  }
-  const { otherPlatform } = scopeTargets(targets, platform, deviceIndex ?? EMPTY_DEVICE_INDEX);
+  const { otherPlatform } = placeTargets(targets, scope, facts);
   return [...new Set(otherPlatform.map((entry) => entry.platform))].sort();
 }
 
@@ -224,16 +221,12 @@ export async function runtimeErrorsAsync(
     },
     context
   );
-  const { devServerUrl, deviceIndex } = connection;
+  const { devServerUrl, scope, facts } = connection;
 
   // @ref ../dev/logErrors — F105. Which *other* platforms have an app on this dev server, because
   // the log fallback below cannot tell their lines from this one's and a caveat that does not say so
   // is the overclaim. Computed from the read the preflight already made, so it costs nothing.
-  const otherPlatformsConnected = otherPlatformsOf(
-    connection.targets,
-    options.platform,
-    deviceIndex
-  );
+  const otherPlatformsConnected = otherPlatformsOf(connection.targets, scope, facts);
 
   // Marked before the window opens, so the log read below is bounded the same way the debugger
   // window is: a log is cumulative, and reporting all of it as "what happened while I watched"
@@ -245,8 +238,8 @@ export async function runtimeErrorsAsync(
     metroUrl: devServerUrl,
     durationMs,
     targetRetryMs: APP_RECONNECT_GRACE_MS,
-    platform: options.platform,
-    deviceIndex,
+    scope,
+    facts,
   });
   try {
     errors = await collector.collectAsync();
