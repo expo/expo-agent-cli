@@ -2,7 +2,7 @@ import { EventEmitter } from 'events';
 import type WebSocketImpl from 'ws';
 
 import { CdpRuntimeErrorCollector, parseRuntimeErrorMessage } from '../runtimeErrorCollector';
-import { scopeOfPlatformFlag } from '../runScope';
+import { scopeOfFlags } from '../runScope';
 import { MockWebSocket } from './MockWebSocket';
 import { makeDeviceFacts, READ_EVERY_TARGET } from './runScopeFixtures';
 
@@ -309,7 +309,7 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
     const collector = new CdpRuntimeErrorCollector({
       metroUrl: 'http://localhost:8081',
       durationMs: 20,
-      scope: scopeOfPlatformFlag('android'),
+      scope: scopeOfFlags({ platform: 'android', eas: false }),
       // The facts this machine's own device tools would report, which are the strongest of the
       // three pieces of evidence `platformOfTarget` ranks.
       facts: ANDROID_AND_IOS_FACTS,
@@ -346,7 +346,7 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
     const collector = new CdpRuntimeErrorCollector({
       metroUrl: 'http://localhost:8081',
       durationMs: 20,
-      scope: scopeOfPlatformFlag('android'),
+      scope: scopeOfFlags({ platform: 'android', eas: false }),
       facts: ANDROID_AND_IOS_FACTS,
       createWebSocket: (url) => new MockWebSocket(url, () => {}) as unknown as WebSocketImpl,
     });

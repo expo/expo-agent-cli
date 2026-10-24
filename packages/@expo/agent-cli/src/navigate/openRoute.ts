@@ -50,7 +50,9 @@ import {
   deviceFactsForScopeAsync,
   placeTargets,
   readDeviceFactsAsync,
-  scopeOfPlatformFlag,
+  scopeOfDevice,
+  scopeOfFlags,
+  type RunScope,
 } from '../runtime/runScope';
 import { CommandError } from '../utils/errors';
 import { reverseLoopbackPortAsync, type ReverseResult } from './adbReverse';
@@ -396,7 +398,7 @@ export async function resolveRouteUrlAsync(
   // a dev server with an iOS simulator already attached would otherwise decide an `--android` run's
   // target app from the simulator's registration. Nothing on the named platform leaves the decision
   // to the project's own shape, which is the honest fallback. Expo Go costs no device-tool spawn.
-  const scope = scopeOfPlatformFlag(platform);
+  const scope = scopeOfFlags({ platform, eas: options.cloud === 'required' });
   const decisionTargets = placeTargets(
     devServer.targets,
     scope,
@@ -743,17 +745,15 @@ const ROUTE_ATTACH_FLOOR_MS = 2_000;
 /**
  * A function that waits until an app of this platform holds a debugger target, or the deadline.
  *
- * Built once and shared by the two waits of one run — the launcher's and the route link's — so both
- * ask the same question of the same dev server, and the device facts that scoping needs are read
- * once rather than per open.
+ * The launcher's wait and the route link's wait ask the same question of the same dev server. The
+ * device facts that scoping needs are read once per wait, not once per poll.
  *
  * @returns how many targets this platform had when the wait ended: zero means the deadline won.
  */
 async function attachWaiterAsync(
   devServerUrl: string,
-  platform: NavigatePlatform
+  scope: RunScope
 ): Promise<(deadline: number) => Promise<number>> {
-  const scope = scopeOfPlatformFlag(platform);
   const facts = await readDeviceFactsAsync();
   const countAsync = async (): Promise<number> => {
     const probe = await probeDevServerAsync(devServerUrl);
@@ -859,7 +859,7 @@ async function launchDevClientFirstAsync({
     };
   }
 
-  const waitAsync = await attachWaiterAsync(devServerUrl, device.platform);
+  const waitAsync = await attachWaiterAsync(devServerUrl, scopeOfDevice(device));
   const targets = await waitAsync(startedAt + budgetMs);
   return {
     url: launcherUrl,
@@ -951,7 +951,7 @@ async function confirmAttachAsync({
   }
 
   const startedAt = Date.now();
-  const waitAsync = await attachWaiterAsync(devServerUrl, device.platform);
+  const waitAsync = await attachWaiterAsync(devServerUrl, scopeOfDevice(device));
 
   let targets = await waitAsync(startedAt + budgetMs);
   let recovered = false;
