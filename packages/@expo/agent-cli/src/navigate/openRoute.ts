@@ -394,12 +394,12 @@ export async function resolveRouteUrlAsync(
   // Scoped to the platform that was named, for the reason every other reading command is (F51):
   // a dev server with an iOS simulator already attached would otherwise decide an `--android` run's
   // target app from the simulator's registration. Nothing on the named platform leaves the decision
-  // to the project's own shape, which is the honest fallback. Expo Go costs no device-tool spawn.
+  // to the project's shape. No bindings: navigate does not skip apps (llp/0005 §Target owner).
   const scope = scopeOfFlags({ platform, eas: options.cloud === 'required' });
   const decisionTargets = placeTargets(
     devServer.targets,
     scope,
-    await deviceFactsForScopeAsync(devServer.targets, scope)
+    await deviceFactsForScopeAsync(devServer.targets, scope, null)
   ).read;
 
   const target = decideExpoGoTarget({

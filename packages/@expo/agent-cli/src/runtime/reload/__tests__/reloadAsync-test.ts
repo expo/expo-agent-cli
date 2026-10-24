@@ -362,6 +362,7 @@ describe(reloadAsync, () => {
       'reloaded',
       'route',
       'routeCheck',
+      'skippedApps',
       'url',
       'verifiedBy',
       'waitedMs',
@@ -805,6 +806,44 @@ describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => 
     expect(JSON.parse(printed()).bundlePlatformSource).toBe('connected-app');
     expect(JSON.parse(printed()).bundlePlatforms).toEqual(['android']);
   });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+  it(`does not check the bundle of another worktree's app, and reports that app`, async () => {
+    const CLONE = 'agent-cli c4ed0a60';
+    vol.mkdirSync('/wt/legend', { recursive: true });
+    seedIosBinding('/wt/legend', 'UDID-LEGEND', CLONE);
+    mockSpawnQueue([
+      {
+        stdout: JSON.stringify({
+          devices: { 'iOS-26-0': [{ udid: 'UDID-LEGEND', name: CLONE, state: 'Booted' }] },
+        }),
+      },
+    ]);
+    // Expo Go on the other worktree's clone: its app id alone would place it on iOS.
+    const ON_CLONE = { ...EXPO_GO_TARGET, id: 'clone-1', deviceName: CLONE };
+    const platformsAsked: string[] = [];
+    const server = mockDevServer([ON_CLONE, ANDROID_TARGET]);
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (input: unknown, init?: any) => {
+      const header = init?.headers?.['expo-platform'];
+      if (header) {
+        platformsAsked.push(String(header));
+      }
+      return await (inner as any)(input, init);
+    }) as unknown as typeof fetch;
+    const { socket } = fakeSocket(
+      [{ 'socket#1': 'role=android' }, { 'socket#4': 'role=android' }],
+      () => server.listing([ON_CLONE, { ...ANDROID_TARGET, id: 'android-2' }])
+    );
+    mockConnect(socket);
+
+    await reloadAsync(projectRoot, options({ json: true }));
+
+    expect(platformsAsked).toEqual(['android']);
+    expect(JSON.parse(printed()).skippedApps).toEqual([
+      { deviceName: CLONE, group: 'other-worktree', projectRoots: ['/wt/legend'] },
+    ]);
+  });
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live
@@ -837,6 +876,7 @@ describe(explainReloadFailure, () => {
       bundlesAfterReload: { observed: null, count: 0, line: null, reason: null },
       bundlePlatforms: ['ios'],
       bundlePlatformSource: 'flag',
+      skippedApps: [],
       route: null,
       routeCheck: {
         checked: false,

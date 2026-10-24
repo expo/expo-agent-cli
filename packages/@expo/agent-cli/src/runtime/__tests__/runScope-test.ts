@@ -32,7 +32,7 @@ describe(placeTargets, () => {
         scopeOfFlags({ platform, eas: false }),
         makeDeviceFacts()
       )
-    ).toEqual({ read, otherPlatform, undetermined });
+    ).toEqual({ read, otherPlatform, undetermined, skipped: [] });
   });
 });
 
@@ -91,6 +91,120 @@ describe('placeTargets on an EAS Simulator session', () => {
       read,
       otherPlatform: [],
       undetermined,
+      skipped: [],
     });
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+// Another worktree's clone simulator, still booted, loads its JavaScript from this port. A target
+// names its device by name only; the booted simulators and the live bindings say whose it is.
+const CLONE = 'agent-cli c4ed0a60';
+const ON_CLONE = { appId: 'host.exp.Exponent', deviceName: CLONE } as CdpTarget;
+const bound = (udid: string, projectRoot: string, own = false) => ({
+  udid,
+  name: CLONE,
+  projectRoot,
+  own,
+});
+
+describe('placeTargets and the worktree that bound the simulator', () => {
+  it.each([
+    {
+      name: 'skips a target when only another worktree binds its booted simulator',
+      booted: ['SIM-A'],
+      iosBindings: [bound('SIM-A', '/wt/legend')],
+      projectRoots: ['/wt/legend'],
+    },
+    {
+      name: 'reads a target on the simulator this worktree binds',
+      booted: ['SIM-A'],
+      iosBindings: [bound('SIM-A', '/wt/mapfilter', true)],
+      projectRoots: null,
+    },
+    {
+      name: 'reads a target on a simulator this worktree and another one both bind',
+      booted: ['SIM-A'],
+      iosBindings: [bound('SIM-A', '/wt/legend'), bound('SIM-A', '/wt/mapfilter', true)],
+      projectRoots: null,
+    },
+    {
+      name: 'reads a target on a simulator no live binding names',
+      booted: ['SIM-A'],
+      iosBindings: [],
+      projectRoots: null,
+    },
+    {
+      name: 'reads a target when one of two booted simulators with its name is bound elsewhere',
+      booted: ['SIM-A', 'SIM-B'],
+      iosBindings: [bound('SIM-A', '/wt/legend')],
+      projectRoots: null,
+    },
+    {
+      name: 'skips a target when each booted simulator with its name is bound elsewhere',
+      booted: ['SIM-A', 'SIM-B'],
+      iosBindings: [bound('SIM-A', '/wt/legend'), bound('SIM-B', '/wt/other')],
+      projectRoots: ['/wt/legend', '/wt/other'],
+    },
+    {
+      name: 'reads a target when no simulator with its name is booted',
+      booted: [],
+      iosBindings: [bound('SIM-A', '/wt/legend')],
+      projectRoots: null,
+    },
+  ])('$name', ({ booted, iosBindings, projectRoots }) => {
+    const facts = makeDeviceFacts({
+      booted: booted.map((udid) => ({ name: CLONE, udid })),
+      iosBindings,
+    });
+
+    expect(placeTargets([ON_CLONE], scopeOfFlags({ platform: null, eas: false }), facts)).toEqual({
+      read: projectRoots == null ? [ON_CLONE] : [],
+      otherPlatform: [],
+      undetermined: [],
+      skipped:
+        projectRoots == null
+          ? []
+          : [{ target: ON_CLONE, placement: { group: 'other-worktree', projectRoots } }],
+    });
+  });
+
+  // Out of every scope: not read with a platform flag or without one, and on an EAS Simulator iOS
+  // session it does not take the one unclaimed slot that is the session's app.
+  it.each([
+    {
+      name: 'with no platform flag',
+      targets: [ON_CLONE, android],
+      platform: null,
+      eas: false,
+      read: [android],
+    },
+    {
+      name: 'of its own platform',
+      targets: [ON_CLONE, android],
+      platform: 'ios' as const,
+      eas: false,
+      read: [],
+    },
+    {
+      name: 'of an EAS Simulator iOS session',
+      targets: [
+        { ...ON_CLONE, appId: 'dev.vonovak.cyclable' } as CdpTarget,
+        { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17' } as CdpTarget,
+      ],
+      platform: 'ios' as const,
+      eas: true,
+      read: [{ appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17' }],
+    },
+  ])('keeps a skipped target out of the read set $name', ({ targets, platform, eas, read }) => {
+    const facts = makeDeviceFacts({
+      booted: [{ name: CLONE, udid: 'SIM-A' }],
+      iosBindings: [bound('SIM-A', '/wt/legend')],
+    });
+
+    const placed = placeTargets(targets, scopeOfFlags({ platform, eas }), facts);
+
+    expect(placed.read).toEqual(read);
+    expect(placed.skipped.map((entry) => entry.target)).toEqual([targets[0]]);
   });
 });

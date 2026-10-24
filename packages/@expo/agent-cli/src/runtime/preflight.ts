@@ -30,6 +30,7 @@
 // empty afterwards is reported as inconclusive rather than as a call to fix.
 
 import { EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
+import * as Log from '../log';
 import type { NavigatePlatform } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
 import { hostPlatform } from '../smoke/suggest';
@@ -44,10 +45,12 @@ import {
 } from './devServer';
 import { discoverDevServerAsync } from './discoverDevServer';
 import {
+  describeSkippedApps,
   deviceFactsForScopeAsync,
   NO_DEVICE_FACTS,
   placeTargets,
   scopeOfFlags,
+  skippedAppsOf,
   type DeviceFacts,
   type PlacedTargets,
   type RunScope,
@@ -246,8 +249,10 @@ export async function preflightRuntimeAsync(
   // The device facts are read for the list that was already read, so the platform this command was
   // told about is the platform of the app it reads — the two steps cannot disagree about which app
   // that is (F51, F53). They cost a subprocess only when a target's platform cannot be read off its
-  // application id or its device name, which for Expo Go is never.
-  const facts = knownFacts ?? (await deviceFactsForScopeAsync(targets, scope));
+  // application id or its device name, which for Expo Go is never. Only a run in a project reads
+  // the bindings that mark another worktree's app (llp/0005 §Target owner).
+  const facts =
+    knownFacts ?? (await deviceFactsForScopeAsync(targets, scope, context.projectRoot ?? null));
 
   // Scoped for **every** caller that named a platform, whatever it needs, and that is F101. This
   // used to sit below the `need` branch, so `appTargets` — documented as the list a command may read
@@ -257,23 +262,21 @@ export async function preflightRuntimeAsync(
   // reporting `stopped: true, wasRunning: true`. Reading the other platform's app is F51 whether or
   // not the command also required one to exist.
   const placed = placeTargets(targets, scope, facts);
-  const connection: RuntimeConnection = { ...base, appTargets: placed.read, facts };
-
-  if (need !== 'debugger-target') {
-    return connection;
-  }
-
-  if (targets.length === 0) {
-    throw noAppConnectedError({ devServerUrl: url, retryMs: retryBudgetMs, cloud, platform });
-  }
 
   // Only a command that *requires* a runtime refuses on an empty scope. For `reload` an empty scope
   // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
   // seventh and eighth calls a success.
-  if (platform != null && placed.read.length === 0) {
-    throw noAppOnPlatformError(url, platform, placed, cloud);
+  if (need === 'debugger-target' && targets.length === 0) {
+    throw noAppConnectedError({ devServerUrl: url, retryMs: retryBudgetMs, cloud, platform });
   }
-  return connection;
+  if (need === 'debugger-target' && placed.read.length === 0) {
+    throw emptyScopeError(url, scope, placed);
+  }
+  const skipped = skippedAppsOf(placed);
+  if (skipped.length > 0) {
+    Log.progress(describeSkippedApps(skipped));
+  }
+  return { ...base, appTargets: placed.read, facts };
 }
 
 /**
@@ -410,6 +413,43 @@ export function noAppConnectedError({
 }
 
 /**
+ * The refusal for a dev server whose apps are all out of this run's scope.
+ *
+ * The apps stay connected, so asking again gives the same answer (exit 1) until the app is opened.
+ * When only other worktrees' apps are connected, it names them: their simulator loads from this
+ * port, and a reader who is not told so debugs the wrong build (llp/0005 §Target owner).
+ */
+export function emptyScopeError(
+  devServerUrl: string,
+  scope: RunScope,
+  placed: PlacedTargets
+): CommandError {
+  const platform = scope.platform?.value;
+  const cloud = scope.device.kind === 'eas-flag';
+  const skipped = skippedAppsOf(placed);
+  const skippedWhy = skipped.length > 0 ? ` ${describeSkippedApps(skipped)}` : '';
+  if (platform != null && placed.otherPlatform.length + placed.undetermined.length > 0) {
+    return noAppOnPlatformError(devServerUrl, platform, placed, cloud, skippedWhy);
+  }
+  const navigate = `${PROGRAM_PREFIX} navigate / --${platform ?? hostPlatform()}${cloud ? ' --eas' : ''}`;
+  const error = new CommandError(
+    'NO_APP_CONNECTED',
+    [
+      `No app of this worktree is connected to the Expo dev server at ${devServerUrl}, so there is nothing to read.`,
+      `Why:${skippedWhy} Such an app loads its JavaScript from this port, but it runs the other worktree's build, so a read of it says nothing about this one.`,
+      `How: open the app on this worktree's device with "${navigate}", then run this command again.`,
+    ].join('\n')
+  );
+  error.suggestedCommand = navigate;
+  return withData(error, {
+    devServerUrl,
+    devServerReachable: true,
+    debuggerTargets: skipped.length,
+    platform,
+  });
+}
+
+/**
  * The failure for a dev server whose apps are all on some other platform, or unreadable.
  *
  * Two shapes, because the next steps differ. Apps on another platform means `--android` was asked
@@ -421,7 +461,8 @@ function noAppOnPlatformError(
   devServerUrl: string,
   platform: NavigatePlatform,
   scoped: Pick<PlacedTargets, 'otherPlatform' | 'undetermined'>,
-  cloud: boolean
+  cloud: boolean,
+  skippedWhy: string
 ): CommandError {
   const others = scoped.otherPlatform.map((entry) => entry.platform);
   const uniqueOthers = [...new Set(others)];
@@ -431,12 +472,12 @@ function noAppOnPlatformError(
     uniqueOthers.length > 0
       ? [
           `No ${platform} app is connected to the Expo dev server at ${devServerUrl}, so there is nothing on ${platform} to read.`,
-          `Why: its debugger target list names ${others.length} app${others.length === 1 ? '' : 's'}, and ${others.length === 1 ? 'it is' : 'they are'} on ${uniqueOthers.join(' and ')}${scoped.undetermined.length > 0 ? `, plus ${scoped.undetermined.length} whose platform nothing in the target names` : ''}. Reading one of those would answer a question about ${uniqueOthers[0]} while reporting it as ${platform}.`,
+          `Why: its debugger target list names ${others.length} app${others.length === 1 ? '' : 's'}, and ${others.length === 1 ? 'it is' : 'they are'} on ${uniqueOthers.join(' and ')}${scoped.undetermined.length > 0 ? `, plus ${scoped.undetermined.length} whose platform nothing in the target names` : ''}. Reading one of those would answer a question about ${uniqueOthers[0]} while reporting it as ${platform}.${skippedWhy}`,
           `How: open the app on ${platform} with "${PROGRAM_PREFIX} navigate / --${platform}${cloud ? ' --eas' : ''}", then run this command again. Drop --${platform} to read whichever app is connected.`,
         ].join('\n')
       : [
           `No app connected to the Expo dev server at ${devServerUrl} could be shown to be running on ${platform}.`,
-          `Why: its debugger target list names ${scoped.undetermined.length} app${scoped.undetermined.length === 1 ? '' : 's'}, and nothing in ${scoped.undetermined.length === 1 ? 'its target' : 'their targets'} says which platform ${scoped.undetermined.length === 1 ? 'it is' : 'they are'} on — the dev server does not label them, so this is read from the device name and the app id. A development build on a physical device can look like this.`,
+          `Why: its debugger target list names ${scoped.undetermined.length} app${scoped.undetermined.length === 1 ? '' : 's'}, and nothing in ${scoped.undetermined.length === 1 ? 'its target' : 'their targets'} says which platform ${scoped.undetermined.length === 1 ? 'it is' : 'they are'} on — the dev server does not label them, so this is read from the device name and the app id. A development build on a physical device can look like this.${skippedWhy}`,
           `How: drop --${platform} to read the app that is connected, which is the honest command when only one is. To have the platform recognised, connect the device this machine's device tools can see ("adb devices -l", "xcrun simctl list devices booted").`,
         ].join('\n')
   );
