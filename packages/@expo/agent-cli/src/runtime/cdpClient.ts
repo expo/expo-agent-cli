@@ -312,7 +312,7 @@ export class CdpClient {
    * Settling a promise takes more than one `Runtime.evaluate`, and a connection per request would
    * pay the handshake — and the inspector proxy's own bookkeeping — for each poll.
    */
-  private async openSessionAsync(): Promise<CdpSession> {
+  async openSessionAsync(): Promise<CdpSession> {
     const ws = await this.createWebSocketAsync();
     const url = this.getWebSocketDebuggerUrl();
     const pending = new Map<
@@ -392,6 +392,9 @@ export class CdpClient {
           pending.delete(id);
         }
       },
+      get closed() {
+        return closedWith != null;
+      },
       close() {
         closedWith ??= new Error('The debugger connection was closed.');
         pending.clear();
@@ -426,11 +429,23 @@ export class CdpClient {
       session.close();
     }
   }
+
+  /** Send one CDP request over its own connection, and resolve with the result. */
+  async sendAsync(method: string, params: object, timeoutMs: number): Promise<unknown> {
+    const session = await this.openSessionAsync();
+    try {
+      return await session.sendAsync(method, params, timeoutMs);
+    } finally {
+      session.close();
+    }
+  }
 }
 
 /** One debugger connection, with the request/response bookkeeping done. */
-interface CdpSession {
+export interface CdpSession {
   sendAsync(method: string, params: object, timeoutMs: number): Promise<unknown>;
+  /** The connection dropped or was closed: every request on it fails from now on. */
+  readonly closed: boolean;
   close(): void;
 }
 
@@ -454,7 +469,7 @@ function withDeadline<T>(promise: Promise<T>, timeoutMs: number, method: string)
 }
 
 /** Send one `Runtime.evaluate` and read the answer. */
-async function runtimeEvaluateAsync(
+export async function runtimeEvaluateAsync(
   session: CdpSession,
   expression: string,
   { returnByValue, timeoutMs }: { returnByValue: boolean; timeoutMs: number }

@@ -15,16 +15,18 @@ import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../../de
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../../exitCodes';
 import { resetPackageRunnerCache } from '../../../utils/packageRunner';
 import { connectMessageSocketAsync, type MessageSocketPeers } from '../../messageSocket';
-import {
-  explainReloadFailure,
-  reloadAsync,
-  reloadOverDevServerAsync,
-  type ReloadResultJson,
-} from '../reloadAsync';
+import { explainReloadFailure, reloadAsync, type ReloadResultJson } from '../reloadAsync';
+import { reloadOverDevServerAsync } from '../rungOne';
 import { scopeOfFlags } from '../../runScope';
 import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
+import { serveInspectorApp } from '../../__tests__/fakeInspectorApp';
+
+vi.mock('ws', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('ws')>();
+  return { ...actual, WebSocket: vi.fn() };
+});
 
 vi.mock('../../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -916,6 +918,82 @@ describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => 
       platform: { value: 'android', by: 'bound-device' },
       device: { kind: 'bound', device: { backend: 'cloud', id: '01a15bf1' } },
     });
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+// Another worktree's clone simulator loads from this port beside this worktree's app on its bound
+// simulator. Its app is skipped: rung 1 sends it no reload, and nothing it does proves this one.
+describe(`${reloadAsync.name} beside an app the scope skipped`, () => {
+  const CLONE = 'agent-cli c4ed0a60';
+  const ON_CLONE = { ...EXPO_GO_TARGET, id: 'clone-1', deviceName: CLONE };
+  const BOTH_BOOTED = {
+    stdout: JSON.stringify({
+      devices: {
+        'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [
+          { udid: 'IOS-1', name: 'iPhone 17', state: 'Booted' },
+          { udid: 'UDID-LEGEND', name: CLONE, state: 'Booted' },
+        ],
+      },
+    }),
+  };
+
+  beforeEach(() => {
+    vol.mkdirSync('/wt/legend', { recursive: true });
+    seedIosBinding('/wt/legend', 'UDID-LEGEND', CLONE);
+    mockSpawnQueue(Array.from({ length: 8 }, () => BOTH_BOOTED));
+  });
+
+  it(`does not count a new page of the skipped app as this worktree's reload`, async () => {
+    writeProject();
+    const OWN = {
+      ...EXPO_GO_TARGET,
+      reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'own' },
+    };
+    const server = mockDevServer([ON_CLONE, OWN]);
+    const cloneRegistersAgain = () => server.listing([{ ...ON_CLONE, id: 'clone-2' }, OWN]);
+    mockConnect(fakeSocket([{ 'socket#1': 'role=ios' }], cloneRegistersAgain).socket);
+    serveInspectorApp({ onReload: 'nothing', onPageReload: cloneRegistersAgain });
+
+    await reloadAsync(projectRoot, options({ json: true, method: 'dev-server', timeoutMs: 600 }));
+
+    expect(JSON.parse(printed())).toMatchObject({ reloaded: false, appsReconnected: 0 });
+  });
+
+  it(`says the new JavaScript context proved the reload, not that no mechanism ran`, async () => {
+    writeProject();
+    const OWN = {
+      ...EXPO_GO_TARGET,
+      reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'own' },
+    };
+    mockDevServer([ON_CLONE, OWN]);
+    mockConnect(fakeSocket([{ 'socket#1': 'role=ios' }]).socket);
+    serveInspectorApp();
+
+    await reloadAsync(projectRoot, options({ json: true, method: 'dev-server', timeoutMs: 600 }));
+
+    expect(JSON.parse(printed())).toMatchObject({
+      reloaded: true,
+      verifiedBy: 'debugger-context-replaced',
+      bundlesAfterReload: {
+        observed: null,
+        reason: expect.stringContaining('new JavaScript context'),
+      },
+    });
+  });
+
+  it(`relaunches this worktree's app, not the skipped app listed first`, async () => {
+    writeProject();
+    mockDevServer([{ ...ON_CLONE, appId: 'com.legend.app' }, EXPO_GO_TARGET]);
+    mockConnect(fakeSocket([{}]).socket);
+
+    await reloadAsync(projectRoot, options({ json: true, timeoutMs: 600 }));
+
+    const terminate = vi
+      .mocked(spawn)
+      .mock.calls.map(([, args]) => args as string[])
+      .find((args) => args[1] === 'terminate');
+    expect(terminate).toEqual(['simctl', 'terminate', 'IOS-1', 'host.exp.Exponent']);
   });
 });
 

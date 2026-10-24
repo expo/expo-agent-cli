@@ -405,23 +405,7 @@ describe('a worktree bound to an EAS Simulator session, with only a local app co
   let stub: StubDevServer;
   let cloudBinding: string;
   beforeAll(async () => {
-    await installStubXcrunAsync(projectRoot, null);
-    const root = canonicalizeExistingPath(projectRoot);
-    const bindings = path.join(expoHomeOf(projectRoot), 'agent-cli', 'bindings');
-    await fs.promises.rm(path.join(bindings, `${digestOf(root)}-ios-local-ios.json`), {
-      force: true,
-    });
-    cloudBinding = path.join(bindings, `${digestOf(root)}-ios-cloud.json`);
-    await fs.promises.writeFile(
-      cloudBinding,
-      JSON.stringify({
-        version: 1,
-        device: { backend: 'cloud', platform: 'ios', id: '01a160c1', origin: 'started' },
-        projectRoot: root,
-        boundAt: new Date().toISOString(),
-        expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
-      })
-    );
+    cloudBinding = await bindToSessionAsync();
     stub = await startStubDevServerAsync({
       targets: [{ ...EXPO_GO_TARGET, appId: 'dev.vonovak.cyclable' }],
       inspectorEvaluate: () => undefined,
@@ -448,3 +432,73 @@ describe('a worktree bound to an EAS Simulator session, with only a local app co
     expect(result.stderr).not.toContain('Scoped to ios');
   });
 });
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+// N2-17: the same session binding, with the session's app ("iPhone 17") beside an app on the booted
+// local simulator ("iPhone 17 Pro"). The dev server relays a broadcast to both, so runtime:reload
+// sends none: it reloads the session's app over Page.reload and proves it there.
+describe('a worktree bound to an EAS Simulator session, beside a local app', () => {
+  let stub: StubDevServer;
+  let cloudBinding: string;
+  beforeAll(async () => {
+    cloudBinding = await bindToSessionAsync();
+    const devBuild = { ...EXPO_GO_TARGET, appId: 'dev.vonovak.cyclable' };
+    stub = await startStubDevServerAsync({
+      targets: [
+        devBuild,
+        {
+          ...devBuild,
+          id: '2',
+          deviceName: 'iPhone 17',
+          webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=2&page=1',
+        },
+      ],
+    });
+  });
+  afterAll(async () => {
+    await stub.close();
+    fs.rmSync(cloudBinding, { force: true });
+  });
+
+  it('runtime:reload sends no broadcast and reloads only the session app', async () => {
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['runtime:reload', '--dev-server-url', stub.url, '--no-bundle-check', '--json'],
+      { reject: false, env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' } }
+    );
+
+    expect(stub.broadcasts()).toBe(0);
+    expect(stub.pageReloads()).toEqual(['2']);
+    expect(result.exitCode).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      reloaded: true,
+      verifiedBy: 'debugger-context-replaced',
+      skippedApps: [{ deviceName: 'iPhone 17 Pro', group: 'other-device' }],
+    });
+  });
+});
+
+/**
+ * Bind this worktree to an EAS Simulator iOS session, with "iPhone 17 Pro" booted on this machine
+ * and not bound to it. Returns the binding file.
+ */
+async function bindToSessionAsync(): Promise<string> {
+  await installStubXcrunAsync(projectRoot, null);
+  const root = canonicalizeExistingPath(projectRoot);
+  const bindings = path.join(expoHomeOf(projectRoot), 'agent-cli', 'bindings');
+  await fs.promises.rm(path.join(bindings, `${digestOf(root)}-ios-local-ios.json`), {
+    force: true,
+  });
+  const cloudBinding = path.join(bindings, `${digestOf(root)}-ios-cloud.json`);
+  await fs.promises.writeFile(
+    cloudBinding,
+    JSON.stringify({
+      version: 1,
+      device: { backend: 'cloud', platform: 'ios', id: '01a160c1', origin: 'started' },
+      projectRoot: root,
+      boundAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+    })
+  );
+  return cloudBinding;
+}

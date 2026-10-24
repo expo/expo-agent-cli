@@ -20,6 +20,7 @@ import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
 import { PROGRAM_PREFIX } from '../../programName';
+import { serveInspectorApp } from '../../runtime/__tests__/fakeInspectorApp';
 import { describeSkippedApps } from '../../runtime/runScope';
 import { resolveEasCli } from '../../utils/easCli';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
@@ -28,6 +29,10 @@ import { buildSmokeDeps, cleanupLeft, deviceBoundByStart } from '../smokeAsync';
 import type { SmokeEnvironmentJson } from '../types';
 
 vi.mock('../../log');
+vi.mock('ws', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('ws')>();
+  return { ...actual, WebSocket: vi.fn() };
+});
 vi.mock('../../deviceBinding', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../deviceBinding')>()),
   acquireDeviceAsync: vi.fn(),
@@ -398,5 +403,49 @@ describe('evaluate beside an app of another worktree', () => {
         { deviceName: CLONE, group: 'other-worktree', projectRoots: ['/wt/legend'] },
       ])
     );
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+// The gate's reload is runtime:reload's rung 1: beside another worktree's app it sends no
+// broadcast, reloads its own app over Page.reload, and proves it by the app's new context.
+describe('reloadApp beside an app of another worktree', () => {
+  const realFetch = globalThis.fetch;
+  const CLONE = 'agent-cli c4ed0a60';
+  const target = (id: string, deviceName: string) => ({
+    id,
+    appId: 'host.exp.Exponent',
+    deviceName,
+    webSocketDebuggerUrl: `ws://127.0.0.1:8081/inspector/debug?device=${id}&page=1`,
+    reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: id },
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vol.reset();
+  });
+
+  it(`reloads only this worktree's app, and proves it by its new JavaScript context`, async () => {
+    vol.fromJSON({ [`${projectRoot}/package.json`]: '{}', '/wt/legend/package.json': '{}' });
+    seedIosBinding('/wt/legend', 'SIM-LEGEND', CLONE);
+    vi.mocked(spawnCaptureAsync).mockResolvedValue({
+      stdout: JSON.stringify({ devices: { 'iOS-26-0': [{ udid: 'SIM-LEGEND', name: CLONE }] } }),
+      stderr: '',
+      exitCode: 0,
+    });
+    const own = target('own', 'iPhone 17');
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => [target('clone', CLONE), own],
+    })) as unknown as typeof fetch;
+    const app = serveInspectorApp();
+
+    const result = await buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios'])).reloadApp(
+      'http://127.0.0.1:8081',
+      2000
+    );
+
+    expect(result).toMatchObject({ ok: true, verifiedBy: 'debugger-context-replaced' });
+    expect(app.reloaded()).toEqual([own.webSocketDebuggerUrl]);
   });
 });

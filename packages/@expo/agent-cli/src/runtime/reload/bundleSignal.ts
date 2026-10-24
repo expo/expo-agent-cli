@@ -162,7 +162,7 @@ export async function waitForNewBundleAsync(
     intervalMs = BUNDLE_POLL_INTERVAL_MS,
     tail = BUNDLE_LOG_LINES,
     signal,
-    platform = null,
+    platforms = 'any',
   }: {
     before: BundleSignalMark;
     timeoutMs: number;
@@ -171,13 +171,14 @@ export async function waitForNewBundleAsync(
     /** Stop the wait because the caller's other proof answered first. */
     signal?: AbortSignal;
     /**
-     * The platform the caller named, or null when they named none (F126).
+     * The platforms whose bundle counts: the one the caller named (F126), less any platform an app
+     * the run skipped is on (llp/0005 §Target owner). Empty counts none.
      *
-     * `null` counts every platform's bundles, and that is deliberate rather than a gap: narrowing a
+     * `any` counts every platform's bundles, and that is deliberate rather than a gap: narrowing a
      * run that named nothing would be this module choosing a default platform, which is exactly what
      * F53 was. The report says which platform the line it quotes was for either way.
      */
-    platform?: NativePlatform | null;
+    platforms?: readonly NativePlatform[] | 'any';
   }
 ): Promise<BundleSignalObservation> {
   const startedAt = Date.now();
@@ -232,7 +233,10 @@ export async function waitForNewBundleAsync(
       reason = `the dev server wrote more than ${tail} lines since this command read its log, so which of its bundles came after the relaunch cannot be told apart`;
     } else {
       const all = readBundleLines(fresh);
-      const bundles = platform ? all.filter((line) => bundleIsFor(line, platform)) : all;
+      const bundles =
+        platforms === 'any'
+          ? all
+          : all.filter((line) => platforms.some((platform) => bundleIsFor(line, platform)));
       if (bundles.length > 0) {
         return {
           observed: true,
@@ -245,9 +249,9 @@ export async function waitForNewBundleAsync(
       // Something was served and it was not for the platform this command is about. Said out loud,
       // because "no bundle finished" and "a bundle finished for the other app on this dev server"
       // send a reader to different places.
-      if (platform && all.length > 0) {
+      if (platforms !== 'any' && all.length > 0) {
         const others = [...new Set(all.map((line) => line.platform))].join(', ');
-        reason = `the dev server finished ${all.length} bundle${all.length === 1 ? '' : 's'} in the ${timeoutMs}ms after the app was relaunched, and ${all.length === 1 ? 'it was not' : 'none of them was'} for ${platform} — ${others} asked, which is another app on this dev server rather than the one this command reloaded`;
+        reason = `the dev server finished ${all.length} bundle${all.length === 1 ? '' : 's'} in the ${timeoutMs}ms after the app was relaunched, and ${all.length === 1 ? 'it was not' : 'none of them was'} for ${platforms.join(' or ') || 'a platform no skipped app is on'} — ${others} asked, which is another app on this dev server rather than the one this command reloaded`;
       }
     }
 

@@ -1,8 +1,19 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Reloading the app
 
 /** One way of reloading, and what it did. */
-export interface ReloadAttempt {
-  method: 'dev-server' | 'runtime' | 'device';
+export type ReloadAttempt =
+  | (AttemptOutcome & { method: 'dev-server' | 'runtime' | 'device' })
+  /**
+   * Rung 1 while the scope skips an app: CDP `Page.reload` to each of this worktree's targets, and
+   * no broadcast (llp/0005 §Target owner).
+   */
+  | (AttemptOutcome & {
+      method: 'page-reload';
+      /** The device names whose target answered `Page.reload`. */
+      answeredBy: string[];
+    });
+
+interface AttemptOutcome {
   /** The app was reloaded by this method. */
   ok: boolean;
   /**
