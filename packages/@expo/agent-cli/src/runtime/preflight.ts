@@ -279,6 +279,11 @@ export async function preflightRuntimeAsync(
   if (need === 'debugger-target' && placed.read.length === 0) {
     throw emptyScopeError(url, scope, placed);
   }
+  if (scope.device.kind === 'bound' && placed.read.length > 0) {
+    Log.progress(
+      `Scoped to ${scope.device.device.platform}: ${describeBoundDevice(scope.device.device)}, the device bound to this worktree.`
+    );
+  }
   const skipped = skippedAppsOf(placed);
   if (skipped.length > 0) {
     Log.progress(describeSkippedApps(skipped));
@@ -287,13 +292,12 @@ export async function preflightRuntimeAsync(
 }
 
 /**
- * The scope of this run: its flags, or with no platform flag, the device bound to this worktree.
+ * The scope of this run: the device bound to this worktree on the run's platform, else its flags.
  *
- * @ref llp/0035-one-device-per-worktree.rfc.md §Readers — DF24: with an iOS app and an Android app
- * on one dev server, a read with no flag took whichever the dev server listed first, and
- * `runtime:reload` checked the iOS bundle for a worktree bound to an Android session. The bound
- * device decides only when the dev server leaves a choice, more than one app this run may read: one
- * app is read as it is, and no device tool runs.
+ * @ref llp/0035-one-device-per-worktree.rfc.md §Readers — DF24, N2-30, N2-33. A flag names the
+ * platform, not the device: it never drops the bound device of that platform, and a flag of the
+ * other platform reads that platform only. With no flag, the bound device names the platform. With
+ * no app listed there is nothing to place, so no binding is read.
  */
 async function scopeOfRunAsync(
   targets: CdpTarget[],
@@ -304,35 +308,30 @@ async function scopeOfRunAsync(
     knownFacts,
   }: { projectRoot: string | null; cloud: boolean; knownFacts: DeviceFacts | undefined }
 ): Promise<{ scope: RunScope; facts: DeviceFacts }> {
-  const factsFor = async (scope: RunScope) =>
-    knownFacts ?? (await deviceFactsForScopeAsync(targets, scope, projectRoot));
-  const facts = await factsFor(flags);
-  if (
-    flags.platform != null ||
-    projectRoot == null ||
-    placeTargets(targets, flags, facts).read.length < 2
-  ) {
-    return { scope: flags, facts };
-  }
-  const device = await boundDeviceAsync(projectRoot, cloud);
-  if (device == null) {
-    return { scope: flags, facts };
-  }
-  Log.progress(
-    `Scoped to ${device.platform}: ${describeBoundDevice(device)}, the device bound to this worktree.`
-  );
-  const scope = scopeOfBoundDevice(device);
-  return { scope, facts: await factsFor(scope) };
+  const device =
+    projectRoot == null || targets.length === 0
+      ? null
+      : await boundDeviceAsync(projectRoot, { cloud, platform: flags.platform?.value });
+  const scope =
+    device == null ? flags : scopeOfBoundDevice(device, flags.platform?.by ?? 'bound-device');
+  return {
+    scope,
+    facts: knownFacts ?? (await deviceFactsForScopeAsync(targets, scope, projectRoot)),
+  };
 }
 
 /**
- * The device bound to this worktree, read without a lease extension, or null.
+ * The device bound to this worktree on this platform, or on any platform when none is named, read
+ * without a lease extension, or null.
  *
  * Without `--eas`, the winner of the rung order, else this worktree's live EAS session binding when
  * exactly one platform has one. With `--eas`, that binding only. A rung that refuses or fails gives
  * no scope: it does not refuse a read that a flag would have allowed.
  */
-async function boundDeviceAsync(projectRoot: string, cloud: boolean): Promise<BoundDevice | null> {
+async function boundDeviceAsync(
+  projectRoot: string,
+  { cloud, platform }: { cloud: boolean; platform: NavigatePlatform | undefined }
+): Promise<BoundDevice | null> {
   const { devicesDisabled, findBoundDeviceAsync } =
     require('../deviceBinding') as typeof import('../deviceBinding');
   const { liveCloudBindings } =
@@ -341,12 +340,16 @@ async function boundDeviceAsync(projectRoot: string, cloud: boolean): Promise<Bo
     return null;
   }
   if (!cloud) {
-    const found = await findBoundDeviceAsync(projectRoot, { extend: false }).catch(() => null);
+    const found = await findBoundDeviceAsync(projectRoot, { platform, extend: false }).catch(
+      () => null
+    );
     if (found?.device) {
       return found.device;
     }
   }
-  const sessions = liveCloudBindings(projectRoot);
+  const sessions = liveCloudBindings(projectRoot).filter(
+    (binding) => platform == null || binding.device.platform === platform
+  );
   return sessions.length === 1 ? sessions[0]!.device : null;
 }
 
@@ -498,16 +501,25 @@ export function emptyScopeError(
   const platform = scope.platform?.value;
   const cloud = readsEasSession(scope);
   const skipped = skippedAppsOf(placed);
-  const skippedWhy = skipped.length > 0 ? ` ${describeSkippedApps(skipped)}` : '';
+  const boundTo =
+    scope.device.kind === 'bound'
+      ? ` This worktree is bound to ${describeBoundDevice(scope.device.device)}.`
+      : '';
+  const scopeWhy = `${skipped.length > 0 ? ` ${describeSkippedApps(skipped)}` : ''}${boundTo}`;
   if (scope.platform != null && placed.otherPlatform.length + placed.undetermined.length > 0) {
-    return noAppOnPlatformError(devServerUrl, scope.platform, placed, cloud, skippedWhy);
+    return noAppOnPlatformError(
+      devServerUrl,
+      { ...scope, platform: scope.platform },
+      placed,
+      scopeWhy
+    );
   }
   const navigate = `${PROGRAM_PREFIX} navigate / --${platform ?? hostPlatform()}${cloud ? ' --eas' : ''}`;
   const error = new CommandError(
     'NO_APP_CONNECTED',
     [
       `No app of this worktree is connected to the Expo dev server at ${devServerUrl}, so there is nothing to read.`,
-      `Why:${skippedWhy} Such an app loads its JavaScript from this port, but it is not the app on this worktree's device, so a read of it says nothing about that app.`,
+      `Why:${scopeWhy} Such an app loads its JavaScript from this port, but it is not the app on this worktree's device, so a read of it says nothing about that app.`,
       `How: open the app on this worktree's device with "${navigate}", then run this command again.`,
     ].join('\n')
   );
@@ -530,31 +542,35 @@ export function emptyScopeError(
  */
 function noAppOnPlatformError(
   devServerUrl: string,
-  { value: platform, by }: NonNullable<RunScope['platform']>,
+  scope: RunScope & { platform: NonNullable<RunScope['platform']> },
   scoped: Pick<PlacedTargets, 'otherPlatform' | 'undetermined'>,
-  cloud: boolean,
-  skippedWhy: string
+  scopeWhy: string
 ): CommandError {
+  const { value: platform, by } = scope.platform;
+  const cloud = readsEasSession(scope);
   const others = scoped.otherPlatform.map((entry) => entry.platform);
   const uniqueOthers = [...new Set(others)];
-  // With no flag, the bound device named the platform, and there is no flag to drop.
-  const instead =
-    by === 'flag'
-      ? `Drop --${platform} to read whichever app is connected.`
-      : `Pass --${uniqueOthers[0]} to read the other app instead.`;
+  // A flag hint only where the flag can help. Dropping a flag reads every app only when no device
+  // of that platform is bound; the other platform's flag is said only to a caller who named none.
+  const bound = scope.device.kind === 'bound';
+  const instead = !bound
+    ? ` Drop --${platform} to read whichever app is connected.`
+    : by === 'bound-device'
+      ? ` Pass --${uniqueOthers[0]} to read the other app instead.`
+      : '';
 
   const error = new CommandError(
     'NO_APP_CONNECTED',
     uniqueOthers.length > 0
       ? [
           `No ${platform} app is connected to the Expo dev server at ${devServerUrl}, so there is nothing on ${platform} to read.`,
-          `Why: its debugger target list names ${others.length} app${others.length === 1 ? '' : 's'}, and ${others.length === 1 ? 'it is' : 'they are'} on ${uniqueOthers.join(' and ')}${scoped.undetermined.length > 0 ? `, plus ${scoped.undetermined.length} whose platform nothing in the target names` : ''}. Reading one of those would answer a question about ${uniqueOthers[0]} while reporting it as ${platform}.${skippedWhy}`,
-          `How: open the app on ${platform} with "${PROGRAM_PREFIX} navigate / --${platform}${cloud ? ' --eas' : ''}", then run this command again. ${instead}`,
+          `Why: its debugger target list names ${others.length} app${others.length === 1 ? '' : 's'}, and ${others.length === 1 ? 'it is' : 'they are'} on ${uniqueOthers.join(' and ')}${scoped.undetermined.length > 0 ? `, plus ${scoped.undetermined.length} whose platform nothing in the target names` : ''}. Reading one of those would answer a question about ${uniqueOthers[0]} while reporting it as ${platform}.${scopeWhy}`,
+          `How: open the app on ${platform} with "${PROGRAM_PREFIX} navigate / --${platform}${cloud ? ' --eas' : ''}", then run this command again.${instead}`,
         ].join('\n')
       : [
           `No app connected to the Expo dev server at ${devServerUrl} could be shown to be running on ${platform}.`,
-          `Why: its debugger target list names ${scoped.undetermined.length} app${scoped.undetermined.length === 1 ? '' : 's'}, and nothing in ${scoped.undetermined.length === 1 ? 'its target' : 'their targets'} says which platform ${scoped.undetermined.length === 1 ? 'it is' : 'they are'} on — the dev server does not label them, so this is read from the device name and the app id. A development build on a physical device can look like this.${skippedWhy}`,
-          `How: ${by === 'flag' ? `drop --${platform} to read the app that is connected, which is the honest command when only one is.` : 'name the platform with --ios or --android.'} To have the platform recognised, connect the device this machine's device tools can see ("adb devices -l", "xcrun simctl list devices booted").`,
+          `Why: its debugger target list names ${scoped.undetermined.length} app${scoped.undetermined.length === 1 ? '' : 's'}, and nothing in ${scoped.undetermined.length === 1 ? 'its target' : 'their targets'} says which platform ${scoped.undetermined.length === 1 ? 'it is' : 'they are'} on — the dev server does not label them, so this is read from the device name and the app id. A development build on a physical device can look like this.${scopeWhy}`,
+          `How: ${bound ? '' : `drop --${platform} to read the app that is connected, which is the honest command when only one is. Or `}connect the device where this machine's device tools can see it ("adb devices -l", "xcrun simctl list devices booted"), so its platform is recognised.`,
         ].join('\n')
   );
   error.suggestedCommand =

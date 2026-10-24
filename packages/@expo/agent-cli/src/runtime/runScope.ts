@@ -38,7 +38,8 @@ export interface RunScope {
   /**
    * The device this run reads. `eas-flag` is a run with `--eas` and a platform, or a `navigate`
    * that resolved to an EAS Simulator session: the session of that platform is the device. `bound`
-   * is the device bound to this worktree, which scoped a read with no flag.
+   * is the device bound to this worktree on the run's platform, whether a flag or the binding named
+   * that platform.
    */
   device: { kind: 'any' } | { kind: 'eas-flag' } | { kind: 'bound'; device: BoundDevice };
 }
@@ -62,12 +63,25 @@ export function scopeOfDevice(device: Pick<NavigateDevice, 'backend' | 'platform
   return scopeOfFlags({ platform: device.platform, eas: device.backend === 'cloud' });
 }
 
-/** The scope of the device bound to this worktree: its platform, and the device itself. */
-export function scopeOfBoundDevice(device: BoundDevice): RunScope {
-  return {
-    platform: { value: device.platform, by: 'bound-device' },
-    device: { kind: 'bound', device },
-  };
+/**
+ * The scope of the device bound to this worktree: its platform, and the device itself.
+ *
+ * @param by what named the platform: a flag of the device's platform, or the binding itself.
+ */
+export function scopeOfBoundDevice(
+  device: BoundDevice,
+  by: NonNullable<RunScope['platform']>['by']
+): RunScope {
+  return { platform: { value: device.platform, by }, device: { kind: 'bound', device } };
+}
+
+/** Whether this scope is an EAS Simulator iOS session bound to this worktree. */
+function boundIosSession(scope: RunScope): boolean {
+  return (
+    scope.device.kind === 'bound' &&
+    scope.device.device.backend === 'cloud' &&
+    scope.device.device.platform === 'ios'
+  );
 }
 
 /** Whether this scope's device is an EAS Simulator session: named by `--eas`, or bound. */
@@ -177,11 +191,19 @@ function placeTarget(
     return { group: 'other-platform', platform };
   }
   // A local simulator's targets carry its name. A local Android target carries only the model,
-  // and a cloud session's the cloud device's, so those scope the platform and not the device.
+  // so it scopes the platform and not the device.
   if (scope.device.kind === 'bound' && scope.device.device.backend === 'local-ios') {
     return target.deviceName === scope.device.device.name
       ? { group: 'read' }
       : { group: 'other-device' };
+  }
+  // A session target carries the cloud simulator's model, which no local tool reports. So a target
+  // on a booted local simulator is not the session's app, even with the session app's app id.
+  if (
+    boundIosSession(scope) &&
+    facts.booted.some((simulator) => simulator.name === target.deviceName)
+  ) {
+    return { group: 'other-device' };
   }
   return platform == null ? { group: 'undetermined' } : { group: 'read' };
 }
@@ -241,7 +263,8 @@ export function placeTargets(
  *
  * The bindings are files, so a run in a project always reads them. The booted simulators cost a
  * subprocess, so they are read only for a platform scope with a target the fact-free rules cannot
- * place, or for a target with the name of a simulator another worktree binds.
+ * place, for a target with the name of a simulator another worktree binds, or on an EAS Simulator
+ * iOS session, which sets apart every app on a booted local simulator.
  *
  * @param projectRoot this worktree, or null for a run with no project, which reads no bindings.
  */
@@ -257,7 +280,9 @@ export async function deviceFactsForScopeAsync(
     iosBindings.some((binding) => !binding.own && binding.name === target.deviceName)
   );
   const tools =
-    onOtherBinding || (scope.platform != null && someUnplaceable(targets))
+    onOtherBinding ||
+    (scope.platform != null && someUnplaceable(targets)) ||
+    (boundIosSession(scope) && targets.length > 0)
       ? await readDeviceFactsAsync()
       : NO_DEVICE_FACTS;
   return { ...tools, iosBindings };

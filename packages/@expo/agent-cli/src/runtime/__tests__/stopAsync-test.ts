@@ -29,6 +29,12 @@ interface SpawnAnswer {
   exitCode?: number | null;
 }
 
+/**
+ * The app on the simulator bound to this worktree. A run in a project with a connected app asks
+ * first whether that simulator is up, so each queue below opens with that answer.
+ */
+const CONNECTED = { id: '1', appId: 'host.exp.Exponent', deviceName: 'iPhone 17' };
+
 function mockSpawnQueue(answers: SpawnAnswer[]) {
   let call = 0;
   vi.mocked(spawn).mockImplementation((() => {
@@ -98,12 +104,12 @@ afterEach(() => {
 
 describe(runtimeStopAsync, () => {
   it(`should terminate the connected app on the booted simulator`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+    mockDevServer([CONNECTED]);
+    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await expect(runtimeStopAsync(projectRoot, options())).resolves.toBe(0);
 
-    expect(spawnedArgv(1)).toEqual(['xcrun', 'simctl', 'terminate', 'IOS-1', 'host.exp.Exponent']);
+    expect(spawnedArgv(2)).toEqual(['xcrun', 'simctl', 'terminate', 'IOS-1', 'host.exp.Exponent']);
     expect(JSON.parse(printed())).toMatchObject({
       stopped: true,
       wasRunning: true,
@@ -116,8 +122,8 @@ describe(runtimeStopAsync, () => {
   });
 
   it(`should print a stable set of top-level keys with --json`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+    mockDevServer([CONNECTED]);
+    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await runtimeStopAsync(projectRoot, options());
 
@@ -143,8 +149,9 @@ describe(runtimeStopAsync, () => {
   // something else is. Each alone is ordinary; the conjunction is a typo, and the old command
   // exited 0 with "The app was not running, so this is what starts it" while the app kept running.
   it(`should exit 20 when --app-id names an app that is not the one connected`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
+    mockDevServer([CONNECTED]);
     mockSpawnQueue([
+      { stdout: BOOTED_SIMULATOR },
       { stdout: BOOTED_SIMULATOR },
       { exitCode: 4, stderr: 'found nothing to terminate' },
     ]);
@@ -164,8 +171,9 @@ describe(runtimeStopAsync, () => {
   });
 
   it(`should name the corrected command in the follow-ups of a mismatch`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
+    mockDevServer([CONNECTED]);
     mockSpawnQueue([
+      { stdout: BOOTED_SIMULATOR },
       { stdout: BOOTED_SIMULATOR },
       { exitCode: 4, stderr: 'found nothing to terminate' },
     ]);
@@ -183,8 +191,8 @@ describe(runtimeStopAsync, () => {
   // The id was right and the app was running under it: nothing is suspicious about a connected app
   // with another id, because a device can run more than one.
   it(`should stay at 0 when the app --app-id named was running`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+    mockDevServer([CONNECTED]);
+    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await expect(
       runtimeStopAsync(projectRoot, options({ appId: 'com.example.other' }))
@@ -208,12 +216,12 @@ describe(runtimeStopAsync, () => {
   });
 
   it(`should stop the id --app-id names`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+    mockDevServer([CONNECTED]);
+    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await runtimeStopAsync(projectRoot, options({ appId: 'com.example.other' }));
 
-    expect(spawnedArgv(1)).toContain('com.example.other');
+    expect(spawnedArgv(2)).toContain('com.example.other');
     expect(JSON.parse(printed()).bundleIdSource).toBe('flag');
   });
 

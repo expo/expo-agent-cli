@@ -46,6 +46,7 @@ const NPX_FILES = {
 const EXPO_GO_TARGET = {
   id: 'device-1',
   appId: 'host.exp.Exponent',
+  deviceName: 'iPhone 17',
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=device&page=1',
 };
 
@@ -211,6 +212,17 @@ const BOOTED_SIMULATOR = JSON.stringify({
   },
 });
 
+/**
+ * The answer to the one device-tool call a run with an app connected makes before any rung: is the
+ * simulator bound to this worktree up. It is, so the run is scoped to it.
+ */
+const BOUND_SIMULATOR_UP = { stdout: BOOTED_SIMULATOR };
+
+/** The `simctl` verbs this run spawned, in order. */
+function spawnedVerbs(): string[] {
+  return vi.mocked(spawn).mock.calls.map(([, args]) => (args as string[])[1]!);
+}
+
 function options(overrides: Partial<ReloadOptions> = {}): ReloadOptions {
   return {
     route: null,
@@ -321,6 +333,7 @@ describe(reloadAsync, () => {
   it(`should reload over the dev server and exit 0`, async () => {
     writeProject();
     mockConnect(mockReloadingDevServer().socket);
+    mockSpawnQueue([BOUND_SIMULATOR_UP]);
 
     await expect(reloadAsync(projectRoot, options({ json: true }))).resolves.toBe(EXIT_OK);
     const report = JSON.parse(printed());
@@ -333,8 +346,8 @@ describe(reloadAsync, () => {
       route: null,
       url: null,
     });
-    // Nothing was asked of a device: that is the point of the dev-server method.
-    expect(spawn).not.toHaveBeenCalled();
+    // Nothing was asked of a device but whether it is up: that is the point of the dev-server method.
+    expect(spawnedVerbs()).toEqual(['list']);
   });
 
   it(`should print a stable set of top-level keys with --json`, async () => {
@@ -379,6 +392,7 @@ describe(reloadAsync, () => {
     mockDevServer([EXPO_GO_TARGET], { bundle: 'broken' });
     const { socket, sent } = fakeSocket([{ 'socket#1': 'role=ios' }]);
     mockConnect(socket);
+    mockSpawnQueue([BOUND_SIMULATOR_UP]);
 
     await expect(reloadAsync(projectRoot, options({ json: true }))).resolves.toBe(
       EXIT_OUTCOME_FAILED
@@ -398,7 +412,7 @@ describe(reloadAsync, () => {
     });
     // The gate is before the broadcast, not after it: nothing was reloaded and no device was asked.
     expect(sent).toEqual([]);
-    expect(spawn).not.toHaveBeenCalled();
+    expect(spawnedVerbs()).toEqual(['list']);
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Other gates, in brief — friction run 5, F48-6. "0
@@ -596,20 +610,27 @@ describe(reloadAsync, () => {
     writeProject();
     mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{}]).socket);
+    mockSpawnQueue([BOUND_SIMULATOR_UP]);
 
     await expect(
       reloadAsync(projectRoot, options({ json: true, method: 'dev-server' }))
     ).resolves.toBe(EXIT_OUTCOME_FAILED);
     expect(JSON.parse(printed()).attempts).toHaveLength(1);
-    expect(spawn).not.toHaveBeenCalled();
+    expect(spawnedVerbs()).toEqual(['list']);
   });
 
   it(`should never open the command socket with --method device`, async () => {
     writeProject();
     const server = mockDevServer([EXPO_GO_TARGET]);
     mockSpawnQueue(
-      [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      [
+        BOUND_SIMULATOR_UP,
+        { stdout: BOOTED_SIMULATOR },
+        { stdout: '' },
+        { stdout: BOOTED_SIMULATOR },
+        { stdout: '' },
+      ],
+      (index) => index === 3 && server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await expect(reloadAsync(projectRoot, options({ method: 'device' }))).resolves.toBe(EXIT_OK);
@@ -696,8 +717,14 @@ describe(reloadAsync, () => {
     mockConnect(fakeSocket([{ 'socket#1': 'role=ios' }]).socket);
     const server = mockDevServer([EXPO_GO_TARGET]);
     mockSpawnQueue(
-      [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      [
+        BOUND_SIMULATOR_UP,
+        { stdout: BOOTED_SIMULATOR },
+        { stdout: '' },
+        { stdout: BOOTED_SIMULATOR },
+        { stdout: '' },
+      ],
+      (index) => index === 3 && server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await expect(reloadAsync(projectRoot, options({ json: true }))).resolves.toBe(EXIT_OK);
@@ -747,7 +774,7 @@ describe(reloadAsync, () => {
       [`${projectRoot}/app/notes.tsx`]: '',
     });
     mockConnect(mockReloadingDevServer().socket);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+    mockSpawnQueue([BOUND_SIMULATOR_UP, { stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await expect(reloadAsync(projectRoot, options({ route: '/notes', json: true }))).resolves.toBe(
       EXIT_OK
@@ -812,6 +839,7 @@ describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => 
   // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
   it(`does not check the bundle of another worktree's app, and reports that app`, async () => {
     const CLONE = 'agent-cli c4ed0a60';
+    fs.rmSync(bindingPathFor(projectRoot, 'ios', 'local-ios'));
     vol.mkdirSync('/wt/legend', { recursive: true });
     seedIosBinding('/wt/legend', 'UDID-LEGEND', CLONE);
     mockSpawnQueue([
@@ -1065,8 +1093,14 @@ describe('an app the command socket cannot see', () => {
     const server = mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{}]).socket);
     mockSpawnQueue(
-      [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      [
+        BOUND_SIMULATOR_UP,
+        { stdout: BOOTED_SIMULATOR },
+        { stdout: '' },
+        { stdout: BOOTED_SIMULATOR },
+        { stdout: '' },
+      ],
+      (index) => index === 3 && server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await expect(reloadAsync(projectRoot, options({ json: true }))).resolves.toBe(EXIT_OK);
@@ -1088,8 +1122,14 @@ describe('an app the command socket cannot see', () => {
     const server = mockDevServer([EXPO_GO_TARGET]);
     mockConnect(fakeSocket([{}]).socket);
     mockSpawnQueue(
-      [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      [
+        BOUND_SIMULATOR_UP,
+        { stdout: BOOTED_SIMULATOR },
+        { stdout: '' },
+        { stdout: BOOTED_SIMULATOR },
+        { stdout: '' },
+      ],
+      (index) => index === 3 && server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await reloadAsync(projectRoot, options({ json: true }));
@@ -1148,8 +1188,14 @@ describe('an app the command socket cannot see', () => {
     writeProject();
     const server = mockDevServer([EXPO_GO_TARGET]);
     mockSpawnQueue(
-      [{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }, { stdout: '' }],
-      (index) => index === 2 && server.listing([RELOADED_EXPO_GO_TARGET])
+      [
+        BOUND_SIMULATOR_UP,
+        { stdout: BOOTED_SIMULATOR },
+        { stdout: '' },
+        { stdout: BOOTED_SIMULATOR },
+        { stdout: '' },
+      ],
+      (index) => index === 3 && server.listing([RELOADED_EXPO_GO_TARGET])
     );
 
     await expect(reloadAsync(projectRoot, options({ json: true, method: 'device' }))).resolves.toBe(
