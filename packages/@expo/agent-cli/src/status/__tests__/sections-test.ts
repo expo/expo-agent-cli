@@ -956,20 +956,24 @@ describe('buildNextActionStatus with a cloud session on record', () => {
 
   // A session is a device this CLI can drive, so it outranks every URL below it: those are things
   // a person has to open somewhere else.
-  it(`names the command that acts, rather than a URL for somebody to open`, () => {
-    const next = buildNextActionStatus(
-      state,
-      {} as never,
-      'ios',
-      devServer,
-      absentDevice,
-      null,
-      'ios'
-    );
+  // The platform is the recorded session's, as in the gate below (N2-26).
+  it.each(['ios', 'android'] as const)(
+    `names the command that acts on the %s session, rather than a URL for somebody to open`,
+    (platform) => {
+      const next = buildNextActionStatus(
+        state,
+        {} as never,
+        platform,
+        devServer,
+        absentDevice,
+        null,
+        platform
+      );
 
-    expect(next.command).toBe('npx @expo/agent-cli navigate / --eas');
-    expect(next.why).toContain('EAS Simulator session');
-  });
+      expect(next.command).toBe(`npx @expo/agent-cli navigate / --${platform} --eas`);
+      expect(next.why).toContain('EAS Simulator session');
+    }
+  );
 
   it(`falls back to the URL to open elsewhere when there is no session`, () => {
     const next = buildNextActionStatus(
@@ -1003,6 +1007,8 @@ describe('buildNextActionStatus with a cloud session on record', () => {
 
     expect(next.command).toBe('npx @expo/agent-cli smoke --ios --eas');
     expect(next.why).toContain('EAS Simulator session');
+    // Status makes no session call, and smoke starts (and bills) a session when this one ended.
+    expect(next.why).toMatch(/on record \(not checked\).*starts one for this run/);
   });
 
   it(`names the platform of an Android session in the gate`, () => {
@@ -1019,7 +1025,30 @@ describe('buildNextActionStatus with a cloud session on record', () => {
     );
 
     expect(next.command).toBe('npx @expo/agent-cli smoke --android --eas');
+    expect(next.why).toMatch(/on record \(not checked\).*starts one for this run/);
   });
+
+  // `status --ios` in a worktree with only an Android session: the session is the one device this
+  // worktree may drive, so the step names its platform, not the report's.
+  it.each([
+    [0, 'npx @expo/agent-cli navigate / --android --eas'],
+    [1, 'npx @expo/agent-cli smoke --android --eas'],
+  ])(
+    `names the session's platform, not the report's, with %i apps connected`,
+    (appsConnected, command) => {
+      const next = buildNextActionStatus(
+        state,
+        {} as never,
+        'ios',
+        { ...(devServer as object), appsConnected } as never,
+        absentDevice,
+        null,
+        'android'
+      );
+
+      expect(next.command).toBe(command);
+    }
+  );
 
   it(`keeps the plain gate when the app is on this machine`, () => {
     const withApp = { ...(devServer as object), appsConnected: 1 } as never;
@@ -1065,7 +1094,7 @@ describe('buildNextActionStatus with a cloud session on record', () => {
       'ios'
     );
 
-    expect(next.command).toBe('npx @expo/agent-cli navigate / --eas');
+    expect(next.command).toBe('npx @expo/agent-cli navigate / --ios --eas');
     expect(next.why).toContain('could not answer');
   });
 
