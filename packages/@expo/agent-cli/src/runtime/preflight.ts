@@ -47,7 +47,7 @@ import {
   deviceFactsForScopeAsync,
   NO_DEVICE_FACTS,
   placeTargets,
-  scopeOfPlatformFlag,
+  scopeOfFlags,
   type DeviceFacts,
   type PlacedTargets,
   type RunScope,
@@ -194,7 +194,7 @@ export async function preflightRuntimeAsync(
     projectRoot: context.projectRoot ?? undefined,
   });
   const url = normalizeDevServerUrl(discovery.devServerUrl);
-  const scope = scopeOfPlatformFlag(platform);
+  const scope = scopeOfFlags({ platform, eas: cloud });
 
   let reachable = discovery.reachable;
   let targets = discovery.targets;

@@ -19,7 +19,7 @@ import {
   deviceFactsIfNeededAsync,
   NO_DEVICE_FACTS,
   placeTargets,
-  scopeOfPlatformFlag,
+  scopeOfFlags,
   type DeviceFacts,
   type RunScope,
 } from './runScope';
@@ -300,7 +300,7 @@ export async function waitForAppConnectionAsync(
   {
     timeoutMs,
     intervalMs = 250,
-    scope = scopeOfPlatformFlag(null),
+    scope = scopeOfFlags({ platform: null, eas: false }),
     facts: knownFacts,
   }: WaitForAppConnectionOptions
 ): Promise<AppConnectionResult> {

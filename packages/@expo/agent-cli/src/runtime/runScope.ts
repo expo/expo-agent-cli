@@ -5,7 +5,7 @@
 // device tools report, and the run's scope, which is the caller's decision. `placeTargets` is the
 // one function that combines them, so every runtime read places a target the same way.
 
-import type { NavigatePlatform } from '../navigate/device';
+import type { NavigateDevice, NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
 import { platformOfTarget } from './targetPlatform';
 
@@ -24,15 +24,30 @@ export const NO_DEVICE_FACTS: DeviceFacts = { booted: [], androidModels: [] };
 export interface RunScope {
   /** The platform this run reads, and what named it; null reads every platform. */
   platform: { value: NavigatePlatform; by: 'flag' } | null;
-  device: { kind: 'any' };
+  /**
+   * The device this run reads. `eas-flag` is a run with `--eas` and a platform, or a `navigate`
+   * that resolved to an EAS Simulator session: the session of that platform is the device.
+   */
+  device: { kind: 'any' } | { kind: 'eas-flag' };
 }
 
-/** The scope a command with only a platform flag has: that platform, or every platform. */
-export function scopeOfPlatformFlag(platform: NavigatePlatform | null | undefined): RunScope {
-  return {
-    platform: platform == null ? null : { value: platform, by: 'flag' },
-    device: { kind: 'any' },
-  };
+/** The scope a command's flags give: the platform flag, and `--eas` when a platform names a session. */
+export function scopeOfFlags({
+  platform,
+  eas,
+}: {
+  platform: NavigatePlatform | null | undefined;
+  eas: boolean;
+}): RunScope {
+  if (platform == null) {
+    return { platform: null, device: { kind: 'any' } };
+  }
+  return { platform: { value: platform, by: 'flag' }, device: { kind: eas ? 'eas-flag' : 'any' } };
+}
+
+/** The scope of a device a run already resolved: a cloud device is the EAS Simulator session. */
+export function scopeOfDevice(device: Pick<NavigateDevice, 'backend' | 'platform'>): RunScope {
+  return scopeOfFlags({ platform: device.platform, eas: device.backend === 'cloud' });
 }
 
 /** Where one target falls for one scope. */
@@ -51,7 +66,7 @@ export interface PlacedTargets {
   undetermined: CdpTarget[];
 }
 
-export function placeTarget(
+function placeTarget(
   target: Pick<CdpTarget, 'appId' | 'deviceName'>,
   scope: RunScope,
   facts: DeviceFacts
@@ -71,6 +86,13 @@ export function placeTarget(
  *
  * `undetermined` is its own group rather than being folded into `read`, and that is the whole
  * point: a run that cannot tell what it is talking to must not earn a platform's verdict from it.
+ *
+ * One rule needs the whole list, so it lives here and not in `platformOfTarget`: on an EAS
+ * Simulator iOS session, exactly one undetermined target is the session's app. Its device name is
+ * the cloud simulator's model, which no local tool reports, and a development build's app id is
+ * often the same on both platforms. The run named the session, so the one target nothing on this
+ * machine claims is its app. Two such targets stay undetermined: nothing says which one is the
+ * session's. An Android session needs no rule, because its device name shape places it.
  */
 export function placeTargets(
   targets: CdpTarget[],
@@ -91,6 +113,14 @@ export function placeTargets(
         placed.undetermined.push(target);
         break;
     }
+  }
+  const [only, ...more] = placed.undetermined;
+  if (scope.device.kind === 'eas-flag' && scope.platform?.value === 'ios' && only && !more.length) {
+    return {
+      ...placed,
+      read: targets.filter((target) => target === only || placed.read.includes(target)),
+      undetermined: [],
+    };
   }
   return placed;
 }
