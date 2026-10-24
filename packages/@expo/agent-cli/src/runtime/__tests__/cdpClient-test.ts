@@ -15,7 +15,8 @@ import {
 } from '../cdpClient';
 import { MockWebSocket } from './MockWebSocket';
 import LIVE from './fixtures/live-promise-frames.json';
-import { READ_EVERY_TARGET } from './runScopeFixtures';
+import { describeSkippedApps } from '../runScope';
+import { makeDeviceFacts, READ_EVERY_TARGET } from './runScopeFixtures';
 
 const TARGET = {
   id: '1',
@@ -227,6 +228,33 @@ describe('CdpClient.evaluateAsync', () => {
 
     const client = new CdpClient({ ...READ_EVERY_TARGET, metroUrl: 'http://localhost:8081' });
     await expect(client.evaluateAsync('1')).rejects.toThrow(/No target found/);
+  });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner. The client re-reads the list, so it
+  // refuses the same way the preflight does when only another worktree's app is left on it.
+  it(`should refuse when only another worktree's app is listed, and name that worktree`, async () => {
+    const onClone = { ...TARGET, deviceName: 'agent-cli c4ed0a60' };
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => [onClone],
+    })) as unknown as typeof fetch;
+
+    const client = new CdpClient({
+      ...READ_EVERY_TARGET,
+      metroUrl: 'http://localhost:8081',
+      facts: makeDeviceFacts({
+        booted: [{ name: 'agent-cli c4ed0a60', udid: 'SIM-LEGEND' }],
+        iosBindings: [
+          { udid: 'SIM-LEGEND', name: 'agent-cli c4ed0a60', projectRoot: '/wt/legend', own: false },
+        ],
+      }),
+    });
+
+    await expect(client.evaluateAsync('1')).rejects.toThrow(
+      describeSkippedApps([
+        { deviceName: 'agent-cli c4ed0a60', group: 'other-worktree', projectRoots: ['/wt/legend'] },
+      ])
+    );
   });
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload — friction run 4, F39.

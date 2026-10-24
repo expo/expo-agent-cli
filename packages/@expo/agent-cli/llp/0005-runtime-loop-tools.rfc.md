@@ -641,6 +641,26 @@ Follow-ups keep the platform flag the run had. `navigate --android`'s screenshot
 
 On a local iOS simulator, every `simctl openurl` of a development-build scheme raises a springboard confirmation, `Open in "<app>"?`, on every call. The four gates that let `navigate --cloud` answer the dialog start with "only on `--cloud`". Whether that gate should be about the device rather than about the flag is open. With the dialog answered by hand, the iOS development build behaves like the Android one.
 
+### Target owner
+
+The dev server on a port takes a debugger connection from every app that loads its JavaScript from that port. A simulator that another worktree bound, and that is still booted, loads from the same port. A runtime read then read that app as this worktree's app [observed — night-1 dogfood, N2-06; night-3, N3-01].
+
+A debugger target names its device by name only. A booted simulator has a name and a udid, and a binding in the registry ([[0035-one-device-per-worktree]]) records both. So a target is matched to the booted simulators by name, and each simulator to the bindings by udid.
+
+Rules:
+
+- A target is another worktree's app only when every booted simulator with its device name has a udid that only other worktrees bind. A simulator that this worktree also binds, a simulator that nobody binds, and a name that no booted simulator has keep the target. Of two booted simulators with one name, one bound elsewhere does not make the target another worktree's. Test: runScope-test "placeTargets and the worktree that bound the simulator".
+- Only a live binding is an owner: its lease has not expired, and its project root exists. A release keeps the file with an expired lease, so a released binding is not an owner. Tests: records-test "a live iOS binding"; preflight-test "should read the app on a simulator whose other binding ran out, and renew no lease".
+- Another worktree's app is out of every scope. It is not read with a platform flag or without one, and it does not take the one unplaced slot of an EAS Simulator iOS session (§Android). Test: runScope-test "keeps a skipped target out of the read set".
+- A read that skips an app says so on stderr, in one sentence that names each device and the worktree that bound it. Test: preflight-test "should read this worktree's app, and name the skipped one on stderr".
+- When only other worktrees' apps are connected, a command that needs a runtime refuses with `NO_APP_CONNECTED`, exit 1, and names each device and worktree. Its How line opens the app on this worktree's device. The debugger client refuses the same way when the list changes after the preflight. Tests: e2e runtime-preflight-test "a dev server whose only app runs on another worktree's simulator"; cdpClient-test "should refuse when only another worktree's app is listed, and name that worktree".
+- `runtime:reload` lists these apps in `skippedApps`, and its bundle check does not build for their platform. The reload broadcast still reaches them. Test: reloadAsync-test "does not check the bundle of another worktree's app, and reports that app".
+- Only a run in a project reads the bindings: without a project root there is no "this worktree". `dev:wait`, `navigate` and `smoke` read no bindings, so they do not skip another worktree's app.
+
+The trade-off of the lease: a lease lasts 60 minutes and is renewed by use (llp/0035 §Lease). A runtime read does not renew it, because a renewal takes the registry lock, and reads are the most frequent calls. So when a worktree runs only `runtime:*` reads for 60 minutes, its binding is no longer live, and another worktree reads that app again. Test: preflight-test "should read the app on a simulator whose other binding ran out, and renew no lease".
+
+The keys are names, and that sets the limits. React Native Android's device name is the model, and a local Android binding records a serial only, so a local Android app is never skipped. An EAS Simulator session's target carries the cloud device's model, so a cloud binding has no name to match.
+
 ## Cloud simulator
 
 _Renamed 2026-09-08:_ the flag this section calls `--cloud` is **`--eas`** now, on every command that has it — `smoke`, `navigate`, `runtime:reload`, `runtime:stop`. `dev` already said `--eas` for the build backend ([[0015-backend-selection-and-config]] §One flag for EAS), and two names for one service meant `dev --cloud` and `smoke --eas` were both refused as unknown options [observed — 1.0.9]. `--cloud` is gone, not aliased [Kudo, 2026-09-08]. The text below keeps the name it was written with; read `--cloud` as `--eas`.
