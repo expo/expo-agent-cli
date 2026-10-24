@@ -19,7 +19,7 @@
 // | `boot-device`      | `dev` (conditional)              | `acquireDeviceAsync`        |
 // | `install-app`      | (new, conditional)               | `installExpoGoAsync`        |
 // | `app`              | this command only                | `waitForAppConnectionAsync` |
-// | `reload`           | `runtime:reload`                 | `reloadOverDevServerAsync`  |
+// | `reload`           | `runtime:reload`                 | `runRungOneAsync`           |
 // | `route`            | `navigate`                       | `openRouteAsync`            |
 // | `runtime`          | `runtime:eval`                   | `CdpClient.evaluateAsync`   |
 // | `errors`           | `runtime:errors`                 | `CdpRuntimeErrorCollector`  |
@@ -173,7 +173,12 @@ export interface SmokeReloadResult {
    * Under llp/0021's rule: named only when this result's own evidence field for it is non-empty, so
    * `ok` and a label with nothing behind it cannot be reported together.
    */
-  verifiedBy: 'message-socket-peers' | 'fresh-debugger-target' | 'dev-server-bundle' | null;
+  verifiedBy:
+    | 'message-socket-peers'
+    | 'fresh-debugger-target'
+    | 'dev-server-bundle'
+    | 'debugger-context-replaced'
+    | null;
   /** The targets listed before the broadcast, which is what makes a later one "fresh". */
   knownTargetIds: string[];
   /** Targets seen afterwards under an id that was not in that list. */

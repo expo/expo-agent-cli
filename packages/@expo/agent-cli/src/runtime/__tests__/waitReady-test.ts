@@ -461,6 +461,7 @@ describe(waitForFreshAppConnectionAsync, () => {
       timeoutMs: 2000,
       intervalMs: 20,
       knownTargetIds: ['device-1'],
+      isSkipped: () => false,
     });
 
     expect(result).toMatchObject({ appsConnected: 1, freshTargets: 1, timedOut: false });
@@ -473,6 +474,7 @@ describe(waitForFreshAppConnectionAsync, () => {
       timeoutMs: 120,
       intervalMs: 20,
       knownTargetIds: ['device-1'],
+      isSkipped: () => false,
     });
 
     // The count is what the dev server reported, and `freshTargets` is what was proved: reporting
@@ -488,6 +490,7 @@ describe(waitForFreshAppConnectionAsync, () => {
       timeoutMs: 2000,
       intervalMs: 20,
       knownTargetIds: [],
+      isSkipped: () => false,
     });
 
     expect(result).toMatchObject({ appsConnected: 1, freshTargets: 1, timedOut: false });
@@ -501,6 +504,7 @@ describe(waitForFreshAppConnectionAsync, () => {
       timeoutMs: 120,
       intervalMs: 20,
       knownTargetIds: ['device-1'],
+      isSkipped: () => false,
     });
 
     expect(result).toMatchObject({ appsConnected: 0, freshTargets: 0, timedOut: true });

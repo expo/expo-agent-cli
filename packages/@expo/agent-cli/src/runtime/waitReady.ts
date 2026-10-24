@@ -13,6 +13,7 @@
 // that the dev server that answered belongs to this project — the caveat `discoverDevServerAsync`
 // documents but cannot close.
 
+import type { CdpTarget } from './cdpClient';
 import { normalizeDevServerUrl, probeDevServerAsync } from './devServer';
 import { decodeProjectRoot, matchProjectRoot, PROJECT_ROOT_HEADER } from './projectRootHeader';
 import {
@@ -350,6 +351,11 @@ export interface WaitForFreshAppConnectionOptions extends WaitForAppConnectionOp
    */
   knownTargetIds: readonly string[];
   /**
+   * Whether a target is on a device the run's scope skipped (llp/0005 §Target owner). Such a
+   * target is neither counted nor fresh: another worktree's app that reloads proves nothing here.
+   */
+  isSkipped: (target: CdpTarget) => boolean;
+  /**
    * Stop the wait from outside, for a caller watching a second proof at the same time.
    *
    * `runtime:reload` watches this list *and* the dev server's own output, on every rung: some apps
@@ -389,7 +395,13 @@ export interface FreshAppConnectionResult extends AppConnectionResult {
  */
 export async function waitForFreshAppConnectionAsync(
   devServerUrl: string,
-  { timeoutMs, intervalMs = 250, knownTargetIds, signal }: WaitForFreshAppConnectionOptions
+  {
+    timeoutMs,
+    intervalMs = 250,
+    knownTargetIds,
+    isSkipped,
+    signal,
+  }: WaitForFreshAppConnectionOptions
 ): Promise<FreshAppConnectionResult> {
   const startedAt = Date.now();
   const deadline = startedAt + timeoutMs;
@@ -397,9 +409,11 @@ export async function waitForFreshAppConnectionAsync(
   let appsConnected = 0;
 
   for (;;) {
-    const probe = await probeDevServerAsync(devServerUrl);
-    appsConnected = probe.targets.length;
-    const fresh = probe.targets.filter((target) => !known.has(target.id));
+    const targets = (await probeDevServerAsync(devServerUrl)).targets.filter(
+      (target) => !isSkipped(target)
+    );
+    appsConnected = targets.length;
+    const fresh = targets.filter((target) => !known.has(target.id));
     if (fresh.length > 0) {
       return {
         appsConnected,

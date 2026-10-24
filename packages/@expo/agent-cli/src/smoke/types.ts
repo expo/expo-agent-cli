@@ -234,11 +234,16 @@ export interface SmokeReloadJson {
   /**
    * What proved it, or null when nothing did.
    *
-   * The same four labels `runtime:reload --json` uses, from the same observations, and under the
-   * same rule: a label may be named only when its own evidence is in this payload and non-empty
-   * (llp/0021 §The rules band).
+   * The labels `runtime:reload --json` uses, but `app-relaunch`, from the same observations, and
+   * under the same rule: a label may be named only when its own evidence is in this payload and
+   * non-empty (llp/0021 §The rules band).
    */
-  verifiedBy: 'message-socket-peers' | 'fresh-debugger-target' | 'dev-server-bundle' | null;
+  verifiedBy:
+    | 'message-socket-peers'
+    | 'fresh-debugger-target'
+    | 'dev-server-bundle'
+    | 'debugger-context-replaced'
+    | null;
   /**
    * Debugger targets the dev server had listed *before* the reload, by id.
    *
