@@ -142,7 +142,7 @@ async function openAppAsync(
   },
   context: RuntimeContext
 ): Promise<OpenApp> {
-  const { devServerUrl, targets, scope, facts } = await preflightRuntimeAsync(
+  const { devServerUrl, appTargets, scope, facts } = await preflightRuntimeAsync(
     { need: 'debugger-target', devServerUrl: options.devServerUrl, platform: options.platform },
     context
   );
@@ -150,7 +150,10 @@ async function openAppAsync(
 
   let bundle: BundleCheckResult | null = null;
   if (wantBundleCheck) {
-    const { platforms } = await resolveBundleCheckPlatformsAsync(options.platform ?? null, targets);
+    const { platforms } = await resolveBundleCheckPlatformsAsync(
+      options.platform ?? null,
+      appTargets
+    );
     const results: BundleCheckResult[] = [];
     for (const platform of platforms) {
       results.push(

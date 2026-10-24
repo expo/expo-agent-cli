@@ -1,10 +1,12 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Android
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
 // Which debugger targets one run reads, decided in one place.
 //
 // Three inputs, kept apart on purpose: the targets the dev server lists, the facts this machine's
 // device tools report, and the run's scope, which is the caller's decision. `placeTargets` is the
 // one function that combines them, so every runtime read places a target the same way.
 
+import type { LiveIosBinding } from '../deviceBinding/records';
 import type { NavigateDevice, NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
 import { platformOfTarget } from './targetPlatform';
@@ -15,10 +17,15 @@ export interface DeviceFacts {
   booted: { name: string; udid: string }[];
   /** Hardware models of attached Android devices, as `adb devices -l` reports them. */
   androidModels: string[];
+  /**
+   * Every worktree's live local iOS binding, read only for a run in a project. A run with no
+   * project root (`dev:wait`, a `navigate` wait) has no "this worktree", so it reads none.
+   */
+  iosBindings: LiveIosBinding[];
 }
 
 /** Facts that know nothing, for a run that did not need to ask the device tools. */
-export const NO_DEVICE_FACTS: DeviceFacts = { booted: [], androidModels: [] };
+export const NO_DEVICE_FACTS: DeviceFacts = { booted: [], androidModels: [], iosBindings: [] };
 
 /** The decision of which targets this run reads, made once by the caller. */
 export interface RunScope {
@@ -54,7 +61,14 @@ export function scopeOfDevice(device: Pick<NavigateDevice, 'backend' | 'platform
 export type Placement =
   | { group: 'read' }
   | { group: 'other-platform'; platform: NavigatePlatform }
-  | { group: 'undetermined' };
+  | { group: 'undetermined' }
+  | { group: 'other-worktree'; projectRoots: string[] };
+
+/** The placements of a target this run sees and skips on purpose, whatever the scope. */
+export type SkipPlacement = Extract<Placement, { group: 'other-worktree' }>;
+
+/** A skipped app, as a report names it. */
+export type SkippedApp = { deviceName: string } & SkipPlacement;
 
 /** A target list, grouped by {@link Placement}. */
 export interface PlacedTargets {
@@ -64,6 +78,50 @@ export interface PlacedTargets {
   otherPlatform: { target: CdpTarget; platform: NavigatePlatform }[];
   /** Targets whose platform nothing decided, in a platform scope. Never read. */
   undetermined: CdpTarget[];
+  /** Targets out of every scope, such as another worktree's app. Never read. */
+  skipped: { target: CdpTarget; placement: SkipPlacement }[];
+}
+
+/** The skipped targets of a placed list, as a report names them. */
+export function skippedAppsOf(placed: Pick<PlacedTargets, 'skipped'>): SkippedApp[] {
+  return placed.skipped.map(({ target, placement }) => ({
+    deviceName: target.deviceName,
+    ...placement,
+  }));
+}
+
+/** The one sentence every report, refusal and stderr line uses to name the skipped apps. */
+export function describeSkippedApps(apps: readonly SkippedApp[]): string {
+  const each = apps.map((app) => {
+    switch (app.group) {
+      case 'other-worktree':
+        return `"${app.deviceName}" runs on a simulator another worktree bound (${app.projectRoots.join(', ')})`;
+    }
+  });
+  return `Skipped ${apps.length} app${apps.length === 1 ? '' : 's'}: ${each.join('; ')}.`;
+}
+
+/**
+ * The other worktrees whose simulator this target runs on, or null when it may be this one's.
+ *
+ * A target names its device by name only. So it is another worktree's only when every booted
+ * simulator with that name has a udid that only other worktrees bind. A name nothing booted has,
+ * or a simulator nobody or this worktree binds, keeps the target.
+ */
+function otherWorktreesOf(
+  target: Pick<CdpTarget, 'deviceName'>,
+  facts: DeviceFacts
+): string[] | null {
+  const booted = facts.booted.filter((simulator) => simulator.name === target.deviceName);
+  const roots = new Set<string>();
+  for (const { udid } of booted) {
+    const owners = facts.iosBindings.filter((binding) => binding.udid === udid);
+    if (owners.length === 0 || owners.some((binding) => binding.own)) {
+      return null;
+    }
+    owners.forEach((binding) => roots.add(binding.projectRoot));
+  }
+  return roots.size > 0 ? [...roots] : null;
 }
 
 function placeTarget(
@@ -71,6 +129,10 @@ function placeTarget(
   scope: RunScope,
   facts: DeviceFacts
 ): Placement {
+  const projectRoots = otherWorktreesOf(target, facts);
+  if (projectRoots != null) {
+    return { group: 'other-worktree', projectRoots };
+  }
   if (scope.platform == null) {
     return { group: 'read' };
   }
@@ -92,14 +154,15 @@ function placeTarget(
  * the cloud simulator's model, which no local tool reports, and a development build's app id is
  * often the same on both platforms. The run named the session, so the one target nothing on this
  * machine claims is its app. Two such targets stay undetermined: nothing says which one is the
- * session's. An Android session needs no rule, because its device name shape places it.
+ * session's. An Android session needs no rule, because its device name shape places it. A target
+ * on another worktree's simulator is skipped in every scope, so it never takes that slot.
  */
 export function placeTargets(
   targets: CdpTarget[],
   scope: RunScope,
   facts: DeviceFacts
 ): PlacedTargets {
-  const placed: PlacedTargets = { read: [], otherPlatform: [], undetermined: [] };
+  const placed: PlacedTargets = { read: [], otherPlatform: [], undetermined: [], skipped: [] };
   for (const target of targets) {
     const placement = placeTarget(target, scope, facts);
     switch (placement.group) {
@@ -111,6 +174,9 @@ export function placeTargets(
         break;
       case 'undetermined':
         placed.undetermined.push(target);
+        break;
+      case 'other-worktree':
+        placed.skipped.push({ target, placement });
         break;
     }
   }
@@ -129,13 +195,28 @@ export function placeTargets(
  * The facts a scope needs to place these targets, asking the device tools only when their answer
  * could change a placement.
  *
- * A scope with no platform reads every target, so it needs no facts at all.
+ * The bindings are files, so a run in a project always reads them. The booted simulators cost a
+ * subprocess, so they are read only for a platform scope with a target the fact-free rules cannot
+ * place, or for a target with the name of a simulator another worktree binds.
+ *
+ * @param projectRoot this worktree, or null for a run with no project, which reads no bindings.
  */
 export async function deviceFactsForScopeAsync(
   targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
-  scope: RunScope
+  scope: RunScope,
+  projectRoot: string | null
 ): Promise<DeviceFacts> {
-  return scope.platform == null ? NO_DEVICE_FACTS : await deviceFactsIfNeededAsync(targets);
+  const { liveIosBindings } =
+    require('../deviceBinding/records') as typeof import('../deviceBinding/records');
+  const iosBindings = projectRoot == null ? [] : liveIosBindings(projectRoot);
+  const onOtherBinding = targets.some((target) =>
+    iosBindings.some((binding) => !binding.own && binding.name === target.deviceName)
+  );
+  const tools =
+    onOtherBinding || (scope.platform != null && someUnplaceable(targets))
+      ? await readDeviceFactsAsync()
+      : NO_DEVICE_FACTS;
+  return { ...tools, iosBindings };
 }
 
 /**
@@ -149,10 +230,11 @@ export async function deviceFactsForScopeAsync(
 export async function deviceFactsIfNeededAsync(
   targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[]
 ): Promise<DeviceFacts> {
-  const undetermined = targets.some(
-    (target) => platformOfTarget(target, NO_DEVICE_FACTS).platform == null
-  );
-  return undetermined ? await readDeviceFactsAsync() : NO_DEVICE_FACTS;
+  return someUnplaceable(targets) ? await readDeviceFactsAsync() : NO_DEVICE_FACTS;
+}
+
+function someUnplaceable(targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[]): boolean {
+  return targets.some((target) => platformOfTarget(target, NO_DEVICE_FACTS).platform == null);
 }
 
 /**
@@ -175,6 +257,7 @@ export async function readDeviceFactsAsync(): Promise<DeviceFacts> {
   ]);
 
   return {
+    ...NO_DEVICE_FACTS,
     booted: simctl?.exitCode === 0 ? parseBootedSimulators(simctl.stdout) : [],
     androidModels:
       adb?.exitCode === 0

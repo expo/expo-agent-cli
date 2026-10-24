@@ -67,7 +67,8 @@ import {
   type DevServerMessageSocket,
   type MessageSocketPeers,
 } from '../messageSocket';
-import { preflightRuntimeAsync } from '../preflight';
+import { preflightRuntimeAsync, type RuntimeConnection } from '../preflight';
+import { placeTargets, skippedAppsOf, type SkippedApp } from '../runScope';
 import { waitForFreshAppConnectionAsync } from '../waitReady';
 import {
   markBundleSignalSync,
@@ -253,6 +254,8 @@ export interface ReloadResultJson {
    * run that had never asked which app it was reloading read exactly like an answer.
    */
   bundlePlatformSource: BundlePlatformSource;
+  /** Apps the reload does not count or check, such as another worktree's (llp/0005 §Target owner). */
+  skippedApps: SkippedApp[];
   /** Route the app was sent to afterwards, or null when none was asked for. */
   route: string | null;
   /** Whether that route was checked against the project's routes. */
@@ -330,7 +333,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   // default: with an Android-only break and both apps attached, a `runtime:reload` with no flag
   // checked the **iOS** bundle, passed, and reloaded the Android app onto the broken one.
   const { platforms: bundlePlatforms, source: bundlePlatformSource } =
-    await resolveBundleCheckPlatformsAsync(options.platform ?? null, devServer.targets);
+    await resolveBundleCheckPlatformsAsync(options.platform ?? null, devServer.appTargets);
   const bundles: BundleCheckResult[] = [];
   if (options.bundleCheck) {
     for (const platform of bundlePlatforms) {
@@ -464,7 +467,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     // reaches for on its own. Putting it in `auto` would have traded the relaunch's known cost for
     // a less predictable one.
     if (method == null && options.method === 'runtime') {
-      const attempt = await reloadOverRuntimeAsync(devServerUrl, options, observedApps);
+      const attempt = await reloadOverRuntimeAsync(devServer, observedApps);
       attempts.push(attempt);
       if (attempt.ok) {
         // No mechanism proof: the debugger has no peer list to churn, so the claim is "the call was
@@ -679,6 +682,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     },
     bundlePlatforms: bundles.map((entry) => entry.platform),
     bundlePlatformSource,
+    skippedApps: skippedAppsOf(placeTargets(devServer.targets, devServer.scope, devServer.facts)),
     route,
     routeCheck,
     url: landing?.url ?? cloudUrl,
@@ -1134,8 +1138,7 @@ const RUNTIME_RELOAD_ANSWER_MS = 4000;
  * the call is reported as "sent" rather than as a failure.
  */
 async function reloadOverRuntimeAsync(
-  devServerUrl: string,
-  options: ReloadOptions,
+  { devServerUrl, scope, facts }: Pick<RuntimeConnection, 'devServerUrl' | 'scope' | 'facts'>,
   connectedApps: number
 ): Promise<ReloadAttempt> {
   const failed = (reason: string): ReloadAttempt => ({
@@ -1153,16 +1156,10 @@ async function reloadOverRuntimeAsync(
 
   const { CdpClient, isMethodNotFoundError } =
     require('../cdpClient') as typeof import('../cdpClient');
-  const { deviceFactsIfNeededAsync, NO_DEVICE_FACTS, scopeOfFlags } =
-    require('../runScope') as typeof import('../runScope');
 
   let client: import('../cdpClient').CdpClient;
   try {
-    const scope = scopeOfFlags({ platform: options.platform, eas: options.cloud });
-    const facts =
-      scope.platform == null
-        ? NO_DEVICE_FACTS
-        : await deviceFactsIfNeededAsync((await probeDevServerAsync(devServerUrl)).targets);
+    // The preflight's scope and facts: the app this reloads is the app the rest of the run read.
     client = new CdpClient({ metroUrl: devServerUrl, scope, facts });
   } catch (error: unknown) {
     return failed(

@@ -49,6 +49,7 @@
 - `smoke` now reloads an app that was already running onto the code on disk before it reads it, so the gate no longer passes an app whose error window and screenshot are from before the edit. A reload it cannot prove is `inconclusive` rather than `passed`, and `--no-reload` opts out. ([#2](https://github.com/expo/expo-agent-cli/pull/2) by [@kudo](https://github.com/kudo))
 - `dev --detach` no longer reports a detached dev server for a plan step that opens the app and is then refused by macOS after the lock appeared. The grace window that catches that refusal no longer requires `--wait-ready`, so a `dev --detach --ios` now spends it before reporting. ([#2](https://github.com/expo/expo-agent-cli/pull/2) by [@kudo](https://github.com/kudo))
 - Runtime reads on an EAS Simulator iOS session now read the session's app when it is the one unclaimed debugger target, rather than finding no app on iOS. ([#203](https://github.com/expo/expo-agent-cli/pull/203) by [@vonovak](https://github.com/vonovak))
+- Runtime reads no longer read an app on a simulator that another worktree bound with a live lease. They skip it and name it on stderr; with only such apps connected, they refuse with `NO_APP_CONNECTED` and name the worktree. `runtime:reload` lists them in `skippedApps` and does not check their bundle. ([#204](https://github.com/expo/expo-agent-cli/pull/204) by [@vonovak](https://github.com/vonovak))
 
 ### 💡 Others
 

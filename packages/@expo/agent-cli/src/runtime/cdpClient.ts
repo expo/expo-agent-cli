@@ -5,7 +5,6 @@
 import type CdpMessageType from 'devtools-protocol';
 import { WebSocket } from 'ws';
 
-import type { NavigatePlatform } from '../navigate/device';
 import { formatCdpExceptionDetails, stringifyCdpValue } from './cdpFormat';
 import { debugEvent } from './events';
 import {
@@ -17,7 +16,14 @@ import {
   parseSettledPromiseSlot,
   wrapExpressionForPromises,
 } from './promiseSettling';
-import { placeTargets, type DeviceFacts, type PlacedTargets, type RunScope } from './runScope';
+import {
+  describeSkippedApps,
+  placeTargets,
+  skippedAppsOf,
+  type DeviceFacts,
+  type PlacedTargets,
+  type RunScope,
+} from './runScope';
 
 /**
  * Metro's inspector proxy rejects WebSocket handshakes without a same-origin `Origin`
@@ -199,21 +205,26 @@ export interface CdpClientOptions {
   facts: DeviceFacts;
 }
 
-/** The failure for a platform-scoped client that found no target of its platform. */
-export class NoTargetOnPlatformError extends Error {
-  readonly isNoTargetOnPlatform = true;
-
-  constructor(
-    readonly platform: NavigatePlatform,
-    readonly otherPlatforms: NavigatePlatform[],
-    readonly undetermined: number
-  ) {
+/**
+ * The failure for a client whose scope holds no target: none of its platform, or none that is not
+ * another worktree's. Its message is the whole report.
+ */
+export class NoTargetInScopeError extends Error {
+  constructor(scope: RunScope, placed: PlacedTargets) {
+    const platform = scope.platform?.value;
+    const otherPlatforms = [...new Set(placed.otherPlatform.map((entry) => entry.platform))];
+    const skipped = skippedAppsOf(placed);
     super(
-      otherPlatforms.length > 0
-        ? `No ${platform} app is connected to the dev server; the ${otherPlatforms.join(' and ')} app that is connected is a different runtime.`
-        : `No app connected to the dev server could be shown to be running on ${platform}${undetermined > 0 ? `, and ${undetermined} could not be placed at all` : ''}.`
+      [
+        platform == null
+          ? 'No app of this worktree is connected to the dev server.'
+          : otherPlatforms.length > 0
+            ? `No ${platform} app is connected to the dev server; the ${otherPlatforms.join(' and ')} app that is connected is a different runtime.`
+            : `No app connected to the dev server could be shown to be running on ${platform}${placed.undetermined.length > 0 ? `, and ${placed.undetermined.length} could not be placed at all` : ''}.`,
+        ...(skipped.length > 0 ? [describeSkippedApps(skipped)] : []),
+      ].join(' ')
     );
-    this.name = 'NoTargetOnPlatformError';
+    this.name = 'NoTargetInScopeError';
   }
 }
 
@@ -265,14 +276,13 @@ export class CdpClient {
     }
     if (!target) {
       // Two different failures, and only one of them is "the app is not there". A scoped run that
-      // found apps on the other platform has to say so, or the reader debugs a healthy app (F51).
-      const { platform } = this.options.scope;
-      if (platform != null && placed.read.length === 0) {
-        throw new NoTargetOnPlatformError(
-          platform.value,
-          [...new Set(placed.otherPlatform.map((entry) => entry.platform))],
-          placed.undetermined.length
-        );
+      // found apps on the other platform, or only another worktree's app, has to say so, or the
+      // reader debugs a healthy app (F51, llp/0005 §Target owner).
+      if (
+        placed.read.length === 0 &&
+        (this.options.scope.platform != null || placed.skipped.length > 0)
+      ) {
+        throw new NoTargetInScopeError(this.options.scope, placed);
       }
       throw new Error('No target found.');
     }
