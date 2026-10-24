@@ -504,9 +504,9 @@ export function buildNextActionStatus(
    * The platform of the EAS Simulator session this worktree has a live binding for, or null.
    *
    * Taken by the caller from the recorded bindings. Whether the session is still *running* costs an
-   * `eas` start-up, which `status` does not spend on this line, so it is not asked here. A binding
-   * for a dead session costs one `navigate --eas` that says so, which is a far cheaper wrong answer
-   * than a slow report.
+   * `eas` start-up, which `status` does not spend on this line, so it is not asked here. A dead
+   * session costs one `navigate / --<p> --eas` that says so, or one smoke run that starts a session
+   * for itself.
    *
    * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
    */
@@ -593,9 +593,10 @@ function verifyAction(
   if (devServer.appsConnected > 0) {
     return cloudLoop
       ? {
-          // The platform is a fact about the recorded session rather than a choice.
+          // The platform is a fact about the recorded session rather than a choice. Status makes no
+          // session call, so the why says the session is recorded, not checked.
           command: `${smokeCommand(cloudSession)} --eas`,
-          why: 'a dev server is running with an app connected and this project has an EAS Simulator session, so the gate runs against that session — a plain "smoke" would look for a simulator on this machine',
+          why: 'an EAS Simulator session is on record (not checked) and an app is connected, so the gate runs on that session, not on this machine; if the session ended, smoke starts one for this run and stops it after, which bills',
         }
       : {
           command: verifyCommand(device, state),
@@ -613,7 +614,7 @@ function verifyAction(
   // **command this CLI can run**: the URLs are things a person has to open somewhere else.
   if (cloudLoop) {
     return {
-      command: `${OPEN_APP_COMMAND} --eas`,
+      command: `${OPEN_APP_COMMAND} --${cloudSession} --eas`,
       why: `no app is connected and ${
         device?.state === 'absent'
           ? 'this machine has no booted simulator or attached device'
