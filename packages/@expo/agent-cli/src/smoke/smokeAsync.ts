@@ -61,7 +61,7 @@ import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
 import {
   deviceFactsIfNeededAsync,
   placeTargets,
-  scopeOfPlatformFlag,
+  scopeOfFlags,
   type DeviceFacts,
 } from '../runtime/runScope';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../runtime/waitReady';
@@ -364,7 +364,6 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
 
   /**
    * What this machine's device tools reported, kept for as long as it still answers.
-   *
    * @ref llp/0005-runtime-loop-tools.rfc.md §Which platform is the caller's to say — F51, F152.
    *
    * The facts exist to place a target whose own fields name no platform, and they are read by
@@ -373,22 +372,23 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
    * for exists**, and a cached "nothing to place" is then an answer about an empty list: the first
    * probe of this run finds no targets, `NO_DEVICE_FACTS` is cached, and the development build that
    * attaches a moment later — whose app id is the project's own and whose device name is a
-   * simulator's — cannot be placed by it. Every wait after that counted zero, so `smoke --ios`
-   * against a development build spent its whole budget and reported "no app had attached" about an
-   * app that had [observed — `smoke-test.ts` "opens the dev-client loading link before the route
-   * link", 55.8 s of a 60 s budget with the app listed throughout, 2026-09-06].
+   * simulator's — cannot be placed by it. Every later wait counted zero, so `smoke --ios` spent
+   * its budget and reported "no app had attached" about a dev build that had [observed — the e2e
+   * "opens the dev-client loading link before the route link", 55.8 s of 60 s, 2026-09-06].
    *
    * So the cache is kept only while it still places what is listed **now**. An empty list places
    * vacuously and costs nothing, which is the case the laziness was for; a list the cache cannot
-   * read is the case it was never an answer to.
+   * read is the case it was never an answer to. The scope is read at call time: a config's EAS
+   * device sets `options.cloud` after these deps are built.
    */
-  const scope = scopeOfPlatformFlag(options.platform);
+  const scope = () =>
+    scopeOfFlags({ platform: options.platform, eas: options.cloud === 'required' });
   let deviceFacts: DeviceFacts | null = null;
   const factsAsync = async (devServerUrl: string): Promise<DeviceFacts> => {
     const probe = await probeDevServerAsync(devServerUrl);
     const placesEverything =
       deviceFacts != null &&
-      placeTargets(probe.targets, scope, deviceFacts).undetermined.length === 0;
+      placeTargets(probe.targets, scope(), deviceFacts).undetermined.length === 0;
     if (placesEverything) {
       return deviceFacts!;
     }
@@ -758,7 +758,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     waitForAppConnection: async (devServerUrl, timeoutMs) =>
       waitForAppConnectionAsync(devServerUrl, {
         timeoutMs,
-        scope,
+        scope: scope(),
         facts: await factsAsync(devServerUrl),
       }),
 
@@ -827,7 +827,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       const probe = await probeDevServerAsync(devServerUrl);
       // `read` only: a target nothing placed must not earn this run's verdict either way (@ref
       // src/runtime/runScope §placeTargets), so an unreadable target never becomes a refusal.
-      const placed = placeTargets(probe.targets, scope, await factsAsync(devServerUrl));
+      const placed = placeTargets(probe.targets, scope(), await factsAsync(devServerUrl));
       const expoGo = placed.read
         .map((target) => target.appId)
         .find((appId): appId is string => appId != null && EXPO_GO_APP_IDS.includes(appId));
@@ -1054,7 +1054,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       try {
         await new CdpClient({
           metroUrl: devServerUrl,
-          scope,
+          scope: scope(),
           facts: await factsAsync(devServerUrl),
         }).evaluateAsync(LIVENESS_EXPRESSION, {
           awaitPromise: false,
@@ -1084,7 +1084,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         const records = await new CdpRuntimeErrorCollector({
           metroUrl: devServerUrl,
           durationMs: windowMs,
-          scope,
+          scope: scope(),
           facts: await factsAsync(devServerUrl),
         }).collectAsync();
         return { ok: true, records, reason: null };

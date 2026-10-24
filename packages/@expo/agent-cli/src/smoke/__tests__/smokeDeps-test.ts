@@ -310,3 +310,43 @@ describe('ensureEasSession with no EAS build to install', () => {
     expect(readBindingFile(file)).toEqual({ kind: 'none' });
   });
 });
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Android — the EAS Simulator iOS session rule
+describe('evaluate on an EAS Simulator iOS session', () => {
+  const realFetch = globalThis.fetch;
+  const CLOUD_TARGET = {
+    id: '1',
+    appId: 'dev.vonovak.cyclable',
+    deviceName: 'iPhone 17',
+    description: '',
+    type: 'node',
+    title: 'React Native',
+    devtoolsFrontendUrl: '/devtools',
+    webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=1&page=1',
+  };
+
+  beforeEach(() => {
+    // No local device tool answers, so no local device claims the target.
+    vi.mocked(spawnCaptureAsync).mockRejectedValue(new Error('not installed'));
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () => [CLOUD_TARGET],
+    })) as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it(`reads the one unclaimed target when a config's EAS device sets --eas after the deps are built`, async () => {
+    const options = resolveSmokeOptions(['--ios']);
+    const deps = buildSmokeDeps(projectRoot, options);
+    options.cloud = 'required';
+
+    const result = await deps.evaluate('http://127.0.0.1:8081');
+
+    // The target is in scope, so the selector probes it and finds no socket there. Out of scope,
+    // the reason is "No app connected to the dev server could be shown to be running on ios".
+    expect(result.reason).toBe('No target found.');
+  });
+});

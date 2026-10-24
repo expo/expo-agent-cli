@@ -1153,12 +1153,12 @@ async function reloadOverRuntimeAsync(
 
   const { CdpClient, isMethodNotFoundError } =
     require('../cdpClient') as typeof import('../cdpClient');
-  const { deviceFactsIfNeededAsync, NO_DEVICE_FACTS, scopeOfPlatformFlag } =
+  const { deviceFactsIfNeededAsync, NO_DEVICE_FACTS, scopeOfFlags } =
     require('../runScope') as typeof import('../runScope');
 
   let client: import('../cdpClient').CdpClient;
   try {
-    const scope = scopeOfPlatformFlag(options.platform);
+    const scope = scopeOfFlags({ platform: options.platform, eas: options.cloud });
     const facts =
       scope.platform == null
         ? NO_DEVICE_FACTS
