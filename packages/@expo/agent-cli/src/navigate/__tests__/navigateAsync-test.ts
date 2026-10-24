@@ -1,9 +1,11 @@
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { vol } from 'memfs';
+import path from 'path';
 import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
 
 import { resetApprovedSchemes } from '../../device/approveScheme';
+import { unwrapGuardedExec } from '../../device/cloudCommand';
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
 import { navigateAsync } from '../navigateAsync';
 import type { NavigateOptions } from '../resolveOptions';
@@ -1243,6 +1245,53 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     }
   );
 
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server
+  it(`opens the launcher URL first, when no platform is named and only an iOS app is attached`, async () => {
+    mockDevClientProject();
+    const iosTarget = {
+      ...DEV_BUILD_TARGET,
+      id: 'i1',
+      deviceName: 'iPhone 17',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=i1&page=1',
+    };
+    // The launcher URL loads the bundle, so the emulator's app connects once it has been opened.
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () =>
+        openedUrls().includes(LAUNCHER_URL) ? [iosTarget, DEV_BUILD_TARGET] : [iosTarget],
+    })) as unknown as typeof fetch;
+    // No platform is named, so every platform's tools are asked; answer each by its argv.
+    vi.mocked(spawn).mockImplementation(((_bin: string, args: string[]) => {
+      const argv = Array.isArray(args) ? args : [];
+      const stdout = argv.includes('get-state')
+        ? EMULATOR_UP
+        : argv.includes('reverse')
+          ? '8081'
+          : argv.includes('devices')
+            ? ADB_DEVICES
+            : argv.includes('start')
+              ? 'Starting: Intent'
+              : '';
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      process.nextTick(() => {
+        if (stdout) child.stdout.emit('data', stdout);
+        child.emit('close', 0, null);
+      });
+      return child as never;
+    }) as never);
+
+    const exitCode = await navigateAsync(
+      projectRoot,
+      options({ platform: undefined, attachTimeoutMs: 1_000 })
+    );
+
+    expect(openedUrls()).toEqual([LAUNCHER_URL, 'demoapp://profile/42']);
+    expect(exitCode).toBe(0);
+  });
+
   it('honors EXPO_NO_DEV_MENU=0 for generated launch URLs', async () => {
     vi.stubEnv('EXPO_NO_DEV_MENU', '0');
     mockDevClientProject();
@@ -1421,5 +1470,138 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
 
     expect(JSON.parse(printed()).launch).toBeNull();
     expect(openedUrls()).toEqual(['demoapp://profile/42']);
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server
+//
+// The device is resolved after the dev server is read, so "is an app attached" is asked of the
+// session the run opens, whatever flag led to it.
+describe(`${navigateAsync.name} on an EAS Simulator session`, () => {
+  const RUNNER_DIR = (process.env.PATH ?? '/usr/local/bin').split(path.delimiter)[0]!;
+  const TUNNEL_HOST = 'znakdiwe5j2n5o0.boltexpo.dev';
+  const TUNNEL_LAUNCHER_URL = `demoapp://?__expo_url=https%3A%2F%2F${TUNNEL_HOST}&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1`;
+  const ROUTE_LINK = 'demoapp://profile/42';
+  const IOS_TARGET = {
+    id: 'i1',
+    appId: 'com.example.demo',
+    deviceName: 'iPhone 17',
+    webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=i1&page=1',
+  };
+  const ANDROID_TARGET = {
+    id: 'a1',
+    appId: 'com.example.demo',
+    deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+    webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=a1&page=1',
+  };
+
+  function mockCloudProject() {
+    vol.reset();
+    vol.fromJSON({
+      [`${projectRoot}/package.json`]: JSON.stringify({
+        name: 'demo',
+        dependencies: { 'expo-dev-client': '5.0.0' },
+      }),
+      [`${projectRoot}/node_modules/expo-dev-client/package.json`]: '{"name":"expo-dev-client"}',
+      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
+      [`${projectRoot}/.env.eas-simulator`]: 'EAS_SIMULATOR_SESSION_ID=sess-1\n',
+      [`${projectRoot}/.expo/dev/logs/dev-detached.log`]: `Waiting on http://${TUNNEL_HOST}\n`,
+      [path.join(RUNNER_DIR, 'npx')]: '#!/bin/sh\n',
+      [path.join(RUNNER_DIR, 'npx.cmd')]: '#!/bin/sh\n',
+    });
+    vi.mocked(readDevServerLockAsync).mockResolvedValue(
+      lockInfo({
+        url: 'http://127.0.0.1:8081',
+        port: 8081,
+        pid: 4242,
+        startedAt: '2020-01-01T00:00:00.000Z',
+        projectRoot,
+      })
+    );
+  }
+
+  /**
+   * Answer `eas simulator:list` with one live session and record every `simulator:exec` open. Local
+   * tools find nothing, so the session is the only device.
+   */
+  function mockCloudTools(platform: 'IOS' | 'ANDROID'): string[] {
+    const opened: string[] = [];
+    vi.mocked(spawn).mockImplementation(((_bin: string, args: string[]) => {
+      const argv = Array.isArray(args) ? args : [];
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+      });
+      let stdout = '';
+      if (argv.includes('simulator:list')) {
+        stdout = JSON.stringify({
+          sessions: [
+            {
+              id: 'sess-1',
+              status: 'IN_PROGRESS',
+              platform,
+              type: 'agent-device',
+              createdAt: '2026-10-22T10:00:00.000Z',
+            },
+          ],
+          pageInfo: { hasNextPage: false },
+        });
+      } else if (argv.includes('simulator:exec')) {
+        const target = unwrapGuardedExec(argv);
+        if (target?.args[1] === 'open') {
+          opened.push(target.args[2]!);
+        }
+      }
+      process.nextTick(() => {
+        if (stdout) {
+          child.stdout.emit('data', stdout);
+        }
+        child.emit('close', 0, null);
+      });
+      return child as never;
+    }) as never);
+    return opened;
+  }
+
+  it.each([
+    [
+      'no flag, an Android session, only an iOS app attached',
+      undefined,
+      'ANDROID',
+      [IOS_TARGET],
+      [TUNNEL_LAUNCHER_URL, ROUTE_LINK],
+    ],
+    [
+      'no flag, an Android session, its app attached',
+      undefined,
+      'ANDROID',
+      [ANDROID_TARGET],
+      [ROUTE_LINK],
+    ],
+    ['no flag, an iOS session, its app attached', undefined, 'IOS', [IOS_TARGET], [ROUTE_LINK]],
+    [
+      '--ios without --eas, an iOS session, its app attached',
+      'ios',
+      'IOS',
+      [IOS_TARGET],
+      [ROUTE_LINK],
+    ],
+  ] as const)('opens, with %s', async (_name, platform, sessionPlatform, targets, expected) => {
+    mockCloudProject();
+    const opened = mockCloudTools(sessionPlatform);
+    const sessionTarget = sessionPlatform === 'IOS' ? IOS_TARGET : ANDROID_TARGET;
+    // The launcher URL loads the bundle, so the session's app connects once it has been opened.
+    globalThis.fetch = (async () => ({
+      ok: true,
+      json: async () =>
+        opened.includes(TUNNEL_LAUNCHER_URL) ? [...targets, sessionTarget] : targets,
+    })) as unknown as typeof fetch;
+
+    await navigateAsync(
+      projectRoot,
+      options({ platform, devServerUrl: null, attachTimeoutMs: 300, json: true })
+    );
+
+    expect(opened).toEqual(expected);
   });
 });

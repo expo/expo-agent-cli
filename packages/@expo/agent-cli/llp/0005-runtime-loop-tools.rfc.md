@@ -124,6 +124,8 @@ When the target app cannot be told apart (nothing connected, no `--app-id`, no `
 
 Device-facing URLs prefer a current tunnel host over the listen address. See the next section.
 
+Whether the app is attached is a fact about the device the run opens. A `navigate` run reads the attached apps of that device's scope, with or without a platform flag: its platform, and on an EAS Simulator session the session's app. An app of another platform on the same dev server does not count. When none is attached, the launcher URL opens first, then the route link. An attached app gets the route link alone, so `--ios` that falls back to an iOS session does not reload its app. Tests: `navigateAsync-test.ts` "opens the launcher URL first, when no platform is named and only an iOS app is attached" and "on an EAS Simulator session".
+
 ### Where a device reaches the dev server
 
 Device-facing URLs prefer a current tunnel host over the listen address [confirmed, Kudo, 2026-08-25]. The lock records `http://127.0.0.1:<port>`. That is the right answer for every command that talks to the dev server over HTTP. It is the wrong one for a link a device opens.

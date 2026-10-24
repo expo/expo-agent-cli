@@ -195,15 +195,6 @@ export interface ResolvedRoute {
   connect: ConnectUrl[];
   /** Whether the route was checked against the project's routes, and what the check said. */
   routeCheck: RouteCheckJson;
-  /**
-   * Whether an app of the platform in question already holds a debugger target on this dev server.
-   *
-   * The same fact the target decision is made from, kept rather than thrown away: it is what
-   * separates "navigate an app that is running" from "get the app running, then navigate it"
-   * (F123, {@link openRouteAsync}). False when nothing is connected **or** when there is no dev
-   * server to be connected to.
-   */
-  appAttached: boolean;
 }
 
 /** One open of a URL on a device, and what came of it. */
@@ -462,10 +453,6 @@ export async function resolveRouteUrlAsync(
       automation: process.env.EXPO_NO_DEV_MENU !== '0',
     }),
     routeCheck,
-    // The same list the target decision was made from. Kept, because "which app is this" and "is
-    // that app running" are two questions with one answer here, and F123 is the second one having
-    // been computed and then dropped.
-    appAttached: decisionTargets.length > 0,
   };
 }
 
@@ -510,8 +497,15 @@ export async function openRouteAsync(
   // Decided before the reverse, because the two links need different ports forwarded: the launcher
   // URL carries the dev server's origin inside its `__expo_url` parameter, and a route link for a
   // development build carries no host at all.
+  //
+  // Whether the app is attached is asked of the device this run opens, not of the platform flag:
+  // with no flag, an app of another platform on the same dev server is not this device's app.
   const budgetMs = options.confirmAttachMs ?? 0;
-  const launcherUrl = devLauncherUrlFor(resolved, budgetMs);
+  const waitAsync = budgetMs > 0 ? attachWaiter(devServerUrl, scopeOfDevice(device)) : null;
+  const launcherUrl =
+    waitAsync && !resolved.isExpoGo && (await waitAsync(0)) === 0
+      ? devLauncherUrlOf(resolved)
+      : null;
 
   // @ref ./adbReverse — before the link, never after. `exp://127.0.0.1:<port>` means the *device's*
   // loopback, so an emulator resolves it to a port nothing listens on and Expo Go lands on its
@@ -539,7 +533,7 @@ export async function openRouteAsync(
     projectRoot,
     options,
     device,
-    devServerUrl,
+    waitAsync,
     launcherUrl,
     budgetMs,
   });
@@ -555,6 +549,7 @@ export async function openRouteAsync(
     options,
     device,
     devServerUrl,
+    waitAsync,
     url: resolved.url,
     openedOk: result.exitCode === 0,
     // What is left of the caller's budget. A launcher open that attached in four seconds leaves
@@ -743,21 +738,22 @@ const ATTACH_POLL_MS = 500;
 const ROUTE_ATTACH_FLOOR_MS = 2_000;
 
 /**
- * A function that waits until an app of this platform holds a debugger target, or the deadline.
+ * Wait until an app of this scope holds a debugger target, or the deadline.
  *
- * The launcher's wait and the route link's wait ask the same question of the same dev server. The
- * device facts that scoping needs are read once per wait, not once per poll.
- *
- * @returns how many targets this platform had when the wait ended: zero means the deadline won.
+ * @returns how many targets this scope had when the wait ended: zero means the deadline won.
  */
-async function attachWaiterAsync(
-  devServerUrl: string,
-  scope: RunScope
-): Promise<(deadline: number) => Promise<number>> {
-  const facts = await readDeviceFactsAsync();
+type AttachWaiter = (deadline: number) => Promise<number>;
+
+/**
+ * The one waiter of a run: the launcher decision, the launcher's wait and the route link's wait ask
+ * the same question of the same dev server. The device facts are read once, at the first probe.
+ */
+function attachWaiter(devServerUrl: string, scope: RunScope): AttachWaiter {
+  let facts: ReturnType<typeof readDeviceFactsAsync> | null = null;
   const countAsync = async (): Promise<number> => {
     const probe = await probeDevServerAsync(devServerUrl);
-    return probe.reachable ? placeTargets(probe.targets, scope, facts).read.length : 0;
+    facts ??= readDeviceFactsAsync();
+    return probe.reachable ? placeTargets(probe.targets, scope, await facts).read.length : 0;
   };
   return async (deadline: number): Promise<number> => {
     for (;;) {
@@ -808,31 +804,28 @@ async function attachWaiterAsync(
  *
  * @returns the launcher URL to open first, or null when this run opens only the route link.
  */
-function devLauncherUrlFor(resolved: ResolvedRoute, budgetMs: number): string | null {
-  if (budgetMs <= 0 || resolved.isExpoGo || resolved.appAttached) {
-    return null;
-  }
+function devLauncherUrlOf(resolved: ResolvedRoute): string | null {
   return resolved.connect.find((entry) => entry.target === 'dev-build')?.url ?? null;
 }
 
-/** Open the launcher URL {@link devLauncherUrlFor} chose, and wait for the app it loads. */
+/** Open the launcher URL {@link devLauncherUrlOf} gave, and wait for the app it loads. */
 async function launchDevClientFirstAsync({
   projectRoot,
   options,
   device,
-  devServerUrl,
+  waitAsync,
   launcherUrl,
   budgetMs,
 }: {
   projectRoot: string;
   options: OpenRouteOptions;
   device: NavigateDevice;
-  devServerUrl: string;
-  /** The URL {@link devLauncherUrlFor} decided on, or null when this ladder does not fire. */
+  waitAsync: AttachWaiter | null;
+  /** The launcher URL to open first, or null when this ladder does not fire. */
   launcherUrl: string | null;
   budgetMs: number;
 }): Promise<DevLauncherOpen | null> {
-  if (launcherUrl == null) {
+  if (launcherUrl == null || waitAsync == null) {
     return null;
   }
 
@@ -859,7 +852,6 @@ async function launchDevClientFirstAsync({
     };
   }
 
-  const waitAsync = await attachWaiterAsync(devServerUrl, scopeOfDevice(device));
   const targets = await waitAsync(startedAt + budgetMs);
   return {
     url: launcherUrl,
@@ -914,6 +906,7 @@ async function confirmAttachAsync({
   options,
   device,
   devServerUrl,
+  waitAsync,
   url,
   openedOk,
   budgetMs,
@@ -922,12 +915,13 @@ async function confirmAttachAsync({
   options: OpenRouteOptions;
   device: NavigateDevice;
   devServerUrl: string;
+  waitAsync: AttachWaiter | null;
   url: string;
   openedOk: boolean;
   /** How long this check may wait. The caller's own budget, less whatever it has already spent. */
   budgetMs: number;
 }): Promise<AttachCheck> {
-  if (budgetMs <= 0) {
+  if (budgetMs <= 0 || waitAsync == null) {
     return {
       checked: false,
       confirmed: null,
@@ -951,8 +945,6 @@ async function confirmAttachAsync({
   }
 
   const startedAt = Date.now();
-  const waitAsync = await attachWaiterAsync(devServerUrl, scopeOfDevice(device));
-
   let targets = await waitAsync(startedAt + budgetMs);
   let recovered = false;
   let alert: AlertCheck | null = null;
