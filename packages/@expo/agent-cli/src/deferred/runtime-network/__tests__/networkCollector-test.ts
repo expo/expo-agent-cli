@@ -11,6 +11,7 @@ import {
   parseNetworkMessage,
   targetAdvertisesNetworkPanel,
 } from '../networkCollector';
+import { READ_EVERY_TARGET } from '../../../runtime/__tests__/runScopeFixtures';
 
 const TARGET = {
   id: '1',
@@ -59,6 +60,7 @@ function mockCollector(
 ) {
   const requests: any[] = [];
   const collector = new CdpNetworkCollector({
+    ...READ_EVERY_TARGET,
     metroUrl: 'http://localhost:8081',
     targetSelector: async () => TARGET,
     durationMs,
@@ -213,6 +215,7 @@ describe('CdpNetworkCollector.collectAsync', () => {
 
   it(`should reject when the debugger connection does not open in time`, async () => {
     const collector = new CdpNetworkCollector({
+      ...READ_EVERY_TARGET,
       metroUrl: 'http://localhost:8081',
       targetSelector: async () => TARGET,
       timeoutMs: 20,
@@ -228,12 +231,16 @@ describe('CdpNetworkCollector.collectAsync', () => {
       json: async () => [],
     })) as unknown as typeof fetch;
 
-    const collector = new CdpNetworkCollector({ metroUrl: 'http://localhost:8081' });
+    const collector = new CdpNetworkCollector({
+      ...READ_EVERY_TARGET,
+      metroUrl: 'http://localhost:8081',
+    });
     await expect(collector.collectAsync()).rejects.toThrow(/No target found/);
   });
 
   it(`should resolve with the requests seen so far when the app disconnects`, async () => {
     const collector = new CdpNetworkCollector({
+      ...READ_EVERY_TARGET,
       metroUrl: 'http://localhost:8081',
       targetSelector: async () => TARGET,
       durationMs: 5000,

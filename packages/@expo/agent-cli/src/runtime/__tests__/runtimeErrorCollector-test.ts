@@ -2,7 +2,14 @@ import { EventEmitter } from 'events';
 import type WebSocketImpl from 'ws';
 
 import { CdpRuntimeErrorCollector, parseRuntimeErrorMessage } from '../runtimeErrorCollector';
+import { scopeOfPlatformFlag } from '../runScope';
 import { MockWebSocket } from './MockWebSocket';
+import { makeDeviceFacts, READ_EVERY_TARGET } from './runScopeFixtures';
+
+const ANDROID_AND_IOS_FACTS = makeDeviceFacts({
+  booted: [{ name: 'iPhone 17 Pro', udid: 'SIM-1' }],
+  androidModels: ['sdk_gphone64_arm64'],
+});
 
 const TARGET = {
   id: '1',
@@ -124,6 +131,7 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
   it(`should capture exceptions and console errors, and skip other console output`, async () => {
     const requests: any[] = [];
     const collector = new CdpRuntimeErrorCollector({
+      ...READ_EVERY_TARGET,
       metroUrl: 'http://localhost:8081',
       targetSelector: async () => TARGET,
       durationMs: 20,
@@ -207,6 +215,7 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
 
   it(`should resolve with the errors seen so far when the app disconnects`, async () => {
     const collector = new CdpRuntimeErrorCollector({
+      ...READ_EVERY_TARGET,
       metroUrl: 'http://localhost:8081',
       targetSelector: async () => TARGET,
       durationMs: 5000,
@@ -231,12 +240,16 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
       json: async () => [],
     })) as unknown as typeof fetch;
 
-    const collector = new CdpRuntimeErrorCollector({ metroUrl: 'http://localhost:8081' });
+    const collector = new CdpRuntimeErrorCollector({
+      ...READ_EVERY_TARGET,
+      metroUrl: 'http://localhost:8081',
+    });
     await expect(collector.collectAsync()).rejects.toThrow(/No target found/);
   });
 
   it(`should reject when the debugger connection does not open in time`, async () => {
     const collector = new CdpRuntimeErrorCollector({
+      ...READ_EVERY_TARGET,
       metroUrl: 'http://localhost:8081',
       targetSelector: async () => TARGET,
       timeoutMs: 20,
@@ -248,6 +261,7 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
 
   it(`should ignore a message that is not JSON instead of failing the window`, async () => {
     const collector = new CdpRuntimeErrorCollector({
+      ...READ_EVERY_TARGET,
       metroUrl: 'http://localhost:8081',
       targetSelector: async () => TARGET,
       durationMs: 20,
@@ -295,10 +309,10 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
     const collector = new CdpRuntimeErrorCollector({
       metroUrl: 'http://localhost:8081',
       durationMs: 20,
-      platform: 'android',
-      // The index this machine's own device tools would report, which is the strongest of the three
-      // pieces of evidence `platformOfTarget` ranks.
-      deviceIndex: { iosNames: ['iPhone 17 Pro'], androidModels: ['sdk_gphone64_arm64'] },
+      scope: scopeOfPlatformFlag('android'),
+      // The facts this machine's own device tools would report, which are the strongest of the
+      // three pieces of evidence `platformOfTarget` ranks.
+      facts: ANDROID_AND_IOS_FACTS,
       createWebSocket: (url) => {
         opened.push(url);
         return mixedPlatformSocket(url);
@@ -332,8 +346,8 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
     const collector = new CdpRuntimeErrorCollector({
       metroUrl: 'http://localhost:8081',
       durationMs: 20,
-      platform: 'android',
-      deviceIndex: { iosNames: ['iPhone 17 Pro'], androidModels: ['sdk_gphone64_arm64'] },
+      scope: scopeOfPlatformFlag('android'),
+      facts: ANDROID_AND_IOS_FACTS,
       createWebSocket: (url) => new MockWebSocket(url, () => {}) as unknown as WebSocketImpl,
     });
 

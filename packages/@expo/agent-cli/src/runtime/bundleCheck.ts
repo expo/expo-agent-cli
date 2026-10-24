@@ -86,12 +86,9 @@ export async function resolveBundleCheckPlatformsAsync(
   if (named != null) {
     return { platforms: [named], source: 'flag' };
   }
-  const { buildDeviceNameIndexIfNeededAsync, platformsOfTargets } =
-    require('./targetPlatform') as typeof import('./targetPlatform');
-  const { platforms } = platformsOfTargets(
-    targets,
-    await buildDeviceNameIndexIfNeededAsync(targets)
-  );
+  const { deviceFactsIfNeededAsync } = require('./runScope') as typeof import('./runScope');
+  const { platformsOfTargets } = require('./targetPlatform') as typeof import('./targetPlatform');
+  const { platforms } = platformsOfTargets(targets, await deviceFactsIfNeededAsync(targets));
   return platforms.length > 0
     ? { platforms, source: 'connected-app' }
     : { platforms: [fallback], source: 'default' };

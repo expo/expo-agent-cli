@@ -47,10 +47,11 @@ import {
   type DevServerSource,
 } from '../runtime/devServer';
 import {
-  buildDeviceNameIndexAsync,
-  buildDeviceNameIndexIfNeededAsync,
-  scopeTargets,
-} from '../runtime/targetPlatform';
+  deviceFactsForScopeAsync,
+  placeTargets,
+  readDeviceFactsAsync,
+  scopeOfPlatformFlag,
+} from '../runtime/runScope';
 import { CommandError } from '../utils/errors';
 import { reverseLoopbackPortAsync, type ReverseResult } from './adbReverse';
 import { buildConnectUrls, type ConnectUrl } from './connectUrl';
@@ -394,15 +395,13 @@ export async function resolveRouteUrlAsync(
   // Scoped to the platform that was named, for the reason every other reading command is (F51):
   // a dev server with an iOS simulator already attached would otherwise decide an `--android` run's
   // target app from the simulator's registration. Nothing on the named platform leaves the decision
-  // to the project's own shape, which is the honest fallback. The index costs no subprocess unless
-  // a target cannot be placed by its app id, which Expo Go always can.
-  const decisionTargets = platform
-    ? scopeTargets(
-        devServer.targets,
-        platform,
-        await buildDeviceNameIndexIfNeededAsync(devServer.targets)
-      ).matched
-    : devServer.targets;
+  // to the project's own shape, which is the honest fallback. Expo Go costs no device-tool spawn.
+  const scope = scopeOfPlatformFlag(platform);
+  const decisionTargets = placeTargets(
+    devServer.targets,
+    scope,
+    await deviceFactsForScopeAsync(devServer.targets, scope)
+  ).read;
 
   const target = decideExpoGoTarget({
     appIdOverride: appId,
@@ -745,8 +744,8 @@ const ROUTE_ATTACH_FLOOR_MS = 2_000;
  * A function that waits until an app of this platform holds a debugger target, or the deadline.
  *
  * Built once and shared by the two waits of one run — the launcher's and the route link's — so both
- * ask the same question of the same dev server, and the device-name index that scoping needs is
- * built once rather than per open.
+ * ask the same question of the same dev server, and the device facts that scoping needs are read
+ * once rather than per open.
  *
  * @returns how many targets this platform had when the wait ended: zero means the deadline won.
  */
@@ -754,10 +753,11 @@ async function attachWaiterAsync(
   devServerUrl: string,
   platform: NavigatePlatform
 ): Promise<(deadline: number) => Promise<number>> {
-  const index = await buildDeviceNameIndexAsync();
+  const scope = scopeOfPlatformFlag(platform);
+  const facts = await readDeviceFactsAsync();
   const countAsync = async (): Promise<number> => {
     const probe = await probeDevServerAsync(devServerUrl);
-    return probe.reachable ? scopeTargets(probe.targets, platform, index).matched.length : 0;
+    return probe.reachable ? placeTargets(probe.targets, scope, facts).read.length : 0;
   };
   return async (deadline: number): Promise<number> => {
     for (;;) {
