@@ -165,34 +165,22 @@ describe(readProjectSchemeConfig, () => {
 });
 
 describe(resolveDeepLinkUrl, () => {
-  it(`should pass a full custom-scheme URL through unchanged`, () => {
+  it.each([
+    ['myapp://profile/42', config({ scheme: 'other' }), false],
+    ['https://example.com/profile/42', config(), true],
+  ])(`should open the full URL %j as given`, (route, projectConfig, isExpoGo) => {
     const result = resolveDeepLinkUrl({
-      route: 'myapp://profile/42',
-      config: config({ scheme: 'other' }),
-      isExpoGo: false,
+      route,
+      config: projectConfig,
+      isExpoGo,
+      devServerUrl: isExpoGo ? 'http://localhost:8081' : undefined,
     });
 
     expect(result).toEqual({
       ok: true,
       host: null,
-      url: 'myapp://profile/42',
-      resolution: 'the route was already a full URL, so it was used unchanged',
-    });
-  });
-
-  it(`should pass a full https URL through unchanged`, () => {
-    const result = resolveDeepLinkUrl({
-      route: 'https://example.com/profile/42',
-      config: config(),
-      isExpoGo: true,
-      devServerUrl: 'http://localhost:8081',
-    });
-
-    expect(result).toEqual({
-      ok: true,
-      host: null,
-      url: 'https://example.com/profile/42',
-      resolution: 'the route was already a full URL, so it was used unchanged',
+      url: route,
+      resolution: 'the route was already a full URL, so it was only percent-encoded',
     });
   });
 
@@ -313,6 +301,50 @@ describe(resolveDeepLinkUrl, () => {
     });
 
     expect(result).toMatchObject({ ok: true, url: 'demoapp://profile/42?tab=posts' });
+  });
+
+  it.each([
+    ['/street/U Zeleného stromu', 'demoapp://street/U%20Zelen%C3%A9ho%20stromu'],
+    ['/street/U%20Zelen%C3%A9ho%20stromu', 'demoapp://street/U%20Zelen%C3%A9ho%20stromu'],
+    ['/street/Horní?x=a b&y=1#top', 'demoapp://street/Horn%C3%AD?x=a%20b&y=1#top'],
+    ['/discount/50%', 'demoapp://discount/50%25'],
+    ['cyclable://street/U Zeleného stromu', 'cyclable://street/U%20Zelen%C3%A9ho%20stromu'],
+    ['demoapp://Žižkov/x', 'demoapp://%C5%BDi%C5%BEkov/x'],
+    ['exp://[::1]:8081/--/street/U Z', 'exp://[::1]:8081/--/street/U%20Z'],
+    ['exp://[fe80::1%25en0]:8081', 'exp://[fe80::1%25en0]:8081'],
+    ['exp://[fe80::1%en0]:8081', 'exp://[fe80::1%25en0]:8081'],
+    ['myapp://u:p@[::1]:80/x', 'myapp://u:p@[::1]:80/x'],
+    ['myapp://foo%5Bbar%5D/baz', 'myapp://foo%5Bbar%5D/baz'],
+    ['myapp://foo[bar]/baz', 'myapp://foo%5Bbar%5D/baz'],
+    ['exp://[::1%5D:8081/a', 'exp://%5B::1%5D:8081/a'],
+    [
+      'exp+cyclable://expo-development-client/?url=http%3A%2F%2F192.168.1.10%3A8081',
+      'exp+cyclable://expo-development-client/?url=http%3A%2F%2F192.168.1.10%3A8081',
+    ],
+    ['exp://h/--/a b?q=a b#f g', 'exp://h/--/a%20b?q=a%20b#f%20g'],
+    ['myapp:profile/Ž', 'myapp:profile/%C5%BD'],
+  ])(`should percent-encode %j once`, (route, url) => {
+    const result = resolveDeepLinkUrl({
+      route,
+      config: config({ scheme: 'demoapp', configFile: 'app.json' }),
+      isExpoGo: false,
+    });
+
+    expect(result).toMatchObject({ ok: true, url });
+  });
+
+  it(`should percent-encode the route in an Expo Go link`, () => {
+    const result = resolveDeepLinkUrl({
+      route: '/street/U Zeleného stromu',
+      config: config(),
+      isExpoGo: true,
+      devServerUrl: 'http://192.168.1.10:8081',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      url: 'exp://192.168.1.10:8081/--/street/U%20Zelen%C3%A9ho%20stromu',
+    });
   });
 
   it(`should collapse repeated leading slashes`, () => {

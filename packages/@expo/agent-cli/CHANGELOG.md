@@ -49,6 +49,7 @@
 - `smoke` now reloads an app that was already running onto the code on disk before it reads it, so the gate no longer passes an app whose error window and screenshot are from before the edit. A reload it cannot prove is `inconclusive` rather than `passed`, and `--no-reload` opts out. ([#2](https://github.com/expo/expo-agent-cli/pull/2) by [@kudo](https://github.com/kudo))
 - `dev --detach` no longer reports a detached dev server for a plan step that opens the app and is then refused by macOS after the lock appeared. The grace window that catches that refusal no longer requires `--wait-ready`, so a `dev --detach --ios` now spends it before reporting. ([#2](https://github.com/expo/expo-agent-cli/pull/2) by [@kudo](https://github.com/kudo))
 - `runtime:tree` and the interaction commands find the focused screen of an expo-router 58 app on the native stack, JS tabs and the drawer, so they read the screen on top, not every mounted screen. The JS stack, JS top tabs and headless `ui` tabs still report no focused screen. ([#199](https://github.com/expo/expo-agent-cli/pull/199) by [@vonovak](https://github.com/vonovak))
+- `navigate` percent-encodes the route and a full URL, so a link with spaces or diacritics opens instead of failing with APP_NOT_INSTALLED. ([#198](https://github.com/expo/expo-agent-cli/pull/198) by [@vonovak](https://github.com/vonovak))
 
 ### 💡 Others
 
