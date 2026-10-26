@@ -312,6 +312,11 @@ describe(resolveDeepLinkUrl, () => {
     ['demoapp://Žižkov/x', 'demoapp://%C5%BDi%C5%BEkov/x'],
     ['exp://[::1]:8081/--/street/U Z', 'exp://[::1]:8081/--/street/U%20Z'],
     ['exp://[fe80::1%25en0]:8081', 'exp://[fe80::1%25en0]:8081'],
+    ['exp://[fe80::1%en0]:8081', 'exp://[fe80::1%25en0]:8081'],
+    ['myapp://u:p@[::1]:80/x', 'myapp://u:p@[::1]:80/x'],
+    ['myapp://foo%5Bbar%5D/baz', 'myapp://foo%5Bbar%5D/baz'],
+    ['myapp://foo[bar]/baz', 'myapp://foo%5Bbar%5D/baz'],
+    ['exp://[::1%5D:8081/a', 'exp://%5B::1%5D:8081/a'],
     [
       'exp+cyclable://expo-development-client/?url=http%3A%2F%2F192.168.1.10%3A8081',
       'exp+cyclable://expo-development-client/?url=http%3A%2F%2F192.168.1.10%3A8081',

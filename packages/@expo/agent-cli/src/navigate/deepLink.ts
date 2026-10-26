@@ -523,17 +523,23 @@ function encodeUrlPart(part: string): string {
   return encodeURI(part).replace(/%25([0-9A-Fa-f]{2})/g, '%$1');
 }
 
-// The authority keeps `[` `]` so an IPv6 host such as `exp://[::1]:8081` stays a host.
 function encodeFullUrl(url: string): string {
   return url.replace(
     /^([a-zA-Z][a-zA-Z0-9+.-]*:)(\/\/[^/?#]*)?([\s\S]*)$/,
     (_match, scheme: string, authority: string | undefined, rest: string) =>
-      scheme +
-      encodeUrlPart(authority ?? '')
-        .replace(/%5B/g, '[')
-        .replace(/%5D/g, ']') +
-      encodeUrlPart(rest)
+      scheme + encodeAuthority(authority ?? '') + encodeUrlPart(rest)
   );
+}
+
+// encodeURI escapes `[` `]`; only an IPv6 host such as `exp://[::1]:8081` gets them back, and
+// escapes the caller wrote, `%5B` included, stay.
+const IPV6_HOST = /^(\/\/(?:[^@]*@)?)\[([0-9A-Fa-f:.]+)(%[^\]]*)?\](?=(?::\d*)?$)/;
+
+function encodeAuthority(authority: string): string {
+  const match = IPV6_HOST.exec(authority);
+  if (!match) return encodeUrlPart(authority);
+  const [whole, prefix, address, zone] = match;
+  return `${encodeUrlPart(prefix ?? '')}[${address}${encodeUrlPart(zone ?? '')}]${authority.slice(whole.length)}`;
 }
 
 function stripSchemeSuffix(value: string): string {
