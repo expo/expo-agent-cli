@@ -21,8 +21,9 @@ import {
   evaluateExpression,
   installHook,
   installHookWithoutRoots,
+  nativeTabsScreen,
   removeHook,
-  screen,
+  routerScreen,
   type FiberSpec,
 } from './fiberTree';
 
@@ -550,7 +551,7 @@ describe('the focus filter', () => {
       name: 'RNSTabsHostIOS',
       props: {},
       children: recorded.map((node) =>
-        screen(String(node.scalarProps.name), node.scalarProps.isFocused === true, [
+        nativeTabsScreen(String(node.scalarProps.name), node.scalarProps.isFocused === true, [
           {
             name: 'Pressable',
             props: { testID: `${node.scalarProps.name}-button`, onPress: () => {} },
@@ -623,16 +624,16 @@ describe('the focus filter', () => {
       name: 'Root',
       props: {},
       children: [
-        screen('tab-a', true, [
-          screen('detail', true, [
+        nativeTabsScreen('tab-a', true, [
+          nativeTabsScreen('detail', true, [
             { name: 'Pressable', props: { testID: 'deep', onPress: () => {} } },
           ]),
-          screen('list', false, [
+          nativeTabsScreen('list', false, [
             { name: 'Pressable', props: { testID: 'behind', onPress: () => {} } },
           ]),
         ]),
-        screen('tab-b', false, [
-          screen('other', true, [
+        nativeTabsScreen('tab-b', false, [
+          nativeTabsScreen('other', true, [
             { name: 'Pressable', props: { testID: 'other-tab', onPress: () => {} } },
           ]),
         ]),
@@ -675,8 +676,12 @@ describe('the focus filter', () => {
       name: 'Root',
       props: {},
       children: [
-        screen('one', false, [{ name: 'Pressable', props: { testID: 'a', onPress: () => {} } }]),
-        screen('two', false, [{ name: 'Pressable', props: { testID: 'b', onPress: () => {} } }]),
+        nativeTabsScreen('one', false, [
+          { name: 'Pressable', props: { testID: 'a', onPress: () => {} } },
+        ]),
+        nativeTabsScreen('two', false, [
+          { name: 'Pressable', props: { testID: 'b', onPress: () => {} } },
+        ]),
       ],
     };
 
@@ -688,6 +693,73 @@ describe('the focus filter', () => {
     expect(answer.focusedScreen).toBeNull();
     expect(answer.screensSeen).toEqual(['one', 'two']);
     expect(answer.nodes.map((node) => node.testID)).toEqual(['a', 'b']);
+  });
+});
+
+// @ref llp/0018-interaction-commands.rfc.md §Eight shipped decisions 2. React Navigation's screen fibers
+// carry `focused` and `route`, and each route also renders a core `SceneView` that has no `focused`.
+describe('the focus filter in an expo-router 58 app', () => {
+  const street = (testID: string) =>
+    ({ name: 'Text', props: { testID, children: testID } }) satisfies FiberSpec;
+
+  /** The core `SceneView` every navigator renders inside each route: `route`, no `focused`. */
+  const coreSceneView = (routeName: string, children: FiberSpec[]) =>
+    ({
+      name: 'SceneView',
+      props: { route: { key: `${routeName}-key`, name: routeName }, navigation: {} },
+      children,
+    }) satisfies FiberSpec;
+
+  const route = (
+    component: 'Screen' | 'SceneView',
+    routeName: string,
+    focused: boolean,
+    children: FiberSpec[] = []
+  ) => routerScreen(component, routeName, focused, [coreSceneView(routeName, children)]);
+
+  /** Root stack: (tabs) under three pushed street screens, the last one on top. */
+  function app(): FiberSpec {
+    return {
+      name: 'Root',
+      props: {},
+      children: [
+        route('SceneView', '(tabs)', false, [
+          route('Screen', 'index', true, [
+            { name: 'Pressable', props: { testID: 'street-row', onPress: () => {} } },
+          ]),
+          route('Screen', 'map', false),
+        ]),
+        route('SceneView', 'street/[name]', false, [street('street-length')]),
+        route('SceneView', 'street/[name]', false, [street('street-length')]),
+        route('SceneView', 'street/[name]', true, [street('street-length')]),
+      ],
+    };
+  }
+
+  const treeOf = (testID: string | null) =>
+    buildTreeExpression({ full: false, allScreens: false, testID, maxNodes: 500 });
+
+  it(`finds the top stack screen as the focused one, and matches one element of three street screens`, () => {
+    const answer = against<TreeAnswer>(app(), treeOf(null));
+
+    expect(answer.focusedScreen).toBe('street/[name]');
+    expect(answer.screensSeen).toEqual(['(tabs)', 'index', 'map', 'street/[name]']);
+    expect(against<TreeAnswer>(app(), treeOf('street-length')).matched).toBe(1);
+  });
+
+  it(`reports no focused screen and the whole tree under the JS stack, whose cards are not screen fibers`, () => {
+    const card = (focused: boolean) =>
+      ({
+        name: 'CardContainerInner',
+        props: { focused, scene: { route: { key: 'street-key', name: 'street/[name]' } } },
+        children: [coreSceneView('street/[name]', [street('street-length')])],
+      }) satisfies FiberSpec;
+    const jsStack = { name: 'Root', props: {}, children: [card(false), card(false), card(true)] };
+
+    const answer = against<TreeAnswer>(jsStack, treeOf(null));
+
+    expect(answer.focusedScreen).toBeNull();
+    expect(against<TreeAnswer>(jsStack, treeOf('street-length')).matched).toBe(3);
   });
 });
 
@@ -1323,7 +1395,7 @@ describe('the type call', () => {
   // which would have failed for a different reason.
   it(`answers "no candidate takes text" before it answers "which one"`, () => {
     const shared = (screenName: string): FiberSpec =>
-      screen(screenName, true, [
+      nativeTabsScreen(screenName, true, [
         { name: 'Pressable', props: { testID: 'shared-id', onPress: () => {} } },
       ]);
     const answer = against<CallAnswer>(
@@ -1344,7 +1416,7 @@ describe('the type call', () => {
 
   it(`still asks which one when the candidates do take text`, () => {
     const input = (screenName: string): FiberSpec =>
-      screen(screenName, true, [
+      nativeTabsScreen(screenName, true, [
         { name: 'TextInput', props: { testID: 'shared-input', onChangeText: () => {} } },
       ]);
     const answer = against<CallAnswer>(
