@@ -7,7 +7,19 @@ const longFiles = {
   'src/dev/devAsync.ts': 1042,
   'src/runtime/reload/reloadAsync.ts': 1032,
   'src/smoke/phases.ts': 1078,
-  'src/status/statusAsync.ts': 809,
+  'src/smoke/smokeAsync.ts': 801,
+  'src/status/statusAsync.ts': 806,
+};
+
+// Known debt: files that hold a function over the 100-line limit and have room under 800. The
+// disable comment on that function does not stop it from growing, so the file is capped at its
+// current size. Lower a cap when a file shrinks; delete the entry when the function is split.
+const longFunctionFiles = {
+  'src/agents/installAgentAsync.ts': 254,
+  'src/dev/easSession.ts': 476,
+  'src/followups/smoke.ts': 277,
+  'src/plan/decide.ts': 474,
+  'src/runtime/discoverDevServer.ts': 194,
 };
 
 export default {
@@ -45,11 +57,19 @@ export default {
       rules: { 'no-console': 'off' },
     },
     {
-      // Tests are table-driven and long by design; size limits apply to shipped code.
-      files: ['**/__tests__/**', 'e2e/**', 'e2e-live/**', 'evals/**', 'scripts/**'],
+      // Tests are table-driven and long by design; size limits apply to shipped code. Nothing
+      // loads, compiles or tests `src/deferred/`, so its size does not matter either.
+      files: [
+        '**/__tests__/**',
+        'e2e/**',
+        'e2e-live/**',
+        'evals/**',
+        'scripts/**',
+        'src/deferred/**',
+      ],
       rules: { 'max-lines': 'off', 'max-lines-per-function': 'off', 'max-depth': 'off' },
     },
-    ...Object.entries(longFiles).map(([file, max]) => ({
+    ...Object.entries({ ...longFiles, ...longFunctionFiles }).map(([file, max]) => ({
       files: [file],
       rules: { 'max-lines': ['error', { max, ...codeLines }] },
     })),

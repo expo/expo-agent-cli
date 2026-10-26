@@ -11,7 +11,7 @@ import chalk from 'chalk';
 import path from 'path';
 
 import { devDetachAsync } from '../dev/detachAsync';
-import type { EnsureEasSessionReport } from '../dev/openAppEas';
+import type { EnsureEasSessionReport } from '../dev/easSession';
 import { resolveDevOptions } from '../dev/resolveOptions';
 import { resolveDevStopOptions } from '../dev/resolveStopOptions';
 import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
@@ -50,7 +50,8 @@ import { EAS_SIMULATOR_PROFILE, localRequirement } from '../toolchain/runsOn';
 import { smokeCommand } from './suggest';
 import { checkEntryBundleAsync } from '../runtime/bundleCheck';
 import { CdpClient, isMethodNotFoundError } from '../runtime/cdpClient';
-import { discoverDevServerAsync, probeDevServerAsync } from '../runtime/devServer';
+import { probeDevServerAsync } from '../runtime/devServer';
+import { discoverDevServerAsync } from '../runtime/discoverDevServer';
 import { markBundleSignalSync } from '../runtime/reload/bundleSignal';
 import {
   reloadOverDevServerAsync,
@@ -555,7 +556,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // on EAS; the gate never compiles one — `dev --eas` does, and is named.
     ensureEasSession: async (devServerUrl) => {
       const { ensureEasSessionAsync } =
-        require('../dev/openAppEas') as typeof import('../dev/openAppEas');
+        require('../dev/easSession') as typeof import('../dev/easSession');
       const target = await targetAsync();
       const result = await ensureEasSessionAsync(projectRoot, {
         platform: options.platform,

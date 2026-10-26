@@ -148,7 +148,6 @@ export class CdpNetworkCollector {
    * @throws {Error} when the app cannot be reached, so callers can tell "no requests" from
    * "not connected".
    */
-  // oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
   async collectAsync(): Promise<NetworkRequestRecord[]> {
     const {
       metroUrl,

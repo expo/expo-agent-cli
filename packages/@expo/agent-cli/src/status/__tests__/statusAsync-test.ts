@@ -29,7 +29,8 @@ import * as resolveAsync from '../../plan/resolveAsync';
 import * as appConfig from '../../project/appConfig';
 import { probeProjectStateAsync } from '../../project/probe';
 import type { ProjectState, StartPlan } from '../../project/types';
-import { discoverDevServerAsync, type DevServerDiscovery } from '../../runtime/devServer';
+import { type DevServerDiscovery } from '../../runtime/devServer';
+import { discoverDevServerAsync } from '../../runtime/discoverDevServer';
 import { probeTargetLivenessAsync } from '../../runtime/targetLiveness';
 import { waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { getPersistedAgentIdsAsync } from '../../skills/agents';
@@ -51,7 +52,7 @@ vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
 vi.mock('../../project/probe', () => ({ probeProjectStateAsync: vi.fn() }));
 vi.mock('../../plan/lastBuild', () => ({ readLastBuildRecord: vi.fn(() => ({})) }));
-vi.mock('../../runtime/devServer', () => ({ discoverDevServerAsync: vi.fn() }));
+vi.mock('../../runtime/discoverDevServer', () => ({ discoverDevServerAsync: vi.fn() }));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
 // The liveness probe opens one debugger socket per listed target (F56). These tests are about the
 // report; the probe has its own suite. Every listed target answers unless a case says otherwise.
@@ -1775,8 +1776,9 @@ describe('status retains discovery results at its deadline', () => {
       live: targets.length,
       stale: [],
     }));
-    const actual =
-      await vi.importActual<typeof import('../../runtime/devServer')>('../../runtime/devServer');
+    const actual = await vi.importActual<typeof import('../../runtime/discoverDevServer')>(
+      '../../runtime/discoverDevServer'
+    );
     vi.mocked(discoverDevServerAsync).mockImplementation((...args) => {
       discoveryWork = actual.discoverDevServerAsync(...args);
       void discoveryWork.then(() => {

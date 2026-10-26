@@ -41,11 +41,8 @@ import {
 import { readProjectRoutesAsync } from '../project/routes';
 import { readConfiguredAppId, resolveAppId } from '../runtime/appId';
 import { stopAppOnDeviceAsync } from '../runtime/appProcess';
-import {
-  discoverDevServerAsync,
-  probeDevServerAsync,
-  type DevServerSource,
-} from '../runtime/devServer';
+import { probeDevServerAsync, type DevServerSource } from '../runtime/devServer';
+import { discoverDevServerAsync } from '../runtime/discoverDevServer';
 import {
   buildDeviceNameIndexAsync,
   buildDeviceNameIndexIfNeededAsync,

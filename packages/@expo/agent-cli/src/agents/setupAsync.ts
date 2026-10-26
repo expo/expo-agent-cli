@@ -19,7 +19,7 @@ import type { DiscoveredSkill, SkillsAgent } from '../skills/types';
 import { withStdoutRedirectedAsync } from '../utils/stdout';
 import { ensureClaudeMdReferenceAsync } from './agentsMd';
 import { event } from './events';
-import { installAgentAsync } from './installers';
+import { installAgentAsync } from './installAgentAsync';
 import { prepareSetupAsync } from './plan';
 import { writeProjectInstructionsAsync } from './projectInstructions';
 import type { SetupOptions, SetupReport } from './types';

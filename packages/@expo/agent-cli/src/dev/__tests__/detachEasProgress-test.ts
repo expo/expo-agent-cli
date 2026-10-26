@@ -8,7 +8,7 @@ import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { detachedPidLine } from '../childVerdict';
 import { childStartsSessionSync } from '../detachEasProgress';
 import { detachedLogPath } from '../logFile';
-import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from '../openAppEas';
+import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from '../easSession';
 import { isProcessAlive } from '../processLiveness';
 
 vi.mock('../processLiveness', () => ({ isProcessAlive: vi.fn() }));

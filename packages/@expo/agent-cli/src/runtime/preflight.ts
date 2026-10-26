@@ -37,12 +37,12 @@ import { CommandError } from '../utils/errors';
 import type { CdpTarget } from './cdpClient';
 import {
   APP_RECONNECT_GRACE_MS,
-  discoverDevServerAsync,
   howToNameTheDevServer,
   normalizeDevServerUrl,
   probeDevServerAsync,
   type DevServerSource,
 } from './devServer';
+import { discoverDevServerAsync } from './discoverDevServer';
 import {
   buildDeviceNameIndexIfNeededAsync,
   scopeTargets,

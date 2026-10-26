@@ -40,11 +40,8 @@ import { generateFingerprintAsync } from '../project/fingerprint';
 import { readProjectPackageJsonAsync } from '../project/nodeModules';
 import { probeProjectStateAsync } from '../project/probe';
 import type { ProjectState, StartPlan } from '../project/types';
-import {
-  discoverDevServerAsync,
-  type DevServerDiscovery,
-  type DevServerProbe,
-} from '../runtime/devServer';
+import { type DevServerDiscovery, type DevServerProbe } from '../runtime/devServer';
+import { discoverDevServerAsync } from '../runtime/discoverDevServer';
 import { probeTargetLivenessAsync } from '../runtime/targetLiveness';
 import { waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { getAllAgents, getPersistedAgentIdsAsync } from '../skills/agents';

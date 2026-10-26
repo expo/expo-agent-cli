@@ -8,16 +8,13 @@
 
 import * as Log from '../../log';
 import { CdpClient } from '../cdpClient';
-import { discoverDevServerAsync } from '../devServer';
+import { discoverDevServerAsync } from '../discoverDevServer';
 import type { RuntimeErrorsOptions, RuntimeEvalOptions } from '../resolveOptions';
 import { runtimeErrorsAsync, runtimeEvalAsync } from '../runtimeAsync';
 import { CdpRuntimeErrorCollector } from '../runtimeErrorCollector';
 
 vi.mock('../../log');
-vi.mock('../devServer', async () => ({
-  ...(await vi.importActual('../devServer')),
-  discoverDevServerAsync: vi.fn(),
-}));
+vi.mock('../discoverDevServer', () => ({ discoverDevServerAsync: vi.fn() }));
 vi.mock('../cdpClient', async () => ({
   ...(await vi.importActual('../cdpClient')),
   CdpClient: vi.fn(),

@@ -9,17 +9,14 @@ import { event } from '../../../events';
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../../exitCodes';
 import * as Log from '../../../log';
 import { checkEntryBundleAsync, type BundleCheckResult } from '../../../runtime/bundleCheck';
-import { discoverDevServerAsync } from '../../../runtime/devServer';
+import { discoverDevServerAsync } from '../../../runtime/discoverDevServer';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../../../runtime/waitReady';
 import type { DevWaitOptions } from '../resolveWaitOptions';
 import { devWaitAsync } from '../waitAsync';
 
 vi.mock('../../log');
 vi.mock('../../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
-vi.mock('../../runtime/devServer', async () => ({
-  ...(await vi.importActual('../../runtime/devServer')),
-  discoverDevServerAsync: vi.fn(),
-}));
+vi.mock('../../runtime/discoverDevServer', () => ({ discoverDevServerAsync: vi.fn() }));
 vi.mock('../../runtime/waitReady', () => ({
   waitForBundlerReadyAsync: vi.fn(),
   waitForAppConnectionAsync: vi.fn(),
