@@ -2,7 +2,8 @@ import { vol } from 'memfs';
 
 import { getAllAgents } from '../../skills/agents';
 import { findExecutableOnPath, spawnSubprocessAsync } from '../../utils/subprocess';
-import { buildInstallerPlans, installAgentAsync } from '../installers';
+import { installAgentAsync } from '../installAgentAsync';
+import { buildInstallerPlans } from '../installers';
 
 vi.mock('../../utils/subprocess', () => ({
   findExecutableOnPath: vi.fn(),

@@ -8,7 +8,7 @@ import { lockAddressFor } from '../../devLock';
 import { cleanupTempProjects, makeTempProject } from '../../devLock/__tests__/tempProject';
 import { acquireDevServerLockAsync } from '../../devLock/server';
 import type { DevServerLockHandle } from '../../devLock/types';
-import { discoverDevServerAsync } from '../devServer';
+import { discoverDevServerAsync } from '../discoverDevServer';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
 // The suite-wide `fs` mock is memfs, which the kernel cannot bind a socket inside.

@@ -221,6 +221,7 @@ export interface DevDetachOptions {
  * up — is the outcome asked for. Everything else throws.
  * @throws {CommandError} when the child exited before publishing its lock, or the wait ran out.
  */
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export async function devDetachAsync(
   projectRoot: string,
   options: DevOptions,

@@ -23,7 +23,8 @@ import {
   resolveBundleCheckPlatformsAsync,
   type BundleCheckResult,
 } from '../../runtime/bundleCheck';
-import { discoverDevServerAsync, howToNameTheDevServer } from '../../runtime/devServer';
+import { howToNameTheDevServer } from '../../runtime/devServer';
+import { discoverDevServerAsync } from '../../runtime/discoverDevServer';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { CommandError } from '../../utils/errors';
 import { buildDevWaitFollowUps } from './followups';

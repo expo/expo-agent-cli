@@ -23,8 +23,7 @@ vi.mock('../../dev/detachAsync', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../dev/detachAsync')>()),
   devDetachAsync: vi.fn(async () => 0),
 }));
-vi.mock('../../runtime/devServer', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../runtime/devServer')>()),
+vi.mock('../../runtime/discoverDevServer', () => ({
   discoverDevServerAsync: vi.fn(async () => ({
     reachable: true,
     devServerUrl: 'http://127.0.0.1:8081',

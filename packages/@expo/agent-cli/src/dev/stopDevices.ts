@@ -63,16 +63,8 @@ async function stopLocalDevicesAsync(
         // `url` is set only when the port answered as an Expo dev server.
         report.deviceError = `Devices were kept because a dev server this worktree did not lock answers on port ${stop.port}.\nHow: stop that dev server where it was started, then run "${PROGRAM_PREFIX} dev:stop --release" again.`;
       } else {
-        const released: ReleasedDevice[] = [];
-        for (const platform of options.platform
-          ? [options.platform]
-          : (['ios', 'android'] as const)) {
-          try {
-            released.push(...(await releaseWorktreeDevicesAsync(projectRoot, { platform })));
-          } catch (error) {
-            report.deviceError ??= error instanceof Error ? error.message : String(error);
-          }
-        }
+        const { released, error } = await releaseDevicesAsync(projectRoot, options.platform);
+        report.deviceError ??= error;
         const remaining = kept().filter(
           (device) =>
             !released.some((done) => done.id === device.id && done.platform === device.platform)
@@ -101,4 +93,20 @@ async function stopLocalDevicesAsync(
     }
   }
   return report;
+}
+
+async function releaseDevicesAsync(
+  projectRoot: string,
+  platform: DevStopOptions['platform']
+): Promise<{ released: ReleasedDevice[]; error: string | null }> {
+  const released: ReleasedDevice[] = [];
+  let error: string | null = null;
+  for (const each of platform ? [platform] : (['ios', 'android'] as const)) {
+    try {
+      released.push(...(await releaseWorktreeDevicesAsync(projectRoot, { platform: each })));
+    } catch (caught) {
+      error ??= caught instanceof Error ? caught.message : String(caught);
+    }
+  }
+  return { released, error };
 }

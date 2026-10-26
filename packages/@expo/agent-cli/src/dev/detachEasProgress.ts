@@ -14,7 +14,7 @@ import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { parseDetachedChildPid } from './childVerdict';
 import { readDetachedLogSync } from './logFile';
-import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './openAppEas';
+import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
 import { isProcessAlive } from './processLiveness';
 
 const WHOLE_LOG = Number.MAX_SAFE_INTEGER;

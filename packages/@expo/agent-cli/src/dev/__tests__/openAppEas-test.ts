@@ -19,14 +19,12 @@ import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
 import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
 import {
   buildLatestSimulatorBuildArgs,
-  buildSessionStartArgs,
   easRunLifecycle,
   findLatestSimulatorBuildIdAsync,
   openAppOnEasAsync,
   otherPlatformSessionAsync,
-  readSessionId,
-  readSessionUrl,
 } from '../openAppEas';
+import { buildSessionStartArgs, readSessionId, readSessionUrl } from '../easSession';
 
 vi.mock('../../log');
 vi.mock('../events', () => ({ event: vi.fn(), debugEvent: vi.fn() }));
@@ -681,7 +679,7 @@ describe(openAppOnEasAsync, () => {
 });
 
 describe('the session half on its own', () => {
-  const { ensureEasSessionAsync } = require('../openAppEas') as typeof import('../openAppEas');
+  const { ensureEasSessionAsync } = require('../easSession') as typeof import('../easSession');
   const { buildSessionStopArgs, stopEasSessionAsync } =
     require('../../device/eas') as typeof import('../../device/eas');
 

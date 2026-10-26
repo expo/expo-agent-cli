@@ -274,6 +274,7 @@ export interface ReloadResultJson {
  * @returns the exit code: `0` reloaded and reconnected, `20` not reloaded, `22` reloaded but the
  * app had not reconnected when the budget ran out (llp/0010 §Exit codes).
  */
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export async function reloadAsync(projectRoot: string, options: ReloadOptions): Promise<number> {
   const startedAt = Date.now();
   const { route, json, followups: wantFollowUps } = options;

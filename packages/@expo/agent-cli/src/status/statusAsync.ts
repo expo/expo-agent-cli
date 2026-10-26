@@ -40,11 +40,8 @@ import { generateFingerprintAsync } from '../project/fingerprint';
 import { readProjectPackageJsonAsync } from '../project/nodeModules';
 import { probeProjectStateAsync } from '../project/probe';
 import type { ProjectState, StartPlan } from '../project/types';
-import {
-  discoverDevServerAsync,
-  type DevServerDiscovery,
-  type DevServerProbe,
-} from '../runtime/devServer';
+import { type DevServerDiscovery, type DevServerProbe } from '../runtime/devServer';
+import { discoverDevServerAsync } from '../runtime/discoverDevServer';
 import { probeTargetLivenessAsync } from '../runtime/targetLiveness';
 import { waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { getAllAgents, getPersistedAgentIdsAsync } from '../skills/agents';
@@ -247,6 +244,7 @@ function readOrphanSessions(
  * wrapped on its own: an unreadable project still reports a running dev server, and a dependency
  * graph the skill discovery cannot walk still reports the project.
  */
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions

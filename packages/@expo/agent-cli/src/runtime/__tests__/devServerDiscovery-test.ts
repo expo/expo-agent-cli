@@ -1,7 +1,7 @@
 import { vol } from 'memfs';
 import path from 'node:path';
 
-import { discoverDevServerAsync } from '../devServer';
+import { discoverDevServerAsync } from '../discoverDevServer';
 
 const target = { webSocketDebuggerUrl: 'ws://x' } as any;
 
