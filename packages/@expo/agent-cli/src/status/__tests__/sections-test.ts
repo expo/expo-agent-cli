@@ -1007,8 +1007,10 @@ describe('buildNextActionStatus with a cloud session on record', () => {
 
     expect(next.command).toBe('npx @expo/agent-cli smoke --ios --eas');
     expect(next.why).toContain('EAS Simulator session');
-    // Status makes no session call, and smoke starts (and bills) a session when this one ended.
-    expect(next.why).toMatch(/on record \(not checked\).*starts one for this run/);
+    // Status makes no session call, and smoke starts (and bills) a session only when it can install an app.
+    expect(next.why).toMatch(
+      /on record \(not checked\).*Expo Go or a finished simulator build.*dev --ios --eas/
+    );
   });
 
   it(`names the platform of an Android session in the gate`, () => {
@@ -1025,7 +1027,9 @@ describe('buildNextActionStatus with a cloud session on record', () => {
     );
 
     expect(next.command).toBe('npx @expo/agent-cli smoke --android --eas');
-    expect(next.why).toMatch(/on record \(not checked\).*starts one for this run/);
+    expect(next.why).toMatch(
+      /on record \(not checked\).*Expo Go or a finished simulator build.*dev --android --eas/
+    );
   });
 
   // `status --ios` in a worktree with only an Android session: the session is the one device this

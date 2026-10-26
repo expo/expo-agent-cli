@@ -505,8 +505,9 @@ export function buildNextActionStatus(
    *
    * Taken by the caller from the recorded bindings. Whether the session is still *running* costs an
    * `eas` start-up, which `status` does not spend on this line, so it is not asked here. A dead
-   * session costs one `navigate / --<p> --eas` that says so, or one smoke run that starts a session
-   * for itself.
+   * session costs one `navigate / --<p> --eas` that says so, or one smoke run. That run starts a
+   * session (and stops it after) only for Expo Go or a finished simulator build, and otherwise fails
+   * at `start-session`.
    *
    * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
    */
@@ -596,7 +597,7 @@ function verifyAction(
           // The platform is a fact about the recorded session rather than a choice. Status makes no
           // session call, so the why says the session is recorded, not checked.
           command: `${smokeCommand(cloudSession)} --eas`,
-          why: 'an EAS Simulator session is on record (not checked) and an app is connected, so the gate runs on that session, not on this machine; if the session ended, smoke starts one for this run and stops it after, which bills',
+          why: `an EAS Simulator session is on record (not checked) and an app is connected, so the gate runs on that session, not on this machine; if it ended, smoke starts a billed one for Expo Go or a finished simulator build, else fails and names "${PROGRAM_PREFIX} dev --${cloudSession} --eas"`,
         }
       : {
           command: verifyCommand(device, state),
