@@ -70,6 +70,7 @@ describe(wrapExpressionForPromises, () => {
   });
 
   it(`should not treat an object that only looks like a promise as one`, () => {
+    // oxlint-disable-next-line unicorn/no-thenable -- the test needs a promise look-alike
     expect(runInFakeApp(wrapExpressionForPromises('({ then: 3 })', NONCE))).toEqual({ then: 3 });
   });
 

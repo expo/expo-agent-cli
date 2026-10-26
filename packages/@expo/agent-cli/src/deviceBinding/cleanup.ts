@@ -1,4 +1,5 @@
 // @ref llp/0035-one-device-per-worktree.rfc.md §Records
+import { Log } from '../log';
 import { easCommandPrefix } from '../utils/easCli';
 import { firstLine } from '../utils/text';
 import { killEmulatorIfOurs } from './android';
@@ -69,7 +70,7 @@ export async function runCleanupAsync(
     const reason = gone ? 'device-gone' : item.reason;
     report.reason = reason;
     const detail = report.error ?? gone;
-    console.error(
+    Log.error(
       !report.error && item.reaped && reason === 'deleted-worktree' && item.action === 'stop-cloud'
         ? `${doneVerb(item)} ${report.name} of worktree ${item.binding.projectRoot}: that worktree no longer exists, so no other command can stop it.`
         : `${report.error ? 'Could not release' : doneVerb(item)} ${report.name} (${reason})${detail ? `: ${detail}` : '.'}`
@@ -78,7 +79,7 @@ export async function runCleanupAsync(
     const step = report.error ? manualStep(item) : null;
     if (step) report.error = `${report.error}\nHow: run "${step}".`;
     if (item.reaped && item.reason === 'deleted-worktree') {
-      console.error(
+      Log.error(
         `Dev-server cleanup was not checked for deleted worktree ${item.binding.projectRoot}; a CLI or Metro process may still be running.`
       );
     }

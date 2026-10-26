@@ -418,6 +418,7 @@ describe('input that is not a log', () => {
     });
 
     // Nothing but the message: no NUL, no escape sequences, nothing a terminal would act on.
+    // oxlint-disable-next-line no-control-regex -- the test looks for control bytes
     const control = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
     // Colour is off on a pipe, so any escape byte here would be one that came from the input.
     expect(control.test(result.stdout)).toBe(false);

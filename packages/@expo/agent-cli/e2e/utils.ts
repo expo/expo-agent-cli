@@ -829,6 +829,7 @@ export const STUB_WEB_ERROR_PAGE = `<html><body><div id="root"></div><script id=
       {
         level: 'static',
         message: {
+          // oxlint-disable-next-line no-control-regex -- strips ANSI colour codes
           content: `${STUB_TRANSFORM_ERROR.message.replace(/\u001b\[[\d;]*m/g, '')}`,
         },
         stack: [{ file: '/project/src/app/index.tsx', lineNumber: 101, column: 2 }],

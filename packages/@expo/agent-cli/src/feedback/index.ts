@@ -101,7 +101,7 @@ export const agentCliFeedback: Command = async (argv) => {
   } = await import('./feedbackAsync');
 
   if (isTelemetryDisabled()) {
-    console.error(TELEMETRY_DISABLED_MESSAGE);
+    Log.error(TELEMETRY_DISABLED_MESSAGE);
     if (args['--json']) {
       Log.log(JSON.stringify({ sent: false, feedbackId: null }));
     }
@@ -109,7 +109,7 @@ export const agentCliFeedback: Command = async (argv) => {
   }
 
   if (args._.length > 0 && args['--message'] === undefined) {
-    console.warn(
+    Log.warn(
       'Passing feedback as a positional argument is deprecated. Use --message or -m instead.'
     );
   }
@@ -130,11 +130,11 @@ export const agentCliFeedback: Command = async (argv) => {
   // and record command telemetry after that config has run and feedback remains enabled.
   if (!isTelemetryDisabled()) {
     if (args['--resume'] !== undefined && metadata.feedbackId !== args['--resume']) {
-      console.warn(
+      Log.warn(
         `The provided feedback ID is invalid, so a new one was generated: ${metadata.feedbackId}`
       );
     }
-    console.error(
+    Log.error(
       'Submitting feedback with detected agent, sandbox, environment, and project metadata. Authenticated submissions are associated with your Expo account.'
     );
     recordCommand('feedback', version);

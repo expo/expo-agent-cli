@@ -21,7 +21,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { GitError, runGitAsync, type GitWorkTree } from '../../utils/git';
+import { runGitAsync, type GitWorkTree } from '../../utils/git';
 
 // Re-exported so this module still reads as "the git a checkpoint is made of": the two general
 // helpers live in `src/utils/git.ts` because `src/impact/` reads a diff with them, and every caller

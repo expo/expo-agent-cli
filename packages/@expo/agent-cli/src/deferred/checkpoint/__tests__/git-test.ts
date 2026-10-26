@@ -9,7 +9,6 @@ import {
   diffTreesAsync,
   objectExistsAsync,
   parseNameStatus,
-  resolveWorkTreeAsync,
   restoreTreeAsync,
   writeSnapshotTreeAsync,
   type GitWorkTree,
