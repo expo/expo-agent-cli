@@ -566,9 +566,9 @@ export const APP_ATTACH_TIMEOUT_MS = 120_000;
  * tapapp` on a simulator this run booted].
  *
  * Waiting is not a softer verdict. The question the phase asks is "can this runtime be read at
- * all", and a runtime that answers at eight seconds *can* be. A runtime with no debugger is asked
- * for {@link RUNTIME_UNSUPPORTED_GRACE_MS} (5 s) after its first "method not found", and a wait that
- * ends with no answer reports the runtime's own reason exactly as it did before.
+ * all", and a runtime that answers at eight seconds *can* be. In an app this run moved, a runtime
+ * with no debugger is asked for {@link RUNTIME_UNSUPPORTED_GRACE_MS} (5 s) after its first "method
+ * not found"; one that nothing moved is asked once. A wait that ends with no answer reports the runtime's own reason exactly as it did before.
  */
 export const RUNTIME_READY_TIMEOUT_MS = 15_000;
 
