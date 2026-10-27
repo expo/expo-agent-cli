@@ -1,10 +1,9 @@
 import chalk from 'chalk';
+import type { ChildProcess } from 'child_process';
 
 import { devDetachAsync } from '../../dev/detachAsync';
 import { resolveDevOptions } from '../../dev/resolveOptions';
-import { resolveDevStopOptions } from '../../dev/resolveStopOptions';
-import { devStopAsync, type DevStopResultJson } from '../../dev/stopAsync';
-import { inspectBindingAsync } from '../../deviceBinding';
+import { devicesDisabled, inspectBindingAsync } from '../../deviceBinding';
 import { event } from '../../events';
 import * as Log from '../../log';
 import { checkEntryBundleAsync } from '../../runtime/bundleCheck';
@@ -15,13 +14,14 @@ import { firstLine } from '../../utils/text';
 import type { SmokeDeps } from '../contract';
 import { BUILD_DEV_SERVER_TIMEOUT_MS, START_DEV_SERVER_TIMEOUT_MS } from '../timeouts';
 import { smokeCommand } from '../suggest';
-import { whatAndHow } from './reasons';
+import { stopOwnedDevServerAsync } from '../cleanupDevServer';
 import { deviceBoundByStart, START_DEV_SERVER_ARGV, startPortArgs } from './startArgs';
 import type { SmokeDepsContext } from './shared';
 
 /** What the start phase tells the stop phase: whether the device it found was already running. */
 interface DevServerState {
   keepBoundDevice: boolean;
+  startedChild: ChildProcess | null;
 }
 
 /** How long discovery may spend on each candidate port. Short: a dev server that is up answers. */
@@ -121,7 +121,12 @@ async function startDevServer(
         detachTimeoutMs:
           target.buildLocation != null ? BUILD_DEV_SERVER_TIMEOUT_MS : START_DEV_SERVER_TIMEOUT_MS,
       },
-      { print: false }
+      {
+        print: false,
+        onSpawn: (child) => {
+          server.startedChild = child;
+        },
+      }
     );
   } catch (error: unknown) {
     return {
@@ -148,46 +153,17 @@ async function startDevServer(
   };
 }
 
-// `dev:stop`'s own act, through `dev:stop`'s own function, with its report suppressed: this
-// run prints one report and the stop is a line in it. Everything that makes the stop safe is
-// that command's — it signals the pid the project's lock names and refuses a dev server no
-// lock answers for, so a cleanup can never take down something this run did not start.
+/** Cleanup authority comes from the child this smoke run actually spawned. */
 async function stopDevServer(
   ctx: SmokeDepsContext,
   server: DevServerState
 ): ReturnType<SmokeDeps['stopDevServer']> {
-  const { projectRoot, options } = ctx;
-  const captured: { report: DevStopResultJson | null } = { report: null };
-  const release = ctx.cloudRoute.current !== 'required' && !server.keepBoundDevice;
-  await devStopAsync(
-    projectRoot,
-    {
-      ...resolveDevStopOptions(['--no-followups']),
-      release,
-      platform: options.platform,
-    },
-    {
-      print: false,
-      onReport: (stopped) => {
-        captured.report = stopped;
-      },
-    }
+  return stopOwnedDevServerAsync(
+    ctx.projectRoot,
+    ctx.options.platform,
+    !devicesDisabled() && ctx.cloudRoute.current !== 'required' && !server.keepBoundDevice,
+    server.startedChild
   );
-  const stopped = captured.report;
-  const serverStopped = stopped != null && (stopped.stopped || stopped.reason === 'not-running');
-  return {
-    ok: serverStopped,
-    target: stopped?.url ?? (stopped?.port == null ? null : `port ${stopped.port}`),
-    reason: serverStopped ? null : (stopped?.detail ?? 'the dev server did not stop'),
-    // A refused release leaves each kept row without a reason; dev:stop's refusal is that reason.
-    devices: release
-      ? stopped?.devices?.map((device) =>
-          device.released || device.reason != null || stopped.deviceError == null
-            ? device
-            : { ...device, reason: whatAndHow(stopped.deviceError) }
-        )
-      : undefined,
-  };
 }
 
 function waitForBundlerReady(
@@ -214,7 +190,7 @@ function checkEntryBundle(
 
 /** The dev-server deps of one run. `keepBoundDevice` is the start phase's note to the stop phase. */
 export function createDevServerDeps(ctx: SmokeDepsContext) {
-  const server: DevServerState = { keepBoundDevice: false };
+  const server: DevServerState = { keepBoundDevice: false, startedChild: null };
   return {
     discoverDevServer: (explicitUrl) => discoverDevServer(ctx, explicitUrl),
     startDevServer: () => startDevServer(ctx, server),
