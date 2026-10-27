@@ -94,7 +94,7 @@ async function devInRunAsync(
   // lets the owning child record the request before doing startup work.
   if (options.detach) {
     const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
-    return await devDetachAsync(projectRoot, options, { reuseBoundDevice: true });
+    return await devDetachAsync(projectRoot, options);
   }
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — one dev server per project.
