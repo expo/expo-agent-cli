@@ -29,3 +29,9 @@ and compatibility with existing status/stop discovery. Fixed-name logs remain re
 
 A parent-only guard, the server socket alone, and timeout-based takeover all leave duplicate-start
 windows. General orphan adoption, foreground exclusivity, and pre-server cancellation are out of scope.
+
+Normal stop releases ownership, and a new run preserves the previous run's log.
+Windows stop force-terminates the process tree, so child cleanup cannot run. Only a successful
+tree stop followed by proof that its PID and server lock are gone may remove that captured
+owner's claim. Failed stops and unexplained deaths grant no such permission. The stop/restart
+process E2E enforces this contract on the Windows CI runner.

@@ -74,6 +74,30 @@ function removeEmpty(directory: string): void {
   }
 }
 
+/** Capture before Windows taskkill; invoke only after its tree stop succeeds and the lock is gone. */
+export function prepareDetachedTreeStop(root: string, pid: number): () => void {
+  const directory = path.join(canonicalizeExistingPath(root), '.expo', 'dev', 'detached-run');
+  let found: ReturnType<typeof readOwner>;
+  try {
+    found = readOwner(directory);
+  } catch {
+    return () => {};
+  }
+  if (found?.owner.pid !== pid) return () => {};
+  const id = found.owner.id;
+  return () => {
+    if (alive(pid)) return;
+    try {
+      // Unique marker names cannot remove a replacement owner's evidence.
+      fs.rmSync(path.join(directory, `next-${id}.json`), { force: true });
+      fs.rmSync(path.join(directory, `owner-${id}.json`), { force: true });
+      removeEmpty(directory);
+    } catch {
+      // An unreadable or unremovable claim stays conservative on the next start.
+    }
+  };
+}
+
 function acquire(root: string, own: Owner): { release: () => void; execute: () => void } {
   const directory = path.join(canonicalizeExistingPath(root), '.expo', 'dev');
   fs.mkdirSync(directory, { recursive: true });
