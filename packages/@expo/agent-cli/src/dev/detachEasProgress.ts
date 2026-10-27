@@ -13,7 +13,7 @@ import { PROGRAM_PREFIX } from '../programName';
 import { env } from '../utils/env';
 import { CommandError } from '../utils/errors';
 import { parseDetachedChildPid } from './childVerdict';
-import { readDetachedLogSync } from './logFile';
+import { detachedLogPath, readDetachedLogFileSync } from './logFile';
 import { EAS_SESSION_START_TIMEOUT_MS, EAS_TUNNEL_WAIT_MS } from './easSession';
 import { isProcessAlive } from './processLiveness';
 
@@ -62,13 +62,14 @@ export function knownSessionIdSync(projectRoot: string, platform: NativePlatform
 export function childStartsSessionSync(
   projectRoot: string,
   lock: DevServerLockInfo,
-  platform: NativePlatform
+  platform: NativePlatform,
+  logFile = detachedLogPath(projectRoot)
 ): boolean {
   if (lock.easPlatform !== platform || lock.easOpenFinished) return false;
   // The child's own bounds: the tunnel wait, then the session start.
   const startWindowMs = EAS_TUNNEL_WAIT_MS + EAS_SESSION_START_TIMEOUT_MS;
   if (Date.now() - Date.parse(lock.startedAt) >= startWindowMs) return false;
-  const log = readDetachedLogSync(projectRoot, WHOLE_LOG);
+  const log = readDetachedLogFileSync(logFile, WHOLE_LOG);
   if (log == null || parseDetachedChildPid(log.lines) !== lock.pid || !isProcessAlive(lock.pid)) {
     return false;
   }

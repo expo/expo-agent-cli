@@ -1,6 +1,6 @@
 // @ref llp/0036-detached-run-ownership.rfc.md
 // Each candidate writes a private log. Only the owner publishes the current log;
-// observers pin their selected run so a later start cannot change what they read.
+// observers keep their selected file explicitly so a later start cannot change what they read.
 
 import { randomUUID } from 'crypto';
 import fs from 'fs';
@@ -12,12 +12,6 @@ const DEV_LOGS_DIR = path.join('.expo', 'dev', 'logs');
 
 /** Name of the file a detached dev server's stdout and stderr are written to. */
 const DETACHED_LOG_NAME = 'dev-detached.log';
-const pinnedLogs = new Map<string, string>();
-
-/** An observer keeps reading the run it selected, even if a later run becomes current. */
-export function pinDetachedLog(projectRoot: string, file: string): void {
-  pinnedLogs.set(path.resolve(projectRoot), file);
-}
 
 /** Only the owning child publishes a new log. Candidates never truncate the current run. */
 export function publishDetachedLog(projectRoot: string, file: string): void {
@@ -29,8 +23,6 @@ export function publishDetachedLog(projectRoot: string, file: string): void {
 
 /** Where this project's detached dev server writes its output. */
 export function detachedLogPath(projectRoot: string): string {
-  const pinned = pinnedLogs.get(path.resolve(projectRoot));
-  if (pinned) return pinned;
   try {
     const name: unknown = JSON.parse(
       fs.readFileSync(path.join(projectRoot, DEV_LOGS_DIR, 'dev-detached-current.json'), 'utf8')
@@ -57,7 +49,6 @@ export function openDetachedLogSync(
   const logFile = path.join(projectRoot, DEV_LOGS_DIR, `dev-detached-${id}.log`);
   fs.mkdirSync(path.dirname(logFile), { recursive: true });
   const fd = fs.openSync(logFile, 'wx');
-  pinDetachedLog(projectRoot, logFile);
   return { logFile, fd };
 }
 
@@ -83,7 +74,11 @@ export interface DetachedLogRead {
  * @param tail how many lines from the end to return.
  */
 export function readDetachedLogSync(projectRoot: string, tail: number): DetachedLogRead | null {
-  const logFile = detachedLogPath(projectRoot);
+  return readDetachedLogFileSync(detachedLogPath(projectRoot), tail);
+}
+
+/** Read one selected run without consulting or changing the project's current log. */
+export function readDetachedLogFileSync(logFile: string, tail: number): DetachedLogRead | null {
   let raw: string;
   try {
     raw = fs.readFileSync(logFile, 'utf8');
