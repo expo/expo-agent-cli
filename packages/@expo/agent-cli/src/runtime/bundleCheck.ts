@@ -24,11 +24,14 @@
 //     the *source* of the URL differs by platform and everything after it does not. Asking for JSON
 //     and reading the HTML answer as a parse failure is what left `--platform web` reporting
 //     `checked: true, ok: null` with a `SyntaxError` for a reason [observed — friction run 2].
-//  2. A **HEAD** of that exact URL. HEAD builds the bundle and reports the real status without
-//     sending the 8 MB body [observed — Metro treats it as a normal request and only annotates it
-//     as a prefetch]; the body is only fetched when the status says something went wrong. The URL
-//     is used byte for byte, because every query parameter is part of Metro's graph id and changing
-//     one would compile a second graph rather than read the one the app uses.
+//  2. A **HEAD** of the path and query of that URL, on the dev server it was given. HEAD builds
+//     the bundle and reports the real status without sending the 8 MB body [observed — Metro
+//     treats it as a normal request and only annotates it as a prefetch]; the body is only fetched
+//     when the status says something went wrong. The path and query are used byte for byte,
+//     because every query parameter is part of Metro's graph id and changing one would compile a
+//     second graph rather than read the one the app uses. The host the manifest or the page names
+//     is never used: behind `--tunnel` it is the tunnel host, and a HEAD of the bundle through the
+//     Expo tunnel closes every websocket on that tunnel [observed — 2026-10-27].
 
 import { stripVTControlCharacters } from 'util';
 
@@ -213,23 +216,24 @@ export async function checkEntryBundleAsync(
     if (entry.url == null) {
       return finish({ outcome: 'unknown', url: null, error: null, reason: entry.reason });
     }
+    const url = toDevServerUrl(entry.url, origin);
 
     // HEAD, so a bundle that compiles costs a status line instead of megabytes of JavaScript.
-    const head = await fetch(entry.url, {
+    const head = await fetch(url, {
       method: 'HEAD',
       signal: controller.signal,
       headers: { connection: 'close' },
     });
     if (head.ok || head.status === 304) {
-      return finish({ outcome: 'ok', url: entry.url, error: null });
+      return finish({ outcome: 'ok', url, error: null });
     }
 
     // Only now is the body worth having, and it is the small one: Metro answers a failed build
     // with a JSON object, not with a bundle.
-    const body = await fetch(entry.url, { signal: controller.signal });
+    const body = await fetch(url, { signal: controller.signal });
     return finish({
       outcome: 'broken',
-      url: entry.url,
+      url,
       error: await readBundleErrorAsync(body),
     });
   } catch (error: unknown) {
@@ -252,6 +256,21 @@ export async function checkEntryBundleAsync(
   }
 }
 
+/**
+ * The same path and query, on the dev server the check was given.
+ *
+ * The host a manifest or a page names is never used, a different port on the same host included:
+ * Metro keys the bundle on the path and query, never on the host. Why the tunnel host in particular
+ * must not be used is in the header comment, item 2.
+ */
+function toDevServerUrl(bundleUrl: string, origin: string): string {
+  const named = new URL(bundleUrl);
+  const url = new URL(`${origin}/`);
+  url.pathname = named.pathname;
+  url.search = named.search;
+  return url.toString();
+}
+
 /** Where the entry bundle URL of one platform comes from, or why it could not be read. */
 interface EntryBundleUrl {
   url: string | null;
@@ -271,7 +290,7 @@ interface EntryBundleUrl {
  * The entry bundle URL this dev server would hand the app, for one platform.
  *
  * Two documents answer this and the platform decides which: native reads the manifest, web reads
- * the page. Both end in the same place — one URL, used byte for byte.
+ * the page. Both end in the same place — one URL.
  */
 function readEntryBundleUrlAsync(
   origin: string,
@@ -592,7 +611,11 @@ export interface BundleCheckJson {
   ok: boolean | null;
   /** Platform the bundle was built for, or null when nothing was built. */
   platform: BundleCheckPlatform | null;
-  /** Entry bundle URL that was fetched, resolved from the dev server's own manifest. */
+  /**
+   * Entry bundle URL that was fetched: the path and query the dev server's own manifest (or web
+   * page) names, on the dev server the check was given. Behind a tunnel it is the local URL, not
+   * the public one the manifest names.
+   */
   url: string | null;
   /** What the bundler reported. Present exactly when `ok` is false. */
   error: BundleCheckError | null;

@@ -273,7 +273,9 @@ The dev server's own tunnel is the public origin — v2. `expo start --tunnel` v
 the same flag uses `@expo/ws-tunnel` on the Expo account and works [verified live —
 2026-09-05]. So the suite starts `dev --tunnel`, reads the advertised origin back through
 the CLI, and curls `<origin>/status` before it starts anything that bills — the tunnel is
-tested surface now, not harness plumbing. `AGENT_CLI_LIVE_PUBLIC_ORIGIN` keeps the proxy
+tested surface now, not harness plumbing. The entry-bundle check is not part of that surface:
+it stays on the local dev server ([[0010-agent-conventions]] §Other gates), and the suite
+asserts that. `AGENT_CLI_LIVE_PUBLIC_ORIGIN` keeps the proxy
 path (`EXPO_PACKAGER_PROXY_URL`) as the hatch, because the v2 flag is `UNSTABLE`-prefixed.
 
 A cloud reload takes whichever rung works, and which one that is turns out to be the

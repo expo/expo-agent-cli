@@ -698,7 +698,10 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
       'dev-server-bundle',
     ]).toContain(report.verifiedBy);
     expect(report.bundle.ok).toBe(true);
-    expect(report.bundle.url).toContain(publicHost);
+    // The check stays on the local dev server and never touches the tunnel (llp/0010 §Other gates).
+    // The public origin is proven by the `<origin>/status` curl above and, in expo-go mode, by
+    // `navigate`; in dev-build mode the curl is the only proof.
+    expect(report.bundle.url).toContain(`http://127.0.0.1:${port}/`);
 
     // The two lists, reported side by side because they can disagree here (llp/0005 §What proves a reload
     // question). `commandSocketClients` has to be a number rather than null: "nobody asked" and "nobody

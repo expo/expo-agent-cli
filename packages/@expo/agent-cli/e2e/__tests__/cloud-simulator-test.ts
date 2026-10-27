@@ -659,6 +659,9 @@ describe('@expo/agent-cli runtime:reload --eas', () => {
       // Watched and not seen: this project has a captured dev server log, and the stub never
       // writes a `Bundled` line into it.
       expect(report.bundlesAfterReload.observed).toBe(false);
+      // The manifest names a tunnel host; the bundle check asks this stub, so it compiles here.
+      expect(report.bundle).toMatchObject({ checked: true, ok: true });
+      expect(new URL(report.bundle.url).origin).toBe(new URL(stub.url).origin);
       expect(result.exitCode).toBe(22);
 
       const execs = easInvocations(projectRoot).filter((argv) => argv[0] === 'simulator:exec');
