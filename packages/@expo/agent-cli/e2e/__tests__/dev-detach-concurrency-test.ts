@@ -7,6 +7,9 @@ import {
   executeAgentCliAsync,
   fixturesDir,
   killAsync,
+  installStubBinAsync,
+  pathEnvVars,
+  readDevLockAsync,
   readStubExpoInvocations,
   setupFixtureAsync,
   spawnAgentCli,
@@ -14,6 +17,7 @@ import {
   waitForDevLockAsync,
   waitForExitAsync,
 } from '../utils';
+import { bindingFixture, installStubXcrunAsync } from './installedAppStubs';
 
 async function fixture() {
   const root = await setupFixtureAsync('go-app');
@@ -335,3 +339,87 @@ it('stopping and starting again selects a new log without changing the previous 
   }
 });
 
+
+it('smoke cannot stop a competing detached owner when its own bootstrap loses', async () => {
+  const f = await fixture();
+  let smoke: ReturnType<typeof spawnAgentCli> | undefined;
+  try {
+    const first = f.start();
+    expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
+    smoke = spawnAgentCli(
+      f.root,
+      ['smoke', '--ios', '--json', '--no-screenshot', '--port', String(f.port), '--timeout', '1s'],
+      {
+        env: { ...f.env, ...pathEnvVars(path.join(f.root, '.no-bin')) },
+      }
+    );
+    const finished = waitForExitAsync(smoke, collectOutput(smoke));
+    expect(await waitForAsync(() => f.marks('exited').length === 1, 15_000)).toBe(true);
+    f.release();
+    const started = await first.result;
+    expect(started.exitCode, started.all).toBe(0);
+    const owner = JSON.parse(started.stdout);
+    const checked = await finished;
+    expect(checked.exitCode, checked.all).not.toBe(0);
+    expect(await readDevLockAsync(f.root)).toMatchObject({ pid: owner.pid });
+    expect(await (await fetch(`${owner.url}/status`)).text()).toBe('packager-status:running');
+    expect(readStubExpoInvocations(f.root).filter((call) => call.args[0] === 'start')).toHaveLength(
+      1
+    );
+  } finally {
+    if (smoke) await killAsync(smoke, 'SIGKILL');
+    await f.cleanup();
+  }
+});
+
+it.skipIf(process.platform !== 'darwin')(
+  'smoke reports skipped device cleanup when its own server has already exited',
+  async () => {
+    const f = await fixture();
+    const device = 'E2E-OWNED-CLEANUP';
+    const { calls } = await installStubXcrunAsync(f.root, {
+      simulators: [{ udid: device, name: 'agent-cli deadbeef', state: 'Shutdown' }],
+    });
+    const binding = await bindingFixture(f.root, device, 'agent-cli deadbeef');
+    const script = path.join(f.root, '.stub-bin', 'npx-refuse.js');
+    fs.writeFileSync(script, 'process.exit(1);');
+    await installStubBinAsync(path.dirname(script), 'npx', script);
+    const env = { ...f.env, ...pathEnvVars(path.dirname(script)), AGENT_CLI_NO_DEVICE: '0' };
+    try {
+      f.release();
+      const result = await executeAgentCliAsync(
+        f.root,
+        [
+          'smoke',
+          '--ios',
+          '--json',
+          '--no-screenshot',
+          '--port',
+          String(f.port),
+          '--timeout',
+          '1s',
+        ],
+        { reject: false, env: { ...env, STUB_EXPO_DIE_AFTER_STATUS_MS: '1' } }
+      );
+      const report = JSON.parse(result.stdout);
+      expect(report.environment.cleanup).toContainEqual(
+        expect.objectContaining({
+          resource: 'dev-server',
+          ok: false,
+          reason: expect.stringContaining('device cleanup was skipped'),
+        })
+      );
+      expect(calls()).toContainEqual(['simctl', 'bootstatus', device, '-b']);
+      expect(calls()).not.toContainEqual(['simctl', 'shutdown', device]);
+      expect(Date.parse(JSON.parse(fs.readFileSync(binding, 'utf8')).expiresAt)).toBeGreaterThan(
+        Date.now()
+      );
+    } finally {
+      await executeAgentCliAsync(f.root, ['dev:stop', '--release', '--json'], {
+        reject: false,
+        env,
+      });
+      await f.cleanup();
+    }
+  }
+);

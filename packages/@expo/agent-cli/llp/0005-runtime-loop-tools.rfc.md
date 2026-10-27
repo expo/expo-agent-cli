@@ -659,6 +659,8 @@ Start what is missing, stop only what you started, leave what you found [confirm
 
 `start-dev-server` and `boot-device` appear in the phase list only when the run did them. Every other phase is a question of every run, so a run that never reached one owes the reader a `skipped` row. These two are acts. A machine that already had a dev server did not skip a start. Their failures are the ordinary 20-band. The cleanup still runs.
 
+Dev-server cleanup may stop only the still-live child spawned by this smoke run, after the stop operation confirms that child owns the server lock. A lost startup race or a replacement server grants no cleanup authority. The process E2E `dev-detach-concurrency-test.ts` proves the competing owner remains reachable. A child still starting without a server lock is reported as left behind; pre-server cancellation is outside this contract. If server ownership is gone, requested device cleanup is explicitly reported as skipped rather than applied to the current bindings.
+
 Cleanup is registered before the resource is started, newest-first. A start that got halfway is still a resource this run is holding. Newest-first because the dev server is started before the device is booted, and leaving an app talking to a bundler that has gone is a worse state than the reverse. A cleanup that fails is reported and never folded into the outcome. It lands in `environment.cleanup`, as a `left behind` line, and on `cli:smoke` as `leftBehind`.
 
 ### It builds what the app needs, and says so first
