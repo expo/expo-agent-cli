@@ -48,6 +48,7 @@ import { PACKAGER_STATUS_READY } from '../runtime/waitReady';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
 import { windowsTaskkillCommand } from '../utils/windowsShim';
 import { debugEvent, event } from './events';
+import { prepareDetachedTreeStop } from './detachedRun';
 import { findPortListenerAsync, isPortInUseAsync, type PortListener } from './portListener';
 import { isProcessAlive } from './processLiveness';
 import { stopDevicesAsync, type StoppedDevices } from './stopDevices';
@@ -312,6 +313,9 @@ async function stopLockedDevServerAsync(
   // A signal that cannot be delivered is not a failure to stop: a lock answering for a pid that
   // is gone is the one case the socket cannot produce on its own, but a lock held by a *different*
   // user's process can, and `ESRCH` there means the thing is already not running.
+  // Windows kills the whole tree without running the child's finally block.
+  const releaseDetachedRun =
+    process.platform === 'win32' ? prepareDetachedTreeStop(lock.projectRoot, lock.pid) : () => {};
   const sent = await signalProcessAsync(lock.pid, options.signal);
   base.signal = sent.delivered ? options.signal : null;
   debugEvent('stop_signalled', { pid: lock.pid, signal: options.signal, ok: sent.delivered });
@@ -324,6 +328,7 @@ async function stopLockedDevServerAsync(
 
   // The two facts that are about the thing this command signalled. The port is not one of them.
   if (outcome.processGone && outcome.lockGone) {
+    if (sent.delivered) releaseDetachedRun();
     base.stopped = true;
     return { report: base, finishing: false };
   }
