@@ -231,7 +231,7 @@ describe(readDetachedLogSync, () => {
     expect(readDetachedLogSync(projectRoot, 10)!.lines).toEqual(['Bundled 1200ms']);
   });
 
-  it(`truncates the file for a new run`, () => {
+  it(`opens a fresh private file for a new run`, () => {
     vol.fromJSON({ [detachedLogPath(projectRoot)]: 'from the last run\n' });
 
     const { logFile } = openDetachedLogSync(projectRoot);

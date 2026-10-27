@@ -199,9 +199,9 @@ describe('@expo/agent-cli dev --detach', () => {
         ready: null,
       });
       expect(report.pid).toBeGreaterThan(0);
-      expect(report.logFile).toContain(LOG_PATH);
-      // Line 1 of the child's log names the child, before its plan, so a re-run can tell who wrote it.
-      const log = await fs.promises.readFile(path.join(projectRoot, LOG_PATH), 'utf8');
+      expect(report.logFile).toContain(path.join('.expo', 'dev', 'logs', 'dev-detached-'));
+      // Line 1 of the child's log names the child, before its plan.
+      const log = await fs.promises.readFile(report.logFile, 'utf8');
       expect(log.split('\n')[0]).toBe(`Detached dev run, pid ${report.pid}.`);
 
       // The parent has exited — this test is running — and the child has not.
@@ -754,9 +754,7 @@ describe('@expo/agent-cli dev --detach', () => {
         // step only a person can complete. The child classified it and this parent relayed it.
         expect(
           result.exitCode,
-          `${result.all}\nDetached child log:\n${await fs.promises
-            .readFile(path.join(projectRoot, LOG_PATH), 'utf8')
-            .catch(() => '(unavailable)')}`
+          `${result.all}\nDetached child log:\n${(await executeAgentCliAsync(projectRoot, ['dev:logs'], { reject: false })).all}`
         ).toBe(7);
         const { error } = JSON.parse(result.stdout);
         expect(error.needsHuman).toMatchObject({
@@ -827,13 +825,17 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
-        env: detachEnv(projectRoot, 8394),
-      });
+      const started = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--json'],
+        {
+          env: detachEnv(projectRoot, 8394),
+        }
+      );
       // The stub prints its start line as soon as it runs; the file is written by the child.
       await waitForAsync(
         () =>
-          (fs.readFileSync(path.join(projectRoot, LOG_PATH), 'utf8') || '').includes(
+          (fs.readFileSync(JSON.parse(started.stdout).logFile, 'utf8') || '').includes(
             'stub_expo_start'
           ),
         5000
@@ -845,7 +847,7 @@ describe('@expo/agent-cli dev:logs', () => {
 
       expect(result.exitCode).toBe(0);
       const report = JSON.parse(result.stdout);
-      expect(report.logFile).toContain(LOG_PATH);
+      expect(report.logFile).toContain(path.join('.expo', 'dev', 'logs', 'dev-detached-'));
       expect(report.lines.join('\n')).toContain('stub_expo_start');
       expect(report.devServer).toMatchObject({ port: 8394 });
     } finally {
@@ -857,10 +859,14 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
-        env: detachEnv(projectRoot, 8393),
-      });
-      await waitForAsync(() => fs.existsSync(path.join(projectRoot, LOG_PATH)), 5000);
+      const started = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--json'],
+        {
+          env: detachEnv(projectRoot, 8393),
+        }
+      );
+      await waitForAsync(() => fs.existsSync(JSON.parse(started.stdout).logFile), 5000);
 
       const result = await executeAgentCliAsync(projectRoot, ['dev:logs'], {
         env: stubExpoEnv(projectRoot),
