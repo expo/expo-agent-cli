@@ -12,7 +12,7 @@ import path from 'path';
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
-import { withDevServerPort, withoutPortArgs } from '../dev/forwardedArgs';
+import { withDevServerPort } from '../dev/forwardedArgs';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
 import { rerunDevCommand } from '../plan/rerun';
 import { cloudStopCommand } from '../deviceBinding/cleanup';
@@ -459,11 +459,15 @@ export async function collectStatusReportAsync(
       null,
       recoveryPlan
     );
-    const backend = request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null);
+    const easServer = ownServer?.easPlatform === platform ? ownServer : null;
+    const backend = easServer
+      ? 'eas'
+      : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
+    const port = easServer?.port ?? recoveryPort;
     const devArgs = [
       ...(backend ? [`--${backend}`] : []),
       ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
-      ...(recoveryPort != null ? ['--port', String(recoveryPort)] : []),
+      ...(port != null ? ['--port', String(port)] : []),
     ];
     const devCommand = rerunDevCommand(
       platform,
@@ -481,16 +485,17 @@ export async function collectStatusReportAsync(
     const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
     const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > Date.now());
     const expiredSession =
-      cloud.length === 0 && !liveBound
-        ? expiredCloud.find((entry) => entry.platform === platform)
-        : undefined;
-    // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
-    const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-    if (expiredSession) {
+      cloud.length === 0 && !liveBound && expiredCloud.find((entry) => entry.platform === platform);
+    // An unfinished session start is observed; rebinding after it finishes needs a deliberate restart.
+    const pendingSession =
+      easServer?.easPlatform &&
+      childStartsSessionSync(projectRoot, easServer, easServer.easPlatform);
+    const stopFirst = ownServer ? `${PROGRAM_PREFIX} dev:stop && ` : '';
+    if (expiredSession && !pendingSession) {
       // @ref llp/0021-honest-reports.rfc.md §How they show up
       report.next = {
         ...devNext,
-        command: deviceCommand(expiredSession.platform, { eas: true }),
+        command: `${stopFirst}${deviceCommand(expiredSession.platform, { eas: true })}`,
         why: `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`,
       };
     } else if (
@@ -512,32 +517,23 @@ export async function collectStatusReportAsync(
         (deviceBackend !== 'eas' && !devicesDisabled() && hostBindsPlatform(platform)))
     ) {
       // @ref llp/0021-honest-reports.rfc.md §How they show up
-      // Detached dev can only reuse beside an own server; an expired binding can still be reused.
-      // A server that runs an EAS session is never stopped, for any platform.
-      const restart = ownServer != null && ownServer.easPlatform == null && bound.length === 0;
       const [unreadable] = unreadableBindingFiles(projectRoot, platform);
-      // A re-run finds the running EAS Metro through its lock, which names its port: no --port.
-      const command = easServer
-        ? rerunDevCommand(platform, ['--eas', ...withoutPortArgs(devArgs.slice(backend ? 1 : 0))])
-        : restart
-          ? `${PROGRAM_PREFIX} dev:stop && ${devCommand}`
-          : devCommand;
+      const command = pendingSession ? `${PROGRAM_PREFIX} dev:logs` : `${stopFirst}${devCommand}`;
       const easWhy = easServer
-        ? `${
-            childStartsSessionSync(projectRoot, easServer, platform)
-              ? `The dev server's EAS Simulator session for ${platform} is starting.`
-              : `The dev server's EAS Simulator session for ${platform} is not bound yet.`
-          } This command waits for it, or reopens the app on the running Metro. No restart is needed.`
+        ? pendingSession
+          ? `The dev server's EAS Simulator session for ${platform} is starting. Read its logs and check status again when startup finishes.`
+          : `The dev server's EAS Simulator session for ${platform} is not bound. Stop the server before starting a run that binds it; plain dev:stop preserves existing sessions.`
         : null;
       report.next = {
         ...devNext,
         command: unreadable ? `rm -f '${unreadable.file}' && ${command}` : command,
+        steps: pendingSession ? [] : devNext.steps,
         why: unreadable
           ? `The binding file ${unreadable.file} does not parse; a newer CLI may have written it.`
           : (easWhy ??
             (bound.length
-              ? `The lease on the bound ${platform} device expired.`
-              : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`)),
+              ? `The lease on the bound ${platform} device expired.${ownServer ? ' Stop the running dev server before rebinding it.' : ''}`
+              : `No ${platform} device is bound to this worktree.${ownServer ? ' The running dev server must restart to bind one.' : ''}`)),
       };
     }
   } else {

@@ -55,7 +55,7 @@ export function cloudSessionUnavailableError(
     [
       'No EAS Simulator session this CLI can drive is running for this project, so there is no cloud simulator to open the link on.',
       `Why: ${probe.reason}. A cloud simulator is a session that is started, driven and stopped — unlike a local simulator, there is nothing to find that somebody else left booted.`,
-      `How: start the app with "${start}". Once it opens, run this command again in another terminal. This starts a tunnelled dev server and selects Expo Go or a development build for the project. End the dev server and session with "${PROGRAM_PREFIX} dev:stop --eas" when done. To see this project's sessions, "${cloudSessionListCommand()}" lists them with their ids. To open the link elsewhere, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL.`,
+      `How: if this project's dev server is running, stop it with "${PROGRAM_PREFIX} dev:stop" first (existing sessions are preserved). Start the app with "${start}". Once it opens, run this command again in another terminal. This starts a tunnelled dev server and selects Expo Go or a development build for the project. End the dev server and session with "${PROGRAM_PREFIX} dev:stop --eas" when done. To see this project's sessions, "${cloudSessionListCommand()}" lists them with their ids. To open the link elsewhere, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL.`,
     ].join('\n')
   );
   error.suggestedCommand = start;
@@ -192,10 +192,10 @@ export function cloudNeedsTunnelError(
     [
       `The dev server is only reachable from ${hostType === 'localhost' ? 'this machine' : 'this network'}, so a cloud simulator cannot load ${url} and nothing was opened.`,
       `Why: the URL carries a ${hostType ?? 'local'} host, and the simulator runs on EAS infrastructure — ${hostType === 'localhost' ? 'that host is the loopback of whatever resolves it, which there is a machine in a datacenter' : 'that address is on this network and the session is not'}. Opening it would land the app on an error screen with the device tool reporting success, which is the class of false green this command exists to remove.`,
-      `How: restart the dev server with a tunnel — "${PROGRAM_PREFIX} dev --${platform} --detach --tunnel" — and run this command again. A tunnel serves the same dev server from any network, which is the one address a cloud simulator can use.`,
+      `How: stop the dev server with "${PROGRAM_PREFIX} dev:stop", then run "${PROGRAM_PREFIX} dev --${platform} --detach --tunnel" and retry this command. A tunnel serves the same dev server from any network, which is the one address a cloud simulator can use.`,
     ].join('\n')
   );
-  error.suggestedCommand = `${PROGRAM_PREFIX} dev --${platform} --detach --tunnel`;
+  error.suggestedCommand = `${PROGRAM_PREFIX} dev:stop`;
   return error;
 }
 

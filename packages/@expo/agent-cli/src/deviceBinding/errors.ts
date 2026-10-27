@@ -45,7 +45,7 @@ export function noBoundDeviceError(
   if (state === 'unreadable') {
     return refusal('NO_BOUND_DEVICE', 'unreadable', EXIT_NEEDS_HUMAN, [
       `The binding file ${path} does not parse; a newer CLI may have written it.`,
-      `How: run "rm -f '${path}'", then "${command}".`,
+      `How: run "rm -f '${path}'", then "${command}". If this project's server is running, stop it first with "${PROGRAM_PREFIX} dev:stop".`,
     ]);
   }
   if (state === 'unknown') {
@@ -65,7 +65,7 @@ export function noBoundDeviceError(
   const error = refusal('NO_BOUND_DEVICE', state, EXIT_OUTCOME_FAILED, [
     what,
     `Why: every verb drives the device "${PROGRAM_PREFIX} dev" bound to this worktree, and never the first booted one, so two worktrees never share a device.`,
-    `How: run "${command}", then this command again.`,
+    `How: run "${command}", then this command again. If this project's server is running, stop it first with "${PROGRAM_PREFIX} dev:stop".`,
   ]);
   error.suggestedCommand = command;
   return error;
@@ -206,7 +206,7 @@ export function cloudBindingError(
     'NO_BOUND_DEVICE',
     [
       `The bound ${platform} EAS session is ${fault}.`,
-      `How: run "${command}" to bind a session again.`,
+      `How: run "${command}" to bind a session again. If this project's server is running, stop it first with "${PROGRAM_PREFIX} dev:stop"; plain stop preserves its sessions.`,
     ].join('\n')
   );
   error.exitCode = EXIT_OUTCOME_FAILED;

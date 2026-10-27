@@ -1236,16 +1236,15 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     }
 
     it.each(['ios', 'android'] as const)(
-      'waits for the %s session instead of a restart',
+      'names a restart when the %s session has no pending start',
       async (platform) => {
         easServer(platform);
         const report = await collectStatusReportAsync(projectRoot, { ...options, platform });
-        // No --port: the re-run finds the running Metro through its lock, which names the port.
+        // Restart the owned server on its current port.
         expect(report.next?.command).toBe(
-          `npx @expo/agent-cli dev --${platform} --eas --detach --wait-ready`
+          `npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --${platform} --eas --port 8081 --detach --wait-ready`
         );
-        expect(report.next?.why).toContain('No restart is needed.');
-        expect(report.next?.why).not.toContain('must restart');
+        expect(report.next?.why).toContain('Stop the server before starting');
       }
     );
 
@@ -1260,7 +1259,8 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
       fs.mkdirSync(path.dirname(detachedLogPath(projectRoot)), { recursive: true });
       fs.writeFileSync(detachedLogPath(projectRoot), `${detachedPidLine(process.pid)}\n`);
       const report = await collectStatusReportAsync(projectRoot, iosOptions);
-      expect(report.next?.command).not.toContain('dev:stop');
+      expect(report.next?.command).toBe('npx @expo/agent-cli dev:logs');
+      expect(report.next?.steps).toEqual([]);
       expect(report.next?.why).toContain('is starting');
     });
 
@@ -1280,16 +1280,16 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
         });
         expect(report.devServer?.appsConnected).toBeGreaterThan(0);
         expect(report.next?.command).toBe(
-          'npx @expo/agent-cli dev --android --eas --detach --wait-ready'
+          'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --eas --port 8081 --detach --wait-ready'
         );
-        expect(report.next?.why).toContain('No restart is needed.');
+        expect(report.next?.why).toContain('Stop the server before starting');
       });
 
       it('and no binding and no platform flag or request, next binds the session of the lock', async () => {
         androidEasServerWithApp();
         const report = await collectStatusReportAsync(projectRoot, options);
         expect(report.next?.command).toBe(
-          'npx @expo/agent-cli dev --android --eas --detach --wait-ready'
+          'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --eas --port 8081 --detach --wait-ready'
         );
         expect(report.next?.command).not.toContain('smoke');
       });
@@ -1307,19 +1307,19 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
       });
     });
 
-    it('beside a remembered request for the other platform, never stops the EAS server', async () => {
+    it('beside a remembered request for the other platform, restarts the platform of the owned server', async () => {
       easServer('android');
       recordLastDevRequest(projectRoot, resolveDevOptions(['--ios']));
       const report = await collectStatusReportAsync(projectRoot, options);
       expect(report.next?.command).toBe(
-        'npx @expo/agent-cli dev --android --eas --detach --wait-ready'
+        'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --android --eas --port 8081 --detach --wait-ready'
       );
     });
 
-    it('beside a caller who names the other platform, never stops the EAS server', async () => {
+    it('beside a caller who names the other platform, requires stopping the owned server', async () => {
       easServer('android');
       const report = await collectStatusReportAsync(projectRoot, iosOptions);
-      expect(report.next?.command).not.toContain('dev:stop');
+      expect(report.next?.command).toContain('dev:stop &&');
     });
 
     it('on a host that binds no device, still binds the session of the lock', async () => {
@@ -1327,19 +1327,19 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
       easServer('ios');
       const report = await collectStatusReportAsync(projectRoot, iosOptions);
       expect(report.next?.command).toBe(
-        'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
+        'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --eas --port 8081 --detach --wait-ready'
       );
-      expect(report.next?.why).toContain('No restart is needed.');
+      expect(report.next?.why).toContain('Stop the server before starting');
     });
 
-    it('names no --port for an explicit server URL on another port', async () => {
+    it('keeps the owned server port when an explicit URL names another port', async () => {
       easServer('ios');
       const report = await collectStatusReportAsync(projectRoot, {
         devServerUrl: 'http://127.0.0.1:9000',
         platform: 'ios',
       });
       expect(report.next?.command).toBe(
-        'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
+        'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --eas --port 8081 --detach --wait-ready'
       );
     });
 
@@ -1373,7 +1373,7 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
       });
       const report = await collectStatusReportAsync(projectRoot, iosOptions);
       expect(report.next?.command).toBe(
-        'npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
+        'npx @expo/agent-cli dev:stop && npx @expo/agent-cli dev --ios --eas --detach --wait-ready'
       );
       expect(report.next?.why).toContain('sess-old expired');
       expect(report.next?.why).not.toContain('is starting');
@@ -1406,22 +1406,25 @@ describe(`${collectStatusReportAsync.name} and an unbound worktree`, () => {
     );
   });
 
-  it.each([false, true])('reuses an expired binding (own server=%s)', async (ownServer) => {
-    stopDevServer();
-    vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue(ownServer ? running : null);
-    vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
-      {
-        platform: 'ios',
-        state: 'gone',
-        expiresAt: '2026-01-01T00:00:00.000Z',
-      } as summary.BindingSummary,
-    ]);
-    const report = await collectStatusReportAsync(projectRoot, iosOptions);
-    expect(report.next?.command).toBe(
-      'npx @expo/agent-cli dev --ios --port 8081 --detach --wait-ready'
-    );
-    expect(report.next?.why).toBe('The lease on the bound ios device expired.');
-  });
+  it.each([false, true])(
+    'rebinds an expired device after stopping any owned server (own server=%s)',
+    async (ownServer) => {
+      stopDevServer();
+      vi.mocked(devLock.readDevServerLockAsync).mockResolvedValue(ownServer ? running : null);
+      vi.spyOn(summary, 'readBindingSummaryAsync').mockResolvedValueOnce([
+        {
+          platform: 'ios',
+          state: 'gone',
+          expiresAt: '2026-01-01T00:00:00.000Z',
+        } as summary.BindingSummary,
+      ]);
+      const report = await collectStatusReportAsync(projectRoot, iosOptions);
+      expect(report.next?.command).toBe(
+        `${ownServer ? 'npx @expo/agent-cli dev:stop && ' : ''}npx @expo/agent-cli dev --ios --port 8081 --detach --wait-ready`
+      );
+      expect(report.next?.why).toContain('The lease on the bound ios device expired.');
+    }
+  );
 
   it(`keeps the plan's next while an app is connected to this project's dev server`, async () => {
     const plan = await planNextAsync();
