@@ -70,9 +70,6 @@ vi.mock('crypto', async (original) => ({
 
 function fakeChild() {
   const child = Object.assign(new EventEmitter(), { pid: 4242, unref: vi.fn() });
-  Promise.resolve().then(() =>
-    child.emit('message', { detachedRun: { id: attemptId, pid: child.pid, logFile } })
-  );
   return child;
 }
 const startLog = path.join(projectRoot, '.expo', 'dev', 'logs', 'start.log');
