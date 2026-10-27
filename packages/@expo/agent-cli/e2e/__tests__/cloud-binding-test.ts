@@ -446,7 +446,7 @@ it('a failed start records the billed session, and dev:stop --eas stops it', asy
   expect(stops()).toEqual([['simulator:stop', '--id', 'billed', '--non-interactive']]);
   expect(fs.existsSync(bindingFile(root))).toBe(false);
 });
-it('a re-run beside a child whose open finished reopens when the binding is gone', async () => {
+it('recovery restarts the server before rebinding its preserved EAS session', async () => {
   const root = await project();
   const run = (...flags: string[]) =>
     executeAgentCliAsync(root, ['dev', '--ios', '--eas', '--detach', '--wait-ready', ...flags], {
@@ -471,6 +471,10 @@ it('a re-run beside a child whose open finished reopens when the binding is gone
   expect(opens()).toEqual([]);
   fs.rmSync(bindingFile(root));
 
+  const status = await executeAgentCliAsync(root, ['status', '--json'], { env: envFor(root) });
+  expect(JSON.parse(status.stdout).next.command).toContain('dev:stop &&');
+  expect(JSON.parse(status.stdout).next.command).toContain('dev --ios --eas');
+  await executeAgentCliAsync(root, ['dev:stop', '--json'], { env: envFor(root) });
   const second = await run();
   expect(second.exitCode, second.stderr).toBe(0);
   expect(second.stderr).not.toMatch(/Waiting up to .* for the EAS Simulator session/);
@@ -479,7 +483,9 @@ it('a re-run beside a child whose open finished reopens when the binding is gone
   );
   expect(second.stdout).not.toContain('nothing was started');
   expect(readBinding(root).device).toMatchObject({ id });
+  expect(await waitForAsync(() => opens().length === 1, 15_000)).toBe(true);
   expect(opens().map((i) => i.executedSessionId)).toEqual([id]);
+  expect(stubEasArgs(root).filter((args) => args[0] === 'simulator')).toHaveLength(1);
 });
 it('a dev run renews the expired binding of a session that is still listed, and opens the app on it', async () => {
   const root = await project();
