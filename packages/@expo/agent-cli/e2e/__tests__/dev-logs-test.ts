@@ -13,13 +13,17 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
-        env: detachEnv(projectRoot, 8394),
-      });
+      const started = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--json'],
+        {
+          env: detachEnv(projectRoot, 8394),
+        }
+      );
       // The stub prints its start line as soon as it runs; the file is written by the child.
       await waitForAsync(
         () =>
-          (fs.readFileSync(path.join(projectRoot, DETACHED_LOG_PATH), 'utf8') || '').includes(
+          (fs.readFileSync(JSON.parse(started.stdout).logFile, 'utf8') || '').includes(
             'stub_expo_start'
           ),
         5000
@@ -31,7 +35,7 @@ describe('@expo/agent-cli dev:logs', () => {
 
       expect(result.exitCode).toBe(0);
       const report = JSON.parse(result.stdout);
-      expect(report.logFile).toContain(DETACHED_LOG_PATH);
+      expect(report.logFile).toContain(path.join('.expo', 'dev', 'logs', 'dev-detached-'));
       expect(report.lines.join('\n')).toContain('stub_expo_start');
       expect(report.devServer).toMatchObject({ port: 8394 });
     } finally {
@@ -43,10 +47,14 @@ describe('@expo/agent-cli dev:logs', () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     try {
-      await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--detach', '--json'], {
-        env: detachEnv(projectRoot, 8393),
-      });
-      await waitForAsync(() => fs.existsSync(path.join(projectRoot, DETACHED_LOG_PATH)), 5000);
+      const started = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--detach', '--json'],
+        {
+          env: detachEnv(projectRoot, 8393),
+        }
+      );
+      await waitForAsync(() => fs.existsSync(JSON.parse(started.stdout).logFile), 5000);
 
       const result = await executeAgentCliAsync(projectRoot, ['dev:logs'], {
         env: stubExpoEnv(projectRoot),
