@@ -119,9 +119,8 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
   // the child does the probe: this run's whole job is to start that child and report on it. It
-  // records the request before it reports: a reused server is a server that runs.
+  // lets the owning child record the request before doing startup work.
   if (options.detach) {
-    recordLastDevRequest(projectRoot, options);
     const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
     return await devDetachAsync(projectRoot, options, { reuseBoundDevice: true });
   }
