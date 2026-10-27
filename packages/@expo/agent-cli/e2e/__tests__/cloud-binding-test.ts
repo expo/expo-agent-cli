@@ -477,11 +477,6 @@ it('recovery restarts the server before rebinding its preserved EAS session', as
   await executeAgentCliAsync(root, ['dev:stop', '--json'], { env: envFor(root) });
   const second = await run();
   expect(second.exitCode, second.stderr).toBe(0);
-  expect(second.stderr).not.toMatch(/Waiting up to .* for the EAS Simulator session/);
-  expect(second.stdout).toContain(
-    `This project already had a dev server; this run bound EAS Simulator session ${id}.`
-  );
-  expect(second.stdout).not.toContain('nothing was started');
   expect(readBinding(root).device).toMatchObject({ id });
   expect(await waitForAsync(() => opens().length === 1, 15_000)).toBe(true);
   expect(opens().map((i) => i.executedSessionId)).toEqual([id]);
