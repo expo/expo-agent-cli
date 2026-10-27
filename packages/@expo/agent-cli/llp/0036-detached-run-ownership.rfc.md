@@ -14,6 +14,7 @@ A parent-held guard cannot protect a child that survives its parent.
 
 The child owns startup before probing or other work, through normal subprocess cleanup.
 Overlapping detached starts refuse with exit 20, the owner PID, and its private log path; observer death or timeout never releases ownership.
+Once a server is published, a repeated detached start also refuses with exit 20 and its PID/port, even for identical options. Changing options requires explicit stop/start.
 Observers report only their own child. A startup observation timeout exits 22 without stopping it. Independent worktrees remain independent.
 
 | Ownership evidence                                                           | Contender behavior                 |

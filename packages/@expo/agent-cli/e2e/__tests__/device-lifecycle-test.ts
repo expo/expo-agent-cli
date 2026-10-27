@@ -199,9 +199,10 @@ describe('device lifecycle across two worktrees', () => {
     const reused = await executeAgentCliAsync(
       projectRoot,
       ['dev', '--ios', '--detach', '--no-open'],
-      { env }
+      { env, reject: false }
     );
-    expect(reused.stdout).toContain(`Device       ${name} (${udid}) · created`);
+    expect(reused.exitCode).toBe(20);
+    expect(bindings()[0]?.device).toEqual(binding!.device);
   });
 
   // @ref llp/0035-one-device-per-worktree.rfc.md §Reap
