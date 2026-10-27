@@ -36,6 +36,7 @@
 
 ### 🐛 Bug fixes
 
+- `runtime:stop --eas` on an Android session asks the controller once more when its `close` ran out of time ("process remained running after close"), instead of exiting 1. About 1 stop in 3 on an EAS Expo Go session hit this. ([#TBD](https://github.com/expo/expo-agent-cli/pull/TBD) by [@vonovak](https://github.com/vonovak))
 - The entry-bundle check that runs before `runtime:tree`, `runtime:tap`, `runtime:type`, `runtime:reload` and `smoke` sends its HEAD to the dev server it was given, never to the tunnel host the manifest names. Through the Expo tunnel that HEAD closed every websocket on the tunnel, the app's debugger socket too, so on a dev server started with `--tunnel` (every EAS Simulator session) every runtime read answered "No target found". ([#197](https://github.com/expo/expo-agent-cli/pull/197) by [@vonovak](https://github.com/vonovak))
 - `dev --detach --wait-ready` rejects another project's Metro and follows its own child's port changes within the original timeout. The same readiness check applies when reusing a running server.
 - Discovery skips a dev server whose `/status` names another project root, on the scanned ports and on the port `start.log` names, and reports the foreign servers in `status` when nothing else answered. A `/status` that does not answer within 3 s is not accepted. The dev-server lock never publishes a port that serves another project, named on the command line or not. ([#132](https://github.com/expo/expo-agent-cli/pull/132) by [@vonovak](https://github.com/vonovak))

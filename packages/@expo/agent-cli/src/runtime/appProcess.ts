@@ -246,11 +246,19 @@ async function stopAppOnCloudAsync(params: StopAppParams): Promise<StopAppResult
     };
   }
 
-  const result = await stopAppOnCloudSimulatorAsync({
-    projectRoot: params.projectRoot,
-    sessionId: params.deviceId,
-    appId: params.appId,
-  });
+  const { projectRoot } = params;
+  const close = () =>
+    stopAppOnCloudSimulatorAsync({
+      projectRoot,
+      sessionId: params.deviceId,
+      appId: params.appId,
+    });
+  let result = await close();
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — a close that ran out of time is
+  // asked once more.
+  if (!result.spawnError && result.exitCode !== 0 && isCloseTimeout(result)) {
+    result = await close();
+  }
   if (result.spawnError) {
     return {
       command: display,
@@ -277,6 +285,15 @@ async function stopAppOnCloudAsync(params: StopAppParams): Promise<StopAppResult
   // `wasAlreadyStopped: false` and `verified: false` together say the honest thing: the verb ran,
   // and whether this id was running beforehand was never established.
   return { command: display, ok: true, verified: false, wasAlreadyStopped: false, reason: null };
+}
+
+/** Whether the controller's close only ran out of time waiting for the app to go. */
+function isCloseTimeout(result: { stdout: string; stderr: string }): boolean {
+  const controller = readControllerError(`${result.stderr}\n${result.stdout}`);
+  return (
+    controller?.code === 'COMMAND_FAILED' &&
+    /remained (?:running|foreground) after close/.test(controller.message)
+  );
 }
 
 /** Whether the device tool refused because the app was not running to begin with. */

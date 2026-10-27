@@ -5,17 +5,21 @@ import path from 'path';
 
 import { buildStopAppCommand, looksLikeNotRunning, stopAppOnDeviceAsync } from '../appProcess';
 
-/** Answer the next `spawn` with a fixed result. */
-function mockSpawn({
-  stdout = '',
-  stderr = '',
-  exitCode = 0,
-}: {
+interface SpawnAnswer {
   stdout?: string;
   stderr?: string;
   exitCode?: number;
-}) {
+}
+
+/** Answer each `spawn` with the next answer in turn; the last one answers every later spawn. */
+function mockSpawn(...answers: SpawnAnswer[]) {
+  let call = 0;
   vi.mocked(spawn).mockImplementation((() => {
+    const {
+      stdout = '',
+      stderr = '',
+      exitCode = 0,
+    } = answers[Math.min(call++, answers.length - 1)]!;
     const child = Object.assign(new EventEmitter(), {
       stdout: new EventEmitter(),
       stderr: new EventEmitter(),
@@ -261,6 +265,42 @@ describe('stopping the app on a cloud simulator session', () => {
         "the session's controller answered SESSION_NOT_FOUND: No active session. Run open first.",
     });
   });
+
+  // On Android the controller runs `am force-stop` and then waits 2 s for `pidof` to come back empty
+  // (agent-device 0.21.31, `android-app-close-timeout`). On an EAS Android Expo Go session that wait
+  // runs out in about 1 stop of 3 [observed — workflow 01a17cd8, 2026-10-27], so a close that only
+  // ran out of time is asked once more. Any other refusal is the answer.
+  const CLOSED = { stdout: '{"success":true,"data":{"app":"host.exp.exponent"}}' };
+  const STILL_RUNNING = {
+    exitCode: 1,
+    stderr:
+      'Error (COMMAND_FAILED): Android app host.exp.exponent process remained running after close',
+  };
+  const STILL_FOREGROUND = {
+    exitCode: 1,
+    stderr: 'Error (COMMAND_FAILED): Android app host.exp.exponent remained foreground after close',
+  };
+  const NO_SESSION = {
+    exitCode: 1,
+    stderr: 'Error (SESSION_NOT_FOUND): No active session. Run open first.',
+  };
+  it.each([
+    ['a process still running, then closed', [STILL_RUNNING, CLOSED], true, 2],
+    ['an app still in the foreground, then closed', [STILL_FOREGROUND, CLOSED], true, 2],
+    ['a process still running twice', [STILL_RUNNING, STILL_RUNNING], false, 2],
+    ['a refusal that is not a timeout', [NO_SESSION, CLOSED], false, 1],
+  ])(
+    `asks the controller once more only after a close timeout: %s`,
+    async (_, answers, ok, closes) => {
+      cloudProject();
+      mockSpawn(...answers);
+
+      const result = await stopAppOnDeviceAsync({ ...cloudParams, platform: 'android' });
+
+      expect(result.ok).toBe(ok);
+      expect(vi.mocked(spawn)).toHaveBeenCalledTimes(closes);
+    }
+  );
 
   it(`refuses rather than guessing when no project was named`, async () => {
     await expect(
