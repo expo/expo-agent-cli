@@ -1,8 +1,31 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Reloading the app
 
+/** Each target retains its own delivery and replacement evidence. */
+export interface TargetReloadOutcome {
+  targetId: string;
+  deviceName: string;
+  outcome:
+    | 'unsupported'
+    | 'unmarkable'
+    | 'not-delivered'
+    | 'delivered-unproved'
+    | 'context-replaced';
+  reason: string | null;
+}
+
 /** One way of reloading, and what it did. */
-export interface ReloadAttempt {
-  method: 'dev-server' | 'runtime' | 'device';
+export type ReloadAttempt =
+  | (AttemptOutcome & { method: 'dev-server' | 'runtime' | 'device' })
+  /**
+   * Rung 1 while the scope skips an app: CDP `Page.reload` to each of this worktree's targets, and
+   * no broadcast (llp/0005 §Target owner).
+   */
+  | (AttemptOutcome & {
+      method: 'page-reload';
+      outcomes: TargetReloadOutcome[];
+    });
+
+interface AttemptOutcome {
   /** The app was reloaded by this method. */
   ok: boolean;
   /**
@@ -28,4 +51,13 @@ export interface ReloadAttempt {
    * Null for every attempt that stopped nothing, including a stop that itself failed.
    */
   leftAppStopped: string | null;
+}
+
+/** The witnesses behind the aggregate context-replaced label and human report. */
+export function contextReplacedTargets(attempts: readonly ReloadAttempt[]): TargetReloadOutcome[] {
+  return attempts.flatMap((attempt) =>
+    attempt.method === 'page-reload'
+      ? attempt.outcomes.filter((each) => each.outcome === 'context-replaced')
+      : []
+  );
 }

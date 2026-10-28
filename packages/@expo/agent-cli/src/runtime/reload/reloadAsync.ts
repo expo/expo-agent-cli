@@ -39,7 +39,7 @@ import { resolveDeviceAsync, type NavigateDevice } from '../../navigate/device';
 import { isCallerNamedDevServer } from '../../navigate/openRoute';
 import { checkRoute, routeNotFoundError, type RouteCheckJson } from '../../navigate/routeCheck';
 import { decideExpoGoTarget } from '../../navigate/target';
-import type { NativePlatform, PlanPlatform } from '../../plan/types';
+import type { PlanPlatform } from '../../plan/types';
 import { PROGRAM_PREFIX } from '../../programName';
 import { smokeCommand, statedSmokePlatform } from '../../smoke/suggest';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../../project/expoGo';
@@ -60,27 +60,38 @@ import {
   type BundleCheckResult,
   type BundlePlatformSource,
 } from '../bundleCheck';
-import { APP_RECONNECT_GRACE_MS, probeDevServerAsync, type DevServerSource } from '../devServer';
+import { APP_RECONNECT_GRACE_MS, type DevServerSource } from '../devServer';
+import type { CdpTarget } from '../cdpClient';
 import { preflightRuntimeAsync, type RuntimeConnection } from '../preflight';
-import { scopeJson, skippedAppsOf, type ScopeJson, type SkippedApp } from '../targetSelection';
-import { waitForFreshAppConnectionAsync, countConnectedAppsAsync } from '../waitReady';
+import {
+  classifyTargets,
+  describeSkippedApps,
+  scopeJson,
+  skippedAppsOf,
+  type ScopeJson,
+  type SkippedApp,
+} from '../targetSelection';
+import { countConnectedAppsAsync } from '../waitReady';
 import {
   markBundleSignalSync,
-  waitForNewBundleAsync,
   type BundleSignalMark,
   type BundleSignalObservation,
 } from './bundleSignal';
 import { reloadOnCloudSimulatorAsync } from './cloudReload';
 import type { ReloadAttempt } from './attempt';
+import { describeEvidence, observeReloadAsync, type Unwatched } from './evidence';
 import { debugEvent, event } from './events';
 import type { ReloadOptions } from './resolveOptions';
-import { easCommandPrefix } from '../../utils/easCli';
 import {
-  PEER_CHURN_TIMEOUT_MS,
-  PEER_POLL_INTERVAL_MS,
-  reloadOverDevServerAsync,
+  CHURN_NOT_ASKED,
+  prepareRungOneAsync,
+  runRungOneAsync,
   type CommandSocketChurn,
+  type PreparedRungOne,
+  type RungOneOutcome,
 } from './rungOne';
+import { easCommandPrefix } from '../../utils/easCli';
+import { firstLine } from '../../utils/text';
 
 /**
  * Machine shape of `@expo/agent-cli runtime:reload --json`.
@@ -103,7 +114,9 @@ export interface ReloadResultJson {
    * {@link appsReconnected} carries: a JavaScript runtime registering under a page id the dev server
    * had never used. `dev-server-bundle` — nor did it, and the proof is the weaker one
    * {@link bundlesAfterReload} carries: the dev server served a bundle after this command acted,
-   * which says something fetched it and not *which* client did.
+   * which says something fetched it and not *which* client did. `debugger-context-replaced` —
+   * rung 1 sent `Page.reload` to this worktree's target, and the same target then answered from a
+   * new JavaScript context (llp/0005 §Target owner).
    *
    * The mechanism's own observation wins the label when it has one, because it is the stronger fact;
    * the exit code is decided by the observations rather than by the label (llp/0005 §How it reloads).
@@ -112,7 +125,8 @@ export interface ReloadResultJson {
    * band): this may name only a signal whose **own** evidence is in this payload and non-empty —
    * `commandSocketChurn.reconnected` for `message-socket-peers`, {@link appsReconnected} for
    * `fresh-debugger-target`, `bundlesAfterReload.count` for `dev-server-bundle`, and an `attempts`
-   * entry that stopped and started the app for `app-relaunch`. A label with nothing to show for
+   * entry that stopped and started the app for `app-relaunch`, and a `page-reload` attempt that
+   * worked for `debugger-context-replaced`. A label with nothing to show for
    * itself is `null`, which makes `reloaded` false — the band, rather than a claim.
    */
   verifiedBy:
@@ -120,11 +134,13 @@ export interface ReloadResultJson {
     | 'fresh-debugger-target'
     | 'app-relaunch'
     | 'dev-server-bundle'
+    | 'debugger-context-replaced'
     | null;
   devServerUrl: string;
   devServerSource: DevServerSource;
   /**
-   * Debugger targets the dev server reported after the reload: apps with a live JS runtime.
+   * Debugger targets the dev server reported after the reload: apps with a live JS runtime, not
+   * counting the apps in {@link skippedApps}.
    *
    * **Asked again when a proved reload would otherwise report zero** (F141). The watches that prove
    * a reload share one budget and the first to answer ends both, so a run the bundle signal proved
@@ -207,7 +223,10 @@ export interface ReloadResultJson {
   bundlePlatformSource: BundlePlatformSource;
   /** Which apps this run read: the flags, or the device bound to this worktree (llp/0035 §Readers). */
   scope: ScopeJson;
-  /** Apps the reload does not count or check, such as another worktree's (llp/0005 §Target owner). */
+  /**
+   * Apps the scope skipped: rung 1 does not reload them, and no evidence of theirs counts
+   * (llp/0005 §Target owner).
+   */
   skippedApps: SkippedApp[];
   /** Route the app was sent to afterwards, or null when none was asked for. */
   route: string | null;
@@ -286,7 +305,9 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   // for is a question about the app being reloaded, and this used to answer it with a host-free
   // default: with an Android-only break and both apps attached, a `runtime:reload` with no flag
   // checked the **iOS** bundle, passed, and reloaded the Android app onto the broken one.
-  const { targetSelection, deviceInventory, classifiedTargets } = devServer;
+  const { targetSelection, classifiedTargets } = devServer;
+  let actionConnection = devServer;
+  const { deviceInventory } = devServer;
   const { platforms: bundlePlatforms, source: bundlePlatformSource } =
     await resolveBundleCheckPlatformsAsync(targetSelection, classifiedTargets.read, {
       deviceInventory,
@@ -322,30 +343,29 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
 
   const attempts: ReloadAttempt[] = [];
   let method: ReloadResultJson['method'] = null;
-  let verifiedBy: ReloadResultJson['verifiedBy'] = null;
   let device: NavigateDevice | null = null;
-  let knownTargetIds: string[] = [];
   // Read whenever the command socket is opened at all, and reported next to the debugger-target
   // count rather than instead of it (llp/0005 §What proves a reload).
   let commandSocketClients: number | null = null;
   // The evidence behind `verifiedBy: 'message-socket-peers'` (F95). Its own default says the socket
   // was never asked, which is the truth for every run that skipped the rung.
-  let commandSocketChurn: CommandSocketChurn = {
-    observed: null,
-    before: null,
-    after: null,
-    reconnected: 0,
-    reason: "the dev server's command socket was not asked on this run",
-  };
+  let commandSocketChurn = CHURN_NOT_ASKED;
   // Where the dev server's captured output stood before anything was reloaded. Marked on every rung
   // (wave 21): "was the app seen to come back" is one question, and a command that answered it two
   // ways depending on where the device was is two commands wearing one name.
   let bundleMark: BundleSignalMark | null = null;
   let cloudUrl: string | null = null;
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner. Rung 1, and the evidence that counts.
+  let prepared: PreparedRungOne | null = null;
+  let rungOne: RungOneOutcome | null = null;
+  // One inventory for the run: the prepared observation's, once rung 1 prepared it. Only the whole
+  // list's `read` group is this run's: a fresh page, a count or a relaunch id of another app is not.
+  const own = (targets: CdpTarget[]) =>
+    classifyTargets(targets, targetSelection, actionConnection.deviceInventory).read;
   // The last count anybody actually read, for the runs where no wait happens. Reporting a flat 0
   // for a refusal would be this command inventing "no app is connected" out of a step it skipped,
   // which is the same shape of claim as the ones it exists to remove.
-  let observedApps = devServer.targets.length;
+  let observedApps = own(devServer.targets).length;
 
   // What the mechanism that ran observed *by itself*, apart from the app coming back. Peer churn
   // and a relaunch on a local device are observations already — the dev server's socket ids never
@@ -354,21 +374,28 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   let mechanismProof: ReloadResultJson['verifiedBy'] = null;
 
   /**
-   * Rung one was taken, its frame was delivered, and its own proof did not arrive.
+   * Why rung 1 did not prove the reload, or null when it did or did not run.
    *
-   * The one fact that makes `auto` climb (F99). Separate from `method`, which by then already names
-   * `dev-server`: the report has to say a mechanism ran, and the ladder has to know it was not
-   * *proved* — those are the two halves F97 split apart, and this is the half rung two reads.
+   * The one fact that makes `auto` climb (F99). Separate from `method`, which names `dev-server`
+   * for a delivered reload: the report has to say a mechanism ran, and the ladder has to know it
+   * was not *proved* — those are the two halves F97 split apart, and this is the half rung two
+   * reads.
    */
-  let broadcastUnproved = false;
+  let relaunchWhy: string | null = null;
 
   if (refusal == null) {
     // Read as late as possible, and always again rather than reusing the discovery probe: these
     // ids are what "the app came back" is measured against, and anything that reloaded the app in
     // the meantime — a save the watcher picked up — would otherwise be credited to this command.
-    const before = await probeDevServerAsync(devServerUrl);
-    knownTargetIds = before.targets.map((target) => target.id);
-    observedApps = before.targets.length;
+    const before = await prepareRungOneAsync(
+      devServerUrl,
+      projectRoot,
+      targetSelection,
+      remainingMs()
+    );
+    prepared = before;
+    actionConnection = { ...devServer, ...before };
+    observedApps = before.classifiedTargets.read.length;
 
     // Marked before any mechanism runs and after the bundle gate, so everything the wait counts is
     // output the dev server produced because of *this* command — the gate's own `HEAD` on the entry
@@ -377,42 +404,23 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
 
     // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — wave 21.
     //
-    // **Rung one: the broadcast, when there is a client to broadcast to.** `getpeers` answers that
-    // question, and the answer — not `--eas`, not the location of the device — is what picks the
-    // rung. A pinned `--method` skips this, as a pinned method always has.
+    // **Rung one: the broadcast, when there is a client to broadcast to** — or `Page.reload` to
+    // this worktree's targets while the scope skips an app. `getpeers` answers the first question,
+    // and the answer — not `--eas`, not the location of the device — is what picks the rung. A
+    // pinned `--method` skips this, as a pinned method always has.
     if (options.method === 'auto' || options.method === 'dev-server') {
-      // The count from `/json/list` goes in, so the reason this attempt gives can tell "no app is
-      // connected" from "the app is connected and this socket cannot see it" (K2).
-      const attempt = await reloadOverDevServerAsync(devServerUrl, {
-        connectedApps: observedApps,
-        // Bounded by the command's own budget as well as by its own (F95). The wait is for a *new*
-        // client id now rather than for the list to move, so an app that dropped its connection and
-        // stayed away spends the whole churn window — and a `--timeout` the caller chose must not be
-        // outlived by a step inside it, which would delay the relaunch rung past the deadline. The
-        // floor keeps at least one read: a budget already spent is still worth one look.
-        churnTimeoutMs: Math.min(
-          PEER_CHURN_TIMEOUT_MS,
-          Math.max(remainingMs(), PEER_POLL_INTERVAL_MS * 2)
-        ),
-        onChurn: (churn) => {
-          commandSocketChurn = churn;
-          commandSocketClients = churn.before;
-        },
-      });
-      attempts.push(attempt);
-      if (attempt.ok) {
-        method = 'dev-server';
-        mechanismProof = 'message-socket-peers';
-      } else if (attempt.delivered) {
-        // @ref llp/0005 §How it reloads — F97. The frame
-        // reached a registered client and the peer list did not move inside the churn window. A
-        // mechanism ran; its own proof is missing, so `mechanismProof` stays null and the two shared
-        // observations below — a fresh debugger target, or a bundle the dev server served — decide.
-        // That is the difference between exit `20` and exit `22`, and between watching for the
-        // evidence and not looking at all.
-        method = 'dev-server';
-        broadcastUnproved = true;
-      }
+      rungOne = await runRungOneAsync(devServerUrl, { prepared: before, budgetMs: remainingMs() });
+      attempts.push(rungOne.attempt);
+      commandSocketChurn = rungOne.churn;
+      commandSocketClients = rungOne.churn.before;
+      // @ref llp/0005 §How it reloads — F97. A delivered or acted reload is a mechanism that ran;
+      // its own proof is missing, so the two shared observations below — a fresh debugger target,
+      // or a bundle the dev server served — decide. That is the difference between exit `20` and
+      // exit `22`, and between watching for the evidence and not looking at all.
+      method =
+        rungOne.kind === 'not-delivered' || rungOne.kind === 'unprovable' ? null : 'dev-server';
+      mechanismProof = rungOne.kind === 'proved' ? rungOne.proof : null;
+      relaunchWhy = 'relaunchWhy' in rungOne ? rungOne.relaunchWhy : null;
     }
 
     // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads — the cloud loop, K2.
@@ -424,7 +432,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     // reaches for on its own. Putting it in `auto` would have traded the relaunch's known cost for
     // a less predictable one.
     if (method == null && options.method === 'runtime') {
-      const attempt = await reloadOverRuntimeAsync(devServer, observedApps);
+      const attempt = await reloadOverRuntimeAsync(actionConnection, observedApps);
       attempts.push(attempt);
       if (attempt.ok) {
         // No mechanism proof: the debugger has no peer list to churn, so the claim is "the call was
@@ -437,17 +445,16 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     // act: the session's controller (`./cloudReload.ts`, wave 19's two verbs) or a device booted on
     // this machine.
     //
-    // Reached in **two** states, and the second is F99 — the ladder climbing rather than stopping:
+    // Reached whenever rung 1 did not prove the reload (`relaunchWhy`), and the second state is F99
+    // — the ladder climbing rather than stopping:
     //
-    //  1. the socket held no client, so a broadcast has nobody to serve, whatever the report of the
-    //     app's own connection says;
-    //  2. the broadcast **was** delivered to a client and its own proof never arrived. That is
-    //     `broadcastUnproved`, and it is the state a live cloud reload sat in for a whole 180 s
-    //     budget while the very next command — finding the socket empty, because the broadcast had
-    //     taken the client away without reloading anything — climbed here and exited 0 in 18.5 s
-    //     [observed — 2026-08-27, live cloud]. Stopping at a rung that was tried and proved nothing
-    //     is not a ladder, and llp/0005's own rule is that the state is spent "when nothing cheaper
-    //     can reach the app".
+    //  1. the reload reached no app: the socket had no client, or no own target took `Page.reload`;
+    //  2. the reload **was** delivered and its own proof never arrived. That is the state a live
+    //     cloud reload sat in for a whole 180 s budget while the very next command — finding the
+    //     socket empty, because the broadcast had taken the client away without reloading
+    //     anything — climbed here and exited 0 in 18.5 s [observed — 2026-08-27, live cloud].
+    //     Stopping at a rung that was tried and proved nothing is not a ladder, and llp/0005's own
+    //     rule is that the state is spent "when nothing cheaper can reach the app".
     //
     // It costs the app's JavaScript state, and `auto` used to refuse rather than spend it — "never
     // force-stop an app the dev server can see" (K2). That rule protected a cheaper alternative,
@@ -455,15 +462,16 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     // cost is visible in (`describeRelaunchCost`). A **pinned** `--method dev-server` never climbs:
     // a caller who named one rung excluded the others, cost and all.
     const relaunchRung =
-      mechanismProof == null &&
-      method !== 'runtime' &&
-      (options.method === 'device' ||
-        (options.method === 'auto' && ((commandSocketClients ?? 0) === 0 || broadcastUnproved)));
+      options.method === 'device' || (options.method === 'auto' && relaunchWhy != null);
+    const why = relaunchWhy ?? '--method device named the relaunch';
     if (relaunchRung && options.cloud) {
       const cloud = await reloadOnCloudSimulatorAsync(projectRoot, options, {
-        targetAppIds: before.targets.map((target) => target.appId).filter(Boolean),
+        // Only this worktree's apps: a skipped app's id would relaunch the wrong app.
+        targetAppIds: own(before.targets)
+          .map((target) => target.appId)
+          .filter(Boolean),
       });
-      attempts.push(withRelaunchCost(cloud.attempt, observedApps, { climbed: broadcastUnproved }));
+      attempts.push(withRelaunchCost(cloud.attempt, observedApps, why));
       device = cloud.device;
       cloudUrl = cloud.url;
       if (cloud.attempt.ok) {
@@ -473,10 +481,8 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
         method = 'device';
       }
     } else if (relaunchRung) {
-      const attempt = await reloadOnDeviceAsync(projectRoot, options, devServerUrl);
-      attempts.push(
-        withRelaunchCost(attempt.attempt, observedApps, { climbed: broadcastUnproved })
-      );
+      const attempt = await reloadOnDeviceAsync(projectRoot, options, devServerUrl, own);
+      attempts.push(withRelaunchCost(attempt.attempt, observedApps, why));
       device = attempt.device;
       if (attempt.attempt.ok) {
         method = 'device';
@@ -497,23 +503,32 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   // three minutes [observed — live run S11] — and a relaunched app re-registers under the page
   // id it had before, so on both of those the bundle the dev server finished is the observation that
   // is left (`./bundleSignal.ts`).
-  const connection =
-    method != null && bundleMark != null
-      ? await waitForReloadEvidenceAsync(devServerUrl, projectRoot, {
-          timeoutMs: remainingMs(),
-          knownTargetIds,
-          targetSelection,
-          deviceInventory,
+  const seen =
+    method != null && prepared != null && bundleMark != null
+      ? await observeReloadAsync(devServerUrl, projectRoot, {
+          prepared,
+          mechanismProof,
+          churn: commandSocketChurn,
+          attempts,
           bundleMark,
-          // The scope's platform, never the resolved default: null counts every platform (F126).
-          platform: devServer.targetSelection.platform?.value ?? null,
+          timeoutMs: remainingMs(),
         })
-      : { appsConnected: observedApps, freshTargets: 0, timedOut: false, waitedMs: 0 };
-
-  const bundleObservation: BundleSignalObservation | null =
-    'bundle' in connection ? (connection.bundle as BundleSignalObservation) : null;
+      : null;
+  const unwatched: Unwatched | null = seen?.unwatched ?? null;
+  const connection = seen?.evidence ?? {
+    appsConnected: observedApps,
+    freshTargets: 0,
+    timedOut: false,
+    waitedMs: 0,
+    bundle: null,
+  };
+  const bundleObservation = connection.bundle;
+  const verifiedBy = seen?.verifiedBy ?? null;
   /** The app was seen to be back: the same question, answered the same way, on every rung. */
-  const observed = connection.freshTargets > 0 || bundleObservation?.observed === true;
+  const observed =
+    unwatched === 'context-replaced' ||
+    connection.freshTargets > 0 ||
+    bundleObservation?.observed === true;
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload — **F141.** `appsConnected` is
   // the *last* read the wait above made, and the two watches share one budget: a run the bundle
@@ -530,32 +545,9 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   const reconnectBudget = Math.min(APP_RECONNECT_GRACE_MS, remainingMs());
   const appsConnected =
     observed && connection.appsConnected === 0
-      ? await countConnectedAppsAsync(devServerUrl, reconnectBudget, devServer)
+      ? await countConnectedAppsAsync(devServerUrl, reconnectBudget, actionConnection)
       : connection.appsConnected;
 
-  // What the run may claim. The mechanism's own observation is the label when it has one, because
-  // "the app's connection was replaced" and "the dev server served a bundle to somebody" are
-  // different facts and the stronger one belongs in the report. With no mechanism proof, the
-  // observation that answered is the label — and with neither, `reloaded` is false.
-  //
-  // **Every candidate has to have its evidence in the payload** (F95). Before wave 22 the mechanism
-  // proof was taken on trust, and the report then named a signal a reader could not check: a run said
-  // `verifiedBy: 'message-socket-peers'` beside `appsReconnected: 0`, which is a label reconciled
-  // against a different signal's count. Now the label is chosen from the candidates that can show
-  // themselves, in the same order of strength.
-  if (method != null) {
-    const evidence: VerificationEvidence = {
-      churn: commandSocketChurn,
-      freshTargets: connection.freshTargets,
-      bundle: bundleObservation,
-      attempts,
-    };
-    verifiedBy =
-      ([mechanismProof, 'fresh-debugger-target', 'dev-server-bundle'] as const).find(
-        (label): label is NonNullable<ReloadResultJson['verifiedBy']> =>
-          label != null && hasEvidenceFor(label, evidence)
-      ) ?? null;
-  }
   if (bundleObservation != null) {
     debugEvent('bundle_observed', {
       observed: bundleObservation.observed,
@@ -636,11 +628,15 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
       line: bundleObservation?.last?.text ?? null,
       reason: bundleObservation
         ? bundleObservation.reason
-        : 'nothing watched the dev server output: no mechanism ran, so there was nothing to watch for',
+        : unwatched === 'context-replaced'
+          ? "not watched: a new JavaScript context on this worktree's app already proved the reload"
+          : unwatched === 'nothing-can-prove'
+            ? 'not watched: a Page.reload keeps the page id, and no bundle may count on this run, so nothing could prove the reload'
+            : 'nothing watched the dev server output: no mechanism ran, so there was nothing to watch for',
     },
     bundlePlatforms: bundles.map((entry) => entry.platform),
     bundlePlatformSource,
-    skippedApps: skippedAppsOf(devServer.classifiedTargets),
+    skippedApps: skippedAppsOf(actionConnection.classifiedTargets),
     scope: scopeJson(devServer.targetSelection),
     route,
     routeCheck,
@@ -673,46 +669,11 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   }
 
   if (exitCode !== EXIT_OK) {
-    Log.error(explainReloadFailure(report, options));
+    Log.error(explainReloadFailure(report, options, { unwatched, rungOne }));
   }
 
   reportFollowUps('runtime:reload', followups, { json });
   return exitCode;
-}
-
-/** Everything a label could be named off, as the payload will carry it. */
-export interface VerificationEvidence {
-  churn: CommandSocketChurn;
-  freshTargets: number;
-  bundle: BundleSignalObservation | null;
-  attempts: readonly ReloadAttempt[];
-}
-
-/**
- * Whether the payload holds this label's **own** evidence, non-empty.
- *
- * @ref llp/0021-honest-reports.rfc.md §The rules — F95.
- *
- * The rule `verifiedBy` is chosen by, spelled once so a fifth label cannot be added without saying
- * what would prove it. Each case names a field of {@link ReloadResultJson} and nothing else: a reader
- * who wants to check the label reads that field, and a label whose field is empty is not printed.
- */
-export function hasEvidenceFor(
-  label: NonNullable<ReloadResultJson['verifiedBy']>,
-  evidence: VerificationEvidence
-): boolean {
-  switch (label) {
-    case 'message-socket-peers':
-      return evidence.churn.observed === true && evidence.churn.reconnected > 0;
-    case 'fresh-debugger-target':
-      return evidence.freshTargets > 0;
-    case 'dev-server-bundle':
-      return evidence.bundle?.observed === true && evidence.bundle.newBundles > 0;
-    case 'app-relaunch':
-      // The relaunch is its own observation — `simctl terminate` names a process and fails when there
-      // is none — so what has to be in the payload is the attempt that made it, succeeding.
-      return evidence.attempts.some((attempt) => attempt.method === 'device' && attempt.ok);
-  }
 }
 
 /**
@@ -771,96 +732,15 @@ function describeNoReconnection({
 function withRelaunchCost(
   attempt: ReloadAttempt,
   connectedApps: number,
-  { climbed }: { climbed: boolean }
+  why: string
 ): ReloadAttempt {
   if (!attempt.ok || connectedApps === 0) {
     return attempt;
   }
-  const why = climbed
-    ? "the reload was broadcast to a client on the dev server's command socket and nothing was seen to come of it, so the app was relaunched instead"
-    : "no client was registered on the dev server's command socket, so the app was relaunched instead";
   return {
     ...attempt,
     reason: `${why} — which costs the app's JavaScript state: ${attempt.reason}`,
   };
-}
-
-/** What the wait for a cloud reload found: the target list, and the dev server's own output. */
-export interface ReloadEvidence {
-  appsConnected: number;
-  freshTargets: number;
-  timedOut: boolean;
-  waitedMs: number;
-  bundle: BundleSignalObservation;
-}
-
-/**
- * Wait for either proof a reload leaves: a fresh debugger target, or a bundle the dev server served.
- *
- * Two watches on one budget, and the first to answer ends the wait — the target list because it is
- * the stronger fact and the rest of the CLI needs it, the log because on some apps it is the only one
- * there is (S11). Every rung uses it (wave 21); until then the log was read on the cloud path alone,
- * which made one question have two answers.
- */
-export async function waitForReloadEvidenceAsync(
-  devServerUrl: string,
-  projectRoot: string,
-  {
-    timeoutMs,
-    knownTargetIds,
-    bundleMark,
-    platform,
-    targetSelection,
-    deviceInventory,
-  }: Pick<RuntimeConnection, 'targetSelection' | 'deviceInventory'> & {
-    timeoutMs: number;
-    knownTargetIds: readonly string[];
-    bundleMark: BundleSignalMark;
-    /** The platform the caller named, so the other app's bundle is not this one's proof (F126). */
-    platform: NativePlatform | null;
-  }
-): Promise<ReloadEvidence> {
-  const startedAt = Date.now();
-  // Whichever answers first ends both. Not a `Promise.race`: the loser is asked to stop and still
-  // returns what its last read saw, because `appsConnected` is a number the failure text quotes and
-  // an abandoned wait would leave it at zero for a dev server it had simply stopped asking.
-  const settled = new AbortController();
-  const targets = waitForFreshAppConnectionAsync(devServerUrl, {
-    timeoutMs,
-    knownTargetIds,
-    targetSelection,
-    deviceInventory,
-    signal: settled.signal,
-  }).then((result) => {
-    if (result.freshTargets > 0) {
-      settled.abort();
-    }
-    return result;
-  });
-  const bundle = waitForNewBundleAsync(projectRoot, {
-    before: bundleMark,
-    timeoutMs,
-    signal: settled.signal,
-    platform,
-  }).then((result) => {
-    if (result.observed) {
-      settled.abort();
-    }
-    return result;
-  });
-  const [connection, observation] = await Promise.all([targets, bundle]);
-  return {
-    appsConnected: connection.appsConnected,
-    freshTargets: connection.freshTargets,
-    timedOut: connection.timedOut && !observation.observed,
-    waitedMs: Date.now() - startedAt,
-    bundle: observation,
-  };
-}
-
-/** The first line of a message, for a reason that has to fit on one. */
-function firstLine(text: string): string {
-  return text.split('\n')[0]!.trim();
 }
 
 /**
@@ -1009,7 +889,8 @@ async function reloadOverRuntimeAsync(
 async function reloadOnDeviceAsync(
   projectRoot: string,
   options: ReloadOptions,
-  devServerUrl: string
+  devServerUrl: string,
+  own: (targets: CdpTarget[]) => CdpTarget[]
 ): Promise<{ attempt: ReloadAttempt; device: NavigateDevice | null }> {
   let device: NavigateDevice;
   try {
@@ -1043,7 +924,7 @@ async function reloadOnDeviceAsync(
     };
   }
 
-  const appId = await resolveAppIdAsync(projectRoot, devServerUrl, device, options.appId);
+  const appId = await resolveAppIdAsync(projectRoot, devServerUrl, device, own, options.appId);
   const stopped = await stopAppOnDeviceAsync({
     platform: device.platform,
     deviceId: device.deviceId,
@@ -1189,6 +1070,7 @@ async function resolveAppIdAsync(
   projectRoot: string,
   devServerUrl: string,
   device: NavigateDevice,
+  own: (targets: CdpTarget[]) => CdpTarget[],
   appIdOverride?: string
 ): Promise<string> {
   const { probeDevServerAsync } = require('../devServer') as typeof import('../devServer');
@@ -1196,7 +1078,10 @@ async function resolveAppIdAsync(
   return resolveAppId({
     platform: device.platform,
     appIdOverride,
-    targetAppIds: probe.targets.map((target) => target.appId).filter(Boolean),
+    // Only this worktree's apps: a skipped app's id stops the wrong app (llp/0005 §Target owner).
+    targetAppIds: own(probe.targets)
+      .map((target) => target.appId)
+      .filter(Boolean),
     configured: readConfiguredAppId(projectRoot, device.platform),
   }).appId;
 }
@@ -1206,6 +1091,7 @@ const METHOD_PHRASE: { [method: string]: string } = {
   'dev-server': "the dev server's client command socket",
   runtime: "the app's own expo.reloadAppAsync, over the debugger",
   device: 'stopping the app on the device and opening it again',
+  'page-reload': "Page.reload to this worktree's app, over the debugger",
 };
 
 /**
@@ -1230,31 +1116,12 @@ function explainCloudRelaunchRefusal(report: ReloadResultJson): string[] {
   ];
 }
 
-/**
- * The count behind the label, in one clause.
- *
- * F95: `verified by message-socket-peers` on its own is a name, and the reader's only way to check it
- * used to be a number belonging to a different signal. Each label reads its own field.
- */
-function describeEvidence(report: ReloadResultJson): string {
-  switch (report.verifiedBy) {
-    case 'message-socket-peers':
-      return `${report.commandSocketChurn.reconnected} client(s) registered on the dev server's command socket that it had not listed before`;
-    case 'fresh-debugger-target':
-      return `${report.appsReconnected} debugger target(s) the dev server had not listed before`;
-    case 'dev-server-bundle':
-      return `${report.bundlesAfterReload.count} bundle(s) the dev server finished after this command acted`;
-    case 'app-relaunch':
-      return 'the app was stopped on the device and started again';
-    default:
-      return 'nothing';
-  }
-}
-
 function printHumanReport(report: ReloadResultJson, options: ReloadOptions): void {
   const lines = [
     chalk`{bold Reloaded} ${report.reloaded ? chalk.green('yes') : chalk.red('no')}${
-      report.method ? chalk`{dim  · via ${METHOD_PHRASE[report.method] ?? report.method}}` : ''
+      report.method
+        ? chalk`{dim  · via ${METHOD_PHRASE[report.method === 'dev-server' && report.attempts.some((attempt) => attempt.method === 'page-reload') ? 'page-reload' : report.method]}}`
+        : ''
     }`,
   ];
   if (report.verifiedBy) {
@@ -1276,6 +1143,14 @@ function printHumanReport(report: ReloadResultJson, options: ReloadOptions): voi
         : (report.appsReconnectedReason ?? 'none reconnected after the reload')
     }}`
   );
+  // @ref llp/0005 §Target owner. A line per placement group: rung 1 did not reload these apps, and
+  // a reader must not take their bundle or their screen for this worktree's.
+  for (const group of ['other-worktree', 'other-device'] as const) {
+    const apps = report.skippedApps.filter((app) => app.group === group);
+    if (apps.length > 0) {
+      lines.push(chalk`{bold Not reloaded} {dim ${describeSkippedApps(apps)}}`);
+    }
+  }
   // @ref llp/0005 §What proves a reload. Its own line, whenever the socket was asked: one number
   // for two lists is how "Apps connected 1" came to sit above a broadcast that reached nobody.
   if (report.commandSocketClients != null) {
@@ -1373,8 +1248,18 @@ function explainStrandedApp(report: ReloadResultJson, options: ReloadOptions): s
   ];
 }
 
+/** What the payload does not carry and the failure text needs: the state rung 1 and the wait ended in. */
+export interface ReloadFailureState {
+  unwatched: Unwatched | null;
+  rungOne: RungOneOutcome | null;
+}
+
 /** The what / why / how for a reload that did not end where it was supposed to. */
-export function explainReloadFailure(report: ReloadResultJson, options: ReloadOptions): string {
+export function explainReloadFailure(
+  report: ReloadResultJson,
+  options: ReloadOptions,
+  state: ReloadFailureState
+): string {
   // The `smoke` this points at needs a platform now. Prefer the device this reload ran against,
   // then the flag the caller passed, then the host's default — and carry `--eas` through.
   const smokePlatform =
@@ -1416,12 +1301,25 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
   // cannot tell apart, and naming both is the honest report — `reloaded: no` with the mechanism that
   // ran, rather than a success off a verb that answers about no app in particular.
   if (report.method != null && report.verifiedBy == null) {
+    const outside = state.rungOne?.kind === 'acted' ? state.rungOne.reachedOutside : 0;
+    const why =
+      state.unwatched === 'nothing-can-prove'
+        ? `Why: the app answered Page.reload, which keeps its page id, and no bundle may count here (${describeSkippedApps(report.skippedApps)}), so nothing could prove the reload and nothing was watched.`
+        : [
+            outside > 0
+              ? `Why: the dev server's command socket clients churned, but ${outside} listed app${outside === 1 ? '' : 's'} outside this run's scope ${outside === 1 ? 'was' : 'were'} reloaded too, so the churn proves nothing, and neither observation that could prove it happened within ${options.timeoutMs}ms.`
+              : `Why: two observations were watched for ${options.timeoutMs}ms and neither happened.`,
+            `The dev server listed no debugger target it had not listed before (${report.devServerUrl}/json/list named ${report.appsConnected})${options.cloud ? ', which a cloud simulator often never does — an app has run this project on one with that list empty throughout' : ''}.`,
+            `And ${report.bundlesAfterReload.reason ?? 'the dev server served no bundle after the relaunch'}. So the app may be running the new code invisibly, or it may not have come back.`,
+          ].join(' ');
     return [
       chalk.red(
         `The app was ${report.method === 'device' ? 'relaunched' : 'asked to reload itself'}${options.cloud ? ' on the cloud simulator' : ''}, and nothing was observed to confirm it reloaded.`
       ),
-      `Why: two observations were watched for ${options.timeoutMs}ms and neither happened. The dev server listed no debugger target it had not listed before (${report.devServerUrl}/json/list named ${report.appsConnected}), which a cloud simulator often never does — an app has run this project on one with that list empty throughout. And ${report.bundlesAfterReload.reason ?? 'the dev server served no bundle after the relaunch'}. So the app may be running the new code invisibly, or it may not have come back.`,
-      `How: look at the screen — "${smokeCommand(smokePlatform)} --eas --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach --tunnel" so its output is recorded.` : ''}`.trim(),
+      why,
+      state.unwatched === 'nothing-can-prove'
+        ? `How: run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`
+        : `How: look at the screen — "${smokeBase} --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". ${options.cloud ? 'A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ' : ''}${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach${options.cloud ? ' --tunnel' : ''}" so its output is recorded.` : ''}`.trim(),
     ].join('\n');
   }
   if (!report.reloaded) {
@@ -1434,9 +1332,11 @@ export function explainReloadFailure(report: ReloadResultJson, options: ReloadOp
       // text described only the second: "open the app first" is advice for a caller whose app is
       // *not* running, and printing it for a connected app is how a reader was sent to start a
       // second copy of an app this command could see all along.
-      report.appsConnected > 0
-        ? `How: the app is connected — ${report.devServerUrl}/json/list names ${report.appsConnected === 1 ? 'it' : `${report.appsConnected} of them`} — so this is not a missing app, it is a runtime the broadcast could not reach. Editing a file the app has loaded is the cheapest way in: the dev server pushes that on its own. The two deliberate methods are "${PROGRAM_PREFIX} runtime:reload --method runtime", which asks the app's own expo.reloadAppAsync to do it and on Expo Go closes the app instead, and "${PROGRAM_PREFIX} runtime:reload --method device", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
-        : `How: open the app on a device or simulator first ("${PROGRAM_PREFIX} navigate /"), then run this command again. A reload needs an app that is already running: it replaces the JavaScript in one, it does not start one.`,
+      state.rungOne?.kind === 'unprovable'
+        ? `How: no app of this worktree could keep the marker that proves a Page.reload, so none was sent. Run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch.`
+        : report.appsConnected > 0
+          ? `How: the app is connected — ${report.devServerUrl}/json/list names ${report.appsConnected === 1 ? 'it' : `${report.appsConnected} of them`} — so this is not a missing app, it is a runtime ${report.attempts.some((attempt) => attempt.method === 'page-reload') ? 'Page.reload' : 'the broadcast'} could not reach. Editing a file the app has loaded is the cheapest way in: the dev server pushes that on its own. The two deliberate methods are "${PROGRAM_PREFIX} runtime:reload --method runtime", which asks the app's own expo.reloadAppAsync to do it and on Expo Go closes the app instead, and "${PROGRAM_PREFIX} runtime:reload --method device", which force-stops the app and opens it again — that always works and costs the app's state${options.cloud ? ', and on a cloud session leaves the app closed if the relaunch is refused' : ''}.`
+          : `How: open the app on a device or simulator first ("${PROGRAM_PREFIX} navigate /"), then run this command again. A reload needs an app that is already running: it replaces the JavaScript in one, it does not start one.`,
     ].join('\n');
   }
   // Two shapes of "not back", and they are told apart by what the target list says. An empty list

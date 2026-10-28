@@ -852,8 +852,12 @@ export type StubDevServer = {
   /** Origin to hand to `--dev-server-url`, e.g. `http://127.0.0.1:53421`. */
   url: string;
   port: number;
+  /** How many `reload` broadcasts the command socket received. */
+  broadcasts(): number;
   /** Platforms requested from the entry-bundle endpoint, in request order. */
   bundlePlatforms(): string[];
+  /** The `device=` query of each inspector socket that was sent `Page.reload`, in order. */
+  pageReloads(): string[];
   /** Stop listening and wait for the server to close. */
   close(): Promise<void>;
 };
@@ -1039,6 +1043,8 @@ export async function startStubDevServerAsync({
 
   let peers: Record<string, string | null> = { ...messagePeers };
   let nextPeerId = 100;
+  let broadcasts = 0;
+  const pageReloads: string[] = [];
   const messageServer = messageSocket === 'none' ? null : new WebSocketServer({ noServer: true });
   const inspectorServer =
     inspectorSocket === 'none' ? null : new WebSocketServer({ noServer: true });
@@ -1066,7 +1072,14 @@ export async function startStubDevServerAsync({
   // With a responder, the socket also speaks the one CDP method the reading commands send. A
   // `no-debugger` socket keeps its `-32601` answer instead: the responder is a runtime that talks,
   // and that socket's whole point is a runtime that cannot.
-  if (inspectorEvaluate && inspectorSocket !== 'no-debugger') {
+  //
+  // `runtime:reload` beside a skipped app sends `Page.reload` to its own target, and proves it with
+  // a marker global (llp/0005 §What proves a reload). Each app keeps its own globals.
+  // `Page.reload` answers `{}`, replaces that one app's JavaScript context, and keeps every page
+  // id, as React Native's host agent does [observed — SDK 58 development build, React Native
+  // 0.88, 2026-10-21; the new context is not observed].
+  const markers = new Map<string, Map<string, string>>();
+  if (inspectorSocket === 'live') {
     inspectorServer?.on('connection', (socket: WebSocket, request: IncomingMessage) => {
       const device = new URL(request.url ?? '/', 'http://stub').searchParams.get('device') ?? '';
       socket.on('message', (data) => {
@@ -1076,11 +1089,35 @@ export async function startStubDevServerAsync({
         } catch {
           return;
         }
+        const reply = (result: object) => socket.send(JSON.stringify({ id: message.id, result }));
+        if (message.method === 'Page.reload') {
+          pageReloads.push(device);
+          markers.delete(device);
+          reply({});
+          return;
+        }
         if (message.method !== 'Runtime.evaluate') {
           return;
         }
         const expression = message.params?.expression ?? '';
-        const value = inspectorEvaluate(expression, device);
+        const globals = markers.get(device) ?? new Map<string, string>();
+        markers.set(device, globals);
+        const setMarker = /(__expoAgentCliReloadMarker\w*) = "([^"]+)"/.exec(expression);
+        const readMarker = /(__expoAgentCliReloadMarker\w*) === "([^"]+)"/.exec(expression);
+        const removeMarker = /delete globalThis\.(__expoAgentCliReloadMarker\w*)/.exec(expression);
+        if (setMarker) {
+          globals.set(setMarker[1]!, setMarker[2]!);
+        }
+        if (!setMarker && !readMarker && !removeMarker && !inspectorEvaluate) {
+          return;
+        }
+        const value = setMarker
+          ? globals.get(setMarker[1]!) === setMarker[2]
+          : readMarker
+            ? globals.get(readMarker[1]!) === readMarker[2]
+            : removeMarker
+              ? globals.delete(removeMarker[1]!)
+              : inspectorEvaluate!(expression, device);
         // The reload asked for over the debugger, which `runtime:reload --method runtime` sends.
         // Its probe half carries the diagnostic string below and the call does not, which is the
         // only thing that tells them apart: every expression this CLI sends is wrapped, and the
@@ -1088,17 +1125,12 @@ export async function startStubDevServerAsync({
         if (expression.includes('reloadAppAsync') && !expression.includes('no-expo-global')) {
           applyReloadTargets();
         }
-        socket.send(
-          JSON.stringify({
-            id: message.id,
-            result: {
-              result:
-                value === undefined
-                  ? { type: 'undefined' }
-                  : { type: typeof value === 'object' ? 'object' : typeof value, value },
-            },
-          })
-        );
+        reply({
+          result:
+            value === undefined
+              ? { type: 'undefined' }
+              : { type: typeof value === 'object' ? 'object' : typeof value, value },
+        });
       });
     });
   }
@@ -1121,6 +1153,9 @@ export async function startStubDevServerAsync({
       if (message.target === 'server' && message.method === 'getpeers') {
         socket.send(JSON.stringify({ id: message.id, result: peers, version: 2 }));
         return;
+      }
+      if (message.method === 'reload' && message.target === undefined) {
+        broadcasts++;
       }
       if (message.method === 'reload' && message.target === undefined && messageSocket === 'v2') {
         // An app that acts on the reload drops its connection and makes a new one, which the dev
@@ -1178,7 +1213,9 @@ export async function startStubDevServerAsync({
   return {
     url: `http://127.0.0.1:${port}`,
     port,
+    broadcasts: () => broadcasts,
     bundlePlatforms: () => [...bundlePlatforms],
+    pageReloads: () => [...pageReloads],
     close: () =>
       new Promise<void>((resolve, reject) => {
         clearInterval(startup);

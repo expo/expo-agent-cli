@@ -80,6 +80,7 @@ function run(overrides: Partial<SmokeRun> = {}): SmokeRun {
       knownTargetIds: ['page-1'],
       freshTargets: 0,
       commandSocketReconnected: true,
+      targetOutcomes: [],
       bundleServed: false,
     },
     appMismatch: null,

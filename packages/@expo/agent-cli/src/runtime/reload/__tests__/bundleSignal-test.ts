@@ -131,7 +131,7 @@ describe(waitForNewBundleAsync, () => {
           before,
           timeoutMs: 400,
           intervalMs: 25,
-          platform: 'ios',
+          platforms: ['ios'],
         })
       ).resolves.toMatchObject({
         observed: false,
@@ -145,7 +145,7 @@ describe(waitForNewBundleAsync, () => {
           before,
           timeoutMs: 100,
           intervalMs: 25,
-          platform: 'ios',
+          platforms: ['ios'],
         })
       ).resolves.toMatchObject({ reason: expect.stringContaining('Android') });
     });
@@ -163,7 +163,7 @@ describe(waitForNewBundleAsync, () => {
           before,
           timeoutMs: 3000,
           intervalMs: 25,
-          platform: 'ios',
+          platforms: ['ios'],
         })
       ).resolves.toMatchObject({ observed: true, last: { platform: 'iOS' } });
     });

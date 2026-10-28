@@ -1,13 +1,35 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §How it reloads
-// Rung 1 of runtime:reload, also used by smoke.
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+// Rung 1 of `runtime:reload`, which is also the `smoke` gate's reload.
+//
+// The dev server relays a broadcast to every app that loads from its port. While the run's scope
+// skips an app (another worktree's, or one beside the bound device), a broadcast would reload that
+// app too. Then rung 1 sends CDP `Page.reload` to this worktree's own targets instead, and proves it
+// on those targets. Everything that follows from that choice is decided here, once.
 
+import type { NativePlatform } from '../../plan/types';
+import { firstLine } from '../../utils/text';
+import { probeDevServerAsync } from '../devServer';
+import type { CdpTarget } from '../cdpClient';
+import { jsContextReplacedAsync } from '../contextReplaced';
 import {
   connectMessageSocketAsync,
   peersChanged,
   type DevServerMessageSocket,
   type MessageSocketPeers,
 } from '../messageSocket';
-import type { ReloadAttempt } from './attempt';
+import {
+  classifyTargets,
+  deviceInventoryForSelectionAsync,
+  describeSkippedApps,
+  skippedAppsOf,
+  type DeviceInventory,
+  type ClassifiedTargets,
+  type TargetSelection,
+  type SkippedApp,
+} from '../targetSelection';
+import { platformOfTarget } from '../targetPlatform';
+import type { ReloadAttempt, TargetReloadOutcome } from './attempt';
 import { debugEvent } from './events';
 
 /**
@@ -18,10 +40,10 @@ import { debugEvent } from './events';
  * the broadcast], so this is generous rather than tight. It is separate from `--timeout`, which
  * covers the slower thing: the JavaScript loading and the debugger target re-registering.
  */
-export const PEER_CHURN_TIMEOUT_MS = 8000;
+const PEER_CHURN_TIMEOUT_MS = 8000;
 
 /** How often the peers are read while waiting for the app to reconnect. */
-export const PEER_POLL_INTERVAL_MS = 250;
+const PEER_POLL_INTERVAL_MS = 250;
 
 /**
  * What the dev server's client command socket was seen to do.
@@ -217,4 +239,298 @@ async function waitForPeerChurnAsync(
       };
     }
   }
+}
+
+/** The churn of a run that never asked the command socket. */
+export const CHURN_NOT_ASKED: CommandSocketChurn = {
+  observed: null,
+  before: null,
+  after: null,
+  reconnected: 0,
+  reason: "the dev server's command socket was not asked on this run",
+};
+
+/** What rung 1 does on this run, and which evidence may prove it. */
+export interface RungOnePolicy {
+  /** `page-reload` exactly when the scope skips an app. */
+  mechanism: 'broadcast' | 'page-reload';
+  skippedApps: SkippedApp[];
+  /** Listed apps outside `read` that the broadcast also reaches: other-platform and unplaced ones. */
+  reachedOutside: number;
+  /** The platforms whose served bundle proves the reload: never one an app outside `read` can fetch. */
+  bundlePlatforms: NativePlatform[] | 'any';
+}
+
+/**
+ * Decide rung 1 for one run's classified targets.
+ *
+ * The scope skips a target by its device name, so a fresh target is skipped by that name too: a
+ * page that re-registered has an id the placement never saw. An app outside `read` that this rung
+ * reloads, or that a page reload leaves alone, fetches its platform's bundle; one on no known
+ * platform could fetch any.
+ */
+export function rungOnePolicy(
+  classifiedTargets: ClassifiedTargets,
+  targetSelection: TargetSelection,
+  deviceInventory: DeviceInventory
+): RungOnePolicy {
+  const scoped: NativePlatform[] | 'any' =
+    targetSelection.platform == null ? 'any' : [targetSelection.platform.value];
+  const broadcast = classifiedTargets.skipped.length === 0;
+  const outside = broadcast
+    ? [
+        ...classifiedTargets.otherPlatform.map((entry) => entry.platform),
+        ...classifiedTargets.undetermined.map(() => null),
+      ]
+    : classifiedTargets.skipped.map(
+        ({ target }) => platformOfTarget(target, deviceInventory).platform
+      );
+  return {
+    mechanism: broadcast ? 'broadcast' : 'page-reload',
+    skippedApps: broadcast ? [] : skippedAppsOf(classifiedTargets),
+    reachedOutside: broadcast ? outside.length : 0,
+    bundlePlatforms:
+      outside.length === 0 && scoped === 'any'
+        ? 'any'
+        : (scoped === 'any' ? (['ios', 'android'] as const) : scoped).filter(
+            (platform) => !outside.includes(platform) && !outside.includes(null)
+          ),
+  };
+}
+
+/**
+ * One observation supplies dispatch, recipients and proof baselines together. Its scope and
+ * inventory serve the rest of the run: the evidence, the counts and the relaunch.
+ */
+export function prepareRungOne(
+  targets: CdpTarget[],
+  targetSelection: TargetSelection,
+  deviceInventory: DeviceInventory
+) {
+  const classifiedTargets = classifyTargets(targets, targetSelection, deviceInventory);
+  return {
+    targets,
+    targetSelection,
+    deviceInventory,
+    classifiedTargets,
+    policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory),
+  };
+}
+export type PreparedRungOne = ReturnType<typeof prepareRungOne>;
+
+/** {@link prepareRungOne} on a fresh probe and inventory, both inside the caller's budget. */
+export async function prepareRungOneAsync(
+  devServerUrl: string,
+  projectRoot: string,
+  targetSelection: TargetSelection,
+  budgetMs: number
+): Promise<PreparedRungOne> {
+  const timeoutMs = Math.max(1, budgetMs);
+  const { targets } = await probeDevServerAsync(devServerUrl, {
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  const deviceInventory = await deviceInventoryForSelectionAsync(
+    targets,
+    targetSelection,
+    projectRoot,
+    devServerUrl,
+    timeoutMs
+  );
+  return prepareRungOne(targets, targetSelection, deviceInventory);
+}
+
+/** What rung 1 came to. `proved` and `acted` keep `auto` on this rung; the rest relaunch. */
+export type RungOneOutcome = { attempt: ReloadAttempt; churn: CommandSocketChurn } & (
+  | { kind: 'proved'; proof: 'message-socket-peers' | 'debugger-context-replaced' }
+  /**
+   * The peers churned beside a listed app outside `read`: the churn may be that app's, so a fresh
+   * own target or a bundle decides.
+   */
+  | { kind: 'acted'; reachedOutside: number }
+  | {
+      /**
+       * `delivered`: the reload reached an app and its own proof did not arrive. `not-delivered`:
+       * it reached none. `unprovable`: no own target could carry the marker that proves a
+       * `Page.reload`, so none was sent.
+       */
+      kind: 'delivered' | 'not-delivered' | 'unprovable';
+      /** The clause the relaunch's attempt opens with. */
+      relaunchWhy: string;
+    }
+);
+
+/**
+ * Run rung 1: the broadcast, or `Page.reload` to the own targets while the scope skips an app.
+ *
+ * @param budgetMs the caller's budget. The rung's own proof is watched for no longer (F95): a
+ * targeted reload shares one absolute deadline across every target and all proof phases. The
+ * broadcast retains its minimum peer observation window.
+ */
+export async function runRungOneAsync(
+  devServerUrl: string,
+  { prepared, budgetMs }: { prepared: PreparedRungOne; budgetMs: number }
+): Promise<RungOneOutcome> {
+  const { policy, classifiedTargets, targets } = prepared;
+  if (policy.mechanism === 'page-reload') {
+    return await reloadOwnTargetsAsync(devServerUrl, {
+      policy,
+      own: classifiedTargets.read,
+      deadline: Date.now() + Math.max(0, budgetMs),
+    });
+  }
+  const timeoutMs = Math.min(PEER_CHURN_TIMEOUT_MS, Math.max(budgetMs, PEER_POLL_INTERVAL_MS * 2));
+  let churn = CHURN_NOT_ASKED;
+  const sent = await reloadOverDevServerAsync(devServerUrl, {
+    connectedApps: targets.length,
+    churnTimeoutMs: timeoutMs,
+    onChurn: (seen) => {
+      churn = seen;
+    },
+  });
+  const outside = policy.reachedOutside;
+  const apps = `${outside} app${outside === 1 ? '' : 's'}`;
+  if (sent.ok && outside > 0) {
+    const clients = `${churn.reconnected} command socket client${churn.reconnected === 1 ? '' : 's'}`;
+    return {
+      kind: 'acted',
+      reachedOutside: outside,
+      attempt: {
+        ...sent,
+        ok: false,
+        delivered: true,
+        reason: `${clients} reconnected, but the broadcast also reached ${apps} outside this run's scope, so the churn is not this app's proof`,
+      },
+      churn,
+    };
+  }
+  if (sent.ok) {
+    return { kind: 'proved', proof: 'message-socket-peers', attempt: sent, churn };
+  }
+  const attempt =
+    outside > 0
+      ? { ...sent, reason: `${sent.reason}; also reloaded ${apps} not in this run's scope` }
+      : sent;
+  return attempt.delivered
+    ? {
+        kind: 'delivered',
+        attempt,
+        churn,
+        relaunchWhy:
+          "the reload was broadcast to a client on the dev server's command socket and nothing was seen to come of it, so the app was relaunched instead",
+      }
+    : {
+        kind: 'not-delivered',
+        attempt,
+        churn,
+        relaunchWhy:
+          "no client was registered on the dev server's command socket, so the app was relaunched instead",
+      };
+}
+
+/** How long one own target has to answer `Page.reload`. */
+const PAGE_RELOAD_ANSWER_MS = 4000;
+
+/**
+ * Send `Page.reload` to each own target that takes it, and prove it on that target.
+ *
+ * The answer `{}` is delivery, not proof, and the target keeps its page id [observed — SDK 58
+ * development build, React Native 0.88, iOS 27 simulator, 2026-10-21]. So a marker global is set
+ * before the reload, and the reload is proved when the same target answers without it
+ * (`../contextReplaced.ts`). One own target proved is enough.
+ */
+async function reloadOwnTargetsAsync(
+  devServerUrl: string,
+  { policy, own, deadline }: { policy: RungOnePolicy; own: CdpTarget[]; deadline: number }
+): Promise<RungOneOutcome> {
+  const outcomes = await Promise.all(
+    own.map(async (target): Promise<TargetReloadOutcome> => {
+      const identity = { targetId: target.id, deviceName: target.deviceName };
+      if (target.reactNative?.capabilities?.nativePageReloads !== true) {
+        return {
+          ...identity,
+          outcome: 'unsupported',
+          reason: 'the target does not support Page.reload',
+        };
+      }
+      try {
+        const seen = await jsContextReplacedAsync(devServerUrl, target, {
+          act: async (session) =>
+            await session.sendAsync(
+              'Page.reload',
+              {},
+              Math.max(1, Math.min(PAGE_RELOAD_ANSWER_MS, deadline - Date.now()))
+            ),
+          timeoutMs: Math.max(0, deadline - Date.now()),
+          deadline,
+        });
+        return {
+          ...identity,
+          outcome:
+            seen.kind === 'replaced'
+              ? 'context-replaced'
+              : seen.kind === 'unmarkable'
+                ? 'unmarkable'
+                : 'delivered-unproved',
+          reason: seen.kind === 'replaced' ? null : seen.reason,
+        };
+      } catch (error: unknown) {
+        return {
+          ...identity,
+          outcome: 'not-delivered',
+          reason: firstLine(error instanceof Error ? error.message : String(error)),
+        };
+      }
+    })
+  );
+  const proved = outcomes.filter((each) => each.outcome === 'context-replaced');
+  const answered = outcomes.filter(
+    (each) => each.outcome === 'context-replaced' || each.outcome === 'delivered-unproved'
+  );
+  const notes = outcomes
+    .filter((each) => each.reason)
+    .map((each) => `"${each.deviceName}": ${each.reason}`);
+  const reloadable = outcomes.filter((each) => each.outcome !== 'unsupported');
+  debugEvent('page_reload_sent', { targets: reloadable.length, answered: answered.length });
+  const kind =
+    proved.length > 0
+      ? 'proved'
+      : answered.length > 0
+        ? 'delivered'
+        : reloadable.length > 0 && reloadable.every((each) => each.outcome === 'unmarkable')
+          ? 'unprovable'
+          : 'not-delivered';
+  const names = (kind === 'proved' ? proved : answered)
+    .map((each) => `"${each.deviceName}"`)
+    .join(', ');
+  const clause = {
+    proved: `${names} answered from a new JavaScript context after Page.reload`,
+    delivered: `${names} answered Page.reload over the debugger, and no new JavaScript context was seen`,
+    unprovable:
+      'no app of this worktree could carry the marker that proves a Page.reload, so none was sent',
+    'not-delivered':
+      reloadable.length === 0
+        ? 'no app of this worktree takes Page.reload'
+        : 'no app of this worktree answered Page.reload',
+  }[kind];
+  const attempt: ReloadAttempt = {
+    method: 'page-reload',
+    ok: kind === 'proved',
+    delivered: kind === 'proved' || kind === 'delivered',
+    outcomes,
+    reason: `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}. No broadcast was sent, because the dev server relays it to every app. ${describeSkippedApps(policy.skippedApps)}`,
+    leftAppStopped: null,
+  };
+  const churn = {
+    ...CHURN_NOT_ASKED,
+    reason:
+      "the dev server's command socket was not asked: the scope skips an app, and a broadcast reaches every app",
+  };
+  return kind === 'proved'
+    ? { kind, proof: 'debugger-context-replaced', attempt, churn }
+    : {
+        kind,
+        attempt,
+        churn,
+        relaunchWhy: `${clause}, so the app was relaunched on this worktree's device instead`,
+      };
 }

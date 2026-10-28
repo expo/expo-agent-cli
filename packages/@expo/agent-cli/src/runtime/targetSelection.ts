@@ -436,7 +436,7 @@ export async function refreshDeviceInventoryAsync(
   const twins = androidModelTwins(targetSelection, inventory);
   const port = devServerUrl == null ? null : devServerPort(devServerUrl);
   const androidReverse =
-    twins && port != null ? await readAndroidReverseAsync(twins.twins, port) : null;
+    twins && port != null ? await readAndroidReverseAsync(twins.twins, port, timeoutMs) : null;
   return { ...inventory, androidReverse };
 }
 
@@ -473,12 +473,15 @@ function devServerPort(devServerUrl: string): number | null {
  */
 async function readAndroidReverseAsync(
   serials: string[],
-  port: number
+  port: number,
+  timeoutMs?: number
 ): Promise<DeviceInventory['androidReverse']> {
   const { parseReverseList, runAdbAsync } =
     require('../device/adb') as typeof import('../device/adb');
   const answers = await Promise.all(
-    serials.map((serial) => runAdbAsync(['-s', serial, 'reverse', '--list']).catch(() => null))
+    serials.map((serial) =>
+      runAdbAsync(['-s', serial, 'reverse', '--list'], { timeoutMs }).catch(() => null)
+    )
   );
   if (answers.some((answer) => answer?.exitCode !== 0)) return null;
   return {
@@ -525,15 +528,4 @@ export async function readDeviceInventoryAsync(timeoutMs?: number): Promise<Devi
       booted != null ? 'observed' : process.platform === 'darwin' ? 'unknown' : 'unsupported',
     androidDevices,
   };
-}
-
-/** Whether a new page is on a device this scope skips. */
-export function isSkippedTarget(
-  target: Pick<CdpTarget, 'appId' | 'deviceName'>,
-  targetSelection: TargetSelection,
-  deviceInventory: DeviceInventory
-): boolean {
-  return ['other-worktree', 'other-device'].includes(
-    classifyTarget(target, targetSelection, deviceInventory).group
-  );
 }

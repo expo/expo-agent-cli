@@ -19,7 +19,7 @@
 // | `boot-device`      | `dev` (conditional)              | `acquireDeviceAsync`        |
 // | `install-app`      | (new, conditional)               | `installExpoGoAsync`        |
 // | `app`              | this command only                | `waitForAppConnectionAsync` |
-// | `reload`           | `runtime:reload`                 | `reloadOverDevServerAsync`  |
+// | `reload`           | `runtime:reload`                 | `runRungOneAsync`           |
 // | `route`            | `navigate`                       | `openRouteAsync`            |
 // | `runtime`          | `runtime:eval`                   | `CdpClient.evaluateAsync`   |
 // | `errors`           | `runtime:errors`                 | `CdpRuntimeErrorCollector`  |
@@ -174,13 +174,14 @@ export interface SmokeReloadResult {
    * Under llp/0021's rule: named only when this result's own evidence field for it is non-empty, so
    * `ok` and a label with nothing behind it cannot be reported together.
    */
-  verifiedBy: 'message-socket-peers' | 'fresh-debugger-target' | 'dev-server-bundle' | null;
+  verifiedBy: SmokeReloadJson['verifiedBy'];
   /** The targets listed before the broadcast, which is what makes a later one "fresh". */
   knownTargetIds: string[];
   /** Targets seen afterwards under an id that was not in that list. */
   freshTargets: number;
   /** Whether the app's client on the command socket was replaced. */
   commandSocketReconnected: boolean;
+  targetOutcomes: SmokeReloadJson['targetOutcomes'];
   /** Whether the dev server was seen to serve a bundle after this run acted. */
   bundleServed: boolean;
   /** Why nothing was proved. Null exactly when {@link ok} is true. */
@@ -498,6 +499,7 @@ export function noReload(): SmokeReloadJson {
     knownTargetIds: [],
     freshTargets: null,
     commandSocketReconnected: null,
+    targetOutcomes: [],
     bundleServed: null,
   };
 }
@@ -1728,6 +1730,7 @@ async function runPhasesAsync(
         reloadJson.knownTargetIds = result.knownTargetIds;
         reloadJson.freshTargets = result.freshTargets;
         reloadJson.commandSocketReconnected = result.commandSocketReconnected;
+        reloadJson.targetOutcomes = result.targetOutcomes;
         reloadJson.bundleServed = result.bundleServed;
         if (result.ok) {
           reloadJson.disposition = 'reloaded';
