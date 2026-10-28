@@ -23,8 +23,13 @@ import {
   resolveBundleCheckPlatformsAsync,
   type BundleCheckResult,
 } from '../../runtime/bundleCheck';
-import { howToNameTheDevServer } from '../../runtime/devServer';
+import { howToNameTheDevServer, probeDevServerAsync } from '../../runtime/devServer';
 import { discoverDevServerAsync } from '../../runtime/discoverDevServer';
+import { targetSelectionOf } from '../../runtime/resolveTargetSelection';
+import {
+  deviceInventoryForSelectionAsync,
+  EMPTY_DEVICE_INVENTORY,
+} from '../../runtime/targetSelection';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { CommandError } from '../../utils/errors';
 import { buildDevWaitFollowUps } from './followups';
@@ -89,12 +94,18 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
   // @ref llp/0005-runtime-loop-tools.rfc.md §Android — friction run 6, F53. Which platform to build
   // for is a question about the *app*, and this command used to answer it with a fixed default: an
   // Android-only break with an iOS app also attached was reported as "compiles for ios".
+  const targetSelection = targetSelectionOf({
+    flags: {
+      platform: options.platformExplicit && options.platform !== 'web' ? options.platform : null,
+      eas: false,
+    },
+    device: null,
+  });
   const { platforms: bundlePlatforms, source: bundlePlatformSource } =
-    await resolveBundleCheckPlatformsAsync(
-      options.platformExplicit ? options.platform : null,
-      discovery.targets,
-      options.platform
-    );
+    await resolveBundleCheckPlatformsAsync(targetSelection, discovery.targets, {
+      deviceInventory: EMPTY_DEVICE_INVENTORY,
+      fallback: options.platform,
+    });
 
   const bundles: BundleCheckResult[] = [];
   if (options.bundleCheck && readiness.ready && readiness.projectRootMatched !== false) {
@@ -125,12 +136,14 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
   // nothing can attach to it, so the wait would spend the rest of the budget to learn what the
   // line above already knows.
   if (options.requireApp && readiness.ready && bundle?.outcome !== 'broken' && !timedOut) {
+    const { targets } = await probeDevServerAsync(discovery.devServerUrl);
     const attached = await waitForAppConnectionAsync(discovery.devServerUrl, {
       timeoutMs: remainingMs(),
       // Scoped when the caller named a native platform: `--require-app --platform android` used to
       // be satisfied by the iOS simulator attached to the same dev server (F51).
-      platform:
-        options.platformExplicit && options.platform !== 'web' ? options.platform : undefined,
+      targetSelection,
+      deviceInventory: await deviceInventoryForSelectionAsync(targets, targetSelection),
+      inventoryTargets: targets,
     });
     appsConnected = attached.appsConnected;
     timedOut = attached.timedOut;

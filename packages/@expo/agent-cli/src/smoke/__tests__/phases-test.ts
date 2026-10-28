@@ -217,6 +217,32 @@ function deps(overrides: Partial<SmokeDeps> = {}): SmokeDeps {
   };
 }
 
+/** A machine with no device until the run boots one; its probe then finds the device booted. */
+function bootableDevice(
+  boot: SmokeDeps['bootDevice'] = async () => ({
+    ok: true,
+    deviceId: 'SIM-BOOTED',
+    backend: 'local-ios' as const,
+    reason: null,
+  })
+): Pick<SmokeDeps, 'probeDevice' | 'bootDevice'> {
+  let found: Awaited<ReturnType<SmokeDeps['probeDevice']>> = {
+    deviceId: null,
+    backend: null,
+    reason: 'no simulator',
+  };
+  return {
+    probeDevice: async () => found,
+    bootDevice: async () => {
+      const booted = await boot();
+      if (booted.ok && booted.deviceId) {
+        found = { deviceId: booted.deviceId, backend: booted.backend, reason: null };
+      }
+      return booted;
+    },
+  };
+}
+
 /** One phase's status, by id, so a case reads as a table row. */
 function statusOf(run: SmokeRun, id: SmokePhaseId): SmokePhaseStatus | undefined {
   return run.phases.find((phase) => phase.id === id)?.status;
@@ -402,26 +428,22 @@ describe(runSmokePhasesAsync, () => {
   // Start what is missing, stop only what this run started, and leave what was already there.
   describe('the environment this run brings', () => {
     /** A machine with nothing on it: no dev server, and no device. */
-    function bareMachine(overrides: Partial<SmokeDeps> = {}): Partial<SmokeDeps> {
+    function bareMachine({
+      bootDevice,
+      ...overrides
+    }: Partial<SmokeDeps> = {}): Partial<SmokeDeps> {
       let reachable = false;
-      let device: { deviceId: string | null; backend: 'local-ios' | null } = {
-        deviceId: null,
-        backend: null,
-      };
+      const device = bootableDevice(bootDevice);
       return {
         discoverDevServer: async () => {
           const found = discovery({ reachable });
           reachable = true;
           return found;
         },
-        probeDevice: async () => ({ ...device, reason: device.deviceId ? null : 'no simulator' }),
-        bootDevice: async () => {
-          device = { deviceId: 'SIM-BOOTED', backend: 'local-ios' };
-          return { ok: true, deviceId: 'SIM-BOOTED', backend: 'local-ios' as const, reason: null };
-        },
+        ...device,
         // Nothing is attached until the run opens the app on the simulator it booted.
         waitForAppConnection: async () => ({
-          appsConnected: device.deviceId ? 1 : 0,
+          appsConnected: (await device.probeDevice()).deviceId ? 1 : 0,
           timedOut: false,
           waitedMs: 3,
         }),
@@ -2564,7 +2586,7 @@ describe(`${runSmokePhasesAsync.name} and installing the app`, () => {
    */
   const needsBoot = () => ({
     bootstrap: true,
-    probeDevice: async () => ({ deviceId: null, backend: null, reason: 'nothing booted' }),
+    ...bootableDevice(),
     waitForAppConnection: vi
       .fn<() => Promise<{ appsConnected: number; timedOut: boolean; waitedMs: number }>>()
       .mockResolvedValueOnce({ appsConnected: 0, timedOut: true, waitedMs: 1 })
@@ -2852,7 +2874,7 @@ describe(`${runSmokePhasesAsync.name} and what it says while it runs`, () => {
       {
         discoverDevServer: async () => discovery({ reachable: looks++ > 0 }),
         waitForAppConnection: async () => ({ appsConnected: 0, timedOut: true, waitedMs: 1 }),
-        probeDevice: async () => ({ deviceId: null, backend: null, reason: 'no simulator' }),
+        ...bootableDevice(),
         installNeededOnDevice: async () => true,
       },
       // The three acts are only performed by a run allowed to bring its own environment, and this

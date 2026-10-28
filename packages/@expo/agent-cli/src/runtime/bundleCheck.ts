@@ -35,6 +35,7 @@
 
 import { stripVTControlCharacters } from 'util';
 
+import type { TargetSelection, DeviceInventory } from './targetSelection';
 import type { CdpTarget } from './cdpClient';
 import { normalizeDevServerUrl } from './devServer';
 
@@ -64,6 +65,7 @@ export const DEFAULT_BUNDLE_CHECK_PLATFORM: BundleCheckPlatform = 'ios';
 export type BundlePlatformSource =
   /** The caller named it. */
   | 'flag'
+  | 'device'
   /** It is the platform (or platforms) of the apps connected to the dev server. */
   | 'connected-app'
   /** Nothing named one and no connected app could be placed, so {@link DEFAULT_BUNDLE_CHECK_PLATFORM} stands. */
@@ -82,19 +84,18 @@ export type BundlePlatformSource =
  * @param targets the dev server's debugger targets, as `/json/list` reported them.
  */
 export async function resolveBundleCheckPlatformsAsync(
-  named: BundleCheckPlatform | null,
+  targetSelection: TargetSelection,
   targets: CdpTarget[],
-  fallback: BundleCheckPlatform = DEFAULT_BUNDLE_CHECK_PLATFORM
+  {
+    deviceInventory,
+    fallback = DEFAULT_BUNDLE_CHECK_PLATFORM,
+  }: { deviceInventory: DeviceInventory; fallback?: BundleCheckPlatform }
 ): Promise<{ platforms: BundleCheckPlatform[]; source: BundlePlatformSource }> {
-  if (named != null) {
-    return { platforms: [named], source: 'flag' };
+  if (targetSelection.platform != null) {
+    return { platforms: [targetSelection.platform.value], source: targetSelection.platform.by };
   }
-  const { buildDeviceNameIndexIfNeededAsync, platformsOfTargets } =
-    require('./targetPlatform') as typeof import('./targetPlatform');
-  const { platforms } = platformsOfTargets(
-    targets,
-    await buildDeviceNameIndexIfNeededAsync(targets)
-  );
+  const { platformsOfTargets } = require('./targetPlatform') as typeof import('./targetPlatform');
+  const { platforms } = platformsOfTargets(targets, deviceInventory);
   return platforms.length > 0
     ? { platforms, source: 'connected-app' }
     : { platforms: [fallback], source: 'default' };

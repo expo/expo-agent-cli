@@ -113,7 +113,7 @@ export async function runtimeStopAsync(
   // already stopped — so the connection is read and never insisted on.
   //
   // The platform is passed even though nothing here refuses on it (F101). `resolveDeviceAsync` has
-  // just settled which device this stop acts on, and the preflight's `appTargets` is the scoped list
+  // just settled which device this stop acts on, and the preflight's `classifiedTargets.read` is the scoped list
   // every other command in the family reads — without it, the id below came off whichever target
   // the dev server happened to list first, on either platform.
   const devServer = await preflightRuntimeAsync(
@@ -125,7 +125,9 @@ export async function runtimeStopAsync(
     },
     { projectRoot }
   );
-  const connectedAppIds = devServer.appTargets.map((target) => target.appId).filter(Boolean);
+  const connectedAppIds = devServer.classifiedTargets.read
+    .map((target) => target.appId)
+    .filter(Boolean);
   const resolved = resolveAppId({
     platform: device.platform,
     appIdOverride: options.appId,

@@ -37,17 +37,7 @@
 
 import type { NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
-
-/** What this machine's device tools say is attached, so a target can be matched back to one. */
-export interface DeviceNameIndex {
-  /** Names of booted iOS simulators, as `xcrun simctl` reports them. */
-  iosNames: string[];
-  /** Hardware models of attached Android devices, as `adb devices -l` reports them. */
-  androidModels: string[];
-}
-
-/** An index that knows nothing, for a caller with no device tools to ask. */
-export const EMPTY_DEVICE_INDEX: DeviceNameIndex = { iosNames: [], androidModels: [] };
+import type { DeviceInventory } from './targetSelection';
 
 /** Expo Go's application id, which differs between the platforms by one capital letter. */
 const EXPO_GO_IOS_APP_ID = 'host.exp.Exponent';
@@ -69,24 +59,24 @@ export interface TargetPlatformVerdict {
 /**
  * Work out which platform one debugger target is running on.
  *
- * @param index what this machine's device tools reported, or {@link EMPTY_DEVICE_INDEX} when they
- * were not asked. The last two rules need no index at all, so a machine with no `adb` still tells
- * an Expo Go Android target apart from an iOS one.
+ * @param facts what this machine's device tools reported, or nothing when they were not asked. The
+ * last two rules need no facts at all, so a machine with no `adb` still tells an Expo Go Android
+ * target apart from an iOS one.
  */
 export function platformOfTarget(
   target: Pick<CdpTarget, 'appId' | 'deviceName'>,
-  index: DeviceNameIndex = EMPTY_DEVICE_INDEX
+  deviceInventory?: DeviceInventory
 ): TargetPlatformVerdict {
   const deviceName = typeof target.deviceName === 'string' ? target.deviceName : '';
 
-  if (deviceName && index.iosNames.includes(deviceName)) {
+  if (deviceName && deviceInventory?.booted.some((simulator) => simulator.name === deviceName)) {
     return {
       platform: 'ios',
       evidence: `its device name "${deviceName}" is a booted iOS simulator`,
     };
   }
 
-  const model = index.androidModels.find(
+  const model = deviceInventory?.androidModels.find(
     (candidate) => candidate === deviceName || deviceName.startsWith(`${candidate} - `)
   );
   if (model) {
@@ -122,41 +112,6 @@ export function platformOfTarget(
   };
 }
 
-/** The three groups one platform flag splits a target list into. */
-export interface ScopedTargets {
-  /** Targets shown to be on the platform that was asked for. */
-  matched: CdpTarget[];
-  /** Targets shown to be on another platform. */
-  otherPlatform: { target: CdpTarget; platform: NavigatePlatform }[];
-  /** Targets whose platform nothing decided. Never counted as either. */
-  undetermined: CdpTarget[];
-}
-
-/**
- * Split a target list by platform.
- *
- * `undetermined` is its own group rather than being folded into `matched`, and that is the whole
- * point: a run that cannot tell what it is talking to must not earn a platform's verdict from it.
- */
-export function scopeTargets(
-  targets: CdpTarget[],
-  platform: NavigatePlatform,
-  index: DeviceNameIndex = EMPTY_DEVICE_INDEX
-): ScopedTargets {
-  const scoped: ScopedTargets = { matched: [], otherPlatform: [], undetermined: [] };
-  for (const target of targets) {
-    const verdict = platformOfTarget(target, index);
-    if (verdict.platform === platform) {
-      scoped.matched.push(target);
-    } else if (verdict.platform != null) {
-      scoped.otherPlatform.push({ target, platform: verdict.platform });
-    } else {
-      scoped.undetermined.push(target);
-    }
-  }
-  return scoped;
-}
-
 /**
  * The platforms a set of targets is running on, and whether any of them could not be read.
  *
@@ -165,12 +120,12 @@ export function scopeTargets(
  */
 export function platformsOfTargets(
   targets: CdpTarget[],
-  index: DeviceNameIndex = EMPTY_DEVICE_INDEX
+  deviceInventory?: DeviceInventory
 ): { platforms: NavigatePlatform[]; undetermined: number } {
   const platforms: NavigatePlatform[] = [];
   let undetermined = 0;
   for (const target of targets) {
-    const { platform } = platformOfTarget(target, index);
+    const { platform } = platformOfTarget(target, deviceInventory);
     if (platform == null) {
       undetermined += 1;
     } else if (!platforms.includes(platform)) {
@@ -178,71 +133,4 @@ export function platformsOfTargets(
     }
   }
   return { platforms, undetermined };
-}
-
-/**
- * The device index, but only when the index-free rules cannot place every target.
- *
- * Two subprocesses are cheap and not free, and Expo Go — the case nearly every one of these
- * commands runs against — is placed by its app id alone. So the tools are spawned exactly when
- * their answer could change the outcome: a development build whose device name and app id say
- * nothing this module recognises.
- */
-export async function buildDeviceNameIndexIfNeededAsync(
-  targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[]
-): Promise<DeviceNameIndex> {
-  const undetermined = targets.some((target) => platformOfTarget(target).platform == null);
-  return undetermined ? await buildDeviceNameIndexAsync() : EMPTY_DEVICE_INDEX;
-}
-
-/**
- * Ask this machine's device tools what is attached.
- *
- * Never throws and never fails a command: a missing `xcrun` or `adb` only costs the strongest of
- * the three rules above, and the other two still answer for Expo Go and for React Native Android.
- */
-export async function buildDeviceNameIndexAsync(): Promise<DeviceNameIndex> {
-  const { parseAndroidDevices, runAdbAsync } =
-    require('../device/adb') as typeof import('../device/adb');
-  const { spawnCaptureAsync } =
-    require('../utils/spawnCapture') as typeof import('../utils/spawnCapture');
-
-  const [simctl, adb] = await Promise.all([
-    spawnCaptureAsync('xcrun', ['simctl', 'list', 'devices', 'booted', '-j']).catch(() => null),
-    runAdbAsync(['devices', '-l']).catch(() => null),
-  ]);
-
-  return {
-    iosNames: simctl?.exitCode === 0 ? bootedSimulatorNames(simctl.stdout) : [],
-    androidModels:
-      adb?.exitCode === 0
-        ? parseAndroidDevices(adb.stdout)
-            .map((device) => device.model)
-            .filter((model): model is string => model != null)
-        : [],
-  };
-}
-
-/**
- * Every booted simulator name in `simctl list devices booted -j`.
- *
- * Every runtime, not only iOS: this index answers "is this name one of *our* simulators", and a
- * watchOS simulator's name would otherwise fall through to a later rule that knows less.
- */
-export function bootedSimulatorNames(stdout: string): string[] {
-  let parsed: { devices?: Record<string, { name?: string }[]> };
-  try {
-    parsed = JSON.parse(stdout);
-  } catch {
-    return [];
-  }
-  const names: string[] = [];
-  for (const devices of Object.values(parsed.devices ?? {})) {
-    for (const device of Array.isArray(devices) ? devices : []) {
-      if (typeof device?.name === 'string' && device.name) {
-        names.push(device.name);
-      }
-    }
-  }
-  return names;
 }

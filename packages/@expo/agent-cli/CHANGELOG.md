@@ -56,6 +56,7 @@
 - `navigate` percent-encodes the route and a full URL, so a link with spaces or diacritics opens instead of failing with APP_NOT_INSTALLED. ([#198](https://github.com/expo/expo-agent-cli/pull/198) by [@vonovak](https://github.com/vonovak))
 - `smoke` asks an app it opened or reloaded again for 5 s after its first "method not found", instead of reporting a runtime with no debugger. ([#201](https://github.com/expo/expo-agent-cli/pull/201) by [@vonovak](https://github.com/vonovak))
 - `status` with an EAS Simulator session on record and no app connected now names the session's platform (`navigate / --<p> --eas`), and with an app connected its `smoke --<p> --eas` step says the session is recorded, not checked, and that if it ended, smoke starts a new billed session only for Expo Go or a finished simulator build. ([#208](https://github.com/expo/expo-agent-cli/pull/208) by [@vonovak](https://github.com/vonovak))
+- `smoke` asks for its device again in a later phase when an earlier lookup failed, instead of keeping that failure for the rest of the run. ([#202](https://github.com/expo/expo-agent-cli/pull/202) by [@vonovak](https://github.com/vonovak))
 
 ### 💡 Others
 

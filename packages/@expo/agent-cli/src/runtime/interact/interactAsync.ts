@@ -142,7 +142,7 @@ async function openAppAsync(
   },
   context: RuntimeContext
 ): Promise<OpenApp> {
-  const { devServerUrl, targets, deviceIndex } = await preflightRuntimeAsync(
+  const { devServerUrl, targets, targetSelection, deviceInventory } = await preflightRuntimeAsync(
     { need: 'debugger-target', devServerUrl: options.devServerUrl, platform: options.platform },
     context
   );
@@ -150,7 +150,9 @@ async function openAppAsync(
 
   let bundle: BundleCheckResult | null = null;
   if (wantBundleCheck) {
-    const { platforms } = await resolveBundleCheckPlatformsAsync(options.platform ?? null, targets);
+    const { platforms } = await resolveBundleCheckPlatformsAsync(targetSelection, targets, {
+      deviceInventory,
+    });
     const results: BundleCheckResult[] = [];
     for (const platform of platforms) {
       results.push(
@@ -188,7 +190,7 @@ async function openAppAsync(
 
   return {
     devServerUrl,
-    client: new CdpClient({ metroUrl: devServerUrl, platform: options.platform, deviceIndex }),
+    client: new CdpClient({ metroUrl: devServerUrl, targetSelection, deviceInventory }),
     bundle: json,
     refusal,
   };

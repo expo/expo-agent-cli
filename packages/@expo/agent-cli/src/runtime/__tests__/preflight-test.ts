@@ -5,6 +5,7 @@
 import { EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import { APP_RECONNECT_GRACE_MS } from '../devServer';
 import { preflightRuntimeAsync, reachTheAppLadder } from '../preflight';
+import { makeDeviceInventory } from './targetSelectionFixtures';
 
 const TARGET = {
   id: '1',
@@ -64,7 +65,7 @@ describe(preflightRuntimeAsync, () => {
       named: true,
       reachable: true,
       targets: [TARGET],
-      appTargets: [TARGET],
+      classifiedTargets: { read: [TARGET], otherPlatform: [], undetermined: [] },
     });
   });
 
@@ -86,7 +87,7 @@ describe(preflightRuntimeAsync, () => {
       platform: 'android',
     });
 
-    expect(connection.appTargets).toEqual([ANDROID_TARGET]);
+    expect(connection.classifiedTargets.read).toEqual([ANDROID_TARGET]);
     // Both lists are kept: the report owes the reader what else was attached.
     expect(connection.targets).toHaveLength(2);
   });
@@ -208,7 +209,7 @@ describe(`${preflightRuntimeAsync.name} with no app connected`, () => {
       retryMs: 2000,
     });
 
-    expect(connection.appTargets).toEqual([TARGET]);
+    expect(connection.classifiedTargets.read).toEqual([TARGET]);
   });
 
   it(`should say how long it kept asking`, async () => {
@@ -229,7 +230,7 @@ describe(`${preflightRuntimeAsync.name} with no app connected`, () => {
     const connection = await preflightRuntimeAsync({ need: 'dev-server', devServerUrl });
 
     expect(connection.reachable).toBe(true);
-    expect(connection.appTargets).toEqual([]);
+    expect(connection.classifiedTargets.read).toEqual([]);
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §An empty target list is inconclusive — **F141.** A
@@ -288,7 +289,7 @@ describe(`${preflightRuntimeAsync.name} with no app connected`, () => {
 
     const connection = await preflightRuntimeAsync({ need: 'debugger-target', devServerUrl });
 
-    expect(connection.appTargets).toEqual([TARGET]);
+    expect(connection.classifiedTargets.read).toEqual([TARGET]);
   });
 
   // A command that needs no runtime is not made to wait for one: `runtime:reload` can start the app
@@ -367,7 +368,7 @@ describe(`${preflightRuntimeAsync.name} scoped to a platform`, () => {
       devServerUrl,
       platform: 'android',
       // Empty on purpose: the device tools have nothing to say about this device either.
-      deviceIndex: { iosNames: [], androidModels: [] },
+      deviceInventory: makeDeviceInventory(),
     }).catch((e) => e);
 
     expect(error.code).toBe('NO_APP_CONNECTED');

@@ -18,6 +18,7 @@ import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
 import { PROGRAM_PREFIX } from '../../programName';
 import { resolveEasCli } from '../../utils/easCli';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
+import { ensureGitExcludedAsync } from '../../utils/gitExclude';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps, cleanupLeft, deviceBoundByStart } from '../smokeAsync';
 import type { SmokeEnvironmentJson } from '../types';
@@ -308,5 +309,23 @@ describe('ensureEasSession with no EAS build to install', () => {
     expect(fetchAdvertisedUrlAsync).not.toHaveBeenCalled();
     expect(spawnCaptureAsync).not.toHaveBeenCalled();
     expect(readBindingFile(file)).toEqual({ kind: 'none' });
+  });
+
+  it('keeps the session returned by ensure for subsequent device reads', async () => {
+    vi.mocked(ensureGitExcludedAsync).mockResolvedValue({ result: 'already' });
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(
+      cloudProbe.active({ id: 'session-ready', platform: 'ios' })
+    );
+    const deps = eas();
+    expect(await deps.ensureEasSession('http://127.0.0.1:8081')).toMatchObject({
+      ok: true,
+      sessionId: 'session-ready',
+    });
+    vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.unknown());
+    expect(await deps.probeDevice()).toEqual({
+      deviceId: 'session-ready',
+      backend: 'cloud',
+      reason: null,
+    });
   });
 });

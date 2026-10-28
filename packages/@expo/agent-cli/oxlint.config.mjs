@@ -7,7 +7,6 @@ const longFiles = {
   'src/dev/devAsync.ts': 1042,
   'src/runtime/reload/reloadAsync.ts': 1032,
   'src/smoke/phases.ts': 1078,
-  'src/smoke/smokeAsync.ts': 801,
   'src/status/statusAsync.ts': 806,
 };
 
