@@ -89,7 +89,7 @@ describe(findBoundDeviceAsync, () => {
 
     expect(error.code).toBe('NO_BOUND_DEVICE');
     expect(error.data).toEqual({ reason: 'not-up' });
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --detach --wait-ready');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli status');
   });
 
   it('refuses a gone simulator and a not-up instance naming Android', async () => {

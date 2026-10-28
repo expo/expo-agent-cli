@@ -2,6 +2,7 @@
 // The `next` line of `status`: which platform it is for, which port a re-run keeps, and the command
 // that gets this worktree a device. Pure: `statusAsync` reads the facts, and this decides.
 
+import { loopbackPortOfUrl } from '../navigate/adbReverse';
 import type { DevServerLockInfo } from '../devLock';
 import { withDevServerPort } from '../dev/forwardedArgs';
 import type { LastDevRequest } from '../dev/lastRequest';
@@ -90,10 +91,12 @@ export function resolveNextTarget({
     request?.platform ??
     (boundPlatforms.length === 1 ? boundPlatforms[0]! : resolveDefaultPlatform(state));
   const requestedPort =
-    devServerUrl != null ? localPortOf(devServerUrl) : (ownServer?.port ?? request?.port ?? null);
+    devServerUrl != null
+      ? loopbackPortOfUrl(devServerUrl)
+      : (ownServer?.port ?? request?.port ?? null);
   // A selected address is a preference, not permission to take another project's port.
   const recoveryPort =
-    devServer?.projectRootMatched === false && requestedPort === localPortOf(devServer.url)
+    devServer?.projectRootMatched === false && requestedPort === loopbackPortOfUrl(devServer.url)
       ? null
       : requestedPort;
   return { platform, recoveryPort };
@@ -249,16 +252,4 @@ export function chooseNextAction({
     };
   }
   return next;
-}
-
-/** A remote URL's port is not a request to start a local Metro on that port. */
-function localPortOf(url: string): number | null {
-  try {
-    const parsed = new URL(url);
-    return ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname) && parsed.port
-      ? Number(parsed.port)
-      : null;
-  } catch {
-    return null;
-  }
 }
