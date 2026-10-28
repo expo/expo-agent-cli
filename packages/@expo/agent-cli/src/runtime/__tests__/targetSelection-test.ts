@@ -1,0 +1,126 @@
+import type { CdpTarget } from '../cdpClient';
+import { resolveTargetSelectionAsync } from '../resolveTargetSelection';
+import { classifyTargets } from '../targetSelection';
+import { makeTargetSelection } from './targetSelectionFixtures';
+import { makeDeviceInventory } from './targetSelectionFixtures';
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Android — the EAS Simulator iOS session rule.
+// The target an EAS Simulator iOS session registers: the project's own app id, and the cloud
+// simulator's model name, which no local tool on this machine reports.
+describe('classifyTargets on an EAS Simulator session', () => {
+  const cloud = { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17' } as CdpTarget;
+  const secondCloud = { appId: 'dev.vonovak.cyclable', deviceName: 'iPad Air' } as CdpTarget;
+  const local = { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17 Pro' } as CdpTarget;
+  const expoGo = { appId: 'host.exp.Exponent', deviceName: 'iPhone 17' } as CdpTarget;
+  const deviceInventory = makeDeviceInventory({
+    booted: [{ name: 'iPhone 17 Pro', udid: 'LOCAL-1' }],
+  });
+
+  it.each([
+    {
+      name: 'reads the one unclaimed target on an iOS session',
+      targets: [cloud],
+      platform: 'ios' as const,
+      eas: true,
+      read: [cloud],
+      undetermined: [],
+    },
+    {
+      name: 'reads the one unclaimed target beside a booted local simulator',
+      targets: [local, cloud],
+      platform: 'ios' as const,
+      eas: true,
+      read: [cloud],
+      skipped: [{ target: local, classification: { group: 'other-device' } }],
+      undetermined: [],
+    },
+    {
+      name: 'reads neither of two unclaimed targets',
+      targets: [cloud, secondCloud],
+      platform: 'ios' as const,
+      eas: true,
+      read: [],
+      undetermined: [cloud, secondCloud],
+    },
+    {
+      name: 'reads no unclaimed target on a run without --eas',
+      targets: [cloud],
+      platform: 'ios' as const,
+      eas: false,
+      read: [],
+      undetermined: [cloud],
+    },
+    {
+      name: 'reads no unclaimed target on an Android session, whose names have their own rule',
+      targets: [cloud],
+      platform: 'android' as const,
+      eas: true,
+      read: [],
+      undetermined: [cloud],
+    },
+    {
+      name: 'reads an Expo Go target that no booted local simulator has',
+      targets: [expoGo],
+      platform: 'ios' as const,
+      eas: true,
+      read: [expoGo],
+      undetermined: [],
+    },
+    {
+      name: 'reads no Expo Go target while the local simulators are unknown',
+      targets: [expoGo],
+      platform: 'ios' as const,
+      eas: true,
+      inventory: makeDeviceInventory({ bootedStatus: 'unknown' }),
+      read: [],
+      undetermined: [expoGo],
+    },
+  ])('$name', ({ targets, platform, eas, read, undetermined, skipped = [], inventory }) => {
+    expect(
+      classifyTargets(
+        targets,
+        makeTargetSelection({
+          platform: { value: platform, by: 'flag' },
+          device: eas ? { backend: 'cloud', deviceId: null } : null,
+        }),
+        inventory ?? deviceInventory
+      )
+    ).toEqual({
+      read,
+      skipped,
+      otherPlatform: [],
+      undetermined,
+    });
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
+describe('resolveTargetSelectionAsync with --eas and no platform', () => {
+  const session = { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17' } as CdpTarget;
+  const localExpoGo = { appId: 'host.exp.Exponent', deviceName: 'iPhone 17 Pro' } as CdpTarget;
+
+  it.each([
+    {
+      name: "reads the session's app, not a local simulator's",
+      inventory: makeDeviceInventory({ booted: [{ name: 'iPhone 17 Pro', udid: 'LOCAL-1' }] }),
+      read: [session],
+      undetermined: [],
+      skipped: [{ target: localExpoGo, classification: { group: 'other-device' } }],
+    },
+    {
+      name: 'holds every unclaimed target while the local simulators are unknown',
+      inventory: makeDeviceInventory({ bootedStatus: 'unknown' }),
+      read: [],
+      undetermined: [localExpoGo, session],
+      skipped: [],
+    },
+  ])('$name', async ({ inventory, read, undetermined, skipped }) => {
+    const { classifiedTargets } = await resolveTargetSelectionAsync({
+      projectRoot: null,
+      flags: { platform: null, eas: true },
+      targets: [localExpoGo, session],
+      deviceInventory: inventory,
+    });
+    expect(classifiedTargets).toEqual({ read, undetermined, skipped, otherPlatform: [] });
+  });
+});

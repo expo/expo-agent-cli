@@ -19,6 +19,7 @@ import { decodeProjectRoot, matchProjectRoot, PROJECT_ROOT_HEADER } from './proj
 import {
   isSkippedTarget,
   classifyTargets,
+  scopeToolsUnknown,
   refreshDeviceInventoryAsync,
   type ClassifiedTargets,
   type DeviceInventory,
@@ -281,15 +282,18 @@ export interface AppConnectionResult {
   /** How long the wait took, in milliseconds. */
   waitedMs: number;
   /**
-   * Apps attached that are on another platform, when one was named.
+   * Apps attached that are on another platform, when the scope names a platform or a device.
    *
    * Reported rather than dropped, because it is the difference between "no app is running" and
    * "the app that is running is the other platform's" — which are opposite next steps.
    */
   otherPlatformApps?: number;
-  /** Apps attached whose platform nothing in the target decided. Never counted as either. */
+  /** Apps attached that nothing placed in the scope. Never counted. */
   undeterminedApps?: number;
 }
+
+/** How often a wait asks again for a device tool answer that is unknown. */
+const INVENTORY_RETRY_MS = 1000;
 
 function listKey(targets: readonly Pick<CdpTarget, 'id'>[]): string {
   return targets.map((target) => target.id).join('\n');
@@ -300,7 +304,9 @@ function listKey(targets: readonly Pick<CdpTarget, 'id'>[]): string {
  *
  * @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads
  * An unchanged list keeps its facts, so a target nothing places costs one tool read, not one per
- * poll. A changed list, such as a first app after an empty one, is read again within the budget.
+ * poll. A changed list, such as a first app after an empty one, is read again within the budget, and
+ * so is a tool answer that is unknown, at most once every {@link INVENTORY_RETRY_MS}; the
+ * caller's inventory counts as the first read.
  */
 export function scopedListClassifier(
   targetSelection: TargetSelection,
@@ -309,10 +315,16 @@ export function scopedListClassifier(
   inventoryTargets: readonly Pick<CdpTarget, 'id'>[]
 ): (targets: CdpTarget[]) => Promise<ClassifiedTargets> {
   let inventoryListKey = listKey(inventoryTargets);
+  let readAt = Date.now();
   return async (targets) => {
     const key = listKey(targets);
-    if (key !== inventoryListKey && Date.now() < deadline) {
+    const unknown = scopeToolsUnknown(targetSelection, deviceInventory);
+    if (
+      (key !== inventoryListKey || (unknown && Date.now() - readAt >= INVENTORY_RETRY_MS)) &&
+      Date.now() < deadline
+    ) {
       inventoryListKey = key;
+      readAt = Date.now();
       deviceInventory = await refreshDeviceInventoryAsync(
         targets,
         targetSelection,
@@ -354,7 +366,7 @@ export async function waitForAppConnectionAsync(
     const classifiedTargets = await classify(probe.targets);
     const counted = classifiedTargets.read.length;
     const extra =
-      targetSelection.platform != null
+      targetSelection.platform != null || targetSelection.device != null
         ? {
             otherPlatformApps: classifiedTargets.otherPlatform.length,
             undeterminedApps: classifiedTargets.undetermined.length,

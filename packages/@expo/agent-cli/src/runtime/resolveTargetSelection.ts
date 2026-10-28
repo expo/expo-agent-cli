@@ -3,6 +3,7 @@ import type { NavigateDevice, NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
 import {
   deviceInventoryForSelectionAsync,
+  selectedDeviceOf,
   classifyTargets,
   type DeviceInventory,
   type ClassifiedTargets,
@@ -31,7 +32,11 @@ export function targetSelectionOf({
   return {
     platform:
       platform == null ? null : { value: platform, by: flags.platform != null ? 'flag' : 'device' },
-    device: null,
+    device: device
+      ? selectedDeviceOf(device)
+      : flags.eas
+        ? { backend: 'cloud', deviceId: null }
+        : null,
   };
 }
 

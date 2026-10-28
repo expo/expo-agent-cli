@@ -124,7 +124,7 @@ describe(parseBootedIosSimulators, () => {
 
 describe(parseBootedSimulators, () => {
   it(`should list every booted runtime, so a watch simulator is not mistaken for something else`, () => {
-    expect(parseBootedSimulators(BOOTED_SIMCTL_JSON).map((simulator) => simulator.name)).toEqual([
+    expect(parseBootedSimulators(BOOTED_SIMCTL_JSON)?.map((simulator) => simulator.name)).toEqual([
       'Apple Watch',
       'iPhone 17',
       'iPad',
