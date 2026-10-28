@@ -54,11 +54,8 @@ import { CdpClient, isMethodNotFoundError } from '../runtime/cdpClient';
 import { probeDevServerAsync } from '../runtime/devServer';
 import { discoverDevServerAsync } from '../runtime/discoverDevServer';
 import { markBundleSignalSync } from '../runtime/reload/bundleSignal';
-import {
-  reloadOverDevServerAsync,
-  waitForReloadEvidenceAsync,
-  type CommandSocketChurn,
-} from '../runtime/reload/reloadAsync';
+import { waitForReloadEvidenceAsync } from '../runtime/reload/reloadAsync';
+import { reloadOverDevServerAsync, type CommandSocketChurn } from '../runtime/reload/rungOne';
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
 import { describeSkippedApps } from '../runtime/targetSelection';
 import { buildSmokeTargetSelection } from './targetSelection';
