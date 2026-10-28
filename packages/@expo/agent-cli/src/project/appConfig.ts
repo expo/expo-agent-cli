@@ -5,9 +5,9 @@
 // to be evaluated to learn what it says, which runs project code inside the CLI — the process
 // boundary of llp/0001 §Constraints exists to avoid exactly that. For a project with only a
 // dynamic config, `plugins` is empty and `dynamic` is true, so callers can report the plugin
-// answer as unknown instead of as "no plugins". The config the app itself sees comes from an
-// `expo config` subprocess: `inspect:config-plugins` reads its plugins out of the introspect
-// payload, and `navigate` evaluates the scheme the same way (`src/navigate/deepLink.ts`).
+// answer as unknown instead of as "no plugins". `inspect:config-plugins` reads the plugins the app
+// sees out of an `expo config` subprocess. `navigate` evaluates the scheme in this process with
+// `@expo/config` (`src/project/evaluatedConfig.ts`).
 import path from 'path';
 
 import { fileExistsAsync } from '../utils/dir';

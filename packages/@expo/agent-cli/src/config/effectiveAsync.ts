@@ -44,11 +44,11 @@ export async function printEffectiveConfigAsync(
     readStaticAppConfigAsync(projectRoot),
   ]);
 
-  // The payload keeps the `plugins` array the config declared, evaluated by the project's own CLI,
-  // so a dynamic `app.config.ts` answers here the same way `app.json` does. The static file is the
-  // fallback for an `expo` that prints no array.
+  // A dynamic config that leaves `plugins` out drops the static file's list, so the static file is
+  // the fallback only when no dynamic config was evaluated.
   const declaredPluginIds =
-    readPluginIds(config.plugins) ?? staticConfig.plugins.map((plugin) => plugin.id);
+    readPluginIds(config.plugins) ??
+    (config._internal?.dynamicConfigPath ? [] : staticConfig.plugins.map((plugin) => plugin.id));
 
   const report = buildEffectiveConfig({
     projectRoot,

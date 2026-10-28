@@ -331,7 +331,7 @@ export async function resolveRouteUrlAsync(
   const [devServer, config, nativeDirs, packageJson, routeTable, reach, expoGo] = await Promise.all(
     [
       discoverDevServerAsync(options.devServerUrl ?? undefined, { projectRoot }),
-      // A dynamic config costs an `expo config` run, which overlaps the discovery here.
+      // A dynamic config is evaluated in this process with `@expo/config`. `--scheme` skips it.
       resolveProjectSchemeConfigAsync(projectRoot, { schemeOverride: scheme }),
       readProjectNativeDirsAsync(projectRoot),
       readProjectPackageJsonAsync(projectRoot),

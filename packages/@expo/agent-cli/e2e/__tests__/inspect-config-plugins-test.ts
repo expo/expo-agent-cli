@@ -475,4 +475,23 @@ describe('@expo/agent-cli inspect:config-plugins with a dynamic app config', () 
 
     expect(payload.plugins.map((plugin) => plugin.declared)).toEqual([false, false]);
   });
+
+  // An object export replaces `app.json`, so its plugins are gone from the config the app sees.
+  it('declares nothing when the evaluated config has no plugins key', async () => {
+    const { projectRoot, env } = await setupAsync('go-app', {
+      ...STUB_CONFIG,
+      _internal: { ...STUB_CONFIG._internal, dynamicConfigPath: '/project/app.config.js' },
+    });
+    await fs.promises.writeFile(
+      path.join(projectRoot, 'app.config.js'),
+      "module.exports = { name: 'go-app', slug: 'go-app' };\n"
+    );
+
+    const result = await executeAgentCliAsync(projectRoot, ['inspect:config-plugins', '--json'], {
+      env,
+    });
+    const payload: EffectiveConfigPayload = JSON.parse(result.stdout);
+
+    expect(payload.plugins.map((plugin) => plugin.declared)).toEqual([false, false]);
+  });
 });

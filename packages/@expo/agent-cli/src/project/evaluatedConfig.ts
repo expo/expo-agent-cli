@@ -6,6 +6,8 @@ import { getConfig, type ExpoConfig } from '@expo/config';
 import { loadProjectEnv } from '@expo/env';
 import path from 'path';
 
+const scope = globalThis as { __DEV__?: boolean };
+
 /**
  * The mode the env files are read in, which decides which `.env.*` files apply.
  *
@@ -49,8 +51,11 @@ export function evaluateExpoConfig(
   { mode, isPublicConfig, skipPlugins }: EvaluateExpoConfigOptions
 ): EvaluatedExpoConfig {
   const env = { ...process.env };
+  const dev = '__DEV__' in scope ? { value: scope.__DEV__ } : null;
   const stdoutWrite = process.stdout.write;
   try {
+    // `expo config` sets `__DEV__` from the mode as well, and a config may read it.
+    scope.__DEV__ = mode === 'development';
     loadProjectEnv(projectRoot, { mode, silent: true, force: true });
     process.stdout.write = ((chunk: any, ...rest: any[]) =>
       (process.stderr.write as any)(chunk, ...rest)) as typeof process.stdout.write;
@@ -66,9 +71,14 @@ export function evaluateExpoConfig(
       dynamicConfigFile: relativeTo(projectRoot, config.dynamicConfigPath),
     };
   } catch (error: unknown) {
-    return { ok: false, error: firstLine(error instanceof Error ? error.message : String(error)) };
+    return { ok: false, error: reasonOf(error instanceof Error ? error.message : String(error)) };
   } finally {
     process.stdout.write = stdoutWrite;
+    if (dev) {
+      scope.__DEV__ = dev.value;
+    } else {
+      delete scope.__DEV__;
+    }
     restoreEnv(env);
   }
 }
@@ -87,8 +97,11 @@ function restoreEnv(env: NodeJS.ProcessEnv): void {
   }
 }
 
-function firstLine(text: string): string {
-  return text.split('\n').find((line) => line.trim()) ?? text;
+// `getConfig` puts an `Error reading Expo config at <path>:` header above what the config threw.
+function reasonOf(message: string): string {
+  const lines = message.split('\n').filter((line) => line.trim());
+  const reason = lines[0]?.startsWith('Error reading Expo config at ') ? lines[1] : lines[0];
+  return reason ?? message;
 }
 
 function relativeTo(projectRoot: string, file: string | null): string | null {

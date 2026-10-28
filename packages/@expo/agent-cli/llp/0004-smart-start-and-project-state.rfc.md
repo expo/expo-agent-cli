@@ -700,7 +700,8 @@ The engine shipped in `src/project/`, `src/plan/`, `src/status/`, `src/dev/`, as
    `app.config.js/ts` yields a debug event and a best-effort skip.
    [[0011-impact-and-freshness]] spawns `expo config --json --type public` to resolve
    `runtimeVersion`. The plugins half of this item is still static-only for the probe;
-   `inspect:config-plugins` reads the declared plugins out of the introspect payload, and
+   `inspect:config-plugins` reads the declared plugins out of the introspect payload, where a
+   dynamic config with no `plugins` key declares none, and
    `navigate` evaluates the scheme ([[0005-runtime-loop-tools]] §Pointing an app at this
    dev server). The recorded hash is the pre-build probe hash. Bare-versus-CNG uses "any native dir present".
    `sdkVersion: null` never forces a rule. `expoGo.compatible` is the single Go verdict.

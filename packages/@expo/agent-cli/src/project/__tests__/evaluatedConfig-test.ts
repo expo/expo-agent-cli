@@ -55,16 +55,22 @@ describe(evaluateExpoConfig, () => {
   // process's own environment, and a later subprocess inherits that one.
   it(`should set the mode for the evaluation and put the environment back afterwards`, () => {
     process.env.BABEL_ENV = 'inherited';
-    let seen: { NODE_ENV?: string; BABEL_ENV?: string } = {};
+    let seen: Record<string, unknown> = {};
     vi.mocked(getConfig).mockImplementation(() => {
-      seen = { NODE_ENV: process.env.NODE_ENV, BABEL_ENV: process.env.BABEL_ENV };
+      seen = {
+        NODE_ENV: process.env.NODE_ENV,
+        BABEL_ENV: process.env.BABEL_ENV,
+        __DEV__: (globalThis as { __DEV__?: boolean }).__DEV__,
+      };
       return { exp: {}, pkg: {}, staticConfigPath: null, dynamicConfigPath: null } as never;
     });
 
     evaluateExpoConfig(projectRoot, { mode: 'development' });
 
-    expect(seen).toEqual({ NODE_ENV: 'development', BABEL_ENV: undefined });
+    // `@expo/cli` 58 deletes `BABEL_ENV` for the mode too (`setNodeEnv` in `@expo/env`).
+    expect(seen).toEqual({ NODE_ENV: 'development', BABEL_ENV: undefined, __DEV__: true });
     expect(process.env.NODE_ENV).toBeUndefined();
+    expect('__DEV__' in globalThis).toBe(false);
     expect(process.env.BABEL_ENV).toBe('inherited');
     expect(process.env.__EXPO_ENV_LOADED).toBeUndefined();
   });
@@ -91,7 +97,9 @@ describe(evaluateExpoConfig, () => {
 
   it(`should answer ok: false with the first line of what the config threw`, () => {
     vi.mocked(getConfig).mockImplementation(() => {
-      throw new Error('Cannot resolve app config\n  at app.config.ts:3');
+      throw new Error(
+        `Error reading Expo config at ${projectRoot}/app.config.ts:\n\nCannot resolve app config\n  at app.config.ts:3`
+      );
     });
 
     expect(evaluateExpoConfig(projectRoot, { mode: 'development' })).toEqual({
