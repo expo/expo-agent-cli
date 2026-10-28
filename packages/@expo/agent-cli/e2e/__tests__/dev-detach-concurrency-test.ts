@@ -438,6 +438,29 @@ it.each(['live', 'dead-executing', 'unreadable', 'dead-claimed'])(
   }
 );
 
+it.skipIf(process.platform !== 'darwin')(
+  'startup observation takes priority over unreadable-binding cleanup',
+  async () => {
+    const f = await fixture();
+    const { binDir } = await installStubXcrunAsync(f.root);
+    const binding = await bindingFixture(f.root, 'E2E-STARTUP-BINDING');
+    fs.writeFileSync(binding, '{');
+    const env = { ...pathEnvVars(binDir), AGENT_CLI_NO_DEVICE: '0' };
+    try {
+      f.start();
+      expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
+      const status = await executeAgentCliAsync(f.root, ['status', '--json'], { env });
+      const next = JSON.parse(status.stdout).next;
+      expect(next).toMatchObject({ command: 'npx @expo/agent-cli dev:logs', steps: [] });
+      await executeAgentCliAsync(f.root, [...next.command.split(' ').slice(2), '--json'], { env });
+      expect(fs.readFileSync(binding, 'utf8')).toBe('{');
+      expect(f.marks('blocked')).toHaveLength(1);
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+
 it('stopping and starting again selects a new log without changing the previous run', async () => {
   const f = await fixture();
   try {

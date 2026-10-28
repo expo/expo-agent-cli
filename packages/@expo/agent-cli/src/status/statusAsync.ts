@@ -543,7 +543,7 @@ export async function collectStatusReportAsync(
     errors.project = project.error;
   }
 
-  if (!ownServer && report.next?.command.startsWith(`${PROGRAM_PREFIX} dev `)) {
+  if (!ownServer && report.next) {
     const why = readDetachedRunWarning(projectRoot);
     if (why) {
       report.next.command = `${PROGRAM_PREFIX} dev:logs`;
