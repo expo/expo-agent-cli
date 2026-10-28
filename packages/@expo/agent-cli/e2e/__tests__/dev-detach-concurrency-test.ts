@@ -315,6 +315,66 @@ it('a blocked startup in one worktree does not prevent a second worktree from st
   }
 });
 
+it.skipIf(process.platform !== 'darwin')(
+  'retains ownership while a local app download outlives Metro',
+  async () => {
+    const f = await fixture();
+    const { binDir, calls } = await installStubXcrunAsync(f.root, {
+      simulators: [{ udid: 'E2E-OPEN-OWNER', name: 'owner-sim', state: 'Booted' }],
+      expoGoMissing: true,
+    });
+    const downloading = path.join(f.root, 'downloading');
+    const release = path.join(f.root, 'release-download');
+    const script = path.join(binDir, 'download.cjs');
+    fs.writeFileSync(
+      script,
+      `const fs = require('fs');
+       fs.writeFileSync(${JSON.stringify(downloading)}, '');
+       const timer = setInterval(() => {
+         if (!fs.existsSync(${JSON.stringify(release)})) return;
+         clearInterval(timer);
+         process.stdout.write(JSON.stringify({path: ${JSON.stringify(f.root)}}));
+       }, 20);`
+    );
+    await installStubBinAsync(binDir, 'npx', script);
+    f.release();
+    const parent = spawnAgentCli(
+      f.root,
+      ['dev', '--ios', '--go', '--local', '--detach', '--wait-ready', '--json'],
+      { env: { ...f.env, ...pathEnvVars(binDir), AGENT_CLI_NO_DEVICE: '0' } }
+    );
+    const finished = waitForExitAsync(parent, collectOutput(parent));
+    try {
+      expect(await waitForAsync(() => fs.existsSync(downloading), 15_000)).toBe(true);
+      const owner = await readDevLockAsync(f.root);
+      expect(owner).not.toBeNull();
+      const stop = await executeAgentCliAsync(f.root, ['dev:stop', '--timeout', '1s', '--json'], {
+        reject: false,
+      });
+      expect(stop.exitCode, stop.all).toBe(20);
+      expect(await readDevLockAsync(f.root)).toBeNull();
+      const retry = await f.start().result;
+      expect(retry.exitCode, retry.all).toBe(20);
+      expect(JSON.parse(retry.stdout).error).toMatchObject({
+        code: 'DEV_START_BUSY',
+        data: { pid: owner!.pid },
+      });
+      fs.writeFileSync(release, '');
+      expect(
+        await waitForAsync(() => f.marks('exited').includes(`exited-${owner!.pid}`), 15_000)
+      ).toBe(true);
+      expect(calls().filter((args) => args[1] === 'install')).toHaveLength(1);
+      const restarted = await f.start().result;
+      expect(restarted.exitCode, restarted.all).toBe(0);
+    } finally {
+      fs.writeFileSync(release, '');
+      await killAsync(parent, 'SIGKILL');
+      await finished;
+      await f.cleanup();
+    }
+  }
+);
+
 it('releases ownership after a normal startup failure so another attempt can succeed', async () => {
   const f = await fixture();
   try {

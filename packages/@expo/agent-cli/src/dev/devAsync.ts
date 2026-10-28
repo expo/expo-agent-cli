@@ -664,6 +664,7 @@ async function executePlanAsync(
         );
       }
       stepRunning = true;
+      let localOpen: Promise<void> | undefined;
       const easPlatform = opensApp ? easOpenPlatform(options) : null;
       const eas = easPlatform
         ? easRunLifecycle(projectRoot, {
@@ -694,7 +695,7 @@ async function executePlanAsync(
                 eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
                 void eas.finished.then(markEasOpenFinished);
               } else
-                void openAppForRunAsync(
+                localOpen = openAppForRunAsync(
                   projectRoot,
                   plan,
                   options,
@@ -706,7 +707,8 @@ async function executePlanAsync(
           : undefined,
       }).finally(async () => {
         stepRunning = false;
-        await eas?.finishAsync();
+        // Ownership includes any download/install still finishing after Metro stops.
+        await Promise.all([localOpen, eas?.finishAsync()]);
       });
     };
 
