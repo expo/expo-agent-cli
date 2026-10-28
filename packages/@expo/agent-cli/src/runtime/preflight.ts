@@ -31,6 +31,7 @@
 
 import { resolveTargetSelectionAsync } from './resolveTargetSelection';
 import { EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
+import * as Log from '../log';
 import type { NavigatePlatform } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
 import { hostPlatform } from '../smoke/suggest';
@@ -45,6 +46,8 @@ import {
 } from './devServer';
 import { discoverDevServerAsync } from './discoverDevServer';
 import {
+  skippedAppsOf,
+  describeSkippedApps,
   EMPTY_DEVICE_INVENTORY,
   type DeviceInventory,
   type ClassifiedTargets,
@@ -244,33 +247,21 @@ export async function preflightRuntimeAsync(
     });
   }
 
-  const connection = base;
-
-  if (need !== 'debugger-target') {
-    return connection;
-  }
-
-  if (targets.length === 0) {
+  if (need === 'debugger-target' && targets.length === 0) {
     throw noAppConnectedError({ devServerUrl: url, retryMs: retryBudgetMs, cloud, platform });
   }
 
   // Only a command that *requires* a runtime refuses on an empty scope. For `reload` an empty scope
   // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
   // seventh and eighth calls a success.
-  if (
-    classifiedTargets.read.length === 0 &&
-    (platform != null || classifiedTargets.undetermined.length > 0)
-  ) {
-    throw platform == null
-      ? noSessionAppError(url, classifiedTargets.undetermined.length)
-      : noAppOnPlatformError(
-          url,
-          platform,
-          classifiedTargets,
-          targetSelection.device?.backend === 'cloud'
-        );
+  if (need === 'debugger-target' && classifiedTargets.read.length === 0) {
+    throw emptyScopeError(url, targetSelection, classifiedTargets);
   }
-  return connection;
+  const skipped = skippedAppsOf(classifiedTargets);
+  if (skipped.length > 0) {
+    Log.progress(describeSkippedApps(skipped));
+  }
+  return base;
 }
 
 /**
@@ -413,13 +404,17 @@ export function noAppConnectedError({
  * gave no answer cannot show that an app is off this machine. The session's platform flag narrows
  * which tool has to answer.
  */
-function noSessionAppError(devServerUrl: string, unplaced: number): CommandError {
+function noSessionAppError(
+  devServerUrl: string,
+  unplaced: number,
+  skippedWhy: string
+): CommandError {
   const apps = `${unplaced} app${unplaced === 1 ? '' : 's'}`;
   const error = new CommandError(
     'NO_APP_CONNECTED',
     [
       `No app connected to the Expo dev server at ${devServerUrl} could be shown to be the EAS Simulator session's app.`,
-      `Why: its debugger target list names ${apps} that nothing on this machine places. One unclaimed app is the session's only when the local device tools answered and no other app is unclaimed.`,
+      `Why: its debugger target list names ${apps} that nothing on this machine places. One unclaimed app is the session's only when the local device tools answered and no other app is unclaimed.${skippedWhy}`,
       `How: close the apps on this dev server that are not the session's, then run this command again. A platform flag ("--ios --eas" or "--android --eas") only chooses which device tool has to answer; it does not choose between two unclaimed apps.`,
     ].join('\n')
   );
@@ -429,6 +424,49 @@ function noSessionAppError(devServerUrl: string, unplaced: number): CommandError
     devServerReachable: true,
     debuggerTargets: unplaced,
     platform: null,
+  });
+}
+
+/**
+ * The refusal for a dev server whose apps are all out of this run's scope.
+ *
+ * The apps stay connected, so asking again gives the same answer (exit 1) until the app is opened.
+ * When only other worktrees' apps are connected, it names them: their simulator loads from this
+ * port, and a reader who is not told so debugs the wrong build (llp/0005 §Target owner).
+ */
+export function emptyScopeError(
+  devServerUrl: string,
+  targetSelection: TargetSelection,
+  classifiedTargets: ClassifiedTargets
+): CommandError {
+  const platform = targetSelection.platform?.value;
+  const cloud = targetSelection.device?.backend === 'cloud';
+  const skipped = skippedAppsOf(classifiedTargets);
+  const skippedWhy = skipped.length > 0 ? ` ${describeSkippedApps(skipped)}` : '';
+  if (platform == null && classifiedTargets.undetermined.length > 0) {
+    return noSessionAppError(devServerUrl, classifiedTargets.undetermined.length, skippedWhy);
+  }
+  if (
+    platform != null &&
+    classifiedTargets.otherPlatform.length + classifiedTargets.undetermined.length > 0
+  ) {
+    return noAppOnPlatformError(devServerUrl, platform, classifiedTargets, cloud, skippedWhy);
+  }
+  const navigate = `${PROGRAM_PREFIX} navigate / --${platform ?? hostPlatform()}${cloud ? ' --eas' : ''}`;
+  const error = new CommandError(
+    'NO_APP_CONNECTED',
+    [
+      `No app of this worktree is connected to the Expo dev server at ${devServerUrl}, so there is nothing to read.`,
+      `Why:${skippedWhy} Such an app loads its JavaScript from this port, but it is not the app on this worktree's device, so a read of it says nothing about that app.`,
+      `How: open the app on this worktree's device with "${navigate}", then run this command again.`,
+    ].join('\n')
+  );
+  error.suggestedCommand = navigate;
+  return withData(error, {
+    devServerUrl,
+    devServerReachable: true,
+    debuggerTargets: skipped.length,
+    platform,
   });
 }
 
@@ -444,7 +482,8 @@ function noAppOnPlatformError(
   devServerUrl: string,
   platform: NavigatePlatform,
   scoped: Pick<ClassifiedTargets, 'otherPlatform' | 'undetermined'>,
-  cloud: boolean
+  cloud: boolean,
+  skippedWhy: string
 ): CommandError {
   const others = scoped.otherPlatform.map((entry) => entry.platform);
   const uniqueOthers = [...new Set(others)];
@@ -454,12 +493,12 @@ function noAppOnPlatformError(
     uniqueOthers.length > 0
       ? [
           `No ${platform} app is connected to the Expo dev server at ${devServerUrl}, so there is nothing on ${platform} to read.`,
-          `Why: its debugger target list names ${others.length} app${others.length === 1 ? '' : 's'}, and ${others.length === 1 ? 'it is' : 'they are'} on ${uniqueOthers.join(' and ')}${scoped.undetermined.length > 0 ? `, plus ${scoped.undetermined.length} whose platform nothing in the target names` : ''}. Reading one of those would answer a question about ${uniqueOthers[0]} while reporting it as ${platform}.`,
+          `Why: its debugger target list names ${others.length} app${others.length === 1 ? '' : 's'}, and ${others.length === 1 ? 'it is' : 'they are'} on ${uniqueOthers.join(' and ')}${scoped.undetermined.length > 0 ? `, plus ${scoped.undetermined.length} whose platform nothing in the target names` : ''}. Reading one of those would answer a question about ${uniqueOthers[0]} while reporting it as ${platform}.${skippedWhy}`,
           `How: open the app on ${platform} with "${PROGRAM_PREFIX} navigate / --${platform}${cloud ? ' --eas' : ''}", then run this command again. Drop --${platform} to read whichever app is connected.`,
         ].join('\n')
       : [
           `No app connected to the Expo dev server at ${devServerUrl} could be shown to be running on ${platform}.`,
-          `Why: its debugger target list names ${scoped.undetermined.length} app${scoped.undetermined.length === 1 ? '' : 's'}, and nothing in ${scoped.undetermined.length === 1 ? 'its target' : 'their targets'} says which platform ${scoped.undetermined.length === 1 ? 'it is' : 'they are'} on — the dev server does not label them, so this is read from the device name and the app id. A development build on a physical device can look like this.`,
+          `Why: its debugger target list names ${scoped.undetermined.length} app${scoped.undetermined.length === 1 ? '' : 's'}, and nothing in ${scoped.undetermined.length === 1 ? 'its target' : 'their targets'} says which platform ${scoped.undetermined.length === 1 ? 'it is' : 'they are'} on — the dev server does not label them, so this is read from the device name and the app id. A development build on a physical device can look like this.${skippedWhy}`,
           cloud
             ? `How: close the apps on this dev server that are not the EAS Simulator session's, then run this command again. --${platform} only chooses which device tool has to answer; it does not choose between two unclaimed apps.`
             : `How: drop --${platform} to read the app that is connected, which is the honest command when only one is. To have the platform recognised, connect the device this machine's device tools can see ("adb devices -l", "xcrun simctl list devices booted").`,

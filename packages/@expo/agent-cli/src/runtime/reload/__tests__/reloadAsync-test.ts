@@ -389,6 +389,7 @@ describe(reloadAsync, () => {
       'reloaded',
       'route',
       'routeCheck',
+      'skippedApps',
       'url',
       'verifiedBy',
       'waitedMs',
@@ -832,6 +833,8 @@ describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => 
     expect(JSON.parse(printed()).bundlePlatformSource).toBe('connected-app');
     expect(JSON.parse(printed()).bundlePlatforms).toEqual(['android']);
   });
+
+  // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live
@@ -864,6 +867,7 @@ describe(explainReloadFailure, () => {
       bundlesAfterReload: { observed: null, count: 0, line: null, reason: null },
       bundlePlatforms: ['ios'],
       bundlePlatformSource: 'flag',
+      skippedApps: [],
       route: null,
       routeCheck: {
         checked: false,

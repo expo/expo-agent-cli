@@ -68,7 +68,12 @@ import {
   type MessageSocketPeers,
 } from '../messageSocket';
 import { preflightRuntimeAsync, type RuntimeConnection } from '../preflight';
-import { type TargetSelection, type DeviceInventory } from '../targetSelection';
+import {
+  skippedAppsOf,
+  type SkippedApp,
+  type TargetSelection,
+  type DeviceInventory,
+} from '../targetSelection';
 import { waitForFreshAppConnectionAsync, countConnectedAppsAsync } from '../waitReady';
 import {
   markBundleSignalSync,
@@ -254,6 +259,8 @@ export interface ReloadResultJson {
    * run that had never asked which app it was reloading read exactly like an answer.
    */
   bundlePlatformSource: BundlePlatformSource;
+  /** Apps the reload does not count or check, such as another worktree's (llp/0005 §Target owner). */
+  skippedApps: SkippedApp[];
   /** Route the app was sent to afterwards, or null when none was asked for. */
   route: string | null;
   /** Whether that route was checked against the project's routes. */
@@ -331,9 +338,11 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
   // for is a question about the app being reloaded, and this used to answer it with a host-free
   // default: with an Android-only break and both apps attached, a `runtime:reload` with no flag
   // checked the **iOS** bundle, passed, and reloaded the Android app onto the broken one.
-  const { targetSelection, deviceInventory } = devServer;
+  const { targetSelection, deviceInventory, classifiedTargets } = devServer;
   const { platforms: bundlePlatforms, source: bundlePlatformSource } =
-    await resolveBundleCheckPlatformsAsync(targetSelection, devServer.targets, { deviceInventory });
+    await resolveBundleCheckPlatformsAsync(targetSelection, classifiedTargets.read, {
+      deviceInventory,
+    });
   const bundles: BundleCheckResult[] = [];
   if (options.bundleCheck) {
     for (const platform of bundlePlatforms) {
@@ -684,6 +693,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     },
     bundlePlatforms: bundles.map((entry) => entry.platform),
     bundlePlatformSource,
+    skippedApps: skippedAppsOf(devServer.classifiedTargets),
     route,
     routeCheck,
     url: landing?.url ?? cloudUrl,

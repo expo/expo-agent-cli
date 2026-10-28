@@ -5,7 +5,6 @@
 import type CdpMessageType from 'devtools-protocol';
 import { WebSocket } from 'ws';
 
-import type { NavigatePlatform } from '../navigate/device';
 import { formatCdpExceptionDetails, stringifyCdpValue } from './cdpFormat';
 import { debugEvent } from './events';
 import {
@@ -18,7 +17,9 @@ import {
   wrapExpressionForPromises,
 } from './promiseSettling';
 import {
+  describeSkippedApps,
   classifyTargets,
+  skippedAppsOf,
   type DeviceInventory,
   type ClassifiedTargets,
   type TargetSelection,
@@ -204,23 +205,30 @@ export interface CdpClientOptions {
   deviceInventory: DeviceInventory;
 }
 
-/** The failure for a scoped client that found no target in its scope. */
-export class NoTargetOnPlatformError extends Error {
-  readonly isNoTargetOnPlatform = true;
-
-  constructor(
-    readonly platform: NavigatePlatform | null,
-    readonly otherPlatforms: NavigatePlatform[],
-    readonly undetermined: number
-  ) {
+/**
+ * The failure for a client whose scope holds no target: none of its platform, or none that is not
+ * another worktree's. Its message is the whole report.
+ */
+export class NoTargetInScopeError extends Error {
+  constructor(targetSelection: TargetSelection, classifiedTargets: ClassifiedTargets) {
+    const platform = targetSelection.platform?.value;
+    const otherPlatforms = [
+      ...new Set(classifiedTargets.otherPlatform.map((entry) => entry.platform)),
+    ];
+    const skipped = skippedAppsOf(classifiedTargets);
     super(
-      platform == null
-        ? `No app connected to the dev server could be placed in this run's scope: ${undetermined} could not be placed at all.`
-        : otherPlatforms.length > 0
-          ? `No ${platform} app is connected to the dev server; the ${otherPlatforms.join(' and ')} app that is connected is a different runtime.`
-          : `No app connected to the dev server could be shown to be running on ${platform}${undetermined > 0 ? `, and ${undetermined} could not be placed at all` : ''}.`
+      [
+        platform == null
+          ? classifiedTargets.undetermined.length > 0
+            ? `No app connected to the dev server could be placed in this run's scope: ${classifiedTargets.undetermined.length} could not be placed at all.`
+            : 'No app of this worktree is connected to the dev server.'
+          : otherPlatforms.length > 0
+            ? `No ${platform} app is connected to the dev server; the ${otherPlatforms.join(' and ')} app that is connected is a different runtime.`
+            : `No app connected to the dev server could be shown to be running on ${platform}${classifiedTargets.undetermined.length > 0 ? `, and ${classifiedTargets.undetermined.length} could not be placed at all` : ''}.`,
+        ...(skipped.length > 0 ? [describeSkippedApps(skipped)] : []),
+      ].join(' ')
     );
-    this.name = 'NoTargetOnPlatformError';
+    this.name = 'NoTargetInScopeError';
   }
 }
 
@@ -276,17 +284,15 @@ export class CdpClient {
     }
     if (!target) {
       // Two different failures, and only one of them is "the app is not there". A scoped run that
-      // found apps on the other platform has to say so, or the reader debugs a healthy app (F51).
-      const { platform } = this.options.targetSelection;
+      // found apps on the other platform, only another worktree's app, or only apps nothing placed
+      // has to say so, or the reader debugs a healthy app (F51, llp/0005 §Target owner).
       if (
         classifiedTargets.read.length === 0 &&
-        (platform != null || classifiedTargets.undetermined.length > 0)
+        (this.options.targetSelection.platform != null ||
+          classifiedTargets.skipped.length > 0 ||
+          classifiedTargets.undetermined.length > 0)
       ) {
-        throw new NoTargetOnPlatformError(
-          platform?.value ?? null,
-          [...new Set(classifiedTargets.otherPlatform.map((entry) => entry.platform))],
-          classifiedTargets.undetermined.length
-        );
+        throw new NoTargetInScopeError(this.options.targetSelection, classifiedTargets);
       }
       throw new Error('No target found.');
     }

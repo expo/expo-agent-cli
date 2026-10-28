@@ -14,8 +14,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { digestOf } from '../../src/devLock/address';
+import { hostPlatform } from '../../src/smoke/suggest';
+import { canonicalizeExistingPath } from '../../src/utils/dir';
 import {
   executeAgentCliAsync,
+  expoHomeOf,
   installStubBinAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
@@ -399,3 +403,78 @@ async function installStubXcrunAsync(root: string, startedMarker: string | null)
   );
   await installStubBinAsync(path.join(root, '.stub-bin'), 'xcrun', scriptPath);
 }
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+// Another worktree's clone simulator, still booted and bound to it, loads its JavaScript from this
+// port and is the only app on it. Every command that needs an app refuses rather than read it.
+describe(`a dev server whose only app runs on another worktree's simulator`, () => {
+  const CLONE = 'agent-cli c4ed0a60';
+  let otherRoot: string;
+  let bindingFile: string;
+  let stub: StubDevServer;
+  beforeAll(async () => {
+    otherRoot = canonicalizeExistingPath(
+      await fs.promises.mkdtemp(path.join(path.dirname(projectRoot), 'other-worktree-'))
+    );
+    bindingFile = path.join(
+      expoHomeOf(projectRoot),
+      'agent-cli',
+      'bindings',
+      `${digestOf(otherRoot)}-ios-local-ios.json`
+    );
+    await fs.promises.mkdir(path.dirname(bindingFile), { recursive: true });
+    const now = Date.now();
+    await fs.promises.writeFile(
+      bindingFile,
+      JSON.stringify({
+        version: 1,
+        device: {
+          backend: 'local-ios',
+          platform: 'ios',
+          udid: 'OTHER-SIM',
+          name: CLONE,
+          origin: 'created',
+        },
+        projectRoot: otherRoot,
+        boundAt: new Date(now).toISOString(),
+        expiresAt: new Date(now + 60 * 60_000).toISOString(),
+      })
+    );
+    const scriptPath = path.join(projectRoot, '.stub-bin', 'xcrun-other-worktree.js');
+    await fs.promises.writeFile(
+      scriptPath,
+      `process.stdout.write(${JSON.stringify(
+        JSON.stringify({
+          devices: {
+            'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [
+              { udid: 'OTHER-SIM', name: CLONE, state: 'Booted' },
+            ],
+          },
+        })
+      )});`
+    );
+    await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'xcrun', scriptPath);
+    stub = await startStubDevServerAsync({
+      targets: [{ ...EXPO_GO_TARGET, deviceName: CLONE }],
+      inspectorEvaluate: () => undefined,
+    });
+  });
+  afterAll(async () => {
+    await stub.close();
+    fs.rmSync(bindingFile, { force: true });
+  });
+
+  it.each(NEEDS_AN_APP)(
+    `%s exits 1 with NO_APP_CONNECTED and names that worktree`,
+    async (_name, argv) => {
+      const result = await runAsync(argv, stub.url);
+
+      expect(result.exitCode).toBe(1);
+      const { error } = JSON.parse(result.stdout);
+      expect(error.code).toBe('NO_APP_CONNECTED');
+      expect(error.message).toContain(`"${CLONE}"`);
+      expect(error.message).toContain(otherRoot);
+      expect(error.suggestedCommand).toBe(`npx @expo/agent-cli navigate / --${hostPlatform()}`);
+    }
+  );
+});

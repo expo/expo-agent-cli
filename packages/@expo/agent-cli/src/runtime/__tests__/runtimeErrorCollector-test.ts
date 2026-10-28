@@ -351,7 +351,7 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
       createWebSocket: (url) => new MockWebSocket(url, () => {}) as unknown as WebSocketImpl,
     });
 
-    // The message `NoTargetOnPlatformError` writes: an empty window from the wrong app is worse
+    // The message `NoTargetInScopeError` writes: an empty window from the wrong app is worse
     // than no window, so the scoped failure has to reach the caller as a failure.
     await expect(collector.collectAsync()).rejects.toThrow(/No android app is connected/);
   });

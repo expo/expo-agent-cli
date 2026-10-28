@@ -2,10 +2,32 @@
 // The one place the `runtime:*` commands ask "is there anything to talk to", and the one refusal
 // they all print when there is not.
 
+import { vol } from 'memfs';
+
+import { bindingFor, writeBinding } from '../../deviceBinding/__tests__/fakeTools';
+import { bindingPathFor, readBindingFile } from '../../deviceBinding/registry';
 import { EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
+import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { APP_RECONNECT_GRACE_MS } from '../devServer';
 import { preflightRuntimeAsync, reachTheAppLadder } from '../preflight';
 import { makeDeviceInventory } from './targetSelectionFixtures';
+
+vi.mock('../../log');
+// `xcrun simctl list devices booted -j` answers with these; every other tool fails to run.
+let bootedSimulators: { udid: string; name: string }[] = [];
+vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
+beforeEach(() => {
+  bootedSimulators = [];
+  vi.mocked(spawnCaptureAsync).mockImplementation(async (bin: string) =>
+    bin === 'xcrun'
+      ? {
+          stdout: JSON.stringify({ devices: { 'iOS-26-0': bootedSimulators } }),
+          stderr: '',
+          exitCode: 0,
+        }
+      : { stdout: '', stderr: '', exitCode: 1 }
+  );
+});
 
 const TARGET = {
   id: '1',
@@ -342,6 +364,20 @@ describe(reachTheAppLadder, () => {
 // @ref ./targetPlatform — friction run 6, F51. With an iOS simulator and an Android emulator on
 // one dev server, a command told `--android` used to be handed whichever target came first.
 describe(`${preflightRuntimeAsync.name} scoped to a platform`, () => {
+  it("does not call an excluded local app another worktree's build in a cloud scope", async () => {
+    mockDevServer([TARGET]);
+    bootedSimulators = [{ udid: 'LOCAL', name: TARGET.deviceName }];
+    const error = await preflightRuntimeAsync({
+      need: 'debugger-target',
+      devServerUrl,
+      platform: 'ios',
+      cloud: true,
+    }).catch((e) => e);
+    expect(error.code).toBe('NO_APP_CONNECTED');
+    expect(error.message).toContain('is not the device this run reads');
+    expect(error.message).not.toContain("the other worktree's build");
+  });
+
   it(`should name the platform the connected app is actually on`, async () => {
     mockDevServer([TARGET]);
 
@@ -417,5 +453,46 @@ describe(`${preflightRuntimeAsync.name} on a dev server nobody named`, () => {
     expect(error.code).toBe('NO_DEV_SERVER');
     expect(error.message).toContain('--dev-server-url');
     expect(error.message).not.toContain('the one you named');
+  });
+});
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+// Another worktree's clone simulator, still booted, loads its JavaScript from this port.
+describe(`${preflightRuntimeAsync.name} beside an app of another worktree`, () => {
+  const OWN_ROOT = '/wt/mapfilter';
+  const OTHER_ROOT = '/wt/legend';
+  const CLONE = 'agent-cli c4ed0a60';
+  const ON_CLONE = { ...TARGET, id: '3', appId: 'dev.vonovak.cyclable', deviceName: CLONE };
+
+  beforeEach(() => {
+    vol.fromJSON({ [`${OWN_ROOT}/package.json`]: '{}', [`${OTHER_ROOT}/package.json`]: '{}' });
+    bootedSimulators = [{ udid: 'SIM-LEGEND', name: CLONE }];
+  });
+  afterEach(() => {
+    vol.reset();
+  });
+
+  // A release ends the lease and keeps the file; so does a lease nobody renewed for 60 minutes.
+  it(`should read the app on a simulator whose other binding ran out, and renew no lease`, async () => {
+    writeBinding(
+      bindingPathFor(OTHER_ROOT, 'ios', 'local-ios'),
+      bindingFor(OTHER_ROOT, 'SIM-LEGEND', { name: CLONE, expiresAt: '2000-01-01T00:00:00.000Z' })
+    );
+    const ownFile = bindingPathFor(OWN_ROOT, 'ios', 'local-ios');
+    writeBinding(
+      ownFile,
+      bindingFor(OWN_ROOT, 'SIM-OWN', { expiresAt: '2999-01-01T00:00:00.000Z' })
+    );
+    mockDevServer([ON_CLONE]);
+
+    const connection = await preflightRuntimeAsync(
+      { need: 'debugger-target', devServerUrl, retryMs: 0 },
+      { projectRoot: OWN_ROOT }
+    );
+
+    expect(connection.classifiedTargets.read).toEqual([ON_CLONE]);
+    expect(readBindingFile(ownFile)).toMatchObject({
+      binding: { expiresAt: '2999-01-01T00:00:00.000Z' },
+    });
   });
 });

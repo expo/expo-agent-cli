@@ -850,6 +850,8 @@ export type StubDevServer = {
   /** Origin to hand to `--dev-server-url`, e.g. `http://127.0.0.1:53421`. */
   url: string;
   port: number;
+  /** Platforms requested from the entry-bundle endpoint, in request order. */
+  bundlePlatforms(): string[];
   /** Stop listening and wait for the server to close. */
   close(): Promise<void>;
 };
@@ -882,6 +884,7 @@ export async function startStubDevServerAsync({
   inspectorEvaluate,
 }: StubDevServerOptions = {}): Promise<StubDevServer> {
   let port = 0;
+  const bundlePlatforms: string[] = [];
   // Mutable, because a reload changes it: the debugger target list is the evidence a reload is
   // judged on, so a stub that always answers the same list can only test an app that never moved.
   let listedTargets: unknown[] = targets;
@@ -932,6 +935,7 @@ export async function startStubDevServerAsync({
     }
 
     if (route === STUB_BUNDLE_PATH) {
+      bundlePlatforms.push(new URL(request.url!, 'http://stub').searchParams.get('platform') ?? '');
       // Unreferenced, so a delay a test deliberately never waits out cannot hold the worker open.
       setTimeout(() => {
         if (bundle === 'broken') {
@@ -1171,6 +1175,7 @@ export async function startStubDevServerAsync({
   return {
     url: `http://127.0.0.1:${port}`,
     port,
+    bundlePlatforms: () => [...bundlePlatforms],
     close: () =>
       new Promise<void>((resolve, reject) => {
         clearInterval(startup);

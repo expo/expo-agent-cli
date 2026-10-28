@@ -1,10 +1,12 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §Android
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
 // Which debugger targets one run reads, decided in one place.
 //
 // Three inputs, kept apart on purpose: the targets the dev server lists, the facts this machine's
 // device tools report, and the run's scope, which is the caller's decision. `classifyTargets` is the
 // one function that combines them, so every runtime read places a target the same way.
 
+import { liveIosBindings, type LiveIosBinding } from '../deviceBinding/records';
 import type { NavigateDevice, NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
 import { platformOfTarget } from './targetPlatform';
@@ -17,6 +19,11 @@ export interface DeviceInventory {
   bootedStatus: 'unknown' | 'observed' | 'unsupported';
   /** Hardware models of attached Android devices, as `adb devices -l` reports them; null when it did not exit 0. */
   androidModels: string[] | null;
+  /**
+   * Every worktree's live local iOS binding, read only for a run in a project. A run with no
+   * project root (`dev:wait`, a `navigate` wait) has no "this worktree", so it reads none.
+   */
+  iosBindings: LiveIosBinding[];
 }
 
 /** Facts that know nothing, for a run that did not need to ask the device tools. */
@@ -24,6 +31,7 @@ export const EMPTY_DEVICE_INVENTORY: DeviceInventory = {
   booted: [],
   bootedStatus: 'unknown',
   androidModels: null,
+  iosBindings: [],
 };
 
 export type SelectedDevice = { backend: 'cloud'; deviceId: string | null };
@@ -46,7 +54,14 @@ export type TargetClassification =
   | { group: 'read' }
   | { group: 'other-platform'; platform: NavigatePlatform }
   | { group: 'undetermined' }
-  | { group: 'other-device' };
+  | { group: 'other-device' }
+  | { group: 'other-worktree'; projectRoots: string[] };
+
+export type SkippedTargetClassification = Extract<
+  TargetClassification,
+  { group: 'other-worktree' | 'other-device' }
+>;
+export type SkippedApp = { deviceName: string } & SkippedTargetClassification;
 
 /** A target list, grouped by {@link TargetClassification}. */
 export interface ClassifiedTargets {
@@ -56,10 +71,61 @@ export interface ClassifiedTargets {
   otherPlatform: { target: CdpTarget; platform: NavigatePlatform }[];
   /** Targets nothing placed in this scope: no platform evidence, or no device claim. Never read. */
   undetermined: CdpTarget[];
-  skipped: {
-    target: CdpTarget;
-    classification: Extract<TargetClassification, { group: 'other-device' }>;
-  }[];
+  skipped: { target: CdpTarget; classification: SkippedTargetClassification }[];
+}
+
+/** The skipped targets of a placed list, as a report names them. */
+export function skippedAppsOf(classifiedTargets: Pick<ClassifiedTargets, 'skipped'>): SkippedApp[] {
+  return classifiedTargets.skipped.map(({ target, classification }) => ({
+    deviceName: target.deviceName,
+    ...classification,
+  }));
+}
+
+/** The one sentence every report, refusal and stderr line uses to name the skipped apps. */
+export function describeSkippedApps(apps: readonly SkippedApp[]): string {
+  const each = apps.map((app) => {
+    switch (app.group) {
+      case 'other-device':
+        return `"${app.deviceName}" is not the device this run reads`;
+      case 'other-worktree':
+        return `"${app.deviceName}" runs on a simulator another worktree bound (${app.projectRoots.join(', ')})`;
+    }
+  });
+  return `Skipped ${apps.length} app${apps.length === 1 ? '' : 's'}: ${each.join('; ')}.`;
+}
+
+/**
+ * The other worktrees whose simulator this target runs on, or null when it may be this one's.
+ *
+ * A target names its device by name only. So it is another worktree's only when every booted
+ * simulator with that name has a udid that only other worktrees bind. A name nothing booted has,
+ * or a simulator nobody or this worktree binds, keeps the target. When the simulator list could
+ * not be read, a binding's stored name stands in for it: a name that only other worktrees' bindings
+ * hold is skipped. A stale stored name can only skip more.
+ */
+function otherWorktreesOf(
+  target: Pick<CdpTarget, 'deviceName'>,
+  deviceInventory: DeviceInventory
+): string[] | null {
+  if (deviceInventory.bootedStatus === 'unknown') {
+    const owners = deviceInventory.iosBindings.filter(
+      (binding) => binding.name === target.deviceName
+    );
+    return owners.length > 0 && !owners.some((binding) => binding.own)
+      ? [...new Set(owners.map((binding) => binding.projectRoot))]
+      : null;
+  }
+  const booted = deviceInventory.booted.filter((simulator) => simulator.name === target.deviceName);
+  const roots = new Set<string>();
+  for (const { udid } of booted) {
+    const owners = deviceInventory.iosBindings.filter((binding) => binding.udid === udid);
+    if (owners.length === 0 || owners.some((binding) => binding.own)) {
+      return null;
+    }
+    owners.forEach((binding) => roots.add(binding.projectRoot));
+  }
+  return roots.size > 0 ? [...roots] : null;
 }
 
 /** Whether a device tool whose answer can place a target in this scope gave no answer. */
@@ -109,6 +175,10 @@ function classifyTarget(
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory
 ): TargetClassification {
+  const projectRoots = otherWorktreesOf(target, deviceInventory);
+  if (projectRoots != null) {
+    return { group: 'other-worktree', projectRoots };
+  }
   const { platform } = platformOfTarget(target, deviceInventory);
   if (
     targetSelection.platform != null &&
@@ -145,7 +215,8 @@ function classifyTarget(
  * one target nothing on this machine claims is its app, provided the scope's device tools answered
  * or this host cannot run them. A failed inspection cannot establish absence, so an Android-shaped target stays undetermined while `adb` gave no answer. Two such targets stay
  * undetermined: nothing says which one is the session's. An Android session needs no rule,
- * because its device name shape places it.
+ * because its device name shape places it. A target on another worktree's simulator is skipped in
+ * every scope, so it never takes that slot.
  */
 export function classifyTargets(
   targets: CdpTarget[],
@@ -173,6 +244,9 @@ export function classifyTargets(
       case 'undetermined':
         classifiedTargets.undetermined.push(target);
         break;
+      case 'other-worktree':
+        classifiedTargets.skipped.push({ target, classification });
+        break;
     }
   }
   const [only, ...more] = classifiedTargets.undetermined;
@@ -196,10 +270,13 @@ export function classifyTargets(
 /** Whether the device tools can change where these targets fall for this scope. */
 function toolsCanPlace(
   targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
-  targetSelection: TargetSelection
+  targetSelection: TargetSelection,
+  deviceInventory: DeviceInventory
 ): boolean {
-  // Unscoped reads still need platform evidence for their bundle checks.
+  // Unscoped reads still need platform evidence for their bundle checks. A binding's stored
+  // display name can be stale, so a foreign binding needs the current name-to-UDID mapping.
   return (
+    deviceInventory.iosBindings.some((binding) => !binding.own) ||
     (isCloudScope(targetSelection) && targets.length > 0) ||
     targets.some((target) => platformOfTarget(target, EMPTY_DEVICE_INVENTORY).platform == null)
   );
@@ -212,7 +289,7 @@ export async function refreshDeviceInventoryAsync(
   previous: DeviceInventory,
   timeoutMs?: number
 ): Promise<DeviceInventory> {
-  if (!toolsCanPlace(targets, targetSelection)) {
+  if (!toolsCanPlace(targets, targetSelection, previous)) {
     return previous;
   }
   const tools = await readDeviceInventoryAsync(timeoutMs);
@@ -224,12 +301,17 @@ export async function refreshDeviceInventoryAsync(
   };
 }
 
-/** The facts needed to place this list, read only when the device tools can place it. */
+/** Read bindings and ask the tools only when their answer can change placement. */
 export async function deviceInventoryForSelectionAsync(
   targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
-  targetSelection: TargetSelection
+  targetSelection: TargetSelection,
+  projectRoot: string | null
 ): Promise<DeviceInventory> {
-  return refreshDeviceInventoryAsync(targets, targetSelection, EMPTY_DEVICE_INVENTORY);
+  const iosBindings = projectRoot == null ? [] : liveIosBindings(projectRoot);
+  return refreshDeviceInventoryAsync(targets, targetSelection, {
+    ...EMPTY_DEVICE_INVENTORY,
+    iosBindings,
+  });
 }
 
 /**
@@ -255,6 +337,7 @@ export async function readDeviceInventoryAsync(timeoutMs?: number): Promise<Devi
 
   const booted = simctl?.exitCode === 0 ? parseBootedSimulators(simctl.stdout) : null;
   return {
+    ...EMPTY_DEVICE_INVENTORY,
     booted: booted ?? [],
     bootedStatus:
       booted != null ? 'observed' : process.platform === 'darwin' ? 'unknown' : 'unsupported',

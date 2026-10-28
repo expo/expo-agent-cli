@@ -142,7 +142,7 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
       // Scoped when the caller named a native platform: `--require-app --platform android` used to
       // be satisfied by the iOS simulator attached to the same dev server (F51).
       targetSelection,
-      deviceInventory: await deviceInventoryForSelectionAsync(targets, targetSelection),
+      deviceInventory: await deviceInventoryForSelectionAsync(targets, targetSelection, null),
       inventoryTargets: targets,
     });
     appsConnected = attached.appsConnected;

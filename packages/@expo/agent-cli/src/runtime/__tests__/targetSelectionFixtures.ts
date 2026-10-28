@@ -5,6 +5,7 @@ export function makeDeviceInventory(overrides: Partial<DeviceInventory> = {}): D
     booted: [],
     bootedStatus: 'observed',
     androidModels: [],
+    iosBindings: [],
     ...overrides,
   };
 }
