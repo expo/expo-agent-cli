@@ -372,6 +372,38 @@ it.each(['pid', 'url'] as const)(
   }
 );
 
+it.skipIf(process.platform !== 'darwin')(
+  'a missing-device suggestion leads to state-aware recovery beside a running server',
+  async () => {
+    const f = await fixture();
+    const { binDir } = await installStubXcrunAsync(f.root);
+    const env = { ...f.env, ...pathEnvVars(binDir), AGENT_CLI_NO_DEVICE: '0' };
+    try {
+      f.release();
+      const started = await f.start().result;
+      expect(started.exitCode, started.all).toBe(0);
+      const refused = await executeAgentCliAsync(f.root, ['navigate', '/', '--ios', '--json'], {
+        reject: false,
+        env,
+      });
+      expect(JSON.parse(refused.stdout).error.code).toBe('NO_BOUND_DEVICE');
+      const command = JSON.parse(refused.stdout).error.suggestedCommand;
+      expect(command).toBe('npx @expo/agent-cli status');
+      const recovery = await executeAgentCliAsync(
+        f.root,
+        [...command.split(' ').slice(2), '--json'],
+        { env }
+      );
+      expect(JSON.parse(recovery.stdout).next.command).toMatch(
+        /^npx @expo\/agent-cli dev:stop && npx @expo\/agent-cli dev --ios /
+      );
+      expect(await readDevLockAsync(f.root)).toMatchObject({ pid: JSON.parse(started.stdout).pid });
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+
 it('stopping and starting again selects a new log without changing the previous run', async () => {
   const f = await fixture();
   try {

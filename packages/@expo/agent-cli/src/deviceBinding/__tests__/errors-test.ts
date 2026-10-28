@@ -75,9 +75,9 @@ describe('exit codes per reason', () => {
     expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
   });
 
-  it('names the dev command as the How line of a read refusal', () => {
+  it('names the binding command but suggests checking the server state before recovery', () => {
     const error = noBoundDeviceError('none', { platform: 'android' });
     expect(error.message).toContain('npx @expo/agent-cli dev --android --detach --wait-ready');
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --android --detach --wait-ready');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli status');
   });
 });

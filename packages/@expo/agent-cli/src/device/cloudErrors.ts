@@ -58,7 +58,7 @@ export function cloudSessionUnavailableError(
       `How: if this project's dev server is running, stop it with "${PROGRAM_PREFIX} dev:stop" first (existing sessions are preserved). Start the app with "${start}". Once it opens, run this command again in another terminal. This starts a tunnelled dev server and selects Expo Go or a development build for the project. End the dev server and session with "${PROGRAM_PREFIX} dev:stop --eas" when done. To see this project's sessions, "${cloudSessionListCommand()}" lists them with their ids. To open the link elsewhere, "${PROGRAM_PREFIX} navigate <route> --print-url" prints the URL.`,
     ].join('\n')
   );
-  error.suggestedCommand = start;
+  error.suggestedCommand = `${PROGRAM_PREFIX} status`;
   return error;
 }
 
@@ -140,7 +140,7 @@ export function otherPlatformSessionError(
   }: { wanted: CloudPlatform; sessionId: string; devServerRunning: boolean }
 ): CommandError {
   const stop = `"${PROGRAM_PREFIX} dev:stop --eas" ends session ${sessionId} and the dev server; then "${PROGRAM_PREFIX} dev --${wanted} --eas --detach" starts ${platformLabel(wanted)} session.`;
-  // Beside a running dev server `dev --eas --detach` only reports the server and opens nothing.
+  // Beside a running dev server another detached start is refused; navigate uses the session.
   const reuse = platform
     ? devServerRunning
       ? `"${PROGRAM_PREFIX} navigate / --eas --${platform}"`

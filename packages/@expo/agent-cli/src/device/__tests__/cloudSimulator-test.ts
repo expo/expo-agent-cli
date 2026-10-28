@@ -1146,7 +1146,7 @@ describe(cloudSessionUnavailableError, () => {
     expect(error.message).toContain('npx @expo/agent-cli dev --ios --eas');
     expect(error.message).toContain('selects Expo Go or a development build');
     expect(error.message).toContain('npx @expo/agent-cli dev:stop --eas');
-    expect(error.suggestedCommand).toBe('npx @expo/agent-cli dev --ios --eas');
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli status');
   });
 
   // The probe treats a pending session as live, so the advice lists the pending statuses too.

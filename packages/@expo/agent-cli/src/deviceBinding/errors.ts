@@ -67,7 +67,8 @@ export function noBoundDeviceError(
     `Why: every verb drives the device "${PROGRAM_PREFIX} dev" bound to this worktree, and never the first booted one, so two worktrees never share a device.`,
     `How: run "${command}", then this command again. If this project's server is running, stop it first with "${PROGRAM_PREFIX} dev:stop".`,
   ]);
-  error.suggestedCommand = command;
+  // This synchronous error knows the binding, not whether a server is still starting.
+  error.suggestedCommand = `${PROGRAM_PREFIX} status`;
   return error;
 }
 
@@ -211,7 +212,7 @@ export function cloudBindingError(
   );
   error.exitCode = EXIT_OUTCOME_FAILED;
   error.data = { reason: 'gone' };
-  error.suggestedCommand = command;
+  error.suggestedCommand = `${PROGRAM_PREFIX} status`;
   return error;
 }
 
