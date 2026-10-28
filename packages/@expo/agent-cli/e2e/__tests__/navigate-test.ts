@@ -485,6 +485,32 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
     );
   });
 
+  // The usual dynamic config spreads `app.json` and sets its own scheme, so the static one may not
+  // be the scheme the app registered.
+  it('says the static scheme stands in for a config that cannot be evaluated', async () => {
+    const projectRoot = await setupFixtureAsync('dev-client-app');
+    const appJsonPath = path.join(projectRoot, 'app.json');
+    const appJson = JSON.parse(await fs.promises.readFile(appJsonPath, 'utf8'));
+    appJson.expo.scheme = 'marmelade-static';
+    await fs.promises.writeFile(appJsonPath, JSON.stringify(appJson));
+    await fs.promises.writeFile(
+      path.join(projectRoot, 'app.config.js'),
+      "module.exports = () => { throw new Error('Cannot resolve app config'); };\n"
+    );
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      [...PRINT_URL, '--app-id', 'dev.marmelade.app'],
+      { env: stubExpoEnv(projectRoot) }
+    );
+    const report: NavigateReport = JSON.parse(result.stdout);
+
+    expect(report.url).toBe('marmelade-static://profile/42');
+    expect(report.resolution).toBe(
+      'app.config.js could not be evaluated (Cannot resolve app config), so read the "scheme" field from app.json'
+    );
+  });
+
   it('evaluates nothing when --scheme names the scheme', async () => {
     const projectRoot = await setupDynamicAsync();
 

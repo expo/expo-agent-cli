@@ -251,7 +251,26 @@ export type ResolveDeepLinkUrlResult =
  * Precedence: a full URL is only percent-encoded, then an explicit scheme, then the Expo Go
  * shape, then the config scheme, then `exp+<slug>://`.
  */
-export function resolveDeepLinkUrl({
+export function resolveDeepLinkUrl(params: ResolveDeepLinkUrlParams): ResolveDeepLinkUrlResult {
+  const result = resolveUrl(params);
+  const failure = evaluationFailure(params.config);
+  // The connect URL takes its scheme from the static read too, so a URL that did not need the
+  // scheme still says the config it rests on could not be evaluated.
+  if (
+    !result.ok ||
+    failure == null ||
+    nonEmptyString(params.schemeOverride) != null ||
+    result.resolution.startsWith(failure)
+  ) {
+    return result;
+  }
+  return {
+    ...result,
+    resolution: `${result.resolution}; ${failure}, so the static config was read`,
+  };
+}
+
+function resolveUrl({
   route,
   schemeOverride,
   config,
@@ -360,24 +379,21 @@ function resolveConfigUrl(
   routePath: string,
   config: ResolveDeepLinkUrlParams['config']
 ): ResolveDeepLinkUrlResult {
+  const failure = evaluationFailure(config);
   if (config.scheme != null) {
     return {
       ok: true,
       url: `${config.scheme}://${routePath}`,
-      resolution: `read the "scheme" field from ${config.configFile}`,
+      resolution: `${failure ? `${failure}, so ` : ''}read the "scheme" field from ${config.configFile}`,
       host: null,
     };
   }
 
   if (config.slug != null) {
-    const unread =
-      config.evaluationError != null
-        ? `${config.dynamicConfigFile} could not be evaluated (${config.evaluationError}) and `
-        : '';
     return {
       ok: true,
       url: `exp+${config.slug}://${routePath}`,
-      resolution: `${unread}no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "${config.slug}"`,
+      resolution: `${failure ? `${failure} and ` : ''}no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "${config.slug}"`,
       host: null,
     };
   }
@@ -394,6 +410,12 @@ function resolveConfigUrl(
     // hole in it: `--scheme <your-app-scheme>` is not something an agent can run.
     suggestedCommand: `${PROGRAM_PREFIX} inspect:config-plugins --json`,
   };
+}
+
+function evaluationFailure(config: ProjectSchemeConfig): string | null {
+  return config.evaluationError != null
+    ? `${config.dynamicConfigFile} could not be evaluated (${config.evaluationError})`
+    : null;
 }
 
 /** The `Why:` of a project with no scheme, no slug and no package name, by what was read. */

@@ -553,6 +553,41 @@ describe(resolveDeepLinkUrl, () => {
     });
   });
 
+  it.each([
+    {
+      name: 'a static scheme',
+      isExpoGo: false,
+      url: 'marmelade://profile/42',
+      resolution:
+        'app.config.ts could not be evaluated (boom), so read the "scheme" field from app.json',
+    },
+    {
+      name: 'an Expo Go URL, whose connect URL still uses the static scheme',
+      isExpoGo: true,
+      url: 'exp://127.0.0.1:8081/--/profile/42',
+      resolution:
+        'target app is Expo Go, so the exp:// shape was used with dev server host 127.0.0.1:8081; app.config.ts could not be evaluated (boom), so the static config was read',
+    },
+  ])(
+    `should say when $name rests on a config it could not evaluate`,
+    ({ isExpoGo, url, resolution }) => {
+      const result = resolveDeepLinkUrl({
+        route: '/profile/42',
+        config: config({
+          scheme: 'marmelade',
+          slug: 'marmelade',
+          configFile: 'app.json',
+          dynamicConfigFile: 'app.config.ts',
+          evaluationError: 'boom',
+        }),
+        isExpoGo,
+        devServerUrl: 'http://127.0.0.1:8081',
+      });
+
+      expect(expectUrl(result)).toMatchObject({ url, resolution });
+    }
+  );
+
   it(`should name the evaluation failure when nothing is resolvable`, () => {
     const result = resolveDeepLinkUrl({
       route: '/profile/42',
