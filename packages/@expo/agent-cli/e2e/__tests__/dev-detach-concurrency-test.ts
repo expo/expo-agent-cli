@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import { stopOwnedDevServerAsync } from '../../src/smoke/cleanupDevServer';
+import http from 'node:http';
 import net from 'node:net';
 import path from 'node:path';
 
@@ -9,6 +10,7 @@ import {
   executeAgentCliAsync,
   expoHomeOf,
   fixturesDir,
+  holdDevLockAsync,
   killAsync,
   installStubBinAsync,
   pathEnvVars,
@@ -325,6 +327,50 @@ it('releases ownership after a normal startup failure so another attempt can suc
     await f.cleanup();
   }
 });
+
+it.each(['pid', 'url'] as const)(
+  'refuses success when the published %s changes during the final readiness probe',
+  async (changed) => {
+    const f = await fixture();
+    let release: (() => void) | undefined;
+    const info = {
+      pid: 0,
+      url: '',
+      port: 0,
+      projectRoot: f.root,
+      startedAt: new Date(0).toISOString(),
+    };
+    let probes = 0;
+    const server = http.createServer((request, response) => {
+      if (request.url !== '/status') return void response.writeHead(404).end();
+      if (++probes === 2) {
+        if (changed === 'pid') info.pid = process.pid;
+        else info.url += '/replacement';
+      }
+      response.writeHead(200, { 'X-React-Native-Project-Root': encodeURI(f.root) });
+      response.end('packager-status:running');
+    });
+    try {
+      const started = f.start();
+      expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
+      info.pid = Number(f.marks('blocked')[0]!.slice('blocked-'.length));
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      info.port = (server.address() as net.AddressInfo).port;
+      info.url = `http://127.0.0.1:${info.port}`;
+      release = await holdDevLockAsync(f.root, info);
+      const result = await started.result;
+      expect(probes).toBe(2);
+      expect(result.exitCode, result.all).toBe(20);
+      expect(JSON.parse(result.stdout).error.code).toBe('DEV_DETACH_OWNER_CHANGED');
+    } finally {
+      // Never let cleanup signal the test runner through its replacement socket.
+      release?.();
+      server.closeAllConnections();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await f.cleanup();
+    }
+  }
+);
 
 it('stopping and starting again selects a new log without changing the previous run', async () => {
   const f = await fixture();
