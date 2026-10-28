@@ -192,6 +192,8 @@ function readCalls(recordPath: string): string[][] {
  * archive, e.g. one whose `app.fingerprint` is not the JSON `expo-constants` writes. `STUB_ADB_NO_DD=1` fails `stat`, the way a device
  * without the tools does, and `pull` then copies the fixture to the path asked for.
  * `STUB_ADB_HANG_READ=<file>` makes `exec-out` write its pid there and never exit.
+ * `STUB_ADB_REVERSE={"<serial>": <port>}` makes `-s <serial> reverse --list` list that port, in the
+ * `<serial> tcp:<port> tcp:<port>` shape of eas-cli's androidLocalEgress test fixture.
  *
  * Installed under a fake SDK: `ANDROID_HOME` beats `PATH`, so a runner with a real SDK still
  * reaches this stub (@ref src/device/adb §resolveAdb). The returned `env` names it, and the
@@ -227,6 +229,11 @@ export async function installStubAdbAsync(
       `if (args[2] === 'get-state') {`,
       `  if (!serials.includes(args[1])) { process.stderr.write("error: device '" + args[1] + "' not found\\n"); process.exit(1); }`,
       `  process.stdout.write('device\\n');`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args[2] === 'reverse' && args[3] === '--list') {`,
+      `  const port = JSON.parse(process.env.STUB_ADB_REVERSE || '{}')[args[1]];`,
+      `  if (port) process.stdout.write(args[1] + ' tcp:' + port + ' tcp:' + port + '\\n');`,
       `  process.exit(0);`,
       `}`,
       `if (args.includes('getprop')) { process.stdout.write('1\\n'); process.exit(0); }`,

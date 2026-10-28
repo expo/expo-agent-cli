@@ -54,6 +54,22 @@ it('does not ask simctl for an --android scope because another worktree holds an
   expect(vi.mocked(spawnCaptureAsync).mock.calls.filter(([bin]) => bin === 'xcrun')).toEqual([]);
 });
 
+it('reads an Android session on a host with no adb and no simctl', async () => {
+  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  vi.mocked(spawnCaptureAsync).mockImplementation(async (command) => {
+    if (command === 'xcrun') throw new Error('xcrun unavailable');
+    return { stdout: '', stderr: '', exitCode: null, spawnError: new Error('spawn adb ENOENT') };
+  });
+  const session = makeTarget({ deviceName: 'sdk_gphone64_x86_64 - 15 - API 35' });
+  const { classifiedTargets, deviceInventory } = await resolveTargetSelectionAsync({
+    projectRoot: null,
+    flags: { platform: 'android', eas: true },
+    targets: [session],
+  });
+  expect(deviceInventory.androidDevices).toEqual([]);
+  expect(classifiedTargets.read).toEqual([session]);
+});
+
 it.each(['linux', 'win32'])(
   'allows cloud attribution without local iOS support on %s',
   async (platform) => {

@@ -275,6 +275,19 @@ export interface AndroidDeviceLine {
 }
 
 /**
+ * The forwards in `adb -s <serial> reverse --list`, one per line: `<transport> <device side> <host
+ * side>`, for example `host-14 tcp:8197 tcp:8197` [observed — emulator API 29, 2026-10-29]. The
+ * first column is not the serial, so only columns 2 and 3 are read.
+ */
+export function parseReverseList(stdout: string): { device: string; host: string }[] {
+  return stdout
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter((columns) => columns.length >= 3)
+    .map((columns) => ({ device: columns[1]!, host: columns[2]! }));
+}
+
+/**
  * Read the ready devices out of `adb devices -l`.
  *
  * The long listing rather than the short one, because the `model:` field is what lets a debugger

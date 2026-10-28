@@ -478,3 +478,55 @@ describe(`a dev server whose only app runs on another worktree's simulator`, () 
     }
   );
 });
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
+// N2-33: a worktree bound to an EAS Simulator iOS session, and one app on a local simulator with the
+// session app's app id, loading from the same port. It is not the session's app, so the read refuses
+// and names both, and no scope line says the session was read.
+describe('a worktree bound to an EAS Simulator session, with only a local app connected', () => {
+  let stub: StubDevServer;
+  let cloudBinding: string;
+  beforeAll(async () => {
+    await installStubXcrunAsync(projectRoot, null);
+    const root = canonicalizeExistingPath(projectRoot);
+    const bindings = path.join(expoHomeOf(projectRoot), 'agent-cli', 'bindings');
+    await fs.promises.rm(path.join(bindings, `${digestOf(root)}-ios-local-ios.json`), {
+      force: true,
+    });
+    cloudBinding = path.join(bindings, `${digestOf(root)}-ios-cloud.json`);
+    await fs.promises.writeFile(
+      cloudBinding,
+      JSON.stringify({
+        version: 1,
+        device: { backend: 'cloud', platform: 'ios', id: '01a160c1', origin: 'started' },
+        projectRoot: root,
+        boundAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      })
+    );
+    stub = await startStubDevServerAsync({
+      targets: [{ ...EXPO_GO_TARGET, appId: 'dev.vonovak.cyclable' }],
+      inspectorEvaluate: () => undefined,
+    });
+  });
+  afterAll(async () => {
+    await stub.close();
+    fs.rmSync(cloudBinding, { force: true });
+  });
+
+  it('runtime:tree refuses with NO_APP_CONNECTED and does not name the session as read', async () => {
+    // Devices on, so the read reads the binding; the stub `xcrun` is the only device tool.
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      ['runtime:tree', '--dev-server-url', stub.url, '--json'],
+      { reject: false, env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' } }
+    );
+
+    expect(result.exitCode).toBe(1);
+    const { error } = JSON.parse(result.stdout);
+    expect(error.code).toBe('NO_APP_CONNECTED');
+    expect(error.message).toContain('"iPhone 17 Pro"');
+    expect(error.message).toContain('the EAS Simulator session 01a160c1');
+    expect(result.stderr).not.toContain('Scoped to ios');
+  });
+});

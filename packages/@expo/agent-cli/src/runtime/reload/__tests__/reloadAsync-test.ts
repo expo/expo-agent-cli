@@ -21,6 +21,7 @@ import {
   reloadOverDevServerAsync,
   type ReloadResultJson,
 } from '../reloadAsync';
+import { makeTargetSelection } from '../../__tests__/targetSelectionFixtures';
 import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
@@ -45,6 +46,7 @@ const NPX_FILES = {
 const EXPO_GO_TARGET = {
   id: 'device-1',
   appId: 'host.exp.Exponent',
+  deviceName: 'iPhone 17',
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=device&page=1',
 };
 
@@ -390,6 +392,7 @@ describe(reloadAsync, () => {
       'route',
       'routeCheck',
       'skippedApps',
+      'targetSelection',
       'url',
       'verifiedBy',
       'waitedMs',
@@ -809,6 +812,7 @@ describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => 
   };
 
   it(`asks the dev server for the platform the connected app is on`, async () => {
+    vol.unlinkSync(bindingPathFor(projectRoot, 'ios', 'local-ios'));
     const platformsAsked: string[] = [];
     const server = mockDevServer([ANDROID_TARGET]);
     // Record the `expo-platform` header of every manifest request the check makes.
@@ -865,6 +869,7 @@ describe(explainReloadFailure, () => {
       bundlesAfterReload: { observed: null, count: 0, line: null, reason: null },
       bundlePlatforms: ['ios'],
       bundlePlatformSource: 'flag',
+      targetSelection: makeTargetSelection({ platform: { value: 'ios', by: 'flag' } }),
       skippedApps: [],
       route: null,
       routeCheck: {

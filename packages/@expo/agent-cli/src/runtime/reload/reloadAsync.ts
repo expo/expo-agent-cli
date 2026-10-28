@@ -259,6 +259,8 @@ export interface ReloadResultJson {
    * run that had never asked which app it was reloading read exactly like an answer.
    */
   bundlePlatformSource: BundlePlatformSource;
+  /** Which apps this run read: the flags, or the device bound to this worktree (llp/0035 §Readers). */
+  targetSelection: RuntimeConnection['targetSelection'];
   /** Apps the reload does not count or check, such as another worktree's (llp/0005 §Target owner). */
   skippedApps: SkippedApp[];
   /** Route the app was sent to afterwards, or null when none was asked for. */
@@ -557,9 +559,8 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
           targetSelection,
           deviceInventory,
           bundleMark,
-          // The flag the caller typed, never the resolved default: `null` here means "nobody said",
-          // and `waitForNewBundleAsync` counts every platform for it (F126).
-          platform: options.platform ?? null,
+          // The scope's platform, never the resolved default: null counts every platform (F126).
+          platform: devServer.targetSelection.platform?.value ?? null,
         })
       : { appsConnected: observedApps, freshTargets: 0, timedOut: false, waitedMs: 0 };
 
@@ -694,6 +695,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     bundlePlatforms: bundles.map((entry) => entry.platform),
     bundlePlatformSource,
     skippedApps: skippedAppsOf(devServer.classifiedTargets),
+    targetSelection: devServer.targetSelection,
     route,
     routeCheck,
     url: landing?.url ?? cloudUrl,

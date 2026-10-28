@@ -11,19 +11,29 @@ import { reachTheAppLadder } from '../scopeRefusal';
 import { makeDeviceInventory } from './targetSelectionFixtures';
 
 vi.mock('../../log');
-// `xcrun simctl list devices booted -j` answers with these; every other tool fails to run.
+// `xcrun simctl list devices` answers with these booted simulators, and `adb get-state` with an
+// emulator that is up; every other tool fails to run.
 let bootedSimulators: { udid: string; name: string }[] = [];
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 beforeEach(() => {
   bootedSimulators = [];
-  vi.mocked(spawnCaptureAsync).mockImplementation(async (bin: string) =>
+  vi.mocked(spawnCaptureAsync).mockImplementation(async (bin: string, args: string[] = []) =>
     bin === 'xcrun'
       ? {
-          stdout: JSON.stringify({ devices: { 'iOS-26-0': bootedSimulators } }),
+          stdout: JSON.stringify({
+            devices: {
+              'com.apple.CoreSimulator.SimRuntime.iOS-26-0': bootedSimulators.map((simulator) => ({
+                ...simulator,
+                state: 'Booted',
+              })),
+            },
+          }),
           stderr: '',
           exitCode: 0,
         }
-      : { stdout: '', stderr: '', exitCode: 1 }
+      : args.includes('get-state')
+        ? { stdout: 'device\n', stderr: '', exitCode: 0 }
+        : { stdout: '', stderr: '', exitCode: 1 }
   );
 });
 

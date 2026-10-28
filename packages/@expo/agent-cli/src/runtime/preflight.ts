@@ -30,6 +30,7 @@
 // empty afterwards is reported as inconclusive rather than as a call to fix.
 
 import { resolveTargetSelectionAsync } from './resolveTargetSelection';
+import { liveCloudBindings } from '../deviceBinding/cloud';
 import * as Log from '../log';
 import type { NavigatePlatform } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
@@ -48,6 +49,7 @@ import { emptyScopeError, noAppConnectedError, reachTheAppLadder, withData } fro
 import {
   skippedAppsOf,
   describeSkippedApps,
+  describeSelectedDevice,
   EMPTY_DEVICE_INVENTORY,
   type DeviceInventory,
   type ClassifiedTargets,
@@ -100,8 +102,6 @@ export interface RuntimeConnection {
   targetSelection: TargetSelection;
   /** Known devices and worktree bindings used to classify {@link targets} for {@link targetSelection}. */
   deviceInventory: DeviceInventory;
-  /** The platform the caller named, or undefined. */
-  platform?: NavigatePlatform;
 }
 
 /**
@@ -218,6 +218,7 @@ export async function preflightRuntimeAsync(
       deviceInventory: reachable
         ? knownDeviceInventory
         : (knownDeviceInventory ?? EMPTY_DEVICE_INVENTORY),
+      devServerUrl: url,
     }
   );
   const base: RuntimeConnection = {
@@ -230,7 +231,6 @@ export async function preflightRuntimeAsync(
     classifiedTargets,
     targetSelection,
     deviceInventory,
-    platform,
   };
 
   if (!reachable) {
@@ -255,7 +255,26 @@ export async function preflightRuntimeAsync(
   // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
   // seventh and eighth calls a success.
   if (need === 'debugger-target' && classifiedTargets.read.length === 0) {
-    throw emptyScopeError(url, targetSelection, classifiedTargets);
+    const error = emptyScopeError(url, targetSelection, classifiedTargets, deviceInventory);
+    // A local binding outranks a live session of this worktree; only --eas reads the session.
+    if (
+      targetSelection.bound &&
+      targetSelection.device?.backend !== 'cloud' &&
+      context.projectRoot != null &&
+      liveCloudBindings(context.projectRoot).length > 0
+    ) {
+      error.message += ` This worktree also has a live EAS Simulator session. The local binding comes first, so only a command that takes --eas reaches the session.`;
+    }
+    throw error;
+  }
+  if (
+    targetSelection.bound &&
+    targetSelection.device != null &&
+    classifiedTargets.read.length > 0
+  ) {
+    Log.progress(
+      `Scoped to ${targetSelection.platform?.value}: ${describeSelectedDevice(targetSelection.device)}, the device bound to this worktree.`
+    );
   }
   const skipped = skippedAppsOf(classifiedTargets);
   if (skipped.length > 0) {

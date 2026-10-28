@@ -66,6 +66,7 @@ export type BundlePlatformSource =
   /** The caller named it. */
   | 'flag'
   | 'device'
+  | 'bound-device'
   /** It is the platform (or platforms) of the apps connected to the dev server. */
   | 'connected-app'
   /** Nothing named one and no connected app could be placed, so {@link DEFAULT_BUNDLE_CHECK_PLATFORM} stands. */
@@ -74,14 +75,15 @@ export type BundlePlatformSource =
 /**
  * Which platforms to build the entry bundle for.
  *
- * A named platform is used as named, always: the caller was specific. With none, the connected apps
- * decide — one platform is that platform, and **two are both**, because a project with a
- * `.android.ts` sibling of a broken file compiles for one and not the other, and answering for one
- * of two running apps is how a red screen went unreported (F53). With nothing connected, or nothing
- * that can be placed, the fixed default stands and the caller is told that it is a default.
+ * The scope's platform is used as named, always: the caller was specific, or the device bound to
+ * this worktree was (llp/0035 §Readers). With none, the connected apps decide — one platform is
+ * that platform, and **two are both**, because a project with a `.android.ts` sibling of a broken
+ * file compiles for one and not the other, and answering for one of two running apps is how a red
+ * screen went unreported (F53). With nothing connected, or nothing that can be placed, the fixed
+ * default stands and the caller is told that it is a default.
  *
- * @param named the platform the caller named, or null when they named none.
- * @param targets the dev server's debugger targets, as `/json/list` reported them.
+ * @param scope the run's scope.
+ * @param targets the debugger targets the run may read.
  */
 export async function resolveBundleCheckPlatformsAsync(
   targetSelection: TargetSelection,

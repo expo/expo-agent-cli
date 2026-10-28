@@ -29,6 +29,15 @@ interface SpawnAnswer {
   exitCode?: number | null;
 }
 
+/** The app on the simulator bound to this worktree: the scope reads it by that simulator's name. */
+const CONNECTED = { id: '1', appId: 'host.exp.Exponent', deviceName: 'iPhone 17' };
+
+/** The preflight's device facts on a run bound to an emulator: `simctl`, then `adb devices -l`. */
+const ANDROID_INVENTORY: SpawnAnswer[] = [
+  { exitCode: 1 },
+  { stdout: 'List of devices attached\nemulator-5554\tdevice model:sdk_gphone64_arm64\n' },
+];
+
 function mockSpawnQueue(answers: SpawnAnswer[]) {
   let call = 0;
   vi.mocked(spawn).mockImplementation((() => {
@@ -98,7 +107,7 @@ afterEach(() => {
 
 describe(runtimeStopAsync, () => {
   it(`should terminate the connected app on the booted simulator`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
+    mockDevServer([CONNECTED]);
     mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await expect(runtimeStopAsync(projectRoot, options())).resolves.toBe(0);
@@ -116,7 +125,7 @@ describe(runtimeStopAsync, () => {
   });
 
   it(`should print a stable set of top-level keys with --json`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
+    mockDevServer([CONNECTED]);
     mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await runtimeStopAsync(projectRoot, options());
@@ -143,7 +152,7 @@ describe(runtimeStopAsync, () => {
   // something else is. Each alone is ordinary; the conjunction is a typo, and the old command
   // exited 0 with "The app was not running, so this is what starts it" while the app kept running.
   it(`should exit 20 when --app-id names an app that is not the one connected`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
+    mockDevServer([CONNECTED]);
     mockSpawnQueue([
       { stdout: BOOTED_SIMULATOR },
       { exitCode: 4, stderr: 'found nothing to terminate' },
@@ -164,7 +173,7 @@ describe(runtimeStopAsync, () => {
   });
 
   it(`should name the corrected command in the follow-ups of a mismatch`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
+    mockDevServer([CONNECTED]);
     mockSpawnQueue([
       { stdout: BOOTED_SIMULATOR },
       { exitCode: 4, stderr: 'found nothing to terminate' },
@@ -183,7 +192,7 @@ describe(runtimeStopAsync, () => {
   // The id was right and the app was running under it: nothing is suspicious about a connected app
   // with another id, because a device can run more than one.
   it(`should stay at 0 when the app --app-id named was running`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
+    mockDevServer([CONNECTED]);
     mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await expect(
@@ -208,7 +217,7 @@ describe(runtimeStopAsync, () => {
   });
 
   it(`should stop the id --app-id names`, async () => {
-    mockDevServer([{ id: '1', appId: 'host.exp.Exponent' }]);
+    mockDevServer([CONNECTED]);
     mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await runtimeStopAsync(projectRoot, options({ appId: 'com.example.other' }));
@@ -282,13 +291,14 @@ describe(runtimeStopAsync, () => {
     mockDevServer([]);
     mockSpawnQueue([
       { stdout: 'device\n' }, // adb get-state, the binding's check
+      ...ANDROID_INVENTORY,
       // The `pidof` F102 added, before the stop, because after it the answer is the same either way.
       { stdout: '4021\n' },
       { stdout: '' },
     ]);
 
     await expect(runtimeStopAsync(projectRoot, options({ platform: 'android' }))).resolves.toBe(0);
-    expect(spawnedArgv(2)).toEqual([
+    expect(spawnedArgv(4)).toEqual([
       'adb',
       '-s',
       'emulator-5554',
@@ -322,7 +332,12 @@ describe(runtimeStopAsync, () => {
       },
     ]);
     seedAndroidBinding(projectRoot, 'emulator-5554');
-    mockSpawnQueue([{ stdout: 'device\n' }, { stdout: '3933\n' }, { stdout: '' }]);
+    mockSpawnQueue([
+      { stdout: 'device\n' },
+      ...ANDROID_INVENTORY,
+      { stdout: '3933\n' },
+      { stdout: '' },
+    ]);
 
     await expect(runtimeStopAsync(projectRoot, options({ platform: 'android' }))).resolves.toBe(0);
 
@@ -332,7 +347,7 @@ describe(runtimeStopAsync, () => {
     // The list a reader of an `--android` run needs is the one on the device the run acted on: the
     // iOS id belongs to another device and stopping it here would have been the defect.
     expect(report.connectedAppIds).toEqual(['host.exp.exponent']);
-    expect(spawnedArgv(2)).toContain(`'host.exp.exponent'`);
+    expect(spawnedArgv(4)).toContain(`'host.exp.exponent'`);
   });
 
   it(`should offer navigate as the way back`, async () => {

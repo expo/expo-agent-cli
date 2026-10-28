@@ -339,3 +339,49 @@ describe('runtime:eval and the worktrees that bound the booted simulators', () =
     }
   });
 });
+
+it('runtime:reload selects its bound cloud platform without a platform flag', async () => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+  await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
+  await fs.promises.rm(await bindingFixture(root, BOOTED_SIMULATOR.udid));
+  await writeCloudBindingAsync(expoHomeOf(root), root, { id: '01a15bf1', platform: 'android' });
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: [
+      runtimeTarget('local', { deviceName: BOOTED_SIMULATOR.name, appId: 'host.exp.Exponent' }),
+      runtimeTarget('cloud', { deviceName: 'sdk_gphone64_arm64 - 15 - API 35' }),
+    ],
+    messagePeers: { android: 'role=android' },
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      [
+        'runtime:reload',
+        '--dev-server-url',
+        server.url,
+        '--method',
+        'dev-server',
+        '--timeout',
+        '2s',
+        '--json',
+        '--no-followups',
+      ],
+      { reject: false, env: { AGENT_CLI_NO_DEVICE: '0' } }
+    );
+    expect(result.exitCode, result.all).toBe(0);
+    expect(server.bundlePlatforms()).toEqual(['android']);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      reloaded: true,
+      bundlePlatforms: ['android'],
+      bundlePlatformSource: 'bound-device',
+      targetSelection: {
+        platform: { value: 'android', by: 'bound-device' },
+        device: { backend: 'cloud', deviceId: '01a15bf1' },
+        bound: true,
+      },
+    });
+  } finally {
+    await server.close();
+  }
+});

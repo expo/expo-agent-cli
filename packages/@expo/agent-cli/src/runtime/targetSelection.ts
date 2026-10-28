@@ -6,11 +6,12 @@
 // device tools report, and the run's scope, which is the caller's decision. `classifyTargets` is the
 // one function that combines them, so every runtime read places a target the same way.
 
+import type { BoundDevice } from '../deviceBinding/types';
 import { liveIosBindings, type LiveIosBinding } from '../deviceBinding/records';
 import { SIMCTL_TIMEOUT_MS } from '../device/simulators';
 import type { NavigateDevice, NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
-import { platformOfTarget } from './targetPlatform';
+import { onAndroidModel, platformOfTarget } from './targetPlatform';
 
 /** What this machine's device tools report. Facts only: no decision of this run is in here. */
 export interface DeviceInventory {
@@ -18,8 +19,16 @@ export interface DeviceInventory {
   booted: { name: string; udid: string }[];
   /** Unknown includes an unrequested or failed lookup; unsupported means a non-macOS host. */
   bootedStatus: 'unknown' | 'observed' | 'unsupported';
-  /** Hardware models of attached Android devices, as `adb devices -l` reports them; null when it did not exit 0. */
-  androidModels: string[] | null;
+  /**
+   * Attached Android devices with their models, as `adb devices -l` reports them; empty when this
+   * host has no `adb`, null when `adb` was not asked or failed.
+   */
+  androidDevices: { serial: string; model: string | null }[] | null;
+  /**
+   * The devices of one model that reverse this dev server's port, asked only when two attached
+   * devices share the bound device's model; null when not asked or `adb` failed.
+   */
+  androidReverse: { port: number; serials: string[] } | null;
   /**
    * Every worktree's live local iOS binding, read only for a run in a project. A run with no
    * project root (`dev:wait`, a `navigate` wait) has no "this worktree", so it reads none.
@@ -31,24 +40,51 @@ export interface DeviceInventory {
 export const EMPTY_DEVICE_INVENTORY: DeviceInventory = {
   booted: [],
   bootedStatus: 'unknown',
-  androidModels: null,
+  androidDevices: null,
+  androidReverse: null,
   iosBindings: [],
 };
 
-export type SelectedDevice = { backend: 'cloud'; deviceId: string | null };
-export function selectedDeviceOf(device: NavigateDevice): SelectedDevice | null {
-  return device.backend === 'cloud' ? { backend: 'cloud', deviceId: device.deviceId } : null;
-}
-
-/** The decision of which targets this run reads, made once by the caller. */
+/** The device a run reads, independent of how it was resolved. */
+export type SelectedDevice =
+  | { backend: 'local-ios'; name: string }
+  | { backend: 'local-android'; serial: string }
+  | { backend: 'cloud'; deviceId: string | null };
 export interface TargetSelection {
-  /** The platform this run reads, and what named it; null reads every platform. */
-  platform: { value: NavigatePlatform; by: 'flag' | 'device' } | null;
+  platform: { value: NavigatePlatform; by: 'flag' | 'bound-device' | 'device' } | null;
   device: SelectedDevice | null;
+  bound: boolean;
 }
+export const READ_EVERY_TARGET: TargetSelection = { platform: null, device: null, bound: false };
 
-/** A run that reads every target. */
-export const READ_EVERY_TARGET: TargetSelection = { platform: null, device: null };
+/** A resolved device as a scope value. */
+export function selectedDeviceOf(device: NavigateDevice | BoundDevice): SelectedDevice {
+  switch (device.backend) {
+    case 'local-ios':
+      if (!device.name)
+        throw new Error('A local iOS device has no simulator name to scope reads to');
+      return { backend: 'local-ios', name: device.name };
+    case 'local-android':
+      return {
+        backend: 'local-android',
+        serial: 'serial' in device ? device.serial : device.deviceId,
+      };
+    case 'cloud':
+      return { backend: 'cloud', deviceId: 'id' in device ? device.id : device.deviceId };
+  }
+}
+export function describeSelectedDevice(device: SelectedDevice): string {
+  switch (device.backend) {
+    case 'local-ios':
+      return `the iOS simulator "${device.name}"`;
+    case 'local-android':
+      return `the Android device ${device.serial}`;
+    case 'cloud':
+      return device.deviceId == null
+        ? 'an EAS Simulator session'
+        : `the EAS Simulator session ${device.deviceId}`;
+  }
+}
 
 /** Where one target falls for one scope. */
 export type TargetClassification =
@@ -134,15 +170,10 @@ export function scopeToolsUnknown(
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory
 ): boolean {
+  const platform = targetSelection.platform?.value;
   return (
-    targetSelection.platform?.value !== 'android' && deviceInventory.bootedStatus === 'unknown'
-  );
-}
-
-/** Whether the cloud placement rule decides this scope. An Android session's names place it. */
-function isCloudScope(targetSelection: TargetSelection): boolean {
-  return (
-    targetSelection.device?.backend === 'cloud' && targetSelection.platform?.value !== 'android'
+    (platform !== 'android' && deviceInventory.bootedStatus === 'unknown') ||
+    (platform !== 'ios' && deviceInventory.androidDevices == null)
   );
 }
 
@@ -154,8 +185,8 @@ function claimedLocally(
   const deviceName = typeof target.deviceName === 'string' ? target.deviceName : '';
   return (
     deviceInventory.booted.some((simulator) => simulator.name === deviceName) ||
-    (deviceInventory.androidModels ?? []).some(
-      (model) => model === deviceName || deviceName.startsWith(`${model} - `)
+    (deviceInventory.androidDevices ?? []).some(
+      (device) => device.model != null && onAndroidModel(deviceName, device.model)
     )
   );
 }
@@ -166,7 +197,7 @@ function androidUnproven(
   deviceInventory: DeviceInventory
 ): boolean {
   return (
-    deviceInventory.androidModels == null &&
+    deviceInventory.androidDevices == null &&
     platformOfTarget(target, deviceInventory).platform === 'android'
   );
 }
@@ -187,7 +218,15 @@ function classifyTarget(
     platform !== targetSelection.platform.value
   )
     return { group: 'other-platform', platform };
-  if (isCloudScope(targetSelection)) {
+  if (targetSelection.device?.backend === 'local-ios') {
+    return target.deviceName === targetSelection.device.name
+      ? { group: 'read' }
+      : { group: 'other-device' };
+  }
+  if (targetSelection.device?.backend === 'local-android') {
+    return placeOnAndroidDevice(target, targetSelection.device.serial, deviceInventory);
+  }
+  if (targetSelection.device?.backend === 'cloud') {
     // A cloud scope reads no target a local device tool claims. An app id says nothing about which
     // device runs it, so only an answered tool can show that no local device does.
     if (claimedLocally(target, deviceInventory)) return { group: 'other-device' };
@@ -204,6 +243,44 @@ function classifyTarget(
 }
 
 /**
+ * A React Native Android target names its device `<model> - <release> - API <n>`, so the model is
+ * all it says. It is on the bound device when no other attached device has that model, or when
+ * the bound device is the only one of that model that reverses this dev server's port.
+ */
+function placeOnAndroidDevice(
+  target: Pick<CdpTarget, 'deviceName'>,
+  serial: string,
+  deviceInventory: DeviceInventory
+): TargetClassification {
+  const devices = deviceInventory.androidDevices;
+  if (devices == null) return { group: 'undetermined' };
+  const bound = devices.find((device) => device.serial === serial);
+  if (bound == null) return { group: 'other-device' };
+  if (bound.model == null) return { group: 'undetermined' };
+  const { model } = bound;
+  if (!onAndroidModel(target.deviceName, model)) return { group: 'other-device' };
+  if (devices.filter((device) => device.model === model).length === 1) return { group: 'read' };
+  const reverse = deviceInventory.androidReverse?.serials;
+  return reverse?.length === 1 && reverse[0] === serial
+    ? { group: 'read' }
+    : { group: 'undetermined' };
+}
+
+/** The attached devices that share the bound device's model, when there are two or more. */
+export function androidModelTwins(
+  targetSelection: TargetSelection,
+  deviceInventory: DeviceInventory
+): { serial: string; model: string; twins: string[] } | null {
+  if (targetSelection.device?.backend !== 'local-android') return null;
+  const { serial } = targetSelection.device;
+  const model = deviceInventory.androidDevices?.find((device) => device.serial === serial)?.model;
+  const twins = (deviceInventory.androidDevices ?? [])
+    .filter((device) => model != null && device.model === model)
+    .map((device) => device.serial);
+  return model != null && twins.length > 1 ? { serial, model, twins } : null;
+}
+
+/**
  * Group a target list by where each target falls.
  *
  * `undetermined` is its own group rather than being folded into `read`, and that is the whole
@@ -212,12 +289,13 @@ function classifyTarget(
  * One rule needs the whole list, so it lives here and not in `platformOfTarget`: on an EAS
  * Simulator session, with or without a platform flag, exactly one undetermined target is the
  * session's app. Its device name is the cloud simulator's model, which no local tool reports, and a
- * development build's app id is often the same on both platforms. The run named the session, so the
- * one target nothing on this machine claims is its app, provided the scope's device tools answered
- * or this host cannot run them. A failed inspection cannot establish absence, so an Android-shaped target stays undetermined while `adb` gave no answer. Two such targets stay
- * undetermined: nothing says which one is the session's. An Android session needs no rule,
- * because its device name shape places it. A target on another worktree's simulator is skipped in
- * every scope, so it never takes that slot.
+ * development build's app id is often the same on both platforms. The run named the session, or this
+ * worktree bound it, so the one target nothing on this machine claims is its app, provided the
+ * scope's device tools answered or this host cannot run them. A failed inspection cannot establish
+ * absence, so an Android-shaped target stays undetermined while `adb` gave no answer. Two such
+ * targets stay undetermined: nothing says which one is the session's. An Android
+ * session needs no rule, because its device name shape places it. A target on another worktree's
+ * simulator is skipped in every scope, so it never takes that slot.
  */
 export function classifyTargets(
   targets: CdpTarget[],
@@ -239,20 +317,21 @@ export function classifyTargets(
       case 'other-platform':
         classifiedTargets.otherPlatform.push({ target, platform: classification.platform });
         break;
-      case 'other-device':
-        classifiedTargets.skipped.push({ target, classification });
-        break;
       case 'undetermined':
         classifiedTargets.undetermined.push(target);
         break;
       case 'other-worktree':
+      case 'other-device':
         classifiedTargets.skipped.push({ target, classification });
         break;
     }
   }
   const [only, ...more] = classifiedTargets.undetermined;
+  // An Android session's own target has React Native Android's name shape, so an unplaced one is
+  // never it.
   if (
-    isCloudScope(targetSelection) &&
+    targetSelection.device?.backend === 'cloud' &&
+    targetSelection.platform?.value !== 'android' &&
     !scopeToolsUnknown(targetSelection, deviceInventory) &&
     only &&
     !more.length &&
@@ -279,8 +358,15 @@ function toolsCanPlace(
   return (
     (targetSelection.platform?.value !== 'android' &&
       deviceInventory.iosBindings.some((binding) => !binding.own)) ||
-    (isCloudScope(targetSelection) && targets.length > 0) ||
-    targets.some((target) => platformOfTarget(target, EMPTY_DEVICE_INVENTORY).platform == null)
+    targetSelection.device?.backend === 'local-android' ||
+    (targetSelection.device?.backend === 'cloud' && targets.length > 0) ||
+    targets.some(
+      (target) =>
+        !(
+          targetSelection.device?.backend === 'local-ios' &&
+          target.deviceName === targetSelection.device.name
+        ) && platformOfTarget(target, EMPTY_DEVICE_INVENTORY).platform == null
+    )
   );
 }
 
@@ -299,7 +385,7 @@ export async function refreshDeviceInventoryAsync(
     ...previous,
     booted: tools.booted,
     bootedStatus: tools.bootedStatus,
-    androidModels: tools.androidModels,
+    androidDevices: tools.androidDevices,
   };
 }
 
@@ -308,15 +394,52 @@ export async function deviceInventoryForSelectionAsync(
   targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
   targetSelection: TargetSelection,
   projectRoot: string | null,
+  devServerUrl?: string | null,
   timeoutMs: number = SIMCTL_TIMEOUT_MS
 ): Promise<DeviceInventory> {
   const iosBindings = projectRoot == null ? [] : liveIosBindings(projectRoot);
-  return refreshDeviceInventoryAsync(
+  const inventory = await refreshDeviceInventoryAsync(
     targets,
     targetSelection,
     { ...EMPTY_DEVICE_INVENTORY, iosBindings },
     timeoutMs
   );
+  const twins = androidModelTwins(targetSelection, inventory);
+  const port = devServerUrl == null ? null : devServerPort(devServerUrl);
+  const androidReverse =
+    twins && port != null ? await readAndroidReverseAsync(twins.twins, port) : null;
+  return { ...inventory, androidReverse };
+}
+
+function devServerPort(devServerUrl: string): number | null {
+  try {
+    const url = new URL(devServerUrl);
+    return url.port ? Number(url.port) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which of `serials` reverse `port` to the host, once per run: `adb -s <serial> reverse --list` on
+ * each. Null when one of them could not be asked, because a missing answer cannot rule a device out.
+ */
+async function readAndroidReverseAsync(
+  serials: string[],
+  port: number
+): Promise<DeviceInventory['androidReverse']> {
+  const { parseReverseList, runAdbAsync } =
+    require('../device/adb') as typeof import('../device/adb');
+  const answers = await Promise.all(
+    serials.map((serial) => runAdbAsync(['-s', serial, 'reverse', '--list']).catch(() => null))
+  );
+  if (answers.some((answer) => answer?.exitCode !== 0)) return null;
+  return {
+    port,
+    serials: serials.filter((_, index) =>
+      parseReverseList(answers[index]!.stdout).some((entry) => entry.host === `tcp:${port}`)
+    ),
+  };
 }
 
 /**
@@ -341,17 +464,19 @@ export async function readDeviceInventoryAsync(timeoutMs?: number): Promise<Devi
   ]);
 
   const booted = simctl?.exitCode === 0 ? parseBootedSimulators(simctl.stdout) : null;
+  // No `adb` means no Android device this host drives, which is an answer, not an unknown.
+  const androidDevices =
+    adb?.exitCode === 0
+      ? parseAndroidDevices(adb.stdout).map(({ deviceId, model }) => ({ serial: deviceId, model }))
+      : adb?.notRunnable
+        ? []
+        : null;
   return {
     ...EMPTY_DEVICE_INVENTORY,
     booted: booted ?? [],
     bootedStatus:
       booted != null ? 'observed' : process.platform === 'darwin' ? 'unknown' : 'unsupported',
-    androidModels:
-      adb?.exitCode === 0
-        ? parseAndroidDevices(adb.stdout)
-            .map((device) => device.model)
-            .filter((model): model is string => model != null)
-        : null,
+    androidDevices,
   };
 }
 

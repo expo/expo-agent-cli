@@ -680,7 +680,7 @@ describe('@expo/agent-cli smoke', () => {
       await installStubXcrunAsync(projectRoot, opened);
       const stub = await startStubDevServerAsync({
         projectRoot,
-        targets: [EXPO_GO_TARGET],
+        targets: [{ ...EXPO_GO_TARGET, deviceName: 'iPhone 17 Pro' }],
         targetsAppearWithFile: opened,
       });
       const release = await holdLockForAsync(projectRoot, stub);
@@ -972,7 +972,9 @@ describe('@expo/agent-cli smoke', () => {
       const readNpx = await installStubNpxAsync(projectRoot);
       const stub = await startStubDevServerAsync({
         projectRoot,
-        targets: [EXPO_GO_TARGET],
+        targets: () => [
+          { ...EXPO_GO_TARGET, deviceName: readBinding(projectRoot)?.device.name ?? '' },
+        ],
         targetsAppearWithFile: opened,
       });
 
