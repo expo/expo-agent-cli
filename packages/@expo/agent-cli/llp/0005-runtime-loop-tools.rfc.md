@@ -287,6 +287,17 @@ Three observations, watched on one budget. The first to answer ends both watches
 2. A debugger target the dev server had not listed before the reload (`waitForFreshAppConnectionAsync`). Metro's page ids come from a counter it does not rewind. This proves the app _came back_. The old wait returned on the first non-empty list, which was the pre-reload target on its way out.
 3. A `Bundled` line in the dev server's captured output that was not there before (`src/runtime/reload/bundleSignal.ts`). Fast Refresh produces no `Bundled` line. A relaunched app re-registers under the same debugger page id, because Metro's per-device counter restarts with the app. This is how a cloud reload can exit 0. `verifiedBy: dev-server-bundle` says the dev server served a bundle after this command acted. It does not say which client asked for it.
 
+A `Page.reload` keeps the target's page id, so a fresh target cannot prove it. The proof for one target is a context replacement (`src/runtime/contextReplaced.ts`): set a global with a per-check name on the target, take the action, and read the global on the same target id until it is gone. One debugger session owns the marker, the action, the reads and the cleanup, because a second debugger evicts the first on a single-debugger page. Marking sets the global and checks its stored value in one evaluate; a context that cannot keep it is `unmarkable`, and the action is not taken. A session that closes during the reads is opened again by target id. An action that the app answers with a CDP error was refused, and the error is thrown. An action whose answer is lost (the socket drops, or its time runs out) may have run, so the marker is read anyway; no proof is then `not-replaced`, never an error. Each phase has its own bound:
+
+| Phase                 | Bound                                                                |
+| --------------------- | -------------------------------------------------------------------- |
+| Discovery and marking | 1 s                                                                  |
+| Action                | 5 s, or the request's shorter limit                                  |
+| Reads of the marker   | The caller's budget, with a fresh abort after an action that ran out |
+| The whole proof       | The caller's absolute deadline, when given, cleanup included         |
+
+Cleanup uses only time that is left. Tests: contextReplaced-test "the proof of a Page.reload" (replacement, a socket that drops before `Page.reload` answers, a context that outlived the action, unreadable contexts, unmarkable) and "does not mistake another concurrent check for a replaced context"; contextReplacedTransport-test "owns and bounds the debugger transport: %s" (a refused action, an unwritable global, held HTTP headers and bodies). These are protocol fakes: no real runtime has answered this proof yet.
+
 Known ids are read after the bundle gate and immediately before the broadcast. Never reused from discovery. A save the watcher picked up in between would otherwise be credited to this command.
 
 `appsConnected` and `appsReconnected` are both reported. One connected and zero reconnected is an app that never re-registered. Zero of both is an app that went. `appsReconnected: 0` is also "the bundle proof answered first, so this watch stopped asking". `appsReconnectedReason` names which one.

@@ -176,6 +176,8 @@ export class CdpPromisePendingError extends Error {
 const PROMISE_POLL_INTERVAL_MS = 50;
 
 export interface CdpClientOptions {
+  /** Cancels discovery (including its response body) and closes the owned session. */
+  signal?: AbortSignal;
   /** Dev server (Metro) URL, without a trailing slash, e.g. `http://127.0.0.1:8081`. */
   metroUrl: string;
   targetSelector?: CdpTargetSelector;
@@ -213,7 +215,11 @@ export class CdpClient {
   constructor(private readonly options: CdpClientOptions) {}
 
   private async listTargetsAsync(): Promise<CdpTarget[]> {
-    const response = await fetch(`${this.options.metroUrl}/json/list`);
+    const response = await fetch(
+      `${this.options.metroUrl}/json/list`,
+      this.options.signal ? { signal: this.options.signal } : undefined
+    );
+    this.options.signal?.throwIfAborted();
     if (!response.ok) {
       throw new Error(`Failed to fetch debugger targets: ${response.statusText}`);
     }
@@ -227,6 +233,7 @@ export class CdpClient {
   }
 
   private async resolveWebSocketDebuggerUrlAsync(): Promise<string> {
+    this.options.signal?.throwIfAborted();
     if (this.resolvedWebSocketDebuggerUrl) {
       return this.resolvedWebSocketDebuggerUrl;
     }
@@ -249,6 +256,7 @@ export class CdpClient {
         this.options.deviceInventory
       );
       target = await selector(classifiedTargets.read);
+      this.options.signal?.throwIfAborted();
       if (target || Date.now() >= deadline) {
         break;
       }
@@ -287,6 +295,7 @@ export class CdpClient {
 
   async createWebSocketAsync(): Promise<WebSocket> {
     const webSocketDebuggerUrl = await this.resolveWebSocketDebuggerUrlAsync();
+    this.options.signal?.throwIfAborted();
     const factory = this.options.createWebSocket ?? createInspectorWebSocket;
 
     try {
@@ -307,9 +316,10 @@ export class CdpClient {
    * Settling a promise takes more than one `Runtime.evaluate`, and a connection per request would
    * pay the handshake — and the inspector proxy's own bookkeeping — for each poll.
    */
-  private async openSessionAsync(): Promise<CdpSession> {
+  async openSessionAsync(): Promise<CdpSession> {
     const ws = await this.createWebSocketAsync();
     const url = this.getWebSocketDebuggerUrl();
+    const signal = this.options.signal;
     const pending = new Map<
       number,
       { resolve: (result: unknown) => void; reject: (e: any) => void }
@@ -333,6 +343,7 @@ export class CdpClient {
         reject(error);
       });
       ws.on('close', () => {
+        signal?.removeEventListener('abort', abort);
         const error = new Error(
           'The debugger connection closed before the app answered the request.'
         );
@@ -340,6 +351,13 @@ export class CdpClient {
         reject(error);
       });
     });
+
+    const abort = () => {
+      failAll(signal?.reason ?? new Error('Debugger operation cancelled.'));
+      ws.close();
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
 
     ws.on('message', (data) => {
       debugEvent('cdp_message', { url, message: data.toString() });
@@ -375,21 +393,26 @@ export class CdpClient {
         }
         // The open handshake counts against the caller's budget, so a dead socket does not wait
         // for a request that was never sent.
+        const deadline = Date.now() + timeoutMs;
         await withDeadline(opened, timeoutMs, method);
+        if (closedWith) throw closedWith;
         const id = nextId++;
         const answer = new Promise<unknown>((resolve, reject) => {
           pending.set(id, { resolve, reject });
         });
         ws.send(JSON.stringify({ id, method, params }));
         try {
-          return await withDeadline(answer, timeoutMs, method);
+          return await withDeadline(answer, Math.max(1, deadline - Date.now()), method, timeoutMs);
         } finally {
           pending.delete(id);
         }
       },
+      get closed() {
+        return closedWith != null;
+      },
       close() {
-        closedWith ??= new Error('The debugger connection was closed.');
-        pending.clear();
+        signal?.removeEventListener('abort', abort);
+        failAll(new Error('The debugger connection was closed.'));
         ws.close();
       },
     };
@@ -424,13 +447,20 @@ export class CdpClient {
 }
 
 /** One debugger connection, with the request/response bookkeeping done. */
-interface CdpSession {
+export interface CdpSession {
   sendAsync(method: string, params: object, timeoutMs: number): Promise<unknown>;
+  /** The connection dropped or was closed: every request on it fails from now on. */
+  readonly closed: boolean;
   close(): void;
 }
 
-/** Reject a request the app never answered, naming the budget it was given. */
-function withDeadline<T>(promise: Promise<T>, timeoutMs: number, method: string): Promise<T> {
+/** Reject a request the app never answered, naming the caller's whole budget. */
+function withDeadline<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  method: string,
+  budgetMs: number = timeoutMs
+): Promise<T> {
   let handle: NodeJS.Timeout;
   return Promise.race([
     promise,
@@ -439,7 +469,7 @@ function withDeadline<T>(promise: Promise<T>, timeoutMs: number, method: string)
         () =>
           reject(
             new Error(
-              `The app did not answer the ${method} request within ${timeoutMs}ms. The JavaScript thread may be blocked, or the expression may still be pending. Try a smaller expression or a longer timeout.`
+              `The app did not answer the ${method} request within ${budgetMs}ms. The JavaScript thread may be blocked, or the expression may still be pending. Try a smaller expression or a longer timeout.`
             )
           ),
         timeoutMs
@@ -449,7 +479,7 @@ function withDeadline<T>(promise: Promise<T>, timeoutMs: number, method: string)
 }
 
 /** Send one `Runtime.evaluate` and read the answer. */
-async function runtimeEvaluateAsync(
+export async function runtimeEvaluateAsync(
   session: CdpSession,
   expression: string,
   { returnByValue, timeoutMs }: { returnByValue: boolean; timeoutMs: number }
