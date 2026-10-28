@@ -21,14 +21,10 @@ import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
 import type { DevServerSource } from '../runtime/devServer';
 import { openInPhrase } from './connectUrl';
-import {
-  openRouteAsync,
-  resolveRouteUrlAsync,
-  type AlertCheck,
-  type OpenRouteResult,
-} from './openRoute';
+import { openRouteAsync, type AlertCheck, type OpenRouteResult } from './openRoute';
 import type { NavigateOptions } from './resolveOptions';
 import type { RouteCheckJson } from './routeCheck';
+import { resolveRouteUrlAsync } from './routeResolution';
 import { easCommandPrefix } from '../utils/easCli';
 
 /**

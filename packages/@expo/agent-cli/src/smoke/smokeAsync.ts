@@ -769,8 +769,13 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // gate refuse `exp://127.0.0.1:8500` as unreachable from a cloud simulator while `navigate`,
     // against the same dev server, opened the tunnel host the manifest carried
     // [observed — live cloud, 2026-08-27]. `flag` only when the caller really did name one.
-    openRoute: (route, devServerUrl, attachBudgetMs) =>
-      openRouteAsync(projectRoot, {
+    // The run's device choice, so the open and the waits after it are about one device. An earlier
+    // lookup that failed is not kept, so this one looks again, and throws its own refusal.
+    openRoute: async (route, devServerUrl, attachBudgetMs) => {
+      const lookup = await deviceAsync();
+      if (lookup.device == null) throw lookup.error;
+      return await openRouteAsync(projectRoot, {
+        device: lookup.device,
         route,
         platform: options.platform,
         devServerUrl,
@@ -786,7 +791,8 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         // and is `navigate`'s; passing the budget is how this command joins it rather than building
         // a second URL of its own (F96).
         confirmAttachMs: attachBudgetMs,
-      }),
+      });
+    },
 
     // @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
     //

@@ -1,7 +1,4 @@
-// @ref llp/0005-runtime-loop-tools.rfc.md §Verifying the route
-// How a route becomes the URL a device opens: the route check, the scheme and the dev server.
-
-import { resolveTargetSelectionAsync } from '../runtime/resolveTargetSelection';
+// @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server
 import {
   classifyDevServerHost,
   isTunnelCurrent,
@@ -20,19 +17,120 @@ import {
 } from '../project/nodeModules';
 import { readProjectRoutesAsync } from '../project/routes';
 import { discoverDevServerAsync } from '../runtime/discoverDevServer';
+import { resolveTargetSelectionAsync } from '../runtime/resolveTargetSelection';
+import type { CdpTarget } from '../runtime/cdpClient';
+import type { DevServerSource } from '../runtime/devServer';
 import { CommandError } from '../utils/errors';
-import { buildConnectUrls } from './connectUrl';
+import { buildConnectUrls, type ConnectUrl } from './connectUrl';
 import {
   isFullUrlRoute,
   readProjectSchemeConfig,
   resolveDeepLinkUrl,
   type ProjectSchemeConfig,
 } from './deepLink';
-import type { NavigatePlatform } from './device';
+import type { CloudPreference, NavigatePlatform } from './device';
 import { debugEvent } from './events';
-import { checkRoute, routeNotFoundError } from './routeCheck';
+import {
+  checkRoute,
+  routeNotFoundError,
+  type RouteCheckJson,
+  type RouteCommand,
+} from './routeCheck';
 import { decideExpoGoTarget } from './target';
-import type { OpenRouteOptions, ResolvedRoute } from './openRoute';
+
+/** What the URL depends on: the route, the app, and the dev server a device reaches. */
+export interface RouteUrlOptions {
+  /** Route as the caller wrote it. */
+  route: string;
+  /** Platform to open on, or undefined for whichever device is booted. */
+  platform?: NavigatePlatform;
+  /** URL scheme, instead of the one read from the project's config. */
+  scheme?: string;
+  /** Application id, for scoping the Android intent. */
+  appId?: string;
+  /** The `--dev-server-url` the caller named, or null when it is still to be found. */
+  devServerUrl: string | null;
+  /**
+   * Where {@link devServerUrl} came from: the **caller's own flag**, or a step of this same run.
+   *
+   * The two are not the same question, and treating them as one is F96. The reach lookup below is
+   * suppressed for a `flag`, because the caller named the host they want reached — but `smoke`
+   * discovers this project's dev server in its first phase and hands the URL down to its route
+   * phase, and that URL is a *finding of this run*, not a caller's instruction. Passed as `flag`,
+   * it silenced the manifest lookup and the gate built `exp://127.0.0.1:<port>` while `navigate`,
+   * three minutes earlier and against the same dev server, built the tunnel host from the manifest
+   * [observed — live cloud, 2026-08-27, artifacts 003 and 007].
+   *
+   * Defaults to `flag`, which is the safe reading of a URL whose origin a caller did not say.
+   *
+   * @see llp/0021-honest-reports.rfc.md §The rules
+   */
+  devServerUrlSource?: 'flag' | 'discovered';
+  /**
+   * A tunnel host the caller has just read from the dev server's manifest.
+   *
+   * It wins over the host in the captured log, which can name an earlier tunnel of the same run.
+   */
+  tunnelHost?: string | null;
+  /** Check the route against the project's routes first, cleared by `--no-route-check`. */
+  routeCheck: boolean;
+  /**
+   * The command a route failure suggests re-running.
+   *
+   * The `Try:` line is what a driving agent runs next, so it has to be the command the caller was
+   * running rather than always `navigate` (friction run 5).
+   */
+  command?: RouteCommand;
+  /**
+   * Whether an EAS Simulator session is on this run's device ladder, and how.
+   *
+   * Defaults to `off`, so a caller that says nothing keeps the two local backends exactly.
+   *
+   * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
+   */
+  cloud?: CloudPreference;
+}
+
+/** Everything the URL alone amounts to: the answer of a run that opens nothing. */
+export interface ResolvedRoute {
+  route: string;
+  /** URL a device opens to reach this route. */
+  url: string;
+  /** Where the dev server listens on this machine. */
+  devServerUrl: string;
+  devServerSource: DevServerSource;
+  /** Whether that dev server answered. */
+  devServerReachable: boolean;
+  /** How the URL was derived. */
+  resolution: string;
+  /** Why the target app was decided to be Expo Go or a development build. */
+  target: string;
+  /** Whether the target app was decided to be Expo Go. */
+  isExpoGo: boolean;
+  /**
+   * What kind of host **the URL above carries**: `tunnel`, `lan`, `localhost`, or null.
+   *
+   * Classified from the URL itself rather than from what the dev server advertised, so the two can
+   * never disagree — a report that says `tunnel` over a `127.0.0.1` link reads as "open this
+   * anywhere" [observed — live, 2026-08-25]. Null for a development build's `<scheme>://<route>`,
+   * which carries no host at all: it reaches whatever dev server the app was launched against.
+   */
+  hostType: DevServerHostType | null;
+  /**
+   * How to point an app at this dev server, one entry per application that could be meant.
+   *
+   * A *different* URL from {@link url}: that one navigates an app already loaded against a dev
+   * server, and these get it loaded. `exp://<host>` is the Expo Go form and
+   * `<scheme>://?__expo_url=…` the development build's, and they are not
+   * interchangeable — so two entries appear when nothing established which application is running,
+   * and none when there is no dev server to point at.
+   *
+   * @see ./connectUrl.ts
+   */
+  connect: ConnectUrl[];
+  /** Whether the route was checked against the project's routes, and what the check said. */
+  routeCheck: RouteCheckJson;
+}
 
 /** The tunnel host a device link uses: the one the caller just observed, else the log's current one. */
 export function currentTunnelHost(
@@ -45,19 +143,8 @@ export function currentTunnelHost(
   return isTunnelCurrent(reach) ? (reach.advertised?.host ?? null) : null;
 }
 
-/**
- * Resolve a deep link for a route and open it on a device.
- *
- * @throws {CommandError} `ROUTE_NOT_FOUND` for a route the project has not got, checked before
- * anything is opened; `DEEP_LINK_UNRESOLVED` for a named dev server that does not answer or a
- * project with no resolvable scheme; and whatever `resolveDeviceAsync` throws when there is
- * no device.
- */
-export async function resolveRouteUrlAsync(
-  projectRoot: string,
-  options: OpenRouteOptions
-): Promise<ResolvedRoute> {
-  const { route, platform, scheme, appId } = options;
+export async function loadRouteFactsAsync(projectRoot: string, options: RouteUrlOptions) {
+  const { route, platform } = options;
 
   const [devServer, config, nativeDirs, packageJson, routeTable, reach, expoGo] = await Promise.all(
     [
@@ -119,17 +206,27 @@ export async function resolveRouteUrlAsync(
     'expo-dev-client'
   );
 
-  // Scoped to the platform that was named, for the reason every other reading command is (F51):
-  // a dev server with an iOS simulator already attached would otherwise decide an `--android` run's
-  // target app from the simulator's registration. Nothing on the named platform leaves the decision
-  // to the project's own shape, which is the honest fallback. Expo Go costs no device-tool spawn.
-  const { classifiedTargets } = await resolveTargetSelectionAsync({
-    projectRoot: null,
-    flags: { platform, eas: options.cloud === 'required' },
-    targets: devServer.targets,
-  });
-  const decisionTargets = classifiedTargets.read;
+  return {
+    options,
+    devServer,
+    config,
+    nativeDirs,
+    reach,
+    expoGo,
+    usesDevClient,
+    routeCheck,
+    automation: process.env.EXPO_NO_DEV_MENU !== '0',
+  };
+}
 
+type RouteFacts = Awaited<ReturnType<typeof loadRouteFactsAsync>>;
+
+/** Finalize from project facts and only the targets the caller may read. No device or network I/O. */
+export function finalizeRouteUrl(facts: RouteFacts, decisionTargets: CdpTarget[]): ResolvedRoute {
+  const { options, devServer, config, nativeDirs, reach, expoGo, usesDevClient, routeCheck } =
+    facts;
+  const { route, platform, scheme, appId } = options;
+  const devServerUrl = devServer.devServerUrl;
   const target = decideExpoGoTarget({
     appIdOverride: appId,
     targetAppIds: decisionTargets.map((item) => item.appId).filter(Boolean),
@@ -137,7 +234,6 @@ export async function resolveRouteUrlAsync(
     usesDevClient,
     expoGoCompatible: decidesAgainstExpoGo(expoGo),
   });
-  debugEvent('target_decided', target);
 
   // Only a tunnel that is *current* changes the URL: a host read out of a log whose dev server has
   // since stopped is worse than the LAN address, because it looks like it should work.
@@ -162,7 +258,6 @@ export async function resolveRouteUrlAsync(
     error.suggestedCommand = resolved.suggestedCommand;
     throw error;
   }
-  debugEvent('url_resolved', { url: resolved.url, resolution: resolved.resolution });
 
   return {
     route,
@@ -184,14 +279,40 @@ export async function resolveRouteUrlAsync(
       certain: target.certain,
       // These links are used by navigate and smoke to load a development build unattended.
       // Keep Expo CLI's explicit opt-out for callers testing the dev menu itself.
-      automation: process.env.EXPO_NO_DEV_MENU !== '0',
+      automation: facts.automation,
     }),
     routeCheck,
-    // The same list the target decision was made from. Kept, because "which app is this" and "is
-    // that app running" are two questions with one answer here, and F123 is the second one having
-    // been computed and then dropped.
-    appAttached: decisionTargets.length > 0,
   };
+}
+
+/** Device-free URL API for print/connect consumers. */
+export async function resolveRouteUrlAsync(
+  projectRoot: string,
+  options: RouteUrlOptions
+): Promise<ResolvedRoute> {
+  const facts = await loadRouteFactsAsync(projectRoot, options);
+  const { classifiedTargets } = await resolveTargetSelectionAsync({
+    projectRoot: null,
+    flags: { platform: options.platform, eas: options.cloud === 'required' },
+    targets: facts.devServer.targets,
+  });
+  return finalizeRouteUrl(facts, classifiedTargets.read);
+}
+
+/** Project-only URL for a no-device diagnostic; it never decides what gets opened. */
+export function provisionalRouteUrl(facts: RouteFacts): string | null {
+  try {
+    return finalizeRouteUrl(facts, []).url;
+  } catch (error) {
+    // An attached app can change the project-only guess. Defer its URL error until scoped.
+    if (
+      facts.devServer.targets.length > 0 &&
+      error instanceof CommandError &&
+      error.code === 'DEEP_LINK_UNRESOLVED'
+    )
+      return null;
+    throw error;
+  }
 }
 
 /**

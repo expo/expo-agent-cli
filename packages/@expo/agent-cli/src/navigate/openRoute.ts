@@ -11,8 +11,7 @@
 // So the composition lives here and both callers use it. `navigateAsync` is this function plus the
 // event, the follow-ups and the two output channels; `smoke` is this function inside a phase.
 
-import { resolveTargetSelectionAsync } from '../runtime/resolveTargetSelection';
-import { type DevServerHostType } from '../dev/advertisedUrl';
+import { targetSelectionOf } from '../runtime/resolveTargetSelection';
 import {
   AGENT_DEVICE_SPEC,
   acceptCloudAlertAsync,
@@ -26,68 +25,31 @@ import { cloudNeedsTunnelError, cloudVerbFailedError } from '../device/cloudErro
 import { event as cliEvent } from '../events';
 import { readConfiguredAppId, resolveAppId } from '../runtime/appId';
 import { stopAppOnDeviceAsync } from '../runtime/appProcess';
-import { probeDevServerAsync, type DevServerSource } from '../runtime/devServer';
-import { readDeviceInventoryAsync } from '../runtime/targetSelection';
-import { reverseLoopbackPortAsync, type ReverseResult } from './adbReverse';
-import { type ConnectUrl } from './connectUrl';
-import { openUrlOnDeviceAsync } from './deepLink';
-import type { BoundDevice } from '../deviceBinding';
+import { probeDevServerAsync } from '../runtime/devServer';
 import {
-  navigateDeviceOf,
+  classifyTargets,
+  deviceInventoryForSelectionAsync,
+  withAndroidReverseAsync,
+} from '../runtime/targetSelection';
+import { scopedListClassifier } from '../runtime/waitReady';
+import { reverseLoopbackPortAsync, type ReverseResult } from './adbReverse';
+import { openUrlOnDeviceAsync } from './deepLink';
+import {
   resolveDeviceAsync,
-  type CloudPreference,
   type DeviceBackend,
   type NavigateDevice,
   type NavigatePlatform,
 } from './device';
 import { debugEvent } from './events';
-import { type RouteCheckJson, type RouteCommand } from './routeCheck';
-import { resolveRouteUrlAsync } from './routeResolution';
+import {
+  finalizeRouteUrl,
+  loadRouteFactsAsync,
+  provisionalRouteUrl,
+  type ResolvedRoute,
+  type RouteUrlOptions,
+} from './routeResolution';
 
-export { currentTunnelHost, isCallerNamedDevServer, resolveRouteUrlAsync } from './routeResolution';
-
-export interface OpenRouteOptions {
-  /** Route as the caller wrote it. */
-  route: string;
-  /** Platform to open on, or undefined for whichever device is booted. */
-  platform?: NavigatePlatform;
-  /** URL scheme, instead of the one read from the project's config. */
-  scheme?: string;
-  /** Application id, for scoping the Android intent. */
-  appId?: string;
-  /** The `--dev-server-url` the caller named, or null when it is still to be found. */
-  devServerUrl: string | null;
-  /**
-   * Where {@link devServerUrl} came from: the **caller's own flag**, or a step of this same run.
-   *
-   * The two are not the same question, and treating them as one is F96. The reach lookup below is
-   * suppressed for a `flag`, because the caller named the host they want reached — but `smoke`
-   * discovers this project's dev server in its first phase and hands the URL down to its route
-   * phase, and that URL is a *finding of this run*, not a caller's instruction. Passed as `flag`,
-   * it silenced the manifest lookup and the gate built `exp://127.0.0.1:<port>` while `navigate`,
-   * three minutes earlier and against the same dev server, built the tunnel host from the manifest
-   * [observed — live cloud, 2026-08-27, artifacts 003 and 007].
-   *
-   * Defaults to `flag`, which is the safe reading of a URL whose origin a caller did not say.
-   *
-   * @see llp/0021-honest-reports.rfc.md §The rules
-   */
-  devServerUrlSource?: 'flag' | 'discovered';
-  /**
-   * A tunnel host the caller has just read from the dev server's manifest.
-   *
-   * It wins over the host in the captured log, which can name an earlier tunnel of the same run.
-   */
-  tunnelHost?: string | null;
-  /** Check the route against the project's routes first, cleared by `--no-route-check`. */
-  routeCheck: boolean;
-  /**
-   * The command a route failure suggests re-running.
-   *
-   * The `Try:` line is what a driving agent runs next, so it has to be the command the caller was
-   * running rather than always `navigate` (friction run 5).
-   */
-  command?: RouteCommand;
+export interface OpenRouteOptions extends RouteUrlOptions {
   /**
    * How long to wait for an app on this platform to register a debugger target, in milliseconds.
    *
@@ -105,69 +67,13 @@ export interface OpenRouteOptions {
    */
   recoverStuckApp?: boolean;
   /**
-   * Whether an EAS Simulator session is on this run's device ladder, and how.
-   *
-   * Defaults to `off`, so a caller that says nothing keeps the two local backends exactly.
-   *
-   * @see llp/0005-runtime-loop-tools.rfc.md §Cloud simulator
-   */
-  cloud?: CloudPreference;
-  /**
-   * The device `dev` already bound and booted for this run, so the open inspects nothing twice.
+   * The device the caller already resolved for this run (`dev`'s bound device, `smoke`'s device
+   * choice), so the open and its attachment checks use that device and inspect nothing twice. The
+   * lease is not extended here: the caller's own resolution extended it.
    *
    * @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it
    */
-  device?: BoundDevice;
-}
-
-/** Everything the URL alone amounts to: the answer of a run that opens nothing. */
-export interface ResolvedRoute {
-  route: string;
-  /** URL a device opens to reach this route. */
-  url: string;
-  /** Where the dev server listens on this machine. */
-  devServerUrl: string;
-  devServerSource: DevServerSource;
-  /** Whether that dev server answered. */
-  devServerReachable: boolean;
-  /** How the URL was derived. */
-  resolution: string;
-  /** Why the target app was decided to be Expo Go or a development build. */
-  target: string;
-  /** Whether the target app was decided to be Expo Go. */
-  isExpoGo: boolean;
-  /**
-   * What kind of host **the URL above carries**: `tunnel`, `lan`, `localhost`, or null.
-   *
-   * Classified from the URL itself rather than from what the dev server advertised, so the two can
-   * never disagree — a report that says `tunnel` over a `127.0.0.1` link reads as "open this
-   * anywhere" [observed — live, 2026-08-25]. Null for a development build's `<scheme>://<route>`,
-   * which carries no host at all: it reaches whatever dev server the app was launched against.
-   */
-  hostType: DevServerHostType | null;
-  /**
-   * How to point an app at this dev server, one entry per application that could be meant.
-   *
-   * A *different* URL from {@link url}: that one navigates an app already loaded against a dev
-   * server, and these get it loaded. `exp://<host>` is the Expo Go form and
-   * `<scheme>://?__expo_url=…` the development build's, and they are not
-   * interchangeable — so two entries appear when nothing established which application is running,
-   * and none when there is no dev server to point at.
-   *
-   * @see ./connectUrl.ts
-   */
-  connect: ConnectUrl[];
-  /** Whether the route was checked against the project's routes, and what the check said. */
-  routeCheck: RouteCheckJson;
-  /**
-   * Whether an app of the platform in question already holds a debugger target on this dev server.
-   *
-   * The same fact the target decision is made from, kept rather than thrown away: it is what
-   * separates "navigate an app that is running" from "get the app running, then navigate it"
-   * (F123, {@link openRouteAsync}). False when nothing is connected **or** when there is no dev
-   * server to be connected to.
-   */
-  appAttached: boolean;
+  device?: NavigateDevice;
 }
 
 /** One open of a URL on a device, and what came of it. */
@@ -276,7 +182,7 @@ export interface AlertCheck {
 /**
  * Resolve a deep link for a route and open it on a device.
  *
- * @throws {CommandError} whatever {@link resolveRouteUrlAsync} throws, and whatever
+ * @throws {CommandError} whatever the route URL resolution throws, and whatever
  * {@link resolveDeviceAsync} throws when this machine has no device to open the link on.
  */
 export async function openRouteAsync(
@@ -284,19 +190,24 @@ export async function openRouteAsync(
   options: OpenRouteOptions
 ): Promise<OpenRouteResult> {
   const { platform, appId } = options;
-  const resolved = await resolveRouteUrlAsync(projectRoot, options);
-  const devServerUrl = resolved.devServerUrl;
+  const facts = await loadRouteFactsAsync(projectRoot, options);
+  const devServerUrl = facts.devServer.devServerUrl;
 
-  // The URL is known by now, so a machine with no device is told what to do with it rather than
-  // only that it has none: an agent driving a cloud simulator has somewhere else to open it.
-  const device = options.device
-    ? navigateDeviceOf(options.device)
-    : await resolveDeviceAsync(platform, {
-        url: resolved.url,
-        devServerRunning: resolved.devServerReachable,
-        cloud: options.cloud,
-        projectRoot,
-      });
+  // A project-only URL makes the no-device diagnostic useful. The authoritative app kind and
+  // URL are finalized below, after the concrete device is known.
+  const device =
+    options.device ??
+    (await resolveDeviceAsync(platform, {
+      url: provisionalRouteUrl(facts),
+      devServerRunning: facts.devServer.reachable,
+      cloud: options.cloud,
+      projectRoot,
+    }));
+
+  const budgetMs = options.confirmAttachMs ?? 0;
+  const reads = await deviceTargetReaderAsync(devServerUrl, device);
+  const resolved = finalizeRouteUrl(facts, reads.decisionTargets);
+  debugEvent('url_resolved', { url: resolved.url, resolution: resolved.resolution });
 
   // @ref src/device/cloudSimulator.ts §cloudNeedsTunnelError — refused before anything is opened.
   // A cloud simulator is on EAS's network, so a `127.0.0.1` or LAN host in the link resolves to
@@ -314,8 +225,13 @@ export async function openRouteAsync(
   // Decided before the reverse, because the two links need different ports forwarded: the launcher
   // URL carries the dev server's origin inside its `__expo_url` parameter, and a route link for a
   // development build carries no host at all.
-  const budgetMs = options.confirmAttachMs ?? 0;
-  const launcherUrl = devLauncherUrlFor(resolved, budgetMs);
+  //
+  // Whether the app is attached is asked of the device this run opens, not of the platform flag:
+  // with no flag, an app of another platform on the same dev server is not this device's app.
+  const launcherUrl =
+    budgetMs > 0 && !resolved.isExpoGo && reads.decisionTargets.length === 0
+      ? devLauncherUrlOf(resolved)
+      : null;
 
   // @ref ./adbReverse — before the link, never after. `exp://127.0.0.1:<port>` means the *device's*
   // loopback, so an emulator resolves it to a port nothing listens on and Expo Go lands on its
@@ -335,6 +251,7 @@ export async function openRouteAsync(
   if (reverse?.ok === false) {
     debugEvent('adb_reverse_failed', { reason: reverse.reason ?? '' });
   }
+  const waitAsync = budgetMs > 0 ? await reads.attachWaiterAsync(reverse) : null;
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server — F123, and the
   // whole reason this call sits above the route link rather than beside it.
@@ -343,7 +260,7 @@ export async function openRouteAsync(
     projectRoot,
     options,
     device,
-    devServerUrl,
+    waitAsync,
     launcherUrl,
     budgetMs,
   });
@@ -359,6 +276,7 @@ export async function openRouteAsync(
     options,
     device,
     devServerUrl,
+    waitAsync,
     url: resolved.url,
     openedOk: result.exitCode === 0,
     // What is left of the caller's budget. A launcher open that attached in four seconds leaves
@@ -477,37 +395,48 @@ const ATTACH_POLL_MS = 500;
 const ROUTE_ATTACH_FLOOR_MS = 2_000;
 
 /**
- * A function that waits until an app of this platform holds a debugger target, or the deadline.
+ * Wait until an app of this scope holds a debugger target, or the deadline.
  *
- * The launcher's wait and the route link's wait ask the same question of the same dev server. The
- * device facts that scoping needs are read once per wait, not once per poll.
- *
- * @returns how many targets this platform had when the wait ended: zero means the deadline won.
+ * @returns how many targets this scope had when the wait ended: zero means the deadline won.
  */
-async function attachWaiterAsync(
-  devServerUrl: string,
-  device: NavigateDevice
-): Promise<(deadline: number) => Promise<number>> {
-  const deviceInventory = await readDeviceInventoryAsync();
-  const countAsync = async (): Promise<number> => {
-    const probe = await probeDevServerAsync(devServerUrl);
-    const { classifiedTargets } = await resolveTargetSelectionAsync({
-      projectRoot: null,
-      flags: { platform: device.platform, eas: device.backend === 'cloud' },
-      device,
-      targets: probe.targets,
-      deviceInventory,
-    });
-    return probe.reachable ? classifiedTargets.read.length : 0;
-  };
-  return async (deadline: number): Promise<number> => {
-    for (;;) {
-      const count = await countAsync();
-      if (count > 0 || Date.now() >= deadline) {
-        return count;
-      }
-      await new Promise((resolve) => setTimeout(resolve, ATTACH_POLL_MS));
-    }
+type AttachWaiter = (deadline: number) => Promise<number>;
+
+/**
+ * Read this device's apps: once now, for the decisions before the link, and again on each poll.
+ *
+ * The device tools are asked again for a changed list, within the budget of the wait that polls.
+ * `adb reverse` is asked before the link, which decides the launcher, and again after this run's
+ * own reverse, which can be what places its app beside a twin of the same model.
+ */
+async function deviceTargetReaderAsync(devServerUrl: string, device: NavigateDevice) {
+  const targetSelection = targetSelectionOf({ flags: { platform: null, eas: false }, device });
+  const first = await probeDevServerAsync(devServerUrl);
+  const inventory = await deviceInventoryForSelectionAsync(
+    first.targets,
+    targetSelection,
+    null,
+    devServerUrl
+  );
+  return {
+    decisionTargets: first.reachable
+      ? classifyTargets(first.targets, targetSelection, inventory).read
+      : [],
+    attachWaiterAsync: async (reverse: ReverseResult | null): Promise<AttachWaiter> => {
+      const facts = reverse?.ok
+        ? await withAndroidReverseAsync(targetSelection, inventory, devServerUrl)
+        : inventory;
+      const classify = scopedListClassifier(targetSelection, facts, first.targets, devServerUrl);
+      return async (deadline) => {
+        for (;;) {
+          const probe = await probeDevServerAsync(devServerUrl);
+          const count = probe.reachable ? (await classify(probe.targets, deadline)).read.length : 0;
+          if (count > 0 || Date.now() >= deadline) {
+            return count;
+          }
+          await new Promise((resolve) => setTimeout(resolve, ATTACH_POLL_MS));
+        }
+      };
+    },
   };
 }
 
@@ -549,31 +478,28 @@ async function attachWaiterAsync(
  *
  * @returns the launcher URL to open first, or null when this run opens only the route link.
  */
-function devLauncherUrlFor(resolved: ResolvedRoute, budgetMs: number): string | null {
-  if (budgetMs <= 0 || resolved.isExpoGo || resolved.appAttached) {
-    return null;
-  }
+function devLauncherUrlOf(resolved: ResolvedRoute): string | null {
   return resolved.connect.find((entry) => entry.target === 'dev-build')?.url ?? null;
 }
 
-/** Open the launcher URL {@link devLauncherUrlFor} chose, and wait for the app it loads. */
+/** Open the launcher URL {@link devLauncherUrlOf} gave, and wait for the app it loads. */
 async function launchDevClientFirstAsync({
   projectRoot,
   options,
   device,
-  devServerUrl,
+  waitAsync,
   launcherUrl,
   budgetMs,
 }: {
   projectRoot: string;
   options: OpenRouteOptions;
   device: NavigateDevice;
-  devServerUrl: string;
-  /** The URL {@link devLauncherUrlFor} decided on, or null when this ladder does not fire. */
+  waitAsync: AttachWaiter | null;
+  /** The launcher URL to open first, or null when this ladder does not fire. */
   launcherUrl: string | null;
   budgetMs: number;
 }): Promise<DevLauncherOpen | null> {
-  if (launcherUrl == null) {
+  if (launcherUrl == null || waitAsync == null) {
     return null;
   }
 
@@ -600,7 +526,6 @@ async function launchDevClientFirstAsync({
     };
   }
 
-  const waitAsync = await attachWaiterAsync(devServerUrl, device);
   const targets = await waitAsync(startedAt + budgetMs);
   return {
     url: launcherUrl,
@@ -655,6 +580,7 @@ async function confirmAttachAsync({
   options,
   device,
   devServerUrl,
+  waitAsync,
   url,
   openedOk,
   budgetMs,
@@ -663,36 +589,20 @@ async function confirmAttachAsync({
   options: OpenRouteOptions;
   device: NavigateDevice;
   devServerUrl: string;
+  waitAsync: AttachWaiter | null;
   url: string;
   openedOk: boolean;
   /** How long this check may wait. The caller's own budget, less whatever it has already spent. */
   budgetMs: number;
 }): Promise<AttachCheck> {
-  if (budgetMs <= 0) {
-    return {
-      checked: false,
-      confirmed: null,
-      waitedMs: 0,
-      targets: 0,
-      recovered: false,
-      alert: null,
-      reason: 'this run did not wait for the app to attach',
-    };
+  if (budgetMs <= 0 || waitAsync == null) {
+    return uncheckedAttach('this run did not wait for the app to attach');
   }
   if (!openedOk) {
-    return {
-      checked: false,
-      confirmed: null,
-      waitedMs: 0,
-      targets: 0,
-      recovered: false,
-      alert: null,
-      reason: 'the device refused the deep link, so nothing was opened to wait for',
-    };
+    return uncheckedAttach('the device refused the deep link, so nothing was opened to wait for');
   }
 
   const startedAt = Date.now();
-  const waitAsync = await attachWaiterAsync(devServerUrl, device);
 
   let targets = await waitAsync(startedAt + budgetMs);
   let recovered = false;
@@ -721,7 +631,14 @@ async function confirmAttachAsync({
   // running it on iOS would restart an app that is merely slow.
   const canRecover = device.platform === 'android' && device.backend !== 'local-ios';
   if (targets === 0 && canRecover && options.recoverStuckApp !== false) {
-    const appId = await resolveStuckAppIdAsync(projectRoot, devServerUrl, device, options.appId);
+    // This device's read is empty here, so no attached app names the id: `--app-id`, then the app
+    // config, then Expo Go. The other apps on the dev server belong to other devices.
+    const { appId } = resolveAppId({
+      platform: device.platform,
+      appIdOverride: options.appId,
+      targetAppIds: [],
+      configured: readConfiguredAppId(projectRoot, device.platform),
+    });
     const stopped = await stopAppOnDeviceAsync({
       platform: device.platform,
       deviceId: device.deviceId,
@@ -762,6 +679,19 @@ async function confirmAttachAsync({
         : `no ${device.platform} app registered a debugger target on ${devServerUrl} within ${waitedMs}ms${
             recovered ? ', including after the app was stopped and the link opened again' : ''
           }${alert?.accepted ? ', including after the system dialog this link raised was accepted' : ''}`,
+  };
+}
+
+/** An attach check that did not look, and why. */
+function uncheckedAttach(reason: string): AttachCheck {
+  return {
+    checked: false,
+    confirmed: null,
+    waitedMs: 0,
+    targets: 0,
+    recovered: false,
+    alert: null,
+    reason,
   };
 }
 
@@ -862,20 +792,4 @@ async function resolveOpenDialogAsync({
 
 function firstLine(text: string): string {
   return text.trim().split('\n')[0] ?? '';
-}
-
-/** The application id to force-stop, resolved the way `runtime:stop` resolves it. */
-async function resolveStuckAppIdAsync(
-  projectRoot: string,
-  devServerUrl: string,
-  device: NavigateDevice,
-  appIdOverride?: string
-): Promise<string> {
-  const probe = await probeDevServerAsync(devServerUrl);
-  return resolveAppId({
-    platform: device.platform,
-    appIdOverride,
-    targetAppIds: probe.targets.map((target) => target.appId).filter(Boolean),
-    configured: readConfiguredAppId(projectRoot, device.platform),
-  }).appId;
 }

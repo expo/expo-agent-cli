@@ -51,6 +51,7 @@ type NavigateReport = {
 const EXPO_GO_TARGET = {
   id: '1',
   appId: 'host.exp.Exponent',
+  deviceName: BOOTED_SIMULATOR.name,
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=1&page=1',
 };
 

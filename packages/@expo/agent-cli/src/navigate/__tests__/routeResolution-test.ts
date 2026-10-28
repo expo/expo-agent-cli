@@ -1,10 +1,10 @@
 // @ref llp/0021-honest-reports.rfc.md §The rules
 //
 // The one pure decision F96 turned on: whether the dev server URL in a set of options is the
-// caller's own or a finding of the run holding them. Everything else in `openRoute.ts` needs a dev
-// server, a device and a project; this does not, and it is the branch that was wrong.
+// caller's own or a finding of the run holding them. Everything else in `routeResolution.ts` needs a
+// dev server and a project; this does not, and it is the branch that was wrong.
 
-import { currentTunnelHost, isCallerNamedDevServer } from '../openRoute';
+import { currentTunnelHost, isCallerNamedDevServer } from '../routeResolution';
 
 describe(isCallerNamedDevServer, () => {
   it(`should treat a URL with no source as the caller's, which is the safe reading`, () => {

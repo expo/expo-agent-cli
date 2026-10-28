@@ -11,7 +11,8 @@ import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { acquireCloudBindingAsync, readCloudBindings } from '../../deviceBinding/cloud';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { registryDirectory } from '../../deviceBinding/registry';
-import { openRouteAsync, resolveRouteUrlAsync } from '../../navigate/openRoute';
+import { openRouteAsync } from '../../navigate/openRoute';
+import { resolveRouteUrlAsync } from '../../navigate/routeResolution';
 import { resolveEasCli } from '../../utils/easCli';
 import { ensureGitExcludedAsync } from '../../utils/gitExclude';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
@@ -48,10 +49,8 @@ vi.mock('../../deviceBinding/cloud', async () => {
     acquireCloudBindingAsync: vi.fn(actual.acquireCloudBindingAsync),
   };
 });
-vi.mock('../../navigate/openRoute', () => ({
-  openRouteAsync: vi.fn(),
-  resolveRouteUrlAsync: vi.fn(),
-}));
+vi.mock('../../navigate/openRoute', () => ({ openRouteAsync: vi.fn() }));
+vi.mock('../../navigate/routeResolution', () => ({ resolveRouteUrlAsync: vi.fn() }));
 vi.mock('../../utils/easCli', async () => {
   const actual = await vi.importActual<typeof import('../../utils/easCli')>('../../utils/easCli');
   return { ...actual, resolveEasCli: vi.fn() };

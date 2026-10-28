@@ -11,6 +11,11 @@ import type { RungOneObservation } from '../runtime/reload/rungOne';
 import type { TargetSelection } from '../runtime/targetSelection';
 import type { SmokeOptions } from './resolveOptions';
 
+/** The run's device, or why the lookup found none and the refusal it threw. */
+export type SmokeDeviceLookup =
+  | { device: NavigateDevice; reason: null }
+  | { device: null; reason: string; error: unknown };
+
 export interface SmokeTargetSelection {
   /** The scope, and the one target list and inventory it was resolved on. */
   targetSelectionAsync(
@@ -20,7 +25,7 @@ export interface SmokeTargetSelection {
   scopeAsync(): Promise<TargetSelection>;
   /** The last target list `targetSelectionAsync` read, and the inventory that placed it. */
   lastObservation(): RungOneObservation | null;
-  deviceAsync(): Promise<{ device: NavigateDevice | null; reason: string | null }>;
+  deviceAsync(): Promise<SmokeDeviceLookup>;
   setDevice(device: NavigateDevice | null): void;
 }
 
@@ -39,7 +44,7 @@ export function buildSmokeTargetSelection(
   projectRoot: string,
   options: SmokeOptions
 ): SmokeTargetSelection {
-  let memo: Promise<{ device: NavigateDevice | null; reason: string | null }> | null = null;
+  let memo: Promise<SmokeDeviceLookup> | null = null;
   let observed: RungOneObservation | null = null;
   const scope = async () => ({
     projectRoot,
@@ -53,13 +58,14 @@ export function buildSmokeTargetSelection(
         cloud: options.cloud,
         projectRoot,
       }).then(
-        (device) => ({ device, reason: null }),
-        (error) => {
+        (device): SmokeDeviceLookup => ({ device, reason: null }),
+        (error): SmokeDeviceLookup => {
           // A boot/session may have supplied a device while this lookup was in progress.
           if (memo === pending) memo = null;
           return {
             device: null,
             reason: error instanceof Error ? error.message : String(error),
+            error,
           };
         }
       );

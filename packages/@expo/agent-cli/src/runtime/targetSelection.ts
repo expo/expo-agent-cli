@@ -434,17 +434,12 @@ export async function refreshDeviceInventoryAsync(
     bootedStatus: tools.bootedStatus,
     androidDevices: tools.androidDevices,
   };
-  const twins = androidModelTwins(targetSelection, inventory);
-  const port = devServerUrl == null ? null : devServerPort(devServerUrl);
-  const androidReverse =
-    twins && port != null
-      ? await readAndroidReverseAsync(
-          twins.twins,
-          port,
-          deadline == null ? undefined : Math.max(1, deadline - Date.now())
-        )
-      : null;
-  return { ...inventory, androidReverse };
+  return await withAndroidReverseAsync(
+    targetSelection,
+    inventory,
+    devServerUrl,
+    deadline == null ? undefined : Math.max(1, deadline - Date.now())
+  );
 }
 
 /**
@@ -485,6 +480,23 @@ export async function deviceInventoryForSelectionAsync(
   );
 }
 
+/**
+ * Ask which of the bound device's model twins reverse this dev server's port. A run that reverses
+ * the port itself asks again after it.
+ */
+export async function withAndroidReverseAsync(
+  targetSelection: TargetSelection,
+  deviceInventory: DeviceInventory,
+  devServerUrl?: string | null,
+  timeoutMs?: number
+): Promise<DeviceInventory> {
+  const twins = androidModelTwins(targetSelection, deviceInventory);
+  const port = devServerUrl == null ? null : devServerPort(devServerUrl);
+  const androidReverse =
+    twins && port != null ? await readAndroidReverseAsync(twins.twins, port, timeoutMs) : null;
+  return { ...deviceInventory, androidReverse };
+}
+
 function devServerPort(devServerUrl: string): number | null {
   try {
     const url = new URL(devServerUrl);
@@ -495,7 +507,7 @@ function devServerPort(devServerUrl: string): number | null {
 }
 
 /**
- * Which of `serials` reverse `port` to the host, once per run: `adb -s <serial> reverse --list` on
+ * Which of `serials` reverse `port` to the host: `adb -s <serial> reverse --list` on
  * each. Null when one of them could not be asked, because a missing answer cannot rule a device out.
  */
 async function readAndroidReverseAsync(

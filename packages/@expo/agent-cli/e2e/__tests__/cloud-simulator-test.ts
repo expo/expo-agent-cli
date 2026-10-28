@@ -332,6 +332,48 @@ describe('@expo/agent-cli navigate --eas', () => {
     }
   });
 
+  // The wait after the accept starts after the first wait's budget ran out, and it still asks the
+  // device tools about the app that appears in it.
+  it(`counts the app that attaches after the dialog is accepted`, async () => {
+    const projectRoot = await setupAsync('go-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+    const accepted = () =>
+      easInvocations(projectRoot).some((argv) => argv.slice(3).join(' ') === 'alert accept');
+    const stub = await startStubDevServerAsync({
+      targets: () =>
+        accepted() ? [{ id: '1', appId: 'host.exp.Exponent', deviceName: 'iPhone 17' }] : [],
+      projectRoot,
+      manifestOrigin: 'https://stub-tunnel.example',
+    });
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: stub.url,
+      port: stub.port,
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['navigate', '/', '--eas', '--attach-timeout', '2s', '--json', '--no-followups'],
+        {
+          reject: false,
+          env: { STUB_SIM_ALERT: `Open in "Expo Go"?\nCancel / Open` },
+        }
+      );
+
+      expect(result.exitCode, result.all).toBe(0);
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        attached: true,
+        attachAlert: { found: true, accepted: true },
+      });
+    } finally {
+      await releaseLock();
+      await stub.close();
+    }
+  });
+
   // The other half, and the one that keeps this inside llp/0008: an alert this command did not
   // cause is not this command's to answer. `alert get` finding nothing is the common case — the
   // controller refuses it outright — and no `accept` may follow.

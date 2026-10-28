@@ -1,0 +1,258 @@
+// @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server
+// The built CLI resolves the device, opens URLs through subprocesses, and polls a real HTTP
+// server. Targets appear only after the recorded launcher open, not after an arbitrary delay.
+import fs from 'node:fs';
+
+import { devClientConnectUrl } from '../../src/navigate/connectUrl';
+import { makeTarget } from '../../src/runtime/__tests__/targetSelectionFixtures';
+import {
+  installStubEasAsync,
+  stubEasArgs,
+  writeCloudBindingAsync,
+  writeCloudSessionFileAsync,
+} from '../stubEas';
+import {
+  executeAgentCliAsync,
+  expoHomeOf,
+  holdDevLockAsync,
+  setupFixtureAsync,
+  startStubDevServerAsync,
+} from '../utils';
+import {
+  bindingFixture,
+  BOOTED_SIMULATOR,
+  installStubAdbAsync,
+  installStubXcrunAsync,
+  EMULATOR_SERIAL,
+  stubEmulatorStatePath,
+} from './installedAppStubs';
+
+const APP_ID = 'com.example.demo';
+const ROUTE = 'demoapp://profile/42';
+const TUNNEL_HOST = 'stub-tunnel.example';
+
+type Scenario = {
+  name: string;
+  backend: 'cloud' | 'local-ios' | 'local-android';
+  platform: 'ios' | 'android';
+  flag?: '--ios';
+  initial: 'own' | 'other' | 'empty';
+  neverAttaches?: boolean;
+  /**
+   * A second emulator of the bound model is attached; which of the two reverse the port before
+   * this run's own `adb reverse`.
+   */
+  twin?: 'both' | 'bound' | 'neither';
+};
+const scenarios: Scenario[] = [
+  {
+    name: 'no flag, Android session, only an iOS app attached',
+    backend: 'cloud',
+    platform: 'android',
+    initial: 'other',
+  },
+  {
+    name: 'no flag, Android session, its app attached',
+    backend: 'cloud',
+    platform: 'android',
+    initial: 'own',
+  },
+  {
+    name: 'no flag, iOS session, its app attached',
+    backend: 'cloud',
+    platform: 'ios',
+    initial: 'own',
+  },
+  {
+    name: 'no flag, iOS session, only a local simulator app attached',
+    backend: 'cloud',
+    platform: 'ios',
+    initial: 'other',
+  },
+  {
+    name: '--ios without --eas, iOS session, its app attached',
+    backend: 'cloud',
+    platform: 'ios',
+    flag: '--ios',
+    initial: 'own',
+  },
+  {
+    name: 'iOS session, empty first list, then only a local app',
+    backend: 'cloud',
+    platform: 'ios',
+    initial: 'empty',
+    neverAttaches: true,
+  },
+  {
+    name: '--ios, bound simulator A, only an app on B attached',
+    backend: 'local-ios',
+    platform: 'ios',
+    flag: '--ios',
+    initial: 'other',
+  },
+  {
+    name: 'no flag, bound Android emulator, only an iOS app attached',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'other',
+  },
+  {
+    name: 'no flag, bound Android emulator beside a twin that reverses the port too',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'own',
+    neverAttaches: true,
+    twin: 'both',
+  },
+  {
+    name: 'no flag, bound Android emulator beside a twin, only the bound one reverses the port',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'own',
+    twin: 'bound',
+  },
+  {
+    name: 'no flag, bound Android emulator beside a twin, neither reverses the port before this run',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+    twin: 'neither',
+  },
+];
+
+async function deviceFixture(root: string, scenario: Scenario) {
+  const xcrun = await installStubXcrunAsync(root, {
+    simulators: [BOOTED_SIMULATOR, { udid: 'OTHER-SIM', name: 'Simulator B', state: 'Booted' }],
+  });
+  const localFile = await bindingFixture(root, BOOTED_SIMULATOR.udid, BOOTED_SIMULATOR.name);
+  // Give every case a stub SDK so fact reads never consult a developer's adb.
+  const adb = await installStubAdbAsync(root, APP_ID, {
+    attached: scenario.backend === 'local-android',
+  });
+  if (scenario.backend === 'local-ios') {
+    return {
+      env: adb.env,
+      opens: () =>
+        xcrun
+          .calls()
+          .filter((args) => args[1] === 'openurl')
+          .map((args) => args[3]!),
+    };
+  }
+  await fs.promises.rm(localFile);
+  if (scenario.backend === 'local-android') {
+    return {
+      env: adb.env,
+      forceStops: () => adb.calls().filter((args) => args.includes('force-stop')),
+      opens: () =>
+        adb
+          .calls()
+          .filter((args) => args.includes('start') && args.includes('-d'))
+          // adb forwards these quoted arguments to the device's shell.
+          .map((args) => args[args.indexOf('-d') + 1]!.replace(/^'|'$/g, '')),
+    };
+  }
+  await installStubEasAsync(root);
+  await writeCloudSessionFileAsync(root, 'sess-e2e');
+  await writeCloudBindingAsync(expoHomeOf(root), root, {
+    id: 'sess-e2e',
+    platform: scenario.platform,
+  });
+  return {
+    env: { ...adb.env, STUB_SIM_PLATFORM: scenario.platform.toUpperCase() },
+    opens: () =>
+      stubEasArgs(root)
+        .filter((args) => args[0] === 'simulator:exec' && args[3] === 'open')
+        .map((args) => args[4]!),
+  };
+}
+
+it.each(scenarios)('$name', async (scenario) => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('dev-client-app'));
+  const device = await deviceFixture(root, scenario);
+  const own = makeTarget({
+    id: 'own',
+    appId: APP_ID,
+    deviceName:
+      scenario.platform === 'android'
+        ? 'sdk_gphone64_arm64 - 15 - API 35'
+        : scenario.backend === 'local-ios'
+          ? BOOTED_SIMULATOR.name
+          : 'iPhone 17',
+  });
+  const other = makeTarget({
+    id: 'other',
+    appId: 'host.exp.Exponent',
+    deviceName: scenario.backend === 'local-ios' ? 'Simulator B' : BOOTED_SIMULATOR.name,
+  });
+  const initial = scenario.initial === 'empty' ? [] : scenario.initial === 'own' ? [own] : [other];
+  let launcher = '';
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    manifestOrigin: scenario.backend === 'cloud' ? `https://${TUNNEL_HOST}` : undefined,
+    targets: () =>
+      device.opens().includes(launcher)
+        ? scenario.neverAttaches
+          ? [other]
+          : [...initial, own]
+        : initial,
+  });
+  launcher = devClientConnectUrl(
+    'demoapp',
+    scenario.backend === 'cloud' ? TUNNEL_HOST : new URL(server.url).host,
+    scenario.backend === 'cloud' ? 'tunnel' : null,
+    true
+  );
+  const twinEnv = scenario.twin
+    ? await (async () => {
+        await fs.promises.writeFile(stubEmulatorStatePath(root), 'emulator-5556\n');
+        return {
+          STUB_ADB_REVERSE: JSON.stringify({
+            ...(scenario.twin === 'neither' ? {} : { [EMULATOR_SERIAL]: server.port }),
+            ...(scenario.twin === 'both' ? { 'emulator-5556': server.port } : {}),
+          }),
+        };
+      })()
+    : {};
+  const releaseLock = await holdDevLockAsync(root, {
+    url: server.url,
+    port: server.port,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    projectRoot: root,
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      [
+        'navigate',
+        '/profile/42',
+        ...(scenario.flag ? [scenario.flag] : []),
+        '--scheme',
+        'demoapp',
+        '--no-route-check',
+        '--attach-timeout',
+        '2s',
+        '--json',
+        '--no-followups',
+      ],
+      { reject: false, env: { ...device.env, ...twinEnv } }
+    );
+    expect(result.exitCode, result.all).toBe(scenario.neverAttaches ? 22 : 0);
+    const report = JSON.parse(result.stdout);
+    expect(report).toMatchObject({
+      deviceBackend: scenario.backend,
+      platform: scenario.platform,
+      attached: !scenario.neverAttaches,
+    });
+    // An app that cannot be placed on this device neither counts as attached nor holds the launcher.
+    const ownAttached = scenario.initial === 'own' && scenario.twin !== 'both';
+    expect(device.opens()).toEqual(ownAttached ? [ROUTE] : [launcher, ROUTE]);
+    if (!scenario.neverAttaches) expect(device.forceStops?.() ?? []).toEqual([]);
+    if (ownAttached) expect(report.launch).toBeNull();
+    else expect(report.launch).toMatchObject({ url: launcher, attached: !scenario.neverAttaches });
+  } finally {
+    await releaseLock();
+    await server.close();
+  }
+});

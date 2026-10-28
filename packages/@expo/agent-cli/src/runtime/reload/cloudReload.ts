@@ -31,10 +31,10 @@
 // system while nothing is running, so the "Open in 'Expo Go'?" dialog (S10) does not appear.
 //
 // **The URL is the one that opens the app**, resolved by the same function `navigate --eas` uses
-// (`src/navigate/openRoute.ts`): the manifest-derived tunnel host, never `exp+<slug>://<host>`. And
-// the tunnel precondition is checked **before** anything is asked of the device, which is the other
-// half of the S12 fix — a run that stops the app and only then discovers the URL is unusable is how
-// the app was stranded.
+// (`src/navigate/routeResolution.ts`): the manifest-derived tunnel host, never
+// `exp+<slug>://<host>`. And the tunnel precondition is checked **before** anything is asked of
+// the device, which is the other half of the S12 fix — a run that stops the app and only then
+// discovers the URL is unusable is how the app was stranded.
 
 import {
   openUrlOnCloudSimulatorAsync,
@@ -46,7 +46,7 @@ import { cloudNeedsTunnelError, readHeldSessionName } from '../../device/cloudEr
 import { resolveDeviceAsync, type NavigateDevice } from '../../navigate/device';
 import { hostPlatform } from '../../smoke/suggest';
 import { easFailureReason, readEasFailure } from '../../utils/easFailure';
-import { resolveRouteUrlAsync } from '../../navigate/openRoute';
+import { resolveRouteUrlAsync } from '../../navigate/routeResolution';
 import { readConfiguredAppId, resolveAppId } from '../appId';
 import { debugEvent } from './events';
 import type { ReloadAttempt } from './attempt';

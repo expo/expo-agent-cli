@@ -194,7 +194,8 @@ function readCalls(recordPath: string): string[][] {
  * without the tools does, and `pull` then copies the fixture to the path asked for.
  * `STUB_ADB_HANG_READ=<file>` makes `exec-out` write its pid there and never exit.
  * `STUB_ADB_REVERSE={"<serial>": <port>}` makes `-s <serial> reverse --list` list that port, in the
- * `<serial> tcp:<port> tcp:<port>` shape of eas-cli's androidLocalEgress test fixture.
+ * `<serial> tcp:<port> tcp:<port>` shape of eas-cli's androidLocalEgress test fixture. A
+ * `reverse tcp:<port> tcp:<port>` the stub accepts is listed from then on, as on a device.
  *
  * Installed under a fake SDK: `ANDROID_HOME` beats `PATH`, so a runner with a real SDK still
  * reaches this stub (@ref src/device/adb §resolveAdb). The returned `env` names it, and the
@@ -232,10 +233,13 @@ export async function installStubAdbAsync(
       `  process.stdout.write('device\\n');`,
       `  process.exit(0);`,
       `}`,
+      `const reversed = ${JSON.stringify(path.join(root, '.adb-reversed.jsonl'))};`,
       `if (args[2] === 'reverse' && args[3] === '--list') {`,
       `  if (process.env.STUB_ADB_REVERSE_FAIL) process.exit(1);`,
-      `  const port = JSON.parse(process.env.STUB_ADB_REVERSE || '{}')[args[1]];`,
-      `  if (port) process.stdout.write(args[1] + ' tcp:' + port + ' tcp:' + port + '\\n');`,
+      `  const lines = fs.existsSync(reversed) ? fs.readFileSync(reversed, 'utf8').split('\\n') : [];`,
+      `  const ports = lines.filter(Boolean).map((line) => JSON.parse(line)).filter(([serial]) => serial === args[1]).map(([, port]) => port);`,
+      `  ports.push(JSON.parse(process.env.STUB_ADB_REVERSE || '{}')[args[1]]);`,
+      `  for (const port of new Set(ports.filter(Boolean))) process.stdout.write(args[1] + ' tcp:' + port + ' tcp:' + port + '\\n');`,
       `  process.exit(0);`,
       `}`,
       `if (args.includes('getprop')) { process.stdout.write('1\\n'); process.exit(0); }`,
@@ -263,6 +267,14 @@ export async function installStubAdbAsync(
       `  const bs = Number(/bs=(\\d+)/.exec(command)[1]);`,
       `  process.stdout.write(apk.subarray(skip * bs, (skip + count) * bs));`,
       `  process.exit(0);`,
+      `}`,
+      `if (args[2] === 'reverse' && /^tcp:[0-9]+$/.test(args[3]) && args[3] === args[4]) {`,
+      `  if (!serials.includes(args[1])) process.exit(1);`,
+      `  fs.appendFileSync(reversed, JSON.stringify([args[1], Number(args[3].slice(4))]) + '\\n');`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args[2] === 'shell' && args[3] === 'am' && args[4] === 'start' && args.includes('-d')) {`,
+      `  process.exit(serials.includes(args[1]) ? 0 : 1);`,
       `}`,
       `process.stderr.write('stub adb: unexpected ' + args.join(' ') + '\\n');`,
       `process.exit(2);`,

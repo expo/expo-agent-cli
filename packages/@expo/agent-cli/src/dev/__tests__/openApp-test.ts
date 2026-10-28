@@ -3,6 +3,7 @@ import { installExpoGoAsync } from '../../device/installExpoGo';
 import { simulatorHasAppAsync } from '../../device/installedApps';
 import { androidHasAppAsync } from '../../device/androidApps';
 import type { BoundDevice } from '../../deviceBinding';
+import { navigateDeviceOf } from '../../navigate/device';
 import { openRouteAsync } from '../../navigate/openRoute';
 import { CommandError } from '../../utils/errors';
 import { openAppOnDeviceAsync } from '../openApp';
@@ -74,7 +75,7 @@ describe(openAppOnDeviceAsync, () => {
         platform: 'ios',
         devServerUrl: DEV_SERVER,
         devServerUrlSource: 'discovered',
-        device: BOUND,
+        device: navigateDeviceOf(BOUND),
       })
     );
   });
@@ -120,7 +121,7 @@ describe(openAppOnDeviceAsync, () => {
     expect(androidHasAppAsync).toHaveBeenCalledWith('emulator-5554', 'host.exp.exponent');
     expect(openRouteAsync).toHaveBeenCalledWith(
       projectRoot,
-      expect.objectContaining({ platform: 'android', device: BOUND_EMULATOR })
+      expect.objectContaining({ platform: 'android', device: navigateDeviceOf(BOUND_EMULATOR) })
     );
   });
 
