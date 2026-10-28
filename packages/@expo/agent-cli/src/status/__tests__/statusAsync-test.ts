@@ -1679,7 +1679,7 @@ describe(`${collectStatusReportAsync.name} and the installed section`, () => {
     expect(report.next?.command).toBe(command);
     expect(report.next?.why).toContain('sess-1');
     const [row] = report.installed!.platforms;
-    expect(row).toMatchObject({ reason: 'cloud-session', commands: [command] });
+    expect(row).toMatchObject({ reason: 'cloud-session', commands: [] });
     const text = stripVTControlCharacters(formatStatusReport(report));
     expect(text).not.toContain('EAS Simulator session, gone');
     expect(text).not.toContain('No simulator is booted.');

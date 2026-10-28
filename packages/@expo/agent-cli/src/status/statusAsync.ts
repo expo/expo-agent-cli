@@ -11,6 +11,7 @@ import path from 'path';
 
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
+import { readDetachedRunWarning } from '../dev/detachedRun';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
 import { withDevServerPort } from '../dev/forwardedArgs';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
@@ -31,6 +32,7 @@ import type { ImpactClass, OtaSafety } from '../impact/types';
 import { DEFAULT_RESPONSE_TIMEOUT_MS } from '../installedApp/fingerprintCheckProtocol';
 import * as Log from '../log';
 import { PROGRAM_PREFIX } from '../programName';
+import { loopbackPortOfUrl } from '../navigate/adbReverse';
 import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
 import { readLastBuildRecord, type LastBuildRecord } from '../plan/lastBuild';
@@ -405,12 +407,12 @@ export async function collectStatusReportAsync(
       (boundPlatforms.length === 1 ? boundPlatforms[0]! : resolveDefaultPlatform(state));
     const requestedPort =
       options.devServerUrl != null
-        ? localPortOf(options.devServerUrl)
+        ? loopbackPortOfUrl(options.devServerUrl)
         : (ownServer?.port ?? request?.port ?? null);
     // A selected address is a preference, not permission to take another project's port.
     const recoveryPort =
       report.devServer?.projectRootMatched === false &&
-      requestedPort === localPortOf(report.devServer.url)
+      requestedPort === loopbackPortOfUrl(report.devServer.url)
         ? null
         : requestedPort;
     // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — where `dev` would put
@@ -539,6 +541,15 @@ export async function collectStatusReportAsync(
   } else {
     // One cause, one note. The other three sections are left null, and the project line says why.
     errors.project = project.error;
+  }
+
+  if (!ownServer && report.next?.command.startsWith(`${PROGRAM_PREFIX} dev `)) {
+    const why = readDetachedRunWarning(projectRoot);
+    if (why) {
+      report.next.command = `${PROGRAM_PREFIX} dev:logs`;
+      report.next.steps = [];
+      report.next.why = why;
+    }
   }
 
   if ('value' in skills) {
@@ -823,18 +834,6 @@ async function resolveOtaSafetyAsync(
 function devBuildSchemeSync(projectRoot: string): string | null {
   const config = readProjectSchemeConfig(projectRoot);
   return config.scheme ?? (config.slug ? `exp+${config.slug}` : null);
-}
-
-/** A remote URL's port is not a request to start a local Metro on that port. */
-function localPortOf(url: string): number | null {
-  try {
-    const parsed = new URL(url);
-    return ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname) && parsed.port
-      ? Number(parsed.port)
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 /**

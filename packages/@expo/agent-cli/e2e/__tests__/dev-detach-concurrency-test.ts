@@ -404,6 +404,40 @@ it.skipIf(process.platform !== 'darwin')(
   }
 );
 
+it.each(['live', 'dead-executing', 'unreadable', 'dead-claimed'])(
+  'status respects pre-publication ownership: %s',
+  async (state) => {
+    const f = await fixture();
+    try {
+      const recoverable = state === 'dead-claimed';
+      const first = f.start(recoverable ? { DETACH_TEST_CLAIM_BARRIER: '1' } : {});
+      const mark = recoverable ? 'claimed' : 'blocked';
+      expect(await waitForAsync(() => f.marks(mark).length === 1, 15_000)).toBe(true);
+      const pid = Number(f.marks(mark)[0]!.slice(mark.length + 1));
+      if (state.startsWith('dead-')) {
+        process.kill(pid, 'SIGKILL');
+        await first.result;
+      } else if (state === 'unreadable') {
+        const claim = path.join(f.root, '.expo', 'dev', 'detached-run');
+        const marker = fs.readdirSync(claim).find((name) => name.startsWith('owner-'))!;
+        fs.writeFileSync(path.join(claim, marker), '{');
+      }
+      const status = await executeAgentCliAsync(f.root, ['status', '--json']);
+      const next = JSON.parse(status.stdout).next;
+      if (recoverable) {
+        expect(next.command).toContain(' dev --');
+        f.release();
+        expect((await f.start().result).exitCode).toBe(0);
+      } else {
+        expect(next).toMatchObject({ command: 'npx @expo/agent-cli dev:logs', steps: [] });
+        expect(next.why).toContain('ownership');
+      }
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+
 it('stopping and starting again selects a new log without changing the previous run', async () => {
   const f = await fixture();
   try {

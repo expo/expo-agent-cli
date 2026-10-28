@@ -110,7 +110,7 @@ describe(parseDetachedChildVerdict, () => {
       code: 'NO_BOUND_DEVICE',
       exitCode: 20,
       data: { reason: 'none' },
-      suggestedCommand: 'npx @expo/agent-cli dev --ios --detach --wait-ready',
+      suggestedCommand: 'npx @expo/agent-cli status',
     });
     expect(verdict?.message).toBe(`CommandError: ${refusal.message}`);
   });
