@@ -8,7 +8,7 @@ Delete guidance comments when done.
 
 ## Feature
 
-<!-- What can users now do, and why do they need it? Include a short usage example if helpful. -->
+<!-- What can agents now do, and why do they need it? Include a short usage example if helpful. -->
 
 ## Bug fix
 
