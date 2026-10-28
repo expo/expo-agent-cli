@@ -242,7 +242,7 @@ function buildStopFailureMessage(
     `How: check that ${resolved.appId} is the app you meant — ${resolved.reason} — and pass --app-id to name another. ${
       device.backend === 'cloud'
         ? `Check that the session is still running with "${cloudSessionListCommand()}".`
-        : `Check that the bound ${device.platform === 'ios' ? 'simulator' : 'emulator'} is up with "${PROGRAM_PREFIX} status", or bind one again with "${PROGRAM_PREFIX} dev --${device.platform} --detach --wait-ready".`
+        : `Check that the bound ${device.platform === 'ios' ? 'simulator' : 'emulator'} is up with "${PROGRAM_PREFIX} status", or stop this project's server with "${PROGRAM_PREFIX} dev:stop" before binding again with "${PROGRAM_PREFIX} dev --${device.platform} --detach --wait-ready".`
     }`,
   ].join('\n');
 }
