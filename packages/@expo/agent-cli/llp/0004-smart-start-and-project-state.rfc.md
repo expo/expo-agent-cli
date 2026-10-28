@@ -473,12 +473,8 @@ already has a server refuses with exit 20 and its PID/port, even for identical o
 Use `status` to inspect it, or explicitly stop and restart to change options. Detached
 success reports the server this invocation started; `alreadyRunning` stays false.
 
-Reuse checks the process and its verdict after tunnel lookup and any final readiness
-probe, and before reporting a readiness timeout. Logs older than the lock's start time
-cannot supply a current verdict. Reuse adds no platform-opening grace period.
-
 Detached candidates write separate attempt logs. Only the owning child selects the current
-log read by `dev:logs`; waiting callers pin that run's log. A losing start cannot truncate
+log read by `dev:logs`; each observer retains its own child's log. A losing start cannot truncate
 or replace the owner's output. Older `.expo/dev/logs/dev-detached.log` files remain readable.
 See [[0036-detached-run-ownership]] for startup ownership and recovery.
 
@@ -501,7 +497,7 @@ up. `dev --detach --json` carries `phase`. See [[0021-honest-reports]] for the w
 after a `--wait-ready` claim when the step also opens the app.
 
 The child prints `Detached dev run, pid <n>.` as line 1 of its log, before anything
-else. Only line 1 is read, so later output cannot fake it. A re-run reads it to tell
+else. Only line 1 is read, so later output cannot fake it. Status reads it to tell
 whether the run that holds the lock is the run that wrote the log
 ([[0035-one-device-per-worktree]] §Preserved sessions).
 
@@ -513,16 +509,14 @@ A build is recorded when the app reaches the device, whatever the launch then do
 a build that died before the install, and anything in `inherit` output mode, where
 nothing is captured.
 
-Exit codes. `dev --detach` exits 0 when a dev server is up, whether it started one or
-found one. Exit 1 when the child never published a lock, and 1 when `--wait-ready` gave
-up. In that last case the server is still running, which the message says, unless the
-plan is still compiling. Exit 22 (`DEV_DETACH_SESSION_PENDING`) when `--wait-ready --eas`
-runs out before the session is bound ([[0035-one-device-per-worktree]] §Preserved sessions). 22 means: run
-the same command again. The command has no `--port` that the caller did not type: a
-re-run finds the run through its log and the lock, and the lock names its port.
-For the same reason `status` does not add `--port` to a re-run that follows this
-project's own running EAS dev server. `dev:logs` exits 0 for a log and 1 (`NO_DEV_LOG`) when the
-project has none.
+Exit codes. `dev --detach` exits 0 only for its own new server. A live startup owner
+or published server refuses with exit 20. Exit 22 `DEV_START_IN_PROGRESS` means the
+observer's pre-server budget expired; the child keeps running and its private log is
+named in the error. Read that file, then use `status` after server publication.
+`DEV_DETACH_SESSION_PENDING` also exits 22 when the owned child's EAS session is not
+bound in time. Read `dev:logs` and `status`; a finished open without a binding requires
+explicit stop/start. The child's specific failure is relayed when available.
+`dev:logs` exits 0 for a log and 1 (`NO_DEV_LOG`) when the project has none.
 
 ## A busy port
 
@@ -562,7 +556,7 @@ cache, resolves no plan, asks EAS for no build, probes no toolchain, and reads, 
 matches no device. It records no last request either: the recovery preference `status`
 reads ([[0035-one-device-per-worktree]] §Lifecycle output) is written after the stop, so
 a request the lock refused never replaces the one that started the running server.
-`--detach` records before it reports, because a reused server is a server that runs.
+A detached child records its request only after it passes the same running-server check.
 `--device` on a run that binds nothing is still `BAD_ARGS` first: the refusals about the
 command come before the outcome about the project. The lock alone decides.
 Every plan `dev` can reach that has a step has a step that serves (`isDevServerStep`:
@@ -573,10 +567,8 @@ reasons: the device callback of [[0035-one-device-per-worktree]] §How `dev` use
 answers null on a live lock instead of inspecting the own binding, and the port block
 after the resolver builds the stopped plan, on the lock alone, whatever the forwarded
 arguments made of the last step. Every foreground `dev` that binds a device has
-therefore passed a lock that was not live, so the callback acquires with nothing to
-reuse: `reuseOnly` belongs to `dev --detach` alone, where a running server is the
-expected case (§Daemonization), and the `--device` preview of a plan has no reuse-only
-reading either.
+therefore passed a lock that was not live. Detached starts also refuse a live server;
+they never acquire a device beside it.
 
 The word. One `/status` probe of the lock's URL
 (`probeBundlerAsync(lock.url, { projectRoot })`) picks it: `serving` when it answers for
@@ -602,9 +594,8 @@ platform is the typed one when it is a device platform, else the project's defau
 the one rule the run uses (`defaultSmokePlatform`): a single checked-in native folder,
 then the host.
 
-Two things do not change. `dev --detach` reports the running server with
-`alreadyRunning: true` and exit 0 (§Daemonization), and `smoke` builds on that. The
-plain `start` wrapper keeps allowing a second server, which the serving step's lock claim
+Smoke may inspect an existing server without starting one. The plain `start` wrapper
+keeps allowing a second server, which the serving step's lock claim
 reports on the event stream (`cli:dev_lock_skipped`, §Dev-server lock).
 
 The port is resolved before the plan runs: the named `--port`, or the first port from
