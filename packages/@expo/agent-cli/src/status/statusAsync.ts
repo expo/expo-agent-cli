@@ -11,6 +11,7 @@ import path from 'path';
 
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
+import { readDetachedRunWarning } from '../dev/detachedRun';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
 import { judgeEndedRunAsync } from '../dev/untrackedDevServer';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
@@ -442,6 +443,15 @@ export async function collectStatusReportAsync(
   } else {
     // One cause, one note. The other three sections are left null, and the project line says why.
     errors.project = project.error;
+  }
+
+  if (!ownServer && report.next?.command.startsWith(`${PROGRAM_PREFIX} dev `)) {
+    const why = readDetachedRunWarning(projectRoot);
+    if (why) {
+      report.next.command = `${PROGRAM_PREFIX} dev:logs`;
+      report.next.steps = [];
+      report.next.why = why;
+    }
   }
 
   if ('value' in skills) {

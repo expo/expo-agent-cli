@@ -245,16 +245,14 @@ describe(cloudRungAsync, () => {
     expect(error.message).toContain('dev --ios --eas --detach --wait-ready');
   });
 
-  it('refuses a binding file that is expired, with the eas bind command', async () => {
+  it('refuses an expired binding with state-aware recovery', async () => {
     writeCloudBinding(ROOT, 'android', 'sess-9', expired);
     vi.mocked(probeCloudSessionAsync).mockResolvedValue(cloudProbe.none());
 
     const error = await cloudRungAsync(ROOT, 'android', 'required', fakeTools()).catch((e) => e);
 
     expect(error.message).toContain('The bound android EAS session is expired.');
-    expect(error.suggestedCommand).toBe(
-      'npx @expo/agent-cli dev --android --eas --detach --wait-ready'
-    );
+    expect(error.suggestedCommand).toBe('npx @expo/agent-cli status');
   });
 
   it('refuses gone, and writes nothing, when the binding names another session by the extension', async () => {
