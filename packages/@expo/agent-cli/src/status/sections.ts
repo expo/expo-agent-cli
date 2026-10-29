@@ -642,7 +642,7 @@ function verifyAction(
  * The answer is an **address** rather than a command whenever one can be named, because the thing
  * that has to happen next happens somewhere else. Which address depends on the application, and
  * they are not interchangeable: `exp://<host>` is the Expo Go form, and a development build takes
- * its own scheme (`<scheme>://?__expo_url=…`). When nothing established which of
+ * its own scheme (`<scheme>://expo-development-client/?url=…`). When nothing established which of
  * the two is running, this line names neither — one line cannot carry a labelled pair, so it names
  * the command that prints both [decided, 2026-08-26].
  */

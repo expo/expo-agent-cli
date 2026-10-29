@@ -446,7 +446,7 @@ async function ensureSessionAsync(
   }
 
   // 4. The URL the app opens on the session, in the form the app it is takes: `exp://<host>` for
-  //    Expo Go, `<scheme>://?__expo_url=…` for a development build. Resolved the
+  //    Expo Go, `<scheme>://expo-development-client/?url=…` for a development build. Resolved the
   //    way `navigate` resolves it, so the two commands never disagree about the link.
   let openUrl: string;
   try {
@@ -558,9 +558,7 @@ export async function resolveEasOpenUrlAsync(
   }
   // Full URL routes bypass openRoute's host check. Refuse a resolver fallback to LAN or loopback,
   // or any other host than the tunnel just read from the manifest.
-  const serverUrl = options.expoGo
-    ? connect.url
-    : new URL(connect.url).searchParams.get('__expo_url');
+  const serverUrl = options.expoGo ? connect.url : new URL(connect.url).searchParams.get('url');
   if (!serverUrl || new URL(serverUrl).host !== tunnelHost) {
     throw new Error('the connection URL does not point at the current tunnel');
   }

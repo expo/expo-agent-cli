@@ -41,7 +41,7 @@ export interface ExpoGoDecision {
    * Whether the target was **established** rather than inferred from the project's shape.
    *
    * The difference decides whether a connect URL may be printed as one line. `exp://<host>` is the
-   * Expo Go form and `<scheme>://?__expo_url=…` is the development build's, and
+   * Expo Go form and `<scheme>://expo-development-client/?url=…` is the development build's, and
    * they are not interchangeable — so a caller that has to *guess* which application is meant
    * prints both, labelled, rather than one of them [decided, 2026-08-26].
    *

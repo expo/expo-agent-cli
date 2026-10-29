@@ -3,10 +3,12 @@
 //
 // `exp://<host>` is the **Expo Go** form and nothing else. A development build is a different
 // application with its own URL scheme, and handing it an `exp://` link hands it another app's URL:
-// nothing opens, or Expo Go opens instead. A development build uses the reserved launch parameter:
+// nothing opens, or Expo Go opens instead. A development build uses the dev launcher's host:
 //
-//     <scheme>://?__expo_url=<url-encoded dev server origin>
+//     <scheme>://expo-development-client/?url=<url-encoded dev server origin>
 //
+// The legacy host, not `<scheme>://?__expo_url=`: the dev launcher of SDK 57 and older knows only
+// this host, and treats the reserved form as an app link [observed — issue #227].
 // **A connect URL is not a route link.** `<scheme>://<route>` navigates an app that is *already*
 // loaded against a dev server; this is what gets it loaded. Both are the app's own scheme, and both
 // are printed, because they answer different halves of "open this route on that device".
@@ -44,7 +46,7 @@ export function expoGoConnectUrl(host: string): string {
 /**
  * The development build connect URL.
  *
- * The origin inside the `__expo_url` parameter is `https` for a tunnel and `http` otherwise, which is what
+ * The origin inside the `url` parameter is `https` for a tunnel and `http` otherwise, which is what
  * `@expo/cli` does for the same string: a tunnel terminates TLS, so the plain-HTTP origin the dev
  * server prints for itself is not the one a device off the network should be given
  * [observed — `UrlCreator.constructDevClientUrl`, 2026-08-26].
@@ -56,8 +58,9 @@ export function devClientConnectUrl(
   automation = false
 ): string {
   const origin = `${hostType === 'tunnel' ? 'https' : 'http'}://${host}`;
-  const url = `${scheme}://?__expo_url=${encodeURIComponent(origin)}`;
+  const url = `${scheme}://expo-development-client/?url=${encodeURIComponent(origin)}`;
   // FAB and auto-launch overrides apply only to this process; onboarding is marked completed.
+  // A launcher older than SDK 58 ignores these, and still loads the URL.
   // https://docs.expo.dev/develop/development-builds/development-workflows/#using-launch-urls-in-automation-scenarios
   return automation
     ? `${url}&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1`

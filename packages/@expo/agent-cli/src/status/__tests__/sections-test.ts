@@ -768,7 +768,9 @@ describe(buildNextActionStatus, () => {
           'myapp'
         );
 
-        expect(next.command).toBe('myapp://?__expo_url=https%3A%2F%2Fabc.boltexpo.dev');
+        expect(next.command).toBe(
+          'myapp://expo-development-client/?url=https%3A%2F%2Fabc.boltexpo.dev'
+        );
         expect(next.why).toContain('development build');
       });
 
@@ -1154,7 +1156,7 @@ describe(applyOpenUrls, () => {
         label: 'development build',
         // https inside the parameter, because a tunnel terminates TLS — the same string
         // `UrlCreator.constructDevClientUrl` builds.
-        url: 'exp+sampleapp://?__expo_url=https%3A%2F%2Fx8fj2.on.expo.app',
+        url: 'exp+sampleapp://expo-development-client/?url=https%3A%2F%2Fx8fj2.on.expo.app',
       },
     ]);
   });

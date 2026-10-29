@@ -83,7 +83,7 @@ function mockConnectUrls() {
       { target: 'expo-go', url: 'exp://abc.tunnel.example', label: 'Expo Go' },
       {
         target: 'dev-build',
-        url: 'myapp://?__expo_url=https%3A%2F%2Fabc.tunnel.example',
+        url: 'myapp://expo-development-client/?url=https%3A%2F%2Fabc.tunnel.example',
         label: 'the development build',
       },
     ],
@@ -144,7 +144,7 @@ describe(buildSessionStartArgs, () => {
     const args = buildSessionStartArgs({
       platform: 'android',
       app: { expoGo: false, buildId: 'build-1' },
-      openUrl: 'myapp://?__expo_url=x',
+      openUrl: 'myapp://expo-development-client/?url=x',
       name: 'n',
     });
     expect(args).toContain('--build-id');
@@ -300,7 +300,7 @@ describe(openAppOnEasAsync, () => {
     const args = vi.mocked(spawnCaptureAsync).mock.calls[0]![1];
     expect(args).toContain('--build-id');
     expect(args[args.indexOf('--open-url') + 1]).toBe(
-      'myapp://?__expo_url=https%3A%2F%2Fabc.tunnel.example'
+      'myapp://expo-development-client/?url=https%3A%2F%2Fabc.tunnel.example'
     );
   });
 
@@ -439,7 +439,7 @@ describe(openAppOnEasAsync, () => {
         connect: [
           {
             target: 'dev-build',
-            url: `myapp://?__expo_url=${encodeURIComponent(origin)}`,
+            url: `myapp://expo-development-client/?url=${encodeURIComponent(origin)}`,
           },
         ],
       } as any);

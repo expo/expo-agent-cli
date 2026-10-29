@@ -15,32 +15,32 @@ describe(expoGoConnectUrl, () => {
 describe(devClientConnectUrl, () => {
   it('adds reserved automation parameters without changing the server origin', () => {
     const url = new URL(devClientConnectUrl('myapp', 'abc.boltexpo.dev', 'tunnel', true));
-    expect(url.hostname).toBe('');
+    expect(url.hostname).toBe('expo-development-client');
     expect(Object.fromEntries(url.searchParams)).toEqual({
-      __expo_url: 'https://abc.boltexpo.dev',
+      url: 'https://abc.boltexpo.dev',
       __expo_disable_onboarding: '1',
       __expo_disable_fab: '1',
       __expo_disable_auto_launch: '1',
     });
   });
 
-  it('keeps the reserved launch URL when automation is disabled', () => {
+  it('keeps only the url parameter when automation is disabled', () => {
     const url = new URL(devClientConnectUrl('myapp', 'localhost:8081', 'localhost', false));
-    expect(url.hostname).toBe('');
+    expect(url.hostname).toBe('expo-development-client');
     expect(Object.fromEntries(url.searchParams)).toEqual({
-      __expo_url: 'http://localhost:8081',
+      url: 'http://localhost:8081',
     });
   });
 
   it(`matches the shape the dev launcher parses`, () => {
     expect(devClientConnectUrl('scheme', 'localhost:8081', 'localhost')).toBe(
-      'scheme://?__expo_url=http%3A%2F%2Flocalhost%3A8081'
+      'scheme://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081'
     );
   });
 
-  it(`carries the LAN origin in the reserved launch parameter`, () => {
+  it(`carries the LAN origin in the url parameter`, () => {
     expect(devClientConnectUrl('myapp', '192.168.1.5:8081', 'lan')).toBe(
-      'myapp://?__expo_url=http%3A%2F%2F192.168.1.5%3A8081'
+      'myapp://expo-development-client/?url=http%3A%2F%2F192.168.1.5%3A8081'
     );
   });
 
@@ -48,13 +48,13 @@ describe(devClientConnectUrl, () => {
   // when the dev server's own host type is a tunnel, because a tunnel terminates TLS.
   it(`asks a tunnel for https, the way the Expo CLI does`, () => {
     expect(devClientConnectUrl('myapp', 'abc.boltexpo.dev', 'tunnel')).toBe(
-      'myapp://?__expo_url=https%3A%2F%2Fabc.boltexpo.dev'
+      'myapp://expo-development-client/?url=https%3A%2F%2Fabc.boltexpo.dev'
     );
   });
 
   it(`accepts the exp+<slug> default a managed dev build registers`, () => {
     expect(devClientConnectUrl('exp+notesapp', 'localhost:8081', 'localhost')).toBe(
-      'exp+notesapp://?__expo_url=http%3A%2F%2Flocalhost%3A8081'
+      'exp+notesapp://expo-development-client/?url=http%3A%2F%2Flocalhost%3A8081'
     );
   });
 });
@@ -90,7 +90,7 @@ describe(buildConnectUrls, () => {
       {
         target: 'dev-build',
         label: 'development build',
-        url: 'myapp://?__expo_url=http%3A%2F%2F192.168.1.5%3A8081',
+        url: 'myapp://expo-development-client/?url=http%3A%2F%2F192.168.1.5%3A8081',
       },
     ]);
   });
@@ -132,6 +132,8 @@ describe(buildConnectUrls, () => {
     });
 
     expect(urls[0]!.url).toBe('exp://abc.boltexpo.dev');
-    expect(urls[1]!.url).toBe('myapp://?__expo_url=https%3A%2F%2Fabc.boltexpo.dev');
+    expect(urls[1]!.url).toBe(
+      'myapp://expo-development-client/?url=https%3A%2F%2Fabc.boltexpo.dev'
+    );
   });
 });

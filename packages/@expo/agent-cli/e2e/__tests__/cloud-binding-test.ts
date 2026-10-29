@@ -180,7 +180,7 @@ it.each(['ios', 'android'] as const)(
     const initialOpens = readStubEasInvocations(root).filter((i) => i.executedSessionId);
     expect(initialOpens).toHaveLength(1);
     expect(initialOpens[0]!.args).toContain(
-      'myapp://?__expo_url=https%3A%2F%2Fold.tunnel.example&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1'
+      'myapp://expo-development-client/?url=https%3A%2F%2Fold.tunnel.example&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1'
     );
     const originalBinding = readBinding(root, platform);
     const stopped = await executeAgentCliAsync(root, ['dev:stop', '--json'], { env });
@@ -206,7 +206,7 @@ it.each(['ios', 'android'] as const)(
     expect(opens[1]!.args).toEqual([
       '__controller',
       'open',
-      'myapp://?__expo_url=https%3A%2F%2Fnew.tunnel.example&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
+      'myapp://expo-development-client/?url=https%3A%2F%2Fnew.tunnel.example&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1',
       '--platform',
       platform,
     ]);

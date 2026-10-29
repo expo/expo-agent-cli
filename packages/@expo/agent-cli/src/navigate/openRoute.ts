@@ -180,7 +180,7 @@ export interface ResolvedRoute {
    *
    * A *different* URL from {@link url}: that one navigates an app already loaded against a dev
    * server, and these get it loaded. `exp://<host>` is the Expo Go form and
-   * `<scheme>://?__expo_url=…` the development build's, and they are not
+   * `<scheme>://expo-development-client/?url=…` the development build's, and they are not
    * interchangeable — so two entries appear when nothing established which application is running,
    * and none when there is no dev server to point at.
    *
@@ -202,7 +202,7 @@ export interface ResolvedRoute {
 
 /** One open of a URL on a device, and what came of it. */
 export interface DevLauncherOpen {
-  /** The launcher URL: `<scheme>://?__expo_url=<dev server origin>`. */
+  /** The launcher URL: `<scheme>://expo-development-client/?url=<dev server origin>`. */
   url: string;
   /** The device command that opened it, for reproducing the step by hand. */
   command: string;
@@ -504,7 +504,7 @@ export async function openRouteAsync(
   }
 
   // Decided before the reverse, because the two links need different ports forwarded: the launcher
-  // URL carries the dev server's origin inside its `__expo_url` parameter, and a route link for a
+  // URL carries the dev server's origin inside its `url` parameter, and a route link for a
   // development build carries no host at all.
   const budgetMs = options.confirmAttachMs ?? 0;
   const launcherUrl = devLauncherUrlFor(resolved, budgetMs);
@@ -772,7 +772,7 @@ async function attachWaiterAsync(
  *
  * @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server
  * **F123.** `<scheme>://<route>` navigates an app that is *already* running against a dev server;
- * `<scheme>://?__expo_url=<origin>` is what gets it running. They are both the
+ * `<scheme>://expo-development-client/?url=<origin>` is what gets it running. They are both the
  * app's own scheme and they are not interchangeable — so a run that had just decided "no app is
  * connected to the dev server, and the project depends on expo-dev-client" was handing a not-loaded
  * app the link that only a loaded app understands, spending its whole attach budget, and exiting 22

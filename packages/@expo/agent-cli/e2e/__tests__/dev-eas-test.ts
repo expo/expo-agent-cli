@@ -572,7 +572,7 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
         'build-e2e',
       ]);
       expect(start[start.indexOf('--open-url') + 1]).toBe(
-        `devclient://?__expo_url=${encodeURIComponent(`https://${TUNNEL_HOST}`)}` +
+        `devclient://expo-development-client/?url=${encodeURIComponent(`https://${TUNNEL_HOST}`)}` +
           '&__expo_disable_onboarding=1&__expo_disable_fab=1&__expo_disable_auto_launch=1'
       );
       expect(start).toContain('--non-interactive');

@@ -456,7 +456,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
         (parseJson(status)?.devServer?.openUrls ?? []).find(
           (entry: any) => entry.target === 'dev-build'
         )?.url ?? '';
-      const advertised = launcher.match(/[?&]__expo_url=([^&]+)/)?.[1] ?? '';
+      const advertised = launcher.match(/[?&]url=([^&]+)/)?.[1] ?? '';
       const advertisedOrigin = decodeURIComponent(advertised).replace(/\/+$/, '');
       if (!advertisedOrigin) {
         throw new Error(
@@ -520,7 +520,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
     // `simulator:stop` cleanup can only stop what it can name; a bare stop does not reach it.
     // In dev-build mode the session installs and runs a real dev client, named by its build id — the
     // AGENT_CLI_LIVE_CLOUD_BUILD_ID override, or the newest finished development build for this platform.
-    // Its launch URL is the dev-launcher form (`<scheme>://?__expo_url=<origin>`), which
+    // Its launch URL is the dev-launcher form (`<scheme>://expo-development-client/?url=<origin>`), which
     // `--open-url` accepts, rather than Expo Go's `exp://<host>`.
     let appFlags: string[];
     if (CLOUD_MODE === 'dev-build') {
@@ -548,7 +548,7 @@ describeLive('live-cloud', gate)('live-cloud: an EAS Simulator session, on expo-
             `AGENT_CLI_LIVE_CLOUD_BUILD_ID (harness, not a finding)`
         );
       }
-      const launchUrl = `${EAS_EXAMPLE_SCHEME}://?__expo_url=${encodeURIComponent(origin)}`;
+      const launchUrl = `${EAS_EXAMPLE_SCHEME}://expo-development-client/?url=${encodeURIComponent(origin)}`;
       appFlags = ['--build-id', buildId, '--open-url', launchUrl];
     } else {
       appFlags = ['--expo-go', '--open-url', `exp://${publicHost}`];

@@ -330,7 +330,7 @@ export interface DevServerStatus {
    * The URLs that point an app at this dev server, best first. Empty when no host can be named.
    *
    * The **encoded** launcher URL, not the address the dev server prints for itself: a development
-   * build is opened with `<scheme>://?__expo_url=<encoded origin>`, and the line a
+   * build is opened with `<scheme>://expo-development-client/?url=<encoded origin>`, and the line a
    * tunnelled `expo start` writes to its own stdout is neither that nor a URL an HTTP client can use
    * [observed — 2026-08-27, K8]. An agent that copies what the terminal said fails; this is the
    * string that works, next to the address it was built from.

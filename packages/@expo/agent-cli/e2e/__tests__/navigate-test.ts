@@ -89,9 +89,9 @@ describe('@expo/agent-cli navigate', () => {
         expect(result.exitCode).toBe(0);
         const report = JSON.parse(result.stdout);
         const launch = new URL(report.launch.url);
-        expect(launch.hostname).toBe('');
+        expect(launch.hostname).toBe('expo-development-client');
         expect(Object.fromEntries(launch.searchParams)).toEqual({
-          __expo_url: stub.url,
+          url: stub.url,
           ...(automation
             ? {
                 __expo_disable_onboarding: '1',

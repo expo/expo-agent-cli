@@ -68,7 +68,7 @@ describe(decideExpoGoTarget, () => {
 // @ref llp/0005-runtime-loop-tools.rfc.md §Pointing an app at this dev server
 //
 // `certain` decides whether a connect URL may be printed as one line. `exp://<host>` is the Expo Go
-// form and `<scheme>://?__expo_url=…` is the development build's; they are not
+// form and `<scheme>://expo-development-client/?url=…` is the development build's; they are not
 // interchangeable, so a branch that guesses prints both.
 describe(`${decideExpoGoTarget.name} — how sure it is`, () => {
   const nothingConnected = { targetAppIds: [], hasNativeDirs: false, usesDevClient: false };
