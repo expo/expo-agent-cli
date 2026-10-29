@@ -35,7 +35,7 @@ These rules apply to new code and new tests. Do not rewrite old code or old test
 - **Build expected values with the product's helpers.** A test of a platform-specific value (an argv, a path, an escape) builds the expected value with the helper that the code uses.
 - **Build fixtures from one builder.** Give each fixture type one builder that takes overrides, and pass only the fields that differ, for example `makeLock({ pid: 4242 })`. Then a new field is a one-file change.
 - **Test both platforms.** When a change touches behavior that runs on iOS and Android, test it on both. A pass on one platform proves nothing about the other.
-- **EAS simulator sessions are usually free here.** This repo is developed by Expo employees, so start an EAS simulator session or a live cloud run when a check needs one, without asking. Stop the session when you finish.
+- **EAS simulator sessions are usually free here.** This repo is developed by Expo employees, so start an EAS simulator session or a live cloud run when a check needs one, without asking. Do not abuse them, but do not be afraid to use them. Stop the session when you finish.
 - **Keep files small.** In new work, do not grow a file past about 1000 lines. A file that is already larger can stay as it is for now; do not split it as part of an unrelated change.
 
 ## Pull requests
