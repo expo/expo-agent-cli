@@ -24,7 +24,9 @@ export interface AppConfigPlugins {
   /** File the plugins were read from, relative to the project root. Null when there is none. */
   source: string | null;
   plugins: AppConfigPlugin[];
-  /** Why the dynamic config could not be evaluated, so {@link plugins} may be incomplete. */
+  /** Name of the dynamic config file in the project, if any. */
+  dynamicConfigFile: string | null;
+  /** Why {@link dynamicConfigFile} could not be evaluated, so {@link plugins} is unknown and empty. */
   evaluationError: string | null;
 }
 
@@ -61,25 +63,15 @@ export interface ProjectExpoConfig {
   evaluationError: string | null;
 }
 
-export interface ReadExpoConfigOptions {
-  /**
-   * Evaluate a dynamic config without running its config plugins.
-   * `@expo/config` then drops the `plugins` key, so a reader of the plugins runs them, and fails
-   * to the static read when one is not installed.
-   */
-  skipPlugins: boolean;
-}
-
 /**
  * Read the project's app config.
  *
- * The dev loop's view: the env files are those of `development`. The answer is not cached, for the
- * reason llp/0011 gives: a dynamic config can read env vars and `.env` files that no file stamp sees.
+ * The dev loop's view: the env files are those of `development`, and the config plugins are not
+ * run, so a plugin module that is not installed does not fail the read. The declared `plugins`
+ * are kept. The answer is not cached, for the reason llp/0011 gives: a dynamic config can read env
+ * vars and `.env` files that no file stamp sees.
  */
-export function readExpoConfig(
-  projectRoot: string,
-  { skipPlugins }: ReadExpoConfigOptions
-): ProjectExpoConfig {
+export function readExpoConfig(projectRoot: string): ProjectExpoConfig {
   const dynamicConfigFile =
     DYNAMIC_CONFIG_FILES.find((file) => fs.existsSync(path.join(projectRoot, file))) ?? null;
   const staticRead = readStaticConfig(projectRoot);
@@ -90,7 +82,7 @@ export function readExpoConfig(
   const evaluated = evaluateExpoConfig(projectRoot, {
     mode: 'development',
     isPublicConfig: true,
-    skipPlugins,
+    skipPlugins: true,
   });
   if (!evaluated.ok) {
     return { ...staticRead, dynamicConfigFile, evaluationError: evaluated.error };
@@ -113,13 +105,14 @@ export function hasAppConfigFile(projectRoot: string): boolean {
 
 /** Read the config plugins the project declares. */
 export function readAppConfigPlugins(projectRoot: string): AppConfigPlugins {
-  const { source, config, unreadable, evaluationError } = readExpoConfig(projectRoot, {
-    skipPlugins: false,
-  });
-  // A file that does not parse was not read, so it is not named as the source.
+  const { source, config, unreadable, dynamicConfigFile, evaluationError } =
+    readExpoConfig(projectRoot);
+  // A file that does not parse was not read, so it is not named as the source. The static list
+  // does not stand in for a dynamic config that failed: the plugins it returns are unknown.
   return {
     source: unreadable ? null : source,
-    plugins: parsePlugins(config?.plugins),
+    plugins: evaluationError == null ? parsePlugins(config?.plugins) : [],
+    dynamicConfigFile,
     evaluationError,
   };
 }
@@ -142,9 +135,7 @@ export interface EasProjectLink {
 }
 
 export function readEasProject(projectRoot: string): EasProjectLink {
-  const { source, config, unreadable, evaluationError } = readExpoConfig(projectRoot, {
-    skipPlugins: true,
-  });
+  const { source, config, unreadable, evaluationError } = readExpoConfig(projectRoot);
   const projectId = config?.extra?.eas?.projectId;
   return {
     projectId: typeof projectId === 'string' && projectId.trim() ? projectId.trim() : null,

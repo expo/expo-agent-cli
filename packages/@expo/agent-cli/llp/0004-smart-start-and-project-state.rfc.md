@@ -699,11 +699,11 @@ The engine shipped in `src/project/`, `src/plan/`, `src/status/`, `src/dev/`, as
 4. Every value read from the app config (scheme, slug, app id, plugins, router root, EAS
    project id) comes from one reader: a static file as written, and a dynamic
    `app.config.js/ts` evaluated with `@expo/config` in `development` mode after the env files
-   are loaded ([[0005-runtime-loop-tools]] §Pointing an app at this dev server). The reader of
-   a field does not run the config plugins. The readers of the plugins and the router root run
-   them, because `@expo/config` drops the `plugins` key of a dynamic config read without them. A
-   dynamic config that fails to evaluate keeps the static values and reports why, so a missing
-   value reads as unknown. `inspect:config-plugins` reads the declared plugins
+   are loaded ([[0005-runtime-loop-tools]] §Pointing an app at this dev server). No config
+   plugin runs, so a plugin module that is not installed does not fail the read, and the
+   `plugins` the config declares are kept. A dynamic config that fails to evaluate keeps the
+   static values and reports why, so a missing value reads as unknown. Its plugins and router
+   root are unknown: Expo Go gets an `unknown-app-config` reason, and the route check is skipped. `inspect:config-plugins` reads the declared plugins
    out of the introspect payload, where a dynamic config with no `plugins` key declares none.
    [[0011-impact-and-freshness]] spawns `expo config --json --type public` to resolve
    `runtimeVersion`, because config plugins can set it. The fingerprint's asset sources read

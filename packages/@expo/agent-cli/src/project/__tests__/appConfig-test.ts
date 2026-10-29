@@ -50,7 +50,7 @@ describe(readExpoConfig, () => {
       'app.config.json': JSON.stringify({ expo: { runtimeVersion: 'from-app-config-json' } }),
     });
 
-    const result = readExpoConfig(projectRoot, { skipPlugins: true });
+    const result = readExpoConfig(projectRoot);
 
     expect(result).toMatchObject({ source: 'app.config.json', unreadable: false });
     expect(result.config?.runtimeVersion).toBe('from-app-config-json');
@@ -64,7 +64,7 @@ describe(readExpoConfig, () => {
       dynamicConfigPath: path.join(projectRoot, file),
     } as never);
 
-    expect(readExpoConfig(projectRoot, { skipPlugins: true })).toMatchObject({
+    expect(readExpoConfig(projectRoot)).toMatchObject({
       source: file,
       config: { slug: 'evaluated' },
       dynamicConfigFile: file,
@@ -80,7 +80,7 @@ describe(readExpoConfig, () => {
       throw new Error('boom');
     });
 
-    expect(readExpoConfig(projectRoot, { skipPlugins: true })).toMatchObject({
+    expect(readExpoConfig(projectRoot)).toMatchObject({
       source: 'app.json',
       config: { slug: 'static' },
       dynamicConfigFile: 'app.config.js',
@@ -94,7 +94,7 @@ describe(readExpoConfig, () => {
       'app.json': JSON.stringify({ expo: { name: 'app' } }),
     });
 
-    expect(readExpoConfig(projectRoot, { skipPlugins: true })).toMatchObject({
+    expect(readExpoConfig(projectRoot)).toMatchObject({
       source: 'app.config.json',
       config: null,
       unreadable: true,
@@ -123,6 +123,7 @@ describe(readAppConfigPlugins, () => {
     expect(readAppConfigPlugins(projectRoot)).toEqual({
       source: null,
       plugins: [],
+      dynamicConfigFile: null,
       evaluationError: null,
     });
   });

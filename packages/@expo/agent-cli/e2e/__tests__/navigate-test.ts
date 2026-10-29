@@ -418,6 +418,7 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
     const projectRoot = await setupFixtureAsync('dev-client-app');
     await fs.promises.rm(path.join(projectRoot, 'app.json'));
     for (const [name, contents] of Object.entries(files)) {
+      await fs.promises.mkdir(path.dirname(path.join(projectRoot, name)), { recursive: true });
       await fs.promises.writeFile(path.join(projectRoot, name), contents);
     }
     return projectRoot;
@@ -506,38 +507,53 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
     );
   });
 
-  it('checks the route under the router root named in the plugins a dynamic config keeps', async () => {
-    const projectRoot = await setupFixtureAsync('dev-client-app');
-    const appJsonPath = path.join(projectRoot, 'app.json');
-    const appJson = JSON.parse(await fs.promises.readFile(appJsonPath, 'utf8'));
-    appJson.expo.plugins = [['expo-router', { root: './routes' }]];
-    await fs.promises.writeFile(appJsonPath, JSON.stringify(appJson));
-    await fs.promises.writeFile(
-      path.join(projectRoot, 'app.config.js'),
-      'module.exports = ({ config }) => ({ ...config });\n'
-    );
-    const expoRouter = path.join(projectRoot, 'node_modules', 'expo-router');
-    await fs.promises.mkdir(expoRouter, { recursive: true });
-    await fs.promises.writeFile(
-      path.join(expoRouter, 'package.json'),
-      JSON.stringify({ name: 'expo-router', version: '1.0.0' })
-    );
-    await fs.promises.writeFile(
-      path.join(expoRouter, 'app.plugin.js'),
-      'module.exports = (config) => config;\n'
-    );
+  // The root is only in the dynamic config, and no plugin module is installed.
+  it('checks the route under the router root a dynamic config names in its plugins', async () => {
+    const projectRoot = await setupDynamicAsync({
+      'app.config.js': [
+        'module.exports = ({ config }) => ({',
+        '  ...config,',
+        "  scheme: 'marmelade',",
+        "  plugins: [['expo-router', { root: './routes' }], 'react-native-fancy'],",
+        '});',
+        '',
+      ].join('\n'),
+    });
     const route = path.join(projectRoot, 'routes', 'profile', '[id].tsx');
     await fs.promises.mkdir(path.dirname(route), { recursive: true });
     await fs.promises.writeFile(route, 'export default function Route() { return null; }\n');
 
     const result = await executeAgentCliAsync(
       projectRoot,
-      [...PRINT_URL, '--app-id', 'com.example.demo'],
+      [...PRINT_URL, '--app-id', 'dev.marmelade.app'],
       { env: stubExpoEnv(projectRoot) }
     );
     const report: NavigateReport = JSON.parse(result.stdout);
 
     expect(report.routeCheck).toMatchObject({ checked: true, ok: true, matched: '/profile/[id]' });
+  });
+
+  // An `app` directory is there, but a config that failed may name another root.
+  it('skips the route check when the config cannot be evaluated', async () => {
+    const projectRoot = await setupDynamicAsync({
+      'app.config.js':
+        "module.exports = () => { throw new Error('Cannot resolve app config'); };\n",
+      'app/index.tsx': 'export default function Route() { return null; }\n',
+    });
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      [...PRINT_URL, '--app-id', 'dev.marmelade.app'],
+      { env: stubExpoEnv(projectRoot) }
+    );
+    const report: NavigateReport = JSON.parse(result.stdout);
+
+    expect(result.exitCode).toBe(0);
+    expect(report.routeCheck).toMatchObject({
+      checked: false,
+      reason:
+        'app.config.js could not be evaluated (Cannot resolve app config), so the router root is unknown',
+    });
   });
 
   it('evaluates nothing for a static app config', async () => {

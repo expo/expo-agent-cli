@@ -7,7 +7,6 @@
 // changes the native projects, and no native project is checked in.
 import { requireAutolinking } from '../utils/autolinking';
 import { readAppConfigPlugins } from './appConfig';
-import { debugEvent } from './events';
 import { dumpCoversSdk, isExpoGoNativeModule } from './expoGoModules';
 import {
   describeNativeCode,
@@ -86,8 +85,10 @@ export async function checkExpoGoCompatibilityAsync(
   }
 
   if (appConfig.evaluationError != null) {
-    // The static plugins stand in for a dynamic config that could not be evaluated, and may be incomplete.
-    debugEvent('config_plugins_unknown', { reason: 'dynamic-app-config' });
+    reasons.push({
+      kind: 'unknown-app-config',
+      detail: `${appConfig.dynamicConfigFile} could not be evaluated (${appConfig.evaluationError}), so the config plugins it declares are unknown.`,
+    });
   }
   for (const plugin of appConfig.plugins) {
     // A plugin of a bundled module is accepted: its module is inside the Expo Go runtime. This
@@ -177,20 +178,21 @@ async function scanAutolinkingGraphAsync(projectRoot: string): Promise<Installed
  *
  * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
  *
- * Two of the four kinds, and which two is the whole content of this list.
+ * Two of the five kinds, and which two is the whole content of this list.
  *
  * `unbundled-native-module` is native code that is not in the runtime, so the app cannot run there.
  * `config-plugin` changes the native projects, and Expo Go is not built from those projects — the
  * check is already deliberately optimistic here, accepting a plugin whose module *is* bundled, so
  * what reaches this point is a plugin whose changes really are absent.
  *
- * The two that are left out are not weaker versions of the same thing; they are different
+ * The three that are left out are not weaker versions of the same thing; they are different
  * statements. `unknown-sdk` is this check saying it could not read the project — the ordinary state
- * of a fresh clone with no `node_modules`. And `custom-native-code` is a checked-in native directory,
+ * of a fresh clone with no `node_modules`. `unknown-app-config` says the same of a dynamic config
+ * that threw. And `custom-native-code` is a checked-in native directory,
  * which its own `detail` calls out as something that *can* contain native code the runtime lacks: a
  * bare project with no unbundled module still runs in Expo Go, which is exactly the uncertainty
- * {@link import('../navigate/target').ExpoGoDecision.certain} exists to carry. Treating either as
- * decisive would refuse working projects.
+ * {@link import('../navigate/target').ExpoGoDecision.certain} exists to carry. Treating any of them
+ * as decisive would refuse working projects.
  */
 const RULES_OUT_EXPO_GO = new Set<ExpoGoIncompatibility['kind']>([
   'unbundled-native-module',
@@ -203,7 +205,7 @@ const RULES_OUT_EXPO_GO = new Set<ExpoGoIncompatibility['kind']>([
  * @ref llp/0005-runtime-loop-tools.rfc.md §Expo Go is only a target for a project that fits in it
  *
  * {@link ExpoGoCompatibility.compatible} is two-valued and cannot be used for this, because it is
- * `false` for all four reason kinds and only two of them rule Expo Go out
+ * `false` for all five reason kinds and only two of them rule Expo Go out
  * (@ref ./expoGo §RULES_OUT_EXPO_GO). A caller that read it directly would refuse a fresh clone and
  * would claim certainty about a bare project, and the unit suites that run against a virtual
  * filesystem caught both [observed, 2026-09-03].

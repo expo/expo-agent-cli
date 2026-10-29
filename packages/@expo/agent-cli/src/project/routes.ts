@@ -79,12 +79,12 @@ export interface ProjectRouteMatch {
  * table has learned nothing about the route it was asked about.
  */
 export async function readProjectRoutesAsync(projectRoot: string): Promise<ProjectRouteTable> {
-  const routerRoot = await resolveRouterRootAsync(projectRoot);
+  const { root: routerRoot, unknownBecause } = await resolveRouterRootAsync(projectRoot);
   if (routerRoot == null) {
     return {
       routerRoot: null,
       routes: [],
-      reason: 'this project has no app directory, so it does not use Expo Router',
+      reason: unknownBecause ?? 'this project has no app directory, so it does not use Expo Router',
     };
   }
 
@@ -158,29 +158,37 @@ export function matchProjectRoute(
  * then `app`. A configured root that does not exist is still the answer — the project says that is
  * where its routes are, and reporting `app` instead would describe another directory's files.
  */
-async function resolveRouterRootAsync(projectRoot: string): Promise<string | null> {
-  const configured = await readConfiguredRouterRootAsync(projectRoot);
+async function resolveRouterRootAsync(
+  projectRoot: string
+): Promise<{ root: string | null; unknownBecause: string | null }> {
+  const read = readExpoConfig(projectRoot);
+  // A dynamic config that failed may name another root.
+  if (read.evaluationError != null) {
+    return {
+      root: null,
+      unknownBecause: `${read.dynamicConfigFile} could not be evaluated (${read.evaluationError}), so the router root is unknown`,
+    };
+  }
+  const configured = readConfiguredRouterRoot(read.config);
   if (configured != null) {
-    return configured;
+    return { root: configured, unknownBecause: null };
   }
   if (await directoryExistsAsync(path.join(projectRoot, 'src', 'app'))) {
-    return 'src/app';
+    return { root: 'src/app', unknownBecause: null };
   }
   if (await directoryExistsAsync(path.join(projectRoot, 'app'))) {
-    return 'app';
+    return { root: 'app', unknownBecause: null };
   }
-  return null;
+  return { root: null, unknownBecause: null };
 }
 
 /**
  * The router root named in the app config, from either place it can be written.
  *
  * `extra.router.root` is where the resolved config carries it, and the `expo-router` plugin's
- * options are where a project usually writes it. The config is read with its plugins run, because
- * `@expo/config` drops the `plugins` key of a dynamic config read without them.
+ * options are where a project usually writes it.
  */
-async function readConfiguredRouterRootAsync(projectRoot: string): Promise<string | null> {
-  const expo = readExpoConfig(projectRoot, { skipPlugins: false }).config;
+function readConfiguredRouterRoot(expo: Record<string, any> | null): string | null {
   const fromExtra = nonEmptyString(expo?.extra?.router?.root);
   if (fromExtra != null) {
     return toPosix(fromExtra);

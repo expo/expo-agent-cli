@@ -763,33 +763,37 @@ describe('@expo/agent-cli status', () => {
       expect(packages).not.toContain('@shopify/react-native-skia');
     });
 
-    // A plugin that is not installed fails the evaluation, so the static list stands in.
+    // No plugin module is installed: the check reads the declared list, it does not load it.
     it.each([
-      ['should see the plugins of a dynamic config that spreads app.json', true],
-      ['should fall back to the app.json plugins when one cannot be resolved', false],
-    ])('%s', async (_name, pluginInstalled) => {
+      [
+        'should see the plugins a dynamic config keeps from app.json and adds',
+        'module.exports = ({ config }) => ({ ...config, plugins: [...config.plugins, "react-native-other"] });\n',
+        [
+          expect.objectContaining({ kind: 'config-plugin', packageName: 'react-native-fancy' }),
+          expect.objectContaining({ kind: 'config-plugin', packageName: 'react-native-other' }),
+        ],
+      ],
+      [
+        'should call the plugins unknown when the dynamic config throws',
+        "module.exports = () => { throw new Error('Cannot resolve app config'); };\n",
+        [
+          expect.objectContaining({
+            kind: 'unknown-app-config',
+            detail: expect.stringContaining('Cannot resolve app config'),
+          }),
+        ],
+      ],
+    ])('%s', async (_name, appConfigJs, reasons) => {
       const projectRoot = await goAppOnDumpSdkAsync();
       const appJsonPath = path.join(projectRoot, 'app.json');
       const appJson = JSON.parse(await fs.promises.readFile(appJsonPath, 'utf8'));
-      appJson.expo.plugins = ['./plugins/withNothing.js'];
+      appJson.expo.plugins = ['react-native-fancy'];
       await fs.promises.writeFile(appJsonPath, JSON.stringify(appJson));
-      await fs.promises.writeFile(
-        path.join(projectRoot, 'app.config.js'),
-        'module.exports = ({ config }) => ({ ...config });\n'
-      );
-      if (pluginInstalled) {
-        await fs.promises.mkdir(path.join(projectRoot, 'plugins'));
-        await fs.promises.writeFile(
-          path.join(projectRoot, 'plugins', 'withNothing.js'),
-          'module.exports = (config) => config;\n'
-        );
-      }
+      await fs.promises.writeFile(path.join(projectRoot, 'app.config.js'), appConfigJs);
 
       const report = await reportInAsync(projectRoot);
 
-      expect(report.probe?.expoGo.reasons).toEqual([
-        expect.objectContaining({ kind: 'config-plugin' }),
-      ]);
+      expect(report.probe?.expoGo.reasons).toEqual(reasons);
     });
   });
 

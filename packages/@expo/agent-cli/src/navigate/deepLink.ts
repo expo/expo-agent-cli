@@ -72,7 +72,7 @@ export interface ProjectSchemeConfig {
  * `exp+<package name>://` with "no scheme field was found", which is not what happened].
  */
 export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfig {
-  const read = readExpoConfig(projectRoot, { skipPlugins: true });
+  const read = readExpoConfig(projectRoot);
   const scheme = firstScheme(read.config?.scheme);
   let slug = nonEmptyString(read.config?.slug);
   if (slug == null) {
