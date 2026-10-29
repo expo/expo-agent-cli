@@ -5,6 +5,7 @@ import { randomBytes } from 'crypto';
 import { firstLine } from '../utils/text';
 import {
   CdpClient,
+  CdpRequestError,
   CdpTimeoutError,
   runtimeEvaluateAsync,
   type CdpSession,
@@ -30,6 +31,30 @@ export type ContextReplaced =
   | { kind: 'answer-lost'; reason: string }
   /** The app answered and did not keep the marker, so nothing could prove the action: not taken. */
   | { kind: 'unmarkable'; reason: string };
+
+/**
+ * Set the marker. A context that does not keep it, or a CDP error answer, is `unmarkable`; a mark
+ * that gets no answer throws.
+ */
+async function markAsync(
+  ask: (expression: string) => Promise<{
+    open: CdpSession;
+    read: Awaited<ReturnType<typeof runtimeEvaluateAsync>>;
+  }>,
+  marker: string,
+  nonce: string
+): Promise<CdpSession | ContextReplaced> {
+  try {
+    const { open, read } = await ask(
+      `(${marker} = ${JSON.stringify(nonce)}, ${marker} === ${JSON.stringify(nonce)})`
+    );
+    if (read.value === true) return open;
+    return { kind: 'unmarkable', reason: read.exceptionText ?? 'the app did not keep the marker' };
+  } catch (error: unknown) {
+    if (error instanceof CdpRequestError) return { kind: 'unmarkable', reason: describe(error) };
+    throw error;
+  }
+}
 
 /**
  * Set a marker on the target, take the action, and read the marker until it is gone.
@@ -100,24 +125,8 @@ export async function jsContextReplacedAsync(
   };
 
   try {
-    let marked: CdpSession;
-    try {
-      const { open, read: set } = await ask(
-        `(${marker} = ${JSON.stringify(nonce)}, ${marker} === ${JSON.stringify(nonce)})`
-      );
-      if (set.value !== true) {
-        return {
-          kind: 'unmarkable',
-          reason: set.exceptionText ?? 'the app did not keep the marker',
-        };
-      }
-      marked = open;
-    } catch (error: unknown) {
-      if (error instanceof CdpRequestError) {
-        return { kind: 'unmarkable', reason: describe(error) };
-      }
-      throw error;
-    }
+    const marked = await markAsync(ask, marker, nonce);
+    if ('kind' in marked) return marked;
 
     clock.limit(ACT_MS);
     const lost = await act(marked).then(
