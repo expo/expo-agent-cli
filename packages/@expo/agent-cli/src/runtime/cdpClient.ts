@@ -275,7 +275,8 @@ export class CdpClient {
         throw emptyScopeError(
           this.options.metroUrl,
           this.options.targetSelection,
-          classifiedTargets
+          classifiedTargets,
+          this.options.deviceInventory
         );
       }
       throw new Error('No target found.');

@@ -13,7 +13,6 @@ import {
   describeSkippedApps,
   describeSelectedDevice,
   androidModelTwins,
-  EMPTY_DEVICE_INVENTORY,
   type DeviceInventory,
   type ClassifiedTargets,
   type TargetSelection,
@@ -152,7 +151,7 @@ export function emptyScopeError(
   devServerUrl: string,
   targetSelection: TargetSelection,
   classifiedTargets: ClassifiedTargets,
-  deviceInventory: DeviceInventory = EMPTY_DEVICE_INVENTORY
+  deviceInventory: DeviceInventory
 ): CommandError {
   const twins = androidModelTwins(targetSelection, deviceInventory);
   if (twins && classifiedTargets.undetermined.length > 0) {
