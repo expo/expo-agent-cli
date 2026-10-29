@@ -281,15 +281,20 @@ describe('a run that names a platform', () => {
     );
   }
 
-  it('reads the app it places on that platform', async () => {
+  it(`reads the app it places on that platform, not the other platform's`, async () => {
+    const evaluated = new Set<string>();
     const stub = await startStubDevServerAsync({
-      targets: [UNPLACED_TARGET, ANDROID_TARGET],
-      inspectorEvaluate: () => undefined,
+      targets: [UNPLACED_TARGET, EXPO_GO_TARGET, ANDROID_TARGET],
+      inspectorEvaluate: (_expression, device) => {
+        evaluated.add(device);
+        return undefined;
+      },
     });
     try {
       const result = await runAndroidAsync(stub);
 
       expect(JSON.parse(result.stdout).error?.code).not.toBe('NO_APP_CONNECTED');
+      expect([...evaluated]).toEqual(['2']);
     } finally {
       await stub.close();
     }
