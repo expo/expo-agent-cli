@@ -49,6 +49,8 @@ type Scenario = {
    * this run's own `adb reverse`.
    */
   twin?: 'both' | 'bound' | 'neither';
+  /** A second emulator of the bound model attaches with the app, while this run waits. */
+  twinAttachesWhileWaiting?: boolean;
 };
 const scenarios: Scenario[] = [
   {
@@ -146,6 +148,13 @@ const scenarios: Scenario[] = [
     initial: 'empty',
     attachesAfterStop: true,
   },
+  {
+    name: 'no flag, bound Android emulator, a twin attaches with the app while it waits',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+    twinAttachesWhileWaiting: true,
+  },
 ];
 
 async function deviceFixture(root: string, scenario: Scenario) {
@@ -236,8 +245,11 @@ it.each(scenarios)('$name', async (scenario) => {
   const server = await startStubDevServerAsync({
     projectRoot: root,
     manifestOrigin: scenario.backend === 'cloud' ? `https://${TUNNEL_HOST}` : undefined,
-    targets: () =>
-      scenario.attachesAfterStop
+    targets: () => {
+      if (scenario.twinAttachesWhileWaiting && device.opens().includes(launcher)) {
+        fs.writeFileSync(stubEmulatorStatePath(root), 'emulator-5556\n');
+      }
+      return scenario.attachesAfterStop
         ? device.forceStops!().length > 0
           ? [own]
           : []
@@ -245,7 +257,8 @@ it.each(scenarios)('$name', async (scenario) => {
           ? scenario.neverAttaches
             ? [other, ...(scenario.otherModelApp ? [otherModel] : [])]
             : [...initial, own]
-          : initial,
+          : initial;
+    },
   });
   launcher = devClientConnectUrl(
     'demoapp',
