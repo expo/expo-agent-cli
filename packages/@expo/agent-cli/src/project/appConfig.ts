@@ -61,14 +61,25 @@ export interface ProjectExpoConfig {
   evaluationError: string | null;
 }
 
+export interface ReadExpoConfigOptions {
+  /**
+   * Evaluate a dynamic config without running its config plugins.
+   * `@expo/config` then drops the `plugins` key, so a reader of the plugins runs them, and fails
+   * to the static read when one is not installed.
+   */
+  skipPlugins: boolean;
+}
+
 /**
  * Read the project's app config.
  *
- * The dev loop's view: the env files are those of `development`, and the config plugins are not
- * run, because every value read through here is a declared field. The answer is not cached, for the
+ * The dev loop's view: the env files are those of `development`. The answer is not cached, for the
  * reason llp/0011 gives: a dynamic config can read env vars and `.env` files that no file stamp sees.
  */
-export function readExpoConfig(projectRoot: string): ProjectExpoConfig {
+export function readExpoConfig(
+  projectRoot: string,
+  { skipPlugins }: ReadExpoConfigOptions
+): ProjectExpoConfig {
   const dynamicConfigFile =
     DYNAMIC_CONFIG_FILES.find((file) => fs.existsSync(path.join(projectRoot, file))) ?? null;
   const staticRead = readStaticConfig(projectRoot);
@@ -79,7 +90,7 @@ export function readExpoConfig(projectRoot: string): ProjectExpoConfig {
   const evaluated = evaluateExpoConfig(projectRoot, {
     mode: 'development',
     isPublicConfig: true,
-    skipPlugins: true,
+    skipPlugins,
   });
   if (!evaluated.ok) {
     return { ...staticRead, dynamicConfigFile, evaluationError: evaluated.error };
@@ -102,7 +113,9 @@ export function hasAppConfigFile(projectRoot: string): boolean {
 
 /** Read the config plugins the project declares. */
 export function readAppConfigPlugins(projectRoot: string): AppConfigPlugins {
-  const { source, config, unreadable, evaluationError } = readExpoConfig(projectRoot);
+  const { source, config, unreadable, evaluationError } = readExpoConfig(projectRoot, {
+    skipPlugins: false,
+  });
   // A file that does not parse was not read, so it is not named as the source.
   return {
     source: unreadable ? null : source,
@@ -129,7 +142,9 @@ export interface EasProjectLink {
 }
 
 export function readEasProject(projectRoot: string): EasProjectLink {
-  const { source, config, unreadable, evaluationError } = readExpoConfig(projectRoot);
+  const { source, config, unreadable, evaluationError } = readExpoConfig(projectRoot, {
+    skipPlugins: true,
+  });
   const projectId = config?.extra?.eas?.projectId;
   return {
     projectId: typeof projectId === 'string' && projectId.trim() ? projectId.trim() : null,

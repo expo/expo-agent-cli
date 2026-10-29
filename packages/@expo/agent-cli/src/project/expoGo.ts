@@ -86,7 +86,7 @@ export async function checkExpoGoCompatibilityAsync(
   }
 
   if (appConfig.evaluationError != null) {
-    // A dynamic config that could not be evaluated leaves its plugins unknown.
+    // The static plugins stand in for a dynamic config that could not be evaluated, and may be incomplete.
     debugEvent('config_plugins_unknown', { reason: 'dynamic-app-config' });
   }
   for (const plugin of appConfig.plugins) {

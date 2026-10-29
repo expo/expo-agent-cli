@@ -762,6 +762,35 @@ describe('@expo/agent-cli status', () => {
       expect(packages).not.toContain('expo-sqlite');
       expect(packages).not.toContain('@shopify/react-native-skia');
     });
+
+    // A plugin that is not installed fails the evaluation, so the static list stands in.
+    it.each([
+      ['should see the plugins of a dynamic config that spreads app.json', true],
+      ['should fall back to the app.json plugins when one cannot be resolved', false],
+    ])('%s', async (_name, pluginInstalled) => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      const appJsonPath = path.join(projectRoot, 'app.json');
+      const appJson = JSON.parse(await fs.promises.readFile(appJsonPath, 'utf8'));
+      appJson.expo.plugins = ['./plugins/withNothing.js'];
+      await fs.promises.writeFile(appJsonPath, JSON.stringify(appJson));
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'app.config.js'),
+        'module.exports = ({ config }) => ({ ...config });\n'
+      );
+      if (pluginInstalled) {
+        await fs.promises.mkdir(path.join(projectRoot, 'plugins'));
+        await fs.promises.writeFile(
+          path.join(projectRoot, 'plugins', 'withNothing.js'),
+          'module.exports = (config) => config;\n'
+        );
+      }
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.probe?.expoGo.reasons).toEqual([
+        expect.objectContaining({ kind: 'config-plugin' }),
+      ]);
+    });
   });
 
   describe('Expo Go compatibility after prebuild', () => {

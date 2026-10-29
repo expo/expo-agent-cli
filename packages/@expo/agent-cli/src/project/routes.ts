@@ -176,11 +176,11 @@ async function resolveRouterRootAsync(projectRoot: string): Promise<string | nul
  * The router root named in the app config, from either place it can be written.
  *
  * `extra.router.root` is where the resolved config carries it, and the `expo-router` plugin's
- * options are where a project usually writes it — the plugin copies the second into the first, and
- * the config is read with its plugins not run (`readExpoConfig`).
+ * options are where a project usually writes it. The config is read with its plugins run, because
+ * `@expo/config` drops the `plugins` key of a dynamic config read without them.
  */
 async function readConfiguredRouterRootAsync(projectRoot: string): Promise<string | null> {
-  const expo = readExpoConfig(projectRoot).config;
+  const expo = readExpoConfig(projectRoot, { skipPlugins: false }).config;
   const fromExtra = nonEmptyString(expo?.extra?.router?.root);
   if (fromExtra != null) {
     return toPosix(fromExtra);

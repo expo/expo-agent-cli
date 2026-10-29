@@ -506,6 +506,40 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
     );
   });
 
+  it('checks the route under the router root named in the plugins a dynamic config keeps', async () => {
+    const projectRoot = await setupFixtureAsync('dev-client-app');
+    const appJsonPath = path.join(projectRoot, 'app.json');
+    const appJson = JSON.parse(await fs.promises.readFile(appJsonPath, 'utf8'));
+    appJson.expo.plugins = [['expo-router', { root: './routes' }]];
+    await fs.promises.writeFile(appJsonPath, JSON.stringify(appJson));
+    await fs.promises.writeFile(
+      path.join(projectRoot, 'app.config.js'),
+      'module.exports = ({ config }) => ({ ...config });\n'
+    );
+    const expoRouter = path.join(projectRoot, 'node_modules', 'expo-router');
+    await fs.promises.mkdir(expoRouter, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(expoRouter, 'package.json'),
+      JSON.stringify({ name: 'expo-router', version: '1.0.0' })
+    );
+    await fs.promises.writeFile(
+      path.join(expoRouter, 'app.plugin.js'),
+      'module.exports = (config) => config;\n'
+    );
+    const route = path.join(projectRoot, 'routes', 'profile', '[id].tsx');
+    await fs.promises.mkdir(path.dirname(route), { recursive: true });
+    await fs.promises.writeFile(route, 'export default function Route() { return null; }\n');
+
+    const result = await executeAgentCliAsync(
+      projectRoot,
+      [...PRINT_URL, '--app-id', 'com.example.demo'],
+      { env: stubExpoEnv(projectRoot) }
+    );
+    const report: NavigateReport = JSON.parse(result.stdout);
+
+    expect(report.routeCheck).toMatchObject({ checked: true, ok: true, matched: '/profile/[id]' });
+  });
+
   it('evaluates nothing for a static app config', async () => {
     const projectRoot = await setupFixtureAsync('dev-client-app');
 

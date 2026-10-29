@@ -163,7 +163,7 @@ export function readConfiguredAppId(
   projectRoot: string,
   platform: NavigatePlatform
 ): string | null {
-  const expo = readExpoConfig(projectRoot).config;
+  const expo = readExpoConfig(projectRoot, { skipPlugins: true }).config;
   const platformConfig = isRecord(expo?.[platform])
     ? (expo[platform] as Record<string, unknown>)
     : null;
@@ -182,7 +182,7 @@ export function readConfiguredAppId(
  * treats null as "no scheme", which is a handled case.
  */
 export function readConfiguredScheme(projectRoot: string): string | null {
-  const expo = readExpoConfig(projectRoot).config;
+  const expo = readExpoConfig(projectRoot, { skipPlugins: true }).config;
   const scheme = Array.isArray(expo?.scheme) ? expo.scheme[0] : expo?.scheme;
   return typeof scheme === 'string' && URL_SCHEME.test(scheme.trim()) ? scheme.trim() : null;
 }
