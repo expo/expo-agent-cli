@@ -17,6 +17,8 @@ import {
   installStubXcrunAsync,
 } from './installedAppStubs';
 
+const RELOAD_FLAGS = ['--timeout', '2s', '--json', '--no-followups'];
+
 async function besideOtherWorktreeAsync(bindingName: string = BOOTED_SIMULATOR.name) {
   const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
   await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
@@ -128,21 +130,13 @@ it('runtime:reload checks only its own Android bundle beside a foreign iOS app',
   try {
     const result = await executeAgentCliAsync(
       root,
-      [
-        'runtime:reload',
-        '--dev-server-url',
-        server.url,
-        '--method',
-        'dev-server',
-        '--timeout',
-        '2s',
-        '--json',
-        '--no-followups',
-      ],
+      ['runtime:reload', '--dev-server-url', server.url, '--method', 'dev-server', ...RELOAD_FLAGS],
       { reject: false }
     );
     expect(result.exitCode, result.all).toBe(0);
     expect(server.bundlePlatforms()).toEqual(['android']);
+    expect(server.broadcasts()).toBe(0);
+    expect(server.pageReloads()).toEqual(['own']);
     expect(JSON.parse(result.stdout)).toMatchObject({
       reloaded: true,
       bundlePlatforms: ['android'],
@@ -381,6 +375,7 @@ it('runtime:reload selects its bound cloud platform without a platform flag', as
     );
     expect(result.exitCode, result.all).toBe(0);
     expect(server.bundlePlatforms()).toEqual(['android']);
+    expect(server.broadcasts()).toBe(1);
     const report = JSON.parse(result.stdout);
     expect(report).toMatchObject({
       reloaded: true,
@@ -394,6 +389,210 @@ it('runtime:reload selects its bound cloud platform without a platform flag', as
       device: { backend: 'cloud', id: '01a15bf1', name: null },
     });
     expect(report).not.toHaveProperty('targetSelection');
+  } finally {
+    await server.close();
+  }
+});
+
+// This worktree's simulator and another worktree's clone simulator are both booted, and both load
+// from this dev server. The clone's app is skipped: nothing is sent to it and nothing it does proves
+// this reload (llp/0005 §What proves a reload).
+describe("runtime:reload beside another worktree's iOS app", () => {
+  const BOUND = { AGENT_CLI_NO_DEVICE: '0' };
+  const CLONE = {
+    udid: 'SIM-CLONE',
+    name: 'agent-cli c4ed0a60',
+    state: 'Booted',
+  } as const;
+  const ownIos = () =>
+    runtimeTarget('own', {
+      deviceName: BOOTED_SIMULATOR.name,
+      appId: 'host.exp.Exponent',
+    });
+  const cloneIos = () =>
+    runtimeTarget('clone', {
+      deviceName: CLONE.name,
+      appId: 'host.exp.Exponent',
+    });
+
+  async function besideCloneAsync() {
+    const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+    const { calls } = await installStubXcrunAsync(root, {
+      simulators: [BOOTED_SIMULATOR, CLONE],
+    });
+    await bindOtherWorktreeAsync(root, CLONE.udid, CLONE.name);
+    return { root, xcrunCalls: calls };
+  }
+
+  it.each([
+    { pageReload: 'replaces-context' as const, reloaded: true },
+    { pageReload: 'keeps-context' as const, reloaded: false },
+  ])(
+    'sends Page.reload to its own app only, and a page of the skipped app proves nothing ($pageReload)',
+    async ({ pageReload, reloaded }) => {
+      const { root } = await besideCloneAsync();
+      const server = await startStubDevServerAsync({
+        projectRoot: root,
+        targets: [ownIos(), cloneIos()],
+        pageReload,
+      });
+      try {
+        const result = await executeAgentCliAsync(
+          root,
+          [
+            'runtime:reload',
+            '--ios',
+            '--dev-server-url',
+            server.url,
+            '--method',
+            'dev-server',
+            ...RELOAD_FLAGS,
+          ],
+          { reject: false, env: BOUND }
+        );
+        expect(server.broadcasts(), result.all).toBe(0);
+        expect(server.pageReloads()).toEqual(['own']);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          reloaded,
+          ...(reloaded ? {} : { appsReconnected: 0 }),
+        });
+        if (!reloaded) {
+          expect(result.stderr).toContain('nothing could prove the reload and nothing was watched');
+        }
+      } finally {
+        await server.close();
+      }
+    }
+  );
+
+  it('sends no Page.reload when its own app cannot keep the marker', async () => {
+    const { root } = await besideCloneAsync();
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [ownIos(), cloneIos()],
+      inspectorSocket: 'no-debugger',
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--ios',
+          '--dev-server-url',
+          server.url,
+          '--method',
+          'dev-server',
+          ...RELOAD_FLAGS,
+        ],
+        { reject: false, env: BOUND }
+      );
+      expect(server.pageReloads()).toEqual([]);
+      expect(server.broadcasts()).toBe(0);
+      expect(result.stderr).toContain('so none was sent');
+      expect(result.stderr).toContain('runtime:reload --method device');
+      expect(result.stderr).not.toContain('could not reach');
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('reads the target list again after the bundle gate, and does not broadcast to a new app', async () => {
+    const { root } = await besideCloneAsync();
+    const elsewhere = runtimeTarget('far', { deviceName: 'Ada’s phone' });
+    let server: Awaited<ReturnType<typeof startStubDevServerAsync>> | undefined;
+    server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: () => (server?.bundlePlatforms().length ? [ownIos(), elsewhere] : [ownIos()]),
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--dev-server-url',
+          server.url,
+          '--method',
+          'dev-server',
+          ...RELOAD_FLAGS,
+        ],
+        { reject: false, env: BOUND }
+      );
+      expect(server.bundlePlatforms(), result.all).not.toEqual([]);
+      expect(server.broadcasts()).toBe(0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('relaunches its own app on its own simulator when the dev server reaches none', async () => {
+    const { root, xcrunCalls } = await besideCloneAsync();
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [ownIos(), cloneIos()],
+      messagePeers: {},
+      inspectorSocket: 'none',
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--ios',
+          '--dev-server-url',
+          server.url,
+          '--timeout',
+          '2s',
+          '--no-followups',
+        ],
+        { reject: false, env: BOUND }
+      );
+      const terminated = xcrunCalls().filter((call) => call[1] === 'terminate');
+      expect(terminated, result.all).toEqual([
+        ['simctl', 'terminate', BOOTED_SIMULATOR.udid, 'host.exp.Exponent'],
+      ]);
+      expect(result.stdout).toContain('via stopping the app on the device and opening it again');
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+it("runtime:reload does not take another platform's churn as its proof", async () => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: [
+      runtimeTarget('go-ios', {
+        deviceName: 'iPhone 17',
+        appId: 'host.exp.Exponent',
+      }),
+      runtimeTarget('go-android', {
+        deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+        appId: 'host.exp.exponent',
+      }),
+    ],
+    messagePeers: { 'socket#1': 'role=ios', 'socket#2': 'role=ios' },
+    reloadTargets: 'stale',
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      [
+        'runtime:reload',
+        '--ios',
+        '--dev-server-url',
+        server.url,
+        '--method',
+        'dev-server',
+        ...RELOAD_FLAGS,
+      ],
+      { reject: false }
+    );
+    const report = JSON.parse(result.stdout);
+    expect(report.reloaded, result.all).toBe(false);
+    expect(report.attempts[0].reason).toContain("outside this run's scope");
+    expect(result.stderr).not.toContain('--eas');
+    expect(result.stderr).not.toContain('tunnel');
   } finally {
     await server.close();
   }

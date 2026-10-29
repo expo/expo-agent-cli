@@ -742,6 +742,17 @@ export type StubDevServerOptions = {
    */
   inspectorSocket?: 'live' | 'none' | 'no-debugger';
   /**
+   * What a `Page.reload` sent to a `live` inspector socket does.
+   *
+   * - `replaces-context` (default) — the app's JavaScript context is replaced, so its marker global
+   *   is gone [observed — live, iOS and Android, 2026-10-29].
+   * - `keeps-context` — the context stays, so the marker survives, and every *other* app's page
+   *   registers again under a new page id. This is the case a reload proof has to reject: the
+   *   app did not reload and a neighbour churned. Not observed live; it models what the proof
+   *   must refuse to count.
+   */
+  pageReload?: 'replaces-context' | 'keeps-context';
+  /**
    * How the inspector socket answers `Runtime.evaluate`, for the commands that ask the app a
    * question rather than only connecting to it.
    *
@@ -882,6 +893,7 @@ export async function startStubDevServerAsync({
   bundleDelayMs = 0,
   messageSocket = 'v2',
   inspectorSocket = 'live',
+  pageReload = 'replaces-context',
   messagePeers = { 'socket#1': 'role=ios' },
   reloadTargets = 'reconnect',
   reloadReconnectDelayMs = 700,
@@ -1041,6 +1053,14 @@ export async function startStubDevServerAsync({
     }));
   };
 
+  const renamedTarget = (target: unknown): unknown => reloadedTargets([target])[0];
+
+  /** The `device=` query of a listed target's debugger URL. */
+  const listedDevice = (target: unknown): string | null => {
+    const url = (target as { webSocketDebuggerUrl?: unknown }).webSocketDebuggerUrl;
+    return typeof url === 'string' ? new URL(url, 'http://stub').searchParams.get('device') : null;
+  };
+
   let peers: Record<string, string | null> = { ...messagePeers };
   let nextPeerId = 100;
   let broadcasts = 0;
@@ -1051,9 +1071,10 @@ export async function startStubDevServerAsync({
   // A runtime with no debugger: the socket is there, and every method it is asked for comes back
   // `-32601`. `live` stays silent instead, which is a runtime that is being asked nothing.
   if (inspectorSocket === 'no-debugger') {
-    inspectorServer?.on('connection', (socket: WebSocket) => {
+    inspectorServer?.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+      const device = new URL(request.url ?? '/', 'http://stub').searchParams.get('device') ?? '';
       socket.on('message', (data) => {
-        let message: { id?: unknown };
+        let message: { id?: unknown; method?: unknown };
         try {
           message = JSON.parse(String(data));
         } catch {
@@ -1061,6 +1082,9 @@ export async function startStubDevServerAsync({
         }
         if (message.id == null) {
           return;
+        }
+        if (message.method === 'Page.reload') {
+          pageReloads.push(device);
         }
         socket.send(
           JSON.stringify({ id: message.id, error: { code: -32601, message: 'Method not found' } })
@@ -1092,7 +1116,13 @@ export async function startStubDevServerAsync({
         const reply = (result: object) => socket.send(JSON.stringify({ id: message.id, result }));
         if (message.method === 'Page.reload') {
           pageReloads.push(device);
-          markers.delete(device);
+          if (pageReload === 'replaces-context') {
+            markers.delete(device);
+          } else {
+            listedTargets = listedTargets.map((target) =>
+              listedDevice(target) === device ? target : renamedTarget(target)
+            );
+          }
           reply({});
           return;
         }

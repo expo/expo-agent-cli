@@ -1,4 +1,3 @@
-import { makeTarget } from '../../runtime/__tests__/targetSelectionFixtures';
 // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke
 // @ref llp/0035-one-device-per-worktree.rfc.md §Wiring
 // Smoke binds and releases only its own platform through the registry.
@@ -335,57 +334,6 @@ describe('ensureEasSession with no EAS build to install', () => {
       backend: 'cloud',
       reason: null,
     });
-  });
-});
-
-// @ref llp/0005-runtime-loop-tools.rfc.md §Android — the EAS Simulator iOS session rule
-describe('evaluate on an EAS Simulator iOS session', () => {
-  const realPlatform = process.platform;
-  const realFetch = globalThis.fetch;
-  const CLOUD_TARGET = {
-    id: '1',
-    appId: 'dev.vonovak.cyclable',
-    deviceName: 'iPhone 17',
-    description: '',
-    type: 'node',
-    title: 'React Native',
-    devtoolsFrontendUrl: '/devtools',
-    webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=1&page=1',
-  };
-
-  beforeEach(() => {
-    Object.defineProperty(process, 'platform', { value: 'darwin' });
-    globalThis.fetch = (async () => ({
-      ok: true,
-      json: async () => [CLOUD_TARGET],
-    })) as unknown as typeof fetch;
-  });
-
-  afterEach(() => {
-    Object.defineProperty(process, 'platform', { value: realPlatform });
-    globalThis.fetch = realFetch;
-  });
-
-  it("waitForAppConnection on --ios --eas beside a local simulator's app", async () => {
-    vi.mocked(spawnCaptureAsync).mockResolvedValue({
-      exitCode: 0,
-      stdout: JSON.stringify({
-        devices: { ios: [{ name: 'iPhone 17 Pro', udid: 'LOCAL', state: 'Booted' }] },
-      }),
-      stderr: '',
-    });
-    globalThis.fetch = (async () => ({
-      ok: true,
-      json: async () => [
-        makeTarget({ id: 'local', deviceName: 'iPhone 17 Pro' }),
-        makeTarget({ id: 'session' }),
-      ],
-    })) as unknown as typeof fetch;
-    const result = await buildSmokeDeps(
-      projectRoot,
-      resolveSmokeOptions(['--ios', '--eas'])
-    ).waitForAppConnection('http://127.0.0.1:8081', 10);
-    expect(result).toMatchObject({ appsConnected: 1, undeterminedApps: 0 });
   });
 });
 

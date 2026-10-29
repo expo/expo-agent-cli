@@ -21,7 +21,6 @@ import { reloadOverDevServerAsync } from '../rungOne';
 import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
-import { serveInspectorApp } from '../../__tests__/fakeInspectorApp';
 
 vi.mock('ws', async (importOriginal) => {
   const actual = await importOriginal<typeof import('ws')>();
@@ -765,137 +764,6 @@ describe(reloadAsync, () => {
     const error = await reloadAsync(projectRoot, options({ route: '/nope' })).catch((e) => e);
     expect(error.code).toBe('ROUTE_NOT_FOUND');
     expect(connectMessageSocketAsync).not.toHaveBeenCalled();
-  });
-});
-
-
-// @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
-// Another worktree's clone simulator loads from this port beside this worktree's app on its bound
-// simulator. Its app is skipped: rung 1 sends it no reload, and nothing it does proves this one.
-describe(`${reloadAsync.name} beside an app the scope skipped`, () => {
-  const CLONE = 'agent-cli c4ed0a60';
-  const ON_CLONE = { ...EXPO_GO_TARGET, id: 'clone-1', deviceName: CLONE };
-  const BOTH_BOOTED = {
-    stdout: JSON.stringify({
-      devices: {
-        'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [
-          { udid: 'IOS-1', name: 'iPhone 17', state: 'Booted' },
-          { udid: 'UDID-LEGEND', name: CLONE, state: 'Booted' },
-        ],
-      },
-    }),
-  };
-
-  beforeEach(() => {
-    vol.mkdirSync('/wt/legend', { recursive: true });
-    seedIosBinding('/wt/legend', 'UDID-LEGEND', CLONE);
-    mockSpawnQueue(Array.from({ length: 8 }, () => BOTH_BOOTED));
-  });
-
-  it(`does not count a new page of the skipped app as this worktree's reload`, async () => {
-    writeProject();
-    const OWN = {
-      ...EXPO_GO_TARGET,
-      reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'own' },
-    };
-    const server = mockDevServer([ON_CLONE, OWN]);
-    const cloneRegistersAgain = () => server.listing([{ ...ON_CLONE, id: 'clone-2' }, OWN]);
-    mockConnect(fakeSocket([{ 'socket#1': 'role=ios' }], cloneRegistersAgain).socket);
-    serveInspectorApp({ onReload: 'nothing', onPageReload: cloneRegistersAgain });
-
-    await reloadAsync(projectRoot, options({ json: true, method: 'dev-server', timeoutMs: 600 }));
-
-    expect(JSON.parse(printed())).toMatchObject({ reloaded: false, appsReconnected: 0 });
-  });
-
-  it(`does not count another platform's new page, or the churn beside it, as this worktree's reload`, async () => {
-    writeProject();
-    const ANDROID = {
-      id: 'android-1',
-      appId: 'host.exp.exponent',
-      deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
-      webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=android&page=1',
-    };
-    const server = mockDevServer([EXPO_GO_TARGET, ANDROID]);
-    const androidRegistersAgain = () =>
-      server.listing([EXPO_GO_TARGET, { ...ANDROID, id: 'android-2' }]);
-    mockConnect(
-      fakeSocket([{ 'socket#1': 'role=ios' }, { 'socket#4': 'role=ios' }], androidRegistersAgain)
-        .socket
-    );
-
-    await reloadAsync(
-      projectRoot,
-      options({ json: true, method: 'dev-server', platform: 'ios', timeoutMs: 600 })
-    );
-
-    const report = JSON.parse(printed());
-    expect(report).toMatchObject({ reloaded: false, verifiedBy: null, appsReconnected: 0 });
-    expect(report.attempts[0]).toMatchObject({ method: 'dev-server', ok: false, delivered: true });
-    expect(report.attempts[0].reason).toBe(
-      "1 command socket client reconnected, but the broadcast also reached 1 app outside this run's scope, so the churn is not this app's proof"
-    );
-    const explained = vi.mocked(console.error).mock.calls.flat().join('\n');
-    expect(explained).toContain(
-      "1 listed app outside this run's scope was reloaded too, so the churn proves nothing"
-    );
-    expect(explained).not.toContain('--eas');
-    expect(explained).not.toContain('tunnel');
-  });
-
-  it('says nothing was watched when a Page.reload had no bundle that could count', async () => {
-    writeProject();
-    const OWN = {
-      ...EXPO_GO_TARGET,
-      reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'own' },
-    };
-    mockDevServer([ON_CLONE, OWN]);
-    serveInspectorApp({ onReload: 'nothing' });
-
-    await reloadAsync(
-      projectRoot,
-      options({ method: 'dev-server', platform: 'ios', timeoutMs: 600 })
-    );
-
-    const explained = vi.mocked(console.error).mock.calls.flat().join('\n');
-    expect(explained).toContain('nothing could prove the reload and nothing was watched');
-    expect(explained).not.toContain('two observations were watched');
-  });
-
-  it('says no Page.reload was sent when no own app could keep the marker', async () => {
-    writeProject();
-    const OWN = {
-      ...EXPO_GO_TARGET,
-      reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'own' },
-    };
-    mockDevServer([ON_CLONE, OWN]);
-    const app = serveInspectorApp({ evaluate: 'method-not-found' });
-
-    await reloadAsync(
-      projectRoot,
-      options({ method: 'dev-server', platform: 'ios', timeoutMs: 600 })
-    );
-
-    expect(app.reloaded()).toEqual([]);
-    const explained = vi.mocked(console.error).mock.calls.flat().join('\n');
-    expect(explained).toContain('so none was sent');
-    expect(explained).toContain('runtime:reload --method device');
-    expect(explained).not.toContain('could not reach');
-  });
-
-  it(`relaunches this worktree's app and reports the device fallback`, async () => {
-    writeProject();
-    mockDevServer([{ ...ON_CLONE, appId: 'com.legend.app' }, EXPO_GO_TARGET]);
-    mockConnect(fakeSocket([{}]).socket);
-
-    await reloadAsync(projectRoot, options({ timeoutMs: 600 }));
-
-    const terminate = vi
-      .mocked(spawn)
-      .mock.calls.map(([, args]) => args as string[])
-      .find((args) => args[1] === 'terminate');
-    expect(terminate).toEqual(['simctl', 'terminate', 'IOS-1', 'host.exp.Exponent']);
-    expect(printed()).toContain('via stopping the app on the device and opening it again');
   });
 });
 
@@ -1906,26 +1774,4 @@ describe('the verification payload', () => {
     expect(report.commandSocketChurn.reason).toContain('not asked');
     expect(report.appsReconnectedReason).toContain('no reload happened');
   });
-});
-
-it('protects an app that becomes visible during the bundle gate', async () => {
-  writeProject();
-  mockSpawnQueue(Array.from({ length: 8 }, () => ({ stdout: BOOTED_SIMULATOR })));
-  const foreign = { ...EXPO_GO_TARGET, id: 'other-page', deviceName: 'Other simulator' };
-  const server = mockDevServer([EXPO_GO_TARGET]);
-  const fetchBefore = globalThis.fetch;
-  let bundleRequested = false;
-  globalThis.fetch = (async (input: unknown) => {
-    const url = String(input);
-    if (url.includes('entry.bundle')) {
-      bundleRequested = true;
-      server.listing([EXPO_GO_TARGET, foreign]);
-    }
-    return fetchBefore(input as never);
-  }) as typeof fetch;
-  const { socket, sent } = fakeSocket([{ first: 'role=ios' }, { second: 'role=ios' }]);
-  mockConnect(socket);
-  await reloadAsync(projectRoot, options({ json: true, method: 'dev-server', timeoutMs: 600 }));
-  expect(bundleRequested).toBe(true);
-  expect(sent).toEqual([]);
 });

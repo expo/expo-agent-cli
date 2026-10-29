@@ -61,13 +61,6 @@ describe('what rung 1 does, and which bundle proves it', () => {
       bundlePlatforms: ['ios'],
     },
     {
-      name: "broadcasts beside an app outside the scope's platform, and only the scope's bundle proves",
-      targets: [ownIos, ownAndroid],
-      targetSelection: BOUND_SIMULATOR,
-      mechanism: 'broadcast',
-      bundlePlatforms: ['ios'],
-    },
-    {
       name: "broadcasts beside Expo Go on the other platform, and the scope's bundle proves",
       targets: [expoGoAndroid, expoGoIos],
       targetSelection: FLAG_ANDROID,
@@ -79,13 +72,6 @@ describe('what rung 1 does, and which bundle proves it', () => {
       targets: [ownIos, elsewhere],
       targetSelection: FLAG_IOS,
       mechanism: 'broadcast',
-      bundlePlatforms: [],
-    },
-    {
-      name: "an iOS bundle does not prove the own iOS app beside another worktree's iOS app",
-      targets: [ownIos, onClone],
-      targetSelection: BOUND_SIMULATOR,
-      mechanism: 'page-reload',
       bundlePlatforms: [],
     },
     {
