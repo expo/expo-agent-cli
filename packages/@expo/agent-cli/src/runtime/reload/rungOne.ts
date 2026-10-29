@@ -22,7 +22,6 @@ import {
   classifyTargets,
   deviceFactsLost,
   deviceInventoryForSelectionAsync,
-  describeSkippedApps,
   EMPTY_DEVICE_INVENTORY,
   skippedAppsOf,
   type DeviceInventory,
@@ -530,7 +529,7 @@ async function reloadOwnTargetsAsync(
     ok: kind === 'proved',
     delivered: kind === 'proved' || kind === 'delivered',
     outcomes,
-    reason: `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}. No broadcast was sent, because the dev server relays it to every app. ${describeSkippedApps(policy.skippedApps)}`,
+    reason: `${clause}${notes.length ? ` (${notes.join('; ')})` : ''}. No broadcast was sent, because the dev server relays it to every app, and this run skips ${policy.skippedApps.length} of them (\`skippedApps\`).`,
     leftAppStopped: null,
   };
   const churn = {
