@@ -1,7 +1,7 @@
 // @ref llp/0004-smart-start-and-project-state.rfc.md §Sub-features
 // "What must rerun after installing this package?" — the same classification the decision table
 // uses, consumed right after `expo install`.
-import { readStaticAppConfigAsync } from './appConfig';
+import { readAppConfigPlugins } from './appConfig';
 import {
   describeNativeCode,
   hasNativeCode,
@@ -36,7 +36,7 @@ export async function classifyInstallImpactAsync(
 
   const [bundledNativeModules, appConfig, nativeDirs, packageJson] = await Promise.all([
     loadBundledNativeModulesAsync(projectRoot),
-    readStaticAppConfigAsync(projectRoot),
+    readAppConfigPlugins(projectRoot),
     readProjectNativeDirsAsync(projectRoot),
     readProjectPackageJsonAsync(projectRoot),
   ]);

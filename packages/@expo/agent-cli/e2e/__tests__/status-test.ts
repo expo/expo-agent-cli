@@ -762,6 +762,112 @@ describe('@expo/agent-cli status', () => {
       expect(packages).not.toContain('expo-sqlite');
       expect(packages).not.toContain('@shopify/react-native-skia');
     });
+
+    const OTHER_PLUGIN = [
+      expect.objectContaining({ kind: 'config-plugin', packageName: 'react-native-other' }),
+    ];
+    const FIRST_CALL_ONLY = [
+      'let calls = 0;',
+      'const plugins = () => { calls += 1; return calls === 1 ? ["react-native-other"] : []; };',
+    ];
+
+    // No plugin module is installed: the check reads the declared list, it does not load it.
+    // Status reads the config more than once, and every read sees the same single call.
+    it.each([
+      [
+        'should see the plugins a dynamic config keeps from app.json and adds',
+        {
+          'app.config.js':
+            'module.exports = ({ config }) => ({ ...config, plugins: [...config.plugins, "react-native-other"] });\n',
+        },
+        [
+          expect.objectContaining({ kind: 'config-plugin', packageName: 'react-native-fancy' }),
+          expect.objectContaining({ kind: 'config-plugin', packageName: 'react-native-other' }),
+        ],
+      ],
+      [
+        'should read the plugins of a config that answers differently on a later call',
+        {
+          'app.config.js': [
+            ...FIRST_CALL_ONLY,
+            'module.exports = ({ config }) => ({ ...config, plugins: plugins() });',
+            '',
+          ].join('\n'),
+        },
+        OTHER_PLUGIN,
+      ],
+      [
+        'should read the plugins of an ES module config that answers differently on a later call',
+        {
+          'app.config.mjs': [
+            ...FIRST_CALL_ONLY,
+            'export default ({ config }) => ({ ...config, plugins: plugins() });',
+            '',
+          ].join('\n'),
+        },
+        OTHER_PLUGIN,
+      ],
+      [
+        'should read the plugins of a config whose helper keeps its own list',
+        {
+          'plugins.js': [
+            'const list = [];',
+            'module.exports = () => { list.push("react-native-other"); return list; };',
+            '',
+          ].join('\n'),
+          'app.config.js': [
+            'const plugins = require("./plugins");',
+            'module.exports = ({ config }) => ({ ...config, plugins: plugins() });',
+            '',
+          ].join('\n'),
+        },
+        OTHER_PLUGIN,
+      ],
+      [
+        'should call the plugins unknown when the dynamic config throws',
+        {
+          'app.config.js':
+            "module.exports = () => { throw new Error('Cannot resolve app config'); };\n",
+        },
+        [
+          expect.objectContaining({
+            kind: 'unknown-app-config',
+            detail: expect.stringContaining('Cannot resolve app config'),
+          }),
+        ],
+      ],
+    ])('%s', async (_name, files, reasons) => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      const appJsonPath = path.join(projectRoot, 'app.json');
+      const appJson = JSON.parse(await fs.promises.readFile(appJsonPath, 'utf8'));
+      appJson.expo.plugins = ['react-native-fancy'];
+      await fs.promises.writeFile(appJsonPath, JSON.stringify(appJson));
+      for (const [name, contents] of Object.entries(files)) {
+        await fs.promises.writeFile(path.join(projectRoot, name), contents);
+      }
+
+      const report = await reportInAsync(projectRoot);
+
+      expect(report.probe?.expoGo.reasons).toEqual(reasons);
+    });
+
+    // `@expo/require-utils` runs a file that throws while it loads twice on its own.
+    it('should load a config that throws while it loads once per command', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'app.config.js'),
+        [
+          'require("fs").appendFileSync(__dirname + "/runs.log", "run\\n");',
+          'throw new Error("Cannot resolve app config");',
+          '',
+        ].join('\n')
+      );
+
+      await reportInAsync(projectRoot);
+
+      const runs = await fs.promises.readFile(path.join(projectRoot, 'runs.log'), 'utf8');
+      expect(runs.trim().split('\n').length).toBeLessThanOrEqual(2);
+    });
   });
 
   describe('Expo Go compatibility after prebuild', () => {
@@ -1422,6 +1528,35 @@ describe('@expo/agent-cli status', () => {
         const text = await executeAgentCliAsync(projectRoot, ['status']);
         expect(text.stdout).toContain('tunnel https://e2e-tunnel.boltexpo.dev');
         expect(text.stdout).toMatch(/open in .*: exp:\/\/e2e-tunnel\.boltexpo\.dev/);
+      } finally {
+        releaseLock();
+        await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
+      }
+    });
+
+    // Issue #84: the package name is not the slug, so a static read offered a scheme the app lacks.
+    it('builds the development build URL from the scheme a dynamic config evaluates to', async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      await fs.promises.rm(path.join(projectRoot, 'app.json'));
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'app.config.js'),
+        "module.exports = { name: 'BabyPath', slug: 'babypath', scheme: 'babypath' };\n"
+      );
+      const devServer = await startDevServerDoubleAsync([]);
+      const releaseLock = await holdDevLockAsync(projectRoot, {
+        url: devServer.url,
+        port: Number(new URL(devServer.url).port),
+        pid: process.pid,
+        startedAt: new Date(Date.now() - 5_000).toISOString(),
+        projectRoot,
+      });
+      try {
+        const report: StatusReport = JSON.parse(
+          (await executeAgentCliAsync(projectRoot, ['status', '--json'])).stdout
+        );
+
+        const devBuild = report.devServer!.openUrls.find((url) => url.target === 'dev-build');
+        expect(devBuild?.url).toMatch(/^babypath:\/\//);
       } finally {
         releaseLock();
         await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
@@ -2358,19 +2493,28 @@ describe('@expo/agent-cli status', () => {
       expect(report.errors).toEqual({});
     });
 
-    // A dynamic config may set the id from the environment.
-    it('asks EAS when the config is dynamic and the static one names no project', async () => {
-      const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
-      await fs.promises.writeFile(
-        path.join(projectRoot, 'app.config.js'),
-        'module.exports = ({ config }) => ({ ...config, extra: { eas: { projectId: process.env.EAS_PROJECT_ID } } });\n'
-      );
+    // The dynamic config is evaluated with the project's env files, so its answer is believed.
+    it.each([
+      { env: 'EAS_PROJECT_ID=proj-from-env\n', state: 'none', commands: ['whoami', 'build:list'] },
+      { env: null, state: 'unknown', commands: ['whoami'] },
+    ])(
+      'reads the EAS project a dynamic config evaluates to (.env: $env)',
+      async ({ env, state, commands }) => {
+        const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
+        await fs.promises.writeFile(
+          path.join(projectRoot, 'app.config.js'),
+          'module.exports = ({ config }) => ({ ...config, extra: { eas: { projectId: process.env.EAS_PROJECT_ID } } });\n'
+        );
+        if (env != null) {
+          await fs.promises.writeFile(path.join(projectRoot, '.env'), env);
+        }
 
-      const report = await reportInAsync(projectRoot, []);
+        const report = await reportInAsync(projectRoot, []);
 
-      expect(iosOf(report)).toMatchObject({ state: 'none', source: 'eas' });
-      expect(easCommands(projectRoot)).toContain('build:list');
-    });
+        expect(iosOf(report).state).toBe(state);
+        expect([...new Set(easCommands(projectRoot))]).toEqual(commands);
+      }
+    );
   });
 
   // @ref llp/0023-fingerprint-caching.rfc.md

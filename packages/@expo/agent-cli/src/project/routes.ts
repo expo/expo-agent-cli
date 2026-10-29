@@ -20,8 +20,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { directoryExistsAsync } from '../utils/dir';
-import { STATIC_CONFIG_FILES } from './appConfig';
-import { readJsonFileAsync } from './nodeModules';
+import { configOf, evaluationFailureOf, readExpoConfig } from './appConfig';
 
 /** Extensions Metro resolves for a route module. */
 const ROUTE_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx'];
@@ -80,12 +79,12 @@ export interface ProjectRouteMatch {
  * table has learned nothing about the route it was asked about.
  */
 export async function readProjectRoutesAsync(projectRoot: string): Promise<ProjectRouteTable> {
-  const routerRoot = await resolveRouterRootAsync(projectRoot);
+  const { root: routerRoot, unknownBecause } = await resolveRouterRootAsync(projectRoot);
   if (routerRoot == null) {
     return {
       routerRoot: null,
       routes: [],
-      reason: 'this project has no app directory, so it does not use Expo Router',
+      reason: unknownBecause ?? 'this project has no app directory, so it does not use Expo Router',
     };
   }
 
@@ -159,48 +158,48 @@ export function matchProjectRoute(
  * then `app`. A configured root that does not exist is still the answer — the project says that is
  * where its routes are, and reporting `app` instead would describe another directory's files.
  */
-async function resolveRouterRootAsync(projectRoot: string): Promise<string | null> {
-  const configured = await readConfiguredRouterRootAsync(projectRoot);
+async function resolveRouterRootAsync(
+  projectRoot: string
+): Promise<{ root: string | null; unknownBecause: string | null }> {
+  const read = readExpoConfig(projectRoot);
+  // A config that could not be evaluated may name another root in the `expo-router` options.
+  if (read.kind === 'evaluation-failed') {
+    return {
+      root: null,
+      unknownBecause: `${evaluationFailureOf(read)}, so the router root is unknown`,
+    };
+  }
+  const configured = readConfiguredRouterRoot(configOf(read)?.config ?? null);
   if (configured != null) {
-    return configured;
+    return { root: configured, unknownBecause: null };
   }
   if (await directoryExistsAsync(path.join(projectRoot, 'src', 'app'))) {
-    return 'src/app';
+    return { root: 'src/app', unknownBecause: null };
   }
   if (await directoryExistsAsync(path.join(projectRoot, 'app'))) {
-    return 'app';
+    return { root: 'app', unknownBecause: null };
   }
-  return null;
+  return { root: null, unknownBecause: null };
 }
 
 /**
- * The router root named in the static app config, from either place it can be written.
+ * The router root named in the app config, from either place it can be written.
  *
  * `extra.router.root` is where the resolved config carries it, and the `expo-router` plugin's
- * options are where a project usually writes it — the plugin copies the second into the first, and
- * this reads a config nobody resolved. A dynamic `app.config.js` is never evaluated, per the
- * process boundary; such a project falls through to the directory defaults.
+ * options are where a project usually writes it.
  */
-async function readConfiguredRouterRootAsync(projectRoot: string): Promise<string | null> {
-  for (const file of STATIC_CONFIG_FILES) {
-    const contents = await readJsonFileAsync<Record<string, any>>(path.join(projectRoot, file));
-    if (contents == null) {
-      continue;
-    }
-    const expo = (contents.expo ?? contents) as Record<string, any>;
-    const fromExtra = nonEmptyString(expo?.extra?.router?.root);
-    if (fromExtra != null) {
-      return toPosix(fromExtra);
-    }
-    for (const plugin of Array.isArray(expo?.plugins) ? expo.plugins : []) {
-      if (Array.isArray(plugin) && plugin[0] === 'expo-router') {
-        const fromPlugin = nonEmptyString((plugin[1] as Record<string, unknown> | undefined)?.root);
-        if (fromPlugin != null) {
-          return toPosix(fromPlugin);
-        }
+function readConfiguredRouterRoot(expo: Record<string, any> | null): string | null {
+  const fromExtra = nonEmptyString(expo?.extra?.router?.root);
+  if (fromExtra != null) {
+    return toPosix(fromExtra);
+  }
+  for (const plugin of Array.isArray(expo?.plugins) ? expo.plugins : []) {
+    if (Array.isArray(plugin) && plugin[0] === 'expo-router') {
+      const fromPlugin = nonEmptyString((plugin[1] as Record<string, unknown> | undefined)?.root);
+      if (fromPlugin != null) {
+        return toPosix(fromPlugin);
       }
     }
-    return null;
   }
   return null;
 }

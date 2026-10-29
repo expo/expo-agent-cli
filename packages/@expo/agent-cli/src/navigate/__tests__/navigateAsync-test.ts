@@ -1,3 +1,4 @@
+import { getConfig } from '@expo/config';
 import { spawn } from 'child_process';
 import { EventEmitter } from 'events';
 import { vol } from 'memfs';
@@ -8,7 +9,13 @@ import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLo
 import { navigateAsync } from '../navigateAsync';
 import type { NavigateOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import { forgetExpoConfigReads } from '../../project/appConfig';
 
+// The declared plugins are read off the loaded module, which these tests do not load.
+vi.mock('@expo/config', () => ({
+  getConfig: vi.fn(),
+  getConfigFilePaths: () => ({ staticConfigPath: null, dynamicConfigPath: null }),
+}));
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
   readLastLoggedDevServerPort: vi.fn(() => null),
@@ -178,6 +185,7 @@ afterEach(() => {
   }
   mockPlatform(realPlatform);
   vol.reset();
+  forgetExpoConfigReads();
 });
 
 describe(navigateAsync, () => {
@@ -585,19 +593,52 @@ describe(navigateAsync, () => {
     expect(vi.mocked(console.error).mock.calls.join('\n')).toContain('did not open the deep link');
   });
 
-  it(`should explain an unresolvable scheme instead of opening anything`, async () => {
-    vol.fromJSON({
-      [`${projectRoot}/app.config.js`]: 'module.exports = {};',
-      [`${projectRoot}/ios/Podfile`]: '',
+  // A dynamic config is evaluated with `@expo/config` in this process (issue #84), so nothing is
+  // spawned for it, and nothing reaches a device.
+  describe('a dynamic config', () => {
+    it(`should explain a config it could not evaluate instead of opening anything`, async () => {
+      vol.fromJSON({
+        [`${projectRoot}/app.config.js`]: 'module.exports = {};',
+        [`${projectRoot}/ios/Podfile`]: '',
+      });
+      mockDevServer(null);
+      vi.mocked(getConfig).mockImplementation(() => {
+        throw new Error('boom');
+      });
+
+      const error = await navigateAsync(projectRoot, options({ devServerUrl: null })).catch(
+        (e) => e
+      );
+
+      expect(error.code).toBe('DEEP_LINK_UNRESOLVED');
+      expect(error.message).toContain('app.config.js, and evaluating it failed: boom');
+      expect(spawn).not.toHaveBeenCalled();
     });
-    mockDevServer(null);
-    mockSpawnQueue([]);
 
-    const error = await navigateAsync(projectRoot, options({ devServerUrl: null })).catch((e) => e);
+    it(`should build the URL from the scheme the evaluated config names`, async () => {
+      vol.fromJSON({
+        [`${projectRoot}/app.config.js`]: 'module.exports = {};',
+        [`${projectRoot}/package.json`]: JSON.stringify({ name: 'demo', dependencies: {} }),
+        [`${projectRoot}/ios/Podfile`]: '',
+      });
+      mockDevServer(null);
+      vi.mocked(getConfig).mockReturnValue({
+        exp: { slug: 'demo', scheme: 'dynamicapp' },
+        pkg: {},
+        staticConfigPath: null,
+        dynamicConfigPath: `${projectRoot}/app.config.js`,
+      } as never);
 
-    expect(error.code).toBe('DEEP_LINK_UNRESOLVED');
-    expect(error.message).toContain('app.config.js');
-    expect(spawn).not.toHaveBeenCalled();
+      await expect(
+        navigateAsync(projectRoot, options({ devServerUrl: null, printUrl: true, json: true }))
+      ).resolves.toBe(0);
+
+      expect(JSON.parse(printed())).toMatchObject({
+        url: 'dynamicapp://profile/42',
+        resolution: 'read the "scheme" field from app.config.js',
+      });
+      expect(spawn).not.toHaveBeenCalled();
+    });
   });
 
   it(`should explain a missing dev server when Expo Go needs its host`, async () => {

@@ -109,7 +109,7 @@ The lookup answers in three states: `{ state: 'found', build }`, `{ state: 'none
 - A `none` is believed for five minutes (`EAS_NONE_CACHE_TTL_MS`), because a build may finish soon after. The report shows its age (`none (as of 2m ago)`; `checkedAt` and `ageMs` in `--json`). A `none` without a valid `checkedAt` is dropped.
 - `--no-fingerprint-cache` ignores the record ([[0023-fingerprint-caching]] §Every consumer can turn it off).
 
-**An unlinked project is never asked.** When the static app config names no `extra.eas.projectId`, `status` answers `unknown` with the `eas init` command and does not call EAS. A dynamic `app.config.js` may set the id from the environment, so EAS is still asked for it.
+**An unlinked project is never asked.** When the app config names no `extra.eas.projectId`, `status` answers `unknown` with the `eas init` command and does not call EAS. A dynamic `app.config.js` is evaluated for the id; when it cannot be evaluated, it may still set one, so EAS is asked.
 
 ## A fingerprint change is not "OTA-unsafe"
 

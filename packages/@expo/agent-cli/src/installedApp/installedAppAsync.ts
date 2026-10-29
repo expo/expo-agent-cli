@@ -169,8 +169,8 @@ async function checkPlatformAsync(
     return verdict('app-id-unknown', {
       recommendation:
         platform === 'ios'
-          ? 'The project names no ios.bundleIdentifier in its static app config, so there is no app to look for on the device. Set it in the app config.'
-          : `The project names no android.package in its static app config and has no prebuilt android project to read one from, so there is no app to look for on the device. Set it in the app config, or run "${PROGRAM_PREFIX} prebuild -p android".`,
+          ? 'The project names no ios.bundleIdentifier in its app config, so there is no app to look for on the device. Set it in the app config.'
+          : `The project names no android.package in its app config and has no prebuilt android project to read one from, so there is no app to look for on the device. Set it in the app config, or run "${PROGRAM_PREFIX} prebuild -p android".`,
     });
   }
 

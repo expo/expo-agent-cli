@@ -32,8 +32,8 @@ import * as Log from '../../log';
 import {
   isFullUrlRoute,
   openUrlOnDeviceAsync,
-  readProjectSchemeConfig,
   resolveDeepLinkUrl,
+  readProjectSchemeConfig,
 } from '../../navigate/deepLink';
 import { resolveDeviceAsync, type NavigateDevice } from '../../navigate/device';
 import { isCallerNamedDevServer } from '../../navigate/openRoute';
@@ -1339,7 +1339,7 @@ async function openRouteAsync(
   device: NavigateDevice;
 } | null> {
   const [config, nativeDirs, packageJson, reach] = await Promise.all([
-    Promise.resolve(readProjectSchemeConfig(projectRoot)),
+    readProjectSchemeConfig(projectRoot),
     readProjectNativeDirsAsync(projectRoot),
     readProjectPackageJsonAsync(projectRoot),
     // The same question `navigate` asks, through the same function: not where this dev server

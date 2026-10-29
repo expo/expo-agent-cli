@@ -35,7 +35,7 @@ import { readProjectSchemeConfig } from '../navigate/deepLink';
 import { readAuthPreflightAsync } from '../needsHuman/preflight';
 import { readLastBuildRecord, type LastBuildRecord } from '../plan/lastBuild';
 import type { DeviceBackend, NativePlatform, PlanPlatform } from '../plan/types';
-import { readStaticEasProjectAsync } from '../project/appConfig';
+import { readEasProject } from '../project/appConfig';
 import { generateFingerprintAsync } from '../project/fingerprint';
 import { readProjectPackageJsonAsync } from '../project/nodeModules';
 import { probeProjectStateAsync } from '../project/probe';
@@ -249,7 +249,7 @@ export async function collectStatusReportAsync(
   projectRoot: string,
   options: StatusOptions
 ): Promise<StatusReport> {
-  const easProject = await readStaticEasProjectAsync(projectRoot);
+  const easProject = readEasProject(projectRoot);
   const projectRead = attemptAsync(() => readProjectAsync(projectRoot, options));
   const authRead = attemptAsync<AuthStatus>(() => readAuthPreflightAsync(projectRoot));
   // Start the per-platform fingerprints the EAS lookup will need once auth and the project hash say
@@ -821,10 +821,8 @@ async function resolveOtaSafetyAsync(
 /**
  * The URL scheme a development build of this project registers, or null.
  *
- * The precedence of the deep link itself: the `scheme` field of the static app config, then the
- * `exp+<slug>` default a managed development build registers. One file read, statically — a dynamic
- * `app.config.js` is never evaluated (llp/0001 §Constraints item 5), so such a project reports null
- * and the report names the command that can be given `--scheme` instead.
+ * The precedence of the deep link itself: the `scheme` field of the app config the app sees, then
+ * the `exp+<slug>` default a managed development build registers.
  */
 function devBuildSchemeSync(projectRoot: string): string | null {
   const config = readProjectSchemeConfig(projectRoot);

@@ -285,20 +285,6 @@ describe(checkExpoGoCompatibilityAsync, () => {
     ]);
   });
 
-  it(`should skip plugin detection when only a dynamic app config exists`, async () => {
-    vol.fromJSON({
-      ...projectPackage({ expo: '54.0.0' }),
-      ...expoPackage({}),
-      // Evaluating `app.config.js` would run project code, so the plugin list is unknown.
-      [`${projectRoot}/app.config.js`]: 'module.exports = { plugins: ["react-native-fancy"] };',
-    });
-
-    await expect(checkExpoGoCompatibilityAsync(projectRoot)).resolves.toEqual({
-      compatible: true,
-      reasons: [],
-    });
-  });
-
   it(`should report custom native code for checked-in native directories`, async () => {
     vol.fromJSON({
       ...projectPackage({ expo: '54.0.0' }),

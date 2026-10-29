@@ -118,7 +118,7 @@ export async function resolveStartFollowUpsAsync(
  * The URL a device on this network opens, and what opens it.
  *
  * Null when this host reports no LAN address, or when a development build's scheme cannot be read
- * from the static app config — a line with a hole in it is not a suggestion, and the ladder falls
+ * from the app config — a line with a hole in it is not a suggestion, and the ladder falls
  * through to the tunnel rung instead.
  */
 function resolveLanConnectUrl(

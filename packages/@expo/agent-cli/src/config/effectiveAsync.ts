@@ -7,7 +7,7 @@
 import { event } from '../events';
 import { buildConfigEffectiveFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
-import { readStaticAppConfigAsync } from '../project/appConfig';
+import { readPluginIds } from '../project/appConfig';
 import {
   assertFilePlatform,
   buildEffectiveConfig,
@@ -39,15 +39,14 @@ export async function printEffectiveConfigAsync(
   const file = resolveModFile(options.file);
   assertFilePlatform(file, platform);
 
-  const [{ config, command, durationMs }, staticConfig] = await Promise.all([
-    introspectConfigAsync(projectRoot),
-    readStaticAppConfigAsync(projectRoot),
-  ]);
+  const { config, command, durationMs } = await introspectConfigAsync(projectRoot);
+
+  const declaredPluginIds = readPluginIds(config.plugins);
 
   const report = buildEffectiveConfig({
     projectRoot,
     config,
-    declaredPluginIds: staticConfig.plugins.map((plugin) => plugin.id),
+    declaredPluginIds,
     command,
     durationMs,
     platform,

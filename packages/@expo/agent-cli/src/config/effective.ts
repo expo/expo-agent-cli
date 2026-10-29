@@ -76,6 +76,8 @@ interface IntrospectedInternal {
 /** The parsed `expo config --type introspect --json` object. Only the read keys are typed. */
 export interface IntrospectedConfig {
   sdkVersion?: string;
+  /** The `plugins` array as the config declared it, evaluated; `@expo/config` keeps it on the payload. */
+  plugins?: unknown;
   _internal?: IntrospectedInternal;
   [key: string]: unknown;
 }
@@ -83,7 +85,7 @@ export interface IntrospectedConfig {
 export interface BuildEffectiveConfigOptions {
   projectRoot: string;
   config: IntrospectedConfig;
-  /** Plugin ids of the static app config, from `readStaticAppConfigAsync`. */
+  /** Plugin ids as the app config spells them, from the `plugins` of the evaluated config. */
   declaredPluginIds: string[];
   /** The argv of the subprocess that produced {@link config}, for `source.command`. */
   command: string[];

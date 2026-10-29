@@ -1,0 +1,79 @@
+import { getConfig } from '@expo/config';
+import { vol } from 'memfs';
+
+import { evaluateExpoConfig } from '../evaluatedConfig';
+
+// The declared plugins are read off the loaded module, which these tests do not load.
+vi.mock('@expo/config', () => ({
+  getConfig: vi.fn(),
+  getConfigFilePaths: () => ({ staticConfigPath: null, dynamicConfigPath: null }),
+}));
+
+const projectRoot = '/project';
+
+beforeEach(() => {
+  vol.reset();
+  vi.mocked(getConfig).mockReset();
+  delete process.env.NODE_ENV;
+  delete process.env.BABEL_ENV;
+});
+
+describe(evaluateExpoConfig, () => {
+  // The env files are loaded for the evaluation only: what `expo start` would serve is this
+  // process's own environment, and a later subprocess inherits that one.
+  it(`should set the mode for the evaluation and put the environment back afterwards`, () => {
+    process.env.BABEL_ENV = 'inherited';
+    let seen: Record<string, unknown> = {};
+    vi.mocked(getConfig).mockImplementation(() => {
+      seen = {
+        NODE_ENV: process.env.NODE_ENV,
+        BABEL_ENV: process.env.BABEL_ENV,
+        __DEV__: (globalThis as { __DEV__?: boolean }).__DEV__,
+      };
+      return { exp: {}, pkg: {}, staticConfigPath: null, dynamicConfigPath: null } as never;
+    });
+
+    evaluateExpoConfig(projectRoot);
+
+    // `@expo/cli` 58 deletes `BABEL_ENV` for the mode too (`setNodeEnv` in `@expo/env`).
+    expect(seen).toEqual({ NODE_ENV: 'development', BABEL_ENV: undefined, __DEV__: true });
+    expect(process.env.NODE_ENV).toBeUndefined();
+    expect('__DEV__' in globalThis).toBe(false);
+    expect(process.env.BABEL_ENV).toBe('inherited');
+    expect(process.env.__EXPO_ENV_LOADED).toBeUndefined();
+  });
+
+  // Project code runs here, and a `--json` run owns stdout (llp/0006 §Output contract).
+  it(`should send what the config prints to stderr`, () => {
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    try {
+      vi.mocked(getConfig).mockImplementation(() => {
+        process.stdout.write('hello from app.config.js\n');
+        return { exp: {}, pkg: {}, staticConfigPath: null, dynamicConfigPath: null } as never;
+      });
+
+      evaluateExpoConfig(projectRoot);
+
+      expect(stderr).toHaveBeenCalledWith('hello from app.config.js\n');
+      expect(stdout).not.toHaveBeenCalled();
+    } finally {
+      stdout.mockRestore();
+      stderr.mockRestore();
+    }
+  });
+
+  it(`should answer ok: false with the first line of what the config threw`, () => {
+    vi.mocked(getConfig).mockImplementation(() => {
+      throw new Error(
+        `Error reading Expo config at ${projectRoot}/app.config.ts:\n\nCannot resolve app config\n  at app.config.ts:3`
+      );
+    });
+
+    expect(evaluateExpoConfig(projectRoot)).toEqual({
+      ok: false,
+      error: 'Cannot resolve app config',
+    });
+    expect(process.env.NODE_ENV).toBeUndefined();
+  });
+});

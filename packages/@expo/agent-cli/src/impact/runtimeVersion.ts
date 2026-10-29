@@ -7,7 +7,7 @@
 // module leaves the runtimeVersion where it was — so an update published now reaches installed
 // builds that cannot run it, and the app crashes on a module that is not there.
 
-import { readStaticExpoConfigAsync } from '../project/appConfig';
+import { hasAppConfigFile } from '../project/appConfig';
 import { spawnExpoAsync } from '../utils/expoCli';
 import type { OtaSafety, RuntimeVersionInfo } from './types';
 
@@ -27,9 +27,8 @@ const KNOWN_POLICIES = ['fingerprint', 'appVersion', 'sdkVersion', 'nativeVersio
  * answer. A project with no app config file is not evaluated.
  */
 export async function resolveRuntimeVersionAsync(projectRoot: string): Promise<RuntimeVersionInfo> {
-  const staticConfig = await readStaticExpoConfigAsync(projectRoot);
   // No app config at all: spawning `expo config` here can mean `npx expo` fetching a package.
-  if (!staticConfig.source && !staticConfig.dynamic) {
+  if (!hasAppConfigFile(projectRoot)) {
     return { policy: null, literal: null, source: null };
   }
 

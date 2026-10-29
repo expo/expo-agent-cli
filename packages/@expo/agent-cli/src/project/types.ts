@@ -16,7 +16,12 @@ export type ProjectTarget = 'expo-go' | 'dev-client' | 'bare' | 'web' | 'none';
 
 /** One reason a project cannot run in Expo Go. */
 export interface ExpoGoIncompatibility {
-  kind: 'unbundled-native-module' | 'config-plugin' | 'custom-native-code' | 'unknown-sdk';
+  kind:
+    | 'unbundled-native-module'
+    | 'config-plugin'
+    | 'custom-native-code'
+    | 'unknown-sdk'
+    | 'unknown-app-config';
   /** The offending package or plugin, when one exists. */
   packageName?: string;
   /** Human/agent readable explanation. */

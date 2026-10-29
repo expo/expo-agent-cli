@@ -41,6 +41,7 @@ const STUB_CONFIG = {
   name: 'go-app',
   slug: 'go-app',
   sdkVersion: '54.0.0',
+  plugins: ['expo-camera'],
   _internal: {
     projectRoot: '/project',
     pluginHistory: {
@@ -78,9 +79,9 @@ const STUB_CONFIG = {
  * Copy a fixture, declare `expo-camera` in its `app.json`, and write the payload the stub
  * `expo config` will print.
  *
- * The declared half of the plugin list is deliberately not read out of the payload: it comes from
- * the project's own static app config, which is the only place that says what the project *asked*
- * for. So the fixture has to declare it, or the join has nothing to join.
+ * The declared half of the plugin list comes from the `plugins` array of the payload, which is the
+ * config as the project's own CLI evaluated it. `STUB_CONFIG` carries the `expo-camera` the fixture
+ * declares, as a real `expo config --type introspect` would.
  *
  * @returns the project root as the CLI reports it, with symlinks resolved — on macOS the temporary
  *   directory is one, and a subprocess reports the resolved path.
@@ -179,11 +180,10 @@ describe('@expo/agent-cli inspect:config-plugins', () => {
   // list is `_internal.pluginHistory` — what recorded itself — and a declared plugin missing from
   // it lands in no entry at all, which is the one gap the reader has to be told about.
   it('names a declared plugin the history has no entry for', async () => {
-    const { projectRoot, env } = await setupAsync('go-app');
-    const appConfigPath = path.join(projectRoot, 'app.json');
-    const appConfig = JSON.parse(await fs.promises.readFile(appConfigPath, 'utf8'));
-    appConfig.expo.plugins = ['expo-camera', 'expo-build-properties', './plugins/withThing'];
-    await fs.promises.writeFile(appConfigPath, JSON.stringify(appConfig, null, 2));
+    const { projectRoot, env } = await setupAsync('go-app', {
+      ...STUB_CONFIG,
+      plugins: ['expo-camera', 'expo-build-properties', './plugins/withThing'],
+    });
 
     const result = await executeAgentCliAsync(projectRoot, ['inspect:config-plugins', '--json'], {
       env,
@@ -426,5 +426,52 @@ describe('@expo/agent-cli config (bare)', () => {
     expect(readStubExpoInvocations(projectRoot).map((invocation) => invocation.args)).toEqual([
       ['config', 'effective'],
     ]);
+  });
+});
+
+// The declared plugins of a project whose config is code (issue #84). The payload is what
+// `expo config --type introspect` prints for it, `plugins` included, so the static read is not
+// needed, and is not what the app sees.
+describe('@expo/agent-cli inspect:config-plugins with a dynamic app config', () => {
+  async function setupDynamicAsync(
+    plugins: unknown
+  ): Promise<{ projectRoot: string; env: Record<string, string> }> {
+    const { projectRoot, env } = await setupAsync('go-app', { ...STUB_CONFIG, plugins });
+    await fs.promises.rm(path.join(projectRoot, 'app.json'));
+    await fs.promises.writeFile(
+      path.join(projectRoot, 'app.config.js'),
+      "module.exports = { name: 'go-app', slug: 'go-app', plugins: ['expo-camera'] };\n"
+    );
+    return { projectRoot, env };
+  }
+
+  it('reads the declared plugins out of the evaluated config', async () => {
+    const { projectRoot, env } = await setupDynamicAsync(['expo-camera']);
+
+    const result = await executeAgentCliAsync(projectRoot, ['inspect:config-plugins', '--json'], {
+      env,
+    });
+    const payload: EffectiveConfigPayload = JSON.parse(result.stdout);
+
+    expect(payload.plugins).toEqual([
+      { name: 'expo-camera', version: '17.0.0', declared: true },
+      { name: 'expo-notifications', version: 'UNVERSIONED', declared: false },
+    ]);
+    expect(payload.declaredNotApplied).toEqual([]);
+  });
+
+  it('takes the evaluated plugins over a static file beside the dynamic config', async () => {
+    const { projectRoot, env } = await setupAsync('go-app', { ...STUB_CONFIG, plugins: [] });
+    await fs.promises.writeFile(
+      path.join(projectRoot, 'app.config.js'),
+      'module.exports = ({ config }) => ({ ...config, plugins: [] });\n'
+    );
+
+    const result = await executeAgentCliAsync(projectRoot, ['inspect:config-plugins', '--json'], {
+      env,
+    });
+    const payload: EffectiveConfigPayload = JSON.parse(result.stdout);
+
+    expect(payload.plugins.map((plugin) => plugin.declared)).toEqual([false, false]);
   });
 });
