@@ -144,6 +144,33 @@ describe('cloud attribution with no platform when adb gave no answer', () => {
     const classified = await classifyAsync(false, [target]);
     expect(classified.read).toEqual([target]);
   });
+
+  it('asks adb again on a later poll of a wait, and then reads the session app', async () => {
+    let adbAnswers = false;
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    vi.mocked(spawnCaptureAsync).mockImplementation(async (command) =>
+      command === 'xcrun'
+        ? { stdout: '{"devices":{}}', stderr: '', exitCode: 0 }
+        : { stdout: 'List of devices attached\n', stderr: '', exitCode: adbAnswers ? 0 : 1 }
+    );
+    const { targetSelection, deviceInventory } = await resolveTargetSelectionAsync({
+      projectRoot: null,
+      flags: { platform: null, eas: true },
+      targets: [emulator],
+    });
+    const now = Date.now();
+    const classify = scopedListClassifier(
+      targetSelection,
+      deviceInventory,
+      now + 5000,
+      [emulator],
+      null
+    );
+    expect((await classify([emulator])).undetermined).toEqual([emulator]);
+    adbAnswers = true;
+    vi.spyOn(Date, 'now').mockReturnValue(now + 1100);
+    expect((await classify([emulator])).read).toEqual([emulator]);
+  });
 });
 
 // A unit test: at this layer the stub `adb` cannot open an Android app, so no e2e wait can attach a

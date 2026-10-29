@@ -215,6 +215,21 @@ export function scopeToolsUnknown(
   );
 }
 
+/**
+ * Whether a device tool this scope reads gave no answer, so a wait asks it again. Wider than
+ * {@link scopeToolsUnknown}: with no platform, a silent `adb` still holds Android-shaped targets.
+ */
+export function scopeToolsSilent(
+  targetSelection: TargetSelection,
+  deviceInventory: DeviceInventory
+): boolean {
+  const platform = targetSelection.platform?.value;
+  return (
+    (platform !== 'android' && deviceInventory.bootedStatus === 'unknown') ||
+    (platform !== 'ios' && deviceInventory.androidDevices == null)
+  );
+}
+
 /** Whether a local device tool names this target's device: a booted simulator or an attached model. */
 function claimedLocally(
   target: Pick<CdpTarget, 'appId' | 'deviceName'>,
