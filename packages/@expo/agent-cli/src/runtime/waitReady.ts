@@ -317,7 +317,8 @@ export function scopedListClassifier(
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory,
   deadline: number,
-  inventoryTargets: readonly Pick<CdpTarget, 'id'>[]
+  inventoryTargets: readonly Pick<CdpTarget, 'id'>[],
+  devServerUrl: string | null
 ): (targets: CdpTarget[]) => Promise<ClassifiedTargets> {
   let inventoryListKey = listKey(inventoryTargets);
   let attemptedKey = inventoryListKey;
@@ -336,6 +337,7 @@ export function scopedListClassifier(
         targets,
         targetSelection,
         deviceInventory,
+        devServerUrl,
         Math.max(1, deadline - Date.now())
       );
       if (!scopeToolsUnknown(targetSelection, fresh) || unknown) {
@@ -370,7 +372,8 @@ export async function waitForAppConnectionAsync(
     targetSelection,
     deviceInventory,
     deadline,
-    inventoryTargets
+    inventoryTargets,
+    devServerUrl
   );
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);

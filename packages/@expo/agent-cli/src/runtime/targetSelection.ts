@@ -370,23 +370,33 @@ function toolsCanPlace(
   );
 }
 
-/** Ask the device tools again for a new list, when their answer can change where it falls. */
+/**
+ * Ask the device tools again for a new list, when their answer can change where it falls. Twins of
+ * the bound Android model are asked what they reverse of the dev server's port, as the first read
+ * does: a twin that attached since then decides whether the own app is placed.
+ */
 export async function refreshDeviceInventoryAsync(
   targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
   targetSelection: TargetSelection,
   previous: DeviceInventory,
+  devServerUrl: string | null,
   timeoutMs?: number
 ): Promise<DeviceInventory> {
   if (!toolsCanPlace(targets, targetSelection, previous)) {
     return previous;
   }
   const tools = await readDeviceInventoryAsync(timeoutMs);
-  return {
+  const inventory = {
     ...previous,
     booted: tools.booted,
     bootedStatus: tools.bootedStatus,
     androidDevices: tools.androidDevices,
   };
+  const twins = androidModelTwins(targetSelection, inventory);
+  const port = devServerUrl == null ? null : devServerPort(devServerUrl);
+  const androidReverse =
+    twins && port != null ? await readAndroidReverseAsync(twins.twins, port) : null;
+  return { ...inventory, androidReverse };
 }
 
 /** Read bindings and ask the tools only when their answer can change placement. */
@@ -394,21 +404,17 @@ export async function deviceInventoryForSelectionAsync(
   targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
   targetSelection: TargetSelection,
   projectRoot: string | null,
-  devServerUrl?: string | null,
+  devServerUrl: string | null = null,
   timeoutMs: number = SIMCTL_TIMEOUT_MS
 ): Promise<DeviceInventory> {
   const iosBindings = projectRoot == null ? [] : liveIosBindings(projectRoot);
-  const inventory = await refreshDeviceInventoryAsync(
+  return await refreshDeviceInventoryAsync(
     targets,
     targetSelection,
     { ...EMPTY_DEVICE_INVENTORY, iosBindings },
+    devServerUrl,
     timeoutMs
   );
-  const twins = androidModelTwins(targetSelection, inventory);
-  const port = devServerUrl == null ? null : devServerPort(devServerUrl);
-  const androidReverse =
-    twins && port != null ? await readAndroidReverseAsync(twins.twins, port) : null;
-  return { ...inventory, androidReverse };
 }
 
 function devServerPort(devServerUrl: string): number | null {
