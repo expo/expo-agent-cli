@@ -47,7 +47,7 @@ export const EMPTY_DEVICE_INVENTORY: DeviceInventory = {
 
 /** The device a run reads, independent of how it was resolved. */
 export type SelectedDevice =
-  | { backend: 'local-ios'; name: string }
+  | { backend: 'local-ios'; udid: string; name: string }
   | { backend: 'local-android'; serial: string }
   | { backend: 'cloud'; deviceId: string | null };
 export interface TargetSelection {
@@ -63,7 +63,11 @@ export function selectedDeviceOf(device: NavigateDevice | BoundDevice): Selected
     case 'local-ios':
       if (!device.name)
         throw new Error('A local iOS device has no simulator name to scope reads to');
-      return { backend: 'local-ios', name: device.name };
+      return {
+        backend: 'local-ios',
+        udid: 'udid' in device ? device.udid : device.deviceId,
+        name: device.name,
+      };
     case 'local-android':
       return {
         backend: 'local-android',
@@ -73,6 +77,36 @@ export function selectedDeviceOf(device: NavigateDevice | BoundDevice): Selected
       return { backend: 'cloud', deviceId: 'id' in device ? device.id : device.deviceId };
   }
 }
+/** The scope as a report prints it: a public shape, owned by no internal type. */
+export interface ScopeJson {
+  platform: NavigatePlatform | null;
+  platformFrom: NonNullable<TargetSelection['platform']>['by'] | null;
+  bound: boolean;
+  /** `id` is the simulator udid, the adb serial or the session id; `name` only a simulator has. */
+  device: { backend: SelectedDevice['backend']; id: string | null; name: string | null } | null;
+}
+
+export function scopeJson({ platform, device, bound }: TargetSelection): ScopeJson {
+  return {
+    platform: platform?.value ?? null,
+    platformFrom: platform?.by ?? null,
+    bound,
+    device:
+      device == null
+        ? null
+        : {
+            backend: device.backend,
+            id:
+              device.backend === 'local-ios'
+                ? device.udid
+                : device.backend === 'local-android'
+                  ? device.serial
+                  : device.deviceId,
+            name: device.backend === 'local-ios' ? device.name : null,
+          },
+  };
+}
+
 export function describeSelectedDevice(device: SelectedDevice): string {
   switch (device.backend) {
     case 'local-ios':

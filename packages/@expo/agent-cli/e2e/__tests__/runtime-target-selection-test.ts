@@ -381,16 +381,19 @@ it('runtime:reload selects its bound cloud platform without a platform flag', as
     );
     expect(result.exitCode, result.all).toBe(0);
     expect(server.bundlePlatforms()).toEqual(['android']);
-    expect(JSON.parse(result.stdout)).toMatchObject({
+    const report = JSON.parse(result.stdout);
+    expect(report).toMatchObject({
       reloaded: true,
       bundlePlatforms: ['android'],
       bundlePlatformSource: 'bound-device',
-      targetSelection: {
-        platform: { value: 'android', by: 'bound-device' },
-        device: { backend: 'cloud', deviceId: '01a15bf1' },
-        bound: true,
-      },
     });
+    expect(report.scope).toEqual({
+      platform: 'android',
+      platformFrom: 'bound-device',
+      bound: true,
+      device: { backend: 'cloud', id: '01a15bf1', name: null },
+    });
+    expect(report).not.toHaveProperty('targetSelection');
   } finally {
     await server.close();
   }

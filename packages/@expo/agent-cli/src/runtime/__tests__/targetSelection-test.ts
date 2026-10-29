@@ -1,6 +1,6 @@
 import type { CdpTarget } from '../cdpClient';
 import { resolveTargetSelectionAsync } from '../resolveTargetSelection';
-import { classifyTargets } from '../targetSelection';
+import { classifyTargets, scopeJson } from '../targetSelection';
 import { makeTargetSelection, makeDeviceInventory } from './targetSelectionFixtures';
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Android — the EAS Simulator iOS session rule.
@@ -212,5 +212,45 @@ describe('classifyTargets on a bound phone whose model adb spells differently', 
         makeDeviceInventory({ androidDevices: [{ serial: 'R58M1234567', model }] })
       ).read
     ).toEqual([target]);
+  });
+});
+
+describe('scopeJson', () => {
+  it.each([
+    {
+      device: { backend: 'local-ios' as const, udid: 'SIM-1', name: 'iPhone 17' },
+      json: { backend: 'local-ios', id: 'SIM-1', name: 'iPhone 17' },
+    },
+    {
+      device: { backend: 'local-android' as const, serial: 'emulator-5554' },
+      json: { backend: 'local-android', id: 'emulator-5554', name: null },
+    },
+    {
+      device: { backend: 'cloud' as const, deviceId: '01a15bf1' },
+      json: { backend: 'cloud', id: '01a15bf1', name: null },
+    },
+    {
+      device: { backend: 'cloud' as const, deviceId: null },
+      json: { backend: 'cloud', id: null, name: null },
+    },
+  ])('names a $device.backend device by id and name', ({ device, json }) => {
+    const scope = scopeJson(
+      makeTargetSelection({
+        platform: { value: device.backend === 'local-ios' ? 'ios' : 'android', by: 'bound-device' },
+        device,
+        bound: true,
+      })
+    );
+    expect(scope.bound).toBe(true);
+    expect(scope.device).toEqual(json);
+  });
+
+  it('names no platform and no device for a run that reads every app', () => {
+    expect(scopeJson(makeTargetSelection())).toEqual({
+      platform: null,
+      platformFrom: null,
+      bound: false,
+      device: null,
+    });
   });
 });

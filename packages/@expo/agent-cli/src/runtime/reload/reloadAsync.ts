@@ -68,12 +68,7 @@ import {
   type MessageSocketPeers,
 } from '../messageSocket';
 import { preflightRuntimeAsync, type RuntimeConnection } from '../preflight';
-import {
-  skippedAppsOf,
-  type SkippedApp,
-  type TargetSelection,
-  type DeviceInventory,
-} from '../targetSelection';
+import { scopeJson, skippedAppsOf, type ScopeJson, type SkippedApp } from '../targetSelection';
 import { waitForFreshAppConnectionAsync, countConnectedAppsAsync } from '../waitReady';
 import {
   markBundleSignalSync,
@@ -260,7 +255,7 @@ export interface ReloadResultJson {
    */
   bundlePlatformSource: BundlePlatformSource;
   /** Which apps this run read: the flags, or the device bound to this worktree (llp/0035 §Readers). */
-  targetSelection: RuntimeConnection['targetSelection'];
+  scope: ScopeJson;
   /** Apps the reload does not count or check, such as another worktree's (llp/0005 §Target owner). */
   skippedApps: SkippedApp[];
   /** Route the app was sent to afterwards, or null when none was asked for. */
@@ -695,7 +690,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     bundlePlatforms: bundles.map((entry) => entry.platform),
     bundlePlatformSource,
     skippedApps: skippedAppsOf(devServer.classifiedTargets),
-    targetSelection: devServer.targetSelection,
+    scope: scopeJson(devServer.targetSelection),
     route,
     routeCheck,
     url: landing?.url ?? cloudUrl,
@@ -972,9 +967,7 @@ export async function waitForReloadEvidenceAsync(
     platform,
     targetSelection,
     deviceInventory,
-  }: {
-    targetSelection: TargetSelection;
-    deviceInventory: DeviceInventory;
+  }: Pick<RuntimeConnection, 'targetSelection' | 'deviceInventory'> & {
     timeoutMs: number;
     knownTargetIds: readonly string[];
     bundleMark: BundleSignalMark;

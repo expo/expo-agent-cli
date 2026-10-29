@@ -21,7 +21,6 @@ import {
   reloadOverDevServerAsync,
   type ReloadResultJson,
 } from '../reloadAsync';
-import { makeTargetSelection } from '../../__tests__/targetSelectionFixtures';
 import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
@@ -796,7 +795,7 @@ describe(explainReloadFailure, () => {
       bundlesAfterReload: { observed: null, count: 0, line: null, reason: null },
       bundlePlatforms: ['ios'],
       bundlePlatformSource: 'flag',
-      targetSelection: makeTargetSelection({ platform: { value: 'ios', by: 'flag' } }),
+      scope: { platform: 'ios', platformFrom: 'flag', bound: false, device: null },
       skippedApps: [],
       route: null,
       routeCheck: {
