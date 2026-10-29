@@ -199,7 +199,11 @@ function otherWorktreesOf(
   return roots.size > 0 ? [...roots] : null;
 }
 
-/** Whether a device tool whose answer can place a target in this scope gave no answer. */
+/**
+ * Whether a device tool whose answer can place a target in this scope gave no answer. With no
+ * platform, a silent `adb` holds only Android-shaped targets ({@link androidUnproven}), so a lone iOS
+ * session app is still read.
+ */
 export function scopeToolsUnknown(
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory
@@ -207,7 +211,7 @@ export function scopeToolsUnknown(
   const platform = targetSelection.platform?.value;
   return (
     (platform !== 'android' && deviceInventory.bootedStatus === 'unknown') ||
-    (platform !== 'ios' && deviceInventory.androidDevices == null)
+    (platform === 'android' && deviceInventory.androidDevices == null)
   );
 }
 
