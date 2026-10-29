@@ -414,57 +414,6 @@ describe('@expo/agent-cli navigate --eas', () => {
     }
   });
 
-  // The development build an EAS Simulator iOS session runs registers the project's own app id and
-  // the cloud simulator's model name, which no local tool reports. It is the session's app, so the
-  // run counts it as attached and opens only the route link, never the launcher URL.
-  it(`counts the session's development build as the iOS app, and opens only the route link`, async () => {
-    const projectRoot = await setupAsync('dev-client-app');
-    await writeSessionFileAsync(projectRoot, 'sess-e2e');
-    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
-    const stub = await startStubDevServerAsync({
-      targets: [{ id: '1', appId: 'com.example.demo', deviceName: 'iPhone 17' }],
-      projectRoot,
-      manifestOrigin: 'https://stub-tunnel.example',
-    });
-    const releaseLock = await holdDevLockAsync(projectRoot, {
-      url: stub.url,
-      port: stub.port,
-      pid: process.pid,
-      startedAt: new Date().toISOString(),
-      projectRoot,
-    });
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        [
-          'navigate',
-          '/',
-          '--ios',
-          '--eas',
-          '--scheme',
-          'demoapp',
-          '--app-id',
-          'com.example.demo',
-          '--attach-timeout',
-          '5s',
-          '--json',
-          '--no-followups',
-        ],
-        { reject: false }
-      );
-
-      const opens = easInvocations(projectRoot)
-        .filter((argv) => argv[0] === 'simulator:exec' && argv[3] === 'open')
-        .map((argv) => argv[4]);
-      expect(opens).toEqual(['demoapp://']);
-      expect(result.exitCode).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({ launch: null, attached: true });
-    } finally {
-      await releaseLock();
-      await stub.close();
-    }
-  });
-
   // A cloud simulator is on EAS's network, so a loopback host in the link resolves to a machine in
   // a datacenter. Refused before anything opens, rather than opened onto an error screen.
   it(`refuses a dev server only this machine can reach`, async () => {

@@ -2,6 +2,7 @@
 // The built CLI resolves the device, opens URLs through subprocesses, and polls a real HTTP
 // server. Targets appear only after the recorded launcher open, not after an arbitrary delay.
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { devClientConnectUrl } from '../../src/navigate/connectUrl';
 import { makeTarget } from '../../src/runtime/__tests__/targetSelectionFixtures';
@@ -35,9 +36,12 @@ type Scenario = {
   name: string;
   backend: 'cloud' | 'local-ios' | 'local-android';
   platform: 'ios' | 'android';
-  flag?: '--ios';
+  /** Flags after the route, besides the ones every row passes. */
+  flags?: string[];
   initial: 'own' | 'other' | 'empty';
   neverAttaches?: boolean;
+  /** An Android app of another model is attached too, which this run must not stop or count. */
+  otherModelApp?: boolean;
   /**
    * A second emulator of the bound model is attached; which of the two reverse the port before
    * this run's own `adb reverse`.
@@ -73,7 +77,14 @@ const scenarios: Scenario[] = [
     name: '--ios without --eas, iOS session, its app attached',
     backend: 'cloud',
     platform: 'ios',
-    flag: '--ios',
+    flags: ['--ios'],
+    initial: 'own',
+  },
+  {
+    name: '--ios --eas --app-id, iOS session, its app attached',
+    backend: 'cloud',
+    platform: 'ios',
+    flags: ['--ios', '--eas', '--app-id', APP_ID],
     initial: 'own',
   },
   {
@@ -87,7 +98,7 @@ const scenarios: Scenario[] = [
     name: '--ios, bound simulator A, only an app on B attached',
     backend: 'local-ios',
     platform: 'ios',
-    flag: '--ios',
+    flags: ['--ios'],
     initial: 'other',
   },
   {
@@ -95,6 +106,14 @@ const scenarios: Scenario[] = [
     backend: 'local-android',
     platform: 'android',
     initial: 'other',
+  },
+  {
+    name: "no flag, bound Android emulator, only an iOS app and another model's Android app attached",
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'other',
+    neverAttaches: true,
+    otherModelApp: true,
   },
   {
     name: 'no flag, bound Android emulator beside a twin that reverses the port too',
@@ -143,6 +162,7 @@ async function deviceFixture(root: string, scenario: Scenario) {
   if (scenario.backend === 'local-android') {
     return {
       env: adb.env,
+      calls: adb.calls,
       forceStops: () => adb.calls().filter((args) => args.includes('force-stop')),
       opens: () =>
         adb
@@ -170,6 +190,15 @@ async function deviceFixture(root: string, scenario: Scenario) {
 it.each(scenarios)('$name', async (scenario) => {
   const root = await fs.promises.realpath(await setupFixtureAsync('dev-client-app'));
   const device = await deviceFixture(root, scenario);
+  if (scenario.backend === 'local-android') {
+    // The launcher's main activity and the recovery's force-stop both come from this config.
+    const configPath = path.join(root, 'app.json');
+    const { expo } = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+    await fs.promises.writeFile(
+      configPath,
+      JSON.stringify({ expo: { ...expo, android: { package: APP_ID } } })
+    );
+  }
   const own = makeTarget({
     id: 'own',
     appId: APP_ID,
@@ -185,7 +214,15 @@ it.each(scenarios)('$name', async (scenario) => {
     appId: 'host.exp.Exponent',
     deviceName: scenario.backend === 'local-ios' ? 'Simulator B' : BOOTED_SIMULATOR.name,
   });
-  const initial = scenario.initial === 'empty' ? [] : scenario.initial === 'own' ? [own] : [other];
+  const otherModel = makeTarget({
+    id: 'other-model',
+    appId: 'host.exp.exponent',
+    deviceName: 'Pixel 9 - 15 - API 35',
+  });
+  const initial = [
+    ...(scenario.initial === 'empty' ? [] : scenario.initial === 'own' ? [own] : [other]),
+    ...(scenario.otherModelApp ? [otherModel] : []),
+  ];
   let launcher = '';
   const server = await startStubDevServerAsync({
     projectRoot: root,
@@ -193,7 +230,7 @@ it.each(scenarios)('$name', async (scenario) => {
     targets: () =>
       device.opens().includes(launcher)
         ? scenario.neverAttaches
-          ? [other]
+          ? [other, ...(scenario.otherModelApp ? [otherModel] : [])]
           : [...initial, own]
         : initial,
   });
@@ -227,7 +264,7 @@ it.each(scenarios)('$name', async (scenario) => {
       [
         'navigate',
         '/profile/42',
-        ...(scenario.flag ? [scenario.flag] : []),
+        ...(scenario.flags ?? []),
         '--scheme',
         'demoapp',
         '--no-route-check',
@@ -243,6 +280,7 @@ it.each(scenarios)('$name', async (scenario) => {
     expect(report).toMatchObject({
       deviceBackend: scenario.backend,
       platform: scenario.platform,
+      url: ROUTE,
       attached: !scenario.neverAttaches,
     });
     // An app that cannot be placed on this device neither counts as attached nor holds the launcher.
@@ -251,6 +289,35 @@ it.each(scenarios)('$name', async (scenario) => {
     if (!scenario.neverAttaches) expect(device.forceStops?.() ?? []).toEqual([]);
     if (ownAttached) expect(report.launch).toBeNull();
     else expect(report.launch).toMatchObject({ url: launcher, attached: !scenario.neverAttaches });
+    if (device.calls) {
+      const calls = device.calls();
+      const startOf = (url: string) =>
+        calls.findIndex((args) => args.includes('start') && args.some((arg) => arg.includes(url)));
+      if (!ownAttached) {
+        // The launcher goes to the main activity by component: a VIEW intent reaches the
+        // dev launcher before its app runs, and the app lands on an error screen.
+        const launch = calls[startOf(launcher)]!.join(' ');
+        expect(launch).toContain(`-n '${APP_ID}/.MainActivity'`);
+        expect(launch).not.toContain('android.intent.action.VIEW');
+      }
+      if (scenario.twin === 'neither') {
+        // The link would load against a port nothing on the device listens on, if it came first.
+        expect(report.reversedPort).toBe(server.port);
+        const reverse = calls.findIndex(
+          (args) => args[2] === 'reverse' && args[3] === `tcp:${server.port}`
+        );
+        expect(reverse).toBeGreaterThan(-1);
+        expect(reverse).toBeLessThan(startOf(launcher));
+      }
+      if (scenario.neverAttaches) {
+        // The recovery stops the configured app, not the app of another model.
+        const stops = device.forceStops!();
+        expect(stops.length).toBeGreaterThan(0);
+        for (const args of stops) expect(args.at(-1)!.replace(/^'|'$/g, '')).toBe(APP_ID);
+        expect(result.stderr).toContain('no android app connected');
+        expect(result.stderr).toContain('accepted the intent and nothing more');
+      }
+    }
   } finally {
     await releaseLock();
     await server.close();

@@ -20,6 +20,7 @@ import {
 import {
   appStartedMarkerPath,
   BOOTED_SIMULATOR,
+  installStubAdbAsync,
   installStubXcrunAsync,
   SIMULATOR_UDID,
 } from './installedAppStubs';
@@ -113,6 +114,58 @@ describe('@expo/agent-cli navigate', () => {
       }
     }
   );
+
+  // Expo Go is a different application with a different URL, and `exp://<host>` already carries the
+  // dev server: there is nothing to load first, so no launcher is opened for it.
+  it('opens only the route link for Expo Go on Android', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const adb = await installStubAdbAsync(projectRoot, 'host.exp.exponent');
+    const opens = () =>
+      adb
+        .calls()
+        .filter((args) => args.includes('start') && args.includes('-d'))
+        .map((args) => args[args.indexOf('-d') + 1]!.replace(/^'|'$/g, ''));
+    const stub = await startStubDevServerAsync({
+      projectRoot,
+      targets: () =>
+        opens().length
+          ? [
+              {
+                id: '1',
+                appId: 'host.exp.exponent',
+                deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+              },
+            ]
+          : [],
+    });
+
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        [
+          'navigate',
+          '/profile/42',
+          '--json',
+          '--no-followups',
+          '--attach-timeout',
+          '5s',
+          '--dev-server-url',
+          stub.url,
+        ],
+        { env: { ...stubExpoEnv(projectRoot), ...adb.env } }
+      );
+
+      expect(result.exitCode).toBe(0);
+      const report: NavigateReport & { launch: unknown; attached: boolean } = JSON.parse(
+        result.stdout
+      );
+      expect(report.launch).toBeNull();
+      expect(report.attached).toBe(true);
+      expect(opens()).toEqual([`exp://127.0.0.1:${stub.port}/--/profile/42`]);
+    } finally {
+      await stub.close();
+    }
+  });
 
   it('documents that the dev server is discovered, not assumed to be 8081', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
