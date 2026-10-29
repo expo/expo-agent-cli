@@ -1211,7 +1211,10 @@ describe('@expo/agent-cli smoke', () => {
               STUB_EXPO_DELAY_MS: '30000',
               STUB_EXPO_DEV_SERVER_PORT: '9354',
               STUB_EXPO_LISTEN: '1',
-              STUB_EXPO_TARGETS: JSON.stringify([EXPO_GO_TARGET]),
+              // The app runs on the bound simulator, so its target carries that simulator's name.
+              STUB_EXPO_TARGETS: JSON.stringify([
+                { ...EXPO_GO_TARGET, deviceName: 'agent-cli f5ce27a6' },
+              ]),
             },
             reject: false,
           }
