@@ -292,7 +292,9 @@ function isCloseTimeout(result: { stdout: string; stderr: string }): boolean {
   const controller = readControllerError(`${result.stderr}\n${result.stdout}`);
   return (
     controller?.code === 'COMMAND_FAILED' &&
-    /remained (?:running|foreground) after close/.test(controller.message)
+    /remained (?:running|foreground) after close|ran before close did not exit/.test(
+      controller.message
+    )
   );
 }
 

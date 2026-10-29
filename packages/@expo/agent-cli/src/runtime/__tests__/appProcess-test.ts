@@ -266,10 +266,11 @@ describe('stopping the app on a cloud simulator session', () => {
     });
   });
 
-  // On Android the controller runs `am force-stop` and then waits 2 s for `pidof` to come back empty
-  // (agent-device 0.21.31, `android-app-close-timeout`). On an EAS Android Expo Go session that wait
-  // runs out in about 1 stop of 3 [observed — workflow 01a17cd8, 2026-10-27], so a close that only
-  // ran out of time is asked once more. Any other refusal is the answer.
+  // On Android the controller runs `am force-stop` and then waits for the app to go, refusing with
+  // `android-app-close-timeout` in one of three sentences (agent-device 0.21.34). On an EAS Android
+  // Expo Go session that wait runs out in about 1 stop of 3 [observed — workflow 01a17cd8,
+  // 2026-10-27], so a close that only ran out of time is asked once more. Any other refusal is the
+  // answer.
   const CLOSED = { stdout: '{"success":true,"data":{"app":"host.exp.exponent"}}' };
   const STILL_RUNNING = {
     exitCode: 1,
@@ -280,6 +281,11 @@ describe('stopping the app on a cloud simulator session', () => {
     exitCode: 1,
     stderr: 'Error (COMMAND_FAILED): Android app host.exp.exponent remained foreground after close',
   };
+  const STILL_EXITING = {
+    exitCode: 1,
+    stderr:
+      'Error (COMMAND_FAILED): Android app host.exp.exponent process that ran before close did not exit',
+  };
   const NO_SESSION = {
     exitCode: 1,
     stderr: 'Error (SESSION_NOT_FOUND): No active session. Run open first.',
@@ -287,6 +293,7 @@ describe('stopping the app on a cloud simulator session', () => {
   it.each([
     ['a process still running, then closed', [STILL_RUNNING, CLOSED], true, 2],
     ['an app still in the foreground, then closed', [STILL_FOREGROUND, CLOSED], true, 2],
+    ['a process that did not exit, then closed', [STILL_EXITING, CLOSED], true, 2],
     ['a process still running twice', [STILL_RUNNING, STILL_RUNNING], false, 2],
     ['a refusal that is not a timeout', [NO_SESSION, CLOSED], false, 1],
   ])(
