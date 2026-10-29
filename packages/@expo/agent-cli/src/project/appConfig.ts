@@ -71,31 +71,20 @@ export function evaluationFailureOf(read: ProjectExpoConfig): string | null {
     : null;
 }
 
-const reads = new Map<string, ProjectExpoConfig>();
+/** The last evaluation per project, with the static read it was made beside. */
+const evaluations = new Map<string, { staticRead: string; read: ProjectExpoConfig }>();
 
 /**
  * Read the project's app config.
  *
  * A dynamic config is evaluated once per project per process, so the scheme, the ids and the
- * plugins one command reads all come from one call of it. Nothing is kept across runs, for the
- * reason llp/0011 gives: a dynamic config can read env vars and files that no stamp sees.
+ * plugins one command reads all come from one call of it. The static file is read every time, and
+ * a change to it evaluates again: a build writes undeclared ids into `app.json`, and a function
+ * config beside it returns them (`modifyConfigAsync` in `@expo/config`). Nothing is kept across
+ * runs, for the reason llp/0011 gives: a dynamic config can read env vars and files that no stamp
+ * sees.
  */
 export function readExpoConfig(projectRoot: string): ProjectExpoConfig {
-  const known = reads.get(projectRoot);
-  if (known) {
-    return known;
-  }
-  const read = readUncached(projectRoot);
-  reads.set(projectRoot, read);
-  return read;
-}
-
-/** Forget every read, for a caller that changes a config file and reads it again. */
-export function forgetExpoConfigReads(): void {
-  reads.clear();
-}
-
-function readUncached(projectRoot: string): ProjectExpoConfig {
   const staticRead = readStaticConfig(projectRoot);
   const dynamicConfigFile = DYNAMIC_CONFIG_FILES.find((file) =>
     fs.existsSync(path.join(projectRoot, file))
@@ -103,8 +92,12 @@ function readUncached(projectRoot: string): ProjectExpoConfig {
   if (dynamicConfigFile == null) {
     return staticRead;
   }
+  const known = evaluations.get(projectRoot);
+  if (known?.staticRead === JSON.stringify(staticRead)) {
+    return known.read;
+  }
   const evaluated = evaluateExpoConfig(projectRoot);
-  return evaluated.ok
+  const read: ProjectExpoConfig = evaluated.ok
     ? { kind: 'evaluated', file: dynamicConfigFile, config: evaluated.exp as ExpoConfigObject }
     : {
         kind: 'evaluation-failed',
@@ -112,6 +105,13 @@ function readUncached(projectRoot: string): ProjectExpoConfig {
         error: evaluated.error,
         fallback: staticRead,
       };
+  evaluations.set(projectRoot, { staticRead: JSON.stringify(staticRead), read });
+  return read;
+}
+
+/** Forget every evaluation, for a unit suite that reuses one project root. */
+export function forgetExpoConfigReads(): void {
+  evaluations.clear();
 }
 
 /** Whether the project has any app config file, without reading or evaluating it. */

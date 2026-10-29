@@ -3,7 +3,6 @@ import { vol } from 'memfs';
 import { requireAutolinking } from '../../utils/autolinking';
 import { checkExpoGoCompatibilityAsync, decidesAgainstExpoGo } from '../expoGo';
 import { EXPO_GO_MODULES_DUMP } from '../expoGoModules';
-import { forgetExpoConfigReads } from '../appConfig';
 
 vi.mock('../../utils/autolinking', () => ({
   requireAutolinking: vi.fn(() => {
@@ -48,7 +47,6 @@ function projectPackage(
 
 afterEach(() => {
   vol.reset();
-  forgetExpoConfigReads();
 });
 
 describe(checkExpoGoCompatibilityAsync, () => {

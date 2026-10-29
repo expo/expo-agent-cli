@@ -94,6 +94,33 @@ describe(readExpoConfig, () => {
     });
   });
 
+  // A build writes undeclared ids into `app.json`, and the open after it reads them.
+  it(`should read a static config again after it changes`, () => {
+    writeFiles({ 'app.json': JSON.stringify({ expo: { slug: 'before' } }) });
+    readExpoConfig(projectRoot);
+    writeFiles({ 'app.json': JSON.stringify({ expo: { slug: 'after' } }) });
+
+    expect(readExpoConfig(projectRoot)).toMatchObject({ config: { slug: 'after' } });
+  });
+
+  it(`should evaluate a dynamic config once, and again after the static file beside it changes`, () => {
+    writeFiles({
+      'app.json': JSON.stringify({ expo: { slug: 'demo' } }),
+      'app.config.js': 'module.exports = ({ config }) => config;',
+    });
+    vi.mocked(getConfig).mockReturnValue({ exp: { slug: 'evaluated' } } as never);
+
+    readExpoConfig(projectRoot);
+    readExpoConfig(projectRoot);
+    expect(getConfig).toHaveBeenCalledTimes(1);
+
+    writeFiles({
+      'app.json': JSON.stringify({ expo: { slug: 'demo', ios: { bundleIdentifier: 'com.x' } } }),
+    });
+    readExpoConfig(projectRoot);
+    expect(getConfig).toHaveBeenCalledTimes(2);
+  });
+
   it(`should report a static file that does not parse, without falling back`, () => {
     writeFiles({
       'app.config.json': '{ not json',

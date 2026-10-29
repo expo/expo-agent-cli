@@ -1,13 +1,11 @@
 import { vol } from 'memfs';
 
 import { EXPO_GO_APP_ID, readConfiguredAppId, readConfiguredScheme, resolveAppId } from '../appId';
-import { forgetExpoConfigReads } from '../../project/appConfig';
 
 const projectRoot = '/project';
 
 afterEach(() => {
   vol.reset();
-  forgetExpoConfigReads();
 });
 
 describe(resolveAppId, () => {
@@ -309,7 +307,6 @@ describe('the application id of a prebuilt Android project', () => {
 
     expect(readConfiguredAppId('/project', 'ios')).toBeNull();
     vol.reset();
-    forgetExpoConfigReads();
     vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'demo' }) });
     expect(readConfiguredAppId('/project', 'android')).toBeNull();
   });
