@@ -159,17 +159,11 @@ describe('cloud attribution with no platform when adb gave no answer', () => {
       targets: [emulator],
     });
     const now = Date.now();
-    const classify = scopedListClassifier(
-      targetSelection,
-      deviceInventory,
-      now + 5000,
-      [emulator],
-      null
-    );
-    expect((await classify([emulator])).undetermined).toEqual([emulator]);
+    const classify = scopedListClassifier(targetSelection, deviceInventory, [emulator], null);
+    expect((await classify([emulator], now + 5000)).undetermined).toEqual([emulator]);
     adbAnswers = true;
     vi.spyOn(Date, 'now').mockReturnValue(now + 1100);
-    expect((await classify([emulator])).read).toEqual([emulator]);
+    expect((await classify([emulator], now + 5000)).read).toEqual([emulator]);
   });
 });
 

@@ -424,8 +424,7 @@ it('--print-url scopes to the bound EAS session like navigate, so an iOS Expo Go
     const result = await executeAgentCliAsync(
       root,
       ['navigate', '/profile/42', '--print-url', '--no-route-check', '--json', '--no-followups'],
-      // The run reads this worktree's EAS binding, which AGENT_CLI_NO_DEVICE=1 would skip.
-      { reject: false, env: { ...device.env, AGENT_CLI_NO_DEVICE: '0' } }
+      { reject: false, env: device.env }
     );
     expect(result.exitCode, result.all).toBe(0);
     expect(JSON.parse(result.stdout)).toMatchObject({
