@@ -506,9 +506,10 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
       ? await observeReloadAsync(devServerUrl, projectRoot, {
           prepared,
           mechanismProof,
-          // A `Page.reload` and a local relaunch bring the app back under the page id it had.
+          // A `Page.reload` and a relaunch, local or cloud, bring the app back under its page id.
           keepsPageId:
             mechanismProof === 'app-relaunch' ||
+            (options.cloud && method === 'device') ||
             (method === 'dev-server' && prepared.policy.mechanism === 'page-reload'),
           churn: commandSocketChurn,
           attempts,

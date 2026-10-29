@@ -502,6 +502,53 @@ describe('@expo/agent-cli runtime:reload --eas with no platform', () => {
       }
     }
   );
+
+  // A relaunched session app comes back under its page id, and the local app's iOS bundle cannot
+  // prove it, so nothing can arrive: the run says so at once instead of waiting out --timeout.
+  it.skipIf(process.platform !== 'darwin')(
+    `does not wait out --timeout after a cloud relaunch that nothing can prove`,
+    async () => {
+      const projectRoot = await setupAsync('go-app');
+      await writeSessionFileAsync(projectRoot, 'sess-e2e');
+      await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+      const stub = await startStubDevServerAsync({
+        targets: [
+          makeTarget({
+            id: 'local',
+            appId: 'host.exp.Exponent',
+            deviceName: BOOTED_SIMULATOR.name,
+          }),
+          makeTarget({ id: 'session', appId: 'host.exp.Exponent', deviceName: 'iPhone 17' }),
+        ],
+        projectRoot,
+        messageSocket: 'none',
+        manifestOrigin: 'https://stub-tunnel.example',
+      });
+      const releaseLock = await holdDevLockAsync(projectRoot, {
+        url: stub.url,
+        port: stub.port,
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        projectRoot,
+      });
+      try {
+        const started = Date.now();
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['runtime:reload', '--eas', '--ios', '--method', 'device', '--timeout', '10s', '--json'],
+          { reject: false }
+        );
+        const elapsed = Date.now() - started;
+        const report = JSON.parse(result.stdout);
+        expect(report.attempts.at(-1), result.all).toMatchObject({ method: 'device', ok: true });
+        expect(result.exitCode).toBe(22);
+        expect(elapsed).toBeLessThan(8000);
+      } finally {
+        await releaseLock();
+        await stub.close();
+      }
+    }
+  );
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
