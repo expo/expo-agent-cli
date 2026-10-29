@@ -1,9 +1,4 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload
-// Whether an action replaced the JavaScript context of one debugger target.
-//
-// `Page.reload` keeps the target's page id, so a fresh target cannot prove it. A global the old
-// context held and the new one does not can: it is set before the action, and read on the same
-// target id after it.
 
 import { randomBytes } from 'crypto';
 
