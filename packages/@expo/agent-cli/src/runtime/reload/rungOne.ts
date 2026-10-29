@@ -33,7 +33,7 @@ export const PEER_POLL_INTERVAL_MS = 250;
  * `appsReconnected: 0` [observed — live tier, 2026-08-27, twice], and a reader reconciling those two
  * numbers was reconciling a label against a **different signal's** count: `appsReconnected` is what
  * `fresh-debugger-target` rests on. Every label now carries its own count, and a label whose count is
- * zero cannot be named ({@link hasEvidenceFor}).
+ * zero cannot be named (`hasEvidenceFor` in `reloadAsync.ts`).
  */
 export interface CommandSocketChurn {
   /**
