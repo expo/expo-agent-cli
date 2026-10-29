@@ -152,16 +152,69 @@ export function readPrebuiltAndroidApplicationId(projectRoot: string): string | 
 }
 
 /**
+ * The bundle identifier of a **prebuilt** iOS project, from `ios/<name>.xcodeproj/project.pbxproj`.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §An app that cannot be named still has to be installed
+ * The iOS side of {@link readPrebuiltAndroidApplicationId}. A project with only `app.config.ts`
+ * has no static id, so without this every `smoke --ios` rebuilt the app [observed — issue #226].
+ *
+ * Only the first application target counts, the one `@expo/config-plugins` reads. Its Debug and
+ * Release ids can differ, and they are then two apps, so a mismatch answers null rather than a guess.
+ */
+export function readPrebuiltIosBundleIdentifier(projectRoot: string): string | null {
+  const iosDir = path.join(projectRoot, 'ios');
+  let source: string;
+  try {
+    const project = fs.readdirSync(iosDir).find((name) => name.endsWith('.xcodeproj'));
+    if (project == null) {
+      return null;
+    }
+    source = fs.readFileSync(path.join(iosDir, project, 'project.pbxproj'), 'utf8');
+  } catch {
+    return null;
+  }
+
+  const objects = new Map<string, string>();
+  for (const match of source.matchAll(
+    /^([ \t]*)([0-9A-Fa-f]{24})\b[^\n]*= \{\n([\s\S]*?)^\1\};/gm
+  )) {
+    objects.set(match[2]!, match[3]!);
+  }
+  const app = Array.from(objects.values()).find(
+    (body) =>
+      /^\s*isa = PBXNativeTarget;/m.test(body) &&
+      /^\s*productType = "com\.apple\.product-type\.application";/m.test(body)
+  );
+  const listId = app && /^\s*buildConfigurationList = ([0-9A-Fa-f]{24})\b/m.exec(app)?.[1];
+  const list = listId ? objects.get(listId) : undefined;
+  const configIds = Array.from(
+    /^\s*buildConfigurations = \(([^)]*)\)/m.exec(list ?? '')?.[1]?.matchAll(/[0-9A-Fa-f]{24}/g) ??
+      [],
+    (match) => match[0]
+  );
+  const ids = new Set(
+    configIds.map(
+      (id) =>
+        /^\s*PRODUCT_BUNDLE_IDENTIFIER = "?([^";\n]+)"?;/m
+          .exec(objects.get(id) ?? '')?.[1]
+          ?.trim() ?? null
+    )
+  );
+  const [only] = ids;
+  return ids.size === 1 && only != null && isValidAppId(only) ? only : null;
+}
+
+/**
  * `ios.bundleIdentifier` or `android.package` from the project's static app config.
  *
  * A dynamic `app.config.js` is never evaluated, per the process boundary of llp/0001
  * constraint 5; such a project answers null and falls through to the Expo Go default, which
  * `--app-id` overrides.
  *
- * **Android has a second source**, and it is consulted when the config names none: the
- * `applicationId` a prebuild wrote into Gradle (@ref ./appId §readPrebuiltAndroidApplicationId).
- * The config comes first, because a project that declares `android.package` has said what it wants
- * and a prebuild older than that declaration would otherwise outrank it.
+ * **Each platform has a second source**, and it is consulted when the config names none: the id a
+ * prebuild wrote into Gradle or the Xcode project (@ref ./appId §readPrebuiltAndroidApplicationId,
+ * §readPrebuiltIosBundleIdentifier). The config comes first, because a project that declares its id
+ * has said what it wants and a prebuild older than that declaration would otherwise outrank it.
  */
 export function readConfiguredAppId(
   projectRoot: string,
@@ -183,7 +236,9 @@ export function readConfiguredAppId(
       return isValidAppId(value.trim()) ? value.trim() : null;
     }
   }
-  return platform === 'android' ? readPrebuiltAndroidApplicationId(projectRoot) : null;
+  return platform === 'android'
+    ? readPrebuiltAndroidApplicationId(projectRoot)
+    : readPrebuiltIosBundleIdentifier(projectRoot);
 }
 
 /**

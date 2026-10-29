@@ -312,6 +312,112 @@ describe('the application id of a prebuilt Android project', () => {
   });
 });
 
+// @ref ../appId §readPrebuiltIosBundleIdentifier — issue #226: a project with only `app.config.ts`
+// named no iOS app, so `smoke --ios` rebuilt the app on every run.
+describe('the bundle identifier of a prebuilt iOS project', () => {
+  type Ids = { debug: string; release: string };
+
+  /** A pbxproj in the shape `expo prebuild` writes, the extension target after the app target. */
+  function pbxproj({ app, extension }: { app: Ids; extension?: Ids }): void {
+    const target = (id: string, listId: string, productType: string) =>
+      [
+        `\t\t${id} /* target */ = {`,
+        '\t\t\tisa = PBXNativeTarget;',
+        `\t\t\tbuildConfigurationList = ${listId} /* Build configuration list */;`,
+        '\t\t\tbuildPhases = (',
+        '\t\t\t);',
+        `\t\t\tproductType = "${productType}";`,
+        '\t\t};',
+      ].join('\n');
+    const config = (id: string, name: string, bundleId: string) =>
+      [
+        `\t\t${id} /* ${name} */ = {`,
+        '\t\t\tisa = XCBuildConfiguration;',
+        '\t\t\tbuildSettings = {',
+        `\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = ${bundleId};`,
+        '\t\t\t};',
+        `\t\t\tname = ${name};`,
+        '\t\t};',
+      ].join('\n');
+    const list = (id: string, debugId: string, releaseId: string) =>
+      [
+        `\t\t${id} /* Build configuration list */ = {`,
+        '\t\t\tisa = XCConfigurationList;',
+        '\t\t\tbuildConfigurations = (',
+        `\t\t\t\t${debugId} /* Debug */,`,
+        `\t\t\t\t${releaseId} /* Release */,`,
+        '\t\t\t);',
+        '\t\t};',
+      ].join('\n');
+    const objects = [
+      target(
+        'A0000000000000000000000A',
+        'A0000000000000000000000C',
+        'com.apple.product-type.application'
+      ),
+      config('A0000000000000000000000D', 'Debug', app.debug),
+      config('A0000000000000000000000E', 'Release', app.release),
+      list('A0000000000000000000000C', 'A0000000000000000000000D', 'A0000000000000000000000E'),
+    ];
+    if (extension) {
+      objects.push(
+        target(
+          'B0000000000000000000000A',
+          'B0000000000000000000000C',
+          'com.apple.product-type.app-extension'
+        ),
+        config('B0000000000000000000000D', 'Debug', extension.debug),
+        config('B0000000000000000000000E', 'Release', extension.release),
+        list('B0000000000000000000000C', 'B0000000000000000000000D', 'B0000000000000000000000E')
+      );
+    }
+    vol.fromJSON({
+      '/project/app.config.ts': 'export default {};',
+      '/project/ios/Demo.xcodeproj/project.pbxproj': `{\n\tobjects = {\n${objects.join('\n')}\n\t};\n}\n`,
+    });
+  }
+
+  const same = (id: string): Ids => ({ debug: id, release: id });
+
+  it.each([
+    ['one app target', { app: same('com.example.demo') }, 'com.example.demo'],
+    ['a quoted id', { app: same('"com.example.quoted"') }, 'com.example.quoted'],
+    [
+      'an app with an extension',
+      { app: same('com.example.app'), extension: same('com.example.app.widget') },
+      'com.example.app',
+    ],
+    [
+      'different Debug and Release ids',
+      {
+        app: { debug: 'com.example.app.debug', release: 'com.example.app' },
+        extension: same('com.example.app.shareextension'),
+      },
+      null,
+    ],
+    [
+      'an unexpanded app id next to a literal extension id',
+      { app: same('"$(PRODUCT_BUNDLE_IDENTIFIER)"'), extension: same('com.example.app.widget') },
+      null,
+    ],
+  ])(`should read %s`, (_name, targets, expected) => {
+    pbxproj(targets);
+
+    expect(readConfiguredAppId('/project', 'ios')).toBe(expected);
+  });
+
+  it(`should prefer the app config over an older prebuild`, () => {
+    pbxproj({ app: same('com.stale.one') });
+    vol.fromJSON({
+      '/project/app.json': JSON.stringify({
+        expo: { ios: { bundleIdentifier: 'com.declared.one' } },
+      }),
+    });
+
+    expect(readConfiguredAppId('/project', 'ios')).toBe('com.declared.one');
+  });
+});
+
 describe(readConfiguredScheme, () => {
   it(`reads a string scheme, and the first of an array`, () => {
     vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme: 'myapp' } }) });
