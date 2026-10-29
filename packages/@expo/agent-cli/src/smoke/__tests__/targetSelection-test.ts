@@ -3,9 +3,7 @@ import { vol } from 'memfs';
 import type { AddressInfo } from 'net';
 
 import { fakeTools, seedIosBinding } from '../../deviceBinding/__tests__/fakeTools';
-import { resolveBundleCheckPlatformsAsync } from '../../runtime/bundleCheck';
 import type { CdpTarget } from '../../runtime/cdpClient';
-import { resolveTargetSelectionAsync } from '../../runtime/resolveTargetSelection';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { resolveSmokeOptions } from '../resolveOptions';
 import { buildSmokeDeps } from '../smokeAsync';
@@ -84,22 +82,6 @@ it('reclassifies an unchanged target after a failed inventory read recovers', as
   expect(
     (await selection.targetSelectionAsync(url)).classifiedTargets.read.map((app) => app.id)
   ).toEqual(['page-1']);
-});
-
-it('infers both bundle platforms without a platform flag or selected device', async () => {
-  inventory();
-  const selection = await resolveTargetSelectionAsync({
-    projectRoot,
-    flags: { platform: null, eas: false },
-    targets: [target(), target({ id: 'android', appId: 'host.exp.exponent', deviceName: 'Pixel' })],
-  });
-  expect(
-    await resolveBundleCheckPlatformsAsync(
-      selection.targetSelection,
-      selection.classifiedTargets.read,
-      selection
-    )
-  ).toEqual({ platforms: ['ios', 'android'], source: 'connected-app' });
 });
 
 it('retries a failed device lookup, shares concurrent discovery, and retains the successful choice', async () => {

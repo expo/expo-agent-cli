@@ -127,6 +127,42 @@ describe('@expo/agent-cli runtime:reload', () => {
     }
   });
 
+  describe('which attached apps a run reads', () => {
+    const IOS_TARGET = { ...EXPO_GO_TARGET, deviceName: 'iPhone 17 Pro' };
+    const ANDROID_TARGET = {
+      id: '2',
+      appId: 'host.exp.exponent',
+      deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+      webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=2&page=1',
+    };
+    it('checks the bundle on both platforms when no platform is named', async () => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [IOS_TARGET, ANDROID_TARGET],
+        messagePeers: { 'socket#1': 'role=ios', 'socket#2': 'role=android' },
+      });
+      const releaseLock = await lockToStubAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['runtime:reload', '--method', 'dev-server', '--json'],
+          { env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '1' } }
+        );
+
+        expect(result.exitCode).toBe(0);
+        const report: ReloadReport & { bundlePlatforms: string[]; bundlePlatformSource: string } =
+          JSON.parse(result.stdout);
+        expect(report.bundlePlatforms).toEqual(['ios', 'android']);
+        expect(report.bundlePlatformSource).toBe('connected-app');
+      } finally {
+        releaseLock();
+        await stub.close();
+      }
+    });
+  });
+
   it('prints one JSON object with a stable set of keys', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });

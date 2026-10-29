@@ -252,6 +252,65 @@ describe('a dev server with an app connected', () => {
   });
 });
 
+// @ref llp/0005-runtime-loop-tools.rfc.md §Android
+// A run that names a platform reads only the apps it can place there. An app nothing places on
+// either platform (a development build on someone's phone) is not evidence about `--android`.
+describe('a run that names a platform', () => {
+  const ANDROID_TARGET = {
+    ...EXPO_GO_TARGET,
+    id: '2',
+    appId: 'host.exp.exponent',
+    description: 'host.exp.exponent',
+    deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+    webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=2&page=1',
+  };
+  const UNPLACED_TARGET = {
+    ...EXPO_GO_TARGET,
+    id: '3',
+    appId: 'com.example.app',
+    description: 'com.example.app',
+    deviceName: 'Ada’s phone',
+    webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=3&page=1',
+  };
+
+  async function runAndroidAsync(stub: StubDevServer) {
+    return await executeAgentCliAsync(
+      projectRoot,
+      ['runtime:eval', '1 + 1', '--android', '--dev-server-url', stub.url, '--json'],
+      { reject: false, env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '1' } }
+    );
+  }
+
+  it('reads the app it places on that platform', async () => {
+    const stub = await startStubDevServerAsync({
+      targets: [UNPLACED_TARGET, ANDROID_TARGET],
+      inspectorEvaluate: () => undefined,
+    });
+    try {
+      const result = await runAndroidAsync(stub);
+
+      expect(JSON.parse(result.stdout).error?.code).not.toBe('NO_APP_CONNECTED');
+    } finally {
+      await stub.close();
+    }
+  });
+
+  it('does not read an app nothing places', async () => {
+    const stub = await startStubDevServerAsync({
+      targets: [UNPLACED_TARGET],
+      inspectorEvaluate: () => undefined,
+    });
+    try {
+      const result = await runAndroidAsync(stub);
+
+      expect(result.exitCode).toBe(1);
+      expect(JSON.parse(result.stdout).error.code).toBe('NO_APP_CONNECTED');
+    } finally {
+      await stub.close();
+    }
+  });
+});
+
 // @ref llp/0005-runtime-loop-tools.rfc.md §What proves a reload — **F141.** An app that is
 // re-registering holds no debugger target for about half a second, and the whole family reads that
 // list. The grace period that waits it out was `runtime:errors`' alone, because F39 was found on the
