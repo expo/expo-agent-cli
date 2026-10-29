@@ -96,9 +96,8 @@ async function boundDeviceAsync(
   projectRoot: string,
   flags: ResolveTargetSelectionOptions['flags']
 ): Promise<BoundDevice | null> {
-  const disabled = !flags.eas && devicesDisabled();
-  if (disabled) return null;
-  if (!flags.eas) {
+  // AGENT_CLI_NO_DEVICE keeps this machine's devices untouched; an EAS session is not one of them.
+  if (!flags.eas && !devicesDisabled()) {
     const local = liveLocalBinding(projectRoot, flags.platform ?? undefined);
     if (local) return local.device;
   }

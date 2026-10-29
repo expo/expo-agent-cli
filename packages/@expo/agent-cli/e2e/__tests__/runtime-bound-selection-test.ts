@@ -406,7 +406,8 @@ it('eval refuses with NO_BOUND_DEVICE when its own cloud binding file cannot be 
   }
 });
 
-it('eval with AGENT_CLI_NO_DEVICE=1 skips the cloud binding', async () => {
+// The variable keeps this machine's devices untouched; an EAS session is not one of them.
+it('eval with AGENT_CLI_NO_DEVICE=1 still scopes to the EAS session binding', async () => {
   const { root, env } = await setupBoundAsync('ios-cloud');
   const server = await startStubDevServerAsync({
     projectRoot: root,
@@ -420,7 +421,7 @@ it('eval with AGENT_CLI_NO_DEVICE=1 skips the cloud binding', async () => {
       { reject: false, env: { ...env, AGENT_CLI_NO_DEVICE: '1' } }
     );
     expect(result.exitCode, result.all).toBe(0);
-    expect(result.stderr).not.toContain('Scoped to');
+    expect(result.stderr).toContain('Scoped to');
   } finally {
     await server.close();
   }
