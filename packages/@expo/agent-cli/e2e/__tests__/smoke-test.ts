@@ -774,14 +774,15 @@ describe('@expo/agent-cli smoke', () => {
     async function runAsync(
       projectRoot: string,
       stub: StubDevServer,
-      args: string[] = []
+      args: string[] = [],
+      env: Record<string, string> = {}
     ): Promise<Record<string, any>> {
       const release = await holdLockForAsync(projectRoot, stub);
       try {
         const result = await executeAgentCliAsync(
           projectRoot,
           ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '4s', ...args],
-          { env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0' }, reject: false }
+          { env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '0', ...env }, reject: false }
         );
         return JSON.parse(result.stdout);
       } finally {
@@ -974,9 +975,11 @@ describe('@expo/agent-cli smoke', () => {
       const stub = await startStubDevServerAsync({ projectRoot, targets: [] });
 
       try {
-        const report = await runAsync(projectRoot, stub);
+        const report = await runAsync(projectRoot, stub, [], { AGENT_CLI_COLD_ATTACH_MS: '2000' });
 
         expect(report.appsConnected).toBe(0);
+        // The wait for the app that never came was the harness budget, not the two-minute one.
+        expect(report.phases.find((phase: any) => phase.id === 'app').ms).toBeLessThan(10_000);
         expect(report.environment).toMatchObject({ devServer: 'reused', device: 'booted' });
         expect(report.environment.boundDevice).toMatchObject({ id: 'E2E-PARKED', released: true });
         expect(report.followups[0].command).toBe(
@@ -1041,6 +1044,7 @@ describe('@expo/agent-cli smoke', () => {
               STUB_EXPO_DELAY_MS: '30000',
               STUB_EXPO_DEV_SERVER_PORT: '9353',
               STUB_EXPO_LISTEN: '1',
+              AGENT_CLI_COLD_ATTACH_MS: '2000',
             },
             reject: false,
           }
@@ -1048,6 +1052,8 @@ describe('@expo/agent-cli smoke', () => {
 
         const report = JSON.parse(result.stdout);
         expect(report.environment.devServer).toBe('started');
+        // The wait for the app that never came was the harness budget, not the two-minute one.
+        expect(report.phases.find((phase: any) => phase.id === 'app').ms).toBeLessThan(10_000);
         expect(report.environment.boundDevice).toEqual({
           id: 'E2E-PARKED',
           name: 'agent-cli deadbeef',
