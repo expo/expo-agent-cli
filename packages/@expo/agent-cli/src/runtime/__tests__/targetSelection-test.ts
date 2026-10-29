@@ -9,7 +9,6 @@ import { makeDeviceInventory } from './targetSelectionFixtures';
 // simulator's model name, which no local tool on this machine reports.
 describe('classifyTargets on an EAS Simulator session', () => {
   const cloud = { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17' } as CdpTarget;
-  const secondCloud = { appId: 'dev.vonovak.cyclable', deviceName: 'iPad Air' } as CdpTarget;
   const local = { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17 Pro' } as CdpTarget;
   const expoGo = { appId: 'host.exp.Exponent', deviceName: 'iPhone 17' } as CdpTarget;
   const deviceInventory = makeDeviceInventory({
@@ -33,30 +32,6 @@ describe('classifyTargets on an EAS Simulator session', () => {
       read: [cloud],
       skipped: [{ target: local, classification: { group: 'other-device' } }],
       undetermined: [],
-    },
-    {
-      name: 'reads neither of two unclaimed targets',
-      targets: [cloud, secondCloud],
-      platform: 'ios' as const,
-      eas: true,
-      read: [],
-      undetermined: [cloud, secondCloud],
-    },
-    {
-      name: 'reads no unclaimed target on a run without --eas',
-      targets: [cloud],
-      platform: 'ios' as const,
-      eas: false,
-      read: [],
-      undetermined: [cloud],
-    },
-    {
-      name: 'reads no unclaimed target on an Android session, whose names have their own rule',
-      targets: [cloud],
-      platform: 'android' as const,
-      eas: true,
-      read: [],
-      undetermined: [cloud],
     },
     {
       name: 'reads an Expo Go target that no booted local simulator has',
@@ -100,13 +75,6 @@ describe('resolveTargetSelectionAsync with --eas and no platform', () => {
   const localExpoGo = { appId: 'host.exp.Exponent', deviceName: 'iPhone 17 Pro' } as CdpTarget;
 
   it.each([
-    {
-      name: "reads the session's app, not a local simulator's",
-      inventory: makeDeviceInventory({ booted: [{ name: 'iPhone 17 Pro', udid: 'LOCAL-1' }] }),
-      read: [session],
-      undetermined: [],
-      skipped: [{ target: localExpoGo, classification: { group: 'other-device' } }],
-    },
     {
       name: 'holds every unclaimed target while the local simulators are unknown',
       inventory: makeDeviceInventory({ bootedStatus: 'unknown' }),

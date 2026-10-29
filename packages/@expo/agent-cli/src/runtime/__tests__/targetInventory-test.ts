@@ -1,25 +1,16 @@
 import { fakeTools } from '../../deviceBinding/__tests__/fakeTools';
 import { spawnCaptureAsync, type SpawnCaptureResult } from '../../utils/spawnCapture';
 import { resolveTargetSelectionAsync } from '../resolveTargetSelection';
-import { classifyTargets, EMPTY_DEVICE_INVENTORY } from '../targetSelection';
-import { makeTarget, makeTargetSelection } from './targetSelectionFixtures';
+import { makeTarget } from './targetSelectionFixtures';
 
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
 
 const realPlatform = process.platform;
 const target = makeTarget();
-const cloud = makeTargetSelection({
-  platform: { value: 'ios', by: 'flag' },
-  device: { backend: 'cloud', deviceId: 'session' },
-});
 
 afterEach(() => {
   Object.defineProperty(process, 'platform', { value: realPlatform });
   vi.resetAllMocks();
-});
-
-it('does not attribute an unclaimed target before inspecting local simulators', () => {
-  expect(classifyTargets([target], cloud, EMPTY_DEVICE_INVENTORY).undetermined).toEqual([target]);
 });
 
 it.each([

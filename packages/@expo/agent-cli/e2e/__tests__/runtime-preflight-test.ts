@@ -295,6 +295,24 @@ describe('a run that names a platform', () => {
     }
   });
 
+  it('does not read an app nothing places on a run without --eas', async () => {
+    const stub = await startStubDevServerAsync({
+      targets: [{ ...UNPLACED_TARGET, deviceName: 'iPhone 17' }],
+      inspectorEvaluate: () => undefined,
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['runtime:eval', '1 + 1', '--ios', '--dev-server-url', stub.url, '--json'],
+        { reject: false, env: { ...stubExpoEnv(projectRoot), AGENT_CLI_NO_DEVICE: '1' } }
+      );
+
+      expect(JSON.parse(result.stdout).error.code).toBe('NO_APP_CONNECTED');
+    } finally {
+      await stub.close();
+    }
+  });
+
   it('does not read an app nothing places', async () => {
     const stub = await startStubDevServerAsync({
       targets: [UNPLACED_TARGET],

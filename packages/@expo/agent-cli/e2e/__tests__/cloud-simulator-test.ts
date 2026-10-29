@@ -500,6 +500,60 @@ describe('@expo/agent-cli runtime:reload --eas with no platform', () => {
   });
 });
 
+// @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
+describe('@expo/agent-cli runtime:reload --eas with apps nothing claims', () => {
+  const unclaimed = (id: string, deviceName: string) =>
+    makeTarget({
+      id,
+      appId: 'com.example.demo',
+      deviceName,
+      webSocketDebuggerUrl: `ws://127.0.0.1:1/inspector/debug?device=${id}&page=1`,
+      reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: id },
+    });
+
+  it.each([
+    { name: 'no platform', flags: [], apps: ['iPhone 17', 'iPad Air'] },
+    { name: '--ios', flags: ['--ios'], apps: ['iPhone 17', 'iPad Air'] },
+    { name: '--android', flags: ['--android'], apps: ['iPhone 17'] },
+  ])(`reads neither unclaimed app with $name`, async ({ flags, apps }) => {
+    const projectRoot = await setupAsync('dev-client-app');
+    await writeSessionFileAsync(projectRoot, 'sess-e2e');
+    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+    const evaluated: string[] = [];
+    const stub = await startStubDevServerAsync({
+      targets: apps.map((name, index) => unclaimed(String(index + 1), name)),
+      projectRoot,
+      inspectorEvaluate: (expression, device) => {
+        if (expression.includes('reloadAppAsync')) evaluated.push(device);
+        return undefined;
+      },
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        [
+          'runtime:reload',
+          '--eas',
+          ...flags,
+          '--method',
+          'runtime',
+          '--dev-server-url',
+          stub.url,
+          '--timeout',
+          '2s',
+          '--json',
+          '--no-followups',
+        ],
+        { reject: false }
+      );
+      expect(evaluated, result.all).toEqual([]);
+      expect(result.exitCode).not.toBe(0);
+    } finally {
+      await stub.close();
+    }
+  });
+});
+
 describe('@expo/agent-cli runtime:stop --eas', () => {
   // The controller's `close <app-id>` ends the named app and leaves the billed machine up. The
   // pinned argv is the point: `--shutdown` would tear down the session, and `simulator:stop` would
