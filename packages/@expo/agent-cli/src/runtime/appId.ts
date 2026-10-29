@@ -14,7 +14,7 @@ import path from 'path';
 
 import type { NavigatePlatform } from '../navigate/device';
 import { EXPO_GO_APP_IDS } from '../navigate/target';
-import { STATIC_CONFIG_FILES } from '../project/appConfig';
+import { readExpoConfig } from '../project/appConfig';
 
 /** Expo Go's application id, per platform, for a project that has no build of its own. */
 export const EXPO_GO_APP_ID: Record<NavigatePlatform, string> = {
@@ -61,7 +61,7 @@ export interface ResolveAppIdInput {
   appIdOverride?: string | null;
   /** Application ids the dev server reported for the apps attached to it. */
   targetAppIds: readonly string[];
-  /** `ios.bundleIdentifier` / `android.package` from the project's static app config. */
+  /** `ios.bundleIdentifier` / `android.package` from the project's app config. */
   configured: string | null;
 }
 
@@ -133,9 +133,7 @@ export function resolveAppId({
  * reported only that the device had refused the deep link — because with no app id there was
  * nothing to check for, nothing to install, and nothing to explain.
  *
- * A static file read, which keeps the llp/0001 constraint 5 line the app-config reader draws: no
- * `app.config.js` is evaluated and no Gradle is run. Both quote styles and the Kotlin DSL's `=` are
- * accepted; the shape was read off a real `expo prebuild` rather than guessed
+ * A file read: no Gradle is run. Both quote styles and the Kotlin DSL's `=` are accepted; the shape was read off a real `expo prebuild` rather than guessed
  * [observed, 2026-09-04: `    applicationId 'com.tuft.pdfbuild'`].
  */
 export function readPrebuiltAndroidApplicationId(projectRoot: string): string | null {
@@ -152,11 +150,9 @@ export function readPrebuiltAndroidApplicationId(projectRoot: string): string | 
 }
 
 /**
- * `ios.bundleIdentifier` or `android.package` from the project's static app config.
- *
- * A dynamic `app.config.js` is never evaluated, per the process boundary of llp/0001
- * constraint 5; such a project answers null and falls through to the Expo Go default, which
- * `--app-id` overrides.
+ * `ios.bundleIdentifier` or `android.package` from the app config the app sees (`readExpoConfig`).
+ * A config that names none answers null and falls through to the Expo Go default, which `--app-id`
+ * overrides.
  *
  * **Android has a second source**, and it is consulted when the config names none: the
  * `applicationId` a prebuild wrote into Gradle (@ref ./appId §readPrebuiltAndroidApplicationId).
@@ -167,52 +163,28 @@ export function readConfiguredAppId(
   projectRoot: string,
   platform: NavigatePlatform
 ): string | null {
-  for (const fileName of STATIC_CONFIG_FILES) {
-    const config = readJsonFile(path.join(projectRoot, fileName));
-    if (config == null) {
-      continue;
-    }
-    const expo = (isRecord(config.expo) ? config.expo : config) as Record<string, unknown>;
-    const platformConfig = isRecord(expo[platform])
-      ? (expo[platform] as Record<string, unknown>)
-      : null;
-    const value = platformConfig?.[platform === 'ios' ? 'bundleIdentifier' : 'package'];
-    if (typeof value === 'string' && value.trim().length > 0) {
-      // A malformed id is treated as absent, which is the same fall-through as a config that names
-      // none: the Expo Go default, which `--app-id` overrides.
-      return isValidAppId(value.trim()) ? value.trim() : null;
-    }
+  const expo = readExpoConfig(projectRoot).config;
+  const platformConfig = isRecord(expo?.[platform])
+    ? (expo[platform] as Record<string, unknown>)
+    : null;
+  const value = platformConfig?.[platform === 'ios' ? 'bundleIdentifier' : 'package'];
+  if (typeof value === 'string' && value.trim().length > 0) {
+    // A malformed id is treated as absent, which is the same fall-through as a config that names
+    // none: the Expo Go default, which `--app-id` overrides.
+    return isValidAppId(value.trim()) ? value.trim() : null;
   }
   return platform === 'android' ? readPrebuiltAndroidApplicationId(projectRoot) : null;
 }
 
 /**
- * The project's URL scheme from its static app config: `expo.scheme`, a string or the first of an
- * array. Null for a project that declares none, only evaluates one in `app.config.js`, or declares
- * one that is not a scheme. A caller treats null as "no scheme", which is a handled case.
+ * The project's URL scheme from the app config the app sees: `expo.scheme`, a string or the first of
+ * an array. Null for a project that declares none, or declares one that is not a scheme. A caller
+ * treats null as "no scheme", which is a handled case.
  */
 export function readConfiguredScheme(projectRoot: string): string | null {
-  for (const fileName of STATIC_CONFIG_FILES) {
-    const config = readJsonFile(path.join(projectRoot, fileName));
-    if (config == null) {
-      continue;
-    }
-    const expo = (isRecord(config.expo) ? config.expo : config) as Record<string, unknown>;
-    const scheme = Array.isArray(expo.scheme) ? expo.scheme[0] : expo.scheme;
-    if (typeof scheme === 'string' && URL_SCHEME.test(scheme.trim())) {
-      return scheme.trim();
-    }
-  }
-  return null;
-}
-
-function readJsonFile(filePath: string): Record<string, unknown> | null {
-  try {
-    const parsed: unknown = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    return isRecord(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
+  const expo = readExpoConfig(projectRoot).config;
+  const scheme = Array.isArray(expo?.scheme) ? expo.scheme[0] : expo?.scheme;
+  return typeof scheme === 'string' && URL_SCHEME.test(scheme.trim()) ? scheme.trim() : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -275,7 +275,7 @@ describe(readEasBuildsStatusAsync, () => {
     const status = await readEasBuildsStatusAsync(projectRoot, {
       auth: signedIn,
       projectHash: PROJECT_HASH,
-      easProject: { projectId: null, source: 'app.json', dynamic: false, unreadable: false },
+      easProject: { projectId: null, source: 'app.json', evaluationError: null, unreadable: false },
     });
 
     expect(iosOf(status.platforms)).toMatchObject({ state: 'found', source: 'cache' });
@@ -285,7 +285,7 @@ describe(readEasBuildsStatusAsync, () => {
     const status = await readEasBuildsStatusAsync(projectRoot, {
       auth: signedIn,
       projectHash: PROJECT_HASH,
-      easProject: { projectId: null, source: 'app.json', dynamic: false, unreadable: true },
+      easProject: { projectId: null, source: 'app.json', evaluationError: null, unreadable: true },
     });
 
     expect(iosOf(status.platforms).state).toBe('unknown');
@@ -298,7 +298,7 @@ describe(readEasBuildsStatusAsync, () => {
     const status = await readEasBuildsStatusAsync(projectRoot, {
       auth: { loggedIn: true, user: null, source: 'EXPO_TOKEN' },
       projectHash: PROJECT_HASH,
-      easProject: { projectId: null, source: 'app.json', dynamic: false, unreadable: false },
+      easProject: { projectId: null, source: 'app.json', evaluationError: null, unreadable: false },
     });
 
     expect(iosOf(status.platforms).reason).toContain(
@@ -311,7 +311,7 @@ describe(readEasBuildsStatusAsync, () => {
     const status = await readEasBuildsStatusAsync(projectRoot, {
       auth: { loggedIn: null, user: null, source: null },
       projectHash: PROJECT_HASH,
-      easProject: { projectId: null, source: 'app.json', dynamic: false, unreadable: false },
+      easProject: { projectId: null, source: 'app.json', evaluationError: null, unreadable: false },
     });
 
     expect(iosOf(status.platforms).reason).toContain('init --account <account-name>');
@@ -403,7 +403,12 @@ describe(dropEasNoneEntry, () => {
 });
 
 describe(platformsToFingerprintEarly, () => {
-  const linked = { projectId: 'proj-1', source: 'app.json', dynamic: false, unreadable: false };
+  const linked = {
+    projectId: 'proj-1',
+    source: 'app.json',
+    evaluationError: null,
+    unreadable: false,
+  };
   const early = (options: Partial<Parameters<typeof platformsToFingerprintEarly>[1]> = {}) =>
     platformsToFingerprintEarly(projectRoot, {
       auth: signedIn,

@@ -6,7 +6,7 @@
 // `expo/bundledNativeModules.json` for an SDK this CLI has not recaptured), no config plugin
 // changes the native projects, and no native project is checked in.
 import { requireAutolinking } from '../utils/autolinking';
-import { readStaticAppConfigAsync } from './appConfig';
+import { readAppConfigPlugins } from './appConfig';
 import { debugEvent } from './events';
 import { dumpCoversSdk, isExpoGoNativeModule } from './expoGoModules';
 import {
@@ -45,7 +45,7 @@ export async function checkExpoGoCompatibilityAsync(
     readSdkVersionAsync(projectRoot),
     loadBundledNativeModulesAsync(projectRoot),
     readProjectPackageJsonAsync(projectRoot),
-    readStaticAppConfigAsync(projectRoot),
+    readAppConfigPlugins(projectRoot),
     readProjectNativeDirsAsync(projectRoot),
   ]);
 
@@ -85,8 +85,8 @@ export async function checkExpoGoCompatibilityAsync(
     });
   }
 
-  if (appConfig.dynamic && !appConfig.source) {
-    // A dynamic-only config is not evaluated here, so its plugins stay unknown.
+  if (appConfig.evaluationError != null) {
+    // A dynamic config that could not be evaluated leaves its plugins unknown.
     debugEvent('config_plugins_unknown', { reason: 'dynamic-app-config' });
   }
   for (const plugin of appConfig.plugins) {

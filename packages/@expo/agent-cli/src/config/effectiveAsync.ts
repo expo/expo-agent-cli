@@ -7,7 +7,7 @@
 import { event } from '../events';
 import { buildConfigEffectiveFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
-import { readPluginIds, readStaticAppConfigAsync } from '../project/appConfig';
+import { readAppConfigPlugins, readPluginIds } from '../project/appConfig';
 import {
   assertFilePlatform,
   buildEffectiveConfig,
@@ -39,16 +39,15 @@ export async function printEffectiveConfigAsync(
   const file = resolveModFile(options.file);
   assertFilePlatform(file, platform);
 
-  const [{ config, command, durationMs }, staticConfig] = await Promise.all([
-    introspectConfigAsync(projectRoot),
-    readStaticAppConfigAsync(projectRoot),
-  ]);
+  const { config, command, durationMs } = await introspectConfigAsync(projectRoot);
 
-  // A dynamic config that leaves `plugins` out drops the static file's list, so the static file is
-  // the fallback only when no dynamic config was evaluated.
+  // A dynamic config that leaves `plugins` out drops the static file's list, so the app config is
+  // the fallback only when the payload evaluated no dynamic config.
   const declaredPluginIds =
     readPluginIds(config.plugins) ??
-    (config._internal?.dynamicConfigPath ? [] : staticConfig.plugins.map((plugin) => plugin.id));
+    (config._internal?.dynamicConfigPath
+      ? []
+      : readAppConfigPlugins(projectRoot).plugins.map((plugin) => plugin.id));
 
   const report = buildEffectiveConfig({
     projectRoot,

@@ -119,7 +119,7 @@ export interface EasBuildsOptions {
    * remembered EAS answer is refused too.
    */
   fingerprintCache?: boolean;
-  /** The EAS project link from the static app config. Null when the project could not be read. */
+  /** The EAS project link from the app config. Null when the project could not be read. */
   easProject?: EasProjectLink | null;
 }
 
@@ -198,7 +198,10 @@ function recordAnswers(cached: CachedEntry | undefined, projectHash: string | nu
 }
 
 function mayAskEas(easProject: EasProjectLink | null | undefined): boolean {
-  return !easProject || (!easProject.unreadable && (!!easProject.projectId || easProject.dynamic));
+  return (
+    !easProject ||
+    (!easProject.unreadable && (!!easProject.projectId || easProject.evaluationError != null))
+  );
 }
 
 async function readPlatformAsync(
@@ -232,8 +235,12 @@ async function readPlatformAsync(
       `${options.easProject.source} does not parse, so whether this project is linked to EAS is unknown and EAS was not asked`
     );
   }
-  if (options.easProject && !options.easProject.projectId && !options.easProject.dynamic) {
-    // A dynamic config may set the id from an environment variable, so only a static one is trusted.
+  if (
+    options.easProject &&
+    !options.easProject.projectId &&
+    options.easProject.evaluationError == null
+  ) {
+    // A config that could not be evaluated may still set the id, so only a config that was read is trusted.
     return unknown(platform, null, unlinkedReason(projectRoot, options.easProject, options.auth));
   }
 

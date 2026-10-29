@@ -696,14 +696,16 @@ The engine shipped in `src/project/`, `src/plan/`, `src/status/`, `src/dev/`, as
    still plans a build for a project whose fingerprint EAS already has a build for.
 3. The `web` rule fires only on an explicit `--web`, because `ProjectState` cannot prove
    "web-only".
-4. Config plugins are read from static config only (`app.json`). A dynamic
-   `app.config.js/ts` yields a debug event and a best-effort skip.
+4. Every value read from the app config (scheme, slug, app id, plugins, router root, EAS
+   project id) comes from one reader: a static file as written, and a dynamic
+   `app.config.js/ts` evaluated with `@expo/config` in `development` mode after the env files
+   are loaded, plugins not run ([[0005-runtime-loop-tools]] §Pointing an app at this dev
+   server). A dynamic config that fails to evaluate keeps the static values and reports why,
+   so a missing value reads as unknown. `inspect:config-plugins` reads the declared plugins
+   out of the introspect payload, where a dynamic config with no `plugins` key declares none.
    [[0011-impact-and-freshness]] spawns `expo config --json --type public` to resolve
-   `runtimeVersion`. The plugins half of this item is still static-only for the probe;
-   `inspect:config-plugins` reads the declared plugins out of the introspect payload, where a
-   dynamic config with no `plugins` key declares none, and
-   `navigate` evaluates the scheme ([[0005-runtime-loop-tools]] §Pointing an app at this
-   dev server). The recorded hash is the pre-build probe hash. Bare-versus-CNG uses "any native dir present".
+   `runtimeVersion`, because config plugins can set it. The fingerprint's asset sources read
+   the static file only ([[0023-fingerprint-caching]]). The recorded hash is the pre-build probe hash. Bare-versus-CNG uses "any native dir present".
    `sdkVersion: null` never forces a rule. `expoGo.compatible` is the single Go verdict.
 
 ## Testing
@@ -802,7 +804,7 @@ shape to reach for, and it is a decision for a later revision of this document.
 
 ### Which app
 
-The app id comes from the static app config (`ios.bundleIdentifier`, `android.package`); on Android
+The app id comes from the app config (`ios.bundleIdentifier`, `android.package`); on Android
 also from the `applicationId` a prebuild wrote into `build.gradle`, which `navigate` already reads.
 Nothing is read out of an Xcode project: build variants and extension targets make that a guess, and
 a wrong id is worse than none. Expo Go is never the target: it carries no project fingerprint. A

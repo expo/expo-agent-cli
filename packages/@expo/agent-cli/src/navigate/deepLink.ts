@@ -2,10 +2,7 @@
 // Deep-link primitives: resolve a project's URL scheme, turn a route into a launchable URL, and
 // open that URL on a booted device.
 //
-// The scheme is read from the static config files. A dynamic `app.config.js`/`.ts` is evaluated
-// with `@expo/config` after the project's env files are loaded (`evaluateExpoConfig`), the way
-// `expo config` reads it. A caller that passes `--scheme` already knows the answer, and then
-// nothing is evaluated.
+// The scheme comes from the app config the app sees (`readExpoConfig`), and `--scheme` wins over it.
 import fs from 'fs';
 import path from 'path';
 
@@ -18,8 +15,7 @@ import {
   openUrlOnCloudSimulatorAsync,
 } from '../device/cloudSimulator';
 import { PROGRAM_PREFIX } from '../programName';
-import { DYNAMIC_CONFIG_FILES, STATIC_CONFIG_FILES } from '../project/appConfig';
-import { evaluateExpoConfig } from '../project/evaluatedConfig';
+import { readExpoConfig } from '../project/appConfig';
 import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
@@ -53,10 +49,7 @@ export interface ProjectSchemeConfig {
   scheme: string | null;
   /** `expo.slug`, falling back to `package.json` `name`. Used for `exp+<slug>://`. */
   slug: string | null;
-  /**
-   * Name of the config file the values came from, if any: a static file, or the dynamic file once
-   * {@link resolveProjectSchemeConfigAsync} evaluated it.
-   */
+  /** Name of the config file the values came from, if any: the evaluated dynamic file, or a static one. */
   configFile: string | null;
   /** Name of a dynamic config file present in the project, if any. */
   dynamicConfigFile: string | null;
@@ -68,64 +61,9 @@ export interface ProjectSchemeConfig {
 }
 
 /**
- * Read the URL scheme and slug from the project's static config files.
- *
- * Reads `app.json` then `app.config.json`, accepting either an `expo` key or a bare config
- * object. Does not evaluate `app.config.js` / `app.config.ts`; when one is present its name is
- * reported, and {@link resolveProjectSchemeConfigAsync} is the reader that evaluates it.
- */
-export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfig {
-  const result: ProjectSchemeConfig = {
-    scheme: null,
-    slug: null,
-    configFile: null,
-    dynamicConfigFile: null,
-    evaluationError: null,
-  };
-
-  for (const fileName of STATIC_CONFIG_FILES) {
-    const config = readJsonFile(path.join(projectRoot, fileName));
-    if (config == null) {
-      continue;
-    }
-    const expoConfig = (isRecord(config.expo) ? config.expo : config) as Record<string, unknown>;
-    const scheme = firstScheme(expoConfig.scheme);
-    const slug = nonEmptyString(expoConfig.slug);
-    if (scheme != null || slug != null) {
-      result.scheme = scheme;
-      result.slug = slug;
-      result.configFile = fileName;
-      break;
-    }
-  }
-
-  for (const fileName of DYNAMIC_CONFIG_FILES) {
-    if (fs.existsSync(path.join(projectRoot, fileName))) {
-      result.dynamicConfigFile = fileName;
-      break;
-    }
-  }
-
-  if (result.slug == null) {
-    const packageJson = readJsonFile(path.join(projectRoot, 'package.json'));
-    // `expo.slug` defaults to the package name when it is not set in the config.
-    result.slug = packageJson != null ? nonEmptyString(packageJson.name) : null;
-  }
-
-  return result;
-}
-
-/**
  * Read the URL scheme and slug the app itself sees.
  *
- * The static read is the whole answer for a project with no dynamic config, and nothing is
- * evaluated. With an `app.config.js`/`.ts`, `@expo/config` evaluates it after the project's env
- * files are loaded (`evaluateExpoConfig`), and `scheme` and `slug` come from its answer: the
- * evaluated config is what the app registered, whatever a static file beside it says. The answer
- * is not cached, for the reason llp/0011 gives: a dynamic config can read env vars and `.env`
- * files that no file stamp sees.
- *
- * A `schemeOverride` skips the evaluation, because the flag wins over whatever the config says.
+ * `slug` falls back to the `package.json` name, as `expo.slug` does.
  *
  * A dynamic config that fails to evaluate keeps the static read and says why in
  * `evaluationError`. The `exp+<slug>` fallback is still a scheme a development build registers,
@@ -133,47 +71,28 @@ export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfi
  * read [observed — issue #84: a project with only `app.config.ts` was sent to
  * `exp+<package name>://` with "no scheme field was found", which is not what happened].
  */
-export async function resolveProjectSchemeConfigAsync(
-  projectRoot: string,
-  { schemeOverride }: { schemeOverride?: string | null } = {}
-): Promise<ProjectSchemeConfig> {
-  const config = readProjectSchemeConfig(projectRoot);
-  if (config.dynamicConfigFile == null || nonEmptyString(schemeOverride) != null) {
-    return config;
-  }
-
-  const evaluated = evaluateSchemeConfig(projectRoot);
-  if (!evaluated.ok) {
-    return { ...config, evaluationError: evaluated.error };
+export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfig {
+  const read = readExpoConfig(projectRoot);
+  const scheme = firstScheme(read.config?.scheme);
+  let slug = nonEmptyString(read.config?.slug);
+  if (slug == null) {
+    const packageJson = readJsonFile(path.join(projectRoot, 'package.json'));
+    slug = packageJson != null ? nonEmptyString(packageJson.name) : null;
   }
   return {
-    scheme: evaluated.scheme,
-    slug: evaluated.slug ?? config.slug,
-    configFile: config.dynamicConfigFile,
-    dynamicConfigFile: config.dynamicConfigFile,
-    evaluationError: null,
+    scheme,
+    slug,
+    configFile: read.config != null ? read.source : null,
+    dynamicConfigFile: read.dynamicConfigFile,
+    evaluationError: read.evaluationError,
   };
 }
 
-/** `scheme` and `slug` of the evaluated config, or why it could not be evaluated. */
-function evaluateSchemeConfig(
+/** {@link readProjectSchemeConfig}, for the callers that run it beside other async reads. */
+export async function resolveProjectSchemeConfigAsync(
   projectRoot: string
-): { ok: true; scheme: string | null; slug: string | null } | { ok: false; error: string } {
-  // The dev loop: the scheme of the app `expo start` serves, with the env files it reads. The
-  // scheme and slug are declared fields, so the config plugins are not run for them.
-  const evaluated = evaluateExpoConfig(projectRoot, {
-    mode: 'development',
-    isPublicConfig: true,
-    skipPlugins: true,
-  });
-  if (!evaluated.ok) {
-    return evaluated;
-  }
-  return {
-    ok: true,
-    scheme: firstScheme(evaluated.exp.scheme),
-    slug: nonEmptyString(evaluated.exp.slug),
-  };
+): Promise<ProjectSchemeConfig> {
+  return readProjectSchemeConfig(projectRoot);
 }
 
 export interface ResolveDeepLinkUrlParams {
@@ -423,11 +342,8 @@ function whyUnresolvable(config: ProjectSchemeConfig): string {
   if (config.evaluationError != null) {
     return `Why: this project uses ${config.dynamicConfigFile}, and evaluating it failed: ${config.evaluationError}.`;
   }
-  if (config.dynamicConfigFile != null && config.configFile === config.dynamicConfigFile) {
-    return `Why: no "scheme" or "slug" field was found in the evaluated ${config.dynamicConfigFile}, and package.json has no "name" field.`;
-  }
   if (config.dynamicConfigFile != null) {
-    return `Why: this project uses ${config.dynamicConfigFile}, and this command reads the config statically instead of evaluating JavaScript.`;
+    return `Why: no "scheme" or "slug" field was found in the evaluated ${config.dynamicConfigFile}, and package.json has no "name" field.`;
   }
   return 'Why: no "scheme" or "slug" field was found in app.json or app.config.json, and package.json has no "name" field.';
 }

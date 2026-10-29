@@ -1339,7 +1339,7 @@ async function openRouteAsync(
   device: NavigateDevice;
 } | null> {
   const [config, nativeDirs, packageJson, reach] = await Promise.all([
-    resolveProjectSchemeConfigAsync(projectRoot, { schemeOverride: options.scheme }),
+    resolveProjectSchemeConfigAsync(projectRoot),
     readProjectNativeDirsAsync(projectRoot),
     readProjectPackageJsonAsync(projectRoot),
     // The same question `navigate` asks, through the same function: not where this dev server

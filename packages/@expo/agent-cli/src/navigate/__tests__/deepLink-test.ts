@@ -131,20 +131,6 @@ describe(readProjectSchemeConfig, () => {
     expect(readProjectSchemeConfig(projectRoot).scheme).toBeNull();
   });
 
-  it(`should report a dynamic config file it cannot read`, () => {
-    const projectRoot = createProjectFixture({
-      'app.config.js': 'module.exports = { expo: { scheme: "dynamic" } };',
-    });
-
-    expect(readProjectSchemeConfig(projectRoot)).toEqual({
-      scheme: null,
-      slug: null,
-      configFile: null,
-      dynamicConfigFile: 'app.config.js',
-      evaluationError: null,
-    });
-  });
-
   it(`should fall back to the package.json name for the slug`, () => {
     const projectRoot = createProjectFixture({
       'package.json': JSON.stringify({ name: 'from-package-json' }),
@@ -216,21 +202,6 @@ describe(resolveProjectSchemeConfigAsync, () => {
       slug: 'demo',
       configFile: 'app.json',
       dynamicConfigFile: null,
-      evaluationError: null,
-    });
-    expect(getConfig).not.toHaveBeenCalled();
-  });
-
-  it(`should evaluate nothing when --scheme names the scheme`, async () => {
-    const projectRoot = createDynamicFixture();
-
-    await expect(
-      resolveProjectSchemeConfigAsync(projectRoot, { schemeOverride: 'override' })
-    ).resolves.toEqual({
-      scheme: null,
-      slug: 'marmelade-app',
-      configFile: null,
-      dynamicConfigFile: 'app.config.ts',
       evaluationError: null,
     });
     expect(getConfig).not.toHaveBeenCalled();

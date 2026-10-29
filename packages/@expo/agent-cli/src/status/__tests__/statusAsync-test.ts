@@ -1758,10 +1758,10 @@ describe('status retains discovery results at its deadline', () => {
       return controller.signal;
     });
     // Answered at once, so the probe's budget starts where the advances below count from.
-    vi.spyOn(appConfig, 'readStaticEasProjectAsync').mockResolvedValue({
+    vi.spyOn(appConfig, 'readEasProject').mockReturnValue({
       projectId: null,
       source: null,
-      dynamic: false,
+      evaluationError: null,
       unreadable: false,
     });
     vi.spyOn(devLock, 'readDevServerLockAsync').mockResolvedValue(null);

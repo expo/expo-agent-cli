@@ -398,7 +398,6 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
   const PRINT_URL = ['navigate', '/profile/42', '--ios', '--json', '--print-url'];
   /** Reads the variable the `.env` sets, and leaves a marker so a run that evaluated it shows. */
   const APP_CONFIG_JS = [
-    "require('node:fs').writeFileSync(require('node:path').join(__dirname, 'evaluated.marker'), '');",
     'module.exports = ({ config }) => ({',
     '  ...config,',
     "  scheme: process.env.APP_VARIANT ? `marmelade-${process.env.APP_VARIANT}` : 'marmelade',",
@@ -422,10 +421,6 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
       await fs.promises.writeFile(path.join(projectRoot, name), contents);
     }
     return projectRoot;
-  }
-
-  function wasEvaluated(projectRoot: string): boolean {
-    return fs.existsSync(path.join(projectRoot, 'evaluated.marker'));
   }
 
   /** The stub `expo` bin's `config` invocations, which the evaluation never makes. */
@@ -509,20 +504,6 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
     expect(report.resolution).toBe(
       'app.config.js could not be evaluated (Cannot resolve app config), so read the "scheme" field from app.json'
     );
-  });
-
-  it('evaluates nothing when --scheme names the scheme', async () => {
-    const projectRoot = await setupDynamicAsync();
-
-    const result = await executeAgentCliAsync(
-      projectRoot,
-      [...PRINT_URL, '--scheme', 'demoapp', '--app-id', 'dev.marmelade.app'],
-      { env: stubExpoEnv(projectRoot) }
-    );
-    const report: NavigateReport = JSON.parse(result.stdout);
-
-    expect(report.url).toBe('demoapp://profile/42');
-    expect(wasEvaluated(projectRoot)).toBe(false);
   });
 
   it('evaluates nothing for a static app config', async () => {

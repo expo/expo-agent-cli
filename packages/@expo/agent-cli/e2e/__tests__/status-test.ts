@@ -1428,6 +1428,35 @@ describe('@expo/agent-cli status', () => {
       }
     });
 
+    // Issue #84: the package name is not the slug, so a static read offered a scheme the app lacks.
+    it('builds the development build URL from the scheme a dynamic config evaluates to', async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      await fs.promises.rm(path.join(projectRoot, 'app.json'));
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'app.config.js'),
+        "module.exports = { name: 'BabyPath', slug: 'babypath', scheme: 'babypath' };\n"
+      );
+      const devServer = await startDevServerDoubleAsync([]);
+      const releaseLock = await holdDevLockAsync(projectRoot, {
+        url: devServer.url,
+        port: Number(new URL(devServer.url).port),
+        pid: process.pid,
+        startedAt: new Date(Date.now() - 5_000).toISOString(),
+        projectRoot,
+      });
+      try {
+        const report: StatusReport = JSON.parse(
+          (await executeAgentCliAsync(projectRoot, ['status', '--json'])).stdout
+        );
+
+        const devBuild = report.devServer!.openUrls.find((url) => url.target === 'dev-build');
+        expect(devBuild?.url).toMatch(/^babypath:\/\//);
+      } finally {
+        releaseLock();
+        await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
+      }
+    });
+
     it('drops a logged tunnel once its dev server is gone', async () => {
       const projectRoot = await setupAsync('go-app');
       const logDir = path.join(projectRoot, '.expo', 'dev', 'logs');
@@ -2358,19 +2387,28 @@ describe('@expo/agent-cli status', () => {
       expect(report.errors).toEqual({});
     });
 
-    // A dynamic config may set the id from the environment.
-    it('asks EAS when the config is dynamic and the static one names no project', async () => {
-      const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
-      await fs.promises.writeFile(
-        path.join(projectRoot, 'app.config.js'),
-        'module.exports = ({ config }) => ({ ...config, extra: { eas: { projectId: process.env.EAS_PROJECT_ID } } });\n'
-      );
+    // The dynamic config is evaluated with the project's env files, so its answer is believed.
+    it.each([
+      { env: 'EAS_PROJECT_ID=proj-from-env\n', state: 'none', commands: ['whoami', 'build:list'] },
+      { env: null, state: 'unknown', commands: ['whoami'] },
+    ])(
+      'reads the EAS project a dynamic config evaluates to (.env: $env)',
+      async ({ env, state, commands }) => {
+        const projectRoot = await setupWithEasAsync('dev-client-fresh-app', { linked: false });
+        await fs.promises.writeFile(
+          path.join(projectRoot, 'app.config.js'),
+          'module.exports = ({ config }) => ({ ...config, extra: { eas: { projectId: process.env.EAS_PROJECT_ID } } });\n'
+        );
+        if (env != null) {
+          await fs.promises.writeFile(path.join(projectRoot, '.env'), env);
+        }
 
-      const report = await reportInAsync(projectRoot, []);
+        const report = await reportInAsync(projectRoot, []);
 
-      expect(iosOf(report)).toMatchObject({ state: 'none', source: 'eas' });
-      expect(easCommands(projectRoot)).toContain('build:list');
-    });
+        expect(iosOf(report).state).toBe(state);
+        expect([...new Set(easCommands(projectRoot))]).toEqual(commands);
+      }
+    );
   });
 
   // @ref llp/0023-fingerprint-caching.rfc.md
