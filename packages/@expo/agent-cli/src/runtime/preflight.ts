@@ -297,7 +297,13 @@ function withLiveSessionNote(
     projectRoot != null &&
     liveCloudBindings(projectRoot).length > 0
   ) {
-    error.message += ` This worktree also has a live EAS Simulator session. The local binding comes first, so only a command that takes --eas reaches the session.`;
+    const lines = error.message.split('\n');
+    const why = lines.findIndex((line) => line.startsWith('Why:'));
+    if (why >= 0) {
+      lines[why] +=
+        ` This worktree also has a live EAS Simulator session. The local binding comes first, so only a command that takes --eas reaches the session.`;
+      error.message = lines.join('\n');
+    }
   }
   return error;
 }

@@ -1,7 +1,7 @@
 // @ref llp/0005-runtime-loop-tools.rfc.md §One preflight for the runtime family
 // @ref llp/0035-one-device-per-worktree.rfc.md §Readers
 import { devicesDisabled, localBackendOf, noBoundDeviceError } from '../deviceBinding';
-import { liveCloudBindings } from '../deviceBinding/cloud';
+import { live, readCloudBindings } from '../deviceBinding/cloud';
 import { isExpired } from '../deviceBinding/lease';
 import { bindingPathFor, readBindingFile } from '../deviceBinding/registry';
 import type { Binding, BoundDevice, DevicePlatform } from '../deviceBinding/types';
@@ -87,19 +87,25 @@ export async function resolveTargetSelectionAsync(
 /**
  * This worktree's local binding on the run's platform is the scope, whether or not its device is up
  * now. No inspection decides it: a device that is not up has no app, so the read finds none. With
- * no local binding, the one live cloud binding is the scope.
+ * no local binding, the one live cloud binding is the scope. With devices disabled, only `--eas`
+ * reads a binding.
  *
- * @throws `NO_BOUND_DEVICE` when an own local binding file cannot be read.
+ * @throws `NO_BOUND_DEVICE` when an own binding file cannot be read.
  */
 async function boundDeviceAsync(
   projectRoot: string,
   flags: ResolveTargetSelectionOptions['flags']
 ): Promise<BoundDevice | null> {
-  if (!flags.eas && !devicesDisabled()) {
+  const disabled = !flags.eas && devicesDisabled();
+  if (disabled) return null;
+  if (!flags.eas) {
     const local = liveLocalBinding(projectRoot, flags.platform ?? undefined);
     if (local) return local.device;
   }
-  const sessions = liveCloudBindings(projectRoot).filter(
+  const { bindings, unreadable } = readCloudBindings(projectRoot);
+  const own = unreadable.find((each) => flags.platform == null || each.platform === flags.platform);
+  if (own) throw noBoundDeviceError('unreadable', own);
+  const sessions = live(bindings, new Date()).filter(
     (binding) => flags.platform == null || binding.device.platform === flags.platform
   );
   return sessions.length === 1 ? sessions[0]!.device : null;

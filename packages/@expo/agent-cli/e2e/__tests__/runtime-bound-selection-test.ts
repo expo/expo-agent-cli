@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 
 import { runtimeTarget } from '../runtimeTargetFixtures';
-import { writeCloudBindingAsync } from '../stubEas';
+import { cloudBindingFile, writeCloudBindingAsync } from '../stubEas';
 import {
   executeAgentCliAsync,
   expoHomeOf,
@@ -61,7 +61,10 @@ async function setupBoundAsync(
   // The stub binds the first booted simulator; this worktree's binding is A in every state.
   const bindingFile = await bindingFixture(root, A.udid);
   if (!binding.startsWith('simulator')) await fs.promises.rm(bindingFile);
-  const adb = await installStubAdbAsync(root, 'dev.example.app', { attached, bound });
+  const adb = await installStubAdbAsync(root, 'dev.example.app', {
+    attached,
+    bound,
+  });
   if (binding.endsWith('cloud')) {
     await writeCloudBindingAsync(expoHomeOf(root), root, {
       platform: binding === 'android-cloud' ? 'android' : 'ios',
@@ -129,7 +132,12 @@ const selectionCases: {
     selected: 'android',
     line: null,
   },
-  { binding: 'simulator', targets: ['b', 'a', 'android'], selected: 'a', line: simulatorLine },
+  {
+    binding: 'simulator',
+    targets: ['b', 'a', 'android'],
+    selected: 'a',
+    line: simulatorLine,
+  },
   {
     binding: 'simulator',
     flag: 'ios',
@@ -191,8 +199,12 @@ const refusalCases: {
   app?: string;
   device?: string;
   text?: string;
+  /** A sentence of the Why line. */
+  why?: string;
   /** Attach a twin of the bound emulator; the serials that reverse the dev server's port. */
   twin?: string[];
+  /** `adb reverse --list` fails on every device. */
+  reverseFails?: boolean;
   /** The bound emulator is not among the devices adb lists. */
   emulatorGone?: boolean;
 }[] = [
@@ -201,13 +213,22 @@ const refusalCases: {
     binding: 'emulator',
     targets: ['android'],
     twin: [EMULATOR_SERIAL, TWIN],
-    text: `"adb -s ${TWIN} reverse --remove tcp:`,
+    text: `How: remove a forward the other device keeps with "adb -s ${TWIN} reverse --remove tcp:`,
   },
   {
     name: 'two emulators of one model that neither reverses the port',
     binding: 'emulator',
     targets: ['android'],
     twin: [],
+    text: `How: detach "${TWIN}", or reverse the port on ${EMULATOR_SERIAL} with "adb -s ${EMULATOR_SERIAL} reverse tcp:`,
+  },
+  {
+    name: 'two emulators of one model whose reverse list cannot be read',
+    binding: 'emulator',
+    targets: ['android'],
+    twin: [],
+    reverseFails: true,
+    text: 'How: run this command again once "adb reverse --list" works on each of them.',
   },
   {
     name: 'a bound emulator that is not attached',
@@ -229,7 +250,7 @@ const refusalCases: {
     shutdown: true,
     targets: ['cloud'],
     device: `the iOS simulator "${A.name}"`,
-    text: 'This worktree also has a live EAS Simulator session.',
+    why: 'This worktree also has a live EAS Simulator session.',
   },
   {
     name: 'another simulator',
@@ -283,15 +304,28 @@ for (const row of refusalCases) {
             server.url,
             '--json',
           ],
-          { reject: false, env: { ...env, ...twinEnv } }
+          {
+            reject: false,
+            env: {
+              ...env,
+              ...twinEnv,
+              ...(row.reverseFails ? { STUB_ADB_REVERSE_FAIL: '1' } : {}),
+            },
+          }
         );
         expect(result.exitCode).toBe(1);
         const { error } = JSON.parse(result.stdout);
         expect(error.code).toBe('NO_APP_CONNECTED');
+        expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
+        expect(error.message.split('\n').at(-1)).toMatch(/^How: /);
         if (row.how) expect(error.message.split('\n').at(-1)).toBe(row.how);
         if (row.app) expect(error.message).toContain(row.app);
         if (row.device) expect(error.message).toContain(row.device);
         if (row.text) expect(error.message).toContain(row.text);
+        if (row.why)
+          expect(
+            error.message.split('\n').find((line: string) => line.startsWith('Why:'))
+          ).toContain(row.why);
         expect(result.stderr).not.toContain('Scoped to');
       } finally {
         await server.close();
@@ -317,7 +351,10 @@ it('eval reads the bound emulator beside a twin when only the bound one reverses
     const result = await executeAgentCliAsync(
       root,
       ['runtime:eval', '"selected-app-sentinel"', '--dev-server-url', server.url, '--json'],
-      { reject: false, env: { ...env, ...twinEnv } }
+      {
+        reject: false,
+        env: { ...env, ...twinEnv },
+      }
     );
     expect(result.exitCode, result.all).toBe(0);
     expect(evaluated).toEqual(['android']);
@@ -331,7 +368,10 @@ it.skipIf(process.platform !== 'darwin')(
   async () => {
     const { root, bindingFile, env } = await setupBoundAsync('simulator');
     await fs.promises.writeFile(bindingFile, '{');
-    const server = await startStubDevServerAsync({ projectRoot: root, targets: [apps.a] });
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [apps.a],
+    });
     try {
       const result = await executeAgentCliAsync(
         root,
@@ -345,6 +385,46 @@ it.skipIf(process.platform !== 'darwin')(
     }
   }
 );
+
+it('eval refuses with NO_BOUND_DEVICE when its own cloud binding file cannot be read', async () => {
+  const { root, env } = await setupBoundAsync('ios-cloud');
+  await fs.promises.writeFile(cloudBindingFile(expoHomeOf(root), root, 'ios'), '{');
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: [apps.a],
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      ['runtime:eval', '1', '--dev-server-url', server.url, '--json'],
+      { reject: false, env }
+    );
+    expect(result.exitCode, result.all).toBe(7);
+    expect(JSON.parse(result.stdout).error.code).toBe('NO_BOUND_DEVICE');
+  } finally {
+    await server.close();
+  }
+});
+
+it('eval with AGENT_CLI_NO_DEVICE=1 skips the cloud binding', async () => {
+  const { root, env } = await setupBoundAsync('ios-cloud');
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: [apps.cloud],
+    inspectorEvaluate: (expression) => (expression === '1' ? 1 : undefined),
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      ['runtime:eval', '1', '--dev-server-url', server.url, '--json'],
+      { reject: false, env: { ...env, AGENT_CLI_NO_DEVICE: '1' } }
+    );
+    expect(result.exitCode, result.all).toBe(0);
+    expect(result.stderr).not.toContain('Scoped to');
+  } finally {
+    await server.close();
+  }
+});
 
 it.skipIf(process.platform !== 'darwin')(
   'eval with no dev server refuses with NO_DEV_SERVER beside an unreadable binding file',

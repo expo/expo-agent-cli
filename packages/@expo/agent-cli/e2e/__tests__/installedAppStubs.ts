@@ -233,6 +233,7 @@ export async function installStubAdbAsync(
       `  process.exit(0);`,
       `}`,
       `if (args[2] === 'reverse' && args[3] === '--list') {`,
+      `  if (process.env.STUB_ADB_REVERSE_FAIL) process.exit(1);`,
       `  const port = JSON.parse(process.env.STUB_ADB_REVERSE || '{}')[args[1]];`,
       `  if (port) process.stdout.write(args[1] + ' tcp:' + port + ' tcp:' + port + '\\n');`,
       `  process.exit(0);`,

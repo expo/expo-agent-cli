@@ -290,7 +290,7 @@ function androidTwinsError(
     [
       `No app connected to the Expo dev server at ${devServerUrl} could be shown to be on the Android device ${serial}, the device bound to this worktree.`,
       `Why: an Android app names its device by model only, and ${twins.length} attached devices have the model ${model} (${twins.join(', ')}). Of these, ${forwarded}, so the port does not single out ${serial}.`,
-      `How: remove a forward the other device keeps with ${others.map((other) => `"adb -s ${other} reverse --remove tcp:${port}"`).join(' or ')}, or detach that device, then run this command again.`,
+      twinsHow(serial, others, reverse, port),
     ].join('\n')
   );
   return withData(error, {
@@ -302,4 +302,20 @@ function androidTwinsError(
       classifiedTargets.skipped.length,
     platform: 'android',
   });
+}
+
+function twinsHow(
+  serial: string,
+  others: string[],
+  reverse: DeviceInventory['androidReverse'],
+  port: string | number
+): string {
+  if (reverse == null) {
+    return 'How: run this command again once "adb reverse --list" works on each of them.';
+  }
+  const forwarding = others.filter((other) => reverse.serials.includes(other));
+  if (forwarding.length === 0) {
+    return `How: detach ${others.map((other) => `"${other}"`).join(' or ')}, or reverse the port on ${serial} with "adb -s ${serial} reverse tcp:${port} tcp:${port}", then run this command again.`;
+  }
+  return `How: remove a forward the other device keeps with ${forwarding.map((other) => `"adb -s ${other} reverse --remove tcp:${port}"`).join(' or ')}, or detach that device, then run this command again.`;
 }
