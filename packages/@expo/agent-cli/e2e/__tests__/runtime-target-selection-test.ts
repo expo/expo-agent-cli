@@ -500,6 +500,7 @@ describe("runtime:reload beside another worktree's iOS app", () => {
   it.skipIf(process.platform !== 'darwin')(
     'reads the target list again after the bundle gate, and does not broadcast to a new app',
     async () => {
+      // This worktree is bound to the booted simulator, so the phone is another device.
       const { root } = await besideCloneAsync();
       const elsewhere = runtimeTarget('far', { deviceName: 'Ada’s phone' });
       let server: Awaited<ReturnType<typeof startStubDevServerAsync>> | undefined;
@@ -522,6 +523,8 @@ describe("runtime:reload beside another worktree's iOS app", () => {
         );
         expect(server.bundlePlatforms(), result.all).not.toEqual([]);
         expect(server.broadcasts()).toBe(0);
+        expect(server.pageReloads()).toEqual(['own']);
+        expect(result.exitCode).toBe(0);
       } finally {
         await server.close();
       }
