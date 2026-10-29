@@ -27,6 +27,13 @@ import {
   type ExecuteResult,
 } from '../utils';
 
+/** A debugger target that looks like Expo Go, which its app id alone places on iOS. */
+const EXPO_GO_TARGET = {
+  id: '1',
+  appId: 'host.exp.Exponent',
+  webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=1&page=1',
+};
+
 /**
  * Copy a fixture and put the shared stub `eas` on its `PATH`, behind a stub package runner.
  *
@@ -534,12 +541,17 @@ describe('@expo/agent-cli smoke --eas', () => {
   // phases, so an account with no session is told so rather than quietly falling back here.
   it(`reports the missing session rather than falling back to this machine`, async () => {
     const projectRoot = await setupAsync('go-app');
-    const stub = await startStubDevServerAsync({ targets: [], projectRoot });
+    const stub = await startStubDevServerAsync({
+      targets: [],
+      projectRoot,
+      manifestOrigin: 'https://stub-tunnel.example',
+    });
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
         ['smoke', '--ios', '--eas', '--dev-server-url', stub.url, '--json', '--timeout', '2s'],
-        { reject: false, env: { STUB_SIM_SESSIONS: '0' } }
+        // No session on the account, and the one this run starts never becomes ready.
+        { reject: false, env: { STUB_SIM_SESSIONS: '0', STUB_SIM_START_EXIT: '1' } }
       );
 
       // Whatever the outcome code, the report is one parseable object and it never claims a pass.
@@ -547,6 +559,10 @@ describe('@expo/agent-cli smoke --eas', () => {
       expect(() => JSON.parse(result.stdout)).not.toThrow();
       const report = JSON.parse(result.stdout);
       expect(report.ok).toBe(false);
+      // What failed is the session start itself, named by the command that ran it.
+      const start = report.phases.find((phase: { id: string }) => phase.id === 'start-session');
+      expect(start).toMatchObject({ status: 'failed' });
+      expect(start.reason).toContain('simulator --platform ios');
       // The phase that could not run says which device it could not find.
       const app = report.phases.find((phase: { id: string }) => phase.id === 'app');
       expect(app.reason).toContain('EAS Simulator session');
@@ -770,7 +786,7 @@ describe('@expo/agent-cli smoke --eas brings its own session', () => {
   it(`starts a session with Expo Go and the tunnelled URL when none is up, finds it, and ends it by id`, async () => {
     const projectRoot = await setupAsync('go-app');
     const stub = await startStubDevServerAsync({
-      targets: [],
+      targets: [EXPO_GO_TARGET],
       projectRoot,
       manifestOrigin: 'https://stub-tunnel.example',
     });
@@ -803,6 +819,11 @@ describe('@expo/agent-cli smoke --eas brings its own session', () => {
       // The session it started is the device the rest of the run drove…
       expect(report.deviceId).toBe('sess-e2e-started');
       expect(report.deviceBackend).toBe('cloud');
+      // Expo Go on the session attached to the tunnelled dev server, so the run read an app.
+      expect(report.phases.find((entry: { id: string }) => entry.id === 'app')).toMatchObject({
+        status: 'ok',
+      });
+      expect(report.appsConnected).toBe(1);
       // …and the one it ended on the way out, by id and never bare.
       expect(invocations).toContainEqual([
         'simulator:stop',

@@ -29,6 +29,8 @@ import {
   type StubDevServer,
   expoHomeOf,
 } from '../utils';
+import { createdSimulatorName } from '../../src/deviceBinding/choose';
+import { digestForRoot } from '../../src/deviceBinding/registry';
 import {
   androidBindingFixture,
   appStartedMarkerPath,
@@ -794,7 +796,16 @@ describe('@expo/agent-cli smoke', () => {
       const readNpx = await installStubNpxAsync(projectRoot);
       const stub = await startStubDevServerAsync({
         projectRoot,
-        targets: [],
+        // The development build, on the simulator this run is about to create: a target whose
+        // device name is not a booted simulator's is never counted as an iOS app, and a run that
+        // counts none waits out the whole cold attach budget.
+        targets: [
+          {
+            ...DEV_BUILD_TARGET,
+            appId: DEV_CLIENT_ID,
+            deviceName: createdSimulatorName(digestForRoot(projectRoot)),
+          },
+        ],
         targetsAppearWithFile: opened,
       });
 
@@ -832,6 +843,11 @@ describe('@expo/agent-cli smoke', () => {
         const run = readNpx().find((argv) => argv.includes('run:ios'));
         expect(run).toEqual(['expo', 'run:ios', '--no-bundler', '--device', 'E2E-CREATED-1']);
         expect(readNpx().some((argv) => argv.includes('start'))).toBe(false);
+        // The build it installed is the app it then read: the open attached it.
+        expect(report.phases.find((phase: any) => phase.id === 'app')).toMatchObject({
+          status: 'ok',
+        });
+        expect(report.appsConnected).toBe(1);
       } finally {
         await stub.close();
       }
@@ -1078,6 +1094,7 @@ describe('@expo/agent-cli smoke', () => {
               STUB_EXPO_DELAY_MS: '30000',
               STUB_EXPO_DEV_SERVER_PORT: '9354',
               STUB_EXPO_LISTEN: '1',
+              STUB_EXPO_TARGETS: JSON.stringify([EXPO_GO_TARGET]),
             },
             reject: false,
           }
@@ -1085,6 +1102,7 @@ describe('@expo/agent-cli smoke', () => {
 
         const report = JSON.parse(result.stdout);
         expect(report.environment.devServer).toBe('started');
+        expect(report.appsConnected).toBe(1);
         expect(report.environment.boundDevice).toEqual({
           id: 'E2E-BOOTED',
           name: 'agent-cli f5ce27a6',
