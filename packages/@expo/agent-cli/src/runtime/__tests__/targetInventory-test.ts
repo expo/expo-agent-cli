@@ -203,7 +203,7 @@ it('a wait poll asks `adb reverse` again when a twin of the bound model attached
   const own = makeTarget({ deviceName: 'Pixel 9 - 15 - API 35' });
   const start = await deviceInventoryForSelectionAsync([], selection, null, url);
   twinAttached = true;
-  const classify = scopedListClassifier(selection, start, Date.now() + 5000, [], url);
-  const { read, undetermined } = await classify([own]);
+  const classify = scopedListClassifier(selection, start, [], url);
+  const { read, undetermined } = await classify([own], Date.now() + 5000);
   expect({ read, undetermined }).toEqual({ read: [own], undetermined: [] });
 });
