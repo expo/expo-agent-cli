@@ -158,8 +158,8 @@ export function readPrebuiltAndroidApplicationId(projectRoot: string): string | 
  * The iOS side of {@link readPrebuiltAndroidApplicationId}. A project with only `app.config.ts`
  * has no static id, so without this every `smoke --ios` rebuilt the app [observed — issue #226].
  *
- * An app extension's id is the app's id plus a suffix, so the id every other one extends is the
- * app's. Ids that share no such root, such as a test target's, answer null rather than a guess.
+ * Only the first application target counts, the one `@expo/config-plugins` reads. Its Debug and
+ * Release ids can differ, and they are then two apps, so a mismatch answers null rather than a guess.
  */
 export function readPrebuiltIosBundleIdentifier(projectRoot: string): string | null {
   const iosDir = path.join(projectRoot, 'ios');
@@ -173,16 +173,35 @@ export function readPrebuiltIosBundleIdentifier(projectRoot: string): string | n
   } catch {
     return null;
   }
+
+  const objects = new Map<string, string>();
+  for (const match of source.matchAll(
+    /^([ \t]*)([0-9A-Fa-f]{24})\b[^\n]*= \{\n([\s\S]*?)^\1\};/gm
+  )) {
+    objects.set(match[2]!, match[3]!);
+  }
+  const app = Array.from(objects.values()).find(
+    (body) =>
+      /^\s*isa = PBXNativeTarget;/m.test(body) &&
+      /^\s*productType = "com\.apple\.product-type\.application";/m.test(body)
+  );
+  const listId = app && /^\s*buildConfigurationList = ([0-9A-Fa-f]{24})\b/m.exec(app)?.[1];
+  const list = listId ? objects.get(listId) : undefined;
+  const configIds = Array.from(
+    /^\s*buildConfigurations = \(([^)]*)\)/m.exec(list ?? '')?.[1]?.matchAll(/[0-9A-Fa-f]{24}/g) ??
+      [],
+    (match) => match[0]
+  );
   const ids = new Set(
-    Array.from(source.matchAll(/^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"?([^";]+)"?;/gm), (match) =>
-      match[1]!.trim()
-    ).filter(isValidAppId)
+    configIds.map(
+      (id) =>
+        /^\s*PRODUCT_BUNDLE_IDENTIFIER = "?([^";\n]+)"?;/m
+          .exec(objects.get(id) ?? '')?.[1]
+          ?.trim() ?? null
+    )
   );
-  return (
-    Array.from(ids).find((id) =>
-      Array.from(ids).every((other) => other === id || other.startsWith(`${id}.`))
-    ) ?? null
-  );
+  const [only] = ids;
+  return ids.size === 1 && only != null && isValidAppId(only) ? only : null;
 }
 
 /**
