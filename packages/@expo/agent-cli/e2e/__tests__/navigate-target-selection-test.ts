@@ -40,6 +40,8 @@ type Scenario = {
   flags?: string[];
   initial: 'own' | 'other' | 'empty';
   neverAttaches?: boolean;
+  /** The app attaches only once this run has stopped it and opened the link again. */
+  attachesAfterStop?: boolean;
   /** An Android app of another model is attached too, which this run must not stop or count. */
   otherModelApp?: boolean;
   /**
@@ -137,6 +139,13 @@ const scenarios: Scenario[] = [
     initial: 'empty',
     twin: 'neither',
   },
+  {
+    name: 'no flag, bound Android emulator, the app attaches after the recovery stops it and opens the link again',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+    attachesAfterStop: true,
+  },
 ];
 
 async function deviceFixture(root: string, scenario: Scenario) {
@@ -228,11 +237,15 @@ it.each(scenarios)('$name', async (scenario) => {
     projectRoot: root,
     manifestOrigin: scenario.backend === 'cloud' ? `https://${TUNNEL_HOST}` : undefined,
     targets: () =>
-      device.opens().includes(launcher)
-        ? scenario.neverAttaches
-          ? [other, ...(scenario.otherModelApp ? [otherModel] : [])]
-          : [...initial, own]
-        : initial,
+      scenario.attachesAfterStop
+        ? device.forceStops!().length > 0
+          ? [own]
+          : []
+        : device.opens().includes(launcher)
+          ? scenario.neverAttaches
+            ? [other, ...(scenario.otherModelApp ? [otherModel] : [])]
+            : [...initial, own]
+          : initial,
   });
   launcher = devClientConnectUrl(
     'demoapp',
@@ -285,10 +298,15 @@ it.each(scenarios)('$name', async (scenario) => {
     });
     // An app that cannot be placed on this device neither counts as attached nor holds the launcher.
     const ownAttached = scenario.initial === 'own' && scenario.twin !== 'both';
-    expect(device.opens()).toEqual(ownAttached ? [ROUTE] : [launcher, ROUTE]);
-    if (!scenario.neverAttaches) expect(device.forceStops?.() ?? []).toEqual([]);
+    const stuck = scenario.neverAttaches || scenario.attachesAfterStop;
+    const recovers = stuck && scenario.backend === 'local-android';
+    expect(device.opens()).toEqual(
+      ownAttached ? [ROUTE] : recovers ? [launcher, ROUTE, ROUTE] : [launcher, ROUTE]
+    );
+    if (!recovers) expect(device.forceStops?.() ?? []).toEqual([]);
+    expect(report.attachRecovered).toBe(!!recovers);
     if (ownAttached) expect(report.launch).toBeNull();
-    else expect(report.launch).toMatchObject({ url: launcher, attached: !scenario.neverAttaches });
+    else expect(report.launch).toMatchObject({ url: launcher, attached: !stuck });
     if (device.calls) {
       const calls = device.calls();
       const startOf = (url: string) =>

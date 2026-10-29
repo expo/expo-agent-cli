@@ -193,6 +193,7 @@ function readCalls(recordPath: string): string[][] {
  * archive, e.g. one whose `app.fingerprint` is not the JSON `expo-constants` writes. `STUB_ADB_NO_DD=1` fails `stat`, the way a device
  * without the tools does, and `pull` then copies the fixture to the path asked for.
  * `STUB_ADB_HANG_READ=<file>` makes `exec-out` write its pid there and never exit.
+ * `STUB_ADB_RUNNING=<appId>` makes `shell pidof <appId>` answer a pid; any other app is not running. `shell am force-stop` exits 0.
  * `STUB_ADB_REVERSE={"<serial>": <port>}` makes `-s <serial> reverse --list` list that port, in the
  * `<serial> tcp:<port> tcp:<port>` shape of eas-cli's androidLocalEgress test fixture. A
  * `reverse tcp:<port> tcp:<port>` the stub accepts is listed from then on, as on a device.
@@ -276,6 +277,12 @@ export async function installStubAdbAsync(
       `if (args[2] === 'shell' && args[3] === 'am' && args[4] === 'start' && args.includes('-d')) {`,
       `  process.exit(serials.includes(args[1]) ? 0 : 1);`,
       `}`,
+      `if (args[2] === 'shell' && args[3] === 'pidof') {`,
+      `  const running = process.env.STUB_ADB_RUNNING === args[4].replace(/^'|'$/g, '');`,
+      `  if (running) process.stdout.write('4242\\n');`,
+      `  process.exit(running ? 0 : 1);`,
+      `}`,
+      `if (args[2] === 'shell' && args[3] === 'am' && args[4] === 'force-stop') process.exit(0);`,
       `process.stderr.write('stub adb: unexpected ' + args.join(' ') + '\\n');`,
       `process.exit(2);`,
     ].join('\n')
