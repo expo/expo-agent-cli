@@ -165,7 +165,8 @@ export function classifyTargets(
     isCloudScope(targetSelection) &&
     !scopeToolsUnknown(targetSelection, deviceInventory) &&
     only &&
-    !more.length
+    !more.length &&
+    (targetSelection.platform != null || classifiedTargets.read.length === 0)
   ) {
     return {
       ...classifiedTargets,

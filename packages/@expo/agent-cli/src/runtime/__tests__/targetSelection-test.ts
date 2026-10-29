@@ -67,6 +67,23 @@ describe('classifyTargets on an EAS Simulator session', () => {
       undetermined,
     });
   });
+
+  // An Android session's own app is already read, so the session is not iOS, and the unclaimed
+  // target may be a development build on a physical phone.
+  it('reads no unclaimed target beside an Android session app, with no platform', () => {
+    const androidSession = {
+      appId: 'dev.vonovak.cyclable',
+      deviceName: 'sdk_gphone64_x86_64 - 15 - API 35',
+    } as CdpTarget;
+
+    expect(
+      classifyTargets(
+        [androidSession, cloud],
+        makeTargetSelection({ platform: null, device: { backend: 'cloud', deviceId: null } }),
+        deviceInventory
+      )
+    ).toEqual({ read: [androidSession], skipped: [], otherPlatform: [], undetermined: [cloud] });
+  });
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
