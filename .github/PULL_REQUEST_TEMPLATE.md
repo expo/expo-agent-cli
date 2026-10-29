@@ -8,7 +8,7 @@ Delete guidance comments when done.
 
 ## Feature
 
-<!-- What can agents now do, and why do they need it? Include a short usage example if helpful. -->
+<!-- Pitch the change in two or three sentences: what can agents now do, and why do they need it? Include a short usage example if helpful. -->
 
 ## Bug fix
 
