@@ -300,6 +300,9 @@ export async function resolveRouteUrlAsync(
     projectRoot,
     flags: { platform: options.platform, eas: options.cloud === 'required' },
     targets: facts.devServer.targets,
+    // The port `adb reverse` is asked about, so a bound emulator beside a twin is placed as
+    // `navigate` places it.
+    devServerUrl: facts.devServer.devServerUrl,
   });
   return finalizeRouteUrl(facts, classifiedTargets.read);
 }

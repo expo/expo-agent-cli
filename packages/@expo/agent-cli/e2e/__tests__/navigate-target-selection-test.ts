@@ -437,3 +437,50 @@ it('--print-url scopes to the bound EAS session like navigate, so an iOS Expo Go
     await server.close();
   }
 });
+
+it('--print-url reads the bound emulator beside a twin as navigate does, through adb reverse', async () => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('dev-client-app'));
+  const scenario = scenarios.find((each) => each.backend === 'local-android')!;
+  const device = await deviceFixture(root, scenario);
+  await fs.promises.writeFile(stubEmulatorStatePath(root), 'emulator-5556\n');
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: [
+      makeTarget({
+        id: 'go',
+        appId: 'host.exp.exponent',
+        deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+      }),
+    ],
+  });
+  const releaseLock = await holdDevLockAsync(root, {
+    url: server.url,
+    port: server.port,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    projectRoot: root,
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      ['navigate', '/profile/42', '--print-url', '--no-route-check', '--json', '--no-followups'],
+      {
+        reject: false,
+        env: {
+          ...device.env,
+          AGENT_CLI_NO_DEVICE: '0',
+          STUB_ADB_REVERSE: JSON.stringify({ [EMULATOR_SERIAL]: server.port }),
+        },
+      }
+    );
+    expect(result.exitCode, result.all).toBe(0);
+    // The Expo Go app on the bound emulator is the app; its link is the Expo Go one.
+    expect(JSON.parse(result.stdout).url).toMatch(/^exp:\/\//);
+    expect(
+      device.calls!().some((args) => args.includes('reverse') && args.includes('--list'))
+    ).toBe(true);
+  } finally {
+    await releaseLock();
+    await server.close();
+  }
+});
