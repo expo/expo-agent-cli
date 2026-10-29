@@ -833,8 +833,6 @@ describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => 
     expect(JSON.parse(printed()).bundlePlatformSource).toBe('connected-app');
     expect(JSON.parse(printed()).bundlePlatforms).toEqual(['android']);
   });
-
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live

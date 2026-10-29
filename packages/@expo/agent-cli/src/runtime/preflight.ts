@@ -453,11 +453,19 @@ export function emptyScopeError(
     return noAppOnPlatformError(devServerUrl, platform, classifiedTargets, cloud, skippedWhy);
   }
   const navigate = `${PROGRAM_PREFIX} navigate / --${platform ?? hostPlatform()}${cloud ? ' --eas' : ''}`;
+  const otherWorktreeOnly =
+    skipped.length > 0 && skipped.every((app) => app.group === 'other-worktree');
   const error = new CommandError(
     'NO_APP_CONNECTED',
     [
-      `No app of this worktree is connected to the Expo dev server at ${devServerUrl}, so there is nothing to read.`,
-      `Why:${skippedWhy} Such an app loads its JavaScript from this port, but it is not the app on this worktree's device, so a read of it says nothing about that app.`,
+      otherWorktreeOnly
+        ? `No app of this worktree is connected to the Expo dev server at ${devServerUrl}, so there is nothing to read.`
+        : `No app on this run's device is connected to the Expo dev server at ${devServerUrl}, so there is nothing to read.`,
+      `Why:${skippedWhy} Such an app loads its JavaScript from this port, but ${
+        otherWorktreeOnly
+          ? "it is not the app on this worktree's device"
+          : "it is not on this run's device"
+      }, so a read of it says nothing about that app.`,
       `How: open the app on this worktree's device with "${navigate}", then run this command again.`,
     ].join('\n')
   );

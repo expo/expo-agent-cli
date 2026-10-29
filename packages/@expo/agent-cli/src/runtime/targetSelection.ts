@@ -7,6 +7,7 @@
 // one function that combines them, so every runtime read places a target the same way.
 
 import { liveIosBindings, type LiveIosBinding } from '../deviceBinding/records';
+import { SIMCTL_TIMEOUT_MS } from '../device/simulators';
 import type { NavigateDevice, NavigatePlatform } from '../navigate/device';
 import type { CdpTarget } from './cdpClient';
 import { platformOfTarget } from './targetPlatform';
@@ -305,13 +306,16 @@ export async function refreshDeviceInventoryAsync(
 export async function deviceInventoryForSelectionAsync(
   targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
   targetSelection: TargetSelection,
-  projectRoot: string | null
+  projectRoot: string | null,
+  timeoutMs: number = SIMCTL_TIMEOUT_MS
 ): Promise<DeviceInventory> {
   const iosBindings = projectRoot == null ? [] : liveIosBindings(projectRoot);
-  return refreshDeviceInventoryAsync(targets, targetSelection, {
-    ...EMPTY_DEVICE_INVENTORY,
-    iosBindings,
-  });
+  return refreshDeviceInventoryAsync(
+    targets,
+    targetSelection,
+    { ...EMPTY_DEVICE_INVENTORY, iosBindings },
+    timeoutMs
+  );
 }
 
 /**
