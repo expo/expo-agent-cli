@@ -152,16 +152,50 @@ export function readPrebuiltAndroidApplicationId(projectRoot: string): string | 
 }
 
 /**
+ * The bundle identifier of a **prebuilt** iOS project, from `ios/<name>.xcodeproj/project.pbxproj`.
+ *
+ * @ref llp/0005-runtime-loop-tools.rfc.md §An app that cannot be named still has to be installed
+ * The iOS side of {@link readPrebuiltAndroidApplicationId}. A project with only `app.config.ts`
+ * has no static id, so without this every `smoke --ios` rebuilt the app [observed — issue #226].
+ *
+ * An app extension's id is the app's id plus a suffix, so the id every other one extends is the
+ * app's. Ids that share no such root, such as a test target's, answer null rather than a guess.
+ */
+export function readPrebuiltIosBundleIdentifier(projectRoot: string): string | null {
+  const iosDir = path.join(projectRoot, 'ios');
+  let source: string;
+  try {
+    const project = fs.readdirSync(iosDir).find((name) => name.endsWith('.xcodeproj'));
+    if (project == null) {
+      return null;
+    }
+    source = fs.readFileSync(path.join(iosDir, project, 'project.pbxproj'), 'utf8');
+  } catch {
+    return null;
+  }
+  const ids = new Set(
+    Array.from(source.matchAll(/^\s*PRODUCT_BUNDLE_IDENTIFIER\s*=\s*"?([^";]+)"?;/gm), (match) =>
+      match[1]!.trim()
+    ).filter(isValidAppId)
+  );
+  return (
+    Array.from(ids).find((id) =>
+      Array.from(ids).every((other) => other === id || other.startsWith(`${id}.`))
+    ) ?? null
+  );
+}
+
+/**
  * `ios.bundleIdentifier` or `android.package` from the project's static app config.
  *
  * A dynamic `app.config.js` is never evaluated, per the process boundary of llp/0001
  * constraint 5; such a project answers null and falls through to the Expo Go default, which
  * `--app-id` overrides.
  *
- * **Android has a second source**, and it is consulted when the config names none: the
- * `applicationId` a prebuild wrote into Gradle (@ref ./appId §readPrebuiltAndroidApplicationId).
- * The config comes first, because a project that declares `android.package` has said what it wants
- * and a prebuild older than that declaration would otherwise outrank it.
+ * **Each platform has a second source**, and it is consulted when the config names none: the id a
+ * prebuild wrote into Gradle or the Xcode project (@ref ./appId §readPrebuiltAndroidApplicationId,
+ * §readPrebuiltIosBundleIdentifier). The config comes first, because a project that declares its id
+ * has said what it wants and a prebuild older than that declaration would otherwise outrank it.
  */
 export function readConfiguredAppId(
   projectRoot: string,
@@ -183,7 +217,9 @@ export function readConfiguredAppId(
       return isValidAppId(value.trim()) ? value.trim() : null;
     }
   }
-  return platform === 'android' ? readPrebuiltAndroidApplicationId(projectRoot) : null;
+  return platform === 'android'
+    ? readPrebuiltAndroidApplicationId(projectRoot)
+    : readPrebuiltIosBundleIdentifier(projectRoot);
 }
 
 /**

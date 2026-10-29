@@ -524,7 +524,7 @@ The install fires only for an app this CLI can _name_, and on Android it usually
 
 **No app id is not "no app".** The install decision needs an application id to ask "is it already there", and for a native build the absence of one is the ordinary state of a project that has never been prebuilt for that platform: `android.package` is undeclared and there is no `android/app/build.gradle`, because `expo prebuild` is the thing that writes both. Treating that as "nothing to install" is the bug that outlived two attempts at fixing it — an emulator booted, nothing installed, the deep link refused, three runs in a row [observed — Kudo, 2026-09-04].
 
-The id is only needed for the _check_. `expo run:<platform>` needs none: it resolves the package itself, from the config it is about to write. So a run that cannot see whether the app is installed installs it — and after that first build the package **is** declared, so every later run resolves it and checks properly. One build, then normal.
+The id is only needed for the _check_. `expo run:<platform>` needs none: it resolves the package itself, from the config it is about to write. So a run that cannot see whether the app is installed installs it — and that first build prebuilds the project, which writes the id into `android/app/build.gradle` or `ios/<name>.xcodeproj`. Every later run reads it there and checks properly, even when the only config is a dynamic `app.config.ts`. One build, then normal.
 
 Expo Go is excluded, and the asymmetry is the point: its application ids are constants, so an Expo Go run that cannot name its app has a plan this could not read at all, and spending 423 MB of somebody's bandwidth on that basis would be a guess rather than an inference.
 

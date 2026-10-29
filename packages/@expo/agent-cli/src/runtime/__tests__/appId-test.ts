@@ -312,6 +312,43 @@ describe('the application id of a prebuilt Android project', () => {
   });
 });
 
+// @ref ../appId §readPrebuiltIosBundleIdentifier — issue #226: a project with only `app.config.ts`
+// named no iOS app, so `smoke --ios` rebuilt the app on every run.
+describe('the bundle identifier of a prebuilt iOS project', () => {
+  /** One `PRODUCT_BUNDLE_IDENTIFIER` line per build configuration, as `expo prebuild` writes it. */
+  function pbxproj(...ids: string[]): void {
+    vol.fromJSON({
+      '/project/app.config.ts': 'export default {};',
+      '/project/ios/Demo.xcodeproj/project.pbxproj': ids
+        .map((id) => `\t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = ${id};`)
+        .join('\n'),
+    });
+  }
+
+  it.each([
+    ['one app target', ['com.example.demo', 'com.example.demo'], 'com.example.demo'],
+    ['a quoted id', ['"com.example.quoted"'], 'com.example.quoted'],
+    ['an app with an extension', ['com.example.app.widget', 'com.example.app'], 'com.example.app'],
+    ['ids with no common root', ['host.exp.Exponent', 'host.exp.Tests'], null],
+    ['an unexpanded build setting', ['"org.example.$(PRODUCT_NAME:rfc1034identifier)"'], null],
+  ])(`should read %s`, (_name, ids, expected) => {
+    pbxproj(...ids);
+
+    expect(readConfiguredAppId('/project', 'ios')).toBe(expected);
+  });
+
+  it(`should prefer the app config over an older prebuild`, () => {
+    pbxproj('com.stale.one');
+    vol.fromJSON({
+      '/project/app.json': JSON.stringify({
+        expo: { ios: { bundleIdentifier: 'com.declared.one' } },
+      }),
+    });
+
+    expect(readConfiguredAppId('/project', 'ios')).toBe('com.declared.one');
+  });
+});
+
 describe(readConfiguredScheme, () => {
   it(`reads a string scheme, and the first of an array`, () => {
     vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme: 'myapp' } }) });
