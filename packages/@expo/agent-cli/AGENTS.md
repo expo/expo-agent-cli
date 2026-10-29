@@ -41,8 +41,7 @@ These rules apply to new code and new tests. Do not rewrite old code or old test
 
 - This repo uses GitHub stacks. Manage stacked PRs with the `gh stack` CLI: `gh stack init`, `add`, `submit`, `sync` and `rebase`. Do not build a stack from hand-pushed branches.
 - Keep each PR focused on one question: one feature or one issue.
-- When a PR adds or changes tests, read the tests that already exist for that behavior, and delete in that PR every test that no longer adds confidence beyond the new ones.
-- In a stack, write a test in its final form in the PR that adds it. When a later PR makes a test redundant, delete the test in that later PR, not earlier.
+- When a PR adds or changes tests, read the tests that already exist for that behavior, and delete in that PR every test that no longer adds confidence beyond the new ones. This holds especially in a stack: write a test in its final form in the PR that adds it, and when a later PR makes a test redundant, delete it in that later PR, not earlier.
 
 ## Formatting
 
