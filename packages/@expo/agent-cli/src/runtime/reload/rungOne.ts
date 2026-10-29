@@ -11,7 +11,7 @@ import type { NativePlatform } from '../../plan/types';
 import { firstLine } from '../../utils/text';
 import { probeDevServerAsync } from '../devServer';
 import type { CdpTarget } from '../cdpClient';
-import { jsContextReplacedAsync } from '../contextReplaced';
+import { jsContextReplacedAsync, type ContextReplaced } from '../contextReplaced';
 import {
   connectMessageSocketAsync,
   peersChanged,
@@ -583,7 +583,7 @@ async function reloadOwnTargetAsync(
     }
     return {
       ...identity,
-      outcome: seen.kind === 'unmarkable' ? 'unmarkable' : 'delivered-unproved',
+      outcome: UNPROVED[seen.kind],
       reason: seen.reason,
     };
   } catch (error: unknown) {
@@ -596,5 +596,15 @@ async function reloadOwnTargetAsync(
         };
   }
 }
+
+/** Nothing shows that an action whose answer was lost reached the app, so it is not counted as answered. */
+const UNPROVED = {
+  'not-replaced': 'delivered-unproved',
+  'answer-lost': 'not-delivered',
+  unmarkable: 'unmarkable',
+} as const satisfies Record<
+  Exclude<ContextReplaced['kind'], 'replaced'>,
+  TargetReloadOutcome['outcome']
+>;
 
 const NOT_NEEDED = 'another app of this worktree proved the reload first, so this check stopped';

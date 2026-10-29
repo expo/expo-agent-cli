@@ -15,7 +15,8 @@ const BUDGET_MS = 3000;
 
 /**
  * Rung 1 against a fake inspector: each own id answers `Page.reload`, and the ids in `replaces` get
- * a new context. `holdUntil` holds every answer until that many `Page.reload`s arrived.
+ * a new context. `holdUntil` holds every answer until that many `Page.reload`s arrived. The ids in
+ * `dropOnReload` close their socket instead of answering, and keep their context.
  */
 async function runRungOneBesideForeignAsync(
   ids: string[],
@@ -23,7 +24,8 @@ async function runRungOneBesideForeignAsync(
     replaces,
     holdUntil = 0,
     budgetMs = BUDGET_MS,
-  }: { replaces: string[]; holdUntil?: number; budgetMs?: number }
+    dropOnReload = [],
+  }: { replaces: string[]; holdUntil?: number; budgetMs?: number; dropOnReload?: string[] }
 ) {
   const globals = new Map<string, Record<string, unknown>>();
   const held: (() => void)[] = [];
@@ -36,6 +38,10 @@ async function runRungOneBesideForeignAsync(
       const message = JSON.parse(String(data));
       if (message.method === 'Page.reload') {
         actions.push(id);
+        if (dropOnReload.includes(id)) {
+          socket.terminate();
+          return;
+        }
         held.push(() => {
           if (replaces.includes(id)) globals.set(id, {});
           socket.send(JSON.stringify({ id: message.id, result: {} }));
@@ -136,4 +142,19 @@ it('reports a mark the spent budget stopped as not delivered, not as unprovable'
     outcomes: [{ targetId: 'a', outcome: 'not-delivered' }],
   });
   expect(outcome.attempt.reason).not.toContain('could carry the marker');
+});
+
+it('reports a Page.reload whose answer was lost as not delivered, not as answered', async () => {
+  const { outcome, actions } = await runRungOneBesideForeignAsync(['a'], {
+    replaces: [],
+    dropOnReload: ['a'],
+    budgetMs: 1500,
+  });
+  expect(actions).toEqual(['a']);
+  expect(outcome.kind).toBe('not-delivered');
+  expect(outcome.attempt).toMatchObject({
+    delivered: false,
+    outcomes: [{ targetId: 'a', outcome: 'not-delivered' }],
+  });
+  expect(outcome.attempt.reason).toContain('the answer to the action was lost');
 });
