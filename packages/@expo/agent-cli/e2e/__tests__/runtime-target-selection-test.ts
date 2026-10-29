@@ -496,33 +496,37 @@ describe("runtime:reload beside another worktree's iOS app", () => {
     }
   });
 
-  it('reads the target list again after the bundle gate, and does not broadcast to a new app', async () => {
-    const { root } = await besideCloneAsync();
-    const elsewhere = runtimeTarget('far', { deviceName: 'Ada’s phone' });
-    let server: Awaited<ReturnType<typeof startStubDevServerAsync>> | undefined;
-    server = await startStubDevServerAsync({
-      projectRoot: root,
-      targets: () => (server?.bundlePlatforms().length ? [ownIos(), elsewhere] : [ownIos()]),
-    });
-    try {
-      const result = await executeAgentCliAsync(
-        root,
-        [
-          'runtime:reload',
-          '--dev-server-url',
-          server.url,
-          '--method',
-          'dev-server',
-          ...RELOAD_FLAGS,
-        ],
-        { reject: false, env: BOUND }
-      );
-      expect(server.bundlePlatforms(), result.all).not.toEqual([]);
-      expect(server.broadcasts()).toBe(0);
-    } finally {
-      await server.close();
+  // The clone runs on a booted local simulator, which exists only on macOS.
+  it.skipIf(process.platform !== 'darwin')(
+    'reads the target list again after the bundle gate, and does not broadcast to a new app',
+    async () => {
+      const { root } = await besideCloneAsync();
+      const elsewhere = runtimeTarget('far', { deviceName: 'Ada’s phone' });
+      let server: Awaited<ReturnType<typeof startStubDevServerAsync>> | undefined;
+      server = await startStubDevServerAsync({
+        projectRoot: root,
+        targets: () => (server?.bundlePlatforms().length ? [ownIos(), elsewhere] : [ownIos()]),
+      });
+      try {
+        const result = await executeAgentCliAsync(
+          root,
+          [
+            'runtime:reload',
+            '--dev-server-url',
+            server.url,
+            '--method',
+            'dev-server',
+            ...RELOAD_FLAGS,
+          ],
+          { reject: false, env: BOUND }
+        );
+        expect(server.bundlePlatforms(), result.all).not.toEqual([]);
+        expect(server.broadcasts()).toBe(0);
+      } finally {
+        await server.close();
+      }
     }
-  });
+  );
 
   it('relaunches its own app on its own simulator when the dev server reaches none', async () => {
     const { root, xcrunCalls } = await besideCloneAsync();

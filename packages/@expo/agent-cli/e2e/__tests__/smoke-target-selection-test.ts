@@ -17,7 +17,8 @@ const CLONE = { udid: 'SIM-CLONE', name: 'agent-cli c4ed0a60', state: 'Booted' }
 const app = (id: string, deviceName: string) =>
   runtimeTarget(id, { deviceName, appId: 'host.exp.Exponent' });
 
-it.each([
+// Both rows read a booted local simulator, which exists only on macOS.
+it.skipIf(process.platform !== 'darwin').each([
   { name: "another worktree's app", cloud: false },
   { name: 'a local simulator (bound cloud session, no --eas)', cloud: true },
 ])('smoke reloads only its own app beside $name', async ({ cloud }) => {
