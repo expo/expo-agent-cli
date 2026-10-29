@@ -19,7 +19,11 @@ const BUDGET_MS = 3000;
  */
 async function runRungOneBesideForeignAsync(
   ids: string[],
-  { replaces, holdUntil = 0 }: { replaces: string[]; holdUntil?: number }
+  {
+    replaces,
+    holdUntil = 0,
+    budgetMs = BUDGET_MS,
+  }: { replaces: string[]; holdUntil?: number; budgetMs?: number }
 ) {
   const globals = new Map<string, Record<string, unknown>>();
   const held: (() => void)[] = [];
@@ -73,7 +77,7 @@ async function runRungOneBesideForeignAsync(
         classifiedTargets,
         policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory),
       },
-      budgetMs: BUDGET_MS,
+      budgetMs,
     });
     return { outcome, elapsed: Date.now() - started, actions, globals };
   } finally {
@@ -118,4 +122,17 @@ it('watches an own target that keeps its context until the deadline, cleanup inc
     outcomes: [{ targetId: 'a', outcome: 'delivered-unproved' }],
   });
   expect(Object.keys(globals.get('a')!)).toEqual([]);
+});
+
+it('reports a mark the spent budget stopped as not delivered, not as unprovable', async () => {
+  const { outcome, actions } = await runRungOneBesideForeignAsync(['a'], {
+    replaces: ['a'],
+    budgetMs: 0,
+  });
+  expect(actions).toEqual([]);
+  expect(outcome.kind).toBe('not-delivered');
+  expect(outcome.attempt).toMatchObject({
+    outcomes: [{ targetId: 'a', outcome: 'not-delivered' }],
+  });
+  expect(outcome.attempt.reason).not.toContain('could carry the marker');
 });

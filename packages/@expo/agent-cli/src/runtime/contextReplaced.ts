@@ -28,7 +28,7 @@ export type ContextReplaced =
   | { kind: 'not-replaced'; reason: string }
   /** The action's answer never came, so it may not have run, and no read proved it did. */
   | { kind: 'answer-lost'; reason: string }
-  /** The marker could not be set, so nothing could prove the action: it was not taken. */
+  /** The app answered and did not keep the marker, so nothing could prove the action: not taken. */
   | { kind: 'unmarkable'; reason: string };
 
 /**
@@ -37,9 +37,10 @@ export type ContextReplaced =
  * A read that fails, and a read that still finds the marker, are "not yet": a reloading context
  * refuses requests for a moment, and the old one can answer once more after the action.
  *
- * An action whose answer is lost (the socket drops, its time runs out, or the phase is aborted) may
- * have run, so the marker is read anyway, within the same deadline, and the reason names the lost
- * answer. Any other failure of the action, a CDP error included, is thrown.
+ * A mark that gets no answer (an abort, the deadline, a lost connection) throws, and the action is
+ * not taken. An action whose answer is lost (the socket drops, its time runs out, or the phase is
+ * aborted) may have run, so the marker is read anyway, within the same deadline, and the reason
+ * names the lost answer. Any other failure of the action, a CDP error included, is thrown.
  */
 export async function jsContextReplacedAsync(
   devServerUrl: string,
@@ -112,7 +113,10 @@ export async function jsContextReplacedAsync(
       }
       marked = open;
     } catch (error: unknown) {
-      return { kind: 'unmarkable', reason: describe(error) };
+      if (error instanceof CdpRequestError) {
+        return { kind: 'unmarkable', reason: describe(error) };
+      }
+      throw error;
     }
 
     clock.limit(ACT_MS);

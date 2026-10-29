@@ -539,11 +539,7 @@ async function reloadOwnTargetAsync(
       return { ...identity, outcome: 'context-replaced', reason: null };
     }
     if (provedOne.signal.aborted) {
-      return {
-        ...identity,
-        outcome: 'not-needed',
-        reason: 'another app of this worktree proved the reload first, so this check stopped',
-      };
+      return { ...identity, outcome: 'not-needed', reason: NOT_NEEDED };
     }
     return {
       ...identity,
@@ -551,10 +547,14 @@ async function reloadOwnTargetAsync(
       reason: seen.reason,
     };
   } catch (error: unknown) {
-    return {
-      ...identity,
-      outcome: 'not-delivered',
-      reason: firstLine(error instanceof Error ? error.message : String(error)),
-    };
+    return provedOne.signal.aborted
+      ? { ...identity, outcome: 'not-needed', reason: NOT_NEEDED }
+      : {
+          ...identity,
+          outcome: 'not-delivered',
+          reason: firstLine(error instanceof Error ? error.message : String(error)),
+        };
   }
 }
+
+const NOT_NEEDED = 'another app of this worktree proved the reload first, so this check stopped';
