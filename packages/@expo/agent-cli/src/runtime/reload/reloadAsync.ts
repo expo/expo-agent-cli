@@ -387,12 +387,10 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
     // Read as late as possible, and always again rather than reusing the discovery probe: these
     // ids are what "the app came back" is measured against, and anything that reloaded the app in
     // the meantime — a save the watcher picked up — would otherwise be credited to this command.
-    const before = await prepareRungOneAsync(
-      devServerUrl,
-      projectRoot,
-      targetSelection,
-      remainingMs()
-    );
+    const before = await prepareRungOneAsync(devServerUrl, projectRoot, targetSelection, {
+      budgetMs: remainingMs(),
+      preflight: devServer,
+    });
     prepared = before;
     actionConnection = { ...devServer, ...before };
     observedApps = before.classifiedTargets.read.length;

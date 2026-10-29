@@ -426,6 +426,7 @@ export async function refreshDeviceInventoryAsync(
   if (!toolsCanPlace(targets, targetSelection, previous)) {
     return previous;
   }
+  const deadline = timeoutMs == null ? null : Date.now() + timeoutMs;
   const tools = await readDeviceInventoryAsync(timeoutMs);
   const inventory = {
     ...previous,
@@ -436,8 +437,31 @@ export async function refreshDeviceInventoryAsync(
   const twins = androidModelTwins(targetSelection, inventory);
   const port = devServerUrl == null ? null : devServerPort(devServerUrl);
   const androidReverse =
-    twins && port != null ? await readAndroidReverseAsync(twins.twins, port, timeoutMs) : null;
+    twins && port != null
+      ? await readAndroidReverseAsync(
+          twins.twins,
+          port,
+          deadline == null ? undefined : Math.max(1, deadline - Date.now())
+        )
+      : null;
   return { ...inventory, androidReverse };
+}
+
+/** Whether a device tool these targets needed did not answer, where `before` had its answer. */
+export function deviceFactsLost(
+  targets: readonly Pick<CdpTarget, 'appId' | 'deviceName'>[],
+  targetSelection: TargetSelection,
+  before: DeviceInventory,
+  after: DeviceInventory
+): boolean {
+  return (
+    toolsCanPlace(targets, targetSelection, after) &&
+    ((after.bootedStatus === 'unknown' && before.bootedStatus === 'observed') ||
+      (after.androidDevices == null && before.androidDevices != null) ||
+      (after.androidReverse == null &&
+        before.androidReverse != null &&
+        androidModelTwins(targetSelection, after) != null))
+  );
 }
 
 /** Read bindings and ask the tools only when their answer can change placement. */

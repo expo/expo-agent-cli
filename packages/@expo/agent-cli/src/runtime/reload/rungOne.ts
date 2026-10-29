@@ -20,8 +20,10 @@ import {
 } from '../messageSocket';
 import {
   classifyTargets,
+  deviceFactsLost,
   deviceInventoryForSelectionAsync,
   describeSkippedApps,
+  EMPTY_DEVICE_INVENTORY,
   skippedAppsOf,
   type DeviceInventory,
   type ClassifiedTargets,
@@ -308,11 +310,15 @@ export function rungOnePolicy(
 /**
  * One observation supplies dispatch, recipients and proof baselines together. Its scope and
  * inventory serve the rest of the run: the evidence, the counts and the relaunch.
+ *
+ * @param unread why the fresh read failed, so this is an older observation: it may miss an app a
+ * broadcast would reach, so none is sent.
  */
 export function prepareRungOne(
   targets: CdpTarget[],
   targetSelection: TargetSelection,
-  deviceInventory: DeviceInventory
+  deviceInventory: DeviceInventory,
+  unread: string | null = null
 ) {
   const classifiedTargets = classifyTargets(targets, targetSelection, deviceInventory);
   return {
@@ -321,29 +327,51 @@ export function prepareRungOne(
     deviceInventory,
     classifiedTargets,
     policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory),
+    unread,
   };
 }
 export type PreparedRungOne = ReturnType<typeof prepareRungOne>;
 
-/** {@link prepareRungOne} on a fresh probe and inventory, both inside the caller's budget. */
+/** A target list and the device facts that placed it. */
+export type RungOneObservation = Pick<PreparedRungOne, 'targets' | 'deviceInventory'>;
+
+/**
+ * {@link prepareRungOne} on a fresh probe and inventory, inside one deadline. A probe that fails,
+ * or a device tool that does not answer where `preflight` had its answer, keeps `preflight`.
+ */
 export async function prepareRungOneAsync(
   devServerUrl: string,
   projectRoot: string,
   targetSelection: TargetSelection,
-  budgetMs: number
+  { budgetMs, preflight }: { budgetMs: number; preflight: RungOneObservation | null }
 ): Promise<PreparedRungOne> {
-  const timeoutMs = Math.max(1, budgetMs);
-  const { targets } = await probeDevServerAsync(devServerUrl, {
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  const deadline = Date.now() + Math.max(1, budgetMs);
+  const left = () => Math.max(1, deadline - Date.now());
+  const keep = (unread: string) => {
+    const { targets, deviceInventory } = preflight ?? {
+      targets: [],
+      deviceInventory: EMPTY_DEVICE_INVENTORY,
+    };
+    return prepareRungOne(targets, targetSelection, deviceInventory, unread);
+  };
+  const probe = await probeDevServerAsync(devServerUrl, { signal: AbortSignal.timeout(left()) });
+  if (!probe.reachable) {
+    return keep(`the dev server's target list could not be read again (${probe.reason})`);
+  }
   const deviceInventory = await deviceInventoryForSelectionAsync(
-    targets,
+    probe.targets,
     targetSelection,
     projectRoot,
     devServerUrl,
-    timeoutMs
+    left()
   );
-  return prepareRungOne(targets, targetSelection, deviceInventory);
+  if (
+    preflight &&
+    deviceFactsLost(probe.targets, targetSelection, preflight.deviceInventory, deviceInventory)
+  ) {
+    return keep('the device tools did not answer again');
+  }
+  return prepareRungOne(probe.targets, targetSelection, deviceInventory);
 }
 
 /** What rung 1 came to. `proved` and `acted` keep `auto` on this rung; the rest relaunch. */
@@ -378,7 +406,20 @@ export async function runRungOneAsync(
   devServerUrl: string,
   { prepared, budgetMs }: { prepared: PreparedRungOne; budgetMs: number }
 ): Promise<RungOneOutcome> {
-  const { policy, classifiedTargets, targets } = prepared;
+  const { policy, classifiedTargets, targets, unread } = prepared;
+  if (policy.mechanism === 'broadcast' && unread != null) {
+    return {
+      kind: 'not-delivered',
+      attempt: {
+        method: 'dev-server',
+        ok: false,
+        reason: `${unread}, so no broadcast was sent: it reaches every app on the dev server, and this run could not see which apps those are`,
+        leftAppStopped: null,
+      },
+      churn: CHURN_NOT_ASKED,
+      relaunchWhy: `${unread}, so no broadcast was sent and the app was relaunched instead`,
+    };
+  }
   if (policy.mechanism === 'page-reload') {
     return await reloadOwnTargetsAsync(devServerUrl, {
       policy,

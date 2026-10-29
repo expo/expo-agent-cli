@@ -76,6 +76,7 @@ async function runRungOneBesideForeignAsync(
         deviceInventory,
         classifiedTargets,
         policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory),
+        unread: null,
       },
       budgetMs,
     });

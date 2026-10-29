@@ -958,12 +958,10 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     reloadApp: async (devServerUrl, timeoutMs) => {
       const deadline = Date.now() + timeoutMs;
       const remainingMs = () => Math.max(0, deadline - Date.now());
-      const prepared = await prepareRungOneAsync(
-        devServerUrl,
-        projectRoot,
-        await scopeAsync(),
-        remainingMs()
-      );
+      const prepared = await prepareRungOneAsync(devServerUrl, projectRoot, await scopeAsync(), {
+        budgetMs: remainingMs(),
+        preflight: null,
+      });
       const bundleMark = markBundleSignalSync(projectRoot);
       const rungOne = await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs() });
       const result = {

@@ -339,6 +339,55 @@ describe('runtime:eval and the worktrees that bound the booted simulators', () =
   });
 });
 
+// The local app is placed by the booted simulator list, which exists only on macOS.
+it.skipIf(process.platform !== 'darwin')(
+  'runtime:reload keeps the first placement when simctl fails after the bundle gate',
+  async () => {
+    const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+    await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
+    await fs.promises.rm(await bindingFixture(root, BOOTED_SIMULATOR.udid));
+    await installStubEasAsync(root);
+    await writeCloudBindingAsync(expoHomeOf(root), root, { id: 'sess-e2e' });
+    const app = (id: string, deviceName: string) =>
+      runtimeTarget(id, { deviceName, appId: 'host.exp.Exponent' });
+    const targets = [app('local', BOOTED_SIMULATOR.name), app('session', 'iPhone 17')];
+    let failedOnce = false;
+    let server: Awaited<ReturnType<typeof startStubDevServerAsync>> | undefined;
+    server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: () => {
+        if (!failedOnce && server?.bundlePlatforms().length) {
+          failedOnce = true;
+          fs.writeFileSync(`${root}/.xcrun-simulators.json`, 'not json');
+        }
+        return targets;
+      },
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--ios',
+          '--eas',
+          '--dev-server-url',
+          server.url,
+          '--method',
+          'dev-server',
+          ...RELOAD_FLAGS,
+        ],
+        { reject: false }
+      );
+      expect(failedOnce, result.all).toBe(true);
+      expect(server.broadcasts()).toBe(0);
+      expect(server.pageReloads()).toEqual(['session']);
+      expect(result.exitCode).toBe(0);
+    } finally {
+      await server.close();
+    }
+  }
+);
+
 it('runtime:reload selects its bound cloud platform without a platform flag', async () => {
   const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
   await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
@@ -530,6 +579,41 @@ describe("runtime:reload beside another worktree's iOS app", () => {
       }
     }
   );
+
+  it('keeps the first placement and sends no broadcast when the target list read after the bundle gate fails', async () => {
+    const { root } = await besideCloneAsync();
+    let failedOnce = false;
+    let server: Awaited<ReturnType<typeof startStubDevServerAsync>> | undefined;
+    server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: () => {
+        if (failedOnce || !server?.bundlePlatforms().length) return [ownIos(), cloneIos()];
+        failedOnce = true;
+        return null;
+      },
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--ios',
+          '--dev-server-url',
+          server.url,
+          '--method',
+          'dev-server',
+          ...RELOAD_FLAGS,
+        ],
+        { reject: false, env: BOUND }
+      );
+      expect(failedOnce, result.all).toBe(true);
+      expect(server.broadcasts()).toBe(0);
+      expect(server.pageReloads()).toEqual(['own']);
+      expect(result.exitCode).toBe(0);
+    } finally {
+      await server.close();
+    }
+  });
 
   it('relaunches its own app on its own simulator when the dev server reaches none', async () => {
     const { root, xcrunCalls } = await besideCloneAsync();

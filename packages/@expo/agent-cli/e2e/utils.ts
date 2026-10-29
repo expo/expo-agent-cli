@@ -671,9 +671,9 @@ export type StubDevServerOptions = {
    * Debugger targets `GET /json/list` answers with — the apps a command under test will believe
    * are connected. Defaults to none, which is a dev server nothing has attached to yet. A function
    * is called on every read, for a list that changes between reads, such as one that follows a
-   * device-tool invocation log.
+   * device-tool invocation log. A function that returns null fails that read with a 500.
    */
-  targets?: unknown[] | (() => unknown[]);
+  targets?: unknown[] | (() => unknown[] | null);
   /** Begin listening only after the stub Expo start creates this file. */
   readyWithFile?: string;
   /**
@@ -984,12 +984,16 @@ export async function startStubDevServerAsync({
 
     if (route === '/json/list') {
       const started = targetsAppearWithFile == null || fs.existsSync(targetsAppearWithFile);
+      const listed = typeof targets === 'function' ? targets() : listedTargets;
+      if (listed == null) {
+        response.writeHead(500).end();
+        return;
+      }
       response.writeHead(200, { 'Content-Type': 'application/json' });
       // Rewritten onto this stub's own port, the way a real dev server publishes its debugger URLs
       // — a fixture URL naming 8081 or no port at all is one nothing can connect to, and
       // `@expo/agent-cli status` now opens each of them to tell a live target from a page an app left
       // behind (llp/0005-runtime-loop-tools.rfc.md §Android, F56).
-      const listed = typeof targets === 'function' ? targets() : listedTargets;
       response.end(JSON.stringify(started ? listed.map(onThisPort) : []));
       return;
     }
