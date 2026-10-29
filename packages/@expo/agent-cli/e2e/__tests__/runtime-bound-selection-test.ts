@@ -347,6 +347,21 @@ it.skipIf(process.platform !== 'darwin')(
 );
 
 it.skipIf(process.platform !== 'darwin')(
+  'eval with no dev server refuses with NO_DEV_SERVER beside an unreadable binding file',
+  async () => {
+    const { root, bindingFile, env } = await setupBoundAsync('simulator');
+    await fs.promises.writeFile(bindingFile, '{');
+    const result = await executeAgentCliAsync(
+      root,
+      ['runtime:eval', '1', '--dev-server-url', 'http://127.0.0.1:1', '--json'],
+      { reject: false, env }
+    );
+    expect(result.exitCode, result.all).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe('NO_DEV_SERVER');
+  }
+);
+
+it.skipIf(process.platform !== 'darwin')(
   'eval with AGENT_CLI_NO_DEVICE=1 reads by the flag and skips the binding',
   async () => {
     const { root, env } = await setupBoundAsync('simulator');

@@ -51,6 +51,7 @@ import {
   describeSkippedApps,
   describeSelectedDevice,
   EMPTY_DEVICE_INVENTORY,
+  READ_EVERY_TARGET,
   type DeviceInventory,
   type ClassifiedTargets,
   type TargetSelection,
@@ -210,32 +211,22 @@ export async function preflightRuntimeAsync(
     }
   }
 
-  const { targetSelection, deviceInventory, classifiedTargets } = await resolveTargetSelectionAsync(
-    {
-      projectRoot: context.projectRoot ?? null,
-      flags: { platform, eas: cloud },
-      targets: reachable ? targets : [],
-      deviceInventory: reachable
-        ? knownDeviceInventory
-        : (knownDeviceInventory ?? EMPTY_DEVICE_INVENTORY),
-      devServerUrl: url,
-    }
-  );
-  const base: RuntimeConnection = {
+  const found = {
     devServerUrl: url,
     devServerSource: discovery.source,
     named,
     reachable,
     unreachableReason: reachable ? null : unreachableReason,
-    targets,
-    classifiedTargets,
-    targetSelection,
-    deviceInventory,
   };
-
   if (!reachable) {
     if (need === 'optional') {
-      return { ...base, targets: [] };
+      return {
+        ...found,
+        targets: [],
+        classifiedTargets: { read: [], otherPlatform: [], undetermined: [], skipped: [] },
+        targetSelection: READ_EVERY_TARGET,
+        deviceInventory: knownDeviceInventory ?? EMPTY_DEVICE_INVENTORY,
+      };
     }
     throw noDevServerError({
       devServerUrl: url,
@@ -247,6 +238,23 @@ export async function preflightRuntimeAsync(
     });
   }
 
+  const { targetSelection, deviceInventory, classifiedTargets } = await resolveTargetSelectionAsync(
+    {
+      projectRoot: context.projectRoot ?? null,
+      flags: { platform, eas: cloud },
+      targets,
+      deviceInventory: knownDeviceInventory,
+      devServerUrl: url,
+    }
+  );
+  const base: RuntimeConnection = {
+    ...found,
+    targets,
+    classifiedTargets,
+    targetSelection,
+    deviceInventory,
+  };
+
   if (need === 'debugger-target' && targets.length === 0) {
     throw noAppConnectedError({ devServerUrl: url, retryMs: retryBudgetMs, cloud, platform });
   }
@@ -255,17 +263,11 @@ export async function preflightRuntimeAsync(
   // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
   // seventh and eighth calls a success.
   if (need === 'debugger-target' && classifiedTargets.read.length === 0) {
-    const error = emptyScopeError(url, targetSelection, classifiedTargets, deviceInventory);
-    // A local binding outranks a live session of this worktree; only --eas reads the session.
-    if (
-      targetSelection.bound &&
-      targetSelection.device?.backend !== 'cloud' &&
-      context.projectRoot != null &&
-      liveCloudBindings(context.projectRoot).length > 0
-    ) {
-      error.message += ` This worktree also has a live EAS Simulator session. The local binding comes first, so only a command that takes --eas reaches the session.`;
-    }
-    throw error;
+    throw withLiveSessionNote(
+      emptyScopeError(url, targetSelection, classifiedTargets, deviceInventory),
+      targetSelection,
+      context.projectRoot
+    );
   }
   if (
     targetSelection.bound &&
@@ -281,6 +283,23 @@ export async function preflightRuntimeAsync(
     Log.progress(describeSkippedApps(skipped));
   }
   return base;
+}
+
+/** A local binding outranks a live session of this worktree; only --eas reads the session. */
+function withLiveSessionNote(
+  error: CommandError,
+  targetSelection: TargetSelection,
+  projectRoot: string | null | undefined
+): CommandError {
+  if (
+    targetSelection.bound &&
+    targetSelection.device?.backend !== 'cloud' &&
+    projectRoot != null &&
+    liveCloudBindings(projectRoot).length > 0
+  ) {
+    error.message += ` This worktree also has a live EAS Simulator session. The local binding comes first, so only a command that takes --eas reaches the session.`;
+  }
+  return error;
 }
 
 /**
