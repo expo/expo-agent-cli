@@ -40,6 +40,18 @@ export const DEFAULT_SMOKE_TIMEOUT_MS = 60_000;
  */
 export const DEFAULT_SMOKE_START_TIMEOUT_MS = 180_000;
 
+/**
+ * The budget an app opened onto a cold environment gets to attach (`./phases` §APP_ATTACH_TIMEOUT_MS),
+ * or the one `AGENT_CLI_COLD_ATTACH_MS` names.
+ *
+ * A harness switch, like `AGENT_CLI_NO_DEVICE`: the stub tier's no-app cases boot a stub device
+ * and open a stub app that never attaches, and the two minutes they would wait prove nothing.
+ */
+export function coldWaitMs(defaultMs: number): number {
+  const named = Number(process.env.AGENT_CLI_COLD_ATTACH_MS);
+  return Number.isFinite(named) && named > 0 ? named : defaultMs;
+}
+
 export interface SmokeOptions {
   /** Route to open before the window, or null to read the app where it already is. */
   route: string | null;

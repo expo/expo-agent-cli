@@ -52,7 +52,7 @@ import type { DevServerDiscovery } from '../runtime/devServer';
 import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
 import type { AppConnectionResult, BundlerReadyResult } from '../runtime/waitReady';
 import type { SmokeProgress } from './progress';
-import type { SmokeOptions } from './resolveOptions';
+import { coldWaitMs, type SmokeOptions } from './resolveOptions';
 import type {
   SmokeCleanupJson,
   SmokeEnvironmentJson,
@@ -1467,7 +1467,7 @@ async function runPhasesAsync(
    * for the same reason: loading an app onto an environment this run made cold is this run's own
    * setup, and loading one onto a warm environment is this run reading a slow app.
    */
-  const attachBudget = () => (coldEnvironment() ? APP_ATTACH_TIMEOUT_MS : remaining());
+  const attachBudget = () => (coldEnvironment() ? coldWaitMs(APP_ATTACH_TIMEOUT_MS) : remaining());
 
   /**
    * Wait for the app this run moved to stop re-registering. At most once, and never otherwise.
