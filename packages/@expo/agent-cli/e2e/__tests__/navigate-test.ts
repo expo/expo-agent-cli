@@ -477,7 +477,7 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
     // The package name, because that is all the static read has for this project.
     expect(report.url).toBe('exp+dev-client-app://profile/42');
     expect(report.resolution).toBe(
-      'app.config.js could not be evaluated (Cannot resolve app config) and no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "dev-client-app"'
+      'no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "dev-client-app"; app.config.js could not be evaluated (Cannot resolve app config), so the static config was read'
     );
   });
 
@@ -503,7 +503,7 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
 
     expect(report.url).toBe('marmelade-static://profile/42');
     expect(report.resolution).toBe(
-      'app.config.js could not be evaluated (Cannot resolve app config), so read the "scheme" field from app.json'
+      'read the "scheme" field from app.json; app.config.js could not be evaluated (Cannot resolve app config), so the static config was read'
     );
   });
 

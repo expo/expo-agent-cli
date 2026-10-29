@@ -55,7 +55,7 @@ import {
   isFullUrlRoute,
   openUrlOnDeviceAsync,
   resolveDeepLinkUrl,
-  resolveProjectSchemeConfigAsync,
+  readProjectSchemeConfig,
   type ProjectSchemeConfig,
 } from './deepLink';
 import type { BoundDevice } from '../deviceBinding';
@@ -331,7 +331,7 @@ export async function resolveRouteUrlAsync(
   const [devServer, config, nativeDirs, packageJson, routeTable, reach, expoGo] = await Promise.all(
     [
       discoverDevServerAsync(options.devServerUrl ?? undefined, { projectRoot }),
-      resolveProjectSchemeConfigAsync(projectRoot),
+      readProjectSchemeConfig(projectRoot),
       readProjectNativeDirsAsync(projectRoot),
       readProjectPackageJsonAsync(projectRoot),
       readProjectRoutesAsync(projectRoot),

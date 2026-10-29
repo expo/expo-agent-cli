@@ -1,6 +1,7 @@
 import { vol } from 'memfs';
 
 import { matchProjectRoute, readProjectRoutesAsync } from '../routes';
+import { forgetExpoConfigReads } from '../appConfig';
 
 const projectRoot = '/project';
 
@@ -17,6 +18,7 @@ async function routesOf(files: Record<string, string>): Promise<string[]> {
 
 afterEach(() => {
   vol.reset();
+  forgetExpoConfigReads();
 });
 
 describe(readProjectRoutesAsync, () => {

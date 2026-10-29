@@ -198,10 +198,7 @@ function recordAnswers(cached: CachedEntry | undefined, projectHash: string | nu
 }
 
 function mayAskEas(easProject: EasProjectLink | null | undefined): boolean {
-  return (
-    !easProject ||
-    (!easProject.unreadable && (!!easProject.projectId || easProject.evaluationError != null))
-  );
+  return !easProject || easProject.kind === 'linked' || easProject.kind === 'unknown';
 }
 
 async function readPlatformAsync(
@@ -228,19 +225,14 @@ async function readPlatformAsync(
       `this machine is not signed in to Expo (per ${options.auth.source ?? 'the auth check'}), so EAS has nothing to answer with`
     );
   }
-  if (options.easProject?.unreadable) {
+  if (options.easProject?.kind === 'unreadable') {
     return unknown(
       platform,
       null,
       `${options.easProject.source} does not parse, so whether this project is linked to EAS is unknown and EAS was not asked`
     );
   }
-  if (
-    options.easProject &&
-    !options.easProject.projectId &&
-    options.easProject.evaluationError == null
-  ) {
-    // A config that could not be evaluated may still set the id, so only a config that was read is trusted.
+  if (options.easProject?.kind === 'unlinked') {
     return unknown(platform, null, unlinkedReason(projectRoot, options.easProject, options.auth));
   }
 
@@ -281,7 +273,7 @@ async function readPlatformAsync(
 /** Names the same `eas init` forms as `assertEasProjectConfiguredAsync`. */
 function unlinkedReason(
   projectRoot: string,
-  easProject: EasProjectLink,
+  easProject: Extract<EasProjectLink, { kind: 'unlinked' }>,
   auth: AuthStatus | null
 ): string {
   const config = easProject.source ?? 'its app config';

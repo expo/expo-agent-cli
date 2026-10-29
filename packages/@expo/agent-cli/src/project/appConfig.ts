@@ -4,9 +4,8 @@
 // A project with only `app.json`/`app.config.json` is read from that file, and nothing is
 // evaluated. A dynamic `app.config.js`/`.ts` is evaluated with `@expo/config` after the project's
 // env files are loaded (`src/project/evaluatedConfig.ts`), the way `expo config` reads it. When that
-// fails, the static file stands and `evaluationError` says why, so a caller can report a missing
-// value as unknown instead of as absent.
-import { getFiles as getEnvFiles } from '@expo/env';
+// fails, the result says why and carries the static read, so a caller can report a missing value as
+// unknown instead of as absent.
 import fs from 'fs';
 import path from 'path';
 
@@ -42,100 +41,77 @@ export const DYNAMIC_CONFIG_FILES = [
   'app.config.js',
 ];
 
-/** The app config the app sees, and where it came from. */
-export interface ProjectExpoConfig {
-  /**
-   * File the config was read from, relative to the project root: the dynamic file once it was
-   * evaluated, else the static one. Null when there is none.
-   */
-  source: string | null;
-  /** The `expo` object of the config. Null with no config, or a static file that does not parse. */
-  config: Record<string, any> | null;
-  /** Name of the dynamic config file in the project, if any. */
-  dynamicConfigFile: string | null;
-  /** The static file exists but does not parse, so {@link config} is null without being absent. */
-  unreadable: boolean;
-  /**
-   * Why {@link dynamicConfigFile} could not be evaluated, when it exists and {@link config} is the
-   * static read. Null when it was evaluated, or there is none.
-   */
-  evaluationError: string | null;
-  /** {@link dynamicConfigFile} was evaluated, but the `plugins` it returns could not be read. */
-  pluginsUnknown: boolean;
+/** The `expo` object of an app config. */
+export type ExpoConfigObject = Record<string, any>;
+
+/** What reading the first static config file came to. `file` is relative to the project root. */
+export type StaticConfigRead =
+  | { kind: 'none' }
+  | { kind: 'unreadable'; file: string }
+  | { kind: 'static'; file: string; config: ExpoConfigObject };
+
+/** What reading the app config the app sees came to. `file` is relative to the project root. */
+export type ProjectExpoConfig =
+  | StaticConfigRead
+  | { kind: 'evaluated'; file: string; config: ExpoConfigObject }
+  | { kind: 'evaluation-failed'; file: string; error: string; fallback: StaticConfigRead };
+
+/** The read that holds values: the evaluated or static one, or the static read a failed evaluation left. */
+export function configOf(
+  read: ProjectExpoConfig
+): Extract<ProjectExpoConfig, { kind: 'static' | 'evaluated' }> | null {
+  const settled = read.kind === 'evaluation-failed' ? read.fallback : read;
+  return settled.kind === 'static' || settled.kind === 'evaluated' ? settled : null;
 }
 
-/** The last evaluation per project in this process, with the files it was evaluated from. */
-const evaluations = new Map<string, { inputs: string; read: ProjectExpoConfig }>();
+/** One sentence on a dynamic config that could not be evaluated, or null when there is none. */
+export function evaluationFailureOf(read: ProjectExpoConfig): string | null {
+  return read.kind === 'evaluation-failed'
+    ? `${read.file} could not be evaluated (${read.error})`
+    : null;
+}
+
+const reads = new Map<string, ProjectExpoConfig>();
 
 /**
  * Read the project's app config.
  *
- * The dev loop's view: the env files are those of `development`, and the config plugins are not
- * run, so a plugin module that is not installed does not fail the read. The declared `plugins`
- * are kept.
- *
- * A dynamic config is evaluated once per process while its inputs stay the same, so the scheme,
- * the ids and the plugins one command reads all come from one call of it. Nothing is kept across
- * runs, for the reason llp/0011 gives: a dynamic config can read env vars and files that no stamp
- * sees.
+ * A dynamic config is evaluated once per project per process, so the scheme, the ids and the
+ * plugins one command reads all come from one call of it. Nothing is kept across runs, for the
+ * reason llp/0011 gives: a dynamic config can read env vars and files that no stamp sees.
  */
 export function readExpoConfig(projectRoot: string): ProjectExpoConfig {
-  const dynamicConfigFile =
-    DYNAMIC_CONFIG_FILES.find((file) => fs.existsSync(path.join(projectRoot, file))) ?? null;
-  const staticRead = readStaticConfig(projectRoot);
-  if (dynamicConfigFile == null) {
-    return { ...staticRead, dynamicConfigFile, evaluationError: null, pluginsUnknown: false };
+  const known = reads.get(projectRoot);
+  if (known) {
+    return known;
   }
-
-  const inputs = readEvaluationInputs(projectRoot, dynamicConfigFile);
-  const last = evaluations.get(projectRoot);
-  if (last?.inputs === inputs) {
-    return last.read;
-  }
-  const read = evaluateDynamicConfig(projectRoot, dynamicConfigFile, staticRead);
-  evaluations.set(projectRoot, { inputs, read });
+  const read = readUncached(projectRoot);
+  reads.set(projectRoot, read);
   return read;
 }
 
-/** The contents of the files an evaluation reads: the configs, `package.json` and the env files. */
-function readEvaluationInputs(projectRoot: string, dynamicConfigFile: string): string {
-  return [dynamicConfigFile, ...STATIC_CONFIG_FILES, 'package.json', ...getEnvFiles('development')]
-    .map((file) => {
-      try {
-        return `${file}\0${fs.readFileSync(path.join(projectRoot, file), 'utf8')}`;
-      } catch {
-        return `${file}\0`;
-      }
-    })
-    .join('\0');
+/** Forget every read, for a caller that changes a config file and reads it again. */
+export function forgetExpoConfigReads(): void {
+  reads.clear();
 }
 
-function evaluateDynamicConfig(
-  projectRoot: string,
-  dynamicConfigFile: string,
-  staticRead: Pick<ProjectExpoConfig, 'source' | 'config' | 'unreadable'>
-): ProjectExpoConfig {
-  const evaluated = evaluateExpoConfig(projectRoot, {
-    mode: 'development',
-    isPublicConfig: true,
-    skipPlugins: true,
-  });
-  if (!evaluated.ok) {
-    return {
-      ...staticRead,
-      dynamicConfigFile,
-      evaluationError: evaluated.error,
-      pluginsUnknown: false,
-    };
+function readUncached(projectRoot: string): ProjectExpoConfig {
+  const staticRead = readStaticConfig(projectRoot);
+  const dynamicConfigFile = DYNAMIC_CONFIG_FILES.find((file) =>
+    fs.existsSync(path.join(projectRoot, file))
+  );
+  if (dynamicConfigFile == null) {
+    return staticRead;
   }
-  return {
-    source: dynamicConfigFile,
-    config: evaluated.exp as Record<string, any>,
-    dynamicConfigFile,
-    unreadable: false,
-    evaluationError: null,
-    pluginsUnknown: evaluated.pluginsUnknown,
-  };
+  const evaluated = evaluateExpoConfig(projectRoot);
+  return evaluated.ok
+    ? { kind: 'evaluated', file: dynamicConfigFile, config: evaluated.exp as ExpoConfigObject }
+    : {
+        kind: 'evaluation-failed',
+        file: dynamicConfigFile,
+        error: evaluated.error,
+        fallback: staticRead,
+      };
 }
 
 /** Whether the project has any app config file, without reading or evaluating it. */
@@ -148,59 +124,56 @@ export function hasAppConfigFile(projectRoot: string): boolean {
 /** Read the config plugins the project declares. */
 export function readAppConfigPlugins(projectRoot: string): AppConfigPlugins {
   const read = readExpoConfig(projectRoot);
-  const unknownBecause = whyPluginsAreUnknown(read);
-  // A file that does not parse was not read, so it is not named as the source. The static list
-  // does not stand in for a dynamic config whose plugins are unknown.
-  return {
-    source: read.unreadable ? null : read.source,
-    plugins: unknownBecause == null ? parsePlugins(read.config?.plugins) : [],
-    unknownBecause,
-  };
-}
-
-/** Why the `plugins` of the config the app sees are unknown, or null when they were read. */
-export function whyPluginsAreUnknown(read: ProjectExpoConfig): string | null {
-  if (read.evaluationError != null) {
-    return `${read.dynamicConfigFile} could not be evaluated (${read.evaluationError})`;
+  switch (read.kind) {
+    case 'none':
+    case 'unreadable':
+      // A file that does not parse was not read, so it is not named as the source.
+      return { source: null, plugins: [], unknownBecause: null };
+    case 'static':
+    case 'evaluated':
+      return {
+        source: read.file,
+        plugins: parsePlugins(read.config.plugins),
+        unknownBecause: null,
+      };
+    case 'evaluation-failed':
+      // The static list does not stand in for a dynamic config whose plugins are unknown.
+      return { source: null, plugins: [], unknownBecause: evaluationFailureOf(read) };
   }
-  if (read.pluginsUnknown) {
-    return `the plugins ${read.dynamicConfigFile} returns could not be read`;
-  }
-  return null;
 }
 
 /**
- * The project's `extra.eas.projectId`.
+ * Whether the project is linked to an EAS project, by its `extra.eas.projectId`.
  *
  * @ref llp/0027-everything-on-eas.rfc.md §Check the EAS project before starting the environment
- * A null `projectId` with an `evaluationError` proves nothing: the dynamic config may set the id.
+ * A config that names no id is `unlinked` only when it was read. One that could not be evaluated
+ * may set the id, so it is `unknown`.
  */
-export interface EasProjectLink {
-  /** The `extra.eas.projectId` of the config, or null when it names none. */
-  projectId: string | null;
-  /** File it was read from, relative to the project root. Null when there is no config. */
-  source: string | null;
-  /** The dynamic config could not be evaluated, so a null {@link projectId} is not an answer. */
-  evaluationError: string | null;
-  /** {@link source} does not parse, so a null {@link projectId} is not an answer either. */
-  unreadable: boolean;
-}
+export type EasProjectLink =
+  | { kind: 'linked'; projectId: string; source: string }
+  | { kind: 'unlinked'; source: string | null }
+  | { kind: 'unreadable'; source: string }
+  | { kind: 'unknown'; source: string; why: string };
 
 export function readEasProject(projectRoot: string): EasProjectLink {
-  const { source, config, unreadable, evaluationError } = readExpoConfig(projectRoot);
-  const projectId = config?.extra?.eas?.projectId;
-  return {
-    projectId: typeof projectId === 'string' && projectId.trim() ? projectId.trim() : null,
-    source,
-    evaluationError,
-    unreadable,
-  };
+  const read = readExpoConfig(projectRoot);
+  const settled = read.kind === 'evaluation-failed' ? read.fallback : read;
+  if (settled.kind === 'unreadable') {
+    return { kind: 'unreadable', source: settled.file };
+  }
+  const values = configOf(read);
+  const projectId = values?.config.extra?.eas?.projectId;
+  if (values && typeof projectId === 'string' && projectId.trim()) {
+    return { kind: 'linked', projectId: projectId.trim(), source: values.file };
+  }
+  if (read.kind === 'evaluation-failed') {
+    return { kind: 'unknown', source: read.file, why: evaluationFailureOf(read)! };
+  }
+  return { kind: 'unlinked', source: settled.kind === 'none' ? null : settled.file };
 }
 
 /** The first static config file that exists, as `@expo/config` takes it: no fallback past one that does not parse. */
-function readStaticConfig(
-  projectRoot: string
-): Pick<ProjectExpoConfig, 'source' | 'config' | 'unreadable'> {
+function readStaticConfig(projectRoot: string): StaticConfigRead {
   for (const file of STATIC_CONFIG_FILES) {
     let text: string;
     try {
@@ -212,40 +185,30 @@ function readStaticConfig(
     try {
       contents = JSON.parse(text);
     } catch {
-      return { source: file, config: null, unreadable: true };
+      return { kind: 'unreadable', file };
     }
     if (contents == null || typeof contents !== 'object' || Array.isArray(contents)) {
-      return { source: file, config: null, unreadable: true };
+      return { kind: 'unreadable', file };
     }
     // Both `{ "expo": { ... } }` and a bare config object are valid.
-    const record = contents as Record<string, any>;
-    return {
-      source: file,
-      config: (record.expo ?? record) as Record<string, any>,
-      unreadable: false,
-    };
+    const record = contents as ExpoConfigObject;
+    return { kind: 'static', file, config: (record.expo ?? record) as ExpoConfigObject };
   }
-  return { source: null, config: null, unreadable: false };
+  return { kind: 'none' };
 }
 
 /** Normalize the `plugins` array, whose entries are a module path or `[path, options]`. */
 function parsePlugins(plugins: unknown): AppConfigPlugin[] {
-  return (readPluginIds(plugins) ?? []).map((id) => ({
+  return readPluginIds(plugins).map((id) => ({
     id,
     packageName: parsePackageNameFromModulePath(id),
   }));
 }
 
-/**
- * The ids of a `plugins` array as the config spells them, or null when the value is not an array.
- *
- * Null rather than an empty list, because the two mean different things to a caller with a
- * fallback: an evaluated config that names no plugins has answered, and one that carries no
- * `plugins` key has not.
- */
-export function readPluginIds(plugins: unknown): string[] | null {
+/** The ids of a `plugins` array as the config spells them. Anything but an array has none. */
+export function readPluginIds(plugins: unknown): string[] {
   if (!Array.isArray(plugins)) {
-    return null;
+    return [];
   }
 
   const ids: string[] = [];

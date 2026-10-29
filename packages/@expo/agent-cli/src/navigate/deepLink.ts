@@ -15,7 +15,12 @@ import {
   openUrlOnCloudSimulatorAsync,
 } from '../device/cloudSimulator';
 import { PROGRAM_PREFIX } from '../programName';
-import { readExpoConfig } from '../project/appConfig';
+import {
+  configOf,
+  evaluationFailureOf,
+  readExpoConfig,
+  type ProjectExpoConfig,
+} from '../project/appConfig';
 import { hostPlatform } from '../smoke/suggest';
 import { CommandError } from '../utils/errors';
 import { spawnCaptureAsync } from '../utils/spawnCapture';
@@ -51,13 +56,8 @@ export interface ProjectSchemeConfig {
   slug: string | null;
   /** Name of the config file the values came from, if any: the evaluated dynamic file, or a static one. */
   configFile: string | null;
-  /** Name of a dynamic config file present in the project, if any. */
-  dynamicConfigFile: string | null;
-  /**
-   * Why {@link dynamicConfigFile} could not be evaluated, when it exists and the values are the
-   * static read. Null when it was evaluated, or never asked.
-   */
-  evaluationError: string | null;
+  /** What reading the app config came to, which decides what the resolution says it rests on. */
+  read: ProjectExpoConfig;
 }
 
 /**
@@ -65,34 +65,21 @@ export interface ProjectSchemeConfig {
  *
  * `slug` falls back to the `package.json` name, as `expo.slug` does.
  *
- * A dynamic config that fails to evaluate keeps the static read and says why in
- * `evaluationError`. The `exp+<slug>` fallback is still a scheme a development build registers,
- * so the URL is still offered, but the caller is told it rests on a file this command could not
- * read [observed — issue #84: a project with only `app.config.ts` was sent to
+ * A dynamic config that fails to evaluate keeps the static read and says why in `read`. The
+ * `exp+<slug>` fallback is still a scheme a development build registers, so the URL is still
+ * offered, but the caller is told it rests on a file this command could not read [observed — issue #84: a project with only `app.config.ts` was sent to
  * `exp+<package name>://` with "no scheme field was found", which is not what happened].
  */
 export function readProjectSchemeConfig(projectRoot: string): ProjectSchemeConfig {
   const read = readExpoConfig(projectRoot);
-  const scheme = firstScheme(read.config?.scheme);
-  let slug = nonEmptyString(read.config?.slug);
+  const values = configOf(read);
+  const scheme = firstScheme(values?.config.scheme);
+  let slug = nonEmptyString(values?.config.slug);
   if (slug == null) {
     const packageJson = readJsonFile(path.join(projectRoot, 'package.json'));
     slug = packageJson != null ? nonEmptyString(packageJson.name) : null;
   }
-  return {
-    scheme,
-    slug,
-    configFile: read.config != null ? read.source : null,
-    dynamicConfigFile: read.dynamicConfigFile,
-    evaluationError: read.evaluationError,
-  };
-}
-
-/** {@link readProjectSchemeConfig}, for the callers that run it beside other async reads. */
-export async function resolveProjectSchemeConfigAsync(
-  projectRoot: string
-): Promise<ProjectSchemeConfig> {
-  return readProjectSchemeConfig(projectRoot);
+  return { scheme, slug, configFile: values?.file ?? null, read };
 }
 
 export interface ResolveDeepLinkUrlParams {
@@ -172,15 +159,10 @@ export type ResolveDeepLinkUrlResult =
  */
 export function resolveDeepLinkUrl(params: ResolveDeepLinkUrlParams): ResolveDeepLinkUrlResult {
   const result = resolveUrl(params);
-  const failure = evaluationFailure(params.config);
+  const failure = evaluationFailureOf(params.config.read);
   // The connect URL takes its scheme from the static read too, so a URL that did not need the
   // scheme still says the config it rests on could not be evaluated.
-  if (
-    !result.ok ||
-    failure == null ||
-    nonEmptyString(params.schemeOverride) != null ||
-    result.resolution.startsWith(failure)
-  ) {
+  if (!result.ok || failure == null || nonEmptyString(params.schemeOverride) != null) {
     return result;
   }
   return {
@@ -298,12 +280,11 @@ function resolveConfigUrl(
   routePath: string,
   config: ResolveDeepLinkUrlParams['config']
 ): ResolveDeepLinkUrlResult {
-  const failure = evaluationFailure(config);
   if (config.scheme != null) {
     return {
       ok: true,
       url: `${config.scheme}://${routePath}`,
-      resolution: `${failure ? `${failure}, so ` : ''}read the "scheme" field from ${config.configFile}`,
+      resolution: `read the "scheme" field from ${config.configFile}`,
       host: null,
     };
   }
@@ -312,7 +293,7 @@ function resolveConfigUrl(
     return {
       ok: true,
       url: `exp+${config.slug}://${routePath}`,
-      resolution: `${failure ? `${failure} and ` : ''}no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "${config.slug}"`,
+      resolution: `no "scheme" field was found, so the development build default exp+<slug>:// was used with slug "${config.slug}"`,
       host: null,
     };
   }
@@ -331,21 +312,16 @@ function resolveConfigUrl(
   };
 }
 
-function evaluationFailure(config: ProjectSchemeConfig): string | null {
-  return config.evaluationError != null
-    ? `${config.dynamicConfigFile} could not be evaluated (${config.evaluationError})`
-    : null;
-}
-
 /** The `Why:` of a project with no scheme, no slug and no package name, by what was read. */
-function whyUnresolvable(config: ProjectSchemeConfig): string {
-  if (config.evaluationError != null) {
-    return `Why: this project uses ${config.dynamicConfigFile}, and evaluating it failed: ${config.evaluationError}.`;
+function whyUnresolvable({ read }: ProjectSchemeConfig): string {
+  switch (read.kind) {
+    case 'evaluation-failed':
+      return `Why: this project uses ${read.file}, and evaluating it failed: ${read.error}.`;
+    case 'evaluated':
+      return `Why: no "scheme" or "slug" field was found in the evaluated ${read.file}, and package.json has no "name" field.`;
+    default:
+      return 'Why: no "scheme" or "slug" field was found in app.json or app.config.json, and package.json has no "name" field.';
   }
-  if (config.dynamicConfigFile != null) {
-    return `Why: no "scheme" or "slug" field was found in the evaluated ${config.dynamicConfigFile}, and package.json has no "name" field.`;
-  }
-  return 'Why: no "scheme" or "slug" field was found in app.json or app.config.json, and package.json has no "name" field.';
 }
 
 export interface OpenUrlCommand {

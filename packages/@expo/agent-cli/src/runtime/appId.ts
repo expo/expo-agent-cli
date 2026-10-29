@@ -14,7 +14,7 @@ import path from 'path';
 
 import type { NavigatePlatform } from '../navigate/device';
 import { EXPO_GO_APP_IDS } from '../navigate/target';
-import { readExpoConfig } from '../project/appConfig';
+import { configOf, readExpoConfig } from '../project/appConfig';
 
 /** Expo Go's application id, per platform, for a project that has no build of its own. */
 export const EXPO_GO_APP_ID: Record<NavigatePlatform, string> = {
@@ -163,7 +163,7 @@ export function readConfiguredAppId(
   projectRoot: string,
   platform: NavigatePlatform
 ): string | null {
-  const expo = readExpoConfig(projectRoot).config;
+  const expo = configOf(readExpoConfig(projectRoot))?.config;
   const platformConfig = isRecord(expo?.[platform])
     ? (expo[platform] as Record<string, unknown>)
     : null;
@@ -182,7 +182,7 @@ export function readConfiguredAppId(
  * treats null as "no scheme", which is a handled case.
  */
 export function readConfiguredScheme(projectRoot: string): string | null {
-  const expo = readExpoConfig(projectRoot).config;
+  const expo = configOf(readExpoConfig(projectRoot))?.config;
   const scheme = Array.isArray(expo?.scheme) ? expo.scheme[0] : expo?.scheme;
   return typeof scheme === 'string' && URL_SCHEME.test(scheme.trim()) ? scheme.trim() : null;
 }

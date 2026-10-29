@@ -6,6 +6,7 @@ import { seedAndroidBinding, seedIosBinding } from '../../deviceBinding/__tests_
 import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLock';
 import type { RuntimeStopOptions } from '../resolveStopOptions';
 import { buildStopFollowUps, runtimeStopAsync, type RuntimeStopResultJson } from '../stopAsync';
+import { forgetExpoConfigReads } from '../../project/appConfig';
 
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
@@ -94,6 +95,7 @@ afterEach(() => {
   }
   Object.defineProperty(process, 'platform', { value: realPlatform });
   vol.reset();
+  forgetExpoConfigReads();
 });
 
 describe(runtimeStopAsync, () => {

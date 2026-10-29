@@ -1,6 +1,7 @@
 import { vol } from 'memfs';
 
 import { classifyInstallImpactAsync } from '../impact';
+import { forgetExpoConfigReads } from '../appConfig';
 
 const projectRoot = '/project';
 
@@ -34,6 +35,7 @@ function writeProject({
 
 afterEach(() => {
   vol.reset();
+  forgetExpoConfigReads();
 });
 
 describe(classifyInstallImpactAsync, () => {

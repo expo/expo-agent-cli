@@ -7,7 +7,7 @@
 import { event } from '../events';
 import { buildConfigEffectiveFollowUps, followUpsEnabled, reportFollowUps } from '../followups';
 import * as Log from '../log';
-import { readAppConfigPlugins, readPluginIds } from '../project/appConfig';
+import { readPluginIds } from '../project/appConfig';
 import {
   assertFilePlatform,
   buildEffectiveConfig,
@@ -41,13 +41,7 @@ export async function printEffectiveConfigAsync(
 
   const { config, command, durationMs } = await introspectConfigAsync(projectRoot);
 
-  // A dynamic config that leaves `plugins` out drops the static file's list, so the app config is
-  // the fallback only when the payload evaluated no dynamic config.
-  const declaredPluginIds =
-    readPluginIds(config.plugins) ??
-    (config._internal?.dynamicConfigPath
-      ? []
-      : readAppConfigPlugins(projectRoot).plugins.map((plugin) => plugin.id));
+  const declaredPluginIds = readPluginIds(config.plugins);
 
   const report = buildEffectiveConfig({
     projectRoot,

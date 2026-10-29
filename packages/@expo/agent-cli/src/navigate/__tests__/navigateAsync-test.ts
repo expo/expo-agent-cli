@@ -9,6 +9,7 @@ import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../devLo
 import { navigateAsync } from '../navigateAsync';
 import type { NavigateOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
+import { forgetExpoConfigReads } from '../../project/appConfig';
 
 // The declared plugins are read off the loaded module, which these tests do not load.
 vi.mock('@expo/config', () => ({
@@ -184,6 +185,7 @@ afterEach(() => {
   }
   mockPlatform(realPlatform);
   vol.reset();
+  forgetExpoConfigReads();
 });
 
 describe(navigateAsync, () => {

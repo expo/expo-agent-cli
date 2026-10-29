@@ -1,11 +1,13 @@
 import { vol } from 'memfs';
 
 import { EXPO_GO_APP_ID, readConfiguredAppId, readConfiguredScheme, resolveAppId } from '../appId';
+import { forgetExpoConfigReads } from '../../project/appConfig';
 
 const projectRoot = '/project';
 
 afterEach(() => {
   vol.reset();
+  forgetExpoConfigReads();
 });
 
 describe(resolveAppId, () => {
@@ -307,26 +309,20 @@ describe('the application id of a prebuilt Android project', () => {
 
     expect(readConfiguredAppId('/project', 'ios')).toBeNull();
     vol.reset();
+    forgetExpoConfigReads();
     vol.fromJSON({ '/project/package.json': JSON.stringify({ name: 'demo' }) });
     expect(readConfiguredAppId('/project', 'android')).toBeNull();
   });
 });
 
 describe(readConfiguredScheme, () => {
-  it(`reads a string scheme, and the first of an array`, () => {
-    vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme: 'myapp' } }) });
-    expect(readConfiguredScheme(projectRoot)).toBe('myapp');
-    vol.fromJSON({
-      [`${projectRoot}/app.json`]: JSON.stringify({ expo: { scheme: ['first', 'second'] } }),
-    });
-    expect(readConfiguredScheme(projectRoot)).toBe('first');
-  });
-
-  it(`answers null when the static config names none`, () => {
-    vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo: { name: 'x' } }) });
-    expect(readConfiguredScheme(projectRoot)).toBeNull();
-    vol.fromJSON({ [`${projectRoot}/app.config.js`]: 'module.exports = {}' });
-    expect(readConfiguredScheme(projectRoot)).toBeNull();
+  it.each([
+    ['a string scheme', { scheme: 'myapp' }, 'myapp'],
+    ['the first of an array', { scheme: ['first', 'second'] }, 'first'],
+    ['no scheme', { name: 'x' }, null],
+  ])(`reads %s`, (_name, expo, expected) => {
+    vol.fromJSON({ [`${projectRoot}/app.json`]: JSON.stringify({ expo }) });
+    expect(readConfiguredScheme(projectRoot)).toBe(expected);
   });
 
   // The scheme is interpolated into the URL handed to `devicectl openURL`. A value carrying its

@@ -41,6 +41,7 @@ const STUB_CONFIG = {
   name: 'go-app',
   slug: 'go-app',
   sdkVersion: '54.0.0',
+  plugins: ['expo-camera'],
   _internal: {
     projectRoot: '/project',
     pluginHistory: {
@@ -79,9 +80,8 @@ const STUB_CONFIG = {
  * `expo config` will print.
  *
  * The declared half of the plugin list comes from the `plugins` array of the payload, which is the
- * config as the project's own CLI evaluated it. `STUB_CONFIG` carries none, so these runs fall
- * back to the static app config, which is why the fixture has to declare it; the dynamic suite
- * below puts the array in the payload.
+ * config as the project's own CLI evaluated it. `STUB_CONFIG` carries the `expo-camera` the fixture
+ * declares, as a real `expo config --type introspect` would.
  *
  * @returns the project root as the CLI reports it, with symlinks resolved — on macOS the temporary
  *   directory is one, and a subprocess reports the resolved path.
@@ -180,11 +180,10 @@ describe('@expo/agent-cli inspect:config-plugins', () => {
   // list is `_internal.pluginHistory` — what recorded itself — and a declared plugin missing from
   // it lands in no entry at all, which is the one gap the reader has to be told about.
   it('names a declared plugin the history has no entry for', async () => {
-    const { projectRoot, env } = await setupAsync('go-app');
-    const appConfigPath = path.join(projectRoot, 'app.json');
-    const appConfig = JSON.parse(await fs.promises.readFile(appConfigPath, 'utf8'));
-    appConfig.expo.plugins = ['expo-camera', 'expo-build-properties', './plugins/withThing'];
-    await fs.promises.writeFile(appConfigPath, JSON.stringify(appConfig, null, 2));
+    const { projectRoot, env } = await setupAsync('go-app', {
+      ...STUB_CONFIG,
+      plugins: ['expo-camera', 'expo-build-properties', './plugins/withThing'],
+    });
 
     const result = await executeAgentCliAsync(projectRoot, ['inspect:config-plugins', '--json'], {
       env,
@@ -466,25 +465,6 @@ describe('@expo/agent-cli inspect:config-plugins with a dynamic app config', () 
     await fs.promises.writeFile(
       path.join(projectRoot, 'app.config.js'),
       'module.exports = ({ config }) => ({ ...config, plugins: [] });\n'
-    );
-
-    const result = await executeAgentCliAsync(projectRoot, ['inspect:config-plugins', '--json'], {
-      env,
-    });
-    const payload: EffectiveConfigPayload = JSON.parse(result.stdout);
-
-    expect(payload.plugins.map((plugin) => plugin.declared)).toEqual([false, false]);
-  });
-
-  // An object export replaces `app.json`, so its plugins are gone from the config the app sees.
-  it('declares nothing when the evaluated config has no plugins key', async () => {
-    const { projectRoot, env } = await setupAsync('go-app', {
-      ...STUB_CONFIG,
-      _internal: { ...STUB_CONFIG._internal, dynamicConfigPath: '/project/app.config.js' },
-    });
-    await fs.promises.writeFile(
-      path.join(projectRoot, 'app.config.js'),
-      "module.exports = { name: 'go-app', slug: 'go-app' };\n"
     );
 
     const result = await executeAgentCliAsync(projectRoot, ['inspect:config-plugins', '--json'], {

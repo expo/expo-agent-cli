@@ -11,20 +11,6 @@ vi.mock('@expo/config', () => ({
 
 const projectRoot = '/project';
 
-function mockConfig(
-  exp: Record<string, unknown>,
-  files: Partial<{ static: string; dynamic: string }> = {}
-) {
-  vi.mocked(getConfig).mockReturnValue({
-    exp,
-    pkg: {},
-    rootConfig: {},
-    staticConfigPath: files.static ? `${projectRoot}/${files.static}` : null,
-    dynamicConfigPath: files.dynamic ? `${projectRoot}/${files.dynamic}` : null,
-    hasUnusedStaticConfig: false,
-  } as never);
-}
-
 beforeEach(() => {
   vol.reset();
   vi.mocked(getConfig).mockReset();
@@ -33,29 +19,6 @@ beforeEach(() => {
 });
 
 describe(evaluateExpoConfig, () => {
-  it(`should evaluate with the options expo config uses, for the mode the caller names`, () => {
-    mockConfig({ slug: 'demo', scheme: 'demoapp' }, { dynamic: 'app.config.ts' });
-
-    const result = evaluateExpoConfig(projectRoot, {
-      mode: 'production',
-      isPublicConfig: true,
-      skipPlugins: true,
-    });
-
-    expect(result).toEqual({
-      ok: true,
-      exp: { slug: 'demo', scheme: 'demoapp' },
-      staticConfigFile: null,
-      dynamicConfigFile: 'app.config.ts',
-      pluginsUnknown: false,
-    });
-    expect(getConfig).toHaveBeenCalledWith(projectRoot, {
-      skipSDKVersionRequirement: true,
-      isPublicConfig: true,
-      skipPlugins: true,
-    });
-  });
-
   // The env files are loaded for the evaluation only: what `expo start` would serve is this
   // process's own environment, and a later subprocess inherits that one.
   it(`should set the mode for the evaluation and put the environment back afterwards`, () => {
@@ -70,7 +33,7 @@ describe(evaluateExpoConfig, () => {
       return { exp: {}, pkg: {}, staticConfigPath: null, dynamicConfigPath: null } as never;
     });
 
-    evaluateExpoConfig(projectRoot, { mode: 'development' });
+    evaluateExpoConfig(projectRoot);
 
     // `@expo/cli` 58 deletes `BABEL_ENV` for the mode too (`setNodeEnv` in `@expo/env`).
     expect(seen).toEqual({ NODE_ENV: 'development', BABEL_ENV: undefined, __DEV__: true });
@@ -90,7 +53,7 @@ describe(evaluateExpoConfig, () => {
         return { exp: {}, pkg: {}, staticConfigPath: null, dynamicConfigPath: null } as never;
       });
 
-      evaluateExpoConfig(projectRoot, { mode: 'development' });
+      evaluateExpoConfig(projectRoot);
 
       expect(stderr).toHaveBeenCalledWith('hello from app.config.js\n');
       expect(stdout).not.toHaveBeenCalled();
@@ -107,7 +70,7 @@ describe(evaluateExpoConfig, () => {
       );
     });
 
-    expect(evaluateExpoConfig(projectRoot, { mode: 'development' })).toEqual({
+    expect(evaluateExpoConfig(projectRoot)).toEqual({
       ok: false,
       error: 'Cannot resolve app config',
     });

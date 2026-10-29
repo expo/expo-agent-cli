@@ -71,7 +71,6 @@ interface IntrospectedInternal {
   modResults?: { [platform: string]: PlatformMods };
   pluginHistory?: { [name: string]: { name?: string; version?: string } };
   autolinkedModules?: string[];
-  dynamicConfigPath?: string | null;
 }
 
 /** The parsed `expo config --type introspect --json` object. Only the read keys are typed. */
@@ -86,10 +85,7 @@ export interface IntrospectedConfig {
 export interface BuildEffectiveConfigOptions {
   projectRoot: string;
   config: IntrospectedConfig;
-  /**
-   * Plugin ids as the app config spells them: the `plugins` of the evaluated config, or of the
-   * static file when the payload carries none and no dynamic config was evaluated.
-   */
+  /** Plugin ids as the app config spells them, from the `plugins` of the evaluated config. */
   declaredPluginIds: string[];
   /** The argv of the subprocess that produced {@link config}, for `source.command`. */
   command: string[];

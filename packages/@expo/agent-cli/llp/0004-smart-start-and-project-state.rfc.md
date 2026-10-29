@@ -701,8 +701,8 @@ The engine shipped in `src/project/`, `src/plan/`, `src/status/`, `src/dev/`, as
    `app.config.js/ts` evaluated with `@expo/config` in `development` mode after the env files
    are loaded ([[0005-runtime-loop-tools]] §Pointing an app at this dev server). No config
    plugin runs, so a plugin module that is not installed does not fail the read, and the
-   `plugins` the config declares are kept. One command evaluates a dynamic config once while
-   its files stay the same, so every value it reads comes from one call of the config. A dynamic config that fails to evaluate keeps the
+   `plugins` the config declares are kept. One command evaluates a dynamic config once per project, so every value it reads comes from
+   one call of the config. A dynamic config that fails to evaluate keeps the
    static values and reports why, so a missing value reads as unknown. Its plugins and router
    root are unknown: Expo Go gets an `unknown-app-config` reason, and the route check is skipped. `inspect:config-plugins` reads the declared plugins
    out of the introspect payload, where a dynamic config with no `plugins` key declares none.

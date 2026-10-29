@@ -2,7 +2,13 @@ import { getConfig } from '@expo/config';
 import { vol } from 'memfs';
 import path from 'path';
 
-import { readAppConfigPlugins, readEasProject, readExpoConfig, readPluginIds } from '../appConfig';
+import {
+  forgetExpoConfigReads,
+  readAppConfigPlugins,
+  readEasProject,
+  readExpoConfig,
+  readPluginIds,
+} from '../appConfig';
 
 // The declared plugins are read off the loaded module, which these tests do not load.
 vi.mock('@expo/config', () => ({
@@ -14,6 +20,7 @@ const projectRoot = path.resolve('/project');
 
 afterEach(() => {
   vol.reset();
+  forgetExpoConfigReads();
 });
 
 function writeFiles(files: Record<string, string>) {
@@ -32,18 +39,12 @@ describe(readPluginIds, () => {
     ]);
   });
 
-  it(`should answer an empty list for an empty array`, () => {
-    expect(readPluginIds([])).toEqual([]);
-  });
-
-  it(`should skip an entry that names no module`, () => {
-    expect(readPluginIds(['', [''], 42, null])).toEqual([]);
-  });
-
-  it(`should answer null when the value is not an array`, () => {
-    expect(readPluginIds(undefined)).toBeNull();
-    expect(readPluginIds('expo-camera')).toBeNull();
-  });
+  it.each([[[]], [['', [''], 42, null]], [undefined], ['expo-camera']])(
+    `should answer an empty list for %j`,
+    (plugins) => {
+      expect(readPluginIds(plugins)).toEqual([]);
+    }
+  );
 });
 
 describe(readExpoConfig, () => {
@@ -54,10 +55,11 @@ describe(readExpoConfig, () => {
       'app.config.json': JSON.stringify({ expo: { runtimeVersion: 'from-app-config-json' } }),
     });
 
-    const result = readExpoConfig(projectRoot);
-
-    expect(result).toMatchObject({ source: 'app.config.json', unreadable: false });
-    expect(result.config?.runtimeVersion).toBe('from-app-config-json');
+    expect(readExpoConfig(projectRoot)).toEqual({
+      kind: 'static',
+      file: 'app.config.json',
+      config: { runtimeVersion: 'from-app-config-json' },
+    });
   });
 
   it.each(['app.config.mts', 'app.config.cts'])(`should count %s as a dynamic config`, (file) => {
@@ -68,10 +70,10 @@ describe(readExpoConfig, () => {
       dynamicConfigPath: path.join(projectRoot, file),
     } as never);
 
-    expect(readExpoConfig(projectRoot)).toMatchObject({
-      source: file,
+    expect(readExpoConfig(projectRoot)).toEqual({
+      kind: 'evaluated',
+      file,
       config: { slug: 'evaluated' },
-      dynamicConfigFile: file,
     });
   });
 
@@ -84,11 +86,11 @@ describe(readExpoConfig, () => {
       throw new Error('boom');
     });
 
-    expect(readExpoConfig(projectRoot)).toMatchObject({
-      source: 'app.json',
-      config: { slug: 'static' },
-      dynamicConfigFile: 'app.config.js',
-      evaluationError: 'boom',
+    expect(readExpoConfig(projectRoot)).toEqual({
+      kind: 'evaluation-failed',
+      file: 'app.config.js',
+      error: 'boom',
+      fallback: { kind: 'static', file: 'app.json', config: { slug: 'static' } },
     });
   });
 
@@ -98,11 +100,7 @@ describe(readExpoConfig, () => {
       'app.json': JSON.stringify({ expo: { name: 'app' } }),
     });
 
-    expect(readExpoConfig(projectRoot)).toMatchObject({
-      source: 'app.config.json',
-      config: null,
-      unreadable: true,
-    });
+    expect(readExpoConfig(projectRoot)).toEqual({ kind: 'unreadable', file: 'app.config.json' });
   });
 });
 
@@ -113,10 +111,46 @@ describe(readEasProject, () => {
       'app.config.json': JSON.stringify({ expo: { extra: { eas: { projectId: 'proj-1' } } } }),
     });
 
-    expect(readEasProject(projectRoot)).toMatchObject({
+    expect(readEasProject(projectRoot)).toEqual({
+      kind: 'linked',
       projectId: 'proj-1',
       source: 'app.config.json',
     });
+  });
+});
+
+describe('Reading the EAS project link', () => {
+  it.each([
+    [
+      'a config that names no id',
+      { 'app.json': '{"expo":{}}' },
+      null,
+      { kind: 'unlinked', source: 'app.json' },
+    ],
+    ['no config at all', {}, null, { kind: 'unlinked', source: null }],
+    [
+      'a static file that does not parse',
+      { 'app.json': '{ not json' },
+      null,
+      { kind: 'unreadable', source: 'app.json' },
+    ],
+    [
+      'a dynamic config that fails to evaluate',
+      { 'app.json': '{"expo":{}}', 'app.config.js': 'module.exports = {};' },
+      'boom',
+      {
+        kind: 'unknown',
+        source: 'app.config.js',
+        why: 'app.config.js could not be evaluated (boom)',
+      },
+    ],
+  ])(`should read %s`, (_name, files, thrown, expected) => {
+    writeFiles(files);
+    vi.mocked(getConfig).mockImplementation(() => {
+      throw new Error(thrown ?? 'not evaluated');
+    });
+
+    expect(readEasProject(projectRoot)).toEqual(expected);
   });
 });
 
