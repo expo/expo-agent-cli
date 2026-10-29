@@ -15,18 +15,15 @@ export interface DeviceInventory {
   booted: { name: string; udid: string }[];
   /** Unknown includes an unrequested or failed lookup; unsupported means a non-macOS host. */
   bootedStatus: 'unknown' | 'observed' | 'unsupported';
-  /** Hardware models of attached Android devices, as `adb devices -l` reports them. */
-  androidModels: string[];
-  /** Unknown includes an unrequested or failed `adb`: no answer is not an empty list. */
-  androidStatus: 'unknown' | 'observed';
+  /** Hardware models of attached Android devices, as `adb devices -l` reports them; null when it did not exit 0. */
+  androidModels: string[] | null;
 }
 
 /** Facts that know nothing, for a run that did not need to ask the device tools. */
 export const EMPTY_DEVICE_INVENTORY: DeviceInventory = {
   booted: [],
   bootedStatus: 'unknown',
-  androidModels: [],
-  androidStatus: 'unknown',
+  androidModels: null,
 };
 
 export type SelectedDevice = { backend: 'cloud'; deviceId: string | null };
@@ -90,7 +87,7 @@ function claimedLocally(
   const deviceName = typeof target.deviceName === 'string' ? target.deviceName : '';
   return (
     deviceInventory.booted.some((simulator) => simulator.name === deviceName) ||
-    deviceInventory.androidModels.some(
+    (deviceInventory.androidModels ?? []).some(
       (model) => model === deviceName || deviceName.startsWith(`${model} - `)
     )
   );
@@ -102,7 +99,7 @@ function androidUnproven(
   deviceInventory: DeviceInventory
 ): boolean {
   return (
-    deviceInventory.androidStatus === 'unknown' &&
+    deviceInventory.androidModels == null &&
     platformOfTarget(target, deviceInventory).platform === 'android'
   );
 }
@@ -224,7 +221,6 @@ export async function refreshDeviceInventoryAsync(
     booted: tools.booted,
     bootedStatus: tools.bootedStatus,
     androidModels: tools.androidModels,
-    androidStatus: tools.androidStatus,
   };
 }
 
@@ -267,8 +263,7 @@ export async function readDeviceInventoryAsync(timeoutMs?: number): Promise<Devi
         ? parseAndroidDevices(adb.stdout)
             .map((device) => device.model)
             .filter((model): model is string => model != null)
-        : [],
-    androidStatus: adb?.exitCode === 0 ? 'observed' : 'unknown',
+        : null,
   };
 }
 

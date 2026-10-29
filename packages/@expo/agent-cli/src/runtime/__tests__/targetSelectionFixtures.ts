@@ -5,7 +5,6 @@ export function makeDeviceInventory(overrides: Partial<DeviceInventory> = {}): D
     booted: [],
     bootedStatus: 'observed',
     androidModels: [],
-    androidStatus: 'observed',
     ...overrides,
   };
 }
@@ -14,7 +13,7 @@ export function makeTargetSelection(overrides: Partial<TargetSelection> = {}): T
 }
 export const EVERY_TARGET_CLIENT = {
   targetSelection: READ_EVERY_TARGET,
-  deviceInventory: makeDeviceInventory({ bootedStatus: 'unknown', androidStatus: 'unknown' }),
+  deviceInventory: makeDeviceInventory({ bootedStatus: 'unknown', androidModels: null }),
 };
 
 export function makeTarget(overrides: Partial<CdpTarget> = {}): CdpTarget {
