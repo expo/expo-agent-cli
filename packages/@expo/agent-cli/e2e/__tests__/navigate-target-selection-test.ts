@@ -347,8 +347,52 @@ it.each(scenarios)('$name', async (scenario) => {
         for (const args of stops) expect(args.at(-1)!.replace(/^'|'$/g, '')).toBe(APP_ID);
         expect(result.stderr).toContain('no android app connected');
         expect(result.stderr).toContain('accepted the intent and nothing more');
+        expect(result.stderr).toContain(
+          'The app was stopped and the link opened a second time, and that did not attach either.'
+        );
       }
     }
+  } finally {
+    await releaseLock();
+    await server.close();
+  }
+});
+
+it('recovers an Expo Go run by stopping Expo Go, not the android.package of the config', async () => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+  const device = await deviceFixture(root, {
+    name: 'expo go',
+    backend: 'local-android',
+    platform: 'android',
+    initial: 'empty',
+  });
+  const configPath = path.join(root, 'app.json');
+  const { expo } = JSON.parse(await fs.promises.readFile(configPath, 'utf8'));
+  await fs.promises.writeFile(
+    configPath,
+    JSON.stringify({ expo: { ...expo, android: { package: APP_ID } } })
+  );
+  const server = await startStubDevServerAsync({ projectRoot: root, targets: () => [] });
+  const releaseLock = await holdDevLockAsync(root, {
+    url: server.url,
+    port: server.port,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    projectRoot: root,
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      ['navigate', '/profile/42', '--no-route-check', '--attach-timeout', '2s', '--json'],
+      { reject: false, env: device.env }
+    );
+    expect(result.exitCode, result.all).toBe(22);
+    const stops = device.forceStops!();
+    expect(stops.length).toBeGreaterThan(0);
+    for (const args of stops) expect(args.at(-1)!.replace(/^'|'$/g, '')).toBe('host.exp.exponent');
+    expect(result.stderr).toContain(
+      'The app was stopped and the link opened a second time, and that did not attach either.'
+    );
   } finally {
     await releaseLock();
     await server.close();

@@ -278,6 +278,7 @@ export async function openRouteAsync(
     devServerUrl,
     waitAsync,
     url: resolved.url,
+    isExpoGo: resolved.isExpoGo,
     openedOk: result.exitCode === 0,
     // What is left of the caller's budget. A launcher open that attached in four seconds leaves
     // almost all of it for the route link, and one that spent the lot still leaves a floor — the
@@ -582,6 +583,7 @@ async function confirmAttachAsync({
   devServerUrl,
   waitAsync,
   url,
+  isExpoGo,
   openedOk,
   budgetMs,
 }: {
@@ -591,6 +593,8 @@ async function confirmAttachAsync({
   devServerUrl: string;
   waitAsync: AttachWaiter | null;
   url: string;
+  /** The link this run opened targets Expo Go, whatever the app config names. */
+  isExpoGo: boolean;
   openedOk: boolean;
   /** How long this check may wait. The caller's own budget, less whatever it has already spent. */
   budgetMs: number;
@@ -632,12 +636,13 @@ async function confirmAttachAsync({
   const canRecover = device.platform === 'android' && device.backend !== 'local-ios';
   if (targets === 0 && canRecover && options.recoverStuckApp !== false) {
     // This device's read is empty here, so no attached app names the id: `--app-id`, then the app
-    // config, then Expo Go. The other apps on the dev server belong to other devices.
+    // config, then Expo Go. The other apps on the dev server belong to other devices. A run that
+    // opened Expo Go stops Expo Go: `android.package` is normal on a managed app that runs in it.
     const { appId } = resolveAppId({
       platform: device.platform,
       appIdOverride: options.appId,
       targetAppIds: [],
-      configured: readConfiguredAppId(projectRoot, device.platform),
+      configured: isExpoGo ? null : readConfiguredAppId(projectRoot, device.platform),
     });
     const stopped = await stopAppOnDeviceAsync({
       platform: device.platform,
