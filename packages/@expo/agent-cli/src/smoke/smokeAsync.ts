@@ -971,7 +971,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         commandSocketReconnected: rungOne.churn.reconnected > 0,
         targetOutcomes: rungOne.attempt.method === 'page-reload' ? rungOne.attempt.outcomes : [],
       };
-      if (rungOne.kind !== 'proved' && rungOne.kind !== 'acted') {
+      if (rungOne.kind === 'not-delivered' || rungOne.kind === 'unprovable') {
         return {
           ...result,
           ok: false,

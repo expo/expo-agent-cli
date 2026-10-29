@@ -2,6 +2,7 @@
 // Run the published command through real pipes and HTTP/WebSocket connections. The device tools
 // and inspector protocol are doubles; this checks reload dispatch, not real Hermes behavior.
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { bindOtherWorktreeAsync, runtimeTarget } from '../runtimeTargetFixtures';
 import { writeCloudBindingAsync } from '../stubEas';
@@ -69,6 +70,69 @@ it.skipIf(process.platform !== 'darwin').each([
     });
     expect(server.broadcasts()).toBe(0);
     expect(server.pageReloads()).toEqual(['own']);
+  } finally {
+    await server.close();
+  }
+});
+
+// The skipped app is on iOS, so an Android bundle served after `Page.reload` is this app's proof.
+it('smoke takes an Android bundle as proof when Page.reload kept the context beside an iOS app', async () => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+  await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
+  await fs.promises.rm(await bindingFixture(root, BOOTED_SIMULATOR.udid));
+  await bindOtherWorktreeAsync(root, BOOTED_SIMULATOR.udid, BOOTED_SIMULATOR.name);
+  const logPath = path.join(root, '.expo', 'dev', 'logs', 'dev-detached.log');
+  await fs.promises.mkdir(path.dirname(logPath), { recursive: true });
+  await fs.promises.writeFile(logPath, 'Starting Metro Bundler\n');
+  const targets = [
+    app('other', BOOTED_SIMULATOR.name),
+    runtimeTarget('own', {
+      deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+      appId: 'host.exp.exponent',
+    }),
+  ];
+  let bundled = false;
+  let server: Awaited<ReturnType<typeof startStubDevServerAsync>> | undefined;
+  server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: () => {
+      if (!bundled && server?.pageReloads().length) {
+        bundled = true;
+        fs.appendFileSync(logPath, 'Android Bundled 25ms node_modules/expo-router/entry.js\n');
+      }
+      return targets;
+    },
+    pageReload: 'keeps-context',
+    inspectorEvaluate: () => 1,
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      [
+        'smoke',
+        '--android',
+        '--dev-server-url',
+        server.url,
+        '--no-start',
+        '--no-screenshot',
+        '--window',
+        '100ms',
+        '--timeout',
+        '20s',
+        '--json',
+        '--no-followups',
+      ],
+      { reject: false }
+    );
+    const report = JSON.parse(result.stdout);
+    expect(server.pageReloads(), result.all).toEqual(['own']);
+    expect(server.broadcasts()).toBe(0);
+    expect(report.reload).toMatchObject({
+      disposition: 'reloaded',
+      verifiedBy: 'dev-server-bundle',
+      bundleServed: true,
+      targetOutcomes: [{ targetId: 'own', outcome: 'delivered-unproved' }],
+    });
   } finally {
     await server.close();
   }
