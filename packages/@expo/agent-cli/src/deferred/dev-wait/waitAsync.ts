@@ -26,10 +26,7 @@ import {
 import { howToNameTheDevServer, probeDevServerAsync } from '../../runtime/devServer';
 import { discoverDevServerAsync } from '../../runtime/discoverDevServer';
 import { targetSelectionOf } from '../../runtime/resolveTargetSelection';
-import {
-  deviceInventoryForSelectionAsync,
-  EMPTY_DEVICE_INVENTORY,
-} from '../../runtime/targetSelection';
+import { deviceInventoryForSelectionAsync } from '../../runtime/targetSelection';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../../runtime/waitReady';
 import { CommandError } from '../../utils/errors';
 import { buildDevWaitFollowUps } from './followups';
@@ -101,11 +98,14 @@ export async function devWaitAsync(projectRoot: string, options: DevWaitOptions)
     },
     device: null,
   });
-  const { platforms: bundlePlatforms, source: bundlePlatformSource } =
-    await resolveBundleCheckPlatformsAsync(targetSelection, discovery.targets, {
-      deviceInventory: EMPTY_DEVICE_INVENTORY,
-      fallback: options.platform,
-    });
+  // A named platform, web included, is built as named. The selection above is for the attach wait
+  // and for inference, and it cannot carry web.
+  const { platforms: bundlePlatforms, source: bundlePlatformSource } = options.platformExplicit
+    ? { platforms: [options.platform], source: 'flag' as const }
+    : await resolveBundleCheckPlatformsAsync(targetSelection, discovery.targets, {
+        deviceInventory: await deviceInventoryForSelectionAsync(discovery.targets, targetSelection),
+        fallback: options.platform,
+      });
 
   const bundles: BundleCheckResult[] = [];
   if (options.bundleCheck && readiness.ready && readiness.projectRootMatched !== false) {
