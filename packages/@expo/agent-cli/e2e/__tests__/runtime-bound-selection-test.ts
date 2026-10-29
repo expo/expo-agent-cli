@@ -29,6 +29,11 @@ const apps = {
     deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
     appId: 'host.exp.exponent',
   }),
+  // An EAS Android session runs an x86_64 image; the local emulator on Apple Silicon is arm64.
+  androidSession: runtimeTarget('androidSession', {
+    deviceName: 'sdk_gphone64_x86_64 - 15 - API 35',
+    appId: 'host.exp.exponent',
+  }),
 };
 type BindingKind =
   | 'emulator'
@@ -41,7 +46,14 @@ const sessionLine =
   'Scoped to ios: the EAS Simulator session 01a160c1, the device bound to this worktree.';
 const simulatorLine = `Scoped to ios: the iOS simulator "${A.name}", the device bound to this worktree.`;
 
-async function setupBoundAsync(binding: BindingKind, { shutdown = false } = {}) {
+async function setupBoundAsync(
+  binding: BindingKind,
+  {
+    shutdown = false,
+    attached = binding === 'emulator',
+    bound = binding === 'emulator',
+  }: { shutdown?: boolean; attached?: boolean; bound?: boolean } = {}
+) {
   const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
   await installStubXcrunAsync(root, {
     simulators: [shutdown ? { ...A, state: 'Shutdown' as const } : A, B],
@@ -49,9 +61,7 @@ async function setupBoundAsync(binding: BindingKind, { shutdown = false } = {}) 
   // The stub binds the first booted simulator; this worktree's binding is A in every state.
   const bindingFile = await bindingFixture(root, A.udid);
   if (!binding.startsWith('simulator')) await fs.promises.rm(bindingFile);
-  const adb = await installStubAdbAsync(root, 'dev.example.app', {
-    attached: binding === 'emulator',
-  });
+  const adb = await installStubAdbAsync(root, 'dev.example.app', { attached, bound });
   if (binding.endsWith('cloud')) {
     await writeCloudBindingAsync(expoHomeOf(root), root, {
       platform: binding === 'android-cloud' ? 'android' : 'ios',
@@ -74,6 +84,8 @@ const TWIN = 'emulator-5556';
 const selectionCases: {
   binding: BindingKind;
   flag?: 'ios' | 'android';
+  /** List the local emulator beside an EAS Android session. */
+  emulatorAttached?: boolean;
   targets: AppId[];
   selected: AppId;
   line: string | null;
@@ -88,6 +100,13 @@ const selectionCases: {
     binding: 'android-cloud',
     targets: ['a', 'android'],
     selected: 'android',
+    line: 'Scoped to android: the EAS Simulator session 01a15bf1, the device bound to this worktree.',
+  },
+  {
+    binding: 'android-cloud',
+    emulatorAttached: true,
+    targets: ['android', 'androidSession'],
+    selected: 'androidSession',
     line: 'Scoped to android: the EAS Simulator session 01a15bf1, the device bound to this worktree.',
   },
   {
@@ -123,7 +142,9 @@ for (const row of selectionCases) {
   it.skipIf(row.binding === 'simulator' && process.platform !== 'darwin')(
     `eval with ${row.binding}, flag ${row.flag ?? 'none'}, reads ${row.selected}`,
     async () => {
-      const { root, env } = await setupBoundAsync(row.binding);
+      const { root, env } = await setupBoundAsync(row.binding, {
+        attached: row.emulatorAttached ?? row.binding === 'emulator',
+      });
       const evaluated: string[] = [];
       const server = await startStubDevServerAsync({
         projectRoot: root,
@@ -172,6 +193,8 @@ const refusalCases: {
   text?: string;
   /** Attach a twin of the bound emulator; the serials that reverse the dev server's port. */
   twin?: string[];
+  /** The bound emulator is not among the devices adb lists. */
+  emulatorGone?: boolean;
 }[] = [
   {
     name: 'two emulators of one model that both reverse the port',
@@ -179,6 +202,18 @@ const refusalCases: {
     targets: ['android'],
     twin: [EMULATOR_SERIAL, TWIN],
     text: `"adb -s ${TWIN} reverse --remove tcp:`,
+  },
+  {
+    name: 'two emulators of one model that neither reverses the port',
+    binding: 'emulator',
+    targets: ['android'],
+    twin: [],
+  },
+  {
+    name: 'a bound emulator that is not attached',
+    binding: 'emulator',
+    targets: ['android'],
+    emulatorGone: true,
   },
   {
     name: 'a shut-down bound simulator beside a booted one',
@@ -228,7 +263,10 @@ for (const row of refusalCases) {
   it.skipIf(row.binding.startsWith('simulator') && process.platform !== 'darwin')(
     `eval refusal: ${row.name}`,
     async () => {
-      const { root, env } = await setupBoundAsync(row.binding, { shutdown: row.shutdown });
+      const { root, env } = await setupBoundAsync(row.binding, {
+        shutdown: row.shutdown,
+        attached: !row.emulatorGone && row.binding === 'emulator',
+      });
       const server = await startStubDevServerAsync({
         projectRoot: root,
         targets: row.targets.map((id) => apps[id]),

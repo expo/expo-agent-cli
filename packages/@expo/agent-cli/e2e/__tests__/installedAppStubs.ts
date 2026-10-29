@@ -182,7 +182,8 @@ function readCalls(recordPath: string): string[][] {
 
 /**
  * A stub `adb` that lists the attached emulator `EMULATOR_SERIAL` (bound to the fixture through
- * {@link androidBindingFixture}, unless `attached` is false) and every instance the stub `emulator`
+ * {@link androidBindingFixture}; `attached: false` lists no emulator, `bound` alone picks whether to
+ * write that binding) and every instance the stub `emulator`
  * is up as ({@link stubEmulatorStatePath}). `get-state` answers `device` for a listed serial and the
  * real tool's "not found" for any other; `sys.boot_completed` is `1`. The emulator has `appId`
  * installed, unless `STUB_ADB_INSTALLED=0`.
@@ -202,12 +203,12 @@ function readCalls(recordPath: string): string[][] {
 export async function installStubAdbAsync(
   root: string,
   appId: string,
-  { attached = true }: { attached?: boolean } = {}
+  { attached = true, bound = attached }: { attached?: boolean; bound?: boolean } = {}
 ): Promise<{ env: Record<string, string>; calls: StubCalls }> {
   const recordPath = path.join(root, '.adb-calls.jsonl');
   const scriptPath = path.join(root, '.stub-bin', 'adb-stub.js');
   await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
-  if (attached) {
+  if (bound) {
     await androidBindingFixture(root, EMULATOR_SERIAL);
   }
   await fs.promises.writeFile(

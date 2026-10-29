@@ -527,6 +527,8 @@ describe('a worktree bound to an EAS Simulator session, with only a local app co
     expect(error.code).toBe('NO_APP_CONNECTED');
     expect(error.message).toContain('"iPhone 17 Pro"');
     expect(error.message).toContain('the EAS Simulator session 01a160c1');
+    expect(error.message).toContain('is not the device this run reads');
+    expect(error.message).not.toContain("the other worktree's build");
     expect(result.stderr).not.toContain('Scoped to ios');
   });
 });

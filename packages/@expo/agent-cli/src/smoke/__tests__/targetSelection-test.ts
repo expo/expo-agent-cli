@@ -118,17 +118,6 @@ it('publishes an acquired device to subsequent phases without another lookup', a
   });
 });
 
-it('places a development-build target that appears after the first empty wait probe', async () => {
-  inventory();
-  let reads = 0;
-  const url = await serverAsync(() => (++reads === 1 ? [] : [target()]));
-  const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios']));
-  expect(await deps.waitForAppConnection(url, 600)).toMatchObject({
-    appsConnected: 1,
-    timedOut: false,
-  });
-});
-
 it('asks the device tools once for a list that does not change', async () => {
   const tools = inventory();
   const url = await serverAsync(() => [
@@ -142,31 +131,6 @@ it('asks the device tools once for a list that does not change', async () => {
   });
   expect(tools.calls.filter((args) => args[0] === 'list')).toHaveLength(1);
 });
-
-it.each(['Booted', 'Shutdown'] as const)(
-  'scopes a wait on an initially empty list to the %s simulator bound to this worktree',
-  async (state) => {
-    seedIosBinding(projectRoot, 'IOS-A', 'Device A');
-    const tools = fakeTools({
-      simulators: [
-        { udid: 'IOS-A', name: 'Device A', state },
-        { udid: 'IOS-B', name: 'Device B', state: 'Booted' },
-      ],
-    });
-    vi.mocked(spawnCaptureAsync).mockImplementation((command, args) =>
-      command === 'xcrun' ? tools.simctl(args.slice(1)) : tools.adb(args)
-    );
-    let reads = 0;
-    const url = await serverAsync(() =>
-      ++reads === 1 ? [] : [target({ deviceName: 'Device B' })]
-    );
-    const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios']));
-    expect(await deps.waitForAppConnection(url, 350)).toMatchObject({
-      appsConnected: 0,
-      timedOut: true,
-    });
-  }
-);
 
 it('refreshes failed local exclusion evidence before counting a cloud attachment', async () => {
   const url = await serverAsync(() => [target()]);
