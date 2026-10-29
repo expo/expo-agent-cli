@@ -812,6 +812,9 @@ describe(navigateAsync, () => {
   });
   // @ref llp/0005-runtime-loop-tools.rfc.md §navigate
   describe('--print-url', () => {
+    // These cases are about the URL shape with no device bound; the bound scope is pinned in e2e.
+    beforeEach(() => vol.reset());
+
     function mockExpoGoProject() {
       vol.fromJSON({
         [`${projectRoot}/package.json`]: JSON.stringify({ name: 'demo', dependencies: {} }),

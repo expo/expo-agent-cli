@@ -323,3 +323,42 @@ it.each(scenarios)('$name', async (scenario) => {
     await server.close();
   }
 });
+
+it('--print-url scopes to the bound EAS session like navigate, so an iOS Expo Go app does not count', async () => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('dev-client-app'));
+  const device = await deviceFixture(root, scenarios[0]!);
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    manifestOrigin: `https://${TUNNEL_HOST}`,
+    targets: () => [
+      makeTarget({
+        id: 'other',
+        appId: 'host.exp.Exponent',
+        deviceName: BOOTED_SIMULATOR.name,
+      }),
+    ],
+  });
+  const releaseLock = await holdDevLockAsync(root, {
+    url: server.url,
+    port: server.port,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    projectRoot: root,
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      ['navigate', '/profile/42', '--print-url', '--no-route-check', '--json', '--no-followups'],
+      { reject: false, env: device.env }
+    );
+    expect(result.exitCode, result.all).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      url: 'exp+dev-client-app://profile/42',
+      printUrl: true,
+    });
+    expect(device.opens()).toEqual([]);
+  } finally {
+    await releaseLock();
+    await server.close();
+  }
+});

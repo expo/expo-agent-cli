@@ -377,6 +377,7 @@ async function printRouteUrlAsync(projectRoot: string, options: NavigateOptions)
     devServerUrl: options.devServerUrl,
     routeCheck: options.routeCheck,
     command: 'navigate',
+    cloud: options.cloud,
   });
 
   const followups = followUpsEnabled(wantFollowUps)
