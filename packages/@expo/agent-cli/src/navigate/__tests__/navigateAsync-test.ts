@@ -10,7 +10,11 @@ import { navigateAsync } from '../navigateAsync';
 import type { NavigateOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 
-vi.mock('@expo/config', () => ({ getConfig: vi.fn() }));
+// The declared plugins are read off the loaded module, which these tests do not load.
+vi.mock('@expo/config', () => ({
+  getConfig: vi.fn(),
+  getConfigFilePaths: () => ({ staticConfigPath: null, dynamicConfigPath: null }),
+}));
 vi.mock('../../devLock', () => ({
   readDevServerLockAsync: vi.fn(async () => null),
   readLastLoggedDevServerPort: vi.fn(() => null),

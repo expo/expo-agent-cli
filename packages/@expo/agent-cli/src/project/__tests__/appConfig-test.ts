@@ -4,7 +4,11 @@ import path from 'path';
 
 import { readAppConfigPlugins, readEasProject, readExpoConfig, readPluginIds } from '../appConfig';
 
-vi.mock('@expo/config', () => ({ getConfig: vi.fn() }));
+// The declared plugins are read off the loaded module, which these tests do not load.
+vi.mock('@expo/config', () => ({
+  getConfig: vi.fn(),
+  getConfigFilePaths: () => ({ staticConfigPath: null, dynamicConfigPath: null }),
+}));
 
 const projectRoot = path.resolve('/project');
 
@@ -123,8 +127,7 @@ describe(readAppConfigPlugins, () => {
     expect(readAppConfigPlugins(projectRoot)).toEqual({
       source: null,
       plugins: [],
-      dynamicConfigFile: null,
-      evaluationError: null,
+      unknownBecause: null,
     });
   });
 });

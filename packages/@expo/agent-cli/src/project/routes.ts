@@ -20,7 +20,7 @@ import fs from 'fs';
 import path from 'path';
 
 import { directoryExistsAsync } from '../utils/dir';
-import { readExpoConfig } from './appConfig';
+import { readExpoConfig, whyPluginsAreUnknown } from './appConfig';
 
 /** Extensions Metro resolves for a route module. */
 const ROUTE_EXTENSIONS = ['.js', '.jsx', '.ts', '.tsx'];
@@ -162,16 +162,14 @@ async function resolveRouterRootAsync(
   projectRoot: string
 ): Promise<{ root: string | null; unknownBecause: string | null }> {
   const read = readExpoConfig(projectRoot);
-  // A dynamic config that failed may name another root.
-  if (read.evaluationError != null) {
-    return {
-      root: null,
-      unknownBecause: `${read.dynamicConfigFile} could not be evaluated (${read.evaluationError}), so the router root is unknown`,
-    };
-  }
-  const configured = readConfiguredRouterRoot(read.config);
+  const configured = read.evaluationError == null ? readConfiguredRouterRoot(read.config) : null;
   if (configured != null) {
     return { root: configured, unknownBecause: null };
+  }
+  // A config whose plugins are unknown may name another root in the `expo-router` options.
+  const pluginsUnknown = whyPluginsAreUnknown(read);
+  if (pluginsUnknown != null) {
+    return { root: null, unknownBecause: `${pluginsUnknown}, so the router root is unknown` };
   }
   if (await directoryExistsAsync(path.join(projectRoot, 'src', 'app'))) {
     return { root: 'src/app', unknownBecause: null };

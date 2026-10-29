@@ -3,7 +3,11 @@ import { vol } from 'memfs';
 
 import { evaluateExpoConfig } from '../evaluatedConfig';
 
-vi.mock('@expo/config', () => ({ getConfig: vi.fn() }));
+// The declared plugins are read off the loaded module, which these tests do not load.
+vi.mock('@expo/config', () => ({
+  getConfig: vi.fn(),
+  getConfigFilePaths: () => ({ staticConfigPath: null, dynamicConfigPath: null }),
+}));
 
 const projectRoot = '/project';
 
@@ -43,6 +47,7 @@ describe(evaluateExpoConfig, () => {
       exp: { slug: 'demo', scheme: 'demoapp' },
       staticConfigFile: null,
       dynamicConfigFile: 'app.config.ts',
+      pluginsUnknown: false,
     });
     expect(getConfig).toHaveBeenCalledWith(projectRoot, {
       skipSDKVersionRequirement: true,

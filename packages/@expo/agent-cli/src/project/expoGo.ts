@@ -84,10 +84,10 @@ export async function checkExpoGoCompatibilityAsync(
     });
   }
 
-  if (appConfig.evaluationError != null) {
+  if (appConfig.unknownBecause != null) {
     reasons.push({
       kind: 'unknown-app-config',
-      detail: `${appConfig.dynamicConfigFile} could not be evaluated (${appConfig.evaluationError}), so the config plugins it declares are unknown.`,
+      detail: `${appConfig.unknownBecause}, so its config plugins are unknown.`,
     });
   }
   for (const plugin of appConfig.plugins) {

@@ -24,10 +24,8 @@ export interface AppConfigPlugins {
   /** File the plugins were read from, relative to the project root. Null when there is none. */
   source: string | null;
   plugins: AppConfigPlugin[];
-  /** Name of the dynamic config file in the project, if any. */
-  dynamicConfigFile: string | null;
-  /** Why {@link dynamicConfigFile} could not be evaluated, so {@link plugins} is unknown and empty. */
-  evaluationError: string | null;
+  /** Why the plugins of the dynamic config are unknown, so {@link plugins} is empty. */
+  unknownBecause: string | null;
 }
 
 /** Static config files, in the order `@expo/config` resolves them (`getStaticConfigFilePath`). */
@@ -61,6 +59,8 @@ export interface ProjectExpoConfig {
    * static read. Null when it was evaluated, or there is none.
    */
   evaluationError: string | null;
+  /** {@link dynamicConfigFile} was evaluated, but the `plugins` it returns could not be read. */
+  pluginsUnknown: boolean;
 }
 
 /**
@@ -76,7 +76,7 @@ export function readExpoConfig(projectRoot: string): ProjectExpoConfig {
     DYNAMIC_CONFIG_FILES.find((file) => fs.existsSync(path.join(projectRoot, file))) ?? null;
   const staticRead = readStaticConfig(projectRoot);
   if (dynamicConfigFile == null) {
-    return { ...staticRead, dynamicConfigFile, evaluationError: null };
+    return { ...staticRead, dynamicConfigFile, evaluationError: null, pluginsUnknown: false };
   }
 
   const evaluated = evaluateExpoConfig(projectRoot, {
@@ -85,7 +85,12 @@ export function readExpoConfig(projectRoot: string): ProjectExpoConfig {
     skipPlugins: true,
   });
   if (!evaluated.ok) {
-    return { ...staticRead, dynamicConfigFile, evaluationError: evaluated.error };
+    return {
+      ...staticRead,
+      dynamicConfigFile,
+      evaluationError: evaluated.error,
+      pluginsUnknown: false,
+    };
   }
   return {
     source: dynamicConfigFile,
@@ -93,6 +98,7 @@ export function readExpoConfig(projectRoot: string): ProjectExpoConfig {
     dynamicConfigFile,
     unreadable: false,
     evaluationError: null,
+    pluginsUnknown: evaluated.pluginsUnknown,
   };
 }
 
@@ -105,16 +111,26 @@ export function hasAppConfigFile(projectRoot: string): boolean {
 
 /** Read the config plugins the project declares. */
 export function readAppConfigPlugins(projectRoot: string): AppConfigPlugins {
-  const { source, config, unreadable, dynamicConfigFile, evaluationError } =
-    readExpoConfig(projectRoot);
+  const read = readExpoConfig(projectRoot);
+  const unknownBecause = whyPluginsAreUnknown(read);
   // A file that does not parse was not read, so it is not named as the source. The static list
-  // does not stand in for a dynamic config that failed: the plugins it returns are unknown.
+  // does not stand in for a dynamic config whose plugins are unknown.
   return {
-    source: unreadable ? null : source,
-    plugins: evaluationError == null ? parsePlugins(config?.plugins) : [],
-    dynamicConfigFile,
-    evaluationError,
+    source: read.unreadable ? null : read.source,
+    plugins: unknownBecause == null ? parsePlugins(read.config?.plugins) : [],
+    unknownBecause,
   };
+}
+
+/** Why the `plugins` of the config the app sees are unknown, or null when they were read. */
+export function whyPluginsAreUnknown(read: ProjectExpoConfig): string | null {
+  if (read.evaluationError != null) {
+    return `${read.dynamicConfigFile} could not be evaluated (${read.evaluationError})`;
+  }
+  if (read.pluginsUnknown) {
+    return `the plugins ${read.dynamicConfigFile} returns could not be read`;
+  }
+  return null;
 }
 
 /**

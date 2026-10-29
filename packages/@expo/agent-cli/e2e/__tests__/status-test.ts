@@ -774,6 +774,18 @@ describe('@expo/agent-cli status', () => {
         ],
       ],
       [
+        'should read the plugins from the one call that gives the other values',
+        [
+          'let calls = 0;',
+          'module.exports = ({ config }) => {',
+          '  calls += 1;',
+          '  return { ...config, plugins: calls === 1 ? ["react-native-other"] : [] };',
+          '};',
+          '',
+        ].join('\n'),
+        [expect.objectContaining({ kind: 'config-plugin', packageName: 'react-native-other' })],
+      ],
+      [
         'should call the plugins unknown when the dynamic config throws',
         "module.exports = () => { throw new Error('Cannot resolve app config'); };\n",
         [

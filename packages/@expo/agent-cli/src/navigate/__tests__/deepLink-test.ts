@@ -15,7 +15,11 @@ import {
 
 const PROJECT_ROOT = '/fixtures/project';
 
-vi.mock('@expo/config', () => ({ getConfig: vi.fn() }));
+// The declared plugins are read off the loaded module, which these tests do not load.
+vi.mock('@expo/config', () => ({
+  getConfig: vi.fn(),
+  getConfigFilePaths: () => ({ staticConfigPath: null, dynamicConfigPath: null }),
+}));
 
 /** Create a project fixture in memory from a map of file name to contents. */
 function createProjectFixture(files: Record<string, string>): string {
