@@ -185,17 +185,17 @@ Every command of this group takes `--port <n>` as sugar for `--dev-server-url ht
 
 A run reads only the apps in its scope. The scope comes from the caller's flags and from the device the run opens. A target's own fields and the facts this machine's device tools report place it (§Android). A target that nothing places is undetermined: it is never read, and it never earns a platform's verdict.
 
-| Scope source | Target                    | Result                 | Test                                                                                             |
-| ------------ | ------------------------- | ---------------------- | ------------------------------------------------------------------------------------------------ |
-| none         | any                       | read                   | runtime targetSelection-test "a scope with no platform reads every target"                       |
-| flag only    | platform evidence matches | read                   | runtime targetSelection-test "a platform scope keeps an undetermined target out of the read set" |
-| flag only    | other platform            | skip as other-platform | same                                                                                             |
-| flag only    | no platform evidence      | undetermined           | same                                                                                             |
+| Scope source | Target                    | Result                 | Test                                                                                    |
+| ------------ | ------------------------- | ---------------------- | --------------------------------------------------------------------------------------- |
+| none         | any                       | read                   | e2e runtime-reload-test "checks the bundle on both platforms when no platform is named" |
+| flag only    | platform evidence matches | read                   | e2e runtime-preflight-test "reads the app it places on that platform"                   |
+| flag only    | other platform            | skip as other-platform | same                                                                                    |
+| flag only    | no platform evidence      | undetermined           | e2e runtime-preflight-test "does not read an app nothing places"                        |
 
 Three rules hold for every caller of the scope:
 
 - A classification belongs to one target list and the device facts read for it. A later list is classified again, even when it names the same target ids. Test: smoke targetSelection-test "reclassifies an unchanged target after a failed inventory read recovers".
-- A connection with no platform scope gives bundle inference every platform it can identify. Test: smoke targetSelection-test "infers both bundle platforms without a platform flag or selected device".
+- A connection with no platform scope gives bundle inference every platform it can identify. Test: e2e runtime-reload-test "checks the bundle on both platforms when no platform is named".
 - An attachment wait keeps its device facts while the target list is unchanged, and reads them again for a changed list, within the wait's budget. So an empty first list cannot keep a later development build from being placed, and a target that nothing places costs one read of the device tools, not one per poll. Tests: smoke targetSelection-test "places a development-build target that appears after the first empty wait probe" and "asks the device tools once for a list that does not change".
 
 ## Reloading the app
