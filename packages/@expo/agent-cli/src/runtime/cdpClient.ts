@@ -62,6 +62,11 @@ export class CdpRequestError extends Error {
   }
 }
 
+/** The app did not answer a request in time: it may still have acted on it. */
+export class CdpTimeoutError extends Error {
+  override name = 'CdpTimeoutError';
+}
+
 /**
  * Whether the runtime answered that it does not implement the method that was called.
  *
@@ -468,7 +473,7 @@ function withDeadline<T>(
       handle = setTimeout(
         () =>
           reject(
-            new Error(
+            new CdpTimeoutError(
               `The app did not answer the ${method} request within ${budgetMs}ms. The JavaScript thread may be blocked, or the expression may still be pending. Try a smaller expression or a longer timeout.`
             )
           ),

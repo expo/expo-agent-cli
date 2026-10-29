@@ -5,7 +5,7 @@ import { randomBytes } from 'crypto';
 import { firstLine } from '../utils/text';
 import {
   CdpClient,
-  CdpRequestError,
+  CdpTimeoutError,
   runtimeEvaluateAsync,
   type CdpSession,
   type CdpTarget,
@@ -35,9 +35,9 @@ export type ContextReplaced =
  * A read that fails, and a read that still finds the marker, are "not yet": a reloading context
  * refuses requests for a moment, and the old one can answer once more after the action.
  *
- * An action that the app answers with a CDP error was refused, and that error is thrown. An action
- * whose answer is lost (the socket drops, or its time runs out) may have run, so the marker is
- * read anyway, within the same deadline.
+ * An action whose answer is lost (the socket drops, its time runs out, or the phase is aborted) may
+ * have run, so the marker is read anyway, within the same deadline, and the reason names the lost
+ * answer. Any other failure of the action, a CDP error included, is thrown.
  */
 export async function jsContextReplacedAsync(
   devServerUrl: string,
@@ -114,24 +114,26 @@ export async function jsContextReplacedAsync(
 
     clock.limit(ACT_MS);
     const lost = await act(marked).then(
-      () => null,
-      (error: unknown) =>
-        error instanceof CdpRequestError ? Promise.reject(error) : describe(error)
+      () => '',
+      (error: unknown) => {
+        const answerLost =
+          error instanceof CdpTimeoutError || marked.closed || clock.signal().aborted;
+        if (!answerLost) throw error;
+        return `the answer to the action was lost (${describe(error)}), and `;
+      }
     );
 
     clock.limit(timeoutMs);
-    let reason = lost
-      ? `the answer to the action was lost (${lost}), and no read of the marker answered`
-      : 'no read of the marker answered';
     for (;;) {
+      let reason: string;
       try {
         const { read } = await ask(`${marker} === ${JSON.stringify(nonce)}`);
         if (read.value === false) {
           return { kind: 'replaced' };
         }
-        reason = 'the marker set before it was still there, so the JavaScript context was the same';
+        reason = `${lost}the marker set before it was still there, so the JavaScript context was the same`;
       } catch (error: unknown) {
-        reason = `the last read of the marker failed: ${describe(error)}`;
+        reason = `${lost}the last read of the marker failed: ${describe(error)}`;
       }
       if (!clock.open() || clock.remaining() <= POLL_MS) {
         return { kind: 'not-replaced', reason };
