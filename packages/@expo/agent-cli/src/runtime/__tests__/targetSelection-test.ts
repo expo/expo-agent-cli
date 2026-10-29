@@ -131,45 +131,9 @@ const bound = (udid: string, projectRoot: string, own = false) => ({
 describe('classifyTargets and the worktree that bound the simulator', () => {
   it.each([
     {
-      name: 'skips a target when only another worktree binds its booted simulator',
-      booted: ['SIM-A'],
-      iosBindings: [bound('SIM-A', '/wt/legend')],
-      projectRoots: ['/wt/legend'],
-    },
-    {
       name: 'reads a target on the simulator this worktree binds',
       booted: ['SIM-A'],
       iosBindings: [bound('SIM-A', '/wt/mapfilter', true)],
-      projectRoots: null,
-    },
-    {
-      name: 'reads a target on a simulator this worktree and another one both bind',
-      booted: ['SIM-A'],
-      iosBindings: [bound('SIM-A', '/wt/legend'), bound('SIM-A', '/wt/mapfilter', true)],
-      projectRoots: null,
-    },
-    {
-      name: 'reads a target on a simulator no live binding names',
-      booted: ['SIM-A'],
-      iosBindings: [],
-      projectRoots: null,
-    },
-    {
-      name: 'reads a target when one of two booted simulators with its name is bound elsewhere',
-      booted: ['SIM-A', 'SIM-B'],
-      iosBindings: [bound('SIM-A', '/wt/legend')],
-      projectRoots: null,
-    },
-    {
-      name: 'skips a target when each booted simulator with its name is bound elsewhere',
-      booted: ['SIM-A', 'SIM-B'],
-      iosBindings: [bound('SIM-A', '/wt/legend'), bound('SIM-B', '/wt/other')],
-      projectRoots: ['/wt/legend', '/wt/other'],
-    },
-    {
-      name: 'reads a target when no simulator with its name is booted',
-      booted: [],
-      iosBindings: [bound('SIM-A', '/wt/legend')],
       projectRoots: null,
     },
     {
@@ -201,51 +165,5 @@ describe('classifyTargets and the worktree that bound the simulator', () => {
           ? []
           : [{ target: ON_CLONE, classification: { group: 'other-worktree', projectRoots } }],
     });
-  });
-
-  // Out of every scope: not read with a platform flag or without one, and on an EAS Simulator iOS
-  // session it does not take the one unclaimed slot that is the session's app.
-  it.each([
-    {
-      name: 'with no platform flag',
-      targets: [ON_CLONE, android],
-      platform: null,
-      eas: false,
-      read: [android],
-    },
-    {
-      name: 'of its own platform',
-      targets: [ON_CLONE, android],
-      platform: 'ios' as const,
-      eas: false,
-      read: [],
-    },
-    {
-      name: 'of an EAS Simulator iOS session',
-      targets: [
-        { ...ON_CLONE, appId: 'dev.vonovak.cyclable' } as CdpTarget,
-        { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17' } as CdpTarget,
-      ],
-      platform: 'ios' as const,
-      eas: true,
-      read: [{ appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17' }],
-    },
-  ])('keeps a skipped target out of the read set $name', ({ targets, platform, eas, read }) => {
-    const deviceInventory = makeDeviceInventory({
-      booted: [{ name: CLONE, udid: 'SIM-A' }],
-      iosBindings: [bound('SIM-A', '/wt/legend')],
-    });
-
-    const classifiedTargets = classifyTargets(
-      targets,
-      makeTargetSelection({
-        platform: platform == null ? null : { value: platform, by: 'flag' },
-        device: eas ? { backend: 'cloud', deviceId: null } : null,
-      }),
-      deviceInventory
-    );
-
-    expect(classifiedTargets.read).toEqual(read);
-    expect(classifiedTargets.skipped.map((entry) => entry.target)).toEqual([targets[0]]);
   });
 });

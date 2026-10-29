@@ -47,7 +47,12 @@ export type StubCalls = () => string[][];
  * lease 60 min ahead, the canonical root. Every verb of the fixture then drives this simulator
  * (llp/0035 §Readers), so a case that hands a verb a booted simulator seeds this first.
  */
-export async function bindingFixture(projectRoot: string, udid: string, name = SIMULATOR_NAME) {
+export async function bindingFixture(
+  projectRoot: string,
+  udid: string,
+  name = SIMULATOR_NAME,
+  expiresAt = new Date(Date.now() + 60 * 60_000).toISOString()
+) {
   const root = canonicalizeExistingPath(projectRoot);
   const now = Date.now();
   const file = path.join(
@@ -64,7 +69,7 @@ export async function bindingFixture(projectRoot: string, udid: string, name = S
       device: { backend: 'local-ios', platform: 'ios', udid, name, origin: 'created' },
       projectRoot: root,
       boundAt: new Date(now).toISOString(),
-      expiresAt: new Date(now + 60 * 60_000).toISOString(),
+      expiresAt,
     })
   );
   return file;

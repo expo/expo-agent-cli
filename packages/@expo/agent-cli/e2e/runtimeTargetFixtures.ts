@@ -17,9 +17,14 @@ export function runtimeTarget(id: string, overrides: Partial<CdpTarget> = {}): C
 }
 
 /** Another existing worktree's binding in this fixture's machine-wide registry. */
-export async function bindOtherWorktreeAsync(root: string, udid: string, name: string) {
+export async function bindOtherWorktreeAsync(
+  root: string,
+  udid: string,
+  name: string,
+  expiresAt?: string
+) {
   const otherRoot = await fs.promises.mkdtemp(path.join(root, 'other-worktree-'));
-  const file = await bindingFixture(otherRoot, udid, name);
+  const file = await bindingFixture(otherRoot, udid, name, expiresAt);
   const registry = path.join(expoHomeOf(root), 'agent-cli', 'bindings');
   await fs.promises.mkdir(registry, { recursive: true });
   await fs.promises.rename(file, path.join(registry, path.basename(file)));
