@@ -769,7 +769,9 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // `screenshot` phase disagreed about the device would photograph one to answer for the other.
     //
     // It throws where the probes it replaced returned; caught, because no device is an answer this
-    // gate reports rather than fails on.
+    // gate reports rather than fails on. The answer keeps the refusal's How line: with no device
+    // bound, that line is the `dev` command that binds one, and a skip row without it left a
+    // reader with a booted simulator and no way forward [observed — issue #171].
     probeDevice: async () => {
       try {
         const device = await resolveDeviceAsync(options.platform, {
@@ -781,7 +783,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
         return {
           deviceId: null,
           backend: null,
-          reason: error instanceof Error ? firstLine(error.message) : String(error),
+          reason: error instanceof Error ? whatAndHow(error.message) : String(error),
         };
       }
     },
