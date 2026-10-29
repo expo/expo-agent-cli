@@ -162,6 +162,15 @@ describe('@expo/agent-cli navigate', () => {
       expect(report.launch).toBeNull();
       expect(report.attached).toBe(true);
       expect(opens()).toEqual([`exp://127.0.0.1:${stub.port}/--/profile/42`]);
+      // The link would load against a port nothing on the device listens on, if it came first.
+      expect((report as { reversedPort?: number }).reversedPort).toBe(stub.port);
+      const calls = adb.calls();
+      const reverse = calls.findIndex(
+        (args) => args[2] === 'reverse' && args[3] === `tcp:${stub.port}`
+      );
+      const link = calls.findIndex((args) => args.includes('start') && args.includes('-d'));
+      expect(reverse).toBeGreaterThan(-1);
+      expect(reverse).toBeLessThan(link);
     } finally {
       await stub.close();
     }
