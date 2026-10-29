@@ -30,7 +30,7 @@ const expoGoAndroid = {
 const ANY: TargetSelection = READ_EVERY_TARGET;
 const BOUND_SIMULATOR: TargetSelection = {
   platform: { value: 'ios', by: 'bound-device' },
-  device: { backend: 'local-ios', name: 'iPhone 17' },
+  device: { backend: 'local-ios', udid: 'SIM-1', name: 'iPhone 17' },
   bound: true,
 };
 const FLAG_IOS: TargetSelection = {

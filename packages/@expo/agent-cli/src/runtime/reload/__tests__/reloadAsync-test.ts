@@ -16,7 +16,6 @@ import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../../exi
 import { resetPackageRunnerCache } from '../../../utils/packageRunner';
 import { connectMessageSocketAsync, type MessageSocketPeers } from '../../messageSocket';
 import { explainReloadFailure, reloadAsync, type ReloadResultJson } from '../reloadAsync';
-import { makeTargetSelection } from '../../__tests__/targetSelectionFixtures';
 import { reloadOverDevServerAsync } from '../rungOne';
 import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
