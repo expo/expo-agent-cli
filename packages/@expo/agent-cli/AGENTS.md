@@ -41,7 +41,7 @@ These rules apply to new code and new tests. Do not rewrite old code or old test
 ## Pull requests
 
 - Fill in [the PR template](../../../.github/PULL_REQUEST_TEMPLATE.md), also when a CLI or an agent opens the PR; those paths do not apply it.
-- This repo uses GitHub stacks. Install the `gh stack` extension (`gh extension install github/gh-stack`; needs GitHub CLI 2.0+ and Git 2.36+) and its agent skill (`gh skill install github/gh-stack`, from [github/gh-stack](https://github.com/github/gh-stack#ai-agent-integration)). Use the skill and `gh stack` to create, submit, sync and rebase a stack. Do not build a stack from hand-pushed branches.
+- This repo uses GitHub stacks. Install the `gh stack` extension (`gh extension install github/gh-stack`) and its agent skill (`gh skill install github/gh-stack`, from [github/gh-stack](https://github.com/github/gh-stack#ai-agent-integration)). Use the skill and `gh stack` to create, submit, sync and rebase a stack. Do not build a stack from hand-pushed branches.
 - Keep each PR focused on one question: one feature or one issue.
 - When a PR adds or changes tests, read the tests that already exist for that behavior, and delete in that PR every test that no longer adds confidence beyond the new ones. This holds especially in a stack: write a test in its final form in the PR that adds it, and when a later PR makes a test redundant, delete it in that later PR.
 
