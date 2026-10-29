@@ -59,6 +59,7 @@ import {
   type CommandSocketChurn,
 } from '../runtime/reload/reloadAsync';
 import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
+import { describeSkippedApps } from '../runtime/targetSelection';
 import { buildSmokeTargetSelection } from './targetSelection';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../runtime/waitReady';
 import { formatSmokeResult, smokeResultToJson } from './format';
@@ -733,12 +734,16 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     waitForAppConnection: async (devServerUrl, timeoutMs) => {
       const { targetSelection, deviceInventory, targets } =
         await targetSelectionAsync(devServerUrl);
-      return waitForAppConnectionAsync(devServerUrl, {
+      const connection = await waitForAppConnectionAsync(devServerUrl, {
         timeoutMs,
         targetSelection,
         deviceInventory,
         inventoryTargets: targets,
       });
+      if (connection.appsConnected > 0 && connection.skippedApps?.length) {
+        Log.progress(describeSkippedApps(connection.skippedApps));
+      }
+      return connection;
     },
 
     // The same ladder `navigate` walks, through the same function — local device first, then this

@@ -12,6 +12,7 @@ import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckJson } from '../runtime/bundleCheck';
 import type { DevServerSource } from '../runtime/devServer';
 import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
+import type { SkippedApp } from '../runtime/targetSelection';
 import type { SmokeAppMismatchKind } from './phases';
 
 /**
@@ -305,6 +306,8 @@ export interface SmokeResultJson {
   environment: SmokeEnvironmentJson;
   /** Debugger targets attached when the run read them. Null when it never got that far. */
   appsConnected: number | null;
+  /** Apps attached that the run skipped as another worktree's or another device's: name, group, worktrees. */
+  skippedApps: SkippedApp[];
   /** The same `bundle` object `dev:wait` and `runtime:reload` print, from the same check. */
   bundle: BundleCheckJson;
   /** Route the run opened, or null when none was asked for. */

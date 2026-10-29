@@ -21,8 +21,10 @@ import {
   classifyTargets,
   scopeToolsUnknown,
   refreshDeviceInventoryAsync,
+  skippedAppsOf,
   type ClassifiedTargets,
   type DeviceInventory,
+  type SkippedApp,
   type TargetSelection,
 } from './targetSelection';
 
@@ -290,6 +292,8 @@ export interface AppConnectionResult {
   otherPlatformApps?: number;
   /** Apps attached that nothing placed in the scope. Never counted. */
   undeterminedApps?: number;
+  /** Apps attached that another worktree's simulator or another device runs. Never counted. */
+  skippedApps?: SkippedApp[];
 }
 
 /** How often a wait asks again for a device tool answer that is unknown. */
@@ -377,6 +381,7 @@ export async function waitForAppConnectionAsync(
         ? {
             otherPlatformApps: classifiedTargets.otherPlatform.length,
             undeterminedApps: classifiedTargets.undetermined.length,
+            skippedApps: skippedAppsOf(classifiedTargets),
           }
         : {};
 

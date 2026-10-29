@@ -50,6 +50,7 @@ import type { RouteCheckJson } from '../navigate/routeCheck';
 import type { BundleCheckResult } from '../runtime/bundleCheck';
 import type { DevServerDiscovery } from '../runtime/devServer';
 import type { RuntimeErrorRecord } from '../runtime/runtimeErrorCollector';
+import { describeSkippedApps, type SkippedApp } from '../runtime/targetSelection';
 import type { AppConnectionResult, BundlerReadyResult } from '../runtime/waitReady';
 import type { SmokeProgress } from './progress';
 import { coldWaitMs, type SmokeOptions } from './resolveOptions';
@@ -439,6 +440,7 @@ export interface SmokeRun {
   /** What this run found on the machine, what it started, and what it put back. */
   environment: SmokeEnvironmentJson;
   appsConnected: number | null;
+  skippedApps?: SkippedApp[];
   bundle: BundleCheckResult | null;
   route: string | null;
   routeCheck: RouteCheckJson | null;
@@ -1588,12 +1590,15 @@ async function runPhasesAsync(
     chargeToBootstrap();
   }
 
-  const appsConnected = connection.appsConnected;
-  const withApp = { ...base, bundle, appsConnected };
+  const { appsConnected, skippedApps = [] } = connection;
+  const withApp = { ...base, bundle, appsConnected, skippedApps };
 
   if (appsConnected === 0) {
     const appPhase = phases[phases.length - 1]!;
-
+    if (skippedApps.length > 0) {
+      const skipped = describeSkippedApps(skippedApps);
+      appPhase.reason = appPhase.reason == null ? skipped : `${appPhase.reason} · ${skipped}`;
+    }
     // @ref ./phases §SmokeDeps.explainSilentApp
     //
     // Nothing attached is a *symptom*, and the device often holds the cause. The commonest one is

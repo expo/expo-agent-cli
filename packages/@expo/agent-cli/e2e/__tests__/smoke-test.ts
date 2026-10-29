@@ -755,14 +755,18 @@ describe('@expo/agent-cli smoke', () => {
       { name: 'listed from the first poll', appearsAfterOpen: false },
       { name: 'listed only after the app was opened', appearsAfterOpen: true },
     ])('is not counted as the app, $name', async ({ appearsAfterOpen }) => {
-      const projectRoot = await setupFixtureAsync('go-app');
+      const projectRoot = await fs.promises.realpath(await setupFixtureAsync('go-app'));
       await installStatefulXcrunAsync(projectRoot, {
         simulators: [
           { udid: 'SIM-OWN', name: 'iPhone 17 Pro', state: 'Booted' },
           { udid: 'SIM-LEGEND', name: 'agent-cli c4ed0a60', state: 'Booted' },
         ],
       });
-      await bindOtherWorktreeAsync(projectRoot, 'SIM-LEGEND', 'agent-cli c4ed0a60');
+      const otherRoot = await bindOtherWorktreeAsync(
+        projectRoot,
+        'SIM-LEGEND',
+        'agent-cli c4ed0a60'
+      );
       const stub = await startStubDevServerAsync({
         projectRoot,
         targets: [{ ...EXPO_GO_TARGET, deviceName: 'agent-cli c4ed0a60' }],
@@ -783,6 +787,65 @@ describe('@expo/agent-cli smoke', () => {
           status: 'inconclusive',
         });
         expect(report.appsConnected).toBe(0);
+        const skipped = {
+          deviceName: 'agent-cli c4ed0a60',
+          group: 'other-worktree',
+          projectRoots: [otherRoot],
+        };
+        expect(report.skippedApps).toEqual([skipped]);
+        const reason: string = report.phases.find((phase: any) => phase.id === 'app').reason;
+        expect(reason).toContain('agent-cli c4ed0a60');
+        expect(reason).toContain(otherRoot);
+        expect(reason.match(/Skipped 1 app/g)).toHaveLength(1);
+      } finally {
+        release();
+        await stub.close();
+      }
+    });
+  });
+
+  describe.skipIf(process.platform !== 'darwin')("an app beside another worktree's app", () => {
+    it('is read, and the skipped app is named on stderr and in the report', async () => {
+      const projectRoot = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+      await installStatefulXcrunAsync(projectRoot, {
+        simulators: [
+          { udid: 'SIM-OWN', name: 'iPhone 17 Pro', state: 'Booted' },
+          { udid: 'SIM-LEGEND', name: 'agent-cli c4ed0a60', state: 'Booted' },
+        ],
+      });
+      const otherRoot = await bindOtherWorktreeAsync(
+        projectRoot,
+        'SIM-LEGEND',
+        'agent-cli c4ed0a60'
+      );
+      const stub = await startStubDevServerAsync({
+        projectRoot,
+        targets: [
+          { ...EXPO_GO_TARGET, deviceName: 'iPhone 17 Pro' },
+          {
+            ...EXPO_GO_TARGET,
+            id: '2',
+            webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=2&page=1',
+            deviceName: 'agent-cli c4ed0a60',
+          },
+        ],
+      });
+      const release = await holdLockForAsync(projectRoot, stub);
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['smoke', '--ios', '--json', '--no-screenshot', '--timeout', '4s'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
+
+        const report = JSON.parse(result.stdout);
+        expect(report.appsConnected).toBe(1);
+        expect(report.skippedApps).toEqual([
+          { deviceName: 'agent-cli c4ed0a60', group: 'other-worktree', projectRoots: [otherRoot] },
+        ]);
+        expect(result.stderr.match(/Skipped 1 app: "agent-cli c4ed0a60"/g)).toHaveLength(1);
+        expect(result.stderr).toContain(otherRoot);
       } finally {
         release();
         await stub.close();
@@ -1753,6 +1816,7 @@ describe('@expo/agent-cli smoke', () => {
         'routeCheck',
         'runtimeSupported',
         'screenshot',
+        'skippedApps',
         'source',
         'started',
         'untrusted',
