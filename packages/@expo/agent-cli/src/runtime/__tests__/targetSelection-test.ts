@@ -75,14 +75,20 @@ describe('classifyTargets on an EAS Simulator session', () => {
       appId: 'dev.vonovak.cyclable',
       deviceName: 'sdk_gphone64_x86_64 - 15 - API 35',
     } as CdpTarget;
+    const unclaimed = { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17' } as CdpTarget;
 
     expect(
       classifyTargets(
-        [androidSession, cloud],
+        [androidSession, unclaimed],
         makeTargetSelection({ platform: null, device: { backend: 'cloud', deviceId: null } }),
-        deviceInventory
+        makeDeviceInventory({ booted: [{ name: 'iPhone 17 Pro', udid: 'LOCAL-1' }] })
       )
-    ).toEqual({ read: [androidSession], skipped: [], otherPlatform: [], undetermined: [cloud] });
+    ).toEqual({
+      read: [androidSession],
+      skipped: [],
+      otherPlatform: [],
+      undetermined: [unclaimed],
+    });
   });
 });
 
