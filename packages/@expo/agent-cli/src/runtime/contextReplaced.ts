@@ -124,7 +124,7 @@ export async function jsContextReplacedAsync(
     );
 
     clock.limit(timeoutMs);
-    for (;;) {
+    for (let last = false; ;) {
       let reason: string;
       try {
         const { read } = await ask(`${marker} === ${JSON.stringify(nonce)}`);
@@ -135,10 +135,12 @@ export async function jsContextReplacedAsync(
       } catch (error: unknown) {
         reason = `${lost}the last read of the marker failed: ${describe(error)}`;
       }
-      if (!clock.open() || clock.remaining() <= POLL_MS) {
+      if (last || !clock.open()) {
         return { kind: 'not-replaced', reason };
       }
-      await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      // Less than an interval left still covers one more read, taken at once.
+      if (clock.remaining() > POLL_MS) await new Promise((resolve) => setTimeout(resolve, POLL_MS));
+      else last = true;
     }
   } finally {
     await closeSession();

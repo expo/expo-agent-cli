@@ -95,6 +95,20 @@ describe('the proof of a Page.reload', () => {
     expect(served.reloaded()).toHaveLength(reloads);
   });
 
+  it('reads once more without sleeping when less than a poll interval is left', async () => {
+    serveInspectorApp({ onReload: 'clears-late' });
+
+    // Reads at 0 ms (fails) and 250 ms (old marker) leave about 150 ms: no sleep, one more read.
+    const outcome = await jsContextReplacedAsync('http://127.0.0.1:8081', TARGET, {
+      act: async (client) => {
+        await client.sendAsync('Page.reload', {}, 1000);
+      },
+      timeoutMs: 400,
+    });
+
+    expect(outcome).toEqual({ kind: 'replaced' });
+  });
+
   it('throws an action that failed before its answer could be lost', async () => {
     const served = serveInspectorApp();
 
