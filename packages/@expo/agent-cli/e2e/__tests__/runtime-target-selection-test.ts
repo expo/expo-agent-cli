@@ -560,6 +560,44 @@ describe("runtime:reload beside another worktree's iOS app", () => {
     }
   });
 
+  it('relaunches within --timeout when its own app keeps its context after Page.reload', async () => {
+    const { root, xcrunCalls } = await besideCloneAsync();
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [ownIos(), cloneIos()],
+      pageReload: 'keeps-context',
+    });
+    try {
+      const started = Date.now();
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--dev-server-url',
+          server.url,
+          '--timeout',
+          '30s',
+          '--json',
+          '--no-followups',
+        ],
+        { reject: false, env: BOUND }
+      );
+      expect(Date.now() - started, result.all).toBeLessThan(20_000);
+      expect(server.pageReloads()).toEqual(['own']);
+      const report = JSON.parse(result.stdout);
+      expect(report.attempts.map((attempt: { method: string }) => attempt.method)).toEqual([
+        'page-reload',
+        'device',
+      ]);
+      expect(report.attempts[0].outcomes).toMatchObject([
+        { targetId: 'own', outcome: 'delivered-unproved' },
+      ]);
+      expect(xcrunCalls().filter((call) => call[1] === 'terminate')).toHaveLength(1);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('does not wait out --timeout after a relaunch that nothing can prove', async () => {
     const { root } = await besideCloneAsync();
     const server = await startStubDevServerAsync({

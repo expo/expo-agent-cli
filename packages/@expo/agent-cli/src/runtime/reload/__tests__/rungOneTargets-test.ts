@@ -11,11 +11,17 @@ import {
 import { classifyTargets } from '../../targetSelection';
 import { rungOnePolicy, runRungOneAsync } from '../rungOne';
 
-const BUDGET_MS = 1500;
+const BUDGET_MS = 3000;
 
-it('shares one deadline across targets and retains each target’s proof', async () => {
+/**
+ * Rung 1 against a fake inspector: each own id answers `Page.reload`, and the ids in `replaces` get
+ * a new context. `holdUntil` holds every answer until that many `Page.reload`s arrived.
+ */
+async function runRungOneBesideForeignAsync(
+  ids: string[],
+  { replaces, holdUntil = 0 }: { replaces: string[]; holdUntil?: number }
+) {
   const globals = new Map<string, Record<string, unknown>>();
-  // Page.reload is answered only once every own target has sent it: a serial rung never gets there.
   const held: (() => void)[] = [];
   const actions: string[] = [];
   const server = createServer((_request, response) => response.end(JSON.stringify(targets)));
@@ -27,10 +33,10 @@ it('shares one deadline across targets and retains each target’s proof', async
       if (message.method === 'Page.reload') {
         actions.push(id);
         held.push(() => {
-          if (id === 'a') globals.set(id, {});
+          if (replaces.includes(id)) globals.set(id, {});
           socket.send(JSON.stringify({ id: message.id, result: {} }));
         });
-        if (held.length === 3) held.forEach((answer) => answer());
+        if (held.length >= holdUntil) held.splice(0).forEach((answer) => answer());
         return;
       }
       const context = globals.get(id) ?? {};
@@ -43,7 +49,7 @@ it('shares one deadline across targets and retains each target’s proof', async
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as AddressInfo).port;
-  const targets = ['a', 'b', 'c', 'foreign'].map((id) =>
+  const targets = [...ids, 'foreign'].map((id) =>
     makeTarget({
       id,
       deviceName: id,
@@ -69,23 +75,47 @@ it('shares one deadline across targets and retains each target’s proof', async
       },
       budgetMs: BUDGET_MS,
     });
-    // The rung ends at its one deadline, cleanup included.
-    expect(Date.now() - started).toBeLessThan(BUDGET_MS * 2);
-    expect(actions.sort()).toEqual(['a', 'b', 'c']);
-    expect(outcome.kind).toBe('proved');
-    expect(outcome.attempt).toMatchObject({
-      method: 'page-reload',
-      outcomes: [
-        { targetId: 'a', outcome: 'context-replaced' },
-        { targetId: 'b', outcome: 'delivered-unproved' },
-        { targetId: 'c', outcome: 'delivered-unproved' },
-      ],
-    });
-    expect(outcome.attempt.reason).toMatch(/^"a" answered from a new JavaScript context/);
+    return { outcome, elapsed: Date.now() - started, actions, globals };
   } finally {
     for (const socket of wss.clients) socket.terminate();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+}
+
+it('sends Page.reload to every own target at once, and the first proof stops the others', async () => {
+  // A serial rung never gets every answer: each is held until all three were sent.
+  const { outcome, elapsed, actions, globals } = await runRungOneBesideForeignAsync(
+    ['a', 'b', 'c'],
+    { replaces: ['a'], holdUntil: 3 }
+  );
+  expect(elapsed).toBeLessThan(BUDGET_MS / 2);
+  expect(actions.sort()).toEqual(['a', 'b', 'c']);
+  expect(outcome.kind).toBe('proved');
+  expect(outcome.attempt).toMatchObject({
+    method: 'page-reload',
+    outcomes: [
+      { targetId: 'a', outcome: 'context-replaced' },
+      { targetId: 'b', outcome: 'not-needed' },
+      { targetId: 'c', outcome: 'not-needed' },
+    ],
+  });
+  expect(outcome.attempt.reason).toMatch(/^"a" answered from a new JavaScript context/);
+  // A stopped check still removes its marker.
+  expect(Object.keys(globals.get('b')!)).toEqual([]);
+  expect(Object.keys(globals.get('c')!)).toEqual([]);
+});
+
+it('watches an own target that keeps its context until the deadline, cleanup included', async () => {
+  const { outcome, elapsed, globals } = await runRungOneBesideForeignAsync(['a'], {
+    replaces: [],
+  });
+  expect(elapsed).toBeGreaterThan(BUDGET_MS - 400);
+  expect(elapsed).toBeLessThan(BUDGET_MS * 2);
+  expect(outcome.kind).toBe('delivered');
+  expect(outcome.attempt).toMatchObject({
+    outcomes: [{ targetId: 'a', outcome: 'delivered-unproved' }],
+  });
+  expect(Object.keys(globals.get('a')!)).toEqual([]);
 });

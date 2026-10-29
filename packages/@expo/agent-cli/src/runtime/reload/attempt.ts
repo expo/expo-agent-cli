@@ -9,7 +9,9 @@ export interface TargetReloadOutcome {
     | 'unmarkable'
     | 'not-delivered'
     | 'delivered-unproved'
-    | 'context-replaced';
+    | 'context-replaced'
+    /** The check stopped because another own target proved the reload first. */
+    | 'not-needed';
   reason: string | null;
 }
 

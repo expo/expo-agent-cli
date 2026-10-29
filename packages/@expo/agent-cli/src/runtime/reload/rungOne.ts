@@ -42,6 +42,13 @@ import { debugEvent } from './events';
  */
 const PEER_CHURN_TIMEOUT_MS = 8000;
 
+/**
+ * How long `Page.reload` has to prove itself on the own targets, cleanup included. Like the churn
+ * window, it is separate from `--timeout`: a proof that does not come leaves the rest of the budget
+ * to the relaunch.
+ */
+const PAGE_RELOAD_PROOF_MS = 8000;
+
 /** How often the peers are read while waiting for the app to reconnect. */
 const PEER_POLL_INTERVAL_MS = 250;
 
@@ -362,9 +369,10 @@ export type RungOneOutcome = { attempt: ReloadAttempt; churn: CommandSocketChurn
 /**
  * Run rung 1: the broadcast, or `Page.reload` to the own targets while the scope skips an app.
  *
- * @param budgetMs the caller's budget. The rung's own proof is watched for no longer (F95): a
- * targeted reload shares one absolute deadline across every target and all proof phases. The
- * broadcast retains its minimum peer observation window.
+ * @param budgetMs the caller's budget. The rung's own proof is watched for no longer (F95), and
+ * each mechanism has its own window inside it: a targeted reload shares one absolute deadline of
+ * at most {@link PAGE_RELOAD_PROOF_MS} across every target and all proof phases. The broadcast
+ * retains its minimum peer observation window.
  */
 export async function runRungOneAsync(
   devServerUrl: string,
@@ -375,7 +383,7 @@ export async function runRungOneAsync(
     return await reloadOwnTargetsAsync(devServerUrl, {
       policy,
       own: classifiedTargets.read,
-      deadline: Date.now() + Math.max(0, budgetMs),
+      deadline: Date.now() + Math.min(Math.max(0, budgetMs), PAGE_RELOAD_PROOF_MS),
     });
   }
   const timeoutMs = Math.min(PEER_CHURN_TIMEOUT_MS, Math.max(budgetMs, PEER_POLL_INTERVAL_MS * 2));
@@ -436,51 +444,15 @@ const PAGE_RELOAD_ANSWER_MS = 4000;
  * The answer `{}` is delivery, not proof, and the target keeps its page id [observed — SDK 58
  * development build, React Native 0.88, iOS 27 simulator, 2026-10-21]. So a marker global is set
  * before the reload, and the reload is proved when the same target answers without it
- * (`../contextReplaced.ts`). One own target proved is enough.
+ * (`../contextReplaced.ts`). One own target proved is enough: it stops the other checks.
  */
 async function reloadOwnTargetsAsync(
   devServerUrl: string,
   { policy, own, deadline }: { policy: RungOnePolicy; own: CdpTarget[]; deadline: number }
 ): Promise<RungOneOutcome> {
+  const provedOne = new AbortController();
   const outcomes = await Promise.all(
-    own.map(async (target): Promise<TargetReloadOutcome> => {
-      const identity = { targetId: target.id, deviceName: target.deviceName };
-      if (target.reactNative?.capabilities?.nativePageReloads !== true) {
-        return {
-          ...identity,
-          outcome: 'unsupported',
-          reason: 'the target does not support Page.reload',
-        };
-      }
-      try {
-        const seen = await jsContextReplacedAsync(devServerUrl, target, {
-          act: async (session) =>
-            await session.sendAsync(
-              'Page.reload',
-              {},
-              Math.max(1, Math.min(PAGE_RELOAD_ANSWER_MS, deadline - Date.now()))
-            ),
-          timeoutMs: Math.max(0, deadline - Date.now()),
-          deadline,
-        });
-        return {
-          ...identity,
-          outcome:
-            seen.kind === 'replaced'
-              ? 'context-replaced'
-              : seen.kind === 'unmarkable'
-                ? 'unmarkable'
-                : 'delivered-unproved',
-          reason: seen.kind === 'replaced' ? null : seen.reason,
-        };
-      } catch (error: unknown) {
-        return {
-          ...identity,
-          outcome: 'not-delivered',
-          reason: firstLine(error instanceof Error ? error.message : String(error)),
-        };
-      }
-    })
+    own.map((target) => reloadOwnTargetAsync(devServerUrl, target, deadline, provedOne))
   );
   const proved = outcomes.filter((each) => each.outcome === 'context-replaced');
   const answered = outcomes.filter(
@@ -533,4 +505,56 @@ async function reloadOwnTargetsAsync(
         churn,
         relaunchWhy: `${clause}, so the app was relaunched on this worktree's device instead`,
       };
+}
+
+/** `Page.reload` to one own target, proved on it. The first target proved stops the other checks. */
+async function reloadOwnTargetAsync(
+  devServerUrl: string,
+  target: CdpTarget,
+  deadline: number,
+  provedOne: AbortController
+): Promise<TargetReloadOutcome> {
+  const identity = { targetId: target.id, deviceName: target.deviceName };
+  if (target.reactNative?.capabilities?.nativePageReloads !== true) {
+    return {
+      ...identity,
+      outcome: 'unsupported',
+      reason: 'the target does not support Page.reload',
+    };
+  }
+  try {
+    const seen = await jsContextReplacedAsync(devServerUrl, target, {
+      act: async (session) =>
+        await session.sendAsync(
+          'Page.reload',
+          {},
+          Math.max(1, Math.min(PAGE_RELOAD_ANSWER_MS, deadline - Date.now()))
+        ),
+      timeoutMs: Math.max(0, deadline - Date.now()),
+      deadline,
+      signal: provedOne.signal,
+    });
+    if (seen.kind === 'replaced') {
+      provedOne.abort();
+      return { ...identity, outcome: 'context-replaced', reason: null };
+    }
+    if (provedOne.signal.aborted) {
+      return {
+        ...identity,
+        outcome: 'not-needed',
+        reason: 'another app of this worktree proved the reload first, so this check stopped',
+      };
+    }
+    return {
+      ...identity,
+      outcome: seen.kind === 'unmarkable' ? 'unmarkable' : 'delivered-unproved',
+      reason: seen.reason,
+    };
+  } catch (error: unknown) {
+    return {
+      ...identity,
+      outcome: 'not-delivered',
+      reason: firstLine(error instanceof Error ? error.message : String(error)),
+    };
+  }
 }

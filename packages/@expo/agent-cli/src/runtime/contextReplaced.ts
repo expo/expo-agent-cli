@@ -48,19 +48,22 @@ export async function jsContextReplacedAsync(
     act,
     timeoutMs,
     deadline,
+    signal,
   }: {
     act: (session: Pick<CdpSession, 'sendAsync'>) => Promise<unknown>;
     timeoutMs: number;
     /** Optional deadline for the entire operation, shared by multi-target callers. */
     deadline?: number;
+    /** Stops the check in any phase. The marker is still removed, within the deadline. */
+    signal?: AbortSignal;
   }
 ): Promise<ContextReplaced> {
-  const clock = phaseClock(deadline);
+  const clock = phaseClock(deadline, signal);
   clock.limit(READ_MS);
-  const client = () =>
+  const client = (phase = clock.signal()) =>
     new CdpClient({
       metroUrl: devServerUrl,
-      signal: clock.signal(),
+      signal: phase,
       targetSelection: READ_EVERY_TARGET,
       deviceInventory: EMPTY_DEVICE_INVENTORY,
       targetSelector: async (targets) => targets.find((each) => each.id === target.id) ?? null,
@@ -85,16 +88,14 @@ export async function jsContextReplacedAsync(
     return { open, read };
   };
   const closeSession = async () => {
-    if (session != null) {
-      if (!session.closed && clock.open()) {
-        // Best effort: a failed reload must not leave a new marker behind on every attempt.
-        await runtimeEvaluateAsync(session, `delete ${marker}`, {
-          returnByValue: true,
-          timeoutMs: Math.min(READ_MS, clock.remaining()),
-        }).catch(() => {});
-      }
-      session.close();
+    const cleanupMs = clock.cleanupMs();
+    // A stop closed the session, so a stopped check opens one for the cleanup.
+    if (session?.closed && signal?.aborted && cleanupMs > 0) {
+      session = await client(AbortSignal.timeout(cleanupMs))
+        .openSessionAsync()
+        .catch(() => session);
     }
+    await removeMarkerAsync(session, marker, cleanupMs);
   };
 
   try {
@@ -153,25 +154,53 @@ function notReplaced(reason: string, lost: string | null): ContextReplaced {
     : { kind: 'answer-lost', reason: `the answer to the action was lost (${lost}), and ${reason}` };
 }
 
-/** One abort controller per phase, each bounded by its budget and by the whole proof's deadline. */
-function phaseClock(deadline: number | undefined) {
+/** Best effort: a failed reload must not leave a new marker behind on every attempt. */
+async function removeMarkerAsync(session: CdpSession | null, marker: string, timeoutMs: number) {
+  if (session != null && !session.closed && timeoutMs > 0) {
+    await runtimeEvaluateAsync(session, `delete ${marker}`, {
+      returnByValue: true,
+      timeoutMs,
+    }).catch(() => {});
+  }
+  session?.close();
+}
+
+/**
+ * One abort controller per phase, each bounded by its budget and by the whole proof's deadline. The
+ * caller's signal aborts the phase it lands in and every phase after it.
+ */
+function phaseClock(deadline: number | undefined, outer: AbortSignal | undefined) {
   let controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let expiresAt = Date.now();
   const expire = () => controller.abort(new Error('Context proof deadline expired.'));
+  const stopped = () => controller.abort(outer?.reason);
+  outer?.addEventListener('abort', stopped);
+  const open = () => !controller.signal.aborted && Date.now() < expiresAt;
   return {
     signal: () => controller.signal,
     remaining: () => Math.max(1, expiresAt - Date.now()),
-    open: () => !controller.signal.aborted && Date.now() < expiresAt,
+    open,
+    /** What is left of the phase, or of the deadline after a stop, up to one read. */
+    cleanupMs: () =>
+      outer?.aborted
+        ? Math.min(READ_MS, (deadline ?? Infinity) - Date.now())
+        : open()
+          ? Math.min(READ_MS, Math.max(1, expiresAt - Date.now()))
+          : 0,
     limit(budget: number) {
       clearTimeout(timer);
       // A phase that ran out aborted its controller; the next phase gets its own.
       if (controller.signal.aborted) controller = new AbortController();
+      if (outer?.aborted) stopped();
       expiresAt = Math.min(deadline ?? Infinity, Date.now() + budget);
       if (expiresAt <= Date.now()) expire();
       timer = setTimeout(expire, Math.max(0, expiresAt - Date.now()));
     },
-    stop: () => clearTimeout(timer),
+    stop() {
+      clearTimeout(timer);
+      outer?.removeEventListener('abort', stopped);
+    },
   };
 }
 
