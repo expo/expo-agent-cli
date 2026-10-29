@@ -397,6 +397,7 @@ describe(`${preflightRuntimeAsync.name} on an EAS Simulator session with no plat
     expect(error.message).toContain('names 2 apps');
     expect(error.message).toContain('--ios --eas');
     expect(error.message).toContain('--android --eas');
+    expect(error.message).toContain('close the apps');
     expect(error.data).toMatchObject({ debuggerTargets: 2, platform: null });
   });
 });

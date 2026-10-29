@@ -420,7 +420,7 @@ function noSessionAppError(devServerUrl: string, unplaced: number): CommandError
     [
       `No app connected to the Expo dev server at ${devServerUrl} could be shown to be the EAS Simulator session's app.`,
       `Why: its debugger target list names ${apps} that nothing on this machine places. One unclaimed app is the session's only when the local device tools answered and no other app is unclaimed.`,
-      `How: run this command again with the session's platform ("--ios --eas" or "--android --eas"), and close the apps on this dev server that are not the session's.`,
+      `How: close the apps on this dev server that are not the session's, then run this command again. A platform flag ("--ios --eas" or "--android --eas") only chooses which device tool has to answer; it does not choose between two unclaimed apps.`,
     ].join('\n')
   );
   error.suggestedCommand = `${PROGRAM_PREFIX} status --json`;
@@ -460,7 +460,9 @@ function noAppOnPlatformError(
       : [
           `No app connected to the Expo dev server at ${devServerUrl} could be shown to be running on ${platform}.`,
           `Why: its debugger target list names ${scoped.undetermined.length} app${scoped.undetermined.length === 1 ? '' : 's'}, and nothing in ${scoped.undetermined.length === 1 ? 'its target' : 'their targets'} says which platform ${scoped.undetermined.length === 1 ? 'it is' : 'they are'} on — the dev server does not label them, so this is read from the device name and the app id. A development build on a physical device can look like this.`,
-          `How: drop --${platform} to read the app that is connected, which is the honest command when only one is. To have the platform recognised, connect the device this machine's device tools can see ("adb devices -l", "xcrun simctl list devices booted").`,
+          cloud
+            ? `How: close the apps on this dev server that are not the EAS Simulator session's, then run this command again. --${platform} only chooses which device tool has to answer; it does not choose between two unclaimed apps.`
+            : `How: drop --${platform} to read the app that is connected, which is the honest command when only one is. To have the platform recognised, connect the device this machine's device tools can see ("adb devices -l", "xcrun simctl list devices booted").`,
         ].join('\n')
   );
   error.suggestedCommand =

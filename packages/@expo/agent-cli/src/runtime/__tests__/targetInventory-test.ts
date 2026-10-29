@@ -70,3 +70,44 @@ it.each(['linux', 'win32'])(
     ]);
   }
 );
+
+// @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
+describe('cloud attribution with no platform when adb gave no answer', () => {
+  const emulator = makeTarget({
+    id: '2',
+    appId: 'dev.example.app',
+    deviceName: 'sdk_gphone64_x86_64 - 15 - API 35',
+  });
+
+  async function classifyAsync(adbAnswers: boolean, targets: (typeof target)[]) {
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    vi.mocked(spawnCaptureAsync).mockImplementation(async (command) =>
+      command === 'xcrun'
+        ? { stdout: '{"devices":{}}', stderr: '', exitCode: 0 }
+        : { stdout: 'List of devices attached\n', stderr: '', exitCode: adbAnswers ? 0 : 1 }
+    );
+    const { classifiedTargets } = await resolveTargetSelectionAsync({
+      projectRoot: null,
+      flags: { platform: null, eas: true },
+      targets,
+    });
+    return classifiedTargets;
+  }
+
+  it('holds an Android-shaped target beside the session app', async () => {
+    const classified = await classifyAsync(false, [emulator, target]);
+    expect(classified.read).toEqual([]);
+    expect(classified.undetermined).toEqual([emulator, target]);
+  });
+
+  it('holds a lone Android-shaped target', async () => {
+    const classified = await classifyAsync(false, [emulator]);
+    expect(classified.read).toEqual([]);
+    expect(classified.undetermined).toEqual([emulator]);
+  });
+
+  it('still reads a lone unclaimed iOS target', async () => {
+    const classified = await classifyAsync(false, [target]);
+    expect(classified.read).toEqual([target]);
+  });
+});

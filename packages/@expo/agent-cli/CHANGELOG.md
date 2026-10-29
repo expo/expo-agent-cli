@@ -57,7 +57,7 @@
 - `smoke` asks an app it opened or reloaded again for 5 s after its first "method not found", instead of reporting a runtime with no debugger. ([#201](https://github.com/expo/expo-agent-cli/pull/201) by [@vonovak](https://github.com/vonovak))
 - `status` with an EAS Simulator session on record and no app connected now names the session's platform (`navigate / --<p> --eas`), and with an app connected its `smoke --<p> --eas` step says the session is recorded, not checked, and that if it ended, smoke starts a new billed session only for Expo Go or a finished simulator build. ([#208](https://github.com/expo/expo-agent-cli/pull/208) by [@vonovak](https://github.com/vonovak))
 - `smoke` asks for its device again in a later phase when an earlier lookup failed, instead of keeping that failure for the rest of the run. ([#202](https://github.com/expo/expo-agent-cli/pull/202) by [@vonovak](https://github.com/vonovak))
-- Runtime reads on an EAS Simulator session now read the session's app when it is the one unclaimed debugger target, also with `--eas` and no platform flag, and skip the apps on local simulators. ([#203](https://github.com/expo/expo-agent-cli/pull/203) by [@vonovak](https://github.com/vonovak))
+- Runtime reads on an EAS Simulator session now read the session's app when it is the one unclaimed debugger target, also with `--eas` and no platform flag, and skip the apps on local simulators. When `adb` gave no answer, an Android-shaped app stays unread instead of blocking the session's app, and the refusal for two unclaimed apps says to close the apps that are not the session's. ([#203](https://github.com/expo/expo-agent-cli/pull/203) by [@vonovak](https://github.com/vonovak))
 
 ### 💡 Others
 

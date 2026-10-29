@@ -17,6 +17,8 @@ export interface DeviceInventory {
   bootedStatus: 'unknown' | 'observed' | 'unsupported';
   /** Hardware models of attached Android devices, as `adb devices -l` reports them. */
   androidModels: string[];
+  /** Unknown includes an unrequested or failed `adb`: no answer is not an empty list. */
+  androidStatus: 'unknown' | 'observed';
 }
 
 /** Facts that know nothing, for a run that did not need to ask the device tools. */
@@ -24,6 +26,7 @@ export const EMPTY_DEVICE_INVENTORY: DeviceInventory = {
   booted: [],
   bootedStatus: 'unknown',
   androidModels: [],
+  androidStatus: 'unknown',
 };
 
 export type SelectedDevice = { backend: 'cloud'; deviceId: string | null };
@@ -93,6 +96,17 @@ function claimedLocally(
   );
 }
 
+/** Whether a target looks Android while `adb` gave no answer, so it may be a local emulator. */
+function androidUnproven(
+  target: Pick<CdpTarget, 'appId' | 'deviceName'>,
+  deviceInventory: DeviceInventory
+): boolean {
+  return (
+    deviceInventory.androidStatus === 'unknown' &&
+    platformOfTarget(target, deviceInventory).platform === 'android'
+  );
+}
+
 function classifyTarget(
   target: Pick<CdpTarget, 'appId' | 'deviceName'>,
   targetSelection: TargetSelection,
@@ -109,7 +123,11 @@ function classifyTarget(
     // A cloud scope reads no target a local device tool claims. An app id says nothing about which
     // device runs it, so only an answered tool can show that no local device does.
     if (claimedLocally(target, deviceInventory)) return { group: 'other-device' };
-    if (scopeToolsUnknown(targetSelection, deviceInventory)) return { group: 'undetermined' };
+    if (
+      scopeToolsUnknown(targetSelection, deviceInventory) ||
+      androidUnproven(target, deviceInventory)
+    )
+      return { group: 'undetermined' };
     return platform == null ? { group: 'undetermined' } : { group: 'read' };
   }
   return targetSelection.platform != null && platform == null
@@ -128,7 +146,7 @@ function classifyTarget(
  * session's app. Its device name is the cloud simulator's model, which no local tool reports, and a
  * development build's app id is often the same on both platforms. The run named the session, so the
  * one target nothing on this machine claims is its app, provided the scope's device tools answered
- * or this host cannot run them. A failed inspection cannot establish absence. Two such targets stay
+ * or this host cannot run them. A failed inspection cannot establish absence, so an Android-shaped target stays undetermined while `adb` gave no answer. Two such targets stay
  * undetermined: nothing says which one is the session's. An Android session needs no rule,
  * because its device name shape places it.
  */
@@ -166,6 +184,7 @@ export function classifyTargets(
     !scopeToolsUnknown(targetSelection, deviceInventory) &&
     only &&
     !more.length &&
+    !androidUnproven(only, deviceInventory) &&
     (targetSelection.platform != null || classifiedTargets.read.length === 0)
   ) {
     return {
@@ -205,6 +224,7 @@ export async function refreshDeviceInventoryAsync(
     booted: tools.booted,
     bootedStatus: tools.bootedStatus,
     androidModels: tools.androidModels,
+    androidStatus: tools.androidStatus,
   };
 }
 
@@ -248,6 +268,7 @@ export async function readDeviceInventoryAsync(timeoutMs?: number): Promise<Devi
             .map((device) => device.model)
             .filter((model): model is string => model != null)
         : [],
+    androidStatus: adb?.exitCode === 0 ? 'observed' : 'unknown',
   };
 }
 

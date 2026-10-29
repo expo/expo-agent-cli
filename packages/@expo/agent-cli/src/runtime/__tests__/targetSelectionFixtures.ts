@@ -1,14 +1,20 @@
 import type { CdpTarget } from '../cdpClient';
 import { READ_EVERY_TARGET, type DeviceInventory, type TargetSelection } from '../targetSelection';
 export function makeDeviceInventory(overrides: Partial<DeviceInventory> = {}): DeviceInventory {
-  return { booted: [], bootedStatus: 'observed', androidModels: [], ...overrides };
+  return {
+    booted: [],
+    bootedStatus: 'observed',
+    androidModels: [],
+    androidStatus: 'observed',
+    ...overrides,
+  };
 }
 export function makeTargetSelection(overrides: Partial<TargetSelection> = {}): TargetSelection {
   return { ...READ_EVERY_TARGET, ...overrides };
 }
 export const EVERY_TARGET_CLIENT = {
   targetSelection: READ_EVERY_TARGET,
-  deviceInventory: makeDeviceInventory({ bootedStatus: 'unknown' }),
+  deviceInventory: makeDeviceInventory({ bootedStatus: 'unknown', androidStatus: 'unknown' }),
 };
 
 export function makeTarget(overrides: Partial<CdpTarget> = {}): CdpTarget {
