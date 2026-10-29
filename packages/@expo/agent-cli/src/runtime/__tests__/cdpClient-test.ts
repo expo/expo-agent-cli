@@ -227,7 +227,7 @@ describe('CdpClient.evaluateAsync', () => {
     })) as unknown as typeof fetch;
 
     const client = new CdpClient({ ...EVERY_TARGET_CLIENT, metroUrl: 'http://localhost:8081' });
-    await expect(client.evaluateAsync('1')).rejects.toThrow(/No target found/);
+    await expect(client.evaluateAsync('1')).rejects.toThrow(/no app is connected to it/);
   });
 
   // @ref llp/0005-runtime-loop-tools.rfc.md §Target owner. The client re-reads the list, so it
@@ -298,7 +298,7 @@ describe('CdpClient.evaluateAsync', () => {
       metroUrl: 'http://localhost:8081',
       targetRetryMs: 300,
     });
-    await expect(client.evaluateAsync('1')).rejects.toThrow(/No target found/);
+    await expect(client.evaluateAsync('1')).rejects.toThrow(/no app is connected to it/);
   });
 });
 

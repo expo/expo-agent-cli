@@ -86,6 +86,31 @@ it.each([
   }
 );
 
+it.each([[[]], [['--android']]])(
+  'runtime:eval %j refuses like the preflight when the list is empty after the preflight',
+  async (flags) => {
+    const { root, targets } = await besideOtherWorktreeAsync();
+    const own = targets[1]!;
+    let reads = 0;
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: () => (reads++ === 0 ? [own] : []),
+    });
+    try {
+      const result = await executeAgentCliAsync(
+        root,
+        ['runtime:eval', '"1"', ...flags, '--dev-server-url', server.url, '--json'],
+        { reject: false }
+      );
+      expect(result.exitCode, result.all).toBe(22);
+      expect(JSON.parse(result.stdout).error.code).toBe('NO_APP_CONNECTED');
+      expect(result.stdout).toContain('no app is connected to it');
+    } finally {
+      await server.close();
+    }
+  }
+);
+
 it('runtime:reload checks only its own Android bundle beside a foreign iOS app', async () => {
   const { root, otherRoot, targets } = await besideOtherWorktreeAsync();
   const server = await startStubDevServerAsync({

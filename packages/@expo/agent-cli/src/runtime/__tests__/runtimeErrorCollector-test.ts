@@ -244,7 +244,7 @@ describe('CdpRuntimeErrorCollector.collectAsync', () => {
       ...EVERY_TARGET_CLIENT,
       metroUrl: 'http://localhost:8081',
     });
-    await expect(collector.collectAsync()).rejects.toThrow(/No target found/);
+    await expect(collector.collectAsync()).rejects.toThrow(/no app is connected to it/);
   });
 
   it(`should reject when the debugger connection does not open in time`, async () => {

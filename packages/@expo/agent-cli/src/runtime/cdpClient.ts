@@ -16,7 +16,7 @@ import {
   parseSettledPromiseSlot,
   wrapExpressionForPromises,
 } from './promiseSettling';
-import { emptyScopeError } from './preflight';
+import { emptyScopeError, noAppConnectedError } from './preflight';
 import {
   classifyTargets,
   type DeviceInventory,
@@ -255,6 +255,14 @@ export class CdpClient {
       await new Promise((resolve) => setTimeout(resolve, TARGET_RETRY_POLL_MS));
     }
     if (!target) {
+      const { read, otherPlatform, undetermined, skipped } = classifiedTargets;
+      // An empty list is the preflight's "no app is connected", whatever the scope.
+      if (read.length + otherPlatform.length + undetermined.length + skipped.length === 0) {
+        throw noAppConnectedError({
+          devServerUrl: this.options.metroUrl,
+          platform: this.options.targetSelection.platform?.value,
+        });
+      }
       // Two different failures, and only one of them is "the app is not there". A scoped run that
       // found apps on the other platform, only another worktree's app, or only apps nothing placed
       // has to say so, or the reader debugs a healthy app (F51, llp/0005 §Target owner).
