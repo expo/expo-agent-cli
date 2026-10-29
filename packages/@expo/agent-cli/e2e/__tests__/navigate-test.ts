@@ -507,17 +507,21 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
     );
   });
 
-  // The root is only in the dynamic config, and no plugin module is installed.
-  it('checks the route under the router root a dynamic config names in its plugins', async () => {
+  // The root is only in the dynamic config, no plugin module is installed, and only the first call
+  // names it. Node does not run an ES module again, so every read must share that one call.
+  it('checks the route under the router root from the call that gave the scheme', async () => {
     const projectRoot = await setupDynamicAsync({
-      'app.config.js': [
-        'module.exports = ({ config }) => ({',
-        '  ...config,',
-        "  scheme: 'marmelade',",
-        "  plugins: [['expo-router', { root: './routes' }], 'react-native-fancy'],",
-        '});',
+      'app.config.mjs': [
+        'let calls = 0;',
+        'export default ({ config }) => {',
+        '  calls += 1;',
+        '  return calls === 1',
+        "    ? { ...config, scheme: 'first', plugins: [['expo-router', { root: './routes' }]] }",
+        "    : { ...config, scheme: 'later', plugins: [] };",
+        '};',
         '',
       ].join('\n'),
+      'app/index.tsx': 'export default function Route() { return null; }\n',
     });
     const route = path.join(projectRoot, 'routes', 'profile', '[id].tsx');
     await fs.promises.mkdir(path.dirname(route), { recursive: true });
@@ -530,6 +534,7 @@ describe('@expo/agent-cli navigate with a dynamic app config', () => {
     );
     const report: NavigateReport = JSON.parse(result.stdout);
 
+    expect(report.url).toBe('first://profile/42');
     expect(report.routeCheck).toMatchObject({ checked: true, ok: true, matched: '/profile/[id]' });
   });
 

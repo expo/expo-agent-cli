@@ -763,31 +763,72 @@ describe('@expo/agent-cli status', () => {
       expect(packages).not.toContain('@shopify/react-native-skia');
     });
 
+    const OTHER_PLUGIN = [
+      expect.objectContaining({ kind: 'config-plugin', packageName: 'react-native-other' }),
+    ];
+    const FIRST_CALL_ONLY = [
+      'let calls = 0;',
+      'const plugins = () => { calls += 1; return calls === 1 ? ["react-native-other"] : []; };',
+    ];
+
     // No plugin module is installed: the check reads the declared list, it does not load it.
+    // Status reads the config more than once, and every read sees the same single call.
     it.each([
       [
         'should see the plugins a dynamic config keeps from app.json and adds',
-        'module.exports = ({ config }) => ({ ...config, plugins: [...config.plugins, "react-native-other"] });\n',
+        {
+          'app.config.js':
+            'module.exports = ({ config }) => ({ ...config, plugins: [...config.plugins, "react-native-other"] });\n',
+        },
         [
           expect.objectContaining({ kind: 'config-plugin', packageName: 'react-native-fancy' }),
           expect.objectContaining({ kind: 'config-plugin', packageName: 'react-native-other' }),
         ],
       ],
       [
-        'should read the plugins from the one call that gives the other values',
-        [
-          'let calls = 0;',
-          'module.exports = ({ config }) => {',
-          '  calls += 1;',
-          '  return { ...config, plugins: calls === 1 ? ["react-native-other"] : [] };',
-          '};',
-          '',
-        ].join('\n'),
-        [expect.objectContaining({ kind: 'config-plugin', packageName: 'react-native-other' })],
+        'should read the plugins of a config that answers differently on a later call',
+        {
+          'app.config.js': [
+            ...FIRST_CALL_ONLY,
+            'module.exports = ({ config }) => ({ ...config, plugins: plugins() });',
+            '',
+          ].join('\n'),
+        },
+        OTHER_PLUGIN,
+      ],
+      [
+        'should read the plugins of an ES module config that answers differently on a later call',
+        {
+          'app.config.mjs': [
+            ...FIRST_CALL_ONLY,
+            'export default ({ config }) => ({ ...config, plugins: plugins() });',
+            '',
+          ].join('\n'),
+        },
+        OTHER_PLUGIN,
+      ],
+      [
+        'should read the plugins of a config whose helper keeps its own list',
+        {
+          'plugins.js': [
+            'const list = [];',
+            'module.exports = () => { list.push("react-native-other"); return list; };',
+            '',
+          ].join('\n'),
+          'app.config.js': [
+            'const plugins = require("./plugins");',
+            'module.exports = ({ config }) => ({ ...config, plugins: plugins() });',
+            '',
+          ].join('\n'),
+        },
+        OTHER_PLUGIN,
       ],
       [
         'should call the plugins unknown when the dynamic config throws',
-        "module.exports = () => { throw new Error('Cannot resolve app config'); };\n",
+        {
+          'app.config.js':
+            "module.exports = () => { throw new Error('Cannot resolve app config'); };\n",
+        },
         [
           expect.objectContaining({
             kind: 'unknown-app-config',
@@ -795,17 +836,37 @@ describe('@expo/agent-cli status', () => {
           }),
         ],
       ],
-    ])('%s', async (_name, appConfigJs, reasons) => {
+    ])('%s', async (_name, files, reasons) => {
       const projectRoot = await goAppOnDumpSdkAsync();
       const appJsonPath = path.join(projectRoot, 'app.json');
       const appJson = JSON.parse(await fs.promises.readFile(appJsonPath, 'utf8'));
       appJson.expo.plugins = ['react-native-fancy'];
       await fs.promises.writeFile(appJsonPath, JSON.stringify(appJson));
-      await fs.promises.writeFile(path.join(projectRoot, 'app.config.js'), appConfigJs);
+      for (const [name, contents] of Object.entries(files)) {
+        await fs.promises.writeFile(path.join(projectRoot, name), contents);
+      }
 
       const report = await reportInAsync(projectRoot);
 
       expect(report.probe?.expoGo.reasons).toEqual(reasons);
+    });
+
+    // `@expo/require-utils` runs a file that throws while it loads twice on its own.
+    it('should load a config that throws while it loads once per command', async () => {
+      const projectRoot = await goAppOnDumpSdkAsync();
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'app.config.js'),
+        [
+          'require("fs").appendFileSync(__dirname + "/runs.log", "run\\n");',
+          'throw new Error("Cannot resolve app config");',
+          '',
+        ].join('\n')
+      );
+
+      await reportInAsync(projectRoot);
+
+      const runs = await fs.promises.readFile(path.join(projectRoot, 'runs.log'), 'utf8');
+      expect(runs.trim().split('\n').length).toBeLessThanOrEqual(2);
     });
   });
 

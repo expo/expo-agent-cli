@@ -61,7 +61,7 @@ export function evaluateExpoConfig(
   const env = { ...process.env };
   const dev = '__DEV__' in scope ? { value: scope.__DEV__ } : null;
   const stdoutWrite = process.stdout.write;
-  let watch: DeclaredPluginsWatch | null = null;
+  let forget: (() => void) | null = null;
   try {
     // `expo config` sets `__DEV__` from the mode as well, and a config may read it.
     scope.__DEV__ = mode === 'development';
@@ -69,7 +69,12 @@ export function evaluateExpoConfig(
     process.stdout.write = ((chunk: any, ...rest: any[]) =>
       (process.stderr.write as any)(chunk, ...rest)) as typeof process.stdout.write;
     const { dynamicConfigPath } = getConfigFilePaths(projectRoot);
-    watch = skipPlugins && dynamicConfigPath ? watchDeclaredPlugins(dynamicConfigPath) : null;
+    let watch: DeclaredPluginsWatch | null = null;
+    if (skipPlugins && dynamicConfigPath) {
+      forget = forgetModulesLoadedFrom(dynamicConfigPath);
+      // A config that throws while it loads throws here, and `getConfig` does not run it again.
+      watch = watchDeclaredPlugins(dynamicConfigPath);
+    }
     const config = getConfig(projectRoot, {
       skipSDKVersionRequirement: true,
       isPublicConfig,
@@ -89,7 +94,7 @@ export function evaluateExpoConfig(
   } catch (error: unknown) {
     return { ok: false, error: reasonOf(error instanceof Error ? error.message : String(error)) };
   } finally {
-    watch?.release();
+    forget?.();
     process.stdout.write = stdoutWrite;
     if (dev) {
       scope.__DEV__ = dev.value;
@@ -100,55 +105,59 @@ export function evaluateExpoConfig(
   }
 }
 
-interface DeclaredPluginsWatch {
-  /** What the config returned for `plugins`, or null when the export was never called. */
-  declared(): { plugins: unknown } | null;
-  /**
-   * Drop the module from `require.cache`, so the next evaluation runs it fresh.
-   * An ES module stays in Node's own module cache, so its state carries over to the next read.
-   */
-  release(): void;
+/**
+ * Drop the config from `require.cache` now, and on the returned call drop every module loaded
+ * since, so the next evaluation runs the config and the helpers it requires fresh.
+ */
+function forgetModulesLoadedFrom(dynamicConfigPath: string): () => void {
+  const cache = requireCache(dynamicConfigPath);
+  for (const key of [dynamicConfigPath, realpathOrSelf(dynamicConfigPath)]) {
+    delete cache[key];
+  }
+  const before = new Set(Object.keys(cache));
+  return () => {
+    for (const key of Object.keys(cache)) {
+      if (!before.has(key)) {
+        delete cache[key];
+      }
+    }
+  };
 }
+
+interface DeclaredPluginsWatch {
+  /** What the config returned for `plugins`, or null when no fresh call was seen. */
+  declared(): { plugins: unknown } | null;
+}
+
+/** Exports a previous evaluation already called: a module Node served again, not a new run. */
+const calledExports = new WeakSet<object>();
 
 /**
  * Watch the `plugins` the dynamic config returns, which `getConfig` deletes when it skips them.
  *
  * The module is loaded into `require.cache` first, where `getConfig` takes it from, with its export
  * wrapped. So the one call that gives the scheme also gives the plugins, and no plugin module
- * loads.
+ * loads. Node serves an ES module again without running it, so its plugins are unknown on a second
+ * evaluation in one process.
  */
 function watchDeclaredPlugins(dynamicConfigPath: string): DeclaredPluginsWatch {
-  // Through `Module`, because the bundler replaces a bare `createRequire()` call.
-  const cache = Module.createRequire(dynamicConfigPath).cache;
-  const realPath = realpathOrSelf(dynamicConfigPath);
-  const keys = [dynamicConfigPath, realPath];
-  // A transpiled config is cached under its output name as well.
-  const release = () => {
-    const modules = new Set(keys.map((key) => cache[key]).filter(Boolean));
-    for (const [key, mod] of Object.entries(cache)) {
-      if (keys.includes(key) || modules.has(mod)) {
-        delete cache[key];
-      }
-    }
-  };
-  release();
-  try {
-    loadModuleSync(dynamicConfigPath);
-  } catch {
-    // `getConfig` reports why when it loads the module itself.
-    return { declared: () => null, release };
-  }
-  const mod = cache[dynamicConfigPath] ?? cache[realPath];
+  const cache = requireCache(dynamicConfigPath);
+  loadModuleSync(dynamicConfigPath);
+  const mod = cache[dynamicConfigPath] ?? cache[realpathOrSelf(dynamicConfigPath)];
   if (mod == null) {
-    return { declared: () => null, release };
+    return { declared: () => null };
   }
 
   const original = mod.exports;
   const hasDefault = original?.default != null;
   const exported = hasDefault ? original.default : original;
   if (typeof exported !== 'function') {
-    return { declared: () => ({ plugins: pluginsOf(exported) }), release };
+    return { declared: () => ({ plugins: pluginsOf(exported) }) };
   }
+  if (calledExports.has(exported)) {
+    return { declared: () => null };
+  }
+  calledExports.add(exported);
   let declared: { plugins: unknown } | null = null;
   const capture = (request: unknown) => {
     const result = exported(request);
@@ -156,7 +165,12 @@ function watchDeclaredPlugins(dynamicConfigPath: string): DeclaredPluginsWatch {
     return result;
   };
   mod.exports = hasDefault ? { ...original, default: capture } : capture;
-  return { declared: () => declared, release };
+  return { declared: () => declared };
+}
+
+// Through `Module`, because the bundler replaces a bare `createRequire()` call.
+function requireCache(file: string): NodeJS.Dict<NodeJS.Module> {
+  return Module.createRequire(file).cache;
 }
 
 // Node keys `require.cache` by the real path, and `/tmp` is a symlink on macOS.

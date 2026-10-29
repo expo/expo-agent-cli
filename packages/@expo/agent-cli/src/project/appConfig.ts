@@ -6,6 +6,7 @@
 // env files are loaded (`src/project/evaluatedConfig.ts`), the way `expo config` reads it. When that
 // fails, the static file stands and `evaluationError` says why, so a caller can report a missing
 // value as unknown instead of as absent.
+import { getFiles as getEnvFiles } from '@expo/env';
 import fs from 'fs';
 import path from 'path';
 
@@ -63,13 +64,20 @@ export interface ProjectExpoConfig {
   pluginsUnknown: boolean;
 }
 
+/** The last evaluation per project in this process, with the files it was evaluated from. */
+const evaluations = new Map<string, { inputs: string; read: ProjectExpoConfig }>();
+
 /**
  * Read the project's app config.
  *
  * The dev loop's view: the env files are those of `development`, and the config plugins are not
  * run, so a plugin module that is not installed does not fail the read. The declared `plugins`
- * are kept. The answer is not cached, for the reason llp/0011 gives: a dynamic config can read env
- * vars and `.env` files that no file stamp sees.
+ * are kept.
+ *
+ * A dynamic config is evaluated once per process while its inputs stay the same, so the scheme,
+ * the ids and the plugins one command reads all come from one call of it. Nothing is kept across
+ * runs, for the reason llp/0011 gives: a dynamic config can read env vars and files that no stamp
+ * sees.
  */
 export function readExpoConfig(projectRoot: string): ProjectExpoConfig {
   const dynamicConfigFile =
@@ -79,6 +87,34 @@ export function readExpoConfig(projectRoot: string): ProjectExpoConfig {
     return { ...staticRead, dynamicConfigFile, evaluationError: null, pluginsUnknown: false };
   }
 
+  const inputs = readEvaluationInputs(projectRoot, dynamicConfigFile);
+  const last = evaluations.get(projectRoot);
+  if (last?.inputs === inputs) {
+    return last.read;
+  }
+  const read = evaluateDynamicConfig(projectRoot, dynamicConfigFile, staticRead);
+  evaluations.set(projectRoot, { inputs, read });
+  return read;
+}
+
+/** The contents of the files an evaluation reads: the configs, `package.json` and the env files. */
+function readEvaluationInputs(projectRoot: string, dynamicConfigFile: string): string {
+  return [dynamicConfigFile, ...STATIC_CONFIG_FILES, 'package.json', ...getEnvFiles('development')]
+    .map((file) => {
+      try {
+        return `${file}\0${fs.readFileSync(path.join(projectRoot, file), 'utf8')}`;
+      } catch {
+        return `${file}\0`;
+      }
+    })
+    .join('\0');
+}
+
+function evaluateDynamicConfig(
+  projectRoot: string,
+  dynamicConfigFile: string,
+  staticRead: Pick<ProjectExpoConfig, 'source' | 'config' | 'unreadable'>
+): ProjectExpoConfig {
   const evaluated = evaluateExpoConfig(projectRoot, {
     mode: 'development',
     isPublicConfig: true,

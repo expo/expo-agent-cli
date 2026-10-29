@@ -246,7 +246,9 @@ describe(resolveProjectSchemeConfigAsync, () => {
   });
 
   it(`should keep the static read and say why when the evaluation fails`, async () => {
-    const projectRoot = createDynamicFixture();
+    const projectRoot = createDynamicFixture({
+      'app.config.ts': 'throw new Error("Cannot resolve app config");',
+    });
     vi.mocked(getConfig).mockImplementation(() => {
       throw new Error('Cannot resolve app config');
     });
