@@ -116,13 +116,32 @@ describe(parseBootedIosSimulators, () => {
     ]);
   });
 
+  it(`should skip an entry with no name and keep the valid ones`, () => {
+    expect(parseBootedIosSimulators(ENTRY_WITH_NO_NAME_JSON)).toEqual([
+      { udid: 'IOS-1', name: 'iPhone 17' },
+    ]);
+  });
+
   it(`should list nothing for output that is not simctl JSON`, () => {
     expect(parseBootedIosSimulators('not json')).toEqual([]);
     expect(parseBootedIosSimulators('')).toEqual([]);
   });
 });
 
+const ENTRY_WITH_NO_NAME_JSON = JSON.stringify({
+  devices: {
+    'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [
+      { udid: 'BAD' },
+      { udid: 'IOS-1', name: 'iPhone 17' },
+    ],
+  },
+});
+
 describe(parseBootedSimulators, () => {
+  it(`should return null when one entry has no name, so no caller infers absence`, () => {
+    expect(parseBootedSimulators(ENTRY_WITH_NO_NAME_JSON)).toBeNull();
+  });
+
   it(`should list every booted runtime, so a watch simulator is not mistaken for something else`, () => {
     expect(parseBootedSimulators(BOOTED_SIMCTL_JSON)?.map((simulator) => simulator.name)).toEqual([
       'Apple Watch',

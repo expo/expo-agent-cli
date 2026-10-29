@@ -84,9 +84,13 @@ export function parseSimulators(stdout: string): SimulatorEntry[] {
   return simulators;
 }
 
-/** Every booted iOS simulator in `simctl list devices booted -j`, in the order `simctl` lists them. */
+/**
+ * Every booted iOS simulator in `simctl list devices booted -j`, in the order `simctl` lists them.
+ *
+ * An entry without a udid or a name is skipped, so one bad entry does not hide the valid ones.
+ */
 export function parseBootedIosSimulators(stdout: string): { udid: string; name: string }[] {
-  return parseBooted(stdout, (runtime) => runtime.includes('.iOS-')) ?? [];
+  return parseBooted(stdout, (runtime) => runtime.includes('.iOS-'), true) ?? [];
 }
 
 /**
@@ -94,15 +98,17 @@ export function parseBootedIosSimulators(stdout: string): { udid: string; name: 
  *
  * Not only iOS: a target on a watchOS simulator is on one of this machine's simulators, and it would
  * otherwise fall through to a platform rule that knows less.
- * Returns null for an incomplete or invalid listing: callers must not infer absence from it.
+ * Returns null for an incomplete or invalid listing, an entry without a udid or a name included:
+ * callers must not infer absence from it.
  */
 export function parseBootedSimulators(stdout: string): { udid: string; name: string }[] | null {
-  return parseBooted(stdout, () => true);
+  return parseBooted(stdout, () => true, false);
 }
 
 function parseBooted(
   stdout: string,
-  keepRuntime: (runtime: string) => boolean
+  keepRuntime: (runtime: string) => boolean,
+  skipBadEntries: boolean
 ): { udid: string; name: string }[] | null {
   let parsed: { devices?: Record<string, { udid?: string; name?: string }[]> };
   try {
@@ -130,8 +136,10 @@ function parseBooted(
         !device.udid ||
         typeof device.name !== 'string' ||
         !device.name
-      )
+      ) {
+        if (skipBadEntries) continue;
         return null;
+      }
       simulators.push({ udid: device.udid, name: device.name });
     }
   }
