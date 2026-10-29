@@ -79,6 +79,9 @@ export async function runtimeEvalAsync(
     if (error instanceof CdpPromisePendingError) {
       throw promisePendingError(devServerUrl, expression, timeoutMs, error, options.platform);
     }
+    if (error instanceof CommandError) {
+      throw error;
+    }
     throw new CommandError(
       'RUNTIME_EVALUATE_FAILED',
       [

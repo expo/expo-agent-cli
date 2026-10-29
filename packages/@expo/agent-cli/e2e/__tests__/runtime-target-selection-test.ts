@@ -58,6 +58,28 @@ it('runtime:eval skips a renamed foreign simulator and names its worktree', asyn
   }
 });
 
+it('runtime:eval refuses with NO_APP_CONNECTED when only a foreign app is listed after the preflight', async () => {
+  const { root, otherRoot, targets } = await besideOtherWorktreeAsync();
+  const [foreign, own] = targets;
+  let reads = 0;
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: () => (reads++ === 0 ? [own!] : [foreign!]),
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      ['runtime:eval', '"1"', '--dev-server-url', server.url, '--json'],
+      { reject: false }
+    );
+    expect(result.exitCode, result.all).toBe(1);
+    expect(JSON.parse(result.stdout).error.code).toBe('NO_APP_CONNECTED');
+    expect(result.stdout).toContain(otherRoot);
+  } finally {
+    await server.close();
+  }
+});
+
 it('runtime:reload checks only its own Android bundle beside a foreign iOS app', async () => {
   const { root, otherRoot, targets } = await besideOtherWorktreeAsync();
   const server = await startStubDevServerAsync({

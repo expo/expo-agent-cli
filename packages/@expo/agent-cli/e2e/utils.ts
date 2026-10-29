@@ -669,9 +669,10 @@ export async function waitForDevLockAsync(
 export type StubDevServerOptions = {
   /**
    * Debugger targets `GET /json/list` answers with — the apps a command under test will believe
-   * are connected. Defaults to none, which is a dev server nothing has attached to yet.
+   * are connected. Defaults to none, which is a dev server nothing has attached to yet. A function
+   * is called on every read, for a list that changes between reads.
    */
-  targets?: unknown[];
+  targets?: unknown[] | (() => unknown[]);
   /** Begin listening only after the stub Expo start creates this file. */
   readyWithFile?: string;
   /**
@@ -887,7 +888,7 @@ export async function startStubDevServerAsync({
   const bundlePlatforms: string[] = [];
   // Mutable, because a reload changes it: the debugger target list is the evidence a reload is
   // judged on, so a stub that always answers the same list can only test an app that never moved.
-  let listedTargets: unknown[] = targets;
+  let listedTargets: unknown[] = typeof targets === 'function' ? [] : targets;
   let nextPageId = 100;
   const server: Server = createServer((request, response) => {
     const route = (request.url ?? '').split('?')[0];
@@ -971,7 +972,8 @@ export async function startStubDevServerAsync({
       // — a fixture URL naming 8081 or no port at all is one nothing can connect to, and
       // `@expo/agent-cli status` now opens each of them to tell a live target from a page an app left
       // behind (llp/0005-runtime-loop-tools.rfc.md §Android, F56).
-      response.end(JSON.stringify(started ? listedTargets.map(onThisPort) : []));
+      const listed = typeof targets === 'function' ? targets() : listedTargets;
+      response.end(JSON.stringify(started ? listed.map(onThisPort) : []));
       return;
     }
 

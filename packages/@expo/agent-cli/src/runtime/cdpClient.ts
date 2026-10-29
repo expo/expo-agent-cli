@@ -16,10 +16,9 @@ import {
   parseSettledPromiseSlot,
   wrapExpressionForPromises,
 } from './promiseSettling';
+import { emptyScopeError } from './preflight';
 import {
-  describeSkippedApps,
   classifyTargets,
-  skippedAppsOf,
   type DeviceInventory,
   type ClassifiedTargets,
   type TargetSelection,
@@ -205,33 +204,6 @@ export interface CdpClientOptions {
   deviceInventory: DeviceInventory;
 }
 
-/**
- * The failure for a client whose scope holds no target: none of its platform, or none that is not
- * another worktree's. Its message is the whole report.
- */
-export class NoTargetInScopeError extends Error {
-  constructor(targetSelection: TargetSelection, classifiedTargets: ClassifiedTargets) {
-    const platform = targetSelection.platform?.value;
-    const otherPlatforms = [
-      ...new Set(classifiedTargets.otherPlatform.map((entry) => entry.platform)),
-    ];
-    const skipped = skippedAppsOf(classifiedTargets);
-    super(
-      [
-        platform == null
-          ? classifiedTargets.undetermined.length > 0
-            ? `No app connected to the dev server could be placed in this run's scope: ${classifiedTargets.undetermined.length} could not be placed at all.`
-            : 'No app of this worktree is connected to the dev server.'
-          : otherPlatforms.length > 0
-            ? `No ${platform} app is connected to the dev server; the ${otherPlatforms.join(' and ')} app that is connected is a different runtime.`
-            : `No app connected to the dev server could be shown to be running on ${platform}${classifiedTargets.undetermined.length > 0 ? `, and ${classifiedTargets.undetermined.length} could not be placed at all` : ''}.`,
-        ...(skipped.length > 0 ? [describeSkippedApps(skipped)] : []),
-      ].join(' ')
-    );
-    this.name = 'NoTargetInScopeError';
-  }
-}
-
 /** How often the target list is re-read while {@link CdpClientOptions.targetRetryMs} runs. */
 const TARGET_RETRY_POLL_MS = 250;
 
@@ -292,7 +264,11 @@ export class CdpClient {
           classifiedTargets.skipped.length > 0 ||
           classifiedTargets.undetermined.length > 0)
       ) {
-        throw new NoTargetInScopeError(this.options.targetSelection, classifiedTargets);
+        throw emptyScopeError(
+          this.options.metroUrl,
+          this.options.targetSelection,
+          classifiedTargets
+        );
       }
       throw new Error('No target found.');
     }

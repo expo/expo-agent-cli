@@ -222,6 +222,9 @@ async function askAppAsync(
     if (isMethodNotFoundError(error)) {
       throw evaluateUnsupportedError(devServerUrl);
     }
+    if (error instanceof CommandError) {
+      throw error;
+    }
     throw new CommandError(
       'RUNTIME_TREE_FAILED',
       [
