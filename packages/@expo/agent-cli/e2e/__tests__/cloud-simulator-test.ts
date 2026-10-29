@@ -448,56 +448,60 @@ describe('@expo/agent-cli navigate --eas', () => {
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
 describe('@expo/agent-cli runtime:reload --eas with no platform', () => {
-  it(`reloads the session's app, not the app on a booted local simulator`, async () => {
-    const projectRoot = await setupAsync('dev-client-app');
-    await writeSessionFileAsync(projectRoot, 'sess-e2e');
-    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
-    const evaluated: string[] = [];
-    const stub = await startStubDevServerAsync({
-      targets: [
-        makeTarget({
-          id: 'local',
-          appId: 'host.exp.Exponent',
-          deviceName: BOOTED_SIMULATOR.name,
-          webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=local&page=1',
-          reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'local' },
-        }),
-        makeTarget({
-          id: 'session',
-          appId: 'com.example.demo',
-          deviceName: 'iPhone 17',
-          webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=session&page=1',
-          reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'session' },
-        }),
-      ],
-      projectRoot,
-      inspectorEvaluate: (expression, device) => {
-        if (expression.includes('reloadAppAsync')) evaluated.push(device);
-        return undefined;
-      },
-    });
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        [
-          'runtime:reload',
-          '--eas',
-          '--method',
-          'runtime',
-          '--dev-server-url',
-          stub.url,
-          '--timeout',
-          '2s',
-          '--json',
-          '--no-followups',
+  // A booted local simulator exists only on macOS.
+  it.skipIf(process.platform !== 'darwin')(
+    `reloads the session's app, not the app on a booted local simulator`,
+    async () => {
+      const projectRoot = await setupAsync('dev-client-app');
+      await writeSessionFileAsync(projectRoot, 'sess-e2e');
+      await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR] });
+      const evaluated: string[] = [];
+      const stub = await startStubDevServerAsync({
+        targets: [
+          makeTarget({
+            id: 'local',
+            appId: 'host.exp.Exponent',
+            deviceName: BOOTED_SIMULATOR.name,
+            webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=local&page=1',
+            reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'local' },
+          }),
+          makeTarget({
+            id: 'session',
+            appId: 'com.example.demo',
+            deviceName: 'iPhone 17',
+            webSocketDebuggerUrl: 'ws://127.0.0.1:1/inspector/debug?device=session&page=1',
+            reactNative: { capabilities: { nativePageReloads: true }, logicalDeviceId: 'session' },
+          }),
         ],
-        { reject: false }
-      );
-      expect(new Set(evaluated), result.all).toEqual(new Set(['session']));
-    } finally {
-      await stub.close();
+        projectRoot,
+        inspectorEvaluate: (expression, device) => {
+          if (expression.includes('reloadAppAsync')) evaluated.push(device);
+          return undefined;
+        },
+      });
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          [
+            'runtime:reload',
+            '--eas',
+            '--method',
+            'runtime',
+            '--dev-server-url',
+            stub.url,
+            '--timeout',
+            '2s',
+            '--json',
+            '--no-followups',
+          ],
+          { reject: false }
+        );
+        expect(new Set(evaluated), result.all).toEqual(new Set(['session']));
+      } finally {
+        await stub.close();
+      }
     }
-  });
+  );
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Which app a run reads — `--eas` with no platform.
