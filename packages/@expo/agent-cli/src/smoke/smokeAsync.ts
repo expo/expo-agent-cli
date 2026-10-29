@@ -984,6 +984,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       const { verifiedBy, evidence } = await observeReloadAsync(devServerUrl, projectRoot, {
         prepared,
         mechanismProof: rungOne.kind === 'proved' ? rungOne.proof : null,
+        keepsPageId: prepared.policy.mechanism === 'page-reload',
         churn: rungOne.churn,
         attempts: [rungOne.attempt],
         bundleMark,

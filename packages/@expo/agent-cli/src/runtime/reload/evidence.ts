@@ -176,7 +176,10 @@ export function chooseVerifiedBy<Proof extends Label>(
 export type Unwatched =
   /** A new JavaScript context on the own target already proved the reload. */
   | 'context-replaced'
-  /** A `Page.reload` keeps the page id, and no bundle may count: nothing could arrive to prove it. */
+  /**
+   * The app comes back under the page id it had, it was listed before the run, and no bundle may
+   * count: nothing could arrive to prove it.
+   */
   | 'nothing-can-prove';
 
 /**
@@ -191,6 +194,7 @@ export async function observeReloadAsync<Proof extends Label>(
   {
     prepared,
     mechanismProof,
+    keepsPageId,
     churn,
     attempts,
     bundleMark,
@@ -198,6 +202,11 @@ export async function observeReloadAsync<Proof extends Label>(
   }: {
     prepared: PreparedRungOne;
     mechanismProof: Proof | null;
+    /**
+     * The mechanism brings the app back under the page id it had: `Page.reload` and a local
+     * relaunch do, a broadcast does not. An app it starts gets a new id.
+     */
+    keepsPageId: boolean;
     churn: CommandSocketChurn;
     attempts: readonly ReloadAttempt[];
     bundleMark: BundleSignalMark;
@@ -212,7 +221,8 @@ export async function observeReloadAsync<Proof extends Label>(
   const unwatched: Unwatched | null =
     mechanismProof === 'debugger-context-replaced'
       ? 'context-replaced'
-      : attempts.at(-1)?.method === 'page-reload' &&
+      : keepsPageId &&
+          prepared.classifiedTargets.read.length > 0 &&
           Array.isArray(bundlePlatforms) &&
           bundlePlatforms.length === 0
         ? 'nothing-can-prove'

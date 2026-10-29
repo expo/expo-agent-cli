@@ -559,6 +559,42 @@ describe("runtime:reload beside another worktree's iOS app", () => {
       await server.close();
     }
   });
+
+  it('does not wait out --timeout after a relaunch that nothing can prove', async () => {
+    const { root } = await besideCloneAsync();
+    const server = await startStubDevServerAsync({
+      projectRoot: root,
+      targets: [ownIos(), cloneIos()],
+      messagePeers: {},
+      inspectorSocket: 'none',
+    });
+    try {
+      const started = Date.now();
+      const result = await executeAgentCliAsync(
+        root,
+        [
+          'runtime:reload',
+          '--ios',
+          '--dev-server-url',
+          server.url,
+          '--timeout',
+          '20s',
+          '--json',
+          '--no-followups',
+        ],
+        { reject: false, env: BOUND }
+      );
+      expect(Date.now() - started, result.all).toBeLessThan(10_000);
+      expect(result.exitCode).toBe(22);
+      const report = JSON.parse(result.stdout);
+      expect(report).toMatchObject({ reloaded: true, verifiedBy: 'app-relaunch' });
+      expect(report.bundlesAfterReload.reason).toContain('keeps its page id');
+      expect(result.stderr).toContain('a relaunched app registers again under the page id it had');
+      expect(result.stderr).not.toContain('the runtime that answers now is the one from before');
+    } finally {
+      await server.close();
+    }
+  });
 });
 
 it("runtime:reload does not take another platform's churn as its proof", async () => {

@@ -508,6 +508,10 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
       ? await observeReloadAsync(devServerUrl, projectRoot, {
           prepared,
           mechanismProof,
+          // A `Page.reload` and a local relaunch bring the app back under the page id it had.
+          keepsPageId:
+            mechanismProof === 'app-relaunch' ||
+            (method === 'dev-server' && prepared.policy.mechanism === 'page-reload'),
           churn: commandSocketChurn,
           attempts,
           bundleMark,
@@ -631,7 +635,7 @@ export async function reloadAsync(projectRoot: string, options: ReloadOptions): 
         : unwatched === 'context-replaced'
           ? "not watched: a new JavaScript context on this worktree's app already proved the reload"
           : unwatched === 'nothing-can-prove'
-            ? 'not watched: a Page.reload keeps the page id, and no bundle may count on this run, so nothing could prove the reload'
+            ? `not watched: ${method === 'device' ? 'a relaunched app' : 'an app reloaded by Page.reload'} keeps its page id, and no bundle may count on this run, so nothing could prove the reload`
             : 'nothing watched the dev server output: no mechanism ran, so there was nothing to watch for',
     },
     bundlePlatforms: bundles.map((entry) => entry.platform),
@@ -1300,25 +1304,25 @@ export function explainReloadFailure(
   // may be back and invisible to this dev server, or it may not be back. Two states this command
   // cannot tell apart, and naming both is the honest report — `reloaded: no` with the mechanism that
   // ran, rather than a success off a verb that answers about no app in particular.
-  if (report.method != null && report.verifiedBy == null) {
+  const unprovable = state.unwatched === 'nothing-can-prove';
+  if ((report.method != null && report.verifiedBy == null) || unprovable) {
     const outside = state.rungOne?.kind === 'acted' ? state.rungOne.reachedOutside : 0;
-    const why =
-      state.unwatched === 'nothing-can-prove'
-        ? `Why: the app answered Page.reload, which keeps its page id, and no bundle may count here (${describeSkippedApps(report.skippedApps)}), so nothing could prove the reload and nothing was watched.`
-        : [
-            outside > 0
-              ? `Why: the dev server's command socket clients churned, but ${outside} listed app${outside === 1 ? '' : 's'} outside this run's scope ${outside === 1 ? 'was' : 'were'} reloaded too, so the churn proves nothing, and neither observation that could prove it happened within ${options.timeoutMs}ms.`
-              : `Why: two observations were watched for ${options.timeoutMs}ms and neither happened.`,
-            `The dev server listed no debugger target it had not listed before (${report.devServerUrl}/json/list named ${report.appsConnected})${options.cloud ? ', which a cloud simulator often never does — an app has run this project on one with that list empty throughout' : ''}.`,
-            `And ${report.bundlesAfterReload.reason ?? 'the dev server served no bundle after the relaunch'}. So the app may be running the new code invisibly, or it may not have come back.`,
-          ].join(' ');
+    const why = unprovable
+      ? `Why: ${report.method === 'device' ? 'a relaunched app registers again under the page id it had' : 'the app answered Page.reload, which keeps its page id'}, and no bundle may count here (${describeSkippedApps(report.skippedApps)}), so nothing could prove the reload and nothing was watched.`
+      : [
+          outside > 0
+            ? `Why: the dev server's command socket clients churned, but ${outside} listed app${outside === 1 ? '' : 's'} outside this run's scope ${outside === 1 ? 'was' : 'were'} reloaded too, so the churn proves nothing, and neither observation that could prove it happened within ${options.timeoutMs}ms.`
+            : `Why: two observations were watched for ${options.timeoutMs}ms and neither happened.`,
+          `The dev server listed no debugger target it had not listed before (${report.devServerUrl}/json/list named ${report.appsConnected})${options.cloud ? ', which a cloud simulator often never does — an app has run this project on one with that list empty throughout' : ''}.`,
+          `And ${report.bundlesAfterReload.reason ?? 'the dev server served no bundle after the relaunch'}. So the app may be running the new code invisibly, or it may not have come back.`,
+        ].join(' ');
     return [
       chalk.red(
         `The app was ${report.method === 'device' ? 'relaunched' : 'asked to reload itself'}${options.cloud ? ' on the cloud simulator' : ''}, and nothing was observed to confirm it reloaded.`
       ),
       why,
-      state.unwatched === 'nothing-can-prove'
-        ? `How: run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`
+      unprovable
+        ? `How: ${report.method === 'device' ? `look at the screen — "${smokeBase} --no-route-check" photographs it — before you believe "${PROGRAM_PREFIX} runtime:errors".` : `run "${PROGRAM_PREFIX} runtime:reload --method device", which relaunches this worktree's app and proves it by the relaunch, or look at the screen with "${smokeBase} --no-route-check".`}`
         : `How: look at the screen — "${smokeBase} --no-route-check" photographs it — and at what the dev server was asked for, with "${PROGRAM_PREFIX} dev:logs". ${options.cloud ? 'A first bundle over a tunnel can take longer than this wait, so a longer --timeout is worth one try. ' : ''}${report.bundlesAfterReload.observed == null ? `This project has no captured dev server log, which is where the one usable proof would have been: start it with "${PROGRAM_PREFIX} dev --detach${options.cloud ? ' --tunnel' : ''}" so its output is recorded.` : ''}`.trim(),
     ].join('\n');
   }
