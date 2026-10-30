@@ -17,8 +17,9 @@ const longFunctionFiles = {
   'src/agents/installAgentAsync.ts': 254,
   'src/dev/easSession.ts': 477,
   'src/followups/smoke.ts': 277,
-  'src/plan/decide.ts': 474,
+  'src/plan/decide.ts': 486,
   'src/runtime/discoverDevServer.ts': 194,
+  'src/status/nextAction.ts': 208,
 };
 
 export default {

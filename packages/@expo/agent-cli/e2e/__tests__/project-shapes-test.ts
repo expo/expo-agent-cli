@@ -530,27 +530,55 @@ describe('a package.json that is not an Expo app', () => {
 });
 
 describe('an Expo app whose dependencies are not installed', () => {
-  // The rule is *declared*, not installed: `expo` in package.json makes this an Expo app, and a
-  // fresh clone with no node_modules is the most ordinary state a real project is ever in. Reading
-  // the installed package instead would have refused every one of them.
-  it('is planned for, rather than refused as not an Expo app', async () => {
+  // `expo` in package.json makes this an Expo app, so it is never refused as NOT_EXPO_APP. But the
+  // plan reads expo-dev-client and the fingerprint from node_modules, so without them it would plan
+  // a dev-client install and a new build. The answer is the bare install, first.
+  async function uninstalledAppAsync(): Promise<string> {
     const directory = await fs.promises.realpath(
       await fs.promises.mkdtemp(path.join(os.tmpdir(), 'agent-cli-uninstalled-'))
     );
     await fs.promises.writeFile(
       path.join(directory, 'package.json'),
       JSON.stringify(
-        { name: 'cloned', version: '1.0.0', dependencies: { expo: '~54.0.0' } },
+        {
+          name: 'cloned',
+          version: '1.0.0',
+          dependencies: { expo: '~54.0.0', 'expo-dev-client': '~6.0.0' },
+        },
         null,
         2
       )
     );
+    return directory;
+  }
 
-    const result = await executeAgentCliAsync(directory, ['dev', '--plan', '--json'], {
+  it('refuses to plan, and names the bare install rather than a dev-client install', async () => {
+    const directory = await uninstalledAppAsync();
+
+    const result = await executeAgentCliAsync(directory, ['dev', '--android', '--plan', '--json'], {
       reject: false,
     });
 
+    expect(result.exitCode).toBe(1);
     expect(result.all).not.toContain('NOT_EXPO_APP');
-    expect(JSON.parse(result.stdout).rule).not.toBe('not-expo-app');
+    expect(result.all).not.toContain('expo install expo-dev-client');
+    const report = JSON.parse(result.stdout);
+    expect(report.error.code).toBe('DEPENDENCIES_NOT_INSTALLED');
+    expect(report.error.suggestedCommand).toBe('npx @expo/agent-cli install');
+  });
+
+  it('lets status report, with the bare install as next', async () => {
+    const directory = await uninstalledAppAsync();
+
+    const result = await executeAgentCliAsync(directory, ['status', '--json', '--no-followups'], {
+      reject: false,
+    });
+
+    const report = JSON.parse(result.stdout);
+    expect(report.project.isExpoApp).toBe(true);
+    expect(report.next).toMatchObject({
+      command: 'npx @expo/agent-cli install',
+      rule: 'dependencies-not-installed',
+    });
   });
 });

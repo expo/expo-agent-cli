@@ -148,6 +148,28 @@ describe(decideStartPlan, () => {
     });
   });
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  describe('rule: dependencies-not-installed', () => {
+    it.each([
+      ['no platform', {}],
+      ['web', { platform: 'web' as const }],
+      ['an EAS build', { platform: 'android' as const, buildBackend: backend('eas') }],
+    ])(`should plan nothing but the bare install for %s`, (_, options) => {
+      const plan = decideStartPlan(
+        createState({ sdkVersion: null, usesDevClient: false }),
+        options
+      );
+
+      expect(plan).toMatchObject({
+        rule: 'dependencies-not-installed',
+        target: 'none',
+        steps: [],
+        buildLocation: null,
+      });
+      expect(plan.reasons.join(' ')).toContain('npx @expo/agent-cli install');
+    });
+  });
+
   describe('rule: web', () => {
     it(`should start the dev server for web when the web platform is requested`, () => {
       const plan = decideStartPlan(createState(), { platform: 'web' });
@@ -767,21 +789,6 @@ describe(decideStartPlan, () => {
       });
 
       expect(plan.rule).toBe('needs-dev-client');
-    });
-
-    it(`should report an unknown SDK version as the reason it cannot use Expo Go`, () => {
-      const state = createState({
-        sdkVersion: null,
-        expoGo: {
-          compatible: false,
-          reasons: [{ kind: 'unknown-sdk', detail: 'Could not resolve the expo package version' }],
-        },
-      });
-      const plan = decideStartPlan(state, { platform: 'ios' });
-
-      expect(plan.rule).toBe('needs-dev-client');
-      expect(plan.reasons.join('\n')).toMatch(/Expo SDK version is unknown/);
-      expect(plan.reasons.join('\n')).toMatch(/Could not resolve the expo package version/);
     });
   });
 

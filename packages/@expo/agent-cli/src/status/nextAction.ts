@@ -96,6 +96,7 @@ export interface NextActionFacts {
   host: NextActionHost;
 }
 
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
 export function chooseNextAction({
   state,
   record,
@@ -133,6 +134,11 @@ export function chooseNextAction({
     // "expo run:ios" on a Linux box would be the report disagreeing with the command.
     recoveryPlan
   );
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  // The bare install outranks every device next below: each of them runs `dev`, which stops first.
+  if (next.rule === 'dependencies-not-installed') {
+    return next;
+  }
   const devNext = buildNextActionStatus(
     state,
     record,
