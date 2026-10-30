@@ -135,6 +135,7 @@ type StatusReport = {
     devices: { platform: string; deviceId: string; name: string | null }[];
     reason: string | null;
   } | null;
+  orphanSessions: { platform: string; id: string; projectRoot: string; command: string }[];
   skills: { agentIds: string[] | null; discovered: number; linked: number } | null;
   auth: {
     loggedIn: boolean | null;
@@ -468,6 +469,39 @@ async function installStubEasAsync(
   await pinEasCliAsync(projectRoot);
 }
 
+/** The top-level keys of `status --json`, in order: the command's contract. */
+const REPORT_KEYS = [
+  'project',
+  'expoGo',
+  'freshness',
+  'installed',
+  'builds',
+  'devServer',
+  'device',
+  'binding',
+  'orphanSessions',
+  'skills',
+  'auth',
+  'next',
+  'assertion',
+  'probe',
+  'errors',
+  'followups',
+];
+
+/** The events a run wrote to its `LOG_EVENTS` file; `_e` names each one. */
+function readEvents(eventsFile: string): Record<string, unknown>[] {
+  return fs
+    .readFileSync(eventsFile, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+function statusEvent(eventsFile: string): Record<string, unknown> | undefined {
+  return readEvents(eventsFile).find((entry) => entry._e === 'cli:status');
+}
+
 describe('@expo/agent-cli status', () => {
   it('prints usage with `status --help`', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
@@ -515,25 +549,9 @@ describe('@expo/agent-cli status', () => {
     it('reports every section in the JSON report', async () => {
       const report = await reportAsync('go-app');
 
-      expect(Object.keys(report)).toEqual([
-        'project',
-        'expoGo',
-        'freshness',
-        'installed',
-        'builds',
-        'devServer',
-        'device',
-        'binding',
-        'orphanSessions',
-        'skills',
-        'auth',
-        'next',
-        'assertion',
-        'probe',
-        'errors',
-        'followups',
-      ]);
+      expect(Object.keys(report)).toEqual(REPORT_KEYS);
       expect(report.errors).toEqual({});
+      expect(report.orphanSessions).toEqual([]);
       expect(report.project).toMatchObject({
         name: 'go-app',
         sdkVersion: '54.0.0',
@@ -605,10 +623,37 @@ describe('@expo/agent-cli status', () => {
       });
     });
 
-    it('reports that no agent is selected', async () => {
-      const report = await reportAsync('go-app');
+    // Section isolation: a discovery that cannot run costs the skills line, never the report's
+    // shape or another section.
+    it('notes a skills section it could not read, and reports the rest', async () => {
+      const projectRoot = await setupAsync('go-app');
+      await fs.promises.rm(
+        path.join(
+          projectRoot,
+          'node_modules',
+          'expo',
+          'internal',
+          'unstable-autolinking-exports.js'
+        )
+      );
+      const eventsFile = path.join(projectRoot, 'events.jsonl');
 
-      expect(report.skills).toEqual({ agentIds: null, discovered: 0, linked: 0 });
+      const report = await reportInAsync(projectRoot, [], { LOG_EVENTS: eventsFile });
+
+      expect(Object.keys(report)).toEqual(REPORT_KEYS);
+      expect(report.skills).toBeNull();
+      expect(Object.keys(report.errors)).toEqual(['skills']);
+      expect(report.project?.name).toBe('go-app');
+      expect(report.devServer).not.toBeNull();
+      expect(statusEvent(eventsFile)).toMatchObject({ sectionErrors: ['skills'] });
+    });
+
+    // Without a selection there is nowhere to link to, so no discovered skill counts as linked.
+    it('reports that no agent is selected', async () => {
+      const report = await reportAsync('skills-app');
+
+      expect(report.skills).toMatchObject({ agentIds: null, linked: 0 });
+      expect(report.skills!.discovered).toBeGreaterThan(0);
     });
 
     it('reports the agents a previous skills run selected', async () => {
@@ -650,10 +695,31 @@ describe('@expo/agent-cli status', () => {
       );
 
       expect(result.exitCode).toBe(0);
-      const events = readEvents(eventsFile);
-      // `2g` names the event in the `_e` field of every JSONL line.
-      const status = events.find((entry) => entry._e === 'cli:status');
-      expect(status).toMatchObject({ rule: 'expo-go', devServerRunning: false });
+      const status = statusEvent(eventsFile);
+      expect(status).toMatchObject({
+        rule: 'expo-go',
+        sdkVersion: '54.0.0',
+        expoGoCompatible: true,
+        devServerRunning: false,
+        appsConnected: 0,
+        appsListed: 0,
+        appsStale: 0,
+        devServerHostType: null,
+        tunnelUrl: null,
+        openUrl: null,
+        installed: null,
+        freshness: { ios: 'unknown', android: 'unknown' },
+        easBuilds: { ios: 'unknown', android: 'unknown' },
+        impact: { ios: null, android: null },
+        assertion: null,
+        easBuildsAsked: false,
+        skillsDiscovered: 0,
+        skillsLinked: 0,
+        sectionErrors: [],
+      });
+      expect(status).toHaveProperty('localDevice');
+      expect(status).toHaveProperty('fingerprintSource');
+      expect(status).toHaveProperty('fingerprintRevalidatedAgainst');
     });
 
     // @ref llp/0009-smart-followups.rfc.md §Examples per command — status keeps its own `next`
@@ -1486,6 +1552,39 @@ describe('@expo/agent-cli status', () => {
     });
   });
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Session cleanup
+  it('names the EAS session of a deleted worktree, and the command that stops it', async () => {
+    const projectRoot = await setupAsync('go-app');
+    const gone = `${fs.realpathSync(projectRoot)}-deleted`;
+    await writeCloudBindingAsync(expoHomeOf(projectRoot), gone, { id: 'sess-orphan' });
+
+    const report = await reportInAsync(projectRoot);
+
+    const command = 'npx @expo/agent-cli dev:stop';
+    expect(report.orphanSessions).toEqual([
+      { platform: 'ios', id: 'sess-orphan', projectRoot: gone, command },
+    ]);
+    expect(report.next?.command).not.toBe(command);
+    expect(report.followups[0]).toMatchObject({ command });
+
+    // Plain `dev:stop` would also stop this worktree's own dev server.
+    const devServer = await startDevServerDoubleAsync([]);
+    const releaseLock = await holdDevLockAsync(projectRoot, {
+      url: devServer.url,
+      port: Number(new URL(devServer.url).port),
+      pid: process.pid,
+      startedAt: new Date().toISOString(),
+      projectRoot,
+    });
+    try {
+      const withServer = await reportInAsync(projectRoot);
+      expect(withServer.orphanSessions[0]!.command).toMatch(/ simulator:stop --id sess-orphan$/);
+    } finally {
+      releaseLock();
+      await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
+    }
+  });
+
   // @ref llp/0021-honest-reports.rfc.md §The rules
   describe('a tunnelled dev server', () => {
     it('names the tunnel and the URLs that open the app on it', async () => {
@@ -1863,6 +1962,36 @@ describe('@expo/agent-cli status', () => {
       ).toMatchObject({ class: 'dev-client-compatible', fingerprintChanged: false });
       expect(report.followups.map((followup) => followup.id)).toContain('change-restart-metro');
     });
+
+    // The file-level view only runs where it can change the answer: a moved fingerprint already has
+    // the stronger class, and with no record there is no class to refine.
+    it.each([
+      [
+        'when the fingerprint moved',
+        {
+          STUB_FINGERPRINT_HASH: 'ffff1111ffff1111ffff1111ffff1111ffff1111',
+          STUB_FP_SOURCES: JSON.stringify([
+            APP_CONFIG,
+            { type: 'dir', filePath: 'node_modules/x', reasons: ['rncoreAutolinkingIos'] },
+          ]),
+        },
+        false,
+      ],
+      ['when nothing was recorded', env, true],
+    ])('looks at no files %s', async (_case, runEnv, dropRecord) => {
+      const projectRoot = await setupCommittedAsync();
+      if (dropRecord) {
+        await fs.promises.rm(path.join(projectRoot, '.expo', 'agent-cli-last-build.json'));
+      }
+      await fs.promises.writeFile(
+        path.join(projectRoot, 'metro.config.js'),
+        'module.exports = {};\n'
+      );
+
+      const report = await reportInAsync(projectRoot, [], runEnv);
+
+      expect(report.freshness!.changedFiles).toBeNull();
+    });
   });
 
   // @ref llp/0009-smart-followups.rfc.md §Examples per command
@@ -1870,22 +1999,32 @@ describe('@expo/agent-cli status', () => {
     it('names runtime:errors when an app is connected to the dev server', async () => {
       const projectRoot = await setupAsync('go-app');
       const devServer = await startDevServerDoubleAsync([CDP_TARGET]);
+      const eventsFile = path.join(projectRoot, 'events.jsonl');
       try {
-        const result = await executeAgentCliAsync(projectRoot, [
-          'status',
-          '--json',
-          '--dev-server-url',
-          devServer.url,
-        ]);
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['status', '--json', '--dev-server-url', devServer.url],
+          { env: { LOG_EVENTS: eventsFile } }
+        );
 
         expect(result.exitCode).toBe(0);
         const report: StatusReport = JSON.parse(result.stdout);
-        expect(report.followups).toContainEqual(
-          expect.objectContaining({
-            id: 'runtime-errors',
-            command: 'npx @expo/agent-cli runtime:errors',
-          })
-        );
+        const runtimeErrors = expect.objectContaining({
+          id: 'runtime-errors',
+          command: 'npx @expo/agent-cli runtime:errors',
+        });
+        expect(report.followups).toContainEqual(runtimeErrors);
+        // The `next` line already says what to do, so the follow-ups reach an agent only through
+        // the JSON report and the event, never as a text section.
+        expect(readEvents(eventsFile).filter((entry) => entry._e === 'cli:followups')).toEqual([
+          expect.objectContaining({ command: 'status', followups: [runtimeErrors] }),
+        ]);
+        const text = await executeAgentCliAsync(projectRoot, [
+          'status',
+          '--dev-server-url',
+          devServer.url,
+        ]);
+        expect(text.stdout).not.toContain('Suggested next:');
       } finally {
         await new Promise<void>((resolve) => devServer.server.close(() => resolve()));
       }
@@ -1918,6 +2057,11 @@ describe('@expo/agent-cli status', () => {
       expect(report.followups).toContainEqual(
         expect.objectContaining({ id: 'skills-sync', command: 'npx @expo/agent-cli skills:sync' })
       );
+
+      await executeAgentCliAsync(projectRoot, ['skills:sync', '--json']);
+      const synced = await reportInAsync(projectRoot);
+      expect(synced.skills!.linked).toBe(synced.skills!.discovered);
+      expect(synced.followups.map((followup) => followup.id)).not.toContain('skills-sync');
     });
   });
 
@@ -2299,6 +2443,41 @@ describe('@expo/agent-cli status', () => {
         '--non-interactive',
       ]);
     });
+
+    // A saved `dev --eas` request makes the plan ask for a simulator build. The builds section
+    // already asked EAS, so the plan asks again only when that answer cannot settle it: a build of
+    // another profile, where a simulator build may still exist.
+    it.each([
+      [
+        'a simulator build the section found',
+        [{ ...FINISHED_BUILD, buildProfile: 'development-simulator' }],
+        2,
+      ],
+      ['no build', [], 2],
+      ['a build of another profile', [FINISHED_BUILD], 3],
+    ])(
+      'asks EAS once per platform for a saved --eas request beside %s',
+      async (_case, builds, lookups) => {
+        const projectRoot = await setupWithEasAsync('dev-client-app');
+        await fs.promises.mkdir(path.join(projectRoot, '.expo'), { recursive: true });
+        await fs.promises.writeFile(
+          path.join(projectRoot, '.expo', 'agent-cli-last-dev.json'),
+          JSON.stringify({
+            version: 1,
+            platform: 'ios',
+            port: null,
+            buildBackend: 'eas',
+            runTarget: null,
+          })
+        );
+
+        await reportInAsync(projectRoot, [], { STUB_EAS_BUILD_LIST: JSON.stringify(builds) });
+
+        expect(easCommands(projectRoot).filter((command) => command === 'build:list')).toHaveLength(
+          lookups
+        );
+      }
+    );
 
     // The other half of the decision: a hit is written against the *project* fingerprint, so the
     // next run answers it for free. A cache that still spawned would be no cache at all.
@@ -3066,6 +3245,94 @@ describe('@expo/agent-cli status', () => {
       expect(report.devServer?.running).toBe(false);
       expect(report.devServer?.appsConnected).toBe(0);
       expect(report.devServer?.reason).toBeTruthy();
+      // Nothing answered, so nothing was asked about readiness either.
+      expect(report.devServer).toMatchObject({ ready: null, projectRootMatched: null });
+    });
+
+    // @ref llp/0010 — `status` never waits for a bundle, so "still working" is its own answer and
+    // not a claim that the bundler failed.
+    it('reports an unknown readiness while the bundler is still working', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const stub = await startStubDevServerAsync({ projectRoot, statusDelayMs: 30_000 });
+
+      try {
+        const result = await executeAgentCliAsync(projectRoot, [
+          'status',
+          '--json',
+          '--dev-server-url',
+          stub.url,
+        ]);
+
+        expect(JSON.parse(result.stdout).devServer).toMatchObject({ running: true, ready: null });
+      } finally {
+        await stub.close();
+      }
+    });
+
+    // @ref llp/0005-runtime-loop-tools.rfc.md §Android — F56. A page a force-stopped app left in
+    // `/json/list` is listed, not connected.
+    it('counts the targets that still answer, and names the ones that do not', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const devServer = await startDevServerDoubleAsync([CDP_TARGET], 'stale');
+      server = devServer.server;
+
+      const json = await executeAgentCliAsync(projectRoot, [
+        'status',
+        '--json',
+        '--dev-server-url',
+        devServer.url,
+      ]);
+      const text = await executeAgentCliAsync(projectRoot, [
+        'status',
+        '--dev-server-url',
+        devServer.url,
+      ]);
+
+      expect(JSON.parse(json.stdout).devServer).toMatchObject({
+        appsConnected: 0,
+        appsListed: 1,
+        appsStale: 1,
+      });
+      expect(text.stdout).toContain('1 stale target still listed');
+    });
+
+    // The lock names the port this worktree's dev server holds now; a saved request names the one
+    // it asked for last time.
+    it('follows a running own lock over the port of the saved request', async () => {
+      const projectRoot = await setupAsync('go-app');
+      const ownUrl = await getUnusedDevServerUrlAsync();
+      const ownPort = Number(new URL(ownUrl).port);
+      await fs.promises.mkdir(path.join(projectRoot, '.expo'), { recursive: true });
+      await fs.promises.writeFile(
+        path.join(projectRoot, '.expo', 'agent-cli-last-dev.json'),
+        JSON.stringify({
+          version: 1,
+          platform: 'android',
+          port: ownPort + 1,
+          buildBackend: 'local',
+          runTarget: 'expo-go',
+        })
+      );
+      const releaseLock = await holdDevLockAsync(projectRoot, {
+        url: ownUrl,
+        port: ownPort,
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        projectRoot,
+      });
+
+      try {
+        const result = await executeAgentCliAsync(projectRoot, ['status', '--json']);
+
+        expect(result.exitCode).toBe(0);
+        const report: StatusReport = JSON.parse(result.stdout);
+        expect(report.devServer).toMatchObject({ url: ownUrl, running: false, source: 'lock' });
+        expect(report.next?.command).toBe(
+          `npx @expo/agent-cli dev --android --local --go --port ${ownPort} --detach --wait-ready`
+        );
+      } finally {
+        releaseLock();
+      }
     });
 
     // @ref llp/0004-smart-start-and-project-state.rfc.md §Status

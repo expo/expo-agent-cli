@@ -12,15 +12,12 @@ import path from 'path';
 import { readDevServerLockAsync } from '../devLock';
 import { childStartsSessionSync } from '../dev/detachEasProgress';
 import { readLastDevRequest, type LastDevRequest } from '../dev/lastRequest';
-import { withDevServerPort, withoutPortArgs } from '../dev/forwardedArgs';
 import { lookUpEasSimulatorBuildAsync } from '../plan/easBuildLookup';
-import { rerunDevCommand } from '../plan/rerun';
 import { cloudStopCommand } from '../deviceBinding/cleanup';
 import { deletedWorktreeSessions } from '../deviceBinding/reap';
 import { unreadableBindingFiles } from '../deviceBinding/records';
 import { readBindingSummaryAsync } from '../deviceBinding/summary';
 import { inspectBindingCachedAsync, devicesDisabled, hostBindsPlatform } from '../deviceBinding';
-import { deviceCommand } from '../deviceBinding/errors';
 import { resolveDevServerReachAsync } from '../dev/advertisedUrl';
 import { probeLocalDeviceAsync } from '../device/localDevice';
 import { event } from '../events';
@@ -58,6 +55,7 @@ import {
 } from './easBuilds';
 import { formatStatusReport } from './format';
 import { readInstalledStatusAsync, withCloudSessions } from './installed';
+import { chooseNextAction, cloudBindings, resolveNextTarget } from './nextAction';
 import {
   applyEasFreshness,
   applyOpenUrls,
@@ -65,7 +63,6 @@ import {
   buildExpoGoStatus,
   buildFreshnessStatus,
   buildLocalDeviceStatus,
-  buildNextActionStatus,
   buildProjectStatus,
   effectivePlatformFreshness,
   resolveDefaultPlatform,
@@ -311,15 +308,8 @@ export async function collectStatusReportAsync(
   } catch (error) {
     errors.binding ??= error instanceof Error ? error.message : String(error);
   }
-  // Recorded evidence only: a live cloud binding, never a `gone` one. Status makes no session
-  // service call. The device line alone keeps `gone` rows.
-  const cloud = (report.binding ?? []).filter(
-    (entry) => entry.backend === 'cloud' && entry.state === 'recorded'
-  );
-  // A cloud binding is `gone` only when its lease expired; the session itself is not checked.
-  const expiredCloud = (report.binding ?? []).filter(
-    (entry) => entry.backend === 'cloud' && entry.state === 'gone'
-  );
+  // The device line alone keeps `gone` rows.
+  const { cloud, expiredCloud } = cloudBindings(report.binding ?? []);
 
   // One EAS lookup per run, shared by the plan below and the builds section, so the plan gets the
   // section's record, auth gate and link gate instead of a lookup of its own on every run.
@@ -397,26 +387,19 @@ export async function collectStatusReportAsync(
     // (K7(c)).
     const devBuildScheme = devBuildSchemeSync(projectRoot);
     applyOpenUrls(report.devServer, state, devBuildScheme);
-    const boundPlatforms = [...new Set((report.binding ?? []).map((entry) => entry.platform))];
-    const platform =
-      options.platform ??
-      ownServer?.easPlatform ??
-      request?.platform ??
-      (boundPlatforms.length === 1 ? boundPlatforms[0]! : resolveDefaultPlatform(state));
-    const requestedPort =
-      options.devServerUrl != null
-        ? localPortOf(options.devServerUrl)
-        : (ownServer?.port ?? request?.port ?? null);
-    // A selected address is a preference, not permission to take another project's port.
-    const recoveryPort =
-      report.devServer?.projectRootMatched === false &&
-      requestedPort === localPortOf(report.devServer.url)
-        ? null
-        : requestedPort;
+    const { platform, recoveryPort } = resolveNextTarget({
+      platform: options.platform,
+      devServerUrl: options.devServerUrl,
+      ownServer,
+      request,
+      bindings: report.binding ?? [],
+      devServer: report.devServer,
+      state,
+    });
     // @ref llp/0015-backend-selection-and-config.rfc.md §The device backend — where `dev` would put
     // the app, read once: the plan reports it, and a device on EAS needs no local binding.
     const deviceBackend = configuredDeviceBackend(projectRoot, request, platform);
-    const resolvedPlan = await attemptPlanAsync(
+    const plan = await attemptPlanAsync(
       projectRoot,
       state,
       record,
@@ -425,121 +408,29 @@ export async function collectStatusReportAsync(
       deviceBackend,
       readBuildsOnceAsync
     );
-    const cloudPlatform =
-      (cloud.find((entry) => entry.platform === platform) ?? cloud[0])?.platform ?? null;
-    const recoveryPlan =
-      resolvedPlan && recoveryPort != null
-        ? withDevServerPort(resolvedPlan, recoveryPort)
-        : resolvedPlan;
-    report.next = buildNextActionStatus(
+    report.next = chooseNextAction({
       state,
       record,
       platform,
-      report.devServer,
-      report.device,
-      // The scheme a development build of this project registers, read the same way the deep link
-      // reads it: `exp://` is the Expo Go form only, and a development build's connect URL takes
-      // the app's own scheme (`src/navigate/connectUrl.ts`).
+      recoveryPort,
+      devServer: report.devServer,
+      device: report.device,
       devBuildScheme,
-      cloudPlatform,
-      // @ref llp/0015-backend-selection-and-config.rfc.md §What `status` reports
-      // The plan `@expo/agent-cli dev` would make *here* — the developer's config, this host and the
-      // toolchain probe folded in — rather than the one the project's state alone implies. The two
-      // differ on exactly the machines where it matters, and a `status` that reported
-      // "expo run:ios" on a Linux box would be the report disagreeing with the command.
-      recoveryPlan
-    );
-    const devNext = buildNextActionStatus(
-      state,
-      record,
-      platform,
-      null,
-      report.device,
-      devBuildScheme,
-      null,
-      recoveryPlan
-    );
-    const backend = request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null);
-    const devArgs = [
-      ...(backend ? [`--${backend}`] : []),
-      ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
-      ...(recoveryPort != null ? ['--port', String(recoveryPort)] : []),
-    ];
-    const devCommand = rerunDevCommand(
-      platform,
-      devArgs,
-      backend === 'eas' ? undefined : request?.device
-    );
-    if (
-      (request || recoveryPort != null) &&
-      report.next.command.startsWith(`${PROGRAM_PREFIX} dev `)
-    )
-      report.next.command =
-        platform === 'web'
-          ? `${PROGRAM_PREFIX} dev --web${devArgs.map((arg) => ` ${arg}`).join('')}`
-          : devCommand;
-    const bound = 'value' in binding ? binding.value.filter((e) => e.platform === platform) : [];
-    const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > Date.now());
-    const expiredSession =
-      cloud.length === 0 && !liveBound
-        ? expiredCloud.find((entry) => entry.platform === platform)
-        : undefined;
-    // An own server that runs this platform's EAS session needs no restart: dev --eas waits for it.
-    const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-    if (expiredSession) {
-      // @ref llp/0021-honest-reports.rfc.md §How they show up
-      report.next = {
-        ...devNext,
-        command: deviceCommand(expiredSession.platform, { eas: true }),
-        why: `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`,
-      };
-    } else if (
-      state.isExpoApp &&
-      platform !== 'web' &&
-      'value' in binding &&
-      !liveBound &&
-      // An app on an own EAS server can load from Metro while the session is not bound.
-      !(
-        report.devServer?.running &&
-        report.devServer.appsConnected > 0 &&
-        report.devServer.projectRootMatched !== false &&
-        ownServer?.easPlatform !== platform
-      ) &&
-      cloud.length === 0 &&
-      // `dev --eas` binds a cloud session and needs no local device tools. A project whose
-      // config puts this platform on EAS gets no local-device step.
-      (easServer != null ||
-        (deviceBackend !== 'eas' && !devicesDisabled() && hostBindsPlatform(platform)))
-    ) {
-      // @ref llp/0021-honest-reports.rfc.md §How they show up
-      // Detached dev can only reuse beside an own server; an expired binding can still be reused.
-      // A server that runs an EAS session is never stopped, for any platform.
-      const restart = ownServer != null && ownServer.easPlatform == null && bound.length === 0;
-      const [unreadable] = unreadableBindingFiles(projectRoot, platform);
-      // A re-run finds the running EAS Metro through its lock, which names its port: no --port.
-      const command = easServer
-        ? rerunDevCommand(platform, ['--eas', ...withoutPortArgs(devArgs.slice(backend ? 1 : 0))])
-        : restart
-          ? `${PROGRAM_PREFIX} dev:stop && ${devCommand}`
-          : devCommand;
-      const easWhy = easServer
-        ? `${
-            childStartsSessionSync(projectRoot, easServer, platform)
-              ? `The dev server's EAS Simulator session for ${platform} is starting.`
-              : `The dev server's EAS Simulator session for ${platform} is not bound yet.`
-          } This command waits for it, or reopens the app on the running Metro. No restart is needed.`
-        : null;
-      report.next = {
-        ...devNext,
-        command: unreadable ? `rm -f '${unreadable.file}' && ${command}` : command,
-        why: unreadable
-          ? `The binding file ${unreadable.file} does not parse; a newer CLI may have written it.`
-          : (easWhy ??
-            (bound.length
-              ? `The lease on the bound ${platform} device expired.`
-              : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`)),
-      };
-    }
+      bindings: 'value' in binding ? binding.value : null,
+      ownServer,
+      request,
+      deviceBackend,
+      plan,
+      host: {
+        now: Date.now(),
+        devicesDisabled: devicesDisabled(),
+        bindsPlatform: hostBindsPlatform,
+        childStartsSession: (lock, lockPlatform) =>
+          childStartsSessionSync(projectRoot, lock, lockPlatform),
+        unreadableBindingFile: (bindingPlatform) =>
+          unreadableBindingFiles(projectRoot, bindingPlatform)[0]?.file ?? null,
+      },
+    });
   } else {
     // One cause, one note. The other three sections are left null, and the project line says why.
     errors.project = project.error;
@@ -827,18 +718,6 @@ async function resolveOtaSafetyAsync(
 function devBuildSchemeSync(projectRoot: string): string | null {
   const config = readProjectSchemeConfig(projectRoot);
   return config.scheme ?? (config.slug ? `exp+${config.slug}` : null);
-}
-
-/** A remote URL's port is not a request to start a local Metro on that port. */
-function localPortOf(url: string): number | null {
-  try {
-    const parsed = new URL(url);
-    return ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname) && parsed.port
-      ? Number(parsed.port)
-      : null;
-  } catch {
-    return null;
-  }
 }
 
 /**
