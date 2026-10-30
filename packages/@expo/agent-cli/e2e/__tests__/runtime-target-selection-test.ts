@@ -713,7 +713,7 @@ describe("runtime:reload beside another worktree's iOS app", () => {
       expect(result.exitCode).toBe(22);
       const report = JSON.parse(result.stdout);
       expect(report).toMatchObject({ reloaded: true, verifiedBy: 'app-relaunch' });
-      expect(report.bundlesAfterReload.reason).toContain('keeps its page id');
+      expect(report.bundlesAfterReload.reason).toContain('under the page id it had');
       expect(result.stderr).toContain('a relaunched app registers again under the page id it had');
       expect(result.stderr).not.toContain('the runtime that answers now is the one from before');
     } finally {

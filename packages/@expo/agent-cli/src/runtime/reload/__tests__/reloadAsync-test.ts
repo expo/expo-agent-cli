@@ -1041,6 +1041,21 @@ describe('an app the command socket cannot see', () => {
     expect(JSON.parse(printed())).toMatchObject({ method: 'device', verifiedBy: 'app-relaunch' });
   });
 
+  // A relaunched app keeps its page id, so a list that still names it says nothing of which runtime
+  // answers.
+  it(`does not call the listed runtime the old one after a relaunch that nothing confirmed`, async () => {
+    writeProject();
+    mockDevServer([EXPO_GO_TARGET]);
+    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }, { stdout: BOOTED_SIMULATOR }]);
+
+    await expect(
+      reloadAsync(projectRoot, options({ method: 'device', timeoutMs: 300 }))
+    ).resolves.toBe(EXIT_OUTCOME_TIMEOUT);
+    const stderr = vi.mocked(console.error).mock.calls.flat().join('\n');
+    expect(stderr).toContain('The app was relaunched, and nothing was observed to confirm it');
+    expect(stderr).not.toContain('the runtime that answers now is the one from before');
+  });
+
   it(`reports a runtime whose expo global cannot reload it, without guessing`, async () => {
     writeProject();
     mockDevServer([EXPO_GO_TARGET]);

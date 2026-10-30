@@ -2,7 +2,7 @@
 import type { NativePlatform } from '../../plan/types';
 import type { DeviceInventory, TargetSelection } from '../targetSelection';
 import { waitForFreshAppConnectionAsync } from '../waitReady';
-import { contextReplacedTargets, type ReloadAttempt } from './attempt';
+import { contextReplacedTargets, keepsPageId, type ReloadAttempt } from './attempt';
 import {
   waitForNewBundleAsync,
   type BundleSignalMark,
@@ -194,7 +194,6 @@ export async function observeReloadAsync<Proof extends Label>(
   {
     prepared,
     mechanismProof,
-    keepsPageId,
     churn,
     attempts,
     bundleMark,
@@ -202,11 +201,6 @@ export async function observeReloadAsync<Proof extends Label>(
   }: {
     prepared: PreparedRungOne;
     mechanismProof: Proof | null;
-    /**
-     * The mechanism brings the app back under the page id it had: `Page.reload` and a local
-     * relaunch do, a broadcast does not. An app it starts gets a new id.
-     */
-    keepsPageId: boolean;
     churn: CommandSocketChurn;
     attempts: readonly ReloadAttempt[];
     bundleMark: BundleSignalMark;
@@ -221,7 +215,7 @@ export async function observeReloadAsync<Proof extends Label>(
   const unwatched: Unwatched | null =
     mechanismProof === 'debugger-context-replaced'
       ? 'context-replaced'
-      : keepsPageId &&
+      : keepsPageId(attempts) != null &&
           prepared.classifiedTargets.read.length > 0 &&
           Array.isArray(bundlePlatforms) &&
           bundlePlatforms.length === 0

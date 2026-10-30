@@ -55,6 +55,28 @@ interface AttemptOutcome {
   leftAppStopped: string | null;
 }
 
+/** The attempt the run settled on: the last one that reloaded the app or reached it. */
+export function settledAttempt(attempts: readonly ReloadAttempt[]): ReloadAttempt | undefined {
+  return attempts.findLast((attempt) => attempt.ok || attempt.delivered === true);
+}
+
+/**
+ * Why the mechanism brings the app back under the page id it had, or null when it does not. Then a
+ * page id the dev server had not listed can prove the reload.
+ */
+const KEEPS_PAGE_ID: Record<ReloadAttempt['method'], string | null> = {
+  'page-reload': 'the app answered Page.reload, which keeps its page id',
+  device: 'a relaunched app registers again under the page id it had',
+  'dev-server': null,
+  runtime: null,
+};
+
+/** {@link KEEPS_PAGE_ID} for the attempt the run settled on. */
+export function keepsPageId(attempts: readonly ReloadAttempt[]): string | null {
+  const settled = settledAttempt(attempts);
+  return settled ? KEEPS_PAGE_ID[settled.method] : null;
+}
+
 /** The witnesses behind the aggregate context-replaced label and human report. */
 export function contextReplacedTargets(attempts: readonly ReloadAttempt[]): TargetReloadOutcome[] {
   return attempts.flatMap((attempt) =>
