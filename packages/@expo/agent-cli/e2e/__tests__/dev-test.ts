@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  clearStubFingerprintInvocations,
   executeAgentCliAsync,
   installStubBinAsync,
   installStubFingerprintAsync,
@@ -15,6 +16,7 @@ import {
   pathEnvVars,
   readDevLockAsync,
   readStubExpoInvocations,
+  readStubFingerprintInvocations,
   setupFixtureAsync,
   spawnAgentCli,
   waitForAsync,
@@ -57,6 +59,18 @@ function invocationArgs(projectRoot: string): string[][] {
 function readLastBuildRecord(projectRoot: string): Record<string, string> | null {
   const filePath = path.join(projectRoot, LAST_BUILD_FILE);
   return fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : null;
+}
+
+/** The `cli:start_plan` events a run wrote to its `LOG_EVENTS` file. */
+function startPlanEvents(
+  eventsFile: string
+): { mode: string; steps: { id: string; argv: string[] }[] }[] {
+  return fs
+    .readFileSync(eventsFile, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter((entry) => entry._e === 'cli:start_plan');
 }
 
 describe('@expo/agent-cli dev', () => {
@@ -292,6 +306,30 @@ describe('@expo/agent-cli dev', () => {
       ]);
     });
 
+    // A build that compiled and then failed before the install is not a build on the device:
+    // `Build Succeeded` alone records nothing. A checked-in `ios/` makes `run:ios` the only step.
+    it('records no build for a step that failed before it installed anything', async () => {
+      const projectRoot = await setupAsync('dev-client-fresh-app');
+      await fs.promises.mkdir(path.join(projectRoot, 'ios'), { recursive: true });
+      await fs.promises.writeFile(path.join(projectRoot, 'ios', 'Podfile'), '');
+
+      const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--local'], {
+        env: {
+          STUB_FINGERPRINT_HASH: CHANGED_HASH,
+          STUB_EXPO_EXIT_CODE: '1',
+          STUB_EXPO_STDERR: '› Build Succeeded\nerror: code signing',
+        },
+        reject: false,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(invocationArgs(projectRoot)).toEqual([['run:ios', ...PORT_ARGS]]);
+      expect(readLastBuildRecord(projectRoot)).toEqual({
+        ios: RECORDED_HASH,
+        android: RECORDED_HASH,
+      });
+    });
+
     // @ref llp/0023-fingerprint-caching.rfc.md §What invalidates an answer — a prebuild creates
     // `ios/`, which no pinned file of the cache stamps, so the cache goes after every step that ran.
     it.each([
@@ -307,6 +345,27 @@ describe('@expo/agent-cli dev', () => {
       expect(fs.existsSync(path.join(projectRoot, '.expo', 'agent-cli-fingerprint.json'))).toBe(
         kept
       );
+    });
+
+    // @ref llp/0023-fingerprint-caching.rfc.md — the probe reads the cache the run before it wrote.
+    // A cache hit and a measurement print the same hash, so the stub's spawn count is the proof.
+    it.each([
+      ['reads the fingerprint cache that the plan before it wrote', [], 0],
+      [
+        'measures the fingerprint again under --no-fingerprint-cache',
+        ['--no-fingerprint-cache'],
+        1,
+      ],
+    ])('%s', async (_case, flags, spawns) => {
+      const projectRoot = await setupAsync('dev-client-fresh-app');
+      const plan = ['dev', '--plan', '--ios', '--local', '--json'];
+      await executeAgentCliAsync(projectRoot, plan);
+      expect(readStubFingerprintInvocations(projectRoot)).toHaveLength(1);
+      clearStubFingerprintInvocations(projectRoot);
+
+      await executeAgentCliAsync(projectRoot, [...plan, ...flags]);
+
+      expect(readStubFingerprintInvocations(projectRoot)).toHaveLength(spawns);
     });
 
     it('runs only the dev server when the recorded build still matches', async () => {
@@ -675,6 +734,39 @@ describe('@expo/agent-cli dev', () => {
       expect(report.steps.at(-1).argv).toEqual(['expo', ...starts[1]!.args]);
     });
 
+    // The busy stop offers 8181, the retry starts there, and Metro's bind fails on it too. The
+    // suggestion is the caller's own command with a free port: an `--eas` run told to run without
+    // `--eas` would plan a different build.
+    it("fails the plan when the retry lost its port too, and suggests the caller's own command", async () => {
+      const projectRoot = await setupAsync('go-app');
+
+      const result = await executeAgentCliAsync(
+        projectRoot,
+        ['dev', '--ios', '--clear', '--tunnel', '--json', '--', '--max-workers', '2'],
+        {
+          env: {
+            RCT_METRO_PORT: '8180',
+            STUB_EXPO_PORT_BUSY: '8180',
+            STUB_EXPO_EADDRINUSE_PORT: '8181',
+          },
+          reject: false,
+        }
+      );
+
+      expect(result.exitCode, result.all).toBe(20);
+      const { error } = JSON.parse(result.stdout);
+      expect(error).toMatchObject({ code: 'PORT_TAKEN_AFTER_RETRY', needsHuman: null });
+      expect(error.message).toContain('exited 1');
+      expect(error.message).toContain('asked for port 8180');
+      expect(error.message).toContain('moved it to port 8181');
+      expect(error.suggestedCommand).toMatch(
+        / dev --ios --clear --tunnel --json --port \d+ --detach --wait-ready -- --max-workers 2$/
+      );
+      const starts = readStubExpoInvocations(projectRoot).filter(({ args }) => args[0] === 'start');
+      expect(starts.map(({ args }) => args.at(-1))).toEqual(['2', '2']);
+      expect(starts[1]!.args).toContain('8181');
+    });
+
     // A port the caller named is a requirement. Exit 20 is "the outcome failed", never 7, and the
     // recovery is never the command that just failed.
     it('exits 20 when the port the caller demanded is taken', async () => {
@@ -765,9 +857,13 @@ describe('@expo/agent-cli dev', () => {
       expect(invocationArgs(projectRoot)).toEqual([]);
     });
 
-    it.each(['--web', '--ios'])(
-      'refuses --device on a %s run that binds no local device, before anything runs',
-      async (platform) => {
+    // The harness sets AGENT_CLI_NO_DEVICE=1, so the `--ios` row is the devices-off refusal.
+    it.each([
+      ['a --web run', '--web', '--web serves the app to a browser'],
+      ['an --ios run with devices off', '--ios', 'AGENT_CLI_NO_DEVICE=1 turns every device off'],
+    ])(
+      'refuses --device on %s, which binds no local device, before anything runs',
+      async (_case, platform, why) => {
         const projectRoot = await setupAsync('go-app');
 
         const result = await executeAgentCliAsync(
@@ -777,7 +873,9 @@ describe('@expo/agent-cli dev', () => {
         );
 
         expect(result.exitCode).toBe(1);
-        expect(JSON.parse(result.stdout).error.code).toBe('BAD_ARGS');
+        const { error } = JSON.parse(result.stdout);
+        expect(error.code).toBe('BAD_ARGS');
+        expect(error.message).toContain(why);
         expect(invocationArgs(projectRoot)).toEqual([]);
       }
     );
@@ -1306,20 +1404,26 @@ describe('@expo/agent-cli dev', () => {
       home = expoHomeOf(first);
       const env = { ...adb.env, AGENT_CLI_NO_DEVICE: '0' };
 
+      const eventsOf = (root: string) => path.join(root, 'events.jsonl');
+
       // @ref llp/0035-one-device-per-worktree.rfc.md §How `dev` uses it — `--plan` only inspects.
       const unbound = await executeAgentCliAsync(
         first!,
         ['dev', '--android', '--local', '--plan', '--json'],
-        { env }
+        { env: { ...env, LOG_EVENTS: eventsOf(first!) } }
       );
       expect(JSON.parse(unbound.stdout).reasons).toContain(
         'The run will reuse or start an emulator instance for this worktree, and pin the build steps to it.'
       );
       expect(fs.existsSync(path.join(home, 'agent-cli', 'bindings'))).toBe(false);
+      expect(startPlanEvents(eventsOf(first!)).map((event) => event.mode)).toEqual(['plan']);
+      fs.rmSync(eventsOf(first!));
 
       const results = await Promise.all(
         [first!, second!].map((root) =>
-          executeAgentCliAsync(root, ['dev', '--android', '--local'], { env })
+          executeAgentCliAsync(root, ['dev', '--android', '--local'], {
+            env: { ...env, LOG_EVENTS: eventsOf(root) },
+          })
         )
       );
 
@@ -1328,19 +1432,31 @@ describe('@expo/agent-cli dev', () => {
       const ports = [first!, second!].map((root) => bindings[fs.realpathSync.native(root)]!.port);
       expect(ports).toEqual(expect.arrayContaining([5554, 5556]));
       for (const [index, root] of [first!, second!].entries()) {
-        expect(invocationArgs(root)).toEqual([
-          ['prebuild', '--platform', 'android'],
-          ['run:android', ...PORT_ARGS, '--device', `emulator-${ports[index]}`],
+        const pinned = ['run:android', ...PORT_ARGS, '--device', `emulator-${ports[index]}`];
+        expect(invocationArgs(root)).toEqual([['prebuild', '--platform', 'android'], pinned]);
+        // The plan the run announced is the pinned one, not the one from before the bind.
+        const [announced, ...more] = startPlanEvents(eventsOf(root));
+        expect(more).toEqual([]);
+        expect(announced!.mode).toBe('smart');
+        expect(announced!.steps.find((step) => step.id === 'run')!.argv).toEqual([
+          'expo',
+          ...pinned,
         ]);
       }
 
-      const bound = await executeAgentCliAsync(
-        first!,
-        ['dev', '--android', '--local', '--plan', '--json'],
-        { env }
-      );
-      const run = JSON.parse(bound.stdout).steps.find((step: { id: string }) => step.id === 'run');
-      expect(run.argv).toEqual(expect.arrayContaining(['--device', `emulator-${ports[0]}`]));
+      // The own binding pins the plan whether its instance is up or still booting (`offline`).
+      const serial = `emulator-${ports[0]}`;
+      for (const state of [{}, { STUB_ADB_OFFLINE: serial }]) {
+        const bound = await executeAgentCliAsync(
+          first!,
+          ['dev', '--android', '--local', '--plan', '--json'],
+          { env: { ...env, ...state } }
+        );
+        const run = JSON.parse(bound.stdout).steps.find(
+          (step: { id: string }) => step.id === 'run'
+        );
+        expect(run.argv).toEqual(['expo', 'run:android', ...PORT_ARGS, '--device', serial]);
+      }
       expect(Object.keys(readBindings(home))).toHaveLength(2);
     });
   });

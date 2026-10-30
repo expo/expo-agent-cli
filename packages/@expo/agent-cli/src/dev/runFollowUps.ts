@@ -11,12 +11,24 @@ import type { DevServerRun } from '../start/startAsync';
 import type { DevOptions } from './resolveOptions';
 
 /**
+ * When the follow-ups are asked for: before the plan runs, or after it, with the dev server it
+ * started. Two phases rather than a nullable server, so the call after the run cannot fall into
+ * the port reading of the call before it.
+ */
+export type RunFollowUpPhase = { phase: 'planned' } | { phase: 'ran'; devServer: DevServerRun };
+
+/** Before the plan runs. */
+export const PLANNED: RunFollowUpPhase = { phase: 'planned' };
+
+/** The options of a run that its follow-ups read. */
+type RunFollowUpOptions = Pick<DevOptions, 'followups' | 'deviceBackend'>;
+
+/**
  * What the shared start ladder is asked for, for one `dev` run.
  *
- * `devServer` is what the run learned about the server it started, and null before it has started
- * one. The port is only claimed when something reported it: `source: 'default'` means neither the
- * dev server nor the command line named one, and a URL built on that assumption is how this
- * command came to tell an agent to open a *different project's* app
+ * After the run, the port is only claimed when something reported it: `source: 'default'` means
+ * neither the dev server nor the command line named one, and a URL built on that assumption is how
+ * this command came to tell an agent to open a *different project's* app
  * [observed — friction run, 2026-08-23].
  *
  * The dev-server options a follow-up may quote are the **plan's last step**, never the caller's own
@@ -28,17 +40,18 @@ import type { DevOptions } from './resolveOptions';
  */
 export function runFollowUpRequest(
   plan: StartPlan,
-  options: Pick<DevOptions, 'followups' | 'deviceBackend'>,
-  devServer: DevServerRun | null
+  options: RunFollowUpOptions,
+  when: RunFollowUpPhase
 ): { options: StartFollowUpOptions; hint: StartTargetHint } {
   const planArgs = plan.steps.at(-1)?.argv.slice(1) ?? [];
-  const port = devServer
-    ? // After the run: what the dev server reported, and nothing when it reported nothing.
-      devServer.port && devServer.port.source !== 'default'
-      ? devServer.port.port
-      : null
-    : // Before it: the port the plan's own last step carries, or the one the Expo CLI defaults to.
-      resolveDevServerPort(planArgs);
+  const port =
+    when.phase === 'ran'
+      ? // After the run: what the dev server reported, and nothing when it reported nothing.
+        when.devServer.port && when.devServer.port.source !== 'default'
+        ? when.devServer.port.port
+        : null
+      : // Before it: the port the plan's own last step carries, or the one the Expo CLI defaults to.
+        resolveDevServerPort(planArgs);
 
   return {
     options: { expoArgs: planArgs, followups: options.followups },
@@ -58,9 +71,9 @@ export function runFollowUpRequest(
 export async function resolveRunFollowUpsAsync(
   projectRoot: string,
   plan: StartPlan,
-  options: DevOptions,
-  devServer: DevServerRun | null
+  options: RunFollowUpOptions,
+  when: RunFollowUpPhase
 ): Promise<FollowUp[]> {
-  const request = runFollowUpRequest(plan, options, devServer);
+  const request = runFollowUpRequest(plan, options, when);
   return await resolveStartFollowUpsAsync(projectRoot, request.options, request.hint);
 }

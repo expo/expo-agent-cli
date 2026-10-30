@@ -185,7 +185,9 @@ function readCalls(recordPath: string): string[][] {
  * {@link androidBindingFixture}; `attached: false` lists no emulator, `bound` alone picks whether to
  * write that binding) and every instance the stub `emulator`
  * is up as ({@link stubEmulatorStatePath}). `get-state` answers `device` for a listed serial and the
- * real tool's "not found" for any other; `sys.boot_completed` is `1`. The emulator has `appId`
+ * real tool's "not found" for any other; `STUB_ADB_OFFLINE=<serial>` makes it answer that serial
+ * with the error a booting instance gets (@ref src/deviceBinding/emulator §getEmulatorStateAsync).
+ * `sys.boot_completed` is `1`. The emulator has `appId`
  * installed, unless `STUB_ADB_INSTALLED=0`.
  *
  * `exec-out` receives the `dd` command as one argument, the way a device shell would, and the stub
@@ -231,6 +233,7 @@ export async function installStubAdbAsync(
       `}`,
       `if (args[2] === 'get-state') {`,
       `  if (!serials.includes(args[1])) { process.stderr.write("error: device '" + args[1] + "' not found\\n"); process.exit(1); }`,
+      `  if (process.env.STUB_ADB_OFFLINE === args[1]) { process.stderr.write('error: device offline\\n'); process.exit(1); }`,
       `  process.stdout.write('device\\n');`,
       `  process.exit(0);`,
       `}`,

@@ -64,7 +64,7 @@ import {
 import { appReachedDevice } from './buildEvidence';
 import { detachedPidLine } from './childVerdict';
 import { recordLastDevRequest } from './lastRequest';
-import { resolveRunFollowUpsAsync } from './runFollowUps';
+import { PLANNED, resolveRunFollowUpsAsync } from './runFollowUps';
 import { explicitRequestOf, withoutDeviceArgs } from './deviceOption';
 import { event as devEvent } from './events';
 import {
@@ -252,7 +252,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // it so they can name the port it actually took. A terminal cannot wait for that: the bundler
   // takes the screen and anything printed afterwards scrolls away with its output.
   if (!options.json) {
-    reportFollowUps('dev', await resolveRunFollowUpsAsync(projectRoot, plan, options, null), {});
+    reportFollowUps('dev', await resolveRunFollowUpsAsync(projectRoot, plan, options, PLANNED), {});
   }
 
   // @ref llp/0008-guardrails.rfc.md §The plan is announced, not negotiated — the plan was printed
@@ -300,7 +300,14 @@ async function reportRunResultAsync(
 ): Promise<void> {
   // One object, when the run is over and there is something true to say about it.
   const ran = planAsRun(plan, run);
-  const followups = await resolveRunFollowUpsAsync(projectRoot, ran, options, run.devServer);
+  // A run whose last step started no dev server (a forwarded `--no-bundler`) has nothing that
+  // reported a port, so its follow-ups read the plan, as they do before a run.
+  const followups = await resolveRunFollowUpsAsync(
+    projectRoot,
+    ran,
+    options,
+    run.devServer ? { phase: 'ran', devServer: run.devServer } : PLANNED
+  );
   reportFollowUps('dev', followups, { json: true });
   Log.log(JSON.stringify({ ...ran, followups }, null, 2));
 }

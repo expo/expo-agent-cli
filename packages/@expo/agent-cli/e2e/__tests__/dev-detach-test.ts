@@ -582,17 +582,22 @@ describe('@expo/agent-cli dev --detach', () => {
       const lastRequest = path.join(projectRoot, '.expo', 'agent-cli-last-dev.json');
       const startedBy = fs.readFileSync(lastRequest, 'utf8');
 
-      // Another platform, so a refused request that replaced the record would show.
-      const foreground = await executeAgentCliAsync(projectRoot, ['dev', '--android', '--json'], {
-        env: stubExpoEnv(projectRoot),
-        reject: false,
-      });
+      // Both platforms, so the check suggested is the caller's own; the second is not the one
+      // that started the server, so a refused request that replaced the record would show.
+      for (const platform of ['ios', 'android']) {
+        const foreground = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', `--${platform}`, '--json'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
 
-      expect(foreground.exitCode, foreground.all).toBe(20);
-      expect(JSON.parse(foreground.stdout).error).toMatchObject({
-        code: 'DEV_SERVER_RUNNING',
-        data: { port, pid, phase: 'serving' },
-      });
+        expect(foreground.exitCode, foreground.all).toBe(20);
+        expect(JSON.parse(foreground.stdout).error).toMatchObject({
+          code: 'DEV_SERVER_RUNNING',
+          data: { port, pid, phase: 'serving' },
+          suggestedCommand: `npx @expo/agent-cli smoke --${platform}`,
+        });
+      }
       const starts = readStubExpoInvocations(projectRoot).filter(({ args }) => args[0] === 'start');
       expect(starts).toHaveLength(1);
       // The recovery `status` reads is the request that started the running server.
@@ -606,10 +611,17 @@ describe('@expo/agent-cli dev --detach', () => {
       );
 
       expect(planned.exitCode).toBe(0);
-      expect(JSON.parse(planned.stdout)).toMatchObject({
+      const plan = JSON.parse(planned.stdout);
+      expect(plan).toMatchObject({
         steps: [],
         devServerPort: { port, state: 'running', phase: 'serving' },
       });
+      expect(plan.reasons).toContainEqual(
+        `This project's dev server is already running on port ${port} (pid ${pid}); the run stops instead of starting a second one.`
+      );
+      expect(plan.followups.map((followup: { id: string }) => followup.id)).toEqual([
+        'dev-server-running',
+      ]);
     } finally {
       await cleanUpAsync(projectRoot);
     }

@@ -4,7 +4,7 @@
 
 import type { StartPlan } from '../../project/types';
 import type { DevServerRun } from '../../start/startAsync';
-import { runFollowUpRequest } from '../runFollowUps';
+import { PLANNED, runFollowUpRequest, type RunFollowUpPhase } from '../runFollowUps';
 
 function mockPlan(overrides: Partial<StartPlan> = {}, argv = ['expo', 'start', '--go']): StartPlan {
   return {
@@ -17,8 +17,8 @@ function mockPlan(overrides: Partial<StartPlan> = {}, argv = ['expo', 'start', '
   };
 }
 
-function ran(port: DevServerRun['port']): DevServerRun {
-  return { exitCode: 0, stdout: '', stderr: '', port };
+function ran(port: DevServerRun['port']): RunFollowUpPhase {
+  return { phase: 'ran', devServer: { exitCode: 0, stdout: '', stderr: '', port } };
 }
 
 const local = { followups: true, deviceBackend: 'local' } as const;
@@ -26,8 +26,13 @@ const local = { followups: true, deviceBackend: 'local' } as const;
 describe(runFollowUpRequest, () => {
   const withPort = ['expo', 'start', '--go', '--port', '8082'];
   it.each([
-    ['before the run, the port the plan step names', withPort, null, 8082],
-    ['before the run, the default when the step names none', ['expo', 'start', '--go'], null, 8081],
+    ['before the run, the port the plan step names', withPort, PLANNED, 8082],
+    [
+      'before the run, the default when the step names none',
+      ['expo', 'start', '--go'],
+      PLANNED,
+      8081,
+    ],
     [
       'after the run, the port the dev server logged',
       withPort,
@@ -42,15 +47,15 @@ describe(runFollowUpRequest, () => {
     ],
     ['no port when nothing reported one', withPort, ran({ port: 8081, source: 'default' }), null],
     ['no port when the lock could not run', withPort, ran(null), null],
-  ])(`names %s`, (_case, argv, devServer, port) => {
-    expect(runFollowUpRequest(mockPlan({}, argv), local, devServer).hint.port).toBe(port);
+  ])(`names %s`, (_case, argv, when, port) => {
+    expect(runFollowUpRequest(mockPlan({}, argv), local, when).hint.port).toBe(port);
   });
 
   // F120: the plan's last step, never the caller's own `expo start` options.
   it(`quotes the plan's last step, which a run:* plan does not forward --tunnel to`, () => {
     const plan = mockPlan({ target: 'dev-client' }, ['expo', 'run:ios', '--port', '8082']);
 
-    expect(runFollowUpRequest(plan, local, null)).toEqual({
+    expect(runFollowUpRequest(plan, local, PLANNED)).toEqual({
       options: { expoArgs: ['run:ios', '--port', '8082'], followups: true },
       hint: { expoGo: false, web: false, eas: false, port: 8082, localBuild: null },
     });
@@ -66,7 +71,7 @@ describe(runFollowUpRequest, () => {
       { expoGo: false, web: false, eas: true },
     ],
   ])(`describes %s`, (_case, plan, options, hint) => {
-    expect(runFollowUpRequest(plan, options, null).hint).toMatchObject(hint);
+    expect(runFollowUpRequest(plan, options, PLANNED).hint).toMatchObject(hint);
   });
 
   it(`passes on what the plan's toolchain probe found`, () => {
@@ -83,6 +88,6 @@ describe(runFollowUpRequest, () => {
       },
     });
 
-    expect(runFollowUpRequest(plan, local, null).hint.localBuild).toBe('missing');
+    expect(runFollowUpRequest(plan, local, PLANNED).hint.localBuild).toBe('missing');
   });
 });
