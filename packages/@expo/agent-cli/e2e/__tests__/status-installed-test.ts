@@ -12,6 +12,7 @@ import {
   collectOutput,
   executeAgentCliAsync,
   installStubFingerprintAsync,
+  lastBuildFilePath,
   setupFixtureAsync,
   spawnAgentCli,
   startStubDevServerAsync,
@@ -197,7 +198,7 @@ describe('@expo/agent-cli status, the installed section', () => {
     });
 
     it('warns to prebuild on a match when this CLI never built it', async () => {
-      fs.rmSync(path.join(projectRoot, '.expo', 'agent-cli-last-build.json'));
+      fs.rmSync(lastBuildFilePath(projectRoot));
       const result = await executeAgentCliAsync(projectRoot, ['status', '--json'], {
         env: { ...WITH_DEVICES, ...adb.env, STUB_FINGERPRINT_HASH: EMBEDDED_HASH },
       });
