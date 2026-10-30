@@ -44,10 +44,24 @@ const EXPO_GO_IOS_APP_ID = 'host.exp.Exponent';
 const EXPO_GO_ANDROID_APP_ID = 'host.exp.exponent';
 
 /**
- * React Native Android's device name: `<model> - <release> - API <sdk>`
- * [`AndroidInfoHelpers.getFriendlyDeviceName`].
+ * React Native Android's device name: `<Build.MODEL> - <release> - API <sdk>`
+ * [`AndroidInfoHelpers.getFriendlyDeviceName`]. A release has no space.
  */
-const ANDROID_FRIENDLY_DEVICE_NAME = / - .+ - API \d+$/;
+const ANDROID_FRIENDLY_DEVICE_NAME = /^(.*?) - [^ ]+ - API \d+$/;
+
+/**
+ * A model in adb's spelling: `adb devices -l` replaces every character of `Build.MODEL` that is not
+ * a letter or a digit with `_` in `model:` (adb's `sanitize`), so `Pixel 9` is `model:Pixel_9`.
+ */
+function comparableModel(model: string): string {
+  return model.replace(/[^A-Za-z0-9]/g, '_');
+}
+
+/** Whether a target's device name names this `adb devices -l` model, with or without the suffix. */
+export function onAndroidModel(deviceName: string, model: string): boolean {
+  const targetModel = ANDROID_FRIENDLY_DEVICE_NAME.exec(deviceName)?.[1] ?? deviceName;
+  return comparableModel(targetModel) === comparableModel(model);
+}
 
 export interface TargetPlatformVerdict {
   /** The platform this target runs on, or null when nothing decided it. */
@@ -76,9 +90,9 @@ export function platformOfTarget(
     };
   }
 
-  const model = deviceInventory?.androidModels?.find(
-    (candidate) => candidate === deviceName || deviceName.startsWith(`${candidate} - `)
-  );
+  const model = deviceInventory?.androidDevices?.find(
+    (device) => device.model != null && onAndroidModel(deviceName, device.model)
+  )?.model;
   if (model) {
     return {
       platform: 'android',

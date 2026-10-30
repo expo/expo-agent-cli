@@ -33,19 +33,17 @@ describe(platformOfTarget, () => {
     expect(verdict.evidence).toContain('booted iOS simulator');
   });
 
-  it('matches an attached Android device by its model, with or without the API suffix', () => {
-    const deviceInventory = makeDeviceInventory({ androidModels: ['Pixel 7'] });
-    expect(
-      platformOfTarget({ appId: 'com.example.app', deviceName: 'Pixel 7' }, deviceInventory)
-        .platform
-    ).toBe('android');
-    expect(
-      platformOfTarget(
-        { appId: 'com.example.app', deviceName: 'Pixel 7 - 15 - API 35' },
-        deviceInventory
-      ).platform
-    ).toBe('android');
-  });
+  it.each(['Pixel_9', 'Pixel 9 - 15 - API 35'])(
+    'matches %s to the attached Android device adb names model:Pixel_9',
+    (deviceName) => {
+      const verdict = platformOfTarget(
+        { appId: 'com.example.app', deviceName },
+        makeDeviceInventory({ androidDevices: [{ serial: 'R5CR10ABCDE', model: 'Pixel_9' }] })
+      );
+      expect(verdict.platform).toBe('android');
+      expect(verdict.evidence).toContain('attached Android device');
+    }
+  );
 
   it('answers null rather than guessing for a development build it cannot place', () => {
     const verdict = platformOfTarget({ appId: 'com.example.app', deviceName: 'Ada’s phone' });

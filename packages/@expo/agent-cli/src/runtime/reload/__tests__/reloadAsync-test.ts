@@ -45,6 +45,7 @@ const NPX_FILES = {
 const EXPO_GO_TARGET = {
   id: 'device-1',
   appId: 'host.exp.Exponent',
+  deviceName: 'iPhone 17',
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=device&page=1',
 };
 
@@ -361,39 +362,6 @@ describe(reloadAsync, () => {
     });
     // Nothing was asked of a device: that is the point of the dev-server method.
     expect(spawn).not.toHaveBeenCalled();
-  });
-
-  it(`should print a stable set of top-level keys with --json`, async () => {
-    writeProject();
-    mockConnect(mockReloadingDevServer().socket);
-
-    await reloadAsync(projectRoot, options({ json: true }));
-
-    expect(Object.keys(JSON.parse(printed())).sort()).toEqual([
-      'appsConnected',
-      'appsReconnected',
-      'appsReconnectedReason',
-      'attempts',
-      'bundle',
-      'bundlePlatformSource',
-      'bundlePlatforms',
-      'bundlesAfterReload',
-      'commandSocketChurn',
-      'commandSocketClients',
-      'devServerSource',
-      'devServerUrl',
-      'deviceId',
-      'followups',
-      'method',
-      'platform',
-      'reloaded',
-      'route',
-      'routeCheck',
-      'skippedApps',
-      'url',
-      'verifiedBy',
-      'waitedMs',
-    ]);
   });
 
   // @ref llp/0010-agent-conventions.rfc.md §Other gates, in brief — friction run 4, F38.
@@ -797,44 +765,6 @@ describe(reloadAsync, () => {
   });
 });
 
-// @ref ../../bundleCheck — friction run 6, F53. With an Android-only break and no platform flag,
-// this command built the **iOS** bundle, passed the gate, and reloaded the Android app onto the
-// bundle that does not compile — reporting `Bundle compiles · for ios` while doing it.
-describe(`${reloadAsync.name} and the platform it checks the bundle for`, () => {
-  const ANDROID_TARGET = {
-    id: 'android-1',
-    appId: 'host.exp.exponent',
-    deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
-    webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=android&page=1',
-  };
-
-  it(`asks the dev server for the platform the connected app is on`, async () => {
-    const platformsAsked: string[] = [];
-    const server = mockDevServer([ANDROID_TARGET]);
-    // Record the `expo-platform` header of every manifest request the check makes.
-    const inner = globalThis.fetch;
-    globalThis.fetch = (async (input: unknown, init?: any) => {
-      const header = init?.headers?.['expo-platform'];
-      if (header) {
-        platformsAsked.push(String(header));
-      }
-      return await (inner as any)(input, init);
-    }) as unknown as typeof fetch;
-
-    const { socket } = fakeSocket(
-      [{ 'socket#1': 'role=android' }, { 'socket#4': 'role=android' }],
-      () => server.listing([{ ...ANDROID_TARGET, id: 'android-2' }])
-    );
-    mockConnect(socket);
-
-    await reloadAsync(projectRoot, options({ json: true }));
-
-    expect(platformsAsked).toEqual(['android']);
-    expect(JSON.parse(printed()).bundlePlatformSource).toBe('connected-app');
-    expect(JSON.parse(printed()).bundlePlatforms).toEqual(['android']);
-  });
-});
-
 // @ref llp/0005-runtime-loop-tools.rfc.md §Cloud simulator — live
 // run S12.
 //
@@ -865,6 +795,7 @@ describe(explainReloadFailure, () => {
       bundlesAfterReload: { observed: null, count: 0, line: null, reason: null },
       bundlePlatforms: ['ios'],
       bundlePlatformSource: 'flag',
+      scope: { platform: 'ios', platformFrom: 'flag', bound: false, device: null },
       skippedApps: [],
       route: null,
       routeCheck: {

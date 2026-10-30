@@ -670,7 +670,8 @@ export type StubDevServerOptions = {
   /**
    * Debugger targets `GET /json/list` answers with — the apps a command under test will believe
    * are connected. Defaults to none, which is a dev server nothing has attached to yet. A function
-   * is called on every read, for a list that changes between reads.
+   * is called on every read, for a list that changes between reads, such as one that follows a
+   * device-tool invocation log.
    */
   targets?: unknown[] | (() => unknown[]);
   /** Begin listening only after the stub Expo start creates this file. */

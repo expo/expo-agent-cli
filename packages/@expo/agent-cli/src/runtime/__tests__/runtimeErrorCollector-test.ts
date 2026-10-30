@@ -8,7 +8,7 @@ import { makeDeviceInventory, EVERY_TARGET_CLIENT } from './targetSelectionFixtu
 
 const ANDROID_AND_IOS_FACTS = makeDeviceInventory({
   booted: [{ name: 'iPhone 17 Pro', udid: 'SIM-1' }],
-  androidModels: ['sdk_gphone64_arm64'],
+  androidDevices: [{ serial: 'emulator-5554', model: 'sdk_gphone64_arm64' }],
 });
 
 const TARGET = {

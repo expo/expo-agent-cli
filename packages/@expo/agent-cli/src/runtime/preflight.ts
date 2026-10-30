@@ -30,6 +30,7 @@
 // empty afterwards is reported as inconclusive rather than as a call to fix.
 
 import { resolveTargetSelectionAsync } from './resolveTargetSelection';
+import { liveCloudBindings } from '../deviceBinding/cloud';
 import * as Log from '../log';
 import type { NavigatePlatform } from '../navigate/device';
 import { PROGRAM_PREFIX } from '../programName';
@@ -48,7 +49,9 @@ import { emptyScopeError, noAppConnectedError, reachTheAppLadder, withData } fro
 import {
   skippedAppsOf,
   describeSkippedApps,
+  describeSelectedDevice,
   EMPTY_DEVICE_INVENTORY,
+  READ_EVERY_TARGET,
   type DeviceInventory,
   type ClassifiedTargets,
   type TargetSelection,
@@ -100,8 +103,6 @@ export interface RuntimeConnection {
   targetSelection: TargetSelection;
   /** Known devices and worktree bindings used to classify {@link targets} for {@link targetSelection}. */
   deviceInventory: DeviceInventory;
-  /** The platform the caller named, or undefined. */
-  platform?: NavigatePlatform;
 }
 
 /**
@@ -210,32 +211,22 @@ export async function preflightRuntimeAsync(
     }
   }
 
-  const { targetSelection, deviceInventory, classifiedTargets } = await resolveTargetSelectionAsync(
-    {
-      projectRoot: context.projectRoot ?? null,
-      flags: { platform, eas: cloud },
-      targets: reachable ? targets : [],
-      deviceInventory: reachable
-        ? knownDeviceInventory
-        : (knownDeviceInventory ?? EMPTY_DEVICE_INVENTORY),
-    }
-  );
-  const base: RuntimeConnection = {
+  const found = {
     devServerUrl: url,
     devServerSource: discovery.source,
     named,
     reachable,
     unreachableReason: reachable ? null : unreachableReason,
-    targets,
-    classifiedTargets,
-    targetSelection,
-    deviceInventory,
-    platform,
   };
-
   if (!reachable) {
     if (need === 'optional') {
-      return { ...base, targets: [] };
+      return {
+        ...found,
+        targets: [],
+        classifiedTargets: { read: [], otherPlatform: [], undetermined: [], skipped: [] },
+        targetSelection: READ_EVERY_TARGET,
+        deviceInventory: knownDeviceInventory ?? EMPTY_DEVICE_INVENTORY,
+      };
     }
     throw noDevServerError({
       devServerUrl: url,
@@ -247,6 +238,23 @@ export async function preflightRuntimeAsync(
     });
   }
 
+  const { targetSelection, deviceInventory, classifiedTargets } = await resolveTargetSelectionAsync(
+    {
+      projectRoot: context.projectRoot ?? null,
+      flags: { platform, eas: cloud },
+      targets,
+      deviceInventory: knownDeviceInventory,
+      devServerUrl: url,
+    }
+  );
+  const base: RuntimeConnection = {
+    ...found,
+    targets,
+    classifiedTargets,
+    targetSelection,
+    deviceInventory,
+  };
+
   if (need === 'debugger-target' && targets.length === 0) {
     throw noAppConnectedError({ devServerUrl: url, retryMs: retryBudgetMs, cloud, platform });
   }
@@ -255,13 +263,49 @@ export async function preflightRuntimeAsync(
   // is a rung of its ladder — it can start the app — and for `stop` it is the state llp/0010 §The
   // seventh and eighth calls a success.
   if (need === 'debugger-target' && classifiedTargets.read.length === 0) {
-    throw emptyScopeError(url, targetSelection, classifiedTargets);
+    throw withLiveSessionNote(
+      emptyScopeError(url, targetSelection, classifiedTargets, deviceInventory),
+      targetSelection,
+      context.projectRoot
+    );
+  }
+  if (
+    targetSelection.bound &&
+    targetSelection.device != null &&
+    classifiedTargets.read.length > 0
+  ) {
+    Log.progress(
+      `Scoped to ${targetSelection.platform?.value}: ${describeSelectedDevice(targetSelection.device)}, the device bound to this worktree.`
+    );
   }
   const skipped = skippedAppsOf(classifiedTargets);
   if (skipped.length > 0) {
     Log.progress(describeSkippedApps(skipped));
   }
   return base;
+}
+
+/** A local binding outranks a live session of this worktree; only --eas reads the session. */
+function withLiveSessionNote(
+  error: CommandError,
+  targetSelection: TargetSelection,
+  projectRoot: string | null | undefined
+): CommandError {
+  if (
+    targetSelection.bound &&
+    targetSelection.device?.backend !== 'cloud' &&
+    projectRoot != null &&
+    liveCloudBindings(projectRoot).length > 0
+  ) {
+    const lines = error.message.split('\n');
+    const why = lines.findIndex((line) => line.startsWith('Why:'));
+    if (why >= 0) {
+      lines[why] +=
+        ` This worktree also has a live EAS Simulator session. The local binding comes first, so only a command that takes --eas reaches the session.`;
+      error.message = lines.join('\n');
+    }
+  }
+  return error;
 }
 
 /**

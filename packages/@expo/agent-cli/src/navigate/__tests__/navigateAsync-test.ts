@@ -99,7 +99,7 @@ const BOOTED_SIMULATOR = JSON.stringify({
   },
 });
 
-const ADB_DEVICES = 'List of devices attached\nemulator-5554\tdevice\n';
+const ADB_DEVICES = 'List of devices attached\nemulator-5554\tdevice model:sdk_gphone64_arm64\n';
 /** What `adb -s <serial> get-state` prints for the bound instance, the registry's one check. */
 const EMULATOR_UP = 'device\n';
 
@@ -1404,7 +1404,6 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
     mockDevServer([DEV_BUILD_TARGET]);
     mockSpawnQueue([
       { stdout: EMULATOR_UP },
-      { stdout: '8081' },
       { stdout: 'Starting: Intent' },
       { stdout: '' },
       { stdout: ADB_DEVICES },

@@ -10,7 +10,12 @@ import {
   setupFixtureAsync,
   startStubDevServerAsync,
 } from '../utils';
-import { bindingFixture, BOOTED_SIMULATOR, installStubXcrunAsync } from './installedAppStubs';
+import {
+  bindingFixture,
+  BOOTED_SIMULATOR,
+  installStubAdbAsync,
+  installStubXcrunAsync,
+} from './installedAppStubs';
 
 async function besideOtherWorktreeAsync(bindingName: string = BOOTED_SIMULATOR.name) {
   const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
@@ -338,4 +343,58 @@ describe('runtime:eval and the worktrees that bound the booted simulators', () =
       await server.close();
     }
   });
+});
+
+it('runtime:reload selects its bound cloud platform without a platform flag', async () => {
+  const root = await fs.promises.realpath(await setupFixtureAsync('go-app'));
+  await installStubXcrunAsync(root, { simulators: [BOOTED_SIMULATOR] });
+  await fs.promises.rm(await bindingFixture(root, BOOTED_SIMULATOR.udid));
+  await writeCloudBindingAsync(expoHomeOf(root), root, { id: '01a15bf1', platform: 'android' });
+  // No local emulator, whatever the host has attached: one of this model would claim the cloud app.
+  const adb = await installStubAdbAsync(root, 'host.exp.exponent', {
+    attached: false,
+    bound: false,
+  });
+  const server = await startStubDevServerAsync({
+    projectRoot: root,
+    targets: [
+      runtimeTarget('local', { deviceName: BOOTED_SIMULATOR.name, appId: 'host.exp.Exponent' }),
+      runtimeTarget('cloud', { deviceName: 'sdk_gphone64_arm64 - 15 - API 35' }),
+    ],
+    messagePeers: { android: 'role=android' },
+  });
+  try {
+    const result = await executeAgentCliAsync(
+      root,
+      [
+        'runtime:reload',
+        '--dev-server-url',
+        server.url,
+        '--method',
+        'dev-server',
+        '--timeout',
+        '2s',
+        '--json',
+        '--no-followups',
+      ],
+      { reject: false, env: { ...adb.env, AGENT_CLI_NO_DEVICE: '0' } }
+    );
+    expect(result.exitCode, result.all).toBe(0);
+    expect(server.bundlePlatforms()).toEqual(['android']);
+    const report = JSON.parse(result.stdout);
+    expect(report).toMatchObject({
+      reloaded: true,
+      bundlePlatforms: ['android'],
+      bundlePlatformSource: 'bound-device',
+    });
+    expect(report.scope).toEqual({
+      platform: 'android',
+      platformFrom: 'bound-device',
+      bound: true,
+      device: { backend: 'cloud', id: '01a15bf1', name: null },
+    });
+    expect(report).not.toHaveProperty('targetSelection');
+  } finally {
+    await server.close();
+  }
 });

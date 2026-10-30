@@ -1,7 +1,12 @@
 import { fakeTools } from '../../deviceBinding/__tests__/fakeTools';
 import { spawnCaptureAsync, type SpawnCaptureResult } from '../../utils/spawnCapture';
 import { resolveTargetSelectionAsync } from '../resolveTargetSelection';
-import { refreshDeviceInventoryAsync } from '../targetSelection';
+import {
+  deviceInventoryForSelectionAsync,
+  refreshDeviceInventoryAsync,
+  type TargetSelection,
+} from '../targetSelection';
+import { scopedListClassifier } from '../waitReady';
 import { makeDeviceInventory, makeTarget, makeTargetSelection } from './targetSelectionFixtures';
 
 vi.mock('../../utils/spawnCapture', () => ({ spawnCaptureAsync: vi.fn() }));
@@ -50,8 +55,24 @@ it('does not ask simctl for an --android scope because another worktree holds an
   const android = makeTarget({ appId: 'host.exp.exponent', deviceName: 'Pixel 9 - 15 - API 35' });
   const foreign = { udid: 'U9', name: 'iPhone 17', projectRoot: '/other', own: false };
   const inventory = makeDeviceInventory({ iosBindings: [foreign] });
-  await refreshDeviceInventoryAsync([android], selection, inventory);
+  await refreshDeviceInventoryAsync([android], selection, inventory, null);
   expect(vi.mocked(spawnCaptureAsync).mock.calls.filter(([bin]) => bin === 'xcrun')).toEqual([]);
+});
+
+it('reads an Android session on a host with no adb and no simctl', async () => {
+  Object.defineProperty(process, 'platform', { value: 'darwin' });
+  vi.mocked(spawnCaptureAsync).mockImplementation(async (command) => {
+    if (command === 'xcrun') throw new Error('xcrun unavailable');
+    return { stdout: '', stderr: '', exitCode: null, spawnError: new Error('spawn adb ENOENT') };
+  });
+  const session = makeTarget({ deviceName: 'sdk_gphone64_x86_64 - 15 - API 35' });
+  const { classifiedTargets, deviceInventory } = await resolveTargetSelectionAsync({
+    projectRoot: null,
+    flags: { platform: 'android', eas: true },
+    targets: [session],
+  });
+  expect(deviceInventory.androidDevices).toEqual([]);
+  expect(classifiedTargets.read).toEqual([session]);
 });
 
 it.each(['linux', 'win32'])(
@@ -123,4 +144,66 @@ describe('cloud attribution with no platform when adb gave no answer', () => {
     const classified = await classifyAsync(false, [target]);
     expect(classified.read).toEqual([target]);
   });
+
+  it('asks adb again on a later poll of a wait, and then reads the session app', async () => {
+    let adbAnswers = false;
+    Object.defineProperty(process, 'platform', { value: 'darwin' });
+    vi.mocked(spawnCaptureAsync).mockImplementation(async (command) =>
+      command === 'xcrun'
+        ? { stdout: '{"devices":{}}', stderr: '', exitCode: 0 }
+        : { stdout: 'List of devices attached\n', stderr: '', exitCode: adbAnswers ? 0 : 1 }
+    );
+    const { targetSelection, deviceInventory } = await resolveTargetSelectionAsync({
+      projectRoot: null,
+      flags: { platform: null, eas: true },
+      targets: [emulator],
+    });
+    const now = Date.now();
+    const classify = scopedListClassifier(
+      targetSelection,
+      deviceInventory,
+      now + 5000,
+      [emulator],
+      null
+    );
+    expect((await classify([emulator])).undetermined).toEqual([emulator]);
+    adbAnswers = true;
+    vi.spyOn(Date, 'now').mockReturnValue(now + 1100);
+    expect((await classify([emulator])).read).toEqual([emulator]);
+  });
+});
+
+// A unit test: at this layer the stub `adb` cannot open an Android app, so no e2e wait can attach a
+// twin mid-run. The e2e row lives with the attach wait of `navigate`.
+it('a wait poll asks `adb reverse` again when a twin of the bound model attached', async () => {
+  Object.defineProperty(process, 'platform', { value: 'linux' });
+  let twinAttached = false;
+  vi.mocked(spawnCaptureAsync).mockImplementation(async (command, args) => {
+    if (command === 'xcrun') throw new Error('xcrun unavailable');
+    if (args.includes('devices')) {
+      const lines = ['List of devices attached', 'A\tdevice model:Pixel_9'];
+      if (twinAttached) lines.push('B\tdevice model:Pixel_9');
+      return { stdout: `${lines.join('\n')}\n`, stderr: '', exitCode: 0 };
+    }
+    if (args.includes('reverse')) {
+      return {
+        stdout: args[1] === 'A' ? 'host-1 tcp:8081 tcp:8081\n' : '',
+        stderr: '',
+        exitCode: 0,
+      };
+    }
+    return { stdout: '', stderr: '', exitCode: 1 };
+  });
+  const selection: TargetSelection = {
+    platform: { value: 'android', by: 'device' },
+    device: { backend: 'local-android', serial: 'A' },
+    bound: false,
+  };
+  const url = 'http://127.0.0.1:8081';
+  const own = makeTarget({ deviceName: 'Pixel 9 - 15 - API 35' });
+  const start = await deviceInventoryForSelectionAsync([], selection, null, url);
+  twinAttached = true;
+  const classify = scopedListClassifier(selection, start, Date.now() + 5000, [], url);
+  const { read, undetermined } = await classify([own]);
+  expect({ read, undetermined }).toEqual({ read: [own], undetermined: [] });
 });

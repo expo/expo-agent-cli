@@ -196,6 +196,7 @@ describe('@expo/agent-cli runtime:reload', () => {
         'reloaded',
         'route',
         'routeCheck',
+        'scope',
         'skippedApps',
         'url',
         'verifiedBy',

@@ -1,4 +1,3 @@
-import { describeSkippedApps } from '../../runtime/targetSelection';
 import { makeTarget } from '../../runtime/__tests__/targetSelectionFixtures';
 // @ref llp/0035-one-device-per-worktree.rfc.md §iOS smoke
 // @ref llp/0035-one-device-per-worktree.rfc.md §Wiring
@@ -24,6 +23,7 @@ import { probeCloudSessionAsync } from '../../device/cloudSimulator';
 import { cloudProbe } from '../../device/__tests__/fakeCloudProbe';
 import { lookUpEasSimulatorBuildAsync } from '../../plan/easBuildLookup';
 import { PROGRAM_PREFIX } from '../../programName';
+import { describeSkippedApps } from '../../runtime/targetSelection';
 import { resolveEasCli } from '../../utils/easCli';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { ensureGitExcludedAsync } from '../../utils/gitExclude';

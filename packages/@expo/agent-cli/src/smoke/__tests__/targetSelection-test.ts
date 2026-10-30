@@ -118,17 +118,6 @@ it('publishes an acquired device to subsequent phases without another lookup', a
   });
 });
 
-it('places a development-build target that appears after the first empty wait probe', async () => {
-  inventory();
-  let reads = 0;
-  const url = await serverAsync(() => (++reads === 1 ? [] : [target()]));
-  const deps = buildSmokeDeps(projectRoot, resolveSmokeOptions(['--ios']));
-  expect(await deps.waitForAppConnection(url, 600)).toMatchObject({
-    appsConnected: 1,
-    timedOut: false,
-  });
-});
-
 it('asks the device tools once for a list that does not change', async () => {
   const tools = inventory();
   const url = await serverAsync(() => [

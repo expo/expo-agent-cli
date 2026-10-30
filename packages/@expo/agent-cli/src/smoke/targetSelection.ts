@@ -57,10 +57,13 @@ export function buildSmokeTargetSelection(
     },
     targetSelectionAsync: async (devServerUrl) => {
       const { targets } = await probeDevServerAsync(devServerUrl);
+      const device = memo ? (await memo).device : null;
       const resolved = await resolveTargetSelectionAsync({
         projectRoot,
         flags: { platform: options.platform, eas: options.cloud === 'required' },
         targets,
+        device,
+        devServerUrl,
       });
       return { ...resolved, targets };
     },

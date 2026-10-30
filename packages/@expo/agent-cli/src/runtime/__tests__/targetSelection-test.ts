@@ -1,38 +1,27 @@
 import type { CdpTarget } from '../cdpClient';
 import { resolveTargetSelectionAsync } from '../resolveTargetSelection';
-import { classifyTargets } from '../targetSelection';
-import { makeTargetSelection } from './targetSelectionFixtures';
-import { makeDeviceInventory } from './targetSelectionFixtures';
+import { classifyTargets, scopeJson } from '../targetSelection';
+import { makeTargetSelection, makeDeviceInventory } from './targetSelectionFixtures';
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Android — the EAS Simulator iOS session rule.
 // The target an EAS Simulator iOS session registers: the project's own app id, and the cloud
 // simulator's model name, which no local tool on this machine reports.
 describe('classifyTargets on an EAS Simulator session', () => {
-  const cloud = { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17' } as CdpTarget;
-  const local = { appId: 'dev.vonovak.cyclable', deviceName: 'iPhone 17 Pro' } as CdpTarget;
   const expoGo = { appId: 'host.exp.Exponent', deviceName: 'iPhone 17' } as CdpTarget;
+  // An EAS Android session runs an x86_64 image; a local emulator on Apple Silicon is arm64.
+  const androidSession = {
+    appId: 'dev.vonovak.cyclable',
+    deviceName: 'sdk_gphone64_x86_64 - 15 - API 35',
+  } as CdpTarget;
+  const localEmulator = {
+    appId: 'dev.vonovak.cyclable',
+    deviceName: 'sdk_gphone64_arm64 - 15 - API 35',
+  } as CdpTarget;
   const deviceInventory = makeDeviceInventory({
     booted: [{ name: 'iPhone 17 Pro', udid: 'LOCAL-1' }],
   });
 
   it.each([
-    {
-      name: 'reads the one unclaimed target on an iOS session',
-      targets: [cloud],
-      platform: 'ios' as const,
-      eas: true,
-      read: [cloud],
-      undetermined: [],
-    },
-    {
-      name: 'reads the one unclaimed target beside a booted local simulator',
-      targets: [local, cloud],
-      platform: 'ios' as const,
-      eas: true,
-      read: [cloud],
-      skipped: [{ target: local, classification: { group: 'other-device' } }],
-      undetermined: [],
-    },
     {
       name: 'reads an Expo Go target that no booted local simulator has',
       targets: [expoGo],
@@ -50,7 +39,16 @@ describe('classifyTargets on an EAS Simulator session', () => {
       read: [],
       undetermined: [expoGo],
     },
-  ])('$name', ({ targets, platform, eas, read, undetermined, skipped = [], inventory }) => {
+    {
+      name: 'an Android session holds every target when adb was not asked',
+      targets: [localEmulator, androidSession],
+      platform: 'android' as const,
+      eas: true,
+      inventory: makeDeviceInventory({ androidDevices: null }),
+      read: [],
+      undetermined: [localEmulator, androidSession],
+    },
+  ])('$name', ({ targets, platform, eas, read, undetermined, inventory }) => {
     expect(
       classifyTargets(
         targets,
@@ -62,7 +60,7 @@ describe('classifyTargets on an EAS Simulator session', () => {
       )
     ).toEqual({
       read,
-      skipped,
+      skipped: [],
       otherPlatform: [],
       undetermined,
     });
@@ -129,25 +127,11 @@ const bound = (udid: string, projectRoot: string, own = false) => ({
 });
 
 describe('classifyTargets and the worktree that bound the simulator', () => {
-  it.each([
-    {
-      name: 'reads a target on the simulator this worktree binds',
-      booted: ['SIM-A'],
-      iosBindings: [bound('SIM-A', '/wt/mapfilter', true)],
-      projectRoots: null,
-    },
-    {
-      name: "skips a target with a foreign binding's name when the simulator list could not be read",
-      booted: [],
-      bootedStatus: 'unknown' as const,
-      iosBindings: [bound('SIM-B', '/wt/b')],
-      projectRoots: ['/wt/b'],
-    },
-  ])('$name', ({ booted, bootedStatus = 'observed' as const, iosBindings, projectRoots }) => {
+  it("skips a target with a foreign binding's name when the simulator list could not be read", () => {
     const deviceInventory = makeDeviceInventory({
-      booted: booted.map((udid) => ({ name: CLONE, udid })),
-      bootedStatus,
-      iosBindings,
+      booted: [],
+      bootedStatus: 'unknown',
+      iosBindings: [bound('SIM-B', '/wt/b')],
     });
 
     expect(
@@ -157,13 +141,116 @@ describe('classifyTargets and the worktree that bound the simulator', () => {
         deviceInventory
       )
     ).toEqual({
-      read: projectRoots == null ? [ON_CLONE] : [],
+      read: [],
       otherPlatform: [],
       undetermined: [],
-      skipped:
-        projectRoots == null
-          ? []
-          : [{ target: ON_CLONE, classification: { group: 'other-worktree', projectRoots } }],
+      skipped: [
+        { target: ON_CLONE, classification: { group: 'other-worktree', projectRoots: ['/wt/b'] } },
+      ],
+    });
+  });
+});
+
+// @ref llp/0035-one-device-per-worktree.rfc.md §Readers — a local Android device.
+describe('classifyTargets on the Android device bound to this worktree', () => {
+  const model = 'sdk_gphone64_arm64';
+  const bound = { serial: 'emulator-5554', model };
+  const twin = { serial: 'emulator-5556', model };
+  const android = { appId: 'host.exp.exponent', deviceName: `${model} - 15 - API 35` } as CdpTarget;
+  const onPhone = { appId: 'host.exp.exponent', deviceName: 'Pixel 9 - 15 - API 35' } as CdpTarget;
+  const otherDevice = { group: 'other-device' } as const;
+  const phoneSkipped = [{ target: onPhone, classification: otherDevice }];
+
+  it.each([
+    {
+      name: 'holds the target of a shared model when adb reverse was not read',
+      androidDevices: [bound, twin],
+      undetermined: [android],
+    },
+    {
+      name: 'holds every target when adb was not read',
+      androidDevices: null,
+      undetermined: [android, onPhone],
+      skipped: [],
+    },
+  ])('$name', ({ androidDevices, undetermined, skipped = phoneSkipped }) => {
+    expect(
+      classifyTargets(
+        [android, onPhone],
+        makeTargetSelection({
+          platform: { value: 'android', by: 'bound-device' },
+          device: { backend: 'local-android', serial: bound.serial },
+          bound: true,
+        }),
+        makeDeviceInventory({ androidDevices })
+      )
+    ).toEqual({ read: [], otherPlatform: [], undetermined, skipped });
+  });
+});
+
+// React Native Android names the device by `Build.MODEL`; `adb devices -l` prints the model with
+// some characters replaced by `_`. Both sides are compared in one spelling.
+describe('classifyTargets on a bound phone whose model adb spells differently', () => {
+  it.each([
+    { name: 'a model with a space', deviceName: 'Pixel 9 - 15 - API 35', model: 'Pixel_9' },
+    { name: 'a model with a dash', deviceName: 'SM-A525F - 13 - API 33', model: 'SM_A525F' },
+    {
+      name: 'a model whose dash adb keeps',
+      deviceName: 'SM-A525F - 13 - API 33',
+      model: 'SM-A525F',
+    },
+  ])('reads the target of $name', ({ deviceName, model }) => {
+    const target = { appId: 'com.example.app', deviceName } as CdpTarget;
+    expect(
+      classifyTargets(
+        [target],
+        makeTargetSelection({
+          platform: { value: 'android', by: 'bound-device' },
+          device: { backend: 'local-android', serial: 'R58M1234567' },
+          bound: true,
+        }),
+        makeDeviceInventory({ androidDevices: [{ serial: 'R58M1234567', model }] })
+      ).read
+    ).toEqual([target]);
+  });
+});
+
+describe('scopeJson', () => {
+  it.each([
+    {
+      device: { backend: 'local-ios' as const, udid: 'SIM-1', name: 'iPhone 17' },
+      json: { backend: 'local-ios', id: 'SIM-1', name: 'iPhone 17' },
+    },
+    {
+      device: { backend: 'local-android' as const, serial: 'emulator-5554' },
+      json: { backend: 'local-android', id: 'emulator-5554', name: null },
+    },
+    {
+      device: { backend: 'cloud' as const, deviceId: '01a15bf1' },
+      json: { backend: 'cloud', id: '01a15bf1', name: null },
+    },
+    {
+      device: { backend: 'cloud' as const, deviceId: null },
+      json: { backend: 'cloud', id: null, name: null },
+    },
+  ])('names a $device.backend device by id and name', ({ device, json }) => {
+    const scope = scopeJson(
+      makeTargetSelection({
+        platform: { value: device.backend === 'local-ios' ? 'ios' : 'android', by: 'bound-device' },
+        device,
+        bound: true,
+      })
+    );
+    expect(scope.bound).toBe(true);
+    expect(scope.device).toEqual(json);
+  });
+
+  it('names no platform and no device for a run that reads every app', () => {
+    expect(scopeJson(makeTargetSelection())).toEqual({
+      platform: null,
+      platformFrom: null,
+      bound: false,
+      device: null,
     });
   });
 });

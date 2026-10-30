@@ -680,7 +680,7 @@ describe('@expo/agent-cli smoke', () => {
       await installStubXcrunAsync(projectRoot, opened);
       const stub = await startStubDevServerAsync({
         projectRoot,
-        targets: [EXPO_GO_TARGET],
+        targets: [{ ...EXPO_GO_TARGET, deviceName: 'iPhone 17 Pro' }],
         targetsAppearWithFile: opened,
       });
       const release = await holdLockForAsync(projectRoot, stub);
@@ -972,7 +972,9 @@ describe('@expo/agent-cli smoke', () => {
       const readNpx = await installStubNpxAsync(projectRoot);
       const stub = await startStubDevServerAsync({
         projectRoot,
-        targets: [EXPO_GO_TARGET],
+        targets: () => [
+          { ...EXPO_GO_TARGET, deviceName: readBinding(projectRoot)?.device.name ?? '' },
+        ],
         targetsAppearWithFile: opened,
       });
 
@@ -1209,7 +1211,10 @@ describe('@expo/agent-cli smoke', () => {
               STUB_EXPO_DELAY_MS: '30000',
               STUB_EXPO_DEV_SERVER_PORT: '9354',
               STUB_EXPO_LISTEN: '1',
-              STUB_EXPO_TARGETS: JSON.stringify([EXPO_GO_TARGET]),
+              // The app runs on the bound simulator, so its target carries that simulator's name.
+              STUB_EXPO_TARGETS: JSON.stringify([
+                { ...EXPO_GO_TARGET, deviceName: 'agent-cli f5ce27a6' },
+              ]),
             },
             reject: false,
           }

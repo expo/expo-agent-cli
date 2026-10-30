@@ -59,6 +59,8 @@ export const runtimeReloadHelp: CommandHelp = {
       'bundlesAfterReload',
       'bundlePlatforms',
       'bundlePlatformSource',
+      'scope',
+      'skippedApps',
       'route',
       'routeCheck',
       'url',

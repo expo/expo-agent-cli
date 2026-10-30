@@ -182,7 +182,8 @@ function readCalls(recordPath: string): string[][] {
 
 /**
  * A stub `adb` that lists the attached emulator `EMULATOR_SERIAL` (bound to the fixture through
- * {@link androidBindingFixture}, unless `attached` is false) and every instance the stub `emulator`
+ * {@link androidBindingFixture}; `attached: false` lists no emulator, `bound` alone picks whether to
+ * write that binding) and every instance the stub `emulator`
  * is up as ({@link stubEmulatorStatePath}). `get-state` answers `device` for a listed serial and the
  * real tool's "not found" for any other; `sys.boot_completed` is `1`. The emulator has `appId`
  * installed, unless `STUB_ADB_INSTALLED=0`.
@@ -192,6 +193,8 @@ function readCalls(recordPath: string): string[][] {
  * archive, e.g. one whose `app.fingerprint` is not the JSON `expo-constants` writes. `STUB_ADB_NO_DD=1` fails `stat`, the way a device
  * without the tools does, and `pull` then copies the fixture to the path asked for.
  * `STUB_ADB_HANG_READ=<file>` makes `exec-out` write its pid there and never exit.
+ * `STUB_ADB_REVERSE={"<serial>": <port>}` makes `-s <serial> reverse --list` list that port, in the
+ * `<serial> tcp:<port> tcp:<port>` shape of eas-cli's androidLocalEgress test fixture.
  *
  * Installed under a fake SDK: `ANDROID_HOME` beats `PATH`, so a runner with a real SDK still
  * reaches this stub (@ref src/device/adb §resolveAdb). The returned `env` names it, and the
@@ -200,12 +203,12 @@ function readCalls(recordPath: string): string[][] {
 export async function installStubAdbAsync(
   root: string,
   appId: string,
-  { attached = true }: { attached?: boolean } = {}
+  { attached = true, bound = attached }: { attached?: boolean; bound?: boolean } = {}
 ): Promise<{ env: Record<string, string>; calls: StubCalls }> {
   const recordPath = path.join(root, '.adb-calls.jsonl');
   const scriptPath = path.join(root, '.stub-bin', 'adb-stub.js');
   await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
-  if (attached) {
+  if (bound) {
     await androidBindingFixture(root, EMULATOR_SERIAL);
   }
   await fs.promises.writeFile(
@@ -227,6 +230,12 @@ export async function installStubAdbAsync(
       `if (args[2] === 'get-state') {`,
       `  if (!serials.includes(args[1])) { process.stderr.write("error: device '" + args[1] + "' not found\\n"); process.exit(1); }`,
       `  process.stdout.write('device\\n');`,
+      `  process.exit(0);`,
+      `}`,
+      `if (args[2] === 'reverse' && args[3] === '--list') {`,
+      `  if (process.env.STUB_ADB_REVERSE_FAIL) process.exit(1);`,
+      `  const port = JSON.parse(process.env.STUB_ADB_REVERSE || '{}')[args[1]];`,
+      `  if (port) process.stdout.write(args[1] + ' tcp:' + port + ' tcp:' + port + '\\n');`,
       `  process.exit(0);`,
       `}`,
       `if (args.includes('getprop')) { process.stdout.write('1\\n'); process.exit(0); }`,

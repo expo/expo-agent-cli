@@ -19,7 +19,7 @@ import { decodeProjectRoot, matchProjectRoot, PROJECT_ROOT_HEADER } from './proj
 import {
   isSkippedTarget,
   classifyTargets,
-  scopeToolsUnknown,
+  silentTool,
   refreshDeviceInventoryAsync,
   skippedAppsOf,
   type ClassifiedTargets,
@@ -317,7 +317,8 @@ export function scopedListClassifier(
   targetSelection: TargetSelection,
   deviceInventory: DeviceInventory,
   deadline: number,
-  inventoryTargets: readonly Pick<CdpTarget, 'id'>[]
+  inventoryTargets: readonly Pick<CdpTarget, 'id'>[],
+  devServerUrl: string | null
 ): (targets: CdpTarget[]) => Promise<ClassifiedTargets> {
   let inventoryListKey = listKey(inventoryTargets);
   let attemptedKey = inventoryListKey;
@@ -325,7 +326,7 @@ export function scopedListClassifier(
   return async (targets) => {
     const key = listKey(targets);
     const due = Date.now() - readAt >= INVENTORY_RETRY_MS;
-    const unknown = scopeToolsUnknown(targetSelection, deviceInventory);
+    const unknown = silentTool(targetSelection, deviceInventory) != null;
     if (
       ((key !== inventoryListKey && (key !== attemptedKey || due)) || (unknown && due)) &&
       Date.now() < deadline
@@ -336,9 +337,10 @@ export function scopedListClassifier(
         targets,
         targetSelection,
         deviceInventory,
+        devServerUrl,
         Math.max(1, deadline - Date.now())
       );
-      if (!scopeToolsUnknown(targetSelection, fresh) || unknown) {
+      if (silentTool(targetSelection, fresh) == null || unknown) {
         deviceInventory = fresh;
         inventoryListKey = key;
       }
@@ -370,7 +372,8 @@ export async function waitForAppConnectionAsync(
     targetSelection,
     deviceInventory,
     deadline,
-    inventoryTargets
+    inventoryTargets,
+    devServerUrl
   );
   for (;;) {
     const probe = await probeDevServerAsync(devServerUrl);
