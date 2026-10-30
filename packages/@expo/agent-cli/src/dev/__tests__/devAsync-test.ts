@@ -300,6 +300,7 @@ describe(devAsync, () => {
           agentSkills: true,
           output: 'inherit',
           easPlatform: null,
+          runLock: { lock: null },
           onDevServer: expect.any(Function),
         }
       );
@@ -315,6 +316,7 @@ describe(devAsync, () => {
         agentSkills: true,
         output: 'inherit',
         easPlatform: null,
+        runLock: { lock: null },
       });
     });
 
@@ -397,6 +399,7 @@ describe(devAsync, () => {
           agentSkills: true,
           output: 'inherit',
           easPlatform: null,
+          runLock: { lock: null },
           onDevServer: expect.any(Function),
         }
       );
@@ -415,6 +418,7 @@ describe(devAsync, () => {
           agentSkills: false,
           output: 'inherit',
           easPlatform: null,
+          runLock: { lock: null },
           onDevServer: expect.any(Function),
         }
       );
@@ -432,6 +436,7 @@ describe(devAsync, () => {
           agentSkills: true,
           output: 'inherit',
           easPlatform: null,
+          runLock: { lock: null },
         }
       );
     });
@@ -523,6 +528,7 @@ describe(devAsync, () => {
         agentSkills: true,
         output: 'inherit',
         easPlatform: null,
+        runLock: { lock: null },
       });
     });
 
@@ -675,6 +681,7 @@ describe(devAsync, () => {
           agentSkills: true,
           output: 'inherit',
           easPlatform: null,
+          runLock: { lock: null },
           onDevServer: expect.any(Function),
         }
       );
@@ -690,6 +697,7 @@ describe(devAsync, () => {
         agentSkills: true,
         output: 'inherit',
         easPlatform: null,
+        runLock: { lock: null },
       });
     });
 
@@ -705,6 +713,7 @@ describe(devAsync, () => {
         agentSkills: true,
         output: 'inherit',
         easPlatform: null,
+        runLock: { lock: null },
       });
     });
 
@@ -723,6 +732,7 @@ describe(devAsync, () => {
         agentSkills: true,
         output: 'inherit',
         easPlatform: null,
+        runLock: { lock: null },
       });
       const warnings = vi.mocked(Log.warn).mock.calls.map(([line]) => String(line));
       expect(warnings.filter((line) => line.includes('the dev server uses'))).toEqual([
@@ -935,6 +945,7 @@ describe(devAsync, () => {
           agentSkills: true,
           output: 'inherit',
           easPlatform: null,
+          runLock: { lock: null },
         }
       );
     });
@@ -1040,6 +1051,7 @@ describe(devAsync, () => {
           agentSkills: true,
           output: 'inherit',
           easPlatform: null,
+          runLock: { lock: null },
           onDevServer: expect.any(Function),
         }
       );
@@ -1090,6 +1102,7 @@ describe(devAsync, () => {
           agentSkills: true,
           output: 'tee',
           easPlatform: null,
+          runLock: { lock: null },
           onDevServer: expect.any(Function),
         }
       );
@@ -1112,6 +1125,7 @@ describe(devAsync, () => {
           agentSkills: true,
           output: 'capture',
           easPlatform: null,
+          runLock: { lock: null },
           onDevServer: expect.any(Function),
         }
       );

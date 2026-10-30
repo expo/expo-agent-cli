@@ -9,7 +9,7 @@ import { isExplicitChoiceRefusal } from '../deviceBinding/errors';
 import { previewExplicitDeviceAsync } from '../deviceBinding/preview';
 import { outputTail } from '../deploy/parseOutput';
 import { readDevServerLockAsync } from '../devLock/client';
-import type { DevServerLockInfo } from '../devLock/types';
+import type { DevServerLockHandle, DevServerLockInfo } from '../devLock/types';
 import { readLastLoggedDevServerPort, readPortArg } from '../devLock/port';
 import {
   acquireDeviceAsync,
@@ -621,13 +621,38 @@ interface PlanRun {
   serving: { index: number; args: string[] } | null;
 }
 
-// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
+/** The run's dev-server lock, once a step took it. */
+type RunLock = { lock: DevServerLockHandle | null };
+
+/**
+ * Run the plan's steps under one dev-server lock, and release it when the run ends.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the lock belongs to the
+ * run, so it answers through a port retry and through the run's EAS exit work.
+ */
 async function executePlanAsync(
   projectRoot: string,
   plan: StartPlan,
   state: ProjectState,
   options: DevOptions,
   acquired: AcquireResult | null
+): Promise<PlanRun> {
+  const runLock: RunLock = { lock: null };
+  try {
+    return await runPlanStepsAsync(projectRoot, plan, state, options, acquired, runLock);
+  } finally {
+    runLock.lock?.release();
+  }
+}
+
+// oxlint-disable-next-line max-lines-per-function -- known debt: split this before it grows
+async function runPlanStepsAsync(
+  projectRoot: string,
+  plan: StartPlan,
+  state: ProjectState,
+  options: DevOptions,
+  acquired: AcquireResult | null,
+  runLock: RunLock
 ): Promise<PlanRun> {
   const output = stepOutputFor(options);
   let devServer: DevServerRun | null = null;
@@ -636,9 +661,13 @@ async function executePlanAsync(
   // retry does: the second bind is the same dev server, not a second app to open.
   let openArmed = false;
   // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the one EAS open of the
-  // plan, said on the lock of every dev-server step: a port retry takes a new lock.
+  // plan, said on the run's lock.
   let markEasOpenFinished!: () => void;
+  let easOpenDone = false;
   const easOpenFinished = new Promise<void>((resolve) => (markEasOpenFinished = resolve));
+  void easOpenFinished.then(() => {
+    easOpenDone = true;
+  });
   // @ref llp/0027-everything-on-eas.rfc.md §The open is a session — the EAS build the session
   // installs: the one the plan found, or the one this run's `eas build` step makes below.
   let easBuildId: string | null = plan.easBuild?.id ?? null;
@@ -677,9 +706,11 @@ async function executePlanAsync(
             },
           })
         : null;
+      let easOpened = false;
       return await runDevServerAsync(projectRoot, stepArgs, {
         agentSkills: options.agentSkills,
         output,
+        runLock,
         // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
         easPlatform: eas?.platform ?? null,
         easOpenFinished: eas ? easOpenFinished : undefined,
@@ -692,6 +723,7 @@ async function executePlanAsync(
               // Open alongside Metro. A failed open must not stop it.
               const stillWanted = () => stepRunning;
               if (eas) {
+                easOpened = true;
                 eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
                 void eas.finished.then(markEasOpenFinished);
               } else
@@ -707,6 +739,11 @@ async function executePlanAsync(
           : undefined,
       }).finally(async () => {
         stepRunning = false;
+        // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — Metro is gone,
+        // and the run binds the session its open returns: `dev:stop` reads that here.
+        if (easOpened && !easOpenDone) {
+          runLock.lock?.update({ ...runLock.lock.info, phase: 'finishing' });
+        }
         await eas?.finishAsync();
       });
     };

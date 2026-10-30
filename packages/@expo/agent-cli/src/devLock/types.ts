@@ -29,7 +29,19 @@ export interface DevServerLockInfo {
    * no EAS open.
    */
   easOpenFinished: boolean;
+  /**
+   * What the run that holds the lock does now.
+   *
+   * @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — the phase table.
+   */
+  phase: DevServerLockPhase;
 }
+
+/**
+ * `building`: a step before the dev-server step runs. `serving`: the dev-server step runs.
+ * `finishing`: the dev-server step exited, and the run's EAS open has not returned.
+ */
+export type DevServerLockPhase = 'building' | 'serving' | 'finishing';
 
 /** A held lock. Releasing it frees the address for the next dev server of this project. */
 export interface DevServerLockHandle {
@@ -39,6 +51,8 @@ export interface DevServerLockHandle {
   replacedStale: boolean;
   /** Stop answering and clean up the address. Safe to call more than once. */
   release(): void;
+  /** What the lock answers now. */
+  readonly info: DevServerLockInfo;
   /** Answer every later connection with `info` instead. */
   update(info: DevServerLockInfo): void;
 }

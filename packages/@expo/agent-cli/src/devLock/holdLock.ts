@@ -20,6 +20,11 @@ export type HoldDevServerLockOptions = ResolveDevServerPortOptions & {
   easPlatform?: DevServerLockInfo['easPlatform'];
   /** Settles when the run's EAS open returns; the lock then answers `easOpenFinished: true`. */
   easOpenFinished?: Promise<unknown>;
+  /**
+   * The lock the `dev` run already holds. The step answers on it with phase `serving` instead of
+   * taking a new one, so a port retry leaves no gap. A port of another project releases it.
+   */
+  held?: DevServerLockHandle | null;
 };
 
 /**
@@ -44,17 +49,13 @@ export async function holdDevServerLockAsync(
   args: string[],
   options: HoldDevServerLockOptions
 ): Promise<DevServerLockHandle | null> {
-  let easOpenFinished = false;
-  let port = 0;
   // Attached after the publish: a settled promise still calls back, so an open that returned
   // first is not lost.
   const publishAndWatchAsync = async (resolved: ResolvedDevServerPort | null) => {
-    if (resolved) port = resolved.port;
-    const lock = await publishAsync(projectRoot, options, resolved, easOpenFinished);
-    const finish = () => {
-      easOpenFinished = true;
-      lock?.update(lockInfo(projectRoot, options, port, true));
-    };
+    const lock = options.held
+      ? republish(projectRoot, options, options.held, resolved)
+      : await publishAsync(projectRoot, options, resolved);
+    const finish = () => lock?.update({ ...lock.info, easOpenFinished: true });
     options.easOpenFinished?.then(finish, finish);
     return lock;
   };
@@ -76,17 +77,16 @@ export async function holdDevServerLockAsync(
   if (watched?.source === 'log') {
     options.onResolved?.(watched);
     if (watched.port !== named) {
-      port = watched.port;
-      lock?.update(lockInfo(projectRoot, options, port, easOpenFinished));
+      lock?.update({ ...lock.info, url: `http://127.0.0.1:${watched.port}`, port: watched.port });
     }
   }
   return lock;
 }
 
-/** The lock's answer for a dev server on `port`. */
+/** The lock's answer for a dev server on `port`, spawned at `options.since`. */
 function lockInfo(
   projectRoot: string,
-  options: HoldDevServerLockOptions,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'easPlatform'>,
   port: number,
   easOpenFinished: boolean
 ): DevServerLockInfo {
@@ -98,15 +98,38 @@ function lockInfo(
     projectRoot,
     easPlatform: options.easPlatform ?? null,
     easOpenFinished,
+    phase: 'serving',
   };
+}
+
+/**
+ * Answer on the lock the run already holds, for the dev-server step on the resolved port.
+ *
+ * The same rules as {@link publishAsync}: a port of another project is never published, so the
+ * run's lock is released; a dev server that already exited changes nothing.
+ */
+function republish(
+  projectRoot: string,
+  options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform'>,
+  held: DevServerLockHandle,
+  resolved: ResolvedDevServerPort | null
+): DevServerLockHandle | null {
+  if (resolved == null) {
+    event('dev_lock_skipped', { address: held.address, reason: 'foreign-port' });
+    held.release();
+    return null;
+  }
+  if (options.isRunning()) {
+    held.update(lockInfo(projectRoot, options, resolved.port, held.info.easOpenFinished));
+  }
+  return held;
 }
 
 /** Take the lock for a dev server on the resolved port. */
 async function publishAsync(
   projectRoot: string,
   options: Pick<HoldDevServerLockOptions, 'since' | 'isRunning' | 'easPlatform'>,
-  resolved: ResolvedDevServerPort | null,
-  easOpenFinished: boolean
+  resolved: ResolvedDevServerPort | null
 ): Promise<DevServerLockHandle | null> {
   // Derived once, inside the try, so the catch below has an address to report without being able
   // to fail deriving one — a `catch` that can throw is not a safety net.
@@ -127,9 +150,7 @@ async function publishAsync(
       return null;
     }
 
-    const result = await acquireDevServerLockAsync(
-      lockInfo(projectRoot, options, port, easOpenFinished)
-    );
+    const result = await acquireDevServerLockAsync(lockInfo(projectRoot, options, port, false));
 
     switch (result.status) {
       case 'acquired': {
