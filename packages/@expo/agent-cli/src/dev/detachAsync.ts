@@ -39,12 +39,13 @@ import { liveCloudBindings } from '../deviceBinding/cloud';
 import { readBindingSummaryAsync, type BindingSummary } from '../deviceBinding/summary';
 import { PORT_WATCH_TIMEOUT_MS, readLastLoggedDevServerPort } from '../devLock/port';
 import { event as cliEvent } from '../events';
-import { EXIT_OUTCOME_FAILED } from '../exitCodes';
+import { EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../exitCodes';
 import { followUpsEnabled, reportFollowUps, type FollowUp } from '../followups';
 import * as Log from '../log';
 import { needsHumanErrorFrom, needsHumanOf } from '../needsHuman/error';
 import { findNeedsHumanScenario } from '../needsHuman/registry';
 import type { NativePlatform } from '../plan/types';
+import { rerunDevCommand } from '../plan/rerun';
 import { PROGRAM_PREFIX } from '../programName';
 import { defaultSmokePlatformAsync, smokeCommand, statedSmokePlatform } from '../smoke/suggest';
 import { wrapUntrustedAppOutput } from '../runtime/untrusted';
@@ -237,14 +238,30 @@ export async function devDetachAsync(
 
   // Asked before anything is spawned. A second detached dev server for one project cannot hold the
   // lock, so nothing would be able to find it or stop it afterwards.
-  const running = await readDevServerLockAsync(projectRoot);
+  let running = await readDevServerLockAsync(projectRoot);
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that still builds is
+  // followed, not given a second child.
+  if (running?.phase === 'building') {
+    const followed = running;
+    running = await waitForLockAsync(projectRoot, {
+      timeoutMs: options.detachTimeoutMs,
+      hasExited: () => !isProcessAlive(followed.pid),
+    });
+    if (running?.phase === 'building') {
+      if (isProcessAlive(running.pid)) {
+        throw stillBuildingOnLockError(running, options, Date.now() - startedAt);
+      }
+      running = null;
+    }
+  }
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that finishes its
   // EAS session start has no server to report, and a second child would start a second session.
   if (running?.phase === 'finishing') {
     throw await devServerRunningStopAsync(projectRoot, running, options.platform);
   }
   if (running) {
-    const hasExited = () => !isProcessAlive(running.pid);
+    const runningPid = running.pid;
+    const hasExited = () => !isProcessAlive(runningPid);
     async function checkReuseFailureAsync(
       lock: DevServerLockInfo,
       statusAnswering: boolean | null = null
@@ -389,6 +406,11 @@ export async function devDetachAsync(
     timeoutMs: options.detachTimeoutMs,
     hasExited,
   });
+  if (lock?.phase === 'building') {
+    if (!hasExited()) throw stillBuildingOnLockError(lock, options, Date.now() - startedAt);
+    // A run that ended in its build holds no lock any more, and its log says why.
+    lock = null;
+  }
   if (!lock) {
     // A device refusal in the child ends it before any lock, and reaches the caller unchanged.
     const relayed = relayedDeviceError(
@@ -1327,7 +1349,8 @@ async function waitForLockAsync(
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const lock = await readDevServerLockAsync(projectRoot);
-    if (lock) {
+    // A `building` lock is a run that has no dev server yet: the wait goes on.
+    if (lock && lock.phase !== 'building') {
       const spawnedAt = Date.parse(lock.startedAt);
       if (
         readLastLoggedDevServerPort(projectRoot, { since: spawnedAt }) === lock.port ||
@@ -1360,6 +1383,33 @@ function logTail(projectRoot: string): string {
   return read?.lines.length
     ? `\n\nWhat the dev server printed:\n${wrapUntrustedAppOutput(read.lines.join('\n'))}`
     : '';
+}
+
+/**
+ * The error for a detached run whose lock still says `building` when the wait ends.
+ *
+ * @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — exit 22: the run is alive,
+ * and the same command follows it.
+ */
+function stillBuildingOnLockError(
+  lock: DevServerLockInfo,
+  options: DevOptions,
+  waitedMs: number
+): CommandError {
+  const logFile = detachedLogPath(lock.projectRoot);
+  const rerun = rerunDevCommand(options.platform, options.callerArgv);
+  const error = new CommandError(
+    'DEV_DETACH_STILL_BUILDING',
+    [
+      `The detached dev run (pid ${lock.pid}) is still building after ${Math.round(waitedMs / 1000)} s, so its dev server is not up yet.`,
+      `Why: its plan builds before it serves, and its lock says that it builds. The run keeps going and starts the dev server on ${lock.url} when the build ends.`,
+      `How: run "${rerun}" again. It follows this run and starts no second one. "${PROGRAM_PREFIX} dev:logs" shows the build. "${PROGRAM_PREFIX} dev:stop" stops the run.`,
+    ].join('\n')
+  );
+  error.exitCode = EXIT_OUTCOME_TIMEOUT;
+  error.data = { pid: lock.pid, url: lock.url, logFile, waitedMs };
+  error.suggestedCommand = rerun;
+  return error;
 }
 
 /** The error for a detached child that never published a lock. */
