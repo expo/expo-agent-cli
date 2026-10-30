@@ -6,12 +6,13 @@
 // probed as named, an unnamed one is discovered, and either way the answer is read once and handed
 // to the command (llp/0005 §One preflight for the runtime family).
 
+import * as Log from '../../log';
 import { CdpClient } from '../cdpClient';
 import { discoverDevServerAsync } from '../discoverDevServer';
 import type { RuntimeErrorsOptions, RuntimeEvalOptions } from '../resolveOptions';
 import { runtimeErrorsAsync, runtimeEvalAsync } from '../runtimeAsync';
 import { CdpRuntimeErrorCollector } from '../runtimeErrorCollector';
-import { printedLog } from '../../utils/__tests__/printed';
+import { printed } from '../../utils/__tests__/printed';
 
 vi.mock('../../log');
 vi.mock('../discoverDevServer', () => ({ discoverDevServerAsync: vi.fn() }));
@@ -89,7 +90,7 @@ describe('the dev server a runtime command talks to', () => {
     expect(discoverDevServerAsync).toHaveBeenCalledWith(undefined, { projectRoot });
     // Discovered once and used everywhere after that: the discovered URL is what the report names
     // and what the debugger connection is opened on.
-    expect(printedLog()).toContain('http://127.0.0.1:8083');
+    expect(printed(Log.log)).toContain('http://127.0.0.1:8083');
   });
 
   it.each([
@@ -110,7 +111,7 @@ describe('the dev server a runtime command talks to', () => {
     // The caller was specific, so the named URL is the only one tried — no lock, no log, no scan.
     // `source: flag` is what keeps the failure from suggesting the flag this caller just passed.
     expect(discoverDevServerAsync).toHaveBeenCalledWith('http://host:9000', { projectRoot });
-    expect(printedLog()).toContain('http://host:9000');
+    expect(printed(Log.log)).toContain('http://host:9000');
   });
 
   it(`opens the debugger connection on the dev server it found`, async () => {
@@ -122,7 +123,7 @@ describe('the dev server a runtime command talks to', () => {
   it(`reports the discovered dev server in the output`, async () => {
     await runtimeErrorsAsync(errorsOptions, { projectRoot });
 
-    expect(printedLog()).toContain('http://127.0.0.1:8083');
+    expect(printed(Log.log)).toContain('http://127.0.0.1:8083');
   });
 
   it(`discovers without a project when the command runs outside one`, async () => {

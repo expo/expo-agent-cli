@@ -9,7 +9,7 @@ import { navigateAsync } from '../navigateAsync';
 import type { NavigateOptions } from '../resolveOptions';
 import { lockInfo } from '../../devLock/__tests__/fakeLock';
 import { forgetExpoConfigReads } from '../../project/appConfig';
-import { mockSpawnBy, type SpawnAnswer } from '../../utils/__tests__/fakeSpawn';
+import { mockSpawnQueue, type SpawnAnswer } from '../../utils/__tests__/fakeSpawn';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
 import { printed } from '../../utils/__tests__/printed';
 import { mockDevServer } from '../../runtime/__tests__/fakeDevServer';
@@ -26,16 +26,6 @@ vi.mock('../../devLock', () => ({
 
 const projectRoot = '/project';
 
-/** Answer each `spawn` call in order, and record the argv it was called with. */
-/**
- * Answer the device commands in order, and answer a simulator preference write with success.
- *
- * @ref src/device/approveScheme.ts — the reason the queue skips them. A local iOS open writes the
- * scheme approval and the dev-menu onboarding flag first, so a positional queue written for
- * `[probe, open]` had its `open` answer land on a `defaults write` and the open then got the
- * default success. Every existing queue in this file is about the device commands, so those are
- * what it feeds; the writes always succeed, which is also what they do in practice.
- */
 /** The device-fact reads a scoped read makes on every probe: `simctl` booted list, `adb devices -l`. */
 function isInventoryRead(args: unknown): boolean {
   return (
@@ -46,17 +36,25 @@ function isInventoryRead(args: unknown): boolean {
 }
 
 /**
+ * Answer the device commands in order, and answer a simulator preference write with success.
+ *
+ * @ref src/device/approveScheme.ts — the reason the queue skips them. A local iOS open writes the
+ * scheme approval and the dev-menu onboarding flag first, so a positional queue written for
+ * `[probe, open]` had its `open` answer land on a `defaults write` and the open then got the
+ * default success. Every queue in this file is about the device commands, so those are what it
+ * feeds; the writes always succeed, which is also what they do in practice.
+ *
  * With `androidInventory`, the device-fact reads are answered by command and take no queue entry:
  * no simulator list, and the bound emulator in `adb devices -l`.
  */
-function mockSpawnQueue(answers: SpawnAnswer[], { androidInventory = false } = {}) {
-  let queued = 0;
-  mockSpawnBy(({ args }) => {
-    if (androidInventory && isInventoryRead(args)) {
-      return args[0] === 'devices' ? { stdout: ADB_DEVICES } : { exitCode: 1 };
-    }
-    if (Array.isArray(args) && args.includes('defaults')) return {};
-    return answers[queued++];
+function mockDeviceCommands(answers: SpawnAnswer[], { androidInventory = false } = {}) {
+  mockSpawnQueue(answers, {
+    byCommand: ({ args }) => {
+      if (androidInventory && isInventoryRead(args)) {
+        return args[0] === 'devices' ? { stdout: ADB_DEVICES } : { exitCode: 1 };
+      }
+      return Array.isArray(args) && args.includes('defaults') ? {} : undefined;
+    },
   });
 }
 
@@ -178,7 +176,7 @@ describe(navigateAsync, () => {
     // written for the same reason and for any app, Expo Go or a development build: an unapproved
     // scheme raises `Open in "<app>"?` while `simctl openurl` exits 0, and an unseen onboarding
     // sheet then covers the app that did launch.
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: 'success' }]);
+    mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: 'success' }]);
 
     await expect(navigateAsync(projectRoot, options())).resolves.toBe(0);
 
@@ -242,7 +240,7 @@ describe(navigateAsync, () => {
         'http://127.0.0.1:8099': [EXPO_GO_TARGET],
         'http://127.0.0.1:8081': [EXPO_GO_TARGET],
       });
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await expect(
         navigateAsync(projectRoot, options({ devServerUrl: null, json: true }))
@@ -267,7 +265,7 @@ describe(navigateAsync, () => {
         })
       );
       mockDevServersAt({ 'http://127.0.0.1:8123': [EXPO_GO_TARGET] });
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await navigateAsync(
         projectRoot,
@@ -285,7 +283,7 @@ describe(navigateAsync, () => {
     it(`should refuse to open anything when --dev-server-url does not answer`, async () => {
       mockExpoGoProject();
       mockDevServersAt({});
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       const error = await navigateAsync(
         projectRoot,
@@ -332,7 +330,7 @@ describe(navigateAsync, () => {
         [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
       });
       mockDevServersAt({});
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await expect(
         navigateAsync(projectRoot, options({ devServerUrl: null, json: true }))
@@ -353,7 +351,7 @@ describe(navigateAsync, () => {
     });
     mockDevServer(null);
     seedAndroidBinding(projectRoot, 'emulator-5554');
-    mockSpawnQueue([{ stdout: EMULATOR_UP }, { stdout: 'Starting: Intent' }]);
+    mockDeviceCommands([{ stdout: EMULATOR_UP }, { stdout: 'Starting: Intent' }]);
 
     await expect(
       navigateAsync(
@@ -375,7 +373,7 @@ describe(navigateAsync, () => {
       [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo' } }),
     });
     mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+    mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await expect(navigateAsync(projectRoot, options({ scheme: 'override' }))).resolves.toBe(0);
 
@@ -388,7 +386,7 @@ describe(navigateAsync, () => {
       [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
     });
     mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '', exitCode: 1 }]);
+    mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '', exitCode: 1 }]);
 
     await expect(navigateAsync(projectRoot, options())).resolves.toBe(1);
     expect(vi.mocked(console.error).mock.calls.join('\n')).toContain('did not open the deep link');
@@ -401,7 +399,7 @@ describe(navigateAsync, () => {
     });
     mockDevServer([EXPO_GO_TARGET]);
     // The device tool prints on success, which must not join the JSON on stdout.
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: 'success' }]);
+    mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: 'success' }]);
 
     await expect(navigateAsync(projectRoot, options({ json: true }))).resolves.toBe(0);
 
@@ -464,7 +462,7 @@ describe(navigateAsync, () => {
       [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
     });
     mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+    mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
     await navigateAsync(projectRoot, options({ json: true }));
 
@@ -508,7 +506,7 @@ describe(navigateAsync, () => {
 
     it(`should offer the simulator screenshot and the runtime loop`, async () => {
       mockExpoGoProject();
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await navigateAsync(projectRoot, options());
 
@@ -528,7 +526,7 @@ describe(navigateAsync, () => {
       });
       mockDevServer(null);
       seedAndroidBinding(projectRoot, 'emulator-5554');
-      mockSpawnQueue([{ stdout: EMULATOR_UP }, { stdout: 'Starting: Intent' }]);
+      mockDeviceCommands([{ stdout: EMULATOR_UP }, { stdout: 'Starting: Intent' }]);
 
       await navigateAsync(projectRoot, options({ devServerUrl: null, platform: 'android' }));
 
@@ -537,7 +535,7 @@ describe(navigateAsync, () => {
 
     it(`should print nothing with --no-followups`, async () => {
       mockExpoGoProject();
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await navigateAsync(projectRoot, options({ followups: false }));
 
@@ -546,7 +544,7 @@ describe(navigateAsync, () => {
 
     it(`should offer nothing after a link the device refused`, async () => {
       mockExpoGoProject();
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '', exitCode: 1 }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '', exitCode: 1 }]);
 
       await expect(navigateAsync(projectRoot, options({ json: true }))).resolves.toBe(1);
 
@@ -561,7 +559,7 @@ describe(navigateAsync, () => {
       [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
     });
     mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '', exitCode: 1 }]);
+    mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '', exitCode: 1 }]);
 
     await expect(navigateAsync(projectRoot, options({ json: true }))).resolves.toBe(1);
 
@@ -625,7 +623,7 @@ describe(navigateAsync, () => {
       [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo' } }),
     });
     mockDevServer(null);
-    mockSpawnQueue([]);
+    mockDeviceCommands([]);
 
     const error = await navigateAsync(projectRoot, options({ devServerUrl: null })).catch((e) => e);
 
@@ -648,7 +646,7 @@ describe(navigateAsync, () => {
     it(`should refuse a route the project has not got, before touching a device`, async () => {
       mockRouterProject(['index.tsx', 'notes.tsx']);
       mockDevServer([EXPO_GO_TARGET]);
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       const error = await navigateAsync(projectRoot, options({ route: '/nope' })).catch((e) => e);
 
@@ -679,7 +677,7 @@ describe(navigateAsync, () => {
     it(`should open a route the project has`, async () => {
       mockRouterProject(['index.tsx', 'notes.tsx']);
       mockDevServer([EXPO_GO_TARGET]);
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await expect(
         navigateAsync(projectRoot, options({ route: '/notes', json: true }))
@@ -696,7 +694,7 @@ describe(navigateAsync, () => {
     it(`should match a value against a dynamic route`, async () => {
       mockRouterProject(['index.tsx', 'users/[id].tsx']);
       mockDevServer([EXPO_GO_TARGET]);
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await expect(
         navigateAsync(projectRoot, options({ route: '/users/42', json: true }))
@@ -707,7 +705,7 @@ describe(navigateAsync, () => {
     it(`should open anything with --no-route-check`, async () => {
       mockRouterProject(['index.tsx']);
       mockDevServer([EXPO_GO_TARGET]);
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await expect(
         navigateAsync(projectRoot, options({ route: '/nope', routeCheck: false, json: true }))
@@ -727,7 +725,7 @@ describe(navigateAsync, () => {
         [`${projectRoot}/app.json`]: JSON.stringify({ expo: { slug: 'demo', scheme: 'demoapp' } }),
       });
       mockDevServer([EXPO_GO_TARGET]);
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await expect(navigateAsync(projectRoot, options({ route: '/anything' }))).resolves.toBe(0);
     });
@@ -737,7 +735,7 @@ describe(navigateAsync, () => {
     it(`should name the matched route in the human summary, with no markup left in it`, async () => {
       mockRouterProject(['index.tsx', 'notes.tsx']);
       mockDevServer([EXPO_GO_TARGET]);
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await navigateAsync(projectRoot, options({ route: '/notes' }));
 
@@ -750,7 +748,7 @@ describe(navigateAsync, () => {
     it(`should not judge a full URL against this project's routes`, async () => {
       mockRouterProject(['index.tsx']);
       mockDevServer([EXPO_GO_TARGET]);
-      mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
+      mockDeviceCommands([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
 
       await expect(
         navigateAsync(projectRoot, options({ route: 'otherapp://deep/link', json: true }))
@@ -794,7 +792,7 @@ describe(navigateAsync, () => {
     it(`resolves the URL and spawns no device tool`, async () => {
       mockExpoGoProject();
       mockDevServer([EXPO_GO_TARGET]);
-      mockSpawnQueue([]);
+      mockDeviceCommands([]);
 
       await expect(
         navigateAsync(projectRoot, options({ printUrl: true, platform: undefined }))
@@ -1072,7 +1070,7 @@ describe(navigateAsync, () => {
       });
       mockDevServer([EXPO_GO_TARGET]);
       // The bound simulator is gone from the listing, and no platform flag names the other rung.
-      mockSpawnQueue([{ stdout: JSON.stringify({ devices: {} }) }]);
+      mockDeviceCommands([{ stdout: JSON.stringify({ devices: {} }) }]);
       await expect(navigateAsync(projectRoot, options())).rejects.toMatchObject({
         code: 'NO_BOUND_DEVICE',
         message: expect.stringContaining('exp://127.0.0.1:8081/--/profile/42'),
@@ -1099,9 +1097,12 @@ describe(`${navigateAsync.name} on Android`, () => {
   it(`asks adb for the device list once while the attach wait polls an unchanged list`, async () => {
     mockExpoGoProject();
     mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue([{ stdout: EMULATOR_UP }, { stdout: '8081' }, { stdout: 'Starting: Intent' }], {
-      androidInventory: true,
-    });
+    mockDeviceCommands(
+      [{ stdout: EMULATOR_UP }, { stdout: '8081' }, { stdout: 'Starting: Intent' }],
+      {
+        androidInventory: true,
+      }
+    );
 
     await navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 600 }));
 
@@ -1112,7 +1113,11 @@ describe(`${navigateAsync.name} on Android`, () => {
   it(`reports the attach it did not check when --no-wait-attach was passed`, async () => {
     mockExpoGoProject();
     mockDevServer([EXPO_GO_TARGET]);
-    mockSpawnQueue([{ stdout: EMULATOR_UP }, { stdout: '8081' }, { stdout: 'Starting: Intent' }]);
+    mockDeviceCommands([
+      { stdout: EMULATOR_UP },
+      { stdout: '8081' },
+      { stdout: 'Starting: Intent' },
+    ]);
 
     await expect(
       navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 0, json: true }))
@@ -1189,7 +1194,11 @@ describe(`${navigateAsync.name} on a development build that is not loaded`, () =
   it(`does not launch first when nothing will be waited for`, async () => {
     mockDevClientProject();
     mockDevServer([]);
-    mockSpawnQueue([{ stdout: EMULATOR_UP }, { stdout: '8081' }, { stdout: 'Starting: Intent' }]);
+    mockDeviceCommands([
+      { stdout: EMULATOR_UP },
+      { stdout: '8081' },
+      { stdout: 'Starting: Intent' },
+    ]);
 
     await expect(
       navigateAsync(projectRoot, options({ platform: 'android', attachTimeoutMs: 0, json: true }))

@@ -2,7 +2,7 @@ import * as Log from '../../log';
 import { classifyInstallImpactAsync } from '../../project/impact';
 import type { InstallImpactReport } from '../../project/types';
 import { reportInstallImpactAsync } from '../impactReport';
-import { printedLog } from '../../utils/__tests__/printed';
+import { printed } from '../../utils/__tests__/printed';
 
 vi.mock('../../log');
 vi.mock('../../project/impact', () => ({ classifyInstallImpactAsync: vi.fn() }));
@@ -30,7 +30,7 @@ describe(reportInstallImpactAsync, () => {
     await reportInstallImpactAsync(projectRoot, ['expo-camera', 'zod']);
 
     expect(classifyInstallImpactAsync).toHaveBeenCalledWith(projectRoot, ['expo-camera', 'zod']);
-    const lines = printedLog().split('\n');
+    const lines = printed(Log.log).split('\n');
     expect(lines.filter((line) => line.includes('expo-camera'))).toHaveLength(1);
     expect(lines.filter((line) => line.includes('zod'))).toHaveLength(1);
   });
@@ -45,7 +45,7 @@ describe(reportInstallImpactAsync, () => {
 
     await reportInstallImpactAsync(projectRoot, ['a', 'b', 'c', 'd']);
 
-    const text = printedLog();
+    const text = printed(Log.log);
     expect(text).toContain('prebuild');
     expect(text).toContain('pod install');
     expect(text).toContain('reload the app');
@@ -59,7 +59,7 @@ describe(reportInstallImpactAsync, () => {
 
     await reportInstallImpactAsync(projectRoot, ['expo-camera']);
 
-    expect(printedLog()).toContain('ships an ios/ directory');
+    expect(printed(Log.log)).toContain('ships an ios/ directory');
   });
 
   it(`should print nothing when there is nothing to classify`, async () => {

@@ -19,7 +19,9 @@ export interface FakeDevServer {
  *
  * The list is mutable through the returned handle, so a test can say what the dev server reports
  * *after* the app acted on the reload. The server also answers the entry-bundle check: the manifest
- * names `${manifestOrigin}/entry.bundle`, and `bundle` says whether that bundle builds.
+ * names `${manifestOrigin}/entry.bundle`, and `bundle` says whether that bundle builds. It answers
+ * `/json/list`, `/status`, `/` and `*.bundle` only; any other request throws, so a new fetch in the
+ * product fails loudly instead of getting a plausible answer.
  *
  * @param bundle `compiles` (the default), `broken` (Metro's 500 with a TransformError) or
  * `no-manifest` (a dev server that answers nothing the check understands).
@@ -45,12 +47,23 @@ export function mockDevServer(
     if (now == null) {
       throw new Error('fetch failed');
     }
-    if (url.endsWith('/json/list')) {
+    const path = new URL(url).pathname;
+    if (path === '/json/list') {
       return { ok: true, json: async () => now };
+    }
+    // `GET /status`, which also carries the project root header on a real dev server; this one
+    // sends none.
+    if (path === '/status') {
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => 'packager-status:running',
+      };
     }
     // The entry bundle. A broken one answers the way Metro answers a failed build: 500 with a
     // small JSON body rather than megabytes of JavaScript.
-    if (url.includes('entry.bundle')) {
+    if (path.endsWith('.bundle')) {
       if (bundle === 'broken') {
         return {
           ok: false,
@@ -67,17 +80,21 @@ export function mockDevServer(
     }
     // The manifest: `GET /` with an `expo-platform` header, whose `launchAsset.url` is the entry
     // bundle.
-    if (bundle === 'no-manifest') {
-      return { ok: false, status: 404, statusText: 'Not Found' };
+    if (path === '/') {
+      if (bundle === 'no-manifest') {
+        return { ok: false, status: 404, statusText: 'Not Found' };
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name: string) =>
+            name.toLowerCase() === 'content-type' ? 'application/json' : null,
+        },
+        json: async () => ({ launchAsset: { url: `${manifestOrigin}/entry.bundle?dev=true` } }),
+      };
     }
-    return {
-      ok: true,
-      status: 200,
-      headers: {
-        get: (name: string) => (name.toLowerCase() === 'content-type' ? 'application/json' : null),
-      },
-      json: async () => ({ launchAsset: { url: `${manifestOrigin}/entry.bundle?dev=true` } }),
-    };
+    throw new Error(`fakeDevServer: unexpected request ${url}`);
   }) as unknown as typeof fetch;
   return {
     listing: (next) => {

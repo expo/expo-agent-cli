@@ -552,7 +552,7 @@ describe(`${runtimeErrorsAsync.name} on a runtime with no debugger`, () => {
 
     await expect(runtimeErrorsAsync({ ...errorsOptions, failOnError: true })).resolves.toBe(22);
 
-    expect(complaints.mock.calls.flat().join('\n')).toContain('has nothing to judge');
+    expect(printed(complaints)).toContain('has nothing to judge');
   });
 
   it(`reports the runtime as unreadable in the machine shape`, async () => {

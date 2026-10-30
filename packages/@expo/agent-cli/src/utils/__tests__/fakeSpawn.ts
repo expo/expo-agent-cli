@@ -3,7 +3,7 @@ import { EventEmitter } from 'events';
 import type { Mock } from 'vitest';
 
 /** A child process the test drives by hand: it emits `data`, `close` and `error` itself. */
-export interface FakeChild<Stream extends EventEmitter | null = EventEmitter> extends EventEmitter {
+interface FakeChild<Stream extends EventEmitter | null = EventEmitter> extends EventEmitter {
   stdout: Stream;
   stderr: Stream;
   kill: Mock;
@@ -39,20 +39,18 @@ export interface SpawnCall {
 
 /**
  * Answer each `spawn` with what `answerFor` returns for it; no answer is an empty one (exit 0).
- * Every child settles on the next tick, after the code under test attached its listeners.
- * `onCall` runs once per spawn, before its child settles. Returns the commands spawned so far.
+ * Every child settles on the next tick, so the code under test must attach its listeners before it
+ * awaits anything after `spawn` returns; a child that settles earlier hangs the test.
+ * Returns the commands spawned so far.
  */
 export function mockSpawnBy(
-  answerFor: (call: SpawnCall, index: number) => SpawnAnswer | undefined,
-  onCall?: (index: number) => void
+  answerFor: (call: SpawnCall, index: number) => SpawnAnswer | undefined
 ): SpawnCall[] {
   const calls: SpawnCall[] = [];
   vi.mocked(spawn).mockImplementation(((command: string, args: string[]) => {
     const call = { command, args };
     calls.push(call);
-    const index = calls.length - 1;
-    const answer = answerFor(call, index) ?? {};
-    onCall?.(index);
+    const answer = answerFor(call, calls.length - 1) ?? {};
     const child = Object.assign(new EventEmitter(), {
       stdout: new EventEmitter(),
       stderr: new EventEmitter(),
@@ -71,12 +69,26 @@ export function mockSpawnBy(
   return calls;
 }
 
-/** Answer each `spawn` with the next answer in turn; a spawn past the end exits 0, silent. */
+/**
+ * Answer each `spawn` with the next answer in turn; a spawn past the end exits 0, silent.
+ *
+ * `byCommand` is asked first. A spawn it answers takes no entry from the queue, so the queue holds
+ * only the spawns the test is about, and an incidental one (a device-inventory read, a preference
+ * write) cannot shift the answers.
+ */
 export function mockSpawnQueue(
   answers: SpawnAnswer[],
-  onCall?: (index: number) => void
+  { byCommand }: { byCommand?: (call: SpawnCall) => SpawnAnswer | undefined } = {}
 ): SpawnCall[] {
-  return mockSpawnBy((_call, index) => answers[index], onCall);
+  let next = 0;
+  return mockSpawnBy((call) => byCommand?.(call) ?? answers[next++]);
+}
+
+/** A host with no local device: `simctl` lists no simulator and `adb devices` lists no emulator. */
+export function answerNoLocalDevices({ command, args }: SpawnCall): SpawnAnswer | undefined {
+  if (command === 'xcrun' && args[1] === 'list') return { stdout: JSON.stringify({ devices: {} }) };
+  if (args[0] === 'devices') return { stdout: 'List of devices attached\n' };
+  return undefined;
 }
 
 /** Every `spawn` gets the same answer. */
