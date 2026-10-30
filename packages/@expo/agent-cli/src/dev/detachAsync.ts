@@ -55,7 +55,7 @@ import { requestsTunnel } from '../start/followUps';
 import { CommandError } from '../utils/errors';
 import { fetchAdvertisedUrlAsync, readDevServerLogSync } from './advertisedUrl';
 import {
-  isRelayedDeviceCode,
+  isRelayedChildCode,
   childOpensPlatform,
   parseDetachedChildPort,
   parseDetachedChildVerdict,
@@ -70,11 +70,7 @@ import {
 import { recordLastDevRequest } from './lastRequest';
 import { explicitRequestOf } from './deviceOption';
 import { detachedLogPath, readDetachedLogSync, type DetachedLogRead } from './logFile';
-import {
-  spawnDetachedCandidateAsync,
-  detachedStartupTimeout,
-  assertSelectedServer,
-} from './detachedCandidate';
+import { spawnDetachedCandidate, detachedStartupTimeout } from './detachedCandidate';
 import { isProcessAlive } from './processLiveness';
 import { easOpenPlatform, type DevOptions } from './resolveOptions';
 import { waitForDetachedReadyAsync } from './waitForDetachedReady';
@@ -191,8 +187,6 @@ export function buildDetachSpawn(binPath: string, argv: string[]): DetachSpawn {
 }
 
 export interface DevDetachOptions {
-  /** A contender follows the selected run, even if it stops before reuse begins. */
-  followedRun?: { lock: DevServerLockInfo; startedAt: number };
   /**
    * Whether to print the report at all.
    *
@@ -225,9 +219,9 @@ export interface DevDetachOptions {
 export async function devDetachAsync(
   projectRoot: string,
   options: DevOptions,
-  { print = true, reuseBoundDevice = false, followedRun }: DevDetachOptions = {}
+  { print = true, reuseBoundDevice = false }: DevDetachOptions = {}
 ): Promise<number> {
-  const startedAt = followedRun?.startedAt ?? Date.now();
+  const startedAt = Date.now();
 
   // The platform the `smoke` follow-up should name: the one the caller asked to run for, else the
   // project's own default. `smoke` requires a platform now, so a follow-up without one exits 1.
@@ -251,7 +245,7 @@ export async function devDetachAsync(
 
   // Asked before anything is spawned. A second detached dev server for one project cannot hold the
   // lock, so nothing would be able to find it or stop it afterwards.
-  let running = followedRun?.lock ?? (await readDevServerLockAsync(projectRoot));
+  let running = await readDevServerLockAsync(projectRoot);
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that still builds is
   // followed, not given a second child.
   if (running?.phase === 'building') {
@@ -260,13 +254,14 @@ export async function devDetachAsync(
       projectRoot,
       options,
       startedAt,
-      () => !isProcessAlive(followed.pid)
+      () => !isProcessAlive(followed.pid),
+      followed.pid
     );
     if (wait.kind === 'building') return await reportBuildingRunAsync(wait.lock, true);
     // A followed run that ended in its build spawns nothing: its log says why.
     if (wait.kind === 'ended') {
       const verdict = await waitForChildVerdictAsync(projectRoot);
-      const relayed = relayedDeviceError(verdict);
+      const relayed = relayedChildError(verdict);
       if (relayed) throw relayed;
       throw buildEndedError(followed, verdict?.exitCode ?? null);
     }
@@ -377,15 +372,14 @@ export async function devDetachAsync(
   // The session bound before the spawn, expired or not, is the one the child reuses and renews.
   const keptSessionId = easPlatform ? knownSessionIdSync(projectRoot, easPlatform) : null;
 
-  const run = await spawnDetachedCandidateAsync(
+  const run = spawnDetachedCandidate(
     projectRoot,
     buildDetachSpawn(resolveBinPath(), options.detachArgv),
-    options.callerArgv,
-    startedAt + options.detachTimeoutMs
+    options.callerArgv
   );
   const { logFile, childGone, hasExited } = run;
 
-  const wait = await waitPastBuildingAsync(projectRoot, options, startedAt, hasExited);
+  const wait = await waitPastBuildingAsync(projectRoot, options, startedAt, hasExited, run.pid);
   if (wait.kind === 'building') return await reportBuildingRunAsync(wait.lock, false);
   // A run that ended in its build holds no lock any more, and its log says why.
   let lock = wait.kind === 'up' ? wait.lock : null;
@@ -396,7 +390,7 @@ export async function devDetachAsync(
     const verdict = childExit
       ? await waitForChildVerdictAsync(projectRoot)
       : readChildVerdictSync(projectRoot);
-    const relayed = relayedDeviceError(verdict);
+    const relayed = relayedChildError(verdict);
     if (relayed) {
       throw relayed;
     }
@@ -429,14 +423,6 @@ export async function devDetachAsync(
    * an answer that depends on the event loop having caught up is one more ordering to lose to
    * (@ref ./detachAsync §waitFailureAsync — F153).
    */
-  assertSelectedServer(run, lock.pid);
-  if (run.adopted) {
-    return devDetachAsync(projectRoot, options, {
-      print,
-      reuseBoundDevice,
-      followedRun: { lock, startedAt },
-    });
-  }
   const childPid = lock.pid;
   const childIsGone = () => hasExited() || !isProcessAlive(childPid);
 
@@ -743,8 +729,8 @@ async function waitForChildVerdictAsync(
  * @ref llp/0035-one-device-per-worktree.rfc.md §Output and errors — the agent's recovery is the
  * child's own `dev` or `dev:stop` command, not `dev:logs`.
  */
-function relayedDeviceError(verdict: DetachedChildVerdict | null): CommandError | null {
-  if (verdict == null || !isRelayedDeviceCode(verdict.code)) {
+function relayedChildError(verdict: DetachedChildVerdict | null): CommandError | null {
+  if (verdict == null || !isRelayedChildCode(verdict.code)) {
     return null;
   }
   const error = new CommandError(verdict.code, verdict.message.replace(/^[A-Za-z]*Error: /, ''));
@@ -888,7 +874,7 @@ function detachFailureError(
     eas: DetachEas | null;
   }
 ): CommandError {
-  const relayed = relayedDeviceError(verdict);
+  const relayed = relayedChildError(verdict);
   if (relayed) {
     return relayed;
   }
@@ -1318,13 +1304,15 @@ async function waitForLockAsync(
     timeoutMs,
     hasExited,
     acceptBuilding = false,
-  }: { timeoutMs: number; hasExited: () => boolean; acceptBuilding?: boolean }
+    pid,
+  }: { timeoutMs: number; hasExited: () => boolean; acceptBuilding?: boolean; pid: number }
 ): Promise<DevServerLockInfo | null> {
   const deadline = Date.now() + timeoutMs;
   // A run that ends in its build lets go of its lock; its last `building` answer says it built.
   let building: DevServerLockInfo | null = null;
   for (;;) {
-    const lock = await readDevServerLockAsync(projectRoot);
+    const observed = await readDevServerLockAsync(projectRoot);
+    const lock = observed?.pid === pid ? observed : null;
     if (lock?.phase === 'building') building = lock;
     // A `building` lock has no dev server yet. It ends the wait only for a caller that reports it.
     if (lock?.phase === 'building' && acceptBuilding) return lock;
@@ -1378,12 +1366,14 @@ async function waitPastBuildingAsync(
   projectRoot: string,
   options: DevOptions,
   startedAt: number,
-  hasExited: () => boolean
+  hasExited: () => boolean,
+  pid: number
 ): Promise<BuildingWait> {
   const lock = await waitForLockAsync(projectRoot, {
     timeoutMs: Math.max(0, options.detachTimeoutMs - (Date.now() - startedAt)),
     hasExited,
     acceptBuilding: !options.waitReady,
+    pid,
   });
   if (!lock) return { kind: 'ended', building: null };
   if (lock.phase !== 'building') return { kind: 'up', lock };

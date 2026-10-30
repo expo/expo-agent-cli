@@ -7,19 +7,15 @@ import { readDevServerLockAsync } from '../devLock';
 import { EXIT_OUTCOME_FAILED } from '../exitCodes';
 import { CommandError } from '../utils/errors';
 import { canonicalizeExistingPath } from '../utils/dir';
-import { detachedLogPath, pinDetachedLog, publishDetachedLog } from './logFile';
+import { publishDetachedLog } from './logFile';
+import { easOpenPlatform, type DevOptions } from './resolveOptions';
+import { devServerRunningStopAsync } from './runningDevServer';
 
 export const DETACHED_ATTEMPT_ENV = '__EXPO_AGENT_CLI_DETACHED_ATTEMPT';
-export interface DetachedRun {
+interface Owner {
   id: string;
   pid: number;
   logFile: string;
-}
-export interface DetachedNotice {
-  detachedRun?: DetachedRun;
-  startupError?: { code: string; message: string; exitCode?: number };
-}
-interface Owner extends DetachedRun {
   phase: 'claimed' | 'executing';
 }
 
@@ -78,10 +74,7 @@ function removeEmpty(directory: string): void {
   }
 }
 
-function acquire(
-  root: string,
-  own: Owner
-): { owner: Owner; release: () => void; execute: () => void } {
+function acquire(root: string, own: Owner): { release: () => void; execute: () => void } {
   const directory = path.join(canonicalizeExistingPath(root), '.expo', 'dev');
   fs.mkdirSync(directory, { recursive: true });
   const lock = path.join(directory, 'detached-run');
@@ -94,7 +87,6 @@ function acquire(
         fs.renameSync(temp, lock);
         const marker = path.join(lock, name);
         return {
-          owner: own,
           release: () => {
             fs.rmSync(marker, { force: true });
             removeEmpty(lock);
@@ -124,7 +116,17 @@ function acquire(
         removeEmpty(lock);
         continue;
       }
-      if (alive(found.owner.pid)) return { owner: found.owner, release() {}, execute() {} };
+      if (alive(found.owner.pid))
+        throw Object.assign(
+          new CommandError(
+            'DEV_START_BUSY',
+            `Another detached run (pid ${found.owner.pid}) owns startup. No new work was started.\nRead its log: ${found.owner.logFile}\nWait for startup, then use status or stop the server before starting again.`
+          ),
+          {
+            exitCode: EXIT_OUTCOME_FAILED,
+            data: { pid: found.owner.pid, logFile: found.owner.logFile },
+          }
+        );
       // Re-read after proving death: the process may have begun work before it died.
       let current: ReturnType<typeof readOwner>;
       try {
@@ -150,42 +152,23 @@ function acquire(
   }
 }
 
-function notify(message: DetachedNotice): void {
-  if (process.connected && process.send) process.send(message, () => {});
-  process.channel?.unref();
-}
-
 export async function withDetachedRunAsync(
   root: string,
+  options: DevOptions,
   work: () => Promise<number>
 ): Promise<number> {
   const id = process.env[DETACHED_ATTEMPT_ENV];
   delete process.env[DETACHED_ATTEMPT_ENV];
   if (!id || !/^[\da-f-]{36}$/.test(id)) throw blocked('Missing detached startup identity.');
   const logFile = path.join(root, '.expo', 'dev', 'logs', `dev-detached-${id}.log`);
-  let claim: ReturnType<typeof acquire>;
-  try {
-    claim = acquire(root, { id, pid: process.pid, logFile, phase: 'claimed' });
-  } catch (error) {
-    if (error instanceof CommandError)
-      notify({
-        startupError: { code: error.code, message: error.message, exitCode: error.exitCode },
-      });
-    throw error;
-  }
-  if (claim.owner.id !== id) {
-    notify({ detachedRun: claim.owner });
-    return 0;
-  }
+  const claim = acquire(root, { id, pid: process.pid, logFile, phase: 'claimed' });
   try {
     const running = await readDevServerLockAsync(root);
-    if (running) {
-      notify({ detachedRun: { id, pid: running.pid, logFile: detachedLogPath(root) } });
-      return 0;
-    }
-    pinDetachedLog(root, logFile);
+    if (running)
+      throw await devServerRunningStopAsync(root, running, options.platform, {
+        eas: easOpenPlatform(options) != null,
+      });
     publishDetachedLog(root, logFile);
-    notify({ detachedRun: claim.owner });
     claim.execute();
     return await work();
   } finally {
