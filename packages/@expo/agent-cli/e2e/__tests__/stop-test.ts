@@ -12,9 +12,12 @@ import path from 'node:path';
 import {
   executeAgentCliAsync,
   holdDevLockAsync,
+  readDevLockAsync,
   setupFixtureAsync,
+  spawnAgentCli,
   startStubDevServerAsync,
   stubExpoEnv,
+  waitForDevLockAsync,
 } from '../utils';
 import { BOOTED_SIMULATOR, installStubXcrunAsync, SIMULATOR_UDID } from './installedAppStubs';
 
@@ -454,4 +457,85 @@ describe('@expo/agent-cli runtime:stop', () => {
     expect(result.all).toContain('runtime:stop');
     expect(result.all).toContain('dev:stop');
   });
+});
+
+/** A port nothing listens on, picked by the OS. */
+async function freePortAsync(): Promise<number> {
+  const server = net.createServer();
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as net.AddressInfo;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+async function answersStatusAsync(port: number): Promise<boolean> {
+  try {
+    return (await fetch(`http://127.0.0.1:${port}/status`)).ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A foreground `dev` whose CLI process gets SIGKILL. Its `expo start` child keeps serving the port
+ * with no lock: the orphan of N2-62. Only the CLI pid is signalled, never its process group.
+ */
+async function startOrphanedDevServerAsync(
+  projectRoot: string
+): Promise<{ port: number; cleanup(): void }> {
+  const port = await freePortAsync();
+  const child = spawnAgentCli(projectRoot, ['dev', '--ios'], {
+    env: {
+      STUB_EXPO_LISTEN: '1',
+      STUB_EXPO_DELAY_MS: '120000',
+      STUB_EXPO_DEV_SERVER_PORT: String(port),
+    },
+  });
+  const cleanup = () => {
+    try {
+      process.kill(-child.pid!, 'SIGKILL');
+    } catch {
+      // The group is already gone.
+    }
+  };
+  try {
+    expect(await waitForDevLockAsync(projectRoot)).toMatchObject({ port, pid: child.pid });
+    for (let tries = 0; tries < 50 && !(await answersStatusAsync(port)); tries++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    const exited = new Promise((resolve) => child.once('exit', resolve));
+    process.kill(child.pid!, 'SIGKILL');
+    await exited;
+    expect(await readDevLockAsync(projectRoot)).toBeNull();
+    expect(await answersStatusAsync(port)).toBe(true);
+    return { port, cleanup };
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
+}
+
+// @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+describe.skipIf(process.platform === 'win32')('@expo/agent-cli dev:stop after a SIGKILL of dev', () => {
+  it('stops the dev server the killed run left with no lock, without --force', async () => {
+    const projectRoot = await setupFixtureAsync('go-app');
+    const orphan = await startOrphanedDevServerAsync(projectRoot);
+
+    try {
+      const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+        reject: false,
+      });
+
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        stopped: true,
+        port: orphan.port,
+        lockHeld: false,
+        forced: false,
+      });
+      expect(result.exitCode).toBe(0);
+      expect(await answersStatusAsync(orphan.port)).toBe(false);
+    } finally {
+      orphan.cleanup();
+    }
+  }, 60_000);
 });
