@@ -88,11 +88,28 @@ describe('what rung 1 does, and which bundle proves it', () => {
       mechanism: 'page-reload',
       bundlePlatforms: [],
     },
-  ])('$name', ({ targets, targetSelection, mechanism, bundlePlatforms }) => {
+    {
+      name: 'sends nothing when the fresh read failed and no app is skipped',
+      targets: [ownIos],
+      targetSelection: BOUND_SIMULATOR,
+      unread: 'the target list could not be read again',
+      mechanism: 'none',
+      bundlePlatforms: ['ios'],
+    },
+    {
+      name: 'keeps Page.reload beside a skipped app when the fresh read failed',
+      targets: [ownIos, onClone],
+      targetSelection: ANY,
+      unread: 'the target list could not be read again',
+      mechanism: 'page-reload',
+      bundlePlatforms: ['android'],
+    },
+  ])('$name', ({ targets, targetSelection, unread = null, mechanism, bundlePlatforms }) => {
     const policy = rungOnePolicy(
       classifyTargets(targets, targetSelection, deviceInventory),
       targetSelection,
-      deviceInventory
+      deviceInventory,
+      unread
     );
 
     expect({ mechanism: policy.mechanism, bundlePlatforms: policy.bundlePlatforms }).toEqual({

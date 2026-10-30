@@ -259,15 +259,22 @@ export const CHURN_NOT_ASKED: CommandSocketChurn = {
 };
 
 /** What rung 1 does on this run, and which evidence may prove it. */
-export interface RungOnePolicy {
-  /** `page-reload` exactly when the scope skips an app. */
-  mechanism: 'broadcast' | 'page-reload';
+export type RungOnePolicy = {
   skippedApps: SkippedApp[];
   /** Listed apps outside `read` that the broadcast also reaches: other-platform and unplaced ones. */
   reachedOutside: number;
   /** The platforms whose served bundle proves the reload: never one an app outside `read` can fetch. */
   bundlePlatforms: NativePlatform[] | 'any';
-}
+} &
+  /** `page-reload` exactly when the scope skips an app. */
+  (
+    | { mechanism: 'broadcast' | 'page-reload' }
+    /**
+     * The fresh read failed, so an older observation placed the targets. It may miss an app a
+     * broadcast would reach, so none is sent.
+     */
+    | { mechanism: 'none'; unread: string }
+  );
 
 /**
  * Decide rung 1 for one run's classified targets.
@@ -280,7 +287,8 @@ export interface RungOnePolicy {
 export function rungOnePolicy(
   classifiedTargets: ClassifiedTargets,
   targetSelection: TargetSelection,
-  deviceInventory: DeviceInventory
+  deviceInventory: DeviceInventory,
+  unread: string | null = null
 ): RungOnePolicy {
   const scoped: NativePlatform[] | 'any' =
     targetSelection.platform == null ? 'any' : [targetSelection.platform.value];
@@ -294,7 +302,11 @@ export function rungOnePolicy(
         ({ target }) => platformOfTarget(target, deviceInventory).platform
       );
   return {
-    mechanism: broadcast ? 'broadcast' : 'page-reload',
+    ...(!broadcast
+      ? { mechanism: 'page-reload' }
+      : unread == null
+        ? { mechanism: 'broadcast' }
+        : { mechanism: 'none', unread }),
     skippedApps: broadcast ? [] : skippedAppsOf(classifiedTargets),
     reachedOutside: broadcast ? outside.length : 0,
     bundlePlatforms:
@@ -310,8 +322,7 @@ export function rungOnePolicy(
  * One observation supplies dispatch, recipients and proof baselines together. Its scope and
  * inventory serve the rest of the run: the evidence, the counts and the relaunch.
  *
- * @param unread why the fresh read failed, so this is an older observation: it may miss an app a
- * broadcast would reach, so none is sent.
+ * @param unread why the fresh read failed, so this is an older observation.
  */
 export function prepareRungOne(
   targets: CdpTarget[],
@@ -325,8 +336,7 @@ export function prepareRungOne(
     targetSelection,
     deviceInventory,
     classifiedTargets,
-    policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory),
-    unread,
+    policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory, unread),
   };
 }
 export type PreparedRungOne = ReturnType<typeof prepareRungOne>;
@@ -405,31 +415,48 @@ export async function runRungOneAsync(
   devServerUrl: string,
   { prepared, budgetMs }: { prepared: PreparedRungOne; budgetMs: number }
 ): Promise<RungOneOutcome> {
-  const { policy, classifiedTargets, targets, unread } = prepared;
-  if (policy.mechanism === 'broadcast' && unread != null) {
-    return {
-      kind: 'not-delivered',
-      attempt: {
-        method: 'dev-server',
-        ok: false,
-        reason: `${unread}, so no broadcast was sent: it reaches every app on the dev server, and this run could not see which apps those are`,
-        leftAppStopped: null,
-      },
-      churn: CHURN_NOT_ASKED,
-      relaunchWhy: `${unread}, so no broadcast was sent and the app was relaunched instead`,
-    };
+  const { policy, classifiedTargets, targets } = prepared;
+  switch (policy.mechanism) {
+    case 'none':
+      return {
+        kind: 'not-delivered',
+        attempt: {
+          method: 'dev-server',
+          ok: false,
+          reason: `${policy.unread}, so no broadcast was sent: it reaches every app on the dev server, and this run could not see which apps those are`,
+          leftAppStopped: null,
+        },
+        churn: CHURN_NOT_ASKED,
+        relaunchWhy: `${policy.unread}, so no broadcast was sent and the app was relaunched instead`,
+      };
+    case 'page-reload':
+      return await reloadOwnTargetsAsync(devServerUrl, {
+        policy,
+        own: classifiedTargets.read,
+        deadline: Date.now() + Math.min(Math.max(0, budgetMs), PAGE_RELOAD_PROOF_MS),
+      });
+    case 'broadcast':
+      return await broadcastAsync(devServerUrl, {
+        policy,
+        connectedApps: targets.length,
+        budgetMs,
+      });
   }
-  if (policy.mechanism === 'page-reload') {
-    return await reloadOwnTargetsAsync(devServerUrl, {
-      policy,
-      own: classifiedTargets.read,
-      deadline: Date.now() + Math.min(Math.max(0, budgetMs), PAGE_RELOAD_PROOF_MS),
-    });
-  }
+}
+
+/** The broadcast, watched for the peers' churn within the caller's budget. */
+async function broadcastAsync(
+  devServerUrl: string,
+  {
+    policy,
+    connectedApps,
+    budgetMs,
+  }: { policy: RungOnePolicy; connectedApps: number; budgetMs: number }
+): Promise<RungOneOutcome> {
   const timeoutMs = Math.min(PEER_CHURN_TIMEOUT_MS, Math.max(budgetMs, PEER_POLL_INTERVAL_MS * 2));
   let churn = CHURN_NOT_ASKED;
   const sent = await reloadOverDevServerAsync(devServerUrl, {
-    connectedApps: targets.length,
+    connectedApps,
     churnTimeoutMs: timeoutMs,
     onChurn: (seen) => {
       churn = seen;

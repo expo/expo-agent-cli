@@ -8,8 +8,7 @@ import {
   makeTarget,
   makeTargetSelection,
 } from '../../__tests__/targetSelectionFixtures';
-import { classifyTargets } from '../../targetSelection';
-import { rungOnePolicy, runRungOneAsync } from '../rungOne';
+import { prepareRungOne, runRungOneAsync } from '../rungOne';
 
 const BUDGET_MS = 3000;
 
@@ -72,18 +71,10 @@ async function runRungOneBesideForeignAsync(
     booted: [{ name: 'foreign', udid: 'FOREIGN' }],
     iosBindings: [{ udid: 'FOREIGN', name: 'foreign', own: false, projectRoot: '/other' }],
   });
-  const classifiedTargets = classifyTargets(targets, targetSelection, deviceInventory);
   try {
     const started = Date.now();
     const outcome = await runRungOneAsync(`http://127.0.0.1:${port}`, {
-      prepared: {
-        targets,
-        targetSelection,
-        deviceInventory,
-        classifiedTargets,
-        policy: rungOnePolicy(classifiedTargets, targetSelection, deviceInventory),
-        unread: null,
-      },
+      prepared: prepareRungOne(targets, targetSelection, deviceInventory),
       budgetMs,
     });
     return { outcome, elapsed: Date.now() - started, actions, globals };
