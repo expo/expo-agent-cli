@@ -22,6 +22,8 @@ import {
   waitForAsync,
   waitForDevLockAsync,
   expoHomeOf,
+  readLastBuildFile,
+  readEvents,
 } from '../utils';
 import {
   EMULATOR_NAME,
@@ -33,9 +35,6 @@ import {
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
 const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
-
-/** The record `src/plan/lastBuild.ts` writes, relative to the project root. */
-const LAST_BUILD_FILE = path.join('.expo', 'agent-cli-last-build.json');
 
 /** The hash the stub `@expo/fingerprint` bin of `dev-client-fresh-app` prints by default. */
 const RECORDED_HASH = '0f1e2d3c4b5a69788796a5b4c3d2e1f001234567';
@@ -55,22 +54,11 @@ function invocationArgs(projectRoot: string): string[][] {
   return readStubExpoInvocations(projectRoot).map((invocation) => invocation.args);
 }
 
-/** Read the last-build record, or null when the run wrote none. */
-function readLastBuildRecord(projectRoot: string): Record<string, string> | null {
-  const filePath = path.join(projectRoot, LAST_BUILD_FILE);
-  return fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : null;
-}
-
 /** The `cli:start_plan` events a run wrote to its `LOG_EVENTS` file. */
 function startPlanEvents(
   eventsFile: string
 ): { mode: string; steps: { id: string; argv: string[] }[] }[] {
-  return fs
-    .readFileSync(eventsFile, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .filter((entry) => entry._e === 'cli:start_plan');
+  return readEvents(eventsFile).filter((entry) => entry._e === 'cli:start_plan');
 }
 
 describe('@expo/agent-cli dev', () => {
@@ -239,7 +227,7 @@ describe('@expo/agent-cli dev', () => {
 
       // This fixture ships no fingerprint CLI, so there is no hash to record the build against,
       // and an unrecorded build is planned again next time.
-      expect(readLastBuildRecord(projectRoot)).toBeNull();
+      expect(readLastBuildFile(projectRoot)).toBeNull();
     });
   });
 
@@ -261,7 +249,7 @@ describe('@expo/agent-cli dev', () => {
       // other platform is rewritten in the v2 spelling with the same meaning it had: a bare
       // string said "only a hash was recorded", and `sources: null` says exactly that. Reading
       // normalizes, so one platform's write migrates the other's spelling and nothing else.
-      expect(readLastBuildRecord(projectRoot)).toEqual({
+      expect(readLastBuildFile(projectRoot)).toEqual({
         ios: { hash: CHANGED_HASH, sources: [] },
         android: { hash: RECORDED_HASH, sources: null },
       });
@@ -288,7 +276,7 @@ describe('@expo/agent-cli dev', () => {
         ['prebuild', '--platform', 'ios'],
         ['run:ios', ...PORT_ARGS],
       ]);
-      expect(readLastBuildRecord(projectRoot)).toMatchObject({
+      expect(readLastBuildFile(projectRoot)).toMatchObject({
         ios: { hash: CHANGED_HASH },
       });
       expect(built.stderr).toContain(
@@ -324,7 +312,7 @@ describe('@expo/agent-cli dev', () => {
 
       expect(result.exitCode).toBe(1);
       expect(invocationArgs(projectRoot)).toEqual([['run:ios', ...PORT_ARGS]]);
-      expect(readLastBuildRecord(projectRoot)).toEqual({
+      expect(readLastBuildFile(projectRoot)).toEqual({
         ios: RECORDED_HASH,
         android: RECORDED_HASH,
       });
@@ -376,7 +364,7 @@ describe('@expo/agent-cli dev', () => {
       // No platform flag at all: the open is this command's own act now (llp/0026).
       expect(invocationArgs(projectRoot)).toEqual([['start', '--dev-client', ...PORT_ARGS]]);
       // Nothing was built, so the record is untouched.
-      expect(readLastBuildRecord(projectRoot)).toEqual({
+      expect(readLastBuildFile(projectRoot)).toEqual({
         ios: RECORDED_HASH,
         android: RECORDED_HASH,
       });
@@ -1205,7 +1193,7 @@ describe('@expo/agent-cli dev', () => {
       // The record still names the build this plan was made from. Nothing was compiled — the step
       // installed what was already built — so a hash that moved here would mean the next run
       // planned a rebuild for work this one did not do.
-      expect(readLastBuildRecord(projectRoot)).toMatchObject({
+      expect(readLastBuildFile(projectRoot)).toMatchObject({
         android: { hash: RECORDED_HASH },
       });
     });

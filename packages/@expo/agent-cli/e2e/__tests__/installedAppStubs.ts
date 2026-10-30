@@ -10,7 +10,7 @@ import path from 'node:path';
 import { digestOf } from '../../src/devLock/address';
 import { killEmulator } from '../../src/deviceBinding/tools';
 import { canonicalizeExistingPath } from '../../src/utils/dir';
-import { installStubBinAsync, expoHomeOf } from '../utils';
+import { expoHomeOf, installStubBinAsync, readJsonLines } from '../utils';
 
 export const APK_FIXTURE = path.resolve(__dirname, '../../src/__fixtures__/zip/fixture-stored.zip');
 /** An archive whose `app.fingerprint` is not the JSON `expo-constants` writes: a pre-JSON build. */
@@ -146,7 +146,7 @@ export async function installStubEmulatorAsync(
     ].join('\n')
   );
   await installStubBinAsync(path.join(sdk, 'emulator'), 'emulator', scriptPath);
-  return { calls: () => readCalls(recordPath) };
+  return { calls: () => readJsonLines<string[]>(recordPath) };
 }
 
 /** Kill every instance the Android bindings of `home` name, as a case's `afterEach`. */
@@ -168,16 +168,6 @@ export async function killBoundEmulatorsAsync(home: string): Promise<void> {
       }
     }
   }
-}
-
-function readCalls(recordPath: string): string[][] {
-  return fs.existsSync(recordPath)
-    ? fs
-        .readFileSync(recordPath, 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line))
-    : [];
 }
 
 /**
@@ -293,7 +283,7 @@ export async function installStubAdbAsync(
   await installStubBinAsync(path.join(sdk, 'platform-tools'), 'adb', scriptPath);
   return {
     env: { ANDROID_HOME: sdk, __UNSAFE_EXPO_HOME_DIRECTORY: expoHomeOf(root) },
-    calls: () => readCalls(recordPath),
+    calls: () => readJsonLines<string[]>(recordPath),
   };
 }
 
@@ -303,6 +293,9 @@ export function appStartedMarkerPath(root: string): string {
 }
 
 const STUB_RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
+
+/** The eight bytes every PNG starts with, as a JS string escape a stub can write. */
+export const PNG_HEADER_ESCAPE = '\\x89PNG\\r\\n\\x1a\\n';
 
 /**
  * A stub `xcrun`, installed into `<root>/.stub-bin`, which has to be first on the `PATH` of the
@@ -317,6 +310,7 @@ const STUB_RUNTIME = 'com.apple.CoreSimulator.SimRuntime.iOS-26-0';
  * iOS runtime.
  *
  * `openurl` and `terminate` mark the app started and stopped at {@link appStartedMarkerPath}.
+ * `io screenshot` writes a PNG to the path it is given.
  * `terminate` refuses an app outside `runningAppIds` the way `simctl` does, when the list is given.
  *
  * `devicectl list` answers with the fixture phones when `phone` is given; a `launch` then answers
@@ -426,11 +420,17 @@ export async function installStubXcrunAsync(
       `  save();`,
       `  process.exit(0);`,
       `}`,
-      `if (${expoGoMissing} && args[0] === 'simctl' && args[1] === 'spawn') {`,
+      // The real `simctl spawn` answers 148 for an unknown device and 149 for one that is not booted.
+      // Only the two writes the product sends, for the app it opens, are accepted: the scheme
+      // approval and the dev menu onboarding flag. Any other write is unexpected (exit 2).
+      `if (args[0] === 'simctl' && args[1] === 'spawn' && args[3] === 'defaults' && args[4] === 'write') {`,
       `  const sim = find(args[2]);`,
-      `  const approval = args[5] === 'com.apple.launchservices.schemeapproval' && ['com.apple.CoreSimulator.CoreSimulatorBridge-->exp', 'com.apple.CoreSimulator.CoreSimulatorBridge-->exps'].includes(args[6]) && args[7] === '-string' && args[8] === 'host.exp.Exponent';`,
-      `  const onboarding = args[5] === 'host.exp.Exponent' && args[6] === 'EXDevMenuIsOnboardingFinished' && args[7] === '-bool' && args[8] === 'true';`,
-      `  if (sim?.state === 'Booted' && sim.expoGoInstalled && args[3] === 'defaults' && args[4] === 'write' && (approval || onboarding)) process.exit(0);`,
+      `  if (!sim) process.exit(148);`,
+      `  if (sim.state !== 'Booted') process.exit(149);`,
+      `  if (${expoGoMissing} && !sim.expoGoInstalled) process.exit(1);`,
+      `  const approval = args.length === 9 && args[5] === 'com.apple.launchservices.schemeapproval' && /^com\\.apple\\.CoreSimulator\\.CoreSimulatorBridge-->[a-z][a-z0-9+.-]*$/.test(args[6]) && args[7] === '-string' && args[8] !== '';`,
+      `  const onboarding = args.length === 9 && args[6] === 'EXDevMenuIsOnboardingFinished' && args[7] === '-bool' && args[8] === 'true';`,
+      `  if (approval || onboarding) process.exit(0);`,
       `}`,
       `if (args[0] === 'simctl' && args[1] === 'openurl') {`,
       `  if (${expoGoMissing} && !find(args[2])?.expoGoInstalled) process.exit(115);`,
@@ -444,6 +444,11 @@ export async function installStubXcrunAsync(
       `    process.exit(4);`,
       `  }`,
       `  fs.rmSync(marker, { force: true });`,
+      `  process.exit(0);`,
+      `}`,
+      // `simctl io <udid> screenshot <path>` is given the path and writes the file itself.
+      `if (args[0] === 'simctl' && args[1] === 'io' && args[3] === 'screenshot') {`,
+      `  fs.writeFileSync(args[4], Buffer.from("${PNG_HEADER_ESCAPE}stub-screenshot", 'binary'));`,
       `  process.exit(0);`,
       `}`,
       `if (args[1] === 'get_app_container') {`,
@@ -471,5 +476,5 @@ export async function installStubXcrunAsync(
     ].join('\n')
   );
   await installStubBinAsync(binDir, 'xcrun', scriptPath);
-  return { binDir, calls: () => readCalls(recordPath) };
+  return { binDir, calls: () => readJsonLines<string[]>(recordPath) };
 }

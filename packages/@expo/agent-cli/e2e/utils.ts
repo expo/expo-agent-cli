@@ -9,6 +9,8 @@ import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { WebSocketServer, type WebSocket } from 'ws';
 
+import { LAST_BUILD_FILE_NAME } from '../src/plan/lastBuild';
+
 /** The `@expo/agent-cli` bin, spawned as a subprocess in every e2e test. Requires `bun run build` first. */
 export const bin = path.resolve(__dirname, '../bin/cli.js');
 
@@ -272,17 +274,21 @@ export type StubExpoInvocation = {
   isTTY: boolean;
 };
 
-/** Read every invocation of the stub `expo` bin recorded for a project. */
-export function readStubExpoInvocations(projectRoot: string): StubExpoInvocation[] {
-  const logPath = path.join(projectRoot, STUB_EXPO_LOG_NAME);
-  if (!fs.existsSync(logPath)) {
+/** Every line of a JSONL file, parsed; `[]` when the file does not exist, as for a stub nothing called. */
+export function readJsonLines<T = any>(file: string): T[] {
+  if (!fs.existsSync(file)) {
     return [];
   }
   return fs
-    .readFileSync(logPath, 'utf8')
+    .readFileSync(file, 'utf8')
     .split('\n')
     .filter(Boolean)
-    .map((line) => JSON.parse(line));
+    .map((line) => JSON.parse(line) as T);
+}
+
+/** Read every invocation of the stub `expo` bin recorded for a project. */
+export function readStubExpoInvocations(projectRoot: string): StubExpoInvocation[] {
+  return readJsonLines<StubExpoInvocation>(path.join(projectRoot, STUB_EXPO_LOG_NAME));
 }
 
 /** One recorded invocation of the stub `fingerprint` bin. */
@@ -300,15 +306,9 @@ export type StubFingerprintInvocation = {
  * print the same hash, and differ only in how many subprocesses were spawned.
  */
 export function readStubFingerprintInvocations(projectRoot: string): StubFingerprintInvocation[] {
-  const logPath = path.join(projectRoot, STUB_FINGERPRINT_LOG_NAME);
-  if (!fs.existsSync(logPath)) {
-    return [];
-  }
-  return fs
-    .readFileSync(logPath, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
+  return readJsonLines<StubFingerprintInvocation>(
+    path.join(projectRoot, STUB_FINGERPRINT_LOG_NAME)
+  );
 }
 
 /** Forget every invocation recorded so far, so the next command's count starts at zero. */
@@ -1304,6 +1304,45 @@ export async function holdDevLockAsync(
       fs.rmSync(address, { force: true });
     }
   };
+}
+
+/**
+ * Every JSONL event a run wrote to its `LOG_EVENTS` file. `2g` names each one in `_e`.
+ *
+ * Throws when the file is absent: a run that wrote no log is a different failure than a log
+ * without the event a case looks for.
+ */
+export function readEvents(eventsFile: string): any[] {
+  return fs
+    .readFileSync(eventsFile, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+/** Point the project's dev-server lock at the stub, the way an `@expo/agent-cli`-started server does. */
+export async function holdLockForAsync(
+  projectRoot: string,
+  stub: StubDevServer
+): Promise<() => void> {
+  return await holdDevLockAsync(projectRoot, {
+    url: stub.url,
+    port: stub.port,
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    projectRoot,
+  });
+}
+
+/** Where `dev` records the last build, relative to the project root. */
+export function lastBuildFilePath(projectRoot: string): string {
+  return path.join(projectRoot, '.expo', LAST_BUILD_FILE_NAME);
+}
+
+/** The raw last-build file `dev` writes after a build, or null when the run wrote none. */
+export function readLastBuildFile(projectRoot: string): unknown {
+  const filePath = lastBuildFilePath(projectRoot);
+  return fs.existsSync(filePath) ? JSON.parse(fs.readFileSync(filePath, 'utf8')) : null;
 }
 
 /**

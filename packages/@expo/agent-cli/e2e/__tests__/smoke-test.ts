@@ -19,7 +19,6 @@ import { bindOtherWorktreeAsync } from '../runtimeTargetFixtures';
 import {
   breakXcodeSelectAsync,
   executeAgentCliAsync,
-  holdDevLockAsync,
   installStubBinAsync,
   pathEnvVars,
   readDevLockAsync,
@@ -29,6 +28,9 @@ import {
   stubExpoEnv,
   type StubDevServer,
   expoHomeOf,
+  holdLockForAsync,
+  readEvents,
+  readJsonLines,
 } from '../utils';
 import { createdSimulatorName } from '../../src/deviceBinding/choose';
 import { digestForRoot } from '../../src/deviceBinding/registry';
@@ -37,6 +39,7 @@ import {
   appStartedMarkerPath,
   bindingFixture,
   installStubXcrunAsync as installStatefulXcrunAsync,
+  PNG_HEADER_ESCAPE,
 } from './installedAppStubs';
 
 const SIMULATOR_UDID = 'E2E-SIM-SMOKE';
@@ -67,65 +70,12 @@ const DEV_BUILD_TARGET = {
   webSocketDebuggerUrl: 'ws://127.0.0.1:8081/inspector/debug?device=1&page=1',
 };
 
-/** The eight bytes every PNG starts with, as a JS string escape the stub can write. */
-const PNG_HEADER_ESCAPE = '\\x89PNG\\r\\n\\x1a\\n';
-
-/**
- * Install a stub `xcrun` that lists one booted simulator, records every invocation, and writes a
- * real PNG when it is asked for a screenshot.
- *
- * @returns a reader for the recorded argv
- */
-async function installStubXcrunAsync(
-  projectRoot: string,
-  /**
-   * A file the stub writes when it is asked to open a URL, or null.
-   *
-   * Paired with the stub dev server's `targetsAppearWithFile`, it is what makes "the app attached"
-   * a **consequence of the deep link** rather than a fixture that was true all along — which is
-   * the only way this tier can show that the gate waits for a real target instead of passing on
-   * the exit code of `simctl openurl`.
-   */
-  opensMarker: string | null = null
-): Promise<() => string[][]> {
-  // The booted simulator the stub lists is the one this worktree bound (llp/0035 §Readers).
-  await bindingFixture(projectRoot, SIMULATOR_UDID, 'iPhone 17 Pro');
-  const logPath = path.join(projectRoot, '.stub-xcrun.jsonl');
-  const scriptPath = path.join(projectRoot, '.stub-bin', 'xcrun-stub.js');
-  await fs.promises.mkdir(path.dirname(scriptPath), { recursive: true });
-  await fs.promises.writeFile(
-    scriptPath,
-    [
-      `const fs = require('fs');`,
-      `const args = process.argv.slice(2);`,
-      `fs.appendFileSync(${JSON.stringify(logPath)}, JSON.stringify(args) + '\\n');`,
-      ...(opensMarker
-        ? [
-            `if (args[1] === 'openurl') {`,
-            `  fs.writeFileSync(${JSON.stringify(opensMarker)}, 'opened');`,
-            `}`,
-          ]
-        : []),
-      `if (args[1] === 'list') {`,
-      `  process.stdout.write(JSON.stringify({ devices: { 'com.apple.CoreSimulator.SimRuntime.iOS-26-0': [{ udid: ${JSON.stringify(SIMULATOR_UDID)}, name: 'iPhone 17 Pro', state: 'Booted' }] } }));`,
-      `}`,
-      // `simctl io <udid> screenshot <path>` is given the path and writes the file itself.
-      `if (args[1] === 'io' && args[3] === 'screenshot') {`,
-      `  fs.writeFileSync(args[4], Buffer.from("${PNG_HEADER_ESCAPE}stub-screenshot", 'binary'));`,
-      `}`,
-      `process.exit(0);`,
-    ].join('\n')
-  );
-  await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'xcrun', scriptPath);
-
-  return () =>
-    fs.existsSync(logPath)
-      ? fs
-          .readFileSync(logPath, 'utf8')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => JSON.parse(line))
-      : [];
+/** The stateful stub `xcrun`, listing this file's one booted simulator, and its argv reader. */
+async function installStubXcrunAsync(projectRoot: string): Promise<() => string[][]> {
+  const { calls } = await installStatefulXcrunAsync(projectRoot, {
+    simulators: [{ udid: SIMULATOR_UDID, name: 'iPhone 17 Pro', state: 'Booted' }],
+  });
+  return calls;
 }
 
 /**
@@ -227,14 +177,7 @@ async function installStubAdbForExpoGoAsync(
   await installStubBinAsync(path.join(sdk, 'platform-tools'), 'adb', scriptPath);
   return {
     env: { ANDROID_HOME: sdk },
-    read: () =>
-      fs.existsSync(recordPath)
-        ? fs
-            .readFileSync(recordPath, 'utf8')
-            .split('\n')
-            .filter(Boolean)
-            .map((line) => JSON.parse(line))
-        : [],
+    read: () => readJsonLines(recordPath),
   };
 }
 
@@ -283,14 +226,7 @@ async function installStubNpxAsync(projectRoot: string): Promise<() => string[][
     ].join('\n')
   );
   await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'npx', scriptPath);
-  return () =>
-    fs.existsSync(recordPath)
-      ? fs
-          .readFileSync(recordPath, 'utf8')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => JSON.parse(line))
-      : [];
+  return () => readJsonLines(recordPath);
 }
 
 /**
@@ -304,17 +240,6 @@ async function installStubNpxAsync(projectRoot: string): Promise<() => string[][
  */
 function devServerOnlyEnv(projectRoot: string): Record<string, string> {
   return pathEnvVars(path.join(projectRoot, '.no-bin'));
-}
-
-/** Point the project's dev-server lock at the stub, the way an `@expo/agent-cli`-started server does. */
-async function holdLockForAsync(projectRoot: string, stub: StubDevServer): Promise<() => void> {
-  return await holdDevLockAsync(projectRoot, {
-    url: stub.url,
-    port: stub.port,
-    pid: process.pid,
-    startedAt: new Date().toISOString(),
-    projectRoot,
-  });
 }
 
 describe('@expo/agent-cli smoke', () => {
@@ -676,8 +601,8 @@ describe('@expo/agent-cli smoke', () => {
   describe('what counts as the app being there', () => {
     it('reports the app connected only after the deep link produced a target', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
-      const opened = path.join(projectRoot, '.app-opened');
-      await installStubXcrunAsync(projectRoot, opened);
+      const opened = appStartedMarkerPath(projectRoot);
+      await installStubXcrunAsync(projectRoot);
       const stub = await startStubDevServerAsync({
         projectRoot,
         targets: [{ ...EXPO_GO_TARGET, deviceName: 'iPhone 17 Pro' }],
@@ -1401,8 +1326,8 @@ describe('@expo/agent-cli smoke', () => {
   describe('the URL that loads the app', () => {
     it('opens the dev-client loading link before the route link', async () => {
       const projectRoot = await setupFixtureAsync('dev-client-fresh-app');
-      const opened = path.join(projectRoot, '.app-opened');
-      const readXcrun = await installStubXcrunAsync(projectRoot, opened);
+      const opened = appStartedMarkerPath(projectRoot);
+      const readXcrun = await installStubXcrunAsync(projectRoot);
       const stub = await startStubDevServerAsync({
         projectRoot,
         // The app the loading link loads. It appears when the stub `xcrun` has opened a URL, so
@@ -1912,11 +1837,7 @@ describe('@expo/agent-cli smoke', () => {
       { env: { ...stubExpoEnv(projectRoot), LOG_EVENTS: eventsPath }, reject: false }
     );
 
-    const events = fs
-      .readFileSync(eventsPath, 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
+    const events = readEvents(eventsPath);
     const smoke = events.find((entry) => entry._e === 'cli:smoke');
     expect(smoke).toMatchObject({ outcome: 'failed', started: false });
     expect(smoke.phases).toHaveLength(9);

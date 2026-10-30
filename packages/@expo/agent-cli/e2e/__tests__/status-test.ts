@@ -29,7 +29,9 @@ import {
   installStubBinAsync,
   installStubEasRunnerAsync,
   installStubFingerprintAsync,
+  lastBuildFilePath,
   pathEnvVars,
+  readEvents,
   readStubExpoInvocations,
   readStubFingerprintInvocations,
   linkFixtureToEasAsync,
@@ -648,11 +650,7 @@ describe('@expo/agent-cli status', () => {
       );
 
       expect(result.exitCode).toBe(0);
-      const events = fs
-        .readFileSync(eventsFile, 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
+      const events = readEvents(eventsFile);
       // `2g` names the event in the `_e` field of every JSONL line.
       const status = events.find((entry) => entry._e === 'cli:status');
       expect(status).toMatchObject({ rule: 'expo-go', devServerRunning: false });
@@ -1014,10 +1012,7 @@ describe('@expo/agent-cli status', () => {
     async function setupImpactAsync(recorded: unknown): Promise<string> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
       await installEnvFingerprintStubAsync(projectRoot);
-      await fs.promises.writeFile(
-        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
-        JSON.stringify(recorded)
-      );
+      await fs.promises.writeFile(lastBuildFilePath(projectRoot), JSON.stringify(recorded));
       return projectRoot;
     }
 
@@ -1136,7 +1131,7 @@ describe('@expo/agent-cli status', () => {
       const projectRoot = await setupAsync('dev-client-fresh-app');
       await installEnvFingerprintStubAsync(projectRoot);
       await fs.promises.writeFile(
-        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        lastBuildFilePath(projectRoot),
         JSON.stringify({ ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [] } })
       );
 
@@ -1236,7 +1231,7 @@ describe('@expo/agent-cli status', () => {
     it('lists eight sources, counts the rest, and prints matching platforms once', async () => {
       const { projectRoot, env } = await setupExplainAsync({ policy: 'appVersion' });
       await fs.promises.writeFile(
-        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        lastBuildFilePath(projectRoot),
         JSON.stringify({
           ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [] },
           android: { hash: FIXTURE_FINGERPRINT_HASH, sources: [] },
@@ -1608,7 +1603,7 @@ describe('@expo/agent-cli status', () => {
       const projectRoot = await setupAsync('dev-client-fresh-app');
       await installEnvFingerprintStubAsync(projectRoot, { diff: true });
       await fs.promises.writeFile(
-        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        lastBuildFilePath(projectRoot),
         JSON.stringify({
           ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
           android: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
@@ -1796,7 +1791,7 @@ describe('@expo/agent-cli status', () => {
       const projectRoot = await setupAsync('dev-client-fresh-app');
       await installEnvFingerprintStubAsync(projectRoot);
       await fs.promises.writeFile(
-        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
+        lastBuildFilePath(projectRoot),
         JSON.stringify({
           ios: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
           android: { hash: FIXTURE_FINGERPRINT_HASH, sources: [APP_CONFIG] },
@@ -1971,10 +1966,7 @@ describe('@expo/agent-cli status', () => {
     async function setupAssertAsync(recorded: unknown): Promise<string> {
       const projectRoot = await setupAsync('dev-client-fresh-app');
       await installEnvFingerprintStubAsync(projectRoot);
-      await fs.promises.writeFile(
-        path.join(projectRoot, '.expo', 'agent-cli-last-build.json'),
-        JSON.stringify(recorded)
-      );
+      await fs.promises.writeFile(lastBuildFilePath(projectRoot), JSON.stringify(recorded));
       return projectRoot;
     }
 
