@@ -88,10 +88,12 @@ describe('@expo/agent-cli dev:stop', () => {
         stopped: true,
         pid: recorder.pid,
         port: 59999,
+        url: 'http://127.0.0.1:59999',
         lockHeld: true,
         signal: 'SIGTERM',
         forced: false,
         reason: null,
+        detail: null,
       });
       if (process.platform === 'win32') {
         // taskkill /F is TerminateProcess. POSIX signal handlers never run.
@@ -151,6 +153,10 @@ describe('@expo/agent-cli dev:stop', () => {
       pid: null,
       lockHeld: false,
       reason: 'not-running',
+      // No lock and no port to look at: nothing was measured, and the way to name a port is the flag.
+      processStillRunning: null,
+      portStillAnswering: null,
+      detail: expect.stringContaining('--port'),
     });
   });
 
@@ -175,7 +181,11 @@ describe('@expo/agent-cli dev:stop', () => {
         reason: 'foreign-dev-server',
         portStillAnswering: true,
       });
-      if (report.pid != null) expect(report.processStillRunning).toBe(true);
+      if (report.pid != null) {
+        expect(report.processStillRunning).toBe(true);
+        // The listener is named, so the caller can see whose server it is.
+        expect(report.detail).toContain(String(report.pid));
+      }
       expect(report.detail).toContain('no lock answers for it');
       // Still up, which is the assertion the whole case is about.
       expect((await fetch(`${stub.url}/status`)).ok).toBe(true);
@@ -216,6 +226,8 @@ describe('@expo/agent-cli dev:stop', () => {
       });
       // The lock's own dev server is named, so a mistyped port is recoverable, and it is untouched.
       expect(report.detail).toContain('59999');
+      // The target is the listener on the named port, never the lock's own pid.
+      expect(report.pid).not.toBe(recorder.pid);
       expect(recorder.signalled()).toBeNull();
       expect((await fetch(`${stranger.url}/status`)).ok).toBe(true);
     } finally {
@@ -289,6 +301,14 @@ describe('@expo/agent-cli runtime:stop', () => {
         bundleId: 'host.exp.Exponent',
         bundleIdSource: 'dev-server',
         reason: null,
+        followups: [
+          // The platform is carried: this stop was on the iOS simulator, so the way back is too (F103).
+          {
+            id: 'navigate',
+            command: 'npx @expo/agent-cli navigate / --ios',
+            why: expect.any(String),
+          },
+        ],
       });
       expect(readXcrun()).toContainEqual([
         'simctl',
@@ -367,6 +387,15 @@ describe('@expo/agent-cli runtime:stop', () => {
         bundleId: 'host.exp.Exponent2',
         connectedAppIds: ['host.exp.Exponent'],
         appIdMismatch: true,
+        // The corrected command and nothing else: `navigate /` would start an app while the one
+        // the caller meant to stop is still running.
+        followups: [
+          {
+            id: 'stop-connected-app',
+            command: 'npx @expo/agent-cli runtime:stop --app-id host.exp.Exponent',
+            why: expect.any(String),
+          },
+        ],
       });
       // The id the caller gave is the id that was tried: the flag is still obeyed, and the
       // disagreement is reported rather than silently corrected.
@@ -383,16 +412,23 @@ describe('@expo/agent-cli runtime:stop', () => {
   });
 
   // Stopping an app twice must stay a success, which is what makes the command idempotent. With
-  // nothing connected there is no second app for the id to disagree with.
-  it('stays at 0 for a repeat stop with nothing connected', async () => {
+  // nothing connected there is no second app for the id to disagree with, so a named id that was
+  // not running is not a mismatch either.
+  it.each([
+    { name: 'no --app-id', appIdArgs: [] },
+    { name: 'an --app-id that is not running', appIdArgs: ['--app-id', 'host.exp.Exponent2'] },
+  ])('stays at 0 for a repeat stop with nothing connected ($name)', async ({ appIdArgs }) => {
     const projectRoot = await setupFixtureAsync('go-app');
-    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], runningAppIds: [] });
+    await installStubXcrunAsync(projectRoot, {
+      simulators: [BOOTED_SIMULATOR],
+      runningAppIds: [],
+    });
     const stub = await startStubDevServerAsync({ targets: [] });
 
     try {
       const result = await executeAgentCliAsync(
         projectRoot,
-        ['runtime:stop', '--ios', '--json', '--dev-server-url', stub.url],
+        ['runtime:stop', '--ios', ...appIdArgs, '--json', '--dev-server-url', stub.url],
         { env: stubExpoEnv(projectRoot) }
       );
 
@@ -400,6 +436,7 @@ describe('@expo/agent-cli runtime:stop', () => {
       expect(JSON.parse(result.stdout)).toMatchObject({
         stopped: true,
         wasRunning: false,
+        reason: null,
         appIdMismatch: false,
         connectedAppIds: [],
       });
@@ -416,12 +453,27 @@ describe('@expo/agent-cli runtime:stop', () => {
     const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET] });
 
     try {
-      await executeAgentCliAsync(
+      const result = await executeAgentCliAsync(
         projectRoot,
-        ['runtime:stop', '--ios', '--app-id', 'com.example.other', '--dev-server-url', stub.url],
+        [
+          'runtime:stop',
+          '--ios',
+          '--app-id',
+          'com.example.other',
+          '--json',
+          '--dev-server-url',
+          stub.url,
+        ],
         { env: stubExpoEnv(projectRoot) }
       );
 
+      // The named id was running, so a connected app with another id is not a mismatch: a device can
+      // run more than one app.
+      expect(JSON.parse(result.stdout)).toMatchObject({
+        bundleIdSource: 'flag',
+        wasRunning: true,
+        appIdMismatch: false,
+      });
       expect(readXcrun()).toContainEqual([
         'simctl',
         'terminate',
