@@ -1,29 +1,16 @@
 import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 
 import { resolveWorkTreeAsync } from '../git';
+import { mockSpawnAlways, mockSpawnBy } from './fakeSpawn';
 
 type GitReply = { stdout?: string; stderr?: string; code?: number };
 
 /** Answer every `git` spawn from a table keyed by the first argument. */
 function mockGit(replies: (args: string[]) => GitReply): void {
-  vi.mocked(spawn).mockImplementation(((_command: string, args: string[]) => {
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    const reply = replies(args);
-    process.nextTick(() => {
-      if (reply.stdout) {
-        child.stdout.emit('data', reply.stdout);
-      }
-      if (reply.stderr) {
-        child.stderr.emit('data', reply.stderr);
-      }
-      child.emit('close', reply.code ?? 0);
-    });
-    return child;
-  }) as any);
+  mockSpawnBy(({ args }) => {
+    const { stdout, stderr, code } = replies(args);
+    return { stdout, stderr, exitCode: code };
+  });
 }
 
 /** Every `git` invocation, as `[args, options]` pairs. */
@@ -69,14 +56,7 @@ describe(resolveWorkTreeAsync, () => {
   });
 
   it(`should return null when git is not installed`, async () => {
-    vi.mocked(spawn).mockImplementation(((): any => {
-      const child = Object.assign(new EventEmitter(), {
-        stdout: new EventEmitter(),
-        stderr: new EventEmitter(),
-      });
-      process.nextTick(() => child.emit('error', new Error('spawn git ENOENT')));
-      return child;
-    }) as any);
+    mockSpawnAlways({ error: new Error('spawn git ENOENT') });
 
     await expect(resolveWorkTreeAsync(projectRoot)).resolves.toBeNull();
   });

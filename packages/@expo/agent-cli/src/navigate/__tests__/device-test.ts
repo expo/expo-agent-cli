@@ -1,5 +1,4 @@
 import { spawn } from 'child_process';
-import { EventEmitter } from 'events';
 import { vol } from 'memfs';
 import path from 'path';
 
@@ -8,40 +7,8 @@ import { bindingPathFor } from '../../deviceBinding/registry';
 import type { Binding } from '../../deviceBinding';
 import { writeCloudBinding } from '../../deviceBinding/__tests__/fakeCloudBinding';
 import { resolveDeviceAsync } from '../device';
+import { mockSpawnAlways, mockSpawnQueue } from '../../utils/__tests__/fakeSpawn';
 import { mockPlatform } from '../../utils/__tests__/mockPlatform';
-
-/** Answer every `spawn` call with the queued stdout and exit code. */
-function mockSpawnQueue(answers: { stdout?: string; exitCode?: number | null }[]) {
-  let call = 0;
-  vi.mocked(spawn).mockImplementation((() => {
-    const answer = answers[call++] ?? {};
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    process.nextTick(() => {
-      if (answer.stdout) {
-        child.stdout.emit('data', answer.stdout);
-      }
-      child.emit('close', answer.exitCode ?? 0, null);
-    });
-    return child as any;
-  }) as any);
-}
-
-/** Every `spawn` fails to start, as a missing SDK does. */
-function mockSpawnUnrunnable() {
-  vi.mocked(spawn).mockImplementation((() => {
-    const child = Object.assign(new EventEmitter(), {
-      stdout: new EventEmitter(),
-      stderr: new EventEmitter(),
-    });
-    process.nextTick(() =>
-      child.emit('error', Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' }))
-    );
-    return child as any;
-  }) as any);
-}
 
 const projectRoot = '/project';
 
@@ -296,7 +263,7 @@ describe(resolveDeviceAsync, () => {
   it(`should throw an unrunnable adb at once with --android, and after the EAS rung without`, async () => {
     mockPlatform('linux');
     bindEmulator();
-    mockSpawnUnrunnable();
+    mockSpawnAlways({ error: Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' }) });
 
     const flagged = await resolveDeviceAsync('android', { projectRoot }).catch((e) => e);
     expect(flagged.code).toBe('ADB_NOT_RUNNABLE');
