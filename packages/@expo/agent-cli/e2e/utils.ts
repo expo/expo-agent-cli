@@ -274,7 +274,7 @@ export type StubExpoInvocation = {
   isTTY: boolean;
 };
 
-/** Every line of a JSONL file, parsed; `[]` when the file does not exist. */
+/** Every line of a JSONL file, parsed; `[]` when the file does not exist, as for a stub nothing called. */
 export function readJsonLines<T = any>(file: string): T[] {
   if (!fs.existsSync(file)) {
     return [];
@@ -1306,9 +1306,18 @@ export async function holdDevLockAsync(
   };
 }
 
-/** Every JSONL event a run wrote to its `LOG_EVENTS` file. `2g` names each one in `_e`. */
+/**
+ * Every JSONL event a run wrote to its `LOG_EVENTS` file. `2g` names each one in `_e`.
+ *
+ * Throws when the file is absent: a run that wrote no log is a different failure than a log
+ * without the event a case looks for.
+ */
 export function readEvents(eventsFile: string): any[] {
-  return readJsonLines(eventsFile);
+  return fs
+    .readFileSync(eventsFile, 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 /** Point the project's dev-server lock at the stub, the way an `@expo/agent-cli`-started server does. */

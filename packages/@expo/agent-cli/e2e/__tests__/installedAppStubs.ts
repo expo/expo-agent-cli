@@ -421,12 +421,16 @@ export async function installStubXcrunAsync(
       `  process.exit(0);`,
       `}`,
       // The real `simctl spawn` answers 148 for an unknown device and 149 for one that is not booted.
+      // Only the two writes the product sends, for the app it opens, are accepted: the scheme
+      // approval and the dev menu onboarding flag. Any other write is unexpected (exit 2).
       `if (args[0] === 'simctl' && args[1] === 'spawn' && args[3] === 'defaults' && args[4] === 'write') {`,
       `  const sim = find(args[2]);`,
       `  if (!sim) process.exit(148);`,
       `  if (sim.state !== 'Booted') process.exit(149);`,
       `  if (${expoGoMissing} && !sim.expoGoInstalled) process.exit(1);`,
-      `  process.exit(0);`,
+      `  const approval = args.length === 9 && args[5] === 'com.apple.launchservices.schemeapproval' && /^com\\.apple\\.CoreSimulator\\.CoreSimulatorBridge-->[a-z][a-z0-9+.-]*$/.test(args[6]) && args[7] === '-string' && args[8] !== '';`,
+      `  const onboarding = args.length === 9 && args[6] === 'EXDevMenuIsOnboardingFinished' && args[7] === '-bool' && args[8] === 'true';`,
+      `  if (approval || onboarding) process.exit(0);`,
       `}`,
       `if (args[0] === 'simctl' && args[1] === 'openurl') {`,
       `  if (${expoGoMissing} && !find(args[2])?.expoGoInstalled) process.exit(115);`,
