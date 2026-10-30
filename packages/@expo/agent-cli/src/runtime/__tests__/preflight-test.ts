@@ -6,7 +6,8 @@ import { EXIT_OUTCOME_TIMEOUT } from '../../exitCodes';
 import { SIMCTL_TIMEOUT_MS } from '../../device/simulators';
 import { spawnCaptureAsync } from '../../utils/spawnCapture';
 import { APP_RECONNECT_GRACE_MS } from '../devServer';
-import { preflightRuntimeAsync, reachTheAppLadder } from '../preflight';
+import { preflightRuntimeAsync } from '../preflight';
+import { reachTheAppLadder } from '../scopeRefusal';
 import { makeDeviceInventory } from './targetSelectionFixtures';
 
 vi.mock('../../log');

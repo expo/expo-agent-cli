@@ -16,7 +16,7 @@ import {
   parseSettledPromiseSlot,
   wrapExpressionForPromises,
 } from './promiseSettling';
-import { emptyScopeError, noAppConnectedError } from './preflight';
+import { emptyScopeError, noAppConnectedError } from './scopeRefusal';
 import {
   classifyTargets,
   type DeviceInventory,
