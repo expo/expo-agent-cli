@@ -472,6 +472,11 @@ describe(waitForAppConnectionAsync, () => {
 });
 
 describe(`${waitForAppConnectionAsync.name} device facts`, () => {
+  // simctl answers only on macOS; elsewhere the iOS facts are unsupported, not unknown.
+  const realPlatform = process.platform;
+  beforeEach(() => Object.defineProperty(process, 'platform', { value: 'darwin' }));
+  afterEach(() => Object.defineProperty(process, 'platform', { value: realPlatform }));
+
   it('keeps the facts that placed the last list when a device tool gives no answer', async () => {
     const developmentBuild = { id: '1', appId: 'com.example.dev', deviceName: 'iPhone 15' };
     const url = await startServerAsync(() => ({ body: JSON.stringify([developmentBuild]) }));
