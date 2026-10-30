@@ -6,6 +6,8 @@ import fs from 'fs';
 import path from 'path';
 
 import { readDevServerLockAsync } from '../client';
+import { acquireDevServerLockAsync } from '../server';
+import { lockInfo } from './fakeLock';
 import { holdDevServerLockAsync } from '../holdLock';
 import type { DevServerLockHandle } from '../types';
 import { cleanupTempProjects, makeTempProject } from './tempProject';
@@ -158,6 +160,51 @@ describe(holdDevServerLockAsync, () => {
     expect(resolved).toEqual(['log:8305']);
     expect(await readDevServerLockAsync(projectRoot)).toMatchObject({ port: 8305 });
     running = false;
+  });
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a port retry answers on
+  // the run's lock, with no gap; a port of another project releases it.
+  it.each([
+    ['answers on the lock the run holds', false],
+    ['releases the lock the run holds for a foreign port', true],
+  ] as const)(`%s`, async (_name, foreign) => {
+    const projectRoot = makeTempProject();
+    const acquired = await acquireDevServerLockAsync(
+      lockInfo({ projectRoot, port: 8310, url: 'http://127.0.0.1:8310', pid: process.pid })
+    );
+    if (acquired.status !== 'acquired') throw new Error(acquired.status);
+    held.push(acquired.lock);
+    const since = Date.now();
+    let running = true;
+    // The dev server stops before it logs a port, so a foreign port leaves nothing to name.
+    const stopped = new Promise<void>((resolve) =>
+      setTimeout(() => {
+        running = false;
+        resolve();
+      }, 50)
+    );
+
+    const lock = await holdDevServerLockAsync(projectRoot, ['start', '--port', '8311'], {
+      since,
+      isRunning: () => running,
+      stopped,
+      intervalMs: 10,
+      timeoutMs: 30,
+      servesAnotherProject: async () => foreign,
+      held: acquired.lock,
+    });
+
+    if (foreign) {
+      expect(lock).toBeNull();
+      expect(await readDevServerLockAsync(projectRoot)).toBeNull();
+    } else {
+      expect(lock).toBe(acquired.lock);
+      expect(await readDevServerLockAsync(projectRoot)).toMatchObject({
+        port: 8311,
+        phase: 'serving',
+        startedAt: new Date(since).toISOString(),
+      });
+    }
   });
 
   it(`holds nothing when the dev server stops with only a foreign port to name`, async () => {

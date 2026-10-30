@@ -22,6 +22,7 @@ import type { PlanPlatform } from '../plan/types';
 import { otherPlatformSessionError } from '../device/cloudErrors';
 import { otherPlatformSessionAsync } from './openAppEas';
 import { reopenEasAsync } from './reopenEas';
+import { devServerRunningStopAsync } from './runningDevServer';
 import { spawn } from 'child_process';
 import fs from 'fs';
 
@@ -237,6 +238,11 @@ export async function devDetachAsync(
   // Asked before anything is spawned. A second detached dev server for one project cannot hold the
   // lock, so nothing would be able to find it or stop it afterwards.
   const running = await readDevServerLockAsync(projectRoot);
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — a run that finishes its
+  // EAS session start has no server to report, and a second child would start a second session.
+  if (running?.phase === 'finishing') {
+    throw await devServerRunningStopAsync(projectRoot, running, options.platform);
+  }
   if (running) {
     const hasExited = () => !isProcessAlive(running.pid);
     async function checkReuseFailureAsync(

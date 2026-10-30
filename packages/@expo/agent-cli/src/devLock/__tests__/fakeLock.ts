@@ -10,6 +10,7 @@ export function lockInfo(overrides: Partial<DevServerLockInfo> = {}): DevServerL
     projectRoot: '/project',
     easPlatform: null,
     easOpenFinished: false,
+    phase: 'serving',
     ...overrides,
   };
 }

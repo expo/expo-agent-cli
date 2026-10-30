@@ -154,7 +154,8 @@ export interface StartPlan {
  * - `picked`: `dev` picked a free port; `movedFrom` is the busy port it moved off, or null.
  * - `named`: the caller named the port; `taken` is true when it could not be bound.
  * - `running`: this project's dev server already holds its lock on `port`, so the run stops before
- *   any step; `phase` is `serving` when its `/status` answers for this project, else `starting`.
+ *   any step; `phase` is `finishing` when the lock says so, else `serving` when its `/status`
+ *   answers for this project, else `starting`.
  */
 export type DevServerPort = {
   port: number;
@@ -162,5 +163,8 @@ export type DevServerPort = {
 } & (
   | { state: 'picked' }
   | { state: 'named'; taken: boolean }
-  | { state: 'running'; phase: 'serving' | 'starting' }
+  | { state: 'running'; phase: RunningDevServerPhase }
 );
+
+/** `serving` and `starting` split a `serving` lock by whether Metro answers `/status`. */
+export type RunningDevServerPhase = 'starting' | 'serving' | 'finishing';

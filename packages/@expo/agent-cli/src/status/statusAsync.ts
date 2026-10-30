@@ -270,7 +270,7 @@ export async function collectStatusReportAsync(
   const saved = readLastDevRequest(projectRoot);
   const request =
     saved && (!options.platform || options.platform === saved.platform) ? saved : null;
-  const [project, devServer, device, skills, auth, binding, ownServer] = await Promise.all([
+  const [project, devServer, device, skills, auth, binding, ownLock] = await Promise.all([
     projectRead,
     attemptAsync(() => probeDevServerStatusAsync(projectRoot, options, request)),
     attemptAsync(() => readLocalDeviceStatusAsync(projectRoot, options)),
@@ -284,6 +284,9 @@ export async function collectStatusReportAsync(
     }),
   ]);
 
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dev-server lock — a run that builds or
+  // finishes holds the lock and has no dev server to restart or to reuse.
+  const ownServer = ownLock?.phase === 'serving' ? ownLock : null;
   const errors: Partial<Record<StatusSectionName, string>> = {};
   const report: StatusReport = {
     project: null,
@@ -538,6 +541,13 @@ export async function collectStatusReportAsync(
             (bound.length
               ? `The lease on the bound ${platform} device expired.`
               : `No ${platform} device is bound to this worktree.${restart ? ' The running dev server must restart to bind one.' : ''}`)),
+      };
+    }
+    if (ownLock?.phase === 'finishing') {
+      report.next = {
+        ...devNext,
+        command: `${PROGRAM_PREFIX} dev:stop --eas`,
+        why: `The last dev run (pid ${ownLock.pid}) has no dev server any more and is finishing its EAS Simulator session start. This waits for that start and stops the session; the run also exits by itself, and a later dev --eas reuses the session.`,
       };
     }
   } else {

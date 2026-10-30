@@ -56,9 +56,6 @@ import type { DevStopOptions } from './resolveStopOptions';
 /** How often to re-check whether the dev server has gone. */
 const POLL_INTERVAL_MS = 150;
 
-/** How long a `dev --eas` process that let go of its lock and port may take to exit at once. */
-const FINISHING_GRACE_MS = 2_000;
-
 /**
  * Why a dev server was not stopped.
  *
@@ -148,8 +145,8 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
    * After a signal, this is the primary evidence about the stop. False beside `stopped: false`
    * means the process is gone but something else — the lock, below — remains, so SIGKILL is not
    * the recovery. True beside `stopped: true` and an {@link easPlatform} means the `dev --eas` run's
-   * dev server is gone (its lock released and its port free) and the process is finishing its exit
-   * work; it leaves by itself. On a refusal,
+   * dev server is gone (its lock answers `finishing`) and the process is finishing its session
+   * start; it leaves by itself. On a refusal,
    * this is an observation only; it grants no permission to signal.
    */
   processStillRunning: boolean | null;
@@ -238,6 +235,9 @@ export async function devStopAsync(
 
   // @ref llp/0027-everything-on-eas.rfc.md §dev:stop — after the dev server and whatever it
   // answered: a session that will not stop is reported beside a dev server that did, not instead.
+  if (options.eas && finishing && lock != null) {
+    await waitForEasOpenAsync(projectRoot, lock.pid, startedAt + options.timeoutMs);
+  }
   const cloud = options.eas ? await stopCloudSessionsAsync(projectRoot) : null;
   if (cloud) report.session = cloud.session;
   const devServerOk = report.stopped || report.reason === 'not-running';
@@ -309,6 +309,17 @@ async function stopLockedDevServerAsync(
     followups: [],
   };
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the dev server is already
+  // gone, and the pid waits for its session start to return the id it binds. Nothing is signalled:
+  // SIGKILL would lose that id.
+  if (lock.phase === 'finishing') {
+    base.stopped = true;
+    base.processStillRunning = isProcessAlive(lock.pid);
+    base.portStillAnswering = !(await isPortFreeAsync(lock.port));
+    base.waitedMs = Date.now() - startedAt;
+    return { report: base, finishing: true };
+  }
+
   // A signal that cannot be delivered is not a failure to stop: a lock answering for a pid that
   // is gone is the one case the socket cannot produce on its own, but a lock held by a *different*
   // user's process can, and `ESRCH` there means the thing is already not running.
@@ -327,9 +338,8 @@ async function stopLockedDevServerAsync(
     base.stopped = true;
     return { report: base, finishing: false };
   }
-  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — a `dev --eas` run released
-  // its lock and port, so its dev server is gone. The pid is finishing its exit work: it waits for
-  // its session start to return the id it binds. SIGKILL would lose that id.
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the run's lock says
+  // `finishing`: its dev server is gone, and the pid waits for its session start.
   if (outcome.finishing) {
     base.stopped = true;
     return { report: base, finishing: true };
@@ -513,15 +523,13 @@ interface StopOutcome {
   lockGone: boolean;
   /** Nothing answered `/status` on the port. Secondary: the port is not the process. */
   portFree: boolean;
-  /**
-   * A `dev --eas` lock is gone and its port is free, and the pid stayed alive through the grace
-   * period: the process is finishing its exit work.
-   */
+  /** The pid's lock answers `finishing`: its dev server is gone, and it binds its session. */
   finishing: boolean;
 }
 
 /**
- * Poll until the signalled process and the lock have both gone, or the budget runs out.
+ * Poll until the signalled process and the lock have both gone, the lock says `finishing`, or the
+ * budget runs out.
  *
  * For an ordinary run the port never gates the answer. It used to: "stopped" meant the lock and
  * the port had both gone quiet, which reads as caution and is a wrong answer whenever anything else
@@ -532,27 +540,21 @@ interface StopOutcome {
  * The lock stays in the condition because it is about this project rather than about the port
  * number: while it answers, another command would still be pointed at a dev server here.
  *
- * One exception, for a lock that names an EAS platform: lock gone, port free and the pid alive
- * after {@link FINISHING_GRACE_MS} (or at the deadline, when that comes first) is a `dev --eas`
- * process finishing its exit work, and the wait ends there.
+ * A lock of the same pid that answers `finishing` ends the wait too: the run's dev server is gone,
+ * and the pid binds the session its start returns.
  * @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
  */
 async function waitForStopAsync(lock: DevServerLockInfo, timeoutMs: number): Promise<StopOutcome> {
-  const startedAt = Date.now();
-  const deadline = startedAt + timeoutMs;
+  const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const [lockGone, portFree] = await Promise.all([
+    const [lockGone, current, portFree] = await Promise.all([
       isDevServerLockHeldAsync(lock.projectRoot).then((held) => !held),
+      readDevServerLockAsync(lock.projectRoot),
       isPortFreeAsync(lock.port),
     ]);
     const processGone = !isProcessAlive(lock.pid);
     const atDeadline = Date.now() + POLL_INTERVAL_MS >= deadline;
-    const finishing =
-      lock.easPlatform != null &&
-      lockGone &&
-      portFree &&
-      !processGone &&
-      (atDeadline || Date.now() - startedAt >= FINISHING_GRACE_MS);
+    const finishing = current?.pid === lock.pid && current.phase === 'finishing';
     const outcome = { processGone, lockGone, portFree, finishing };
     if ((processGone && lockGone) || finishing || atDeadline) {
       return outcome;
@@ -576,6 +578,22 @@ async function waitForForcedStopAsync(
     if (Date.now() + POLL_INTERVAL_MS >= deadline) {
       return { processGone, portFree: await isPortFreeAsync(port) };
     }
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+  }
+}
+
+/**
+ * Wait until the finishing run `pid` says its EAS open returned, or lets go of its lock.
+ *
+ * @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions — the run binds the session
+ * inside its open, so after this a `--eas` stop finds that session. At the deadline it stops what
+ * it finds.
+ */
+async function waitForEasOpenAsync(projectRoot: string, pid: number, deadline: number) {
+  for (;;) {
+    const current = await readDevServerLockAsync(projectRoot);
+    if (current?.pid !== pid || current.easOpenFinished) return;
+    if (Date.now() + POLL_INTERVAL_MS >= deadline) return;
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
   }
 }
@@ -623,8 +641,8 @@ export function looksLikeDevServerProcess(listener: PortListener): boolean {
 }
 
 /**
- * @param finishing the stopped `dev --eas` run's process is finishing its exit work: it released
- * its lock and port, and binds the session its start returns after this report.
+ * @param finishing the stopped `dev --eas` run's lock answers `finishing`: its dev server is gone,
+ * and it binds the session its start returns after this report.
  */
 export function buildFollowUps(report: DevStopResultJson, finishing = false): FollowUp[] {
   const cloudRows = report.devices?.filter((d) => d.backend === 'cloud') ?? [];
@@ -700,7 +718,7 @@ function keptSessionFollowUp(
   // A `dev:stop --eas` that already ran reported a session and asked the listing.
   if (finishing && report.session == null)
     return easStopFollowUp(
-      `pid ${report.pid} is still finishing its exit work. A \`dev --eas\` run binds the session its start returns, and that session bills until this ends it.`
+      `pid ${report.pid} is still starting its EAS Simulator session and binds it to this worktree when the start returns. A session it keeps bills until this ends it.`
     );
   return null;
 }
@@ -754,7 +772,7 @@ function printHumanReport(report: DevStopResultJson, finishing: boolean): void {
   if (finishing && report.pid != null) {
     lines.push(
       chalk.dim(
-        ` pid ${report.pid} released the dev-server lock and its port, and is finishing its exit work (an EAS session start can take minutes). It exits by itself.`
+        ` pid ${report.pid} has no dev server any more, and is finishing its EAS session start (it can take minutes). It exits by itself.`
       )
     );
   }

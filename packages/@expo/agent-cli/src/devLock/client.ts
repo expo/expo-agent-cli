@@ -129,7 +129,7 @@ export async function probeDevServerLockAsync(
 /**
  * Parse one lock line into the info it names, or null.
  *
- * Every field but `easPlatform` is required. A partial answer is treated as no answer, because
+ * Every field but `easPlatform`, `easOpenFinished` and `phase` is required. A partial answer is treated as no answer, because
  * the point of the lock is that what a reader gets is complete and current — half of it is
  * neither.
  */
@@ -149,10 +149,8 @@ function parseLockLine(answer: string): DevServerLockInfo | null {
     return null;
   }
 
-  const { url, port, pid, startedAt, projectRoot, easPlatform, easOpenFinished } = parsed as Record<
-    string,
-    unknown
-  >;
+  const { url, port, pid, startedAt, projectRoot, easPlatform, easOpenFinished, phase } =
+    parsed as Record<string, unknown>;
   if (
     typeof url !== 'string' ||
     typeof port !== 'number' ||
@@ -163,7 +161,8 @@ function parseLockLine(answer: string): DevServerLockInfo | null {
   ) {
     return null;
   }
-  // Optional on the wire: a lock held by an older CLI names no EAS platform and no finished open.
+  // Optional on the wire: a lock held by an older CLI names no EAS platform, no finished open and
+  // no phase, and an older CLI took its lock only while it served.
   return {
     url,
     port,
@@ -172,5 +171,6 @@ function parseLockLine(answer: string): DevServerLockInfo | null {
     projectRoot,
     easPlatform: easPlatform === 'ios' || easPlatform === 'android' ? easPlatform : null,
     easOpenFinished: easOpenFinished === true,
+    phase: phase === 'building' || phase === 'finishing' ? phase : 'serving',
   };
 }
