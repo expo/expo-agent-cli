@@ -6,7 +6,6 @@ import { loopbackPortOfUrl } from '../navigate/adbReverse';
 import type { DevServerLockInfo } from '../devLock';
 import { withDevServerPort } from '../dev/forwardedArgs';
 import type { LastDevRequest } from '../dev/lastRequest';
-import { deviceCommand } from '../deviceBinding/errors';
 import type { BindingSummary } from '../deviceBinding/summary';
 import type { DevicePlatform } from '../deviceBinding/types';
 import type { LastBuildRecord } from '../plan/lastBuild';
@@ -184,10 +183,15 @@ export function chooseNextAction({
     recoveryPlan
   );
   const easServer = ownServer?.easPlatform === platform ? ownServer : null;
-  const backend = easServer
-    ? 'eas'
-    : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
-  const port = easServer?.port ?? recoveryPort;
+  const bound = bindings ? bindings.filter((e) => e.platform === platform) : [];
+  const liveBound = bound.some((entry) => Date.parse(entry.expiresAt) > host.now);
+  const expiredSession =
+    cloud.length === 0 && !liveBound && expiredCloud.find((entry) => entry.platform === platform);
+  const backend =
+    easServer || expiredSession
+      ? 'eas'
+      : (request?.buildBackend ?? (devNext.command.includes(' --eas') ? 'eas' : null));
+  const port = ownServer?.port ?? recoveryPort;
   const devArgs = [
     ...(backend ? [`--${backend}`] : []),
     ...(request?.runTarget ? [request.runTarget === 'expo-go' ? '--go' : '--dev-client'] : []),
@@ -211,7 +215,7 @@ export function chooseNextAction({
     // @ref llp/0021-honest-reports.rfc.md §How they show up
     next = {
       ...devNext,
-      command: `${stopFirst}${deviceCommand(expiredSession.platform, { eas: true })}`,
+      command: `${stopFirst}${devCommand}`,
       why: `The lease on the bound ${expiredSession.platform} EAS Simulator session ${expiredSession.id} expired. This command binds a session again.`,
     };
   } else if (
