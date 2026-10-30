@@ -78,8 +78,10 @@ it.each([
         { reject: false }
       );
       expect(result.exitCode, result.all).toBe(1);
-      expect(JSON.parse(result.stdout).error.code).toBe('NO_APP_CONNECTED');
-      expect(result.stdout).toContain(otherRoot);
+      const { error } = JSON.parse(result.stdout);
+      expect(error.code).toBe('NO_APP_CONNECTED');
+      // Read from the parsed message: JSON escapes a Windows path's backslashes.
+      expect(error.message).toContain(otherRoot);
     } finally {
       await server.close();
     }
