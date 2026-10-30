@@ -19,8 +19,6 @@
 // nobody can find, because only one of them can hold the lock that names it.
 
 import type { PlanPlatform } from '../plan/types';
-import { otherPlatformSessionError } from '../device/cloudErrors';
-import { otherPlatformSessionAsync } from './openAppEas';
 import { reopenEasAsync } from './reopenEas';
 import fs from 'fs';
 import type { ChildProcess } from 'child_process';
@@ -321,16 +319,7 @@ export async function devDetachAsync(
     });
   }
 
-  // @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree — the refusal is the
-  // exit code. Spawn path only: on a running server the reopen above throws the same refusal.
   const easPlatform = easOpenPlatform(options);
-  const other = easPlatform ? await otherPlatformSessionAsync(projectRoot, easPlatform) : null;
-  if (easPlatform && other)
-    throw otherPlatformSessionError(other.platform, {
-      wanted: easPlatform,
-      sessionId: other.sessionId,
-      devServerRunning: false,
-    });
   // The session bound before the spawn, expired or not, is the one the child reuses and renews.
   const keptSessionId = easPlatform ? knownSessionIdSync(projectRoot, easPlatform) : null;
 
@@ -701,7 +690,14 @@ function relayedChildError(verdict: DetachedChildVerdict | null): CommandError |
   if (verdict == null || !isRelayedChildCode(verdict.code)) {
     return null;
   }
-  const error = new CommandError(verdict.code, verdict.message.replace(/^[A-Za-z]*Error: /, ''));
+  const message = verdict.message.replace(/^[A-Za-z]*Error: /, '');
+  const scenario = verdict.scenario ? findNeedsHumanScenario(verdict.scenario) : null;
+  const error = scenario
+    ? needsHumanErrorFrom(needsHumanOf(scenario, { detectedBy: 'detached-child-log' }), {
+        message,
+        code: verdict.code,
+      })
+    : new CommandError(verdict.code, message);
   error.exitCode = verdict.exitCode ?? EXIT_OUTCOME_FAILED;
   if (verdict.data) {
     error.data = verdict.data;

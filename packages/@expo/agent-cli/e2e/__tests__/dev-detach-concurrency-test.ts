@@ -29,6 +29,7 @@ import {
   installStubEmulatorAsync,
   killBoundEmulatorsAsync,
 } from './installedAppStubs';
+import { installStubEasAsync, stubEasArgs, writeCloudSessionFileAsync } from '../stubEas';
 
 async function fixture() {
   const root = await setupFixtureAsync('go-app');
@@ -315,65 +316,73 @@ it('a blocked startup in one worktree does not prevent a second worktree from st
   }
 });
 
-it.skipIf(process.platform !== 'darwin')(
-  'retains ownership while a local app download outlives Metro',
-  async () => {
-    const f = await fixture();
-    const { binDir, calls } = await installStubXcrunAsync(f.root, {
-      simulators: [{ udid: 'E2E-OPEN-OWNER', name: 'owner-sim', state: 'Booted' }],
-      expoGoMissing: true,
-    });
-    const downloading = path.join(f.root, 'downloading');
-    const release = path.join(f.root, 'release-download');
-    const script = path.join(binDir, 'download.cjs');
-    fs.writeFileSync(
-      script,
-      `const fs = require('fs');
+it
+  .skipIf(process.platform === 'win32')
+  .each(
+    (['ios', 'android'] as const).filter(
+      (platform) => platform === 'android' || process.platform === 'darwin'
+    )
+  )('retains ownership while a local %s app download outlives Metro', async (platform) => {
+  const f = await fixture();
+  const binDir = path.join(f.root, '.stub-bin');
+  const device =
+    platform === 'ios'
+      ? await installStubXcrunAsync(f.root, {
+          simulators: [{ udid: 'E2E-OPEN-OWNER', name: 'owner-sim', state: 'Booted' }],
+          expoGoMissing: true,
+        })
+      : await installStubAdbAsync(f.root, 'host.exp.exponent');
+  const deviceEnv = 'env' in device ? { ...device.env, STUB_ADB_INSTALLED: '0' } : {};
+  const downloading = path.join(f.root, 'downloading');
+  const release = path.join(f.root, 'release-download');
+  const script = path.join(binDir, 'download.cjs');
+  fs.writeFileSync(
+    script,
+    `const fs = require('fs');
        fs.writeFileSync(${JSON.stringify(downloading)}, '');
        const timer = setInterval(() => {
          if (!fs.existsSync(${JSON.stringify(release)})) return;
          clearInterval(timer);
          process.stdout.write(JSON.stringify({path: ${JSON.stringify(f.root)}}));
        }, 20);`
-    );
-    await installStubBinAsync(binDir, 'npx', script);
-    f.release();
-    const parent = spawnAgentCli(
-      f.root,
-      ['dev', '--ios', '--go', '--local', '--detach', '--wait-ready', '--json'],
-      { env: { ...f.env, ...pathEnvVars(binDir), AGENT_CLI_NO_DEVICE: '0' } }
-    );
-    const finished = waitForExitAsync(parent, collectOutput(parent));
-    try {
-      expect(await waitForAsync(() => fs.existsSync(downloading), 15_000)).toBe(true);
-      const owner = await readDevLockAsync(f.root);
-      expect(owner).not.toBeNull();
-      const stop = await executeAgentCliAsync(f.root, ['dev:stop', '--timeout', '1s', '--json'], {
-        reject: false,
-      });
-      expect(stop.exitCode, stop.all).toBe(20);
-      expect(await readDevLockAsync(f.root)).toBeNull();
-      const retry = await f.start().result;
-      expect(retry.exitCode, retry.all).toBe(20);
-      expect(JSON.parse(retry.stdout).error).toMatchObject({
-        code: 'DEV_START_BUSY',
-        data: { pid: owner!.pid },
-      });
-      fs.writeFileSync(release, '');
-      expect(
-        await waitForAsync(() => f.marks('exited').includes(`exited-${owner!.pid}`), 15_000)
-      ).toBe(true);
-      expect(calls().filter((args) => args[1] === 'install')).toHaveLength(1);
-      const restarted = await f.start().result;
-      expect(restarted.exitCode, restarted.all).toBe(0);
-    } finally {
-      fs.writeFileSync(release, '');
-      await killAsync(parent, 'SIGKILL');
-      await finished;
-      await f.cleanup();
-    }
+  );
+  await installStubBinAsync(binDir, 'npx', script);
+  f.release();
+  const parent = spawnAgentCli(
+    f.root,
+    ['dev', `--${platform}`, '--go', '--local', '--detach', '--wait-ready', '--json'],
+    { env: { ...f.env, ...pathEnvVars(binDir), ...deviceEnv, AGENT_CLI_NO_DEVICE: '0' } }
+  );
+  const finished = waitForExitAsync(parent, collectOutput(parent));
+  try {
+    expect(await waitForAsync(() => fs.existsSync(downloading), 15_000)).toBe(true);
+    const owner = await readDevLockAsync(f.root);
+    expect(owner).not.toBeNull();
+    const stop = await executeAgentCliAsync(f.root, ['dev:stop', '--timeout', '1s', '--json'], {
+      reject: false,
+    });
+    expect(stop.exitCode, stop.all).toBe(20);
+    expect(await readDevLockAsync(f.root)).toBeNull();
+    const retry = await f.start().result;
+    expect(retry.exitCode, retry.all).toBe(20);
+    expect(JSON.parse(retry.stdout).error).toMatchObject({
+      code: 'DEV_START_BUSY',
+      data: { pid: owner!.pid },
+    });
+    fs.writeFileSync(release, '');
+    expect(
+      await waitForAsync(() => f.marks('exited').includes(`exited-${owner!.pid}`), 15_000)
+    ).toBe(true);
+    expect(device.calls().filter((args) => args.includes('install'))).toHaveLength(1);
+    const restarted = await f.start().result;
+    expect(restarted.exitCode, restarted.all).toBe(0);
+  } finally {
+    fs.writeFileSync(release, '');
+    await killAsync(parent, 'SIGKILL');
+    await finished;
+    await f.cleanup();
   }
-);
+});
 
 it('releases ownership after a normal startup failure so another attempt can succeed', async () => {
   const f = await fixture();
@@ -684,6 +693,86 @@ it.each(['ios', 'android'] as const)(
       expect(() => process.kill(child.pid!, 0)).not.toThrow();
     } finally {
       await killAsync(child, 'SIGKILL');
+      await f.cleanup();
+    }
+  }
+);
+
+// EAS preflight must belong to the elected child, including requests that cannot link.
+it.each(['ios', 'android'] as const)(
+  'an EAS %s contender does no config or session work',
+  async (platform) => {
+    const f = await fixture();
+    try {
+      f.start();
+      expect(await waitForAsync(() => f.marks('blocked').length === 1, 15_000)).toBe(true);
+      await installStubEasAsync(f.root);
+      await writeCloudSessionFileAsync(f.root, 'other-platform');
+      const config = path.join(f.root, 'preflight.json');
+      for (const linked of [false, true]) {
+        fs.writeFileSync(
+          config,
+          JSON.stringify(
+            linked
+              ? { name: 'test', slug: 'test', extra: { eas: { projectId: 'project' } } }
+              : { name: 'test', slug: 'test' }
+          )
+        );
+        const result = await executeAgentCliAsync(
+          f.root,
+          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
+          {
+            reject: false,
+            env: { ...f.env, STUB_EXPO_CONFIG_JSON: config },
+          }
+        );
+        expect(result.exitCode, result.all).toBe(20);
+        expect(JSON.parse(result.stdout).error.code).toBe('DEV_START_BUSY');
+        expect(readStubExpoInvocations(f.root)).toHaveLength(0);
+        expect(stubEasArgs(f.root)).toHaveLength(0);
+      }
+    } finally {
+      await f.cleanup();
+    }
+  }
+);
+
+it.each(['ios', 'android'] as const)(
+  'EAS %s preflight survives its parent and preserves linking guidance',
+  async (platform) => {
+    const f = await fixture();
+    const config = path.join(f.root, 'preflight.json');
+    fs.writeFileSync(config, JSON.stringify({ name: 'test', slug: 'test' }));
+    const env = { ...f.env, STUB_EXPO_CONFIG_JSON: config, DETACH_TEST_CONFIG_FILE: config };
+    const args = ['dev', `--${platform}`, '--eas', '--detach', '--json'];
+    const parent = spawnAgentCli(f.root, args, { env });
+    const finished = waitForExitAsync(parent, collectOutput(parent));
+    try {
+      expect(await waitForAsync(() => f.marks('config').length === 1, 15_000)).toBe(true);
+      parent.kill('SIGKILL');
+      await finished;
+      const contender = await executeAgentCliAsync(f.root, args, { env, reject: false });
+      expect(contender.exitCode, contender.all).toBe(20);
+      expect(JSON.parse(contender.stdout).error.code).toBe('DEV_START_BUSY');
+      expect(f.marks('config')).toHaveLength(1);
+      fs.writeFileSync(path.join(f.barrier, 'release-config'), '');
+      expect(
+        await waitForAsync(() => f.marks('exited').length === f.marks('child').length, 15_000)
+      ).toBe(true);
+      const unlinked = await executeAgentCliAsync(f.root, args, { env, reject: false });
+      expect(unlinked.exitCode, unlinked.all).toBe(7);
+      expect(JSON.parse(unlinked.stdout).error).toMatchObject({
+        code: 'EAS_PROJECT_NOT_LINKED',
+        needsHuman: { scenario: 'eas-project-unlinked' },
+      });
+      expect(JSON.parse(unlinked.stdout).error.message).toContain('init --id');
+      expect(
+        readStubExpoInvocations(f.root).filter(({ args }) => args[0] === 'start')
+      ).toHaveLength(0);
+    } finally {
+      fs.writeFileSync(path.join(f.barrier, 'release-config'), '');
+      await killAsync(parent, 'SIGKILL');
+      await finished;
       await f.cleanup();
     }
   }

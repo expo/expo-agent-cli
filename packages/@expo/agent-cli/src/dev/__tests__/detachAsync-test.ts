@@ -20,7 +20,6 @@ import * as Log from '../../log';
 import { waitForBundlerReadyAsync, type BundlerReadyResult } from '../../runtime/waitReady';
 import { logCmdError, type CommandError } from '../../utils/errors';
 import { fetchAdvertisedUrlAsync } from '../advertisedUrl';
-import { otherPlatformSessionAsync } from '../openAppEas';
 import { reopenEasAsync } from '../reopenEas';
 import { devDetachAsync, OPEN_PLATFORM_GRACE_MS } from '../detachAsync';
 import { publishDetachedLog } from '../logFile';
@@ -43,10 +42,6 @@ vi.mock('../../deviceBinding', async (importOriginal) => ({
 }));
 vi.mock('../../runtime/waitReady', () => ({ waitForBundlerReadyAsync: vi.fn() }));
 vi.mock('../reopenEas', () => ({ reopenEasAsync: vi.fn() }));
-vi.mock('../openAppEas', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../openAppEas')>()),
-  otherPlatformSessionAsync: vi.fn(),
-}));
 vi.mock('../processLiveness', () => ({ isProcessAlive: vi.fn() }));
 vi.mock('../events', () => ({ event: vi.fn() }));
 vi.mock('../../events', () => ({ event: vi.fn() }));
@@ -119,50 +114,6 @@ afterEach(() => {
   vi.useRealTimers();
   vi.resetAllMocks();
   vol.reset();
-});
-
-// @ref llp/0035-one-device-per-worktree.rfc.md §One session per worktree
-describe('--eas on the other platform', () => {
-  const detach = () =>
-    devDetachAsync(projectRoot, resolveDevOptions(['--android', '--eas', '--detach']), {
-      print: false,
-      reuseBoundDevice: true,
-    });
-
-  it('refuses with the dev --detach reuse command, since no server runs yet', async () => {
-    vi.mocked(otherPlatformSessionAsync).mockResolvedValue({
-      platform: 'ios',
-      sessionId: 'sess-ios',
-    });
-
-    await expect(detach()).rejects.toMatchObject({
-      code: 'CLOUD_SIMULATOR_PLATFORM_MISMATCH',
-      message: expect.stringContaining('dev --ios --eas --detach'),
-    });
-  });
-
-  it('spawns the child when nothing points at another platform', async () => {
-    vi.mocked(otherPlatformSessionAsync).mockResolvedValue(null);
-
-    const result = detach();
-    await vi.runAllTimersAsync();
-    await expect(result).resolves.toBe(0);
-
-    expect(otherPlatformSessionAsync).toHaveBeenCalledWith(projectRoot, 'android');
-    expect(spawn).toHaveBeenCalledTimes(1);
-  });
-
-  it('asks nothing for a run that opens no app', async () => {
-    const result = devDetachAsync(
-      projectRoot,
-      resolveDevOptions(['--android', '--eas', '--detach', '--no-open']),
-      { print: false }
-    );
-    await vi.runAllTimersAsync();
-    await expect(result).resolves.toBe(0);
-
-    expect(otherPlatformSessionAsync).not.toHaveBeenCalled();
-  });
 });
 
 function run() {
@@ -1104,7 +1055,6 @@ describe('the EAS session under --wait-ready', () => {
   };
 
   beforeEach(() => {
-    vi.mocked(otherPlatformSessionAsync).mockResolvedValue(null);
     vi.mocked(readDevServerLockAsync)
       .mockReset()
       .mockResolvedValueOnce(null)
