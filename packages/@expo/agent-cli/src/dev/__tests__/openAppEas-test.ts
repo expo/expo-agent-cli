@@ -345,27 +345,36 @@ describe(openAppOnEasAsync, () => {
   );
 
   // The wait is injected: the real one is two minutes, which no e2e run can afford.
+  // The session is looked for before the wait: one that is up is found and kept, so it stays bound.
   it.each([
-    ['a session that is up', cloudProbe.active({ id: 'sess-up', platform: 'ios' })],
-    ['no session', cloudProbe.none()],
-  ])('gives up when the dev server advertises no tunnel inside the wait (%s)', async (_, probe) => {
-    vi.mocked(probeCloudSessionAsync).mockResolvedValue(probe);
-    mockTunnel(null);
+    {
+      name: 'a session that is up',
+      probe: cloudProbe.active({ id: 'sess-up', platform: 'ios' }),
+      sessionId: 'sess-up',
+    },
+    { name: 'no session', probe: cloudProbe.none(), sessionId: null },
+  ])(
+    'gives up when the dev server advertises no tunnel inside the wait ($name)',
+    async ({ probe, sessionId }) => {
+      vi.mocked(probeCloudSessionAsync).mockResolvedValue(probe);
+      mockTunnel(null);
 
-    const report = await openAppOnEasAsync(projectRoot, {
-      platform: 'ios',
-      expoGo: true,
-      devServerUrl: DEV_SERVER,
-      buildId: null,
-      keepSession: true,
-      waits: { tunnelMs: 1 },
-    });
+      const report = await openAppOnEasAsync(projectRoot, {
+        platform: 'ios',
+        expoGo: true,
+        devServerUrl: DEV_SERVER,
+        buildId: null,
+        keepSession: true,
+        waits: { tunnelMs: 1 },
+      });
 
-    expect(report).toMatchObject({ opened: false, started: false });
-    expect(report.reason).toContain('advertised no tunnel host');
-    expect(openRouteAsync).not.toHaveBeenCalled();
-    expect(spawnCaptureAsync).not.toHaveBeenCalled();
-  });
+      expect(report).toMatchObject({ opened: false, started: false, sessionId });
+      expect(report.reason).toContain('advertised no tunnel host');
+      expect(probeCloudSessionAsync).toHaveBeenCalled();
+      expect(openRouteAsync).not.toHaveBeenCalled();
+      expect(spawnCaptureAsync).not.toHaveBeenCalled();
+    }
+  );
 
   it(`stops quietly when the dev server is gone before the tunnel came up`, async () => {
     mockTunnel(null);
