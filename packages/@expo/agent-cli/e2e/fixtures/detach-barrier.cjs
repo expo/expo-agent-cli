@@ -66,3 +66,20 @@ if (process.env.__EXPO_AGENT_CLI_DETACHED === '1' && process.argv[2] === 'dev') 
     return readFile.call(this, file, ...args);
   };
 }
+
+// Hold the external config reader, not a CLI module, while the caller can be killed.
+if (process.env.DETACH_TEST_CONFIG_FILE) {
+  const read = fs.readFileSync;
+  fs.readFileSync = function (file, ...args) {
+    if (String(file) === process.env.DETACH_TEST_CONFIG_FILE) {
+      const directory = process.env.DETACH_TEST_BARRIER;
+      fs.writeFileSync(path.join(directory, `config-${process.pid}`), '');
+      const deadline = Date.now() + 30_000;
+      while (!fs.existsSync(path.join(directory, 'release-config'))) {
+        if (Date.now() > deadline) throw new Error('Test did not release EAS config');
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+      }
+    }
+    return read.call(this, file, ...args);
+  };
+}

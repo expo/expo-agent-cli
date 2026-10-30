@@ -113,9 +113,6 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   if (options.device !== undefined && boundPlatform(options) == null) {
     throw deviceNotBindableError(options);
   }
-  if (options.mode !== 'plan' && options.deviceBackend === 'eas') {
-    await assertEasProjectConfiguredAsync(projectRoot);
-  }
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — before the probe, because
   // the child does the probe: this run's whole job is to start that child and report on it. It
@@ -123,6 +120,10 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   if (options.detach) {
     const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
     return await devDetachAsync(projectRoot, options, { reuseBoundDevice: true });
+  }
+
+  if (!options.detachedChild && options.mode !== 'plan' && options.deviceBackend === 'eas') {
+    await assertEasProjectConfiguredAsync(projectRoot);
   }
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §A busy port — one dev server per project.
@@ -664,6 +665,7 @@ async function executePlanAsync(
         );
       }
       stepRunning = true;
+      let localOpen: Promise<void> | undefined;
       const easPlatform = opensApp ? easOpenPlatform(options) : null;
       const eas = easPlatform
         ? easRunLifecycle(projectRoot, {
@@ -694,7 +696,7 @@ async function executePlanAsync(
                 eas.open({ devServerUrl: server.url, stillWanted, buildId: easBuildId });
                 void eas.finished.then(markEasOpenFinished);
               } else
-                void openAppForRunAsync(
+                localOpen = openAppForRunAsync(
                   projectRoot,
                   plan,
                   options,
@@ -706,7 +708,8 @@ async function executePlanAsync(
           : undefined,
       }).finally(async () => {
         stepRunning = false;
-        await eas?.finishAsync();
+        // Ownership includes any download/install still finishing after Metro stops.
+        await Promise.all([localOpen, eas?.finishAsync()]);
       });
     };
 

@@ -15,6 +15,11 @@ import path from 'node:path';
 
 import {
   executeAgentCliAsync,
+  spawnAgentCli,
+  collectOutput,
+  waitForExitAsync,
+  killAsync,
+  fixturesDir,
   holdDevLockAsync,
   installStubFingerprintAsync,
   readDevLockAsync,
@@ -117,63 +122,90 @@ describe('@expo/agent-cli dev --detach', () => {
     'follows its lock away from a %s status endpoint before reporting ready',
     async (answer) => {
       const projectRoot = await setupFixtureAsync('go-app');
-      const own = await startStubDevServerAsync({ projectRoot, statusDelayMs: 200 });
-      let moveTimer: ReturnType<typeof setTimeout> | undefined;
-      let oldRequestClosed = false;
-      const info = {
-        url: '',
-        port: 0,
-        pid: process.pid,
+      const barrier = path.join(projectRoot, '.barrier');
+      fs.mkdirSync(barrier);
+      const parent = spawnAgentCli(
         projectRoot,
-        startedAt: new Date().toISOString(),
-      };
-      const previous = http.createServer((request, response) => {
-        if (request.url !== '/status') {
-          response.writeHead(404).end();
-          return;
+        ['dev', '--web', '--detach', '--wait-ready', '--json'],
+        {
+          env: {
+            ...stubExpoEnv(projectRoot),
+            DETACH_TEST_BARRIER: barrier,
+            NODE_OPTIONS: `--require "${path.join(fixturesDir, 'detach-barrier.cjs').replaceAll('\\', '/')}"`,
+          },
         }
-        response.on('close', () => {
-          oldRequestClosed = true;
-        });
-        // Move only after the CLI has actually asked the old port, avoiding a startup-time race
-        // in the test itself. The lock payload is read anew for each connection.
-        moveTimer ??= setTimeout(() => Object.assign(info, { url: own.url, port: own.port }), 500);
-        if (answer === 'foreign') {
-          response.writeHead(200, {
-            'X-React-Native-Project-Root': encodeURI(path.join(projectRoot, '..', 'sibling')),
-          });
-          response.end('packager-status:running');
-        }
-      });
-      await new Promise<void>((resolve) => previous.listen(0, '127.0.0.1', resolve));
-      info.port = (previous.address() as net.AddressInfo).port;
-      info.url = `http://127.0.0.1:${info.port}`;
-      const release = await holdDevLockAsync(projectRoot, info);
+      );
+      const completed = waitForExitAsync(parent, collectOutput(parent));
+      const blocked = () => fs.readdirSync(barrier).find((name) => name.startsWith('blocked-'));
       try {
-        const result = await executeAgentCliAsync(
+        expect(await waitForAsync(() => blocked() != null, 15_000)).toBe(true);
+        const ownerPid = Number(blocked()!.slice('blocked-'.length));
+        const own = await startStubDevServerAsync({ projectRoot, statusDelayMs: 200 });
+        let moveTimer: ReturnType<typeof setTimeout> | undefined;
+        let oldRequestClosed = false;
+        const info = {
+          url: '',
+          port: 0,
+          pid: ownerPid,
           projectRoot,
-          ['dev', '--web', '--detach', '--wait-ready', '--json'],
-          { env: stubExpoEnv(projectRoot), reject: false }
-        );
-        expect(result.exitCode, result.all).toBe(0);
-        expect(JSON.parse(result.stdout)).toMatchObject({
-          url: own.url,
-          port: own.port,
-          pid: process.pid,
-          alreadyRunning: true,
-          ready: true,
-          projectRootMatched: true,
+          // Port publication has settled; this case tests the subsequent readiness wait.
+          startedAt: new Date(0).toISOString(),
+        };
+        const previous = http.createServer((request, response) => {
+          if (request.url !== '/status') {
+            response.writeHead(404).end();
+            return;
+          }
+          response.on('close', () => {
+            oldRequestClosed = true;
+          });
+          // Move only after the CLI has actually asked the old port, avoiding a startup-time race
+          // in the test itself. The lock payload is read anew for each connection.
+          moveTimer ??= setTimeout(
+            () => Object.assign(info, { url: own.url, port: own.port }),
+            500
+          );
+          if (answer === 'foreign') {
+            response.writeHead(200, {
+              'X-React-Native-Project-Root': encodeURI(path.join(projectRoot, '..', 'sibling')),
+            });
+            response.end('packager-status:running');
+          }
         });
-        expect(oldRequestClosed).toBe(true);
-        expect(readStubExpoInvocations(projectRoot)).toEqual([]);
-        // The CLI must neither stop nor reconfigure the foreign server while waiting.
-        expect(previous.listening).toBe(true);
+        await new Promise<void>((resolve) => previous.listen(0, '127.0.0.1', resolve));
+        info.port = (previous.address() as net.AddressInfo).port;
+        info.url = `http://127.0.0.1:${info.port}`;
+        const release = await holdDevLockAsync(projectRoot, info);
+        try {
+          const result = await completed;
+          expect(result.exitCode, result.all).toBe(0);
+          expect(JSON.parse(result.stdout)).toMatchObject({
+            url: own.url,
+            port: own.port,
+            pid: ownerPid,
+            alreadyRunning: false,
+            ready: true,
+            projectRootMatched: true,
+          });
+          expect(oldRequestClosed).toBe(true);
+          expect(readStubExpoInvocations(projectRoot)).toEqual([]);
+          // The CLI must neither stop nor reconfigure the foreign server while waiting.
+          expect(previous.listening).toBe(true);
+        } finally {
+          clearTimeout(moveTimer);
+          release();
+          previous.closeAllConnections();
+          await new Promise<void>((resolve) => previous.close(() => resolve()));
+          await own.close();
+        }
       } finally {
-        clearTimeout(moveTimer);
-        release();
-        previous.closeAllConnections();
-        await new Promise<void>((resolve) => previous.close(() => resolve()));
-        await own.close();
+        await killAsync(parent, 'SIGKILL');
+        for (const name of fs.readdirSync(barrier).filter((name) => name.startsWith('child-'))) {
+          const pid = Number(name.slice('child-'.length));
+          try {
+            process.kill(process.platform === 'win32' ? pid : -pid, 'SIGKILL');
+          } catch {}
+        }
       }
     }
   );

@@ -467,7 +467,7 @@ the parent keeps waiting for its own server. The missing-header compatibility ru
 reject a foreign root. Without the flag `ready` is `null`.
 
 One detached startup run per project, owned by its child before project probing. Overlapping
-detached starts follow that owner, even if its parent exits before a server exists. A live
+detached starts refuse with exit 20 and that owner's PID/log path, even if its parent exits before a server exists. A live
 server lock is also checked before spawning and again by the elected child. A project that
 already has a server gets it reported back with `alreadyRunning: true`;
 `--wait-ready` performs the same readiness check before exit 0, without spawning another
