@@ -467,6 +467,8 @@ for that port. A server that names another project's root, or none, still needs
 signalled, the reason is `untracked-dev-server`, and the exit is 20. The e2e cases "after a SIGKILL of a foreground dev" in
 `e2e/__tests__/stop-test.ts` enforce the stop, and the port the next `dev` takes.
 
+When the lock and the discovery both find nothing, the text report opens with `Dev server not running · nothing to stop` instead of a red `Stopped no`, and the detail names what was checked; `--json` keeps `stopped: false` and `reason: 'not-running'`.
+
 When `status` finds an untracked dev server and this worktree has a live cloud binding of origin `started`, the run that started both ended: the dev-server line says that its CLI process ended and the server has no owner (`ownerEnded: true` in `--json`), and `next` is `dev:stop --eas`, which stops the server and the session. A tracked server, or no such binding, changes nothing.
 
 The captured log of an untracked server may be an earlier run's, so `status` does not

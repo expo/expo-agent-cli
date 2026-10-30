@@ -145,7 +145,7 @@ describe('@expo/agent-cli dev:stop', () => {
 
   // @ref llp/0010-agent-conventions.rfc.md §Exit codes — the end state the caller asked for is
   // the state it is already in, so a second run must not read as a failure.
-  it('exits 0 when nothing was running', async () => {
+  it('exits 0 when nothing was running, and says so without a red "Stopped no"', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
 
     const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json']);
@@ -156,7 +156,15 @@ describe('@expo/agent-cli dev:stop', () => {
       pid: null,
       lockHeld: false,
       reason: 'not-running',
+      detail: expect.stringContaining(
+        'no dev server of this project answers on the ports status checks'
+      ),
     });
+
+    const text = await executeAgentCliAsync(projectRoot, ['dev:stop']);
+    expect(text.exitCode).toBe(0);
+    expect(text.stdout).toContain('Dev server not running · nothing to stop');
+    expect(text.stdout).not.toContain('Stopped');
   });
 
   // The one thing this command must not do by accident. A second project's dev server on the port
