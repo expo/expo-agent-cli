@@ -8,14 +8,14 @@ if (process.env.__EXPO_AGENT_CLI_DETACHED === '1' && process.argv[2] === 'dev') 
   const mark = (name) => fs.writeFileSync(path.join(directory, `${name}-${process.pid}`), '');
   mark('child');
   process.on('exit', () => mark('exited'));
-  const readFile = fs.promises.readFile;
-  fs.promises.readFile = async function (file, ...args) {
+  const readFile = fs.readFileSync;
+  fs.readFileSync = function (file, ...args) {
     if (String(file) === path.join(process.cwd(), 'app.json')) {
       mark('blocked');
       const deadline = Date.now() + 30_000;
       while (!fs.existsSync(path.join(directory, 'release'))) {
         if (Date.now() > deadline) throw new Error('Test did not release app-config barrier');
-        await new Promise((resolve) => setTimeout(resolve, 20));
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
       }
     }
     return readFile.call(this, file, ...args);
