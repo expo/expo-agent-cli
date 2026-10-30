@@ -132,6 +132,9 @@ jobs:
       - name: 🧪 E2E iOS device binding and Expo Go install
         run: bun run test:e2e -- dev-test smoke-test -t "two worktrees, two simulators|binding the device to boot"
         working-directory: packages/@expo/agent-cli
+      - name: 🧪 E2E reload beside a local simulator
+        run: bun run test:e2e -- runtime-target-selection-test
+        working-directory: packages/@expo/agent-cli
 
   # Windows unit coverage: `resolveSpawnTarget` and the win32 branches of the path helpers.
   # The win32 e2e run — including the skills linker's directory-junction path, which nothing
