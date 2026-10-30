@@ -33,6 +33,7 @@
 // - STUB_EAS_BUILD_EXIT / STUB_EAS_BUILD_STDERR: exit code, and what goes to stderr first — where
 //   the real CLI puts its auth refusal and its prompt stops
 // - STUB_EAS_BUILD_ID: the id of the build it reports (default `build-e2e`)
+// - STUB_EAS_BUILD_DELAY_MS: how long the build waits before it finishes, as `--wait` does
 //   With `--json` it prints the array of `BuildFragment` the real command prints after `--wait`.
 //   A finished build is **remembered** in `stub-eas-builds.json` under the cwd, so a later
 //   `build:list` names it the way the service would — which is how `dev --eas` learns the id of
@@ -200,6 +201,15 @@ function stubBuild() {
 if (command === 'build') {
   if (process.env.STUB_EAS_BUILD_STDERR) {
     process.stderr.write(process.env.STUB_EAS_BUILD_STDERR + '\n');
+  }
+  if (process.env.STUB_EAS_BUILD_DELAY_MS) {
+    process.stdout.write('Waiting for build to complete.\n');
+    Atomics.wait(
+      new Int32Array(new SharedArrayBuffer(4)),
+      0,
+      0,
+      Number(process.env.STUB_EAS_BUILD_DELAY_MS)
+    );
   }
   const exitCode = Number(process.env.STUB_EAS_BUILD_EXIT || 0);
   if (exitCode !== 0) {

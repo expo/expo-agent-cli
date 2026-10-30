@@ -1,4 +1,4 @@
-import { DEFAULT_DETACH_TIMEOUT_MS } from '../resolveOptions';
+import { env } from '../../utils/env';
 import { CALLER_ARGV_ENV } from '../deviceOption';
 import { parseAgentCliSettings } from '../../settings/parse';
 import { resolveDevOptions } from '../resolveOptions';
@@ -20,7 +20,7 @@ describe(resolveDevOptions, () => {
       open: true,
       detach: false,
       waitReady: false,
-      detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
+      detachTimeoutMs: env.AGENT_CLI_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       callerArgv: expect.any(Array),
       detachedChild: false,
@@ -45,7 +45,7 @@ describe(resolveDevOptions, () => {
       open: true,
       detach: false,
       waitReady: false,
-      detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
+      detachTimeoutMs: env.AGENT_CLI_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       callerArgv: expect.any(Array),
       detachedChild: false,
@@ -73,7 +73,7 @@ describe(resolveDevOptions, () => {
       open: true,
       detach: false,
       waitReady: false,
-      detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
+      detachTimeoutMs: env.AGENT_CLI_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       callerArgv: expect.any(Array),
       detachedChild: false,
@@ -214,7 +214,7 @@ describe(resolveDevOptions, () => {
       open: true,
       detach: false,
       waitReady: false,
-      detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
+      detachTimeoutMs: env.AGENT_CLI_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       callerArgv: expect.any(Array),
       detachedChild: false,
@@ -242,7 +242,7 @@ describe(resolveDevOptions, () => {
       open: true,
       detach: false,
       waitReady: false,
-      detachTimeoutMs: DEFAULT_DETACH_TIMEOUT_MS,
+      detachTimeoutMs: env.AGENT_CLI_DETACH_TIMEOUT_MS,
       detachArgv: expect.any(Array),
       callerArgv: expect.any(Array),
       detachedChild: false,

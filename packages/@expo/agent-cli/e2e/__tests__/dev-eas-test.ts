@@ -662,6 +662,136 @@ describe('@expo/agent-cli dev --eas — the device on EAS', () => {
     }
   );
 
+  // @ref llp/0035-one-device-per-worktree.rfc.md §Preserved sessions
+  it.skipIf(process.platform === 'win32')(
+    'answers a dev:stop that comes after Metro exited while the session start runs',
+    async () => {
+      const script = await fs.promises.readFile(path.join(__dirname, '../stubs/eas.js'), 'utf8');
+      const projectRoot = await setupAsync('go-app', {
+        easScript: script.replace(
+          'const exitCode = Number(process.env.STUB_SIM_START_EXIT || 0);',
+          'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 8000); const exitCode = 0;'
+        ),
+      });
+      const logFile = path.join(projectRoot, '.expo', 'dev', 'logs', 'dev-detached.log');
+      try {
+        // A detached run keeps its session, so the session is the stop's to end.
+        const started = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--eas', '--detach', '--json'],
+          { env: { ...easRunEnv(projectRoot, 8587), STUB_EXPO_DELAY_MS: '2500' } }
+        );
+        const pid: number = JSON.parse(started.stdout).pid;
+        expect(
+          await waitForAsync(
+            () =>
+              fs.existsSync(logFile) &&
+              fs.readFileSync(logFile, 'utf8').includes('Finishing EAS session work'),
+            15_000
+          )
+        ).toBe(true);
+
+        const result = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+          env: stubExpoEnv(projectRoot),
+          reject: false,
+        });
+
+        expect(result.exitCode).toBe(0);
+        const report = JSON.parse(result.stdout);
+        // The dev server is gone; the pid finishes its session start, and nothing signals it.
+        expect(report).toMatchObject({
+          stopped: true,
+          reason: null,
+          pid,
+          lockHeld: true,
+          signal: null,
+          processStillRunning: true,
+          easPlatform: 'ios',
+        });
+        expect(report.followups[0].command).toMatch(/dev:stop --eas$/);
+
+        // `--eas` waits for the start, so it finds and stops the session the run binds.
+        const easStop = await executeAgentCliAsync(
+          projectRoot,
+          ['dev:stop', '--eas', '--json', '--timeout', '20s'],
+          { env: stubExpoEnv(projectRoot), reject: false }
+        );
+        expect(easStop.exitCode).toBe(0);
+        expect(JSON.parse(easStop.stdout).session).toMatchObject({
+          id: 'sess-e2e-started',
+          stopped: true,
+        });
+        expect(fs.existsSync(sessionBindingFile(projectRoot))).toBe(false);
+      } finally {
+        await executeAgentCliAsync(projectRoot, ['dev:stop', '--eas', '--json'], {
+          env: stubExpoEnv(projectRoot),
+          reject: false,
+        });
+      }
+    }
+  );
+
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization
+  it.skipIf(process.platform === 'win32')(
+    'reports a detached run that still builds on EAS, and a plain dev:stop stops it before Metro',
+    async () => {
+      const projectRoot = await setupAsync();
+      await writeSchemeAsync(projectRoot, 'devclient');
+      const env = {
+        ...easRunEnv(projectRoot, 8586),
+        STUB_EAS_BUILD_DELAY_MS: '60000',
+        AGENT_CLI_DETACH_TIMEOUT_MS: '3000',
+      };
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--eas', '--detach', '--json'],
+          { env, reject: false }
+        );
+
+        expect(result.exitCode).toBe(22);
+        const { error } = JSON.parse(result.stdout);
+        expect(error.code).toBe('DEV_DETACH_STILL_BUILDING');
+        expect(error.message).not.toContain('did not start');
+        const pid: number = error.data.pid;
+        expect(process.kill(pid, 0)).toBe(true);
+
+        // A second detach follows the building run and spawns no second child.
+        const again = await executeAgentCliAsync(
+          projectRoot,
+          ['dev', '--ios', '--eas', '--detach', '--json'],
+          { env, reject: false }
+        );
+        expect(again.exitCode).toBe(22);
+        expect(JSON.parse(again.stdout).error.data.pid).toBe(pid);
+        expect(easInvocationArgs(projectRoot).filter((args) => args[0] === 'build')).toHaveLength(
+          1
+        );
+
+        const stop = await executeAgentCliAsync(projectRoot, ['dev:stop', '--json'], {
+          env: stubExpoEnv(projectRoot),
+          reject: false,
+        });
+        expect(stop.exitCode).toBe(0);
+        expect(JSON.parse(stop.stdout)).toMatchObject({ stopped: true, pid, lockHeld: true });
+        expect(
+          await waitForAsync(() => {
+            try {
+              process.kill(pid, 0);
+              return false;
+            } catch {
+              return true;
+            }
+          }, 10_000)
+        ).toBe(true);
+        // The interrupted build ended the plan: no dev server started after it.
+        expect(expoInvocationArgs(projectRoot).filter((args) => args[0] === 'start')).toEqual([]);
+      } finally {
+        await cleanUpAsync(projectRoot);
+      }
+    }
+  );
+
   it('starts a session running Expo Go for a project Expo Go can run, and builds nothing', async () => {
     const projectRoot = await setupAsync('go-app');
 
