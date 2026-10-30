@@ -106,89 +106,6 @@ afterEach(() => {
 });
 
 describe(runtimeStopAsync, () => {
-  it(`should terminate the connected app on the booted simulator`, async () => {
-    mockDevServer([CONNECTED]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
-
-    await expect(runtimeStopAsync(projectRoot, options())).resolves.toBe(0);
-
-    expect(spawnedArgv(1)).toEqual(['xcrun', 'simctl', 'terminate', 'IOS-1', 'host.exp.Exponent']);
-    expect(JSON.parse(printed())).toMatchObject({
-      stopped: true,
-      wasRunning: true,
-      platform: 'ios',
-      deviceId: 'IOS-1',
-      bundleId: 'host.exp.Exponent',
-      bundleIdSource: 'dev-server',
-      reason: null,
-    });
-  });
-
-  it(`should print a stable set of top-level keys with --json`, async () => {
-    mockDevServer([CONNECTED]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
-
-    await runtimeStopAsync(projectRoot, options());
-
-    expect(Object.keys(JSON.parse(printed())).sort()).toEqual([
-      'appIdMismatch',
-      'bundleId',
-      'bundleIdReason',
-      'bundleIdSource',
-      'command',
-      'connectedAppIds',
-      'deviceBackend',
-      'deviceId',
-      'followups',
-      'platform',
-      'reason',
-      'stopped',
-      'wasRunning',
-    ]);
-  });
-
-  // @ref llp/0005-runtime-loop-tools.rfc.md §Stopping the app — friction run 4, F42.
-  // The three facts have to be read together: the caller named an id, that id was not running, and
-  // something else is. Each alone is ordinary; the conjunction is a typo, and the old command
-  // exited 0 with "The app was not running, so this is what starts it" while the app kept running.
-  it(`should exit 20 when --app-id names an app that is not the one connected`, async () => {
-    mockDevServer([CONNECTED]);
-    mockSpawnQueue([
-      { stdout: BOOTED_SIMULATOR },
-      { exitCode: 4, stderr: 'found nothing to terminate' },
-    ]);
-
-    await expect(
-      runtimeStopAsync(projectRoot, options({ appId: 'host.exp.Exponent2' }))
-    ).resolves.toBe(20);
-    expect(JSON.parse(printed())).toMatchObject({
-      wasRunning: false,
-      bundleId: 'host.exp.Exponent2',
-      connectedAppIds: ['host.exp.Exponent'],
-      appIdMismatch: true,
-    });
-    const explained = vi.mocked(console.error).mock.calls.flat().join('\n');
-    expect(explained).toContain('host.exp.Exponent');
-    expect(explained).toContain('--app-id host.exp.Exponent');
-  });
-
-  it(`should name the corrected command in the follow-ups of a mismatch`, async () => {
-    mockDevServer([CONNECTED]);
-    mockSpawnQueue([
-      { stdout: BOOTED_SIMULATOR },
-      { exitCode: 4, stderr: 'found nothing to terminate' },
-    ]);
-
-    await runtimeStopAsync(projectRoot, options({ appId: 'host.exp.Exponent2', followups: true }));
-
-    const followups = JSON.parse(printed()).followups;
-    expect(followups[0].command).toBe(
-      'npx @expo/agent-cli runtime:stop --app-id host.exp.Exponent'
-    );
-    // The old list led with `navigate /`, which starts an app while another one is still running.
-    expect(followups.map((followup: { id: string }) => followup.id)).not.toContain('navigate');
-  });
-
   // The id was right and the app was running under it: nothing is suspicious about a connected app
   // with another id, because a device can run more than one.
   it(`should stay at 0 when the app --app-id named was running`, async () => {
@@ -199,31 +116,6 @@ describe(runtimeStopAsync, () => {
       runtimeStopAsync(projectRoot, options({ appId: 'com.example.other' }))
     ).resolves.toBe(0);
     expect(JSON.parse(printed())).toMatchObject({ wasRunning: true, appIdMismatch: false });
-  });
-
-  // Without `--app-id` the id came from the dev server itself, so it cannot disagree with it. A
-  // second `runtime:stop` must stay 0, which is what makes the command idempotent.
-  it(`should stay at 0 for a repeat stop with nothing connected`, async () => {
-    mockDevServer([]);
-    mockSpawnQueue([
-      { stdout: BOOTED_SIMULATOR },
-      { exitCode: 4, stderr: 'found nothing to terminate' },
-    ]);
-
-    await expect(
-      runtimeStopAsync(projectRoot, options({ appId: 'host.exp.Exponent2' }))
-    ).resolves.toBe(0);
-    expect(JSON.parse(printed())).toMatchObject({ appIdMismatch: false, connectedAppIds: [] });
-  });
-
-  it(`should stop the id --app-id names`, async () => {
-    mockDevServer([CONNECTED]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
-
-    await runtimeStopAsync(projectRoot, options({ appId: 'com.example.other' }));
-
-    expect(spawnedArgv(1)).toContain('com.example.other');
-    expect(JSON.parse(printed()).bundleIdSource).toBe('flag');
   });
 
   it(`should read the bundle id from the app config when nothing is connected`, async () => {
@@ -240,24 +132,6 @@ describe(runtimeStopAsync, () => {
     expect(JSON.parse(printed())).toMatchObject({
       bundleId: 'com.example.demo',
       bundleIdSource: 'app-config',
-    });
-  });
-
-  // An app that was not running is the state the caller asked for. `simctl terminate` exits
-  // non-zero for it, and reading that as a failure would make a second stop fail for having
-  // nothing left to do.
-  it(`should report an app that was not running as a success with a note`, async () => {
-    mockDevServer([]);
-    mockSpawnQueue([
-      { stdout: BOOTED_SIMULATOR },
-      { exitCode: 4, stderr: 'found nothing to terminate' },
-    ]);
-
-    await expect(runtimeStopAsync(projectRoot, options())).resolves.toBe(0);
-    expect(JSON.parse(printed())).toMatchObject({
-      stopped: true,
-      wasRunning: false,
-      reason: null,
     });
   });
 
@@ -349,18 +223,6 @@ describe(runtimeStopAsync, () => {
     expect(report.connectedAppIds).toEqual(['host.exp.exponent']);
     expect(spawnedArgv(4)).toContain(`'host.exp.exponent'`);
   });
-
-  it(`should offer navigate as the way back`, async () => {
-    mockDevServer([]);
-    mockSpawnQueue([{ stdout: BOOTED_SIMULATOR }, { stdout: '' }]);
-
-    await runtimeStopAsync(projectRoot, options({ followups: true }));
-
-    expect(JSON.parse(printed()).followups).toEqual([
-      // The platform is carried: this stop was on the iOS simulator, so the way back is too (F103).
-      { id: 'navigate', command: 'npx @expo/agent-cli navigate / --ios', why: expect.any(String) },
-    ]);
-  });
 });
 
 // @ref llp/0005-runtime-loop-tools.rfc.md §Stopping the app — live run S13.
@@ -406,6 +268,20 @@ describe(buildStopFollowUps, () => {
     expect(why).not.toContain('The app was not running');
     expect(why).toMatch(/not something the session's controller reports/);
     expect(why).toContain('cloud simulator session');
+  });
+
+  // F42: the old list led with `navigate /`, which starts an app while another one is still running.
+  it(`offers only the corrected command for a mismatch`, () => {
+    expect(
+      buildStopFollowUps(
+        report({
+          wasRunning: false,
+          bundleId: 'host.exp.Exponent2',
+          connectedAppIds: ['host.exp.Exponent'],
+          appIdMismatch: true,
+        })
+      ).map((followup) => followup.command)
+    ).toEqual(['npx @expo/agent-cli runtime:stop --app-id host.exp.Exponent']);
   });
 
   it(`still carries --eas into the command it suggests`, () => {

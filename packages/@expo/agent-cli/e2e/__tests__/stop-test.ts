@@ -88,10 +88,12 @@ describe('@expo/agent-cli dev:stop', () => {
         stopped: true,
         pid: recorder.pid,
         port: 59999,
+        url: 'http://127.0.0.1:59999',
         lockHeld: true,
         signal: 'SIGTERM',
         forced: false,
         reason: null,
+        detail: null,
       });
       if (process.platform === 'win32') {
         // taskkill /F is TerminateProcess. POSIX signal handlers never run.
@@ -152,6 +154,8 @@ describe('@expo/agent-cli dev:stop', () => {
       lockHeld: false,
       reason: 'not-running',
     });
+    // No lock and no port to look at: the way to name one is the flag.
+    expect(JSON.parse(result.stdout).detail).toContain('--port');
   });
 
   // The one thing this command must not do by accident. A second project's dev server on the port
@@ -289,6 +293,14 @@ describe('@expo/agent-cli runtime:stop', () => {
         bundleId: 'host.exp.Exponent',
         bundleIdSource: 'dev-server',
         reason: null,
+        followups: [
+          // The platform is carried: this stop was on the iOS simulator, so the way back is too (F103).
+          {
+            id: 'navigate',
+            command: 'npx @expo/agent-cli navigate / --ios',
+            why: expect.any(String),
+          },
+        ],
       });
       expect(readXcrun()).toContainEqual([
         'simctl',
@@ -367,6 +379,15 @@ describe('@expo/agent-cli runtime:stop', () => {
         bundleId: 'host.exp.Exponent2',
         connectedAppIds: ['host.exp.Exponent'],
         appIdMismatch: true,
+        // The corrected command and nothing else: `navigate /` would start an app while the one
+        // the caller meant to stop is still running.
+        followups: [
+          {
+            id: 'stop-connected-app',
+            command: 'npx @expo/agent-cli runtime:stop --app-id host.exp.Exponent',
+            why: expect.any(String),
+          },
+        ],
       });
       // The id the caller gave is the id that was tried: the flag is still obeyed, and the
       // disagreement is reported rather than silently corrected.
@@ -383,30 +404,38 @@ describe('@expo/agent-cli runtime:stop', () => {
   });
 
   // Stopping an app twice must stay a success, which is what makes the command idempotent. With
-  // nothing connected there is no second app for the id to disagree with.
-  it('stays at 0 for a repeat stop with nothing connected', async () => {
-    const projectRoot = await setupFixtureAsync('go-app');
-    await installStubXcrunAsync(projectRoot, { simulators: [BOOTED_SIMULATOR], runningAppIds: [] });
-    const stub = await startStubDevServerAsync({ targets: [] });
-
-    try {
-      const result = await executeAgentCliAsync(
-        projectRoot,
-        ['runtime:stop', '--ios', '--json', '--dev-server-url', stub.url],
-        { env: stubExpoEnv(projectRoot) }
-      );
-
-      expect(result.exitCode).toBe(0);
-      expect(JSON.parse(result.stdout)).toMatchObject({
-        stopped: true,
-        wasRunning: false,
-        appIdMismatch: false,
-        connectedAppIds: [],
+  // nothing connected there is no second app for the id to disagree with, so a named id that was
+  // not running is not a mismatch either.
+  it.each([[[]], [['--app-id', 'host.exp.Exponent2']]])(
+    'stays at 0 for a repeat stop with nothing connected (%j)',
+    async (appIdArgs) => {
+      const projectRoot = await setupFixtureAsync('go-app');
+      await installStubXcrunAsync(projectRoot, {
+        simulators: [BOOTED_SIMULATOR],
+        runningAppIds: [],
       });
-    } finally {
-      await stub.close();
+      const stub = await startStubDevServerAsync({ targets: [] });
+
+      try {
+        const result = await executeAgentCliAsync(
+          projectRoot,
+          ['runtime:stop', '--ios', ...appIdArgs, '--json', '--dev-server-url', stub.url],
+          { env: stubExpoEnv(projectRoot) }
+        );
+
+        expect(result.exitCode).toBe(0);
+        expect(JSON.parse(result.stdout)).toMatchObject({
+          stopped: true,
+          wasRunning: false,
+          reason: null,
+          appIdMismatch: false,
+          connectedAppIds: [],
+        });
+      } finally {
+        await stub.close();
+      }
     }
-  });
+  );
 
   it('stops the id --app-id names', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
@@ -416,12 +445,21 @@ describe('@expo/agent-cli runtime:stop', () => {
     const stub = await startStubDevServerAsync({ targets: [EXPO_GO_TARGET] });
 
     try {
-      await executeAgentCliAsync(
+      const result = await executeAgentCliAsync(
         projectRoot,
-        ['runtime:stop', '--ios', '--app-id', 'com.example.other', '--dev-server-url', stub.url],
+        [
+          'runtime:stop',
+          '--ios',
+          '--app-id',
+          'com.example.other',
+          '--json',
+          '--dev-server-url',
+          stub.url,
+        ],
         { env: stubExpoEnv(projectRoot) }
       );
 
+      expect(JSON.parse(result.stdout).bundleIdSource).toBe('flag');
       expect(readXcrun()).toContainEqual([
         'simctl',
         'terminate',

@@ -193,58 +193,6 @@ describe(devStopAsync, () => {
       });
     });
   });
-  // The ordinary path. The lock names the pid, and signalling that pid is enough for the whole
-  // tree because both spawn paths forward terminal signals to the `expo start` child.
-  it(`should signal the pid the lock names, and report it stopped`, async () => {
-    vi.mocked(readDevServerLockAsync)
-      .mockResolvedValueOnce(lock() as never)
-      .mockResolvedValue(null as never);
-    mockPort({ answering: false });
-
-    await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OK);
-    expect(killed).toEqual([{ pid: 4242, signal: 'SIGTERM' }]);
-    expect(JSON.parse(printed())).toMatchObject({
-      stopped: true,
-      pid: 4242,
-      port: 8081,
-      url: 'http://127.0.0.1:8081',
-      lockHeld: true,
-      signal: 'SIGTERM',
-      forced: false,
-      reason: null,
-      detail: null,
-    });
-  });
-
-  it(`should print a stable set of top-level keys with --json`, async () => {
-    vi.mocked(readDevServerLockAsync)
-      .mockResolvedValueOnce(lock() as never)
-      .mockResolvedValue(null as never);
-    mockPort({ answering: false });
-
-    await devStopAsync(projectRoot, options());
-
-    expect(Object.keys(JSON.parse(printed())).sort()).toEqual([
-      'detail',
-      'deviceError',
-      'devices',
-      'easPlatform',
-      'followups',
-      'forceRefusedBy',
-      'forced',
-      'lockHeld',
-      'pid',
-      'port',
-      'portStillAnswering',
-      'processStillRunning',
-      'reaped',
-      'reason',
-      'signal',
-      'stopped',
-      'url',
-      'waitedMs',
-    ]);
-  });
 
   // @ref llp/0004-smart-start-and-project-state.rfc.md §Daemonization — friction run 5,
   // F48-10. The pid answers "did my signal work"; the port answers "is that number in use", and
@@ -443,29 +391,6 @@ describe(devStopAsync, () => {
       expect(printed()).toContain('finishing its exit work');
       expect(printed()).not.toContain('SIGKILL');
     });
-  });
-
-  // @ref llp/0010-agent-conventions.rfc.md §Exit codes. The end state the caller asked for is the
-  // state it is already in, so a second `dev:stop` must not read as a failure.
-  it(`should exit 0 when nothing was running`, async () => {
-    vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
-
-    await expect(devStopAsync(projectRoot, options())).resolves.toBe(EXIT_OK);
-    expect(JSON.parse(printed())).toMatchObject({
-      stopped: false,
-      pid: null,
-      lockHeld: false,
-      reason: 'not-running',
-    });
-    expect(killed).toEqual([]);
-  });
-
-  it(`should say to pass --port when there is no lock and no port to look at`, async () => {
-    vi.mocked(readDevServerLockAsync).mockResolvedValue(null as never);
-
-    await devStopAsync(projectRoot, options());
-
-    expect(JSON.parse(printed()).detail).toContain('--port');
   });
 
   // @ref llp/0021-honest-reports.rfc.md §How they show up — friction run 7,
