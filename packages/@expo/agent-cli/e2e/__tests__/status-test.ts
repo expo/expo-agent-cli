@@ -30,6 +30,7 @@ import {
   installStubEasRunnerAsync,
   installStubFingerprintAsync,
   pathEnvVars,
+  readEvents,
   readStubExpoInvocations,
   readStubFingerprintInvocations,
   linkFixtureToEasAsync,
@@ -648,11 +649,7 @@ describe('@expo/agent-cli status', () => {
       );
 
       expect(result.exitCode).toBe(0);
-      const events = fs
-        .readFileSync(eventsFile, 'utf8')
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
+      const events = readEvents(eventsFile);
       // `2g` names the event in the `_e` field of every JSONL line.
       const status = events.find((entry) => entry._e === 'cli:status');
       expect(status).toMatchObject({ rule: 'expo-go', devServerRunning: false });

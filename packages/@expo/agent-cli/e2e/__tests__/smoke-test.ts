@@ -29,6 +29,8 @@ import {
   type StubDevServer,
   expoHomeOf,
   holdLockForAsync,
+  readEvents,
+  readJsonLines,
 } from '../utils';
 import { createdSimulatorName } from '../../src/deviceBinding/choose';
 import { digestForRoot } from '../../src/deviceBinding/registry';
@@ -175,14 +177,7 @@ async function installStubAdbForExpoGoAsync(
   await installStubBinAsync(path.join(sdk, 'platform-tools'), 'adb', scriptPath);
   return {
     env: { ANDROID_HOME: sdk },
-    read: () =>
-      fs.existsSync(recordPath)
-        ? fs
-            .readFileSync(recordPath, 'utf8')
-            .split('\n')
-            .filter(Boolean)
-            .map((line) => JSON.parse(line))
-        : [],
+    read: () => readJsonLines(recordPath),
   };
 }
 
@@ -231,14 +226,7 @@ async function installStubNpxAsync(projectRoot: string): Promise<() => string[][
     ].join('\n')
   );
   await installStubBinAsync(path.join(projectRoot, '.stub-bin'), 'npx', scriptPath);
-  return () =>
-    fs.existsSync(recordPath)
-      ? fs
-          .readFileSync(recordPath, 'utf8')
-          .split('\n')
-          .filter(Boolean)
-          .map((line) => JSON.parse(line))
-      : [];
+  return () => readJsonLines(recordPath);
 }
 
 /**
@@ -1849,11 +1837,7 @@ describe('@expo/agent-cli smoke', () => {
       { env: { ...stubExpoEnv(projectRoot), LOG_EVENTS: eventsPath }, reject: false }
     );
 
-    const events = fs
-      .readFileSync(eventsPath, 'utf8')
-      .split('\n')
-      .filter(Boolean)
-      .map((line) => JSON.parse(line));
+    const events = readEvents(eventsPath);
     const smoke = events.find((entry) => entry._e === 'cli:smoke');
     expect(smoke).toMatchObject({ outcome: 'failed', started: false });
     expect(smoke.phases).toHaveLength(9);

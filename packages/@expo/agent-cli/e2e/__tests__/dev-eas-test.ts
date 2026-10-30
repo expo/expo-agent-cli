@@ -30,7 +30,7 @@ import {
   setupFixtureAsync,
   stubExpoEnv,
   waitForAsync,
-  readLastBuildRecord,
+  readLastBuildFile,
 } from '../utils';
 
 /** The `--port` that `dev` puts on every step that serves. Its value is whatever this machine has free. */
@@ -41,8 +41,6 @@ const PORT_ARGS = ['--port', expect.stringMatching(/^\d+$/)];
  * For the tests whose subject is the steps; `dev --eas — the device on EAS` below covers the open.
  */
 const STEPS_ONLY_ENV = { env: { STUB_EXPO_NO_PORT_REPORT: '1' } };
-
-/** The record `src/plan/lastBuild.ts` writes, relative to the project root. */
 
 /**
  * An `eas` that is not the EAS CLI: a wrapper that panics before it runs anything.
@@ -199,7 +197,7 @@ describe('@expo/agent-cli dev — the EAS route', () => {
     const result = await executeAgentCliAsync(projectRoot, ['dev', '--ios', '--eas']);
 
     expect(result.exitCode).toBe(0);
-    expect(readLastBuildRecord(projectRoot)).toBeNull();
+    expect(readLastBuildFile(projectRoot)).toBeNull();
   });
 
   it('stops at a failing cloud build, forwards its exit code, and names the EAS CLI', async () => {

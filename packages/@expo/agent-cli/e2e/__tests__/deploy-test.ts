@@ -16,6 +16,7 @@ import {
   setupFixtureAsync,
   stubExpoEnv,
   readEvents,
+  readJsonLines,
 } from '../utils';
 
 /** The shape `deploy --json` prints, per `src/deploy/types.ts`. */
@@ -165,15 +166,7 @@ process.exit(result.status === null ? 1 : result.status);
 
 /** Every recorded invocation of the stub `npx` bin. */
 function readStubNpxInvocations(projectRoot: string): { args: string[]; cwd: string }[] {
-  const logPath = path.join(projectRoot, STUB_NPX_LOG_NAME);
-  if (!fs.existsSync(logPath)) {
-    return [];
-  }
-  return fs
-    .readFileSync(logPath, 'utf8')
-    .split('\n')
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
+  return readJsonLines(path.join(projectRoot, STUB_NPX_LOG_NAME));
 }
 
 /**

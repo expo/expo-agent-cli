@@ -10,7 +10,7 @@ import path from 'node:path';
 
 import {
   executeAgentCliAsync,
-  holdDevLockAsync,
+  holdLockForAsync,
   installStubBinAsync,
   setupFixtureAsync,
   startStubDevServerAsync,
@@ -81,17 +81,6 @@ async function writeNoDeviceXcrunAsync(projectRoot: string): Promise<string> {
   return scriptPath;
 }
 
-/** Point the project's dev-server lock at a stub, so discovery finds it without a port scan. */
-async function lockToStubAsync(projectRoot: string, stub: { url: string; port: number }) {
-  return await holdDevLockAsync(projectRoot, {
-    url: stub.url,
-    port: stub.port,
-    pid: process.pid,
-    startedAt: new Date().toISOString(),
-    projectRoot,
-  });
-}
-
 describe('@expo/agent-cli runtime:reload', () => {
   it('reloads over the dev server, and says what proved it', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
@@ -100,7 +89,7 @@ describe('@expo/agent-cli runtime:reload', () => {
       targets: [EXPO_GO_TARGET],
       messageSocket: 'v2',
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
     const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
       simulators: [BOOTED_SIMULATOR],
     });
@@ -142,7 +131,7 @@ describe('@expo/agent-cli runtime:reload', () => {
         targets: [IOS_TARGET, ANDROID_TARGET],
         messagePeers: { 'socket#1': 'role=ios', 'socket#2': 'role=android' },
       });
-      const releaseLock = await lockToStubAsync(projectRoot, stub);
+      const releaseLock = await holdLockForAsync(projectRoot, stub);
 
       try {
         const result = await executeAgentCliAsync(
@@ -166,7 +155,7 @@ describe('@expo/agent-cli runtime:reload', () => {
   it('prints one JSON object with a stable set of keys', async () => {
     const projectRoot = await setupFixtureAsync('go-app');
     const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
 
     try {
       const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--json'], {
@@ -218,7 +207,7 @@ describe('@expo/agent-cli runtime:reload', () => {
       targets: [EXPO_GO_TARGET],
       messageSocket: 'deaf',
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
 
     try {
       const result = await executeAgentCliAsync(
@@ -250,7 +239,7 @@ describe('@expo/agent-cli runtime:reload', () => {
       targets: [EXPO_GO_TARGET],
       messageSocket: 'no-churn',
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
 
     try {
       const result = await executeAgentCliAsync(
@@ -281,7 +270,7 @@ describe('@expo/agent-cli runtime:reload', () => {
       targets: [EXPO_GO_TARGET],
       bundle: 'broken',
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
     const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
       simulators: [BOOTED_SIMULATOR],
     });
@@ -318,7 +307,7 @@ describe('@expo/agent-cli runtime:reload', () => {
       targets: [EXPO_GO_TARGET],
       bundle: 'broken',
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
 
     try {
       const result = await executeAgentCliAsync(
@@ -348,7 +337,7 @@ describe('@expo/agent-cli runtime:reload', () => {
       targets: [EXPO_GO_TARGET],
       reloadTargets: 'gone',
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
 
     try {
       const result = await executeAgentCliAsync(
@@ -385,7 +374,7 @@ describe('@expo/agent-cli runtime:reload', () => {
           targets: [EXPO_GO_TARGET],
           reloadTargets,
         });
-        const releaseLock = await lockToStubAsync(projectRoot, stub);
+        const releaseLock = await holdLockForAsync(projectRoot, stub);
 
         try {
           const result = await executeAgentCliAsync(
@@ -425,7 +414,7 @@ describe('@expo/agent-cli runtime:reload', () => {
     it('carries the churn count behind the label the happy path prints', async () => {
       const projectRoot = await setupFixtureAsync('go-app');
       const stub = await startStubDevServerAsync({ projectRoot, targets: [EXPO_GO_TARGET] });
-      const releaseLock = await lockToStubAsync(projectRoot, stub);
+      const releaseLock = await holdLockForAsync(projectRoot, stub);
 
       try {
         const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--json'], {
@@ -454,7 +443,7 @@ describe('@expo/agent-cli runtime:reload', () => {
       targets: [EXPO_GO_TARGET],
       reloadTargets: 'stale',
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
 
     try {
       const result = await executeAgentCliAsync(
@@ -499,7 +488,7 @@ describe('@expo/agent-cli runtime:reload', () => {
       // one that stops the target watch mid-window.
       bundleLogPath: logPath,
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
 
     try {
       const result = await executeAgentCliAsync(projectRoot, ['runtime:reload', '--json'], {
@@ -529,7 +518,7 @@ describe('@expo/agent-cli runtime:reload', () => {
       // the target list. The target that appears afterwards is therefore one this run produced.
       targetsAppearWithFile: appStartedMarkerPath(projectRoot),
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
     const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
       simulators: [BOOTED_SIMULATOR],
     });
@@ -640,7 +629,7 @@ describe('an app the command socket cannot see', () => {
       inspectorEvaluate: reloadResponder(),
       reloadTargets: 'reconnect',
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
     const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
       simulators: [BOOTED_SIMULATOR],
     });
@@ -679,7 +668,7 @@ describe('an app the command socket cannot see', () => {
       targets: [CDP_TARGET],
       messagePeers: {},
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
     const { calls: readXcrun } = await installStubXcrunAsync(projectRoot, {
       simulators: [BOOTED_SIMULATOR],
     });
@@ -736,7 +725,7 @@ describe('an app the command socket cannot see', () => {
       targets: [CDP_TARGET],
       messagePeers: {},
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
     // A stub `xcrun` that reports nothing booted, so the relaunch rung has no device.
     await installStubBinAsync(
       path.join(projectRoot, '.stub-bin'),
@@ -774,7 +763,7 @@ describe('an app the command socket cannot see', () => {
       inspectorEvaluate: reloadResponder(),
       reloadTargets: 'reconnect',
     });
-    const releaseLock = await lockToStubAsync(projectRoot, stub);
+    const releaseLock = await holdLockForAsync(projectRoot, stub);
 
     try {
       const result = await executeAgentCliAsync(
