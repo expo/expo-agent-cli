@@ -469,12 +469,9 @@ reject a foreign root. Without the flag `ready` is `null`.
 One detached startup run per project, owned by its child before project probing. Overlapping
 detached starts refuse with exit 20 and that owner's PID/log path, even if its parent exits before a server exists. A live
 server lock is also checked before spawning and again by the elected child. A project that
-already has a server gets it reported back with `alreadyRunning: true`;
-`--wait-ready` performs the same readiness check before exit 0, without spawning another
-child. A second detached one is a process nobody could find. A foreground `dev` stops on
-the same lock instead (§A busy port): `--detach` promises a running server and reports
-the one there, while a foreground run promises the plan it printed, and a plan whose
-server already runs has no step to run.
+already has a server refuses with exit 20 and its PID/port, even for identical options.
+Use `status` to inspect it, or explicitly stop and restart to change options. Detached
+success reports the server this invocation started; `alreadyRunning` stays false.
 
 Reuse checks the process and its verdict after tunnel lookup and any final readiness
 probe, and before reporting a readiness timeout. Logs older than the lock's start time

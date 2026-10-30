@@ -224,7 +224,7 @@ it.each(['ios', 'android'] as const)(
   }
 );
 
-it('reopens an ended session using the matching EAS build when the native project is fresh', async () => {
+it('starts an ended session after explicit stop using the matching EAS build', async () => {
   const root = await project('dev-client-fresh-app');
   const started = await executeAgentCliAsync(
     root,
@@ -245,13 +245,19 @@ it('reopens an ended session using the matching EAS build when the native projec
   await writeCloudBindingAsync(expoHome, root, { id: 'ended' });
   list([{ id: 'ended', status: 'STOPPED' }]);
   await writeCloudSessionFileAsync(root, 'ended');
+  await executeAgentCliAsync(root, ['dev:stop', '--json'], { env: envFor(root) });
   const reopened = await executeAgentCliAsync(
     root,
-    ['dev', '--ios', '--eas', '--detach', '--json'],
+    ['dev', '--ios', '--eas', '--detach', '--wait-ready', '--json'],
     {
       env: {
         ...envFor(root),
         STUB_SIM_START_ID: 'replacement',
+        STUB_EXPO_DEV_SERVER_PORT: '8753',
+        STUB_EXPO_LISTEN: '1',
+        STUB_EXPO_DELAY_MS: '90000',
+        STUB_EXPO_TUNNEL_HOST: 'cloud.tunnel.example',
+        STUB_EXPO_TUNNEL_DELAY_MS: '100',
         STUB_EAS_BUILDS: JSON.stringify([
           {
             id: 'matching-build',
@@ -471,6 +477,18 @@ it.each(['ios', 'android'] as const)(
           JSON.stringify({ ...previous, expiresAt: new Date(0).toISOString() })
         );
       else list([{ id: 'sess-e2e-started', platform: platform.toUpperCase(), status: 'STOPPED' }]);
+      if (fault === 'missing') {
+        const before = [readStubExpoInvocations(root).length, stubEasArgs(root).length];
+        const refused = await executeAgentCliAsync(
+          root,
+          ['dev', `--${platform}`, '--eas', '--detach', '--json'],
+          { env, reject: false }
+        );
+        expect(refused.exitCode, refused.all).toBe(20);
+        expect(JSON.parse(refused.stdout).error.code).toBe('DEV_SERVER_RUNNING');
+        expect(fs.existsSync(bindingFile(root, platform))).toBe(false);
+        expect([readStubExpoInvocations(root).length, stubEasArgs(root).length]).toEqual(before);
+      }
       const advice =
         fault === 'ended'
           ? await navigate(root, [`--${platform}`])

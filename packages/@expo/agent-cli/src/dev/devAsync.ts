@@ -119,7 +119,7 @@ export async function devAsync(projectRoot: string, options: DevOptions): Promis
   // lets the owning child record the request before doing startup work.
   if (options.detach) {
     const { devDetachAsync } = require('./detachAsync') as typeof import('./detachAsync');
-    return await devDetachAsync(projectRoot, options, { reuseBoundDevice: true });
+    return await devDetachAsync(projectRoot, options);
   }
 
   if (!options.detachedChild && options.mode !== 'plan' && options.deviceBackend === 'eas') {
