@@ -1,10 +1,13 @@
 import fs from 'node:fs';
+import { spawn } from 'node:child_process';
+import { stopOwnedDevServerAsync } from '../../src/smoke/cleanupDevServer';
 import net from 'node:net';
 import path from 'node:path';
 
 import {
   collectOutput,
   executeAgentCliAsync,
+  expoHomeOf,
   fixturesDir,
   killAsync,
   installStubBinAsync,
@@ -17,7 +20,13 @@ import {
   waitForDevLockAsync,
   waitForExitAsync,
 } from '../utils';
-import { bindingFixture, installStubXcrunAsync } from './installedAppStubs';
+import {
+  bindingFixture,
+  installStubXcrunAsync,
+  installStubAdbAsync,
+  installStubEmulatorAsync,
+  killBoundEmulatorsAsync,
+} from './installedAppStubs';
 
 async function fixture() {
   const root = await setupFixtureAsync('go-app');
@@ -339,7 +348,6 @@ it('stopping and starting again selects a new log without changing the previous 
   }
 });
 
-
 it('smoke cannot stop a competing detached owner when its own bootstrap loses', async () => {
   const f = await fixture();
   let smoke: ReturnType<typeof spawnAgentCli> | undefined;
@@ -372,26 +380,48 @@ it('smoke cannot stop a competing detached owner when its own bootstrap loses', 
   }
 });
 
-it.skipIf(process.platform !== 'darwin')(
-  'smoke reports skipped device cleanup when its own server has already exited',
-  async () => {
+it.each(
+  (['ios', 'android'] as const).filter(
+    (platform) => platform === 'android' || process.platform === 'darwin'
+  )
+)(
+  'smoke reports skipped %s device cleanup when its own server has already exited',
+  async (platform) => {
     const f = await fixture();
     const device = 'E2E-OWNED-CLEANUP';
-    const { calls } = await installStubXcrunAsync(f.root, {
-      simulators: [{ udid: device, name: 'agent-cli deadbeef', state: 'Shutdown' }],
-    });
-    const binding = await bindingFixture(f.root, device, 'agent-cli deadbeef');
+    let binding: string | undefined;
+    let deviceEnv: Record<string, string> = {};
+    let calls: () => string[][];
+    if (platform === 'ios') {
+      ({ calls } = await installStubXcrunAsync(f.root, {
+        simulators: [{ udid: device, name: 'agent-cli deadbeef', state: 'Shutdown' }],
+      }));
+      binding = await bindingFixture(f.root, device, 'agent-cli deadbeef');
+    } else {
+      const adb = await installStubAdbAsync(f.root, 'host.exp.exponent', {
+        attached: false,
+        bound: false,
+      });
+      deviceEnv = adb.env;
+      calls = adb.calls;
+      await installStubEmulatorAsync(f.root);
+    }
     const script = path.join(f.root, '.stub-bin', 'npx-refuse.js');
     fs.writeFileSync(script, 'process.exit(1);');
     await installStubBinAsync(path.dirname(script), 'npx', script);
-    const env = { ...f.env, ...pathEnvVars(path.dirname(script)), AGENT_CLI_NO_DEVICE: '0' };
+    const env = {
+      ...f.env,
+      ...pathEnvVars(path.dirname(script)),
+      ...deviceEnv,
+      AGENT_CLI_NO_DEVICE: '0',
+    };
     try {
       f.release();
       const result = await executeAgentCliAsync(
         f.root,
         [
           'smoke',
-          '--ios',
+          `--${platform}`,
           '--json',
           '--no-screenshot',
           '--port',
@@ -409,16 +439,56 @@ it.skipIf(process.platform !== 'darwin')(
           reason: expect.stringContaining('device cleanup was skipped'),
         })
       );
-      expect(calls()).toContainEqual(['simctl', 'bootstatus', device, '-b']);
-      expect(calls()).not.toContainEqual(['simctl', 'shutdown', device]);
-      expect(Date.parse(JSON.parse(fs.readFileSync(binding, 'utf8')).expiresAt)).toBeGreaterThan(
+      if (platform === 'ios') {
+        expect(calls()).toContainEqual(['simctl', 'bootstatus', device, '-b']);
+        expect(calls()).not.toContainEqual(['simctl', 'shutdown', device]);
+      } else {
+        const directory = path.join(expoHomeOf(f.root), 'agent-cli', 'bindings');
+        binding = path.join(
+          directory,
+          fs.readdirSync(directory).find((name) => name.endsWith('-android-local-android.json'))!
+        );
+        const own = JSON.parse(fs.readFileSync(binding, 'utf8')).device.origin;
+        expect(own.kind).toBe('spawned');
+        expect(() => process.kill(own.emulatorPid, 0)).not.toThrow();
+      }
+      expect(Date.parse(JSON.parse(fs.readFileSync(binding!, 'utf8')).expiresAt)).toBeGreaterThan(
         Date.now()
       );
     } finally {
+      if (platform === 'android') await killBoundEmulatorsAsync(expoHomeOf(f.root));
       await executeAgentCliAsync(f.root, ['dev:stop', '--release', '--json'], {
         reject: false,
         env,
       });
+      await f.cleanup();
+    }
+  }
+);
+
+it.each(['ios', 'android'] as const)(
+  'cleanup for a live %s child cannot stop a different live owner',
+  async (platform) => {
+    const f = await fixture();
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], {
+      stdio: 'ignore',
+      detached: process.platform !== 'win32',
+    });
+    try {
+      f.release();
+      const started = await f.start().result;
+      expect(started.exitCode, started.all).toBe(0);
+      const owner = JSON.parse(started.stdout);
+      expect(child.pid).not.toBe(owner.pid);
+      expect(child.exitCode).toBeNull();
+      expect(child.signalCode).toBeNull();
+      const cleanup = await stopOwnedDevServerAsync(f.root, platform, false, child);
+      expect(cleanup.ok).toBe(false);
+      expect(await readDevLockAsync(f.root)).toMatchObject({ pid: owner.pid });
+      expect(await (await fetch(`${owner.url}/status`)).text()).toBe('packager-status:running');
+      expect(() => process.kill(child.pid!, 0)).not.toThrow();
+    } finally {
+      await killAsync(child, 'SIGKILL');
       await f.cleanup();
     }
   }
