@@ -39,6 +39,15 @@ const ERROR_MAX_LENGTH = 100;
 /** Render the report as one line per section. */
 export function formatStatusReport(report: StatusReport): string {
   return [
+    // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+    // First, because it is the cause of the lines below it that say "no dev client" or "stale".
+    ...(report.next?.rule === 'dependencies-not-installed'
+      ? [
+          chalk.yellow(
+            `Dependencies are not installed: run \`${renderForInvoker(report.next.command)}\``
+          ),
+        ]
+      : []),
     row('project', report.project, projectLine, report, 'project'),
     row('expo go', report.expoGo, expoGoLine, report, 'expoGo'),
     row('freshness', report.freshness, freshnessLine, report, 'freshness'),

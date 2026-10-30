@@ -36,6 +36,12 @@ export type StartPlanRule =
    * @see llp/0004-smart-start-and-project-state.rfc.md §Not an Expo app
    */
   | 'not-expo-app'
+  /**
+   * The project declares `expo`, and no `expo` is installed: the dependencies come first.
+   *
+   * @see llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+   */
+  | 'dependencies-not-installed'
   /** Web needs no native app, so the dev server is the whole plan. */
   | 'web'
   /** Expo Go can run the project as-is. */

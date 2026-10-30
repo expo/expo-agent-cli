@@ -12,6 +12,7 @@ import { classifyAgainstRecordedBuild, type RecordedImpact } from '../impact/fro
 import { buildConnectUrls, openInPhrase, type ConnectUrl } from '../navigate/connectUrl';
 import { decideExpoGoTarget } from '../navigate/target';
 import { decideStartPlan } from '../plan/decide';
+import { INSTALL_DEPENDENCIES_COMMAND } from '../project/dependencies';
 import type { LastBuildRecord } from '../plan/lastBuild';
 import type { NativePlatform, PlanPlatform } from '../plan/types';
 import { PROGRAM_NAME, PROGRAM_PREFIX } from '../programName';
@@ -534,6 +535,17 @@ export function buildNextActionStatus(
       target: plan.target,
       steps: [],
       why: "this directory is not an Expo app, so there is nothing here to get onto a device — change to the app's own directory, or create one here",
+      buildLocation: null,
+    };
+  }
+  // @ref llp/0004-smart-start-and-project-state.rfc.md §Dependencies not installed
+  if (plan.rule === 'dependencies-not-installed') {
+    return {
+      command: INSTALL_DEPENDENCIES_COMMAND,
+      rule: plan.rule,
+      target: plan.target,
+      steps: [],
+      why: 'the dependencies are not installed, so every fact the plan reads from node_modules is missing — this installs the lockfile, and status reads the project again after it',
       buildLocation: null,
     };
   }
