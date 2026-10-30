@@ -362,10 +362,8 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     return read.kind === 'binding' ? read.binding : null;
   };
 
-  const { targetSelectionAsync, scopeAsync, deviceAsync, setDevice } = buildSmokeTargetSelection(
-    projectRoot,
-    options
-  );
+  const { targetSelectionAsync, scopeAsync, deviceAsync, setDevice, lastObservation } =
+    buildSmokeTargetSelection(projectRoot, options);
 
   return {
     discoverDevServer: (explicitUrl) =>
@@ -960,7 +958,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       const remainingMs = () => Math.max(0, deadline - Date.now());
       const prepared = await prepareRungOneAsync(devServerUrl, projectRoot, await scopeAsync(), {
         budgetMs: remainingMs(),
-        preflight: null,
+        preflight: lastObservation(),
       });
       const bundleMark = markBundleSignalSync(projectRoot);
       const rungOne = await runRungOneAsync(devServerUrl, { prepared, budgetMs: remainingMs() });
