@@ -15,12 +15,8 @@ import { readDevServerLockAsync, readLastLoggedDevServerPort } from '../../../de
 import { EXIT_OK, EXIT_OUTCOME_FAILED, EXIT_OUTCOME_TIMEOUT } from '../../../exitCodes';
 import { resetPackageRunnerCache } from '../../../utils/packageRunner';
 import { connectMessageSocketAsync, type MessageSocketPeers } from '../../messageSocket';
-import {
-  explainReloadFailure,
-  reloadAsync,
-  reloadOverDevServerAsync,
-  type ReloadResultJson,
-} from '../reloadAsync';
+import { explainReloadFailure, reloadAsync, type ReloadResultJson } from '../reloadAsync';
+import { reloadOverDevServerAsync } from '../rungOne';
 import type { ReloadOptions } from '../resolveOptions';
 import { unwrapGuardedExec } from '../../../device/cloudCommand';
 import { lockInfo } from '../../../devLock/__tests__/fakeLock';
