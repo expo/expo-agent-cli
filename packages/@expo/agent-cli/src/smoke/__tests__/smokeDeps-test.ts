@@ -440,6 +440,11 @@ describe('reloadApp beside a local simulator, on a bound EAS session', () => {
     makeTarget({ id, appId: 'host.exp.Exponent', deviceName });
   const targets = [target('local', 'iPhone 16e'), target('session', 'iPhone 17')];
 
+  // A local simulator exists only on a Mac.
+  beforeEach(() => {
+    mockPlatform('darwin');
+  });
+
   afterEach(() => {
     globalThis.fetch = realFetch;
   });
