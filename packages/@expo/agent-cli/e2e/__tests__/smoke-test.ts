@@ -1152,7 +1152,8 @@ describe('@expo/agent-cli smoke', () => {
             env: {
               ...stubExpoEnv(projectRoot),
               AGENT_CLI_NO_DEVICE: '0',
-              STUB_EXPO_DELAY_MS: '30000',
+              // Keep the owned server alive through smoke's app-attachment budget.
+              STUB_EXPO_DELAY_MS: '180000',
               STUB_EXPO_DEV_SERVER_PORT: '9353',
               STUB_EXPO_LISTEN: '1',
               AGENT_CLI_COLD_ATTACH_MS: '2000',

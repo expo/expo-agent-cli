@@ -9,12 +9,11 @@
 
 import chalk from 'chalk';
 import path from 'path';
+import type { ChildProcess } from 'child_process';
 
 import { devDetachAsync } from '../dev/detachAsync';
 import type { EnsureEasSessionReport } from '../dev/easSession';
 import { resolveDevOptions } from '../dev/resolveOptions';
-import { resolveDevStopOptions } from '../dev/resolveStopOptions';
-import { devStopAsync, type DevStopResultJson } from '../dev/stopAsync';
 import {
   acquireDeviceAsync,
   acquireLine,
@@ -60,7 +59,8 @@ import { CdpRuntimeErrorCollector } from '../runtime/runtimeErrorCollector';
 import { describeSkippedApps } from '../runtime/targetSelection';
 import { buildSmokeTargetSelection } from './targetSelection';
 import { waitForAppConnectionAsync, waitForBundlerReadyAsync } from '../runtime/waitReady';
-import { formatSmokeResult, smokeResultToJson } from './format';
+import { formatSmokeResult, smokeResultToJson, whatAndHow } from './format';
+import { stopOwnedDevServerAsync } from './cleanupDevServer';
 import {
   isFailingRecord,
   runSmokePhasesAsync,
@@ -335,6 +335,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
    */
   let installKind: SmokeTarget['installWithKind'] | null = null;
   let keepBoundDevice = false;
+  let startedChild: ChildProcess | null = null;
   const targetAsync = () =>
     (target ??= resolveSmokeTargetAsync(projectRoot, options).then((resolved) => {
       installKind = resolved.installWithKind;
@@ -377,17 +378,7 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
     // The argv is `START_DEV_SERVER_ARGV`, whose documentation says why it carries `--no-open`.
     startDevServer: async () => {
       // @ref llp/0005-runtime-loop-tools.rfc.md §It builds what the app needs, and says so first
-      //
-      // This used to refuse. The detached child runs whatever plan it makes, and for a project
-      // whose development build is missing or stale that plan is a compiler — so the gate named
-      // `dev` and stopped, which is a correct instruction and a dead end for a loop that cannot
-      // leave itself to take it.
-      //
-      // It now runs the plan, and **says so before it starts**. A command that silently blocks for
-      // twenty minutes is indistinguishable from one that has hung, so the one thing the caller
-      // needs is the sentence that tells them which it is. On stderr, because stdout carries one
-      // JSON object and nothing else (llp/0006 §Output contract), and as an event too so a reader
-      // of the stream sees it without parsing English.
+      // Announce any native build before spawning it; its budget belongs to startup.
       keepBoundDevice = true;
       const target = await targetAsync();
       // @ref llp/0015-backend-selection-and-config.rfc.md §The selection — named, not taken. A
@@ -453,7 +444,12 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
                 ? BUILD_DEV_SERVER_TIMEOUT_MS
                 : START_DEV_SERVER_TIMEOUT_MS,
           },
-          { print: false }
+          {
+            print: false,
+            onSpawn: (child) => {
+              startedChild = child;
+            },
+          }
         );
       } catch (error: unknown) {
         return {
@@ -480,44 +476,13 @@ export function buildSmokeDeps(projectRoot: string, options: SmokeOptions): Smok
       };
     },
 
-    // `dev:stop`'s own act, through `dev:stop`'s own function, with its report suppressed: this
-    // run prints one report and the stop is a line in it. Everything that makes the stop safe is
-    // that command's — it signals the pid the project's lock names and refuses a dev server no
-    // lock answers for, so a cleanup can never take down something this run did not start.
-    stopDevServer: async () => {
-      const captured: { report: DevStopResultJson | null } = { report: null };
-      const release = options.cloud !== 'required' && !keepBoundDevice;
-      await devStopAsync(
+    stopDevServer: () =>
+      stopOwnedDevServerAsync(
         projectRoot,
-        {
-          ...resolveDevStopOptions(['--no-followups']),
-          release,
-          platform: options.platform,
-        },
-        {
-          print: false,
-          onReport: (stopped) => {
-            captured.report = stopped;
-          },
-        }
-      );
-      const stopped = captured.report;
-      const serverStopped =
-        stopped != null && (stopped.stopped || stopped.reason === 'not-running');
-      return {
-        ok: serverStopped,
-        target: stopped?.url ?? (stopped?.port == null ? null : `port ${stopped.port}`),
-        reason: serverStopped ? null : (stopped?.detail ?? 'the dev server did not stop'),
-        // A refused release leaves each kept row without a reason; dev:stop's refusal is that reason.
-        devices: release
-          ? stopped?.devices?.map((device) =>
-              device.released || device.reason != null || stopped.deviceError == null
-                ? device
-                : { ...device, reason: whatAndHow(stopped.deviceError) }
-            )
-          : undefined,
-      };
-    },
+        options.platform,
+        !devicesDisabled() && options.cloud !== 'required' && !keepBoundDevice,
+        startedChild
+      ),
 
     // @ref llp/0027-everything-on-eas.rfc.md §smoke
     // The EAS device's boot-and-install: the session in progress on this platform, or one started
@@ -1233,13 +1198,6 @@ export function smokeSessionResult(
     started: result.started,
     reason: result.refusal ? whatAndHow(result.refusal.message) : result.reason,
   };
-}
-
-/** A refusal's What and its How line, as one phase reason; the Why in between is dropped. */
-function whatAndHow(message: string): string {
-  const lines = message.split('\n').filter((line) => line.trim());
-  const how = lines.find((line) => line.startsWith('How:'));
-  return how && how !== lines[0] ? `${lines[0]} ${how}` : (lines[0] ?? message);
 }
 
 /** A debugger failure as one phase reason: a refusal keeps its Why, because that names what was skipped. */

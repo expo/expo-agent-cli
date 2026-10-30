@@ -29,6 +29,7 @@
 
 import { stopCloudSessionsAsync } from './stopCloudSessions';
 import chalk from 'chalk';
+import type { ChildProcess } from 'child_process';
 
 import type { CloudPlatform } from '../device/cloudSimulator';
 import type { ReleasedDevice } from '../deviceBinding';
@@ -184,6 +185,8 @@ export interface DevStopResultJson extends Partial<StoppedDevices> {
 }
 
 export interface DevStopReportOptions {
+  /** Internal cleanup: skip all side effects unless this still-live child owns the lock. */
+  ownedChild?: Pick<ChildProcess, 'pid' | 'exitCode' | 'signalCode'> | null;
   /**
    * Whether to print the report at all.
    *
@@ -212,10 +215,20 @@ export interface DevStopReportOptions {
 export async function devStopAsync(
   projectRoot: string,
   options: DevStopOptions,
-  { print = true, onReport }: DevStopReportOptions = {}
+  { print = true, onReport, ownedChild }: DevStopReportOptions = {}
 ): Promise<number> {
   const startedAt = Date.now();
   const lock = await readDevServerLockAsync(projectRoot);
+  if (
+    ownedChild !== undefined &&
+    (!lock ||
+      !ownedChild ||
+      lock.pid !== ownedChild.pid ||
+      ownedChild.exitCode !== null ||
+      ownedChild.signalCode !== null)
+  ) {
+    return EXIT_OK;
+  }
 
   // `--port` names the target, and a lock is only evidence about the port it holds.
   //
